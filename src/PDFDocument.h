@@ -1,0 +1,66 @@
+#pragma once
+
+#include <QByteArray>
+#include <QColor>
+#include <QImage>
+#include <QObject>
+#include <QSize>
+#include <QSizeF>
+#include <QUrl>
+#include <QtQml/qqmlregistration.h>
+
+#include <fpdfview.h>
+
+class PDFDocument : public QObject
+{
+    Q_OBJECT
+    QML_ELEMENT
+    Q_PROPERTY(QUrl source READ source NOTIFY sourceChanged FINAL)
+    Q_PROPERTY(int pageCount READ pageCount NOTIFY pageCountChanged FINAL)
+    Q_PROPERTY(int currentPage READ currentPage WRITE setCurrentPage NOTIFY currentPageChanged FINAL)
+    Q_PROPERTY(bool loaded READ isLoaded NOTIFY loadedChanged FINAL)
+    Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged FINAL)
+    Q_PROPERTY(qreal currentPageWidth READ currentPageWidth NOTIFY currentPageSizeChanged FINAL)
+    Q_PROPERTY(qreal currentPageHeight READ currentPageHeight NOTIFY currentPageSizeChanged FINAL)
+
+public:
+    explicit PDFDocument(QObject *parent = nullptr);
+    ~PDFDocument() override;
+
+    QUrl source() const;
+    int pageCount() const;
+    int currentPage() const;
+    bool isLoaded() const;
+    QString statusText() const;
+    qreal currentPageWidth() const;
+    qreal currentPageHeight() const;
+
+    Q_INVOKABLE bool open(const QUrl &source);
+    Q_INVOKABLE void close();
+    Q_INVOKABLE void setCurrentPage(int page);
+    Q_INVOKABLE void nextPage();
+    Q_INVOKABLE void previousPage();
+    Q_INVOKABLE QSizeF pageSize(int page) const;
+
+    QImage renderPage(int page, const QSize &pixelSize, const QColor &background) const;
+
+signals:
+    void sourceChanged();
+    void pageCountChanged();
+    void currentPageChanged();
+    void loadedChanged();
+    void statusTextChanged();
+    void currentPageSizeChanged();
+
+private:
+    void closeDocument();
+    void setStatusText(const QString &statusText);
+    void emitDocumentStateChanged();
+
+    QByteArray m_data;
+    FPDF_DOCUMENT m_document = nullptr;
+    QUrl m_source;
+    int m_pageCount = 0;
+    int m_currentPage = 0;
+    QString m_statusText;
+};

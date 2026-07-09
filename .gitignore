@@ -259,6 +259,19 @@ _pkginfo.txt
 # but keep track of directories ending in .cache
 !?*.[Cc]ache/
 
+# CMake / Qt
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+.qt/
+_deps/
+CMakeUserPresets.json
+
+# JetBrains IDEs
+.idea/
+
 # Others
 ClientBin/
 ~$*
