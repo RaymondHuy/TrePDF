@@ -22,6 +22,7 @@ class PDFDocument : public QObject
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged FINAL)
     Q_PROPERTY(qreal currentPageWidth READ currentPageWidth NOTIFY currentPageSizeChanged FINAL)
     Q_PROPERTY(qreal currentPageHeight READ currentPageHeight NOTIFY currentPageSizeChanged FINAL)
+    Q_PROPERTY(qreal maximumPageWidth READ maximumPageWidth NOTIFY pageCountChanged FINAL)
 
 public:
     explicit PDFDocument(QObject *parent = nullptr);
@@ -34,6 +35,7 @@ public:
     QString statusText() const;
     qreal currentPageWidth() const;
     qreal currentPageHeight() const;
+    qreal maximumPageWidth() const;
 
     Q_INVOKABLE bool open(const QUrl &source);
     Q_INVOKABLE void close();

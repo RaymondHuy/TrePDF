@@ -132,6 +132,11 @@ void PDFPageItem::refreshMetrics()
 
 void PDFPageItem::invalidateCache()
 {
+    m_cachedImage = QImage();
+    m_cachedPixelSize = QSize();
+    m_cachedPage = -1;
+    m_cachedZoom = 0.0;
+    m_cachedDocument = nullptr;
     m_cacheDirty = true;
     update();
 }

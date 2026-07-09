@@ -106,6 +106,15 @@ qreal PDFDocument::currentPageHeight() const
     return pageSize(m_currentPage).height();
 }
 
+qreal PDFDocument::maximumPageWidth() const
+{
+    qreal maximumWidth = 0.0;
+    for (int page = 0; page < m_pageCount; ++page) {
+        maximumWidth = qMax(maximumWidth, pageSize(page).width());
+    }
+    return maximumWidth;
+}
+
 bool PDFDocument::open(const QUrl &source)
 {
     const QString filePath = source.isLocalFile() ? source.toLocalFile() : source.toString();
