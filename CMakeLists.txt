@@ -44,6 +44,17 @@ qt_add_qml_module(trepdf
         src/PDFPageItem.h
     QML_FILES
         src/Main.qml
+        src/Components/AppRibbon.qml
+        src/Components/AppTheme.qml
+        src/Components/DocumentView.qml
+        src/Components/EditRibbon.qml
+        src/Components/OrangeButton.qml
+        src/Components/PdfPageDelegate.qml
+        src/Components/RibbonButton.qml
+        src/Components/RibbonGroup.qml
+        src/Components/RibbonTabButton.qml
+        src/Components/SignRibbon.qml
+        src/Components/ViewRibbon.qml
     RESOURCES
         src/assets/icons/calendar-days.svg
         src/assets/icons/chevron-left.svg
