@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Dialogs
@@ -15,49 +17,152 @@ ApplicationWindow {
     title: qsTr("TrePDF")
 
     property real zoom: 1.0
+    property string transientStatus: ""
     readonly property color foxitOrange: "#d97a32"
     readonly property color foxitDarkOrange: "#b85f22"
     readonly property color foxitHoverOrange: "#e99052"
     readonly property color foxitPaleOrange: "#fff4ec"
     readonly property color foxitBorderOrange: "#c66b2a"
-    readonly property color toolbarTextColor: "#fffaf6"
-    readonly property color disabledToolbarTextColor: "#f2c4a5"
+    readonly property color ribbonSurface: "#fffdfb"
+    readonly property color ribbonBorder: "#ddd6d1"
+    readonly property color ribbonTextColor: "#35363a"
+    readonly property color signGreen: "#2f7656"
+    readonly property color signPaleGreen: "#edf7f1"
 
     palette.highlight: foxitOrange
     palette.button: foxitPaleOrange
     palette.buttonText: "#32251c"
     palette.window: "#f7f2ee"
 
-    component OrangeToolButton: ToolButton {
+    component RibbonTabButton: TabButton {
         id: control
 
-        leftPadding: 10
-        rightPadding: 10
-        topPadding: 6
-        bottomPadding: 6
+        implicitWidth: 104
+        implicitHeight: 34
 
         contentItem: Text {
             text: control.text
-            font: control.font
-            color: control.enabled ? window.toolbarTextColor : window.disabledToolbarTextColor
+            font.family: control.font.family
+            font.pixelSize: control.font.pixelSize
+            font.weight: control.checked ? Font.DemiBold : Font.Medium
+            color: control.checked ? window.foxitDarkOrange : "#56575c"
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
         }
 
         background: Rectangle {
-            implicitWidth: 34
-            implicitHeight: 30
+            color: control.checked
+                ? window.foxitPaleOrange
+                : control.hovered
+                    ? "#f6f1ed"
+                    : "transparent"
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 3
+                color: control.checked ? window.foxitOrange : "transparent"
+            }
+        }
+    }
+
+    component RibbonButton: ToolButton {
+        id: control
+
+        property url iconSource
+        property string toolTipText: text
+        property var command
+        property bool requiresDocument: true
+        property bool primary: false
+        property bool signing: false
+
+        implicitWidth: 80
+        implicitHeight: 56
+        enabled: !requiresDocument || pdfDocument.loaded
+        display: AbstractButton.TextUnderIcon
+        spacing: 3
+        leftPadding: 5
+        rightPadding: 5
+        topPadding: 5
+        bottomPadding: 4
+        font.pixelSize: 11
+        palette.buttonText: enabled ? window.ribbonTextColor : "#a7a4a1"
+        icon.source: iconSource
+        icon.width: 22
+        icon.height: 22
+        icon.color: !enabled
+            ? "#aaa8a6"
+            : signing
+                ? window.signGreen
+                : primary
+                    ? window.foxitDarkOrange
+                    : "#4a4b50"
+
+        onClicked: {
+            if (control.command)
+                control.command()
+            else
+                window.showComingSoon(control.text)
+        }
+
+        background: Rectangle {
             radius: 4
             color: !control.enabled
                 ? "transparent"
                 : control.down
-                    ? window.foxitDarkOrange
-                    : control.hovered
-                        ? window.foxitHoverOrange
+                    ? control.signing ? "#dceee4" : "#f5dfcf"
+                    : control.hovered || control.primary
+                        ? control.signing ? window.signPaleGreen : window.foxitPaleOrange
                         : "transparent"
-            border.color: control.hovered && control.enabled ? "#efb27f" : "transparent"
+            border.color: control.primary
+                ? control.signing ? "#a8cfb9" : "#edc5a6"
+                : "transparent"
             border.width: 1
+        }
+
+        ToolTip.visible: hovered
+        ToolTip.delay: 500
+        ToolTip.text: toolTipText
+    }
+
+    component RibbonGroup: Item {
+        id: group
+
+        default property alias tools: toolRow.data
+        property string title
+
+        implicitWidth: toolRow.implicitWidth + 18
+        implicitHeight: 76
+
+        Row {
+            id: toolRow
+
+            x: 6
+            y: 2
+            spacing: 2
+        }
+
+        Label {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 2
+            text: group.title
+            color: "#817c78"
+            font.pixelSize: 10
+            horizontalAlignment: Text.AlignHCenter
+        }
+
+        Rectangle {
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.topMargin: 6
+            anchors.bottomMargin: 6
+            width: 1
+            color: window.ribbonBorder
+            Accessible.ignored: true
         }
     }
 
@@ -129,6 +234,18 @@ ApplicationWindow {
         }
     }
 
+    function showComingSoon(toolName) {
+        transientStatus = qsTr("%1 is coming soon").arg(toolName)
+        transientStatusTimer.restart()
+    }
+
+    Timer {
+        id: transientStatusTimer
+
+        interval: 2600
+        onTriggered: window.transientStatus = ""
+    }
+
     PDFDocument {
         id: pdfDocument
     }
@@ -141,181 +258,363 @@ ApplicationWindow {
         onAccepted: window.openFile(selectedFile)
     }
 
-    menuBar: MenuBar {
-        background: Rectangle {
-            color: window.foxitOrange
-        }
+    Component {
+        id: viewRibbonComponent
 
-        delegate: MenuBarItem {
-            id: menuBarItem
+        Flickable {
+            clip: true
+            contentWidth: viewRibbonRow.implicitWidth + 16
+            contentHeight: height
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
 
-            contentItem: Text {
-                text: menuBarItem.text
-                font: menuBarItem.font
-                color: window.toolbarTextColor
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
+            Row {
+                id: viewRibbonRow
+
+                x: 8
+                height: 76
+
+                RibbonGroup {
+                    title: qsTr("File")
+
+                    RibbonButton {
+                        text: qsTr("Open")
+                        toolTipText: qsTr("Open PDF")
+                        iconSource: "assets/icons/folder-open.svg"
+                        requiresDocument: false
+                        primary: true
+                        command: function() { openDialog.open() }
+                    }
+                }
+
+                RibbonGroup {
+                    title: qsTr("Navigation")
+
+                    RibbonButton {
+                        text: qsTr("Previous")
+                        toolTipText: qsTr("Previous Page")
+                        iconSource: "assets/icons/chevron-left.svg"
+                        enabled: pdfDocument.currentPage > 0
+                        command: function() { window.goToPage(pdfDocument.currentPage - 1) }
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Next")
+                        toolTipText: qsTr("Next Page")
+                        iconSource: "assets/icons/chevron-right.svg"
+                        enabled: pdfDocument.loaded && pdfDocument.currentPage + 1 < pdfDocument.pageCount
+                        command: function() { window.goToPage(pdfDocument.currentPage + 1) }
+                    }
+                }
+
+                RibbonGroup {
+                    title: qsTr("Zoom")
+
+                    RibbonButton {
+                        text: qsTr("Zoom Out")
+                        iconSource: "assets/icons/zoom-out.svg"
+                        command: function() { window.setZoom(window.zoom / 1.15) }
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Zoom In")
+                        iconSource: "assets/icons/zoom-in.svg"
+                        command: function() { window.setZoom(window.zoom * 1.15) }
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Fit Width")
+                        iconSource: "assets/icons/maximize-2.svg"
+                        command: function() { window.fitToWidth() }
+                    }
+                }
+
+                RibbonGroup {
+                    title: qsTr("Page")
+
+                    RibbonButton {
+                        text: qsTr("Rotate Left")
+                        iconSource: "assets/icons/rotate-ccw.svg"
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Rotate Right")
+                        iconSource: "assets/icons/rotate-cw.svg"
+                    }
+                }
+
+                RibbonGroup {
+                    title: qsTr("Find & Panels")
+
+                    RibbonButton {
+                        text: qsTr("Thumbnails")
+                        iconSource: "assets/icons/panel-left.svg"
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Search")
+                        iconSource: "assets/icons/search.svg"
+                    }
+                }
             }
 
-            background: Rectangle {
-                color: menuBarItem.highlighted ? window.foxitDarkOrange : "transparent"
-            }
-        }
-
-        Menu {
-            title: qsTr("File")
-            background: Rectangle {
-                color: "#fff8f2"
-                border.color: "#e0b08d"
-                border.width: 1
-            }
-
-            MenuItem {
-                text: qsTr("Open...")
-                onTriggered: openDialog.open()
-            }
-
-            MenuItem {
-                text: qsTr("Close")
-                enabled: pdfDocument.loaded
-                onTriggered: pdfDocument.close()
-            }
-
-            MenuSeparator {}
-
-            MenuItem {
-                text: qsTr("Quit")
-                onTriggered: Qt.quit()
-            }
-        }
-
-        Menu {
-            title: qsTr("View")
-            background: Rectangle {
-                color: "#fff8f2"
-                border.color: "#e0b08d"
-                border.width: 1
-            }
-
-            MenuItem {
-                text: qsTr("Previous Page")
-                enabled: pdfDocument.currentPage > 0
-                onTriggered: window.goToPage(pdfDocument.currentPage - 1)
-            }
-
-            MenuItem {
-                text: qsTr("Next Page")
-                enabled: pdfDocument.loaded && pdfDocument.currentPage + 1 < pdfDocument.pageCount
-                onTriggered: window.goToPage(pdfDocument.currentPage + 1)
-            }
-
-            MenuSeparator {}
-
-            MenuItem {
-                text: qsTr("Zoom In")
-                enabled: pdfDocument.loaded
-                onTriggered: window.setZoom(window.zoom * 1.15)
-            }
-
-            MenuItem {
-                text: qsTr("Zoom Out")
-                enabled: pdfDocument.loaded
-                onTriggered: window.setZoom(window.zoom / 1.15)
-            }
-
-            MenuItem {
-                text: qsTr("Fit Width")
-                enabled: pdfDocument.loaded
-                onTriggered: window.fitToWidth()
+            ScrollBar.horizontal: ScrollBar {
+                policy: ScrollBar.AsNeeded
             }
         }
     }
 
-    header: ToolBar {
-        background: Rectangle {
-            color: window.foxitOrange
+    Component {
+        id: editRibbonComponent
+
+        Flickable {
+            clip: true
+            contentWidth: editRibbonRow.implicitWidth + 16
+            contentHeight: height
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+
+            Row {
+                id: editRibbonRow
+
+                x: 8
+                height: 76
+
+                RibbonGroup {
+                    title: qsTr("Content")
+
+                    RibbonButton {
+                        text: qsTr("Select")
+                        iconSource: "assets/icons/mouse-pointer-2.svg"
+                        primary: true
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Edit Text")
+                        iconSource: "assets/icons/type.svg"
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Add Text")
+                        iconSource: "assets/icons/type.svg"
+                    }
+                }
+
+                RibbonGroup {
+                    title: qsTr("Objects")
+
+                    RibbonButton {
+                        text: qsTr("Image")
+                        toolTipText: qsTr("Add Image")
+                        iconSource: "assets/icons/image-plus.svg"
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Link")
+                        toolTipText: qsTr("Add Link")
+                        iconSource: "assets/icons/link-2.svg"
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Shapes")
+                        iconSource: "assets/icons/shapes.svg"
+                    }
+                }
+
+                RibbonGroup {
+                    title: qsTr("Markup")
+
+                    RibbonButton {
+                        text: qsTr("Highlight")
+                        iconSource: "assets/icons/highlighter.svg"
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Underline")
+                        iconSource: "assets/icons/underline.svg"
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Strikeout")
+                        iconSource: "assets/icons/strikethrough.svg"
+                    }
+                }
+
+                RibbonGroup {
+                    title: qsTr("History")
+
+                    RibbonButton {
+                        text: qsTr("Undo")
+                        iconSource: "assets/icons/undo-2.svg"
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Redo")
+                        iconSource: "assets/icons/redo-2.svg"
+                    }
+                }
+            }
+
+            ScrollBar.horizontal: ScrollBar {
+                policy: ScrollBar.AsNeeded
+            }
+        }
+    }
+
+    Component {
+        id: signRibbonComponent
+
+        Flickable {
+            clip: true
+            contentWidth: signRibbonRow.implicitWidth + 16
+            contentHeight: height
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+
+            Row {
+                id: signRibbonRow
+
+                x: 8
+                height: 76
+
+                RibbonGroup {
+                    title: qsTr("Sign")
+
+                    RibbonButton {
+                        text: qsTr("Fill && Sign")
+                        iconSource: "assets/icons/pen-line.svg"
+                        signing: true
+                        primary: true
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Signature")
+                        toolTipText: qsTr("Add Signature")
+                        iconSource: "assets/icons/signature.svg"
+                        signing: true
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Initials")
+                        toolTipText: qsTr("Add Initials")
+                        iconSource: "assets/icons/signature.svg"
+                        signing: true
+                    }
+                }
+
+                RibbonGroup {
+                    title: qsTr("Fields")
+
+                    RibbonButton {
+                        text: qsTr("Date")
+                        toolTipText: qsTr("Add Date")
+                        iconSource: "assets/icons/calendar-days.svg"
+                        signing: true
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Check")
+                        toolTipText: qsTr("Add Check Mark")
+                        iconSource: "assets/icons/square-check-big.svg"
+                        signing: true
+                    }
+                }
+
+                RibbonGroup {
+                    title: qsTr("Workflow")
+
+                    RibbonButton {
+                        text: qsTr("Request")
+                        toolTipText: qsTr("Request Signatures")
+                        iconSource: "assets/icons/send.svg"
+                        signing: true
+                    }
+
+                    RibbonButton {
+                        text: qsTr("Validate")
+                        toolTipText: qsTr("Validate Signatures")
+                        iconSource: "assets/icons/shield-check.svg"
+                        signing: true
+                    }
+                }
+            }
+
+            ScrollBar.horizontal: ScrollBar {
+                policy: ScrollBar.AsNeeded
+            }
+        }
+    }
+
+    header: Column {
+        width: window.width
+        spacing: 0
+
+        Rectangle {
+            width: parent.width
+            height: 34
+            color: "#fffaf6"
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: window.ribbonBorder
+            }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 0
+
+                TabBar {
+                    id: ribbonTabs
+
+                    Layout.preferredWidth: 312
+                    Layout.fillHeight: true
+                    spacing: 0
+                    background: Item {}
+
+                    RibbonTabButton {
+                        text: qsTr("View")
+                    }
+
+                    RibbonTabButton {
+                        text: qsTr("Edit")
+                    }
+
+                    RibbonTabButton {
+                        text: qsTr("E-Sign")
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                }
+            }
         }
 
-        RowLayout {
-            anchors.fill: parent
-            spacing: 6
+        Rectangle {
+            width: parent.width
+            height: 78
+            color: window.ribbonSurface
 
-            OrangeToolButton {
-                text: qsTr("Open")
-                onClicked: openDialog.open()
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Open PDF")
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: window.ribbonBorder
             }
 
-            ToolSeparator {}
-
-            OrangeToolButton {
-                text: "<"
-                enabled: pdfDocument.currentPage > 0
-                onClicked: window.goToPage(pdfDocument.currentPage - 1)
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Previous Page")
-            }
-
-            Label {
-                text: pdfDocument.loaded
-                    ? qsTr("%1 / %2").arg(pdfDocument.currentPage + 1).arg(pdfDocument.pageCount)
-                    : qsTr("- / -")
-                horizontalAlignment: Text.AlignHCenter
-                color: window.toolbarTextColor
-                Layout.preferredWidth: 82
-            }
-
-            OrangeToolButton {
-                text: ">"
-                enabled: pdfDocument.loaded && pdfDocument.currentPage + 1 < pdfDocument.pageCount
-                onClicked: window.goToPage(pdfDocument.currentPage + 1)
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Next Page")
-            }
-
-            ToolSeparator {}
-
-            OrangeToolButton {
-                text: "-"
-                enabled: pdfDocument.loaded
-                onClicked: window.setZoom(window.zoom / 1.15)
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Zoom Out")
-            }
-
-            Label {
-                text: qsTr("%1%").arg(Math.round(window.zoom * 100))
-                horizontalAlignment: Text.AlignHCenter
-                color: window.toolbarTextColor
-                Layout.preferredWidth: 64
-            }
-
-            OrangeToolButton {
-                text: "+"
-                enabled: pdfDocument.loaded
-                onClicked: window.setZoom(window.zoom * 1.15)
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Zoom In")
-            }
-
-            OrangeToolButton {
-                text: qsTr("Fit")
-                enabled: pdfDocument.loaded
-                onClicked: window.fitToWidth()
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Fit Width")
-            }
-
-            Item {
-                Layout.fillWidth: true
-            }
-
-            Label {
-                text: pdfDocument.statusText
-                elide: Text.ElideMiddle
-                color: window.toolbarTextColor
-                Layout.maximumWidth: 420
+            Loader {
+                anchors.fill: parent
+                sourceComponent: ribbonTabs.currentIndex === 0
+                    ? viewRibbonComponent
+                    : ribbonTabs.currentIndex === 1
+                        ? editRibbonComponent
+                        : signRibbonComponent
             }
         }
     }
@@ -436,6 +735,31 @@ ApplicationWindow {
                 text: qsTr("Open PDF")
                 onClicked: openDialog.open()
                 Layout.alignment: Qt.AlignHCenter
+            }
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 20
+            width: Math.min(parent.width - 32, statusToastLabel.implicitWidth + 28)
+            height: 36
+            radius: 4
+            color: "#e63a3b3f"
+            visible: window.transientStatus.length > 0
+            z: 10
+
+            Label {
+                id: statusToastLabel
+
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                text: window.transientStatus
+                color: "white"
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
             }
         }
     }
