@@ -1,12 +1,11 @@
 #pragma once
 
-#include <QByteArray>
-#include <QColor>
-#include <QImage>
 #include <QObject>
 #include <QSize>
 #include <QSizeF>
+#include <QString>
 #include <QUrl>
+#include <QVector>
 #include <QtQml/qqmlregistration.h>
 
 #include <fpdfview.h>
@@ -22,6 +21,7 @@ class PDFDocument : public QObject
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged FINAL)
     Q_PROPERTY(qreal currentPageWidth READ currentPageWidth NOTIFY currentPageSizeChanged FINAL)
     Q_PROPERTY(qreal currentPageHeight READ currentPageHeight NOTIFY currentPageSizeChanged FINAL)
+    Q_PROPERTY(qreal maximumPageWidth READ maximumPageWidth NOTIFY pageCountChanged FINAL)
 
 public:
     explicit PDFDocument(QObject *parent = nullptr);
@@ -34,6 +34,7 @@ public:
     QString statusText() const;
     qreal currentPageWidth() const;
     qreal currentPageHeight() const;
+    qreal maximumPageWidth() const;
 
     Q_INVOKABLE bool open(const QUrl &source);
     Q_INVOKABLE void close();
@@ -42,7 +43,8 @@ public:
     Q_INVOKABLE void previousPage();
     Q_INVOKABLE QSizeF pageSize(int page) const;
 
-    QImage renderPage(int page, const QSize &pixelSize, const QColor &background) const;
+    QString renderFilePath() const;
+    int renderRevision() const;
 
 signals:
     void sourceChanged();
@@ -57,10 +59,13 @@ private:
     void setStatusText(const QString &statusText);
     void emitDocumentStateChanged();
 
-    QByteArray m_data;
     FPDF_DOCUMENT m_document = nullptr;
     QUrl m_source;
+    QString m_filePath;
+    QVector<QSizeF> m_pageSizes;
+    qreal m_maximumPageWidth = 0.0;
     int m_pageCount = 0;
     int m_currentPage = 0;
+    int m_revision = 0;
     QString m_statusText;
 };
