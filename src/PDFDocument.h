@@ -1,12 +1,11 @@
 #pragma once
 
-#include <QByteArray>
-#include <QColor>
-#include <QImage>
 #include <QObject>
 #include <QSize>
 #include <QSizeF>
+#include <QString>
 #include <QUrl>
+#include <QVector>
 #include <QtQml/qqmlregistration.h>
 
 #include <fpdfview.h>
@@ -44,7 +43,8 @@ public:
     Q_INVOKABLE void previousPage();
     Q_INVOKABLE QSizeF pageSize(int page) const;
 
-    QImage renderPage(int page, const QSize &pixelSize, const QColor &background) const;
+    QString renderFilePath() const;
+    int renderRevision() const;
 
 signals:
     void sourceChanged();
@@ -59,10 +59,13 @@ private:
     void setStatusText(const QString &statusText);
     void emitDocumentStateChanged();
 
-    QByteArray m_data;
     FPDF_DOCUMENT m_document = nullptr;
     QUrl m_source;
+    QString m_filePath;
+    QVector<QSizeF> m_pageSizes;
+    qreal m_maximumPageWidth = 0.0;
     int m_pageCount = 0;
     int m_currentPage = 0;
+    int m_revision = 0;
     QString m_statusText;
 };

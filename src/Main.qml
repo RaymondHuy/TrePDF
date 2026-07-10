@@ -332,7 +332,7 @@ ApplicationWindow {
             model: pdfDocument.loaded ? pdfDocument.pageCount : 0
             spacing: 28
             reuseItems: true
-            cacheBuffer: Math.max(height * 1.5, 1200)
+            cacheBuffer: Math.min(Math.max(height * 0.5, 256), 640)
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             flickableDirection: Flickable.AutoFlickIfNeeded

@@ -2,9 +2,6 @@
 
 #include <QFile>
 
-#include <limits>
-#include <utility>
-
 namespace {
 
 class PdfiumRuntime
@@ -47,14 +44,6 @@ QString pdfiumErrorText()
     default:
         return QStringLiteral("PDFium failed with an unknown status");
     }
-}
-
-FPDF_DWORD pdfiumColor(const QColor &color)
-{
-    return (static_cast<FPDF_DWORD>(color.alpha()) << 24)
-        | (static_cast<FPDF_DWORD>(color.red()) << 16)
-        | (static_cast<FPDF_DWORD>(color.green()) << 8)
-        | static_cast<FPDF_DWORD>(color.blue());
 }
 
 } // namespace
@@ -108,29 +97,19 @@ qreal PDFDocument::currentPageHeight() const
 
 qreal PDFDocument::maximumPageWidth() const
 {
-    qreal maximumWidth = 0.0;
-    for (int page = 0; page < m_pageCount; ++page) {
-        maximumWidth = qMax(maximumWidth, pageSize(page).width());
-    }
-    return maximumWidth;
+    return m_maximumPageWidth;
 }
 
 bool PDFDocument::open(const QUrl &source)
 {
-    const QString filePath = source.isLocalFile() ? source.toLocalFile() : source.toString();
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        setStatusText(QStringLiteral("Could not open %1").arg(filePath));
+    if (!source.isLocalFile()) {
+        setStatusText(QStringLiteral("Only local PDF files are supported"));
         return false;
     }
 
-    QByteArray data = file.readAll();
-    if (data.size() > std::numeric_limits<int>::max()) {
-        setStatusText(QStringLiteral("The PDF is too large to load"));
-        return false;
-    }
-
-    FPDF_DOCUMENT document = FPDF_LoadMemDocument(data.constData(), static_cast<int>(data.size()), nullptr);
+    const QString filePath = source.toLocalFile();
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
     if (!document) {
         setStatusText(pdfiumErrorText());
         return false;
@@ -138,11 +117,22 @@ bool PDFDocument::open(const QUrl &source)
 
     closeDocument();
 
-    m_data = std::move(data);
     m_document = document;
     m_source = source;
+    m_filePath = filePath;
     m_pageCount = FPDF_GetPageCount(m_document);
     m_currentPage = 0;
+    m_pageSizes.reserve(m_pageCount);
+    for (int page = 0; page < m_pageCount; ++page) {
+        double width = 0.0;
+        double height = 0.0;
+        const QSizeF size = FPDF_GetPageSizeByIndex(m_document, page, &width, &height)
+            ? QSizeF(width, height)
+            : QSizeF();
+        m_pageSizes.append(size);
+        m_maximumPageWidth = qMax(m_maximumPageWidth, size.width());
+    }
+    ++m_revision;
     setStatusText(QStringLiteral("Loaded %1 page(s)").arg(m_pageCount));
     emitDocumentStateChanged();
 
@@ -151,7 +141,7 @@ bool PDFDocument::open(const QUrl &source)
 
 void PDFDocument::close()
 {
-    if (!m_document && m_source.isEmpty() && m_data.isEmpty()) {
+    if (!m_document && m_source.isEmpty() && m_filePath.isEmpty()) {
         return;
     }
 
@@ -188,60 +178,21 @@ void PDFDocument::previousPage()
 
 QSizeF PDFDocument::pageSize(int page) const
 {
-    if (!m_document || page < 0 || page >= m_pageCount) {
+    if (!m_document || page < 0 || page >= m_pageSizes.size()) {
         return {};
     }
 
-    double width = 0.0;
-    double height = 0.0;
-    if (!FPDF_GetPageSizeByIndex(m_document, page, &width, &height)) {
-        return {};
-    }
-
-    return {width, height};
+    return m_pageSizes.at(page);
 }
 
-QImage PDFDocument::renderPage(int page, const QSize &pixelSize, const QColor &background) const
+QString PDFDocument::renderFilePath() const
 {
-    if (!m_document || page < 0 || page >= m_pageCount || pixelSize.isEmpty()) {
-        return {};
-    }
+    return m_filePath;
+}
 
-    FPDF_PAGE pdfPage = FPDF_LoadPage(m_document, page);
-    if (!pdfPage) {
-        return {};
-    }
-
-    QImage image(pixelSize, QImage::Format_ARGB32);
-    image.fill(background);
-
-    FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
-        pixelSize.width(),
-        pixelSize.height(),
-        FPDFBitmap_BGRA,
-        image.bits(),
-        image.bytesPerLine());
-
-    if (!bitmap) {
-        FPDF_ClosePage(pdfPage);
-        return {};
-    }
-
-    FPDFBitmap_FillRect(bitmap, 0, 0, pixelSize.width(), pixelSize.height(), pdfiumColor(background));
-    FPDF_RenderPageBitmap(
-        bitmap,
-        pdfPage,
-        0,
-        0,
-        pixelSize.width(),
-        pixelSize.height(),
-        0,
-        FPDF_ANNOT);
-
-    FPDFBitmap_Destroy(bitmap);
-    FPDF_ClosePage(pdfPage);
-
-    return image;
+int PDFDocument::renderRevision() const
+{
+    return m_revision;
 }
 
 void PDFDocument::closeDocument()
@@ -251,10 +202,13 @@ void PDFDocument::closeDocument()
     }
 
     m_document = nullptr;
-    m_data.clear();
     m_source = QUrl();
+    m_filePath.clear();
+    m_pageSizes.clear();
+    m_maximumPageWidth = 0.0;
     m_pageCount = 0;
     m_currentPage = 0;
+    ++m_revision;
 }
 
 void PDFDocument::setStatusText(const QString &statusText)
