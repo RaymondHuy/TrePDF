@@ -105,17 +105,20 @@ Column {
 
                 RibbonTabButton {
                     theme: root.theme
-                    text: qsTr("View")
+                    //% "View"
+                    text: qsTrId("View")
                 }
 
                 RibbonTabButton {
                     theme: root.theme
-                    text: qsTr("Edit")
+                    //% "Edit"
+                    text: qsTrId("Edit")
                 }
 
                 RibbonTabButton {
                     theme: root.theme
-                    text: qsTr("E-Sign")
+                    //% "E-Sign"
+                    text: qsTrId("ESign")
                 }
             }
 
@@ -139,7 +142,8 @@ Column {
                     id: draftStatusLabel
 
                     anchors.centerIn: parent
-                    text: qsTr("Draft · Not saved")
+                    //% "Draft · Not saved"
+                    text: qsTrId("DraftNotSaved")
                     color: root.theme.foxitDarkOrange
                     font.pixelSize: 11
                     font.weight: Font.DemiBold

@@ -24,12 +24,14 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Sign")
+            //% "Sign"
+            title: qsTrId("Sign")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Fill && Sign")
+                //% "Fill && Sign"
+                text: qsTrId("FillAndSign")
                 iconSource: "../assets/icons/pen-line.svg"
                 signing: true
                 primary: true
@@ -39,8 +41,10 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Signature")
-                toolTipText: qsTr("Add Signature")
+                //% "Signature"
+                text: qsTrId("Signature")
+                //% "Add Signature"
+                toolTipText: qsTrId("AddSignature")
                 iconSource: "../assets/icons/signature.svg"
                 signing: true
                 onClicked: root.toolRequested(text)
@@ -49,8 +53,10 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Initials")
-                toolTipText: qsTr("Add Initials")
+                //% "Initials"
+                text: qsTrId("Initials")
+                //% "Add Initials"
+                toolTipText: qsTrId("AddInitials")
                 iconSource: "../assets/icons/signature.svg"
                 signing: true
                 onClicked: root.toolRequested(text)
@@ -59,13 +65,16 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Fields")
+            //% "Fields"
+            title: qsTrId("Fields")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Date")
-                toolTipText: qsTr("Add Date")
+                //% "Date"
+                text: qsTrId("Date")
+                //% "Add Date"
+                toolTipText: qsTrId("AddDate")
                 iconSource: "../assets/icons/calendar-days.svg"
                 signing: true
                 onClicked: root.toolRequested(text)
@@ -74,8 +83,10 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Check")
-                toolTipText: qsTr("Add Check Mark")
+                //% "Check"
+                text: qsTrId("CheckMark")
+                //% "Add Check Mark"
+                toolTipText: qsTrId("AddCheckMark")
                 iconSource: "../assets/icons/square-check-big.svg"
                 signing: true
                 onClicked: root.toolRequested(text)
@@ -84,13 +95,16 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Workflow")
+            //% "Workflow"
+            title: qsTrId("Workflow")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Request")
-                toolTipText: qsTr("Request Signatures")
+                //% "Request"
+                text: qsTrId("Request")
+                //% "Request Signatures"
+                toolTipText: qsTrId("RequestSignatures")
                 iconSource: "../assets/icons/send.svg"
                 signing: true
                 onClicked: root.toolRequested(text)
@@ -99,8 +113,10 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Validate")
-                toolTipText: qsTr("Validate Signatures")
+                //% "Validate"
+                text: qsTrId("Validate")
+                //% "Validate Signatures"
+                toolTipText: qsTrId("ValidateSignatures")
                 iconSource: "../assets/icons/shield-check.svg"
                 signing: true
                 onClicked: root.toolRequested(text)

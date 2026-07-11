@@ -23,13 +23,18 @@ if((NOT PDFium_ROOT OR PDFium_ROOT MATCHES "-NOTFOUND$") AND EXISTS "${TREPDF_LO
 endif()
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS
+    LinguistTools
     Qml
     Quick
     QuickControls2
 )
 find_package(PDFium REQUIRED)
 
-qt_standard_project_setup(REQUIRES 6.8)
+qt_standard_project_setup(
+    REQUIRES 6.8
+    I18N_SOURCE_LANGUAGE en
+    I18N_TRANSLATED_LANGUAGES vi
+)
 
 qt_add_executable(trepdf
     src/main.cpp
@@ -86,6 +91,21 @@ qt_add_qml_module(trepdf
         src/assets/icons/undo-2.svg
         src/assets/icons/zoom-in.svg
         src/assets/icons/zoom-out.svg
+)
+
+# Qt 6.8 and 6.9 require this flag for ID-based catalogs; Qt 6.10 deprecated it.
+set(TREPDF_LRELEASE_OPTIONS)
+if(Qt6_VERSION VERSION_LESS 6.10)
+    set(TREPDF_LRELEASE_OPTIONS -idbased)
+endif()
+
+qt_add_translations(trepdf
+    SOURCE_TARGETS trepdf
+    TS_FILE_BASE qml
+    TS_FILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/i18n"
+    RESOURCE_PREFIX "/qt/qml/TrePDF/src/i18n"
+    NO_GENERATE_PLURALS_TS_FILE
+    LRELEASE_OPTIONS ${TREPDF_LRELEASE_OPTIONS}
 )
 
 target_include_directories(trepdf

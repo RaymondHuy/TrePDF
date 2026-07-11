@@ -1,6 +1,8 @@
 # TrePDF
 
-Qt Quick Controls app scaffold for rendering PDFs with PDFium.
+TrePDF is a Qt Quick Controls desktop PDF reader powered by PDFium. The app
+supports continuous page viewing, asynchronous rendering, draft content edits,
+and an ID-based localization system with Vietnamese enabled by default.
 
 ## Build
 
@@ -35,3 +37,30 @@ PDFium is configured from `third_party/pdfium`.
 Open the repository folder in CLion and use the default `Debug` CMake profile.
 The project configures Qt and PDFium from the local paths above, then creates
 the `trepdf` target.
+
+## Localization
+
+TrePDF uses Qt's ID-based translation system. Translation keys are unique
+project-wide English names written in PascalCase. QML uses `qsTrId()`, while
+C++ uses `qtTrId()`.
+
+```qml
+//% "Open PDF"
+text: qsTrId("OpenPdf")
+```
+
+Vietnamese is the current default UI language. Its source catalog is
+`i18n/qml_vi.ts`; CMake compiles it to `qml_vi.qm` and embeds it next to the
+main QML file under `:/qt/qml/TrePDF/src/i18n`.
+
+After adding or changing a user-visible string, update the catalog and rebuild:
+
+```sh
+cmake --build build --target update_translations
+cmake --build build --target trepdf
+```
+
+To add another language, append its locale to `I18N_TRANSLATED_LANGUAGES` in
+`CMakeLists.txt`, reconfigure the project, run `update_translations`, then
+complete the generated `i18n/qml_<locale>.ts` catalog. Preserve placeholders
+such as `%1` and `%n` in every translation.

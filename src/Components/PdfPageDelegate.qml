@@ -72,7 +72,8 @@ Item {
     Label {
         id: pageLabel
 
-        text: qsTr("Page %1").arg(pageCard.index + 1)
+        //% "Page %1"
+        text: qsTrId("PageNumber").arg(pageCard.index + 1)
         color: pageCard.index === pageCard.document.currentPage
             ? pageCard.theme.foxitDarkOrange
             : "#6b625d"

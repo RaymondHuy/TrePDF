@@ -9,8 +9,9 @@
 ## Project Summary
 
 TrePDF is a macOS desktop PDF reader built with Qt 6, Qt Quick Controls, QML,
-C++17, and PDFium. The current scope is PDF viewing. PDF editing is planned but
-is not implemented yet.
+C++17, and PDFium. The current scope is PDF viewing plus session-only draft
+editing for supported PDF content. Persisting edits back into the PDF is
+planned but is not implemented yet.
 
 Current features:
 
@@ -19,19 +20,27 @@ Current features:
 - Virtualized continuous scrolling with reusable QML delegates.
 - Asynchronous page rendering on a worker thread.
 - Page navigation, zoom, and fit-to-width controls.
+- Session-only text draft editing with selection, undo, redo, and discard.
+- ID-based localization with Vietnamese as the default UI language.
 - A restrained orange UI inspired by Foxit Reader.
 
 ## Repository Layout
 
-- `CMakeLists.txt`: application target, QML module, Qt/PDFium discovery, and
-  macOS PDFium bundling.
+- `CMakeLists.txt`: application target, QML module, translation pipeline,
+  Qt/PDFium discovery, and macOS PDFium bundling.
 - `cmake/FindPDFium.cmake`: creates the `PDFium::PDFium` imported target.
-- `src/main.cpp`: Qt application and QML engine startup.
+- `i18n/qml_vi.ts`: Vietnamese ID-based translation catalog.
+- `src/main.cpp`: Qt application startup, default UI language, and QML engine
+  loading.
 - `src/Main.qml`: menus, toolbar, virtualized `ListView`, and page delegates.
 - `src/PDFDocument.h/.cpp`: main-thread PDFium document, metadata, page sizes,
   navigation state, and source file path.
+- `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
+  session draft state, and undo/redo history.
 - `src/PDFPageItem.h/.cpp`: asynchronous rendering and scene graph texture
   upload for one page delegate.
+- `src/Components`: ribbon controls, document view, page delegates, and the
+  draft editing overlay.
 - `third_party/pdfium`: prebuilt arm64 PDFium headers and library. Treat this as
   third-party code and do not modify it for normal feature work.
 
@@ -77,6 +86,44 @@ Build command:
   --build /Users/luongvanhuy/Documents/TreOffice/TrePDF/cmake-build-debug \
   --target trepdf -j 8
 ```
+
+## Localization
+
+- Use Qt's ID-based translation system exclusively. Do not introduce new
+  `qsTr()` or `QObject::tr()` calls.
+- Every user-visible QML string uses `qsTrId("PascalCaseKey")`; every
+  user-visible C++ string uses `qtTrId("PascalCaseKey")`.
+- Translation IDs are English, globally unique, and PascalCase. Treat an ID as
+  a stable API: changing it creates a new translation entry.
+- Put an English engineering source comment (`//% "Source text"`) immediately
+  before every `qsTrId()` or `qtTrId()` call so `lupdate` can preserve readable
+  source text.
+- Translation functions take literal IDs only. Do not pass runtime variables to
+  `qsTrId()` or `qtTrId()` unless the literal ID was separately marked with
+  `QT_TRID_NOOP`.
+- Use `%1`, `%2`, or `%n` placeholders instead of concatenating translated
+  fragments. Preserve every placeholder in all translations.
+- Vietnamese is currently the default language. `src/main.cpp` sets the QML
+  engine UI language to `vi`, and the catalog lives at `i18n/qml_vi.ts`.
+- Translation files must use the `qml_<locale>.ts` naming scheme so
+  `QQmlApplicationEngine` can load them automatically.
+- Keep the translation resource prefix at `/qt/qml/TrePDF/src/i18n` while
+  `Main.qml` is packaged as `src/Main.qml`. The engine searches for `i18n`
+  adjacent to the main QML file.
+- Add a locale to `I18N_TRANSLATED_LANGUAGES` in `CMakeLists.txt` before adding
+  its `i18n/qml_<locale>.ts` catalog.
+
+After changing any user-visible text, update and validate translations:
+
+```sh
+/Applications/CLion.app/Contents/bin/cmake/mac/aarch64/bin/cmake \
+  --build /Users/luongvanhuy/Documents/TreOffice/TrePDF/cmake-build-debug \
+  --target update_translations -j 8
+```
+
+Do not leave new entries as `type="unfinished"`. Build `trepdf`, run the
+`trepdf_qmllint` target, and visually check that longer translations are not
+clipped or elided unintentionally.
 
 ## Rendering Architecture
 
@@ -133,7 +180,7 @@ Build command:
 - `clip: true` is intentional for the scrolling viewport.
 - Keep QML imports versionless and use `QtQuick.Controls.Basic` when customizing
   control internals.
-- Wrap user-visible text in `qsTr()`.
+- Wrap user-visible text in `qsTrId()` using the localization rules above.
 
 ## Memory and Performance Invariants
 

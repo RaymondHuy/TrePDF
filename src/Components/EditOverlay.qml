@@ -207,8 +207,10 @@ Item {
             : Qt.ArrowCursor
         activeFocusOnTab: true
         Accessible.role: Accessible.Pane
-        Accessible.name: qsTr("PDF edit surface")
-        Accessible.description: qsTr("Use Tab or arrow keys to select content, then press Enter to edit text")
+        //% "PDF edit surface"
+        Accessible.name: qsTrId("PdfEditSurface")
+        //% "Use Tab or arrow keys to select content, then press Enter to edit text"
+        Accessible.description: qsTrId("PdfEditSurfaceDescription")
 
         onPositionChanged: mouse => {
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
@@ -332,7 +334,8 @@ Item {
             id: editorHint
 
             anchors.centerIn: parent
-            text: qsTr("Enter to apply · Esc to cancel")
+            //% "Enter to apply · Esc to cancel"
+            text: qsTrId("ApplyOrCancelEditHint")
             color: "white"
             font.pixelSize: 10
         }
