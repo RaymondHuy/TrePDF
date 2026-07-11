@@ -10,6 +10,7 @@ Column {
 
     required property AppTheme theme
     required property PDFDocument document
+    required property PDFEditController editController
 
     signal openRequested()
     signal pageRequested(int page)
@@ -19,6 +20,24 @@ Column {
     signal toolRequested(string toolName)
 
     spacing: 0
+
+    function syncEditTool() {
+        if (!document.loaded || ribbonTabs.currentIndex !== 1) {
+            editController.tool = PDFEditController.BrowseTool
+        } else if (editController.tool === PDFEditController.BrowseTool) {
+            editController.tool = PDFEditController.SelectTool
+        }
+    }
+
+    Component.onCompleted: syncEditTool()
+
+    Connections {
+        target: root.document
+
+        function onLoadedChanged() {
+            root.syncEditTool()
+        }
+    }
 
     Component {
         id: viewRibbonComponent
@@ -41,6 +60,7 @@ Column {
         EditRibbon {
             theme: root.theme
             document: root.document
+            editController: root.editController
             onToolRequested: toolName => root.toolRequested(toolName)
         }
     }
@@ -81,6 +101,7 @@ Column {
                 Layout.fillHeight: true
                 spacing: 0
                 background: Item {}
+                onCurrentIndexChanged: root.syncEditTool()
 
                 RibbonTabButton {
                     theme: root.theme
@@ -100,6 +121,29 @@ Column {
 
             Item {
                 Layout.fillWidth: true
+            }
+
+            Rectangle {
+                Layout.preferredWidth: draftStatusLabel.implicitWidth + 20
+                Layout.preferredHeight: 24
+                Layout.alignment: Qt.AlignVCenter
+                visible: root.editController.hasDrafts
+                radius: 12
+                color: root.theme.foxitPaleOrange
+                border.color: root.theme.foxitBorderOrange
+                border.width: 1
+                Accessible.role: Accessible.StaticText
+                Accessible.name: draftStatusLabel.text
+
+                Label {
+                    id: draftStatusLabel
+
+                    anchors.centerIn: parent
+                    text: qsTr("Draft · Not saved")
+                    color: root.theme.foxitDarkOrange
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                }
             }
         }
     }

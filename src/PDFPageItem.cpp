@@ -1,8 +1,10 @@
 #include "PDFPageItem.h"
+#include "PDFiumSynchronization.h"
 
 #include <QCoreApplication>
 #include <QFile>
 #include <QMetaObject>
+#include <QMutexLocker>
 #include <QPointer>
 #include <QRunnable>
 #include <QSGSimpleTextureNode>
@@ -93,12 +95,15 @@ QImage renderPageFromFile(const QString &filePath,
     }
 
     thread_local PDFiumRenderDocument renderDocument;
-    FPDF_DOCUMENT document = renderDocument.document(filePath, revision);
-    if (!document || isCancelled(cancellation)) {
-        return {};
+    FPDF_DOCUMENT document = nullptr;
+    FPDF_PAGE pdfPage = nullptr;
+    {
+        QMutexLocker pageLoadLock(&pdfiumPageLoadMutex());
+        document = renderDocument.document(filePath, revision);
+        if (document && !isCancelled(cancellation)) {
+            pdfPage = FPDF_LoadPage(document, page);
+        }
     }
-
-    FPDF_PAGE pdfPage = FPDF_LoadPage(document, page);
     if (!pdfPage || isCancelled(cancellation)) {
         if (pdfPage) {
             FPDF_ClosePage(pdfPage);

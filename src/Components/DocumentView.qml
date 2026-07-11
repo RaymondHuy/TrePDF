@@ -10,24 +10,47 @@ Rectangle {
 
     required property AppTheme theme
     required property PDFDocument document
+    required property PDFEditController editController
     property real zoom: 1.0
     property string transientStatus
+    property int pendingNavigationPage: -1
     readonly property real viewportWidth: viewer.width
 
     signal openRequested()
 
     color: "#f2efec"
 
-    function scrollToPage(page) {
+    function navigateToPage(page) {
         if (!document.loaded || page < 0 || page >= document.pageCount)
             return
 
-        viewer.positionViewAtIndex(page, ListView.Beginning)
-        viewer.contentY = Math.max(0, viewer.contentY - 16)
+        pendingNavigationPage = page
+        document.setCurrentPage(page)
+
+        Qt.callLater(function() {
+            if (root.pendingNavigationPage !== page)
+                return
+
+            if (!root.document.loaded || page >= root.document.pageCount) {
+                root.pendingNavigationPage = -1
+                return
+            }
+
+            viewer.positionViewAtIndex(page, ListView.Beginning)
+            viewer.contentY = Math.max(0, viewer.contentY - 16)
+
+            Qt.callLater(function() {
+                if (root.pendingNavigationPage !== page)
+                    return
+
+                root.document.setCurrentPage(page)
+                root.pendingNavigationPage = -1
+            })
+        })
     }
 
     function syncCurrentPageFromScroll() {
-        if (!document.loaded || viewer.count <= 0)
+        if (pendingNavigationPage >= 0 || !document.loaded || viewer.count <= 0)
             return
 
         const page = viewer.indexAt(viewer.contentX + viewer.width * 0.5,
@@ -48,7 +71,7 @@ Rectangle {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.AutoFlickIfNeeded
-        currentIndex: root.document.currentPage
+        currentIndex: -1
 
         header: Item {
             width: ListView.view ? ListView.view.width : 0
@@ -73,6 +96,7 @@ Rectangle {
         delegate: PdfPageDelegate {
             theme: root.theme
             document: root.document
+            editController: root.editController
             zoom: root.zoom
         }
     }

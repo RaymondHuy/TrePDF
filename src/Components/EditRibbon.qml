@@ -7,6 +7,7 @@ Flickable {
 
     required property AppTheme theme
     required property PDFDocument document
+    required property PDFEditController editController
 
     signal toolRequested(string toolName)
 
@@ -31,8 +32,8 @@ Flickable {
                 documentLoaded: root.document.loaded
                 text: qsTr("Select")
                 iconSource: "../assets/icons/mouse-pointer-2.svg"
-                primary: true
-                onClicked: root.toolRequested(text)
+                primary: root.editController.tool === PDFEditController.SelectTool
+                onClicked: root.editController.tool = PDFEditController.SelectTool
             }
 
             RibbonButton {
@@ -40,7 +41,8 @@ Flickable {
                 documentLoaded: root.document.loaded
                 text: qsTr("Edit Text")
                 iconSource: "../assets/icons/type.svg"
-                onClicked: root.toolRequested(text)
+                primary: root.editController.tool === PDFEditController.EditTextTool
+                onClicked: root.editController.tool = PDFEditController.EditTextTool
             }
 
             RibbonButton {
@@ -121,7 +123,10 @@ Flickable {
                 documentLoaded: root.document.loaded
                 text: qsTr("Undo")
                 iconSource: "../assets/icons/undo-2.svg"
-                onClicked: root.toolRequested(text)
+                enabled: root.document.loaded
+                    && root.editController.canUndo
+                    && !root.editController.textEditActive
+                onClicked: root.editController.undo()
             }
 
             RibbonButton {
@@ -129,7 +134,10 @@ Flickable {
                 documentLoaded: root.document.loaded
                 text: qsTr("Redo")
                 iconSource: "../assets/icons/redo-2.svg"
-                onClicked: root.toolRequested(text)
+                enabled: root.document.loaded
+                    && root.editController.canRedo
+                    && !root.editController.textEditActive
+                onClicked: root.editController.redo()
             }
         }
     }

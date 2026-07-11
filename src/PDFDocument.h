@@ -10,6 +10,8 @@
 
 #include <fpdfview.h>
 
+class PDFEditController;
+
 class PDFDocument : public QObject
 {
     Q_OBJECT
@@ -55,6 +57,8 @@ signals:
     void currentPageSizeChanged();
 
 private:
+    friend class PDFEditController;
+
     void closeDocument();
     void setStatusText(const QString &statusText);
     void emitDocumentStateChanged();

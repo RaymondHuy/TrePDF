@@ -8,6 +8,7 @@ Item {
     required property int index
     required property AppTheme theme
     required property PDFDocument document
+    required property PDFEditController editController
     property real zoom: 1.0
     property bool pooled: false
     readonly property real pageMargin: 32
@@ -54,6 +55,18 @@ Item {
             : "#c6cad1"
         border.width: pageCard.index === pageCard.document.currentPage ? 2 : 1
         visible: pageView.width > 0 && pageView.height > 0 && !pageCard.pooled
+    }
+
+    EditOverlay {
+        x: pageView.x
+        y: pageView.y
+        width: pageView.width
+        height: pageView.height
+        page: pageCard.index
+        pooled: pageCard.pooled
+        theme: pageCard.theme
+        controller: pageCard.editController
+        z: 2
     }
 
     Label {
