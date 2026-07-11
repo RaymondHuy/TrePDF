@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Dialogs
+import QtQuick.Layouts
 import TrePDF
 
 ApplicationWindow {
@@ -15,6 +16,8 @@ ApplicationWindow {
 
     property real zoom: 1.0
     property string transientStatus: ""
+    property string pendingDraftAction: ""
+    property bool allowCloseWithDrafts: false
 
     palette.highlight: appTheme.foxitOrange
     palette.button: appTheme.foxitPaleOrange
@@ -35,25 +38,55 @@ ApplicationWindow {
         setZoom((documentView.viewportWidth - 96) / pdfDocument.maximumPageWidth)
     }
 
-    function scrollToPage(page) {
-        documentView.scrollToPage(page)
-    }
-
     function goToPage(page) {
-        pdfDocument.setCurrentPage(page)
-        Qt.callLater(function() { scrollToPage(pdfDocument.currentPage) })
+        documentView.navigateToPage(page)
     }
 
     function openFile(url) {
         if (pdfDocument.open(url)) {
             Qt.callLater(fitToWidth)
-            Qt.callLater(function() { scrollToPage(0) })
+            Qt.callLater(function() { goToPage(0) })
+        }
+    }
+
+    function requestOpen() {
+        if (editController.hasDrafts) {
+            pendingDraftAction = "open"
+            discardDraftPopup.open()
+        } else {
+            openDialog.open()
+        }
+    }
+
+    function continueAfterDiscard() {
+        const action = pendingDraftAction
+        pendingDraftAction = ""
+        editController.discardDrafts()
+        discardDraftPopup.close()
+
+        if (action === "open") {
+            Qt.callLater(function() { openDialog.open() })
+        } else if (action === "quit") {
+            allowCloseWithDrafts = true
+            Qt.callLater(function() { window.close() })
         }
     }
 
     function showComingSoon(toolName) {
-        transientStatus = qsTr("%1 is coming soon").arg(toolName)
+        showStatus(qsTr("%1 is coming soon").arg(toolName))
+    }
+
+    function showStatus(message) {
+        transientStatus = message
         transientStatusTimer.restart()
+    }
+
+    onClosing: close => {
+        if (!allowCloseWithDrafts && editController.hasDrafts) {
+            close.accepted = false
+            pendingDraftAction = "quit"
+            discardDraftPopup.open()
+        }
     }
 
     AppTheme {
@@ -71,6 +104,25 @@ ApplicationWindow {
         id: pdfDocument
     }
 
+    PDFEditController {
+        id: editController
+
+        document: pdfDocument
+        onStatusMessage: message => window.showStatus(message)
+    }
+
+    Shortcut {
+        sequences: [StandardKey.Undo]
+        enabled: editController.canUndo && !editController.textEditActive
+        onActivated: editController.undo()
+    }
+
+    Shortcut {
+        sequences: [StandardKey.Redo]
+        enabled: editController.canRedo && !editController.textEditActive
+        onActivated: editController.redo()
+    }
+
     FileDialog {
         id: openDialog
 
@@ -79,11 +131,76 @@ ApplicationWindow {
         onAccepted: window.openFile(selectedFile)
     }
 
+    Popup {
+        id: discardDraftPopup
+
+        x: Math.round((window.width - width) / 2)
+        y: Math.round((window.height - height) / 2)
+        width: Math.min(390, window.width - 32)
+        height: discardDraftContent.implicitHeight + 32
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+
+        background: Rectangle {
+            radius: 6
+            color: "#fffdfb"
+            border.color: appTheme.ribbonBorder
+            border.width: 1
+        }
+
+        contentItem: ColumnLayout {
+            id: discardDraftContent
+
+            spacing: 14
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Discard draft changes?")
+                color: appTheme.ribbonTextColor
+                font.pixelSize: 18
+                font.weight: Font.DemiBold
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Your edits exist only in this session and have not been saved to the PDF.")
+                color: "#656268"
+                wrapMode: Text.Wrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Button {
+                    text: qsTr("Cancel")
+                    onClicked: {
+                        window.pendingDraftAction = ""
+                        discardDraftPopup.close()
+                    }
+                }
+
+                OrangeButton {
+                    Layout.preferredWidth: 104
+                    theme: appTheme
+                    text: qsTr("Discard")
+                    onClicked: window.continueAfterDiscard()
+                }
+            }
+        }
+    }
+
     header: AppRibbon {
         width: window.width
         theme: appTheme
         document: pdfDocument
-        onOpenRequested: openDialog.open()
+        editController: editController
+        onOpenRequested: window.requestOpen()
         onPageRequested: page => window.goToPage(page)
         onZoomOutRequested: window.setZoom(window.zoom / 1.15)
         onZoomInRequested: window.setZoom(window.zoom * 1.15)
@@ -97,8 +214,9 @@ ApplicationWindow {
         anchors.fill: parent
         theme: appTheme
         document: pdfDocument
+        editController: editController
         zoom: window.zoom
         transientStatus: window.transientStatus
-        onOpenRequested: openDialog.open()
+        onOpenRequested: window.requestOpen()
     }
 }

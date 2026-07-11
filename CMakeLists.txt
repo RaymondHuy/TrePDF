@@ -40,6 +40,9 @@ qt_add_qml_module(trepdf
     SOURCES
         src/PDFDocument.cpp
         src/PDFDocument.h
+        src/PDFEditController.cpp
+        src/PDFEditController.h
+        src/PDFiumSynchronization.h
         src/PDFPageItem.cpp
         src/PDFPageItem.h
     QML_FILES
@@ -47,6 +50,7 @@ qt_add_qml_module(trepdf
         src/Components/AppRibbon.qml
         src/Components/AppTheme.qml
         src/Components/DocumentView.qml
+        src/Components/EditOverlay.qml
         src/Components/EditRibbon.qml
         src/Components/OrangeButton.qml
         src/Components/PdfPageDelegate.qml

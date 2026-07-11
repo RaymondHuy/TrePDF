@@ -1,0 +1,1075 @@
+#include "PDFEditController.h"
+#include "PDFiumSynchronization.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+
+#include <QByteArray>
+#include <QFont>
+#include <QFontInfo>
+#include <QMutexLocker>
+#include <QVariantMap>
+
+#include <fpdf_annot.h>
+#include <fpdf_edit.h>
+#include <fpdf_text.h>
+
+namespace {
+
+constexpr unsigned long kModifyContentsPermission = 1UL << 3;
+constexpr int kCoordinateMapExtent = 100000;
+constexpr FS_MATRIX kIdentityMatrix{1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
+
+QSize mappingDeviceSize(const QSizeF &pageSize)
+{
+    const qreal maximumDimension = qMax(pageSize.width(), pageSize.height());
+    if (maximumDimension <= 0.0) {
+        return {};
+    }
+
+    const qreal scale = kCoordinateMapExtent / maximumDimension;
+    return QSize(qMax(1, qRound(pageSize.width() * scale)),
+                 qMax(1, qRound(pageSize.height() * scale)));
+}
+
+QPointF mapPoint(const FS_MATRIX &matrix, const QPointF &point)
+{
+    return QPointF(matrix.a * point.x() + matrix.c * point.y() + matrix.e,
+                   matrix.b * point.x() + matrix.d * point.y() + matrix.f);
+}
+
+FS_MATRIX combinedTransform(const FS_MATRIX &parent, const FS_MATRIX &local)
+{
+    return FS_MATRIX{
+        static_cast<float>(parent.a * local.a + parent.c * local.b),
+        static_cast<float>(parent.b * local.a + parent.d * local.b),
+        static_cast<float>(parent.a * local.c + parent.c * local.d),
+        static_cast<float>(parent.b * local.c + parent.d * local.d),
+        static_cast<float>(parent.a * local.e + parent.c * local.f + parent.e),
+        static_cast<float>(parent.b * local.e + parent.d * local.f + parent.f)};
+}
+
+bool pagePointToDevice(FPDF_PAGE page,
+                       const QSize &deviceSize,
+                       const QPointF &pagePoint,
+                       QPointF &devicePoint)
+{
+    int deviceX = 0;
+    int deviceY = 0;
+    if (!FPDF_PageToDevice(page,
+                           0,
+                           0,
+                           deviceSize.width(),
+                           deviceSize.height(),
+                           0,
+                           pagePoint.x(),
+                           pagePoint.y(),
+                           &deviceX,
+                           &deviceY)) {
+        return false;
+    }
+
+    devicePoint = QPointF(deviceX, deviceY);
+    return true;
+}
+
+bool transformedPointToDevice(FPDF_PAGE page,
+                              const QSize &deviceSize,
+                              const FS_MATRIX &transform,
+                              const QPointF &point,
+                              QPointF &devicePoint)
+{
+    return pagePointToDevice(page, deviceSize, mapPoint(transform, point), devicePoint);
+}
+
+bool supportsInlineTextLayout(FPDF_PAGE page,
+                              const QSizeF &pageSize,
+                              const FS_MATRIX &transform)
+{
+    const QSize deviceSize = mappingDeviceSize(pageSize);
+    QPointF origin;
+    QPointF baselinePoint;
+    QPointF verticalPoint;
+    if (deviceSize.isEmpty()
+        || !transformedPointToDevice(page, deviceSize, transform, QPointF(0.0, 0.0), origin)
+        || !transformedPointToDevice(page, deviceSize, transform, QPointF(1.0, 0.0), baselinePoint)
+        || !transformedPointToDevice(page, deviceSize, transform, QPointF(0.0, 1.0), verticalPoint)) {
+        return false;
+    }
+
+    const QPointF baseline = baselinePoint - origin;
+    const QPointF vertical = verticalPoint - origin;
+    const qreal baselineLength = std::hypot(baseline.x(), baseline.y());
+    const qreal verticalLength = std::hypot(vertical.x(), vertical.y());
+    if (baselineLength <= 0.0 || verticalLength <= 0.0) {
+        return false;
+    }
+
+    return baseline.x() > 0.0
+        && qAbs(baseline.y()) <= baselineLength * 0.05
+        && vertical.y() < 0.0
+        && qAbs(vertical.x()) <= verticalLength * 0.10;
+}
+
+qreal normalizedFontSize(FPDF_PAGE page,
+                         const QSizeF &pageSize,
+                         const FS_MATRIX &transform,
+                         qreal fontSize)
+{
+    const QSize deviceSize = mappingDeviceSize(pageSize);
+    QPointF origin;
+    QPointF fontTop;
+    if (fontSize <= 0.0
+        || deviceSize.isEmpty()
+        || !transformedPointToDevice(page, deviceSize, transform, QPointF(0.0, 0.0), origin)
+        || !transformedPointToDevice(page, deviceSize, transform, QPointF(0.0, fontSize), fontTop)) {
+        return 0.0;
+    }
+
+    return std::hypot(fontTop.x() - origin.x(), fontTop.y() - origin.y())
+        / deviceSize.height();
+}
+
+QRectF normalizedRect(FPDF_PAGE page,
+                      double left,
+                      double bottom,
+                      double right,
+                      double top,
+                      const FS_MATRIX &containerTransform,
+                      const QSizeF &pageSize)
+{
+    const QSize deviceSize = mappingDeviceSize(pageSize);
+    if (!page || deviceSize.isEmpty()) {
+        return {};
+    }
+
+    const std::array<QPointF, 4> containerPoints{
+        QPointF(left, bottom),
+        QPointF(left, top),
+        QPointF(right, bottom),
+        QPointF(right, top)};
+    std::array<QPointF, 4> devicePoints;
+    for (size_t index = 0; index < containerPoints.size(); ++index) {
+        if (!pagePointToDevice(page,
+                               deviceSize,
+                               mapPoint(containerTransform, containerPoints[index]),
+                               devicePoints[index])) {
+            return {};
+        }
+    }
+
+    qreal minimumX = devicePoints.front().x();
+    qreal maximumX = minimumX;
+    qreal minimumY = devicePoints.front().y();
+    qreal maximumY = minimumY;
+    for (const QPointF &point : devicePoints) {
+        minimumX = qMin(minimumX, point.x());
+        maximumX = qMax(maximumX, point.x());
+        minimumY = qMin(minimumY, point.y());
+        maximumY = qMax(maximumY, point.y());
+    }
+
+    const QRectF normalized(minimumX / deviceSize.width(),
+                            minimumY / deviceSize.height(),
+                            (maximumX - minimumX) / deviceSize.width(),
+                            (maximumY - minimumY) / deviceSize.height());
+    return normalized.intersected(QRectF(0.0, 0.0, 1.0, 1.0));
+}
+
+QString textObjectText(FPDF_PAGEOBJECT object, FPDF_TEXTPAGE textPage)
+{
+    if (!object || !textPage) {
+        return {};
+    }
+
+    const unsigned long byteLength = FPDFTextObj_GetText(object, textPage, nullptr, 0);
+    if (byteLength < sizeof(FPDF_WCHAR)) {
+        return {};
+    }
+
+    const qsizetype unitCount = static_cast<qsizetype>(
+        (byteLength + sizeof(FPDF_WCHAR) - 1) / sizeof(FPDF_WCHAR));
+    QVector<FPDF_WCHAR> buffer(unitCount);
+    const unsigned long actualLength = FPDFTextObj_GetText(
+        object,
+        textPage,
+        buffer.data(),
+        byteLength);
+    if (actualLength < sizeof(FPDF_WCHAR)) {
+        return {};
+    }
+
+    qsizetype characterCount = static_cast<qsizetype>(actualLength / sizeof(FPDF_WCHAR));
+    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
+        --characterCount;
+    }
+    return QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(buffer.constData()),
+        characterCount);
+}
+
+QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
+{
+    if (!annotation) {
+        return {};
+    }
+
+    const unsigned long byteLength = FPDFAnnot_GetStringValue(annotation, key, nullptr, 0);
+    if (byteLength < sizeof(FPDF_WCHAR)) {
+        return {};
+    }
+
+    const qsizetype unitCount = static_cast<qsizetype>(
+        (byteLength + sizeof(FPDF_WCHAR) - 1) / sizeof(FPDF_WCHAR));
+    QVector<FPDF_WCHAR> buffer(unitCount);
+    const unsigned long actualLength = FPDFAnnot_GetStringValue(
+        annotation,
+        key,
+        buffer.data(),
+        byteLength);
+    if (actualLength < sizeof(FPDF_WCHAR)) {
+        return {};
+    }
+
+    qsizetype characterCount = static_cast<qsizetype>(actualLength / sizeof(FPDF_WCHAR));
+    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
+        --characterCount;
+    }
+    return QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(buffer.constData()),
+        characterCount);
+}
+
+QString fontFamily(FPDF_PAGEOBJECT object)
+{
+    FPDF_FONT font = FPDFTextObj_GetFont(object);
+    if (!font) {
+        return {};
+    }
+
+    const size_t length = FPDFFont_GetFamilyName(font, nullptr, 0);
+    if (length == 0) {
+        return {};
+    }
+
+    QByteArray buffer(static_cast<qsizetype>(length), '\0');
+    if (FPDFFont_GetFamilyName(font, buffer.data(), length) == 0) {
+        return {};
+    }
+
+    const QString family = QString::fromUtf8(buffer.constData()).trimmed();
+    if (family.isEmpty()) {
+        return {};
+    }
+
+    const QFontInfo resolvedFont{QFont(family)};
+    return resolvedFont.exactMatch() ? family : QString();
+}
+
+QColor textColor(FPDF_PAGEOBJECT object, FPDF_TEXT_RENDERMODE renderMode)
+{
+    unsigned int red = 0;
+    unsigned int green = 0;
+    unsigned int blue = 0;
+    unsigned int alpha = 255;
+    const bool strokeOnly = renderMode == FPDF_TEXTRENDERMODE_STROKE
+        || renderMode == FPDF_TEXTRENDERMODE_STROKE_CLIP;
+    const FPDF_BOOL foundColor = strokeOnly
+        ? FPDFPageObj_GetStrokeColor(object, &red, &green, &blue, &alpha)
+        : FPDFPageObj_GetFillColor(object, &red, &green, &blue, &alpha);
+    if (!foundColor) {
+        return Qt::black;
+    }
+    return QColor::fromRgb(red, green, blue, alpha);
+}
+
+} // namespace
+
+PDFEditController::PDFEditController(QObject *parent)
+    : QObject(parent)
+{
+}
+
+PDFDocument *PDFEditController::document() const
+{
+    return m_document;
+}
+
+void PDFEditController::setDocument(PDFDocument *document)
+{
+    if (m_document == document) {
+        return;
+    }
+
+    if (m_document) {
+        disconnect(m_document, nullptr, this, nullptr);
+    }
+
+    m_document = document;
+    if (m_document) {
+        connect(m_document, &PDFDocument::sourceChanged, this, &PDFEditController::resetSession);
+        connect(m_document, &PDFDocument::loadedChanged, this, &PDFEditController::resetSession);
+        connect(m_document, &PDFDocument::pageCountChanged, this, &PDFEditController::resetSession);
+        connect(m_document, &QObject::destroyed, this, [this]() {
+            m_document = nullptr;
+            resetSession();
+            emit documentChanged();
+        });
+    }
+
+    resetSession();
+    emit documentChanged();
+}
+
+PDFEditController::Tool PDFEditController::tool() const
+{
+    return m_tool;
+}
+
+void PDFEditController::setTool(Tool tool)
+{
+    if (m_tool == tool) {
+        return;
+    }
+
+    finishSelectedTextEdit();
+    m_tool = tool;
+    if (m_tool == BrowseTool) {
+        clearSelection();
+    }
+    emit toolChanged();
+}
+
+bool PDFEditController::hasDrafts() const
+{
+    return !m_drafts.isEmpty();
+}
+
+bool PDFEditController::canUndo() const
+{
+    return !m_undoStack.isEmpty();
+}
+
+bool PDFEditController::canRedo() const
+{
+    return !m_redoStack.isEmpty();
+}
+
+bool PDFEditController::textEditActive() const
+{
+    return m_textEditActive;
+}
+
+int PDFEditController::selectedPage() const
+{
+    return m_hasSelection ? m_selectedCandidate.page : -1;
+}
+
+QString PDFEditController::selectedObjectId() const
+{
+    return m_hasSelection ? m_selectedCandidate.objectId : QString();
+}
+
+QString PDFEditController::selectedKind() const
+{
+    return m_hasSelection ? m_selectedCandidate.kind : QString();
+}
+
+qreal PDFEditController::selectedX() const
+{
+    return m_hasSelection ? m_selectedCandidate.rect.x() : 0.0;
+}
+
+qreal PDFEditController::selectedY() const
+{
+    return m_hasSelection ? m_selectedCandidate.rect.y() : 0.0;
+}
+
+qreal PDFEditController::selectedWidth() const
+{
+    return m_hasSelection ? m_selectedCandidate.rect.width() : 0.0;
+}
+
+qreal PDFEditController::selectedHeight() const
+{
+    return m_hasSelection ? m_selectedCandidate.rect.height() : 0.0;
+}
+
+QString PDFEditController::selectedText() const
+{
+    return m_hasSelection ? m_selectedText : QString();
+}
+
+QString PDFEditController::selectedFontFamily() const
+{
+    return m_hasSelection ? m_selectedCandidate.fontFamily : QString();
+}
+
+qreal PDFEditController::selectedFontSizeRatio() const
+{
+    return m_hasSelection ? m_selectedCandidate.fontSizeRatio : 0.0;
+}
+
+QColor PDFEditController::selectedColor() const
+{
+    return m_hasSelection ? m_selectedCandidate.color : QColor(Qt::black);
+}
+
+bool PDFEditController::selectedEditable() const
+{
+    return m_hasSelection && m_selectedCandidate.editable;
+}
+
+QString PDFEditController::selectedReason() const
+{
+    return m_hasSelection ? m_selectedCandidate.reason : QString();
+}
+
+QVariantList PDFEditController::candidatesForPage(int page)
+{
+    QVariantList result;
+    const QVector<Candidate> &candidates = ensurePageCandidates(page);
+    result.reserve(candidates.size());
+    for (const Candidate &candidate : candidates) {
+        const QString key = draftKey(candidate.page, candidate.objectId);
+        const auto draft = m_drafts.constFind(key);
+        const QString displayText = draft == m_drafts.cend() ? candidate.text : draft->text;
+        result.append(candidateMap(candidate, displayText));
+    }
+    return result;
+}
+
+QVariantList PDFEditController::draftsForPage(int page) const
+{
+    QVariantList result;
+    const auto pageCandidates = m_pageCandidates.constFind(page);
+    if (pageCandidates == m_pageCandidates.cend()) {
+        return result;
+    }
+
+    for (const Candidate &candidate : pageCandidates.value()) {
+        const auto draft = m_drafts.constFind(draftKey(page, candidate.objectId));
+        if (draft == m_drafts.cend()) {
+            continue;
+        }
+
+        QVariantMap map = candidateMap(candidate, draft->text);
+        map.insert(QStringLiteral("originalText"), candidate.text);
+        result.append(map);
+    }
+    return result;
+}
+
+QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
+{
+    const QVector<Candidate> &candidates = ensurePageCandidates(page);
+    const QPointF point(x, y);
+    const Candidate *bestCandidate = nullptr;
+    qreal bestArea = 0.0;
+
+    for (auto candidate = candidates.crbegin(); candidate != candidates.crend(); ++candidate) {
+        const QRectF hitRect = candidate->rect.adjusted(-0.0025, -0.0025, 0.0025, 0.0025);
+        if (!hitRect.contains(point)) {
+            continue;
+        }
+
+        const qreal area = candidate->rect.width() * candidate->rect.height();
+        const bool isBetter = !bestCandidate
+            || (candidate->editable && !bestCandidate->editable)
+            || (candidate->editable == bestCandidate->editable && area < bestArea);
+        if (isBetter) {
+            bestCandidate = &*candidate;
+            bestArea = area;
+        }
+    }
+
+    if (!bestCandidate) {
+        return {};
+    }
+
+    const auto draft = m_drafts.constFind(draftKey(page, bestCandidate->objectId));
+    const QString displayText = draft == m_drafts.cend() ? bestCandidate->text : draft->text;
+    return candidateMap(*bestCandidate, displayText);
+}
+
+bool PDFEditController::selectCandidate(int page, const QString &objectId)
+{
+    if (m_textEditActive
+        && (m_selectedCandidate.page != page || m_selectedCandidate.objectId != objectId)) {
+        finishSelectedTextEdit();
+    }
+
+    const Candidate *candidate = findCandidate(page, objectId);
+    if (!candidate) {
+        clearSelection();
+        return false;
+    }
+
+    setSelection(candidate);
+    if (!candidate->editable && !candidate->reason.isEmpty()) {
+        emit statusMessage(candidate->reason);
+    }
+    return true;
+}
+
+void PDFEditController::clearSelection()
+{
+    if (!m_hasSelection) {
+        return;
+    }
+    finishSelectedTextEdit();
+    setSelection(nullptr);
+}
+
+void PDFEditController::beginSelectedTextEdit()
+{
+    if (m_textEditActive || !m_hasSelection || !m_selectedCandidate.editable) {
+        return;
+    }
+
+    const QString key = draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId);
+    const auto existingDraft = m_drafts.constFind(key);
+    m_textEditCommand = Command();
+    m_textEditCommand.key = key;
+    m_textEditCommand.page = m_selectedCandidate.page;
+    m_textEditCommand.objectId = m_selectedCandidate.objectId;
+    m_textEditCommand.hadBefore = existingDraft != m_drafts.cend();
+    m_textEditCommand.beforeText = m_textEditCommand.hadBefore
+        ? existingDraft->text
+        : m_selectedCandidate.text;
+    m_textEditActive = true;
+    emit textEditActiveChanged();
+}
+
+void PDFEditController::updateSelectedTextPreview(const QString &text)
+{
+    if (!m_textEditActive) {
+        beginSelectedTextEdit();
+    }
+    if (!m_textEditActive || !m_hasSelection) {
+        return;
+    }
+
+    const QString key = draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId);
+    if (text == m_selectedCandidate.text) {
+        m_drafts.remove(key);
+    } else {
+        m_drafts.insert(key, Draft{m_selectedCandidate, text});
+    }
+
+    m_selectedText = text;
+    emit pageDataChanged(m_selectedCandidate.page);
+    emit historyStateChanged();
+    emit selectionChanged();
+}
+
+void PDFEditController::finishSelectedTextEdit()
+{
+    if (!m_textEditActive) {
+        return;
+    }
+
+    const Command baseline = m_textEditCommand;
+    m_textEditActive = false;
+    m_textEditCommand = Command();
+    emit textEditActiveChanged();
+
+    Command command = baseline;
+    const auto currentDraft = m_drafts.constFind(command.key);
+    command.hadAfter = currentDraft != m_drafts.cend();
+    command.afterText = command.hadAfter
+        ? currentDraft->text
+        : m_selectedCandidate.text;
+    const bool changed = command.hadBefore != command.hadAfter
+        || command.beforeText != command.afterText;
+    if (!changed) {
+        return;
+    }
+
+    m_undoStack.append(command);
+    m_redoStack.clear();
+    emit historyStateChanged();
+    emit statusMessage(tr("Draft updated. The PDF file is unchanged."));
+}
+
+void PDFEditController::cancelSelectedTextEdit()
+{
+    if (!m_textEditActive) {
+        return;
+    }
+
+    const Command baseline = m_textEditCommand;
+    m_textEditActive = false;
+    m_textEditCommand = Command();
+    emit textEditActiveChanged();
+    applyDraftState(baseline, false);
+    emit historyStateChanged();
+}
+
+void PDFEditController::commitSelectedText(const QString &text)
+{
+    if (!m_hasSelection || !m_selectedCandidate.editable) {
+        if (m_hasSelection && !m_selectedCandidate.reason.isEmpty()) {
+            emit statusMessage(m_selectedCandidate.reason);
+        }
+        return;
+    }
+
+    if (m_textEditActive) {
+        updateSelectedTextPreview(text);
+        finishSelectedTextEdit();
+        return;
+    }
+
+    const QString key = draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId);
+    const auto existingDraft = m_drafts.constFind(key);
+    const bool hadBefore = existingDraft != m_drafts.cend();
+    const QString beforeText = hadBefore ? existingDraft->text : m_selectedCandidate.text;
+    if (beforeText == text) {
+        return;
+    }
+
+    Command command;
+    command.key = key;
+    command.page = m_selectedCandidate.page;
+    command.objectId = m_selectedCandidate.objectId;
+    command.hadBefore = hadBefore;
+    command.beforeText = beforeText;
+    command.hadAfter = text != m_selectedCandidate.text;
+    command.afterText = text;
+
+    m_undoStack.append(command);
+    m_redoStack.clear();
+    applyDraftState(command, true);
+    emit historyStateChanged();
+    emit statusMessage(tr("Draft updated. The PDF file is unchanged."));
+}
+
+void PDFEditController::undo()
+{
+    if (m_textEditActive || m_undoStack.isEmpty()) {
+        return;
+    }
+
+    const Command command = m_undoStack.takeLast();
+    applyDraftState(command, false);
+    m_redoStack.append(command);
+    emit historyStateChanged();
+}
+
+void PDFEditController::redo()
+{
+    if (m_textEditActive || m_redoStack.isEmpty()) {
+        return;
+    }
+
+    const Command command = m_redoStack.takeLast();
+    applyDraftState(command, true);
+    m_undoStack.append(command);
+    emit historyStateChanged();
+}
+
+void PDFEditController::discardDrafts()
+{
+    if (!m_textEditActive
+        && m_drafts.isEmpty()
+        && m_undoStack.isEmpty()
+        && m_redoStack.isEmpty()) {
+        return;
+    }
+
+    const bool wasEditing = m_textEditActive;
+    m_textEditActive = false;
+    m_textEditCommand = Command();
+    m_drafts.clear();
+    m_undoStack.clear();
+    m_redoStack.clear();
+    setSelection(nullptr);
+    if (wasEditing) {
+        emit textEditActiveChanged();
+    }
+    emit pageDataChanged(-1);
+    emit historyStateChanged();
+    emit statusMessage(tr("All draft changes were discarded."));
+}
+
+void PDFEditController::resetSession()
+{
+    m_pageCandidates.clear();
+    m_drafts.clear();
+    m_undoStack.clear();
+    m_redoStack.clear();
+    m_cachedRevision = m_document ? m_document->renderRevision() : -1;
+    m_hasSelection = false;
+    m_selectedCandidate = Candidate();
+    m_selectedText.clear();
+    const bool wasEditing = m_textEditActive;
+    m_textEditActive = false;
+    m_textEditCommand = Command();
+
+    if (wasEditing) {
+        emit textEditActiveChanged();
+    }
+
+    if ((!m_document || !m_document->isLoaded()) && m_tool != BrowseTool) {
+        m_tool = BrowseTool;
+        emit toolChanged();
+    }
+
+    emit pageDataChanged(-1);
+    emit historyStateChanged();
+    emit selectionChanged();
+}
+
+void PDFEditController::ensureCacheRevision()
+{
+    const int revision = m_document ? m_document->renderRevision() : -1;
+    if (m_cachedRevision == revision) {
+        return;
+    }
+
+    m_cachedRevision = revision;
+    m_pageCandidates.clear();
+}
+
+const QVector<PDFEditController::Candidate> &PDFEditController::ensurePageCandidates(int page)
+{
+    static const QVector<Candidate> empty;
+
+    ensureCacheRevision();
+    if (!m_document || !m_document->isLoaded() || page < 0 || page >= m_document->pageCount()) {
+        return empty;
+    }
+
+    auto cached = m_pageCandidates.find(page);
+    if (cached == m_pageCandidates.end()) {
+        cached = m_pageCandidates.insert(page, scanPage(page));
+    }
+    return cached.value();
+}
+
+QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex) const
+{
+    QVector<Candidate> candidates;
+    if (!m_document || !m_document->m_document) {
+        return candidates;
+    }
+
+    const QSizeF pageSize = m_document->pageSize(pageIndex);
+    if (pageSize.isEmpty()) {
+        return candidates;
+    }
+
+    FPDF_PAGE page = nullptr;
+    FPDF_TEXTPAGE textPage = nullptr;
+    {
+        QMutexLocker pageLoadLock(&pdfiumPageLoadMutex());
+        page = FPDF_LoadPage(m_document->m_document, pageIndex);
+        if (page) {
+            textPage = FPDFText_LoadPage(page);
+        }
+    }
+    if (!page) {
+        return candidates;
+    }
+    const int objectCount = FPDFPage_CountObjects(page);
+    for (int index = 0; index < objectCount; ++index) {
+        appendPageObjectCandidates(
+            page,
+            FPDFPage_GetObject(page, index),
+            QString::number(index),
+            textPage,
+            kIdentityMatrix,
+            pageSize,
+            candidates);
+    }
+    appendAnnotationCandidates(page, pageIndex, pageSize, candidates);
+
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    FPDF_ClosePage(page);
+
+    for (Candidate &candidate : candidates) {
+        candidate.page = pageIndex;
+    }
+    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate &left, const Candidate &right) {
+        return left.editable < right.editable;
+    });
+    return candidates;
+}
+
+void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
+                                                   FPDF_PAGEOBJECT pageObject,
+                                                   const QString &path,
+                                                   FPDF_TEXTPAGE textPage,
+                                                   const FS_MATRIX &containerTransform,
+                                                   const QSizeF &pageSize,
+                                                   QVector<Candidate> &candidates) const
+{
+    if (!pageObject) {
+        return;
+    }
+
+    const int type = FPDFPageObj_GetType(pageObject);
+    if (type == FPDF_PAGEOBJ_FORM) {
+        FS_MATRIX formTransform = kIdentityMatrix;
+        if (!FPDFPageObj_GetMatrix(pageObject, &formTransform)) {
+            formTransform = kIdentityMatrix;
+        }
+        const FS_MATRIX childTransform = combinedTransform(containerTransform, formTransform);
+        const int count = FPDFFormObj_CountObjects(pageObject);
+        for (int index = 0; index < count; ++index) {
+            appendPageObjectCandidates(
+                page,
+                FPDFFormObj_GetObject(pageObject, static_cast<unsigned long>(index)),
+                path + QLatin1Char('/') + QString::number(index),
+                textPage,
+                childTransform,
+                pageSize,
+                candidates);
+        }
+        return;
+    }
+
+    if (type != FPDF_PAGEOBJ_TEXT && type != FPDF_PAGEOBJ_IMAGE) {
+        return;
+    }
+
+    const FPDF_TEXT_RENDERMODE renderMode = type == FPDF_PAGEOBJ_TEXT
+        ? FPDFTextObj_GetTextRenderMode(pageObject)
+        : FPDF_TEXTRENDERMODE_UNKNOWN;
+    if (type == FPDF_PAGEOBJ_TEXT
+        && (renderMode == FPDF_TEXTRENDERMODE_UNKNOWN
+            || renderMode == FPDF_TEXTRENDERMODE_INVISIBLE
+            || renderMode == FPDF_TEXTRENDERMODE_CLIP)) {
+        return;
+    }
+
+    float left = 0.0F;
+    float bottom = 0.0F;
+    float right = 0.0F;
+    float top = 0.0F;
+    if (!FPDFPageObj_GetBounds(pageObject, &left, &bottom, &right, &top)) {
+        return;
+    }
+
+    const QRectF rect = normalizedRect(
+        page,
+        left,
+        bottom,
+        right,
+        top,
+        containerTransform,
+        pageSize);
+    if (rect.isEmpty()) {
+        return;
+    }
+
+    Candidate candidate;
+    candidate.objectId = QStringLiteral("object:") + path;
+    candidate.rect = rect;
+
+    if (type == FPDF_PAGEOBJ_IMAGE) {
+        candidate.kind = QStringLiteral("image");
+        candidate.label = tr("Image");
+        candidate.reason = tr("This content is an image. OCR is required to edit its text.");
+        candidates.append(candidate);
+        return;
+    }
+
+    const QString text = textObjectText(pageObject, textPage);
+    if (text.trimmed().isEmpty()) {
+        return;
+    }
+
+    float fontSize = 0.0F;
+    FPDFTextObj_GetFontSize(pageObject, &fontSize);
+    FS_MATRIX objectTransform = kIdentityMatrix;
+    if (!FPDFPageObj_GetMatrix(pageObject, &objectTransform)) {
+        objectTransform = kIdentityMatrix;
+    }
+    const FS_MATRIX textTransform = combinedTransform(containerTransform, objectTransform);
+    const bool inlineLayoutSupported = supportsInlineTextLayout(page, pageSize, textTransform)
+        && !text.contains(QLatin1Char('\n'))
+        && !text.contains(QLatin1Char('\r'));
+    candidate.kind = QStringLiteral("text");
+    candidate.label = tr("Text");
+    candidate.text = text;
+    candidate.fontFamily = fontFamily(pageObject);
+    candidate.fontSizeRatio = qMax<qreal>(
+        0.0,
+        normalizedFontSize(page, pageSize, textTransform, fontSize));
+    candidate.color = textColor(pageObject, renderMode);
+    const bool editingAllowed = documentAllowsEditing();
+    candidate.editable = editingAllowed && inlineLayoutSupported;
+    candidate.limited = true;
+    if (!editingAllowed) {
+        candidate.reason = tr("This PDF does not permit content editing.");
+    } else if (!inlineLayoutSupported) {
+        candidate.reason = tr("Rotated, transformed, or multiline text is not supported by the inline draft editor yet.");
+    }
+    candidates.append(candidate);
+}
+
+void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
+                                                   int pageIndex,
+                                                   const QSizeF &pageSize,
+                                                   QVector<Candidate> &candidates) const
+{
+    const int annotationCount = FPDFPage_GetAnnotCount(page);
+    for (int index = 0; index < annotationCount; ++index) {
+        FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(page, index);
+        if (!annotation) {
+            continue;
+        }
+
+        const int subtype = FPDFAnnot_GetSubtype(annotation);
+        if (subtype != FPDF_ANNOT_FREETEXT && subtype != FPDF_ANNOT_WIDGET) {
+            FPDFPage_CloseAnnot(annotation);
+            continue;
+        }
+
+        FS_RECTF bounds{};
+        if (!FPDFAnnot_GetRect(annotation, &bounds)) {
+            FPDFPage_CloseAnnot(annotation);
+            continue;
+        }
+
+        const QRectF rect = normalizedRect(
+            page,
+            bounds.left,
+            bounds.bottom,
+            bounds.right,
+            bounds.top,
+            kIdentityMatrix,
+            pageSize);
+        if (rect.isEmpty()) {
+            FPDFPage_CloseAnnot(annotation);
+            continue;
+        }
+
+        Candidate candidate;
+        candidate.page = pageIndex;
+        candidate.objectId = QStringLiteral("annotation:") + QString::number(index);
+        candidate.rect = rect;
+        candidate.fontFamily = QStringLiteral("Helvetica");
+        candidate.fontSizeRatio = qMax<qreal>(0.01, rect.height() * 0.65);
+        candidate.editable = false;
+        candidate.limited = true;
+
+        if (subtype == FPDF_ANNOT_FREETEXT) {
+            candidate.kind = QStringLiteral("freeText");
+            candidate.label = tr("Free text annotation");
+            candidate.text = annotationString(annotation, "Contents");
+        } else {
+            candidate.kind = QStringLiteral("widget");
+            candidate.label = tr("Form field");
+            candidate.text = annotationString(annotation, "V");
+        }
+
+        if (!documentAllowsEditing()) {
+            candidate.reason = tr("This PDF does not permit content editing.");
+        } else {
+            candidate.reason = tr("Editing form fields and free-text annotations is not available in this draft editor yet.");
+        }
+        candidates.append(candidate);
+        FPDFPage_CloseAnnot(annotation);
+    }
+}
+
+const PDFEditController::Candidate *PDFEditController::findCandidate(int page,
+                                                                     const QString &objectId)
+{
+    const QVector<Candidate> &candidates = ensurePageCandidates(page);
+    for (const Candidate &candidate : candidates) {
+        if (candidate.objectId == objectId) {
+            return &candidate;
+        }
+    }
+    return nullptr;
+}
+
+QVariantMap PDFEditController::candidateMap(const Candidate &candidate, const QString &text) const
+{
+    QVariantMap map;
+    map.insert(QStringLiteral("objectId"), candidate.objectId);
+    map.insert(QStringLiteral("kind"), candidate.kind);
+    map.insert(QStringLiteral("label"), candidate.label);
+    map.insert(QStringLiteral("x"), candidate.rect.x());
+    map.insert(QStringLiteral("y"), candidate.rect.y());
+    map.insert(QStringLiteral("width"), candidate.rect.width());
+    map.insert(QStringLiteral("height"), candidate.rect.height());
+    map.insert(QStringLiteral("text"), text);
+    map.insert(QStringLiteral("fontFamily"), candidate.fontFamily);
+    map.insert(QStringLiteral("fontSizeRatio"), candidate.fontSizeRatio);
+    map.insert(QStringLiteral("color"), candidate.color);
+    map.insert(QStringLiteral("editable"), candidate.editable);
+    map.insert(QStringLiteral("limited"), candidate.limited);
+    map.insert(QStringLiteral("reason"), candidate.reason);
+    return map;
+}
+
+bool PDFEditController::documentAllowsEditing() const
+{
+    if (!m_document || !m_document->m_document) {
+        return false;
+    }
+
+    const unsigned long permissions = FPDF_GetDocPermissions(m_document->m_document);
+    return permissions == 0xffffffffUL || (permissions & kModifyContentsPermission) != 0;
+}
+
+QString PDFEditController::draftKey(int page, const QString &objectId) const
+{
+    return QString::number(page) + QLatin1Char('|') + objectId;
+}
+
+void PDFEditController::applyDraftState(const Command &command, bool useAfterState)
+{
+    const bool shouldExist = useAfterState ? command.hadAfter : command.hadBefore;
+    const QString text = useAfterState ? command.afterText : command.beforeText;
+    const Candidate *candidate = findCandidate(command.page, command.objectId);
+    if (!candidate) {
+        return;
+    }
+
+    if (shouldExist) {
+        m_drafts.insert(command.key, Draft{*candidate, text});
+    } else {
+        m_drafts.remove(command.key);
+    }
+
+    updateSelectedTextFromDraft();
+    emit pageDataChanged(command.page);
+}
+
+void PDFEditController::updateSelectedTextFromDraft()
+{
+    if (!m_hasSelection) {
+        return;
+    }
+
+    const auto draft = m_drafts.constFind(
+        draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId));
+    m_selectedText = draft == m_drafts.cend() ? m_selectedCandidate.text : draft->text;
+    emit selectionChanged();
+}
+
+void PDFEditController::setSelection(const Candidate *candidate)
+{
+    if (!candidate) {
+        m_hasSelection = false;
+        m_selectedCandidate = Candidate();
+        m_selectedText.clear();
+        emit selectionChanged();
+        return;
+    }
+
+    m_selectedCandidate = *candidate;
+    m_hasSelection = true;
+    const auto draft = m_drafts.constFind(draftKey(candidate->page, candidate->objectId));
+    m_selectedText = draft == m_drafts.cend() ? candidate->text : draft->text;
+    emit selectionChanged();
+}
