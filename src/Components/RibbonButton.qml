@@ -12,7 +12,7 @@ ToolButton {
     property bool primary: false
     property bool signing: false
 
-    implicitWidth: 80
+    implicitWidth: Math.max(80, implicitContentWidth + leftPadding + rightPadding)
     implicitHeight: 56
     enabled: !requiresDocument || documentLoaded
     display: AbstractButton.TextUnderIcon

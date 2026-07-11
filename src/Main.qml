@@ -12,7 +12,8 @@ ApplicationWindow {
     minimumWidth: 760
     minimumHeight: 520
     visible: true
-    title: qsTr("TrePDF")
+    //% "TrePDF"
+    title: qsTrId("ApplicationTitle")
 
     property real zoom: 1.0
     property string transientStatus: ""
@@ -73,7 +74,8 @@ ApplicationWindow {
     }
 
     function showComingSoon(toolName) {
-        showStatus(qsTr("%1 is coming soon").arg(toolName))
+        //% "%1 is coming soon"
+        showStatus(qsTrId("FeatureComingSoon").arg(toolName))
     }
 
     function showStatus(message) {
@@ -126,8 +128,10 @@ ApplicationWindow {
     FileDialog {
         id: openDialog
 
-        title: qsTr("Open PDF")
-        nameFilters: [qsTr("PDF files (*.pdf)")]
+        //% "Open PDF"
+        title: qsTrId("OpenPdf")
+        //% "PDF files (*.pdf)"
+        nameFilters: [qsTrId("PdfFileFilter")]
         onAccepted: window.openFile(selectedFile)
     }
 
@@ -156,7 +160,8 @@ ApplicationWindow {
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("Discard draft changes?")
+                //% "Discard draft changes?"
+                text: qsTrId("DiscardDraftChangesQuestion")
                 color: appTheme.ribbonTextColor
                 font.pixelSize: 18
                 font.weight: Font.DemiBold
@@ -164,7 +169,8 @@ ApplicationWindow {
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("Your edits exist only in this session and have not been saved to the PDF.")
+                //% "Your edits exist only in this session and have not been saved to the PDF."
+                text: qsTrId("UnsavedEditsDescription")
                 color: "#656268"
                 wrapMode: Text.Wrap
             }
@@ -178,7 +184,8 @@ ApplicationWindow {
                 }
 
                 Button {
-                    text: qsTr("Cancel")
+                    //% "Cancel"
+                    text: qsTrId("Cancel")
                     onClicked: {
                         window.pendingDraftAction = ""
                         discardDraftPopup.close()
@@ -188,7 +195,8 @@ ApplicationWindow {
                 OrangeButton {
                     Layout.preferredWidth: 104
                     theme: appTheme
-                    text: qsTr("Discard")
+                    //% "Discard"
+                    text: qsTrId("Discard")
                     onClicked: window.continueAfterDiscard()
                 }
             }

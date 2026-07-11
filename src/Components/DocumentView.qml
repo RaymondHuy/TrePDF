@@ -107,7 +107,8 @@ Rectangle {
         visible: !root.document.loaded
 
         Label {
-            text: qsTr("No document open")
+            //% "No document open"
+            text: qsTrId("NoDocumentOpen")
             font.pixelSize: 22
             color: "#33251d"
             Layout.alignment: Qt.AlignHCenter
@@ -115,7 +116,8 @@ Rectangle {
 
         OrangeButton {
             theme: root.theme
-            text: qsTr("Open PDF")
+            //% "Open PDF"
+            text: qsTrId("OpenPdf")
             onClicked: root.openRequested()
             Layout.alignment: Qt.AlignHCenter
         }

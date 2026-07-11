@@ -1,6 +1,7 @@
 #include "PDFDocument.h"
 
 #include <QFile>
+#include <QtTranslation>
 
 namespace {
 
@@ -28,21 +29,29 @@ QString pdfiumErrorText()
 {
     switch (FPDF_GetLastError()) {
     case FPDF_ERR_SUCCESS:
-        return QStringLiteral("No error");
+        //% "No error"
+        return qtTrId("NoError");
     case FPDF_ERR_UNKNOWN:
-        return QStringLiteral("Unknown PDFium error");
+        //% "Unknown PDFium error"
+        return qtTrId("UnknownPdfiumError");
     case FPDF_ERR_FILE:
-        return QStringLiteral("The file could not be opened or read");
+        //% "The file could not be opened or read"
+        return qtTrId("FileOpenOrReadFailed");
     case FPDF_ERR_FORMAT:
-        return QStringLiteral("The file is not a valid PDF");
+        //% "The file is not a valid PDF"
+        return qtTrId("InvalidPdfFile");
     case FPDF_ERR_PASSWORD:
-        return QStringLiteral("The PDF requires a password");
+        //% "The PDF requires a password"
+        return qtTrId("PdfPasswordRequired");
     case FPDF_ERR_SECURITY:
-        return QStringLiteral("The PDF security handler is unsupported");
+        //% "The PDF security handler is unsupported"
+        return qtTrId("UnsupportedPdfSecurity");
     case FPDF_ERR_PAGE:
-        return QStringLiteral("The requested PDF page could not be loaded");
+        //% "The requested PDF page could not be loaded"
+        return qtTrId("PdfPageLoadFailed");
     default:
-        return QStringLiteral("PDFium failed with an unknown status");
+        //% "PDFium failed with an unknown status"
+        return qtTrId("UnknownPdfiumStatus");
     }
 }
 
@@ -52,7 +61,8 @@ PDFDocument::PDFDocument(QObject *parent)
     : QObject(parent)
 {
     pdfiumRuntime();
-    setStatusText(QStringLiteral("No document open"));
+    //% "No document open"
+    setStatusText(qtTrId("NoDocumentOpen"));
 }
 
 PDFDocument::~PDFDocument()
@@ -103,7 +113,8 @@ qreal PDFDocument::maximumPageWidth() const
 bool PDFDocument::open(const QUrl &source)
 {
     if (!source.isLocalFile()) {
-        setStatusText(QStringLiteral("Only local PDF files are supported"));
+        //% "Only local PDF files are supported"
+        setStatusText(qtTrId("LocalPdfFilesOnly"));
         return false;
     }
 
@@ -133,7 +144,8 @@ bool PDFDocument::open(const QUrl &source)
         m_maximumPageWidth = qMax(m_maximumPageWidth, size.width());
     }
     ++m_revision;
-    setStatusText(QStringLiteral("Loaded %1 page(s)").arg(m_pageCount));
+    //% "Loaded %n page(s)"
+    setStatusText(qtTrId("LoadedPageCount", m_pageCount));
     emitDocumentStateChanged();
 
     return true;
@@ -146,7 +158,8 @@ void PDFDocument::close()
     }
 
     closeDocument();
-    setStatusText(QStringLiteral("No document open"));
+    //% "No document open"
+    setStatusText(qtTrId("NoDocumentOpen"));
     emitDocumentStateChanged();
 }
 

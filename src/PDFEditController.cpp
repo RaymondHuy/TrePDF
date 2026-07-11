@@ -10,6 +10,7 @@
 #include <QFontInfo>
 #include <QMutexLocker>
 #include <QVariantMap>
+#include <QtTranslation>
 
 #include <fpdf_annot.h>
 #include <fpdf_edit.h>
@@ -590,7 +591,8 @@ void PDFEditController::finishSelectedTextEdit()
     m_undoStack.append(command);
     m_redoStack.clear();
     emit historyStateChanged();
-    emit statusMessage(tr("Draft updated. The PDF file is unchanged."));
+    //% "Draft updated. The PDF file is unchanged."
+    emit statusMessage(qtTrId("DraftUpdatedPdfUnchanged"));
 }
 
 void PDFEditController::cancelSelectedTextEdit()
@@ -643,7 +645,8 @@ void PDFEditController::commitSelectedText(const QString &text)
     m_redoStack.clear();
     applyDraftState(command, true);
     emit historyStateChanged();
-    emit statusMessage(tr("Draft updated. The PDF file is unchanged."));
+    //% "Draft updated. The PDF file is unchanged."
+    emit statusMessage(qtTrId("DraftUpdatedPdfUnchanged"));
 }
 
 void PDFEditController::undo()
@@ -691,7 +694,8 @@ void PDFEditController::discardDrafts()
     }
     emit pageDataChanged(-1);
     emit historyStateChanged();
-    emit statusMessage(tr("All draft changes were discarded."));
+    //% "All draft changes were discarded."
+    emit statusMessage(qtTrId("AllDraftChangesDiscarded"));
 }
 
 void PDFEditController::resetSession()
@@ -873,8 +877,10 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
 
     if (type == FPDF_PAGEOBJ_IMAGE) {
         candidate.kind = QStringLiteral("image");
-        candidate.label = tr("Image");
-        candidate.reason = tr("This content is an image. OCR is required to edit its text.");
+        //% "Image"
+        candidate.label = qtTrId("Image");
+        //% "This content is an image. OCR is required to edit its text."
+        candidate.reason = qtTrId("ImageTextRequiresOcr");
         candidates.append(candidate);
         return;
     }
@@ -895,7 +901,8 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
         && !text.contains(QLatin1Char('\n'))
         && !text.contains(QLatin1Char('\r'));
     candidate.kind = QStringLiteral("text");
-    candidate.label = tr("Text");
+    //% "Text"
+    candidate.label = qtTrId("Text");
     candidate.text = text;
     candidate.fontFamily = fontFamily(pageObject);
     candidate.fontSizeRatio = qMax<qreal>(
@@ -906,9 +913,11 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
     candidate.editable = editingAllowed && inlineLayoutSupported;
     candidate.limited = true;
     if (!editingAllowed) {
-        candidate.reason = tr("This PDF does not permit content editing.");
+        //% "This PDF does not permit content editing."
+        candidate.reason = qtTrId("PdfEditingNotPermitted");
     } else if (!inlineLayoutSupported) {
-        candidate.reason = tr("Rotated, transformed, or multiline text is not supported by the inline draft editor yet.");
+        //% "Rotated, transformed, or multiline text is not supported by the inline draft editor yet."
+        candidate.reason = qtTrId("InlineEditorUnsupportedTextLayout");
     }
     candidates.append(candidate);
 }
@@ -961,18 +970,22 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
 
         if (subtype == FPDF_ANNOT_FREETEXT) {
             candidate.kind = QStringLiteral("freeText");
-            candidate.label = tr("Free text annotation");
+            //% "Free text annotation"
+            candidate.label = qtTrId("FreeTextAnnotation");
             candidate.text = annotationString(annotation, "Contents");
         } else {
             candidate.kind = QStringLiteral("widget");
-            candidate.label = tr("Form field");
+            //% "Form field"
+            candidate.label = qtTrId("FormField");
             candidate.text = annotationString(annotation, "V");
         }
 
         if (!documentAllowsEditing()) {
-            candidate.reason = tr("This PDF does not permit content editing.");
+            //% "This PDF does not permit content editing."
+            candidate.reason = qtTrId("PdfEditingNotPermitted");
         } else {
-            candidate.reason = tr("Editing form fields and free-text annotations is not available in this draft editor yet.");
+            //% "Editing form fields and free-text annotations is not available in this draft editor yet."
+            candidate.reason = qtTrId("DraftEditorUnsupportedAnnotations");
         }
         candidates.append(candidate);
         FPDFPage_CloseAnnot(annotation);

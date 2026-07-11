@@ -25,12 +25,14 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Content")
+            //% "Content"
+            title: qsTrId("Content")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Select")
+                //% "Select"
+                text: qsTrId("Select")
                 iconSource: "../assets/icons/mouse-pointer-2.svg"
                 primary: root.editController.tool === PDFEditController.SelectTool
                 onClicked: root.editController.tool = PDFEditController.SelectTool
@@ -39,7 +41,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Edit Text")
+                //% "Edit Text"
+                text: qsTrId("EditText")
                 iconSource: "../assets/icons/type.svg"
                 primary: root.editController.tool === PDFEditController.EditTextTool
                 onClicked: root.editController.tool = PDFEditController.EditTextTool
@@ -48,7 +51,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Add Text")
+                //% "Add Text"
+                text: qsTrId("AddText")
                 iconSource: "../assets/icons/type.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -56,13 +60,16 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Objects")
+            //% "Objects"
+            title: qsTrId("Objects")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Image")
-                toolTipText: qsTr("Add Image")
+                //% "Image"
+                text: qsTrId("Image")
+                //% "Add Image"
+                toolTipText: qsTrId("AddImage")
                 iconSource: "../assets/icons/image-plus.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -70,8 +77,10 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Link")
-                toolTipText: qsTr("Add Link")
+                //% "Link"
+                text: qsTrId("Link")
+                //% "Add Link"
+                toolTipText: qsTrId("AddLink")
                 iconSource: "../assets/icons/link-2.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -79,7 +88,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Shapes")
+                //% "Shapes"
+                text: qsTrId("Shapes")
                 iconSource: "../assets/icons/shapes.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -87,12 +97,14 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Markup")
+            //% "Markup"
+            title: qsTrId("Markup")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Highlight")
+                //% "Highlight"
+                text: qsTrId("Highlight")
                 iconSource: "../assets/icons/highlighter.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -100,7 +112,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Underline")
+                //% "Underline"
+                text: qsTrId("Underline")
                 iconSource: "../assets/icons/underline.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -108,7 +121,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Strikeout")
+                //% "Strikeout"
+                text: qsTrId("Strikeout")
                 iconSource: "../assets/icons/strikethrough.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -116,12 +130,14 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("History")
+            //% "History"
+            title: qsTrId("History")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Undo")
+                //% "Undo"
+                text: qsTrId("Undo")
                 iconSource: "../assets/icons/undo-2.svg"
                 enabled: root.document.loaded
                     && root.editController.canUndo
@@ -132,7 +148,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Redo")
+                //% "Redo"
+                text: qsTrId("Redo")
                 iconSource: "../assets/icons/redo-2.svg"
                 enabled: root.document.loaded
                     && root.editController.canRedo

@@ -29,13 +29,16 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("File")
+            //% "File"
+            title: qsTrId("File")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Open")
-                toolTipText: qsTr("Open PDF")
+                //% "Open"
+                text: qsTrId("Open")
+                //% "Open PDF"
+                toolTipText: qsTrId("OpenPdf")
                 iconSource: "../assets/icons/folder-open.svg"
                 requiresDocument: false
                 primary: true
@@ -45,13 +48,16 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Navigation")
+            //% "Navigation"
+            title: qsTrId("Navigation")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Previous")
-                toolTipText: qsTr("Previous Page")
+                //% "Previous"
+                text: qsTrId("Previous")
+                //% "Previous Page"
+                toolTipText: qsTrId("PreviousPage")
                 iconSource: "../assets/icons/chevron-left.svg"
                 enabled: root.document.currentPage > 0
                 onClicked: root.pageRequested(root.document.currentPage - 1)
@@ -60,8 +66,10 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Next")
-                toolTipText: qsTr("Next Page")
+                //% "Next"
+                text: qsTrId("Next")
+                //% "Next Page"
+                toolTipText: qsTrId("NextPage")
                 iconSource: "../assets/icons/chevron-right.svg"
                 enabled: root.document.loaded && root.document.currentPage + 1 < root.document.pageCount
                 onClicked: root.pageRequested(root.document.currentPage + 1)
@@ -70,12 +78,14 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Zoom")
+            //% "Zoom"
+            title: qsTrId("Zoom")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Zoom Out")
+                //% "Zoom Out"
+                text: qsTrId("ZoomOut")
                 iconSource: "../assets/icons/zoom-out.svg"
                 onClicked: root.zoomOutRequested()
             }
@@ -83,7 +93,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Zoom In")
+                //% "Zoom In"
+                text: qsTrId("ZoomIn")
                 iconSource: "../assets/icons/zoom-in.svg"
                 onClicked: root.zoomInRequested()
             }
@@ -91,7 +102,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Fit Width")
+                //% "Fit Width"
+                text: qsTrId("FitWidth")
                 iconSource: "../assets/icons/maximize-2.svg"
                 onClicked: root.fitWidthRequested()
             }
@@ -99,12 +111,14 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Page")
+            //% "Page"
+            title: qsTrId("Page")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Rotate Left")
+                //% "Rotate Left"
+                text: qsTrId("RotateLeft")
                 iconSource: "../assets/icons/rotate-ccw.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -112,7 +126,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Rotate Right")
+                //% "Rotate Right"
+                text: qsTrId("RotateRight")
                 iconSource: "../assets/icons/rotate-cw.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -120,12 +135,14 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            title: qsTr("Find & Panels")
+            //% "Find & Panels"
+            title: qsTrId("FindAndPanels")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Thumbnails")
+                //% "Thumbnails"
+                text: qsTrId("Thumbnails")
                 iconSource: "../assets/icons/panel-left.svg"
                 onClicked: root.toolRequested(text)
             }
@@ -133,7 +150,8 @@ Flickable {
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                text: qsTr("Search")
+                //% "Search"
+                text: qsTrId("Search")
                 iconSource: "../assets/icons/search.svg"
                 onClicked: root.toolRequested(text)
             }

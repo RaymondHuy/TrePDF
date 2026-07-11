@@ -12,6 +12,7 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QQmlApplicationEngine engine;
+    engine.setUiLanguage(QStringLiteral("vi"));
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
