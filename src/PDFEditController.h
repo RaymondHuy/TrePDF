@@ -71,6 +71,9 @@ public:
     QColor selectedColor() const;
     bool selectedEditable() const;
     QString selectedReason() const;
+    quint64 draftRevisionForPage(int page) const;
+    QVector<QVector<int>> draftedTextObjectPathsForPage(int page) const;
+    bool allDraftedTextObjectsSuppressibleForPage(int page) const;
 
     Q_INVOKABLE QVariantList candidatesForPage(int page);
     Q_INVOKABLE QVariantList draftsForPage(int page) const;
@@ -93,12 +96,14 @@ signals:
     void textEditActiveChanged();
     void selectionChanged();
     void pageDataChanged(int page);
+    void draftRenderStateChanged(int page, quint64 revision, bool immediate);
     void statusMessage(const QString &message);
 
 private:
     struct Candidate {
         int page = -1;
         QString objectId;
+        QVector<int> objectPath;
         QString kind;
         QString label;
         QRectF rect;
@@ -107,6 +112,7 @@ private:
         qreal fontSizeRatio = 0.0;
         QColor color = Qt::black;
         bool editable = false;
+        bool renderSuppressible = false;
         bool limited = false;
         QString reason;
     };
@@ -132,8 +138,9 @@ private:
     QVector<Candidate> scanPage(int page) const;
     void appendPageObjectCandidates(FPDF_PAGE page,
                                     FPDF_PAGEOBJECT pageObject,
-                                    const QString &path,
+                                    const QVector<int> &objectPath,
                                     FPDF_TEXTPAGE textPage,
+                                    const QHash<FPDF_PAGEOBJECT, QRectF> &textObjectBounds,
                                     const FS_MATRIX &containerTransform,
                                     const QSizeF &pageSize,
                                     QVector<Candidate> &candidates) const;
@@ -145,7 +152,9 @@ private:
     QVariantMap candidateMap(const Candidate &candidate, const QString &text) const;
     bool documentAllowsEditing() const;
     QString draftKey(int page, const QString &objectId) const;
-    void applyDraftState(const Command &command, bool useAfterState);
+    void markDraftStateChanged(int page, bool immediate);
+    void requestDraftRender(int page, bool immediate);
+    void applyDraftState(const Command &command, bool useAfterState, bool immediate);
     void updateSelectedTextFromDraft();
     void setSelection(const Candidate *candidate);
 
@@ -154,6 +163,8 @@ private:
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
     QHash<QString, Draft> m_drafts;
+    QHash<int, quint64> m_pageDraftRevisions;
+    quint64 m_nextDraftRevision = 0;
     QVector<Command> m_undoStack;
     QVector<Command> m_redoStack;
     Candidate m_selectedCandidate;
