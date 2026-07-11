@@ -239,6 +239,19 @@ Item {
 
             required property var modelData
 
+            readonly property real horizontalPadding: 2
+            readonly property real measuredTextWidth: Math.max(
+                draftTextMetrics.advanceWidth,
+                draftTextMetrics.boundingRect.width)
+            readonly property real expandedTextWidth: Math.max(
+                width,
+                measuredTextWidth + horizontalPadding)
+            readonly property real textWidth: Math.min(root.width, expandedTextWidth)
+            readonly property real textPageX: Math.max(
+                0,
+                Math.min(x, root.width - textWidth))
+            readonly property bool textNeedsFitting: expandedTextWidth > root.width
+
             x: modelData.x * root.width
             y: modelData.y * root.height
             width: Math.max(1, modelData.width * root.width)
@@ -263,19 +276,34 @@ Item {
                 visible: !root.draftTextureReady
             }
 
+            TextMetrics {
+                id: draftTextMetrics
+
+                text: draftItem.modelData.text
+                font.family: draftItem.modelData.fontFamily
+                font.pixelSize: Math.max(
+                    6,
+                    draftItem.modelData.fontSizeRatio * root.height)
+            }
+
             Text {
-                x: 1
+                x: draftItem.textPageX - draftItem.x
                 y: (draftItem.height - height) / 2
-                width: Math.max(1, draftItem.width - 2)
+                width: Math.max(1, draftItem.textWidth)
                 height: Math.max(
                     draftItem.height + root.fallbackBleed * 2,
                     implicitHeight)
+                leftPadding: draftItem.horizontalPadding / 2
+                rightPadding: draftItem.horizontalPadding / 2
                 text: draftItem.modelData.text
                 color: draftItem.modelData.color
                 font.family: draftItem.modelData.fontFamily
                 font.pixelSize: Math.max(6, draftItem.modelData.fontSizeRatio * root.height)
+                fontSizeMode: draftItem.textNeedsFitting ? Text.HorizontalFit : Text.FixedSize
+                minimumPixelSize: 1
                 verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
+                wrapMode: Text.NoWrap
+                elide: Text.ElideNone
             }
         }
     }
