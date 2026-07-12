@@ -29,6 +29,12 @@ Item {
         && hasActiveDraft(editingObjectId)
     readonly property bool selectCursorReady: selectCursorImage.status === Image.Ready
     readonly property bool selectCursorActive: selectCursorReady && selectCursorVisible
+    readonly property bool addTextCursorReady: addTextCursorImage.status === Image.Ready
+    readonly property bool addTextCursorActive: addTextCursorReady
+        && interactionActive
+        && !editing
+        && controller.tool === PDFEditController.AddTextTool
+        && hitArea.containsMouse
 
     visible: !pooled && (interactionActive || drafts.length > 0)
     enabled: interactionActive
@@ -455,7 +461,7 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton
         preventStealing: false
-        cursorShape: root.selectCursorActive
+        cursorShape: root.selectCursorActive || root.addTextCursorActive
             ? Qt.BlankCursor
             : root.controller.tool === PDFEditController.AddTextTool
             ? Qt.IBeamCursor
@@ -534,6 +540,23 @@ Item {
         visible: root.selectCursorActive
             && root.interactionActive
             && root.controller.tool === PDFEditController.SelectTool
+        z: 4
+        Accessible.ignored: true
+    }
+
+    Image {
+        id: addTextCursorImage
+
+        x: hitArea.mouseX - width / 2
+        y: hitArea.mouseY - height / 2
+        width: 22
+        height: 22
+        source: "../assets/icons/add.svg"
+        sourceSize.width: 22
+        sourceSize.height: 22
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        visible: root.addTextCursorActive
         z: 4
         Accessible.ignored: true
     }
