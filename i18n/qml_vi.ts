@@ -52,6 +52,7 @@
     </message>
     <message id="Edit">
         <location filename="../src/Components/AppRibbon.qml" line="115"/>
+        <location filename="../src/Components/EditOverlay.qml" line="629"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
@@ -73,17 +74,22 @@
         <translation>Chưa mở tài liệu</translation>
     </message>
     <message id="PdfEditSurface">
-        <location filename="../src/Components/EditOverlay.qml" line="413"/>
+        <location filename="../src/Components/EditOverlay.qml" line="518"/>
         <source>PDF edit surface</source>
         <translation>Vùng chỉnh sửa PDF</translation>
     </message>
     <message id="PdfEditSurfaceDescription">
-        <location filename="../src/Components/EditOverlay.qml" line="415"/>
+        <location filename="../src/Components/EditOverlay.qml" line="520"/>
         <source>Use Tab or arrow keys to select content, then press Enter to edit text</source>
         <translation>Dùng Tab hoặc các phím mũi tên để chọn nội dung, sau đó nhấn Enter để sửa văn bản</translation>
     </message>
+    <message id="Delete">
+        <location filename="../src/Components/EditOverlay.qml" line="658"/>
+        <source>Delete</source>
+        <translation>Xóa</translation>
+    </message>
     <message id="ApplyOrCancelEditHint">
-        <location filename="../src/Components/EditOverlay.qml" line="614"/>
+        <location filename="../src/Components/EditOverlay.qml" line="866"/>
         <source>Enter to apply · Esc to cancel</source>
         <translation>Enter để áp dụng · Esc để hủy</translation>
     </message>
