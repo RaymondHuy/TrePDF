@@ -54,7 +54,8 @@ Flickable {
                 //% "Add Text"
                 text: qsTrId("AddText")
                 iconSource: "../assets/icons/type.svg"
-                onClicked: root.toolRequested(text)
+                primary: root.editController.tool === PDFEditController.AddTextTool
+                onClicked: root.editController.tool = PDFEditController.AddTextTool
             }
         }
 

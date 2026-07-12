@@ -41,7 +41,8 @@ public:
     enum Tool {
         BrowseTool,
         SelectTool,
-        EditTextTool
+        EditTextTool,
+        AddTextTool
     };
     Q_ENUM(Tool)
 
@@ -78,6 +79,7 @@ public:
     Q_INVOKABLE QVariantList candidatesForPage(int page);
     Q_INVOKABLE QVariantList draftsForPage(int page) const;
     Q_INVOKABLE QVariantMap candidateAt(int page, qreal x, qreal y);
+    Q_INVOKABLE QVariantMap addText(int page, qreal x, qreal y);
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
@@ -114,6 +116,8 @@ private:
         bool editable = false;
         bool renderSuppressible = false;
         bool limited = false;
+        bool added = false;
+        quint64 addedOrder = 0;
         QString reason;
     };
 
@@ -130,6 +134,7 @@ private:
         QString beforeText;
         bool hadAfter = false;
         QString afterText;
+        Candidate candidate;
     };
 
     void resetSession();
@@ -155,6 +160,7 @@ private:
     void markDraftStateChanged(int page, bool immediate);
     void requestDraftRender(int page, bool immediate);
     void applyDraftState(const Command &command, bool useAfterState, bool immediate);
+    bool removeAddedCandidate(int page, const QString &objectId);
     void updateSelectedTextFromDraft();
     void setSelection(const Candidate *candidate);
 
@@ -162,9 +168,11 @@ private:
     Tool m_tool = BrowseTool;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
+    QVector<Candidate> m_addedCandidates;
     QHash<QString, Draft> m_drafts;
     QHash<int, quint64> m_pageDraftRevisions;
     quint64 m_nextDraftRevision = 0;
+    quint64 m_nextAddedTextId = 0;
     QVector<Command> m_undoStack;
     QVector<Command> m_redoStack;
     Candidate m_selectedCandidate;
