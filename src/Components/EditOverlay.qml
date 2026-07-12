@@ -18,12 +18,17 @@ Item {
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
+    property real selectCursorX: 0
+    property real selectCursorY: 0
+    property bool selectCursorVisible: false
     readonly property real fallbackBleed: 2
     readonly property real minimumTextPixelSize: 6
     readonly property bool interactionActive: !pooled
         && controller.tool !== PDFEditController.BrowseTool
     readonly property bool editorUsesCleanTexture: draftTextureReady
         && hasActiveDraft(editingObjectId)
+    readonly property bool selectCursorReady: selectCursorImage.status === Image.Ready
+    readonly property bool selectCursorActive: selectCursorReady && selectCursorVisible
 
     visible: !pooled && (interactionActive || drafts.length > 0)
     enabled: interactionActive
@@ -32,6 +37,7 @@ Item {
         if (pooled) {
             drafts = []
             hoverCandidate = ({})
+            hideSelectCursor()
             return
         }
 
@@ -56,8 +62,10 @@ Item {
             }
         }
         drafts = displayedDrafts
-        if (!interactionActive)
+        if (!interactionActive) {
             hoverCandidate = ({})
+            hideSelectCursor()
+        }
     }
 
     function containsObject(items, objectId) {
@@ -101,6 +109,35 @@ Item {
         return candidate !== null
             && candidate.objectId !== undefined
             && candidate.objectId.length > 0
+    }
+
+    function isTextBoxCandidate(candidate) {
+        return hasCandidate(candidate)
+            && (candidate.kind === "text"
+                || candidate.kind === "addedText"
+                || candidate.kind === "freeText")
+    }
+
+    function updateSelectCursor(x, y, candidate) {
+        if (controller.tool !== PDFEditController.SelectTool
+                || !isTextBoxCandidate(candidate)) {
+            hideSelectCursor()
+            return
+        }
+
+        selectCursorX = x
+        selectCursorY = y
+        selectCursorVisible = true
+    }
+
+    function hideSelectCursor() {
+        selectCursorVisible = false
+    }
+
+    function updateHoverAtPosition(x, y) {
+        const candidate = candidateAtPosition(x, y)
+        hoverCandidate = candidate
+        updateSelectCursor(x, y, candidate)
     }
 
     function candidateAtPosition(x, y) {
@@ -248,6 +285,7 @@ Item {
             if (root.editing)
                 root.commitEditing()
             root.hoverCandidate = ({})
+            root.hideSelectCursor()
             root.reloadData()
         }
 
@@ -377,10 +415,25 @@ Item {
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
                 preventStealing: false
-                cursorShape: Qt.IBeamCursor
-                onEntered: root.hoverCandidate = draftItem.modelData
-                onPositionChanged: root.hoverCandidate = draftItem.modelData
+                cursorShape: root.controller.tool === PDFEditController.SelectTool
+                    ? root.selectCursorActive ? Qt.BlankCursor : Qt.ArrowCursor
+                    : Qt.IBeamCursor
+                onEntered: {
+                    root.updateSelectCursor(
+                        draftItem.x + mouseX,
+                        draftItem.y + mouseY,
+                        draftItem.modelData)
+                    root.hoverCandidate = draftItem.modelData
+                }
+                onPositionChanged: mouse => {
+                    root.updateSelectCursor(
+                        draftItem.x + mouse.x,
+                        draftItem.y + mouse.y,
+                        draftItem.modelData)
+                    root.hoverCandidate = draftItem.modelData
+                }
                 onExited: {
+                    root.hideSelectCursor()
                     if (root.hasCandidate(root.hoverCandidate)
                             && root.hoverCandidate.objectId
                                 === draftItem.modelData.objectId) {
@@ -402,7 +455,9 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton
         preventStealing: false
-        cursorShape: root.controller.tool === PDFEditController.AddTextTool
+        cursorShape: root.selectCursorActive
+            ? Qt.BlankCursor
+            : root.controller.tool === PDFEditController.AddTextTool
             ? Qt.IBeamCursor
             : root.hasCandidate(root.hoverCandidate)
             ? root.hoverCandidate.editable ? Qt.IBeamCursor : Qt.ForbiddenCursor
@@ -414,10 +469,12 @@ Item {
         //% "Use Tab or arrow keys to select content, then press Enter to edit text"
         Accessible.description: qsTrId("PdfEditSurfaceDescription")
 
-        onPositionChanged: mouse => {
-            root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
+        onEntered: root.updateHoverAtPosition(mouseX, mouseY)
+        onPositionChanged: mouse => root.updateHoverAtPosition(mouse.x, mouse.y)
+        onExited: {
+            root.hideSelectCursor()
+            root.hoverCandidate = ({})
         }
-        onExited: root.hoverCandidate = ({})
         onPressed: forceActiveFocus()
         onClicked: mouse => {
             if (root.controller.tool === PDFEditController.AddTextTool) {
@@ -460,6 +517,25 @@ Item {
         Keys.onUpPressed: event => {
             event.accepted = root.selectRelativeCandidate(-1)
         }
+    }
+
+    Image {
+        id: selectCursorImage
+
+        x: root.selectCursorX - 3
+        y: root.selectCursorY - 3
+        width: 22
+        height: 22
+        source: "../assets/icons/mouse-pointer-filled-orange.svg"
+        sourceSize.width: 22
+        sourceSize.height: 22
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        visible: root.selectCursorActive
+            && root.interactionActive
+            && root.controller.tool === PDFEditController.SelectTool
+        z: 4
+        Accessible.ignored: true
     }
 
     Rectangle {

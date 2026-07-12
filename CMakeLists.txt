@@ -74,6 +74,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/link-2.svg
         src/assets/icons/maximize-2.svg
         src/assets/icons/mouse-pointer-2.svg
+        src/assets/icons/mouse-pointer-filled-orange.svg
         src/assets/icons/panel-left.svg
         src/assets/icons/pen-line.svg
         src/assets/icons/redo-2.svg
