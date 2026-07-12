@@ -65,6 +65,7 @@ qt_add_qml_module(trepdf
         src/Components/SignRibbon.qml
         src/Components/ViewRibbon.qml
     RESOURCES
+        src/assets/icons/add.svg
         src/assets/icons/calendar-days.svg
         src/assets/icons/chevron-left.svg
         src/assets/icons/chevron-right.svg
@@ -74,6 +75,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/link-2.svg
         src/assets/icons/maximize-2.svg
         src/assets/icons/mouse-pointer-2.svg
+        src/assets/icons/mouse-pointer-filled-orange.svg
         src/assets/icons/panel-left.svg
         src/assets/icons/pen-line.svg
         src/assets/icons/redo-2.svg

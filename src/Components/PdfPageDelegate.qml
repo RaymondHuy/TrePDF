@@ -34,6 +34,7 @@ Item {
         id: pageView
 
         document: pageCard.pooled ? null : pageCard.document
+        editController: pageCard.pooled ? null : pageCard.editController
         page: pageCard.index
         zoom: pageCard.zoom
         pageColor: "white"
@@ -66,6 +67,8 @@ Item {
         pooled: pageCard.pooled
         theme: pageCard.theme
         controller: pageCard.editController
+        draftTextureCurrent: pageView.draftTextureCurrent
+        draftTextureReady: pageView.draftTextureReady
         z: 2
     }
 

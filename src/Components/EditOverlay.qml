@@ -9,6 +9,8 @@ Item {
 
     required property int page
     required property bool pooled
+    required property bool draftTextureCurrent
+    required property bool draftTextureReady
     required property AppTheme theme
     required property PDFEditController controller
 
@@ -16,8 +18,23 @@ Item {
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
+    property real selectCursorX: 0
+    property real selectCursorY: 0
+    property bool selectCursorVisible: false
+    readonly property real fallbackBleed: 2
+    readonly property real minimumTextPixelSize: 6
     readonly property bool interactionActive: !pooled
         && controller.tool !== PDFEditController.BrowseTool
+    readonly property bool editorUsesCleanTexture: draftTextureReady
+        && hasActiveDraft(editingObjectId)
+    readonly property bool selectCursorReady: selectCursorImage.status === Image.Ready
+    readonly property bool selectCursorActive: selectCursorReady && selectCursorVisible
+    readonly property bool addTextCursorReady: addTextCursorImage.status === Image.Ready
+    readonly property bool addTextCursorActive: addTextCursorReady
+        && interactionActive
+        && !editing
+        && controller.tool === PDFEditController.AddTextTool
+        && hitArea.containsMouse
 
     visible: !pooled && (interactionActive || drafts.length > 0)
     enabled: interactionActive
@@ -26,12 +43,72 @@ Item {
         if (pooled) {
             drafts = []
             hoverCandidate = ({})
+            hideSelectCursor()
             return
         }
 
-        drafts = controller.draftsForPage(page)
-        if (!interactionActive)
+        const previousDrafts = drafts
+        const currentDrafts = controller.draftsForPage(page)
+        const displayedDrafts = []
+        for (let index = 0; index < currentDrafts.length; ++index)
+            displayedDrafts.push(currentDrafts[index])
+
+        if (!draftTextureCurrent) {
+            for (let index = 0; index < previousDrafts.length; ++index) {
+                const previousDraft = previousDrafts[index]
+                if (containsObject(currentDrafts, previousDraft.objectId))
+                    continue
+
+                if (previousDraft.added === true)
+                    continue
+                else if (previousDraft.restoration === true)
+                    displayedDrafts.push(previousDraft)
+                else if (previousDraft.originalText !== undefined)
+                    displayedDrafts.push(restorationOverlay(previousDraft))
+            }
+        }
+        drafts = displayedDrafts
+        if (!interactionActive) {
             hoverCandidate = ({})
+            hideSelectCursor()
+        }
+    }
+
+    function containsObject(items, objectId) {
+        for (let index = 0; index < items.length; ++index) {
+            if (items[index].objectId === objectId)
+                return true
+        }
+        return false
+    }
+
+    function hasActiveDraft(objectId) {
+        if (objectId.length === 0)
+            return false
+
+        for (let index = 0; index < drafts.length; ++index) {
+            if (drafts[index].objectId === objectId
+                    && drafts[index].restoration !== true) {
+                return true
+            }
+        }
+        return false
+    }
+
+    function restorationOverlay(draft) {
+        return {
+            objectId: draft.objectId,
+            x: draft.x,
+            y: draft.y,
+            width: draft.width,
+            height: draft.height,
+            text: draft.originalText,
+            originalText: draft.originalText,
+            fontFamily: draft.fontFamily,
+            fontSizeRatio: draft.fontSizeRatio,
+            color: draft.color,
+            restoration: true
+        }
     }
 
     function hasCandidate(candidate) {
@@ -40,11 +117,66 @@ Item {
             && candidate.objectId.length > 0
     }
 
+    function isTextBoxCandidate(candidate) {
+        return hasCandidate(candidate)
+            && (candidate.kind === "text"
+                || candidate.kind === "addedText"
+                || candidate.kind === "freeText")
+    }
+
+    function updateSelectCursor(x, y, candidate) {
+        if (controller.tool !== PDFEditController.SelectTool
+                || !isTextBoxCandidate(candidate)) {
+            hideSelectCursor()
+            return
+        }
+
+        selectCursorX = x
+        selectCursorY = y
+        selectCursorVisible = true
+    }
+
+    function hideSelectCursor() {
+        selectCursorVisible = false
+    }
+
+    function updateHoverAtPosition(x, y) {
+        const candidate = candidateAtPosition(x, y)
+        hoverCandidate = candidate
+        updateSelectCursor(x, y, candidate)
+    }
+
     function candidateAtPosition(x, y) {
-        if (!interactionActive || width <= 0 || height <= 0)
+        if (!interactionActive
+                || controller.tool === PDFEditController.AddTextTool
+                || width <= 0
+                || height <= 0) {
             return ({})
+        }
 
         return controller.candidateAt(page, x / width, y / height)
+    }
+
+    function beginAddingText(x, y) {
+        if (controller.tool !== PDFEditController.AddTextTool
+                || width <= 0
+                || height <= 0) {
+            return
+        }
+
+        if (editing)
+            commitEditing()
+
+        const candidate = controller.addText(page, x / width, y / height)
+        if (!hasCandidate(candidate))
+            return
+
+        editingObjectId = candidate.objectId
+        editor.text = candidate.text
+        editing = true
+        Qt.callLater(function() {
+            editor.forceActiveFocus()
+        })
     }
 
     function selectCandidate(candidate) {
@@ -141,6 +273,10 @@ Item {
     }
 
     onInteractionActiveChanged: reloadData()
+    onDraftTextureCurrentChanged: {
+        if (draftTextureCurrent)
+            reloadData()
+    }
     Component.onCompleted: reloadData()
 
     Connections {
@@ -154,6 +290,8 @@ Item {
         function onToolChanged() {
             if (root.editing)
                 root.commitEditing()
+            root.hoverCandidate = ({})
+            root.hideSelectCursor()
             root.reloadData()
         }
 
@@ -170,26 +308,147 @@ Item {
     Repeater {
         model: root.drafts
 
-        delegate: Rectangle {
+        delegate: Item {
+            id: draftItem
+
             required property var modelData
 
-            x: modelData.x * root.width
-            y: modelData.y * root.height
-            width: Math.max(1, modelData.width * root.width)
-            height: Math.max(1, modelData.height * root.height)
-            color: "#fffdfb"
+            readonly property real originalX: modelData.x * root.width
+            readonly property real originalY: modelData.y * root.height
+            readonly property real originalWidth: Math.max(1, modelData.width * root.width)
+            readonly property real originalHeight: Math.max(1, modelData.height * root.height)
+            readonly property real horizontalPadding: 2
+            readonly property real measuredTextWidth: Math.max(
+                draftTextMetrics.advanceWidth,
+                draftTextMetrics.boundingRect.width)
+            readonly property real expandedTextWidth: Math.max(
+                originalWidth,
+                measuredTextWidth + horizontalPadding)
+            readonly property real textWidth: Math.min(root.width, expandedTextWidth)
+            readonly property real textPageX: Math.max(
+                0,
+                Math.min(originalX, root.width - textWidth))
+            readonly property real textHeight: Math.max(
+                originalHeight + root.fallbackBleed * 2,
+                draftText.implicitHeight)
+            readonly property real textPageY: originalY + (originalHeight - textHeight) / 2
+            readonly property bool textNeedsFitting: expandedTextWidth > root.width
+            readonly property bool hovered: root.hasCandidate(root.hoverCandidate)
+                && root.hoverCandidate.objectId === modelData.objectId
+            readonly property bool selected: root.controller.selectedPage === root.page
+                && root.controller.selectedObjectId === modelData.objectId
+
+            x: textPageX
+            y: textPageY
+            width: textWidth
+            height: textHeight
             visible: !(root.editing && root.editingObjectId === modelData.objectId)
-            clip: true
+            z: modelData.added === true ? 1 : 0
+
+            readonly property real leftBleed: Math.min(root.fallbackBleed, originalX)
+            readonly property real topBleed: Math.min(root.fallbackBleed, originalY)
+            readonly property real rightBleed: Math.min(
+                root.fallbackBleed,
+                Math.max(0, root.width - originalX - originalWidth))
+            readonly property real bottomBleed: Math.min(
+                root.fallbackBleed,
+                Math.max(0, root.height - originalY - originalHeight))
+
+            Rectangle {
+                x: draftItem.originalX - draftItem.x - draftItem.leftBleed
+                y: draftItem.originalY - draftItem.y - draftItem.topBleed
+                width: draftItem.originalWidth
+                    + draftItem.leftBleed
+                    + draftItem.rightBleed
+                height: draftItem.originalHeight
+                    + draftItem.topBleed
+                    + draftItem.bottomBleed
+                color: "#fffdfb"
+                visible: !root.draftTextureReady
+                    && draftItem.modelData.added !== true
+            }
+
+            TextMetrics {
+                id: draftTextMetrics
+
+                text: draftItem.modelData.text
+                font.family: draftItem.modelData.fontFamily
+                font.pixelSize: Math.max(
+                    root.minimumTextPixelSize,
+                    draftItem.modelData.fontSizeRatio * root.height)
+            }
 
             Text {
-                anchors.fill: parent
-                anchors.margins: 1
-                text: parent.modelData.text
-                color: parent.modelData.color
-                font.family: parent.modelData.fontFamily
-                font.pixelSize: Math.max(6, parent.modelData.fontSizeRatio * root.height)
+                id: draftText
+
+                x: 0
+                y: 0
+                width: draftItem.width
+                height: draftItem.height
+                leftPadding: draftItem.horizontalPadding / 2
+                rightPadding: draftItem.horizontalPadding / 2
+                text: draftItem.modelData.text
+                color: draftItem.modelData.color
+                font.family: draftItem.modelData.fontFamily
+                font.pixelSize: Math.max(
+                    root.minimumTextPixelSize,
+                    draftItem.modelData.fontSizeRatio * root.height)
+                fontSizeMode: draftItem.textNeedsFitting ? Text.HorizontalFit : Text.FixedSize
+                minimumPixelSize: 1
                 verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
+                wrapMode: Text.NoWrap
+                elide: Text.ElideNone
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                color: draftItem.selected ? "#14d97a32" : "transparent"
+                border.width: 2
+                border.color: draftItem.selected
+                    ? root.theme.foxitOrange
+                    : root.theme.foxitHoverOrange
+                visible: draftItem.modelData.added === true
+                    && root.interactionActive
+                    && !root.editing
+                    && (draftItem.selected || draftItem.hovered)
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                enabled: draftItem.modelData.added === true
+                    && root.interactionActive
+                    && root.controller.tool !== PDFEditController.AddTextTool
+                hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                preventStealing: false
+                cursorShape: root.controller.tool === PDFEditController.SelectTool
+                    ? root.selectCursorActive ? Qt.BlankCursor : Qt.ArrowCursor
+                    : Qt.IBeamCursor
+                onEntered: {
+                    root.updateSelectCursor(
+                        draftItem.x + mouseX,
+                        draftItem.y + mouseY,
+                        draftItem.modelData)
+                    root.hoverCandidate = draftItem.modelData
+                }
+                onPositionChanged: mouse => {
+                    root.updateSelectCursor(
+                        draftItem.x + mouse.x,
+                        draftItem.y + mouse.y,
+                        draftItem.modelData)
+                    root.hoverCandidate = draftItem.modelData
+                }
+                onExited: {
+                    root.hideSelectCursor()
+                    if (root.hasCandidate(root.hoverCandidate)
+                            && root.hoverCandidate.objectId
+                                === draftItem.modelData.objectId) {
+                        root.hoverCandidate = ({})
+                    }
+                }
+                onPressed: hitArea.forceActiveFocus()
+                onClicked: root.selectCandidate(draftItem.modelData)
+                onDoubleClicked: root.beginEditing(draftItem.modelData)
             }
         }
     }
@@ -202,7 +461,11 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton
         preventStealing: false
-        cursorShape: root.hasCandidate(root.hoverCandidate)
+        cursorShape: root.selectCursorActive || root.addTextCursorActive
+            ? Qt.BlankCursor
+            : root.controller.tool === PDFEditController.AddTextTool
+            ? Qt.IBeamCursor
+            : root.hasCandidate(root.hoverCandidate)
             ? root.hoverCandidate.editable ? Qt.IBeamCursor : Qt.ForbiddenCursor
             : Qt.ArrowCursor
         activeFocusOnTab: true
@@ -212,12 +475,19 @@ Item {
         //% "Use Tab or arrow keys to select content, then press Enter to edit text"
         Accessible.description: qsTrId("PdfEditSurfaceDescription")
 
-        onPositionChanged: mouse => {
-            root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
+        onEntered: root.updateHoverAtPosition(mouseX, mouseY)
+        onPositionChanged: mouse => root.updateHoverAtPosition(mouse.x, mouse.y)
+        onExited: {
+            root.hideSelectCursor()
+            root.hoverCandidate = ({})
         }
-        onExited: root.hoverCandidate = ({})
         onPressed: forceActiveFocus()
         onClicked: mouse => {
+            if (root.controller.tool === PDFEditController.AddTextTool) {
+                root.beginAddingText(mouse.x, mouse.y)
+                return
+            }
+
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
             if (root.hasCandidate(root.hoverCandidate))
                 root.selectCandidate(root.hoverCandidate)
@@ -225,6 +495,9 @@ Item {
                 root.controller.clearSelection()
         }
         onDoubleClicked: mouse => {
+            if (root.controller.tool === PDFEditController.AddTextTool)
+                return
+
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
             if (root.hasCandidate(root.hoverCandidate))
                 root.beginEditing(root.hoverCandidate)
@@ -252,6 +525,42 @@ Item {
         }
     }
 
+    Image {
+        id: selectCursorImage
+
+        x: root.selectCursorX - 3
+        y: root.selectCursorY - 3
+        width: 22
+        height: 22
+        source: "../assets/icons/mouse-pointer-filled-orange.svg"
+        sourceSize.width: 22
+        sourceSize.height: 22
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        visible: root.selectCursorActive
+            && root.interactionActive
+            && root.controller.tool === PDFEditController.SelectTool
+        z: 4
+        Accessible.ignored: true
+    }
+
+    Image {
+        id: addTextCursorImage
+
+        x: hitArea.mouseX - width / 2
+        y: hitArea.mouseY - height / 2
+        width: 22
+        height: 22
+        source: "../assets/icons/add.svg"
+        sourceSize.width: 22
+        sourceSize.height: 22
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        visible: root.addTextCursorActive
+        z: 4
+        Accessible.ignored: true
+    }
+
     Rectangle {
         x: root.hasCandidate(root.hoverCandidate) ? root.hoverCandidate.x * root.width : 0
         y: root.hasCandidate(root.hoverCandidate) ? root.hoverCandidate.y * root.height : 0
@@ -266,7 +575,11 @@ Item {
         border.color: root.hasCandidate(root.hoverCandidate) && root.hoverCandidate.editable
             ? root.theme.foxitHoverOrange
             : "#a5a7aa"
-        visible: root.interactionActive && root.hasCandidate(root.hoverCandidate)
+        z: 2
+        visible: root.interactionActive
+            && !root.editing
+            && root.hasCandidate(root.hoverCandidate)
+            && root.hoverCandidate.added !== true
     }
 
     Rectangle {
@@ -279,34 +592,95 @@ Item {
         border.color: root.controller.selectedEditable
             ? root.theme.foxitOrange
             : "#8a8d92"
+        z: 2
         visible: root.interactionActive
+            && !root.editing
             && root.controller.selectedPage === root.page
             && root.controller.selectedObjectId.length > 0
+            && root.controller.selectedKind !== "addedText"
+    }
+
+    Rectangle {
+        id: editorFallbackMask
+
+        readonly property real originalX: root.controller.selectedX * root.width
+        readonly property real originalY: root.controller.selectedY * root.height
+        readonly property real originalWidth: root.controller.selectedWidth * root.width
+        readonly property real originalHeight: root.controller.selectedHeight * root.height
+
+        x: Math.max(0, originalX - root.fallbackBleed)
+        y: Math.max(0, originalY - root.fallbackBleed)
+        width: Math.max(1,
+                        Math.min(root.width,
+                                 originalX + originalWidth + root.fallbackBleed) - x)
+        height: Math.max(1,
+                         Math.min(root.height,
+                                  originalY + originalHeight + root.fallbackBleed) - y)
+        color: "#fffdfb"
+        z: 2
+        visible: editorFrame.visible
+            && root.controller.selectedKind !== "addedText"
+            && !root.editorUsesCleanTexture
     }
 
     Rectangle {
         id: editorFrame
 
-        x: root.controller.selectedX * root.width
-        y: root.controller.selectedY * root.height
-        width: Math.max(80, root.controller.selectedWidth * root.width)
-        height: Math.max(26, root.controller.selectedHeight * root.height)
-        color: "#fffdfb"
+        readonly property real originalX: root.controller.selectedX * root.width
+        readonly property real originalY: root.controller.selectedY * root.height
+        readonly property real originalWidth: root.controller.selectedWidth * root.width
+        readonly property real originalHeight: root.controller.selectedHeight * root.height
+        readonly property bool editsAddedText: root.controller.selectedKind === "addedText"
+        readonly property real baseFontPixelSize: Math.max(
+            root.minimumTextPixelSize,
+            root.controller.selectedFontSizeRatio * root.height)
+        readonly property real measuredTextWidth: Math.max(
+            editorTextMetrics.advanceWidth,
+            editorTextMetrics.boundingRect.width)
+        readonly property real desiredWidth: editsAddedText
+            ? Math.max(originalWidth, measuredTextWidth + 2)
+            : Math.max(80, originalWidth)
+        readonly property real desiredHeight: editsAddedText
+            ? Math.max(
+                originalHeight + root.fallbackBleed * 2,
+                editor.implicitHeight)
+            : Math.max(26, originalHeight)
+
+        x: Math.max(0, Math.min(originalX, root.width - width))
+        y: editsAddedText
+            ? originalY + (originalHeight - height) / 2
+            : Math.max(0, Math.min(originalY, root.height - height))
+        width: Math.min(root.width, desiredWidth)
+        height: editsAddedText ? desiredHeight : Math.min(root.height, desiredHeight)
+        color: editsAddedText || root.editorUsesCleanTexture
+            ? "transparent"
+            : "#fffdfb"
         border.color: root.theme.foxitOrange
         border.width: 2
         radius: 2
+        z: 2
         visible: root.editing
             && root.controller.selectedPage === root.page
             && root.controller.selectedEditable
+
+        TextMetrics {
+            id: editorTextMetrics
+
+            text: editor.text
+            font.family: root.controller.selectedFontFamily
+            font.pixelSize: editorFrame.baseFontPixelSize
+        }
 
         TextInput {
             id: editor
 
             anchors.fill: parent
-            anchors.margins: 4
+            anchors.margins: editorFrame.editsAddedText
+                ? Math.min(1, parent.width / 4, parent.height / 4)
+                : Math.min(4, parent.width / 4, parent.height / 4)
             color: root.controller.selectedColor
             font.family: root.controller.selectedFontFamily
-            font.pixelSize: Math.max(8, root.controller.selectedFontSizeRatio * root.height)
+            font.pixelSize: editorFrame.baseFontPixelSize
             selectByMouse: true
             verticalAlignment: TextInput.AlignVCenter
             clip: true
@@ -328,6 +702,7 @@ Item {
         height: 22
         radius: 3
         color: "#e63a3b3f"
+        z: 2
         visible: editorFrame.visible
 
         Label {
@@ -349,6 +724,7 @@ Item {
         height: 26
         radius: 3
         color: "#e65d6065"
+        z: 2
         visible: root.interactionActive
             && root.controller.selectedPage === root.page
             && root.controller.selectedObjectId.length > 0

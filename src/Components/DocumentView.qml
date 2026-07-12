@@ -84,6 +84,7 @@ Rectangle {
         }
 
         ScrollBar.vertical: ScrollBar {
+            implicitWidth: 12
             policy: ScrollBar.AsNeeded
         }
 
