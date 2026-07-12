@@ -21,6 +21,11 @@ Current features:
 - Asynchronous page rendering on a worker thread.
 - Page navigation, zoom, and fit-to-width controls.
 - Session-only text draft editing with selection, undo, redo, and discard.
+- Contextual Edit/Delete actions when selecting editable text; deletion remains
+  a session-only draft and supports undo/redo.
+- An edit-only, collapsible right-side text-formatting panel provides UI for
+  font family, size, color, bold, italic, and underline. These controls are not
+  connected to draft text formatting yet.
 - ID-based localization with Vietnamese as the default UI language.
 - A restrained orange UI inspired by Foxit Reader.
 

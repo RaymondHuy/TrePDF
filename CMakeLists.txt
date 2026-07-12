@@ -63,15 +63,19 @@ qt_add_qml_module(trepdf
         src/Components/RibbonGroup.qml
         src/Components/RibbonTabButton.qml
         src/Components/SignRibbon.qml
+        src/Components/TextFormatPanel.qml
         src/Components/ViewRibbon.qml
     RESOURCES
         src/assets/icons/add.svg
+        src/assets/icons/bold-text.svg
         src/assets/icons/calendar-days.svg
         src/assets/icons/chevron-left.svg
         src/assets/icons/chevron-right.svg
+        src/assets/icons/edit-text.svg
         src/assets/icons/folder-open.svg
         src/assets/icons/highlighter.svg
         src/assets/icons/image-plus.svg
+        src/assets/icons/italic-font.svg
         src/assets/icons/link-2.svg
         src/assets/icons/maximize-2.svg
         src/assets/icons/mouse-pointer-2.svg
@@ -79,6 +83,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/panel-left.svg
         src/assets/icons/pen-line.svg
         src/assets/icons/redo-2.svg
+        src/assets/icons/remove-text.svg
         src/assets/icons/rotate-ccw.svg
         src/assets/icons/rotate-cw.svg
         src/assets/icons/search.svg
@@ -90,6 +95,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/strikethrough.svg
         src/assets/icons/type.svg
         src/assets/icons/underline.svg
+        src/assets/icons/underline-text.svg
         src/assets/icons/undo-2.svg
         src/assets/icons/zoom-in.svg
         src/assets/icons/zoom-out.svg

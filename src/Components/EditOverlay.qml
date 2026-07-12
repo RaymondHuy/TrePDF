@@ -18,6 +18,7 @@ Item {
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
+    property string selectionActionsObjectId: ""
     property real selectCursorX: 0
     property real selectCursorY: 0
     property bool selectCursorVisible: false
@@ -183,12 +184,28 @@ Item {
         if (editing && editingObjectId !== candidate.objectId)
             commitEditing()
 
-        controller.selectCandidate(page, candidate.objectId)
+        return controller.selectCandidate(page, candidate.objectId)
+    }
+
+    function showSelectionActions(x, y, candidate) {
+        if (controller.tool !== PDFEditController.SelectTool
+                || !candidate.editable
+                || !selectCandidate(candidate)) {
+            selectionActions.close()
+            return
+        }
+
+        selectionActionsObjectId = candidate.objectId
+        hideSelectCursor()
+        selectionActions.openAt(x, y)
     }
 
     function beginEditing(candidate) {
-        if (!candidate.editable || controller.tool !== PDFEditController.EditTextTool)
+        if (!candidate.editable
+                || (controller.tool !== PDFEditController.EditTextTool
+                    && controller.tool !== PDFEditController.SelectTool)) {
             return
+        }
 
         if (!controller.selectCandidate(page, candidate.objectId))
             return
@@ -230,6 +247,15 @@ Item {
         })
     }
 
+    function deleteSelectedText() {
+        if (controller.selectedPage !== page || !controller.selectedEditable)
+            return
+
+        controller.commitSelectedText("")
+        controller.clearSelection()
+        reloadData()
+    }
+
     function selectRelativeCandidate(direction) {
         const candidates = controller.candidatesForPage(page)
         const selectable = []
@@ -261,12 +287,14 @@ Item {
     }
 
     onPageChanged: {
+        selectionActions.close()
         if (editing)
             commitEditing()
         reloadData()
     }
 
     onPooledChanged: {
+        selectionActions.close()
         if (pooled && editing)
             commitEditing()
         reloadData()
@@ -288,6 +316,7 @@ Item {
         }
 
         function onToolChanged() {
+            selectionActions.close()
             if (root.editing)
                 root.commitEditing()
             root.hoverCandidate = ({})
@@ -296,6 +325,12 @@ Item {
         }
 
         function onSelectionChanged() {
+            if (selectionActions.opened
+                    && (root.controller.selectedPage !== root.page
+                        || root.controller.selectedObjectId
+                            !== root.selectionActionsObjectId)) {
+                selectionActions.close()
+            }
             if (root.editing
                     && (root.controller.selectedPage !== root.page
                         || root.controller.selectedObjectId !== root.editingObjectId)) {
@@ -447,7 +482,16 @@ Item {
                     }
                 }
                 onPressed: hitArea.forceActiveFocus()
-                onClicked: root.selectCandidate(draftItem.modelData)
+                onClicked: mouse => {
+                    if (root.controller.tool === PDFEditController.SelectTool) {
+                        root.showSelectionActions(
+                            draftItem.x + mouse.x,
+                            draftItem.y + mouse.y,
+                            draftItem.modelData)
+                    } else {
+                        root.selectCandidate(draftItem.modelData)
+                    }
+                }
                 onDoubleClicked: root.beginEditing(draftItem.modelData)
             }
         }
@@ -489,10 +533,21 @@ Item {
             }
 
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
-            if (root.hasCandidate(root.hoverCandidate))
-                root.selectCandidate(root.hoverCandidate)
-            else
+            if (root.hasCandidate(root.hoverCandidate)) {
+                if (root.controller.tool === PDFEditController.SelectTool
+                        && root.hoverCandidate.editable) {
+                    root.showSelectionActions(
+                        mouse.x,
+                        mouse.y,
+                        root.hoverCandidate)
+                } else {
+                    selectionActions.close()
+                    root.selectCandidate(root.hoverCandidate)
+                }
+            } else {
+                selectionActions.close()
                 root.controller.clearSelection()
+            }
         }
         onDoubleClicked: mouse => {
             if (root.controller.tool === PDFEditController.AddTextTool)
@@ -522,6 +577,106 @@ Item {
         }
         Keys.onUpPressed: event => {
             event.accepted = root.selectRelativeCandidate(-1)
+        }
+    }
+
+    Popup {
+        id: selectionActions
+
+        parent: root
+        width: 136
+        height: 62
+        padding: 4
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        function openAt(pointX, pointY) {
+            const margin = 4
+            const gap = 8
+            x = Math.max(
+                margin,
+                Math.min(root.width - width - margin, pointX - width / 2))
+            const aboveY = pointY - height - gap
+            y = aboveY >= margin
+                ? aboveY
+                : Math.max(
+                    margin,
+                    Math.min(root.height - height - margin, pointY + gap))
+            open()
+        }
+
+        onClosed: root.selectionActionsObjectId = ""
+
+        background: Rectangle {
+            radius: 6
+            color: root.theme.ribbonSurface
+            border.width: 1
+            border.color: root.theme.ribbonBorder
+        }
+
+        contentItem: Row {
+            spacing: 2
+
+            ToolButton {
+                id: editAction
+
+                width: 63
+                height: 54
+                display: AbstractButton.TextUnderIcon
+                spacing: 2
+                //% "Edit"
+                text: qsTrId("Edit")
+                icon.source: "../assets/icons/edit-text.svg"
+                icon.width: 24
+                icon.height: 24
+                icon.color: "transparent"
+                font.pixelSize: 10
+
+                background: Rectangle {
+                    radius: 4
+                    color: editAction.down
+                        ? "#f5dfcf"
+                        : editAction.hovered
+                            ? root.theme.foxitPaleOrange
+                            : "transparent"
+                }
+
+                onClicked: {
+                    selectionActions.close()
+                    root.beginSelectedEditing()
+                }
+            }
+
+            ToolButton {
+                id: deleteAction
+
+                width: 63
+                height: 54
+                display: AbstractButton.TextUnderIcon
+                spacing: 2
+                //% "Delete"
+                text: qsTrId("Delete")
+                icon.source: "../assets/icons/remove-text.svg"
+                icon.width: 24
+                icon.height: 24
+                icon.color: "transparent"
+                font.pixelSize: 10
+
+                background: Rectangle {
+                    radius: 4
+                    color: deleteAction.down
+                        ? "#f4d9d7"
+                        : deleteAction.hovered
+                            ? "#fff0ef"
+                            : "transparent"
+                }
+
+                onClicked: {
+                    selectionActions.close()
+                    root.deleteSelectedText()
+                }
+            }
         }
     }
 

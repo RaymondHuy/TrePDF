@@ -85,7 +85,9 @@ Rectangle {
 
         ScrollBar.vertical: ScrollBar {
             implicitWidth: 12
-            policy: ScrollBar.AsNeeded
+            policy: ScrollBar.AlwaysOn
+            palette.mid: "#847e79"
+            palette.dark: "#625c58"
         }
 
         ScrollBar.horizontal: ScrollBar {

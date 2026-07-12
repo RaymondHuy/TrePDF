@@ -4,44 +4,44 @@
 <context>
     <name></name>
     <message id="ApplicationTitle">
-        <location filename="../src/Main.qml" line="16"/>
+        <location filename="../src/Main.qml" line="18"/>
         <source>TrePDF</source>
         <translation>TrePDF</translation>
     </message>
     <message id="FeatureComingSoon">
-        <location filename="../src/Main.qml" line="78"/>
+        <location filename="../src/Main.qml" line="80"/>
         <source>%1 is coming soon</source>
         <translation>Tính năng %1 sắp ra mắt</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Main.qml" line="132"/>
+        <location filename="../src/Main.qml" line="134"/>
         <location filename="../src/Components/DocumentView.qml" line="121"/>
         <location filename="../src/Components/ViewRibbon.qml" line="41"/>
         <source>Open PDF</source>
         <translation>Mở PDF</translation>
     </message>
     <message id="PdfFileFilter">
-        <location filename="../src/Main.qml" line="134"/>
+        <location filename="../src/Main.qml" line="136"/>
         <source>PDF files (*.pdf)</source>
         <translation>Tệp PDF (*.pdf)</translation>
     </message>
     <message id="DiscardDraftChangesQuestion">
-        <location filename="../src/Main.qml" line="164"/>
+        <location filename="../src/Main.qml" line="166"/>
         <source>Discard draft changes?</source>
         <translation>Bỏ các thay đổi nháp?</translation>
     </message>
     <message id="UnsavedEditsDescription">
-        <location filename="../src/Main.qml" line="173"/>
+        <location filename="../src/Main.qml" line="175"/>
         <source>Your edits exist only in this session and have not been saved to the PDF.</source>
         <translation>Các chỉnh sửa của bạn chỉ tồn tại trong phiên này và chưa được lưu vào tệp PDF.</translation>
     </message>
     <message id="Cancel">
-        <location filename="../src/Main.qml" line="188"/>
+        <location filename="../src/Main.qml" line="190"/>
         <source>Cancel</source>
         <translation>Hủy</translation>
     </message>
     <message id="Discard">
-        <location filename="../src/Main.qml" line="199"/>
+        <location filename="../src/Main.qml" line="201"/>
         <source>Discard</source>
         <translation>Bỏ thay đổi</translation>
     </message>
@@ -52,6 +52,7 @@
     </message>
     <message id="Edit">
         <location filename="../src/Components/AppRibbon.qml" line="115"/>
+        <location filename="../src/Components/EditOverlay.qml" line="629"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
@@ -73,17 +74,22 @@
         <translation>Chưa mở tài liệu</translation>
     </message>
     <message id="PdfEditSurface">
-        <location filename="../src/Components/EditOverlay.qml" line="413"/>
+        <location filename="../src/Components/EditOverlay.qml" line="518"/>
         <source>PDF edit surface</source>
         <translation>Vùng chỉnh sửa PDF</translation>
     </message>
     <message id="PdfEditSurfaceDescription">
-        <location filename="../src/Components/EditOverlay.qml" line="415"/>
+        <location filename="../src/Components/EditOverlay.qml" line="520"/>
         <source>Use Tab or arrow keys to select content, then press Enter to edit text</source>
         <translation>Dùng Tab hoặc các phím mũi tên để chọn nội dung, sau đó nhấn Enter để sửa văn bản</translation>
     </message>
+    <message id="Delete">
+        <location filename="../src/Components/EditOverlay.qml" line="659"/>
+        <source>Delete</source>
+        <translation>Xóa</translation>
+    </message>
     <message id="ApplyOrCancelEditHint">
-        <location filename="../src/Components/EditOverlay.qml" line="614"/>
+        <location filename="../src/Components/EditOverlay.qml" line="868"/>
         <source>Enter to apply · Esc to cancel</source>
         <translation>Enter để áp dụng · Esc để hủy</translation>
     </message>
@@ -151,6 +157,7 @@
     </message>
     <message id="Underline">
         <location filename="../src/Components/EditRibbon.qml" line="117"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="282"/>
         <source>Underline</source>
         <translation>Gạch chân</translation>
     </message>
@@ -443,6 +450,57 @@
         <location filename="../src/PDFEditController.cpp" line="1234"/>
         <source>Editing form fields and free-text annotations is not available in this draft editor yet.</source>
         <translation>Trình chỉnh sửa bản nháp này chưa hỗ trợ chỉnh sửa trường biểu mẫu và chú thích văn bản tự do.</translation>
+    </message>
+    <message id="ExpandTextFormatting">
+        <location filename="../src/Components/TextFormatPanel.qml" line="45"/>
+        <source>Expand text formatting</source>
+        <translation>Mở rộng định dạng văn bản</translation>
+    </message>
+    <message id="TextFormatting">
+        <location filename="../src/Components/TextFormatPanel.qml" line="87"/>
+        <source>Text Formatting</source>
+        <translation>Định dạng văn bản</translation>
+    </message>
+    <message id="CollapseTextFormatting">
+        <location filename="../src/Components/TextFormatPanel.qml" line="104"/>
+        <source>Collapse text formatting</source>
+        <translation>Thu gọn định dạng văn bản</translation>
+    </message>
+    <message id="SelectEditableTextForFormatting">
+        <location filename="../src/Components/TextFormatPanel.qml" line="126"/>
+        <source>Select editable text to enable formatting.</source>
+        <translation>Chọn văn bản có thể chỉnh sửa để bật định dạng.</translation>
+    </message>
+    <message id="FontFamily">
+        <location filename="../src/Components/TextFormatPanel.qml" line="151"/>
+        <source>Font family</source>
+        <translation>Phông chữ</translation>
+    </message>
+    <message id="FontSize">
+        <location filename="../src/Components/TextFormatPanel.qml" line="174"/>
+        <source>Font size</source>
+        <translation>Cỡ chữ</translation>
+    </message>
+    <message id="FontStyle">
+        <location filename="../src/Components/TextFormatPanel.qml" line="195"/>
+        <source>Style</source>
+        <translation>Kiểu chữ</translation>
+    </message>
+    <message id="Bold">
+        <location filename="../src/Components/TextFormatPanel.qml" line="214"/>
+        <source>Bold</source>
+        <translation>Đậm</translation>
+    </message>
+    <message id="Italic">
+        <location filename="../src/Components/TextFormatPanel.qml" line="248"/>
+        <source>Italic</source>
+        <translation>Nghiêng</translation>
+    </message>
+    <message id="FontColor">
+        <location filename="../src/Components/TextFormatPanel.qml" line="312"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="373"/>
+        <source>Font color</source>
+        <translation>Màu chữ</translation>
     </message>
 </context>
 </TS>

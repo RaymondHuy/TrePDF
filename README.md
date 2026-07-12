@@ -4,6 +4,13 @@ TrePDF is a Qt Quick Controls desktop PDF reader powered by PDFium. The app
 supports continuous page viewing, asynchronous rendering, draft content edits,
 and an ID-based localization system with Vietnamese enabled by default.
 
+In Edit mode, selecting editable text opens contextual Edit and Delete actions.
+Deletion is stored only as a session draft and can be undone or redone.
+
+Edit mode also shows a collapsible text-formatting panel on the right with font
+family, size, color, bold, italic, and underline controls. This panel is
+currently UI-only and does not apply formatting to draft text yet.
+
 ## Build
 
 Install Qt 6.8 or newer and provide a PDFium build that contains `fpdfview.h`

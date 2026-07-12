@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Dialogs
@@ -216,15 +218,46 @@ ApplicationWindow {
         onToolRequested: toolName => window.showComingSoon(toolName)
     }
 
-    DocumentView {
-        id: documentView
-
+    RowLayout {
         anchors.fill: parent
-        theme: appTheme
-        document: pdfDocument
-        editController: editController
-        zoom: window.zoom
-        transientStatus: window.transientStatus
-        onOpenRequested: window.requestOpen()
+        spacing: 0
+
+        DocumentView {
+            id: documentView
+
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            theme: appTheme
+            document: pdfDocument
+            editController: editController
+            zoom: window.zoom
+            transientStatus: window.transientStatus
+            onOpenRequested: window.requestOpen()
+        }
+
+        Loader {
+            id: textFormatPanelLoader
+
+            property bool panelCollapsed: false
+
+            Layout.preferredWidth: active
+                ? panelCollapsed ? 42 : 264
+                : 0
+            Layout.fillHeight: true
+            active: pdfDocument.loaded
+                && editController.tool !== PDFEditController.BrowseTool
+            visible: active
+
+            sourceComponent: Component {
+                TextFormatPanel {
+                    theme: appTheme
+                    collapsed: textFormatPanelLoader.panelCollapsed
+                    formattingEnabled: editController.selectedEditable
+                    onCollapsedChangeRequested: collapsed => {
+                        textFormatPanelLoader.panelCollapsed = collapsed
+                    }
+                }
+            }
+        }
     }
 }
