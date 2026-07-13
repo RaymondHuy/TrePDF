@@ -23,6 +23,7 @@ Item {
     property real selectCursorY: 0
     property bool selectCursorVisible: false
     readonly property real fallbackBleed: 2
+    readonly property real editBoxRadius: 4
     readonly property real minimumTextPixelSize: 6
     readonly property bool interactionActive: !pooled
         && controller.tool !== PDFEditController.BrowseTool
@@ -437,6 +438,7 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
+                radius: root.editBoxRadius
                 color: draftItem.selected ? "#14d97a32" : "transparent"
                 border.width: 2
                 border.color: draftItem.selected
@@ -725,6 +727,7 @@ Item {
         height: root.hasCandidate(root.hoverCandidate)
             ? Math.max(1, root.hoverCandidate.height * root.height)
             : 0
+        radius: root.editBoxRadius
         color: "transparent"
         border.width: 2
         border.color: root.hasCandidate(root.hoverCandidate) && root.hoverCandidate.editable
@@ -742,6 +745,7 @@ Item {
         y: root.controller.selectedY * root.height
         width: root.controller.selectedWidth * root.width
         height: root.controller.selectedHeight * root.height
+        radius: root.editBoxRadius
         color: "#14d97a32"
         border.width: 2
         border.color: root.controller.selectedEditable
@@ -812,7 +816,7 @@ Item {
             : "#fffdfb"
         border.color: root.theme.foxitOrange
         border.width: 2
-        radius: 2
+        radius: root.editBoxRadius
         z: 2
         visible: root.editing
             && root.controller.selectedPage === root.page
