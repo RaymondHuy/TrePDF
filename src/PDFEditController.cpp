@@ -7,8 +7,11 @@
 #include <utility>
 
 #include <QByteArray>
+#include <QCryptographicHash>
 #include <QFont>
+#include <QFontDatabase>
 #include <QFontInfo>
+#include <QFontMetricsF>
 #include <QMutexLocker>
 #include <QSet>
 #include <QStringList>
@@ -27,6 +30,9 @@ constexpr qreal kAddedTextWidthRatio = 0.25;
 constexpr qreal kAddedTextMinimumWidthRatio = 0.02;
 constexpr qreal kAddedTextHeightRatio = 0.04;
 constexpr qreal kAddedTextFontSizeRatio = 0.022;
+constexpr int kPdfFontFlagForceBold = 1 << 18;
+constexpr qsizetype kMaximumEmbeddedFontBytes = 32 * 1024 * 1024;
+constexpr qsizetype kMaximumRegisteredFontBytes = 64 * 1024 * 1024;
 constexpr FS_MATRIX kIdentityMatrix{1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
 
 QSize mappingDeviceSize(const QSizeF &pageSize)
@@ -79,6 +85,23 @@ bool pagePointToDevice(FPDF_PAGE page,
     }
 
     devicePoint = QPointF(deviceX, deviceY);
+    return true;
+}
+
+bool normalizedPagePoint(FPDF_PAGE page,
+                         const QSizeF &pageSize,
+                         const QPointF &pagePoint,
+                         QPointF &normalizedPoint)
+{
+    const QSize deviceSize = mappingDeviceSize(pageSize);
+    QPointF devicePoint;
+    if (deviceSize.isEmpty()
+        || !pagePointToDevice(page, deviceSize, pagePoint, devicePoint)) {
+        return false;
+    }
+
+    normalizedPoint = QPointF(devicePoint.x() / deviceSize.width(),
+                              devicePoint.y() / deviceSize.height());
     return true;
 }
 
@@ -137,6 +160,37 @@ qreal normalizedFontSize(FPDF_PAGE page,
 
     return std::hypot(fontTop.x() - origin.x(), fontTop.y() - origin.y())
         / deviceSize.height();
+}
+
+int fontStretchForTransform(FPDF_PAGE page,
+                            const QSizeF &pageSize,
+                            const FS_MATRIX &transform)
+{
+    const QSize deviceSize = mappingDeviceSize(pageSize);
+    QPointF origin;
+    QPointF baselinePoint;
+    QPointF verticalPoint;
+    if (deviceSize.isEmpty()
+        || !transformedPointToDevice(
+            page, deviceSize, transform, QPointF(0.0, 0.0), origin)
+        || !transformedPointToDevice(
+            page, deviceSize, transform, QPointF(1.0, 0.0), baselinePoint)
+        || !transformedPointToDevice(
+            page, deviceSize, transform, QPointF(0.0, 1.0), verticalPoint)) {
+        return QFont::Unstretched;
+    }
+
+    const QPointF baseline = baselinePoint - origin;
+    const QPointF vertical = verticalPoint - origin;
+    const qreal baselineLength = std::hypot(baseline.x(), baseline.y());
+    const qreal verticalLength = std::hypot(vertical.x(), vertical.y());
+    if (baselineLength <= 0.0 || verticalLength <= 0.0) {
+        return QFont::Unstretched;
+    }
+
+    return qBound(static_cast<int>(QFont::UltraCondensed),
+                  qRound(baselineLength / verticalLength * QFont::Unstretched),
+                  static_cast<int>(QFont::UltraExpanded));
 }
 
 QRectF normalizedRect(FPDF_PAGE page,
@@ -249,30 +303,79 @@ QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
         characterCount);
 }
 
-QString fontFamily(FPDF_PAGEOBJECT object)
+QString pdfFontName(FPDF_FONT font, bool baseName)
 {
-    FPDF_FONT font = FPDFTextObj_GetFont(object);
     if (!font) {
         return {};
     }
 
-    const size_t length = FPDFFont_GetFamilyName(font, nullptr, 0);
+    const size_t length = baseName
+        ? FPDFFont_GetBaseFontName(font, nullptr, 0)
+        : FPDFFont_GetFamilyName(font, nullptr, 0);
     if (length == 0) {
         return {};
     }
 
     QByteArray buffer(static_cast<qsizetype>(length), '\0');
-    if (FPDFFont_GetFamilyName(font, buffer.data(), length) == 0) {
+    const size_t actualLength = baseName
+        ? FPDFFont_GetBaseFontName(font, buffer.data(), length)
+        : FPDFFont_GetFamilyName(font, buffer.data(), length);
+    if (actualLength == 0) {
         return {};
     }
 
-    const QString family = QString::fromUtf8(buffer.constData()).trimmed();
+    return QString::fromUtf8(buffer.constData()).trimmed();
+}
+
+bool pdfFontIsBold(FPDF_FONT font)
+{
+    if (!font) {
+        return false;
+    }
+
+    const int weight = FPDFFont_GetWeight(font);
+    if (weight >= static_cast<int>(QFont::Bold)) {
+        return true;
+    }
+
+    const int flags = FPDFFont_GetFlags(font);
+    if (flags >= 0 && (flags & kPdfFontFlagForceBold) != 0) {
+        return true;
+    }
+
+    const QString baseName = pdfFontName(font, true);
+    return baseName.contains(QStringLiteral("bold"), Qt::CaseInsensitive)
+        || baseName.contains(QStringLiteral("black"), Qt::CaseInsensitive)
+        || baseName.contains(QStringLiteral("heavy"), Qt::CaseInsensitive);
+}
+
+QString installedFontFamily(FPDF_FONT font)
+{
+    const QString family = pdfFontName(font, false);
     if (family.isEmpty()) {
         return {};
     }
 
     const QFontInfo resolvedFont{QFont(family)};
     return resolvedFont.exactMatch() ? family : QString();
+}
+
+bool fontSupportsText(const QString &family, const QString &text)
+{
+    if (family.isEmpty()) {
+        return false;
+    }
+
+    QFont font(family);
+    font.setStyleStrategy(QFont::NoFontMerging);
+    const QFontMetricsF metrics(font);
+    for (uint character : text.toUcs4()) {
+        if (!QChar::isSpace(static_cast<char32_t>(character))
+            && !metrics.inFontUcs4(character)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 QColor textColor(FPDF_PAGEOBJECT object, FPDF_TEXT_RENDERMODE renderMode)
@@ -314,6 +417,11 @@ QString pageObjectId(const QVector<int> &objectPath)
 PDFEditController::PDFEditController(QObject *parent)
     : QObject(parent)
 {
+}
+
+PDFEditController::~PDFEditController()
+{
+    clearRegisteredFonts();
 }
 
 PDFDocument *PDFEditController::document() const
@@ -421,6 +529,21 @@ qreal PDFEditController::selectedHeight() const
     return m_hasSelection ? m_selectedCandidate.rect.height() : 0.0;
 }
 
+bool PDFEditController::selectedHasBaseline() const
+{
+    return m_hasSelection && m_selectedCandidate.hasBaseline;
+}
+
+qreal PDFEditController::selectedOriginX() const
+{
+    return selectedHasBaseline() ? m_selectedCandidate.origin.x() : selectedX();
+}
+
+qreal PDFEditController::selectedBaselineY() const
+{
+    return selectedHasBaseline() ? m_selectedCandidate.origin.y() : selectedY();
+}
+
 QString PDFEditController::selectedText() const
 {
     return m_hasSelection ? m_selectedText : QString();
@@ -434,6 +557,26 @@ QString PDFEditController::selectedFontFamily() const
 qreal PDFEditController::selectedFontSizeRatio() const
 {
     return m_hasSelection ? m_selectedCandidate.fontSizeRatio : 0.0;
+}
+
+qreal PDFEditController::selectedDisplayFontSizeRatio() const
+{
+    if (!m_hasSelection) {
+        return 0.0;
+    }
+    return m_selectedCandidate.displayFontSizeRatio > 0.0
+        ? m_selectedCandidate.displayFontSizeRatio
+        : m_selectedCandidate.fontSizeRatio;
+}
+
+int PDFEditController::selectedFontStretch() const
+{
+    return m_hasSelection ? m_selectedCandidate.fontStretch : QFont::Unstretched;
+}
+
+bool PDFEditController::selectedFontBold() const
+{
+    return m_hasSelection && m_selectedCandidate.fontBold;
 }
 
 QColor PDFEditController::selectedColor() const
@@ -620,6 +763,7 @@ QVariantMap PDFEditController::addText(int page, qreal x, qreal y)
     candidate.text.clear();
     candidate.fontFamily = QFontInfo(QFont()).family();
     candidate.fontSizeRatio = kAddedTextFontSizeRatio;
+    candidate.displayFontSizeRatio = candidate.fontSizeRatio;
     candidate.color = Qt::black;
     candidate.editable = true;
     candidate.added = true;
@@ -647,6 +791,132 @@ QVariantMap PDFEditController::addText(int page, qreal x, qreal y)
     emit pageDataChanged(page);
     beginSelectedTextEdit();
     return candidateMap(candidate, candidate.text);
+}
+
+QFont PDFEditController::fontForDisplay(const QString &fontFamily,
+                                        int fontStretch,
+                                        bool fontBold,
+                                        qreal pixelSize) const
+{
+    QFont font;
+    if (!fontFamily.isEmpty()) {
+        font.setFamily(fontFamily);
+    }
+    font.setStretch(qBound(static_cast<int>(QFont::UltraCondensed),
+                           fontStretch,
+                           static_cast<int>(QFont::UltraExpanded)));
+    font.setBold(fontBold);
+    font.setPixelSize(qMax(1, qRound(pixelSize)));
+    return font;
+}
+
+QString PDFEditController::resolvedFontFamily(FPDF_PAGEOBJECT textObject,
+                                              const QString &text)
+{
+    FPDF_FONT font = FPDFTextObj_GetFont(textObject);
+    if (!font) {
+        return {};
+    }
+
+    const QString expectedFamily = pdfFontName(font, false);
+    const QString baseName = pdfFontName(font, true);
+    const QString cacheKey = (baseName.isEmpty() ? expectedFamily : baseName)
+        + QLatin1Char('#')
+        + QString::number(
+            static_cast<qulonglong>(reinterpret_cast<quintptr>(font)),
+            16);
+    const auto cachedFamily = m_pdfFontFamilyCache.constFind(cacheKey);
+    if (cachedFamily != m_pdfFontFamilyCache.cend()) {
+        return fontSupportsText(cachedFamily.value(), text)
+            ? cachedFamily.value()
+            : QString();
+    }
+
+    QString resolvedFamily = registerEmbeddedFont(font, expectedFamily);
+    if (resolvedFamily.isEmpty()) {
+        resolvedFamily = installedFontFamily(font);
+    }
+    m_pdfFontFamilyCache.insert(cacheKey, resolvedFamily);
+    return fontSupportsText(resolvedFamily, text) ? resolvedFamily : QString();
+}
+
+QString PDFEditController::registerEmbeddedFont(FPDF_FONT font,
+                                                const QString &expectedFamily)
+{
+    if (!font || FPDFFont_GetIsEmbedded(font) != 1) {
+        return {};
+    }
+
+    size_t fontByteCount = 0;
+    if (!FPDFFont_GetFontData(font, nullptr, 0, &fontByteCount)
+        || fontByteCount == 0
+        || fontByteCount > static_cast<size_t>(kMaximumEmbeddedFontBytes)) {
+        return {};
+    }
+
+    QByteArray fontData(static_cast<qsizetype>(fontByteCount), '\0');
+    size_t actualByteCount = fontByteCount;
+    if (!FPDFFont_GetFontData(
+            font,
+            reinterpret_cast<uint8_t *>(fontData.data()),
+            fontByteCount,
+            &actualByteCount)
+        || actualByteCount == 0
+        || actualByteCount > fontByteCount) {
+        return {};
+    }
+    fontData.resize(static_cast<qsizetype>(actualByteCount));
+
+    const QByteArray fingerprint = QCryptographicHash::hash(
+        fontData,
+        QCryptographicHash::Sha256);
+    const auto registeredFamily = m_registeredFontFamilies.constFind(fingerprint);
+    if (registeredFamily != m_registeredFontFamilies.cend()) {
+        return registeredFamily.value();
+    }
+    if (fontData.size() > kMaximumRegisteredFontBytes - m_registeredFontBytes) {
+        m_registeredFontFamilies.insert(fingerprint, QString());
+        return {};
+    }
+
+    const int fontId = QFontDatabase::addApplicationFontFromData(fontData);
+    if (fontId < 0) {
+        m_registeredFontFamilies.insert(fingerprint, QString());
+        return {};
+    }
+
+    const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
+    if (families.isEmpty()) {
+        QFontDatabase::removeApplicationFont(fontId);
+        m_registeredFontFamilies.insert(fingerprint, QString());
+        return {};
+    }
+
+    QString family = families.constFirst();
+    for (const QString &candidateFamily : families) {
+        if (candidateFamily.compare(expectedFamily, Qt::CaseInsensitive) == 0) {
+            family = candidateFamily;
+            break;
+        }
+    }
+
+    m_registeredFontIds.append(fontId);
+    m_registeredFontBytes += fontData.size();
+    m_registeredFontFamilies.insert(fingerprint, family);
+    return family;
+}
+
+void PDFEditController::clearRegisteredFonts()
+{
+    for (auto fontId = m_registeredFontIds.crbegin();
+         fontId != m_registeredFontIds.crend();
+         ++fontId) {
+        QFontDatabase::removeApplicationFont(*fontId);
+    }
+    m_registeredFontIds.clear();
+    m_registeredFontFamilies.clear();
+    m_pdfFontFamilyCache.clear();
+    m_registeredFontBytes = 0;
 }
 
 bool PDFEditController::selectCandidate(int page, const QString &objectId)
@@ -899,6 +1169,7 @@ void PDFEditController::resetSession()
     m_hasSelection = false;
     m_selectedCandidate = Candidate();
     m_selectedText.clear();
+    clearRegisteredFonts();
     const bool wasEditing = m_textEditActive;
     m_textEditActive = false;
     m_textEditCommand = Command();
@@ -944,7 +1215,7 @@ const QVector<PDFEditController::Candidate> &PDFEditController::ensurePageCandid
     return cached.value();
 }
 
-QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex) const
+QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex)
 {
     QVector<Candidate> candidates;
     if (!m_document || !m_document->m_document) {
@@ -969,17 +1240,44 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex)
         return candidates;
     }
 
-    QHash<FPDF_PAGEOBJECT, QRectF> textObjectBounds;
+    QHash<FPDF_PAGEOBJECT, TextObjectLayout> textObjectLayouts;
     if (textPage) {
         const int characterCount = FPDFText_CountChars(textPage);
         for (int index = 0; index < characterCount; ++index) {
             FPDF_PAGEOBJECT textObject = FPDFText_GetTextObject(textPage, index);
+            if (!textObject) {
+                continue;
+            }
+
+            auto objectLayout = textObjectLayouts.find(textObject);
+            if (objectLayout == textObjectLayouts.end()) {
+                objectLayout = textObjectLayouts.insert(textObject, TextObjectLayout());
+            }
+            const bool generated = FPDFText_IsGenerated(textPage, index) == 1;
+            if (!generated) {
+                if (!objectLayout->hasOrigin) {
+                    double originX = 0.0;
+                    double originY = 0.0;
+                    if (FPDFText_GetCharOrigin(textPage, index, &originX, &originY)) {
+                        objectLayout->origin = QPointF(originX, originY);
+                        objectLayout->hasOrigin = true;
+                    }
+                }
+
+                const unsigned int unicode = FPDFText_GetUnicode(textPage, index);
+                if (unicode > 0
+                    && unicode <= 0x10FFFF
+                    && !QChar::isSurrogate(static_cast<char32_t>(unicode))) {
+                    const char32_t codePoint = static_cast<char32_t>(unicode);
+                    objectLayout->text.append(QString::fromUcs4(&codePoint, 1));
+                }
+            }
+
             double left = 0.0;
             double right = 0.0;
             double bottom = 0.0;
             double top = 0.0;
-            if (!textObject
-                || !FPDFText_GetCharBox(
+            if (!FPDFText_GetCharBox(
                     textPage, index, &left, &right, &bottom, &top)) {
                 continue;
             }
@@ -990,11 +1288,10 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex)
                 continue;
             }
 
-            auto objectBounds = textObjectBounds.find(textObject);
-            if (objectBounds == textObjectBounds.end()) {
-                textObjectBounds.insert(textObject, characterBounds);
+            if (objectLayout->bounds.isEmpty()) {
+                objectLayout->bounds = characterBounds;
             } else {
-                objectBounds.value() = objectBounds->united(characterBounds);
+                objectLayout->bounds = objectLayout->bounds.united(characterBounds);
             }
         }
     }
@@ -1006,7 +1303,7 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex)
             FPDFPage_GetObject(page, index),
             QVector<int>{index},
             textPage,
-            textObjectBounds,
+            textObjectLayouts,
             kIdentityMatrix,
             pageSize,
             candidates);
@@ -1031,10 +1328,10 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
                                                    FPDF_PAGEOBJECT pageObject,
                                                    const QVector<int> &objectPath,
                                                    FPDF_TEXTPAGE textPage,
-                                                   const QHash<FPDF_PAGEOBJECT, QRectF> &textObjectBounds,
+                                                   const QHash<FPDF_PAGEOBJECT, TextObjectLayout> &textObjectLayouts,
                                                    const FS_MATRIX &containerTransform,
                                                    const QSizeF &pageSize,
-                                                   QVector<Candidate> &candidates) const
+                                                   QVector<Candidate> &candidates)
 {
     if (!pageObject) {
         return;
@@ -1056,7 +1353,7 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
                 FPDFFormObj_GetObject(pageObject, static_cast<unsigned long>(index)),
                 childPath,
                 textPage,
-                textObjectBounds,
+                textObjectLayouts,
                 childTransform,
                 pageSize,
                 candidates);
@@ -1094,15 +1391,17 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
         top,
         containerTransform,
         pageSize);
-    if (type == FPDF_PAGEOBJ_TEXT) {
-        const auto glyphBounds = textObjectBounds.constFind(pageObject);
-        if (glyphBounds != textObjectBounds.cend()) {
+    const auto textLayout = type == FPDF_PAGEOBJ_TEXT
+        ? textObjectLayouts.constFind(pageObject)
+        : textObjectLayouts.cend();
+    if (textLayout != textObjectLayouts.cend()) {
+        if (!textLayout->bounds.isEmpty()) {
             const QRectF glyphRect = normalizedRect(
                 page,
-                glyphBounds->left(),
-                glyphBounds->top(),
-                glyphBounds->right(),
-                glyphBounds->bottom(),
+                textLayout->bounds.left(),
+                textLayout->bounds.top(),
+                textLayout->bounds.right(),
+                textLayout->bounds.bottom(),
                 kIdentityMatrix,
                 pageSize);
             if (!glyphRect.isEmpty()) {
@@ -1118,6 +1417,13 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
     candidate.objectId = pageObjectId(objectPath);
     candidate.objectPath = objectPath;
     candidate.rect = rect;
+    if (textLayout != textObjectLayouts.cend() && textLayout->hasOrigin) {
+        candidate.hasBaseline = normalizedPagePoint(
+            page,
+            pageSize,
+            textLayout->origin,
+            candidate.origin);
+    }
 
     if (type == FPDF_PAGEOBJ_IMAGE) {
         candidate.kind = QStringLiteral("image");
@@ -1129,7 +1435,10 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
         return;
     }
 
-    const QString text = textObjectText(pageObject, textPage);
+    const QString text = textLayout != textObjectLayouts.cend()
+            && !textLayout->text.isEmpty()
+        ? textLayout->text
+        : textObjectText(pageObject, textPage);
     if (text.trimmed().isEmpty()) {
         return;
     }
@@ -1149,10 +1458,13 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
     //% "Text"
     candidate.label = qtTrId("Text");
     candidate.text = text;
-    candidate.fontFamily = fontFamily(pageObject);
+    candidate.fontFamily = resolvedFontFamily(pageObject, candidate.text);
+    candidate.fontBold = pdfFontIsBold(FPDFTextObj_GetFont(pageObject));
     candidate.fontSizeRatio = qMax<qreal>(
         0.0,
         normalizedFontSize(page, pageSize, textTransform, fontSize));
+    candidate.displayFontSizeRatio = candidate.fontSizeRatio;
+    candidate.fontStretch = fontStretchForTransform(page, pageSize, textTransform);
     candidate.color = textColor(pageObject, renderMode);
     const bool editingAllowed = documentAllowsEditing();
     candidate.editable = editingAllowed && inlineLayoutSupported;
@@ -1266,9 +1578,19 @@ QVariantMap PDFEditController::candidateMap(const Candidate &candidate, const QS
     map.insert(QStringLiteral("y"), candidate.rect.y());
     map.insert(QStringLiteral("width"), candidate.rect.width());
     map.insert(QStringLiteral("height"), candidate.rect.height());
+    map.insert(QStringLiteral("hasBaseline"), candidate.hasBaseline);
+    map.insert(QStringLiteral("originX"), candidate.origin.x());
+    map.insert(QStringLiteral("baselineY"), candidate.origin.y());
     map.insert(QStringLiteral("text"), text);
     map.insert(QStringLiteral("fontFamily"), candidate.fontFamily);
     map.insert(QStringLiteral("fontSizeRatio"), candidate.fontSizeRatio);
+    map.insert(
+        QStringLiteral("displayFontSizeRatio"),
+        candidate.displayFontSizeRatio > 0.0
+            ? candidate.displayFontSizeRatio
+            : candidate.fontSizeRatio);
+    map.insert(QStringLiteral("fontStretch"), candidate.fontStretch);
+    map.insert(QStringLiteral("fontBold"), candidate.fontBold);
     map.insert(QStringLiteral("color"), candidate.color);
     map.insert(QStringLiteral("editable"), candidate.editable);
     map.insert(QStringLiteral("limited"), candidate.limited);
