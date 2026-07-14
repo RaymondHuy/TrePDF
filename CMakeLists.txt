@@ -150,6 +150,12 @@ if(APPLE)
     )
 endif()
 
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+    add_subdirectory(tests)
+endif()
+
 include(GNUInstallDirs)
 install(TARGETS trepdf
     BUNDLE DESTINATION .

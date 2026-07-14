@@ -2,9 +2,12 @@
 
 #include "PDFDocument.h"
 
+#include <QByteArray>
 #include <QColor>
+#include <QFont>
 #include <QHash>
 #include <QObject>
+#include <QPointF>
 #include <QPointer>
 #include <QRectF>
 #include <QString>
@@ -30,9 +33,15 @@ class PDFEditController : public QObject
     Q_PROPERTY(qreal selectedY READ selectedY NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedWidth READ selectedWidth NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedHeight READ selectedHeight NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedHasBaseline READ selectedHasBaseline NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(qreal selectedOriginX READ selectedOriginX NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(qreal selectedBaselineY READ selectedBaselineY NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedText READ selectedText NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedFontFamily READ selectedFontFamily NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedFontSizeRatio READ selectedFontSizeRatio NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(qreal selectedDisplayFontSizeRatio READ selectedDisplayFontSizeRatio NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(int selectedFontStretch READ selectedFontStretch NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedFontBold READ selectedFontBold NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QColor selectedColor READ selectedColor NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
@@ -47,6 +56,7 @@ public:
     Q_ENUM(Tool)
 
     explicit PDFEditController(QObject *parent = nullptr);
+    ~PDFEditController() override;
 
     PDFDocument *document() const;
     void setDocument(PDFDocument *document);
@@ -66,9 +76,15 @@ public:
     qreal selectedY() const;
     qreal selectedWidth() const;
     qreal selectedHeight() const;
+    bool selectedHasBaseline() const;
+    qreal selectedOriginX() const;
+    qreal selectedBaselineY() const;
     QString selectedText() const;
     QString selectedFontFamily() const;
     qreal selectedFontSizeRatio() const;
+    qreal selectedDisplayFontSizeRatio() const;
+    int selectedFontStretch() const;
+    bool selectedFontBold() const;
     QColor selectedColor() const;
     bool selectedEditable() const;
     QString selectedReason() const;
@@ -80,6 +96,10 @@ public:
     Q_INVOKABLE QVariantList draftsForPage(int page) const;
     Q_INVOKABLE QVariantMap candidateAt(int page, qreal x, qreal y);
     Q_INVOKABLE QVariantMap addText(int page, qreal x, qreal y);
+    Q_INVOKABLE QFont fontForDisplay(const QString &fontFamily,
+                                     int fontStretch,
+                                     bool fontBold,
+                                     qreal pixelSize) const;
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
@@ -102,6 +122,13 @@ signals:
     void statusMessage(const QString &message);
 
 private:
+    struct TextObjectLayout {
+        QRectF bounds;
+        QPointF origin;
+        QString text;
+        bool hasOrigin = false;
+    };
+
     struct Candidate {
         int page = -1;
         QString objectId;
@@ -109,10 +136,15 @@ private:
         QString kind;
         QString label;
         QRectF rect;
+        QPointF origin;
         QString text;
         QString fontFamily;
         qreal fontSizeRatio = 0.0;
+        qreal displayFontSizeRatio = 0.0;
+        int fontStretch = 100;
+        bool fontBold = false;
         QColor color = Qt::black;
+        bool hasBaseline = false;
         bool editable = false;
         bool renderSuppressible = false;
         bool limited = false;
@@ -140,15 +172,15 @@ private:
     void resetSession();
     void ensureCacheRevision();
     const QVector<Candidate> &ensurePageCandidates(int page);
-    QVector<Candidate> scanPage(int page) const;
+    QVector<Candidate> scanPage(int page);
     void appendPageObjectCandidates(FPDF_PAGE page,
                                     FPDF_PAGEOBJECT pageObject,
                                     const QVector<int> &objectPath,
                                     FPDF_TEXTPAGE textPage,
-                                    const QHash<FPDF_PAGEOBJECT, QRectF> &textObjectBounds,
+                                    const QHash<FPDF_PAGEOBJECT, TextObjectLayout> &textObjectLayouts,
                                     const FS_MATRIX &containerTransform,
                                     const QSizeF &pageSize,
-                                    QVector<Candidate> &candidates) const;
+                                    QVector<Candidate> &candidates);
     void appendAnnotationCandidates(FPDF_PAGE page,
                                     int pageIndex,
                                     const QSizeF &pageSize,
@@ -163,6 +195,9 @@ private:
     bool removeAddedCandidate(int page, const QString &objectId);
     void updateSelectedTextFromDraft();
     void setSelection(const Candidate *candidate);
+    QString resolvedFontFamily(FPDF_PAGEOBJECT textObject, const QString &text);
+    QString registerEmbeddedFont(FPDF_FONT font, const QString &expectedFamily);
+    void clearRegisteredFonts();
 
     QPointer<PDFDocument> m_document;
     Tool m_tool = BrowseTool;
@@ -175,6 +210,10 @@ private:
     quint64 m_nextAddedTextId = 0;
     QVector<Command> m_undoStack;
     QVector<Command> m_redoStack;
+    QHash<QString, QString> m_pdfFontFamilyCache;
+    QHash<QByteArray, QString> m_registeredFontFamilies;
+    QVector<int> m_registeredFontIds;
+    qsizetype m_registeredFontBytes = 0;
     Candidate m_selectedCandidate;
     bool m_hasSelection = false;
     QString m_selectedText;

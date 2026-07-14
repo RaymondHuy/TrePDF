@@ -11,6 +11,10 @@ Edit mode also shows a collapsible text-formatting panel on the right with font
 family, size, color, bold, italic, and underline controls. This panel is
 currently UI-only and does not apply formatting to draft text yet.
 
+The complete editable-text discovery, geometry, font, baseline, overlay, and
+draft-rendering flow is documented in
+[`docs/text-editing-pipeline.md`](docs/text-editing-pipeline.md).
+
 ## Build
 
 Install Qt 6.8 or newer and provide a PDFium build that contains `fpdfview.h`

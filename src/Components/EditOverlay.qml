@@ -24,6 +24,10 @@ Item {
     property bool selectCursorVisible: false
     readonly property real fallbackBleed: 2
     readonly property real editBoxRadius: 4
+    readonly property color editBoxColor: "#f5a55a"
+    readonly property real editBoxHorizontalBleed: 3
+    readonly property real hoverBoxVerticalBleed: 3
+    readonly property real editBoxVerticalBleed: 3
     readonly property real minimumTextPixelSize: 6
     readonly property bool interactionActive: !pooled
         && controller.tool !== PDFEditController.BrowseTool
@@ -108,6 +112,12 @@ Item {
             originalText: draft.originalText,
             fontFamily: draft.fontFamily,
             fontSizeRatio: draft.fontSizeRatio,
+            displayFontSizeRatio: draft.displayFontSizeRatio,
+            fontStretch: draft.fontStretch,
+            fontBold: draft.fontBold,
+            hasBaseline: draft.hasBaseline,
+            originX: draft.originX,
+            baselineY: draft.baselineY,
             color: draft.color,
             restoration: true
         }
@@ -217,7 +227,8 @@ Item {
         editing = true
         Qt.callLater(function() {
             editor.forceActiveFocus()
-            editor.selectAll()
+            editor.deselect()
+            editor.cursorPosition = editor.text.length
         })
     }
 
@@ -367,6 +378,18 @@ Item {
             readonly property real textHeight: Math.max(
                 originalHeight + root.fallbackBleed * 2,
                 draftText.implicitHeight)
+            readonly property real fontPixelSize: Math.max(
+                modelData.added === true ? root.minimumTextPixelSize : 1,
+                modelData.displayFontSizeRatio * root.height)
+            readonly property font displayFont: root.controller.fontForDisplay(
+                modelData.fontFamily,
+                modelData.fontStretch,
+                modelData.fontBold,
+                fontPixelSize)
+            readonly property bool usesBaseline: modelData.hasBaseline === true
+                && modelData.added !== true
+            readonly property real textOriginX: modelData.originX * root.width
+            readonly property real textBaselineY: modelData.baselineY * root.height
             readonly property real textPageY: originalY + (originalHeight - textHeight) / 2
             readonly property bool textNeedsFitting: expandedTextWidth > root.width
             readonly property bool hovered: root.hasCandidate(root.hoverCandidate)
@@ -408,30 +431,28 @@ Item {
                 id: draftTextMetrics
 
                 text: draftItem.modelData.text
-                font.family: draftItem.modelData.fontFamily
-                font.pixelSize: Math.max(
-                    root.minimumTextPixelSize,
-                    draftItem.modelData.fontSizeRatio * root.height)
+                font: draftItem.displayFont
             }
 
             Text {
                 id: draftText
 
                 x: 0
-                y: 0
+                y: draftItem.usesBaseline
+                    ? draftItem.textBaselineY - draftItem.y - baselineOffset
+                    : 0
                 width: draftItem.width
-                height: draftItem.height
-                leftPadding: draftItem.horizontalPadding / 2
-                rightPadding: draftItem.horizontalPadding / 2
+                height: draftItem.usesBaseline ? implicitHeight : draftItem.height
+                leftPadding: draftItem.usesBaseline
+                    ? Math.max(0, draftItem.textOriginX - draftItem.x)
+                    : draftItem.horizontalPadding / 2
+                rightPadding: draftItem.usesBaseline ? 0 : draftItem.horizontalPadding / 2
                 text: draftItem.modelData.text
                 color: draftItem.modelData.color
-                font.family: draftItem.modelData.fontFamily
-                font.pixelSize: Math.max(
-                    root.minimumTextPixelSize,
-                    draftItem.modelData.fontSizeRatio * root.height)
+                font: draftItem.displayFont
                 fontSizeMode: draftItem.textNeedsFitting ? Text.HorizontalFit : Text.FixedSize
                 minimumPixelSize: 1
-                verticalAlignment: Text.AlignVCenter
+                verticalAlignment: draftItem.usesBaseline ? Text.AlignTop : Text.AlignVCenter
                 wrapMode: Text.NoWrap
                 elide: Text.ElideNone
             }
@@ -441,9 +462,7 @@ Item {
                 radius: root.editBoxRadius
                 color: draftItem.selected ? "#14d97a32" : "transparent"
                 border.width: 2
-                border.color: draftItem.selected
-                    ? root.theme.foxitOrange
-                    : root.theme.foxitHoverOrange
+                border.color: root.editBoxColor
                 visible: draftItem.modelData.added === true
                     && root.interactionActive
                     && !root.editing
@@ -719,19 +738,44 @@ Item {
     }
 
     Rectangle {
-        x: root.hasCandidate(root.hoverCandidate) ? root.hoverCandidate.x * root.width : 0
-        y: root.hasCandidate(root.hoverCandidate) ? root.hoverCandidate.y * root.height : 0
-        width: root.hasCandidate(root.hoverCandidate)
+        readonly property real originalX: root.hasCandidate(root.hoverCandidate)
+            ? root.hoverCandidate.x * root.width
+            : 0
+        readonly property real originalY: root.hasCandidate(root.hoverCandidate)
+            ? root.hoverCandidate.y * root.height
+            : 0
+        readonly property real originalWidth: root.hasCandidate(root.hoverCandidate)
             ? Math.max(1, root.hoverCandidate.width * root.width)
             : 0
-        height: root.hasCandidate(root.hoverCandidate)
+        readonly property real originalHeight: root.hasCandidate(root.hoverCandidate)
             ? Math.max(1, root.hoverCandidate.height * root.height)
+            : 0
+
+        x: root.hasCandidate(root.hoverCandidate)
+            ? Math.max(0, originalX - root.editBoxHorizontalBleed)
+            : 0
+        y: root.hasCandidate(root.hoverCandidate)
+            ? Math.max(0, originalY - root.hoverBoxVerticalBleed)
+            : 0
+        width: root.hasCandidate(root.hoverCandidate)
+            ? Math.max(
+                1,
+                Math.min(
+                    root.width,
+                    originalX + originalWidth + root.editBoxHorizontalBleed) - x)
+            : 0
+        height: root.hasCandidate(root.hoverCandidate)
+            ? Math.max(
+                1,
+                Math.min(
+                    root.height,
+                    originalY + originalHeight + root.hoverBoxVerticalBleed) - y)
             : 0
         radius: root.editBoxRadius
         color: "transparent"
         border.width: 2
         border.color: root.hasCandidate(root.hoverCandidate) && root.hoverCandidate.editable
-            ? root.theme.foxitHoverOrange
+            ? root.editBoxColor
             : "#a5a7aa"
         z: 2
         visible: root.interactionActive
@@ -741,15 +785,28 @@ Item {
     }
 
     Rectangle {
-        x: root.controller.selectedX * root.width
-        y: root.controller.selectedY * root.height
-        width: root.controller.selectedWidth * root.width
-        height: root.controller.selectedHeight * root.height
+        readonly property real originalX: root.controller.selectedX * root.width
+        readonly property real originalY: root.controller.selectedY * root.height
+        readonly property real originalWidth: root.controller.selectedWidth * root.width
+        readonly property real originalHeight: root.controller.selectedHeight * root.height
+
+        x: Math.max(0, originalX - root.editBoxHorizontalBleed)
+        y: Math.max(0, originalY - root.editBoxVerticalBleed)
+        width: Math.max(
+            1,
+            Math.min(
+                root.width,
+                originalX + originalWidth + root.editBoxHorizontalBleed) - x)
+        height: Math.max(
+            1,
+            Math.min(
+                root.height,
+                originalY + originalHeight + root.editBoxVerticalBleed) - y)
         radius: root.editBoxRadius
         color: "#14d97a32"
         border.width: 2
         border.color: root.controller.selectedEditable
-            ? root.theme.foxitOrange
+            ? root.editBoxColor
             : "#8a8d92"
         z: 2
         visible: root.interactionActive
@@ -790,31 +847,55 @@ Item {
         readonly property real originalWidth: root.controller.selectedWidth * root.width
         readonly property real originalHeight: root.controller.selectedHeight * root.height
         readonly property bool editsAddedText: root.controller.selectedKind === "addedText"
+        readonly property real horizontalBleed: editsAddedText
+            ? 0
+            : root.editBoxHorizontalBleed
+        readonly property real verticalBleed: editsAddedText
+            ? 0
+            : root.editBoxVerticalBleed
         readonly property real baseFontPixelSize: Math.max(
-            root.minimumTextPixelSize,
-            root.controller.selectedFontSizeRatio * root.height)
+            editsAddedText ? root.minimumTextPixelSize : 1,
+            root.controller.selectedDisplayFontSizeRatio * root.height)
+        readonly property font displayFont: root.controller.fontForDisplay(
+            root.controller.selectedFontFamily,
+            root.controller.selectedFontStretch,
+            root.controller.selectedFontBold,
+            baseFontPixelSize)
+        readonly property bool usesBaseline: !editsAddedText
+            && root.controller.selectedHasBaseline
+        readonly property real textOriginX: root.controller.selectedOriginX * root.width
+        readonly property real textBaselineY: root.controller.selectedBaselineY * root.height
+        readonly property real inputMargin: editsAddedText
+            ? Math.min(1, width / 4, height / 4)
+            : Math.min(4, width / 4, height / 4)
         readonly property real measuredTextWidth: Math.max(
             editorTextMetrics.advanceWidth,
             editorTextMetrics.boundingRect.width)
-        readonly property real desiredWidth: editsAddedText
+        readonly property real baseDesiredWidth: editsAddedText
             ? Math.max(originalWidth, measuredTextWidth + 2)
             : Math.max(80, originalWidth)
-        readonly property real desiredHeight: editsAddedText
+        readonly property real desiredWidth: baseDesiredWidth + horizontalBleed * 2
+        readonly property real baseDesiredHeight: editsAddedText
             ? Math.max(
                 originalHeight + root.fallbackBleed * 2,
                 editor.implicitHeight)
-            : Math.max(26, originalHeight)
+            : Math.max(17, originalHeight)
+        readonly property real desiredHeight: baseDesiredHeight + verticalBleed * 2
 
-        x: Math.max(0, Math.min(originalX, root.width - width))
+        x: Math.max(
+            0,
+            Math.min(originalX - horizontalBleed, root.width - width))
         y: editsAddedText
             ? originalY + (originalHeight - height) / 2
-            : Math.max(0, Math.min(originalY, root.height - height))
+            : Math.max(
+                0,
+                Math.min(originalY - verticalBleed, root.height - height))
         width: Math.min(root.width, desiredWidth)
         height: editsAddedText ? desiredHeight : Math.min(root.height, desiredHeight)
         color: editsAddedText || root.editorUsesCleanTexture
             ? "transparent"
             : "#fffdfb"
-        border.color: root.theme.foxitOrange
+        border.color: root.editBoxColor
         border.width: 2
         radius: root.editBoxRadius
         z: 2
@@ -826,23 +907,34 @@ Item {
             id: editorTextMetrics
 
             text: editor.text
-            font.family: root.controller.selectedFontFamily
-            font.pixelSize: editorFrame.baseFontPixelSize
+            font: editorFrame.displayFont
         }
 
         TextInput {
             id: editor
 
-            anchors.fill: parent
-            anchors.margins: editorFrame.editsAddedText
-                ? Math.min(1, parent.width / 4, parent.height / 4)
-                : Math.min(4, parent.width / 4, parent.height / 4)
+            x: editorFrame.usesBaseline ? 0 : editorFrame.inputMargin
+            y: editorFrame.usesBaseline
+                ? editorFrame.textBaselineY - editorFrame.y - baselineOffset
+                : editorFrame.inputMargin
+            width: editorFrame.usesBaseline
+                ? parent.width
+                : Math.max(1, parent.width - editorFrame.inputMargin * 2)
+            height: editorFrame.usesBaseline
+                ? implicitHeight
+                : Math.max(1, parent.height - editorFrame.inputMargin * 2)
+            leftPadding: editorFrame.usesBaseline
+                ? Math.max(0, editorFrame.textOriginX - editorFrame.x)
+                : 0
             color: root.controller.selectedColor
-            font.family: root.controller.selectedFontFamily
-            font.pixelSize: editorFrame.baseFontPixelSize
+            selectionColor: "#DCEBFF"
+            selectedTextColor: root.theme.ribbonTextColor
+            font: editorFrame.displayFont
             selectByMouse: true
-            verticalAlignment: TextInput.AlignVCenter
-            clip: true
+            verticalAlignment: editorFrame.usesBaseline
+                ? TextInput.AlignTop
+                : TextInput.AlignVCenter
+            clip: !editorFrame.usesBaseline
             onTextEdited: root.controller.updateSelectedTextPreview(text)
             onAccepted: root.commitEditing()
 
