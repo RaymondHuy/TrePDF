@@ -25,7 +25,8 @@ Item {
     readonly property real fallbackBleed: 2
     readonly property real editBoxRadius: 4
     readonly property color editBoxColor: "#f5a55a"
-    readonly property real editBoxHorizontalBleed: 3
+    readonly property real editBoxLeftBleed: 3
+    readonly property real editBoxRightBleed: 3
     readonly property real hoverBoxVerticalBleed: 3
     readonly property real editBoxVerticalBleed: 3
     readonly property real minimumTextPixelSize: 6
@@ -34,7 +35,9 @@ Item {
     readonly property bool editorUsesCleanTexture: draftTextureReady
         && hasActiveDraft(editingObjectId)
     readonly property bool selectCursorReady: selectCursorImage.status === Image.Ready
-    readonly property bool selectCursorActive: selectCursorReady && selectCursorVisible
+    readonly property bool selectCursorActive: selectCursorReady
+        && selectCursorVisible
+        && !editing
     readonly property bool addTextCursorReady: addTextCursorImage.status === Image.Ready
     readonly property bool addTextCursorActive: addTextCursorReady
         && interactionActive
@@ -221,6 +224,7 @@ Item {
         if (!controller.selectCandidate(page, candidate.objectId))
             return
 
+        hideSelectCursor()
         controller.beginSelectedTextEdit()
         editingObjectId = candidate.objectId
         editor.text = controller.selectedText
@@ -752,7 +756,7 @@ Item {
             : 0
 
         x: root.hasCandidate(root.hoverCandidate)
-            ? Math.max(0, originalX - root.editBoxHorizontalBleed)
+            ? Math.max(0, originalX - root.editBoxLeftBleed)
             : 0
         y: root.hasCandidate(root.hoverCandidate)
             ? Math.max(0, originalY - root.hoverBoxVerticalBleed)
@@ -762,7 +766,7 @@ Item {
                 1,
                 Math.min(
                     root.width,
-                    originalX + originalWidth + root.editBoxHorizontalBleed) - x)
+                    originalX + originalWidth + root.editBoxRightBleed) - x)
             : 0
         height: root.hasCandidate(root.hoverCandidate)
             ? Math.max(
@@ -790,13 +794,13 @@ Item {
         readonly property real originalWidth: root.controller.selectedWidth * root.width
         readonly property real originalHeight: root.controller.selectedHeight * root.height
 
-        x: Math.max(0, originalX - root.editBoxHorizontalBleed)
+        x: Math.max(0, originalX - root.editBoxLeftBleed)
         y: Math.max(0, originalY - root.editBoxVerticalBleed)
         width: Math.max(
             1,
             Math.min(
                 root.width,
-                originalX + originalWidth + root.editBoxHorizontalBleed) - x)
+                originalX + originalWidth + root.editBoxRightBleed) - x)
         height: Math.max(
             1,
             Math.min(
@@ -847,9 +851,12 @@ Item {
         readonly property real originalWidth: root.controller.selectedWidth * root.width
         readonly property real originalHeight: root.controller.selectedHeight * root.height
         readonly property bool editsAddedText: root.controller.selectedKind === "addedText"
-        readonly property real horizontalBleed: editsAddedText
+        readonly property real leftBleed: editsAddedText
             ? 0
-            : root.editBoxHorizontalBleed
+            : root.editBoxLeftBleed
+        readonly property real rightBleed: editsAddedText
+            ? 0
+            : root.editBoxRightBleed
         readonly property real verticalBleed: editsAddedText
             ? 0
             : root.editBoxVerticalBleed
@@ -874,7 +881,7 @@ Item {
         readonly property real baseDesiredWidth: editsAddedText
             ? Math.max(originalWidth, measuredTextWidth + 2)
             : Math.max(80, originalWidth)
-        readonly property real desiredWidth: baseDesiredWidth + horizontalBleed * 2
+        readonly property real desiredWidth: baseDesiredWidth + leftBleed + rightBleed
         readonly property real baseDesiredHeight: editsAddedText
             ? Math.max(
                 originalHeight + root.fallbackBleed * 2,
@@ -884,7 +891,7 @@ Item {
 
         x: Math.max(
             0,
-            Math.min(originalX - horizontalBleed, root.width - width))
+            Math.min(originalX - leftBleed, root.width - width))
         y: editsAddedText
             ? originalY + (originalHeight - height) / 2
             : Math.max(

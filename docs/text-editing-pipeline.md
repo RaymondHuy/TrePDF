@@ -421,7 +421,8 @@ Các hằng số QML hiện tại:
 ```text
 editBoxRadius = 4 px
 editBoxColor = #f5a55a
-editBoxHorizontalBleed = 3 px
+editBoxLeftBleed = 3 px
+editBoxRightBleed = 3 px
 hoverBoxVerticalBleed = 3 px
 editBoxVerticalBleed = 3 px
 fallbackBleed = 2 px
@@ -449,7 +450,8 @@ Khung có nền trong suốt, radius 4 px:
 
 ### 9.2 Selection box
 
-Sau khi click chọn, selection box dùng cùng bleed 3 px ở cả bốn phía:
+Sau khi click chọn, selection box dùng bleed trái 3 px, bleed phải 3 px và
+bleed dọc 3 px:
 
 ```text
 selectionX = max(0, ox - 3)
@@ -486,33 +488,39 @@ Controller lưu trạng thái draft trước edit vào `m_textEditCommand`, sau 
 `beginEditing()`:
 
 1. Gọi `selectCandidate()`.
-2. Gọi `beginSelectedTextEdit()`.
-3. Gán `editor.text = controller.selectedText`.
-4. Đặt `editing = true`.
-5. Ở event loop kế tiếp, focus `TextInput`, bỏ selection cũ và đặt caret ở
+2. Ẩn con trỏ chọn tùy biến.
+3. Gọi `beginSelectedTextEdit()`.
+4. Gán `editor.text = controller.selectedText`.
+5. Đặt `editing = true`.
+6. Ở event loop kế tiếp, focus `TextInput`, bỏ selection cũ và đặt caret ở
    cuối chuỗi.
 
 Khi vừa mở editor, toàn bộ dòng không bị chọn tự động. Người dùng có thể kéo
 chuột hoặc dùng Shift + phím mũi tên để chọn một đoạn; đoạn đang chọn có nền
 xanh nhạt (`#DCEBFF`) và chữ tối theo màu text của ribbon.
 
+Trong lúc `editing = true`, con trỏ chọn tùy biến bị vô hiệu hóa và `TextInput`
+dùng con trỏ I-beam gốc của Qt. Vì vậy khi giữ chuột rồi kéo để bôi đen, con trỏ
+di chuyển liên tục theo vị trí kéo thay vì chỉ cập nhật sau khi thả chuột.
+
 ## 11. Công thức kích thước editor frame
 
 ### 11.1 Text có sẵn trong PDF
 
 ```text
-horizontalBleed = 3
+leftBleed = 3
+rightBleed = 3
 verticalBleed = 3
 
 baseDesiredWidth = max(80, originalWidth)
-desiredWidth = baseDesiredWidth + 2 * horizontalBleed
+desiredWidth = baseDesiredWidth + leftBleed + rightBleed
 editorWidth = min(pageWidth, desiredWidth)
 
 baseDesiredHeight = max(17, originalHeight)
 desiredHeight = baseDesiredHeight + 2 * verticalBleed
 editorHeight = min(pageHeight, desiredHeight)
 
-editorX = clamp(originalX - horizontalBleed,
+editorX = clamp(originalX - leftBleed,
                 0,
                 pageWidth - editorWidth)
 editorY = clamp(originalY - verticalBleed,
@@ -534,7 +542,8 @@ Editor có border cam nhạt `#f5a55a` dày 2 px, radius 4 px. Nền của edito
 Add Text dùng công thức riêng:
 
 ```text
-horizontalBleed = 0
+leftBleed = 0
+rightBleed = 0
 verticalBleed = 0
 baseDesiredWidth = max(originalWidth, measuredTextWidth + 2)
 baseDesiredHeight = max(originalHeight + 2 * fallbackBleed,
