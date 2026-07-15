@@ -21,11 +21,16 @@ Current features:
 - Asynchronous page rendering on a worker thread.
 - Page navigation, zoom, and fit-to-width controls.
 - Session-only text draft editing with selection, undo, redo, and discard.
+- Compatible same-line text objects are grouped into one draft edit while each
+  source object path remains available for rendering suppression.
+- Fonts under `src/assets/fonts` are bundled and preferred over matching system
+  families when resolving draft text fonts.
 - Contextual Edit/Delete actions when selecting editable text; deletion remains
   a session-only draft and supports undo/redo.
 - An edit-only, collapsible right-side text-formatting panel provides UI for
-  font family, size, color, bold, italic, and underline. These controls are not
-  connected to draft text formatting yet.
+  font family, size, color, bold, italic, and underline. Font-family changes
+  update the current draft and support undo/redo; the other controls are not
+  connected to draft formatting yet.
 - ID-based localization with Vietnamese as the default UI language.
 - A restrained orange UI inspired by Foxit Reader.
 
@@ -37,6 +42,8 @@ Current features:
 - `i18n/qml_vi.ts`: Vietnamese ID-based translation catalog.
 - `src/main.cpp`: Qt application startup, default UI language, and QML engine
   loading.
+- `src/ApplicationFonts.h/.cpp`: bundled-font registration and the separate
+  bundled/system family catalogs used by draft font resolution.
 - `src/Main.qml`: menus, toolbar, virtualized `ListView`, and page delegates.
 - `src/PDFDocument.h/.cpp`: main-thread PDFium document, metadata, page sizes,
   navigation state, and source file path.

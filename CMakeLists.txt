@@ -36,6 +36,15 @@ qt_standard_project_setup(
     I18N_TRANSLATED_LANGUAGES vi
 )
 
+file(GLOB_RECURSE TREPDF_BUNDLED_FONT_FILES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts/*.otf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts/*.OTF"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts/*.ttc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts/*.TTC"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts/*.ttf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts/*.TTF"
+)
+
 qt_add_executable(trepdf
     src/main.cpp
 )
@@ -43,6 +52,8 @@ qt_add_executable(trepdf
 qt_add_qml_module(trepdf
     URI TrePDF
     SOURCES
+        src/ApplicationFonts.cpp
+        src/ApplicationFonts.h
         src/PDFDocument.cpp
         src/PDFDocument.h
         src/PDFEditController.cpp
@@ -100,6 +111,14 @@ qt_add_qml_module(trepdf
         src/assets/icons/zoom-in.svg
         src/assets/icons/zoom-out.svg
 )
+
+if(TREPDF_BUNDLED_FONT_FILES)
+    qt_add_resources(trepdf "trepdf_fonts"
+        PREFIX "/trepdf/fonts"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts"
+        FILES ${TREPDF_BUNDLED_FONT_FILES}
+    )
+endif()
 
 # Qt 6.8 and 6.9 require this flag for ID-based catalogs; Qt 6.10 deprecated it.
 set(TREPDF_LRELEASE_OPTIONS)

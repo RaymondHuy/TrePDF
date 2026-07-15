@@ -6,10 +6,17 @@ and an ID-based localization system with Vietnamese enabled by default.
 
 In Edit mode, selecting editable text opens contextual Edit and Delete actions.
 Deletion is stored only as a session draft and can be undone or redone.
+Compatible text objects on the same visual line are grouped into one editable
+candidate while retaining every source object path for draft rendering and
+undo/redo.
+
+Fonts placed under `src/assets/fonts` are bundled with the application and
+preferred over matching system-installed families for draft text display.
 
 Edit mode also shows a collapsible text-formatting panel on the right with font
-family, size, color, bold, italic, and underline controls. This panel is
-currently UI-only and does not apply formatting to draft text yet.
+family, size, color, bold, italic, and underline controls. Font-family changes
+apply immediately to the selected draft text and support undo/redo. The other
+formatting controls are currently UI-only.
 
 The complete editable-text discovery, geometry, font, baseline, overlay, and
 draft-rendering flow is documented in

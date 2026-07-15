@@ -11,6 +11,7 @@
 #include <QPointer>
 #include <QRectF>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QVector>
@@ -26,6 +27,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool textEditActive READ textEditActive NOTIFY textEditActiveChanged FINAL)
+    Q_PROPERTY(QStringList bundledFontFamilies READ bundledFontFamilies CONSTANT FINAL)
+    Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies CONSTANT FINAL)
     Q_PROPERTY(int selectedPage READ selectedPage NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedObjectId READ selectedObjectId NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedKind READ selectedKind NOTIFY selectionChanged FINAL)
@@ -33,6 +36,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(qreal selectedY READ selectedY NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedWidth READ selectedWidth NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedHeight READ selectedHeight NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QVariantList selectedSourceRects READ selectedSourceRects NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedHasBaseline READ selectedHasBaseline NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedOriginX READ selectedOriginX NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedBaselineY READ selectedBaselineY NOTIFY selectionChanged FINAL)
@@ -68,6 +72,8 @@ public:
     bool canUndo() const;
     bool canRedo() const;
     bool textEditActive() const;
+    QStringList bundledFontFamilies() const;
+    QStringList availableFontFamilies() const;
 
     int selectedPage() const;
     QString selectedObjectId() const;
@@ -76,6 +82,7 @@ public:
     qreal selectedY() const;
     qreal selectedWidth() const;
     qreal selectedHeight() const;
+    QVariantList selectedSourceRects() const;
     bool selectedHasBaseline() const;
     qreal selectedOriginX() const;
     qreal selectedBaselineY() const;
@@ -104,6 +111,7 @@ public:
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
     Q_INVOKABLE void updateSelectedTextPreview(const QString &text);
+    Q_INVOKABLE void setSelectedFontFamily(const QString &fontFamily);
     Q_INVOKABLE void finishSelectedTextEdit();
     Q_INVOKABLE void cancelSelectedTextEdit();
     Q_INVOKABLE void commitSelectedText(const QString &text);
@@ -129,16 +137,28 @@ private:
         bool hasOrigin = false;
     };
 
+    struct CandidatePart {
+        QString objectId;
+        QVector<int> objectPath;
+        QRectF rect;
+        QPointF origin;
+        QString text;
+        QString separatorAfter;
+        bool hasBaseline = false;
+    };
+
     struct Candidate {
         int page = -1;
         QString objectId;
         QVector<int> objectPath;
+        QVector<CandidatePart> parts;
         QString kind;
         QString label;
         QRectF rect;
         QPointF origin;
         QString text;
         QString fontFamily;
+        QString fontIdentity;
         qreal fontSizeRatio = 0.0;
         qreal displayFontSizeRatio = 0.0;
         int fontStretch = 100;
@@ -164,8 +184,10 @@ private:
         QString objectId;
         bool hadBefore = false;
         QString beforeText;
+        QString beforeFontFamily;
         bool hadAfter = false;
         QString afterText;
+        QString afterFontFamily;
         Candidate candidate;
     };
 
@@ -181,11 +203,14 @@ private:
                                     const FS_MATRIX &containerTransform,
                                     const QSizeF &pageSize,
                                     QVector<Candidate> &candidates);
+    QVector<Candidate> groupTextLineCandidates(QVector<Candidate> candidates,
+                                               const QSizeF &pageSize) const;
     void appendAnnotationCandidates(FPDF_PAGE page,
                                     int pageIndex,
                                     const QSizeF &pageSize,
                                     QVector<Candidate> &candidates) const;
     const Candidate *findCandidate(int page, const QString &objectId);
+    QVariantList candidateSourceRects(const Candidate &candidate) const;
     QVariantMap candidateMap(const Candidate &candidate, const QString &text) const;
     bool documentAllowsEditing() const;
     QString draftKey(int page, const QString &objectId) const;
@@ -210,7 +235,7 @@ private:
     quint64 m_nextAddedTextId = 0;
     QVector<Command> m_undoStack;
     QVector<Command> m_redoStack;
-    QHash<QString, QString> m_pdfFontFamilyCache;
+    QHash<QString, QString> m_pdfEmbeddedFontFamilyCache;
     QHash<QByteArray, QString> m_registeredFontFamilies;
     QVector<int> m_registeredFontIds;
     qsizetype m_registeredFontBytes = 0;

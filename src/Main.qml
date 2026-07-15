@@ -252,7 +252,12 @@ ApplicationWindow {
                 TextFormatPanel {
                     theme: appTheme
                     collapsed: textFormatPanelLoader.panelCollapsed
+                    availableFontFamilies: editController.availableFontFamilies
+                    selectedFontFamily: editController.selectedFontFamily
                     formattingEnabled: editController.selectedEditable
+                    onFontFamilyChangeRequested: fontFamily => {
+                        editController.setSelectedFontFamily(fontFamily)
+                    }
                     onCollapsedChangeRequested: collapsed => {
                         textFormatPanelLoader.panelCollapsed = collapsed
                     }

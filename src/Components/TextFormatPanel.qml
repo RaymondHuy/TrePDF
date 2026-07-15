@@ -10,11 +10,42 @@ Rectangle {
 
     required property AppTheme theme
     required property bool collapsed
+    required property var availableFontFamilies
+    required property string selectedFontFamily
     property bool formattingEnabled: false
     property color previewColor: "#2f3136"
-    readonly property var availableFontFamilies: Qt.fontFamilies()
+
+    readonly property var displayedFontFamilies: {
+        const families = []
+        for (let index = 0; index < availableFontFamilies.length; ++index)
+            families.push(availableFontFamilies[index])
+
+        if (selectedFontFamily.length === 0)
+            return families
+
+        const selectedKey = selectedFontFamily.toLowerCase()
+        for (let index = 0; index < families.length; ++index) {
+            if (families[index].toLowerCase() === selectedKey)
+                return families
+        }
+
+        families.unshift(selectedFontFamily)
+        return families
+    }
+    readonly property int selectedFontFamilyIndex: {
+        if (selectedFontFamily.length === 0)
+            return -1
+
+        const selectedKey = selectedFontFamily.toLowerCase()
+        for (let index = 0; index < displayedFontFamilies.length; ++index) {
+            if (displayedFontFamilies[index].toLowerCase() === selectedKey)
+                return index
+        }
+        return -1
+    }
 
     signal collapsedChangeRequested(bool collapsed)
+    signal fontFamilyChangeRequested(string fontFamily)
 
     implicitWidth: collapsed ? 42 : 264
     color: theme.ribbonSurface
@@ -158,8 +189,11 @@ Rectangle {
                             id: fontFamilyBox
 
                             Layout.fillWidth: true
-                            model: root.availableFontFamilies
+                            model: root.displayedFontFamilies
+                            currentIndex: root.selectedFontFamilyIndex
                             clip: true
+                            onActivated: root.fontFamilyChangeRequested(
+                                fontFamilyBox.currentText)
 
                             background: Rectangle {
                                 radius: 6
@@ -170,11 +204,6 @@ Rectangle {
                                     : root.theme.ribbonBorder
                             }
 
-                            Component.onCompleted: {
-                                const helveticaIndex = find("Helvetica")
-                                if (helveticaIndex >= 0)
-                                    currentIndex = helveticaIndex
-                            }
                         }
 
                         Label {

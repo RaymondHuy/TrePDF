@@ -1,11 +1,21 @@
 qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditController.cpp
+    ../src/ApplicationFonts.cpp
+    ../src/ApplicationFonts.h
     ../src/PDFDocument.cpp
     ../src/PDFDocument.h
     ../src/PDFEditController.cpp
     ../src/PDFEditController.h
     ../src/PDFiumSynchronization.h
 )
+
+if(TREPDF_BUNDLED_FONT_FILES)
+    qt_add_resources(trepdf_edit_controller_tests "trepdf_test_fonts"
+        PREFIX "/trepdf/fonts"
+        BASE "${CMAKE_SOURCE_DIR}/src/assets/fonts"
+        FILES ${TREPDF_BUNDLED_FONT_FILES}
+    )
+endif()
 
 target_include_directories(trepdf_edit_controller_tests
     PRIVATE
