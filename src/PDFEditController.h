@@ -46,6 +46,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(qreal selectedDisplayFontSizeRatio READ selectedDisplayFontSizeRatio NOTIFY selectionChanged FINAL)
     Q_PROPERTY(int selectedFontStretch READ selectedFontStretch NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedFontBold READ selectedFontBold NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedFontItalic READ selectedFontItalic NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedFontUnderline READ selectedFontUnderline NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QColor selectedColor READ selectedColor NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
@@ -92,6 +94,8 @@ public:
     qreal selectedDisplayFontSizeRatio() const;
     int selectedFontStretch() const;
     bool selectedFontBold() const;
+    bool selectedFontItalic() const;
+    bool selectedFontUnderline() const;
     QColor selectedColor() const;
     bool selectedEditable() const;
     QString selectedReason() const;
@@ -106,12 +110,17 @@ public:
     Q_INVOKABLE QFont fontForDisplay(const QString &fontFamily,
                                      int fontStretch,
                                      bool fontBold,
+                                     bool fontItalic,
+                                     bool fontUnderline,
                                      qreal pixelSize) const;
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
     Q_INVOKABLE void updateSelectedTextPreview(const QString &text);
     Q_INVOKABLE void setSelectedFontFamily(const QString &fontFamily);
+    Q_INVOKABLE void setSelectedFontBold(bool enabled);
+    Q_INVOKABLE void setSelectedFontItalic(bool enabled);
+    Q_INVOKABLE void setSelectedFontUnderline(bool enabled);
     Q_INVOKABLE void finishSelectedTextEdit();
     Q_INVOKABLE void cancelSelectedTextEdit();
     Q_INVOKABLE void commitSelectedText(const QString &text);
@@ -163,6 +172,8 @@ private:
         qreal displayFontSizeRatio = 0.0;
         int fontStretch = 100;
         bool fontBold = false;
+        bool fontItalic = false;
+        bool fontUnderline = false;
         QColor color = Qt::black;
         bool hasBaseline = false;
         bool editable = false;
@@ -185,10 +196,22 @@ private:
         bool hadBefore = false;
         QString beforeText;
         QString beforeFontFamily;
+        bool beforeFontBold = false;
+        bool beforeFontItalic = false;
+        bool beforeFontUnderline = false;
         bool hadAfter = false;
         QString afterText;
         QString afterFontFamily;
+        bool afterFontBold = false;
+        bool afterFontItalic = false;
+        bool afterFontUnderline = false;
         Candidate candidate;
+    };
+
+    enum class FontStyle {
+        Bold,
+        Italic,
+        Underline
     };
 
     void resetSession();
@@ -216,6 +239,10 @@ private:
     QString draftKey(int page, const QString &objectId) const;
     void markDraftStateChanged(int page, bool immediate);
     void requestDraftRender(int page, bool immediate);
+    static bool sameDraftFormatting(const Candidate &left, const Candidate &right);
+    const Candidate &selectedCandidateForDisplay() const;
+    void updateSelectedDraftCandidate(const Candidate &candidate);
+    void setSelectedFontStyle(FontStyle style, bool enabled);
     void applyDraftState(const Command &command, bool useAfterState, bool immediate);
     bool removeAddedCandidate(int page, const QString &objectId);
     void updateSelectedTextFromDraft();

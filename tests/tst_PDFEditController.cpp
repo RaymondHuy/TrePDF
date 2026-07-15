@@ -180,16 +180,17 @@ class PDFEditControllerTest : public QObject
 private slots:
     void initTestCase();
     void registersBundledFonts();
-    void detectsRegularAndBoldPdfFonts();
-    void propagatesBoldThroughSelection();
+    void detectsPdfFontStyles();
+    void propagatesSourceStylesThroughSelection();
     void groupsCompatibleTextObjectsOnSameLine();
     void keepsMixedStylesAsSeparateCandidates();
     void keepsDistantColumnsAsSeparateCandidates();
     void keepsDifferentFontFacesAsSeparateCandidates();
     void editsGroupedLineAsOneDraft();
     void changesFontFamilyForCurrentEdit();
-    void appliesBoldToDisplayFont_data();
-    void appliesBoldToDisplayFont();
+    void changesFontStylesForCurrentEdit();
+    void appliesFontStylesToDisplayFont_data();
+    void appliesFontStylesToDisplayFont();
 
 private:
     QTemporaryDir m_temporaryDirectory;
@@ -279,13 +280,16 @@ void PDFEditControllerTest::registersBundledFonts()
     }
 }
 
-void PDFEditControllerTest::detectsRegularAndBoldPdfFonts()
+void PDFEditControllerTest::detectsPdfFontStyles()
 {
     QCOMPARE(m_regularCandidate.value(QStringLiteral("fontBold")).toBool(), false);
     QCOMPARE(m_boldCandidate.value(QStringLiteral("fontBold")).toBool(), true);
+    QCOMPARE(m_uprightCandidate.value(QStringLiteral("fontItalic")).toBool(), false);
+    QCOMPARE(m_obliqueCandidate.value(QStringLiteral("fontItalic")).toBool(), true);
+    QCOMPARE(m_regularCandidate.value(QStringLiteral("fontUnderline")).toBool(), false);
 }
 
-void PDFEditControllerTest::propagatesBoldThroughSelection()
+void PDFEditControllerTest::propagatesSourceStylesThroughSelection()
 {
     QVERIFY(m_controller.selectCandidate(
         0,
@@ -296,6 +300,17 @@ void PDFEditControllerTest::propagatesBoldThroughSelection()
         0,
         m_boldCandidate.value(QStringLiteral("objectId")).toString()));
     QCOMPARE(m_controller.selectedFontBold(), true);
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_uprightCandidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(m_controller.selectedFontItalic(), false);
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_obliqueCandidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(m_controller.selectedFontItalic(), true);
+    QCOMPARE(m_controller.selectedFontUnderline(), false);
 }
 
 void PDFEditControllerTest::groupsCompatibleTextObjectsOnSameLine()
@@ -446,25 +461,90 @@ void PDFEditControllerTest::changesFontFamilyForCurrentEdit()
     m_controller.discardDrafts();
 }
 
-void PDFEditControllerTest::appliesBoldToDisplayFont_data()
+void PDFEditControllerTest::changesFontStylesForCurrentEdit()
 {
-    QTest::addColumn<bool>("fontBold");
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(!m_controller.selectedFontBold());
+    QVERIFY(!m_controller.selectedFontItalic());
+    QVERIFY(!m_controller.selectedFontUnderline());
 
-    QTest::newRow("regular") << false;
-    QTest::newRow("bold") << true;
+    m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedFontItalic(true);
+    m_controller.setSelectedFontUnderline(true);
+    QVERIFY(m_controller.textEditActive());
+    QVERIFY(m_controller.selectedFontBold());
+    QVERIFY(m_controller.selectedFontItalic());
+    QVERIFY(m_controller.selectedFontUnderline());
+
+    QVariantList drafts = m_controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    const QVariantMap styledDraft = drafts.constFirst().toMap();
+    QCOMPARE(styledDraft.value(QStringLiteral("fontBold")).toBool(), true);
+    QCOMPARE(styledDraft.value(QStringLiteral("fontItalic")).toBool(), true);
+    QCOMPARE(styledDraft.value(QStringLiteral("fontUnderline")).toBool(), true);
+
+    m_controller.finishSelectedTextEdit();
+    QVERIFY(m_controller.canUndo());
+
+    m_controller.undo();
+    QVERIFY(!m_controller.selectedFontBold());
+    QVERIFY(!m_controller.selectedFontItalic());
+    QVERIFY(!m_controller.selectedFontUnderline());
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+
+    m_controller.redo();
+    QVERIFY(m_controller.selectedFontBold());
+    QVERIFY(m_controller.selectedFontItalic());
+    QVERIFY(m_controller.selectedFontUnderline());
+
+    m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedFontBold(false);
+    m_controller.setSelectedFontItalic(false);
+    m_controller.setSelectedFontUnderline(false);
+    QVERIFY(!m_controller.selectedFontBold());
+    QVERIFY(!m_controller.selectedFontItalic());
+    QVERIFY(!m_controller.selectedFontUnderline());
+    m_controller.cancelSelectedTextEdit();
+    QVERIFY(m_controller.selectedFontBold());
+    QVERIFY(m_controller.selectedFontItalic());
+    QVERIFY(m_controller.selectedFontUnderline());
+
+    m_controller.discardDrafts();
 }
 
-void PDFEditControllerTest::appliesBoldToDisplayFont()
+void PDFEditControllerTest::appliesFontStylesToDisplayFont_data()
+{
+    QTest::addColumn<bool>("fontBold");
+    QTest::addColumn<bool>("fontItalic");
+    QTest::addColumn<bool>("fontUnderline");
+
+    QTest::newRow("regular") << false << false << false;
+    QTest::newRow("bold") << true << false << false;
+    QTest::newRow("italic") << false << true << false;
+    QTest::newRow("underline") << false << false << true;
+    QTest::newRow("combined") << true << true << true;
+}
+
+void PDFEditControllerTest::appliesFontStylesToDisplayFont()
 {
     QFETCH(bool, fontBold);
+    QFETCH(bool, fontItalic);
+    QFETCH(bool, fontUnderline);
 
     const QFont displayFont = m_controller.fontForDisplay(
         QString(),
         QFont::Unstretched,
         fontBold,
+        fontItalic,
+        fontUnderline,
         18.0);
 
     QCOMPARE(displayFont.bold(), fontBold);
+    QCOMPARE(displayFont.italic(), fontItalic);
+    QCOMPARE(displayFont.underline(), fontUnderline);
     QCOMPARE(displayFont.pixelSize(), 18);
     QCOMPARE(displayFont.stretch(), static_cast<int>(QFont::Unstretched));
 }

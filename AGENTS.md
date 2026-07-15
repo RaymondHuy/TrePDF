@@ -28,9 +28,9 @@ Current features:
 - Contextual Edit/Delete actions when selecting editable text; deletion remains
   a session-only draft and supports undo/redo.
 - An edit-only, collapsible right-side text-formatting panel provides UI for
-  font family, size, color, bold, italic, and underline. Font-family changes
-  update the current draft and support undo/redo; the other controls are not
-  connected to draft formatting yet.
+  font family, size, color, bold, italic, and underline. Font family, bold,
+  italic, and underline update the current draft and support undo/redo; size
+  and color are not connected to draft formatting yet.
 - ID-based localization with Vietnamese as the default UI language.
 - A restrained orange UI inspired by Foxit Reader.
 

@@ -38,6 +38,7 @@ constexpr qreal kLineWordSeparatorGapEm = 0.20;
 constexpr qreal kLineFontSizeToleranceRatio = 0.08;
 constexpr qreal kLineFontSizeTolerancePoints = 0.5;
 constexpr int kLineFontStretchTolerance = 5;
+constexpr int kPdfFontFlagItalic = 1 << 6;
 constexpr int kPdfFontFlagForceBold = 1 << 18;
 constexpr qsizetype kMaximumEmbeddedFontBytes = 32 * 1024 * 1024;
 constexpr qsizetype kMaximumRegisteredFontBytes = 64 * 1024 * 1024;
@@ -398,6 +399,28 @@ bool pdfFontIsBold(FPDF_FONT font)
         || baseName.contains(QStringLiteral("heavy"), Qt::CaseInsensitive);
 }
 
+bool pdfFontIsItalic(FPDF_FONT font)
+{
+    if (!font) {
+        return false;
+    }
+
+    int italicAngle = 0;
+    if (FPDFFont_GetItalicAngle(font, &italicAngle) && italicAngle != 0) {
+        return true;
+    }
+
+    const int flags = FPDFFont_GetFlags(font);
+    if (flags >= 0 && (flags & kPdfFontFlagItalic) != 0) {
+        return true;
+    }
+
+    const QString baseName = pdfFontName(font, true);
+    return baseName.contains(QStringLiteral("italic"), Qt::CaseInsensitive)
+        || baseName.contains(QStringLiteral("oblique"), Qt::CaseInsensitive)
+        || baseName.contains(QStringLiteral("slanted"), Qt::CaseInsensitive);
+}
+
 QString matchingFontFamily(FPDF_FONT font, const QStringList &availableFamilies)
 {
     QStringList pdfNames;
@@ -638,15 +661,7 @@ QString PDFEditController::selectedText() const
 
 QString PDFEditController::selectedFontFamily() const
 {
-    if (!m_hasSelection) {
-        return {};
-    }
-
-    const auto draft = m_drafts.constFind(
-        draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId));
-    return draft == m_drafts.cend()
-        ? m_selectedCandidate.fontFamily
-        : draft->candidate.fontFamily;
+    return m_hasSelection ? selectedCandidateForDisplay().fontFamily : QString();
 }
 
 qreal PDFEditController::selectedFontSizeRatio() const
@@ -671,7 +686,17 @@ int PDFEditController::selectedFontStretch() const
 
 bool PDFEditController::selectedFontBold() const
 {
-    return m_hasSelection && m_selectedCandidate.fontBold;
+    return m_hasSelection && selectedCandidateForDisplay().fontBold;
+}
+
+bool PDFEditController::selectedFontItalic() const
+{
+    return m_hasSelection && selectedCandidateForDisplay().fontItalic;
+}
+
+bool PDFEditController::selectedFontUnderline() const
+{
+    return m_hasSelection && selectedCandidateForDisplay().fontUnderline;
 }
 
 QColor PDFEditController::selectedColor() const
@@ -899,6 +924,8 @@ QVariantMap PDFEditController::addText(int page, qreal x, qreal y)
 QFont PDFEditController::fontForDisplay(const QString &fontFamily,
                                         int fontStretch,
                                         bool fontBold,
+                                        bool fontItalic,
+                                        bool fontUnderline,
                                         qreal pixelSize) const
 {
     QFont font;
@@ -909,6 +936,8 @@ QFont PDFEditController::fontForDisplay(const QString &fontFamily,
                            fontStretch,
                            static_cast<int>(QFont::UltraExpanded)));
     font.setBold(fontBold);
+    font.setItalic(fontItalic);
+    font.setUnderline(fontUnderline);
     font.setPixelSize(qMax(1, qRound(pixelSize)));
     return font;
 }
@@ -1075,12 +1104,16 @@ void PDFEditController::beginSelectedTextEdit()
     m_textEditCommand.objectId = m_selectedCandidate.objectId;
     m_textEditCommand.candidate = m_selectedCandidate;
     m_textEditCommand.hadBefore = existingDraft != m_drafts.cend();
+    const Candidate &beforeCandidate = m_textEditCommand.hadBefore
+        ? existingDraft->candidate
+        : m_selectedCandidate;
     m_textEditCommand.beforeText = m_textEditCommand.hadBefore
         ? existingDraft->text
         : m_selectedCandidate.text;
-    m_textEditCommand.beforeFontFamily = m_textEditCommand.hadBefore
-        ? existingDraft->candidate.fontFamily
-        : m_selectedCandidate.fontFamily;
+    m_textEditCommand.beforeFontFamily = beforeCandidate.fontFamily;
+    m_textEditCommand.beforeFontBold = beforeCandidate.fontBold;
+    m_textEditCommand.beforeFontItalic = beforeCandidate.fontItalic;
+    m_textEditCommand.beforeFontUnderline = beforeCandidate.fontUnderline;
     m_textEditActive = true;
     emit textEditActiveChanged();
 }
@@ -1100,7 +1133,7 @@ void PDFEditController::updateSelectedTextPreview(const QString &text)
         ? m_selectedCandidate
         : existingDraft->candidate;
     const bool matchesOriginal = text == m_selectedCandidate.text
-        && sameFontFamily(draftCandidate.fontFamily, m_selectedCandidate.fontFamily);
+        && sameDraftFormatting(draftCandidate, m_selectedCandidate);
     bool changed = false;
     if (matchesOriginal) {
         if (existingDraft != m_drafts.cend()) {
@@ -1130,6 +1163,7 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
         return;
     }
 
+    Candidate draftCandidate = selectedCandidateForDisplay();
     const bool finishImmediately = !m_textEditActive;
     if (finishImmediately) {
         beginSelectedTextEdit();
@@ -1138,26 +1172,72 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
         return;
     }
 
-    const QString key = draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId);
-    const auto existingDraft = m_drafts.constFind(key);
-    Candidate draftCandidate = existingDraft == m_drafts.cend()
-        ? m_selectedCandidate
-        : existingDraft->candidate;
-    const QString draftText = existingDraft == m_drafts.cend()
-        ? m_selectedText
-        : existingDraft->text;
     draftCandidate.fontFamily = fontFamily;
+    updateSelectedDraftCandidate(draftCandidate);
 
-    if (draftText == m_selectedCandidate.text
-        && sameFontFamily(fontFamily, m_selectedCandidate.fontFamily)) {
-        m_drafts.remove(key);
-    } else {
-        m_drafts.insert(key, Draft{draftCandidate, draftText});
+    if (finishImmediately) {
+        finishSelectedTextEdit();
+    }
+}
+
+void PDFEditController::setSelectedFontBold(bool enabled)
+{
+    setSelectedFontStyle(FontStyle::Bold, enabled);
+}
+
+void PDFEditController::setSelectedFontItalic(bool enabled)
+{
+    setSelectedFontStyle(FontStyle::Italic, enabled);
+}
+
+void PDFEditController::setSelectedFontUnderline(bool enabled)
+{
+    setSelectedFontStyle(FontStyle::Underline, enabled);
+}
+
+void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
+{
+    if (!m_hasSelection || !m_selectedCandidate.editable) {
+        return;
     }
 
-    markDraftStateChanged(m_selectedCandidate.page, false);
-    emit historyStateChanged();
-    emit selectionChanged();
+    Candidate draftCandidate = selectedCandidateForDisplay();
+    bool currentValue = false;
+    switch (style) {
+    case FontStyle::Bold:
+        currentValue = draftCandidate.fontBold;
+        break;
+    case FontStyle::Italic:
+        currentValue = draftCandidate.fontItalic;
+        break;
+    case FontStyle::Underline:
+        currentValue = draftCandidate.fontUnderline;
+        break;
+    }
+    if (currentValue == enabled) {
+        return;
+    }
+
+    const bool finishImmediately = !m_textEditActive;
+    if (finishImmediately) {
+        beginSelectedTextEdit();
+    }
+    if (!m_textEditActive || !m_hasSelection) {
+        return;
+    }
+
+    switch (style) {
+    case FontStyle::Bold:
+        draftCandidate.fontBold = enabled;
+        break;
+    case FontStyle::Italic:
+        draftCandidate.fontItalic = enabled;
+        break;
+    case FontStyle::Underline:
+        draftCandidate.fontUnderline = enabled;
+        break;
+    }
+    updateSelectedDraftCandidate(draftCandidate);
 
     if (finishImmediately) {
         finishSelectedTextEdit();
@@ -1181,9 +1261,13 @@ void PDFEditController::finishSelectedTextEdit()
     command.afterText = command.hadAfter
         ? currentDraft->text
         : m_selectedCandidate.text;
-    command.afterFontFamily = command.hadAfter
-        ? currentDraft->candidate.fontFamily
-        : m_selectedCandidate.fontFamily;
+    const Candidate &afterCandidate = command.hadAfter
+        ? currentDraft->candidate
+        : m_selectedCandidate;
+    command.afterFontFamily = afterCandidate.fontFamily;
+    command.afterFontBold = afterCandidate.fontBold;
+    command.afterFontItalic = afterCandidate.fontItalic;
+    command.afterFontUnderline = afterCandidate.fontUnderline;
     const bool removedAddedCandidate = command.candidate.added
         && !command.hadAfter
         && removeAddedCandidate(command.page, command.objectId);
@@ -1198,7 +1282,10 @@ void PDFEditController::finishSelectedTextEdit()
     requestDraftRender(command.page, true);
     const bool changed = command.hadBefore != command.hadAfter
         || command.beforeText != command.afterText
-        || !sameFontFamily(command.beforeFontFamily, command.afterFontFamily);
+        || !sameFontFamily(command.beforeFontFamily, command.afterFontFamily)
+        || command.beforeFontBold != command.afterFontBold
+        || command.beforeFontItalic != command.afterFontItalic
+        || command.beforeFontUnderline != command.afterFontUnderline;
     if (!changed) {
         return;
     }
@@ -1243,9 +1330,9 @@ void PDFEditController::commitSelectedText(const QString &text)
     const auto existingDraft = m_drafts.constFind(key);
     const bool hadBefore = existingDraft != m_drafts.cend();
     const QString beforeText = hadBefore ? existingDraft->text : m_selectedCandidate.text;
-    const QString beforeFontFamily = hadBefore
-        ? existingDraft->candidate.fontFamily
-        : m_selectedCandidate.fontFamily;
+    const Candidate &beforeCandidate = hadBefore
+        ? existingDraft->candidate
+        : m_selectedCandidate;
     if (beforeText == text) {
         return;
     }
@@ -1257,11 +1344,17 @@ void PDFEditController::commitSelectedText(const QString &text)
     command.candidate = m_selectedCandidate;
     command.hadBefore = hadBefore;
     command.beforeText = beforeText;
-    command.beforeFontFamily = beforeFontFamily;
+    command.beforeFontFamily = beforeCandidate.fontFamily;
+    command.beforeFontBold = beforeCandidate.fontBold;
+    command.beforeFontItalic = beforeCandidate.fontItalic;
+    command.beforeFontUnderline = beforeCandidate.fontUnderline;
     command.hadAfter = text != m_selectedCandidate.text
-        || !sameFontFamily(beforeFontFamily, m_selectedCandidate.fontFamily);
+        || !sameDraftFormatting(beforeCandidate, m_selectedCandidate);
     command.afterText = text;
-    command.afterFontFamily = beforeFontFamily;
+    command.afterFontFamily = beforeCandidate.fontFamily;
+    command.afterFontBold = beforeCandidate.fontBold;
+    command.afterFontItalic = beforeCandidate.fontItalic;
+    command.afterFontUnderline = beforeCandidate.fontUnderline;
 
     m_undoStack.append(command);
     m_redoStack.clear();
@@ -1638,6 +1731,7 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
     candidate.fontFamily = resolvedFontFamily(pageObject, candidate.text);
     candidate.fontIdentity = normalizedPdfFontIdentity(pdfFont);
     candidate.fontBold = pdfFontIsBold(pdfFont);
+    candidate.fontItalic = pdfFontIsItalic(pdfFont);
     candidate.fontSizeRatio = qMax<qreal>(
         0.0,
         normalizedFontSize(page, pageSize, textTransform, fontSize));
@@ -1760,6 +1854,8 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             && qAbs(leftSize - rightSize) <= sizeTolerance
             && qAbs(left.fontStretch - right.fontStretch) <= kLineFontStretchTolerance
             && left.fontBold == right.fontBold
+            && left.fontItalic == right.fontItalic
+            && left.fontUnderline == right.fontUnderline
             && left.color == right.color;
     };
     const auto horizontalGap = [&](const Candidate &left, const Candidate &right) {
@@ -2013,6 +2109,8 @@ QVariantMap PDFEditController::candidateMap(const Candidate &candidate, const QS
             : candidate.fontSizeRatio);
     map.insert(QStringLiteral("fontStretch"), candidate.fontStretch);
     map.insert(QStringLiteral("fontBold"), candidate.fontBold);
+    map.insert(QStringLiteral("fontItalic"), candidate.fontItalic);
+    map.insert(QStringLiteral("fontUnderline"), candidate.fontUnderline);
     map.insert(QStringLiteral("color"), candidate.color);
     map.insert(QStringLiteral("editable"), candidate.editable);
     map.insert(QStringLiteral("limited"), candidate.limited);
@@ -2034,6 +2132,52 @@ bool PDFEditController::documentAllowsEditing() const
 QString PDFEditController::draftKey(int page, const QString &objectId) const
 {
     return QString::number(page) + QLatin1Char('|') + objectId;
+}
+
+bool PDFEditController::sameDraftFormatting(const Candidate &left,
+                                            const Candidate &right)
+{
+    return sameFontFamily(left.fontFamily, right.fontFamily)
+        && left.fontBold == right.fontBold
+        && left.fontItalic == right.fontItalic
+        && left.fontUnderline == right.fontUnderline;
+}
+
+const PDFEditController::Candidate &PDFEditController::selectedCandidateForDisplay() const
+{
+    if (!m_hasSelection) {
+        return m_selectedCandidate;
+    }
+
+    const auto draft = m_drafts.constFind(
+        draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId));
+    return draft == m_drafts.cend() ? m_selectedCandidate : draft->candidate;
+}
+
+void PDFEditController::updateSelectedDraftCandidate(const Candidate &candidate)
+{
+    const QString key = draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId);
+    const auto existingDraft = m_drafts.constFind(key);
+    const QString draftText = existingDraft == m_drafts.cend()
+        ? m_selectedText
+        : existingDraft->text;
+    const bool matchesOriginal = draftText == m_selectedCandidate.text
+        && sameDraftFormatting(candidate, m_selectedCandidate);
+    bool changed = false;
+    if (matchesOriginal) {
+        changed = m_drafts.remove(key) > 0;
+    } else if (existingDraft == m_drafts.cend()
+               || !sameDraftFormatting(existingDraft->candidate, candidate)) {
+        m_drafts.insert(key, Draft{candidate, draftText});
+        changed = true;
+    }
+    if (!changed) {
+        return;
+    }
+
+    markDraftStateChanged(m_selectedCandidate.page, false);
+    emit historyStateChanged();
+    emit selectionChanged();
 }
 
 void PDFEditController::markDraftStateChanged(int page, bool immediate)
@@ -2058,6 +2202,15 @@ void PDFEditController::applyDraftState(const Command &command,
     const QString fontFamily = useAfterState
         ? command.afterFontFamily
         : command.beforeFontFamily;
+    const bool fontBold = useAfterState
+        ? command.afterFontBold
+        : command.beforeFontBold;
+    const bool fontItalic = useAfterState
+        ? command.afterFontItalic
+        : command.beforeFontItalic;
+    const bool fontUnderline = useAfterState
+        ? command.afterFontUnderline
+        : command.beforeFontUnderline;
     Candidate candidate = command.candidate;
     if (candidate.objectId.isEmpty()) {
         const Candidate *currentCandidate = findCandidate(command.page, command.objectId);
@@ -2069,6 +2222,9 @@ void PDFEditController::applyDraftState(const Command &command,
         return;
     }
     candidate.fontFamily = fontFamily;
+    candidate.fontBold = fontBold;
+    candidate.fontItalic = fontItalic;
+    candidate.fontUnderline = fontUnderline;
 
     bool candidateChanged = false;
     if (candidate.added && shouldExist && !findCandidate(command.page, command.objectId)) {
@@ -2087,7 +2243,7 @@ void PDFEditController::applyDraftState(const Command &command,
     const bool draftChanged = shouldExist
         ? existingDraft == m_drafts.cend()
             || existingDraft->text != text
-            || !sameFontFamily(existingDraft->candidate.fontFamily, fontFamily)
+            || !sameDraftFormatting(existingDraft->candidate, candidate)
         : existingDraft != m_drafts.cend();
 
     if (shouldExist && draftChanged) {

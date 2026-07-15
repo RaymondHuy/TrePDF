@@ -12,6 +12,9 @@ Rectangle {
     required property bool collapsed
     required property var availableFontFamilies
     required property string selectedFontFamily
+    required property bool selectedFontBold
+    required property bool selectedFontItalic
+    required property bool selectedFontUnderline
     property bool formattingEnabled: false
     property color previewColor: "#2f3136"
 
@@ -46,6 +49,9 @@ Rectangle {
 
     signal collapsedChangeRequested(bool collapsed)
     signal fontFamilyChangeRequested(string fontFamily)
+    signal fontBoldChangeRequested(bool enabled)
+    signal fontItalicChangeRequested(bool enabled)
+    signal fontUnderlineChangeRequested(bool enabled)
 
     implicitWidth: collapsed ? 42 : 264
     color: theme.ribbonSurface
@@ -295,6 +301,7 @@ Rectangle {
                                 Layout.preferredWidth: 1
                                 Layout.preferredHeight: 58
                                 checkable: true
+                                checked: root.selectedFontBold
                                 display: AbstractButton.TextUnderIcon
                                 spacing: 3
                                 //% "Bold"
@@ -308,6 +315,8 @@ Rectangle {
                                         ? root.theme.foxitDarkOrange
                                         : "transparent"
                                 font.pixelSize: 10
+                                onClicked: root.fontBoldChangeRequested(
+                                    !root.selectedFontBold)
 
                                 background: Rectangle {
                                     radius: 4
@@ -331,6 +340,7 @@ Rectangle {
                                 Layout.preferredWidth: 1
                                 Layout.preferredHeight: 58
                                 checkable: true
+                                checked: root.selectedFontItalic
                                 display: AbstractButton.TextUnderIcon
                                 spacing: 3
                                 //% "Italic"
@@ -344,6 +354,8 @@ Rectangle {
                                         ? root.theme.foxitDarkOrange
                                         : "transparent"
                                 font.pixelSize: 10
+                                onClicked: root.fontItalicChangeRequested(
+                                    !root.selectedFontItalic)
 
                                 background: Rectangle {
                                     radius: 4
@@ -367,6 +379,7 @@ Rectangle {
                                 Layout.preferredWidth: 1
                                 Layout.preferredHeight: 58
                                 checkable: true
+                                checked: root.selectedFontUnderline
                                 display: AbstractButton.TextUnderIcon
                                 spacing: 3
                                 //% "Underline"
@@ -380,6 +393,8 @@ Rectangle {
                                         ? root.theme.foxitDarkOrange
                                         : "transparent"
                                 font.pixelSize: 10
+                                onClicked: root.fontUnderlineChangeRequested(
+                                    !root.selectedFontUnderline)
 
                                 background: Rectangle {
                                     radius: 4

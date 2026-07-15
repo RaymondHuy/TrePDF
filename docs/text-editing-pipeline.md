@@ -360,9 +360,9 @@ Dropdown font family hiển thị bundled families trước, sau đó toàn bộ
 families chưa trùng tên. Font embedded của text đang chọn cũng được thêm tạm
 nếu chưa có trong hai danh sách này. Khi người dùng chọn family mới,
 `Draft.candidate.fontFamily` được cập nhật ngay để editor và draft overlay dùng
-cùng font. Trạng thái family trước/sau nằm trong cùng command với text nên
-cancel, undo và redo đều khôi phục đúng font. Thay đổi vẫn chỉ tồn tại trong
-session và chưa được ghi ngược vào file PDF.
+cùng font. Family, bold, italic và underline trước/sau nằm trong cùng command
+với text nên cancel, undo và redo đều khôi phục đúng định dạng. Thay đổi vẫn chỉ
+tồn tại trong session và chưa được ghi ngược vào file PDF.
 
 Giới hạn an toàn hiện tại:
 
@@ -386,7 +386,20 @@ hoặc BaseFont name chứa "bold", "black" hoặc "heavy" (không phân biệt 
 Fallback theo tên cần thiết vì có PDF khai báo font bold nhưng weight vẫn trả
 về 400.
 
-### 7.3 Font size
+### 7.3 Italic
+
+`fontItalic = true` nếu italic angle khác `0`, descriptor flags có bit Italic
+(`1 << 6`), hoặc BaseFont name chứa `italic`, `oblique` hay `slanted`. Khi người
+dùng đổi style, draft cập nhật cờ này và `QFont::setItalic()` đổi editor ngay.
+
+### 7.4 Underline
+
+PDF text object không có thuộc tính underline tương đương QFont; gạch chân
+trong PDF thường là một path riêng. Vì vậy candidate nguồn mặc định
+`fontUnderline = false`. Khi người dùng bật Underline, draft lưu cờ này và Qt
+vẽ underline bằng `QFont::setUnderline()`.
+
+### 7.5 Font size
 
 Gọi `fontSize` là giá trị từ `FPDFTextObj_GetFontSize()` và `D(p)` là điểm `p`
 sau khi qua text transform rồi đổi sang device coordinate:
@@ -420,7 +433,7 @@ QFont.pixelSize = max(1, round(baseFontPixelSize))
 
 Đây vẫn là em-size quy đổi sang pixel, không phải glyph bbox height.
 
-### 7.4 Font stretch
+### 7.6 Font stretch
 
 Stretch bù cho scale ngang/dọc của text transform:
 
@@ -432,13 +445,13 @@ fontStretch = clamp(fontStretch, 50, 200)
 `100` là `QFont::Unstretched`; `50` là UltraCondensed và `200` là
 UltraExpanded.
 
-### 7.5 Màu chữ
+### 7.7 Màu chữ
 
 - Với render mode chỉ stroke: lấy stroke color.
 - Các mode còn lại: lấy fill color.
 - Nếu PDFium không trả được màu: fallback sang đen.
 
-### 7.6 Tạo QFont cho overlay/editor
+### 7.8 Tạo QFont cho overlay/editor
 
 `fontForDisplay()` tạo QFont theo thứ tự:
 
@@ -446,10 +459,13 @@ UltraExpanded.
 family = resolved font family, nếu có
 stretch = clamp(fontStretch, 50, 200)
 bold = fontBold
+italic = fontItalic
+underline = fontUnderline
 pixelSize = max(1, round(requestedPixelSize))
 ```
 
-Italic, underline, character spacing và word spacing chưa được lấy từ PDF.
+Character spacing và word spacing chưa được lấy từ PDF. Underline nguồn cũng
+chưa được ghép từ các path trang vào text candidate.
 
 ## 8. Hit test: con trỏ đang nằm trên text nào
 
@@ -766,7 +782,8 @@ TrePDF hiện đã lấy và áp dụng:
 - em-size;
 - transform stretch ngang/dọc;
 - embedded/installed font family nếu Qt dùng được;
-- bold;
+- bold và italic;
+- underline do người dùng áp dụng cho draft;
 - màu chữ.
 
 Nhưng PDF renderer và Qt text layout vẫn là hai hệ thống khác nhau. Các dữ liệu
@@ -778,7 +795,7 @@ sau chưa được tái tạo đầy đủ trong `TextInput`:
 - kerning/position adjustment trong mảng `TJ`;
 - horizontal scaling riêng của text state nếu không thể hiện đủ qua object
   transform;
-- italic, synthetic slant và các style khác;
+- italic angle chính xác, synthetic slant và underline path của PDF gốc;
 - font hinting/rendering của PDFium;
 - subset font không đăng ký được hoặc không map Unicode đúng trong Qt;
 - line metrics/ascent/descent riêng của font Qt.
@@ -869,7 +886,7 @@ Khi font/cỡ chữ lệch:
 - `FPDFFont_GetIsEmbedded()`, family/BaseFont name;
 - `FPDFTextObj_GetFontSize()`;
 - `normalizedFontSize()` và `fontStretchForTransform()`;
-- `pdfFontIsBold()`;
+- `pdfFontIsBold()` và `pdfFontIsItalic()`;
 - QML `editorFrame.baseFontPixelSize` và `editorFrame.displayFont`.
 
 Khi nền trắng hoặc chữ gốc chưa biến mất:

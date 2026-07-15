@@ -14,9 +14,9 @@ Fonts placed under `src/assets/fonts` are bundled with the application and
 preferred over matching system-installed families for draft text display.
 
 Edit mode also shows a collapsible text-formatting panel on the right with font
-family, size, color, bold, italic, and underline controls. Font-family changes
-apply immediately to the selected draft text and support undo/redo. The other
-formatting controls are currently UI-only.
+family, size, color, bold, italic, and underline controls. Font family, bold,
+italic, and underline apply immediately to selected draft text and support
+undo/redo. Font size and color are currently UI-only.
 
 The complete editable-text discovery, geometry, font, baseline, overlay, and
 draft-rendering flow is documented in

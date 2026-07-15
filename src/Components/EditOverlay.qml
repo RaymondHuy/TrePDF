@@ -391,6 +391,8 @@ Item {
                 modelData.fontFamily,
                 modelData.fontStretch,
                 modelData.fontBold,
+                modelData.fontItalic,
+                modelData.fontUnderline,
                 fontPixelSize)
             readonly property bool usesBaseline: modelData.hasBaseline === true
                 && modelData.added !== true
@@ -896,6 +898,8 @@ Item {
             root.controller.selectedFontFamily,
             root.controller.selectedFontStretch,
             root.controller.selectedFontBold,
+            root.controller.selectedFontItalic,
+            root.controller.selectedFontUnderline,
             baseFontPixelSize)
         readonly property bool usesBaseline: !editsAddedText
             && root.controller.selectedHasBaseline

@@ -254,9 +254,21 @@ ApplicationWindow {
                     collapsed: textFormatPanelLoader.panelCollapsed
                     availableFontFamilies: editController.availableFontFamilies
                     selectedFontFamily: editController.selectedFontFamily
+                    selectedFontBold: editController.selectedFontBold
+                    selectedFontItalic: editController.selectedFontItalic
+                    selectedFontUnderline: editController.selectedFontUnderline
                     formattingEnabled: editController.selectedEditable
                     onFontFamilyChangeRequested: fontFamily => {
                         editController.setSelectedFontFamily(fontFamily)
+                    }
+                    onFontBoldChangeRequested: enabled => {
+                        editController.setSelectedFontBold(enabled)
+                    }
+                    onFontItalicChangeRequested: enabled => {
+                        editController.setSelectedFontItalic(enabled)
+                    }
+                    onFontUnderlineChangeRequested: enabled => {
+                        editController.setSelectedFontUnderline(enabled)
                     }
                     onCollapsedChangeRequested: collapsed => {
                         textFormatPanelLoader.panelCollapsed = collapsed
