@@ -3,6 +3,7 @@
 #include "PDFEditController.h"
 
 #include <QFile>
+#include <QFontMetricsF>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUrl>
@@ -183,12 +184,16 @@ private slots:
     void detectsPdfFontStyles();
     void propagatesSourceStylesThroughSelection();
     void groupsCompatibleTextObjectsOnSameLine();
+    void seedsGroupedFrameFromQtTextWidth();
     void keepsMixedStylesAsSeparateCandidates();
     void keepsDistantColumnsAsSeparateCandidates();
     void keepsDifferentFontFacesAsSeparateCandidates();
     void editsGroupedLineAsOneDraft();
+    void resizesDraftFrameWithUndoRedo();
+    void storesReflowedContentBoundsWithUndoRedo();
     void changesFontFamilyForCurrentEdit();
     void changesFontStylesForCurrentEdit();
+    void formatsSelectedRangeInMultilineDraft();
     void appliesFontStylesToDisplayFont_data();
     void appliesFontStylesToDisplayFont();
 
@@ -330,6 +335,39 @@ void PDFEditControllerTest::groupsCompatibleTextObjectsOnSameLine()
     QCOMPARE(m_controller.selectedSourceRects().size(), 2);
 }
 
+void PDFEditControllerTest::seedsGroupedFrameFromQtTextWidth()
+{
+    const QRectF sourceRect = m_groupedCandidate.value(
+        QStringLiteral("sourceRect")).toRectF();
+    const QRectF frameRect = m_groupedCandidate.value(
+        QStringLiteral("frameRect")).toRectF();
+    const QSizeF pageSize = m_document.pageSize(0);
+    const qreal displayFontSizeRatio = m_groupedCandidate.value(
+        QStringLiteral("displayFontSizeRatio")).toReal();
+    const QFont displayFont = m_controller.fontForDisplay(
+        m_groupedCandidate.value(QStringLiteral("fontFamily")).toString(),
+        m_groupedCandidate.value(QStringLiteral("fontStretch")).toInt(),
+        m_groupedCandidate.value(QStringLiteral("fontBold")).toBool(),
+        m_groupedCandidate.value(QStringLiteral("fontItalic")).toBool(),
+        m_groupedCandidate.value(QStringLiteral("fontUnderline")).toBool(),
+        displayFontSizeRatio * pageSize.height());
+    const QFontMetricsF metrics(displayFont);
+    const QString text = m_groupedCandidate.value(QStringLiteral("text")).toString();
+    const qreal requiredWidth = qMax(
+        metrics.horizontalAdvance(text),
+        metrics.boundingRect(text).width());
+    const qreal originX = m_groupedCandidate.value(QStringLiteral("originX")).toReal();
+    const qreal availableWidth = (frameRect.right() - originX) * pageSize.width();
+
+    QVERIFY(frameRect.left() <= sourceRect.left());
+    QVERIFY(frameRect.right() >= sourceRect.right());
+    QVERIFY2(
+        availableWidth >= requiredWidth,
+        qPrintable(QStringLiteral("Grouped frame width %1 is smaller than Qt text width %2")
+                       .arg(availableWidth)
+                       .arg(requiredWidth)));
+}
+
 void PDFEditControllerTest::keepsMixedStylesAsSeparateCandidates()
 {
     QCOMPARE(m_mixedRegularCandidate.value(QStringLiteral("grouped")).toBool(), false);
@@ -379,6 +417,118 @@ void PDFEditControllerTest::editsGroupedLineAsOneDraft()
 
     m_controller.discardDrafts();
     QVERIFY(!m_controller.hasDrafts());
+}
+
+void PDFEditControllerTest::resizesDraftFrameWithUndoRedo()
+{
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF originalFrameRect = m_controller.selectedFrameRect();
+    const qreal originalOriginX = m_controller.selectedOriginX();
+    const qreal originalBaselineY = m_controller.selectedBaselineY();
+    const qreal horizontalShift = qMin(0.01, originalFrameRect.width() / 4.0);
+    const qreal verticalShift = qMin(0.01, originalFrameRect.height() / 4.0);
+    const QRectF resizedFrameRect(
+        originalFrameRect.x() + horizontalShift,
+        originalFrameRect.y() + verticalShift,
+        qMin(
+            1.0 - originalFrameRect.x() - horizontalShift,
+            originalFrameRect.width() + 0.08),
+        qMin(
+            1.0 - originalFrameRect.y() - verticalShift,
+            originalFrameRect.height() + 0.04));
+    QVERIFY(resizedFrameRect != originalFrameRect);
+
+    m_controller.beginSelectedFrameResize();
+    QVERIFY(m_controller.textEditActive());
+    m_controller.updateSelectedFrameRect(resizedFrameRect);
+    QCOMPARE(m_controller.selectedFrameRect(), resizedFrameRect);
+    QCOMPARE(m_controller.selectedContentBounds(), resizedFrameRect);
+    QCOMPARE(m_controller.selectedOriginX(), originalOriginX + horizontalShift);
+    QCOMPARE(m_controller.selectedBaselineY(), originalBaselineY + verticalShift);
+    m_controller.finishSelectedFrameResize();
+
+    QVERIFY(!m_controller.textEditActive());
+    QVERIFY(m_controller.canUndo());
+    QCOMPARE(m_controller.draftsForPage(0).size(), 1);
+    QCOMPARE(
+        m_controller.draftsForPage(0).constFirst().toMap()
+            .value(QStringLiteral("frameRect")).toRectF(),
+        resizedFrameRect);
+
+    m_controller.undo();
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+
+    m_controller.redo();
+    QCOMPARE(m_controller.selectedFrameRect(), resizedFrameRect);
+    QCOMPARE(m_controller.selectedContentBounds(), resizedFrameRect);
+
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    m_controller.beginSelectedFrameResize();
+    m_controller.updateSelectedFrameRect(resizedFrameRect);
+    m_controller.cancelSelectedFrameResize();
+    QVERIFY(!m_controller.textEditActive());
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+
+    const QString editedText = QStringLiteral("Text and geometry in one edit");
+    m_controller.beginSelectedTextEdit();
+    m_controller.updateSelectedTextPreview(editedText);
+    m_controller.beginSelectedFrameResize();
+    m_controller.updateSelectedFrameRect(resizedFrameRect);
+    m_controller.finishSelectedFrameResize();
+    QVERIFY(m_controller.textEditActive());
+    QCOMPARE(m_controller.selectedText(), editedText);
+    QCOMPARE(m_controller.selectedFrameRect(), resizedFrameRect);
+
+    m_controller.cancelSelectedTextEdit();
+    QCOMPARE(
+        m_controller.selectedText(),
+        m_regularCandidate.value(QStringLiteral("text")).toString());
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+}
+
+void PDFEditControllerTest::storesReflowedContentBoundsWithUndoRedo()
+{
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF frameRect = m_controller.selectedFrameRect();
+    const QRectF contentBounds(
+        frameRect.x(),
+        frameRect.y(),
+        frameRect.width(),
+        qMin(1.0 - frameRect.y(), frameRect.height() + 0.05));
+    const QString multilineText = QStringLiteral("First line\nSecond line");
+
+    m_controller.beginSelectedTextEdit();
+    m_controller.updateSelectedTextPreview(multilineText);
+    m_controller.updateSelectedContentBounds(contentBounds);
+    QCOMPARE(m_controller.selectedFrameRect(), frameRect);
+    QCOMPARE(m_controller.selectedContentBounds(), contentBounds);
+    m_controller.finishSelectedTextEdit();
+
+    QCOMPARE(m_controller.draftsForPage(0).size(), 1);
+    m_controller.undo();
+    QCOMPARE(m_controller.selectedFrameRect(), frameRect);
+    QCOMPARE(m_controller.selectedContentBounds(), frameRect);
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+
+    m_controller.redo();
+    QCOMPARE(m_controller.selectedFrameRect(), frameRect);
+    QCOMPARE(m_controller.selectedContentBounds(), contentBounds);
+    QCOMPARE(m_controller.selectedText(), multilineText);
+
+    m_controller.discardDrafts();
 }
 
 void PDFEditControllerTest::changesFontFamilyForCurrentEdit()
@@ -511,6 +661,60 @@ void PDFEditControllerTest::changesFontStylesForCurrentEdit()
     QVERIFY(m_controller.selectedFontBold());
     QVERIFY(m_controller.selectedFontItalic());
     QVERIFY(m_controller.selectedFontUnderline());
+
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::formatsSelectedRangeInMultilineDraft()
+{
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QString text = QStringLiteral("Red blue\nGreen");
+    const QColor rangeColor(QStringLiteral("#c62828"));
+    m_controller.beginSelectedTextEdit();
+    m_controller.updateSelectedTextPreview(text);
+    m_controller.setSelectedTextRange(0, 3);
+    m_controller.setSelectedColor(rangeColor);
+    m_controller.setSelectedFontBold(true);
+
+    const QVariantList drafts = m_controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    const QVariantMap draft = drafts.constFirst().toMap();
+    QCOMPARE(draft.value(QStringLiteral("text")).toString(), text);
+
+    const QVariantList spans = draft.value(QStringLiteral("characterSpans")).toList();
+    QCOMPARE(spans.size(), 2);
+    const QVariantMap firstSpan = spans.at(0).toMap();
+    QCOMPARE(firstSpan.value(QStringLiteral("start")).toLongLong(), 0);
+    QCOMPARE(firstSpan.value(QStringLiteral("length")).toLongLong(), 3);
+    QCOMPARE(firstSpan.value(QStringLiteral("fontBold")).toBool(), true);
+    QCOMPARE(firstSpan.value(QStringLiteral("color")).value<QColor>(), rangeColor);
+    const QVariantMap remainingSpan = spans.at(1).toMap();
+    QCOMPARE(remainingSpan.value(QStringLiteral("start")).toLongLong(), 3);
+    QCOMPARE(
+        remainingSpan.value(QStringLiteral("length")).toLongLong(),
+        text.size() - 3);
+    QCOMPARE(remainingSpan.value(QStringLiteral("fontBold")).toBool(), false);
+    QVERIFY(remainingSpan.value(QStringLiteral("color")).value<QColor>() != rangeColor);
+
+    const QVariantList paragraphs = draft.value(
+        QStringLiteral("paragraphFormats")).toList();
+    QCOMPARE(paragraphs.size(), 2);
+    QCOMPARE(paragraphs.at(0).toMap().value(QStringLiteral("start")).toLongLong(), 0);
+    QCOMPARE(paragraphs.at(0).toMap().value(QStringLiteral("length")).toLongLong(), 8);
+    QCOMPARE(paragraphs.at(1).toMap().value(QStringLiteral("start")).toLongLong(), 9);
+    QCOMPARE(paragraphs.at(1).toMap().value(QStringLiteral("length")).toLongLong(), 5);
+
+    m_controller.finishSelectedTextEdit();
+    m_controller.undo();
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+    m_controller.redo();
+    QCOMPARE(
+        m_controller.draftsForPage(0).constFirst().toMap()
+            .value(QStringLiteral("characterSpans")).toList().size(),
+        2);
 
     m_controller.discardDrafts();
 }

@@ -10,13 +10,25 @@ Compatible text objects on the same visual line are grouped into one editable
 candidate while retaining every source object path for draft rendering and
 undo/redo.
 
+Draft geometry keeps immutable PDF source bounds separate from the layout frame
+and laid-out content bounds. Existing PDF text seeds its frame from the Qt text
+width so the original line fits, while later edits wrap within that frame. The
+selected frame exposes eight resize handles; dragging an edge or corner reflows
+text live and stores the geometry change in session undo/redo.
+
+Each session draft stores text, character-format spans, paragraph formats, its
+layout frame, and content bounds. Undo and redo snapshot the complete rich-text
+draft. The inline rich-text editor supports multiple lines, wraps/reflows inside
+the layout frame, renders mixed character styles, and applies formatting to the
+selected text range.
+
 Fonts placed under `src/assets/fonts` are bundled with the application and
 preferred over matching system-installed families for draft text display.
 
 Edit mode also shows a collapsible text-formatting panel on the right with font
 family, size, color, bold, italic, and underline controls. Font family, bold,
-italic, and underline apply immediately to selected draft text and support
-undo/redo. Font size and color are currently UI-only.
+italic, underline, and color apply immediately to selected draft text and
+support undo/redo. Font size is currently UI-only.
 
 The complete editable-text discovery, geometry, font, baseline, overlay, and
 draft-rendering flow is documented in

@@ -18,6 +18,12 @@ Item {
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
+    property bool loadingEditorText: false
+    property bool syncingEditorPreview: false
+    property bool syncingEditorGeometry: false
+    property bool editorLayoutDirty: false
+    property bool resizingFrame: false
+    property string resizingObjectId: ""
     property string selectionActionsObjectId: ""
     property real selectCursorX: 0
     property real selectCursorY: 0
@@ -27,9 +33,11 @@ Item {
     readonly property color editBoxColor: "#f5a55a"
     readonly property real editBoxLeftBleed: 3
     readonly property real editBoxRightBleed: 3
-    readonly property real hoverBoxVerticalBleed: 3
     readonly property real editBoxVerticalBleed: 3
+    readonly property real boundingBoxPadding: 3
     readonly property real minimumTextPixelSize: 6
+    readonly property real resizeHandleSize: 10
+    readonly property real minimumResizePixelSize: 24
     readonly property bool interactionActive: !pooled
         && controller.tool !== PDFEditController.BrowseTool
     readonly property bool editorUsesCleanTexture: draftTextureReady
@@ -44,6 +52,8 @@ Item {
         && !editing
         && controller.tool === PDFEditController.AddTextTool
         && hitArea.containsMouse
+
+    signal selectedDraftContentBoundsSyncRequested()
 
     visible: !pooled && (interactionActive || drafts.length > 0)
     enabled: interactionActive
@@ -105,29 +115,275 @@ Item {
     }
 
     function restorationOverlay(draft) {
+        const characterSpans = draft.originalCharacterSpans !== undefined
+            ? draft.originalCharacterSpans
+            : draft.characterSpans
+        const paragraphFormats = draft.originalParagraphFormats !== undefined
+            ? draft.originalParagraphFormats
+            : draft.paragraphFormats
+        const primaryFormat = characterSpans.length > 0
+            ? characterSpans[0]
+            : draft
         return {
             objectId: draft.objectId,
-            x: draft.x,
-            y: draft.y,
-            width: draft.width,
-            height: draft.height,
+            sourceRect: draft.sourceRect,
+            frameRect: draft.originalFrameRect !== undefined
+                ? draft.originalFrameRect
+                : draft.frameRect,
+            contentBounds: draft.originalContentBounds !== undefined
+                ? draft.originalContentBounds
+                : draft.contentBounds,
             sourceRects: draft.sourceRects,
             grouped: draft.grouped,
             text: draft.originalText,
             originalText: draft.originalText,
-            fontFamily: draft.fontFamily,
-            fontSizeRatio: draft.fontSizeRatio,
-            displayFontSizeRatio: draft.displayFontSizeRatio,
-            fontStretch: draft.fontStretch,
-            fontBold: draft.fontBold,
-            fontItalic: draft.fontItalic,
-            fontUnderline: draft.fontUnderline,
+            characterSpans: characterSpans,
+            paragraphFormats: paragraphFormats,
+            fontFamily: primaryFormat.fontFamily,
+            fontSizeRatio: primaryFormat.fontSizeRatio,
+            displayFontSizeRatio: primaryFormat.displayFontSizeRatio,
+            fontStretch: primaryFormat.fontStretch,
+            fontBold: primaryFormat.fontBold,
+            fontItalic: primaryFormat.fontItalic,
+            fontUnderline: primaryFormat.fontUnderline,
             hasBaseline: draft.hasBaseline,
             originX: draft.originX,
             baselineY: draft.baselineY,
-            color: draft.color,
+            color: primaryFormat.color,
             restoration: true
         }
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+    }
+
+    function escapeHtmlAttribute(value) {
+        return escapeHtml(value).replace(/"/g, "&quot;")
+    }
+
+    function cssColor(value) {
+        if (value === undefined || value === null)
+            return "rgba(0,0,0,1)"
+
+        return "rgba("
+            + Math.round(value.r * 255) + ","
+            + Math.round(value.g * 255) + ","
+            + Math.round(value.b * 255) + ","
+            + Number(value.a).toFixed(3) + ")"
+    }
+
+    function characterStyle(format, baseRatio) {
+        const family = format.fontFamily === undefined
+            ? ""
+            : String(format.fontFamily)
+                .replace(/\\/g, "\\\\")
+                .replace(/'/g, "\\'")
+        const displayRatio = Number(format.displayFontSizeRatio) > 0
+            ? Number(format.displayFontSizeRatio)
+            : Number(format.fontSizeRatio)
+        const relativeSize = displayRatio > 0 && baseRatio > 0
+            ? displayRatio / baseRatio
+            : 1
+        let style = "font-size:" + relativeSize.toFixed(6) + "em;"
+            + "font-stretch:" + Number(format.fontStretch || 100) + "%;"
+            + "font-weight:" + (format.fontBold === true ? "700" : "400") + ";"
+            + "font-style:" + (format.fontItalic === true ? "italic" : "normal") + ";"
+            + "text-decoration:"
+            + (format.fontUnderline === true ? "underline" : "none") + ";"
+            + "color:" + cssColor(format.color) + ";"
+        if (family.length > 0)
+            style += "font-family:'" + family + "';"
+        return style
+    }
+
+    function richRangeHtml(text, start, end, spans, fallbackFormat, baseRatio) {
+        let html = ""
+        let cursor = start
+        for (let index = 0; index < spans.length; ++index) {
+            const span = spans[index]
+            const spanStart = Math.max(start, Number(span.start))
+            const spanEnd = Math.min(
+                end,
+                span.end !== undefined
+                    ? Number(span.end)
+                    : Number(span.start) + Number(span.length))
+            if (spanEnd <= spanStart)
+                continue
+
+            if (spanStart > cursor) {
+                html += "<span style=\""
+                    + escapeHtmlAttribute(characterStyle(fallbackFormat, baseRatio))
+                    + "\">" + escapeHtml(text.slice(cursor, spanStart)) + "</span>"
+            }
+            html += "<span style=\""
+                + escapeHtmlAttribute(characterStyle(span, baseRatio))
+                + "\">" + escapeHtml(text.slice(spanStart, spanEnd)) + "</span>"
+            cursor = Math.max(cursor, spanEnd)
+        }
+        if (cursor < end) {
+            html += "<span style=\""
+                + escapeHtmlAttribute(characterStyle(fallbackFormat, baseRatio))
+                + "\">" + escapeHtml(text.slice(cursor, end)) + "</span>"
+        }
+        return html
+    }
+
+    function richTextHtml(text, spans, paragraphFormats, fallbackFormat) {
+        const sourceText = text === undefined ? "" : String(text)
+        const sourceSpans = spans === undefined || spans === null ? [] : spans
+        let paragraphs = paragraphFormats === undefined || paragraphFormats === null
+            ? []
+            : paragraphFormats
+        if (paragraphs.length === 0) {
+            paragraphs = []
+            let start = 0
+            while (start <= sourceText.length) {
+                const newline = sourceText.indexOf("\n", start)
+                const end = newline < 0 ? sourceText.length : newline
+                paragraphs.push({
+                    start: start,
+                    length: end - start,
+                    alignment: "left"
+                })
+                if (newline < 0)
+                    break
+                start = newline + 1
+            }
+        }
+
+        const baseRatio = Number(fallbackFormat.displayFontSizeRatio) > 0
+            ? Number(fallbackFormat.displayFontSizeRatio)
+            : Math.max(Number(fallbackFormat.fontSizeRatio), 0.000001)
+        let html = "<html><body style=\"margin:0;\">"
+        for (let index = 0; index < paragraphs.length; ++index) {
+            const paragraph = paragraphs[index]
+            const start = Math.max(0, Math.min(
+                sourceText.length,
+                Number(paragraph.start)))
+            const end = Math.max(start, Math.min(
+                sourceText.length,
+                paragraph.end !== undefined
+                    ? Number(paragraph.end)
+                    : start + Number(paragraph.length)))
+            const alignment = paragraph.alignment === "center"
+                    || paragraph.alignment === "right"
+                    || paragraph.alignment === "justify"
+                ? paragraph.alignment
+                : "left"
+            const content = richRangeHtml(
+                sourceText,
+                start,
+                end,
+                sourceSpans,
+                fallbackFormat,
+                baseRatio)
+            const paragraphStyle = "margin:0;white-space:pre-wrap;text-align:"
+                + alignment + ";"
+            html += "<p style=\"" + escapeHtmlAttribute(paragraphStyle) + "\">"
+                + (content.length > 0 ? content : "<br/>") + "</p>"
+        }
+        return html + "</body></html>"
+    }
+
+    function selectedFallbackFormat() {
+        return {
+            fontFamily: controller.selectedFontFamily,
+            fontSizeRatio: controller.selectedFontSizeRatio,
+            displayFontSizeRatio: controller.selectedDisplayFontSizeRatio,
+            fontStretch: controller.selectedFontStretch,
+            fontBold: controller.selectedFontBold,
+            fontItalic: controller.selectedFontItalic,
+            fontUnderline: controller.selectedFontUnderline,
+            color: controller.selectedColor
+        }
+    }
+
+    function editorPlainText() {
+        return editor.getText(0, editor.length)
+            .replace(/\u2028/g, "\n")
+            .replace(/\u2029/g, "\n")
+    }
+
+    function syncEditorContentBounds() {
+        if (!editing
+                || loadingEditorText
+                || syncingEditorGeometry
+                || !editorLayoutDirty
+                || root.height <= 0) {
+            return
+        }
+
+        const frameRect = controller.selectedFrameRect
+        if (frameRect.width <= 0 || frameRect.height <= 0)
+            return
+
+        const frameTop = frameRect.y * root.height
+        const laidOutBottom = Math.min(
+            root.height,
+            editorFrame.y + editorFrame.editorBottom)
+        const contentHeight = Math.min(
+            1 - frameRect.y,
+            Math.max(
+                frameRect.height,
+                (laidOutBottom - frameTop) / root.height))
+        const currentBounds = controller.selectedContentBounds
+        const epsilon = 0.25 / root.height
+        if (Math.abs(currentBounds.x - frameRect.x) <= epsilon
+                && Math.abs(currentBounds.y - frameRect.y) <= epsilon
+                && Math.abs(currentBounds.width - frameRect.width) <= epsilon
+                && Math.abs(currentBounds.height - contentHeight) <= epsilon) {
+            return
+        }
+
+        syncingEditorGeometry = true
+        controller.updateSelectedContentBounds(Qt.rect(
+            frameRect.x,
+            frameRect.y,
+            frameRect.width,
+            contentHeight))
+        syncingEditorGeometry = false
+    }
+
+    function syncSelectedDraftContentBounds() {
+        if (editing || !resizingFrame || root.height <= 0)
+            return
+
+        selectedDraftContentBoundsSyncRequested()
+    }
+
+    function syncEditorSelection() {
+        if (!editing || loadingEditorText)
+            return
+
+        const start = Math.min(editor.selectionStart, editor.selectionEnd)
+        const end = Math.max(editor.selectionStart, editor.selectionEnd)
+        controller.setSelectedTextRange(start, end - start)
+    }
+
+    function loadEditorRichText(cursorPosition, selectionStart, selectionEnd) {
+        loadingEditorText = true
+        editor.text = richTextHtml(
+            controller.selectedText,
+            controller.selectedCharacterSpans,
+            controller.selectedParagraphFormats,
+            selectedFallbackFormat())
+        const maximumPosition = editor.length
+        const start = Math.max(0, Math.min(maximumPosition, selectionStart))
+        const end = Math.max(0, Math.min(maximumPosition, selectionEnd))
+        if (start !== end) {
+            editor.select(start, end)
+        } else {
+            editor.deselect()
+            editor.cursorPosition = cursorPosition < 0
+                ? maximumPosition
+                : Math.max(0, Math.min(maximumPosition, cursorPosition))
+        }
+        loadingEditorText = false
+        syncEditorSelection()
     }
 
     function hasCandidate(candidate) {
@@ -157,6 +413,53 @@ Item {
 
     function hideSelectCursor() {
         selectCursorVisible = false
+    }
+
+    function resizedFrameRect(startFrameRect, horizontal, vertical, deltaX, deltaY) {
+        const pageWidth = Math.max(1, root.width)
+        const pageHeight = Math.max(1, root.height)
+        const minimumWidth = Math.min(
+            Number(startFrameRect.width),
+            root.minimumResizePixelSize / pageWidth)
+        const minimumHeight = Math.min(
+            Number(startFrameRect.height),
+            root.minimumResizePixelSize / pageHeight)
+        let left = Number(startFrameRect.x)
+        let top = Number(startFrameRect.y)
+        let right = left + Number(startFrameRect.width)
+        let bottom = top + Number(startFrameRect.height)
+
+        if (horizontal < 0) {
+            left = Math.max(
+                0,
+                Math.min(right - minimumWidth, left + deltaX / pageWidth))
+        } else if (horizontal > 0) {
+            right = Math.min(
+                1,
+                Math.max(left + minimumWidth, right + deltaX / pageWidth))
+        }
+
+        if (vertical < 0) {
+            top = Math.max(
+                0,
+                Math.min(bottom - minimumHeight, top + deltaY / pageHeight))
+        } else if (vertical > 0) {
+            bottom = Math.min(
+                1,
+                Math.max(top + minimumHeight, bottom + deltaY / pageHeight))
+        }
+
+        return Qt.rect(left, top, right - left, bottom - top)
+    }
+
+    function cancelFrameResize() {
+        if (!resizingFrame)
+            return
+
+        controller.cancelSelectedFrameResize()
+        resizingFrame = false
+        resizingObjectId = ""
+        reloadData()
     }
 
     function updateHoverAtPosition(x, y) {
@@ -191,8 +494,9 @@ Item {
             return
 
         editingObjectId = candidate.objectId
-        editor.text = candidate.text
+        editorLayoutDirty = false
         editing = true
+        loadEditorRichText(-1, 0, 0)
         Qt.callLater(function() {
             editor.forceActiveFocus()
         })
@@ -231,12 +535,14 @@ Item {
         hideSelectCursor()
         controller.beginSelectedTextEdit()
         editingObjectId = candidate.objectId
-        editor.text = controller.selectedText
+        editorLayoutDirty = false
         editing = true
+        loadEditorRichText(-1, 0, 0)
         Qt.callLater(function() {
             editor.forceActiveFocus()
             editor.deselect()
-            editor.cursorPosition = editor.text.length
+            editor.cursorPosition = editor.length
+            root.syncEditorSelection()
         })
     }
 
@@ -244,17 +550,26 @@ Item {
         if (!editing)
             return
 
-        controller.updateSelectedTextPreview(editor.text)
+        if (resizingFrame) {
+            controller.finishSelectedFrameResize()
+            resizingFrame = false
+            resizingObjectId = ""
+        }
+
+        controller.updateSelectedTextPreview(editorPlainText())
         controller.finishSelectedTextEdit()
         editing = false
         editingObjectId = ""
+        editorLayoutDirty = false
         reloadData()
     }
 
     function cancelEditing() {
+        cancelFrameResize()
         controller.cancelSelectedTextEdit()
         editing = false
         editingObjectId = ""
+        editorLayoutDirty = false
     }
 
     function beginSelectedEditing() {
@@ -308,6 +623,7 @@ Item {
 
     onPageChanged: {
         selectionActions.close()
+        cancelFrameResize()
         if (editing)
             commitEditing()
         reloadData()
@@ -315,6 +631,8 @@ Item {
 
     onPooledChanged: {
         selectionActions.close()
+        if (pooled)
+            cancelFrameResize()
         if (pooled && editing)
             commitEditing()
         reloadData()
@@ -337,6 +655,7 @@ Item {
 
         function onToolChanged() {
             selectionActions.close()
+            root.cancelFrameResize()
             if (root.editing)
                 root.commitEditing()
             root.hoverCandidate = ({})
@@ -345,6 +664,13 @@ Item {
         }
 
         function onSelectionChanged() {
+            if (root.resizingFrame
+                    && (root.controller.selectedPage !== root.page
+                        || root.controller.selectedObjectId
+                            !== root.resizingObjectId)) {
+                root.resizingFrame = false
+                root.resizingObjectId = ""
+            }
             if (selectionActions.opened
                     && (root.controller.selectedPage !== root.page
                         || root.controller.selectedObjectId
@@ -356,6 +682,23 @@ Item {
                         || root.controller.selectedObjectId !== root.editingObjectId)) {
                 root.editing = false
                 root.editingObjectId = ""
+                root.editorLayoutDirty = false
+                return
+            }
+            if (root.editing
+                    && !root.syncingEditorPreview
+                    && !root.syncingEditorGeometry
+                    && !root.loadingEditorText
+                    && !root.resizingFrame) {
+                const cursorPosition = editor.cursorPosition
+                const selectionStart = editor.selectionStart
+                const selectionEnd = editor.selectionEnd
+                root.loadEditorRichText(
+                    cursorPosition,
+                    selectionStart,
+                    selectionEnd)
+                root.editorLayoutDirty = true
+                Qt.callLater(root.syncEditorContentBounds)
             }
         }
     }
@@ -368,31 +711,35 @@ Item {
 
             required property var modelData
 
-            readonly property real originalX: modelData.x * root.width
-            readonly property real originalY: modelData.y * root.height
-            readonly property real originalWidth: Math.max(1, modelData.width * root.width)
-            readonly property real originalHeight: Math.max(1, modelData.height * root.height)
-            readonly property real horizontalPadding: 2
-            readonly property real measuredTextWidth: Math.max(
-                draftTextMetrics.advanceWidth,
-                draftTextMetrics.boundingRect.width)
+            readonly property rect frameRect: modelData.frameRect
+            readonly property rect contentBounds: modelData.contentBounds
+            readonly property real frameX: frameRect.x * root.width
+            readonly property real frameY: frameRect.y * root.height
+            readonly property real frameWidth: Math.max(1, frameRect.width * root.width)
+            readonly property real frameHeight: Math.max(1, frameRect.height * root.height)
+            readonly property real boxBottom: Math.max(
+                frameRect.y + frameRect.height,
+                contentBounds.y + contentBounds.height) * root.height
+            readonly property real boxHeight: Math.max(
+                frameHeight,
+                boxBottom - frameY)
+            readonly property bool usesBaseline: modelData.hasBaseline === true
+                && modelData.added !== true
+            readonly property real textOriginX: modelData.originX * root.width
+            readonly property real textBaselineY: modelData.baselineY * root.height
+            readonly property real contentLeftPageX: usesBaseline
+                ? textOriginX
+                : frameX
+            readonly property real contentRightPageX: frameX + frameWidth
             readonly property real desiredTextPageX: usesBaseline
-                ? Math.min(originalX, textOriginX)
-                : originalX
-            readonly property real measuredContentRight: usesBaseline
-                ? Math.max(
-                    originalX + originalWidth,
-                    textOriginX + measuredTextWidth)
-                : originalX + measuredTextWidth + horizontalPadding
-            readonly property real measuredContentWidth: Math.max(
+                ? Math.min(frameX, textOriginX)
+                : frameX
+            readonly property real layoutContentWidth: Math.max(
                 1,
-                measuredContentRight - desiredTextPageX)
-            readonly property real expandedTextWidth: Math.max(
-                originalWidth,
-                measuredContentWidth)
+                frameX + frameWidth - desiredTextPageX)
             readonly property real visibleTextWidth: Math.min(
                 root.width,
-                expandedTextWidth)
+                layoutContentWidth)
             readonly property real contentPageX: Math.max(
                 0,
                 Math.min(desiredTextPageX, root.width - visibleTextWidth))
@@ -406,9 +753,6 @@ Item {
             readonly property real textWidth: leftBoxBleed
                 + visibleTextWidth
                 + rightBoxBleed
-            readonly property real textHeight: Math.max(
-                originalHeight + root.fallbackBleed * 2,
-                draftText.implicitHeight)
             readonly property real fontPixelSize: Math.max(
                 modelData.added === true ? root.minimumTextPixelSize : 1,
                 modelData.displayFontSizeRatio * root.height)
@@ -419,16 +763,73 @@ Item {
                 modelData.fontItalic,
                 modelData.fontUnderline,
                 fontPixelSize)
-            readonly property bool usesBaseline: modelData.hasBaseline === true
-                && modelData.added !== true
-            readonly property real textOriginX: modelData.originX * root.width
-            readonly property real textBaselineY: modelData.baselineY * root.height
-            readonly property real textPageY: originalY + (originalHeight - textHeight) / 2
-            readonly property bool textNeedsFitting: expandedTextWidth > root.width
+            readonly property real desiredTextPageY: usesBaseline
+                ? Math.min(
+                    frameY - root.fallbackBleed,
+                    textBaselineY - draftText.baselineOffset)
+                : frameY - root.fallbackBleed
+            readonly property real textPageY: Math.max(0, desiredTextPageY)
+            readonly property real textTop: usesBaseline
+                ? Math.max(
+                    0,
+                    textBaselineY - textPageY - draftText.baselineOffset)
+                : root.fallbackBleed
+            readonly property real frameBottom: frameY
+                + frameHeight
+                + root.fallbackBleed
+                - textPageY
+            readonly property real contentBottom: textTop
+                + draftText.implicitHeight
+                + root.fallbackBleed
+            readonly property real textHeight: Math.max(
+                1,
+                Math.min(
+                    root.height - textPageY,
+                    Math.max(frameBottom, contentBottom)))
+            readonly property string richText: root.richTextHtml(
+                modelData.text,
+                modelData.characterSpans,
+                modelData.paragraphFormats,
+                modelData)
             readonly property bool hovered: root.hasCandidate(root.hoverCandidate)
                 && root.hoverCandidate.objectId === modelData.objectId
             readonly property bool selected: root.controller.selectedPage === root.page
                 && root.controller.selectedObjectId === modelData.objectId
+
+            function syncSelectedContentBounds() {
+                if (!selected
+                        || modelData.restoration === true
+                        || root.controller.selectedObjectId !== modelData.objectId) {
+                    return
+                }
+
+                const selectedFrameRect = root.controller.selectedFrameRect
+                const laidOutBottom = Math.min(
+                    root.height,
+                    draftItem.textPageY
+                        + draftItem.textTop
+                        + draftText.implicitHeight
+                        + root.fallbackBleed)
+                const contentHeight = Math.min(
+                    1 - selectedFrameRect.y,
+                    Math.max(
+                        selectedFrameRect.height,
+                        (laidOutBottom - selectedFrameRect.y * root.height)
+                            / root.height))
+                root.controller.updateSelectedContentBounds(Qt.rect(
+                    selectedFrameRect.x,
+                    selectedFrameRect.y,
+                    selectedFrameRect.width,
+                    contentHeight))
+            }
+
+            Connections {
+                target: root
+
+                function onSelectedDraftContentBoundsSyncRequested() {
+                    draftItem.syncSelectedContentBounds()
+                }
+            }
 
             x: textPageX
             y: textPageY
@@ -445,26 +846,26 @@ Item {
 
                     required property var modelData
 
-                    readonly property real originalX: modelData.x * root.width
-                    readonly property real originalY: modelData.y * root.height
-                    readonly property real originalWidth: Math.max(
+                    readonly property real sourceX: modelData.x * root.width
+                    readonly property real sourceY: modelData.y * root.height
+                    readonly property real sourceWidth: Math.max(
                         1,
                         modelData.width * root.width)
-                    readonly property real originalHeight: Math.max(
+                    readonly property real sourceHeight: Math.max(
                         1,
                         modelData.height * root.height)
                     readonly property real maskedX: Math.max(
                         0,
-                        originalX - root.fallbackBleed)
+                        sourceX - root.fallbackBleed)
                     readonly property real maskedY: Math.max(
                         0,
-                        originalY - root.fallbackBleed)
+                        sourceY - root.fallbackBleed)
                     readonly property real maskedRight: Math.min(
                         root.width,
-                        originalX + originalWidth + root.fallbackBleed)
+                        sourceX + sourceWidth + root.fallbackBleed)
                     readonly property real maskedBottom: Math.min(
                         root.height,
-                        originalY + originalHeight + root.fallbackBleed)
+                        sourceY + sourceHeight + root.fallbackBleed)
 
                     x: maskedX - draftItem.x
                     y: maskedY - draftItem.y
@@ -476,46 +877,45 @@ Item {
                 }
             }
 
-            TextMetrics {
-                id: draftTextMetrics
-
-                text: draftItem.modelData.text
-                font: draftItem.displayFont
-            }
-
             Text {
                 id: draftText
 
                 x: 0
-                y: draftItem.usesBaseline
-                    ? draftItem.textBaselineY - draftItem.y - baselineOffset
-                    : 0
+                y: draftItem.textTop
                 width: draftItem.width
-                height: draftItem.usesBaseline ? implicitHeight : draftItem.height
-                leftPadding: draftItem.usesBaseline
-                    ? Math.max(0, draftItem.textOriginX - draftItem.x)
-                    : draftItem.leftBoxBleed + draftItem.horizontalPadding / 2
-                rightPadding: draftItem.usesBaseline ? 0 : draftItem.horizontalPadding / 2
-                text: draftItem.modelData.text
+                height: implicitHeight
+                leftPadding: Math.max(
+                    0,
+                    draftItem.contentLeftPageX - draftItem.x)
+                rightPadding: Math.max(
+                    0,
+                    draftItem.x + draftItem.width - draftItem.contentRightPageX)
+                text: draftItem.richText
+                textFormat: Text.RichText
                 color: draftItem.modelData.color
                 font: draftItem.displayFont
-                fontSizeMode: draftItem.textNeedsFitting ? Text.HorizontalFit : Text.FixedSize
-                minimumPixelSize: 1
-                verticalAlignment: draftItem.usesBaseline ? Text.AlignTop : Text.AlignVCenter
-                wrapMode: Text.NoWrap
+                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                 elide: Text.ElideNone
+                onImplicitHeightChanged: {
+                    if (draftItem.selected && root.resizingFrame)
+                        Qt.callLater(root.syncSelectedDraftContentBounds)
+                }
             }
 
             Rectangle {
-                anchors.fill: parent
+                x: draftItem.frameX - draftItem.x - root.boundingBoxPadding
+                y: draftItem.frameY - draftItem.y - root.boundingBoxPadding
+                width: draftItem.frameWidth + 2 * root.boundingBoxPadding
+                height: draftItem.boxHeight + 2 * root.boundingBoxPadding
                 radius: root.editBoxRadius
-                color: draftItem.selected ? "#14d97a32" : "transparent"
+                color: "transparent"
                 border.width: 2
                 border.color: root.editBoxColor
                 visible: root.interactionActive
                     && !root.editing
                     && draftItem.modelData.restoration !== true
-                    && (draftItem.selected || draftItem.hovered)
+                    && draftItem.hovered
+                    && !draftItem.selected
             }
 
             MouseArea {
@@ -787,39 +1187,35 @@ Item {
     }
 
     Rectangle {
-        readonly property real originalX: root.hasCandidate(root.hoverCandidate)
-            ? root.hoverCandidate.x * root.width
+        readonly property rect frameRect: root.hasCandidate(root.hoverCandidate)
+            ? root.hoverCandidate.frameRect
+            : Qt.rect(0, 0, 0, 0)
+        readonly property rect contentBounds: root.hasCandidate(root.hoverCandidate)
+            ? root.hoverCandidate.contentBounds
+            : frameRect
+        readonly property real frameX: root.hasCandidate(root.hoverCandidate)
+            ? frameRect.x * root.width
             : 0
-        readonly property real originalY: root.hasCandidate(root.hoverCandidate)
-            ? root.hoverCandidate.y * root.height
+        readonly property real frameY: root.hasCandidate(root.hoverCandidate)
+            ? frameRect.y * root.height
             : 0
-        readonly property real originalWidth: root.hasCandidate(root.hoverCandidate)
-            ? Math.max(1, root.hoverCandidate.width * root.width)
+        readonly property real frameWidth: root.hasCandidate(root.hoverCandidate)
+            ? Math.max(1, frameRect.width * root.width)
             : 0
-        readonly property real originalHeight: root.hasCandidate(root.hoverCandidate)
-            ? Math.max(1, root.hoverCandidate.height * root.height)
+        readonly property real frameHeight: root.hasCandidate(root.hoverCandidate)
+            ? Math.max(1, frameRect.height * root.height)
+            : 0
+        readonly property real boxHeight: root.hasCandidate(root.hoverCandidate)
+            ? Math.max(
+                frameHeight,
+                (contentBounds.y + contentBounds.height - frameRect.y)
+                    * root.height)
             : 0
 
-        x: root.hasCandidate(root.hoverCandidate)
-            ? Math.max(0, originalX - root.editBoxLeftBleed)
-            : 0
-        y: root.hasCandidate(root.hoverCandidate)
-            ? Math.max(0, originalY - root.hoverBoxVerticalBleed)
-            : 0
-        width: root.hasCandidate(root.hoverCandidate)
-            ? Math.max(
-                1,
-                Math.min(
-                    root.width,
-                    originalX + originalWidth + root.editBoxRightBleed) - x)
-            : 0
-        height: root.hasCandidate(root.hoverCandidate)
-            ? Math.max(
-                1,
-                Math.min(
-                    root.height,
-                    originalY + originalHeight + root.hoverBoxVerticalBleed) - y)
-            : 0
+        x: frameX - root.boundingBoxPadding
+        y: frameY - root.boundingBoxPadding
+        width: frameWidth + 2 * root.boundingBoxPadding
+        height: boxHeight + 2 * root.boundingBoxPadding
         radius: root.editBoxRadius
         color: "transparent"
         border.width: 2
@@ -831,27 +1227,28 @@ Item {
             && !root.editing
             && root.hasCandidate(root.hoverCandidate)
             && root.hoverCandidate.added !== true
+            && (root.controller.selectedPage !== root.page
+                || root.controller.selectedObjectId
+                    !== root.hoverCandidate.objectId)
             && !root.hasActiveDraft(root.hoverCandidate.objectId)
     }
 
     Rectangle {
-        readonly property real originalX: root.controller.selectedX * root.width
-        readonly property real originalY: root.controller.selectedY * root.height
-        readonly property real originalWidth: root.controller.selectedWidth * root.width
-        readonly property real originalHeight: root.controller.selectedHeight * root.height
+        readonly property rect frameRect: root.controller.selectedFrameRect
+        readonly property rect contentBounds: root.controller.selectedContentBounds
+        readonly property real frameX: frameRect.x * root.width
+        readonly property real frameY: frameRect.y * root.height
+        readonly property real frameWidth: frameRect.width * root.width
+        readonly property real frameHeight: frameRect.height * root.height
+        readonly property real boxHeight: Math.max(
+            frameHeight,
+            (contentBounds.y + contentBounds.height - frameRect.y)
+                * root.height)
 
-        x: Math.max(0, originalX - root.editBoxLeftBleed)
-        y: Math.max(0, originalY - root.editBoxVerticalBleed)
-        width: Math.max(
-            1,
-            Math.min(
-                root.width,
-                originalX + originalWidth + root.editBoxRightBleed) - x)
-        height: Math.max(
-            1,
-            Math.min(
-                root.height,
-                originalY + originalHeight + root.editBoxVerticalBleed) - y)
+        x: frameX - root.boundingBoxPadding
+        y: frameY - root.boundingBoxPadding
+        width: Math.max(1, frameWidth) + 2 * root.boundingBoxPadding
+        height: Math.max(1, boxHeight) + 2 * root.boundingBoxPadding
         radius: root.editBoxRadius
         color: "#14d97a32"
         border.width: 2
@@ -864,6 +1261,7 @@ Item {
             && root.controller.selectedPage === root.page
             && root.controller.selectedObjectId.length > 0
             && root.controller.selectedKind !== "addedText"
+            && !root.controller.selectedEditable
             && !root.hasActiveDraft(root.controller.selectedObjectId)
     }
 
@@ -875,18 +1273,18 @@ Item {
 
             required property var modelData
 
-            readonly property real originalX: modelData.x * root.width
-            readonly property real originalY: modelData.y * root.height
-            readonly property real originalWidth: Math.max(1, modelData.width * root.width)
-            readonly property real originalHeight: Math.max(1, modelData.height * root.height)
-            readonly property real maskedX: Math.max(0, originalX - root.fallbackBleed)
-            readonly property real maskedY: Math.max(0, originalY - root.fallbackBleed)
+            readonly property real sourceX: modelData.x * root.width
+            readonly property real sourceY: modelData.y * root.height
+            readonly property real sourceWidth: Math.max(1, modelData.width * root.width)
+            readonly property real sourceHeight: Math.max(1, modelData.height * root.height)
+            readonly property real maskedX: Math.max(0, sourceX - root.fallbackBleed)
+            readonly property real maskedY: Math.max(0, sourceY - root.fallbackBleed)
             readonly property real maskedRight: Math.min(
                 root.width,
-                originalX + originalWidth + root.fallbackBleed)
+                sourceX + sourceWidth + root.fallbackBleed)
             readonly property real maskedBottom: Math.min(
                 root.height,
-                originalY + originalHeight + root.fallbackBleed)
+                sourceY + sourceHeight + root.fallbackBleed)
 
             x: maskedX
             y: maskedY
@@ -900,13 +1298,19 @@ Item {
         }
     }
 
-    Rectangle {
+    Item {
         id: editorFrame
 
-        readonly property real originalX: root.controller.selectedX * root.width
-        readonly property real originalY: root.controller.selectedY * root.height
-        readonly property real originalWidth: root.controller.selectedWidth * root.width
-        readonly property real originalHeight: root.controller.selectedHeight * root.height
+        readonly property rect frameRect: root.controller.selectedFrameRect
+        readonly property rect contentBounds: root.controller.selectedContentBounds
+        readonly property real frameX: frameRect.x * root.width
+        readonly property real frameY: frameRect.y * root.height
+        readonly property real frameWidth: frameRect.width * root.width
+        readonly property real frameHeight: frameRect.height * root.height
+        readonly property real boxHeight: Math.max(
+            frameHeight,
+            (contentBounds.y + contentBounds.height - frameRect.y)
+                * root.height)
         readonly property bool editsAddedText: root.controller.selectedKind === "addedText"
         readonly property bool editsGroupedText: root.controller.selectedSourceRects.length > 1
         readonly property real leftBleed: editsAddedText
@@ -932,105 +1336,334 @@ Item {
             && root.controller.selectedHasBaseline
         readonly property real textOriginX: root.controller.selectedOriginX * root.width
         readonly property real textBaselineY: root.controller.selectedBaselineY * root.height
-        readonly property real inputMargin: editsAddedText
-            ? Math.min(1, width / 4, height / 4)
-            : Math.min(4, width / 4, height / 4)
-        readonly property real measuredTextWidth: Math.max(
-            editorTextMetrics.advanceWidth,
-            editorTextMetrics.boundingRect.width)
-        readonly property real measuredContentWidth: usesBaseline
-            ? Math.max(0, textOriginX - originalX) + measuredTextWidth
-            : measuredTextWidth + 8
-        readonly property real baseDesiredWidth: editsAddedText
-            ? Math.max(originalWidth, measuredTextWidth + 2)
-            : Math.max(80, originalWidth, measuredContentWidth)
-        readonly property real desiredWidth: baseDesiredWidth + leftBleed + rightBleed
-        readonly property real baseDesiredHeight: editsAddedText
-            ? Math.max(
-                originalHeight + root.fallbackBleed * 2,
-                editor.implicitHeight)
-            : Math.max(17, originalHeight)
-        readonly property real desiredHeight: baseDesiredHeight + verticalBleed * 2
-
-        x: Math.max(
+        readonly property real contentLeftPageX: usesBaseline ? textOriginX : frameX
+        readonly property real contentRightPageX: frameX + Math.max(1, frameWidth)
+        readonly property real inputMargin: editsAddedText ? 1 : 2
+        readonly property real desiredContentPageX: usesBaseline
+            ? Math.min(frameX, textOriginX)
+            : frameX
+        readonly property real layoutContentWidth: Math.max(
+            1,
+            frameX + Math.max(1, frameWidth) - desiredContentPageX)
+        readonly property real visibleContentWidth: Math.min(
+            root.width,
+            layoutContentWidth)
+        readonly property real contentPageX: Math.max(
             0,
-            Math.min(originalX - leftBleed, root.width - width))
-        y: editsAddedText
-            ? originalY + (originalHeight - height) / 2
-            : Math.max(
-                0,
-                Math.min(originalY - verticalBleed, root.height - height))
-        width: Math.min(root.width, desiredWidth)
-        height: editsAddedText ? desiredHeight : Math.min(root.height, desiredHeight)
-        color: editsAddedText || editsGroupedText || root.editorUsesCleanTexture
-            ? "transparent"
-            : "#fffdfb"
-        border.color: root.editBoxColor
-        border.width: 2
-        radius: root.editBoxRadius
+            Math.min(desiredContentPageX, root.width - visibleContentWidth))
+        readonly property real visibleLeftBleed: Math.min(leftBleed, contentPageX)
+        readonly property real visibleRightBleed: Math.min(
+            rightBleed,
+            Math.max(0, root.width - contentPageX - visibleContentWidth))
+        readonly property real desiredPageY: usesBaseline
+            ? Math.min(
+                frameY - verticalBleed,
+                textBaselineY - editor.baselineOffset)
+            : frameY - verticalBleed
+        readonly property real contentTop: usesBaseline
+            ? Math.max(0, textBaselineY - y - editor.baselineOffset)
+            : inputMargin
+        readonly property real frameBottom: frameY
+            + Math.max(1, frameHeight)
+            + verticalBleed
+            - y
+        readonly property real editorBottom: contentTop
+            + editor.contentHeight
+            + (usesBaseline ? verticalBleed : inputMargin)
+        readonly property real desiredHeight: Math.max(
+            editsAddedText ? 1 : 17,
+            frameBottom,
+            editorBottom)
+
+        x: contentPageX - visibleLeftBleed
+        y: Math.max(0, desiredPageY)
+        width: visibleLeftBleed + visibleContentWidth + visibleRightBleed
+        height: Math.max(1, Math.min(root.height - y, desiredHeight))
         z: 2
         visible: root.editing
             && root.controller.selectedPage === root.page
             && root.controller.selectedEditable
 
-        TextMetrics {
-            id: editorTextMetrics
-
-            text: editor.text
-            font: editorFrame.displayFont
+        Rectangle {
+            x: editorFrame.frameX - editorFrame.x - root.boundingBoxPadding
+            y: editorFrame.frameY - editorFrame.y - root.boundingBoxPadding
+            width: Math.max(1, editorFrame.frameWidth)
+                + 2 * root.boundingBoxPadding
+            height: Math.max(1, editorFrame.boxHeight)
+                + 2 * root.boundingBoxPadding
+            radius: root.editBoxRadius
+            color: editorFrame.editsAddedText
+                    || editorFrame.editsGroupedText
+                    || root.editorUsesCleanTexture
+                ? "transparent"
+                : "#fffdfb"
+            Accessible.ignored: true
         }
 
-        TextInput {
+        TextEdit {
             id: editor
 
-            x: editorFrame.usesBaseline ? 0 : editorFrame.inputMargin
-            y: editorFrame.usesBaseline
-                ? editorFrame.textBaselineY - editorFrame.y - baselineOffset
-                : editorFrame.inputMargin
-            width: editorFrame.usesBaseline
-                ? parent.width
-                : Math.max(1, parent.width - editorFrame.inputMargin * 2)
-            height: editorFrame.usesBaseline
-                ? implicitHeight
-                : Math.max(1, parent.height - editorFrame.inputMargin * 2)
-            leftPadding: editorFrame.usesBaseline
-                ? Math.max(0, editorFrame.textOriginX - editorFrame.x)
-                : 0
+            x: 0
+            y: editorFrame.contentTop
+            width: parent.width
+            height: Math.max(1, contentHeight)
+            leftPadding: Math.max(
+                0,
+                editorFrame.contentLeftPageX - editorFrame.x)
+            rightPadding: Math.max(
+                0,
+                editorFrame.x + editorFrame.width - editorFrame.contentRightPageX)
+            topPadding: 0
+            bottomPadding: 0
+            textMargin: 0
             color: root.controller.selectedColor
             selectionColor: "#DCEBFF"
             selectedTextColor: root.theme.ribbonTextColor
             font: editorFrame.displayFont
+            textFormat: TextEdit.RichText
+            wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
             selectByMouse: true
-            verticalAlignment: editorFrame.usesBaseline
-                ? TextInput.AlignTop
-                : TextInput.AlignVCenter
-            clip: !editorFrame.usesBaseline
-            onTextEdited: root.controller.updateSelectedTextPreview(text)
-            onAccepted: root.commitEditing()
+            selectByKeyboard: true
+            persistentSelection: true
+            verticalAlignment: TextEdit.AlignTop
+            clip: true
+            onTextEdited: {
+                if (root.loadingEditorText)
+                    return
+
+                root.editorLayoutDirty = true
+                root.syncingEditorPreview = true
+                root.controller.updateSelectedTextPreview(root.editorPlainText())
+                root.syncingEditorPreview = false
+                root.syncEditorSelection()
+                Qt.callLater(root.syncEditorContentBounds)
+            }
+            onContentHeightChanged: {
+                if (root.editorLayoutDirty)
+                    Qt.callLater(root.syncEditorContentBounds)
+            }
+            onSelectionStartChanged: root.syncEditorSelection()
+            onSelectionEndChanged: root.syncEditorSelection()
 
             Keys.onEscapePressed: event => {
                 root.cancelEditing()
                 event.accepted = true
             }
+            Keys.onPressed: event => {
+                const applyModifier = (event.modifiers & Qt.ControlModifier)
+                    || (event.modifiers & Qt.MetaModifier)
+                if (applyModifier
+                        && (event.key === Qt.Key_Return
+                            || event.key === Qt.Key_Enter)) {
+                    root.commitEditing()
+                    event.accepted = true
+                }
+            }
+        }
+    }
+
+    Item {
+        id: resizeOverlay
+
+        readonly property rect layoutFrameRect: root.controller.selectedFrameRect
+        readonly property rect contentBounds: root.controller.selectedContentBounds
+        readonly property rect frameRect: Qt.rect(
+            layoutFrameRect.x,
+            layoutFrameRect.y,
+            layoutFrameRect.width,
+            Math.max(
+                layoutFrameRect.height,
+                contentBounds.y + contentBounds.height - layoutFrameRect.y))
+
+        x: frameRect.x * root.width - root.boundingBoxPadding
+        y: frameRect.y * root.height - root.boundingBoxPadding
+        width: Math.max(1, frameRect.width * root.width)
+            + 2 * root.boundingBoxPadding
+        height: Math.max(1, frameRect.height * root.height)
+            + 2 * root.boundingBoxPadding
+        z: 6
+        visible: root.interactionActive
+            && root.controller.selectedPage === root.page
+            && root.controller.selectedObjectId.length > 0
+            && root.controller.selectedEditable
+            && (root.editing
+                || root.controller.tool !== PDFEditController.AddTextTool)
+
+        Rectangle {
+            anchors.fill: parent
+            radius: root.editBoxRadius
+            color: "#14d97a32"
+            border.width: 2
+            border.color: root.editBoxColor
+            Accessible.ignored: true
+        }
+
+        Repeater {
+            model: [
+                { horizontal: -1, vertical: -1, cursor: Qt.SizeFDiagCursor },
+                { horizontal: 0, vertical: -1, cursor: Qt.SizeVerCursor },
+                { horizontal: 1, vertical: -1, cursor: Qt.SizeBDiagCursor },
+                { horizontal: 1, vertical: 0, cursor: Qt.SizeHorCursor },
+                { horizontal: 1, vertical: 1, cursor: Qt.SizeFDiagCursor },
+                { horizontal: 0, vertical: 1, cursor: Qt.SizeVerCursor },
+                { horizontal: -1, vertical: 1, cursor: Qt.SizeBDiagCursor },
+                { horizontal: -1, vertical: 0, cursor: Qt.SizeHorCursor }
+            ]
+
+            delegate: Rectangle {
+                id: resizeHandle
+
+                required property var modelData
+                property rect dragStartFrameRect: Qt.rect(0, 0, 0, 0)
+                property point dragStartPosition: Qt.point(0, 0)
+
+                x: modelData.horizontal < 0
+                    ? -width / 2
+                    : modelData.horizontal > 0
+                        ? resizeOverlay.width - width / 2
+                        : (resizeOverlay.width - width) / 2
+                y: modelData.vertical < 0
+                    ? -height / 2
+                    : modelData.vertical > 0
+                        ? resizeOverlay.height - height / 2
+                        : (resizeOverlay.height - height) / 2
+                width: root.resizeHandleSize
+                height: root.resizeHandleSize
+                radius: 2
+                color: "#fffdfb"
+                border.width: 2
+                border.color: root.editBoxColor
+
+                MouseArea {
+                    id: resizeMouse
+
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    hoverEnabled: true
+                    preventStealing: true
+                    cursorShape: resizeHandle.modelData.cursor
+                    activeFocusOnTab: true
+                    Accessible.role: Accessible.Button
+                    //% "Resize text box"
+                    Accessible.name: qsTrId("ResizeTextBox")
+
+                    onPressed: mouse => {
+                        forceActiveFocus()
+                        resizeHandle.dragStartFrameRect
+                            = resizeOverlay.frameRect
+                        if (root.editing)
+                            root.editorLayoutDirty = true
+                        resizeHandle.dragStartPosition = mapToItem(
+                            root,
+                            mouse.x,
+                            mouse.y)
+                        root.controller.beginSelectedFrameResize()
+                        root.resizingFrame = true
+                        root.resizingObjectId
+                            = root.controller.selectedObjectId
+                        mouse.accepted = true
+                    }
+                    onPositionChanged: mouse => {
+                        if (!pressed || !root.resizingFrame)
+                            return
+
+                        const currentPosition = mapToItem(root, mouse.x, mouse.y)
+                        root.controller.updateSelectedFrameRect(
+                            root.resizedFrameRect(
+                                resizeHandle.dragStartFrameRect,
+                                resizeHandle.modelData.horizontal,
+                                resizeHandle.modelData.vertical,
+                                currentPosition.x
+                                    - resizeHandle.dragStartPosition.x,
+                                currentPosition.y
+                                    - resizeHandle.dragStartPosition.y))
+                        if (root.editing)
+                            Qt.callLater(root.syncEditorContentBounds)
+                        else
+                            Qt.callLater(root.syncSelectedDraftContentBounds)
+                    }
+                    onReleased: {
+                        if (!root.resizingFrame)
+                            return
+
+                        if (root.editing)
+                            root.syncEditorContentBounds()
+                        else
+                            root.syncSelectedDraftContentBounds()
+                        root.controller.finishSelectedFrameResize()
+                        root.resizingFrame = false
+                        root.resizingObjectId = ""
+                        root.reloadData()
+                    }
+                    onCanceled: root.cancelFrameResize()
+
+                    Keys.onPressed: event => {
+                        const step = (event.modifiers & Qt.ShiftModifier) ? 10 : 1
+                        let deltaX = 0
+                        let deltaY = 0
+                        if (resizeHandle.modelData.horizontal !== 0) {
+                            if (event.key === Qt.Key_Left)
+                                deltaX = -step
+                            else if (event.key === Qt.Key_Right)
+                                deltaX = step
+                        }
+                        if (resizeHandle.modelData.vertical !== 0) {
+                            if (event.key === Qt.Key_Up)
+                                deltaY = -step
+                            else if (event.key === Qt.Key_Down)
+                                deltaY = step
+                        }
+                        if (deltaX === 0 && deltaY === 0)
+                            return
+
+                        const startFrameRect
+                            = resizeOverlay.frameRect
+                        if (root.editing)
+                            root.editorLayoutDirty = true
+                        root.controller.beginSelectedFrameResize()
+                        root.resizingFrame = true
+                        root.resizingObjectId
+                            = root.controller.selectedObjectId
+                        root.controller.updateSelectedFrameRect(
+                            root.resizedFrameRect(
+                                startFrameRect,
+                                resizeHandle.modelData.horizontal,
+                                resizeHandle.modelData.vertical,
+                                deltaX,
+                                deltaY))
+                        if (root.editing)
+                            root.syncEditorContentBounds()
+                        else
+                            root.syncSelectedDraftContentBounds()
+                        root.controller.finishSelectedFrameResize()
+                        root.resizingFrame = false
+                        root.resizingObjectId = ""
+                        root.reloadData()
+                        if (root.editing)
+                            Qt.callLater(root.syncEditorContentBounds)
+                        event.accepted = true
+                    }
+                }
+            }
         }
     }
 
     Rectangle {
-        anchors.left: editorFrame.left
-        anchors.bottom: editorFrame.top
+        anchors.left: resizeOverlay.left
+        anchors.bottom: resizeOverlay.top
         anchors.bottomMargin: 4
         width: editorHint.implicitWidth + 14
         height: 22
         radius: 3
         color: "#e63a3b3f"
-        z: 2
+        z: 7
         visible: editorFrame.visible
 
         Label {
             id: editorHint
 
             anchors.centerIn: parent
-            //% "Enter to apply · Esc to cancel"
+            //% "Ctrl/Cmd+Enter to apply · Esc to cancel"
             text: qsTrId("ApplyOrCancelEditHint")
             color: "white"
             font.pixelSize: 10
@@ -1038,9 +1671,11 @@ Item {
     }
 
     Rectangle {
-        x: Math.min(Math.max(0, root.controller.selectedX * root.width),
+        x: Math.min(Math.max(0, root.controller.selectedFrameRect.x * root.width),
                     Math.max(0, root.width - width))
-        y: Math.max(0, root.controller.selectedY * root.height - height - 5)
+        y: Math.max(
+            0,
+            root.controller.selectedFrameRect.y * root.height - height - 5)
         width: Math.min(root.width, selectionReason.implicitWidth + 18)
         height: 26
         radius: 3

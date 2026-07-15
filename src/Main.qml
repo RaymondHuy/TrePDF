@@ -257,6 +257,7 @@ ApplicationWindow {
                     selectedFontBold: editController.selectedFontBold
                     selectedFontItalic: editController.selectedFontItalic
                     selectedFontUnderline: editController.selectedFontUnderline
+                    selectedColor: editController.selectedColor
                     formattingEnabled: editController.selectedEditable
                     onFontFamilyChangeRequested: fontFamily => {
                         editController.setSelectedFontFamily(fontFamily)
@@ -269,6 +270,9 @@ ApplicationWindow {
                     }
                     onFontUnderlineChangeRequested: enabled => {
                         editController.setSelectedFontUnderline(enabled)
+                    }
+                    onFontColorChangeRequested: color => {
+                        editController.setSelectedColor(color)
                     }
                     onCollapsedChangeRequested: collapsed => {
                         textFormatPanelLoader.panelCollapsed = collapsed

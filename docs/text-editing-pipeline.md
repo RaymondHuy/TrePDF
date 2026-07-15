@@ -1,7 +1,7 @@
 # Quy trình xác định và hiển thị text có thể chỉnh sửa
 
 Tài liệu này mô tả đúng implementation hiện tại của TrePDF, từ lúc PDFium quét
-nội dung trong PDF đến lúc người dùng mở `TextInput` để chỉnh sửa. Tính năng
+nội dung trong PDF đến lúc người dùng mở `TextEdit` để chỉnh sửa. Tính năng
 hiện tại chỉ tạo **draft trong phiên làm việc**; nội dung chưa được ghi ngược
 vào file PDF.
 
@@ -12,7 +12,7 @@ Các file chính:
 - [`PDFEditController.h`](../src/PDFEditController.h): cấu trúc `Candidate` và
   các property đưa sang QML.
 - [`EditOverlay.qml`](../src/Components/EditOverlay.qml): hit test, hover box,
-  selection box và `TextInput` khi edit.
+  selection box và rich `TextEdit` khi edit.
 - [`PDFPageItem.cpp`](../src/PDFPageItem.cpp): render lại page mà tạm ẩn text
   object gốc khi đã có draft.
 - [`PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml): đặt
@@ -36,11 +36,11 @@ flowchart TD
     J --> L["Hover: khung xám / forbidden cursor"]
     K --> M["Click chọn hoặc double-click/Edit"]
     M --> N["selectCandidate + beginSelectedTextEdit"]
-    N --> O["QML dựng editorFrame + TextInput"]
-    O --> P["Font Qt + baseline + geometry theo Candidate"]
-    P --> Q["Gõ chữ: updateSelectedTextPreview"]
+    N --> O["QML dựng editorFrame + rich TextEdit"]
+    O --> P["Character spans + paragraph formats + baseline + frameRect"]
+    P --> Q["Gõ chữ/Enter: updateSelectedTextPreview + reflow"]
     Q --> R["Tạo draft và render lại page không có object gốc"]
-    R --> S["Enter: commit draft; Esc: phục hồi trạng thái trước edit"]
+    R --> S["Ctrl/Cmd+Enter: commit; Esc: phục hồi trạng thái trước edit"]
 ```
 
 ## 2. Các khái niệm geometry
@@ -81,24 +81,54 @@ sau đó hợp các hình chữ nhật:
 glyphBBox = union(charBox[0], charBox[1], ..., charBox[n - 1])
 ```
 
-Nếu có glyph bbox hợp lệ, nó được ưu tiên làm `Candidate.rect`. Nếu không có,
-TrePDF dùng bounds của cả page object từ `FPDFPageObj_GetBounds()`.
+Nếu có glyph bbox hợp lệ, nó được ưu tiên làm
+`Candidate.geometry.sourceRect`. Nếu không có, TrePDF dùng bounds của cả page
+object từ `FPDFPageObj_GetBounds()`.
 
 Glyph bbox không phải line box của font. Nó không tự bao gồm toàn bộ ascent,
 descent hoặc khoảng trống mà Qt cần để vẽ caret.
 
-### 2.3 Origin và baseline
+### 2.3 Ba lớp geometry của candidate
+
+Geometry normalized theo page được tách giữa candidate nguồn và rich-text
+draft:
+
+- `Candidate.geometry.sourceRect`: bbox bất biến của nội dung PDF nguồn.
+  Candidate dòng dùng union
+  của các source part; mỗi `CandidatePart` vẫn giữ `sourceRect` riêng để mask và
+  suppression chính xác.
+- `Draft.frameRect`: box layout của draft/editor. Với text PDF có baseline, seed
+  ban đầu là union của `sourceRect` và chiều rộng mà `QFontMetricsF` cần để vẽ
+  chuỗi gốc từ origin, cộng 4 page point chống sai số làm tròn. Nhờ vậy candidate
+  gộp không wrap ngay khi vừa mở editor. QML selection, draft delegate và editor
+  đều đọc rectangle này; đây là geometry sẽ thay đổi khi có resize.
+- `Draft.contentBounds`: bbox của nội dung sau layout. Ban đầu bằng `frameRect`;
+  rich-text editor đo chiều cao reflow trong QML và gọi
+  `updateSelectedContentBounds()`. Chiều rộng luôn theo `frameRect`, còn cạnh
+  dưới có thể nở để chứa Enter/wrap. Giá trị này nằm trong cùng snapshot draft
+  nên undo/redo phục hồi đúng chiều cao nội dung.
+
+`sourceRect` không thay đổi theo draft. `frameRect` và `contentBounds` nằm trong
+rich-text draft. `Command` lưu snapshot draft before/after nên cancel, undo và
+redo phục hồi geometry cùng text và định dạng. Overlay hiển thị tám handle ở
+bốn cạnh và bốn góc của box đang chọn; mỗi lần kéo tạo một transaction geometry.
+
+### 2.4 Origin và baseline
 
 - `origin`: điểm bắt đầu của ký tự thật đầu tiên, lấy bằng
   `FPDFText_GetCharOrigin()`.
 - `baseline`: đường đi qua origin mà glyph đứng trên đó.
 - Trong `Candidate`, code hiện lưu điểm origin đã chuẩn hóa thành
   `originX` và `baselineY`.
+- Khi resize làm đổi `frameRect.x/y`, layout origin của draft dịch cùng delta
+  so với frame ban đầu. Vì vậy kéo cạnh trái/trên thật sự đổi vùng layout nhưng
+  vẫn giữ offset baseline gốc bên trong box; source origin trong candidate không
+  bị sửa.
 
-Nếu lấy được origin, QML đặt baseline của `TextInput` trùng với baseline PDF.
+Nếu lấy được origin, QML đặt baseline dòng đầu của `TextEdit` trùng với baseline PDF.
 Nếu không lấy được, editor dùng căn giữa theo chiều dọc trong bbox.
 
-### 2.4 Font size và chiều cao glyph là hai giá trị khác nhau
+### 2.5 Font size và chiều cao glyph là hai giá trị khác nhau
 
 `FPDFTextObj_GetFontSize()` trả về **em-size** của font trong hệ tọa độ PDF.
 Nó không phải chiều cao phần mực đen nhìn thấy.
@@ -212,8 +242,10 @@ emSize = displayFontSizeRatio * pageHeight
 
 Nếu hai chuỗi chưa có whitespace ở ranh giới và gap lớn hơn `0.20 em`, code
 chèn một dấu cách. Gap lớn hơn giới hạn sẽ tách candidate để tránh nối nhầm hai
-cột. Khác style cũng tách candidate vì `TextInput` hiện chỉ áp dụng một QFont và
-một màu cho toàn bộ draft.
+cột. Khác style nguồn cũng tách candidate. Rich-text draft có thể lưu nhiều
+character span; `TextEdit` và draft overlay render từng span, còn các lệnh font,
+color, bold, italic và underline áp dụng vào range đang bôi đen. Nếu không có
+range, lệnh tiếp tục áp dụng cho toàn bộ draft để giữ hành vi cũ.
 
 Candidate dòng nhận bbox union, baseline/origin và style của part đầu tiên.
 `renderSuppressible` chỉ true khi mọi part đều suppress được. Candidate nguồn
@@ -279,7 +311,7 @@ editingAllowed = permissions == 0xFFFFFFFF
 
 `permissions` được lấy từ `FPDF_GetDocPermissions()`.
 
-### 6.2 Layout phải phù hợp editor một dòng nằm ngang
+### 6.2 Object PDF nguồn phải là một dòng nằm ngang
 
 Gọi `T` là ma trận text đã ghép cả Form XObject. Sau khi đưa các điểm qua `T`
 và `FPDF_PageToDevice()`, code tính:
@@ -358,11 +390,11 @@ family, bundled font luôn được resolver xét trước.
 
 Dropdown font family hiển thị bundled families trước, sau đó toàn bộ system
 families chưa trùng tên. Font embedded của text đang chọn cũng được thêm tạm
-nếu chưa có trong hai danh sách này. Khi người dùng chọn family mới,
-`Draft.candidate.fontFamily` được cập nhật ngay để editor và draft overlay dùng
-cùng font. Family, bold, italic và underline trước/sau nằm trong cùng command
-với text nên cancel, undo và redo đều khôi phục đúng định dạng. Thay đổi vẫn chỉ
-tồn tại trong session và chưa được ghi ngược vào file PDF.
+nếu chưa có trong hai danh sách này. Khi người dùng chọn family mới, mọi
+`Draft.characterSpans[].format.fontFamily` được cập nhật để editor và draft
+overlay dùng cùng font. `Command` lưu toàn bộ draft before/after nên cancel,
+undo và redo khôi phục text, spans, paragraph formats và geometry cùng lúc.
+Thay đổi vẫn chỉ tồn tại trong session và chưa được ghi ngược vào file PDF.
 
 Giới hạn an toàn hiện tại:
 
@@ -450,6 +482,9 @@ UltraExpanded.
 - Với render mode chỉ stroke: lấy stroke color.
 - Các mode còn lại: lấy fill color.
 - Nếu PDFium không trả được màu: fallback sang đen.
+- Color picker hiển thị màu của candidate hoặc draft đang chọn. Khi xác nhận
+  màu mới, màu trong mọi character span của draft được cập nhật ngay; thay đổi
+  hỗ trợ cancel, undo và redo.
 
 ### 7.8 Tạo QFont cho overlay/editor
 
@@ -467,6 +502,35 @@ pixelSize = max(1, round(requestedPixelSize))
 Character spacing và word spacing chưa được lấy từ PDF. Underline nguồn cũng
 chưa được ghép từ các path trang vào text candidate.
 
+### 7.9 Rich-text draft
+
+Mỗi thay đổi trong session dùng một `Draft`:
+
+```text
+Draft
+  candidate            // provenance và sourceRect bất biến
+  text                  // QString, range dùng UTF-16 index
+  characterSpans[]      // start, length và CharacterFormat
+  paragraphFormats[]    // start, length, alignment và list metadata
+  frameRect             // box layout normalized theo page
+  contentBounds         // bbox kết quả layout normalized theo page
+```
+
+`CharacterFormat` hiện chứa family, font size ratio, display size ratio,
+stretch, bold, italic, underline và color. `ParagraphFormat` chứa alignment,
+list style (`none`, `bullet`, `decimal`), list level và số bắt đầu.
+
+Draft khởi tạo với một character span phủ toàn bộ text và một paragraph format
+cho mỗi đoạn phân tách bởi `\n`. Khi `TextEdit` gửi plain text mới, controller tìm
+prefix/suffix không đổi, giữ format của các ký tự đó, cho phần chèn kế thừa
+format liền kề rồi merge các span liên tiếp cùng style. Paragraph formats được
+tạo lại cho từng đoạn nên Enter tạo paragraph mới thay vì kết thúc editor.
+
+QML nhận `characterSpans` và `paragraphFormats` trong candidate/draft map, đồng
+thời có `selectedCharacterSpans` và `selectedParagraphFormats` trên controller.
+QML chuyển model semantic này thành rich HTML nội bộ cho `TextEdit`/`Text`, còn
+controller tiếp tục lưu plain text và range UTF-16 thay vì phụ thuộc HTML của Qt.
+
 ## 8. Hit test: con trỏ đang nằm trên text nào
 
 QML gửi tọa độ normalized:
@@ -479,7 +543,7 @@ normalizedPointerY = mouseY / overlayHeight
 C++ nới hit rectangle mỗi phía `0.0025` theo kích thước page normalized:
 
 ```text
-hitRect = candidate.rect adjusted by ±0.0025
+hitRect = candidate.geometry.sourceRect adjusted by ±0.0025
 ```
 
 Nếu nhiều candidate chồng nhau, ưu tiên:
@@ -512,23 +576,22 @@ editBoxRadius = 4 px
 editBoxColor = #f5a55a
 editBoxLeftBleed = 3 px
 editBoxRightBleed = 3 px
-hoverBoxVerticalBleed = 3 px
 editBoxVerticalBleed = 3 px
+boundingBoxPadding = 3 px
 fallbackBleed = 2 px
 borderWidth = 2 px
 ```
 
 ### 9.1 Hover box
 
-Gọi bbox gốc theo pixel là `(ox, oy, ow, oh)`, page là `(pw, ph)`:
+Hover box lấy effective bounds theo pixel `(fx, fy, fw, fh)` rồi nới đều bốn
+phía 3 px:
 
 ```text
-hoverX = max(0, ox - 3)
-hoverY = max(0, oy - 3)
-hoverRight = min(pw, ox + ow + 3)
-hoverBottom = min(ph, oy + oh + 3)
-hoverWidth = max(1, hoverRight - hoverX)
-hoverHeight = max(1, hoverBottom - hoverY)
+hoverX = fx - 3
+hoverY = fy - 3
+hoverWidth = max(1, fw) + 6
+hoverHeight = max(1, fh) + 6
 ```
 
 Khung có nền trong suốt, radius 4 px:
@@ -539,41 +602,46 @@ Khung có nền trong suốt, radius 4 px:
 
 ### 9.2 Selection box
 
-Sau khi click chọn, selection box dùng bleed trái 3 px, bleed phải 3 px và
-bleed dọc 3 px:
+Sau khi click chọn candidate editable, `resizeOverlay` là nguồn duy nhất vẽ
+selection box và tám handles. Layout geometry vẫn đọc đúng `frameRect` và
+`contentBounds`; chỉ phần trang trí được nới đều bốn phía 3 px:
 
 ```text
-selectionX = max(0, ox - 3)
-selectionY = max(0, oy - 3)
-selectionRight = min(pw, ox + ow + 3)
-selectionBottom = min(ph, oy + oh + 3)
+selectionX = fx - 3
+selectionY = fy - 3
+selectionWidth = max(1, fw) + 6
+selectionBottom = max(frameBottom, contentBoundsBottom)
+selectionHeight = max(1, selectionBottom - fy) + 6
 ```
 
 Selection box có nền cam rất nhạt `#14d97a32`, border `#f5a55a` và radius
-4 px.
-Nó bị ẩn khi editor thật sự mở.
+4 px. Nó vẫn là box duy nhất khi editor mở hoặc active draft đang được chọn;
+border của editor host và selection decoration cũ không được vẽ chồng lên nó.
 
-Với active draft, hover và selection box gốc ở trên bị ẩn để tránh vẽ hai
-khung khác kích thước. Draft delegate đo lại chiều rộng hiển thị:
+Draft/editor host nở chiều cao theo rich text để multiline không bị mất. Chiều
+cao đó được lưu vào `contentBounds`; nền editor, hover decoration, selection và
+handles đều dùng effective bounds từ `frameRect` đến cạnh dưới lớn hơn của
+`frameRect`/`contentBounds`, sau đó cùng áp dụng `boundingBoxPadding = 3`. Padding
+trang trí này không tham gia tính wrap width. Draft delegate giữ chiều rộng
+layout như sau:
 
 ```text
 draftLeft = min(originalX, originX)
-draftRight = max(originalRight, originX + measuredTextWidth)
-contentWidth = draftRight - draftLeft
-visibleContentWidth = min(pageWidth, contentWidth)
+draftRight = frameRight
+layoutWidth = draftRight - draftLeft
+visibleContentWidth = min(pageWidth, layoutWidth)
 contentX = max(0, min(draftLeft, pageRight - visibleContentWidth))
 leftBoxBleed = min(3, contentX)
 rightBoxBleed = min(3, max(0, pageRight - contentX - visibleContentWidth))
 draftX = contentX - leftBoxBleed
 draftWidth = leftBoxBleed + visibleContentWidth + rightBoxBleed
+draftHeight = max(frameBottom, textTop + richTextImplicitHeight + bottomBleed)
 ```
 
-Sau đó chính delegate vẽ khung và bắt chuột theo `draftWidth`, nên khung bao cả
-phần chữ đã sửa dài hơn nội dung PDF ban đầu. Chiều rộng vẫn bị giới hạn bởi
-chiều rộng page. Khi origin của ký tự đầu nằm bên trái bbox glyph, draft cũng
-mở rộng sang trái tới origin đó để text không bị dịch phải sau khi commit.
-Khung active draft cộng thêm tối đa 3 px ở hai mép ngang; mép trên và dưới vẫn
-giữ nguyên geometry của nội dung.
+Text dài wrap xuống dòng trong chiều rộng này thay vì làm draft nở ngang. Khi
+origin của ký tự đầu nằm bên trái bbox glyph, draft vẫn mở rộng sang trái tới
+origin để dòng đầu không bị dịch phải sau khi commit. Chiều cao delegate nở
+theo implicit height của rich text và bị cắt ở mép page.
 
 Trong Select tool, click text editable mở popup Edit/Delete. Trong Edit Text
 tool, double-click mở editor trực tiếp. Nhấn Enter trên candidate đang chọn
@@ -591,12 +659,13 @@ hasSelection == true
 selectedCandidate.editable == true
 ```
 
-Controller lưu trạng thái draft trước edit vào `m_textEditCommand`, sau đó đặt
-`textEditActive = true`. Chưa có draft mới cho đến khi text thực sự thay đổi.
+Controller lưu snapshot rich-text draft trước edit vào `m_textEditCommand`, sau
+đó đặt `textEditActive = true`. Chưa có draft mới cho đến khi text, spans,
+paragraph formats hoặc geometry thực sự thay đổi.
 
-Candidate dòng vẫn dùng đúng một draft key `page|lineObjectId`. Chuỗi đã sửa
-không được chia ngược về từng part trong session; `CandidatePart` chỉ giữ nguồn
-để mask, suppression, undo/redo và phục vụ việc ghi PDF trong tương lai.
+Candidate dòng vẫn dùng đúng một draft key `page|lineObjectId`. Rich-text spans
+không được chia ngược về từng source part trong session; `CandidatePart` chỉ giữ
+nguồn để mask, suppression và phục vụ việc ghi PDF trong tương lai.
 
 ### 10.2 Trạng thái QML
 
@@ -605,18 +674,22 @@ không được chia ngược về từng part trong session; `CandidatePart` ch
 1. Gọi `selectCandidate()`.
 2. Ẩn con trỏ chọn tùy biến.
 3. Gọi `beginSelectedTextEdit()`.
-4. Gán `editor.text = controller.selectedText`.
-5. Đặt `editing = true`.
-6. Ở event loop kế tiếp, focus `TextInput`, bỏ selection cũ và đặt caret ở
-   cuối chuỗi.
+4. Đặt `editing = true`.
+5. Chuyển `text`, `characterSpans` và `paragraphFormats` thành rich HTML nội bộ
+   rồi nạp vào `TextEdit`.
+6. Ở event loop kế tiếp, focus `TextEdit`, bỏ selection cũ và đặt caret ở cuối
+   document.
 
 Khi vừa mở editor, toàn bộ dòng không bị chọn tự động. Người dùng có thể kéo
 chuột hoặc dùng Shift + phím mũi tên để chọn một đoạn; đoạn đang chọn có nền
 xanh nhạt (`#DCEBFF`) và chữ tối theo màu text của ribbon.
 
-Trong lúc `editing = true`, con trỏ chọn tùy biến bị vô hiệu hóa và `TextInput`
+Trong lúc `editing = true`, con trỏ chọn tùy biến bị vô hiệu hóa và `TextEdit`
 dùng con trỏ I-beam gốc của Qt. Vì vậy khi giữ chuột rồi kéo để bôi đen, con trỏ
 di chuyển liên tục theo vị trí kéo thay vì chỉ cập nhật sau khi thả chuột.
+Range selection của `TextEdit` được gửi về controller bằng UTF-16 start/length.
+Lệnh formatting tách span ở hai biên range, cập nhật phần giữa rồi merge lại
+những span kề nhau có cùng format.
 
 ## 11. Công thức kích thước editor frame
 
@@ -627,26 +700,29 @@ leftBleed = 3
 rightBleed = 3
 verticalBleed = 3
 
-measuredContentWidth = originOffset + measuredTextWidth
-baseDesiredWidth = max(80, originalWidth, measuredContentWidth)
-desiredWidth = baseDesiredWidth + leftBleed + rightBleed
-editorWidth = min(pageWidth, desiredWidth)
+layoutX = hasBaseline ? min(frameX, textOriginX) : frameX
+layoutWidth = frameRight - layoutX
+editorWidth = visibleLeftBleed + layoutWidth + visibleRightBleed
 
-baseDesiredHeight = max(17, originalHeight)
-desiredHeight = baseDesiredHeight + 2 * verticalBleed
-editorHeight = min(pageHeight, desiredHeight)
+editorY = hasBaseline
+  ? max(0, min(frameY - verticalBleed,
+               baselineY - TextEdit.baselineOffset))
+  : max(0, frameY - verticalBleed)
 
-editorX = clamp(originalX - leftBleed,
-                0,
-                pageWidth - editorWidth)
-editorY = clamp(originalY - verticalBleed,
-                0,
-                pageHeight - editorHeight)
+contentTop = hasBaseline
+  ? baselineY - editorY - TextEdit.baselineOffset
+  : inputMargin
+desiredHeight = max(17,
+                    frameBottom - editorY,
+                    contentTop + TextEdit.contentHeight + bottomMargin)
+editorHeight = min(pageHeight - editorY, desiredHeight)
 ```
 
-Vì có `max(17, originalHeight)`, bbox glyph thấp hơn 17 px vẫn tạo editor cao
-ít nhất 23 px sau khi cộng bleed. Đây là nguyên nhân phần trắng phía dưới có
-thể trông dư so với glyph gốc.
+Chiều rộng layout lấy đúng từ mép content trái tới mép phải của `frameRect`;
+bleed và border không làm tăng hoặc giảm wrap width. Seed frame có thể rộng hơn
+`sourceRect` để vừa chuỗi PDF gốc, nhưng không tiếp tục nới theo text người dùng
+nhập. `TextEdit.WrapAtWordBoundaryOrAnywhere` tự reflow và `contentHeight` làm
+editor nở xuống dưới. `max(17, ...)` vẫn giữ caret đủ cao cho bbox glyph rất thấp.
 
 Editor có border cam nhạt `#f5a55a` dày 2 px, radius 4 px. Nền của editor:
 
@@ -661,10 +737,13 @@ Add Text dùng công thức riêng:
 leftBleed = 0
 rightBleed = 0
 verticalBleed = 0
-baseDesiredWidth = max(originalWidth, measuredTextWidth + 2)
-baseDesiredHeight = max(originalHeight + 2 * fallbackBleed,
-                        editorImplicitHeight)
+editorWidth = frameWidth
+editorHeight = max(frameHeight,
+                   inputMargin + TextEdit.contentHeight + inputMargin)
 ```
+
+Add Text vì vậy cũng wrap trong frame mặc định 25% chiều rộng page và nở chiều
+cao theo số dòng.
 
 Khung mặc định khi tạo Add Text:
 
@@ -684,30 +763,30 @@ Với text PDF có baseline:
 textOriginX = selectedOriginX * pageWidth
 textBaselineY = selectedBaselineY * pageHeight
 
-TextInput.x = 0
-TextInput.y = textBaselineY - editorFrame.y - TextInput.baselineOffset
-TextInput.leftPadding = max(0, textOriginX - editorFrame.x)
+TextEdit.x = 0
+TextEdit.y = textBaselineY - editorFrame.y - TextEdit.baselineOffset
+TextEdit.leftPadding = max(0, textOriginX - editorFrame.x)
 ```
 
 Do đó baseline toàn cục của Qt bằng baseline PDF:
 
 ```text
-editorFrame.y + TextInput.y + TextInput.baselineOffset
+editorFrame.y + TextEdit.y + TextEdit.baselineOffset
 = textBaselineY
 ```
 
 Và vị trí bắt đầu ngang là:
 
 ```text
-editorFrame.x + TextInput.leftPadding = textOriginX
+editorFrame.x + TextEdit.leftPadding = textOriginX
 ```
 
-Khi không có baseline, `TextInput` dùng margin tối đa 4 px và
-`AlignVCenter` trong editor frame.
+Khi không có baseline, `TextEdit` dùng margin 2 px và `AlignTop` trong editor
+frame.
 
 ## 13. Vì sao caret có thể cao hơn chữ
 
-Caret thuộc `TextInput`, nên chiều cao của nó theo line metrics của QFont mà Qt
+Caret thuộc `TextEdit`, nên chiều cao của nó theo line metrics của QFont mà Qt
 đang dùng, không theo glyph bbox của chuỗi hiện tại.
 
 ```text
@@ -721,7 +800,7 @@ Sai font family hoặc Qt fallback vẫn có thể làm chênh lệch lớn hơn
 
 ## 14. Che text gốc và render draft
 
-Nếu vẽ `TextInput` trực tiếp lên page texture gốc, người dùng sẽ thấy hai lớp
+Nếu vẽ `TextEdit` trực tiếp lên page texture gốc, người dùng sẽ thấy hai lớp
 chữ chồng nhau. TrePDF xử lý theo hai giai đoạn.
 
 ### 14.1 Fallback mask tức thời
@@ -765,25 +844,51 @@ editorUsesCleanTexture = true nếu object đang edit có active draft
 ```
 
 Lúc đó fallback mask và nền trắng của editor biến mất; chỉ còn page sạch,
-`TextInput` và border cam.
+`TextEdit` và border cam.
 
 Nếu render mode không suppress được hoặc suppression thất bại,
 `draftTextureReady = false` và mask trắng tiếp tục được dùng.
 
-## 15. Khi user gõ, Enter hoặc Esc
+## 15. Khi user gõ, Enter, Ctrl/Cmd+Enter hoặc Esc
+
+### 15.0 Resize frame
+
+Box text đang chọn có tám resize handle. Khi bắt đầu kéo,
+`beginSelectedFrameResize()` chụp `Draft` hiện tại. Trong lúc kéo, QML chuẩn hóa
+delta theo kích thước page, giới hạn frame trong `[0, 1]`, giữ kích thước tối
+thiểu và gọi `updateSelectedFrameRect()`; binding chiều rộng của `TextEdit` và
+draft text làm nội dung reflow ngay. Sau reflow, QML gọi
+`updateSelectedContentBounds()` để cập nhật cạnh dưới thực tế; handles không
+nhảy về chiều cao frame cũ.
+
+Khi thả chuột, `finishSelectedFrameResize()` tạo đúng một undo command nếu
+resize được bắt đầu ngoài editor. Nếu editor đang mở, geometry được gộp vào
+chính transaction text đang hoạt động. Hủy thao tác phục hồi geometry lúc bắt
+đầu kéo mà không làm mất text đã gõ trước đó; undo/redo phục hồi nguyên snapshot
+gồm text, character spans, paragraph formats, `frameRect` và `contentBounds`.
 
 ### 15.1 Trong lúc gõ
 
-`TextInput.onTextEdited` gọi `updateSelectedTextPreview(text)`:
+`TextEdit.onTextEdited` lấy plain text bằng `getText(0, length)`, chuẩn hóa ký tự
+paragraph separator của Qt thành `\n`, rồi gọi `updateSelectedTextPreview()`:
 
-- text bằng bản gốc: xóa draft nếu có;
-- text khác bản gốc: lưu `Draft{candidate, text}`;
+- cập nhật `Draft.text` và điều chỉnh character spans theo prefix/suffix;
+- tái tạo range paragraph cho text hiện tại;
+- đo lại `TextEdit.contentHeight` và đồng bộ `Draft.contentBounds`, nên Enter
+  làm box/handles nở xuống để chứa dòng mới;
+- toàn bộ rich-text draft bằng trạng thái nguồn: xóa draft nếu có;
+- khác trạng thái nguồn: lưu rich-text draft;
 - cập nhật `selectedText`;
 - phát signal để overlay và page renderer cập nhật.
 
 ### 15.2 Enter
 
-Enter gọi `finishSelectedTextEdit()`:
+Enter chèn `\n`, tạo paragraph format mới và làm document reflow trong
+`frameRect`. Nó không kết thúc editor.
+
+### 15.3 Ctrl/Cmd+Enter
+
+Ctrl/Cmd+Enter gọi `finishSelectedTextEdit()`:
 
 - kết thúc trạng thái edit;
 - so sánh before/after;
@@ -792,7 +897,7 @@ Enter gọi `finishSelectedTextEdit()`:
 - yêu cầu render draft ngay;
 - file PDF trên ổ đĩa vẫn không đổi.
 
-### 15.3 Esc
+### 15.4 Esc
 
 Esc gọi `cancelSelectedTextEdit()` và phục hồi trạng thái draft đã có trước khi
 bắt đầu edit.
@@ -814,7 +919,7 @@ TrePDF hiện đã lấy và áp dụng:
 - màu chữ.
 
 Nhưng PDF renderer và Qt text layout vẫn là hai hệ thống khác nhau. Các dữ liệu
-sau chưa được tái tạo đầy đủ trong `TextInput`:
+sau chưa được tái tạo đầy đủ trong `TextEdit`:
 
 - glyph ID gốc và glyph positioning từng ký tự;
 - character spacing (`Tc`);
@@ -888,7 +993,7 @@ Baseline và origin:
 textOriginX = 0.20 * 1000 = 200 px
 textBaselineY = 0.32 * 1400 = 448 px
 leftPadding = 200 - 197 = 3 px
-TextInput.y = 448 - 417 - baselineOffset
+TextEdit.y = 448 - 417 - baselineOffset
 ```
 
 ## 18. Điểm debug quan trọng
@@ -905,7 +1010,8 @@ Khi bbox/baseline lệch:
 - vòng `FPDFText_GetCharBox()` và `FPDFText_GetCharOrigin()` trong
   `scanPage()`;
 - `normalizedRect()` và `normalizedPagePoint()`;
-- `candidate.rect`, `candidate.origin`, `candidate.hasBaseline`.
+- `candidate.geometry.sourceRect`, `draft.frameRect`, `draft.contentBounds`,
+  `candidate.origin` và `candidate.hasBaseline`.
 
 Khi font/cỡ chữ lệch:
 
@@ -943,13 +1049,17 @@ Text được gom thành candidate dòng
   = các text candidate editable có baseline gần nhau trong 0.25 em
     + gap liên tiếp nằm trong [-0.35 em, 1.25 em]
     + family/size/stretch/bold/color tương thích
-    + giữ từng objectId, objectPath và bbox nguồn trong CandidatePart
+    + giữ từng objectId, objectPath và sourceRect trong CandidatePart
 
 Text hiển thị khi edit
   = Unicode text do Qt layout lại
     + QFont đã áp family/stretch/bold/em-size nếu lấy được
     + baseline PDF nếu có
-    + editor frame theo bbox union và measured text, min 80 × 17 px
+    + sourceRect bất biến cho hit-test/mask/suppression
+    + rich-text draft gồm text, characterSpans và paragraphFormats
+    + Draft.frameRect seed bằng max(sourceRect, chiều rộng layout Qt của text gốc)
+    + Draft.contentBounds ban đầu bằng frameRect
+    + editor/draft wrap theo chiều rộng frameRect và nở chiều cao theo reflow
     + một fallback mask cho mỗi source part đến khi page texture sạch sẵn sàng
     + một draft/undo command có thể suppress nhiều PDF text object nguồn
 ```
