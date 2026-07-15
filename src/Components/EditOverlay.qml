@@ -376,16 +376,24 @@ Item {
             readonly property real measuredTextWidth: Math.max(
                 draftTextMetrics.advanceWidth,
                 draftTextMetrics.boundingRect.width)
-            readonly property real measuredContentWidth: usesBaseline
-                ? Math.max(0, textOriginX - originalX) + measuredTextWidth
-                : measuredTextWidth + horizontalPadding
+            readonly property real desiredTextPageX: usesBaseline
+                ? Math.min(originalX, textOriginX)
+                : originalX
+            readonly property real measuredContentRight: usesBaseline
+                ? Math.max(
+                    originalX + originalWidth,
+                    textOriginX + measuredTextWidth)
+                : originalX + measuredTextWidth + horizontalPadding
+            readonly property real measuredContentWidth: Math.max(
+                1,
+                measuredContentRight - desiredTextPageX)
             readonly property real expandedTextWidth: Math.max(
                 originalWidth,
                 measuredContentWidth)
             readonly property real textWidth: Math.min(root.width, expandedTextWidth)
             readonly property real textPageX: Math.max(
                 0,
-                Math.min(originalX, root.width - textWidth))
+                Math.min(desiredTextPageX, root.width - textWidth))
             readonly property real textHeight: Math.max(
                 originalHeight + root.fallbackBleed * 2,
                 draftText.implicitHeight)

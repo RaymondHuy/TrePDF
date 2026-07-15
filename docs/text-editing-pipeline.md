@@ -557,13 +557,15 @@ Với active draft, hover và selection box gốc ở trên bị ẩn để trá
 khung khác kích thước. Draft delegate đo lại chiều rộng hiển thị:
 
 ```text
-measuredContentWidth = originOffset + measuredTextWidth
-draftWidth = max(originalWidth, measuredContentWidth)
+draftLeft = min(originalX, originX)
+draftRight = max(originalRight, originX + measuredTextWidth)
+draftWidth = draftRight - draftLeft
 ```
 
 Sau đó chính delegate vẽ khung và bắt chuột theo `draftWidth`, nên khung bao cả
 phần chữ đã sửa dài hơn nội dung PDF ban đầu. Chiều rộng vẫn bị giới hạn bởi
-chiều rộng page.
+chiều rộng page. Khi origin của ký tự đầu nằm bên trái bbox glyph, draft cũng
+mở rộng sang trái tới origin đó để text không bị dịch phải sau khi commit.
 
 Trong Select tool, click text editable mở popup Edit/Delete. Trong Edit Text
 tool, double-click mở editor trực tiếp. Nhấn Enter trên candidate đang chọn
