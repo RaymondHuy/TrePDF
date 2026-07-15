@@ -559,13 +559,21 @@ khung khác kích thước. Draft delegate đo lại chiều rộng hiển thị
 ```text
 draftLeft = min(originalX, originX)
 draftRight = max(originalRight, originX + measuredTextWidth)
-draftWidth = draftRight - draftLeft
+contentWidth = draftRight - draftLeft
+visibleContentWidth = min(pageWidth, contentWidth)
+contentX = max(0, min(draftLeft, pageRight - visibleContentWidth))
+leftBoxBleed = min(3, contentX)
+rightBoxBleed = min(3, max(0, pageRight - contentX - visibleContentWidth))
+draftX = contentX - leftBoxBleed
+draftWidth = leftBoxBleed + visibleContentWidth + rightBoxBleed
 ```
 
 Sau đó chính delegate vẽ khung và bắt chuột theo `draftWidth`, nên khung bao cả
 phần chữ đã sửa dài hơn nội dung PDF ban đầu. Chiều rộng vẫn bị giới hạn bởi
 chiều rộng page. Khi origin của ký tự đầu nằm bên trái bbox glyph, draft cũng
 mở rộng sang trái tới origin đó để text không bị dịch phải sau khi commit.
+Khung active draft cộng thêm tối đa 3 px ở hai mép ngang; mép trên và dưới vẫn
+giữ nguyên geometry của nội dung.
 
 Trong Select tool, click text editable mở popup Edit/Delete. Trong Edit Text
 tool, double-click mở editor trực tiếp. Nhấn Enter trên candidate đang chọn

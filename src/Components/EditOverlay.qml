@@ -390,10 +390,22 @@ Item {
             readonly property real expandedTextWidth: Math.max(
                 originalWidth,
                 measuredContentWidth)
-            readonly property real textWidth: Math.min(root.width, expandedTextWidth)
-            readonly property real textPageX: Math.max(
+            readonly property real visibleTextWidth: Math.min(
+                root.width,
+                expandedTextWidth)
+            readonly property real contentPageX: Math.max(
                 0,
-                Math.min(desiredTextPageX, root.width - textWidth))
+                Math.min(desiredTextPageX, root.width - visibleTextWidth))
+            readonly property real leftBoxBleed: Math.min(
+                root.editBoxLeftBleed,
+                contentPageX)
+            readonly property real rightBoxBleed: Math.min(
+                root.editBoxRightBleed,
+                Math.max(0, root.width - contentPageX - visibleTextWidth))
+            readonly property real textPageX: contentPageX - leftBoxBleed
+            readonly property real textWidth: leftBoxBleed
+                + visibleTextWidth
+                + rightBoxBleed
             readonly property real textHeight: Math.max(
                 originalHeight + root.fallbackBleed * 2,
                 draftText.implicitHeight)
@@ -482,7 +494,7 @@ Item {
                 height: draftItem.usesBaseline ? implicitHeight : draftItem.height
                 leftPadding: draftItem.usesBaseline
                     ? Math.max(0, draftItem.textOriginX - draftItem.x)
-                    : draftItem.horizontalPadding / 2
+                    : draftItem.leftBoxBleed + draftItem.horizontalPadding / 2
                 rightPadding: draftItem.usesBaseline ? 0 : draftItem.horizontalPadding / 2
                 text: draftItem.modelData.text
                 color: draftItem.modelData.color
