@@ -120,6 +120,8 @@ Item {
             displayFontSizeRatio: draft.displayFontSizeRatio,
             fontStretch: draft.fontStretch,
             fontBold: draft.fontBold,
+            fontItalic: draft.fontItalic,
+            fontUnderline: draft.fontUnderline,
             hasBaseline: draft.hasBaseline,
             originX: draft.originX,
             baselineY: draft.baselineY,
@@ -374,9 +376,12 @@ Item {
             readonly property real measuredTextWidth: Math.max(
                 draftTextMetrics.advanceWidth,
                 draftTextMetrics.boundingRect.width)
+            readonly property real measuredContentWidth: usesBaseline
+                ? Math.max(0, textOriginX - originalX) + measuredTextWidth
+                : measuredTextWidth + horizontalPadding
             readonly property real expandedTextWidth: Math.max(
                 originalWidth,
-                measuredTextWidth + horizontalPadding)
+                measuredContentWidth)
             readonly property real textWidth: Math.min(root.width, expandedTextWidth)
             readonly property real textPageX: Math.max(
                 0,
@@ -410,7 +415,7 @@ Item {
             width: textWidth
             height: textHeight
             visible: !(root.editing && root.editingObjectId === modelData.objectId)
-            z: modelData.added === true ? 1 : 0
+            z: modelData.restoration === true ? 0 : 1
 
             Repeater {
                 model: draftItem.modelData.sourceRects
@@ -487,16 +492,16 @@ Item {
                 color: draftItem.selected ? "#14d97a32" : "transparent"
                 border.width: 2
                 border.color: root.editBoxColor
-                visible: draftItem.modelData.added === true
-                    && root.interactionActive
+                visible: root.interactionActive
                     && !root.editing
+                    && draftItem.modelData.restoration !== true
                     && (draftItem.selected || draftItem.hovered)
             }
 
             MouseArea {
                 anchors.fill: parent
-                enabled: draftItem.modelData.added === true
-                    && root.interactionActive
+                enabled: root.interactionActive
+                    && draftItem.modelData.restoration !== true
                     && root.controller.tool !== PDFEditController.AddTextTool
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
@@ -806,6 +811,7 @@ Item {
             && !root.editing
             && root.hasCandidate(root.hoverCandidate)
             && root.hoverCandidate.added !== true
+            && !root.hasActiveDraft(root.hoverCandidate.objectId)
     }
 
     Rectangle {
@@ -838,6 +844,7 @@ Item {
             && root.controller.selectedPage === root.page
             && root.controller.selectedObjectId.length > 0
             && root.controller.selectedKind !== "addedText"
+            && !root.hasActiveDraft(root.controller.selectedObjectId)
     }
 
     Repeater {

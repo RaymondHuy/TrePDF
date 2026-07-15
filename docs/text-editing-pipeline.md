@@ -498,6 +498,11 @@ Với candidate dòng, hit rect dùng bbox union nên khoảng trắng nhỏ gi�
 cũng chọn được cả dòng. Giới hạn gap `1.25 em` ngăn hit rect kéo qua khoảng cách
 lớn giữa hai cột.
 
+Sau khi candidate đã có active draft, delegate của draft tự bắt chuột trên
+toàn bộ kích thước text đã render. Vì vậy phần chữ mới dài hơn bbox gốc vẫn có
+thể hover và click được; `candidateAt()` chỉ còn phụ trách vùng candidate gốc
+khi con trỏ chưa đi vào delegate này.
+
 ## 9. Hover và selection hiển thị như thế nào
 
 Các hằng số QML hiện tại:
@@ -547,6 +552,18 @@ selectionBottom = min(ph, oy + oh + 3)
 Selection box có nền cam rất nhạt `#14d97a32`, border `#f5a55a` và radius
 4 px.
 Nó bị ẩn khi editor thật sự mở.
+
+Với active draft, hover và selection box gốc ở trên bị ẩn để tránh vẽ hai
+khung khác kích thước. Draft delegate đo lại chiều rộng hiển thị:
+
+```text
+measuredContentWidth = originOffset + measuredTextWidth
+draftWidth = max(originalWidth, measuredContentWidth)
+```
+
+Sau đó chính delegate vẽ khung và bắt chuột theo `draftWidth`, nên khung bao cả
+phần chữ đã sửa dài hơn nội dung PDF ban đầu. Chiều rộng vẫn bị giới hạn bởi
+chiều rộng page.
 
 Trong Select tool, click text editable mở popup Edit/Delete. Trong Edit Text
 tool, double-click mở editor trực tiếp. Nhấn Enter trên candidate đang chọn
