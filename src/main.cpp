@@ -1,3 +1,5 @@
+#include "ApplicationFonts.h"
+
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -9,6 +11,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName(QStringLiteral("TrePDF"));
     QCoreApplication::setOrganizationName(QStringLiteral("TreOffice"));
 
+    ApplicationFonts::registerBundledFonts();
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QQmlApplicationEngine engine;

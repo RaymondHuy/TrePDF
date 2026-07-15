@@ -111,6 +111,8 @@ Item {
             y: draft.y,
             width: draft.width,
             height: draft.height,
+            sourceRects: draft.sourceRects,
+            grouped: draft.grouped,
             text: draft.originalText,
             originalText: draft.originalText,
             fontFamily: draft.fontFamily,
@@ -118,6 +120,8 @@ Item {
             displayFontSizeRatio: draft.displayFontSizeRatio,
             fontStretch: draft.fontStretch,
             fontBold: draft.fontBold,
+            fontItalic: draft.fontItalic,
+            fontUnderline: draft.fontUnderline,
             hasBaseline: draft.hasBaseline,
             originX: draft.originX,
             baselineY: draft.baselineY,
@@ -372,13 +376,36 @@ Item {
             readonly property real measuredTextWidth: Math.max(
                 draftTextMetrics.advanceWidth,
                 draftTextMetrics.boundingRect.width)
+            readonly property real desiredTextPageX: usesBaseline
+                ? Math.min(originalX, textOriginX)
+                : originalX
+            readonly property real measuredContentRight: usesBaseline
+                ? Math.max(
+                    originalX + originalWidth,
+                    textOriginX + measuredTextWidth)
+                : originalX + measuredTextWidth + horizontalPadding
+            readonly property real measuredContentWidth: Math.max(
+                1,
+                measuredContentRight - desiredTextPageX)
             readonly property real expandedTextWidth: Math.max(
                 originalWidth,
-                measuredTextWidth + horizontalPadding)
-            readonly property real textWidth: Math.min(root.width, expandedTextWidth)
-            readonly property real textPageX: Math.max(
+                measuredContentWidth)
+            readonly property real visibleTextWidth: Math.min(
+                root.width,
+                expandedTextWidth)
+            readonly property real contentPageX: Math.max(
                 0,
-                Math.min(originalX, root.width - textWidth))
+                Math.min(desiredTextPageX, root.width - visibleTextWidth))
+            readonly property real leftBoxBleed: Math.min(
+                root.editBoxLeftBleed,
+                contentPageX)
+            readonly property real rightBoxBleed: Math.min(
+                root.editBoxRightBleed,
+                Math.max(0, root.width - contentPageX - visibleTextWidth))
+            readonly property real textPageX: contentPageX - leftBoxBleed
+            readonly property real textWidth: leftBoxBleed
+                + visibleTextWidth
+                + rightBoxBleed
             readonly property real textHeight: Math.max(
                 originalHeight + root.fallbackBleed * 2,
                 draftText.implicitHeight)
@@ -389,6 +416,8 @@ Item {
                 modelData.fontFamily,
                 modelData.fontStretch,
                 modelData.fontBold,
+                modelData.fontItalic,
+                modelData.fontUnderline,
                 fontPixelSize)
             readonly property bool usesBaseline: modelData.hasBaseline === true
                 && modelData.added !== true
@@ -406,29 +435,45 @@ Item {
             width: textWidth
             height: textHeight
             visible: !(root.editing && root.editingObjectId === modelData.objectId)
-            z: modelData.added === true ? 1 : 0
+            z: modelData.restoration === true ? 0 : 1
 
-            readonly property real leftBleed: Math.min(root.fallbackBleed, originalX)
-            readonly property real topBleed: Math.min(root.fallbackBleed, originalY)
-            readonly property real rightBleed: Math.min(
-                root.fallbackBleed,
-                Math.max(0, root.width - originalX - originalWidth))
-            readonly property real bottomBleed: Math.min(
-                root.fallbackBleed,
-                Math.max(0, root.height - originalY - originalHeight))
+            Repeater {
+                model: draftItem.modelData.sourceRects
 
-            Rectangle {
-                x: draftItem.originalX - draftItem.x - draftItem.leftBleed
-                y: draftItem.originalY - draftItem.y - draftItem.topBleed
-                width: draftItem.originalWidth
-                    + draftItem.leftBleed
-                    + draftItem.rightBleed
-                height: draftItem.originalHeight
-                    + draftItem.topBleed
-                    + draftItem.bottomBleed
-                color: "#fffdfb"
-                visible: !root.draftTextureReady
-                    && draftItem.modelData.added !== true
+                delegate: Rectangle {
+                    id: draftSourceMask
+
+                    required property var modelData
+
+                    readonly property real originalX: modelData.x * root.width
+                    readonly property real originalY: modelData.y * root.height
+                    readonly property real originalWidth: Math.max(
+                        1,
+                        modelData.width * root.width)
+                    readonly property real originalHeight: Math.max(
+                        1,
+                        modelData.height * root.height)
+                    readonly property real maskedX: Math.max(
+                        0,
+                        originalX - root.fallbackBleed)
+                    readonly property real maskedY: Math.max(
+                        0,
+                        originalY - root.fallbackBleed)
+                    readonly property real maskedRight: Math.min(
+                        root.width,
+                        originalX + originalWidth + root.fallbackBleed)
+                    readonly property real maskedBottom: Math.min(
+                        root.height,
+                        originalY + originalHeight + root.fallbackBleed)
+
+                    x: maskedX - draftItem.x
+                    y: maskedY - draftItem.y
+                    width: Math.max(1, maskedRight - maskedX)
+                    height: Math.max(1, maskedBottom - maskedY)
+                    color: "#fffdfb"
+                    visible: !root.draftTextureReady
+                        && draftItem.modelData.added !== true
+                }
             }
 
             TextMetrics {
@@ -449,7 +494,7 @@ Item {
                 height: draftItem.usesBaseline ? implicitHeight : draftItem.height
                 leftPadding: draftItem.usesBaseline
                     ? Math.max(0, draftItem.textOriginX - draftItem.x)
-                    : draftItem.horizontalPadding / 2
+                    : draftItem.leftBoxBleed + draftItem.horizontalPadding / 2
                 rightPadding: draftItem.usesBaseline ? 0 : draftItem.horizontalPadding / 2
                 text: draftItem.modelData.text
                 color: draftItem.modelData.color
@@ -467,16 +512,16 @@ Item {
                 color: draftItem.selected ? "#14d97a32" : "transparent"
                 border.width: 2
                 border.color: root.editBoxColor
-                visible: draftItem.modelData.added === true
-                    && root.interactionActive
+                visible: root.interactionActive
                     && !root.editing
+                    && draftItem.modelData.restoration !== true
                     && (draftItem.selected || draftItem.hovered)
             }
 
             MouseArea {
                 anchors.fill: parent
-                enabled: draftItem.modelData.added === true
-                    && root.interactionActive
+                enabled: root.interactionActive
+                    && draftItem.modelData.restoration !== true
                     && root.controller.tool !== PDFEditController.AddTextTool
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
@@ -786,6 +831,7 @@ Item {
             && !root.editing
             && root.hasCandidate(root.hoverCandidate)
             && root.hoverCandidate.added !== true
+            && !root.hasActiveDraft(root.hoverCandidate.objectId)
     }
 
     Rectangle {
@@ -818,29 +864,40 @@ Item {
             && root.controller.selectedPage === root.page
             && root.controller.selectedObjectId.length > 0
             && root.controller.selectedKind !== "addedText"
+            && !root.hasActiveDraft(root.controller.selectedObjectId)
     }
 
-    Rectangle {
-        id: editorFallbackMask
+    Repeater {
+        model: root.controller.selectedSourceRects
 
-        readonly property real originalX: root.controller.selectedX * root.width
-        readonly property real originalY: root.controller.selectedY * root.height
-        readonly property real originalWidth: root.controller.selectedWidth * root.width
-        readonly property real originalHeight: root.controller.selectedHeight * root.height
+        delegate: Rectangle {
+            id: editorSourceMask
 
-        x: Math.max(0, originalX - root.fallbackBleed)
-        y: Math.max(0, originalY - root.fallbackBleed)
-        width: Math.max(1,
-                        Math.min(root.width,
-                                 originalX + originalWidth + root.fallbackBleed) - x)
-        height: Math.max(1,
-                         Math.min(root.height,
-                                  originalY + originalHeight + root.fallbackBleed) - y)
-        color: "#fffdfb"
-        z: 2
-        visible: editorFrame.visible
-            && root.controller.selectedKind !== "addedText"
-            && !root.editorUsesCleanTexture
+            required property var modelData
+
+            readonly property real originalX: modelData.x * root.width
+            readonly property real originalY: modelData.y * root.height
+            readonly property real originalWidth: Math.max(1, modelData.width * root.width)
+            readonly property real originalHeight: Math.max(1, modelData.height * root.height)
+            readonly property real maskedX: Math.max(0, originalX - root.fallbackBleed)
+            readonly property real maskedY: Math.max(0, originalY - root.fallbackBleed)
+            readonly property real maskedRight: Math.min(
+                root.width,
+                originalX + originalWidth + root.fallbackBleed)
+            readonly property real maskedBottom: Math.min(
+                root.height,
+                originalY + originalHeight + root.fallbackBleed)
+
+            x: maskedX
+            y: maskedY
+            width: Math.max(1, maskedRight - maskedX)
+            height: Math.max(1, maskedBottom - maskedY)
+            color: "#fffdfb"
+            z: 2
+            visible: editorFrame.visible
+                && root.controller.selectedKind !== "addedText"
+                && !root.editorUsesCleanTexture
+        }
     }
 
     Rectangle {
@@ -851,6 +908,7 @@ Item {
         readonly property real originalWidth: root.controller.selectedWidth * root.width
         readonly property real originalHeight: root.controller.selectedHeight * root.height
         readonly property bool editsAddedText: root.controller.selectedKind === "addedText"
+        readonly property bool editsGroupedText: root.controller.selectedSourceRects.length > 1
         readonly property real leftBleed: editsAddedText
             ? 0
             : root.editBoxLeftBleed
@@ -867,6 +925,8 @@ Item {
             root.controller.selectedFontFamily,
             root.controller.selectedFontStretch,
             root.controller.selectedFontBold,
+            root.controller.selectedFontItalic,
+            root.controller.selectedFontUnderline,
             baseFontPixelSize)
         readonly property bool usesBaseline: !editsAddedText
             && root.controller.selectedHasBaseline
@@ -878,9 +938,12 @@ Item {
         readonly property real measuredTextWidth: Math.max(
             editorTextMetrics.advanceWidth,
             editorTextMetrics.boundingRect.width)
+        readonly property real measuredContentWidth: usesBaseline
+            ? Math.max(0, textOriginX - originalX) + measuredTextWidth
+            : measuredTextWidth + 8
         readonly property real baseDesiredWidth: editsAddedText
             ? Math.max(originalWidth, measuredTextWidth + 2)
-            : Math.max(80, originalWidth)
+            : Math.max(80, originalWidth, measuredContentWidth)
         readonly property real desiredWidth: baseDesiredWidth + leftBleed + rightBleed
         readonly property real baseDesiredHeight: editsAddedText
             ? Math.max(
@@ -899,7 +962,7 @@ Item {
                 Math.min(originalY - verticalBleed, root.height - height))
         width: Math.min(root.width, desiredWidth)
         height: editsAddedText ? desiredHeight : Math.min(root.height, desiredHeight)
-        color: editsAddedText || root.editorUsesCleanTexture
+        color: editsAddedText || editsGroupedText || root.editorUsesCleanTexture
             ? "transparent"
             : "#fffdfb"
         border.color: root.editBoxColor

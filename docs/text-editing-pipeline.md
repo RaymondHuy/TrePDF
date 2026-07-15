@@ -27,11 +27,12 @@ flowchart TD
     C --> D["candidateAt(page, x / width, y / height)"]
     D --> E["ensurePageCandidates(page)"]
     E --> F["scanPage bằng PDFium nếu page chưa có cache"]
-    F --> G["Tạo Candidate: bbox, baseline, text, font, color"]
+    F --> G["Tạo Candidate nguồn: bbox, baseline, text, font, color"]
     G --> H{"PDF cho phép sửa và layout một dòng nằm ngang?"}
     H -- Có --> I["editable = true"]
     H -- Không --> J["editable = false + reason"]
-    I --> K["Hover: khung cam"]
+    I --> IA["Gom các candidate cùng dòng và cùng style"]
+    IA --> K["Hover: khung cam"]
     J --> L["Hover: khung xám / forbidden cursor"]
     K --> M["Click chọn hoặc double-click/Edit"]
     M --> N["selectCandidate + beginSelectedTextEdit"]
@@ -57,6 +58,18 @@ object:<top-level-index>/<child-index>/...
 ```
 
 Ví dụ `object:3/1` là child số 1 bên trong Form XObject số 3.
+
+Nếu nhiều text object editable nằm trên cùng baseline, gần nhau và có style
+tương thích, TrePDF thay chúng bằng một candidate dòng có ID ổn định trong
+phiên:
+
+```text
+line:<sha256-của-các-object-id-nguồn>
+```
+
+Candidate dòng giữ `CandidatePart` cho từng object nguồn, gồm `objectId`,
+`objectPath`, bbox, origin, text và separator sau part. Vì vậy UI thao tác với
+một dòng, nhưng renderer vẫn tìm và ẩn được từng PDF page object gốc.
 
 ### 2.2 Glyph bbox
 
@@ -129,8 +142,9 @@ document thay đổi.
 2. Load `FPDF_PAGE` và `FPDF_TEXTPAGE`.
 3. Duyệt từng ký tự trong text page.
 4. Gom ký tự theo `FPDF_PAGEOBJECT`.
-5. Duyệt page object để tạo `Candidate`.
+5. Duyệt page object để tạo candidate nguồn.
 6. Duyệt thêm annotation FreeText và Widget.
+7. Gom các candidate text tương thích thành candidate dòng.
 
 ### 4.2 Gom text layout theo ký tự
 
@@ -171,6 +185,40 @@ T.f = P.b * L.e + P.d * L.f + P.f
 
 Text có render mode `UNKNOWN`, `INVISIBLE` hoặc chỉ `CLIP` không được tạo
 candidate.
+
+### 4.4 Gom candidate thành dòng
+
+`groupTextLineCandidates()` chỉ xét text candidate editable, có baseline, chưa
+phải Add Text và đang chứa đúng một source part. Candidate được phân vào cùng
+dòng khi chênh baseline không quá `0.25 em`.
+
+Trong mỗi dòng, candidate được sắp từ trái sang phải rồi chỉ nối tiếp khi:
+
+```text
+-0.35 em <= horizontalGap <= 1.25 em
+BaseFont identity đã bỏ subset prefix, fallback sang family đã resolve, giống nhau
+font size chênh không quá max(0.5 pt, 8%)
+font stretch chênh không quá 5
+bold và color giống nhau
+```
+
+Khoảng cách được đổi về page unit trước khi so sánh:
+
+```text
+baselineDistance = abs(a.baselineY - b.baselineY) * pageHeight
+horizontalGap = (b.left - a.right) * pageWidth
+emSize = displayFontSizeRatio * pageHeight
+```
+
+Nếu hai chuỗi chưa có whitespace ở ranh giới và gap lớn hơn `0.20 em`, code
+chèn một dấu cách. Gap lớn hơn giới hạn sẽ tách candidate để tránh nối nhầm hai
+cột. Khác style cũng tách candidate vì `TextInput` hiện chỉ áp dụng một QFont và
+một màu cho toàn bộ draft.
+
+Candidate dòng nhận bbox union, baseline/origin và style của part đầu tiên.
+`renderSuppressible` chỉ true khi mọi part đều suppress được. Candidate nguồn
+không còn xuất hiện độc lập trong cache trang, nhưng toàn bộ provenance vẫn nằm
+trong `parts`.
 
 ## 5. Đổi tọa độ PDF sang tọa độ normalized
 
@@ -274,6 +322,8 @@ Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hi�
 | Loại | Có candidate | Editable hiện tại | Lý do nếu không editable |
 |---|---:|---:|---|
 | Text object một dòng, ngang, PDF cho phép sửa | Có | Có | — |
+| Nhiều text object cùng dòng và cùng style | Một candidate dòng | Có | Mỗi object gốc được giữ trong `parts` |
+| Text cùng baseline nhưng khác style hoặc cách quá xa | Candidate riêng | Theo từng candidate | Không gom để tránh mất style/nối hai cột |
 | Text xoay/skew/multiline | Có | Không | Layout chưa được hỗ trợ |
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
 | Image | Có | Không | Cần OCR |
@@ -294,11 +344,25 @@ TrePDF ưu tiên theo thứ tự:
 
 1. Nếu font được embed, lấy bytes bằng `FPDFFont_GetFontData()`.
 2. Đăng ký bytes bằng `QFontDatabase::addApplicationFontFromData()`.
-3. Nếu không đăng ký được embedded font, tìm font family đã cài trên máy và
-   yêu cầu `QFontInfo::exactMatch()`.
-4. Kiểm tra family có đủ glyph cho toàn bộ text bằng `QFontMetricsF` với
+3. Nếu embedded font không đủ glyph, tìm family tương ứng trong các font được
+   bundle từ `src/assets/fonts`.
+4. Chỉ khi không có bundled font phù hợp mới tìm trong danh sách font hệ thống
+   được chụp trước lúc bundled fonts được đăng ký.
+5. Kiểm tra từng family có đủ glyph cho toàn bộ text bằng `QFontMetricsF` với
    `QFont::NoFontMerging`.
-5. Nếu tất cả đều thất bại, trả family rỗng để Qt dùng font mặc định/fallback.
+6. Nếu tất cả đều thất bại, trả family rỗng để Qt dùng font mặc định/fallback.
+
+Các file `.ttf`, `.otf` và `.ttc` dưới `src/assets/fonts` được đóng gói thành
+resource và đăng ký lúc khởi động. Khi bundled font và system font có cùng
+family, bundled font luôn được resolver xét trước.
+
+Dropdown font family hiển thị bundled families trước, sau đó toàn bộ system
+families chưa trùng tên. Font embedded của text đang chọn cũng được thêm tạm
+nếu chưa có trong hai danh sách này. Khi người dùng chọn family mới,
+`Draft.candidate.fontFamily` được cập nhật ngay để editor và draft overlay dùng
+cùng font. Family, bold, italic và underline trước/sau nằm trong cùng command
+với text nên cancel, undo và redo đều khôi phục đúng định dạng. Thay đổi vẫn chỉ
+tồn tại trong session và chưa được ghi ngược vào file PDF.
 
 Giới hạn an toàn hiện tại:
 
@@ -322,7 +386,20 @@ hoặc BaseFont name chứa "bold", "black" hoặc "heavy" (không phân biệt 
 Fallback theo tên cần thiết vì có PDF khai báo font bold nhưng weight vẫn trả
 về 400.
 
-### 7.3 Font size
+### 7.3 Italic
+
+`fontItalic = true` nếu italic angle khác `0`, descriptor flags có bit Italic
+(`1 << 6`), hoặc BaseFont name chứa `italic`, `oblique` hay `slanted`. Khi người
+dùng đổi style, draft cập nhật cờ này và `QFont::setItalic()` đổi editor ngay.
+
+### 7.4 Underline
+
+PDF text object không có thuộc tính underline tương đương QFont; gạch chân
+trong PDF thường là một path riêng. Vì vậy candidate nguồn mặc định
+`fontUnderline = false`. Khi người dùng bật Underline, draft lưu cờ này và Qt
+vẽ underline bằng `QFont::setUnderline()`.
+
+### 7.5 Font size
 
 Gọi `fontSize` là giá trị từ `FPDFTextObj_GetFontSize()` và `D(p)` là điểm `p`
 sau khi qua text transform rồi đổi sang device coordinate:
@@ -356,7 +433,7 @@ QFont.pixelSize = max(1, round(baseFontPixelSize))
 
 Đây vẫn là em-size quy đổi sang pixel, không phải glyph bbox height.
 
-### 7.4 Font stretch
+### 7.6 Font stretch
 
 Stretch bù cho scale ngang/dọc của text transform:
 
@@ -368,13 +445,13 @@ fontStretch = clamp(fontStretch, 50, 200)
 `100` là `QFont::Unstretched`; `50` là UltraCondensed và `200` là
 UltraExpanded.
 
-### 7.5 Màu chữ
+### 7.7 Màu chữ
 
 - Với render mode chỉ stroke: lấy stroke color.
 - Các mode còn lại: lấy fill color.
 - Nếu PDFium không trả được màu: fallback sang đen.
 
-### 7.6 Tạo QFont cho overlay/editor
+### 7.8 Tạo QFont cho overlay/editor
 
 `fontForDisplay()` tạo QFont theo thứ tự:
 
@@ -382,10 +459,13 @@ UltraExpanded.
 family = resolved font family, nếu có
 stretch = clamp(fontStretch, 50, 200)
 bold = fontBold
+italic = fontItalic
+underline = fontUnderline
 pixelSize = max(1, round(requestedPixelSize))
 ```
 
-Italic, underline, character spacing và word spacing chưa được lấy từ PDF.
+Character spacing và word spacing chưa được lấy từ PDF. Underline nguồn cũng
+chưa được ghép từ các path trang vào text candidate.
 
 ## 8. Hit test: con trỏ đang nằm trên text nào
 
@@ -413,6 +493,15 @@ Diện tích dùng để so sánh:
 ```text
 area = normalizedWidth * normalizedHeight
 ```
+
+Với candidate dòng, hit rect dùng bbox union nên khoảng trắng nhỏ giữa các part
+cũng chọn được cả dòng. Giới hạn gap `1.25 em` ngăn hit rect kéo qua khoảng cách
+lớn giữa hai cột.
+
+Sau khi candidate đã có active draft, delegate của draft tự bắt chuột trên
+toàn bộ kích thước text đã render. Vì vậy phần chữ mới dài hơn bbox gốc vẫn có
+thể hover và click được; `candidateAt()` chỉ còn phụ trách vùng candidate gốc
+khi con trỏ chưa đi vào delegate này.
 
 ## 9. Hover và selection hiển thị như thế nào
 
@@ -464,6 +553,28 @@ Selection box có nền cam rất nhạt `#14d97a32`, border `#f5a55a` và radiu
 4 px.
 Nó bị ẩn khi editor thật sự mở.
 
+Với active draft, hover và selection box gốc ở trên bị ẩn để tránh vẽ hai
+khung khác kích thước. Draft delegate đo lại chiều rộng hiển thị:
+
+```text
+draftLeft = min(originalX, originX)
+draftRight = max(originalRight, originX + measuredTextWidth)
+contentWidth = draftRight - draftLeft
+visibleContentWidth = min(pageWidth, contentWidth)
+contentX = max(0, min(draftLeft, pageRight - visibleContentWidth))
+leftBoxBleed = min(3, contentX)
+rightBoxBleed = min(3, max(0, pageRight - contentX - visibleContentWidth))
+draftX = contentX - leftBoxBleed
+draftWidth = leftBoxBleed + visibleContentWidth + rightBoxBleed
+```
+
+Sau đó chính delegate vẽ khung và bắt chuột theo `draftWidth`, nên khung bao cả
+phần chữ đã sửa dài hơn nội dung PDF ban đầu. Chiều rộng vẫn bị giới hạn bởi
+chiều rộng page. Khi origin của ký tự đầu nằm bên trái bbox glyph, draft cũng
+mở rộng sang trái tới origin đó để text không bị dịch phải sau khi commit.
+Khung active draft cộng thêm tối đa 3 px ở hai mép ngang; mép trên và dưới vẫn
+giữ nguyên geometry của nội dung.
+
 Trong Select tool, click text editable mở popup Edit/Delete. Trong Edit Text
 tool, double-click mở editor trực tiếp. Nhấn Enter trên candidate đang chọn
 cũng mở editor.
@@ -482,6 +593,10 @@ selectedCandidate.editable == true
 
 Controller lưu trạng thái draft trước edit vào `m_textEditCommand`, sau đó đặt
 `textEditActive = true`. Chưa có draft mới cho đến khi text thực sự thay đổi.
+
+Candidate dòng vẫn dùng đúng một draft key `page|lineObjectId`. Chuỗi đã sửa
+không được chia ngược về từng part trong session; `CandidatePart` chỉ giữ nguồn
+để mask, suppression, undo/redo và phục vụ việc ghi PDF trong tương lai.
 
 ### 10.2 Trạng thái QML
 
@@ -512,7 +627,8 @@ leftBleed = 3
 rightBleed = 3
 verticalBleed = 3
 
-baseDesiredWidth = max(80, originalWidth)
+measuredContentWidth = originOffset + measuredTextWidth
+baseDesiredWidth = max(80, originalWidth, measuredContentWidth)
 desiredWidth = baseDesiredWidth + leftBleed + rightBleed
 editorWidth = min(pageWidth, desiredWidth)
 
@@ -610,8 +726,9 @@ chữ chồng nhau. TrePDF xử lý theo hai giai đoạn.
 
 ### 14.1 Fallback mask tức thời
 
-Trong lúc chưa có clean texture, `editorFallbackMask` che bbox gốc bằng màu
-`#fffdfb`, nới 2 px mỗi phía và cắt trong page:
+Trong lúc chưa có clean texture, QML tạo một fallback mask cho mỗi source rect,
+thay vì che toàn bộ bbox union của candidate dòng. Mỗi mask dùng màu `#fffdfb`,
+nới 2 px mỗi phía và cắt trong page:
 
 ```text
 maskX = max(0, originalX - 2)
@@ -620,7 +737,9 @@ maskRight = min(pageWidth, originalX + originalWidth + 2)
 maskBottom = min(pageHeight, originalY + originalHeight + 2)
 ```
 
-Mask xuất hiện ngay khi editor mở, kể cả trước khi user gõ ký tự đầu tiên.
+Các mask xuất hiện ngay khi editor mở, kể cả trước khi user gõ ký tự đầu tiên.
+Editor của candidate dòng có nền trong suốt để không phủ trắng khoảng trống
+giữa các part.
 
 ### 14.2 Clean texture từ PDFium
 
@@ -630,11 +749,12 @@ Khi text thay đổi:
 2. Revision của draft page tăng.
 3. `PDFPageItem` debounce render trong 250 ms khi đang gõ.
 4. Worker mở một document PDFium riêng.
-5. Tìm object gốc theo `objectPath`.
-6. Tạm đặt object thành inactive bằng `FPDFPageObj_SetIsActive(false)`.
-7. Render page không có object gốc.
-8. Khôi phục object thành active.
-9. Upload texture mới lên scene graph.
+5. Flatten mọi `parts[].objectPath` của draft.
+6. Tìm tất cả object gốc theo các path này.
+7. Tạm đặt từng object thành inactive bằng `FPDFPageObj_SetIsActive(false)`.
+8. Render page không có các object gốc.
+9. Khôi phục mọi object thành active.
+10. Upload texture mới lên scene graph.
 
 Khi texture đúng revision và suppression thành công:
 
@@ -689,7 +809,8 @@ TrePDF hiện đã lấy và áp dụng:
 - em-size;
 - transform stretch ngang/dọc;
 - embedded/installed font family nếu Qt dùng được;
-- bold;
+- bold và italic;
+- underline do người dùng áp dụng cho draft;
 - màu chữ.
 
 Nhưng PDF renderer và Qt text layout vẫn là hai hệ thống khác nhau. Các dữ liệu
@@ -701,7 +822,7 @@ sau chưa được tái tạo đầy đủ trong `TextInput`:
 - kerning/position adjustment trong mảng `TJ`;
 - horizontal scaling riêng của text state nếu không thể hiện đủ qua object
   transform;
-- italic, synthetic slant và các style khác;
+- italic angle chính xác, synthetic slant và underline path của PDF gốc;
 - font hinting/rendering của PDFium;
 - subset font không đăng ký được hoặc không map Unicode đúng trong Qt;
 - line metrics/ascent/descent riêng của font Qt.
@@ -792,7 +913,7 @@ Khi font/cỡ chữ lệch:
 - `FPDFFont_GetIsEmbedded()`, family/BaseFont name;
 - `FPDFTextObj_GetFontSize()`;
 - `normalizedFontSize()` và `fontStretchForTransform()`;
-- `pdfFontIsBold()`;
+- `pdfFontIsBold()` và `pdfFontIsItalic()`;
 - QML `editorFrame.baseFontPixelSize` và `editorFrame.displayFont`.
 
 Khi nền trắng hoặc chữ gốc chưa biến mất:
@@ -818,10 +939,17 @@ Text được edit
     + transform gần như nằm ngang, không lật/skew mạnh
     + text chỉ có một dòng
 
+Text được gom thành candidate dòng
+  = các text candidate editable có baseline gần nhau trong 0.25 em
+    + gap liên tiếp nằm trong [-0.35 em, 1.25 em]
+    + family/size/stretch/bold/color tương thích
+    + giữ từng objectId, objectPath và bbox nguồn trong CandidatePart
+
 Text hiển thị khi edit
   = Unicode text do Qt layout lại
     + QFont đã áp family/stretch/bold/em-size nếu lấy được
     + baseline PDF nếu có
-    + editor frame theo glyph bbox, min 80 × 17 px và bleed 3 × 3 px
-    + fallback mask cho đến khi page texture sạch sẵn sàng
+    + editor frame theo bbox union và measured text, min 80 × 17 px
+    + một fallback mask cho mỗi source part đến khi page texture sạch sẵn sàng
+    + một draft/undo command có thể suppress nhiều PDF text object nguồn
 ```
