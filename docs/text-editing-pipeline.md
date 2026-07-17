@@ -110,8 +110,8 @@ draft:
 
 `sourceRect` không thay đổi theo draft. `frameRect` và `contentBounds` nằm trong
 rich-text draft. `Command` lưu snapshot draft before/after nên cancel, undo và
-redo phục hồi geometry cùng text và định dạng. Overlay hiển thị tám handle ở
-bốn cạnh và bốn góc của box đang chọn; mỗi lần kéo tạo một transaction geometry.
+redo phục hồi geometry cùng text và định dạng. Overlay hiển thị bốn handle ở
+giữa cạnh trái, phải, trên và dưới; mỗi lần kéo tạo một transaction geometry.
 
 ### 2.4 Origin và baseline
 
@@ -578,6 +578,8 @@ editBoxLeftBleed = 3 px
 editBoxRightBleed = 3 px
 editBoxVerticalBleed = 3 px
 boundingBoxPadding = 3 px
+resizeHandleSize = 8 px
+resizeHandleHitSize = 24 px
 fallbackBleed = 2 px
 borderWidth = 2 px
 ```
@@ -603,7 +605,7 @@ Khung có nền trong suốt, radius 4 px:
 ### 9.2 Selection box
 
 Sau khi click chọn candidate editable, `resizeOverlay` là nguồn duy nhất vẽ
-selection box và tám handles. Layout geometry vẫn đọc đúng `frameRect` và
+selection box và bốn edge handles. Layout geometry vẫn đọc đúng `frameRect` và
 `contentBounds`; chỉ phần trang trí được nới đều bốn phía 3 px:
 
 ```text
@@ -613,6 +615,10 @@ selectionWidth = max(1, fw) + 6
 selectionBottom = max(frameBottom, contentBoundsBottom)
 selectionHeight = max(1, selectionBottom - fy) + 6
 ```
+
+Mỗi edge handle là hình tròn cam đặc đường kính 8 px, viền trắng 1 px. Vùng
+bắt chuột là một item trong suốt 24×24 px đặt đồng tâm với hình tròn để dễ kéo
+mà không làm handle trông nặng.
 
 Selection box có nền cam rất nhạt `#14d97a32`, border `#f5a55a` và radius
 4 px. Nó vẫn là box duy nhất khi editor mở hoặc active draft đang được chọn;
@@ -853,7 +859,7 @@ Nếu render mode không suppress được hoặc suppression thất bại,
 
 ### 15.0 Resize frame
 
-Box text đang chọn có tám resize handle. Khi bắt đầu kéo,
+Box text đang chọn có bốn resize handle ở giữa các cạnh. Khi bắt đầu kéo,
 `beginSelectedFrameResize()` chụp `Draft` hiện tại. Trong lúc kéo, QML chuẩn hóa
 delta theo kích thước page, giới hạn frame trong `[0, 1]`, giữ kích thước tối
 thiểu và gọi `updateSelectedFrameRect()`; binding chiều rộng của `TextEdit` và

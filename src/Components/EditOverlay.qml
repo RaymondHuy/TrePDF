@@ -36,7 +36,8 @@ Item {
     readonly property real editBoxVerticalBleed: 3
     readonly property real boundingBoxPadding: 3
     readonly property real minimumTextPixelSize: 6
-    readonly property real resizeHandleSize: 10
+    readonly property real resizeHandleSize: 8
+    readonly property real resizeHandleHitSize: 24
     readonly property real minimumResizePixelSize: 24
     readonly property bool interactionActive: !pooled
         && controller.tool !== PDFEditController.BrowseTool
@@ -1500,17 +1501,13 @@ Item {
 
         Repeater {
             model: [
-                { horizontal: -1, vertical: -1, cursor: Qt.SizeFDiagCursor },
                 { horizontal: 0, vertical: -1, cursor: Qt.SizeVerCursor },
-                { horizontal: 1, vertical: -1, cursor: Qt.SizeBDiagCursor },
                 { horizontal: 1, vertical: 0, cursor: Qt.SizeHorCursor },
-                { horizontal: 1, vertical: 1, cursor: Qt.SizeFDiagCursor },
                 { horizontal: 0, vertical: 1, cursor: Qt.SizeVerCursor },
-                { horizontal: -1, vertical: 1, cursor: Qt.SizeBDiagCursor },
                 { horizontal: -1, vertical: 0, cursor: Qt.SizeHorCursor }
             ]
 
-            delegate: Rectangle {
+            delegate: Item {
                 id: resizeHandle
 
                 required property var modelData
@@ -1527,12 +1524,19 @@ Item {
                     : modelData.vertical > 0
                         ? resizeOverlay.height - height / 2
                         : (resizeOverlay.height - height) / 2
-                width: root.resizeHandleSize
-                height: root.resizeHandleSize
-                radius: 2
-                color: "#fffdfb"
-                border.width: 2
-                border.color: root.editBoxColor
+                width: root.resizeHandleHitSize
+                height: root.resizeHandleHitSize
+
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: root.resizeHandleSize
+                    height: root.resizeHandleSize
+                    radius: width / 2
+                    color: root.editBoxColor
+                    border.width: 1
+                    border.color: "#fffdfb"
+                    Accessible.ignored: true
+                }
 
                 MouseArea {
                     id: resizeMouse

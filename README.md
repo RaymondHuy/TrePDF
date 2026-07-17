@@ -13,7 +13,7 @@ undo/redo.
 Draft geometry keeps immutable PDF source bounds separate from the layout frame
 and laid-out content bounds. Existing PDF text seeds its frame from the Qt text
 width so the original line fits, while later edits wrap within that frame. The
-selected frame exposes eight resize handles; dragging an edge or corner reflows
+selected frame exposes four edge resize handles; dragging an edge reflows
 text live and stores the geometry change in session undo/redo.
 
 Each session draft stores text, character-format spans, paragraph formats, its
