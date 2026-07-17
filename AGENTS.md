@@ -21,6 +21,16 @@ Current features:
 - Asynchronous page rendering on a worker thread.
 - Page navigation, zoom, and fit-to-width controls.
 - Session-only text draft editing with selection, undo, redo, and discard.
+- Drafts use a rich-text model with UTF-16 text ranges, character spans,
+  paragraph formats, a layout frame, and content bounds. The inline `TextEdit`
+  supports multiple lines, wraps/reflows inside the layout frame, renders every
+  character span, and applies formatting to the selected text range.
+- Editable geometry separates immutable source bounds, the draft layout frame,
+  and laid-out content bounds. The frame and content bounds participate in
+  draft comparison and undo/redo. Existing PDF text seeds the initial frame
+  from its Qt text width so the original line fits before reflow. Four edge
+  resize handles update the normalized frame, reflow text live, and commit
+  geometry through the same draft undo/redo snapshots as text and formatting.
 - Compatible same-line text objects are grouped into one draft edit while each
   source object path remains available for rendering suppression.
 - Fonts under `src/assets/fonts` are bundled and preferred over matching system
@@ -29,8 +39,8 @@ Current features:
   a session-only draft and supports undo/redo.
 - An edit-only, collapsible right-side text-formatting panel provides UI for
   font family, size, color, bold, italic, and underline. Font family, bold,
-  italic, and underline update the current draft and support undo/redo; size
-  and color are not connected to draft formatting yet.
+  italic, underline, and color update the current draft and support undo/redo;
+  size is not connected to draft formatting yet.
 - ID-based localization with Vietnamese as the default UI language.
 - A restrained orange UI inspired by Foxit Reader.
 
@@ -48,7 +58,7 @@ Current features:
 - `src/PDFDocument.h/.cpp`: main-thread PDFium document, metadata, page sizes,
   navigation state, and source file path.
 - `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
-  session draft state, and undo/redo history.
+  rich-text draft state, and snapshot-based undo/redo history.
 - `src/PDFPageItem.h/.cpp`: asynchronous rendering and scene graph texture
   upload for one page delegate.
 - `src/Components`: ribbon controls, document view, page delegates, and the

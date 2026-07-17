@@ -17,6 +17,8 @@
 #include <QVector>
 #include <QtQml/qqmlregistration.h>
 
+#include <functional>
+
 class PDFEditController : public QObject
 {
     Q_OBJECT
@@ -32,11 +34,12 @@ class PDFEditController : public QObject
     Q_PROPERTY(int selectedPage READ selectedPage NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedObjectId READ selectedObjectId NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedKind READ selectedKind NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(qreal selectedX READ selectedX NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(qreal selectedY READ selectedY NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(qreal selectedWidth READ selectedWidth NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(qreal selectedHeight READ selectedHeight NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QRectF selectedSourceRect READ selectedSourceRect NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QRectF selectedFrameRect READ selectedFrameRect NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QRectF selectedContentBounds READ selectedContentBounds NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QVariantList selectedSourceRects READ selectedSourceRects NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QVariantList selectedCharacterSpans READ selectedCharacterSpans NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QVariantList selectedParagraphFormats READ selectedParagraphFormats NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedHasBaseline READ selectedHasBaseline NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedOriginX READ selectedOriginX NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedBaselineY READ selectedBaselineY NOTIFY selectionChanged FINAL)
@@ -80,11 +83,12 @@ public:
     int selectedPage() const;
     QString selectedObjectId() const;
     QString selectedKind() const;
-    qreal selectedX() const;
-    qreal selectedY() const;
-    qreal selectedWidth() const;
-    qreal selectedHeight() const;
+    QRectF selectedSourceRect() const;
+    QRectF selectedFrameRect() const;
+    QRectF selectedContentBounds() const;
     QVariantList selectedSourceRects() const;
+    QVariantList selectedCharacterSpans() const;
+    QVariantList selectedParagraphFormats() const;
     bool selectedHasBaseline() const;
     qreal selectedOriginX() const;
     qreal selectedBaselineY() const;
@@ -117,10 +121,17 @@ public:
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
     Q_INVOKABLE void updateSelectedTextPreview(const QString &text);
+    Q_INVOKABLE void beginSelectedFrameResize();
+    Q_INVOKABLE void updateSelectedFrameRect(const QRectF &frameRect);
+    Q_INVOKABLE void updateSelectedContentBounds(const QRectF &contentBounds);
+    Q_INVOKABLE void finishSelectedFrameResize();
+    Q_INVOKABLE void cancelSelectedFrameResize();
+    Q_INVOKABLE void setSelectedTextRange(int start, int length);
     Q_INVOKABLE void setSelectedFontFamily(const QString &fontFamily);
     Q_INVOKABLE void setSelectedFontBold(bool enabled);
     Q_INVOKABLE void setSelectedFontItalic(bool enabled);
     Q_INVOKABLE void setSelectedFontUnderline(bool enabled);
+    Q_INVOKABLE void setSelectedColor(const QColor &color);
     Q_INVOKABLE void finishSelectedTextEdit();
     Q_INVOKABLE void cancelSelectedTextEdit();
     Q_INVOKABLE void commitSelectedText(const QString &text);
@@ -149,11 +160,15 @@ private:
     struct CandidatePart {
         QString objectId;
         QVector<int> objectPath;
-        QRectF rect;
+        QRectF sourceRect;
         QPointF origin;
         QString text;
         QString separatorAfter;
         bool hasBaseline = false;
+    };
+
+    struct CandidateGeometry {
+        QRectF sourceRect;
     };
 
     struct Candidate {
@@ -163,7 +178,8 @@ private:
         QVector<CandidatePart> parts;
         QString kind;
         QString label;
-        QRectF rect;
+        CandidateGeometry geometry;
+        QRectF initialDraftFrameRect;
         QPointF origin;
         QString text;
         QString fontFamily;
@@ -184,9 +200,52 @@ private:
         QString reason;
     };
 
+    struct CharacterFormat {
+        QString fontFamily;
+        qreal fontSizeRatio = 0.0;
+        qreal displayFontSizeRatio = 0.0;
+        int fontStretch = 100;
+        bool fontBold = false;
+        bool fontItalic = false;
+        bool fontUnderline = false;
+        QColor color = Qt::black;
+    };
+
+    struct CharacterSpan {
+        qsizetype start = 0;
+        qsizetype length = 0;
+        CharacterFormat format;
+    };
+
+    enum class ParagraphAlignment {
+        Left,
+        Center,
+        Right,
+        Justify
+    };
+
+    enum class ParagraphListStyle {
+        None,
+        Bullet,
+        Decimal
+    };
+
+    struct ParagraphFormat {
+        qsizetype start = 0;
+        qsizetype length = 0;
+        ParagraphAlignment alignment = ParagraphAlignment::Left;
+        ParagraphListStyle listStyle = ParagraphListStyle::None;
+        int listLevel = 0;
+        int listStart = 1;
+    };
+
     struct Draft {
         Candidate candidate;
         QString text;
+        QVector<CharacterSpan> characterSpans;
+        QVector<ParagraphFormat> paragraphFormats;
+        QRectF frameRect;
+        QRectF contentBounds;
     };
 
     struct Command {
@@ -194,18 +253,9 @@ private:
         int page = -1;
         QString objectId;
         bool hadBefore = false;
-        QString beforeText;
-        QString beforeFontFamily;
-        bool beforeFontBold = false;
-        bool beforeFontItalic = false;
-        bool beforeFontUnderline = false;
+        Draft before;
         bool hadAfter = false;
-        QString afterText;
-        QString afterFontFamily;
-        bool afterFontBold = false;
-        bool afterFontItalic = false;
-        bool afterFontUnderline = false;
-        Candidate candidate;
+        Draft after;
     };
 
     enum class FontStyle {
@@ -234,14 +284,41 @@ private:
                                     QVector<Candidate> &candidates) const;
     const Candidate *findCandidate(int page, const QString &objectId);
     QVariantList candidateSourceRects(const Candidate &candidate) const;
-    QVariantMap candidateMap(const Candidate &candidate, const QString &text) const;
+    QVariantList characterSpanMaps(const QVector<CharacterSpan> &spans) const;
+    QVariantList paragraphFormatMaps(const QVector<ParagraphFormat> &formats) const;
+    QVariantMap candidateMap(const Draft &draft) const;
     bool documentAllowsEditing() const;
     QString draftKey(int page, const QString &objectId) const;
     void markDraftStateChanged(int page, bool immediate);
     void requestDraftRender(int page, bool immediate);
-    static bool sameDraftFormatting(const Candidate &left, const Candidate &right);
-    const Candidate &selectedCandidateForDisplay() const;
-    void updateSelectedDraftCandidate(const Candidate &candidate);
+    static void setInitialGeometry(Candidate &candidate, const QRectF &sourceRect);
+    void expandInitialTextFrame(Candidate &candidate, const QSizeF &pageSize) const;
+    static CharacterFormat characterFormatForCandidate(const Candidate &candidate);
+    static CharacterFormat primaryCharacterFormat(const Draft &draft);
+    static QVector<ParagraphFormat> paragraphFormatsForText(
+        const QString &text,
+        const ParagraphFormat &prototype);
+    static Draft initialDraftForCandidate(const Candidate &candidate);
+    static QPointF layoutOriginForDraft(const Draft &draft);
+    static bool sameCharacterFormat(const CharacterFormat &left,
+                                    const CharacterFormat &right);
+    static bool sameCharacterSpans(const QVector<CharacterSpan> &left,
+                                   const QVector<CharacterSpan> &right);
+    static bool sameParagraphFormats(const QVector<ParagraphFormat> &left,
+                                     const QVector<ParagraphFormat> &right);
+    static bool sameDraftContent(const Draft &left, const Draft &right);
+    static void setDraftText(Draft &draft, const QString &text);
+    static bool updateCharacterFormats(
+        Draft &draft,
+        qsizetype start,
+        qsizetype length,
+        const std::function<void(CharacterFormat &)> &update);
+    Draft selectedDraftForDisplay() const;
+    void updateSelectedDraft(const Draft &draft);
+    void selectedTextRangeForDraft(const Draft &draft,
+                                   qsizetype &start,
+                                   qsizetype &length) const;
+    void resetFrameResizeState();
     void setSelectedFontStyle(FontStyle style, bool enabled);
     void applyDraftState(const Command &command, bool useAfterState, bool immediate);
     bool removeAddedCandidate(int page, const QString &objectId);
@@ -270,5 +347,11 @@ private:
     bool m_hasSelection = false;
     QString m_selectedText;
     bool m_textEditActive = false;
+    qsizetype m_selectedTextRangeStart = 0;
+    qsizetype m_selectedTextRangeLength = 0;
     Command m_textEditCommand;
+    bool m_frameResizeActive = false;
+    bool m_frameResizeOwnsTextEdit = false;
+    QRectF m_frameResizeStartFrameRect;
+    QRectF m_frameResizeStartContentBounds;
 };

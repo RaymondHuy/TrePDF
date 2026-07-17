@@ -15,8 +15,8 @@ Rectangle {
     required property bool selectedFontBold
     required property bool selectedFontItalic
     required property bool selectedFontUnderline
+    required property color selectedColor
     property bool formattingEnabled: false
-    property color previewColor: "#2f3136"
 
     readonly property var displayedFontFamilies: {
         const families = []
@@ -52,6 +52,7 @@ Rectangle {
     signal fontBoldChangeRequested(bool enabled)
     signal fontItalicChangeRequested(bool enabled)
     signal fontUnderlineChangeRequested(bool enabled)
+    signal fontColorChangeRequested(color color)
 
     implicitWidth: collapsed ? 42 : 264
     color: theme.ribbonSurface
@@ -426,7 +427,10 @@ Rectangle {
 
                             Layout.fillWidth: true
                             Layout.preferredHeight: 38
-                            onClicked: colorDialog.open()
+                            onClicked: {
+                                colorDialog.selectedColor = root.selectedColor
+                                colorDialog.open()
+                            }
 
                             contentItem: RowLayout {
                                 spacing: 10
@@ -435,14 +439,14 @@ Rectangle {
                                     Layout.preferredWidth: 22
                                     Layout.preferredHeight: 22
                                     radius: 3
-                                    color: root.previewColor
+                                    color: root.selectedColor
                                     border.width: 1
                                     border.color: "#8a8785"
                                 }
 
                                 Label {
                                     Layout.fillWidth: true
-                                    text: root.previewColor.toString().toUpperCase()
+                                    text: root.selectedColor.toString().toUpperCase()
                                     color: colorButton.enabled
                                         ? root.theme.ribbonTextColor
                                         : "#aaa8a6"
@@ -474,9 +478,8 @@ Rectangle {
     ColorDialog {
         id: colorDialog
 
-        selectedColor: root.previewColor
         //% "Font color"
         title: qsTrId("FontColor")
-        onAccepted: root.previewColor = selectedColor
+        onAccepted: root.fontColorChangeRequested(selectedColor)
     }
 }
