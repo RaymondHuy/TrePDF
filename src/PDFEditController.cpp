@@ -1,5 +1,6 @@
 #include "PDFEditController.h"
 #include "ApplicationFonts.h"
+#include "PDFSaveWriter.h"
 #include "PDFiumSynchronization.h"
 
 #include <algorithm>
@@ -13,9 +14,12 @@
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QFontMetricsF>
+#include <QFileInfo>
 #include <QMutexLocker>
+#include <QRunnable>
 #include <QSet>
 #include <QStringList>
+#include <QThreadPool>
 #include <QVariantMap>
 #include <QtTranslation>
 
@@ -474,21 +478,26 @@ bool fontSupportsText(const QString &family, const QString &text)
     return true;
 }
 
-QColor textColor(FPDF_PAGEOBJECT object, FPDF_TEXT_RENDERMODE renderMode)
+QColor pageObjectColor(FPDF_PAGEOBJECT object, bool stroke)
 {
     unsigned int red = 0;
     unsigned int green = 0;
     unsigned int blue = 0;
     unsigned int alpha = 255;
-    const bool strokeOnly = renderMode == FPDF_TEXTRENDERMODE_STROKE
-        || renderMode == FPDF_TEXTRENDERMODE_STROKE_CLIP;
-    const FPDF_BOOL foundColor = strokeOnly
+    const FPDF_BOOL foundColor = stroke
         ? FPDFPageObj_GetStrokeColor(object, &red, &green, &blue, &alpha)
         : FPDFPageObj_GetFillColor(object, &red, &green, &blue, &alpha);
     if (!foundColor) {
         return Qt::black;
     }
     return QColor::fromRgb(red, green, blue, alpha);
+}
+
+QColor textColor(FPDF_PAGEOBJECT object, FPDF_TEXT_RENDERMODE renderMode)
+{
+    const bool strokeOnly = renderMode == FPDF_TEXTRENDERMODE_STROKE
+        || renderMode == FPDF_TEXTRENDERMODE_STROKE_CLIP;
+    return pageObjectColor(object, strokeOnly);
 }
 
 bool isSuppressibleTextRenderMode(FPDF_TEXT_RENDERMODE renderMode)
@@ -506,6 +515,52 @@ QString pageObjectId(const QVector<int> &objectPath)
         pathSegments.append(QString::number(index));
     }
     return QStringLiteral("object:") + pathSegments.join(QLatin1Char('/'));
+}
+
+QString saveFailureText(const PDFSaveWriter::Result &result)
+{
+    switch (result.error) {
+    case PDFSaveWriter::Error::None:
+        return {};
+    case PDFSaveWriter::Error::SourceUnavailable:
+        //% "No PDF is open."
+        return qtTrId("NoPdfOpenForSaving");
+    case PDFSaveWriter::Error::SourceOpenFailed:
+        //% "The source PDF could not be opened for saving."
+        return qtTrId("PdfSaveSourceOpenFailed");
+    case PDFSaveWriter::Error::PageLoadFailed:
+        //% "Page %1 could not be loaded while saving."
+        return qtTrId("PdfSavePageLoadFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::UnsupportedSourceObject:
+        //% "Page %1 contains edited text that cannot be saved safely yet."
+        return qtTrId("PdfSaveUnsupportedSourceObject").arg(result.page + 1);
+    case PDFSaveWriter::Error::SourceObjectMissing:
+        //% "An edited object could not be found on page %1."
+        return qtTrId("PdfSaveSourceObjectMissing").arg(result.page + 1);
+    case PDFSaveWriter::Error::SourceObjectRemovalFailed:
+        //% "An original object could not be replaced on page %1."
+        return qtTrId("PdfSaveObjectRemovalFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::FontUnavailable:
+        //% "The font %1 cannot be embedded in the saved PDF."
+        return qtTrId("PdfSaveFontUnavailable").arg(result.detail);
+    case PDFSaveWriter::Error::TextObjectCreationFailed:
+        //% "Saved text could not be created on page %1."
+        return qtTrId("PdfSaveTextCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::PageContentGenerationFailed:
+        //% "Page %1 could not be finalized for saving."
+        return qtTrId("PdfSavePageGenerationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::OutputOpenFailed:
+        //% "The destination file could not be opened: %1"
+        return qtTrId("PdfSaveOutputOpenFailed").arg(result.detail);
+    case PDFSaveWriter::Error::OutputWriteFailed:
+        //% "The PDF could not be written: %1"
+        return qtTrId("PdfSaveOutputWriteFailed").arg(result.detail);
+    case PDFSaveWriter::Error::OutputCommitFailed:
+        //% "The saved PDF could not replace the destination file: %1"
+        return qtTrId("PdfSaveOutputCommitFailed").arg(result.detail);
+    }
+    //% "The PDF could not be saved."
+    return qtTrId("PdfSaveFailed");
 }
 
 } // namespace
@@ -583,6 +638,11 @@ bool PDFEditController::canUndo() const
 bool PDFEditController::canRedo() const
 {
     return !m_redoStack.isEmpty();
+}
+
+bool PDFEditController::saving() const
+{
+    return m_saving;
 }
 
 bool PDFEditController::textEditActive() const
@@ -937,7 +997,14 @@ QVariantMap PDFEditController::addText(int page, qreal x, qreal y)
     //% "Add Text"
     candidate.label = qtTrId("AddText");
     candidate.text.clear();
-    candidate.fontFamily = QFontInfo(QFont()).family();
+    const QStringList bundledFamilies = ApplicationFonts::bundledFontFamilies();
+    candidate.fontFamily = bundledFamilies.contains(
+        QStringLiteral("Arial"),
+        Qt::CaseInsensitive)
+        ? QStringLiteral("Arial")
+        : bundledFamilies.isEmpty()
+            ? QFontInfo(QFont()).family()
+            : bundledFamilies.constFirst();
     candidate.fontSizeRatio = kAddedTextFontSizeRatio;
     candidate.displayFontSizeRatio = candidate.fontSizeRatio;
     candidate.color = Qt::black;
@@ -1623,6 +1690,181 @@ void PDFEditController::discardDrafts()
     emit statusMessage(qtTrId("AllDraftChangesDiscarded"));
 }
 
+bool PDFEditController::save()
+{
+    if (!m_document || !m_document->isLoaded()) {
+        //% "No PDF is open."
+        emit statusMessage(qtTrId("NoPdfOpenForSaving"));
+        return false;
+    }
+    if (!hasDrafts()) {
+        //% "There are no draft changes to save."
+        emit statusMessage(qtTrId("NoDraftChangesToSave"));
+        return true;
+    }
+    return saveAs(m_document->source());
+}
+
+bool PDFEditController::saveAs(const QUrl &target)
+{
+    if (m_saving) {
+        return false;
+    }
+    if (!m_document || !m_document->isLoaded()) {
+        //% "No PDF is open."
+        emit statusMessage(qtTrId("NoPdfOpenForSaving"));
+        return false;
+    }
+    if (!target.isLocalFile() || target.toLocalFile().isEmpty()) {
+        //% "Only local PDF files are supported"
+        emit statusMessage(qtTrId("LocalPdfFilesOnly"));
+        return false;
+    }
+
+    finishSelectedTextEdit();
+    PDFDocument *const expectedDocument = m_document.data();
+    const int expectedRevision = expectedDocument->renderRevision();
+    const QString expectedSourceFilePath = expectedDocument->renderFilePath();
+    m_saving = true;
+    emit savingChanged();
+    const QString targetFilePath = QFileInfo(target.toLocalFile()).absoluteFilePath();
+    const PDFSaveWriter::Result result = PDFSaveWriter::save(*this, targetFilePath);
+    return completeSave(
+        result,
+        targetFilePath,
+        expectedDocument,
+        expectedRevision,
+        expectedSourceFilePath);
+}
+
+bool PDFEditController::requestSave()
+{
+    if (!m_document || !m_document->isLoaded()) {
+        //% "No PDF is open."
+        emit statusMessage(qtTrId("NoPdfOpenForSaving"));
+        return false;
+    }
+    if (!hasDrafts()) {
+        //% "There are no draft changes to save."
+        emit statusMessage(qtTrId("NoDraftChangesToSave"));
+        emit saveFinished(true);
+        return true;
+    }
+    return requestSaveAs(m_document->source());
+}
+
+bool PDFEditController::requestSaveAs(const QUrl &target)
+{
+    if (m_saving) {
+        return false;
+    }
+    if (!m_document || !m_document->isLoaded()) {
+        //% "No PDF is open."
+        emit statusMessage(qtTrId("NoPdfOpenForSaving"));
+        return false;
+    }
+    if (!target.isLocalFile() || target.toLocalFile().isEmpty()) {
+        //% "Only local PDF files are supported"
+        emit statusMessage(qtTrId("LocalPdfFilesOnly"));
+        return false;
+    }
+
+    finishSelectedTextEdit();
+    const QString targetFilePath = QFileInfo(target.toLocalFile()).absoluteFilePath();
+    const PDFSaveWriter::Request request = PDFSaveWriter::prepare(
+        *this,
+        targetFilePath);
+    if (!request.isValid()) {
+        emit statusMessage(saveFailureText(PDFSaveWriter::Result{
+            PDFSaveWriter::Error::SourceUnavailable}));
+        return false;
+    }
+
+    QPointer<PDFEditController> controller(this);
+    PDFDocument *const expectedDocument = m_document.data();
+    const int expectedRevision = m_document->renderRevision();
+    const QString expectedSourceFilePath = m_document->renderFilePath();
+    m_saving = true;
+    emit savingChanged();
+    QThreadPool::globalInstance()->start(QRunnable::create(
+        [controller,
+         expectedDocument,
+         expectedRevision,
+         expectedSourceFilePath,
+         request,
+         targetFilePath]() {
+            PDFSaveWriter::Result result = PDFSaveWriter::save(request);
+            if (!controller) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                controller.data(),
+                [controller,
+                 expectedDocument,
+                 expectedRevision,
+                 expectedSourceFilePath,
+                 result = std::move(result),
+                 targetFilePath]() {
+                    if (controller) {
+                        controller->completeSave(
+                            result,
+                            targetFilePath,
+                            expectedDocument,
+                            expectedRevision,
+                            expectedSourceFilePath);
+                    }
+                },
+                Qt::QueuedConnection);
+        }));
+    return true;
+}
+
+bool PDFEditController::completeSave(
+    const PDFSaveWriter::Result &result,
+    const QString &targetFilePath,
+    PDFDocument *expectedDocument,
+    int expectedRevision,
+    const QString &expectedSourceFilePath)
+{
+    if (!result.succeeded()) {
+        m_saving = false;
+        emit savingChanged();
+        emit statusMessage(saveFailureText(result));
+        emit saveFinished(false);
+        return false;
+    }
+
+    const bool documentUnchanged = m_document
+        && m_document == expectedDocument
+        && m_document->renderRevision() == expectedRevision
+        && m_document->renderFilePath() == expectedSourceFilePath;
+    if (!documentUnchanged) {
+        m_saving = false;
+        emit savingChanged();
+        //% "Saved %1"
+        emit statusMessage(qtTrId("PdfSavedFile").arg(
+            QFileInfo(targetFilePath).fileName()));
+        emit saveFinished(true);
+        return true;
+    }
+
+    const bool reopened = m_document->open(QUrl::fromLocalFile(targetFilePath));
+    m_saving = false;
+    emit savingChanged();
+    if (!reopened) {
+        m_document->close();
+        //% "The PDF was saved, but TrePDF could not reopen it."
+        emit statusMessage(qtTrId("PdfSavedButReopenFailed"));
+        emit saveFinished(true);
+        return true;
+    }
+
+    //% "Saved %1"
+    emit statusMessage(qtTrId("PdfSavedFile").arg(QFileInfo(targetFilePath).fileName()));
+    emit saveFinished(true);
+    return true;
+}
+
 void PDFEditController::resetSession()
 {
     m_pageCandidates.clear();
@@ -1939,14 +2181,31 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
         normalizedFontSize(page, pageSize, textTransform, fontSize));
     candidate.displayFontSizeRatio = candidate.fontSizeRatio;
     candidate.fontStretch = fontStretchForTransform(page, pageSize, textTransform);
+    candidate.textRenderMode = renderMode;
+    candidate.fillColor = pageObjectColor(pageObject, false);
+    candidate.strokeColor = pageObjectColor(pageObject, true);
+    float strokeWidth = 1.0F;
+    if (FPDFPageObj_GetStrokeWidth(pageObject, &strokeWidth)) {
+        candidate.strokeWidth = qMax<qreal>(0.0, strokeWidth);
+    }
     candidate.color = textColor(pageObject, renderMode);
     const bool editingAllowed = documentAllowsEditing();
-    candidate.editable = editingAllowed && inlineLayoutSupported;
+    const bool topLevelObject = objectPath.size() == 1;
+    candidate.editable = editingAllowed
+        && suppressionSupported
+        && topLevelObject
+        && inlineLayoutSupported;
     candidate.renderSuppressible = suppressionSupported;
     candidate.limited = true;
     if (!editingAllowed) {
         //% "This PDF does not permit content editing."
         candidate.reason = qtTrId("PdfEditingNotPermitted");
+    } else if (!suppressionSupported) {
+        //% "Text clipping render modes cannot be edited safely yet."
+        candidate.reason = qtTrId("PdfTextClippingEditUnsupported");
+    } else if (!topLevelObject) {
+        //% "Text inside a PDF form object cannot be saved safely yet."
+        candidate.reason = qtTrId("PdfFormTextSaveUnsupported");
     } else if (!inlineLayoutSupported) {
         //% "Rotated, transformed, or multiline text is not supported by the inline draft editor yet."
         candidate.reason = qtTrId("InlineEditorUnsupportedTextLayout");
@@ -2059,7 +2318,11 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             && left.fontBold == right.fontBold
             && left.fontItalic == right.fontItalic
             && left.fontUnderline == right.fontUnderline
-            && left.color == right.color;
+            && left.color == right.color
+            && left.fillColor == right.fillColor
+            && left.strokeColor == right.strokeColor
+            && qFuzzyCompare(left.strokeWidth + 1.0, right.strokeWidth + 1.0)
+            && left.textRenderMode == right.textRenderMode;
     };
     const auto horizontalGap = [&](const Candidate &left, const Candidate &right) {
         return (right.geometry.sourceRect.left() - left.geometry.sourceRect.right())

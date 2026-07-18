@@ -1,14 +1,15 @@
 # TrePDF
 
 TrePDF is a Qt Quick Controls desktop PDF reader powered by PDFium. The app
-supports continuous page viewing, asynchronous rendering, draft content edits,
-and an ID-based localization system with Vietnamese enabled by default.
+supports continuous page viewing, asynchronous rendering, rich-text content
+edits, Save/Save As, and an ID-based localization system with Vietnamese
+enabled by default.
 
 In Edit mode, selecting editable text opens contextual Edit and Delete actions.
-Deletion is stored only as a session draft and can be undone or redone.
-Compatible text objects on the same visual line are grouped into one editable
-candidate while retaining every source object path for draft rendering and
-undo/redo.
+Changes remain undoable session drafts until Save or Save As writes them into a
+PDF. Compatible text objects on the same visual line are grouped into one
+editable candidate while retaining every source object path for draft rendering
+and persistence.
 
 Draft geometry keeps immutable PDF source bounds separate from the layout frame
 and laid-out content bounds. Existing PDF text seeds its frame from the Qt text
@@ -23,7 +24,22 @@ the layout frame, renders mixed character styles, and applies formatting to the
 selected text range.
 
 Fonts placed under `src/assets/fonts` are bundled with the application and
-preferred over matching system-installed families for draft text display.
+preferred over matching system-installed families for draft display and PDF
+embedding. The save writer can also reuse the original PDF font or a compatible
+PDF standard font. If a newly selected system font cannot be embedded, saving
+stops with an error and keeps the draft intact.
+
+Save writes the current file atomically; Save As preserves the source file and
+opens the saved copy. The controller snapshots the draft on the GUI thread and
+runs serialization on a worker so the interface can keep painting its saving
+state. The writer uses a separate PDFium document, replaces every source object
+represented by a draft, lays out multiline/rich-text runs, calls
+`FPDFPage_GenerateContent()`, and only clears undo history after the saved PDF
+has reopened successfully.
+
+Editable source text is currently limited to top-level page objects with Fill,
+Stroke, or Fill+Stroke rendering. Text used as a clipping path or nested inside
+a Form XObject remains viewable but is not offered as safely editable content.
 
 Edit mode also shows a collapsible text-formatting panel on the right with font
 family, size, color, bold, italic, and underline controls. Font family, bold,

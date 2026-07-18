@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PDFDocument.h"
+#include "PDFSaveWriter.h"
 
 #include <QByteArray>
 #include <QColor>
@@ -28,6 +29,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
+    Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
     Q_PROPERTY(bool textEditActive READ textEditActive NOTIFY textEditActiveChanged FINAL)
     Q_PROPERTY(QStringList bundledFontFamilies READ bundledFontFamilies CONSTANT FINAL)
     Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies CONSTANT FINAL)
@@ -76,6 +78,7 @@ public:
     bool hasDrafts() const;
     bool canUndo() const;
     bool canRedo() const;
+    bool saving() const;
     bool textEditActive() const;
     QStringList bundledFontFamilies() const;
     QStringList availableFontFamilies() const;
@@ -138,18 +141,26 @@ public:
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void discardDrafts();
+    Q_INVOKABLE bool save();
+    Q_INVOKABLE bool saveAs(const QUrl &target);
+    Q_INVOKABLE bool requestSave();
+    Q_INVOKABLE bool requestSaveAs(const QUrl &target);
 
 signals:
     void documentChanged();
     void toolChanged();
     void historyStateChanged();
+    void savingChanged();
     void textEditActiveChanged();
     void selectionChanged();
     void pageDataChanged(int page);
     void draftRenderStateChanged(int page, quint64 revision, bool immediate);
     void statusMessage(const QString &message);
+    void saveFinished(bool succeeded);
 
 private:
+    friend class PDFSaveWriter;
+
     struct TextObjectLayout {
         QRectF bounds;
         QPointF origin;
@@ -191,6 +202,10 @@ private:
         bool fontItalic = false;
         bool fontUnderline = false;
         QColor color = Qt::black;
+        QColor fillColor = Qt::black;
+        QColor strokeColor = Qt::black;
+        qreal strokeWidth = 1.0;
+        FPDF_TEXT_RENDERMODE textRenderMode = FPDF_TEXTRENDERMODE_FILL;
         bool hasBaseline = false;
         bool editable = false;
         bool renderSuppressible = false;
@@ -265,6 +280,11 @@ private:
     };
 
     void resetSession();
+    bool completeSave(const PDFSaveWriter::Result &result,
+                      const QString &targetFilePath,
+                      PDFDocument *expectedDocument,
+                      int expectedRevision,
+                      const QString &expectedSourceFilePath);
     void ensureCacheRevision();
     const QVector<Candidate> &ensurePageCandidates(int page);
     QVector<Candidate> scanPage(int page);
@@ -345,6 +365,7 @@ private:
     qsizetype m_registeredFontBytes = 0;
     Candidate m_selectedCandidate;
     bool m_hasSelection = false;
+    bool m_saving = false;
     QString m_selectedText;
     bool m_textEditActive = false;
     qsizetype m_selectedTextRangeStart = 0;

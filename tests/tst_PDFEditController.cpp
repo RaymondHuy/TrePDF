@@ -4,6 +4,7 @@
 
 #include <QFile>
 #include <QFontMetricsF>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUrl>
@@ -12,6 +13,8 @@
 
 #include <fpdf_edit.h>
 #include <fpdf_save.h>
+#include <fpdf_text.h>
+#include <fpdf_transformpage.h>
 
 namespace {
 
@@ -71,6 +74,53 @@ bool addTextObject(FPDF_DOCUMENT document,
         return false;
     }
 
+    FPDFPageObj_Transform(textObject, 1.0, 0.0, 0.0, 1.0, x, y);
+    return FPDFPage_InsertObject(page, textObject);
+}
+
+bool addStyledTextObject(FPDF_DOCUMENT document,
+                         FPDF_PAGE page,
+                         const QString &text,
+                         FPDF_TEXT_RENDERMODE renderMode,
+                         const QColor &color,
+                         float strokeWidth,
+                         double x,
+                         double y)
+{
+    FPDF_PAGEOBJECT textObject = FPDFPageObj_NewTextObj(
+        document,
+        "Helvetica",
+        24.0F);
+    if (!textObject) {
+        return false;
+    }
+    const auto *wideText = reinterpret_cast<const FPDF_WCHAR *>(text.utf16());
+    const bool usesStroke = renderMode == FPDF_TEXTRENDERMODE_STROKE
+        || renderMode == FPDF_TEXTRENDERMODE_FILL_STROKE
+        || renderMode == FPDF_TEXTRENDERMODE_STROKE_CLIP
+        || renderMode == FPDF_TEXTRENDERMODE_FILL_STROKE_CLIP;
+    bool configured = FPDFText_SetText(textObject, wideText)
+        && FPDFTextObj_SetTextRenderMode(textObject, renderMode);
+    if (configured && usesStroke) {
+        configured = FPDFPageObj_SetStrokeColor(
+            textObject,
+            static_cast<unsigned int>(color.red()),
+            static_cast<unsigned int>(color.green()),
+            static_cast<unsigned int>(color.blue()),
+            static_cast<unsigned int>(color.alpha()))
+            && FPDFPageObj_SetStrokeWidth(textObject, strokeWidth);
+    } else if (configured) {
+        configured = FPDFPageObj_SetFillColor(
+            textObject,
+            static_cast<unsigned int>(color.red()),
+            static_cast<unsigned int>(color.green()),
+            static_cast<unsigned int>(color.blue()),
+            static_cast<unsigned int>(color.alpha()));
+    }
+    if (!configured) {
+        FPDFPageObj_Destroy(textObject);
+        return false;
+    }
     FPDFPageObj_Transform(textObject, 1.0, 0.0, 0.0, 1.0, x, y);
     return FPDFPage_InsertObject(page, textObject);
 }
@@ -160,6 +210,109 @@ bool createFontStylePdf(const QString &filePath)
     return succeeded;
 }
 
+bool createOffsetCropPdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 600.0, 800.0);
+    if (page) {
+        FPDFPage_SetCropBox(page, 50.0F, 100.0F, 550.0F, 700.0F);
+    }
+    bool succeeded = page
+        && addTextObject(
+            document,
+            page,
+            "Helvetica",
+            QStringLiteral("Offset crop text"),
+            100.0,
+            600.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createRenderModePdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 595.0, 842.0);
+    bool succeeded = page
+        && addStyledTextObject(
+            document,
+            page,
+            QStringLiteral("Stroke text"),
+            FPDF_TEXTRENDERMODE_STROKE,
+            QColor(20, 80, 160),
+            1.75F,
+            72.0,
+            700.0)
+        && addStyledTextObject(
+            document,
+            page,
+            QStringLiteral("Clip text"),
+            FPDF_TEXTRENDERMODE_FILL_CLIP,
+            Qt::black,
+            1.0F,
+            72.0,
+            640.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createRotatedPdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+    FPDF_PAGE page = FPDFPage_New(document, 0, 595.0, 842.0);
+    if (page) {
+        FPDFPage_SetRotation(page, 1);
+    }
+    bool succeeded = page
+        && addTextObject(
+            document,
+            page,
+            "Helvetica",
+            QStringLiteral("Rotation source"),
+            72.0,
+            700.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
 QVariantMap candidateForText(const QVariantList &candidates, const QString &text)
 {
     for (const QVariant &candidateValue : candidates) {
@@ -170,6 +323,331 @@ QVariantMap candidateForText(const QVariantList &candidates, const QString &text
         }
     }
     return {};
+}
+
+QString pageText(const QString &filePath, int pageIndex = 0)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    if (!document) {
+        return {};
+    }
+    FPDF_PAGE page = FPDF_LoadPage(document, pageIndex);
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    QString text;
+    if (textPage) {
+        const int count = FPDFText_CountChars(textPage);
+        QVector<unsigned short> buffer(count + 1, 0);
+        const int written = FPDFText_GetText(textPage, 0, count, buffer.data());
+        if (written > 1) {
+            text = QString::fromUtf16(
+                reinterpret_cast<const char16_t *>(buffer.constData()),
+                written - 1);
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    FPDF_CloseDocument(document);
+    return text;
+}
+
+QString normalizedPageText(const QString &filePath, int pageIndex = 0)
+{
+    QString text = pageText(filePath, pageIndex);
+    text.replace(QChar(0xfffe), QLatin1Char(' '));
+    text.replace(QChar(0xffff), QLatin1Char(' '));
+    return text.simplified();
+}
+
+QString pageObjectText(FPDF_PAGEOBJECT object, FPDF_TEXTPAGE textPage)
+{
+    const unsigned long byteLength = FPDFTextObj_GetText(object, textPage, nullptr, 0);
+    if (byteLength < sizeof(FPDF_WCHAR)) {
+        return {};
+    }
+
+    QVector<FPDF_WCHAR> buffer(
+        static_cast<qsizetype>((byteLength + sizeof(FPDF_WCHAR) - 1)
+                               / sizeof(FPDF_WCHAR)));
+    const unsigned long actualLength = FPDFTextObj_GetText(
+        object,
+        textPage,
+        buffer.data(),
+        byteLength);
+    qsizetype characterCount = static_cast<qsizetype>(
+        actualLength / sizeof(FPDF_WCHAR));
+    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
+        --characterCount;
+    }
+    return QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(buffer.constData()),
+        characterCount);
+}
+
+QString baseFontName(FPDF_PAGEOBJECT textObject)
+{
+    const FPDF_FONT font = FPDFTextObj_GetFont(textObject);
+    const size_t byteLength = font
+        ? FPDFFont_GetBaseFontName(font, nullptr, 0)
+        : 0;
+    if (byteLength <= 1) {
+        return {};
+    }
+
+    QByteArray buffer(static_cast<qsizetype>(byteLength), Qt::Uninitialized);
+    if (FPDFFont_GetBaseFontName(
+            font,
+            buffer.data(),
+            static_cast<size_t>(buffer.size()))
+        != byteLength) {
+        return {};
+    }
+    buffer.chop(1);
+    return QString::fromUtf8(buffer);
+}
+
+QStringList topLevelTextObjects(const QString &filePath)
+{
+    QStringList texts;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_TEXT) {
+                texts.append(pageObjectText(object, textPage));
+            }
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return texts;
+}
+
+bool textObjectOrigin(const QString &filePath,
+                      const QString &text,
+                      QPointF &origin)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    bool found = false;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT
+                || !pageObjectText(object, textPage).contains(text)) {
+                continue;
+            }
+            FS_MATRIX matrix{};
+            if (FPDFPageObj_GetMatrix(object, &matrix)) {
+                origin = QPointF(matrix.e, matrix.f);
+                found = true;
+                break;
+            }
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return found;
+}
+
+bool textObjectMatrix(const QString &filePath,
+                      const QString &text,
+                      FS_MATRIX &matrix)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    bool found = false;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_TEXT
+                && pageObjectText(object, textPage).contains(text)
+                && FPDFPageObj_GetMatrix(object, &matrix)) {
+                found = true;
+                break;
+            }
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return found;
+}
+
+bool strokeTextAppearance(const QString &filePath,
+                          const QString &text,
+                          QColor &strokeColor,
+                          qreal &strokeWidth)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    bool found = false;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT
+                || !pageObjectText(object, textPage).contains(text)
+                || FPDFTextObj_GetTextRenderMode(object) != FPDF_TEXTRENDERMODE_STROKE) {
+                continue;
+            }
+            unsigned int red = 0;
+            unsigned int green = 0;
+            unsigned int blue = 0;
+            unsigned int alpha = 0;
+            float width = 0.0F;
+            if (FPDFPageObj_GetStrokeColor(
+                    object,
+                    &red,
+                    &green,
+                    &blue,
+                    &alpha)
+                && FPDFPageObj_GetStrokeWidth(object, &width)) {
+                strokeColor = QColor::fromRgb(red, green, blue, alpha);
+                strokeWidth = width;
+                found = true;
+                break;
+            }
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return found;
+}
+
+struct RichSaveInspection {
+    bool readable = false;
+    bool redRun = false;
+    bool boldItalicRun = false;
+    bool underlinePath = false;
+    bool redAndBlueShareBaseline = false;
+    bool greenIsNextLine = false;
+};
+
+RichSaveInspection inspectRichSave(const QString &filePath)
+{
+    RichSaveInspection inspection;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    inspection.readable = document && page && textPage;
+
+    qreal redBaseline = 0.0;
+    qreal blueBaseline = 0.0;
+    qreal greenBaseline = 0.0;
+    bool foundRedBaseline = false;
+    bool foundBlueBaseline = false;
+    bool foundGreenBaseline = false;
+    if (inspection.readable) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            const int type = FPDFPageObj_GetType(object);
+            if (type == FPDF_PAGEOBJ_PATH) {
+                inspection.underlinePath = true;
+                continue;
+            }
+            if (type != FPDF_PAGEOBJ_TEXT) {
+                continue;
+            }
+
+            const QString text = pageObjectText(object, textPage);
+            FS_MATRIX matrix{};
+            if (!FPDFPageObj_GetMatrix(object, &matrix)) {
+                continue;
+            }
+            if (text.contains(QStringLiteral("Red"))) {
+                unsigned int red = 0;
+                unsigned int green = 0;
+                unsigned int blue = 0;
+                unsigned int alpha = 0;
+                inspection.redRun = FPDFPageObj_GetFillColor(
+                    object,
+                    &red,
+                    &green,
+                    &blue,
+                    &alpha)
+                    && red == 0xc6
+                    && green == 0x28
+                    && blue == 0x28
+                    && alpha == 0xff;
+                const QString fontName = baseFontName(object).toLower();
+                inspection.boldItalicRun = fontName.contains(QStringLiteral("bold"))
+                    && (fontName.contains(QStringLiteral("italic"))
+                        || fontName.contains(QStringLiteral("oblique")));
+                redBaseline = matrix.f;
+                foundRedBaseline = true;
+            } else if (text.contains(QStringLiteral("blue"))) {
+                blueBaseline = matrix.f;
+                foundBlueBaseline = true;
+            } else if (text.contains(QStringLiteral("Green"))) {
+                greenBaseline = matrix.f;
+                foundGreenBaseline = true;
+            }
+        }
+    }
+
+    inspection.redAndBlueShareBaseline = foundRedBaseline
+        && foundBlueBaseline
+        && qAbs(redBaseline - blueBaseline) < 0.5;
+    inspection.greenIsNextLine = foundGreenBaseline
+        && foundBlueBaseline
+        && greenBaseline < blueBaseline - 1.0;
+
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return inspection;
 }
 
 } // namespace
@@ -196,6 +674,19 @@ private slots:
     void formatsSelectedRangeInMultilineDraft();
     void appliesFontStylesToDisplayFont_data();
     void appliesFontStylesToDisplayFont();
+    void savesEditedTextRoundTrip();
+    void savesCurrentFileRoundTrip();
+    void savesUnchangedCopyRoundTrip();
+    void savesMultipleDraftsOnSamePage();
+    void savesDeletedTextRoundTrip();
+    void savesAddedTextRoundTrip();
+    void preservesAddedTextLayerOrder();
+    void savesRichMultilineTextRoundTrip();
+    void savesOffsetCropCoordinates();
+    void savesAddedTextOnRotatedPage();
+    void preservesStrokeAppearanceAndRejectsClipping();
+    void savesAsynchronously();
+    void keepsDraftsWhenSaveFails();
 
 private:
     QTemporaryDir m_temporaryDirectory;
@@ -751,6 +1242,434 @@ void PDFEditControllerTest::appliesFontStylesToDisplayFont()
     QCOMPARE(displayFont.underline(), fontUnderline);
     QCOMPARE(displayFont.pixelSize(), 18);
     QCOMPARE(displayFont.stretch(), static_cast<int>(QFont::Unstretched));
+}
+
+void PDFEditControllerTest::savesEditedTextRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-edit-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-edit-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QString::fromLatin1(kGroupedText));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Saved grouped text"));
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+    const QString savedText = normalizedPageText(outputPath);
+    QVERIFY2(
+        savedText.contains(QStringLiteral("Saved grouped text")),
+        qPrintable(QStringLiteral("Saved page text: %1").arg(savedText)));
+    QVERIFY(!savedText.contains(QString::fromLatin1(kGroupedText)));
+    QVERIFY(!savedText.contains(QStringLiteral("Hello")));
+    QVERIFY(!savedText.contains(QStringLiteral("world")));
+    const QStringList objectTexts = topLevelTextObjects(outputPath);
+    QVERIFY(objectTexts.size() >= 3);
+    QCOMPARE(objectTexts.at(0), QString::fromLatin1(kRegularText));
+    QCOMPARE(objectTexts.at(1), QString::fromLatin1(kBoldText));
+    QVERIFY(objectTexts.at(2).contains(QStringLiteral("Saved")));
+    const QString sourceText = normalizedPageText(sourcePath);
+    QVERIFY(sourceText.contains(QString::fromLatin1(kGroupedText)));
+    QVERIFY(!sourceText.contains(QStringLiteral("Saved grouped text")));
+}
+
+void PDFEditControllerTest::savesCurrentFileRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-current.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QString::fromLatin1(kBoldText));
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Saved to current file"));
+    const int revisionBeforeSave = document.renderRevision();
+    const QSizeF pageSizeBeforeSave = document.pageSize(0);
+    QVERIFY(controller.canUndo());
+
+    QVERIFY(controller.save());
+    QCOMPARE(document.source().toLocalFile(), sourcePath);
+    QVERIFY(document.renderRevision() > revisionBeforeSave);
+    QCOMPARE(document.pageCount(), 1);
+    QCOMPARE(document.pageSize(0), pageSizeBeforeSave);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+    QVERIFY(normalizedPageText(sourcePath).contains(
+        QStringLiteral("Saved to current file")));
+}
+
+void PDFEditControllerTest::savesUnchangedCopyRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-copy-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-copy-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+    const QString sourceText = normalizedPageText(sourcePath);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.hasDrafts());
+
+    QSignalSpy saveFinishedSpy(&controller, &PDFEditController::saveFinished);
+    QVERIFY(controller.requestSaveAs(QUrl::fromLocalFile(outputPath)));
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 5000);
+    QCOMPARE(saveFinishedSpy.constFirst().constFirst().toBool(), true);
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+    QCOMPARE(document.pageCount(), 1);
+    QCOMPARE(normalizedPageText(outputPath), sourceText);
+    QCOMPARE(normalizedPageText(sourcePath), sourceText);
+}
+
+void PDFEditControllerTest::savesMultipleDraftsOnSamePage()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-multiple-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-multiple-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = controller.candidatesForPage(0);
+    const QVariantMap regularCandidate = candidateForText(
+        candidates,
+        QString::fromLatin1(kRegularText));
+    const QVariantMap boldCandidate = candidateForText(
+        candidates,
+        QString::fromLatin1(kBoldText));
+    QVERIFY(controller.selectCandidate(
+        0,
+        regularCandidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("First draft saved"));
+    QVERIFY(controller.selectCandidate(
+        0,
+        boldCandidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Second draft saved"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QString savedText = normalizedPageText(outputPath);
+    QVERIFY(savedText.contains(QStringLiteral("First draft saved")));
+    QVERIFY(savedText.contains(QStringLiteral("Second draft saved")));
+    QVERIFY(!savedText.contains(QString::fromLatin1(kRegularText)));
+    QVERIFY(!savedText.contains(QString::fromLatin1(kBoldText)));
+}
+
+void PDFEditControllerTest::savesDeletedTextRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-delete-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-delete-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QString());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QString savedText = normalizedPageText(outputPath);
+    QVERIFY(!savedText.isEmpty());
+    QVERIFY(!savedText.contains(QString::fromLatin1(kRegularText)));
+    QVERIFY(savedText.contains(QString::fromLatin1(kBoldText)));
+}
+
+void PDFEditControllerTest::savesAddedTextRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-add-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-add-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.addText(0, 0.2, 0.65).isEmpty());
+    const QString addedText = QStringLiteral("Văn bản mới đã lưu");
+    controller.updateSelectedTextPreview(addedText);
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.hasDrafts());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    const QString savedText = normalizedPageText(outputPath);
+    QVERIFY2(
+        savedText.contains(addedText),
+        qPrintable(QStringLiteral("Saved page text: %1").arg(savedText)));
+
+    const QString verificationPath = qEnvironmentVariable("TREPDF_SAVE_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(outputPath, verificationPath));
+    }
+}
+
+void PDFEditControllerTest::preservesAddedTextLayerOrder()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-added-order-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-added-order-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    for (int index = 1; index <= 12; ++index) {
+        QVERIFY(!controller.addText(0, 0.2, 0.65).isEmpty());
+        controller.updateSelectedTextPreview(
+            QStringLiteral("Layer %1").arg(index));
+        controller.finishSelectedTextEdit();
+    }
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QStringList objectTexts = topLevelTextObjects(outputPath);
+    QVERIFY(objectTexts.size() >= 22);
+    const QStringList savedLayers = objectTexts.sliced(objectTexts.size() - 12);
+    for (int index = 1; index <= 12; ++index) {
+        QCOMPARE(
+            savedLayers.at(index - 1).trimmed(),
+            QStringLiteral("Layer %1").arg(index));
+    }
+}
+
+void PDFEditControllerTest::savesRichMultilineTextRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-rich-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-rich-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(QStringLiteral("Red blue\nGreen"));
+    controller.setSelectedTextRange(0, 3);
+    controller.setSelectedFontBold(true);
+    controller.setSelectedFontItalic(true);
+    controller.setSelectedFontUnderline(true);
+    controller.setSelectedColor(QColor(QStringLiteral("#c62828")));
+    controller.finishSelectedTextEdit();
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(normalizedPageText(outputPath).contains(QStringLiteral("Red blue Green")));
+    const RichSaveInspection inspection = inspectRichSave(outputPath);
+    QVERIFY(inspection.readable);
+    QVERIFY(inspection.redRun);
+    QVERIFY(inspection.boldItalicRun);
+    QVERIFY(inspection.underlinePath);
+    QVERIFY(inspection.redAndBlueShareBaseline);
+    QVERIFY(inspection.greenIsNextLine);
+}
+
+void PDFEditControllerTest::savesOffsetCropCoordinates()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-crop-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-crop-output.pdf"));
+    QVERIFY(createOffsetCropPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QStringLiteral("Offset crop text"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(candidate.value(QStringLiteral("editable")).toBool());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Offset crop saved"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QPointF origin;
+    QVERIFY2(
+        textObjectOrigin(outputPath, QStringLiteral("Offset crop"), origin),
+        qPrintable(topLevelTextObjects(outputPath).join(QLatin1Char('|'))));
+    QVERIFY(qAbs(origin.x() - 100.0) < 1.0);
+    QVERIFY(qAbs(origin.y() - 600.0) < 1.0);
+}
+
+void PDFEditControllerTest::savesAddedTextOnRotatedPage()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-rotated-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-rotated-output.pdf"));
+    QVERIFY(createRotatedPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.addText(0, 0.2, 0.65).isEmpty());
+    controller.updateSelectedTextPreview(QStringLiteral("Rotated add"));
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    FS_MATRIX matrix{};
+    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("Rotated"), matrix));
+    QVERIFY(qAbs(matrix.a) < 0.05);
+    QVERIFY(qAbs(matrix.d) < 0.05);
+    QVERIFY(qAbs(matrix.b) > 0.5);
+    QVERIFY(qAbs(matrix.c) > 0.5);
+}
+
+void PDFEditControllerTest::preservesStrokeAppearanceAndRejectsClipping()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-render-mode-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-render-mode-output.pdf"));
+    QVERIFY(createRenderModePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = controller.candidatesForPage(0);
+    const QVariantMap strokeCandidate = candidateForText(
+        candidates,
+        QStringLiteral("Stroke text"));
+    const QVariantMap clipCandidate = candidateForText(
+        candidates,
+        QStringLiteral("Clip text"));
+    QVERIFY(strokeCandidate.value(QStringLiteral("editable")).toBool());
+    QVERIFY(!clipCandidate.value(QStringLiteral("editable")).toBool());
+    QVERIFY(controller.selectCandidate(
+        0,
+        strokeCandidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Stroke saved"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    QColor strokeColor;
+    qreal strokeWidth = 0.0;
+    QVERIFY(strokeTextAppearance(
+        outputPath,
+        QStringLiteral("Stroke"),
+        strokeColor,
+        strokeWidth));
+    QCOMPARE(strokeColor, QColor(20, 80, 160));
+    QVERIFY(qAbs(strokeWidth - 1.75) < 0.01);
+}
+
+void PDFEditControllerTest::savesAsynchronously()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-async-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-async-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Async saved text"));
+
+    QSignalSpy saveFinishedSpy(&controller, &PDFEditController::saveFinished);
+    QVERIFY(controller.requestSaveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(controller.saving());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 5000);
+    QCOMPARE(saveFinishedSpy.constFirst().constFirst().toBool(), true);
+    QVERIFY(!controller.saving());
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+    QVERIFY(normalizedPageText(outputPath).contains(
+        QStringLiteral("Async saved text")));
+}
+
+void PDFEditControllerTest::keepsDraftsWhenSaveFails()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-failure-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("This draft must survive"));
+    const int revisionBeforeSave = document.renderRevision();
+    QVERIFY(controller.canUndo());
+
+    const QString invalidPath = m_temporaryDirectory.filePath(
+        QStringLiteral("missing-directory/output.pdf"));
+    QSignalSpy saveFinishedSpy(&controller, &PDFEditController::saveFinished);
+    QVERIFY(controller.requestSaveAs(QUrl::fromLocalFile(invalidPath)));
+    QVERIFY(controller.saving());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 5000);
+    QCOMPARE(saveFinishedSpy.constFirst().constFirst().toBool(), false);
+    QVERIFY(!QFile::exists(invalidPath));
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QVERIFY(!controller.saving());
+    QCOMPARE(document.source().toLocalFile(), sourcePath);
+    QCOMPARE(document.renderRevision(), revisionBeforeSave);
+    QVERIFY(pageText(sourcePath).contains(QString::fromLatin1(kRegularText)));
 }
 
 QTEST_MAIN(PDFEditControllerTest)

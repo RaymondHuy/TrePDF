@@ -9,9 +9,8 @@
 ## Project Summary
 
 TrePDF is a macOS desktop PDF reader built with Qt 6, Qt Quick Controls, QML,
-C++17, and PDFium. The current scope is PDF viewing plus session-only draft
-editing for supported PDF content. Persisting edits back into the PDF is
-planned but is not implemented yet.
+C++17, and PDFium. The current scope is PDF viewing plus draft editing and
+Save/Save As persistence for supported PDF text content.
 
 Current features:
 
@@ -20,7 +19,8 @@ Current features:
 - Virtualized continuous scrolling with reusable QML delegates.
 - Asynchronous page rendering on a worker thread.
 - Page navigation, zoom, and fit-to-width controls.
-- Session-only text draft editing with selection, undo, redo, and discard.
+- Text draft editing with selection, undo, redo, discard, Save, and Save As.
+  Drafts stay session-only until a save succeeds.
 - Drafts use a rich-text model with UTF-16 text ranges, character spans,
   paragraph formats, a layout frame, and content bounds. The inline `TextEdit`
   supports multiple lines, wraps/reflows inside the layout frame, renders every
@@ -36,7 +36,10 @@ Current features:
 - Fonts under `src/assets/fonts` are bundled and preferred over matching system
   families when resolving draft text fonts.
 - Contextual Edit/Delete actions when selecting editable text; deletion remains
-  a session-only draft and supports undo/redo.
+  an undoable draft until Save writes it into the PDF.
+- Transactional PDF persistence through a separate PDFium document handle.
+  Save overwrites atomically through `QSaveFile`; Save As leaves the source
+  untouched. Drafts and history are cleared only after the saved file reopens.
 - An edit-only, collapsible right-side text-formatting panel provides UI for
   font family, size, color, bold, italic, and underline. Font family, bold,
   italic, underline, and color update the current draft and support undo/redo;
@@ -58,7 +61,10 @@ Current features:
 - `src/PDFDocument.h/.cpp`: main-thread PDFium document, metadata, page sizes,
   navigation state, and source file path.
 - `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
-  rich-text draft state, and snapshot-based undo/redo history.
+  rich-text draft state, snapshot-based undo/redo history, and save commands.
+- `src/PDFSaveWriter.h/.cpp`: resolves source object paths, reflows rich-text
+  runs, embeds/reuses fonts, regenerates changed page content, and writes the
+  PDF transactionally.
 - `src/PDFPageItem.h/.cpp`: asynchronous rendering and scene graph texture
   upload for one page delegate.
 - `src/Components`: ribbon controls, document view, page delegates, and the
@@ -203,6 +209,39 @@ clipped or elided unintentionally.
 - Keep QML imports versionless and use `QtQuick.Controls.Basic` when customizing
   control internals.
 - Wrap user-visible text in `qsTrId()` using the localization rules above.
+
+### PDF Save Architecture
+
+- Never modify or save the GUI thread's main `FPDF_DOCUMENT` directly. Open a
+  separate writer document from `PDFDocument::renderFilePath()`. Snapshot all
+  draft/font/geometry data on the GUI thread, then run `PDFSaveWriter::save()`
+  on a worker; the worker request must not retain controller/document pointers.
+- Resolve every `CandidatePart::objectPath` before removing source objects.
+  Only top-level page text is currently saveable; nested Form XObject text must
+  remain non-editable until its transform/clip/resource scope can be preserved.
+  Remove source objects with `FPDFPage_RemoveObject()` and destroy each object
+  only after a successful removal.
+- PDFium does not wrap text. Reflow the draft with `QTextLayout`, create text
+  objects per line/style run, convert Qt top-left coordinates to PDF bottom-left
+  coordinates, and represent underline as a path.
+- Keep loaded font handles alive until all changed pages have called
+  `FPDFPage_GenerateContent()` and the document has been serialized.
+- Write through `QSaveFile` and `FPDF_SaveAsCopy(FPDF_NO_INCREMENTAL)`. Commit
+  only after PDFium succeeds; any earlier error must leave the destination and
+  in-memory drafts untouched.
+- Preserve the earliest source z-order with `FPDFPage_InsertObjectAtIndex()`;
+  added text is appended. Convert coordinates with `FPDF_DeviceToPage()` so
+  CropBox offsets and page rotation follow the same mapping as the editor.
+- Reopen the saved path through `PDFDocument::open()`. A successful reopen
+  changes the document revision and resets drafts/undo/redo through the normal
+  document-state signals. If reopen unexpectedly fails after commit, close the
+  stale in-memory document because its source object paths no longer match the
+  file now on disk.
+- Disable document editing, Open, and window close while an async save is active.
+  Resume a pending Open/Quit action only after `saveFinished(true)`.
+- Exact bundled font faces, reusable original PDF fonts, and PDF standard fonts
+  are supported. If a newly selected system font cannot be embedded, fail the
+  save with a user-visible message rather than silently substituting it.
 
 ## Memory and Performance Invariants
 

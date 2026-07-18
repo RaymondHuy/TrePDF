@@ -1,0 +1,58 @@
+#pragma once
+
+#include <QString>
+
+#include <memory>
+
+class PDFEditController;
+
+class PDFSaveWriter
+{
+public:
+    class Request
+    {
+    public:
+        bool isValid() const
+        {
+            return static_cast<bool>(m_data);
+        }
+
+    private:
+        friend class PDFSaveWriter;
+        struct Data;
+        std::shared_ptr<const Data> m_data;
+    };
+
+    enum class Error {
+        None,
+        SourceUnavailable,
+        SourceOpenFailed,
+        PageLoadFailed,
+        UnsupportedSourceObject,
+        SourceObjectMissing,
+        SourceObjectRemovalFailed,
+        FontUnavailable,
+        TextObjectCreationFailed,
+        PageContentGenerationFailed,
+        OutputOpenFailed,
+        OutputWriteFailed,
+        OutputCommitFailed
+    };
+
+    struct Result {
+        Error error = Error::None;
+        QString detail;
+        int page = -1;
+
+        bool succeeded() const
+        {
+            return error == Error::None;
+        }
+    };
+
+    static Result save(const PDFEditController &controller,
+                       const QString &targetFilePath);
+    static Request prepare(const PDFEditController &controller,
+                           const QString &targetFilePath);
+    static Result save(const Request &request);
+};

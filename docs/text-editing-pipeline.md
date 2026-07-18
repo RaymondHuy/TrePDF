@@ -1,9 +1,8 @@
 # Quy trình xác định và hiển thị text có thể chỉnh sửa
 
 Tài liệu này mô tả đúng implementation hiện tại của TrePDF, từ lúc PDFium quét
-nội dung trong PDF đến lúc người dùng mở `TextEdit` để chỉnh sửa. Tính năng
-hiện tại chỉ tạo **draft trong phiên làm việc**; nội dung chưa được ghi ngược
-vào file PDF.
+nội dung trong PDF đến lúc người dùng chỉnh sửa và dùng Save/Save As. Thay đổi
+được giữ dưới dạng **draft trong phiên làm việc** cho đến khi save thành công.
 
 Các file chính:
 
@@ -15,6 +14,8 @@ Các file chính:
   selection box và rich `TextEdit` khi edit.
 - [`PDFPageItem.cpp`](../src/PDFPageItem.cpp): render lại page mà tạm ẩn text
   object gốc khi đã có draft.
+- [`PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp): thay object nguồn bằng các
+  text run đã layout và ghi PDF theo transaction.
 - [`PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml): đặt
   `EditOverlay` trùng chính xác lên `PDFPageView`.
 
@@ -28,7 +29,7 @@ flowchart TD
     D --> E["ensurePageCandidates(page)"]
     E --> F["scanPage bằng PDFium nếu page chưa có cache"]
     F --> G["Tạo Candidate nguồn: bbox, baseline, text, font, color"]
-    G --> H{"PDF cho phép sửa và layout một dòng nằm ngang?"}
+    G --> H{"Top-level, render mode an toàn, có quyền sửa và layout ngang?"}
     H -- Có --> I["editable = true"]
     H -- Không --> J["editable = false + reason"]
     I --> IA["Gom các candidate cùng dòng và cùng style"]
@@ -41,6 +42,7 @@ flowchart TD
     P --> Q["Gõ chữ/Enter: updateSelectedTextPreview + reflow"]
     Q --> R["Tạo draft và render lại page không có object gốc"]
     R --> S["Ctrl/Cmd+Enter: commit; Esc: phục hồi trạng thái trước edit"]
+    S --> T["Save/Save As: ghi draft vào PDF và mở lại file đã lưu"]
 ```
 
 ## 2. Các khái niệm geometry
@@ -294,7 +296,10 @@ Do overlay trùng với page view, công thức vẫn đúng khi zoom thay đổ
 Điều kiện hiện tại rất rõ:
 
 ```text
-editable = editingAllowed && inlineLayoutSupported
+editable = editingAllowed
+        && renderSuppressible
+        && topLevelObject
+        && inlineLayoutSupported
 ```
 
 Việc có đọc được embedded font hoặc baseline **không phải** điều kiện bắt buộc
@@ -353,9 +358,11 @@ Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hi�
 
 | Loại | Có candidate | Editable hiện tại | Lý do nếu không editable |
 |---|---:|---:|---|
-| Text object một dòng, ngang, PDF cho phép sửa | Có | Có | — |
+| Text top-level một dòng, ngang, Fill/Stroke/Fill+Stroke | Có | Có nếu PDF cho phép sửa | — |
 | Nhiều text object cùng dòng và cùng style | Một candidate dòng | Có | Mỗi object gốc được giữ trong `parts` |
 | Text cùng baseline nhưng khác style hoặc cách quá xa | Candidate riêng | Theo từng candidate | Không gom để tránh mất style/nối hai cột |
+| Text dùng render mode clipping | Có | Không | Chưa thể bảo toàn text clipping khi save |
+| Text nằm trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip khi save |
 | Text xoay/skew/multiline | Có | Không | Layout chưa được hỗ trợ |
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
 | Image | Có | Không | Cần OCR |
@@ -363,10 +370,9 @@ Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hi�
 | Widget/form field | Có | Không | Draft editor chưa hỗ trợ form field |
 | Add Text do TrePDF tạo | Có | Có nếu PDF cho phép sửa | Không phải object gốc trong PDF |
 
-`renderSuppressible` là một cờ riêng, không nằm trong công thức `editable`.
-Nó chỉ cho biết renderer có thể tạm tắt object gốc để tạo background sạch hay
-không. Các mode được hỗ trợ suppression là `FILL`, `STROKE` và
-`FILL_STROKE`.
+`renderSuppressible` vừa bảo đảm renderer có thể tạo background sạch, vừa chặn
+các render mode clipping khỏi luồng edit/save. Các mode được hỗ trợ là `FILL`,
+`STROKE` và `FILL_STROKE`.
 
 ## 7. Các thuộc tính font và text được lấy như thế nào
 
@@ -394,7 +400,7 @@ nếu chưa có trong hai danh sách này. Khi người dùng chọn family mớ
 `Draft.characterSpans[].format.fontFamily` được cập nhật để editor và draft
 overlay dùng cùng font. `Command` lưu toàn bộ draft before/after nên cancel,
 undo và redo khôi phục text, spans, paragraph formats và geometry cùng lúc.
-Thay đổi vẫn chỉ tồn tại trong session và chưa được ghi ngược vào file PDF.
+Thay đổi chỉ tồn tại trong session cho đến khi Save hoặc Save As thành công.
 
 Giới hạn an toàn hiện tại:
 
@@ -670,8 +676,8 @@ Controller lưu snapshot rich-text draft trước edit vào `m_textEditCommand`,
 paragraph formats hoặc geometry thực sự thay đổi.
 
 Candidate dòng vẫn dùng đúng một draft key `page|lineObjectId`. Rich-text spans
-không được chia ngược về từng source part trong session; `CandidatePart` chỉ giữ
-nguồn để mask, suppression và phục vụ việc ghi PDF trong tương lai.
+không được chia ngược về từng source part trong session; `CandidatePart` giữ
+toàn bộ nguồn để mask, suppression và để writer xóa đúng mọi object khi save.
 
 ### 10.2 Trạng thái QML
 
@@ -901,7 +907,7 @@ Ctrl/Cmd+Enter gọi `finishSelectedTextEdit()`:
 - nếu có thay đổi, thêm một command vào undo stack;
 - xóa redo stack;
 - yêu cầu render draft ngay;
-- file PDF trên ổ đĩa vẫn không đổi.
+- file PDF trên ổ đĩa vẫn không đổi cho đến khi người dùng Save/Save As.
 
 ### 15.4 Esc
 
@@ -909,6 +915,39 @@ Esc gọi `cancelSelectedTextEdit()` và phục hồi trạng thái draft đã c
 bắt đầu edit.
 
 Đổi tool, đổi page hoặc delegate bị pooled sẽ tự commit edit đang mở.
+
+### 15.5 Save và Save As
+
+`PDFEditController::save()` ghi đè đường dẫn hiện tại; `saveAs()` nhận một đường
+dẫn local mới. Cả hai kết thúc edit đang mở rồi chuyển snapshot draft cho
+`PDFSaveWriter`:
+
+UI dùng `requestSave()`/`requestSaveAs()` để tạo request trên GUI thread rồi chạy
+writer qua thread pool. Trong lúc đó `saving = true`, vùng tài liệu và ribbon bị
+khóa để snapshot không bị thay đổi; badge vẫn được render. Pending Open/Quit chỉ
+tiếp tục sau signal `saveFinished(true)`.
+
+1. Mở lại file nguồn bằng một `FPDF_DOCUMENT` riêng, không sửa handle đang dùng
+   để render trên GUI thread.
+2. Gom draft theo page và resolve toàn bộ `parts[].objectPath` trước khi thay đổi
+   object tree.
+3. Dùng `QTextLayout` để wrap/reflow theo `frameRect`, tách từng line/style run,
+   rồi dùng `FPDF_DeviceToPage()` để đổi tọa độ editor sang page coordinates.
+   Cách này giữ đúng CropBox offset và page rotation.
+4. Tái sử dụng font PDF gốc khi phù hợp, hoặc nhúng đúng face font bundled;
+   underline được tạo thành path. Font hệ thống mới không nhúng được sẽ làm save
+   thất bại thay vì bị thay thế âm thầm.
+5. Xóa mọi text object nguồn của draft, insert replacement tại z-order sớm nhất
+   của các object nguồn và gọi `FPDFPage_GenerateContent()` cho từng page đã đổi.
+6. Serialize bằng `FPDF_SaveAsCopy(FPDF_NO_INCREMENTAL)` qua `QSaveFile`; chỉ
+   commit file đích khi toàn bộ quá trình thành công.
+7. Mở lại file đã lưu bằng `PDFDocument::open()`. Các signal đổi document/revision
+   reset draft và undo/redo chỉ sau khi reopen thành công.
+
+Nếu bất kỳ bước nào trước commit lỗi, document đang mở, file nguồn, draft và
+lịch sử undo/redo vẫn được giữ nguyên. Save As không sửa file nguồn. Text nằm
+trong Form XObject hoặc dùng render mode clipping không được đánh dấu editable,
+vì writer chưa thể bảo toàn scope transform/clip của chúng một cách an toàn.
 
 ## 16. Vì sao text Qt vẫn có thể lệch text PDF
 
@@ -1048,6 +1087,8 @@ Text được phát hiện
 Text được edit
   = text được phát hiện
     + PDF cho phép modify contents
+    + object text nằm trực tiếp ở page root, không nằm trong Form XObject
+    + render mode là Fill, Stroke hoặc Fill+Stroke, không có clipping
     + transform gần như nằm ngang, không lật/skew mạnh
     + text chỉ có một dòng
 
@@ -1068,4 +1109,13 @@ Text hiển thị khi edit
     + editor/draft wrap theo chiều rộng frameRect và nở chiều cao theo reflow
     + một fallback mask cho mỗi source part đến khi page texture sạch sẵn sàng
     + một draft/undo command có thể suppress nhiều PDF text object nguồn
+
+Text được lưu
+  = resolve toàn bộ objectPath nguồn trên writer document riêng
+    + QTextLayout tách line và character-format run
+    + font gốc/bundled/standard có thể ghi vào PDF
+    + đổi top-left Qt sang bottom-left PDF
+    + GenerateContent cho mọi page đã sửa
+    + QSaveFile commit thành công
+    + PDFDocument mở lại file kết quả thành công
 ```

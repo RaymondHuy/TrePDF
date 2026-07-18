@@ -58,6 +58,8 @@ qt_add_qml_module(trepdf
         src/PDFDocument.h
         src/PDFEditController.cpp
         src/PDFEditController.h
+        src/PDFSaveWriter.cpp
+        src/PDFSaveWriter.h
         src/PDFiumSynchronization.h
         src/PDFPageItem.cpp
         src/PDFPageItem.h
@@ -97,6 +99,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/remove-text.svg
         src/assets/icons/rotate-ccw.svg
         src/assets/icons/rotate-cw.svg
+        src/assets/icons/save.svg
         src/assets/icons/search.svg
         src/assets/icons/send.svg
         src/assets/icons/shapes.svg
