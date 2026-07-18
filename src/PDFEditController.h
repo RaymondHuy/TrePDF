@@ -334,11 +334,14 @@ private:
         qsizetype start,
         qsizetype length,
         const std::function<void(CharacterFormat &)> &update);
+    void beginSelectedTextEditSession(bool expandFrame);
+    QRectF expandedTextEditFrame(const Draft &draft);
     Draft selectedDraftForDisplay() const;
     void updateSelectedDraft(const Draft &draft);
     void selectedTextRangeForDraft(const Draft &draft,
                                    qsizetype &start,
                                    qsizetype &length) const;
+    void resetTextEditDisplayState();
     void resetFrameResizeState();
     void setSelectedFontStyle(FontStyle style, bool enabled);
     void applyDraftState(const Command &command, bool useAfterState, bool immediate);
@@ -372,8 +375,14 @@ private:
     qsizetype m_selectedTextRangeStart = 0;
     qsizetype m_selectedTextRangeLength = 0;
     Command m_textEditCommand;
+    Draft m_textEditDisplayDraft;
+    bool m_textEditDisplayDraftActive = false;
+    bool m_textEditFrameAutomaticallyExpanded = false;
+    bool m_textEditGeometryExplicitlyChanged = false;
+    QRectF m_textEditInitialDisplayFrameRect;
     bool m_frameResizeActive = false;
     bool m_frameResizeOwnsTextEdit = false;
+    bool m_frameResizeStartGeometryExplicitlyChanged = false;
     QRectF m_frameResizeStartFrameRect;
     QRectF m_frameResizeStartContentBounds;
 };

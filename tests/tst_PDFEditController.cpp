@@ -885,6 +885,12 @@ private slots:
     void propagatesSourceStylesThroughSelection();
     void groupsCompatibleTextObjectsOnSameLine();
     void seedsGroupedFrameFromQtTextWidth();
+    void expandsTextEditFrameTransiently();
+    void stopsExpandedFrameBeforeRightColumn();
+    void keepsExpandedColumnFrameStableAcrossEdits();
+    void followsCurrentRightColumnDraftBoundary();
+    void persistsExpandedFrameForTextChanges();
+    void keepsStandaloneResizeFrameUnexpanded();
     void keepsMixedStylesAsSeparateCandidates();
     void keepsDistantColumnsAsSeparateCandidates();
     void keepsDifferentFontFacesAsSeparateCandidates();
@@ -909,6 +915,7 @@ private slots:
     void savesCurrentFileRoundTrip();
     void savesUnchangedCopyRoundTrip();
     void savesMultipleDraftsOnSamePage();
+    void savesExpandedFrameBeforeRightColumn();
     void savesDeletedTextRoundTrip();
     void savesAddedTextRoundTrip();
     void preservesAddedTextLayerOrder();
@@ -1145,6 +1152,223 @@ void PDFEditControllerTest::seedsGroupedFrameFromQtTextWidth()
                        .arg(requiredWidth)));
 }
 
+void PDFEditControllerTest::expandsTextEditFrameTransiently()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF sourceRect = m_controller.selectedSourceRect();
+    const QRectF originalFrameRect = m_controller.selectedFrameRect();
+    const QString originalText = m_controller.selectedText();
+    m_controller.beginSelectedTextEdit();
+
+    const QRectF editingFrameRect = m_controller.selectedFrameRect();
+    QCOMPARE(editingFrameRect.left(), originalFrameRect.left());
+    QCOMPARE(editingFrameRect.top(), originalFrameRect.top());
+    QCOMPARE(editingFrameRect.height(), originalFrameRect.height());
+    QVERIFY(editingFrameRect.right() > originalFrameRect.right());
+    QVERIFY(editingFrameRect.right() <= 1.0);
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    QVERIFY(!m_controller.hasDrafts());
+
+    // EditOverlay submits the current plain text when the editor closes.
+    m_controller.updateSelectedTextPreview(originalText);
+    m_controller.finishSelectedTextEdit();
+
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    QVERIFY(!m_controller.hasDrafts());
+    QVERIFY(!m_controller.canUndo());
+}
+
+void PDFEditControllerTest::stopsExpandedFrameBeforeRightColumn()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_leftColumnCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF originalLeftFrame = m_controller.selectedFrameRect();
+    const QRectF rightSourceRect = m_rightColumnCandidate.value(
+        QStringLiteral("sourceRect")).toRectF();
+    m_controller.beginSelectedTextEdit();
+    const QRectF expandedLeftFrame = m_controller.selectedFrameRect();
+    QVERIFY(expandedLeftFrame.right() > originalLeftFrame.right());
+    QVERIFY(expandedLeftFrame.right() < rightSourceRect.left());
+    m_controller.finishSelectedTextEdit();
+    QVERIFY(!m_controller.hasDrafts());
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_rightColumnCandidate.value(QStringLiteral("objectId")).toString()));
+    const QRectF originalRightFrame = m_controller.selectedFrameRect();
+    m_controller.beginSelectedTextEdit();
+    const QRectF expandedRightFrame = m_controller.selectedFrameRect();
+    QVERIFY(expandedRightFrame.right() > originalRightFrame.right());
+    QVERIFY(expandedRightFrame.right() <= 1.0);
+    m_controller.finishSelectedTextEdit();
+    QVERIFY(!m_controller.hasDrafts());
+}
+
+void PDFEditControllerTest::keepsExpandedColumnFrameStableAcrossEdits()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_leftColumnCandidate.value(QStringLiteral("objectId")).toString()));
+
+    m_controller.beginSelectedTextEdit();
+    const QRectF expandedFrameRect = m_controller.selectedFrameRect();
+    const QRectF rightSourceRect = m_rightColumnCandidate.value(
+        QStringLiteral("sourceRect")).toRectF();
+    QVERIFY(expandedFrameRect.right() < rightSourceRect.left());
+    m_controller.updateSelectedTextPreview(QStringLiteral("First left edit"));
+    m_controller.finishSelectedTextEdit();
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+
+    m_controller.beginSelectedTextEdit();
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+    m_controller.updateSelectedTextPreview(QStringLiteral("Second left edit"));
+    m_controller.finishSelectedTextEdit();
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+
+    m_controller.beginSelectedTextEdit();
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+    QVERIFY(m_controller.selectedFrameRect().right() < rightSourceRect.left());
+    m_controller.finishSelectedTextEdit();
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::followsCurrentRightColumnDraftBoundary()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_rightColumnCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF originalRightFrame = m_controller.selectedFrameRect();
+    const qreal horizontalShift = qMin<qreal>(
+        0.04,
+        originalRightFrame.left() / 2.0);
+    const QRectF movedRightFrame(
+        originalRightFrame.x() - horizontalShift,
+        originalRightFrame.y(),
+        originalRightFrame.width(),
+        originalRightFrame.height());
+    m_controller.beginSelectedFrameResize();
+    m_controller.updateSelectedFrameRect(movedRightFrame);
+    m_controller.finishSelectedFrameResize();
+    QCOMPARE(m_controller.selectedFrameRect(), movedRightFrame);
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_leftColumnCandidate.value(QStringLiteral("objectId")).toString()));
+    m_controller.beginSelectedTextEdit();
+    const QRectF blockedFrame = m_controller.selectedFrameRect();
+    QVERIFY(blockedFrame.right() < movedRightFrame.left());
+    m_controller.cancelSelectedTextEdit();
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_rightColumnCandidate.value(QStringLiteral("objectId")).toString()));
+    m_controller.commitSelectedText(QString());
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_leftColumnCandidate.value(QStringLiteral("objectId")).toString()));
+    m_controller.beginSelectedTextEdit();
+    QVERIFY(m_controller.selectedFrameRect().right() > blockedFrame.right());
+    m_controller.cancelSelectedTextEdit();
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::persistsExpandedFrameForTextChanges()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF sourceRect = m_controller.selectedSourceRect();
+    const QRectF originalFrameRect = m_controller.selectedFrameRect();
+    m_controller.beginSelectedTextEdit();
+    const QRectF expandedFrameRect = m_controller.selectedFrameRect();
+    const QString editedText = QStringLiteral(
+        "Regular PDF text edited across the remaining line width");
+    m_controller.updateSelectedTextPreview(editedText);
+    m_controller.finishSelectedTextEdit();
+
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    QCOMPARE(m_controller.draftsForPage(0).size(), 1);
+    QCOMPARE(
+        m_controller.draftsForPage(0).constFirst().toMap()
+            .value(QStringLiteral("frameRect")).toRectF(),
+        expandedFrameRect);
+
+    m_controller.undo();
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+
+    m_controller.redo();
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::keepsStandaloneResizeFrameUnexpanded()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF originalFrameRect = m_controller.selectedFrameRect();
+    m_controller.beginSelectedFrameResize();
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    m_controller.cancelSelectedFrameResize();
+
+    QVERIFY(!m_controller.textEditActive());
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QVERIFY(!m_controller.hasDrafts());
+
+    m_controller.beginSelectedTextEdit();
+    const QRectF expandedFrameRect = m_controller.selectedFrameRect();
+    const QRectF resizedFrameRect(
+        expandedFrameRect.x(),
+        expandedFrameRect.y(),
+        expandedFrameRect.width() * 0.75,
+        expandedFrameRect.height());
+    m_controller.beginSelectedFrameResize();
+    m_controller.updateSelectedFrameRect(resizedFrameRect);
+    QCOMPARE(m_controller.selectedFrameRect(), resizedFrameRect);
+    m_controller.cancelSelectedFrameResize();
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+    m_controller.finishSelectedTextEdit();
+
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QVERIFY(!m_controller.hasDrafts());
+
+    m_controller.beginSelectedTextEdit();
+    const QRectF stableExpandedFrameRect = m_controller.selectedFrameRect();
+    const QRectF movedFrameRect(
+        stableExpandedFrameRect.x(),
+        stableExpandedFrameRect.y(),
+        stableExpandedFrameRect.width() * 0.75,
+        stableExpandedFrameRect.height());
+    m_controller.beginSelectedFrameResize();
+    m_controller.updateSelectedFrameRect(movedFrameRect);
+    m_controller.updateSelectedFrameRect(stableExpandedFrameRect);
+    m_controller.finishSelectedFrameResize();
+    m_controller.finishSelectedTextEdit();
+
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QVERIFY(!m_controller.hasDrafts());
+    QVERIFY(!m_controller.canUndo());
+}
+
 void PDFEditControllerTest::keepsMixedStylesAsSeparateCandidates()
 {
     QCOMPARE(m_mixedRegularCandidate.value(QStringLiteral("grouped")).toBool(), false);
@@ -1279,6 +1503,8 @@ void PDFEditControllerTest::storesReflowedContentBoundsWithUndoRedo()
         0,
         m_regularCandidate.value(QStringLiteral("objectId")).toString()));
 
+    const QRectF originalFrameRect = m_controller.selectedFrameRect();
+    m_controller.beginSelectedTextEdit();
     const QRectF frameRect = m_controller.selectedFrameRect();
     const QRectF contentBounds(
         frameRect.x(),
@@ -1287,7 +1513,6 @@ void PDFEditControllerTest::storesReflowedContentBoundsWithUndoRedo()
         qMin(1.0 - frameRect.y(), frameRect.height() + 0.05));
     const QString multilineText = QStringLiteral("First line\nSecond line");
 
-    m_controller.beginSelectedTextEdit();
     m_controller.updateSelectedTextPreview(multilineText);
     m_controller.updateSelectedContentBounds(contentBounds);
     QCOMPARE(m_controller.selectedFrameRect(), frameRect);
@@ -1296,8 +1521,8 @@ void PDFEditControllerTest::storesReflowedContentBoundsWithUndoRedo()
 
     QCOMPARE(m_controller.draftsForPage(0).size(), 1);
     m_controller.undo();
-    QCOMPARE(m_controller.selectedFrameRect(), frameRect);
-    QCOMPARE(m_controller.selectedContentBounds(), frameRect);
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QCOMPARE(m_controller.selectedContentBounds(), originalFrameRect);
     QVERIFY(m_controller.draftsForPage(0).isEmpty());
 
     m_controller.redo();
@@ -2167,6 +2392,51 @@ void PDFEditControllerTest::savesMultipleDraftsOnSamePage()
     QVERIFY(savedText.contains(QStringLiteral("Second draft saved")));
     QVERIFY(!savedText.contains(QString::fromLatin1(kRegularText)));
     QVERIFY(!savedText.contains(QString::fromLatin1(kBoldText)));
+}
+
+void PDFEditControllerTest::savesExpandedFrameBeforeRightColumn()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-column-frame-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-column-frame-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = controller.candidatesForPage(0);
+    const QVariantMap leftCandidate = candidateForText(
+        candidates,
+        QString::fromLatin1(kLeftColumnText));
+    const QVariantMap rightCandidate = candidateForText(
+        candidates,
+        QString::fromLatin1(kRightColumnText));
+    QVERIFY(!leftCandidate.isEmpty());
+    QVERIFY(!rightCandidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        leftCandidate.value(QStringLiteral("objectId")).toString()));
+
+    controller.beginSelectedTextEdit();
+    const QRectF expandedFrameRect = controller.selectedFrameRect();
+    const QRectF rightSourceRect = rightCandidate.value(
+        QStringLiteral("sourceRect")).toRectF();
+    QVERIFY(expandedFrameRect.right() < rightSourceRect.left());
+    const QString editedText = QStringLiteral("Edited left column stays");
+    controller.updateSelectedTextPreview(editedText);
+    controller.finishSelectedTextEdit();
+
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(
+        controller.draftsForPage(0).constFirst().toMap()
+            .value(QStringLiteral("frameRect")).toRectF(),
+        expandedFrameRect);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QString savedText = normalizedPageText(outputPath);
+    QVERIFY(savedText.contains(editedText));
+    QVERIFY(savedText.contains(QString::fromLatin1(kRightColumnText)));
 }
 
 void PDFEditControllerTest::savesDeletedTextRoundTrip()

@@ -557,20 +557,22 @@ Item {
             resizingObjectId = ""
         }
 
+        syncingEditorPreview = true
         controller.updateSelectedTextPreview(editorPlainText())
-        controller.finishSelectedTextEdit()
+        syncingEditorPreview = false
         editing = false
         editingObjectId = ""
         editorLayoutDirty = false
+        controller.finishSelectedTextEdit()
         reloadData()
     }
 
     function cancelEditing() {
-        cancelFrameResize()
-        controller.cancelSelectedTextEdit()
         editing = false
         editingObjectId = ""
         editorLayoutDirty = false
+        cancelFrameResize()
+        controller.cancelSelectedTextEdit()
     }
 
     function beginSelectedEditing() {

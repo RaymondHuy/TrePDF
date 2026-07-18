@@ -13,9 +13,13 @@ and persistence.
 
 Draft geometry keeps immutable PDF source bounds separate from the layout frame
 and laid-out content bounds. Existing PDF text seeds its frame from the Qt text
-width so the original line fits, while later edits wrap within that frame. The
-selected frame exposes four edge resize handles; dragging an edge reflows
-text live and stores the geometry change in session undo/redo.
+width so the original line fits. When its inline editor opens, TrePDF
+transiently extends that frame from its current left edge to the remaining
+column width, or to the inferred right page margin when no same-row text blocks
+it. The wider frame is stored only after a real text edit; opening and closing
+the editor leaves the PDF geometry unchanged. The selected frame exposes four
+edge resize handles; dragging an edge reflows text live and stores the geometry
+change in session undo/redo.
 
 Each session draft stores text, character-format spans, paragraph formats, its
 layout frame, and content bounds. Undo and redo snapshot the complete rich-text

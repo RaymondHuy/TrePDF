@@ -42,6 +42,10 @@ constexpr qreal kLineWordSeparatorGapEm = 0.20;
 constexpr qreal kLineFontSizeToleranceRatio = 0.08;
 constexpr qreal kLineFontSizeTolerancePoints = 0.5;
 constexpr qreal kInitialTextFrameSafetyPoints = 4.0;
+constexpr qreal kTextEditMinimumPageMarginPoints = 12.0;
+constexpr qreal kTextEditMaximumPageMarginRatio = 0.12;
+constexpr qreal kTextEditMinimumExpansionPoints = 2.0;
+constexpr qreal kTextEditRowToleranceRatio = 0.35;
 constexpr int kLineFontStretchTolerance = 5;
 constexpr int kPdfFontFlagItalic = 1 << 6;
 constexpr int kPdfFontFlagForceBold = 1 << 18;
@@ -1303,6 +1307,11 @@ void PDFEditController::clearSelection()
 
 void PDFEditController::beginSelectedTextEdit()
 {
+    beginSelectedTextEditSession(true);
+}
+
+void PDFEditController::beginSelectedTextEditSession(bool expandFrame)
+{
     if (m_textEditActive || !m_hasSelection || !m_selectedCandidate.editable) {
         return;
     }
@@ -1317,10 +1326,34 @@ void PDFEditController::beginSelectedTextEdit()
     m_textEditCommand.before = m_textEditCommand.hadBefore
         ? *existingDraft
         : initialDraftForCandidate(m_selectedCandidate);
+    m_textEditDisplayDraft = m_textEditCommand.before;
+    m_textEditDisplayDraftActive = true;
+    m_textEditFrameAutomaticallyExpanded = false;
+    m_textEditGeometryExplicitlyChanged = false;
+    if (expandFrame) {
+        const QRectF expandedFrame = expandedTextEditFrame(m_textEditDisplayDraft);
+        if (expandedFrame != m_textEditDisplayDraft.frameRect) {
+            const qreal contentBottom = qBound<qreal>(
+                expandedFrame.bottom(),
+                qMax(
+                    m_textEditDisplayDraft.frameRect.bottom(),
+                    m_textEditDisplayDraft.contentBounds.bottom()),
+                1.0);
+            m_textEditDisplayDraft.frameRect = expandedFrame;
+            m_textEditDisplayDraft.contentBounds = QRectF(
+                expandedFrame.x(),
+                expandedFrame.y(),
+                expandedFrame.width(),
+                contentBottom - expandedFrame.y());
+            m_textEditFrameAutomaticallyExpanded = true;
+        }
+    }
+    m_textEditInitialDisplayFrameRect = m_textEditDisplayDraft.frameRect;
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditActive = true;
     emit textEditActiveChanged();
+    emit selectionChanged();
 }
 
 void PDFEditController::updateSelectedTextPreview(const QString &text)
@@ -1333,6 +1366,9 @@ void PDFEditController::updateSelectedTextPreview(const QString &text)
     }
 
     Draft draft = selectedDraftForDisplay();
+    if (draft.text == text) {
+        return;
+    }
     setDraftText(draft, text);
     updateSelectedDraft(draft);
 }
@@ -1345,7 +1381,7 @@ void PDFEditController::beginSelectedFrameResize()
 
     const bool ownsTextEdit = !m_textEditActive;
     if (ownsTextEdit) {
-        beginSelectedTextEdit();
+        beginSelectedTextEditSession(false);
     }
     if (!m_textEditActive || !m_hasSelection) {
         return;
@@ -1354,6 +1390,8 @@ void PDFEditController::beginSelectedFrameResize()
     const Draft draft = selectedDraftForDisplay();
     m_frameResizeActive = true;
     m_frameResizeOwnsTextEdit = ownsTextEdit;
+    m_frameResizeStartGeometryExplicitlyChanged
+        = m_textEditGeometryExplicitlyChanged;
     m_frameResizeStartFrameRect = draft.frameRect;
     m_frameResizeStartContentBounds = draft.contentBounds;
 }
@@ -1390,6 +1428,8 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         return;
     }
 
+    m_textEditGeometryExplicitlyChanged
+        = boundedRect != m_textEditInitialDisplayFrameRect;
     draft.frameRect = boundedRect;
     draft.contentBounds = resizedContentBounds;
     updateSelectedDraft(draft);
@@ -1442,6 +1482,8 @@ void PDFEditController::cancelSelectedFrameResize()
     const bool ownsTextEdit = m_frameResizeOwnsTextEdit;
     const QRectF startFrameRect = m_frameResizeStartFrameRect;
     const QRectF startContentBounds = m_frameResizeStartContentBounds;
+    const bool startGeometryExplicitlyChanged
+        = m_frameResizeStartGeometryExplicitlyChanged;
     resetFrameResizeState();
 
     if (ownsTextEdit) {
@@ -1453,6 +1495,7 @@ void PDFEditController::cancelSelectedFrameResize()
     draft.frameRect = startFrameRect;
     draft.contentBounds = startContentBounds;
     updateSelectedDraft(draft);
+    m_textEditGeometryExplicitlyChanged = startGeometryExplicitlyChanged;
 }
 
 void PDFEditController::setSelectedTextRange(int start, int length)
@@ -1697,18 +1740,25 @@ void PDFEditController::finishSelectedTextEdit()
     }
 
     const Command baseline = m_textEditCommand;
-    const auto currentDraftBeforeFinish = m_drafts.constFind(baseline.key);
-    if (currentDraftBeforeFinish != m_drafts.cend()) {
-        Draft finalizedDraft = *currentDraftBeforeFinish;
-        applyUnicodeFontFallback(finalizedDraft);
-        updateSelectedDraft(finalizedDraft);
+    Draft finalizedDraft = selectedDraftForDisplay();
+    if (m_textEditFrameAutomaticallyExpanded
+        && !m_textEditGeometryExplicitlyChanged
+        && finalizedDraft.text == baseline.before.text) {
+        finalizedDraft.frameRect = baseline.before.frameRect;
+        finalizedDraft.contentBounds = baseline.before.contentBounds;
     }
+    if (!sameDraftContent(finalizedDraft, baseline.before)) {
+        applyUnicodeFontFallback(finalizedDraft);
+    }
+    updateSelectedDraft(finalizedDraft);
     resetFrameResizeState();
     m_textEditActive = false;
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditCommand = Command();
+    resetTextEditDisplayState();
     emit textEditActiveChanged();
+    emit selectionChanged();
 
     Command command = baseline;
     const auto currentDraft = m_drafts.constFind(command.key);
@@ -1753,6 +1803,7 @@ void PDFEditController::cancelSelectedTextEdit()
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditCommand = Command();
+    resetTextEditDisplayState();
     emit textEditActiveChanged();
     applyDraftState(baseline, false, true);
     emit historyStateChanged();
@@ -1850,6 +1901,7 @@ void PDFEditController::discardDrafts()
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditCommand = Command();
+    resetTextEditDisplayState();
     m_addedCandidates.clear();
     m_drafts.clear();
     m_undoStack.clear();
@@ -2062,6 +2114,7 @@ void PDFEditController::resetSession()
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditCommand = Command();
+    resetTextEditDisplayState();
 
     if (wasEditing) {
         emit textEditActiveChanged();
@@ -3249,10 +3302,141 @@ bool PDFEditController::updateCharacterFormats(
     return true;
 }
 
+QRectF PDFEditController::expandedTextEditFrame(const Draft &draft)
+{
+    const Candidate &selectedCandidate = draft.candidate;
+    const QRectF frameRect = draft.frameRect.normalized();
+    if (!m_document
+        || selectedCandidate.kind != QLatin1String("text")
+        || selectedCandidate.added
+        || frameRect.isEmpty()) {
+        return draft.frameRect;
+    }
+
+    const QSizeF pageSize = m_document->pageSize(selectedCandidate.page);
+    if (pageSize.isEmpty()) {
+        return draft.frameRect;
+    }
+
+    const qreal minimumPageMargin = qBound<qreal>(
+        0.0,
+        kTextEditMinimumPageMarginPoints / pageSize.width(),
+        kTextEditMaximumPageMarginRatio);
+    const qreal minimumExpansion = kTextEditMinimumExpansionPoints
+        / pageSize.width();
+    const qreal currentRight = qBound<qreal>(
+        frameRect.left(),
+        frameRect.right(),
+        1.0);
+    const QRectF selectedSourceRect
+        = selectedCandidate.geometry.sourceRect.normalized();
+    const QRectF initialFrameRect
+        = (selectedCandidate.initialDraftFrameRect.isEmpty()
+               ? selectedSourceRect
+               : selectedCandidate.initialDraftFrameRect)
+              .normalized();
+    const qreal boundaryAnchorRight = qBound<qreal>(
+        frameRect.left(),
+        qMax(selectedSourceRect.right(), initialFrameRect.right()),
+        1.0);
+    qreal inferredLeftMargin = 1.0;
+    qreal observedRight = currentRight;
+    qreal nearestRowObstacle = 2.0;
+
+    const auto considerCandidate = [&](const Candidate &candidate) {
+        if ((candidate.kind != QLatin1String("text")
+             && candidate.kind != QLatin1String("addedText"))
+            || candidate.geometry.sourceRect.isEmpty()) {
+            return;
+        }
+
+        const QRectF sourceRect = candidate.geometry.sourceRect.normalized();
+        QRectF effectiveRect = sourceRect;
+        const auto candidateDraft = m_drafts.constFind(
+            draftKey(candidate.page, candidate.objectId));
+        if (candidateDraft != m_drafts.cend()) {
+            if (candidateDraft->text.isEmpty()) {
+                return;
+            }
+            effectiveRect = candidateDraft->frameRect.normalized();
+        } else if (candidate.added && candidate.text.isEmpty()) {
+            return;
+        }
+
+        inferredLeftMargin = qMin(inferredLeftMargin, effectiveRect.left());
+        observedRight = qMax(observedRight, effectiveRect.right());
+        if (candidate.page != selectedCandidate.page
+            || candidate.objectId == selectedCandidate.objectId
+            || effectiveRect.left()
+                <= selectedSourceRect.left() + minimumExpansion) {
+            return;
+        }
+
+        const qreal rowTolerance = kTextEditRowToleranceRatio
+            * qMax(selectedSourceRect.height(), effectiveRect.height());
+        const bool sharesVisualRow
+            = effectiveRect.top() <= selectedSourceRect.bottom() + rowTolerance
+            && effectiveRect.bottom() >= selectedSourceRect.top() - rowTolerance;
+        if (sharesVisualRow) {
+            nearestRowObstacle = qMin(
+                nearestRowObstacle,
+                effectiveRect.left());
+        }
+    };
+
+    const QVector<Candidate> &pageCandidates = ensurePageCandidates(
+        selectedCandidate.page);
+    for (const Candidate &candidate : pageCandidates) {
+        considerCandidate(candidate);
+    }
+    for (const Candidate &candidate : std::as_const(m_addedCandidates)) {
+        if (candidate.page == selectedCandidate.page) {
+            considerCandidate(candidate);
+        }
+    }
+
+    const qreal inferredMargin = inferredLeftMargin < 1.0
+        ? qBound<qreal>(
+              minimumPageMargin,
+              inferredLeftMargin,
+              kTextEditMaximumPageMarginRatio)
+        : minimumPageMargin;
+    qreal pageRight = qMax(1.0 - inferredMargin, observedRight);
+    pageRight = qBound<qreal>(currentRight, pageRight, 1.0);
+
+    qreal targetRight = pageRight;
+    if (nearestRowObstacle <= 1.0) {
+        const qreal fixedColumnRight = nearestRowObstacle <= boundaryAnchorRight
+            ? boundaryAnchorRight
+            : boundaryAnchorRight
+                + (nearestRowObstacle - boundaryAnchorRight) / 2.0;
+        targetRight = qMax(
+            currentRight,
+            qMin(pageRight, fixedColumnRight));
+    }
+    if (targetRight - currentRight < minimumExpansion) {
+        return draft.frameRect;
+    }
+
+    return QRectF(
+        frameRect.x(),
+        frameRect.y(),
+        targetRight - frameRect.x(),
+        frameRect.height());
+}
+
 PDFEditController::Draft PDFEditController::selectedDraftForDisplay() const
 {
     if (!m_hasSelection) {
         return Draft();
+    }
+
+    if (m_textEditActive
+        && m_textEditDisplayDraftActive
+        && m_textEditDisplayDraft.candidate.page == m_selectedCandidate.page
+        && m_textEditDisplayDraft.candidate.objectId
+            == m_selectedCandidate.objectId) {
+        return m_textEditDisplayDraft;
     }
 
     const auto draft = m_drafts.constFind(
@@ -3280,10 +3464,20 @@ void PDFEditController::selectedTextRangeForDraft(const Draft &draft,
     length = textLength;
 }
 
+void PDFEditController::resetTextEditDisplayState()
+{
+    m_textEditDisplayDraft = Draft();
+    m_textEditDisplayDraftActive = false;
+    m_textEditFrameAutomaticallyExpanded = false;
+    m_textEditGeometryExplicitlyChanged = false;
+    m_textEditInitialDisplayFrameRect = QRectF();
+}
+
 void PDFEditController::resetFrameResizeState()
 {
     m_frameResizeActive = false;
     m_frameResizeOwnsTextEdit = false;
+    m_frameResizeStartGeometryExplicitlyChanged = false;
     m_frameResizeStartFrameRect = QRectF();
     m_frameResizeStartContentBounds = QRectF();
 }
@@ -3298,6 +3492,9 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
 
     Draft normalizedDraft = draft;
     normalizedDraft.candidate = m_selectedCandidate;
+    if (m_textEditActive && m_textEditDisplayDraftActive) {
+        m_textEditDisplayDraft = normalizedDraft;
+    }
     const Draft originalDraft = initialDraftForCandidate(m_selectedCandidate);
     const QString key = draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId);
     const auto existingDraft = m_drafts.constFind(key);

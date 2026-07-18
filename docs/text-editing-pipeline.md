@@ -110,6 +110,19 @@ draft:
   dưới có thể nở để chứa Enter/wrap. Giá trị này nằm trong cùng snapshot draft
   nên undo/redo phục hồi đúng chiều cao nội dung.
 
+Khi mở inline editor cho text PDF có sẵn, controller tạo một bản hiển thị tạm
+từ draft hiện tại và chỉ nới cạnh phải. Mép trái, cạnh trên và chiều cao không
+đổi. Nếu có text candidate khác cùng visual row ở bên phải, biên edit dừng tại
+trung điểm khoảng trắng trước candidate đó; nếu không có vật cản, biên edit đi
+đến lề phải suy ra từ lề trái/nội dung của page. Frame này không thay đổi
+`sourceRect`, vùng hit-test hoặc source masks. Nó chỉ được ghi vào draft khi
+text thật sự đổi hoặc người dùng resize rõ ràng; mở rồi đóng editor, gửi lại
+đúng text cũ hoặc nhấn Esc đều phục hồi frame trước đó.
+
+Midpoint được tính từ initial/source frame bất biến nên mở sửa nhiều lần không
+làm cạnh phải bò dần sang cột kế. Với candidate cản đã có draft, thuật toán dùng
+frame draft hiện tại; draft đã xóa hết text không còn chiếm biên cột.
+
 `sourceRect` không thay đổi theo draft. `frameRect` và `contentBounds` nằm trong
 rich-text draft. `Command` lưu snapshot draft before/after nên cancel, undo và
 redo phục hồi geometry cùng text và định dạng. Overlay hiển thị bốn handle ở
@@ -681,8 +694,11 @@ selectedCandidate.editable == true
 ```
 
 Controller lưu snapshot rich-text draft trước edit vào `m_textEditCommand`, sau
-đó đặt `textEditActive = true`. Chưa có draft mới cho đến khi text, spans,
-paragraph formats hoặc geometry thực sự thay đổi.
+đó tạo display draft với frame tạm mở rộng theo phần còn lại của cột/trang và
+đặt `textEditActive = true`. Display draft chưa phải session draft. Chưa có
+draft mới cho đến khi text, spans, paragraph formats hoặc geometry thực sự thay
+đổi; nếu text cuối cùng vẫn bằng snapshot và không resize, geometry tự mở rộng
+bị loại bỏ khi kết thúc edit.
 
 Candidate dòng vẫn dùng đúng một draft key `page|lineObjectId`. Rich-text spans
 không được chia ngược về từng source part trong session; `CandidatePart` giữ
@@ -741,8 +757,11 @@ editorHeight = min(pageHeight - editorY, desiredHeight)
 
 Chiều rộng layout lấy đúng từ mép content trái tới mép phải của `frameRect`;
 bleed và border không làm tăng hoặc giảm wrap width. Seed frame có thể rộng hơn
-`sourceRect` để vừa chuỗi PDF gốc, nhưng không tiếp tục nới theo text người dùng
-nhập. `TextEdit.WrapAtWordBoundaryOrAnywhere` tự reflow và `contentHeight` làm
+`sourceRect` để vừa chuỗi PDF gốc. Khi bắt đầu edit, effective `frameRect` được
+nới tạm từ mép trái hiện tại tới biên cột gần nhất hoặc lề phải page; nó không
+bắt đầu lại từ `x = 0` và không thu nhỏ frame đã có. Khi text đổi, chính frame
+đang thấy này được materialize để preview, undo/redo và Save dùng cùng một wrap
+width. `TextEdit.WrapAtWordBoundaryOrAnywhere` tự reflow và `contentHeight` làm
 editor nở xuống dưới. `max(17, ...)` vẫn giữ caret đủ cao cho bbox glyph rất thấp.
 
 Editor có border cam nhạt `#f5a55a` dày 2 px, radius 4 px. Nền của editor:
@@ -1127,6 +1146,7 @@ Text hiển thị khi edit
     + sourceRect bất biến cho hit-test/mask/suppression
     + rich-text draft gồm text, characterSpans và paragraphFormats
     + Draft.frameRect seed bằng max(sourceRect, chiều rộng layout Qt của text gốc)
+    + edit frame tạm nới cạnh phải tới biên cột hoặc lề phải page
     + Draft.contentBounds ban đầu bằng frameRect
     + editor/draft wrap theo chiều rộng frameRect và nở chiều cao theo reflow
     + một fallback mask cho mỗi source part đến khi page texture sạch sẵn sàng
