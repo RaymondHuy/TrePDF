@@ -34,10 +34,13 @@ potentially incomplete PDF subset. Eligible newly selected macOS system fonts
 whose exact regular/bold/italic face is available are resolved with CoreText,
 snapshotted before the save worker starts, and embedded as CID Unicode TrueType
 fonts. TTC faces are materialized individually so PDFium does not select the
-wrong face. Unedited objects keep their original font resources. Missing styles,
-unsupported outlines, missing glyphs, faces larger than 32 MiB, and fonts whose
-OS/2 license does not permit editable embedding stop the save with an error and
-keep the draft intact.
+wrong face. The font picker probes the exact active style and excludes known
+incompatible system faces such as color, CFF/CFF2, variable, bitmap-only, or
+embedding-restricted fonts. A filtered source font can still be displayed as
+the current PDF font without being offered in the popup. Unedited objects keep
+their original font resources. Missing glyphs, faces larger than 32 MiB, and
+other failures discovered by the final content-specific check stop the save
+with an error and keep the draft intact.
 
 Save writes the current file atomically; Save As preserves the source file and
 opens the saved copy. The controller snapshots the draft on the GUI thread and

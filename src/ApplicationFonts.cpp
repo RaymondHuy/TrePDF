@@ -1,14 +1,18 @@
 #include "ApplicationFonts.h"
 
+#include <QByteArrayView>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QHash>
+#include <QSet>
 #include <QtGlobal>
 #include <QVector>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <utility>
 
@@ -51,6 +55,22 @@ public:
 
     CfHandle(const CfHandle &) = delete;
     CfHandle &operator=(const CfHandle &) = delete;
+
+    CfHandle(CfHandle &&other) noexcept
+        : m_value(std::exchange(other.m_value, nullptr))
+    {
+    }
+
+    CfHandle &operator=(CfHandle &&other) noexcept
+    {
+        if (this != &other) {
+            if (m_value) {
+                CFRelease(m_value);
+            }
+            m_value = std::exchange(other.m_value, nullptr);
+        }
+        return *this;
+    }
 
     T get() const
     {
@@ -97,7 +117,53 @@ CfHandle<CFStringRef> toCfString(const QString &value)
         static_cast<CFIndex>(value.size())));
 }
 
-quint16 readBigEndian16(const QByteArray &data, qsizetype offset)
+CfHandle<CTFontRef> exactSystemFont(const QString &family,
+                                   bool bold,
+                                   bool italic)
+{
+    const CfHandle<CFStringRef> familyName = toCfString(family);
+    if (!familyName) {
+        return CfHandle<CTFontRef>();
+    }
+    const CfHandle<CTFontRef> baseFont(CTFontCreateWithName(
+        familyName.get(),
+        12.0,
+        nullptr));
+    if (!baseFont) {
+        return CfHandle<CTFontRef>();
+    }
+
+    const CTFontSymbolicTraits styleMask = kCTFontTraitBold
+        | kCTFontTraitItalic;
+    CTFontSymbolicTraits desiredTraits = 0;
+    if (bold) {
+        desiredTraits |= kCTFontTraitBold;
+    }
+    if (italic) {
+        desiredTraits |= kCTFontTraitItalic;
+    }
+
+    CfHandle<CTFontRef> font(CTFontCreateCopyWithSymbolicTraits(
+        baseFont.get(),
+        12.0,
+        nullptr,
+        desiredTraits,
+        styleMask));
+    if (!font
+        || (CTFontGetSymbolicTraits(font.get()) & styleMask) != desiredTraits) {
+        return CfHandle<CTFontRef>();
+    }
+
+    const CfHandle<CFStringRef> resolvedFamily(CTFontCopyFamilyName(font.get()));
+    if (fromCfString(resolvedFamily.get()).compare(
+            family,
+            Qt::CaseInsensitive) != 0) {
+        return CfHandle<CTFontRef>();
+    }
+    return font;
+}
+
+quint16 readBigEndian16(QByteArrayView data, qsizetype offset)
 {
     return static_cast<quint16>(
         (static_cast<quint16>(static_cast<unsigned char>(data.at(offset))) << 8)
@@ -159,7 +225,7 @@ const FontTable *findTable(const QVector<FontTable> &tables, quint32 tag)
     return table == tables.cend() ? nullptr : &*table;
 }
 
-bool permitsEditableEmbedding(const QByteArray &os2Table)
+bool permitsEditableEmbedding(QByteArrayView os2Table)
 {
     if (os2Table.size() < 10) {
         return false;
@@ -193,15 +259,75 @@ bool permitsEditableEmbedding(const QByteArray &os2Table)
     return permission == 0x0008U;
 }
 
-QByteArray materializeTrueTypeFont(
+bool isPotentiallyEmbeddableSystemFont(
     CTFontRef font,
     ApplicationFonts::FontFaceData::Error &error)
 {
     error = ApplicationFonts::FontFaceData::Error::UnsupportedFormat;
     const CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(font);
     if ((traits & (kCTFontTraitColorGlyphs | kCTFontTraitComposite)) != 0) {
+        return false;
+    }
+
+    const CfHandle<CFArrayRef> availableTables(CTFontCopyAvailableTables(
+        font,
+        kCTFontTableOptionNoOptions));
+    if (!availableTables) {
+        return false;
+    }
+
+    QSet<quint32> tags;
+    const CFIndex tableCount = CFArrayGetCount(availableTables.get());
+    for (CFIndex index = 0; index < tableCount; ++index) {
+        tags.insert(static_cast<quint32>(reinterpret_cast<uintptr_t>(
+            CFArrayGetValueAtIndex(availableTables.get(), index))));
+    }
+    if (tags.contains(kTagFvar)
+        || tags.contains(kTagCff)
+        || tags.contains(kTagCff2)
+        || !tags.contains(kTagGlyf)
+        || !tags.contains(kTagLoca)
+        || !tags.contains(kTagHead)
+        || !tags.contains(kTagOs2)) {
+        return false;
+    }
+
+    const CfHandle<CFDataRef> headTable(CTFontCopyTable(
+        font,
+        static_cast<CTFontTableTag>(kTagHead),
+        kCTFontTableOptionNoOptions));
+    if (!headTable || CFDataGetLength(headTable.get()) < 12) {
+        return false;
+    }
+
+    const CfHandle<CFDataRef> os2Table(CTFontCopyTable(
+        font,
+        static_cast<CTFontTableTag>(kTagOs2),
+        kCTFontTableOptionNoOptions));
+    if (!os2Table) {
+        error = ApplicationFonts::FontFaceData::Error::EmbeddingRestricted;
+        return false;
+    }
+    const QByteArrayView os2Bytes(
+        reinterpret_cast<const char *>(CFDataGetBytePtr(os2Table.get())),
+        static_cast<qsizetype>(CFDataGetLength(os2Table.get())));
+    if (!permitsEditableEmbedding(os2Bytes)) {
+        error = ApplicationFonts::FontFaceData::Error::EmbeddingRestricted;
+        return false;
+    }
+
+    error = ApplicationFonts::FontFaceData::Error::None;
+    return true;
+}
+
+QByteArray materializeTrueTypeFont(
+    CTFontRef font,
+    ApplicationFonts::FontFaceData::Error &error)
+{
+    if (!isPotentiallyEmbeddableSystemFont(font, error)) {
         return {};
     }
+    error = ApplicationFonts::FontFaceData::Error::UnsupportedFormat;
 
     CfHandle<CFArrayRef> availableTables(CTFontCopyAvailableTables(
         font,
@@ -249,18 +375,9 @@ QByteArray materializeTrueTypeFont(
         tables.append(FontTable{tag, 0, 0, std::move(bytes)});
     }
 
-    if (containsTable(tables, kTagFvar)
-        || containsTable(tables, kTagCff)
-        || containsTable(tables, kTagCff2)
-        || !containsTable(tables, kTagGlyf)
+    if (!containsTable(tables, kTagGlyf)
         || !containsTable(tables, kTagLoca)
         || !containsTable(tables, kTagHead)) {
-        return {};
-    }
-
-    const FontTable *os2Table = findTable(tables, kTagOs2);
-    if (!os2Table || !permitsEditableEmbedding(os2Table->data)) {
-        error = ApplicationFonts::FontFaceData::Error::EmbeddingRestricted;
         return {};
     }
 
@@ -345,7 +462,9 @@ struct FontRegistry {
 
     QStringList bundledFamilies;
     QStringList systemFamilies;
-    QStringList availableFamilies;
+    std::array<QStringList, 4> availableFamilies;
+    std::array<bool, 4> availableFamiliesReady = {};
+    QHash<QString, bool> selectableSystemFaces;
     QVector<BundledFont> bundledFonts;
     bool initialized = false;
 };
@@ -354,6 +473,55 @@ FontRegistry &fontRegistry()
 {
     static FontRegistry registry;
     return registry;
+}
+
+int fontStyleIndex(bool bold, bool italic)
+{
+    return (bold ? 2 : 0) + (italic ? 1 : 0);
+}
+
+bool bundledFaceIsSelectable(const FontRegistry &registry,
+                             const QString &family,
+                             bool bold,
+                             bool italic)
+{
+    return std::any_of(
+        registry.bundledFonts.cbegin(),
+        registry.bundledFonts.cend(),
+        [&family, bold, italic](const FontRegistry::BundledFont &font) {
+            return font.family.compare(family, Qt::CaseInsensitive) == 0
+                && font.bold == bold
+                && font.italic == italic;
+        });
+}
+
+bool systemFaceIsSelectable(FontRegistry &registry,
+                            const QString &family,
+                            bool bold,
+                            bool italic)
+{
+    const QString key = family.toCaseFolded()
+        + QLatin1Char('|')
+        + QString::number(bold)
+        + QString::number(italic);
+    const auto cached = registry.selectableSystemFaces.constFind(key);
+    if (cached != registry.selectableSystemFaces.cend()) {
+        return cached.value();
+    }
+
+    bool selectable = false;
+#ifdef Q_OS_MACOS
+    const CfHandle<CTFontRef> font = exactSystemFont(family, bold, italic);
+    ApplicationFonts::FontFaceData::Error error;
+    selectable = font
+        && isPotentiallyEmbeddableSystemFont(font.get(), error);
+#else
+    Q_UNUSED(family);
+    Q_UNUSED(bold);
+    Q_UNUSED(italic);
+#endif
+    registry.selectableSystemFaces.insert(key, selectable);
+    return selectable;
 }
 
 } // namespace
@@ -405,13 +573,6 @@ void registerBundledFonts()
         }
     }
     registry.bundledFamilies.sort(Qt::CaseInsensitive);
-
-    registry.availableFamilies = registry.bundledFamilies;
-    for (const QString &family : std::as_const(registry.systemFamilies)) {
-        if (!registry.availableFamilies.contains(family, Qt::CaseInsensitive)) {
-            registry.availableFamilies.append(family);
-        }
-    }
 }
 
 const QStringList &bundledFontFamilies()
@@ -426,10 +587,57 @@ const QStringList &systemFontFamilies()
     return fontRegistry().systemFamilies;
 }
 
-const QStringList &availableFontFamilies()
+bool isFontFaceSelectable(const QString &family, bool bold, bool italic)
 {
     registerBundledFonts();
-    return fontRegistry().availableFamilies;
+    FontRegistry &registry = fontRegistry();
+    if (bundledFaceIsSelectable(registry, family, bold, italic)) {
+        return true;
+    }
+    for (const QString &systemFamily : std::as_const(registry.systemFamilies)) {
+        if (systemFamily.compare(family, Qt::CaseInsensitive) == 0) {
+            return systemFaceIsSelectable(
+                registry,
+                systemFamily,
+                bold,
+                italic);
+        }
+    }
+    return false;
+}
+
+const QStringList &availableFontFamilies(bool bold, bool italic)
+{
+    registerBundledFonts();
+    FontRegistry &registry = fontRegistry();
+    const int styleIndex = fontStyleIndex(bold, italic);
+    if (registry.availableFamiliesReady.at(styleIndex)) {
+        return registry.availableFamilies.at(styleIndex);
+    }
+
+    QStringList &families = registry.availableFamilies.at(styleIndex);
+    for (const QString &family : std::as_const(registry.bundledFamilies)) {
+        if (bundledFaceIsSelectable(registry, family, bold, italic)) {
+            families.append(family);
+        }
+    }
+
+    QStringList systemFamilies;
+    for (const QString &family : std::as_const(registry.systemFamilies)) {
+        if (!families.contains(family, Qt::CaseInsensitive)
+            && systemFaceIsSelectable(registry, family, bold, italic)) {
+            systemFamilies.append(family);
+        }
+    }
+    std::sort(
+        systemFamilies.begin(),
+        systemFamilies.end(),
+        [](const QString &left, const QString &right) {
+            return left.compare(right, Qt::CaseInsensitive) < 0;
+        });
+    families.append(systemFamilies);
+    registry.availableFamiliesReady.at(styleIndex) = true;
+    return families;
 }
 
 QByteArray bundledFontData(const QString &family, bool bold, bool italic)
@@ -477,43 +685,13 @@ FontFaceData systemFontFace(const QString &family, bool bold, bool italic)
     }
 
 #ifdef Q_OS_MACOS
-    const CfHandle<CFStringRef> familyName = toCfString(result.family);
-    if (!familyName) {
+    const CfHandle<CTFontRef> font = exactSystemFont(
+        result.family,
+        bold,
+        italic);
+    if (!font) {
         return result;
     }
-    const CfHandle<CTFontRef> baseFont(CTFontCreateWithName(
-        familyName.get(),
-        12.0,
-        nullptr));
-    if (!baseFont) {
-        return result;
-    }
-
-    const CTFontSymbolicTraits styleMask = kCTFontTraitBold
-        | kCTFontTraitItalic;
-    CTFontSymbolicTraits desiredTraits = 0;
-    if (bold) {
-        desiredTraits |= kCTFontTraitBold;
-    }
-    if (italic) {
-        desiredTraits |= kCTFontTraitItalic;
-    }
-    const CfHandle<CTFontRef> font(CTFontCreateCopyWithSymbolicTraits(
-        baseFont.get(),
-        12.0,
-        nullptr,
-        desiredTraits,
-        styleMask));
-    if (!font || (CTFontGetSymbolicTraits(font.get()) & styleMask) != desiredTraits) {
-        return result;
-    }
-
-    const CfHandle<CFStringRef> resolvedFamily(CTFontCopyFamilyName(font.get()));
-    const QString actualFamily = fromCfString(resolvedFamily.get());
-    if (actualFamily.compare(result.family, Qt::CaseInsensitive) != 0) {
-        return result;
-    }
-    result.family = actualFamily;
 
     result.data = materializeTrueTypeFont(font.get(), result.error);
 #else

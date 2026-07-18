@@ -43,7 +43,9 @@ Current features:
 - An edit-only, collapsible right-side text-formatting panel provides UI for
   font family, size, color, bold, italic, and underline. Font family, bold,
   italic, underline, and color update the current draft and support undo/redo;
-  size is not connected to draft formatting yet.
+  size is not connected to draft formatting yet. The font picker filters system
+  faces by the active bold/italic style using a lightweight save-compatibility
+  probe; filtered PDF source fonts remain visible as the current value only.
 - ID-based localization with Vietnamese as the default UI language.
 - A restrained orange UI inspired by Foxit Reader.
 
@@ -245,8 +247,10 @@ clipped or elided unintentionally.
   request. Materialize TTC faces as standalone sfnt data before giving them to
   PDFium. Accept only static `glyf/loca` faces up to 32 MiB whose OS/2 license
   permits Installable or Editable embedding; reject CFF/CFF2, variable,
-  color or bitmap-only, missing-glyph, Restricted, and Preview & Print-only faces with a
-  user-visible save error rather than silently substituting them.
+  color or bitmap-only, missing-glyph, Restricted, and Preview & Print-only
+  faces rather than silently substituting them. Filter the font picker with a
+  lightweight exact-face CoreText probe, but keep content-specific glyph and
+  full-size validation in the save writer.
 
 ## Memory and Performance Invariants
 

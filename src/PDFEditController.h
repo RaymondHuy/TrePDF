@@ -32,7 +32,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
     Q_PROPERTY(bool textEditActive READ textEditActive NOTIFY textEditActiveChanged FINAL)
     Q_PROPERTY(QStringList bundledFontFamilies READ bundledFontFamilies CONSTANT FINAL)
-    Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies CONSTANT FINAL)
+    Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies NOTIFY selectionChanged FINAL)
     Q_PROPERTY(int selectedPage READ selectedPage NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedObjectId READ selectedObjectId NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedKind READ selectedKind NOTIFY selectionChanged FINAL)

@@ -394,13 +394,22 @@ Các file `.ttf`, `.otf` và `.ttc` dưới `src/assets/fonts` được đóng g
 resource và đăng ký lúc khởi động. Khi bundled font và system font có cùng
 family, bundled font luôn được resolver xét trước.
 
-Dropdown font family hiển thị bundled families trước, sau đó toàn bộ system
-families chưa trùng tên. Font embedded của text đang chọn cũng được thêm tạm
-nếu chưa có trong hai danh sách này. Khi người dùng chọn family mới, mọi
-`Draft.characterSpans[].format.fontFamily` được cập nhật để editor và draft
-overlay dùng cùng font. `Command` lưu toàn bộ draft before/after nên cancel,
-undo và redo khôi phục text, spans, paragraph formats và geometry cùng lúc.
-Thay đổi chỉ tồn tại trong session cho đến khi Save hoặc Save As thành công.
+Dropdown font family hiển thị bundled faces phù hợp với style hiện tại trước,
+sau đó các system face vượt qua probe CoreText nhẹ: đúng family/style, không
+phải color/composite, dùng outline `glyf/loca`, không phải CFF/CFF2 hoặc
+variable, và `OS/2.fsType` cho phép Installable hoặc Editable embedding. Kết
+quả được cache theo `(family, bold, italic)`; probe không dựng sfnt và không giữ
+font bytes. Font nguồn PDF bị lọc vẫn được hiển thị trong ô hiện tại nhưng không
+được chèn vào popup. API đổi family kiểm tra lại mọi style span trong range để
+caller ngoài QML không bypass bộ lọc. Coverage theo text và giới hạn 32 MiB vẫn
+được writer kiểm tra chính xác lúc Save.
+
+Khi người dùng chọn family mới, các
+`Draft.characterSpans[].format.fontFamily` giao với range đang chọn được cập
+nhật để editor và draft overlay dùng cùng font; nếu không có range thì áp dụng
+cho toàn draft. `Command` lưu toàn bộ draft before/after nên cancel, undo và
+redo khôi phục text, spans, paragraph formats và geometry cùng lúc. Thay đổi chỉ
+tồn tại trong session cho đến khi Save hoặc Save As thành công.
 
 Giới hạn an toàn hiện tại:
 

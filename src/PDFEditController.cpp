@@ -750,7 +750,9 @@ QStringList PDFEditController::bundledFontFamilies() const
 
 QStringList PDFEditController::availableFontFamilies() const
 {
-    return ApplicationFonts::availableFontFamilies();
+    return ApplicationFonts::availableFontFamilies(
+        selectedFontBold(),
+        selectedFontItalic());
 }
 
 int PDFEditController::selectedPage() const
@@ -1479,6 +1481,38 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
         return;
     }
 
+    Draft draft = selectedDraftForDisplay();
+    qsizetype rangeStart = 0;
+    qsizetype rangeLength = 0;
+    selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+    const qsizetype rangeEnd = rangeStart + rangeLength;
+    bool checkedSpan = false;
+    for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
+        const qsizetype spanStart = qMax<qsizetype>(0, span.start);
+        const qsizetype spanEnd = qMin<qsizetype>(
+            draft.text.size(),
+            span.start + span.length);
+        if (spanEnd <= rangeStart || spanStart >= rangeEnd) {
+            continue;
+        }
+        checkedSpan = true;
+        if (!ApplicationFonts::isFontFaceSelectable(
+                fontFamily,
+                span.format.fontBold,
+                span.format.fontItalic)) {
+            return;
+        }
+    }
+    if (!checkedSpan) {
+        const CharacterFormat format = primaryCharacterFormat(draft);
+        if (!ApplicationFonts::isFontFaceSelectable(
+                fontFamily,
+                format.fontBold,
+                format.fontItalic)) {
+            return;
+        }
+    }
+
     const bool finishImmediately = !m_textEditActive;
     if (finishImmediately) {
         beginSelectedTextEdit();
@@ -1487,10 +1521,7 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
         return;
     }
 
-    Draft draft = selectedDraftForDisplay();
-    qsizetype rangeStart = 0;
-    qsizetype rangeLength = 0;
-    selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+    draft = selectedDraftForDisplay();
     const bool changed = updateCharacterFormats(
         draft,
         rangeStart,
@@ -1571,6 +1602,55 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
         return;
     }
 
+    Draft draft = selectedDraftForDisplay();
+    qsizetype rangeStart = 0;
+    qsizetype rangeLength = 0;
+    selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+    if (style != FontStyle::Underline) {
+        const auto faceRemainsSelectable = [style, enabled](
+                                               const CharacterFormat &format) {
+            const bool knownFamily = ApplicationFonts::bundledFontFamilies().contains(
+                    format.fontFamily,
+                    Qt::CaseInsensitive)
+                || ApplicationFonts::systemFontFamilies().contains(
+                    format.fontFamily,
+                    Qt::CaseInsensitive);
+            if (!knownFamily) {
+                return true;
+            }
+            const bool bold = style == FontStyle::Bold
+                ? enabled
+                : format.fontBold;
+            const bool italic = style == FontStyle::Italic
+                ? enabled
+                : format.fontItalic;
+            return ApplicationFonts::isFontFaceSelectable(
+                format.fontFamily,
+                bold,
+                italic);
+        };
+
+        const qsizetype rangeEnd = rangeStart + rangeLength;
+        bool checkedSpan = false;
+        for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
+            const qsizetype spanStart = qMax<qsizetype>(0, span.start);
+            const qsizetype spanEnd = qMin<qsizetype>(
+                draft.text.size(),
+                span.start + span.length);
+            if (spanEnd <= rangeStart || spanStart >= rangeEnd) {
+                continue;
+            }
+            checkedSpan = true;
+            if (!faceRemainsSelectable(span.format)) {
+                return;
+            }
+        }
+        if (!checkedSpan
+            && !faceRemainsSelectable(primaryCharacterFormat(draft))) {
+            return;
+        }
+    }
+
     const bool finishImmediately = !m_textEditActive;
     if (finishImmediately) {
         beginSelectedTextEdit();
@@ -1579,10 +1659,7 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
         return;
     }
 
-    Draft draft = selectedDraftForDisplay();
-    qsizetype rangeStart = 0;
-    qsizetype rangeLength = 0;
-    selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+    draft = selectedDraftForDisplay();
     const bool changed = updateCharacterFormats(
         draft,
         rangeStart,

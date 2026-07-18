@@ -880,6 +880,7 @@ class PDFEditControllerTest : public QObject
 private slots:
     void initTestCase();
     void registersBundledFonts();
+    void filtersUnsupportedSystemFonts();
     void detectsPdfFontStyles();
     void propagatesSourceStylesThroughSelection();
     void groupsCompatibleTextObjectsOnSameLine();
@@ -990,20 +991,75 @@ void PDFEditControllerTest::registersBundledFonts()
     QVERIFY(!ApplicationFonts::systemFontFamilies().isEmpty());
 
     const QStringList availableFamilies = m_controller.availableFontFamilies();
-    QVERIFY(availableFamilies.size()
-            >= ApplicationFonts::systemFontFamilies().size());
     QCOMPARE(
         availableFamilies.first(),
         ApplicationFonts::bundledFontFamilies().first());
-    for (const QString &family : ApplicationFonts::systemFontFamilies()) {
-        QVERIFY(availableFamilies.contains(family, Qt::CaseInsensitive));
-    }
+    QVERIFY(availableFamilies.contains(
+        QStringLiteral("Arial"),
+        Qt::CaseInsensitive));
 
     QStringList uniqueFamilies;
     for (const QString &family : availableFamilies) {
+        QVERIFY(ApplicationFonts::isFontFaceSelectable(family, false, false));
         QVERIFY(!uniqueFamilies.contains(family, Qt::CaseInsensitive));
         uniqueFamilies.append(family);
     }
+}
+
+void PDFEditControllerTest::filtersUnsupportedSystemFonts()
+{
+    for (int styleIndex = 0; styleIndex < 4; ++styleIndex) {
+        const bool bold = (styleIndex & 2) != 0;
+        const bool italic = (styleIndex & 1) != 0;
+        const QStringList families = ApplicationFonts::availableFontFamilies(
+            bold,
+            italic);
+        QVERIFY(families.contains(QStringLiteral("Arial"), Qt::CaseInsensitive));
+
+        QStringList uniqueFamilies;
+        for (const QString &family : families) {
+            QVERIFY(ApplicationFonts::isFontFaceSelectable(
+                family,
+                bold,
+                italic));
+            QVERIFY(!uniqueFamilies.contains(family, Qt::CaseInsensitive));
+            uniqueFamilies.append(family);
+        }
+    }
+
+    const QString appleColorEmoji = QStringLiteral("Apple Color Emoji");
+    if (ApplicationFonts::systemFontFamilies().contains(
+            appleColorEmoji,
+            Qt::CaseInsensitive)) {
+        QVERIFY(!ApplicationFonts::isFontFaceSelectable(
+            appleColorEmoji,
+            false,
+            false));
+        QVERIFY(!ApplicationFonts::availableFontFamilies().contains(
+            appleColorEmoji,
+            Qt::CaseInsensitive));
+        QVERIFY(!ApplicationFonts::systemFontFace(
+            appleColorEmoji,
+            false,
+            false).isValid());
+
+        QVERIFY(m_controller.selectCandidate(
+            0,
+            m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+        const QString originalFamily = m_controller.selectedFontFamily();
+        m_controller.setSelectedFontFamily(appleColorEmoji);
+        QCOMPARE(m_controller.selectedFontFamily(), originalFamily);
+        QVERIFY(!m_controller.hasDrafts());
+        m_controller.clearSelection();
+    }
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_boldCandidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(
+        m_controller.availableFontFamilies(),
+        ApplicationFonts::availableFontFamilies(true, false));
+    m_controller.clearSelection();
 }
 
 void PDFEditControllerTest::detectsPdfFontStyles()
@@ -1804,13 +1860,14 @@ void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese_data()
     QTest::addColumn<QString>("fontFamily");
     QTest::addColumn<bool>("fontItalic");
     QTest::addColumn<bool>("faceDataValid");
+    QTest::addColumn<bool>("selectable");
 
     QTest::newRow("missing-vietnamese-glyphs")
-        << QStringLiteral("Comic Sans MS") << false << true;
+        << QStringLiteral("Comic Sans MS") << false << true << true;
     QTest::newRow("restricted-license")
-        << QStringLiteral("Brush Script MT") << true << false;
+        << QStringLiteral("Brush Script MT") << true << false << false;
     QTest::newRow("preview-print-only")
-        << QStringLiteral("Avenir Next") << false << false;
+        << QStringLiteral("Avenir Next") << false << false << false;
 }
 
 void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese()
@@ -1818,6 +1875,7 @@ void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese()
     QFETCH(QString, fontFamily);
     QFETCH(bool, fontItalic);
     QFETCH(bool, faceDataValid);
+    QFETCH(bool, selectable);
 
     if (!ApplicationFonts::systemFontFamilies().contains(
             fontFamily,
@@ -1828,6 +1886,13 @@ void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese()
         ApplicationFonts::systemFontFace(fontFamily, false, fontItalic);
     if (systemFace.isValid() != faceDataValid) {
         QSKIP(qPrintable(QStringLiteral("System font prerequisites changed: %1")
+                             .arg(fontFamily)));
+    }
+    if (ApplicationFonts::isFontFaceSelectable(
+            fontFamily,
+            false,
+            fontItalic) != selectable) {
+        QSKIP(qPrintable(QStringLiteral("System font filter changed: %1")
                              .arg(fontFamily)));
     }
     QVERIFY(faceDataValid
@@ -1878,6 +1943,17 @@ void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese()
     QVERIFY(controller.selectCandidate(
         0,
         candidate.value(QStringLiteral("objectId")).toString()));
+    if (!selectable) {
+        const QString originalFamily = controller.selectedFontFamily();
+        controller.setSelectedFontFamily(fontFamily);
+        QCOMPARE(controller.selectedFontFamily(), originalFamily);
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(!ApplicationFonts::availableFontFamilies(
+            false,
+            fontItalic).contains(fontFamily, Qt::CaseInsensitive));
+        return;
+    }
+
     const QString editedText = QStringLiteral("Tiếng Việt").normalized(
         QString::NormalizationForm_D);
     controller.beginSelectedTextEdit();

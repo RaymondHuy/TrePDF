@@ -27,7 +27,9 @@ struct FontFaceData {
 void registerBundledFonts();
 const QStringList &bundledFontFamilies();
 const QStringList &systemFontFamilies();
-const QStringList &availableFontFamilies();
+const QStringList &availableFontFamilies(bool bold = false,
+                                         bool italic = false);
+bool isFontFaceSelectable(const QString &family, bool bold, bool italic);
 QByteArray bundledFontData(const QString &family, bool bold, bool italic);
 FontFaceData systemFontFace(const QString &family, bool bold, bool italic);
 
