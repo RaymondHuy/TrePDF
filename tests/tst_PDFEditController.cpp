@@ -4,6 +4,7 @@
 
 #include <QFile>
 #include <QFontMetricsF>
+#include <QRawFont>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -74,6 +75,29 @@ bool addTextObject(FPDF_DOCUMENT document,
         return false;
     }
 
+    FPDFPageObj_Transform(textObject, 1.0, 0.0, 0.0, 1.0, x, y);
+    return FPDFPage_InsertObject(page, textObject);
+}
+
+bool addTextObjectWithFont(FPDF_DOCUMENT document,
+                           FPDF_PAGE page,
+                           FPDF_FONT font,
+                           const QString &text,
+                           double x,
+                           double y)
+{
+    FPDF_PAGEOBJECT textObject = FPDFPageObj_CreateTextObj(
+        document,
+        font,
+        24.0F);
+    if (!textObject) {
+        return false;
+    }
+    const auto *wideText = reinterpret_cast<const FPDF_WCHAR *>(text.utf16());
+    if (!FPDFText_SetText(textObject, wideText)) {
+        FPDFPageObj_Destroy(textObject);
+        return false;
+    }
     FPDFPageObj_Transform(textObject, 1.0, 0.0, 0.0, 1.0, x, y);
     return FPDFPage_InsertObject(page, textObject);
 }
@@ -206,6 +230,94 @@ bool createFontStylePdf(const QString &filePath)
             && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
     }
 
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createEmbeddedArialPdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    const QByteArray fontData = ApplicationFonts::bundledFontData(
+        QStringLiteral("Arial"),
+        false,
+        false);
+    FPDF_FONT font = fontData.isEmpty()
+        ? nullptr
+        : FPDFText_LoadFont(
+              document,
+              reinterpret_cast<const uint8_t *>(fontData.constData()),
+              static_cast<uint32_t>(fontData.size()),
+              FPDF_FONT_TRUETYPE,
+              true);
+    FPDF_PAGE page = font ? FPDFPage_New(document, 0, 595.0, 842.0) : nullptr;
+    bool succeeded = page
+        && addTextObjectWithFont(
+            document,
+            page,
+            font,
+            QStringLiteral("Tiếng Việt gốc"),
+            72.0,
+            740.0)
+        && addTextObjectWithFont(
+            document,
+            page,
+            font,
+            QStringLiteral("Không đổi"),
+            72.0,
+            680.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    if (font) {
+        FPDFFont_Close(font);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createEmbeddedFontPdf(const QString &filePath,
+                           const QByteArray &fontData,
+                           const QString &text)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document || fontData.isEmpty()) {
+        if (document) {
+            FPDF_CloseDocument(document);
+        }
+        return false;
+    }
+
+    FPDF_FONT font = FPDFText_LoadFont(
+        document,
+        reinterpret_cast<const uint8_t *>(fontData.constData()),
+        static_cast<uint32_t>(fontData.size()),
+        FPDF_FONT_TRUETYPE,
+        true);
+    FPDF_PAGE page = font ? FPDFPage_New(document, 0, 595.0, 842.0) : nullptr;
+    bool succeeded = page
+        && addTextObjectWithFont(document, page, font, text, 72.0, 740.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    if (font) {
+        FPDFFont_Close(font);
+    }
     FPDF_CloseDocument(document);
     return succeeded;
 }
@@ -408,6 +520,115 @@ QString baseFontName(FPDF_PAGEOBJECT textObject)
     }
     buffer.chop(1);
     return QString::fromUtf8(buffer);
+}
+
+QString fontFamilyName(FPDF_FONT font)
+{
+    const size_t byteLength = font
+        ? FPDFFont_GetFamilyName(font, nullptr, 0)
+        : 0;
+    if (byteLength <= 1) {
+        return {};
+    }
+
+    QByteArray buffer(static_cast<qsizetype>(byteLength), Qt::Uninitialized);
+    if (FPDFFont_GetFamilyName(
+            font,
+            buffer.data(),
+            static_cast<size_t>(buffer.size()))
+        != byteLength) {
+        return {};
+    }
+    buffer.chop(1);
+    return QString::fromUtf8(buffer);
+}
+
+struct TextObjectFontInfo {
+    bool found = false;
+    QString baseName;
+    QString familyName;
+    bool italic = false;
+    int embedded = -1;
+};
+
+TextObjectFontInfo textObjectFontInfo(const QString &filePath,
+                                      const QString &text)
+{
+    TextObjectFontInfo info;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT
+                || !pageObjectText(object, textPage).contains(text)) {
+                continue;
+            }
+
+            const FPDF_FONT font = FPDFTextObj_GetFont(object);
+            info.found = font;
+            info.baseName = baseFontName(object);
+            info.familyName = fontFamilyName(font);
+            int italicAngle = 0;
+            info.italic = font
+                && FPDFFont_GetItalicAngle(font, &italicAngle)
+                && italicAngle != 0;
+            info.embedded = font ? FPDFFont_GetIsEmbedded(font) : -1;
+            break;
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return info;
+}
+
+bool textObjectsShareFont(const QString &filePath,
+                          const QString &firstText,
+                          const QString &secondText)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    FPDF_FONT firstFont = nullptr;
+    FPDF_FONT secondFont = nullptr;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT) {
+                continue;
+            }
+            const QString text = pageObjectText(object, textPage);
+            if (!firstFont && text.contains(firstText)) {
+                firstFont = FPDFTextObj_GetFont(object);
+            }
+            if (!secondFont && text.contains(secondText)) {
+                secondFont = FPDFTextObj_GetFont(object);
+            }
+        }
+    }
+    const bool shareFont = firstFont && firstFont == secondFont;
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return shareFont;
 }
 
 QStringList topLevelTextObjects(const QString &filePath)
@@ -675,6 +896,15 @@ private slots:
     void appliesFontStylesToDisplayFont_data();
     void appliesFontStylesToDisplayFont();
     void savesEditedTextRoundTrip();
+    void savesVietnameseEditWithEmbeddedArial_data();
+    void savesVietnameseEditWithEmbeddedArial();
+    void savesVietnameseEditWithEmbeddedSystemFont_data();
+    void savesVietnameseEditWithEmbeddedSystemFont();
+    void preservesInheritedSystemFontForVietnamese();
+    void rejectsUnsupportedSystemFontForVietnamese_data();
+    void rejectsUnsupportedSystemFontForVietnamese();
+    void preservesEmbeddedFontForFormatOnlyVietnameseEdit();
+    void savesNormalizedVietnameseRichText();
     void savesCurrentFileRoundTrip();
     void savesUnchangedCopyRoundTrip();
     void savesMultipleDraftsOnSamePage();
@@ -1289,6 +1519,486 @@ void PDFEditControllerTest::savesEditedTextRoundTrip()
     QVERIFY(!sourceText.contains(QStringLiteral("Saved grouped text")));
 }
 
+void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial_data()
+{
+    QTest::addColumn<QString>("editedText");
+    QTest::addColumn<QString>("sourceText");
+    QTest::addColumn<QString>("untouchedText");
+    QTest::addColumn<bool>("expectedBold");
+
+    const QString text = QStringLiteral("Tiếng Việt");
+    const QString decomposedText = text.normalized(QString::NormalizationForm_D);
+    QTest::newRow("nfc-regular")
+        << text
+        << QString::fromLatin1(kRegularText)
+        << QString::fromLatin1(kBoldText)
+        << false;
+    QTest::newRow("nfd-regular")
+        << decomposedText
+        << QString::fromLatin1(kRegularText)
+        << QString::fromLatin1(kBoldText)
+        << false;
+    QTest::newRow("nfc-bold")
+        << text
+        << QString::fromLatin1(kBoldText)
+        << QString::fromLatin1(kRegularText)
+        << true;
+    QTest::newRow("nfd-bold")
+        << decomposedText
+        << QString::fromLatin1(kBoldText)
+        << QString::fromLatin1(kRegularText)
+        << true;
+}
+
+void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial()
+{
+    QFETCH(QString, editedText);
+    QFETCH(QString, sourceText);
+    QFETCH(QString, untouchedText);
+    QFETCH(bool, expectedBold);
+
+    const QString expectedText = editedText.normalized(
+        QString::NormalizationForm_C);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-vietnamese-source-%1.pdf")
+            .arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-vietnamese-output-%1.pdf")
+            .arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        sourceText);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(editedText);
+    QCOMPARE(controller.selectedFontFamily(), QStringLiteral("Arial"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QString savedText = pageText(outputPath);
+    QVERIFY2(
+        savedText.contains(expectedText),
+        qPrintable(QStringLiteral("Saved page text: %1").arg(savedText)));
+    QCOMPARE(
+        savedText,
+        savedText.normalized(QString::NormalizationForm_C));
+
+    const TextObjectFontInfo editedFont = textObjectFontInfo(
+        outputPath,
+        expectedText);
+    QVERIFY(editedFont.found);
+    QVERIFY2(
+        editedFont.baseName.contains(QStringLiteral("Arial"), Qt::CaseInsensitive),
+        qPrintable(QStringLiteral("Edited font: %1").arg(editedFont.baseName)));
+    QCOMPARE(
+        editedFont.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive),
+        expectedBold);
+    QCOMPARE(editedFont.embedded, 1);
+
+    const TextObjectFontInfo untouchedFont = textObjectFontInfo(
+        outputPath,
+        untouchedText);
+    QVERIFY(untouchedFont.found);
+    QVERIFY(untouchedFont.baseName.contains(
+        QStringLiteral("Helvetica"),
+        Qt::CaseInsensitive));
+    QCOMPARE(untouchedFont.embedded, 0);
+
+    const QString verificationPath = qEnvironmentVariable(
+        "TREPDF_VIETNAMESE_SAVE_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()
+        && QString::fromLatin1(QTest::currentDataTag())
+            == QLatin1String("nfd-bold")) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(outputPath, verificationPath));
+    }
+}
+
+void PDFEditControllerTest::savesVietnameseEditWithEmbeddedSystemFont_data()
+{
+    QTest::addColumn<QString>("fontFamily");
+    QTest::addColumn<bool>("fontBold");
+    QTest::addColumn<bool>("fontItalic");
+
+    QTest::newRow("georgia-regular")
+        << QStringLiteral("Georgia") << false << false;
+    QTest::newRow("georgia-bold")
+        << QStringLiteral("Georgia") << true << false;
+    QTest::newRow("georgia-italic")
+        << QStringLiteral("Georgia") << false << true;
+    QTest::newRow("georgia-bold-italic")
+        << QStringLiteral("Georgia") << true << true;
+    // Helvetica Neue is stored in a TTC on macOS. The styled row verifies that the
+    // selected face is materialized instead of PDFium loading collection face 0.
+    QTest::newRow("helvetica-neue-ttc-bold-italic")
+        << QStringLiteral("Helvetica Neue") << true << true;
+}
+
+void PDFEditControllerTest::savesVietnameseEditWithEmbeddedSystemFont()
+{
+    QFETCH(QString, fontFamily);
+    QFETCH(bool, fontBold);
+    QFETCH(bool, fontItalic);
+
+    if (!ApplicationFonts::systemFontFamilies().contains(
+            fontFamily,
+            Qt::CaseInsensitive)) {
+        QSKIP(qPrintable(QStringLiteral("Missing system font: %1").arg(fontFamily)));
+    }
+    const ApplicationFonts::FontFaceData systemFace =
+        ApplicationFonts::systemFontFace(fontFamily, fontBold, fontItalic);
+    if (!systemFace.isValid()) {
+        QSKIP(qPrintable(QStringLiteral("System face unavailable: %1 (%2)")
+                             .arg(fontFamily)
+                             .arg(static_cast<int>(systemFace.error))));
+    }
+
+    const QString expectedText = QStringLiteral("Tiếng Việt");
+    const QString editedText = expectedText.normalized(
+        QString::NormalizationForm_D);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-system-font-source-%1.pdf")
+            .arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-system-font-output-%1.pdf")
+            .arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(editedText);
+    controller.setSelectedTextRange(0, editedText.size());
+    controller.setSelectedFontFamily(fontFamily);
+    controller.setSelectedFontBold(fontBold);
+    controller.setSelectedFontItalic(fontItalic);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedFontFamily(), fontFamily);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QString savedText = pageText(outputPath);
+    QVERIFY2(
+        normalizedPageText(outputPath).contains(expectedText),
+        qPrintable(QStringLiteral("Saved page text: %1").arg(savedText)));
+    QCOMPARE(savedText, savedText.normalized(QString::NormalizationForm_C));
+
+    const TextObjectFontInfo editedFont = textObjectFontInfo(
+        outputPath,
+        QStringLiteral("Tiếng"));
+    QVERIFY(editedFont.found);
+    QVERIFY2(
+        editedFont.familyName.contains(fontFamily, Qt::CaseInsensitive)
+            || editedFont.baseName.contains(fontFamily, Qt::CaseInsensitive),
+        qPrintable(QStringLiteral("Saved font: %1 / %2")
+                       .arg(editedFont.familyName, editedFont.baseName)));
+    QCOMPARE(
+        editedFont.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive),
+        fontBold);
+    QCOMPARE(editedFont.italic, fontItalic);
+    QCOMPARE(editedFont.embedded, 1);
+    QVERIFY(editedFont.baseName.size() <= 6
+            || editedFont.baseName.at(6) != QLatin1Char('+'));
+
+    const TextObjectFontInfo untouchedFont = textObjectFontInfo(
+        outputPath,
+        QString::fromLatin1(kBoldText));
+    QVERIFY(untouchedFont.found);
+    QVERIFY(untouchedFont.baseName.contains(
+        QStringLiteral("Helvetica"),
+        Qt::CaseInsensitive));
+    QCOMPARE(untouchedFont.embedded, 0);
+
+    const QString verificationPath = qEnvironmentVariable(
+        "TREPDF_SYSTEM_FONT_SAVE_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()
+        && QString::fromLatin1(QTest::currentDataTag())
+            == QLatin1String("helvetica-neue-ttc-bold-italic")) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(outputPath, verificationPath));
+    }
+}
+
+void PDFEditControllerTest::preservesInheritedSystemFontForVietnamese()
+{
+    const QString fontFamily = QStringLiteral("Helvetica Neue");
+    if (!ApplicationFonts::systemFontFamilies().contains(
+            fontFamily,
+            Qt::CaseInsensitive)) {
+        QSKIP("Helvetica Neue is not installed");
+    }
+    const ApplicationFonts::FontFaceData systemFace =
+        ApplicationFonts::systemFontFace(fontFamily, false, false);
+    if (!systemFace.isValid()) {
+        QSKIP("Helvetica Neue regular cannot be embedded on this host");
+    }
+
+    const QString expectedText = QStringLiteral("Tiếng Việt");
+    const QRawFont rawFont(
+        systemFace.data,
+        16.0,
+        QFont::PreferNoHinting);
+    if (!rawFont.isValid()) {
+        QSKIP("Materialized Helvetica Neue face is invalid");
+    }
+    for (uint character : expectedText.toUcs4()) {
+        if (!QChar::isSpace(static_cast<char32_t>(character))
+            && !rawFont.supportsCharacter(character)) {
+            QSKIP("Helvetica Neue does not cover the Vietnamese fixture");
+        }
+    }
+
+    const QString sourceText = QStringLiteral("Inherited system font");
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-inherited-system-font-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-inherited-system-font-output.pdf"));
+    QVERIFY(createEmbeddedFontPdf(sourcePath, systemFace.data, sourceText));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        sourceText);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(
+        expectedText.normalized(QString::NormalizationForm_D));
+    QCOMPARE(controller.selectedFontFamily(), systemFace.family);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(normalizedPageText(outputPath).contains(expectedText));
+    const TextObjectFontInfo editedFont = textObjectFontInfo(
+        outputPath,
+        expectedText);
+    QVERIFY(editedFont.found);
+    QVERIFY2(
+        editedFont.familyName.contains(fontFamily, Qt::CaseInsensitive)
+            || editedFont.baseName.contains(fontFamily, Qt::CaseInsensitive),
+        qPrintable(QStringLiteral("Saved font: %1 / %2")
+                       .arg(editedFont.familyName, editedFont.baseName)));
+    QCOMPARE(editedFont.embedded, 1);
+}
+
+void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese_data()
+{
+    QTest::addColumn<QString>("fontFamily");
+    QTest::addColumn<bool>("fontItalic");
+    QTest::addColumn<bool>("faceDataValid");
+
+    QTest::newRow("missing-vietnamese-glyphs")
+        << QStringLiteral("Comic Sans MS") << false << true;
+    QTest::newRow("restricted-license")
+        << QStringLiteral("Brush Script MT") << true << false;
+    QTest::newRow("preview-print-only")
+        << QStringLiteral("Avenir Next") << false << false;
+}
+
+void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese()
+{
+    QFETCH(QString, fontFamily);
+    QFETCH(bool, fontItalic);
+    QFETCH(bool, faceDataValid);
+
+    if (!ApplicationFonts::systemFontFamilies().contains(
+            fontFamily,
+            Qt::CaseInsensitive)) {
+        QSKIP(qPrintable(QStringLiteral("Missing system font: %1").arg(fontFamily)));
+    }
+    const ApplicationFonts::FontFaceData systemFace =
+        ApplicationFonts::systemFontFace(fontFamily, false, fontItalic);
+    if (systemFace.isValid() != faceDataValid) {
+        QSKIP(qPrintable(QStringLiteral("System font prerequisites changed: %1")
+                             .arg(fontFamily)));
+    }
+    QVERIFY(faceDataValid
+            || systemFace.error != ApplicationFonts::FontFaceData::Error::None);
+    if (QString::fromLatin1(QTest::currentDataTag())
+        == QLatin1String("preview-print-only")) {
+        if (systemFace.error
+            != ApplicationFonts::FontFaceData::Error::EmbeddingRestricted) {
+            QSKIP("Avenir Next embedding permission changed");
+        }
+    }
+    if (QString::fromLatin1(QTest::currentDataTag())
+            == QLatin1String("missing-vietnamese-glyphs")
+        && systemFace.isValid()) {
+        const QRawFont rawFont(
+            systemFace.data,
+            16.0,
+            QFont::PreferNoHinting);
+        QVERIFY(rawFont.isValid());
+        bool supportsVietnamese = true;
+        for (uint character : QStringLiteral("Tiếng Việt").toUcs4()) {
+            if (!QChar::isSpace(static_cast<char32_t>(character))
+                && !rawFont.supportsCharacter(character)) {
+                supportsVietnamese = false;
+                break;
+            }
+        }
+        if (supportsVietnamese) {
+            QSKIP("Comic Sans MS now covers the Vietnamese fixture");
+        }
+    }
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("reject-system-font-source-%1.pdf")
+            .arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("reject-system-font-output-%1.pdf")
+            .arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    const QString editedText = QStringLiteral("Tiếng Việt").normalized(
+        QString::NormalizationForm_D);
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(editedText);
+    controller.setSelectedTextRange(0, editedText.size());
+    controller.setSelectedFontFamily(fontFamily);
+    controller.setSelectedFontItalic(fontItalic);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedFontFamily(), fontFamily);
+
+    const int revisionBeforeSave = document.renderRevision();
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QSignalSpy statusSpy(&controller, &PDFEditController::statusMessage);
+    QVERIFY(!controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!QFile::exists(outputPath));
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QCOMPARE(document.source().toLocalFile(), sourcePath);
+    QCOMPARE(document.renderRevision(), revisionBeforeSave);
+    QVERIFY(pageText(sourcePath).contains(QString::fromLatin1(kRegularText)));
+    QVERIFY(!statusSpy.isEmpty());
+}
+
+void PDFEditControllerTest::preservesEmbeddedFontForFormatOnlyVietnameseEdit()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-embedded-format-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-embedded-format-output.pdf"));
+    const QString editedText = QStringLiteral("Tiếng Việt gốc");
+    const QString untouchedText = QStringLiteral("Không đổi");
+    QVERIFY(createEmbeddedArialPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        editedText);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.setSelectedColor(QColor(QStringLiteral("#c62828")));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QString savedText = pageText(outputPath);
+    QVERIFY(savedText.contains(editedText));
+    QVERIFY(savedText.contains(untouchedText));
+    QVERIFY(textObjectsShareFont(outputPath, editedText, untouchedText));
+
+    const TextObjectFontInfo fontInfo = textObjectFontInfo(
+        outputPath,
+        editedText);
+    QVERIFY(fontInfo.found);
+    QCOMPARE(fontInfo.embedded, 1);
+}
+
+void PDFEditControllerTest::savesNormalizedVietnameseRichText()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-vietnamese-rich-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-vietnamese-rich-output.pdf"));
+    const QString expectedText = QStringLiteral("Tiếng thường\nViệt");
+    const QString editedText = expectedText.normalized(
+        QString::NormalizationForm_D);
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(editedText);
+    controller.setSelectedTextRange(0, editedText.indexOf(QLatin1Char(' ')));
+    controller.setSelectedFontBold(true);
+    controller.finishSelectedTextEdit();
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QString savedText = pageText(outputPath);
+    QVERIFY2(
+        normalizedPageText(outputPath).contains(
+            QStringLiteral("Tiếng thường Việt")),
+        qPrintable(QStringLiteral("Saved page text: %1").arg(savedText)));
+    QCOMPARE(
+        savedText,
+        savedText.normalized(QString::NormalizationForm_C));
+
+    const TextObjectFontInfo boldFont = textObjectFontInfo(
+        outputPath,
+        QStringLiteral("Tiếng"));
+    const TextObjectFontInfo regularFont = textObjectFontInfo(
+        outputPath,
+        QStringLiteral("thường"));
+    QVERIFY(boldFont.found);
+    QVERIFY(regularFont.found);
+    QVERIFY(boldFont.baseName.contains(
+        QStringLiteral("Bold"),
+        Qt::CaseInsensitive));
+    QVERIFY(!regularFont.baseName.contains(
+        QStringLiteral("Bold"),
+        Qt::CaseInsensitive));
+    QCOMPARE(boldFont.embedded, 1);
+    QCOMPARE(regularFont.embedded, 1);
+
+    FS_MATRIX firstLine = {};
+    FS_MATRIX secondLine = {};
+    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("Tiếng"), firstLine));
+    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("Việt"), secondLine));
+    QVERIFY(secondLine.f < firstLine.f - 1.0F);
+}
+
 void PDFEditControllerTest::savesCurrentFileRoundTrip()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -1623,7 +2333,10 @@ void PDFEditControllerTest::savesAsynchronously()
     QVERIFY(controller.selectCandidate(
         0,
         candidate.value(QStringLiteral("objectId")).toString()));
-    controller.commitSelectedText(QStringLiteral("Async saved text"));
+    const QString expectedText = QStringLiteral("Lưu tiếng Việt");
+    const QString editedText = expectedText.normalized(
+        QString::NormalizationForm_D);
+    controller.commitSelectedText(editedText);
 
     QSignalSpy saveFinishedSpy(&controller, &PDFEditController::saveFinished);
     QVERIFY(controller.requestSaveAs(QUrl::fromLocalFile(outputPath)));
@@ -1632,8 +2345,12 @@ void PDFEditControllerTest::savesAsynchronously()
     QCOMPARE(saveFinishedSpy.constFirst().constFirst().toBool(), true);
     QVERIFY(!controller.saving());
     QCOMPARE(document.source().toLocalFile(), outputPath);
-    QVERIFY(normalizedPageText(outputPath).contains(
-        QStringLiteral("Async saved text")));
+    QVERIFY(normalizedPageText(outputPath).contains(expectedText));
+    const TextObjectFontInfo editedFont = textObjectFontInfo(
+        outputPath,
+        QStringLiteral("Lưu"));
+    QVERIFY(editedFont.found);
+    QCOMPARE(editedFont.embedded, 1);
 }
 
 void PDFEditControllerTest::keepsDraftsWhenSaveFails()

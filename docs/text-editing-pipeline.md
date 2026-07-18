@@ -934,9 +934,22 @@ tiếp tục sau signal `saveFinished(true)`.
 3. Dùng `QTextLayout` để wrap/reflow theo `frameRect`, tách từng line/style run,
    rồi dùng `FPDF_DeviceToPage()` để đổi tọa độ editor sang page coordinates.
    Cách này giữ đúng CropBox offset và page rotation.
-4. Tái sử dụng font PDF gốc khi phù hợp, hoặc nhúng đúng face font bundled;
-   underline được tạo thành path. Font hệ thống mới không nhúng được sẽ làm save
-   thất bại thay vì bị thay thế âm thầm.
+4. Chuẩn hóa text đã sửa về Unicode NFC theo grapheme cluster và remap lại các
+   character span UTF-16. Writer có thể tái sử dụng font PDF gốc khi
+   family/style phù hợp và replacement run chỉ chứa các ký tự đã có trong text
+   nguồn; nhờ đó thao tác chỉ đổi màu/gạch chân trên text Unicode không thay
+   font không cần nhúng lại. Ký tự Unicode mới không dùng font nguồn vì đó có
+   thể là subset thiếu glyph hoặc ToUnicode mapping. Family Arial/Helvetica kế
+   thừa từ nguồn được chuyển sang đúng face Arial bundled, kiểm tra coverage rồi
+   nhúng dạng CID Unicode. Với family hệ thống khác do người dùng chọn, prepare
+   resolve đúng face Regular/Bold/Italic bằng CoreText trên GUI thread, lấy từng
+   bảng của face đó và dựng một sfnt TrueType đơn-face. Cách này hỗ trợ cả font
+   nằm trong TTC mà không để PDFium mặc định lấy face 0; bytes được snapshot vào
+   save request trước khi worker chạy. Writer chỉ chấp nhận outline `glyf/loca`,
+   đủ glyph, không quá 32 MiB và `OS/2.fsType` cho phép Installable hoặc Editable
+   embedding. Font CFF/CFF2, variable, color hoặc bitmap-only, Preview & Print-only hoặc
+   Restricted sẽ làm save thất bại thay vì bị thay thế âm thầm. Các object không
+   sửa vẫn giữ font resource cũ. Underline được tạo thành path.
 5. Xóa mọi text object nguồn của draft, insert replacement tại z-order sớm nhất
    của các object nguồn và gọi `FPDFPage_GenerateContent()` cho từng page đã đổi.
 6. Serialize bằng `FPDF_SaveAsCopy(FPDF_NO_INCREMENTAL)` qua `QSaveFile`; chỉ

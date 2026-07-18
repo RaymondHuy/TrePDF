@@ -328,6 +328,7 @@ private:
                                      const QVector<ParagraphFormat> &right);
     static bool sameDraftContent(const Draft &left, const Draft &right);
     static void setDraftText(Draft &draft, const QString &text);
+    static void applyUnicodeFontFallback(Draft &draft);
     static bool updateCharacterFormats(
         Draft &draft,
         qsizetype start,

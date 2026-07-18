@@ -33,6 +33,12 @@ target_link_libraries(trepdf_edit_controller_tests
 )
 
 if(APPLE)
+    target_link_libraries(trepdf_edit_controller_tests
+        PRIVATE
+            "${TREPDF_CORE_FOUNDATION_FRAMEWORK}"
+            "${TREPDF_CORE_TEXT_FRAMEWORK}"
+    )
+
     get_target_property(TREPDF_TEST_PDFIUM_LIBRARY PDFium::PDFium IMPORTED_LOCATION)
     add_custom_command(TARGET trepdf_edit_controller_tests POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

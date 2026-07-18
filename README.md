@@ -25,9 +25,19 @@ selected text range.
 
 Fonts placed under `src/assets/fonts` are bundled with the application and
 preferred over matching system-installed families for draft display and PDF
-embedding. The save writer can also reuse the original PDF font or a compatible
-PDF standard font. If a newly selected system font cannot be embedded, saving
-stops with an error and keeps the draft intact.
+embedding. The save writer can reuse the original PDF font when a replacement
+run only uses characters already present in its source text, and can use a
+compatible PDF standard font for ASCII. Edited non-ASCII text is normalized to
+NFC; newly introduced Vietnamese text inheriting an Arial/Helvetica face is
+written with the matching bundled Arial Unicode font instead of reusing a
+potentially incomplete PDF subset. Eligible newly selected macOS system fonts
+whose exact regular/bold/italic face is available are resolved with CoreText,
+snapshotted before the save worker starts, and embedded as CID Unicode TrueType
+fonts. TTC faces are materialized individually so PDFium does not select the
+wrong face. Unedited objects keep their original font resources. Missing styles,
+unsupported outlines, missing glyphs, faces larger than 32 MiB, and fonts whose
+OS/2 license does not permit editable embedding stop the save with an error and
+keep the draft intact.
 
 Save writes the current file atomically; Save As preserves the source file and
 opens the saved copy. The controller snapshots the draft on the GUI thread and

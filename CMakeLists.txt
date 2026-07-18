@@ -158,6 +158,14 @@ set_target_properties(trepdf PROPERTIES
 )
 
 if(APPLE)
+    find_library(TREPDF_CORE_FOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+    find_library(TREPDF_CORE_TEXT_FRAMEWORK CoreText REQUIRED)
+    target_link_libraries(trepdf
+        PRIVATE
+            "${TREPDF_CORE_FOUNDATION_FRAMEWORK}"
+            "${TREPDF_CORE_TEXT_FRAMEWORK}"
+    )
+
     get_target_property(TREPDF_PDFIUM_LIBRARY PDFium::PDFium IMPORTED_LOCATION)
     set_target_properties(trepdf PROPERTIES
         BUILD_RPATH "@executable_path/../Frameworks"

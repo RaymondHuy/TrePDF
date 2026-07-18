@@ -382,6 +382,99 @@ QString fontFamilyMatchKey(QString name)
     return key;
 }
 
+bool equivalentFontFamilyName(const QString &left, const QString &right)
+{
+    const QString leftKey = fontFamilyMatchKey(left);
+    return sameFontFamily(left, right)
+        || (!leftKey.isEmpty() && leftKey == fontFamilyMatchKey(right));
+}
+
+QString matchingKnownFontFamilyName(const QString &family,
+                                    const QStringList &knownFamilies)
+{
+    for (const QString &knownFamily : knownFamilies) {
+        if (family.compare(knownFamily, Qt::CaseInsensitive) == 0) {
+            return knownFamily;
+        }
+    }
+
+    const QString key = fontFamilyMatchKey(family);
+    for (const QString &knownFamily : knownFamilies) {
+        if (!key.isEmpty() && key == fontFamilyMatchKey(knownFamily)) {
+            return knownFamily;
+        }
+    }
+
+    const QStringList nameParts = family.split(
+        QLatin1Char('-'),
+        Qt::SkipEmptyParts);
+    for (const QString &namePart : nameParts) {
+        const QString partKey = fontFamilyMatchKey(namePart);
+        for (const QString &knownFamily : knownFamilies) {
+            if (!partKey.isEmpty()
+                && partKey == fontFamilyMatchKey(knownFamily)) {
+                return knownFamily;
+            }
+        }
+    }
+    return {};
+}
+
+QString matchingBundledFamilyName(const QString &family)
+{
+    return matchingKnownFontFamilyName(
+        family,
+        ApplicationFonts::bundledFontFamilies());
+}
+
+QString matchingSystemFamilyName(const QString &family)
+{
+    return matchingKnownFontFamilyName(
+        family,
+        ApplicationFonts::systemFontFamilies());
+}
+
+bool isArialCompatibleFontFamily(const QString &family)
+{
+    const auto isCompatibleKey = [](const QString &key) {
+        return key.contains(QStringLiteral("arial"))
+            || key.contains(QStringLiteral("helvetica"))
+            || key == QLatin1String("sans")
+            || key == QLatin1String("sansserif");
+    };
+    if (isCompatibleKey(fontFamilyMatchKey(family))) {
+        return true;
+    }
+    const QStringList nameParts = family.split(
+        QLatin1Char('-'),
+        Qt::SkipEmptyParts);
+    return std::any_of(
+        nameParts.cbegin(),
+        nameParts.cend(),
+        [&isCompatibleKey](const QString &namePart) {
+            return isCompatibleKey(fontFamilyMatchKey(namePart));
+        });
+}
+
+bool isGenericArialCompatibleFontFamily(const QString &family)
+{
+    const QString key = fontFamilyMatchKey(family);
+    return key == QLatin1String("arial")
+        || key == QLatin1String("helvetica")
+        || key == QLatin1String("sans")
+        || key == QLatin1String("sansserif");
+}
+
+bool containsNonAscii(const QString &text)
+{
+    return std::any_of(
+        text.cbegin(),
+        text.cend(),
+        [](QChar character) {
+            return character.unicode() > 0x7f;
+        });
+}
+
 bool pdfFontIsBold(FPDF_FONT font)
 {
     if (!font) {
@@ -1527,6 +1620,12 @@ void PDFEditController::finishSelectedTextEdit()
     }
 
     const Command baseline = m_textEditCommand;
+    const auto currentDraftBeforeFinish = m_drafts.constFind(baseline.key);
+    if (currentDraftBeforeFinish != m_drafts.cend()) {
+        Draft finalizedDraft = *currentDraftBeforeFinish;
+        applyUnicodeFontFallback(finalizedDraft);
+        updateSelectedDraft(finalizedDraft);
+    }
     resetFrameResizeState();
     m_textEditActive = false;
     m_selectedTextRangeStart = 0;
@@ -1615,6 +1714,7 @@ void PDFEditController::commitSelectedText(const QString &text)
     command.before = before;
     command.after = before;
     setDraftText(command.after, text);
+    applyUnicodeFontFallback(command.after);
     command.hadAfter = !sameDraftContent(
         command.after,
         initialDraftForCandidate(m_selectedCandidate));
@@ -2957,6 +3057,51 @@ void PDFEditController::setDraftText(Draft &draft, const QString &text)
     draft.text = text;
     draft.characterSpans = std::move(newSpans);
     draft.paragraphFormats = paragraphFormatsForText(text, paragraphPrototype);
+}
+
+void PDFEditController::applyUnicodeFontFallback(Draft &draft)
+{
+    if (draft.text == draft.candidate.text || !containsNonAscii(draft.text)) {
+        return;
+    }
+
+    const CharacterFormat originalFormat = characterFormatForCandidate(
+        draft.candidate);
+    const QString bundledArial = matchingBundledFamilyName(
+        QStringLiteral("Arial"));
+    for (CharacterSpan &span : draft.characterSpans) {
+        const qsizetype start = qBound<qsizetype>(
+            0,
+            span.start,
+            draft.text.size());
+        const qsizetype length = qBound<qsizetype>(
+            0,
+            span.length,
+            draft.text.size() - start);
+        if (!containsNonAscii(draft.text.sliced(start, length))) {
+            continue;
+        }
+
+        const QString bundledFamily = matchingBundledFamilyName(
+            span.format.fontFamily);
+        const QString systemFamily = matchingSystemFamilyName(
+            span.format.fontFamily);
+        if (!bundledFamily.isEmpty()) {
+            span.format.fontFamily = bundledFamily;
+        } else if (!systemFamily.isEmpty()
+                   && !isGenericArialCompatibleFontFamily(
+                       span.format.fontFamily)) {
+            span.format.fontFamily = systemFamily;
+        } else if (!bundledArial.isEmpty()
+                   && equivalentFontFamilyName(
+                       span.format.fontFamily,
+                       originalFormat.fontFamily)
+                   && isArialCompatibleFontFamily(span.format.fontFamily)) {
+            span.format.fontFamily = bundledArial;
+        } else if (!systemFamily.isEmpty()) {
+            span.format.fontFamily = systemFamily;
+        }
+    }
 }
 
 bool PDFEditController::updateCharacterFormats(

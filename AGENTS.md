@@ -239,9 +239,14 @@ clipped or elided unintentionally.
   file now on disk.
 - Disable document editing, Open, and window close while an async save is active.
   Resume a pending Open/Quit action only after `saveFinished(true)`.
-- Exact bundled font faces, reusable original PDF fonts, and PDF standard fonts
-  are supported. If a newly selected system font cannot be embedded, fail the
-  save with a user-visible message rather than silently substituting it.
+- Exact bundled font faces, reusable original PDF fonts, PDF standard fonts,
+  and eligible macOS system TrueType faces are supported. Resolve system faces
+  with CoreText on the GUI thread and snapshot their bytes into the save
+  request. Materialize TTC faces as standalone sfnt data before giving them to
+  PDFium. Accept only static `glyf/loca` faces up to 32 MiB whose OS/2 license
+  permits Installable or Editable embedding; reject CFF/CFF2, variable,
+  color or bitmap-only, missing-glyph, Restricted, and Preview & Print-only faces with a
+  user-visible save error rather than silently substituting them.
 
 ## Memory and Performance Invariants
 
