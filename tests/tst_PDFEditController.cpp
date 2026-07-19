@@ -18,6 +18,9 @@
 #include <fpdf_text.h>
 #include <fpdf_transformpage.h>
 
+#include <algorithm>
+#include <cmath>
+
 namespace {
 
 constexpr char kRegularText[] = "Regular PDF text";
@@ -29,6 +32,7 @@ constexpr char kLeftColumnText[] = "Left column";
 constexpr char kRightColumnText[] = "Right column";
 constexpr char kUprightText[] = "Upright";
 constexpr char kObliqueText[] = "Oblique";
+constexpr char kStretchedText[] = "Scale";
 
 class PdfFileWriter : public FPDF_FILEWRITE
 {
@@ -63,7 +67,8 @@ bool addTextObject(FPDF_DOCUMENT document,
                    const char *fontName,
                    const QString &text,
                    double x,
-                   double y)
+                   double y,
+                   double horizontalScale = 1.0)
 {
     FPDF_PAGEOBJECT textObject = FPDFPageObj_NewTextObj(document, fontName, 24.0F);
     if (!textObject) {
@@ -76,7 +81,14 @@ bool addTextObject(FPDF_DOCUMENT document,
         return false;
     }
 
-    FPDFPageObj_Transform(textObject, 1.0, 0.0, 0.0, 1.0, x, y);
+    FPDFPageObj_Transform(
+        textObject,
+        horizontalScale,
+        0.0,
+        0.0,
+        1.0,
+        x,
+        y);
     return FPDFPage_InsertObject(page, textObject);
 }
 
@@ -219,6 +231,40 @@ bool createFontStylePdf(const QString &filePath)
                          QString::fromLatin1(kObliqueText),
                          170.0,
                          440.0)
+        && FPDFPage_GenerateContent(page);
+
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createStretchedTextPdf(const QString &filePath,
+                            qreal horizontalScale = 2.0)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 595.0, 842.0);
+    bool succeeded = page
+        && addTextObject(
+            document,
+            page,
+            "Courier",
+            QString::fromLatin1(kStretchedText),
+            72.0,
+            740.0,
+            horizontalScale)
         && FPDFPage_GenerateContent(page);
 
     if (page) {
@@ -730,6 +776,14 @@ bool textObjectMatrix(const QString &filePath,
     return found;
 }
 
+qreal horizontalScale(const FS_MATRIX &matrix)
+{
+    const qreal verticalLength = std::hypot(matrix.c, matrix.d);
+    return verticalLength > 0.0
+        ? std::hypot(matrix.a, matrix.b) / verticalLength
+        : 0.0;
+}
+
 bool strokeTextAppearance(const QString &filePath,
                           const QString &text,
                           QColor &strokeColor,
@@ -890,6 +944,7 @@ private slots:
     void stopsExpandedFrameBeforeRightColumn();
     void keepsExpandedColumnFrameStableAcrossEdits();
     void followsCurrentRightColumnDraftBoundary();
+    void hidesDeletedTextFromInteraction();
     void persistsExpandedFrameForTextChanges();
     void keepsStandaloneResizeFrameUnexpanded();
     void keepsMixedStylesAsSeparateCandidates();
@@ -899,8 +954,16 @@ private slots:
     void resizesDraftFrameWithUndoRedo();
     void storesReflowedContentBoundsWithUndoRedo();
     void changesFontFamilyForCurrentEdit();
+    void resetsStretchWhenChangingFontFamily();
+    void normalizesSourceStretchWhenReselectingFontFamily();
+    void preservesSourceHorizontalScaleWhenResizing_data();
+    void preservesSourceHorizontalScaleWhenResizing();
+    void preservesSourceScaleForUnchangedRichTextRuns();
+    void keepsAddedDidotScaleStableAcrossRepeatedSaves();
     void changesFontStylesForCurrentEdit();
     void formatsSelectedRangeInMultilineDraft();
+    void calibratesDisplayStretchToPdfScale_data();
+    void calibratesDisplayStretchToPdfScale();
     void appliesFontStylesToDisplayFont_data();
     void appliesFontStylesToDisplayFont();
     void savesEditedTextRoundTrip();
@@ -1284,6 +1347,67 @@ void PDFEditControllerTest::followsCurrentRightColumnDraftBoundary()
     m_controller.discardDrafts();
 }
 
+void PDFEditControllerTest::hidesDeletedTextFromInteraction()
+{
+    m_controller.discardDrafts();
+    const QString objectId = m_regularCandidate
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QPointF hitPoint = m_regularCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF()
+        .center();
+    const auto containsObject = [&objectId](const QVariantList &candidates) {
+        return std::any_of(
+            candidates.cbegin(),
+            candidates.cend(),
+            [&objectId](const QVariant &candidate) {
+                return candidate.toMap()
+                    .value(QStringLiteral("objectId"))
+                    .toString() == objectId;
+            });
+    };
+
+    QCOMPARE(
+        m_controller.candidateAt(0, hitPoint.x(), hitPoint.y())
+            .value(QStringLiteral("objectId"))
+            .toString(),
+        objectId);
+    QVERIFY(containsObject(m_controller.candidatesForPage(0)));
+    QVERIFY(m_controller.selectCandidate(0, objectId));
+    m_controller.commitSelectedText(QString());
+
+    const QVariantList deletedDrafts = m_controller.draftsForPage(0);
+    QCOMPARE(deletedDrafts.size(), 1);
+    QVERIFY(deletedDrafts.constFirst().toMap()
+        .value(QStringLiteral("text"))
+        .toString()
+        .isEmpty());
+    QVERIFY(m_controller.candidateAt(0, hitPoint.x(), hitPoint.y())
+        .value(QStringLiteral("objectId"))
+        .toString() != objectId);
+    QVERIFY(!containsObject(m_controller.candidatesForPage(0)));
+    QVERIFY(!m_controller.selectCandidate(0, objectId));
+    QVERIFY(m_controller.selectedObjectId().isEmpty());
+
+    m_controller.undo();
+    QCOMPARE(
+        m_controller.candidateAt(0, hitPoint.x(), hitPoint.y())
+            .value(QStringLiteral("objectId"))
+            .toString(),
+        objectId);
+    QVERIFY(containsObject(m_controller.candidatesForPage(0)));
+    QVERIFY(m_controller.selectCandidate(0, objectId));
+
+    m_controller.redo();
+    QVERIFY(m_controller.candidateAt(0, hitPoint.x(), hitPoint.y())
+        .value(QStringLiteral("objectId"))
+        .toString() != objectId);
+    QVERIFY(!containsObject(m_controller.candidatesForPage(0)));
+    QVERIFY(m_controller.selectedObjectId().isEmpty());
+    m_controller.discardDrafts();
+}
+
 void PDFEditControllerTest::persistsExpandedFrameForTextChanges()
 {
     m_controller.discardDrafts();
@@ -1612,6 +1736,453 @@ void PDFEditControllerTest::changesFontFamilyForCurrentEdit()
         replacementFamily);
 
     m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::resetsStretchWhenChangingFontFamily()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("stretched-font-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("stretched-font-output.pdf"));
+    QVERIFY(createStretchedTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString text = QString::fromLatin1(kStretchedText);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        text);
+    QVERIFY(!candidate.isEmpty());
+    QCOMPARE(
+        candidate.value(QStringLiteral("fontStretch")).toInt(),
+        static_cast<int>(QFont::UltraExpanded));
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+
+    const QString originalFamily = controller.selectedFontFamily();
+    const QString replacementFamily = QStringLiteral("Arial");
+    QVERIFY(ApplicationFonts::bundledFontFamilies().contains(
+        replacementFamily,
+        Qt::CaseInsensitive));
+    QVERIFY(originalFamily.compare(
+        replacementFamily,
+        Qt::CaseInsensitive) != 0);
+
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(0, 4);
+    controller.setSelectedFontFamily(replacementFamily);
+    QVariantList drafts = controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    QVariantList spans = drafts.constFirst().toMap()
+        .value(QStringLiteral("characterSpans"))
+        .toList();
+    QCOMPARE(spans.size(), 2);
+    QCOMPARE(
+        spans.at(0).toMap().value(QStringLiteral("fontFamily")).toString(),
+        replacementFamily);
+    QCOMPARE(
+        spans.at(0).toMap().value(QStringLiteral("fontStretch")).toInt(),
+        static_cast<int>(QFont::Unstretched));
+    QCOMPARE(
+        spans.at(1).toMap().value(QStringLiteral("fontFamily")).toString(),
+        originalFamily);
+    QCOMPARE(
+        spans.at(1).toMap().value(QStringLiteral("fontStretch")).toInt(),
+        static_cast<int>(QFont::UltraExpanded));
+    controller.cancelSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(0, text.size());
+    controller.setSelectedFontFamily(replacementFamily);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(
+        controller.selectedFontStretch(),
+        static_cast<int>(QFont::Unstretched));
+    drafts = controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    QCOMPARE(
+        drafts.constFirst().toMap().value(QStringLiteral("fontStretch")).toInt(),
+        static_cast<int>(QFont::Unstretched));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QVariantMap savedCandidate = candidateForText(
+        controller.candidatesForPage(0),
+        text);
+    QVERIFY(!savedCandidate.isEmpty());
+    const int savedStretch = savedCandidate
+        .value(QStringLiteral("fontStretch"))
+        .toInt();
+    QVERIFY2(
+        qAbs(savedStretch - static_cast<int>(QFont::Unstretched)) <= 10,
+        qPrintable(QStringLiteral("Expected changed font stretch near 100, got %1")
+                       .arg(savedStretch)));
+    FS_MATRIX matrix{};
+    QVERIFY(textObjectMatrix(outputPath, text, matrix));
+    const qreal savedScale = horizontalScale(matrix);
+    QVERIFY2(
+        savedScale >= 0.9 && savedScale <= 1.1,
+        qPrintable(QStringLiteral("Expected changed font scale near 1, got %1")
+                       .arg(savedScale, 0, 'f', 6)));
+}
+
+void PDFEditControllerTest::normalizesSourceStretchWhenReselectingFontFamily()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("reselect-stretched-font-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("reselect-stretched-font-output.pdf"));
+    QVERIFY(createStretchedTextPdf(sourcePath, 4.45));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString text = QString::fromLatin1(kStretchedText);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        text);
+    QVERIFY(!candidate.isEmpty());
+    QCOMPARE(
+        candidate.value(QStringLiteral("fontStretch")).toInt(),
+        static_cast<int>(QFont::UltraExpanded));
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+
+    const QString fontFamily = controller.selectedFontFamily();
+    if (!ApplicationFonts::isFontFaceSelectable(fontFamily, false, false)) {
+        QSKIP(qPrintable(QStringLiteral("Source font is not selectable: %1")
+                             .arg(fontFamily)));
+    }
+    controller.setSelectedFontFamily(fontFamily);
+    QCOMPARE(
+        controller.selectedFontStretch(),
+        static_cast<int>(QFont::Unstretched));
+    QVERIFY(controller.hasDrafts());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    FS_MATRIX matrix{};
+    QVERIFY(textObjectMatrix(outputPath, text, matrix));
+    const qreal savedScale = horizontalScale(matrix);
+    QVERIFY2(
+        savedScale >= 0.9 && savedScale <= 1.1,
+        qPrintable(QStringLiteral("Expected normalized scale near 1, got %1")
+                       .arg(savedScale, 0, 'f', 6)));
+}
+
+void PDFEditControllerTest::preservesSourceHorizontalScaleWhenResizing_data()
+{
+    QTest::addColumn<qreal>("expectedScale");
+
+    QTest::newRow("condensed") << 0.5;
+    QTest::newRow("expanded") << 2.0;
+}
+
+void PDFEditControllerTest::preservesSourceHorizontalScaleWhenResizing()
+{
+    QFETCH(qreal, expectedScale);
+
+    const QString dataTag = QString::fromLatin1(QTest::currentDataTag());
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("preserve-source-scale-%1-source.pdf").arg(dataTag));
+    QVERIFY(createStretchedTextPdf(sourcePath, expectedScale));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString text = QString::fromLatin1(kStretchedText);
+
+    for (int round = 1; round <= 2; ++round) {
+        const QVariantMap candidate = candidateForText(
+            controller.candidatesForPage(0),
+            text);
+        QVERIFY(!candidate.isEmpty());
+        QVERIFY(controller.selectCandidate(
+            0,
+            candidate.value(QStringLiteral("objectId")).toString()));
+
+        QRectF frame = controller.selectedFrameRect();
+        qreal targetRight = 0.85;
+        if (qAbs(frame.right() - targetRight) < 0.001) {
+            targetRight = 0.80;
+        }
+        frame.setRight(targetRight);
+        QVERIFY(frame.width() > 0.0);
+        controller.beginSelectedFrameResize();
+        controller.updateSelectedFrameRect(frame);
+        controller.finishSelectedFrameResize();
+        QVERIFY(controller.hasDrafts());
+
+        const QString outputPath = m_temporaryDirectory.filePath(
+            QStringLiteral("preserve-source-scale-%1-round-%2.pdf")
+                .arg(dataTag)
+                .arg(round));
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+        FS_MATRIX matrix{};
+        QVERIFY(textObjectMatrix(outputPath, text, matrix));
+        const qreal savedScale = horizontalScale(matrix);
+        QVERIFY2(
+            qAbs(savedScale - expectedScale) <= 0.01,
+            qPrintable(QStringLiteral(
+                "Round %1 expected source scale %2, got %3")
+                           .arg(round)
+                           .arg(expectedScale, 0, 'f', 6)
+                           .arg(savedScale, 0, 'f', 6)));
+    }
+}
+
+void PDFEditControllerTest::preservesSourceScaleForUnchangedRichTextRuns()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-stretch-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-stretch-output.pdf"));
+    QVERIFY(createStretchedTextPdf(sourcePath, 2.0));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString text = QString::fromLatin1(kStretchedText);
+    const QVariantMap candidate = candidateForText(
+        controller.candidatesForPage(0),
+        text);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(1, 3);
+    controller.setSelectedFontFamily(QStringLiteral("Arial"));
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    FS_MATRIX prefixMatrix{};
+    FS_MATRIX changedMatrix{};
+    FS_MATRIX suffixMatrix{};
+    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("S"), prefixMatrix));
+    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("cal"), changedMatrix));
+    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("e"), suffixMatrix));
+    const qreal prefixScale = horizontalScale(prefixMatrix);
+    const qreal changedScale = horizontalScale(changedMatrix);
+    const qreal suffixScale = horizontalScale(suffixMatrix);
+    QVERIFY2(
+        qAbs(prefixScale - 2.0) <= 0.01,
+        qPrintable(QStringLiteral("Prefix source scale changed to %1")
+                       .arg(prefixScale, 0, 'f', 6)));
+    QVERIFY2(
+        changedScale >= 0.85 && changedScale <= 1.20,
+        qPrintable(QStringLiteral("Changed Arial scale is %1")
+                       .arg(changedScale, 0, 'f', 6)));
+    QVERIFY2(
+        qAbs(suffixScale - 2.0) <= 0.01,
+        qPrintable(QStringLiteral("Suffix source scale changed to %1")
+                       .arg(suffixScale, 0, 'f', 6)));
+}
+
+void PDFEditControllerTest::keepsAddedDidotScaleStableAcrossRepeatedSaves()
+{
+    const QString fontFamily = QStringLiteral("Didot");
+    if (!ApplicationFonts::systemFontFamilies().contains(
+            fontFamily,
+            Qt::CaseInsensitive)
+        || !ApplicationFonts::isFontFaceSelectable(fontFamily, false, false)) {
+        QSKIP("Didot is not available as a save-compatible system font");
+    }
+    const ApplicationFonts::FontFaceData face =
+        ApplicationFonts::systemFontFace(fontFamily, false, false);
+    if (!face.isValid()) {
+        QSKIP("Didot font data is unavailable");
+    }
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("didot-scale-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.addText(0, 0.2, 0.65).isEmpty());
+    const QString text = QStringLiteral("Didot scale stable");
+    controller.updateSelectedTextPreview(text);
+    controller.setSelectedTextRange(0, text.size());
+    controller.setSelectedFontFamily(fontFamily);
+    QCOMPARE(controller.selectedFontFamily(), fontFamily);
+    controller.finishSelectedTextEdit();
+
+    qreal baselineScale = 0.0;
+    QString finalOutputPath;
+    for (int round = 1; round <= 5; ++round) {
+        if (round > 1) {
+            const QVariantMap candidate = candidateForText(
+                controller.candidatesForPage(0),
+                text);
+            QVERIFY(!candidate.isEmpty());
+            QVERIFY(controller.selectCandidate(
+                0,
+                candidate.value(QStringLiteral("objectId")).toString()));
+        }
+
+        QRectF frame = controller.selectedFrameRect();
+        qreal targetRight = 0.85;
+        if (qAbs(frame.right() - targetRight) < 0.001) {
+            targetRight = 0.80;
+        }
+        frame.setRight(targetRight);
+        QVERIFY(frame.width() > 0.0);
+        controller.beginSelectedFrameResize();
+        controller.updateSelectedFrameRect(frame);
+        controller.finishSelectedFrameResize();
+        QVERIFY(controller.hasDrafts());
+
+        finalOutputPath = m_temporaryDirectory.filePath(
+            QStringLiteral("didot-scale-round-%1.pdf").arg(round));
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(finalOutputPath)));
+
+        FS_MATRIX matrix{};
+        QVERIFY(textObjectMatrix(finalOutputPath, text, matrix));
+        const qreal savedScale = horizontalScale(matrix);
+        const QVariantMap savedCandidate = candidateForText(
+            controller.candidatesForPage(0),
+            text);
+        QVERIFY(!savedCandidate.isEmpty());
+        const QString savedFamily = savedCandidate
+            .value(QStringLiteral("fontFamily"))
+            .toString();
+        const int savedStretch = savedCandidate
+            .value(QStringLiteral("fontStretch"))
+            .toInt();
+        const bool savedBold = savedCandidate
+            .value(QStringLiteral("fontBold"))
+            .toBool();
+        const bool savedItalic = savedCandidate
+            .value(QStringLiteral("fontItalic"))
+            .toBool();
+        const qreal previewPixelSize = savedCandidate
+            .value(QStringLiteral("displayFontSizeRatio"))
+            .toReal() * document.pageSize(0).height();
+        const QFont normalPreviewFont = controller.fontForDisplay(
+            savedFamily,
+            QFont::Unstretched,
+            savedBold,
+            savedItalic,
+            false,
+            previewPixelSize);
+        const QFont scaledPreviewFont = controller.fontForDisplay(
+            savedFamily,
+            savedStretch,
+            savedBold,
+            savedItalic,
+            false,
+            previewPixelSize);
+        const qreal normalPreviewWidth = QFontMetricsF(normalPreviewFont)
+            .horizontalAdvance(text);
+        const qreal scaledPreviewWidth = QFontMetricsF(scaledPreviewFont)
+            .horizontalAdvance(text);
+        QVERIFY(normalPreviewWidth > 0.0);
+        const qreal previewScale = scaledPreviewWidth / normalPreviewWidth;
+        QVERIFY2(
+            qAbs(previewScale - savedScale) <= 0.02,
+            qPrintable(QStringLiteral(
+                "Round %1 PDF scale %2 does not match preview scale %3 "
+                "for stretch %4")
+                           .arg(round)
+                           .arg(savedScale, 0, 'f', 6)
+                           .arg(previewScale, 0, 'f', 6)
+                           .arg(savedStretch)));
+        if (round == 1) {
+            baselineScale = savedScale;
+            QVERIFY2(
+                baselineScale >= 0.85 && baselineScale <= 1.20,
+                qPrintable(QStringLiteral(
+                    "Unexpected first-save Didot scale: %1")
+                               .arg(baselineScale, 0, 'f', 6)));
+        } else {
+            QVERIFY2(
+                qAbs(savedScale - baselineScale) <= 0.01,
+                qPrintable(QStringLiteral(
+                    "Didot scale drifted at round %1: baseline %2, got %3")
+                               .arg(round)
+                               .arg(baselineScale, 0, 'f', 6)
+                               .arg(savedScale, 0, 'f', 6)));
+        }
+    }
+
+    const QString verificationPath = qEnvironmentVariable(
+        "TREPDF_DIDOT_SCALE_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(finalOutputPath, verificationPath));
+    }
+}
+
+void PDFEditControllerTest::calibratesDisplayStretchToPdfScale_data()
+{
+    QTest::addColumn<QString>("fontFamily");
+    QTest::addColumn<int>("targetStretch");
+    QTest::addColumn<int>("pixelSize");
+
+    QTest::newRow("bundled-arial-condensed")
+        << QStringLiteral("Arial") << 89 << 16;
+    QTest::newRow("bundled-arial-expanded")
+        << QStringLiteral("Arial") << 125 << 64;
+    if (ApplicationFonts::systemFontFamilies().contains(
+            QStringLiteral("Didot"),
+            Qt::CaseInsensitive)
+        && ApplicationFonts::isFontFaceSelectable(
+            QStringLiteral("Didot"),
+            false,
+            false)) {
+        QTest::newRow("system-didot-condensed")
+            << QStringLiteral("Didot") << 89 << 16;
+    }
+}
+
+void PDFEditControllerTest::calibratesDisplayStretchToPdfScale()
+{
+    QFETCH(QString, fontFamily);
+    QFETCH(int, targetStretch);
+    QFETCH(int, pixelSize);
+
+    const QString probe = QStringLiteral(
+        "Display width AVATAR To Wa 0123456789");
+    const QFont normalFont = m_controller.fontForDisplay(
+        fontFamily,
+        QFont::Unstretched,
+        false,
+        false,
+        false,
+        pixelSize);
+    const QFont calibratedFont = m_controller.fontForDisplay(
+        fontFamily,
+        targetStretch,
+        false,
+        false,
+        false,
+        pixelSize);
+    const qreal normalWidth = QFontMetricsF(normalFont).horizontalAdvance(probe);
+    const qreal calibratedWidth = QFontMetricsF(calibratedFont)
+        .horizontalAdvance(probe);
+    QVERIFY(normalWidth > 0.0);
+    const qreal actualRatio = calibratedWidth / normalWidth;
+    const qreal targetRatio = targetStretch
+        / static_cast<qreal>(QFont::Unstretched);
+    QVERIFY2(
+        qAbs(actualRatio - targetRatio) <= 0.02,
+        qPrintable(QStringLiteral(
+            "%1 target stretch %2 produced QFont stretch %3 and ratio %4")
+                       .arg(fontFamily)
+                       .arg(targetStretch)
+                       .arg(calibratedFont.stretch())
+                       .arg(actualRatio, 0, 'f', 6)));
 }
 
 void PDFEditControllerTest::changesFontStylesForCurrentEdit()

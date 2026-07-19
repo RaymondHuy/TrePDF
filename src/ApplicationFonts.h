@@ -30,6 +30,11 @@ const QStringList &systemFontFamilies();
 const QStringList &availableFontFamilies(bool bold = false,
                                          bool italic = false);
 bool isFontFaceSelectable(const QString &family, bool bold, bool italic);
+int calibratedFontStretch(const QString &family,
+                          int targetStretch,
+                          bool bold,
+                          bool italic,
+                          int pixelSize);
 QByteArray bundledFontData(const QString &family, bool bold, bool italic);
 FontFaceData systemFontFace(const QString &family, bool bold, bool italic);
 

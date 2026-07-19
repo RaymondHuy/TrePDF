@@ -71,6 +71,7 @@ struct SaveDraft {
     QRectF frameRect;
     QPointF layoutOrigin;
     SaveFormat originalFormat;
+    qreal originalHorizontalScale = 1.0;
     QColor originalFillColor = Qt::black;
     QColor originalStrokeColor = Qt::black;
     qreal originalStrokeWidth = 1.0;
@@ -465,21 +466,24 @@ QString fontFaceKey(const SaveFormat &format)
 
 QFont displayFont(const SaveFormat &format, qreal pageHeight)
 {
+    const qreal sizeRatio = format.displayFontSizeRatio > 0.0
+        ? format.displayFontSizeRatio
+        : format.fontSizeRatio;
+    const int pixelSize = qMax(1, qRound(sizeRatio * pageHeight));
     QFont font;
     if (!format.fontFamily.isEmpty()) {
         font.setFamily(format.fontFamily);
     }
-    font.setStretch(qBound(
-        static_cast<int>(QFont::UltraCondensed),
-        format.fontStretch,
-        static_cast<int>(QFont::UltraExpanded)));
     font.setBold(format.fontBold);
     font.setItalic(format.fontItalic);
     font.setUnderline(format.fontUnderline);
-    const qreal sizeRatio = format.displayFontSizeRatio > 0.0
-        ? format.displayFontSizeRatio
-        : format.fontSizeRatio;
-    font.setPixelSize(qMax(1, qRound(sizeRatio * pageHeight)));
+    font.setPixelSize(pixelSize);
+    font.setStretch(ApplicationFonts::calibratedFontStretch(
+        format.fontFamily,
+        format.fontStretch,
+        format.fontBold,
+        format.fontItalic,
+        pixelSize));
     return font;
 }
 
@@ -827,6 +831,18 @@ SourceObject sourceObjectAtPath(FPDF_PAGE page, const QVector<int> &objectPath)
 class FontResolver
 {
 public:
+    struct ResolvedFont {
+        enum class Source {
+            None,
+            Original,
+            Embedded,
+            Standard
+        };
+
+        FPDF_FONT handle = nullptr;
+        Source source = Source::None;
+    };
+
     explicit FontResolver(FPDF_DOCUMENT document)
         : m_document(document)
     {
@@ -859,34 +875,34 @@ public:
             : QString();
     }
 
-    FPDF_FONT resolve(const SaveFormat &format,
-                      const SaveFormat &originalFormat,
-                      FPDF_FONT originalFont)
+    ResolvedFont resolve(const SaveFormat &format,
+                         const SaveFormat &originalFormat,
+                         FPDF_FONT originalFont)
     {
         if (!format.forceEmbeddedFont
             && format.allowOriginalFontReuse
             && originalFont
             && canReuseOriginalFont(format, originalFormat)) {
-            return originalFont;
+            return {originalFont, ResolvedFont::Source::Original};
         }
 
         if (FPDF_FONT font = loadEmbeddedFont(format)) {
-            return font;
+            return {font, ResolvedFont::Source::Embedded};
         }
         if (format.forceEmbeddedFont
             || !format.embeddableFontFamily.isEmpty()) {
-            return nullptr;
+            return {};
         }
 
         const QByteArray standardName = standardFontName(format).toLatin1();
         if (standardName.isEmpty()) {
-            return nullptr;
+            return {};
         }
         const QString key = QStringLiteral("standard|")
             + QString::fromLatin1(standardName);
         const auto cached = m_fontCache.constFind(key);
         if (cached != m_fontCache.cend()) {
-            return cached.value();
+            return {cached.value(), ResolvedFont::Source::Standard};
         }
         FPDF_FONT font = FPDFText_LoadStandardFont(
             m_document,
@@ -895,7 +911,12 @@ public:
             m_fontCache.insert(key, font);
             m_loadedFonts.append(font);
         }
-        return font;
+        return {
+            font,
+            font
+                ? ResolvedFont::Source::Standard
+                : ResolvedFont::Source::None
+        };
     }
 
 private:
@@ -1121,10 +1142,11 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
         pageWidth,
         pageHeight);
     for (const LayoutRun &run : runs) {
-        FPDF_FONT font = fontResolver.resolve(
+        const FontResolver::ResolvedFont resolvedFont = fontResolver.resolve(
             run.format,
             draft.originalFormat,
             originalFont);
+        FPDF_FONT font = resolvedFont.handle;
         if (!font) {
             return failure(
                 PDFSaveWriter::Error::FontUnavailable,
@@ -1200,7 +1222,17 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
         float right = 0.0F;
         float top = 0.0F;
         qreal horizontalScale = 1.0;
-        if (configured
+        const bool preservesOriginalHorizontalScale =
+            resolvedFont.source == FontResolver::ResolvedFont::Source::Original
+            && run.format.fontStretch == draft.originalFormat.fontStretch;
+        if (configured && preservesOriginalHorizontalScale) {
+            horizontalScale = qBound(
+                kMinimumScale,
+                qIsFinite(draft.originalHorizontalScale)
+                    ? draft.originalHorizontalScale
+                    : 1.0,
+                kMaximumScale);
+        } else if (configured
             && FPDFPageObj_GetBounds(textObject, &left, &bottom, &right, &top)
             && right - left > kMinimumObjectWidth) {
             horizontalScale = qBound(
@@ -1537,6 +1569,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.addedOrder = draft->candidate.addedOrder;
         saveDraft.originalFormat = copiedFormat(
             PDFEditController::characterFormatForCandidate(draft->candidate));
+        saveDraft.originalHorizontalScale = draft->candidate.horizontalScale;
         saveDraft.originalFillColor = draft->candidate.fillColor;
         saveDraft.originalStrokeColor = draft->candidate.strokeColor;
         saveDraft.originalStrokeWidth = draft->candidate.strokeWidth;

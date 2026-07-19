@@ -120,6 +120,11 @@ public:
                                      bool fontItalic,
                                      bool fontUnderline,
                                      qreal pixelSize) const;
+    Q_INVOKABLE int displayFontStretch(const QString &fontFamily,
+                                       int fontStretch,
+                                       bool fontBold,
+                                       bool fontItalic,
+                                       qreal pixelSize) const;
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
@@ -197,6 +202,7 @@ private:
         QString fontIdentity;
         qreal fontSizeRatio = 0.0;
         qreal displayFontSizeRatio = 0.0;
+        qreal horizontalScale = 1.0;
         int fontStretch = 100;
         bool fontBold = false;
         bool fontItalic = false;

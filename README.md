@@ -46,6 +46,17 @@ their original font resources. Missing glyphs, faces larger than 32 MiB, and
 other failures discovered by the final content-specific check stop the save
 with an error and keep the draft intact.
 
+For edited runs that still reuse their original PDF font, Save preserves the
+exact inherited horizontal text scale. Runs using a newly embedded or standard
+font receive Qt-to-PDFium metric compensation once; reopening and saving again
+reuses that resulting scale instead of compounding it. Selecting a font family
+also resets inherited stretch for the changed range, including explicitly
+reselecting the current family to normalize text saved by an older version.
+Because Qt font stretch is not linear for every macOS face, the editor measures
+and calibrates the Qt stretch request per family, style, and pixel size; rich
+text preview and save-time layout share that mapping while the PDF matrix keeps
+the exact source scale.
+
 Save writes the current file atomically; Save As preserves the source file and
 opens the saved copy. The controller snapshots the draft on the GUI thread and
 runs serialization on a worker so the interface can keep painting its saving

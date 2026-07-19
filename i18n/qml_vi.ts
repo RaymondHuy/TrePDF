@@ -444,12 +444,6 @@
             <numerusform>Đã tải %n trang</numerusform>
         </translation>
     </message>
-    <message id="DraftUpdatedPdfUnchanged">
-        <location filename="../src/PDFEditController.cpp" line="1565"/>
-        <location filename="../src/PDFEditController.cpp" line="1627"/>
-        <source>Draft updated. The PDF file is unchanged.</source>
-        <translation>Đã cập nhật bản nháp. Tệp PDF không thay đổi.</translation>
-    </message>
     <message id="AllDraftChangesDiscarded">
         <location filename="../src/PDFEditController.cpp" line="1690"/>
         <source>All draft changes were discarded.</source>

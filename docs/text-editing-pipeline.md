@@ -498,12 +498,29 @@ QFont.pixelSize = max(1, round(baseFontPixelSize))
 Stretch bù cho scale ngang/dọc của text transform:
 
 ```text
-fontStretch = round(baselineLength / verticalLength * 100)
+horizontalScale = baselineLength / verticalLength
+fontStretch = round(horizontalScale * 100)
 fontStretch = clamp(fontStretch, 50, 200)
 ```
 
 `100` là `QFont::Unstretched`; `50` là UltraCondensed và `200` là
-UltraExpanded.
+UltraExpanded. `Candidate` giữ thêm `horizontalScale` dạng `qreal` không làm
+tròn để writer có thể bảo toàn chính xác ma trận PDF nguồn; `fontStretch` đã
+clamp là tỷ lệ đích dùng cho layout/preview bằng QFont.
+
+`QFont::setStretch()` không cho tỷ lệ advance tuyến tính trên mọi font/backend;
+ví dụ cùng giá trị `89`, Didot trên macOS có thể chỉ còn khoảng 79% chiều rộng.
+Trước khi tạo QFont, `ApplicationFonts::calibratedFontStretch()` đo advance thực
+tế của một probe ASCII ở các giá trị Qt từ 50 đến 200 và chọn giá trị gần tỷ lệ
+PDF đích nhất. Kết quả được cache theo family, bold/italic, pixel size và tỷ lệ
+đích. Cùng phép hiệu chỉnh được dùng cho base font, từng rich-text span trong
+QML và `QTextLayout` của writer; giá trị logic trong draft và matrix PDF vẫn là
+`fontStretch`/`horizontalScale` ban đầu, không phải giá trị Qt đã hiệu chỉnh.
+
+Khi người dùng chọn một family khác, stretch của range được đổi về `100` để
+không mang scale của font nguồn sang font mới. Chọn lại chính family hiện tại
+khi stretch khác `100` cũng là thao tác normalize rõ ràng; cách này cho phép
+sửa một object đã bị kéo ngang do file được lưu bởi phiên bản cũ.
 
 ### 7.7 Màu chữ
 
@@ -520,12 +537,17 @@ UltraExpanded.
 
 ```text
 family = resolved font family, nếu có
-stretch = clamp(fontStretch, 50, 200)
 bold = fontBold
 italic = fontItalic
 underline = fontUnderline
 pixelSize = max(1, round(requestedPixelSize))
+stretch = calibratedFontStretch(family, fontStretch, bold, italic, pixelSize)
 ```
+
+HTML rich text không ghi trực tiếp tỷ lệ PDF vào CSS `font-stretch`; mỗi span
+gọi cùng bộ hiệu chỉnh theo family/style/pixel size của chính span đó. Vì vậy
+caret, selection và wrap vẫn do `TextEdit` xử lý nhưng dùng cùng metric với
+layout khi save.
 
 Character spacing và word spacing chưa được lấy từ PDF. Underline nguồn cũng
 chưa được ghép từ các path trang vào text candidate.
@@ -961,7 +983,9 @@ tiếp tục sau signal `saveFinished(true)`.
    object tree.
 3. Dùng `QTextLayout` để wrap/reflow theo `frameRect`, tách từng line/style run,
    rồi dùng `FPDF_DeviceToPage()` để đổi tọa độ editor sang page coordinates.
-   Cách này giữ đúng CropBox offset và page rotation.
+   QFont của layout dùng cùng stretch đã hiệu chỉnh như overlay/editor, nên
+   điểm wrap và chiều rộng run không đổi chỉ vì save/reopen. Cách này giữ đúng
+   CropBox offset và page rotation.
 4. Chuẩn hóa text đã sửa về Unicode NFC theo grapheme cluster và remap lại các
    character span UTF-16. Writer có thể tái sử dụng font PDF gốc khi
    family/style phù hợp và replacement run chỉ chứa các ký tự đã có trong text
@@ -978,6 +1002,13 @@ tiếp tục sau signal `saveFinished(true)`.
    embedding. Font CFF/CFF2, variable, color hoặc bitmap-only, Preview & Print-only hoặc
    Restricted sẽ làm save thất bại thay vì bị thay thế âm thầm. Các object không
    sửa vẫn giữ font resource cũ. Underline được tạo thành path.
+   Resolver đồng thời đánh dấu font của từng run là font PDF nguồn, font nhúng
+   mới hay PDF standard. Nếu run thật sự tái sử dụng font nguồn và stretch chưa
+   bị người dùng đổi, writer ghi lại đúng `horizontalScale` ban đầu. Với font
+   mới, writer chỉ tính một lần hệ số bù metric từ chiều rộng `QTextLayout` và
+   bounds PDFium; sau khi mở lại, hệ số đó trở thành scale nguồn được bảo toàn.
+   Vì vậy chuỗi Save/reopen không lấy phần bù cũ nhân thêm ở mỗi lần lưu, còn
+   text PDF vốn condensed/expanded có chủ ý vẫn giữ nguyên scale.
 5. Xóa mọi text object nguồn của draft, insert replacement tại z-order sớm nhất
    của các object nguồn và gọi `FPDFPage_GenerateContent()` cho từng page đã đổi.
 6. Serialize bằng `FPDF_SaveAsCopy(FPDF_NO_INCREMENTAL)` qua `QSaveFile`; chỉ

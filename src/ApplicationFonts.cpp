@@ -5,8 +5,12 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QSet>
 #include <QtGlobal>
 #include <QVector>
@@ -14,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <utility>
 
 #ifdef Q_OS_MACOS
@@ -23,6 +28,58 @@
 namespace {
 
 constexpr qsizetype kMaximumSystemFontBytes = 32 * 1024 * 1024;
+
+const QString &fontStretchProbe()
+{
+    static const QString probe = QStringLiteral(
+        "Hamburgefontsiv AVATAR 0123456789 abcdefghijklmnopqrstuvwxyz");
+    return probe;
+}
+
+QHash<QString, int> &fontStretchCalibrationCache()
+{
+    static QHash<QString, int> cache;
+    return cache;
+}
+
+QMutex &fontStretchCalibrationMutex()
+{
+    static QMutex mutex;
+    return mutex;
+}
+
+QString fontStretchCalibrationKey(const QString &family,
+                                  int targetStretch,
+                                  bool bold,
+                                  bool italic,
+                                  int pixelSize)
+{
+    return family.toCaseFolded()
+        + QLatin1Char('|')
+        + QString::number(targetStretch)
+        + QLatin1Char('|')
+        + QString::number(bold)
+        + QString::number(italic)
+        + QLatin1Char('|')
+        + QString::number(pixelSize);
+}
+
+qreal fontAdvanceForStretch(const QString &family,
+                            int stretch,
+                            bool bold,
+                            bool italic,
+                            int pixelSize)
+{
+    QFont font;
+    if (!family.isEmpty()) {
+        font.setFamily(family);
+    }
+    font.setBold(bold);
+    font.setItalic(italic);
+    font.setPixelSize(pixelSize);
+    font.setStretch(stretch);
+    return QFontMetricsF(font).horizontalAdvance(fontStretchProbe());
+}
 
 #ifdef Q_OS_MACOS
 
@@ -573,6 +630,8 @@ void registerBundledFonts()
         }
     }
     registry.bundledFamilies.sort(Qt::CaseInsensitive);
+    QMutexLocker lock(&fontStretchCalibrationMutex());
+    fontStretchCalibrationCache().clear();
 }
 
 const QStringList &bundledFontFamilies()
@@ -604,6 +663,77 @@ bool isFontFaceSelectable(const QString &family, bool bold, bool italic)
         }
     }
     return false;
+}
+
+int calibratedFontStretch(const QString &family,
+                          int targetStretch,
+                          bool bold,
+                          bool italic,
+                          int pixelSize)
+{
+    const int boundedTarget = qBound(
+        static_cast<int>(QFont::UltraCondensed),
+        targetStretch,
+        static_cast<int>(QFont::UltraExpanded));
+    const int boundedPixelSize = qMax(1, pixelSize);
+    if (boundedTarget == QFont::Unstretched) {
+        return QFont::Unstretched;
+    }
+
+    const QString key = fontStretchCalibrationKey(
+        family,
+        boundedTarget,
+        bold,
+        italic,
+        boundedPixelSize);
+    {
+        QMutexLocker lock(&fontStretchCalibrationMutex());
+        const auto cached = fontStretchCalibrationCache().constFind(key);
+        if (cached != fontStretchCalibrationCache().cend()) {
+            return cached.value();
+        }
+    }
+
+    const qreal normalAdvance = fontAdvanceForStretch(
+        family,
+        QFont::Unstretched,
+        bold,
+        italic,
+        boundedPixelSize);
+    int bestStretch = boundedTarget;
+    if (qIsFinite(normalAdvance) && normalAdvance > 0.0) {
+        const qreal targetRatio = boundedTarget
+            / static_cast<qreal>(QFont::Unstretched);
+        qreal bestError = std::numeric_limits<qreal>::max();
+        for (int candidate = QFont::UltraCondensed;
+             candidate <= QFont::UltraExpanded;
+             ++candidate) {
+            const qreal candidateAdvance = fontAdvanceForStretch(
+                family,
+                candidate,
+                bold,
+                italic,
+                boundedPixelSize);
+            if (!qIsFinite(candidateAdvance) || candidateAdvance <= 0.0) {
+                continue;
+            }
+
+            const qreal error = qAbs(candidateAdvance / normalAdvance - targetRatio);
+            if (error < bestError
+                || (qFuzzyCompare(error, bestError)
+                    && qAbs(candidate - boundedTarget)
+                        < qAbs(bestStretch - boundedTarget))) {
+                bestError = error;
+                bestStretch = candidate;
+            }
+        }
+    }
+
+    {
+        QMutexLocker lock(&fontStretchCalibrationMutex());
+        fontStretchCalibrationCache().insert(key, bestStretch);
+    }
+    return bestStretch;
 }
 
 const QStringList &availableFontFamilies(bool bold, bool italic)

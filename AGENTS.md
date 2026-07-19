@@ -230,6 +230,14 @@ clipped or elided unintentionally.
 - PDFium does not wrap text. Reflow the draft with `QTextLayout`, create text
   objects per line/style run, convert Qt top-left coordinates to PDF bottom-left
   coordinates, and represent underline as a path.
+- Preserve the exact source horizontal text scale when a run reuses its original
+  PDF font and the user has not reset its stretch. Compute Qt-to-PDFium width
+  compensation only for newly embedded or standard fonts; after reopen, reuse
+  that saved scale instead of recomputing it so repeated saves cannot compound
+  the correction. Treat draft `fontStretch` as the target PDF ratio, not a
+  direct `QFont::setStretch()` value: preview base fonts, rich-text spans, and
+  save-time `QTextLayout` must share the measured stretch calibration, while
+  the PDF matrix continues to use the exact source scale.
 - Keep loaded font handles alive until all changed pages have called
   `FPDFPage_GenerateContent()` and the document has been serialized.
 - Write through `QSaveFile` and `FPDF_SaveAsCopy(FPDF_NO_INCREMENTAL)`. Commit
