@@ -637,9 +637,25 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::SourceObjectRemovalFailed:
         //% "An original object could not be replaced on page %1."
         return qtTrId("PdfSaveObjectRemovalFailed").arg(result.page + 1);
-    case PDFSaveWriter::Error::FontUnavailable:
+    case PDFSaveWriter::Error::FontUnavailable: {
+        if (result.unsupportedCodePoint != 0) {
+            const char32_t codePoint = static_cast<char32_t>(
+                result.unsupportedCodePoint);
+            const QString character = QString::fromUcs4(&codePoint, 1);
+            const QString unicodeName = QStringLiteral("U+%1")
+                .arg(
+                    result.unsupportedCodePoint,
+                    4,
+                    16,
+                    QLatin1Char('0'))
+                .toUpper();
+            //% "The font \u201c%1\u201d does not support the character \u201c%2\u201d (%3). Choose a different font."
+            return qtTrId("PdfSaveFontMissingCharacter")
+                .arg(result.detail, character, unicodeName);
+        }
         //% "The font %1 cannot be embedded in the saved PDF."
         return qtTrId("PdfSaveFontUnavailable").arg(result.detail);
+    }
     case PDFSaveWriter::Error::TextObjectCreationFailed:
         //% "Saved text could not be created on page %1."
         return qtTrId("PdfSaveTextCreationFailed").arg(result.page + 1);

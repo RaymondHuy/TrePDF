@@ -1,6 +1,7 @@
 #include "ApplicationFonts.h"
 #include "PDFDocument.h"
 #include "PDFEditController.h"
+#include "PDFSaveWriter.h"
 
 #include <QFile>
 #include <QFontMetricsF>
@@ -2192,6 +2193,23 @@ void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese()
     const int revisionBeforeSave = document.renderRevision();
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
+    const PDFSaveWriter::Result writerResult = PDFSaveWriter::save(
+        controller,
+        outputPath);
+    QCOMPARE(writerResult.error, PDFSaveWriter::Error::FontUnavailable);
+    QCOMPARE(writerResult.detail, fontFamily);
+    if (QString::fromLatin1(QTest::currentDataTag())
+        == QLatin1String("missing-vietnamese-glyphs")) {
+        QVERIFY(writerResult.unsupportedCodePoint != 0);
+        const QRawFont rawFont(
+            systemFace.data,
+            16.0,
+            QFont::PreferNoHinting);
+        QVERIFY(rawFont.isValid());
+        QVERIFY(!rawFont.supportsCharacter(writerResult.unsupportedCodePoint));
+    } else {
+        QCOMPARE(writerResult.unsupportedCodePoint, 0U);
+    }
     QSignalSpy statusSpy(&controller, &PDFEditController::statusMessage);
     QVERIFY(!controller.saveAs(QUrl::fromLocalFile(outputPath)));
     QVERIFY(!QFile::exists(outputPath));
@@ -2201,6 +2219,12 @@ void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese()
     QCOMPARE(document.renderRevision(), revisionBeforeSave);
     QVERIFY(pageText(sourcePath).contains(QString::fromLatin1(kRegularText)));
     QVERIFY(!statusSpy.isEmpty());
+    const QString statusMessage = statusSpy.constLast().constFirst().toString();
+    if (writerResult.unsupportedCodePoint != 0) {
+        QCOMPARE(statusMessage, QStringLiteral("PdfSaveFontMissingCharacter"));
+    } else {
+        QCOMPARE(statusMessage, QStringLiteral("PdfSaveFontUnavailable"));
+    }
 }
 
 void PDFEditControllerTest::preservesEmbeddedFontForFormatOnlyVietnameseEdit()

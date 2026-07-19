@@ -840,8 +840,10 @@ public:
     }
 
     QString embeddedFamilyForText(const SaveFormat &format,
-                                  const QString &text)
+                                  const QString &text,
+                                  uint &unsupportedCodePoint)
     {
+        unsupportedCodePoint = 0;
         if (format.embeddableFontFamily.isEmpty()
             || format.embeddableFontData.isEmpty()) {
             return {};
@@ -849,7 +851,10 @@ public:
 
         SaveFormat embeddedFormat = format;
         embeddedFormat.fontFamily = format.embeddableFontFamily;
-        return embeddedFontSupportsText(embeddedFormat, text)
+        return embeddedFontSupportsText(
+                   embeddedFormat,
+                   text,
+                   unsupportedCodePoint)
             ? format.embeddableFontFamily
             : QString();
     }
@@ -895,7 +900,8 @@ public:
 
 private:
     bool embeddedFontSupportsText(const SaveFormat &format,
-                                  const QString &text)
+                                  const QString &text,
+                                  uint &unsupportedCodePoint)
     {
         const QString key = fontFaceKey(format);
         auto rawFont = m_rawFontCache.constFind(key);
@@ -913,6 +919,7 @@ private:
         for (uint character : text.toUcs4()) {
             if (!QChar::isSpace(static_cast<char32_t>(character))
                 && !rawFont->supportsCharacter(character)) {
+                unsupportedCodePoint = character;
                 return false;
             }
         }
@@ -952,12 +959,14 @@ private:
 
 PDFSaveWriter::Result failure(PDFSaveWriter::Error error,
                               int page = -1,
-                              const QString &detail = {})
+                              const QString &detail = {},
+                              uint unsupportedCodePoint = 0)
 {
     PDFSaveWriter::Result result;
     result.error = error;
     result.page = page;
     result.detail = detail;
+    result.unsupportedCodePoint = unsupportedCodePoint;
     return result;
 }
 
@@ -1044,7 +1053,9 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
     SaveDraft preparedDraft = draft;
     normalizeDraftText(preparedDraft);
     const auto prepareFormat = [&](SaveFormat &format,
-                                   const QString &text) {
+                                   const QString &text,
+                                   uint &unsupportedCodePoint) {
+        unsupportedCodePoint = 0;
         if (text.isEmpty()) {
             return true;
         }
@@ -1060,7 +1071,8 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
 
         const QString family = fontResolver.embeddedFamilyForText(
             format,
-            text);
+            text,
+            unsupportedCodePoint);
         if (!family.isEmpty()) {
             format.fontFamily = family;
             format.forceEmbeddedFont = true;
@@ -1070,12 +1082,17 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             && format.embeddableFontFamily.isEmpty();
     };
 
+    uint unsupportedCodePoint = 0;
     if (preparedDraft.characterSpans.isEmpty()) {
-        if (!prepareFormat(preparedDraft.originalFormat, preparedDraft.text)) {
+        if (!prepareFormat(
+                preparedDraft.originalFormat,
+                preparedDraft.text,
+                unsupportedCodePoint)) {
             return failure(
                 PDFSaveWriter::Error::FontUnavailable,
                 draft.page,
-                preparedDraft.originalFormat.fontFamily);
+                preparedDraft.originalFormat.fontFamily,
+                unsupportedCodePoint);
         }
     }
     for (SaveSpan &span : preparedDraft.characterSpans) {
@@ -1089,11 +1106,13 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             preparedDraft.text.size() - start);
         if (!prepareFormat(
                 span.format,
-                preparedDraft.text.sliced(start, length))) {
+                preparedDraft.text.sliced(start, length),
+                unsupportedCodePoint)) {
             return failure(
                 PDFSaveWriter::Error::FontUnavailable,
                 draft.page,
-                span.format.fontFamily);
+                span.format.fontFamily,
+                unsupportedCodePoint);
         }
     }
 

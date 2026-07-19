@@ -43,6 +43,7 @@ public:
         Error error = Error::None;
         QString detail;
         int page = -1;
+        uint unsupportedCodePoint = 0;
 
         bool succeeded() const
         {

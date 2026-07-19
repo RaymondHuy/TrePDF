@@ -506,6 +506,11 @@
         <source>An original object could not be replaced on page %1.</source>
         <translation>Không thể thay thế đối tượng gốc trên trang %1.</translation>
     </message>
+    <message id="PdfSaveFontMissingCharacter">
+        <location filename="../src/PDFEditController.cpp" line="656"/>
+        <source>The font “%1” does not support the character “%2” (%3). Choose a different font.</source>
+        <translation>Phông chữ “%1” không hỗ trợ ký tự “%2” (%3). Hãy chọn phông chữ khác.</translation>
+    </message>
     <message id="PdfSaveFontUnavailable">
         <location filename="../src/PDFEditController.cpp" line="545"/>
         <source>The font %1 cannot be embedded in the saved PDF.</source>
