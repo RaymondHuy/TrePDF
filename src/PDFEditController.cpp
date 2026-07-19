@@ -20,6 +20,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QThreadPool>
+#include <QTextBoundaryFinder>
 #include <QVariantMap>
 #include <QtTranslation>
 
@@ -777,6 +778,183 @@ QStringList PDFEditController::availableFontFamilies() const
     return ApplicationFonts::availableFontFamilies(
         selectedFontBold(),
         selectedFontItalic());
+}
+
+QStringList PDFEditController::fontFamiliesForFilter(FontFilter filter) const
+{
+    struct FontRequirement {
+        bool bold = false;
+        bool italic = false;
+        QString text;
+    };
+
+    QVector<FontRequirement> requirements;
+    const auto appendRequirement = [&requirements](
+                                       const CharacterFormat &format,
+                                       const QString &text) {
+        const auto existing = std::find_if(
+            requirements.begin(),
+            requirements.end(),
+            [&format](const FontRequirement &requirement) {
+                return requirement.bold == format.fontBold
+                    && requirement.italic == format.fontItalic;
+            });
+        if (existing == requirements.end()) {
+            requirements.append(FontRequirement{
+                format.fontBold,
+                format.fontItalic,
+                text});
+        } else if (!text.isEmpty()) {
+            if (!existing->text.isEmpty()) {
+                existing->text.append(QLatin1Char(' '));
+            }
+            existing->text.append(text);
+        }
+    };
+
+    if (m_hasSelection) {
+        const Draft draft = selectedDraftForDisplay();
+        qsizetype rangeStart = 0;
+        qsizetype rangeLength = 0;
+        selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+        const qsizetype rangeEnd = rangeStart + rangeLength;
+        const bool rebuildsSpansForNfc = draft.text
+            != draft.text.normalized(QString::NormalizationForm_C);
+        for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
+            const qsizetype spanStart = qMax<qsizetype>(rangeStart, span.start);
+            const qsizetype spanEnd = qMin<qsizetype>(
+                rangeEnd,
+                span.start + span.length);
+            if (spanEnd > spanStart) {
+                appendRequirement(
+                    span.format,
+                    filter == SuitableFonts && !rebuildsSpansForNfc
+                        ? draft.text.mid(spanStart, spanEnd - spanStart)
+                        : QString());
+            }
+        }
+        if (requirements.isEmpty()) {
+            appendRequirement(
+                primaryCharacterFormat(draft),
+                filter == SuitableFonts && !rebuildsSpansForNfc
+                    ? draft.text.mid(rangeStart, rangeLength)
+                    : QString());
+        }
+
+        if (filter == SuitableFonts
+            && rebuildsSpansForNfc
+            && rangeLength > 0) {
+            const auto formatAt = [&draft](qsizetype position) {
+                for (const CharacterSpan &span : draft.characterSpans) {
+                    if (position >= span.start
+                        && position < span.start + span.length) {
+                        return span.format;
+                    }
+                }
+                return primaryCharacterFormat(draft);
+            };
+            const auto appendCluster = [
+                                           &appendRequirement,
+                                           &draft,
+                                           &formatAt,
+                                           rangeStart,
+                                           rangeEnd](
+                                           qsizetype clusterStart,
+                                           qsizetype clusterEnd) {
+                if (clusterStart < rangeStart || clusterStart >= rangeEnd) {
+                    return;
+                }
+                appendRequirement(
+                    formatAt(clusterStart),
+                    draft.text
+                        .mid(clusterStart, clusterEnd - clusterStart)
+                        .normalized(QString::NormalizationForm_C));
+            };
+
+            QTextBoundaryFinder finder(
+                QTextBoundaryFinder::Grapheme,
+                draft.text);
+            finder.toStart();
+            qsizetype clusterStart = 0;
+            while (clusterStart < draft.text.size()) {
+                const qsizetype clusterEnd = finder.toNextBoundary();
+                if (clusterEnd < 0 || clusterEnd <= clusterStart) {
+                    break;
+                }
+                appendCluster(clusterStart, clusterEnd);
+                clusterStart = clusterEnd;
+            }
+            if (clusterStart < draft.text.size()) {
+                appendCluster(clusterStart, draft.text.size());
+            }
+        }
+    } else {
+        requirements.append(FontRequirement{
+            selectedFontBold(),
+            selectedFontItalic(),
+            QString()});
+    }
+
+    const auto familiesForRequirement = [filter](
+                                            const FontRequirement &requirement) {
+        switch (filter) {
+        case SuitableFonts:
+            return ApplicationFonts::fontFamiliesSupportingText(
+                requirement.text,
+                requirement.bold,
+                requirement.italic);
+        case VietnameseFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Vietnamese,
+                requirement.bold,
+                requirement.italic));
+        case ChineseFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Chinese,
+                requirement.bold,
+                requirement.italic));
+        case JapaneseFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Japanese,
+                requirement.bold,
+                requirement.italic));
+        case KoreanFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Korean,
+                requirement.bold,
+                requirement.italic));
+        case AllFonts:
+            return QStringList(ApplicationFonts::availableFontFamilies(
+                requirement.bold,
+                requirement.italic));
+        }
+        return QStringList(ApplicationFonts::availableFontFamilies(
+            requirement.bold,
+            requirement.italic));
+    };
+
+    QStringList families;
+    bool firstRequirement = true;
+    for (const FontRequirement &requirement : std::as_const(requirements)) {
+        const QStringList requirementFamilies = familiesForRequirement(
+            requirement);
+        if (firstRequirement) {
+            families = requirementFamilies;
+            firstRequirement = false;
+            continue;
+        }
+        families.erase(
+            std::remove_if(
+                families.begin(),
+                families.end(),
+                [&requirementFamilies](const QString &family) {
+                    return !requirementFamilies.contains(
+                        family,
+                        Qt::CaseInsensitive);
+                }),
+            families.end());
+    }
+    return families;
 }
 
 int PDFEditController::selectedPage() const

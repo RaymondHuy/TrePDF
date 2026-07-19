@@ -342,6 +342,9 @@ ApplicationWindow {
                     theme: appTheme
                     collapsed: textFormatPanelLoader.panelCollapsed
                     availableFontFamilies: editController.availableFontFamilies
+                    fontFamiliesForFilter: function(filter) {
+                        return editController.fontFamiliesForFilter(filter)
+                    }
                     selectedFontFamily: editController.selectedFontFamily
                     selectedFontBold: editController.selectedFontBold
                     selectedFontItalic: editController.selectedFontItalic

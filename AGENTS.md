@@ -50,6 +50,10 @@ Current features:
   size is not connected to draft formatting yet. The font picker filters system
   faces by the active bold/italic style using a lightweight save-compatibility
   probe; filtered PDF source fonts remain visible as the current value only.
+  Its single dropdown has Suitable, Vietnamese, Chinese, Japanese, Korean, and
+  All filters. Suitable probes the selected range without font fallback;
+  language groups narrow the same save-compatible exact-face list, intersecting
+  every regular/bold/italic face used by a mixed-style selection.
 - ID-based localization with Vietnamese as the default UI language.
 - A restrained orange UI inspired by Foxit Reader.
 

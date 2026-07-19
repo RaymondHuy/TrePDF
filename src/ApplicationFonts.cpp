@@ -11,6 +11,7 @@
 #include <QHash>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QRawFont>
 #include <QSet>
 #include <QtGlobal>
 #include <QVector>
@@ -28,6 +29,63 @@
 namespace {
 
 constexpr qsizetype kMaximumSystemFontBytes = 32 * 1024 * 1024;
+constexpr int kFontLanguageCount = 4;
+
+QVector<uint> visibleCodePoints(const QString &text)
+{
+    const QString normalized = text.normalized(QString::NormalizationForm_C);
+    QVector<uint> result;
+    QSet<uint> seen;
+    for (uint character : normalized.toUcs4()) {
+        if (QChar::isSpace(static_cast<char32_t>(character))
+            || seen.contains(character)) {
+            continue;
+        }
+        seen.insert(character);
+        result.append(character);
+    }
+    return result;
+}
+
+const QString &vietnameseCoverageText()
+{
+    static const QString coverage = [] {
+        QString result = QStringLiteral(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+            "ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝàáâãèéêìíòóôõùúý"
+            "ĂăĐđĨĩŨũƠơƯư");
+        for (char32_t character = 0x1ea0; character <= 0x1ef9;
+             ++character) {
+            result.append(QChar(static_cast<ushort>(character)));
+        }
+        return result;
+    }();
+    return coverage;
+}
+
+const QString &simplifiedChineseProbe()
+{
+    static const QString probe = QStringLiteral("中文汉");
+    return probe;
+}
+
+const QString &traditionalChineseProbe()
+{
+    static const QString probe = QStringLiteral("中文漢");
+    return probe;
+}
+
+const QString &japaneseProbe()
+{
+    static const QString probe = QStringLiteral("日本語");
+    return probe;
+}
+
+const QString &koreanProbe()
+{
+    static const QString probe = QStringLiteral("한국어");
+    return probe;
+}
 
 const QString &fontStretchProbe()
 {
@@ -218,6 +276,14 @@ CfHandle<CTFontRef> exactSystemFont(const QString &family,
         return CfHandle<CTFontRef>();
     }
     return font;
+}
+
+CFCharacterSetRef copyExactSystemFontCharacterSet(const QString &family,
+                                                  bool bold,
+                                                  bool italic)
+{
+    const CfHandle<CTFontRef> font = exactSystemFont(family, bold, italic);
+    return font ? CTFontCopyCharacterSet(font.get()) : nullptr;
 }
 
 quint16 readBigEndian16(QByteArrayView data, qsizetype offset)
@@ -519,11 +585,30 @@ struct FontRegistry {
 
     QStringList bundledFamilies;
     QStringList systemFamilies;
+    QHash<QString, QString> systemFamilyByKey;
     std::array<QStringList, 4> availableFamilies;
     std::array<bool, 4> availableFamiliesReady = {};
+    std::array<QStringList, 4 * kFontLanguageCount> languageFamilies;
+    std::array<bool, 4 * kFontLanguageCount> languageFamiliesReady = {};
+    std::array<QString, 4> lastCoverageText;
+    std::array<QStringList, 4> lastCoverageFamilies;
+    std::array<bool, 4> lastCoverageReady = {};
     QHash<QString, bool> selectableSystemFaces;
+    QHash<QString, QRawFont> bundledRawFonts;
+#ifdef Q_OS_MACOS
+    QHash<QString, CFCharacterSetRef> systemCharacterSets;
+#endif
     QVector<BundledFont> bundledFonts;
     bool initialized = false;
+
+    ~FontRegistry()
+    {
+#ifdef Q_OS_MACOS
+        for (CFCharacterSetRef characterSet : std::as_const(systemCharacterSets)) {
+            CFRelease(characterSet);
+        }
+#endif
+    }
 };
 
 FontRegistry &fontRegistry()
@@ -535,6 +620,29 @@ FontRegistry &fontRegistry()
 int fontStyleIndex(bool bold, bool italic)
 {
     return (bold ? 2 : 0) + (italic ? 1 : 0);
+}
+
+QString fontFaceCacheKey(const QString &family, bool bold, bool italic)
+{
+    return family.toCaseFolded()
+        + QLatin1Char('|')
+        + QString::number(bold)
+        + QString::number(italic);
+}
+
+int fontLanguageIndex(ApplicationFonts::FontLanguage language)
+{
+    switch (language) {
+    case ApplicationFonts::FontLanguage::Vietnamese:
+        return 0;
+    case ApplicationFonts::FontLanguage::Chinese:
+        return 1;
+    case ApplicationFonts::FontLanguage::Japanese:
+        return 2;
+    case ApplicationFonts::FontLanguage::Korean:
+        return 3;
+    }
+    Q_UNREACHABLE_RETURN(0);
 }
 
 bool bundledFaceIsSelectable(const FontRegistry &registry,
@@ -557,10 +665,7 @@ bool systemFaceIsSelectable(FontRegistry &registry,
                             bool bold,
                             bool italic)
 {
-    const QString key = family.toCaseFolded()
-        + QLatin1Char('|')
-        + QString::number(bold)
-        + QString::number(italic);
+    const QString key = fontFaceCacheKey(family, bold, italic);
     const auto cached = registry.selectableSystemFaces.constFind(key);
     if (cached != registry.selectableSystemFaces.cend()) {
         return cached.value();
@@ -581,6 +686,72 @@ bool systemFaceIsSelectable(FontRegistry &registry,
     return selectable;
 }
 
+bool fontFaceSupportsCharacters(FontRegistry &registry,
+                                const QString &family,
+                                bool bold,
+                                bool italic,
+                                const QVector<uint> &characters)
+{
+    const QString key = fontFaceCacheKey(family, bold, italic);
+    if (bundledFaceIsSelectable(registry, family, bold, italic)) {
+        auto rawFont = registry.bundledRawFonts.constFind(key);
+        if (rawFont == registry.bundledRawFonts.cend()) {
+            const QByteArray fontData = ApplicationFonts::bundledFontData(
+                family,
+                bold,
+                italic);
+            rawFont = registry.bundledRawFonts.insert(
+                key,
+                QRawFont(fontData, 16.0, QFont::PreferNoHinting));
+        }
+        if (!rawFont->isValid()) {
+            return false;
+        }
+        return std::all_of(
+            characters.cbegin(),
+            characters.cend(),
+            [&rawFont](uint character) {
+                return rawFont->supportsCharacter(character);
+            });
+    }
+
+    const auto systemFamily = registry.systemFamilyByKey.constFind(
+        family.toCaseFolded());
+    if (systemFamily == registry.systemFamilyByKey.cend()
+        || !systemFaceIsSelectable(
+            registry,
+            systemFamily.value(),
+            bold,
+            italic)) {
+        return false;
+    }
+#ifdef Q_OS_MACOS
+    auto characterSet = registry.systemCharacterSets.constFind(key);
+    if (characterSet == registry.systemCharacterSets.cend()) {
+        CFCharacterSetRef createdCharacterSet = copyExactSystemFontCharacterSet(
+            systemFamily.value(),
+            bold,
+            italic);
+        if (!createdCharacterSet) {
+            return false;
+        }
+        characterSet = registry.systemCharacterSets.insert(
+            key,
+            createdCharacterSet);
+    }
+    return std::all_of(
+        characters.cbegin(),
+        characters.cend(),
+        [&characterSet](uint character) {
+            return CFCharacterSetIsLongCharacterMember(
+                characterSet.value(),
+                static_cast<UTF32Char>(character));
+        });
+#else
+    return false;
+#endif
+}
+
 } // namespace
 
 namespace ApplicationFonts {
@@ -593,6 +764,12 @@ void registerBundledFonts()
     }
     registry.initialized = true;
     registry.systemFamilies = QFontDatabase::families();
+    for (const QString &family : std::as_const(registry.systemFamilies)) {
+        const QString key = family.toCaseFolded();
+        if (!registry.systemFamilyByKey.contains(key)) {
+            registry.systemFamilyByKey.insert(key, family);
+        }
+    }
 
     QDirIterator fontFiles(
         QStringLiteral(":/trepdf/fonts"),
@@ -653,16 +830,29 @@ bool isFontFaceSelectable(const QString &family, bool bold, bool italic)
     if (bundledFaceIsSelectable(registry, family, bold, italic)) {
         return true;
     }
-    for (const QString &systemFamily : std::as_const(registry.systemFamilies)) {
-        if (systemFamily.compare(family, Qt::CaseInsensitive) == 0) {
-            return systemFaceIsSelectable(
-                registry,
-                systemFamily,
-                bold,
-                italic);
-        }
-    }
-    return false;
+    const auto systemFamily = registry.systemFamilyByKey.constFind(
+        family.toCaseFolded());
+    return systemFamily != registry.systemFamilyByKey.cend()
+        && systemFaceIsSelectable(
+            registry,
+            systemFamily.value(),
+            bold,
+            italic);
+}
+
+bool fontFaceSupportsText(const QString &family,
+                          bool bold,
+                          bool italic,
+                          const QString &text)
+{
+    registerBundledFonts();
+    FontRegistry &registry = fontRegistry();
+    return fontFaceSupportsCharacters(
+        registry,
+        family,
+        bold,
+        italic,
+        visibleCodePoints(text));
 }
 
 int calibratedFontStretch(const QString &family,
@@ -770,6 +960,113 @@ const QStringList &availableFontFamilies(bool bold, bool italic)
     return families;
 }
 
+const QStringList &fontFamiliesForLanguage(FontLanguage language,
+                                           bool bold,
+                                           bool italic)
+{
+    registerBundledFonts();
+    FontRegistry &registry = fontRegistry();
+    const int cacheIndex = fontStyleIndex(bold, italic) * kFontLanguageCount
+        + fontLanguageIndex(language);
+    if (registry.languageFamiliesReady.at(cacheIndex)) {
+        return registry.languageFamilies.at(cacheIndex);
+    }
+
+    QStringList &families = registry.languageFamilies.at(cacheIndex);
+    for (const QString &family : availableFontFamilies(bold, italic)) {
+        bool matches = false;
+        if (language == FontLanguage::Vietnamese) {
+            matches = fontFaceSupportsText(
+                family,
+                bold,
+                italic,
+                vietnameseCoverageText());
+        } else {
+            const QList<QFontDatabase::WritingSystem> writingSystems =
+                QFontDatabase::writingSystems(family);
+            switch (language) {
+            case FontLanguage::Vietnamese:
+                break;
+            case FontLanguage::Chinese: {
+                const bool supportsSimplified = writingSystems.contains(
+                    QFontDatabase::SimplifiedChinese);
+                const bool supportsTraditional = writingSystems.contains(
+                    QFontDatabase::TraditionalChinese);
+                matches = (supportsSimplified
+                           && fontFaceSupportsText(
+                               family,
+                               bold,
+                               italic,
+                               simplifiedChineseProbe()))
+                    || (supportsTraditional
+                        && fontFaceSupportsText(
+                            family,
+                            bold,
+                            italic,
+                            traditionalChineseProbe()));
+                break;
+            }
+            case FontLanguage::Japanese:
+                matches = writingSystems.contains(QFontDatabase::Japanese)
+                    && fontFaceSupportsText(
+                        family,
+                        bold,
+                        italic,
+                        japaneseProbe());
+                break;
+            case FontLanguage::Korean:
+                matches = writingSystems.contains(QFontDatabase::Korean)
+                    && fontFaceSupportsText(
+                        family,
+                        bold,
+                        italic,
+                        koreanProbe());
+                break;
+            }
+        }
+        if (matches) {
+            families.append(family);
+        }
+    }
+    registry.languageFamiliesReady.at(cacheIndex) = true;
+    return families;
+}
+
+QStringList fontFamiliesSupportingText(const QString &text,
+                                       bool bold,
+                                       bool italic)
+{
+    registerBundledFonts();
+    FontRegistry &registry = fontRegistry();
+    const int styleIndex = fontStyleIndex(bold, italic);
+    const QString normalizedText = text.normalized(
+        QString::NormalizationForm_C);
+    const QVector<uint> characters = visibleCodePoints(normalizedText);
+    if (characters.isEmpty()) {
+        return availableFontFamilies(bold, italic);
+    }
+    if (registry.lastCoverageReady.at(styleIndex)
+        && registry.lastCoverageText.at(styleIndex) == normalizedText) {
+        return registry.lastCoverageFamilies.at(styleIndex);
+    }
+
+    QStringList families;
+    for (const QString &family : availableFontFamilies(bold, italic)) {
+        if (fontFaceSupportsCharacters(
+                registry,
+                family,
+                bold,
+                italic,
+                characters)) {
+            families.append(family);
+        }
+    }
+    registry.lastCoverageText.at(styleIndex) = normalizedText;
+    registry.lastCoverageFamilies.at(styleIndex) = families;
+    registry.lastCoverageReady.at(styleIndex) = true;
+    return families;
+}
+
 QByteArray bundledFontData(const QString &family, bool bold, bool italic)
 {
     registerBundledFonts();
@@ -804,11 +1101,10 @@ FontFaceData systemFontFace(const QString &family, bool bold, bool italic)
     registerBundledFonts();
 
     FontFaceData result;
-    for (const QString &systemFamily : std::as_const(fontRegistry().systemFamilies)) {
-        if (systemFamily.compare(family, Qt::CaseInsensitive) == 0) {
-            result.family = systemFamily;
-            break;
-        }
+    const auto systemFamily = fontRegistry().systemFamilyByKey.constFind(
+        family.toCaseFolded());
+    if (systemFamily != fontRegistry().systemFamilyByKey.cend()) {
+        result.family = systemFamily.value();
     }
     if (result.family.isEmpty()) {
         return result;

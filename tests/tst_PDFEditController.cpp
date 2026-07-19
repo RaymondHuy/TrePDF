@@ -936,6 +936,8 @@ private slots:
     void initTestCase();
     void registersBundledFonts();
     void filtersUnsupportedSystemFonts();
+    void filtersFontFamiliesByLanguageAndSelectedText();
+    void intersectsFontFiltersAcrossMixedStyles();
     void detectsPdfFontStyles();
     void propagatesSourceStylesThroughSelection();
     void groupsCompatibleTextObjectsOnSameLine();
@@ -1131,6 +1133,250 @@ void PDFEditControllerTest::filtersUnsupportedSystemFonts()
         m_controller.availableFontFamilies(),
         ApplicationFonts::availableFontFamilies(true, false));
     m_controller.clearSelection();
+}
+
+void PDFEditControllerTest::filtersFontFamiliesByLanguageAndSelectedText()
+{
+    m_controller.discardDrafts();
+    m_controller.clearSelection();
+
+    const QString arial = QStringLiteral("Arial");
+    const QString vietnameseText = QStringLiteral("Tiếng Việt có dấu");
+    const QString chineseText = QStringLiteral("中文");
+    QVERIFY(ApplicationFonts::fontFaceSupportsText(
+        arial,
+        false,
+        false,
+        vietnameseText));
+    QVERIFY(!ApplicationFonts::fontFaceSupportsText(
+        arial,
+        false,
+        false,
+        chineseText));
+
+    for (int styleIndex = 0; styleIndex < 4; ++styleIndex) {
+        const bool bold = (styleIndex & 2) != 0;
+        const bool italic = (styleIndex & 1) != 0;
+        const QStringList allFamilies = ApplicationFonts::availableFontFamilies(
+            bold,
+            italic);
+        const QStringList vietnameseFamilies =
+            ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Vietnamese,
+                bold,
+                italic);
+        QVERIFY(vietnameseFamilies.contains(arial, Qt::CaseInsensitive));
+
+        for (ApplicationFonts::FontLanguage language : {
+                 ApplicationFonts::FontLanguage::Vietnamese,
+                 ApplicationFonts::FontLanguage::Chinese,
+                 ApplicationFonts::FontLanguage::Japanese,
+                 ApplicationFonts::FontLanguage::Korean}) {
+            const QStringList languageFamilies =
+                ApplicationFonts::fontFamiliesForLanguage(
+                    language,
+                    bold,
+                    italic);
+            for (const QString &family : languageFamilies) {
+                QVERIFY(allFamilies.contains(family, Qt::CaseInsensitive));
+            }
+        }
+    }
+
+    const QStringList allFamilies = m_controller.fontFamiliesForFilter(
+        PDFEditController::AllFonts);
+    QCOMPARE(allFamilies, m_controller.availableFontFamilies());
+    QCOMPARE(
+        m_controller.fontFamiliesForFilter(PDFEditController::SuitableFonts),
+        allFamilies);
+    QVERIFY(m_controller.fontFamiliesForFilter(
+        PDFEditController::VietnameseFonts).contains(
+            arial,
+            Qt::CaseInsensitive));
+    QVERIFY(!m_controller.fontFamiliesForFilter(
+        PDFEditController::ChineseFonts).contains(
+            arial,
+            Qt::CaseInsensitive));
+    QVERIFY(!m_controller.fontFamiliesForFilter(
+        PDFEditController::JapaneseFonts).contains(
+            arial,
+            Qt::CaseInsensitive));
+    QVERIFY(!m_controller.fontFamiliesForFilter(
+        PDFEditController::KoreanFonts).contains(
+            arial,
+            Qt::CaseInsensitive));
+
+    QCOMPARE(
+        ApplicationFonts::fontFamiliesSupportingText(
+            vietnameseText,
+            false,
+            false),
+        ApplicationFonts::fontFamiliesSupportingText(
+            vietnameseText.normalized(QString::NormalizationForm_D),
+            false,
+            false));
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    m_controller.beginSelectedTextEdit();
+    const QString mixedText = QStringLiteral("ASCII Tiếng Việt 中文");
+    m_controller.updateSelectedTextPreview(mixedText);
+
+    m_controller.setSelectedTextRange(0, 5);
+    QVERIFY(m_controller.fontFamiliesForFilter(
+        PDFEditController::SuitableFonts).contains(
+            arial,
+            Qt::CaseInsensitive));
+
+    const qsizetype chineseStart = mixedText.indexOf(chineseText);
+    QVERIFY(chineseStart >= 0);
+    m_controller.setSelectedTextRange(
+        static_cast<int>(chineseStart),
+        chineseText.size());
+    QVERIFY(!m_controller.fontFamiliesForFilter(
+        PDFEditController::SuitableFonts).contains(
+            arial,
+            Qt::CaseInsensitive));
+
+    m_controller.setSelectedTextRange(0, 0);
+    QVERIFY(!m_controller.fontFamiliesForFilter(
+        PDFEditController::SuitableFonts).contains(
+            arial,
+            Qt::CaseInsensitive));
+    m_controller.cancelSelectedTextEdit();
+    m_controller.clearSelection();
+    QVERIFY(!m_controller.hasDrafts());
+}
+
+void PDFEditControllerTest::intersectsFontFiltersAcrossMixedStyles()
+{
+    m_controller.discardDrafts();
+    m_controller.clearSelection();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    m_controller.beginSelectedTextEdit();
+    m_controller.updateSelectedTextPreview(QStringLiteral("ABCD"));
+    m_controller.setSelectedTextRange(1, 2);
+    m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedTextRange(0, 4);
+
+    QStringList expectedAll = ApplicationFonts::availableFontFamilies(
+        false,
+        false);
+    const QStringList boldFamilies = ApplicationFonts::availableFontFamilies(
+        true,
+        false);
+    expectedAll.erase(
+        std::remove_if(
+            expectedAll.begin(),
+            expectedAll.end(),
+            [&boldFamilies](const QString &family) {
+                return !boldFamilies.contains(family, Qt::CaseInsensitive);
+            }),
+        expectedAll.end());
+    QCOMPARE(
+        m_controller.fontFamiliesForFilter(PDFEditController::AllFonts),
+        expectedAll);
+
+    QStringList expectedSuitable =
+        ApplicationFonts::fontFamiliesSupportingText(
+            QStringLiteral("AD"),
+            false,
+            false);
+    const QStringList boldSuitable =
+        ApplicationFonts::fontFamiliesSupportingText(
+            QStringLiteral("BC"),
+            true,
+            false);
+    expectedSuitable.erase(
+        std::remove_if(
+            expectedSuitable.begin(),
+            expectedSuitable.end(),
+            [&boldSuitable](const QString &family) {
+                return !boldSuitable.contains(family, Qt::CaseInsensitive);
+            }),
+        expectedSuitable.end());
+    QCOMPARE(
+        m_controller.fontFamiliesForFilter(PDFEditController::SuitableFonts),
+        expectedSuitable);
+
+    m_controller.cancelSelectedTextEdit();
+    m_controller.clearSelection();
+    QVERIFY(!m_controller.hasDrafts());
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    m_controller.beginSelectedTextEdit();
+    const QString decomposedText = QStringLiteral("a\u0301");
+    m_controller.updateSelectedTextPreview(decomposedText);
+    m_controller.setSelectedTextRange(1, 1);
+    m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedTextRange(0, decomposedText.size());
+
+    QStringList expectedNormalized =
+        ApplicationFonts::fontFamiliesSupportingText(
+            QStringLiteral("á"),
+            false,
+            false);
+    expectedNormalized.erase(
+        std::remove_if(
+            expectedNormalized.begin(),
+            expectedNormalized.end(),
+            [&boldFamilies](const QString &family) {
+                return !boldFamilies.contains(family, Qt::CaseInsensitive);
+            }),
+        expectedNormalized.end());
+    QCOMPARE(
+        m_controller.fontFamiliesForFilter(PDFEditController::SuitableFonts),
+        expectedNormalized);
+
+    m_controller.cancelSelectedTextEdit();
+    m_controller.clearSelection();
+    QVERIFY(!m_controller.hasDrafts());
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    m_controller.beginSelectedTextEdit();
+    const QString stableCluster = QStringLiteral("a\u0338");
+    QCOMPARE(
+        stableCluster,
+        stableCluster.normalized(QString::NormalizationForm_C));
+    m_controller.updateSelectedTextPreview(stableCluster);
+    m_controller.setSelectedTextRange(1, 1);
+    m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedTextRange(0, stableCluster.size());
+
+    QStringList expectedStableCluster =
+        ApplicationFonts::fontFamiliesSupportingText(
+            QStringLiteral("a"),
+            false,
+            false);
+    const QStringList boldCombiningMark =
+        ApplicationFonts::fontFamiliesSupportingText(
+            QStringLiteral("\u0338"),
+            true,
+            false);
+    expectedStableCluster.erase(
+        std::remove_if(
+            expectedStableCluster.begin(),
+            expectedStableCluster.end(),
+            [&boldCombiningMark](const QString &family) {
+                return !boldCombiningMark.contains(
+                    family,
+                    Qt::CaseInsensitive);
+            }),
+        expectedStableCluster.end());
+    QCOMPARE(
+        m_controller.fontFamiliesForFilter(PDFEditController::SuitableFonts),
+        expectedStableCluster);
+
+    m_controller.cancelSelectedTextEdit();
+    m_controller.clearSelection();
+    QVERIFY(!m_controller.hasDrafts());
 }
 
 void PDFEditControllerTest::detectsPdfFontStyles()
