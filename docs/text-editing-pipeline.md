@@ -1,9 +1,8 @@
 # Quy trình xác định và hiển thị text có thể chỉnh sửa
 
 Tài liệu này mô tả đúng implementation hiện tại của TrePDF, từ lúc PDFium quét
-nội dung trong PDF đến lúc người dùng mở `TextEdit` để chỉnh sửa. Tính năng
-hiện tại chỉ tạo **draft trong phiên làm việc**; nội dung chưa được ghi ngược
-vào file PDF.
+nội dung trong PDF đến lúc người dùng chỉnh sửa và dùng Save/Save As. Thay đổi
+được giữ dưới dạng **draft trong phiên làm việc** cho đến khi save thành công.
 
 Các file chính:
 
@@ -15,6 +14,8 @@ Các file chính:
   selection box và rich `TextEdit` khi edit.
 - [`PDFPageItem.cpp`](../src/PDFPageItem.cpp): render lại page mà tạm ẩn text
   object gốc khi đã có draft.
+- [`PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp): thay object nguồn bằng các
+  text run đã layout và ghi PDF theo transaction.
 - [`PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml): đặt
   `EditOverlay` trùng chính xác lên `PDFPageView`.
 
@@ -28,7 +29,7 @@ flowchart TD
     D --> E["ensurePageCandidates(page)"]
     E --> F["scanPage bằng PDFium nếu page chưa có cache"]
     F --> G["Tạo Candidate nguồn: bbox, baseline, text, font, color"]
-    G --> H{"PDF cho phép sửa và layout một dòng nằm ngang?"}
+    G --> H{"Top-level, render mode an toàn, có quyền sửa và layout ngang?"}
     H -- Có --> I["editable = true"]
     H -- Không --> J["editable = false + reason"]
     I --> IA["Gom các candidate cùng dòng và cùng style"]
@@ -41,6 +42,7 @@ flowchart TD
     P --> Q["Gõ chữ/Enter: updateSelectedTextPreview + reflow"]
     Q --> R["Tạo draft và render lại page không có object gốc"]
     R --> S["Ctrl/Cmd+Enter: commit; Esc: phục hồi trạng thái trước edit"]
+    S --> T["Save/Save As: ghi draft vào PDF và mở lại file đã lưu"]
 ```
 
 ## 2. Các khái niệm geometry
@@ -107,6 +109,19 @@ draft:
   `updateSelectedContentBounds()`. Chiều rộng luôn theo `frameRect`, còn cạnh
   dưới có thể nở để chứa Enter/wrap. Giá trị này nằm trong cùng snapshot draft
   nên undo/redo phục hồi đúng chiều cao nội dung.
+
+Khi mở inline editor cho text PDF có sẵn, controller tạo một bản hiển thị tạm
+từ draft hiện tại và chỉ nới cạnh phải. Mép trái, cạnh trên và chiều cao không
+đổi. Nếu có text candidate khác cùng visual row ở bên phải, biên edit dừng tại
+trung điểm khoảng trắng trước candidate đó; nếu không có vật cản, biên edit đi
+đến lề phải suy ra từ lề trái/nội dung của page. Frame này không thay đổi
+`sourceRect`, vùng hit-test hoặc source masks. Nó chỉ được ghi vào draft khi
+text thật sự đổi hoặc người dùng resize rõ ràng; mở rồi đóng editor, gửi lại
+đúng text cũ hoặc nhấn Esc đều phục hồi frame trước đó.
+
+Midpoint được tính từ initial/source frame bất biến nên mở sửa nhiều lần không
+làm cạnh phải bò dần sang cột kế. Với candidate cản đã có draft, thuật toán dùng
+frame draft hiện tại; draft đã xóa hết text không còn chiếm biên cột.
 
 `sourceRect` không thay đổi theo draft. `frameRect` và `contentBounds` nằm trong
 rich-text draft. `Command` lưu snapshot draft before/after nên cancel, undo và
@@ -294,7 +309,10 @@ Do overlay trùng với page view, công thức vẫn đúng khi zoom thay đổ
 Điều kiện hiện tại rất rõ:
 
 ```text
-editable = editingAllowed && inlineLayoutSupported
+editable = editingAllowed
+        && renderSuppressible
+        && topLevelObject
+        && inlineLayoutSupported
 ```
 
 Việc có đọc được embedded font hoặc baseline **không phải** điều kiện bắt buộc
@@ -353,9 +371,11 @@ Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hi�
 
 | Loại | Có candidate | Editable hiện tại | Lý do nếu không editable |
 |---|---:|---:|---|
-| Text object một dòng, ngang, PDF cho phép sửa | Có | Có | — |
+| Text top-level một dòng, ngang, Fill/Stroke/Fill+Stroke | Có | Có nếu PDF cho phép sửa | — |
 | Nhiều text object cùng dòng và cùng style | Một candidate dòng | Có | Mỗi object gốc được giữ trong `parts` |
 | Text cùng baseline nhưng khác style hoặc cách quá xa | Candidate riêng | Theo từng candidate | Không gom để tránh mất style/nối hai cột |
+| Text dùng render mode clipping | Có | Không | Chưa thể bảo toàn text clipping khi save |
+| Text nằm trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip khi save |
 | Text xoay/skew/multiline | Có | Không | Layout chưa được hỗ trợ |
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
 | Image | Có | Không | Cần OCR |
@@ -363,10 +383,9 @@ Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hi�
 | Widget/form field | Có | Không | Draft editor chưa hỗ trợ form field |
 | Add Text do TrePDF tạo | Có | Có nếu PDF cho phép sửa | Không phải object gốc trong PDF |
 
-`renderSuppressible` là một cờ riêng, không nằm trong công thức `editable`.
-Nó chỉ cho biết renderer có thể tạm tắt object gốc để tạo background sạch hay
-không. Các mode được hỗ trợ suppression là `FILL`, `STROKE` và
-`FILL_STROKE`.
+`renderSuppressible` vừa bảo đảm renderer có thể tạo background sạch, vừa chặn
+các render mode clipping khỏi luồng edit/save. Các mode được hỗ trợ là `FILL`,
+`STROKE` và `FILL_STROKE`.
 
 ## 7. Các thuộc tính font và text được lấy như thế nào
 
@@ -388,13 +407,22 @@ Các file `.ttf`, `.otf` và `.ttc` dưới `src/assets/fonts` được đóng g
 resource và đăng ký lúc khởi động. Khi bundled font và system font có cùng
 family, bundled font luôn được resolver xét trước.
 
-Dropdown font family hiển thị bundled families trước, sau đó toàn bộ system
-families chưa trùng tên. Font embedded của text đang chọn cũng được thêm tạm
-nếu chưa có trong hai danh sách này. Khi người dùng chọn family mới, mọi
-`Draft.characterSpans[].format.fontFamily` được cập nhật để editor và draft
-overlay dùng cùng font. `Command` lưu toàn bộ draft before/after nên cancel,
-undo và redo khôi phục text, spans, paragraph formats và geometry cùng lúc.
-Thay đổi vẫn chỉ tồn tại trong session và chưa được ghi ngược vào file PDF.
+Dropdown font family hiển thị bundled faces phù hợp với style hiện tại trước,
+sau đó các system face vượt qua probe CoreText nhẹ: đúng family/style, không
+phải color/composite, dùng outline `glyf/loca`, không phải CFF/CFF2 hoặc
+variable, và `OS/2.fsType` cho phép Installable hoặc Editable embedding. Kết
+quả được cache theo `(family, bold, italic)`; probe không dựng sfnt và không giữ
+font bytes. Font nguồn PDF bị lọc vẫn được hiển thị trong ô hiện tại nhưng không
+được chèn vào popup. API đổi family kiểm tra lại mọi style span trong range để
+caller ngoài QML không bypass bộ lọc. Coverage theo text và giới hạn 32 MiB vẫn
+được writer kiểm tra chính xác lúc Save.
+
+Khi người dùng chọn family mới, các
+`Draft.characterSpans[].format.fontFamily` giao với range đang chọn được cập
+nhật để editor và draft overlay dùng cùng font; nếu không có range thì áp dụng
+cho toàn draft. `Command` lưu toàn bộ draft before/after nên cancel, undo và
+redo khôi phục text, spans, paragraph formats và geometry cùng lúc. Thay đổi chỉ
+tồn tại trong session cho đến khi Save hoặc Save As thành công.
 
 Giới hạn an toàn hiện tại:
 
@@ -470,12 +498,29 @@ QFont.pixelSize = max(1, round(baseFontPixelSize))
 Stretch bù cho scale ngang/dọc của text transform:
 
 ```text
-fontStretch = round(baselineLength / verticalLength * 100)
+horizontalScale = baselineLength / verticalLength
+fontStretch = round(horizontalScale * 100)
 fontStretch = clamp(fontStretch, 50, 200)
 ```
 
 `100` là `QFont::Unstretched`; `50` là UltraCondensed và `200` là
-UltraExpanded.
+UltraExpanded. `Candidate` giữ thêm `horizontalScale` dạng `qreal` không làm
+tròn để writer có thể bảo toàn chính xác ma trận PDF nguồn; `fontStretch` đã
+clamp là tỷ lệ đích dùng cho layout/preview bằng QFont.
+
+`QFont::setStretch()` không cho tỷ lệ advance tuyến tính trên mọi font/backend;
+ví dụ cùng giá trị `89`, Didot trên macOS có thể chỉ còn khoảng 79% chiều rộng.
+Trước khi tạo QFont, `ApplicationFonts::calibratedFontStretch()` đo advance thực
+tế của một probe ASCII ở các giá trị Qt từ 50 đến 200 và chọn giá trị gần tỷ lệ
+PDF đích nhất. Kết quả được cache theo family, bold/italic, pixel size và tỷ lệ
+đích. Cùng phép hiệu chỉnh được dùng cho base font, từng rich-text span trong
+QML và `QTextLayout` của writer; giá trị logic trong draft và matrix PDF vẫn là
+`fontStretch`/`horizontalScale` ban đầu, không phải giá trị Qt đã hiệu chỉnh.
+
+Khi người dùng chọn một family khác, stretch của range được đổi về `100` để
+không mang scale của font nguồn sang font mới. Chọn lại chính family hiện tại
+khi stretch khác `100` cũng là thao tác normalize rõ ràng; cách này cho phép
+sửa một object đã bị kéo ngang do file được lưu bởi phiên bản cũ.
 
 ### 7.7 Màu chữ
 
@@ -492,12 +537,17 @@ UltraExpanded.
 
 ```text
 family = resolved font family, nếu có
-stretch = clamp(fontStretch, 50, 200)
 bold = fontBold
 italic = fontItalic
 underline = fontUnderline
 pixelSize = max(1, round(requestedPixelSize))
+stretch = calibratedFontStretch(family, fontStretch, bold, italic, pixelSize)
 ```
+
+HTML rich text không ghi trực tiếp tỷ lệ PDF vào CSS `font-stretch`; mỗi span
+gọi cùng bộ hiệu chỉnh theo family/style/pixel size của chính span đó. Vì vậy
+caret, selection và wrap vẫn do `TextEdit` xử lý nhưng dùng cùng metric với
+layout khi save.
 
 Character spacing và word spacing chưa được lấy từ PDF. Underline nguồn cũng
 chưa được ghép từ các path trang vào text candidate.
@@ -666,12 +716,15 @@ selectedCandidate.editable == true
 ```
 
 Controller lưu snapshot rich-text draft trước edit vào `m_textEditCommand`, sau
-đó đặt `textEditActive = true`. Chưa có draft mới cho đến khi text, spans,
-paragraph formats hoặc geometry thực sự thay đổi.
+đó tạo display draft với frame tạm mở rộng theo phần còn lại của cột/trang và
+đặt `textEditActive = true`. Display draft chưa phải session draft. Chưa có
+draft mới cho đến khi text, spans, paragraph formats hoặc geometry thực sự thay
+đổi; nếu text cuối cùng vẫn bằng snapshot và không resize, geometry tự mở rộng
+bị loại bỏ khi kết thúc edit.
 
 Candidate dòng vẫn dùng đúng một draft key `page|lineObjectId`. Rich-text spans
-không được chia ngược về từng source part trong session; `CandidatePart` chỉ giữ
-nguồn để mask, suppression và phục vụ việc ghi PDF trong tương lai.
+không được chia ngược về từng source part trong session; `CandidatePart` giữ
+toàn bộ nguồn để mask, suppression và để writer xóa đúng mọi object khi save.
 
 ### 10.2 Trạng thái QML
 
@@ -726,8 +779,11 @@ editorHeight = min(pageHeight - editorY, desiredHeight)
 
 Chiều rộng layout lấy đúng từ mép content trái tới mép phải của `frameRect`;
 bleed và border không làm tăng hoặc giảm wrap width. Seed frame có thể rộng hơn
-`sourceRect` để vừa chuỗi PDF gốc, nhưng không tiếp tục nới theo text người dùng
-nhập. `TextEdit.WrapAtWordBoundaryOrAnywhere` tự reflow và `contentHeight` làm
+`sourceRect` để vừa chuỗi PDF gốc. Khi bắt đầu edit, effective `frameRect` được
+nới tạm từ mép trái hiện tại tới biên cột gần nhất hoặc lề phải page; nó không
+bắt đầu lại từ `x = 0` và không thu nhỏ frame đã có. Khi text đổi, chính frame
+đang thấy này được materialize để preview, undo/redo và Save dùng cùng một wrap
+width. `TextEdit.WrapAtWordBoundaryOrAnywhere` tự reflow và `contentHeight` làm
 editor nở xuống dưới. `max(17, ...)` vẫn giữ caret đủ cao cho bbox glyph rất thấp.
 
 Editor có border cam nhạt `#f5a55a` dày 2 px, radius 4 px. Nền của editor:
@@ -901,7 +957,7 @@ Ctrl/Cmd+Enter gọi `finishSelectedTextEdit()`:
 - nếu có thay đổi, thêm một command vào undo stack;
 - xóa redo stack;
 - yêu cầu render draft ngay;
-- file PDF trên ổ đĩa vẫn không đổi.
+- file PDF trên ổ đĩa vẫn không đổi cho đến khi người dùng Save/Save As.
 
 ### 15.4 Esc
 
@@ -909,6 +965,61 @@ Esc gọi `cancelSelectedTextEdit()` và phục hồi trạng thái draft đã c
 bắt đầu edit.
 
 Đổi tool, đổi page hoặc delegate bị pooled sẽ tự commit edit đang mở.
+
+### 15.5 Save và Save As
+
+`PDFEditController::save()` ghi đè đường dẫn hiện tại; `saveAs()` nhận một đường
+dẫn local mới. Cả hai kết thúc edit đang mở rồi chuyển snapshot draft cho
+`PDFSaveWriter`:
+
+UI dùng `requestSave()`/`requestSaveAs()` để tạo request trên GUI thread rồi chạy
+writer qua thread pool. Trong lúc đó `saving = true`, vùng tài liệu và ribbon bị
+khóa để snapshot không bị thay đổi; badge vẫn được render. Pending Open/Quit chỉ
+tiếp tục sau signal `saveFinished(true)`.
+
+1. Mở lại file nguồn bằng một `FPDF_DOCUMENT` riêng, không sửa handle đang dùng
+   để render trên GUI thread.
+2. Gom draft theo page và resolve toàn bộ `parts[].objectPath` trước khi thay đổi
+   object tree.
+3. Dùng `QTextLayout` để wrap/reflow theo `frameRect`, tách từng line/style run,
+   rồi dùng `FPDF_DeviceToPage()` để đổi tọa độ editor sang page coordinates.
+   QFont của layout dùng cùng stretch đã hiệu chỉnh như overlay/editor, nên
+   điểm wrap và chiều rộng run không đổi chỉ vì save/reopen. Cách này giữ đúng
+   CropBox offset và page rotation.
+4. Chuẩn hóa text đã sửa về Unicode NFC theo grapheme cluster và remap lại các
+   character span UTF-16. Writer có thể tái sử dụng font PDF gốc khi
+   family/style phù hợp và replacement run chỉ chứa các ký tự đã có trong text
+   nguồn; nhờ đó thao tác chỉ đổi màu/gạch chân trên text Unicode không thay
+   font không cần nhúng lại. Ký tự Unicode mới không dùng font nguồn vì đó có
+   thể là subset thiếu glyph hoặc ToUnicode mapping. Family Arial/Helvetica kế
+   thừa từ nguồn được chuyển sang đúng face Arial bundled, kiểm tra coverage rồi
+   nhúng dạng CID Unicode. Với family hệ thống khác do người dùng chọn, prepare
+   resolve đúng face Regular/Bold/Italic bằng CoreText trên GUI thread, lấy từng
+   bảng của face đó và dựng một sfnt TrueType đơn-face. Cách này hỗ trợ cả font
+   nằm trong TTC mà không để PDFium mặc định lấy face 0; bytes được snapshot vào
+   save request trước khi worker chạy. Writer chỉ chấp nhận outline `glyf/loca`,
+   đủ glyph, không quá 32 MiB và `OS/2.fsType` cho phép Installable hoặc Editable
+   embedding. Font CFF/CFF2, variable, color hoặc bitmap-only, Preview & Print-only hoặc
+   Restricted sẽ làm save thất bại thay vì bị thay thế âm thầm. Các object không
+   sửa vẫn giữ font resource cũ. Underline được tạo thành path.
+   Resolver đồng thời đánh dấu font của từng run là font PDF nguồn, font nhúng
+   mới hay PDF standard. Nếu run thật sự tái sử dụng font nguồn và stretch chưa
+   bị người dùng đổi, writer ghi lại đúng `horizontalScale` ban đầu. Với font
+   mới, writer chỉ tính một lần hệ số bù metric từ chiều rộng `QTextLayout` và
+   bounds PDFium; sau khi mở lại, hệ số đó trở thành scale nguồn được bảo toàn.
+   Vì vậy chuỗi Save/reopen không lấy phần bù cũ nhân thêm ở mỗi lần lưu, còn
+   text PDF vốn condensed/expanded có chủ ý vẫn giữ nguyên scale.
+5. Xóa mọi text object nguồn của draft, insert replacement tại z-order sớm nhất
+   của các object nguồn và gọi `FPDFPage_GenerateContent()` cho từng page đã đổi.
+6. Serialize bằng `FPDF_SaveAsCopy(FPDF_NO_INCREMENTAL)` qua `QSaveFile`; chỉ
+   commit file đích khi toàn bộ quá trình thành công.
+7. Mở lại file đã lưu bằng `PDFDocument::open()`. Các signal đổi document/revision
+   reset draft và undo/redo chỉ sau khi reopen thành công.
+
+Nếu bất kỳ bước nào trước commit lỗi, document đang mở, file nguồn, draft và
+lịch sử undo/redo vẫn được giữ nguyên. Save As không sửa file nguồn. Text nằm
+trong Form XObject hoặc dùng render mode clipping không được đánh dấu editable,
+vì writer chưa thể bảo toàn scope transform/clip của chúng một cách an toàn.
 
 ## 16. Vì sao text Qt vẫn có thể lệch text PDF
 
@@ -1048,6 +1159,8 @@ Text được phát hiện
 Text được edit
   = text được phát hiện
     + PDF cho phép modify contents
+    + object text nằm trực tiếp ở page root, không nằm trong Form XObject
+    + render mode là Fill, Stroke hoặc Fill+Stroke, không có clipping
     + transform gần như nằm ngang, không lật/skew mạnh
     + text chỉ có một dòng
 
@@ -1064,8 +1177,18 @@ Text hiển thị khi edit
     + sourceRect bất biến cho hit-test/mask/suppression
     + rich-text draft gồm text, characterSpans và paragraphFormats
     + Draft.frameRect seed bằng max(sourceRect, chiều rộng layout Qt của text gốc)
+    + edit frame tạm nới cạnh phải tới biên cột hoặc lề phải page
     + Draft.contentBounds ban đầu bằng frameRect
     + editor/draft wrap theo chiều rộng frameRect và nở chiều cao theo reflow
     + một fallback mask cho mỗi source part đến khi page texture sạch sẵn sàng
     + một draft/undo command có thể suppress nhiều PDF text object nguồn
+
+Text được lưu
+  = resolve toàn bộ objectPath nguồn trên writer document riêng
+    + QTextLayout tách line và character-format run
+    + font gốc/bundled/standard có thể ghi vào PDF
+    + đổi top-left Qt sang bottom-left PDF
+    + GenerateContent cho mọi page đã sửa
+    + QSaveFile commit thành công
+    + PDFDocument mở lại file kết quả thành công
 ```

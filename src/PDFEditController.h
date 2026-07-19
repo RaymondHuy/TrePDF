@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PDFDocument.h"
+#include "PDFSaveWriter.h"
 
 #include <QByteArray>
 #include <QColor>
@@ -28,9 +29,10 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
+    Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
     Q_PROPERTY(bool textEditActive READ textEditActive NOTIFY textEditActiveChanged FINAL)
     Q_PROPERTY(QStringList bundledFontFamilies READ bundledFontFamilies CONSTANT FINAL)
-    Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies CONSTANT FINAL)
+    Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies NOTIFY selectionChanged FINAL)
     Q_PROPERTY(int selectedPage READ selectedPage NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedObjectId READ selectedObjectId NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedKind READ selectedKind NOTIFY selectionChanged FINAL)
@@ -76,6 +78,7 @@ public:
     bool hasDrafts() const;
     bool canUndo() const;
     bool canRedo() const;
+    bool saving() const;
     bool textEditActive() const;
     QStringList bundledFontFamilies() const;
     QStringList availableFontFamilies() const;
@@ -117,6 +120,11 @@ public:
                                      bool fontItalic,
                                      bool fontUnderline,
                                      qreal pixelSize) const;
+    Q_INVOKABLE int displayFontStretch(const QString &fontFamily,
+                                       int fontStretch,
+                                       bool fontBold,
+                                       bool fontItalic,
+                                       qreal pixelSize) const;
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
@@ -138,18 +146,26 @@ public:
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void discardDrafts();
+    Q_INVOKABLE bool save();
+    Q_INVOKABLE bool saveAs(const QUrl &target);
+    Q_INVOKABLE bool requestSave();
+    Q_INVOKABLE bool requestSaveAs(const QUrl &target);
 
 signals:
     void documentChanged();
     void toolChanged();
     void historyStateChanged();
+    void savingChanged();
     void textEditActiveChanged();
     void selectionChanged();
     void pageDataChanged(int page);
     void draftRenderStateChanged(int page, quint64 revision, bool immediate);
     void statusMessage(const QString &message);
+    void saveFinished(bool succeeded);
 
 private:
+    friend class PDFSaveWriter;
+
     struct TextObjectLayout {
         QRectF bounds;
         QPointF origin;
@@ -186,11 +202,16 @@ private:
         QString fontIdentity;
         qreal fontSizeRatio = 0.0;
         qreal displayFontSizeRatio = 0.0;
+        qreal horizontalScale = 1.0;
         int fontStretch = 100;
         bool fontBold = false;
         bool fontItalic = false;
         bool fontUnderline = false;
         QColor color = Qt::black;
+        QColor fillColor = Qt::black;
+        QColor strokeColor = Qt::black;
+        qreal strokeWidth = 1.0;
+        FPDF_TEXT_RENDERMODE textRenderMode = FPDF_TEXTRENDERMODE_FILL;
         bool hasBaseline = false;
         bool editable = false;
         bool renderSuppressible = false;
@@ -265,6 +286,11 @@ private:
     };
 
     void resetSession();
+    bool completeSave(const PDFSaveWriter::Result &result,
+                      const QString &targetFilePath,
+                      PDFDocument *expectedDocument,
+                      int expectedRevision,
+                      const QString &expectedSourceFilePath);
     void ensureCacheRevision();
     const QVector<Candidate> &ensurePageCandidates(int page);
     QVector<Candidate> scanPage(int page);
@@ -308,16 +334,20 @@ private:
                                      const QVector<ParagraphFormat> &right);
     static bool sameDraftContent(const Draft &left, const Draft &right);
     static void setDraftText(Draft &draft, const QString &text);
+    static void applyUnicodeFontFallback(Draft &draft);
     static bool updateCharacterFormats(
         Draft &draft,
         qsizetype start,
         qsizetype length,
         const std::function<void(CharacterFormat &)> &update);
+    void beginSelectedTextEditSession(bool expandFrame);
+    QRectF expandedTextEditFrame(const Draft &draft);
     Draft selectedDraftForDisplay() const;
     void updateSelectedDraft(const Draft &draft);
     void selectedTextRangeForDraft(const Draft &draft,
                                    qsizetype &start,
                                    qsizetype &length) const;
+    void resetTextEditDisplayState();
     void resetFrameResizeState();
     void setSelectedFontStyle(FontStyle style, bool enabled);
     void applyDraftState(const Command &command, bool useAfterState, bool immediate);
@@ -345,13 +375,20 @@ private:
     qsizetype m_registeredFontBytes = 0;
     Candidate m_selectedCandidate;
     bool m_hasSelection = false;
+    bool m_saving = false;
     QString m_selectedText;
     bool m_textEditActive = false;
     qsizetype m_selectedTextRangeStart = 0;
     qsizetype m_selectedTextRangeLength = 0;
     Command m_textEditCommand;
+    Draft m_textEditDisplayDraft;
+    bool m_textEditDisplayDraftActive = false;
+    bool m_textEditFrameAutomaticallyExpanded = false;
+    bool m_textEditGeometryExplicitlyChanged = false;
+    QRectF m_textEditInitialDisplayFrameRect;
     bool m_frameResizeActive = false;
     bool m_frameResizeOwnsTextEdit = false;
+    bool m_frameResizeStartGeometryExplicitlyChanged = false;
     QRectF m_frameResizeStartFrameRect;
     QRectF m_frameResizeStartContentBounds;
 };

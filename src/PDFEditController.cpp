@@ -1,5 +1,6 @@
 #include "PDFEditController.h"
 #include "ApplicationFonts.h"
+#include "PDFSaveWriter.h"
 #include "PDFiumSynchronization.h"
 
 #include <algorithm>
@@ -13,9 +14,12 @@
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QFontMetricsF>
+#include <QFileInfo>
 #include <QMutexLocker>
+#include <QRunnable>
 #include <QSet>
 #include <QStringList>
+#include <QThreadPool>
 #include <QVariantMap>
 #include <QtTranslation>
 
@@ -38,6 +42,10 @@ constexpr qreal kLineWordSeparatorGapEm = 0.20;
 constexpr qreal kLineFontSizeToleranceRatio = 0.08;
 constexpr qreal kLineFontSizeTolerancePoints = 0.5;
 constexpr qreal kInitialTextFrameSafetyPoints = 4.0;
+constexpr qreal kTextEditMinimumPageMarginPoints = 12.0;
+constexpr qreal kTextEditMaximumPageMarginRatio = 0.12;
+constexpr qreal kTextEditMinimumExpansionPoints = 2.0;
+constexpr qreal kTextEditRowToleranceRatio = 0.35;
 constexpr int kLineFontStretchTolerance = 5;
 constexpr int kPdfFontFlagItalic = 1 << 6;
 constexpr int kPdfFontFlagForceBold = 1 << 18;
@@ -177,9 +185,9 @@ qreal normalizedFontSize(FPDF_PAGE page,
         / deviceSize.height();
 }
 
-int fontStretchForTransform(FPDF_PAGE page,
-                            const QSizeF &pageSize,
-                            const FS_MATRIX &transform)
+qreal horizontalScaleForTransform(FPDF_PAGE page,
+                                  const QSizeF &pageSize,
+                                  const FS_MATRIX &transform)
 {
     const QSize deviceSize = mappingDeviceSize(pageSize);
     QPointF origin;
@@ -192,20 +200,24 @@ int fontStretchForTransform(FPDF_PAGE page,
             page, deviceSize, transform, QPointF(1.0, 0.0), baselinePoint)
         || !transformedPointToDevice(
             page, deviceSize, transform, QPointF(0.0, 1.0), verticalPoint)) {
-        return QFont::Unstretched;
+        return 1.0;
     }
 
     const QPointF baseline = baselinePoint - origin;
     const QPointF vertical = verticalPoint - origin;
     const qreal baselineLength = std::hypot(baseline.x(), baseline.y());
     const qreal verticalLength = std::hypot(vertical.x(), vertical.y());
-    if (baselineLength <= 0.0 || verticalLength <= 0.0) {
-        return QFont::Unstretched;
+    if (!qIsFinite(baselineLength)
+        || !qIsFinite(verticalLength)
+        || baselineLength <= 0.0
+        || verticalLength <= 0.0) {
+        return 1.0;
     }
 
-    return qBound(static_cast<int>(QFont::UltraCondensed),
-                  qRound(baselineLength / verticalLength * QFont::Unstretched),
-                  static_cast<int>(QFont::UltraExpanded));
+    const qreal horizontalScale = baselineLength / verticalLength;
+    return qIsFinite(horizontalScale) && horizontalScale > 0.0
+        ? horizontalScale
+        : 1.0;
 }
 
 QRectF normalizedRect(FPDF_PAGE page,
@@ -378,6 +390,99 @@ QString fontFamilyMatchKey(QString name)
     return key;
 }
 
+bool equivalentFontFamilyName(const QString &left, const QString &right)
+{
+    const QString leftKey = fontFamilyMatchKey(left);
+    return sameFontFamily(left, right)
+        || (!leftKey.isEmpty() && leftKey == fontFamilyMatchKey(right));
+}
+
+QString matchingKnownFontFamilyName(const QString &family,
+                                    const QStringList &knownFamilies)
+{
+    for (const QString &knownFamily : knownFamilies) {
+        if (family.compare(knownFamily, Qt::CaseInsensitive) == 0) {
+            return knownFamily;
+        }
+    }
+
+    const QString key = fontFamilyMatchKey(family);
+    for (const QString &knownFamily : knownFamilies) {
+        if (!key.isEmpty() && key == fontFamilyMatchKey(knownFamily)) {
+            return knownFamily;
+        }
+    }
+
+    const QStringList nameParts = family.split(
+        QLatin1Char('-'),
+        Qt::SkipEmptyParts);
+    for (const QString &namePart : nameParts) {
+        const QString partKey = fontFamilyMatchKey(namePart);
+        for (const QString &knownFamily : knownFamilies) {
+            if (!partKey.isEmpty()
+                && partKey == fontFamilyMatchKey(knownFamily)) {
+                return knownFamily;
+            }
+        }
+    }
+    return {};
+}
+
+QString matchingBundledFamilyName(const QString &family)
+{
+    return matchingKnownFontFamilyName(
+        family,
+        ApplicationFonts::bundledFontFamilies());
+}
+
+QString matchingSystemFamilyName(const QString &family)
+{
+    return matchingKnownFontFamilyName(
+        family,
+        ApplicationFonts::systemFontFamilies());
+}
+
+bool isArialCompatibleFontFamily(const QString &family)
+{
+    const auto isCompatibleKey = [](const QString &key) {
+        return key.contains(QStringLiteral("arial"))
+            || key.contains(QStringLiteral("helvetica"))
+            || key == QLatin1String("sans")
+            || key == QLatin1String("sansserif");
+    };
+    if (isCompatibleKey(fontFamilyMatchKey(family))) {
+        return true;
+    }
+    const QStringList nameParts = family.split(
+        QLatin1Char('-'),
+        Qt::SkipEmptyParts);
+    return std::any_of(
+        nameParts.cbegin(),
+        nameParts.cend(),
+        [&isCompatibleKey](const QString &namePart) {
+            return isCompatibleKey(fontFamilyMatchKey(namePart));
+        });
+}
+
+bool isGenericArialCompatibleFontFamily(const QString &family)
+{
+    const QString key = fontFamilyMatchKey(family);
+    return key == QLatin1String("arial")
+        || key == QLatin1String("helvetica")
+        || key == QLatin1String("sans")
+        || key == QLatin1String("sansserif");
+}
+
+bool containsNonAscii(const QString &text)
+{
+    return std::any_of(
+        text.cbegin(),
+        text.cend(),
+        [](QChar character) {
+            return character.unicode() > 0x7f;
+        });
+}
+
 bool pdfFontIsBold(FPDF_FONT font)
 {
     if (!font) {
@@ -474,21 +579,26 @@ bool fontSupportsText(const QString &family, const QString &text)
     return true;
 }
 
-QColor textColor(FPDF_PAGEOBJECT object, FPDF_TEXT_RENDERMODE renderMode)
+QColor pageObjectColor(FPDF_PAGEOBJECT object, bool stroke)
 {
     unsigned int red = 0;
     unsigned int green = 0;
     unsigned int blue = 0;
     unsigned int alpha = 255;
-    const bool strokeOnly = renderMode == FPDF_TEXTRENDERMODE_STROKE
-        || renderMode == FPDF_TEXTRENDERMODE_STROKE_CLIP;
-    const FPDF_BOOL foundColor = strokeOnly
+    const FPDF_BOOL foundColor = stroke
         ? FPDFPageObj_GetStrokeColor(object, &red, &green, &blue, &alpha)
         : FPDFPageObj_GetFillColor(object, &red, &green, &blue, &alpha);
     if (!foundColor) {
         return Qt::black;
     }
     return QColor::fromRgb(red, green, blue, alpha);
+}
+
+QColor textColor(FPDF_PAGEOBJECT object, FPDF_TEXT_RENDERMODE renderMode)
+{
+    const bool strokeOnly = renderMode == FPDF_TEXTRENDERMODE_STROKE
+        || renderMode == FPDF_TEXTRENDERMODE_STROKE_CLIP;
+    return pageObjectColor(object, strokeOnly);
 }
 
 bool isSuppressibleTextRenderMode(FPDF_TEXT_RENDERMODE renderMode)
@@ -506,6 +616,68 @@ QString pageObjectId(const QVector<int> &objectPath)
         pathSegments.append(QString::number(index));
     }
     return QStringLiteral("object:") + pathSegments.join(QLatin1Char('/'));
+}
+
+QString saveFailureText(const PDFSaveWriter::Result &result)
+{
+    switch (result.error) {
+    case PDFSaveWriter::Error::None:
+        return {};
+    case PDFSaveWriter::Error::SourceUnavailable:
+        //% "No PDF is open."
+        return qtTrId("NoPdfOpenForSaving");
+    case PDFSaveWriter::Error::SourceOpenFailed:
+        //% "The source PDF could not be opened for saving."
+        return qtTrId("PdfSaveSourceOpenFailed");
+    case PDFSaveWriter::Error::PageLoadFailed:
+        //% "Page %1 could not be loaded while saving."
+        return qtTrId("PdfSavePageLoadFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::UnsupportedSourceObject:
+        //% "Page %1 contains edited text that cannot be saved safely yet."
+        return qtTrId("PdfSaveUnsupportedSourceObject").arg(result.page + 1);
+    case PDFSaveWriter::Error::SourceObjectMissing:
+        //% "An edited object could not be found on page %1."
+        return qtTrId("PdfSaveSourceObjectMissing").arg(result.page + 1);
+    case PDFSaveWriter::Error::SourceObjectRemovalFailed:
+        //% "An original object could not be replaced on page %1."
+        return qtTrId("PdfSaveObjectRemovalFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::FontUnavailable: {
+        if (result.unsupportedCodePoint != 0) {
+            const char32_t codePoint = static_cast<char32_t>(
+                result.unsupportedCodePoint);
+            const QString character = QString::fromUcs4(&codePoint, 1);
+            const QString unicodeName = QStringLiteral("U+%1")
+                .arg(
+                    result.unsupportedCodePoint,
+                    4,
+                    16,
+                    QLatin1Char('0'))
+                .toUpper();
+            //% "The font \u201c%1\u201d does not support the character \u201c%2\u201d (%3). Choose a different font."
+            return qtTrId("PdfSaveFontMissingCharacter")
+                .arg(result.detail, character, unicodeName);
+        }
+        //% "The font %1 cannot be embedded in the saved PDF."
+        return qtTrId("PdfSaveFontUnavailable").arg(result.detail);
+    }
+    case PDFSaveWriter::Error::TextObjectCreationFailed:
+        //% "Saved text could not be created on page %1."
+        return qtTrId("PdfSaveTextCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::PageContentGenerationFailed:
+        //% "Page %1 could not be finalized for saving."
+        return qtTrId("PdfSavePageGenerationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::OutputOpenFailed:
+        //% "The destination file could not be opened: %1"
+        return qtTrId("PdfSaveOutputOpenFailed").arg(result.detail);
+    case PDFSaveWriter::Error::OutputWriteFailed:
+        //% "The PDF could not be written: %1"
+        return qtTrId("PdfSaveOutputWriteFailed").arg(result.detail);
+    case PDFSaveWriter::Error::OutputCommitFailed:
+        //% "The saved PDF could not replace the destination file: %1"
+        return qtTrId("PdfSaveOutputCommitFailed").arg(result.detail);
+    }
+    //% "The PDF could not be saved."
+    return qtTrId("PdfSaveFailed");
 }
 
 } // namespace
@@ -585,6 +757,11 @@ bool PDFEditController::canRedo() const
     return !m_redoStack.isEmpty();
 }
 
+bool PDFEditController::saving() const
+{
+    return m_saving;
+}
+
 bool PDFEditController::textEditActive() const
 {
     return m_textEditActive;
@@ -597,7 +774,9 @@ QStringList PDFEditController::bundledFontFamilies() const
 
 QStringList PDFEditController::availableFontFamilies() const
 {
-    return ApplicationFonts::availableFontFamilies();
+    return ApplicationFonts::availableFontFamilies(
+        selectedFontBold(),
+        selectedFontItalic());
 }
 
 int PDFEditController::selectedPage() const
@@ -792,6 +971,9 @@ QVariantList PDFEditController::candidatesForPage(int page)
     for (const Candidate &candidate : candidates) {
         const QString key = draftKey(candidate.page, candidate.objectId);
         const auto draft = m_drafts.constFind(key);
+        if (draft != m_drafts.cend() && draft->text.isEmpty()) {
+            continue;
+        }
         const Draft displayDraft = draft == m_drafts.cend()
             ? initialDraftForCandidate(candidate)
             : *draft;
@@ -803,6 +985,9 @@ QVariantList PDFEditController::candidatesForPage(int page)
         }
 
         const auto draft = m_drafts.constFind(draftKey(page, candidate.objectId));
+        if (draft != m_drafts.cend() && draft->text.isEmpty()) {
+            continue;
+        }
         const Draft displayDraft = draft == m_drafts.cend()
             ? initialDraftForCandidate(candidate)
             : *draft;
@@ -870,6 +1055,12 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
     qreal bestArea = 0.0;
 
     const auto considerCandidate = [&](const Candidate &candidate) {
+        const auto draft = m_drafts.constFind(
+            draftKey(candidate.page, candidate.objectId));
+        if (draft != m_drafts.cend() && draft->text.isEmpty()) {
+            return;
+        }
+
         const QRectF &sourceRect = candidate.geometry.sourceRect;
         const QRectF hitRect = sourceRect.adjusted(-0.0025, -0.0025, 0.0025, 0.0025);
         if (!hitRect.contains(point)) {
@@ -937,7 +1128,14 @@ QVariantMap PDFEditController::addText(int page, qreal x, qreal y)
     //% "Add Text"
     candidate.label = qtTrId("AddText");
     candidate.text.clear();
-    candidate.fontFamily = QFontInfo(QFont()).family();
+    const QStringList bundledFamilies = ApplicationFonts::bundledFontFamilies();
+    candidate.fontFamily = bundledFamilies.contains(
+        QStringLiteral("Arial"),
+        Qt::CaseInsensitive)
+        ? QStringLiteral("Arial")
+        : bundledFamilies.isEmpty()
+            ? QFontInfo(QFont()).family()
+            : bundledFamilies.constFirst();
     candidate.fontSizeRatio = kAddedTextFontSizeRatio;
     candidate.displayFontSizeRatio = candidate.fontSizeRatio;
     candidate.color = Qt::black;
@@ -977,18 +1175,36 @@ QFont PDFEditController::fontForDisplay(const QString &fontFamily,
                                         bool fontUnderline,
                                         qreal pixelSize) const
 {
+    const int boundedPixelSize = qMax(1, qRound(pixelSize));
     QFont font;
     if (!fontFamily.isEmpty()) {
         font.setFamily(fontFamily);
     }
-    font.setStretch(qBound(static_cast<int>(QFont::UltraCondensed),
-                           fontStretch,
-                           static_cast<int>(QFont::UltraExpanded)));
     font.setBold(fontBold);
     font.setItalic(fontItalic);
     font.setUnderline(fontUnderline);
-    font.setPixelSize(qMax(1, qRound(pixelSize)));
+    font.setPixelSize(boundedPixelSize);
+    font.setStretch(displayFontStretch(
+        fontFamily,
+        fontStretch,
+        fontBold,
+        fontItalic,
+        boundedPixelSize));
     return font;
+}
+
+int PDFEditController::displayFontStretch(const QString &fontFamily,
+                                          int fontStretch,
+                                          bool fontBold,
+                                          bool fontItalic,
+                                          qreal pixelSize) const
+{
+    return ApplicationFonts::calibratedFontStretch(
+        fontFamily,
+        fontStretch,
+        fontBold,
+        fontItalic,
+        qMax(1, qRound(pixelSize)));
 }
 
 QString PDFEditController::resolvedFontFamily(FPDF_PAGEOBJECT textObject,
@@ -1122,6 +1338,11 @@ bool PDFEditController::selectCandidate(int page, const QString &objectId)
         clearSelection();
         return false;
     }
+    const auto draft = m_drafts.constFind(draftKey(page, objectId));
+    if (draft != m_drafts.cend() && draft->text.isEmpty()) {
+        clearSelection();
+        return false;
+    }
 
     setSelection(candidate);
     if (!candidate->editable && !candidate->reason.isEmpty()) {
@@ -1141,6 +1362,11 @@ void PDFEditController::clearSelection()
 
 void PDFEditController::beginSelectedTextEdit()
 {
+    beginSelectedTextEditSession(true);
+}
+
+void PDFEditController::beginSelectedTextEditSession(bool expandFrame)
+{
     if (m_textEditActive || !m_hasSelection || !m_selectedCandidate.editable) {
         return;
     }
@@ -1155,10 +1381,34 @@ void PDFEditController::beginSelectedTextEdit()
     m_textEditCommand.before = m_textEditCommand.hadBefore
         ? *existingDraft
         : initialDraftForCandidate(m_selectedCandidate);
+    m_textEditDisplayDraft = m_textEditCommand.before;
+    m_textEditDisplayDraftActive = true;
+    m_textEditFrameAutomaticallyExpanded = false;
+    m_textEditGeometryExplicitlyChanged = false;
+    if (expandFrame) {
+        const QRectF expandedFrame = expandedTextEditFrame(m_textEditDisplayDraft);
+        if (expandedFrame != m_textEditDisplayDraft.frameRect) {
+            const qreal contentBottom = qBound<qreal>(
+                expandedFrame.bottom(),
+                qMax(
+                    m_textEditDisplayDraft.frameRect.bottom(),
+                    m_textEditDisplayDraft.contentBounds.bottom()),
+                1.0);
+            m_textEditDisplayDraft.frameRect = expandedFrame;
+            m_textEditDisplayDraft.contentBounds = QRectF(
+                expandedFrame.x(),
+                expandedFrame.y(),
+                expandedFrame.width(),
+                contentBottom - expandedFrame.y());
+            m_textEditFrameAutomaticallyExpanded = true;
+        }
+    }
+    m_textEditInitialDisplayFrameRect = m_textEditDisplayDraft.frameRect;
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditActive = true;
     emit textEditActiveChanged();
+    emit selectionChanged();
 }
 
 void PDFEditController::updateSelectedTextPreview(const QString &text)
@@ -1171,6 +1421,9 @@ void PDFEditController::updateSelectedTextPreview(const QString &text)
     }
 
     Draft draft = selectedDraftForDisplay();
+    if (draft.text == text) {
+        return;
+    }
     setDraftText(draft, text);
     updateSelectedDraft(draft);
 }
@@ -1183,7 +1436,7 @@ void PDFEditController::beginSelectedFrameResize()
 
     const bool ownsTextEdit = !m_textEditActive;
     if (ownsTextEdit) {
-        beginSelectedTextEdit();
+        beginSelectedTextEditSession(false);
     }
     if (!m_textEditActive || !m_hasSelection) {
         return;
@@ -1192,6 +1445,8 @@ void PDFEditController::beginSelectedFrameResize()
     const Draft draft = selectedDraftForDisplay();
     m_frameResizeActive = true;
     m_frameResizeOwnsTextEdit = ownsTextEdit;
+    m_frameResizeStartGeometryExplicitlyChanged
+        = m_textEditGeometryExplicitlyChanged;
     m_frameResizeStartFrameRect = draft.frameRect;
     m_frameResizeStartContentBounds = draft.contentBounds;
 }
@@ -1228,6 +1483,8 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         return;
     }
 
+    m_textEditGeometryExplicitlyChanged
+        = boundedRect != m_textEditInitialDisplayFrameRect;
     draft.frameRect = boundedRect;
     draft.contentBounds = resizedContentBounds;
     updateSelectedDraft(draft);
@@ -1280,6 +1537,8 @@ void PDFEditController::cancelSelectedFrameResize()
     const bool ownsTextEdit = m_frameResizeOwnsTextEdit;
     const QRectF startFrameRect = m_frameResizeStartFrameRect;
     const QRectF startContentBounds = m_frameResizeStartContentBounds;
+    const bool startGeometryExplicitlyChanged
+        = m_frameResizeStartGeometryExplicitlyChanged;
     resetFrameResizeState();
 
     if (ownsTextEdit) {
@@ -1291,6 +1550,7 @@ void PDFEditController::cancelSelectedFrameResize()
     draft.frameRect = startFrameRect;
     draft.contentBounds = startContentBounds;
     updateSelectedDraft(draft);
+    m_textEditGeometryExplicitlyChanged = startGeometryExplicitlyChanged;
 }
 
 void PDFEditController::setSelectedTextRange(int start, int length)
@@ -1319,6 +1579,38 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
         return;
     }
 
+    Draft draft = selectedDraftForDisplay();
+    qsizetype rangeStart = 0;
+    qsizetype rangeLength = 0;
+    selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+    const qsizetype rangeEnd = rangeStart + rangeLength;
+    bool checkedSpan = false;
+    for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
+        const qsizetype spanStart = qMax<qsizetype>(0, span.start);
+        const qsizetype spanEnd = qMin<qsizetype>(
+            draft.text.size(),
+            span.start + span.length);
+        if (spanEnd <= rangeStart || spanStart >= rangeEnd) {
+            continue;
+        }
+        checkedSpan = true;
+        if (!ApplicationFonts::isFontFaceSelectable(
+                fontFamily,
+                span.format.fontBold,
+                span.format.fontItalic)) {
+            return;
+        }
+    }
+    if (!checkedSpan) {
+        const CharacterFormat format = primaryCharacterFormat(draft);
+        if (!ApplicationFonts::isFontFaceSelectable(
+                fontFamily,
+                format.fontBold,
+                format.fontItalic)) {
+            return;
+        }
+    }
+
     const bool finishImmediately = !m_textEditActive;
     if (finishImmediately) {
         beginSelectedTextEdit();
@@ -1327,16 +1619,18 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
         return;
     }
 
-    Draft draft = selectedDraftForDisplay();
-    qsizetype rangeStart = 0;
-    qsizetype rangeLength = 0;
-    selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+    draft = selectedDraftForDisplay();
     const bool changed = updateCharacterFormats(
         draft,
         rangeStart,
         rangeLength,
         [&fontFamily](CharacterFormat &format) {
+            if (sameFontFamily(format.fontFamily, fontFamily)
+                && format.fontStretch == QFont::Unstretched) {
+                return;
+            }
             format.fontFamily = fontFamily;
+            format.fontStretch = QFont::Unstretched;
         });
     if (!changed) {
         if (finishImmediately) {
@@ -1411,6 +1705,55 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
         return;
     }
 
+    Draft draft = selectedDraftForDisplay();
+    qsizetype rangeStart = 0;
+    qsizetype rangeLength = 0;
+    selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+    if (style != FontStyle::Underline) {
+        const auto faceRemainsSelectable = [style, enabled](
+                                               const CharacterFormat &format) {
+            const bool knownFamily = ApplicationFonts::bundledFontFamilies().contains(
+                    format.fontFamily,
+                    Qt::CaseInsensitive)
+                || ApplicationFonts::systemFontFamilies().contains(
+                    format.fontFamily,
+                    Qt::CaseInsensitive);
+            if (!knownFamily) {
+                return true;
+            }
+            const bool bold = style == FontStyle::Bold
+                ? enabled
+                : format.fontBold;
+            const bool italic = style == FontStyle::Italic
+                ? enabled
+                : format.fontItalic;
+            return ApplicationFonts::isFontFaceSelectable(
+                format.fontFamily,
+                bold,
+                italic);
+        };
+
+        const qsizetype rangeEnd = rangeStart + rangeLength;
+        bool checkedSpan = false;
+        for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
+            const qsizetype spanStart = qMax<qsizetype>(0, span.start);
+            const qsizetype spanEnd = qMin<qsizetype>(
+                draft.text.size(),
+                span.start + span.length);
+            if (spanEnd <= rangeStart || spanStart >= rangeEnd) {
+                continue;
+            }
+            checkedSpan = true;
+            if (!faceRemainsSelectable(span.format)) {
+                return;
+            }
+        }
+        if (!checkedSpan
+            && !faceRemainsSelectable(primaryCharacterFormat(draft))) {
+            return;
+        }
+    }
+
     const bool finishImmediately = !m_textEditActive;
     if (finishImmediately) {
         beginSelectedTextEdit();
@@ -1419,10 +1762,7 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
         return;
     }
 
-    Draft draft = selectedDraftForDisplay();
-    qsizetype rangeStart = 0;
-    qsizetype rangeLength = 0;
-    selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+    draft = selectedDraftForDisplay();
     const bool changed = updateCharacterFormats(
         draft,
         rangeStart,
@@ -1460,12 +1800,25 @@ void PDFEditController::finishSelectedTextEdit()
     }
 
     const Command baseline = m_textEditCommand;
+    Draft finalizedDraft = selectedDraftForDisplay();
+    if (m_textEditFrameAutomaticallyExpanded
+        && !m_textEditGeometryExplicitlyChanged
+        && finalizedDraft.text == baseline.before.text) {
+        finalizedDraft.frameRect = baseline.before.frameRect;
+        finalizedDraft.contentBounds = baseline.before.contentBounds;
+    }
+    if (!sameDraftContent(finalizedDraft, baseline.before)) {
+        applyUnicodeFontFallback(finalizedDraft);
+    }
+    updateSelectedDraft(finalizedDraft);
     resetFrameResizeState();
     m_textEditActive = false;
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditCommand = Command();
+    resetTextEditDisplayState();
     emit textEditActiveChanged();
+    emit selectionChanged();
 
     Command command = baseline;
     const auto currentDraft = m_drafts.constFind(command.key);
@@ -1494,8 +1847,6 @@ void PDFEditController::finishSelectedTextEdit()
     m_undoStack.append(command);
     m_redoStack.clear();
     emit historyStateChanged();
-    //% "Draft updated. The PDF file is unchanged."
-    emit statusMessage(qtTrId("DraftUpdatedPdfUnchanged"));
 }
 
 void PDFEditController::cancelSelectedTextEdit()
@@ -1510,6 +1861,7 @@ void PDFEditController::cancelSelectedTextEdit()
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditCommand = Command();
+    resetTextEditDisplayState();
     emit textEditActiveChanged();
     applyDraftState(baseline, false, true);
     emit historyStateChanged();
@@ -1548,6 +1900,7 @@ void PDFEditController::commitSelectedText(const QString &text)
     command.before = before;
     command.after = before;
     setDraftText(command.after, text);
+    applyUnicodeFontFallback(command.after);
     command.hadAfter = !sameDraftContent(
         command.after,
         initialDraftForCandidate(m_selectedCandidate));
@@ -1556,8 +1909,6 @@ void PDFEditController::commitSelectedText(const QString &text)
     m_redoStack.clear();
     applyDraftState(command, true, true);
     emit historyStateChanged();
-    //% "Draft updated. The PDF file is unchanged."
-    emit statusMessage(qtTrId("DraftUpdatedPdfUnchanged"));
 }
 
 void PDFEditController::undo()
@@ -1606,6 +1957,7 @@ void PDFEditController::discardDrafts()
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditCommand = Command();
+    resetTextEditDisplayState();
     m_addedCandidates.clear();
     m_drafts.clear();
     m_undoStack.clear();
@@ -1621,6 +1973,181 @@ void PDFEditController::discardDrafts()
     emit historyStateChanged();
     //% "All draft changes were discarded."
     emit statusMessage(qtTrId("AllDraftChangesDiscarded"));
+}
+
+bool PDFEditController::save()
+{
+    if (!m_document || !m_document->isLoaded()) {
+        //% "No PDF is open."
+        emit statusMessage(qtTrId("NoPdfOpenForSaving"));
+        return false;
+    }
+    if (!hasDrafts()) {
+        //% "There are no draft changes to save."
+        emit statusMessage(qtTrId("NoDraftChangesToSave"));
+        return true;
+    }
+    return saveAs(m_document->source());
+}
+
+bool PDFEditController::saveAs(const QUrl &target)
+{
+    if (m_saving) {
+        return false;
+    }
+    if (!m_document || !m_document->isLoaded()) {
+        //% "No PDF is open."
+        emit statusMessage(qtTrId("NoPdfOpenForSaving"));
+        return false;
+    }
+    if (!target.isLocalFile() || target.toLocalFile().isEmpty()) {
+        //% "Only local PDF files are supported"
+        emit statusMessage(qtTrId("LocalPdfFilesOnly"));
+        return false;
+    }
+
+    finishSelectedTextEdit();
+    PDFDocument *const expectedDocument = m_document.data();
+    const int expectedRevision = expectedDocument->renderRevision();
+    const QString expectedSourceFilePath = expectedDocument->renderFilePath();
+    m_saving = true;
+    emit savingChanged();
+    const QString targetFilePath = QFileInfo(target.toLocalFile()).absoluteFilePath();
+    const PDFSaveWriter::Result result = PDFSaveWriter::save(*this, targetFilePath);
+    return completeSave(
+        result,
+        targetFilePath,
+        expectedDocument,
+        expectedRevision,
+        expectedSourceFilePath);
+}
+
+bool PDFEditController::requestSave()
+{
+    if (!m_document || !m_document->isLoaded()) {
+        //% "No PDF is open."
+        emit statusMessage(qtTrId("NoPdfOpenForSaving"));
+        return false;
+    }
+    if (!hasDrafts()) {
+        //% "There are no draft changes to save."
+        emit statusMessage(qtTrId("NoDraftChangesToSave"));
+        emit saveFinished(true);
+        return true;
+    }
+    return requestSaveAs(m_document->source());
+}
+
+bool PDFEditController::requestSaveAs(const QUrl &target)
+{
+    if (m_saving) {
+        return false;
+    }
+    if (!m_document || !m_document->isLoaded()) {
+        //% "No PDF is open."
+        emit statusMessage(qtTrId("NoPdfOpenForSaving"));
+        return false;
+    }
+    if (!target.isLocalFile() || target.toLocalFile().isEmpty()) {
+        //% "Only local PDF files are supported"
+        emit statusMessage(qtTrId("LocalPdfFilesOnly"));
+        return false;
+    }
+
+    finishSelectedTextEdit();
+    const QString targetFilePath = QFileInfo(target.toLocalFile()).absoluteFilePath();
+    const PDFSaveWriter::Request request = PDFSaveWriter::prepare(
+        *this,
+        targetFilePath);
+    if (!request.isValid()) {
+        emit statusMessage(saveFailureText(PDFSaveWriter::Result{
+            PDFSaveWriter::Error::SourceUnavailable}));
+        return false;
+    }
+
+    QPointer<PDFEditController> controller(this);
+    PDFDocument *const expectedDocument = m_document.data();
+    const int expectedRevision = m_document->renderRevision();
+    const QString expectedSourceFilePath = m_document->renderFilePath();
+    m_saving = true;
+    emit savingChanged();
+    QThreadPool::globalInstance()->start(QRunnable::create(
+        [controller,
+         expectedDocument,
+         expectedRevision,
+         expectedSourceFilePath,
+         request,
+         targetFilePath]() {
+            PDFSaveWriter::Result result = PDFSaveWriter::save(request);
+            if (!controller) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                controller.data(),
+                [controller,
+                 expectedDocument,
+                 expectedRevision,
+                 expectedSourceFilePath,
+                 result = std::move(result),
+                 targetFilePath]() {
+                    if (controller) {
+                        controller->completeSave(
+                            result,
+                            targetFilePath,
+                            expectedDocument,
+                            expectedRevision,
+                            expectedSourceFilePath);
+                    }
+                },
+                Qt::QueuedConnection);
+        }));
+    return true;
+}
+
+bool PDFEditController::completeSave(
+    const PDFSaveWriter::Result &result,
+    const QString &targetFilePath,
+    PDFDocument *expectedDocument,
+    int expectedRevision,
+    const QString &expectedSourceFilePath)
+{
+    if (!result.succeeded()) {
+        m_saving = false;
+        emit savingChanged();
+        emit statusMessage(saveFailureText(result));
+        emit saveFinished(false);
+        return false;
+    }
+
+    const bool documentUnchanged = m_document
+        && m_document == expectedDocument
+        && m_document->renderRevision() == expectedRevision
+        && m_document->renderFilePath() == expectedSourceFilePath;
+    if (!documentUnchanged) {
+        m_saving = false;
+        emit savingChanged();
+        //% "Saved %1"
+        emit statusMessage(qtTrId("PdfSavedFile").arg(
+            QFileInfo(targetFilePath).fileName()));
+        emit saveFinished(true);
+        return true;
+    }
+
+    const bool reopened = m_document->open(QUrl::fromLocalFile(targetFilePath));
+    m_saving = false;
+    emit savingChanged();
+    if (!reopened) {
+        m_document->close();
+        //% "The PDF was saved, but TrePDF could not reopen it."
+        emit statusMessage(qtTrId("PdfSavedButReopenFailed"));
+        emit saveFinished(true);
+        return true;
+    }
+
+    //% "Saved %1"
+    emit statusMessage(qtTrId("PdfSavedFile").arg(QFileInfo(targetFilePath).fileName()));
+    emit saveFinished(true);
+    return true;
 }
 
 void PDFEditController::resetSession()
@@ -1643,6 +2170,7 @@ void PDFEditController::resetSession()
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditCommand = Command();
+    resetTextEditDisplayState();
 
     if (wasEditing) {
         emit textEditActiveChanged();
@@ -1938,15 +2466,39 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
         0.0,
         normalizedFontSize(page, pageSize, textTransform, fontSize));
     candidate.displayFontSizeRatio = candidate.fontSizeRatio;
-    candidate.fontStretch = fontStretchForTransform(page, pageSize, textTransform);
+    candidate.horizontalScale = horizontalScaleForTransform(
+        page,
+        pageSize,
+        textTransform);
+    candidate.fontStretch = qBound(
+        static_cast<int>(QFont::UltraCondensed),
+        qRound(candidate.horizontalScale * QFont::Unstretched),
+        static_cast<int>(QFont::UltraExpanded));
+    candidate.textRenderMode = renderMode;
+    candidate.fillColor = pageObjectColor(pageObject, false);
+    candidate.strokeColor = pageObjectColor(pageObject, true);
+    float strokeWidth = 1.0F;
+    if (FPDFPageObj_GetStrokeWidth(pageObject, &strokeWidth)) {
+        candidate.strokeWidth = qMax<qreal>(0.0, strokeWidth);
+    }
     candidate.color = textColor(pageObject, renderMode);
     const bool editingAllowed = documentAllowsEditing();
-    candidate.editable = editingAllowed && inlineLayoutSupported;
+    const bool topLevelObject = objectPath.size() == 1;
+    candidate.editable = editingAllowed
+        && suppressionSupported
+        && topLevelObject
+        && inlineLayoutSupported;
     candidate.renderSuppressible = suppressionSupported;
     candidate.limited = true;
     if (!editingAllowed) {
         //% "This PDF does not permit content editing."
         candidate.reason = qtTrId("PdfEditingNotPermitted");
+    } else if (!suppressionSupported) {
+        //% "Text clipping render modes cannot be edited safely yet."
+        candidate.reason = qtTrId("PdfTextClippingEditUnsupported");
+    } else if (!topLevelObject) {
+        //% "Text inside a PDF form object cannot be saved safely yet."
+        candidate.reason = qtTrId("PdfFormTextSaveUnsupported");
     } else if (!inlineLayoutSupported) {
         //% "Rotated, transformed, or multiline text is not supported by the inline draft editor yet."
         candidate.reason = qtTrId("InlineEditorUnsupportedTextLayout");
@@ -2059,7 +2611,11 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             && left.fontBold == right.fontBold
             && left.fontItalic == right.fontItalic
             && left.fontUnderline == right.fontUnderline
-            && left.color == right.color;
+            && left.color == right.color
+            && left.fillColor == right.fillColor
+            && left.strokeColor == right.strokeColor
+            && qFuzzyCompare(left.strokeWidth + 1.0, right.strokeWidth + 1.0)
+            && left.textRenderMode == right.textRenderMode;
     };
     const auto horizontalGap = [&](const Candidate &left, const Candidate &right) {
         return (right.geometry.sourceRect.left() - left.geometry.sourceRect.right())
@@ -2696,6 +3252,51 @@ void PDFEditController::setDraftText(Draft &draft, const QString &text)
     draft.paragraphFormats = paragraphFormatsForText(text, paragraphPrototype);
 }
 
+void PDFEditController::applyUnicodeFontFallback(Draft &draft)
+{
+    if (draft.text == draft.candidate.text || !containsNonAscii(draft.text)) {
+        return;
+    }
+
+    const CharacterFormat originalFormat = characterFormatForCandidate(
+        draft.candidate);
+    const QString bundledArial = matchingBundledFamilyName(
+        QStringLiteral("Arial"));
+    for (CharacterSpan &span : draft.characterSpans) {
+        const qsizetype start = qBound<qsizetype>(
+            0,
+            span.start,
+            draft.text.size());
+        const qsizetype length = qBound<qsizetype>(
+            0,
+            span.length,
+            draft.text.size() - start);
+        if (!containsNonAscii(draft.text.sliced(start, length))) {
+            continue;
+        }
+
+        const QString bundledFamily = matchingBundledFamilyName(
+            span.format.fontFamily);
+        const QString systemFamily = matchingSystemFamilyName(
+            span.format.fontFamily);
+        if (!bundledFamily.isEmpty()) {
+            span.format.fontFamily = bundledFamily;
+        } else if (!systemFamily.isEmpty()
+                   && !isGenericArialCompatibleFontFamily(
+                       span.format.fontFamily)) {
+            span.format.fontFamily = systemFamily;
+        } else if (!bundledArial.isEmpty()
+                   && equivalentFontFamilyName(
+                       span.format.fontFamily,
+                       originalFormat.fontFamily)
+                   && isArialCompatibleFontFamily(span.format.fontFamily)) {
+            span.format.fontFamily = bundledArial;
+        } else if (!systemFamily.isEmpty()) {
+            span.format.fontFamily = systemFamily;
+        }
+    }
+}
+
 bool PDFEditController::updateCharacterFormats(
     Draft &draft,
     qsizetype start,
@@ -2764,10 +3365,141 @@ bool PDFEditController::updateCharacterFormats(
     return true;
 }
 
+QRectF PDFEditController::expandedTextEditFrame(const Draft &draft)
+{
+    const Candidate &selectedCandidate = draft.candidate;
+    const QRectF frameRect = draft.frameRect.normalized();
+    if (!m_document
+        || selectedCandidate.kind != QLatin1String("text")
+        || selectedCandidate.added
+        || frameRect.isEmpty()) {
+        return draft.frameRect;
+    }
+
+    const QSizeF pageSize = m_document->pageSize(selectedCandidate.page);
+    if (pageSize.isEmpty()) {
+        return draft.frameRect;
+    }
+
+    const qreal minimumPageMargin = qBound<qreal>(
+        0.0,
+        kTextEditMinimumPageMarginPoints / pageSize.width(),
+        kTextEditMaximumPageMarginRatio);
+    const qreal minimumExpansion = kTextEditMinimumExpansionPoints
+        / pageSize.width();
+    const qreal currentRight = qBound<qreal>(
+        frameRect.left(),
+        frameRect.right(),
+        1.0);
+    const QRectF selectedSourceRect
+        = selectedCandidate.geometry.sourceRect.normalized();
+    const QRectF initialFrameRect
+        = (selectedCandidate.initialDraftFrameRect.isEmpty()
+               ? selectedSourceRect
+               : selectedCandidate.initialDraftFrameRect)
+              .normalized();
+    const qreal boundaryAnchorRight = qBound<qreal>(
+        frameRect.left(),
+        qMax(selectedSourceRect.right(), initialFrameRect.right()),
+        1.0);
+    qreal inferredLeftMargin = 1.0;
+    qreal observedRight = currentRight;
+    qreal nearestRowObstacle = 2.0;
+
+    const auto considerCandidate = [&](const Candidate &candidate) {
+        if ((candidate.kind != QLatin1String("text")
+             && candidate.kind != QLatin1String("addedText"))
+            || candidate.geometry.sourceRect.isEmpty()) {
+            return;
+        }
+
+        const QRectF sourceRect = candidate.geometry.sourceRect.normalized();
+        QRectF effectiveRect = sourceRect;
+        const auto candidateDraft = m_drafts.constFind(
+            draftKey(candidate.page, candidate.objectId));
+        if (candidateDraft != m_drafts.cend()) {
+            if (candidateDraft->text.isEmpty()) {
+                return;
+            }
+            effectiveRect = candidateDraft->frameRect.normalized();
+        } else if (candidate.added && candidate.text.isEmpty()) {
+            return;
+        }
+
+        inferredLeftMargin = qMin(inferredLeftMargin, effectiveRect.left());
+        observedRight = qMax(observedRight, effectiveRect.right());
+        if (candidate.page != selectedCandidate.page
+            || candidate.objectId == selectedCandidate.objectId
+            || effectiveRect.left()
+                <= selectedSourceRect.left() + minimumExpansion) {
+            return;
+        }
+
+        const qreal rowTolerance = kTextEditRowToleranceRatio
+            * qMax(selectedSourceRect.height(), effectiveRect.height());
+        const bool sharesVisualRow
+            = effectiveRect.top() <= selectedSourceRect.bottom() + rowTolerance
+            && effectiveRect.bottom() >= selectedSourceRect.top() - rowTolerance;
+        if (sharesVisualRow) {
+            nearestRowObstacle = qMin(
+                nearestRowObstacle,
+                effectiveRect.left());
+        }
+    };
+
+    const QVector<Candidate> &pageCandidates = ensurePageCandidates(
+        selectedCandidate.page);
+    for (const Candidate &candidate : pageCandidates) {
+        considerCandidate(candidate);
+    }
+    for (const Candidate &candidate : std::as_const(m_addedCandidates)) {
+        if (candidate.page == selectedCandidate.page) {
+            considerCandidate(candidate);
+        }
+    }
+
+    const qreal inferredMargin = inferredLeftMargin < 1.0
+        ? qBound<qreal>(
+              minimumPageMargin,
+              inferredLeftMargin,
+              kTextEditMaximumPageMarginRatio)
+        : minimumPageMargin;
+    qreal pageRight = qMax(1.0 - inferredMargin, observedRight);
+    pageRight = qBound<qreal>(currentRight, pageRight, 1.0);
+
+    qreal targetRight = pageRight;
+    if (nearestRowObstacle <= 1.0) {
+        const qreal fixedColumnRight = nearestRowObstacle <= boundaryAnchorRight
+            ? boundaryAnchorRight
+            : boundaryAnchorRight
+                + (nearestRowObstacle - boundaryAnchorRight) / 2.0;
+        targetRight = qMax(
+            currentRight,
+            qMin(pageRight, fixedColumnRight));
+    }
+    if (targetRight - currentRight < minimumExpansion) {
+        return draft.frameRect;
+    }
+
+    return QRectF(
+        frameRect.x(),
+        frameRect.y(),
+        targetRight - frameRect.x(),
+        frameRect.height());
+}
+
 PDFEditController::Draft PDFEditController::selectedDraftForDisplay() const
 {
     if (!m_hasSelection) {
         return Draft();
+    }
+
+    if (m_textEditActive
+        && m_textEditDisplayDraftActive
+        && m_textEditDisplayDraft.candidate.page == m_selectedCandidate.page
+        && m_textEditDisplayDraft.candidate.objectId
+            == m_selectedCandidate.objectId) {
+        return m_textEditDisplayDraft;
     }
 
     const auto draft = m_drafts.constFind(
@@ -2795,10 +3527,20 @@ void PDFEditController::selectedTextRangeForDraft(const Draft &draft,
     length = textLength;
 }
 
+void PDFEditController::resetTextEditDisplayState()
+{
+    m_textEditDisplayDraft = Draft();
+    m_textEditDisplayDraftActive = false;
+    m_textEditFrameAutomaticallyExpanded = false;
+    m_textEditGeometryExplicitlyChanged = false;
+    m_textEditInitialDisplayFrameRect = QRectF();
+}
+
 void PDFEditController::resetFrameResizeState()
 {
     m_frameResizeActive = false;
     m_frameResizeOwnsTextEdit = false;
+    m_frameResizeStartGeometryExplicitlyChanged = false;
     m_frameResizeStartFrameRect = QRectF();
     m_frameResizeStartContentBounds = QRectF();
 }
@@ -2813,6 +3555,9 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
 
     Draft normalizedDraft = draft;
     normalizedDraft.candidate = m_selectedCandidate;
+    if (m_textEditActive && m_textEditDisplayDraftActive) {
+        m_textEditDisplayDraft = normalizedDraft;
+    }
     const Draft originalDraft = initialDraftForCandidate(m_selectedCandidate);
     const QString key = draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId);
     const auto existingDraft = m_drafts.constFind(key);
@@ -2895,11 +3640,13 @@ void PDFEditController::applyDraftState(const Command &command,
             || candidateChanged;
     }
 
-    if (candidate.added
-        && !shouldExist
-        && m_hasSelection
+    const bool selectedCandidateChanged = m_hasSelection
         && m_selectedCandidate.page == command.page
-        && m_selectedCandidate.objectId == command.objectId) {
+        && m_selectedCandidate.objectId == command.objectId;
+    const bool selectionWasRemoved = candidate.added && !shouldExist;
+    const bool selectionWasDeleted = shouldExist && draft.text.isEmpty();
+    if (selectedCandidateChanged
+        && (selectionWasRemoved || selectionWasDeleted)) {
         setSelection(nullptr);
     } else {
         updateSelectedTextFromDraft();

@@ -177,22 +177,37 @@ Item {
             + Number(value.a).toFixed(3) + ")"
     }
 
-    function characterStyle(format, baseRatio) {
-        const family = format.fontFamily === undefined
+    function characterStyle(format, baseRatio, basePixelSize) {
+        const rawFamily = format.fontFamily === undefined
             ? ""
             : String(format.fontFamily)
-                .replace(/\\/g, "\\\\")
-                .replace(/'/g, "\\'")
+        const family = rawFamily
+            .replace(/\\/g, "\\\\")
+            .replace(/'/g, "\\'")
         const displayRatio = Number(format.displayFontSizeRatio) > 0
             ? Number(format.displayFontSizeRatio)
             : Number(format.fontSizeRatio)
         const relativeSize = displayRatio > 0 && baseRatio > 0
             ? displayRatio / baseRatio
             : 1
+        const fontBold = format.fontBold === true
+        const fontItalic = format.fontItalic === true
+        const effectiveBasePixelSize = Number(basePixelSize) > 0
+            ? Number(basePixelSize)
+            : Math.max(1, baseRatio * root.height)
+        const displayPixelSize = Math.max(
+            1,
+            Math.round(relativeSize * effectiveBasePixelSize))
+        const displayStretch = controller.displayFontStretch(
+            rawFamily,
+            Number(format.fontStretch || 100),
+            fontBold,
+            fontItalic,
+            displayPixelSize)
         let style = "font-size:" + relativeSize.toFixed(6) + "em;"
-            + "font-stretch:" + Number(format.fontStretch || 100) + "%;"
-            + "font-weight:" + (format.fontBold === true ? "700" : "400") + ";"
-            + "font-style:" + (format.fontItalic === true ? "italic" : "normal") + ";"
+            + "font-stretch:" + displayStretch + "%;"
+            + "font-weight:" + (fontBold ? "700" : "400") + ";"
+            + "font-style:" + (fontItalic ? "italic" : "normal") + ";"
             + "text-decoration:"
             + (format.fontUnderline === true ? "underline" : "none") + ";"
             + "color:" + cssColor(format.color) + ";"
@@ -201,7 +216,8 @@ Item {
         return style
     }
 
-    function richRangeHtml(text, start, end, spans, fallbackFormat, baseRatio) {
+    function richRangeHtml(text, start, end, spans, fallbackFormat,
+                           baseRatio, basePixelSize) {
         let html = ""
         let cursor = start
         for (let index = 0; index < spans.length; ++index) {
@@ -217,23 +233,27 @@ Item {
 
             if (spanStart > cursor) {
                 html += "<span style=\""
-                    + escapeHtmlAttribute(characterStyle(fallbackFormat, baseRatio))
+                    + escapeHtmlAttribute(characterStyle(
+                        fallbackFormat, baseRatio, basePixelSize))
                     + "\">" + escapeHtml(text.slice(cursor, spanStart)) + "</span>"
             }
             html += "<span style=\""
-                + escapeHtmlAttribute(characterStyle(span, baseRatio))
+                + escapeHtmlAttribute(characterStyle(
+                    span, baseRatio, basePixelSize))
                 + "\">" + escapeHtml(text.slice(spanStart, spanEnd)) + "</span>"
             cursor = Math.max(cursor, spanEnd)
         }
         if (cursor < end) {
             html += "<span style=\""
-                + escapeHtmlAttribute(characterStyle(fallbackFormat, baseRatio))
+                + escapeHtmlAttribute(characterStyle(
+                    fallbackFormat, baseRatio, basePixelSize))
                 + "\">" + escapeHtml(text.slice(cursor, end)) + "</span>"
         }
         return html
     }
 
-    function richTextHtml(text, spans, paragraphFormats, fallbackFormat) {
+    function richTextHtml(text, spans, paragraphFormats, fallbackFormat,
+                          basePixelSize) {
         const sourceText = text === undefined ? "" : String(text)
         const sourceSpans = spans === undefined || spans === null ? [] : spans
         let paragraphs = paragraphFormats === undefined || paragraphFormats === null
@@ -281,7 +301,8 @@ Item {
                 end,
                 sourceSpans,
                 fallbackFormat,
-                baseRatio)
+                baseRatio,
+                basePixelSize)
             const paragraphStyle = "margin:0;white-space:pre-wrap;text-align:"
                 + alignment + ";"
             html += "<p style=\"" + escapeHtmlAttribute(paragraphStyle) + "\">"
@@ -371,7 +392,8 @@ Item {
             controller.selectedText,
             controller.selectedCharacterSpans,
             controller.selectedParagraphFormats,
-            selectedFallbackFormat())
+            selectedFallbackFormat(),
+            editorFrame.baseFontPixelSize)
         const maximumPosition = editor.length
         const start = Math.max(0, Math.min(maximumPosition, selectionStart))
         const end = Math.max(0, Math.min(maximumPosition, selectionEnd))
@@ -557,20 +579,22 @@ Item {
             resizingObjectId = ""
         }
 
+        syncingEditorPreview = true
         controller.updateSelectedTextPreview(editorPlainText())
-        controller.finishSelectedTextEdit()
+        syncingEditorPreview = false
         editing = false
         editingObjectId = ""
         editorLayoutDirty = false
+        controller.finishSelectedTextEdit()
         reloadData()
     }
 
     function cancelEditing() {
-        cancelFrameResize()
-        controller.cancelSelectedTextEdit()
         editing = false
         editingObjectId = ""
         editorLayoutDirty = false
+        cancelFrameResize()
+        controller.cancelSelectedTextEdit()
     }
 
     function beginSelectedEditing() {
@@ -589,6 +613,8 @@ Item {
 
         controller.commitSelectedText("")
         controller.clearSelection()
+        hoverCandidate = ({})
+        hideSelectCursor()
         reloadData()
     }
 
@@ -791,9 +817,11 @@ Item {
                 modelData.text,
                 modelData.characterSpans,
                 modelData.paragraphFormats,
-                modelData)
+                modelData,
+                fontPixelSize)
             readonly property bool hovered: root.hasCandidate(root.hoverCandidate)
                 && root.hoverCandidate.objectId === modelData.objectId
+            readonly property bool hasText: modelData.text.length > 0
             readonly property bool selected: root.controller.selectedPage === root.page
                 && root.controller.selectedObjectId === modelData.objectId
 
@@ -915,6 +943,7 @@ Item {
                 visible: root.interactionActive
                     && !root.editing
                     && draftItem.modelData.restoration !== true
+                    && draftItem.hasText
                     && draftItem.hovered
                     && !draftItem.selected
             }
@@ -923,6 +952,7 @@ Item {
                 anchors.fill: parent
                 enabled: root.interactionActive
                     && draftItem.modelData.restoration !== true
+                    && draftItem.hasText
                     && root.controller.tool !== PDFEditController.AddTextTool
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton

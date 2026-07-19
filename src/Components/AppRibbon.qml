@@ -13,6 +13,8 @@ Column {
     required property PDFEditController editController
 
     signal openRequested()
+    signal saveRequested()
+    signal saveAsRequested()
     signal pageRequested(int page)
     signal zoomOutRequested()
     signal zoomInRequested()
@@ -45,7 +47,10 @@ Column {
         ViewRibbon {
             theme: root.theme
             document: root.document
+            editController: root.editController
             onOpenRequested: root.openRequested()
+            onSaveRequested: root.saveRequested()
+            onSaveAsRequested: root.saveAsRequested()
             onPageRequested: page => root.pageRequested(page)
             onZoomOutRequested: root.zoomOutRequested()
             onZoomInRequested: root.zoomInRequested()
@@ -130,7 +135,7 @@ Column {
                 Layout.preferredWidth: draftStatusLabel.implicitWidth + 20
                 Layout.preferredHeight: 24
                 Layout.alignment: Qt.AlignVCenter
-                visible: root.editController.hasDrafts
+                visible: root.editController.hasDrafts || root.editController.saving
                 radius: 12
                 color: root.theme.foxitPaleOrange
                 border.color: root.theme.foxitBorderOrange
@@ -141,9 +146,19 @@ Column {
                 Label {
                     id: draftStatusLabel
 
+                    readonly property string savingStatusText: {
+                        //% "Saving PDF…"
+                        return qsTrId("SavingPdf")
+                    }
+                    readonly property string draftStatusText: {
+                        //% "Draft · Not saved"
+                        return qsTrId("DraftNotSaved")
+                    }
+
                     anchors.centerIn: parent
-                    //% "Draft · Not saved"
-                    text: qsTrId("DraftNotSaved")
+                    text: root.editController.saving
+                        ? savingStatusText
+                        : draftStatusText
                     color: root.theme.foxitDarkOrange
                     font.pixelSize: 11
                     font.weight: Font.DemiBold

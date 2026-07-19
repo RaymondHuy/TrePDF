@@ -7,8 +7,11 @@ Flickable {
 
     required property AppTheme theme
     required property PDFDocument document
+    required property PDFEditController editController
 
     signal openRequested()
+    signal saveRequested()
+    signal saveAsRequested()
     signal pageRequested(int page)
     signal zoomOutRequested()
     signal zoomInRequested()
@@ -43,6 +46,33 @@ Flickable {
                 requiresDocument: false
                 primary: true
                 onClicked: root.openRequested()
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Save"
+                text: qsTrId("Save")
+                //% "Save PDF"
+                toolTipText: qsTrId("SavePdf")
+                iconSource: "../assets/icons/save.svg"
+                enabled: root.document.loaded
+                    && root.editController.hasDrafts
+                    && !root.editController.saving
+                primary: root.editController.hasDrafts
+                onClicked: root.saveRequested()
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Save As"
+                text: qsTrId("SaveAs")
+                //% "Save PDF As"
+                toolTipText: qsTrId("SavePdfAs")
+                iconSource: "../assets/icons/save.svg"
+                enabled: root.document.loaded && !root.editController.saving
+                onClicked: root.saveAsRequested()
             }
         }
 

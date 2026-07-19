@@ -18,23 +18,7 @@ Rectangle {
     required property color selectedColor
     property bool formattingEnabled: false
 
-    readonly property var displayedFontFamilies: {
-        const families = []
-        for (let index = 0; index < availableFontFamilies.length; ++index)
-            families.push(availableFontFamilies[index])
-
-        if (selectedFontFamily.length === 0)
-            return families
-
-        const selectedKey = selectedFontFamily.toLowerCase()
-        for (let index = 0; index < families.length; ++index) {
-            if (families[index].toLowerCase() === selectedKey)
-                return families
-        }
-
-        families.unshift(selectedFontFamily)
-        return families
-    }
+    readonly property var displayedFontFamilies: availableFontFamilies
     readonly property int selectedFontFamilyIndex: {
         if (selectedFontFamily.length === 0)
             return -1
@@ -198,6 +182,7 @@ Rectangle {
                             Layout.fillWidth: true
                             model: root.displayedFontFamilies
                             currentIndex: root.selectedFontFamilyIndex
+                            displayText: root.selectedFontFamily
                             clip: true
                             onActivated: root.fontFamilyChangeRequested(
                                 fontFamilyBox.currentText)

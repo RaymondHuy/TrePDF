@@ -53,6 +53,9 @@ ApplicationWindow {
     }
 
     function requestOpen() {
+        if (editController.saving)
+            return
+
         if (editController.hasDrafts) {
             pendingDraftAction = "open"
             discardDraftPopup.open()
@@ -61,12 +64,49 @@ ApplicationWindow {
         }
     }
 
+    function requestSave() {
+        if (pdfDocument.loaded)
+            editController.requestSave()
+    }
+
+    function requestSaveAs() {
+        if (!pdfDocument.loaded)
+            return
+
+        saveAsDialog.selectedFile = pdfDocument.source
+        saveAsDialog.open()
+    }
+
+    function saveFileAs(url) {
+        editController.requestSaveAs(url)
+    }
+
     function continueAfterDiscard() {
         const action = pendingDraftAction
         pendingDraftAction = ""
         editController.discardDrafts()
         discardDraftPopup.close()
 
+        if (action === "open") {
+            Qt.callLater(function() { openDialog.open() })
+        } else if (action === "quit") {
+            allowCloseWithDrafts = true
+            Qt.callLater(function() { window.close() })
+        }
+    }
+
+    function continueAfterSave() {
+        if (!editController.requestSave())
+            return
+    }
+
+    function finishPendingDraftAction(succeeded) {
+        if (!succeeded || pendingDraftAction === "")
+            return
+
+        const action = pendingDraftAction
+        pendingDraftAction = ""
+        discardDraftPopup.close()
         if (action === "open") {
             Qt.callLater(function() { openDialog.open() })
         } else if (action === "quit") {
@@ -86,7 +126,11 @@ ApplicationWindow {
     }
 
     onClosing: close => {
-        if (!allowCloseWithDrafts && editController.hasDrafts) {
+        if (editController.saving) {
+            close.accepted = false
+            //% "Please wait for the PDF to finish saving."
+            showStatus(qsTrId("WaitForPdfSave"))
+        } else if (!allowCloseWithDrafts && editController.hasDrafts) {
             close.accepted = false
             pendingDraftAction = "quit"
             discardDraftPopup.open()
@@ -113,18 +157,37 @@ ApplicationWindow {
 
         document: pdfDocument
         onStatusMessage: message => window.showStatus(message)
+        onSaveFinished: succeeded => window.finishPendingDraftAction(succeeded)
     }
 
     Shortcut {
         sequences: [StandardKey.Undo]
-        enabled: editController.canUndo && !editController.textEditActive
+        enabled: editController.canUndo
+            && !editController.textEditActive
+            && !editController.saving
         onActivated: editController.undo()
     }
 
     Shortcut {
         sequences: [StandardKey.Redo]
-        enabled: editController.canRedo && !editController.textEditActive
+        enabled: editController.canRedo
+            && !editController.textEditActive
+            && !editController.saving
         onActivated: editController.redo()
+    }
+
+    Shortcut {
+        sequences: [StandardKey.Save]
+        enabled: pdfDocument.loaded
+            && editController.hasDrafts
+            && !editController.saving
+        onActivated: window.requestSave()
+    }
+
+    Shortcut {
+        sequences: [StandardKey.SaveAs]
+        enabled: pdfDocument.loaded && !editController.saving
+        onActivated: window.requestSaveAs()
     }
 
     FileDialog {
@@ -135,6 +198,18 @@ ApplicationWindow {
         //% "PDF files (*.pdf)"
         nameFilters: [qsTrId("PdfFileFilter")]
         onAccepted: window.openFile(selectedFile)
+    }
+
+    FileDialog {
+        id: saveAsDialog
+
+        //% "Save PDF As"
+        title: qsTrId("SavePdfAs")
+        fileMode: FileDialog.SaveFile
+        //% "PDF files (*.pdf)"
+        nameFilters: [qsTrId("PdfFileFilter")]
+        defaultSuffix: "pdf"
+        onAccepted: window.saveFileAs(selectedFile)
     }
 
     Popup {
@@ -188,10 +263,19 @@ ApplicationWindow {
                 Button {
                     //% "Cancel"
                     text: qsTrId("Cancel")
+                    enabled: !editController.saving
                     onClicked: {
                         window.pendingDraftAction = ""
                         discardDraftPopup.close()
                     }
+                }
+
+
+                Button {
+                    //% "Save"
+                    text: qsTrId("Save")
+                    enabled: !editController.saving
+                    onClicked: window.continueAfterSave()
                 }
 
                 OrangeButton {
@@ -199,6 +283,7 @@ ApplicationWindow {
                     theme: appTheme
                     //% "Discard"
                     text: qsTrId("Discard")
+                    enabled: !editController.saving
                     onClicked: window.continueAfterDiscard()
                 }
             }
@@ -210,7 +295,10 @@ ApplicationWindow {
         theme: appTheme
         document: pdfDocument
         editController: editController
+        enabled: !editController.saving
         onOpenRequested: window.requestOpen()
+        onSaveRequested: window.requestSave()
+        onSaveAsRequested: window.requestSaveAs()
         onPageRequested: page => window.goToPage(page)
         onZoomOutRequested: window.setZoom(window.zoom / 1.15)
         onZoomInRequested: window.setZoom(window.zoom * 1.15)
@@ -221,6 +309,7 @@ ApplicationWindow {
     RowLayout {
         anchors.fill: parent
         spacing: 0
+        enabled: !editController.saving
 
         DocumentView {
             id: documentView
