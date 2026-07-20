@@ -60,6 +60,8 @@ qt_add_qml_module(trepdf
         src/PDFEditController.h
         src/PDFSaveWriter.cpp
         src/PDFSaveWriter.h
+        src/PDFTabModel.cpp
+        src/PDFTabModel.h
         src/PDFiumSynchronization.h
         src/PDFPageItem.cpp
         src/PDFPageItem.h
@@ -68,6 +70,8 @@ qt_add_qml_module(trepdf
         src/Components/AppRibbon.qml
         src/Components/AppTheme.qml
         src/Components/DocumentView.qml
+        src/Components/DocumentTabBar.qml
+        src/Components/DocumentWorkspace.qml
         src/Components/EditOverlay.qml
         src/Components/EditRibbon.qml
         src/Components/OrangeButton.qml

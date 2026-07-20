@@ -14,7 +14,11 @@ Rectangle {
     property real zoom: 1.0
     property string transientStatus
     property int pendingNavigationPage: -1
+    property int navigationGeneration: 0
+    property int sessionChangeGeneration: 0
     readonly property real viewportWidth: viewer.width
+    readonly property real contentX: viewer.contentX
+    readonly property real contentY: viewer.contentY
 
     signal openRequested()
 
@@ -24,12 +28,15 @@ Rectangle {
         if (!document.loaded || page < 0 || page >= document.pageCount)
             return
 
+        const generation = ++navigationGeneration
         pendingNavigationPage = page
         document.setCurrentPage(page)
 
         Qt.callLater(function() {
-            if (root.pendingNavigationPage !== page)
+            if (root.navigationGeneration !== generation
+                    || root.pendingNavigationPage !== page) {
                 return
+            }
 
             if (!root.document.loaded || page >= root.document.pageCount) {
                 root.pendingNavigationPage = -1
@@ -40,12 +47,41 @@ Rectangle {
             viewer.contentY = Math.max(0, viewer.contentY - 16)
 
             Qt.callLater(function() {
-                if (root.pendingNavigationPage !== page)
+                if (root.navigationGeneration !== generation
+                        || root.pendingNavigationPage !== page) {
                     return
+                }
 
                 root.document.setCurrentPage(page)
                 root.pendingNavigationPage = -1
             })
+        })
+    }
+
+    function prepareForSessionChange() {
+        ++sessionChangeGeneration
+        editController.finishSelectedFrameResize()
+        editController.finishSelectedTextEdit()
+        ++navigationGeneration
+        pendingNavigationPage = -1
+    }
+
+    function restorePosition(savedContentX, savedContentY) {
+        prepareForSessionChange()
+        const generation = navigationGeneration
+        Qt.callLater(function() {
+            if (root.navigationGeneration !== generation || !root.document.loaded)
+                return
+
+            viewer.contentX = Math.max(
+                0,
+                Math.min(Number(savedContentX),
+                         Math.max(0, viewer.contentWidth - viewer.width)))
+            viewer.contentY = Math.max(
+                0,
+                Math.min(Number(savedContentY),
+                         Math.max(0, viewer.contentHeight - viewer.height)))
+            root.syncCurrentPageFromScroll()
         })
     }
 
@@ -101,6 +137,7 @@ Rectangle {
             document: root.document
             editController: root.editController
             zoom: root.zoom
+            sessionChangeGeneration: root.sessionChangeGeneration
         }
     }
 

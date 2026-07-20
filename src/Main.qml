@@ -17,102 +17,209 @@ ApplicationWindow {
     //% "TrePDF"
     title: qsTrId("ApplicationTitle")
 
-    property real zoom: 1.0
     property string transientStatus: ""
+    property bool allowWindowClose: false
     property string pendingDraftAction: ""
-    property bool allowCloseWithDrafts: false
+    property bool openingFiles: false
+    property PDFDocumentSession pendingSession: null
+    property PDFDocumentSession saveAsSession: null
+    property PDFDocumentSession workspaceSession: null
+    readonly property PDFDocumentSession activeSession: tabModel.currentSession
+    readonly property PDFDocument activeDocument: activeSession
+        ? activeSession.document
+        : emptyDocument
+    readonly property PDFEditController activeEditController: activeSession
+        ? activeSession.editController
+        : emptyEditController
 
     palette.highlight: appTheme.foxitOrange
     palette.button: appTheme.foxitPaleOrange
     palette.buttonText: "#32251c"
     palette.window: "#f7f2ee"
 
+    function activeWorkspace() {
+        return workspaceLoader.status === Loader.Ready
+            ? workspaceLoader.item
+            : null
+    }
+
+    function prepareActiveWorkspace() {
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.prepareForDeactivation()
+        else if (activeSession)
+            activeSession.prepareForDeactivation()
+    }
+
+    function rebuildWorkspace() {
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.prepareForDeactivation()
+        workspaceLoader.active = false
+        workspaceSession = activeSession
+        workspaceLoader.active = workspaceSession !== null
+    }
+
     function setZoom(value) {
-        zoom = Math.max(0.1, Math.min(5.0, value))
+        if (activeSession)
+            activeSession.zoom = Math.max(0.1, Math.min(5.0, value))
     }
 
     function fitToWidth() {
-        if (!pdfDocument.loaded
-                || pdfDocument.maximumPageWidth <= 0
-                || documentView.viewportWidth <= 0) {
-            return
+        const workspace = activeWorkspace()
+        if (workspace) {
+            workspace.fitToWidth()
+        } else if (activeSession) {
+            activeSession.initialFitPending = true
         }
-
-        setZoom((documentView.viewportWidth - 96) / pdfDocument.maximumPageWidth)
     }
 
     function goToPage(page) {
-        documentView.navigateToPage(page)
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.navigateToPage(page)
     }
 
-    function openFile(url) {
-        if (pdfDocument.open(url)) {
-            Qt.callLater(fitToWidth)
-            Qt.callLater(function() { goToPage(0) })
-        }
+    function switchToTab(index) {
+        if (index === tabModel.currentIndex || tabModel.anySaving)
+            return
+
+        prepareActiveWorkspace()
+        tabModel.currentIndex = index
     }
 
     function requestOpen() {
-        if (editController.saving)
+        if (tabModel.anySaving) {
+            //% "Please wait for the PDF to finish saving."
+            showStatus(qsTrId("WaitForPdfSave"))
             return
-
-        if (editController.hasDrafts) {
-            pendingDraftAction = "open"
-            discardDraftPopup.open()
-        } else {
-            openDialog.open()
         }
+
+        openDialog.open()
+    }
+
+    function openFiles(urls) {
+        prepareActiveWorkspace()
+        openingFiles = true
+        for (let index = 0; index < urls.length; ++index)
+            tabModel.open(urls[index])
+        openingFiles = false
+        rebuildWorkspace()
     }
 
     function requestSave() {
-        if (pdfDocument.loaded)
-            editController.requestSave()
+        if (activeSession) {
+            prepareActiveWorkspace()
+            tabModel.requestSave(activeSession)
+        }
     }
 
     function requestSaveAs() {
-        if (!pdfDocument.loaded)
+        if (!activeSession || tabModel.anySaving)
             return
 
-        saveAsDialog.selectedFile = pdfDocument.source
+        saveAsSession = activeSession
+        saveAsDialog.selectedFile = saveAsSession.document.source
         saveAsDialog.open()
     }
 
     function saveFileAs(url) {
-        editController.requestSaveAs(url)
-    }
-
-    function continueAfterDiscard() {
-        const action = pendingDraftAction
-        pendingDraftAction = ""
-        editController.discardDrafts()
-        discardDraftPopup.close()
-
-        if (action === "open") {
-            Qt.callLater(function() { openDialog.open() })
-        } else if (action === "quit") {
-            allowCloseWithDrafts = true
-            Qt.callLater(function() { window.close() })
+        const session = saveAsSession
+        saveAsSession = null
+        if (session) {
+            if (session === activeSession)
+                prepareActiveWorkspace()
+            tabModel.requestSaveAs(session, url)
         }
     }
 
-    function continueAfterSave() {
-        if (!editController.requestSave())
-            return
+    function beginDraftPrompt(action, session) {
+        pendingDraftAction = action
+        pendingSession = session
+        discardDraftPopup.open()
     }
 
-    function finishPendingDraftAction(succeeded) {
-        if (!succeeded || pendingDraftAction === "")
+    function clearDraftPrompt() {
+        pendingDraftAction = ""
+        pendingSession = null
+        discardDraftPopup.close()
+    }
+
+    function cancelDraftPrompt() {
+        if (pendingSession && pendingSession.saving)
+            return
+        clearDraftPrompt()
+    }
+
+    function requestCloseSession(session) {
+        if (!session || tabModel.anySaving) {
+            if (tabModel.anySaving) {
+                //% "Please wait for the PDF to finish saving."
+                showStatus(qsTrId("WaitForPdfSave"))
+            }
+            return
+        }
+
+        if (session === activeSession)
+            prepareActiveWorkspace()
+        else
+            session.prepareForDeactivation()
+
+        if (session.hasDrafts) {
+            beginDraftPrompt("close", session)
+        } else {
+            tabModel.closeSession(session)
+        }
+    }
+
+    function discardPendingChanges() {
+        const session = pendingSession
+        const action = pendingDraftAction
+        if (!session || session.saving)
+            return
+
+        session.editController.discardDrafts()
+        clearDraftPrompt()
+        if (action === "close") {
+            tabModel.closeSession(session)
+        } else if (action === "quit") {
+            Qt.callLater(window.continueQuitSequence)
+        }
+    }
+
+    function savePendingChanges() {
+        if (pendingSession && !pendingSession.saving)
+            tabModel.requestSave(pendingSession)
+    }
+
+    function finishPendingDraftAction(session, succeeded) {
+        if (session !== pendingSession || !succeeded)
             return
 
         const action = pendingDraftAction
-        pendingDraftAction = ""
-        discardDraftPopup.close()
-        if (action === "open") {
-            Qt.callLater(function() { openDialog.open() })
+        clearDraftPrompt()
+        if (action === "close") {
+            tabModel.closeSession(session)
         } else if (action === "quit") {
-            allowCloseWithDrafts = true
-            Qt.callLater(function() { window.close() })
+            Qt.callLater(window.continueQuitSequence)
         }
+    }
+
+    function continueQuitSequence() {
+        if (tabModel.anySaving) {
+            //% "Please wait for the PDF to finish saving."
+            showStatus(qsTrId("WaitForPdfSave"))
+            return
+        }
+
+        const draftSession = tabModel.firstDraftSession()
+        if (draftSession) {
+            beginDraftPrompt("quit", draftSession)
+            return
+        }
+
+        allowWindowClose = true
+        Qt.callLater(function() { window.close() })
     }
 
     function showComingSoon(toolName) {
@@ -125,15 +232,23 @@ ApplicationWindow {
         transientStatusTimer.restart()
     }
 
+    onActiveSessionChanged: {
+        if (!openingFiles)
+            rebuildWorkspace()
+    }
+
     onClosing: close => {
-        if (editController.saving) {
-            close.accepted = false
+        if (allowWindowClose)
+            return
+
+        close.accepted = false
+        prepareActiveWorkspace()
+        tabModel.finishAllEdits()
+        if (tabModel.anySaving) {
             //% "Please wait for the PDF to finish saving."
             showStatus(qsTrId("WaitForPdfSave"))
-        } else if (!allowCloseWithDrafts && editController.hasDrafts) {
-            close.accepted = false
-            pendingDraftAction = "quit"
-            discardDraftPopup.open()
+        } else {
+            continueQuitSequence()
         }
     }
 
@@ -149,55 +264,78 @@ ApplicationWindow {
     }
 
     PDFDocument {
-        id: pdfDocument
+        id: emptyDocument
     }
 
     PDFEditController {
-        id: editController
+        id: emptyEditController
 
-        document: pdfDocument
+        document: emptyDocument
+    }
+
+    PDFTabModel {
+        id: tabModel
+
         onStatusMessage: message => window.showStatus(message)
-        onSaveFinished: succeeded => window.finishPendingDraftAction(succeeded)
+        onSessionSaveFinished: (session, succeeded) => {
+            window.finishPendingDraftAction(session, succeeded)
+        }
     }
 
     Shortcut {
         sequences: [StandardKey.Undo]
-        enabled: editController.canUndo
-            && !editController.textEditActive
-            && !editController.saving
-        onActivated: editController.undo()
+        enabled: window.activeSession !== null
+            && window.activeEditController.canUndo
+            && !window.activeEditController.textEditActive
+            && !tabModel.anySaving
+        onActivated: window.activeEditController.undo()
     }
 
     Shortcut {
         sequences: [StandardKey.Redo]
-        enabled: editController.canRedo
-            && !editController.textEditActive
-            && !editController.saving
-        onActivated: editController.redo()
+        enabled: window.activeSession !== null
+            && window.activeEditController.canRedo
+            && !window.activeEditController.textEditActive
+            && !tabModel.anySaving
+        onActivated: window.activeEditController.redo()
     }
 
     Shortcut {
         sequences: [StandardKey.Save]
-        enabled: pdfDocument.loaded
-            && editController.hasDrafts
-            && !editController.saving
+        enabled: window.activeDocument.loaded
+            && window.activeEditController.hasDrafts
+            && !tabModel.anySaving
         onActivated: window.requestSave()
     }
 
     Shortcut {
         sequences: [StandardKey.SaveAs]
-        enabled: pdfDocument.loaded && !editController.saving
+        enabled: window.activeDocument.loaded && !tabModel.anySaving
         onActivated: window.requestSaveAs()
+    }
+
+    Shortcut {
+        sequences: [StandardKey.Close]
+        enabled: window.activeSession !== null && !tabModel.anySaving
+        onActivated: window.requestCloseSession(window.activeSession)
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        enabled: discardDraftPopup.opened
+            && (!window.pendingSession || !window.pendingSession.saving)
+        onActivated: window.cancelDraftPrompt()
     }
 
     FileDialog {
         id: openDialog
 
-        //% "Open PDF"
-        title: qsTrId("OpenPdf")
+        //% "Open PDFs"
+        title: qsTrId("OpenPdfs")
+        fileMode: FileDialog.OpenFiles
         //% "PDF files (*.pdf)"
         nameFilters: [qsTrId("PdfFileFilter")]
-        onAccepted: window.openFile(selectedFile)
+        onAccepted: window.openFiles(selectedFiles)
     }
 
     FileDialog {
@@ -210,6 +348,7 @@ ApplicationWindow {
         nameFilters: [qsTrId("PdfFileFilter")]
         defaultSuffix: "pdf"
         onAccepted: window.saveFileAs(selectedFile)
+        onRejected: window.saveAsSession = null
     }
 
     Popup {
@@ -217,11 +356,11 @@ ApplicationWindow {
 
         x: Math.round((window.width - width) / 2)
         y: Math.round((window.height - height) / 2)
-        width: Math.min(390, window.width - 32)
+        width: Math.min(420, window.width - 32)
         height: discardDraftContent.implicitHeight + 32
         modal: true
         focus: true
-        closePolicy: Popup.CloseOnEscape
+        closePolicy: Popup.NoAutoClose
 
         background: Rectangle {
             radius: 6
@@ -237,11 +376,13 @@ ApplicationWindow {
 
             Label {
                 Layout.fillWidth: true
-                //% "Discard draft changes?"
-                text: qsTrId("DiscardDraftChangesQuestion")
+                //% "Save changes to “%1”?"
+                text: qsTrId("SaveChangesToDocumentQuestion").arg(
+                    window.pendingSession ? window.pendingSession.title : "")
                 color: appTheme.ribbonTextColor
                 font.pixelSize: 18
                 font.weight: Font.DemiBold
+                wrapMode: Text.Wrap
             }
 
             Label {
@@ -263,19 +404,17 @@ ApplicationWindow {
                 Button {
                     //% "Cancel"
                     text: qsTrId("Cancel")
-                    enabled: !editController.saving
-                    onClicked: {
-                        window.pendingDraftAction = ""
-                        discardDraftPopup.close()
-                    }
+                    enabled: !window.pendingSession
+                        || !window.pendingSession.saving
+                    onClicked: window.cancelDraftPrompt()
                 }
-
 
                 Button {
                     //% "Save"
                     text: qsTrId("Save")
-                    enabled: !editController.saving
-                    onClicked: window.continueAfterSave()
+                    enabled: window.pendingSession !== null
+                        && !window.pendingSession.saving
+                    onClicked: window.savePendingChanges()
                 }
 
                 OrangeButton {
@@ -283,94 +422,85 @@ ApplicationWindow {
                     theme: appTheme
                     //% "Discard"
                     text: qsTrId("Discard")
-                    enabled: !editController.saving
-                    onClicked: window.continueAfterDiscard()
+                    enabled: window.pendingSession !== null
+                        && !window.pendingSession.saving
+                    onClicked: window.discardPendingChanges()
                 }
             }
         }
     }
 
-    header: AppRibbon {
+    header: Column {
         width: window.width
-        theme: appTheme
-        document: pdfDocument
-        editController: editController
-        enabled: !editController.saving
-        onOpenRequested: window.requestOpen()
-        onSaveRequested: window.requestSave()
-        onSaveAsRequested: window.requestSaveAs()
-        onPageRequested: page => window.goToPage(page)
-        onZoomOutRequested: window.setZoom(window.zoom / 1.15)
-        onZoomInRequested: window.setZoom(window.zoom * 1.15)
-        onFitWidthRequested: window.fitToWidth()
-        onToolRequested: toolName => window.showComingSoon(toolName)
-    }
 
-    RowLayout {
-        anchors.fill: parent
-        spacing: 0
-        enabled: !editController.saving
-
-        DocumentView {
-            id: documentView
-
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+        AppRibbon {
+            width: parent.width
             theme: appTheme
-            document: pdfDocument
-            editController: editController
-            zoom: window.zoom
-            transientStatus: window.transientStatus
+            document: window.activeDocument
+            editController: window.activeEditController
+            enabled: !tabModel.anySaving
+            onOpenRequested: window.requestOpen()
+            onSaveRequested: window.requestSave()
+            onSaveAsRequested: window.requestSaveAs()
+            onPageRequested: page => window.goToPage(page)
+            onZoomOutRequested: {
+                window.setZoom(window.activeSession
+                    ? window.activeSession.zoom / 1.15
+                    : 1.0)
+            }
+            onZoomInRequested: {
+                window.setZoom(window.activeSession
+                    ? window.activeSession.zoom * 1.15
+                    : 1.0)
+            }
+            onFitWidthRequested: window.fitToWidth()
+            onToolRequested: toolName => window.showComingSoon(toolName)
+        }
+
+        DocumentTabBar {
+            width: parent.width
+            theme: appTheme
+            tabModel: tabModel
+            enabled: !tabModel.anySaving
+            onTabRequested: index => window.switchToTab(index)
+            onCloseRequested: session => window.requestCloseSession(session)
             onOpenRequested: window.requestOpen()
         }
+    }
 
-        Loader {
-            id: textFormatPanelLoader
+    DocumentView {
+        anchors.fill: parent
+        visible: window.activeSession === null
+        theme: appTheme
+        document: emptyDocument
+        editController: emptyEditController
+        transientStatus: window.transientStatus
+        onOpenRequested: window.requestOpen()
+    }
 
-            property bool panelCollapsed: false
+    Loader {
+        id: workspaceLoader
 
-            Layout.preferredWidth: active
-                ? panelCollapsed ? 42 : 264
-                : 0
-            Layout.fillHeight: true
-            active: pdfDocument.loaded
-                && editController.tool !== PDFEditController.BrowseTool
-            visible: active
-
-            sourceComponent: Component {
-                TextFormatPanel {
-                    theme: appTheme
-                    collapsed: textFormatPanelLoader.panelCollapsed
-                    availableFontFamilies: editController.availableFontFamilies
-                    fontFamiliesForFilter: function(filter) {
-                        return editController.fontFamiliesForFilter(filter)
-                    }
-                    selectedFontFamily: editController.selectedFontFamily
-                    selectedFontBold: editController.selectedFontBold
-                    selectedFontItalic: editController.selectedFontItalic
-                    selectedFontUnderline: editController.selectedFontUnderline
-                    selectedColor: editController.selectedColor
-                    formattingEnabled: editController.selectedEditable
-                    onFontFamilyChangeRequested: fontFamily => {
-                        editController.setSelectedFontFamily(fontFamily)
-                    }
-                    onFontBoldChangeRequested: enabled => {
-                        editController.setSelectedFontBold(enabled)
-                    }
-                    onFontItalicChangeRequested: enabled => {
-                        editController.setSelectedFontItalic(enabled)
-                    }
-                    onFontUnderlineChangeRequested: enabled => {
-                        editController.setSelectedFontUnderline(enabled)
-                    }
-                    onFontColorChangeRequested: color => {
-                        editController.setSelectedColor(color)
-                    }
-                    onCollapsedChangeRequested: collapsed => {
-                        textFormatPanelLoader.panelCollapsed = collapsed
-                    }
-                }
+        anchors.fill: parent
+        active: false
+        asynchronous: true
+        sourceComponent: Component {
+            DocumentWorkspace {
+                theme: appTheme
+                session: window.workspaceSession
+                transientStatus: window.transientStatus
+                enabled: !tabModel.anySaving
+                onOpenRequested: window.requestOpen()
             }
         }
+    }
+
+    BusyIndicator {
+        anchors.centerIn: parent
+        width: 40
+        height: 40
+        visible: workspaceLoader.active
+            && workspaceLoader.status === Loader.Loading
+        running: visible
     }
 }

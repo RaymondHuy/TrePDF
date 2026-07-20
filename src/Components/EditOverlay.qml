@@ -597,6 +597,19 @@ Item {
         controller.cancelSelectedTextEdit()
     }
 
+    function prepareForSessionChange() {
+        selectionActions.close()
+        hideSelectCursor()
+        hoverCandidate = ({})
+        if (editing) {
+            commitEditing()
+        } else if (resizingFrame) {
+            controller.finishSelectedFrameResize()
+            resizingFrame = false
+            resizingObjectId = ""
+        }
+    }
+
     function beginSelectedEditing() {
         if (controller.selectedPage !== page || !controller.selectedEditable)
             return
