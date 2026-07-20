@@ -9,115 +9,126 @@
         <translation>TrePDF</translation>
     </message>
     <message id="FeatureComingSoon">
-        <location filename="../src/Main.qml" line="120"/>
+        <location filename="../src/Main.qml" line="227"/>
         <source>%1 is coming soon</source>
         <translation>Tính năng %1 sắp ra mắt</translation>
     </message>
     <message id="WaitForPdfSave">
-        <location filename="../src/Main.qml" line="132"/>
+        <location filename="../src/Main.qml" line="94"/>
+        <location filename="../src/Main.qml" line="158"/>
+        <location filename="../src/Main.qml" line="211"/>
+        <location filename="../src/Main.qml" line="249"/>
+        <location filename="../src/PDFTabModel.cpp" line="248"/>
         <source>Please wait for the PDF to finish saving.</source>
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Main.qml" line="197"/>
-        <location filename="../src/Components/DocumentView.qml" line="123"/>
+        <location filename="../src/Components/DocumentView.qml" line="160"/>
+        <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
+        <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="44"/>
         <source>Open PDF</source>
         <translation>Mở PDF</translation>
     </message>
     <message id="PdfFileFilter">
-        <location filename="../src/Main.qml" line="199"/>
-        <location filename="../src/Main.qml" line="210"/>
+        <location filename="../src/Main.qml" line="337"/>
+        <location filename="../src/Main.qml" line="348"/>
         <source>PDF files (*.pdf)</source>
         <translation>Tệp PDF (*.pdf)</translation>
     </message>
     <message id="SavePdfAs">
-        <location filename="../src/Main.qml" line="207"/>
+        <location filename="../src/Main.qml" line="345"/>
         <location filename="../src/Components/ViewRibbon.qml" line="72"/>
         <source>Save PDF As</source>
         <translation>Lưu PDF thành</translation>
     </message>
-    <message id="DiscardDraftChangesQuestion">
-        <location filename="../src/Main.qml" line="241"/>
-        <source>Discard draft changes?</source>
-        <translation>Bỏ các thay đổi nháp?</translation>
+    <message id="OpenPdfs">
+        <location filename="../src/Main.qml" line="334"/>
+        <source>Open PDFs</source>
+        <translation>Mở các tệp PDF</translation>
+    </message>
+    <message id="SaveChangesToDocumentQuestion">
+        <location filename="../src/Main.qml" line="380"/>
+        <source>Save changes to “%1”?</source>
+        <translation>Lưu các thay đổi vào “%1”?</translation>
     </message>
     <message id="UnsavedEditsDescription">
-        <location filename="../src/Main.qml" line="250"/>
+        <location filename="../src/Main.qml" line="391"/>
         <source>Your edits exist only in this session and have not been saved to the PDF.</source>
         <translation>Các chỉnh sửa của bạn chỉ tồn tại trong phiên này và chưa được lưu vào tệp PDF.</translation>
     </message>
     <message id="Cancel">
-        <location filename="../src/Main.qml" line="265"/>
+        <location filename="../src/Main.qml" line="406"/>
         <source>Cancel</source>
         <translation>Hủy</translation>
     </message>
     <message id="Save">
-        <location filename="../src/Main.qml" line="276"/>
+        <location filename="../src/Main.qml" line="414"/>
         <location filename="../src/Components/ViewRibbon.qml" line="55"/>
         <source>Save</source>
         <translation>Lưu</translation>
     </message>
     <message id="Discard">
-        <location filename="../src/Main.qml" line="285"/>
+        <location filename="../src/Main.qml" line="424"/>
         <source>Discard</source>
         <translation>Bỏ thay đổi</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="114"/>
+        <location filename="../src/Components/AppRibbon.qml" line="116"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="120"/>
-        <location filename="../src/Components/EditOverlay.qml" line="1130"/>
+        <location filename="../src/Components/AppRibbon.qml" line="122"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1143"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="126"/>
+        <location filename="../src/Components/AppRibbon.qml" line="128"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="151"/>
+        <location filename="../src/Components/AppRibbon.qml" line="153"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="155"/>
+        <location filename="../src/Components/AppRibbon.qml" line="157"/>
+        <location filename="../src/Components/DocumentTabBar.qml" line="128"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="114"/>
+        <location filename="../src/Components/DocumentView.qml" line="151"/>
         <location filename="../src/PDFDocument.cpp" line="65"/>
         <location filename="../src/PDFDocument.cpp" line="162"/>
         <source>No document open</source>
         <translation>Chưa mở tài liệu</translation>
     </message>
     <message id="PdfEditSurface">
-        <location filename="../src/Components/EditOverlay.qml" line="1019"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1032"/>
         <source>PDF edit surface</source>
         <translation>Vùng chỉnh sửa PDF</translation>
     </message>
     <message id="PdfEditSurfaceDescription">
-        <location filename="../src/Components/EditOverlay.qml" line="1021"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1034"/>
         <source>Use Tab or arrow keys to select content, then press Enter to edit text</source>
         <translation>Dùng Tab hoặc các phím mũi tên để chọn nội dung, sau đó nhấn Enter để sửa văn bản</translation>
     </message>
     <message id="Delete">
-        <location filename="../src/Components/EditOverlay.qml" line="1160"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1173"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
     <message id="ResizeTextBox">
-        <location filename="../src/Components/EditOverlay.qml" line="1582"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1595"/>
         <source>Resize text box</source>
         <translation>Đổi kích thước hộp văn bản</translation>
     </message>
     <message id="ApplyOrCancelEditHint">
-        <location filename="../src/Components/EditOverlay.qml" line="1701"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1714"/>
         <source>Ctrl/Cmd+Enter to apply · Esc to cancel</source>
         <oldsource>Enter to apply · Esc to cancel</oldsource>
         <translation>Ctrl/Cmd+Enter để áp dụng · Esc để hủy</translation>
@@ -211,7 +222,7 @@
         <translation>Làm lại</translation>
     </message>
     <message id="PageNumber">
-        <location filename="../src/Components/PdfPageDelegate.qml" line="79"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="88"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -667,6 +678,21 @@
         <location filename="../src/Components/TextFormatPanel.qml" line="654"/>
         <source>Font color</source>
         <translation>Màu chữ</translation>
+    </message>
+    <message id="CloseDocumentTab">
+        <location filename="../src/Components/DocumentTabBar.qml" line="182"/>
+        <source>Close “%1”</source>
+        <translation>Đóng “%1”</translation>
+    </message>
+    <message id="CloseTab">
+        <location filename="../src/Components/DocumentTabBar.qml" line="186"/>
+        <source>Close tab</source>
+        <translation>Đóng tab</translation>
+    </message>
+    <message id="CannotSaveOverOpenPdf">
+        <location filename="../src/PDFTabModel.cpp" line="348"/>
+        <source>Another open tab is already using that PDF file.</source>
+        <translation>Một tab đang mở khác đã sử dụng tệp PDF đó.</translation>
     </message>
 </context>
 </TS>

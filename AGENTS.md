@@ -14,7 +14,7 @@ Save/Save As persistence for supported PDF text content.
 
 Current features:
 
-- Open and close local PDF files.
+- Open multiple local PDF files in independent tabs and close them separately.
 - Render every page through PDFium.
 - Virtualized continuous scrolling with reusable QML delegates.
 - Asynchronous page rendering on a worker thread.
@@ -66,7 +66,9 @@ Current features:
   loading.
 - `src/ApplicationFonts.h/.cpp`: bundled-font registration and the separate
   bundled/system family catalogs used by draft font resolution.
-- `src/Main.qml`: menus, toolbar, virtualized `ListView`, and page delegates.
+- `src/Main.qml`: multi-tab coordination, menus, toolbar, and active workspace.
+- `src/PDFTabModel.h/.cpp`: per-tab document/edit sessions, active-tab state,
+  duplicate-path protection, and cross-tab save guards.
 - `src/PDFDocument.h/.cpp`: main-thread PDFium document, metadata, page sizes,
   navigation state, and source file path.
 - `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
@@ -256,8 +258,9 @@ clipped or elided unintentionally.
   document-state signals. If reopen unexpectedly fails after commit, close the
   stale in-memory document because its source object paths no longer match the
   file now on disk.
-- Disable document editing, Open, and window close while an async save is active.
-  Resume a pending Open/Quit action only after `saveFinished(true)`.
+- Disable document editing, Open, tab switching/closing, and window close while
+  an async save is active. Resume a pending tab close or Quit action only after
+  the matching tab emits `saveFinished(true)`.
 - Exact bundled font faces, reusable original PDF fonts, PDF standard fonts,
   and eligible macOS system TrueType faces are supported. Resolve system faces
   with CoreText on the GUI thread and snapshot their bytes into the save

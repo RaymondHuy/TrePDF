@@ -983,9 +983,11 @@ dẫn local mới. Cả hai kết thúc edit đang mở rồi chuyển snapshot 
 `PDFSaveWriter`:
 
 UI dùng `requestSave()`/`requestSaveAs()` để tạo request trên GUI thread rồi chạy
-writer qua thread pool. Trong lúc đó `saving = true`, vùng tài liệu và ribbon bị
-khóa để snapshot không bị thay đổi; badge vẫn được render. Pending Open/Quit chỉ
-tiếp tục sau signal `saveFinished(true)`.
+writer qua thread pool. Mỗi tab có controller và draft history riêng. Trong lúc
+một tab save, `saving = true`, vùng tài liệu, ribbon và thanh tab bị khóa để
+snapshot không bị thay đổi và không có save thứ hai chạy đồng thời; badge vẫn
+được render. Pending Close Tab/Quit của đúng session chỉ tiếp tục sau signal
+`saveFinished(true)`. Open tạo tab mới và không làm mất draft của tab hiện tại.
 
 1. Mở lại file nguồn bằng một `FPDF_DOCUMENT` riêng, không sửa handle đang dùng
    để render trên GUI thread.

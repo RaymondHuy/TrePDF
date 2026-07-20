@@ -2,8 +2,10 @@
 #include "PDFDocument.h"
 #include "PDFEditController.h"
 #include "PDFSaveWriter.h"
+#include "PDFTabModel.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QFontMetricsF>
 #include <QRawFont>
 #include <QSignalSpy>
@@ -1023,6 +1025,11 @@ private slots:
     void preservesStrokeAppearanceAndRejectsClipping();
     void savesAsynchronously();
     void keepsDraftsWhenSaveFails();
+    void opensDocumentsInIndependentTabs();
+    void clearsTabIdentityWhenDocumentCloses();
+    void keepsTabDraftsIndependent();
+    void savesOnlyRequestedTab();
+    void rejectsSaveAsOverAnotherOpenTab();
 
 private:
     QTemporaryDir m_temporaryDirectory;
@@ -3523,6 +3530,176 @@ void PDFEditControllerTest::keepsDraftsWhenSaveFails()
     QCOMPARE(document.source().toLocalFile(), sourcePath);
     QCOMPARE(document.renderRevision(), revisionBeforeSave);
     QVERIFY(pageText(sourcePath).contains(QString::fromLatin1(kRegularText)));
+}
+
+void PDFEditControllerTest::opensDocumentsInIndependentTabs()
+{
+    const QString firstPath = m_temporaryDirectory.filePath(
+        QStringLiteral("tabs-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("tabs-second.pdf"));
+    QVERIFY(createFontStylePdf(firstPath));
+    QVERIFY(createFontStylePdf(secondPath));
+
+    PDFTabModel tabs;
+    PDFDocumentSession *firstSession = tabs.open(QUrl::fromLocalFile(firstPath));
+    QVERIFY(firstSession);
+    QCOMPARE(tabs.count(), 1);
+    QCOMPARE(tabs.currentSession(), firstSession);
+
+    firstSession->setZoom(1.75);
+    firstSession->setScrollY(420.0);
+    PDFDocumentSession *secondSession = tabs.open(QUrl::fromLocalFile(secondPath));
+    QVERIFY(secondSession);
+    QVERIFY(secondSession != firstSession);
+    QCOMPARE(tabs.count(), 2);
+    QCOMPARE(tabs.currentIndex(), 1);
+    QCOMPARE(tabs.currentSession(), secondSession);
+    QCOMPARE(secondSession->zoom(), 1.0);
+    QCOMPARE(secondSession->scrollY(), 0.0);
+
+    const QString duplicatePath = QFileInfo(firstPath).dir().filePath(
+        QStringLiteral("./tabs-first.pdf"));
+    QCOMPARE(tabs.open(QUrl::fromLocalFile(duplicatePath)), firstSession);
+    QCOMPARE(tabs.count(), 2);
+    QCOMPARE(tabs.currentIndex(), 0);
+    QCOMPARE(firstSession->zoom(), 1.75);
+    QCOMPARE(firstSession->scrollY(), 420.0);
+}
+
+void PDFEditControllerTest::clearsTabIdentityWhenDocumentCloses()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("tab-identity.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFTabModel tabs;
+    PDFDocumentSession *session = tabs.open(QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+    QCOMPARE(session->title(), QStringLiteral("tab-identity.pdf"));
+    QCOMPARE(session->filePath(), sourcePath);
+
+    session->document()->close();
+
+    QVERIFY(session->title().isEmpty());
+    QVERIFY(session->filePath().isEmpty());
+}
+
+void PDFEditControllerTest::keepsTabDraftsIndependent()
+{
+    const QString firstPath = m_temporaryDirectory.filePath(
+        QStringLiteral("tab-draft-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("tab-draft-second.pdf"));
+    QVERIFY(createFontStylePdf(firstPath));
+    QVERIFY(createFontStylePdf(secondPath));
+
+    PDFTabModel tabs;
+    PDFDocumentSession *firstSession = tabs.open(QUrl::fromLocalFile(firstPath));
+    PDFDocumentSession *secondSession = tabs.open(QUrl::fromLocalFile(secondPath));
+    QVERIFY(firstSession);
+    QVERIFY(secondSession);
+
+    PDFEditController *firstController = firstSession->editController();
+    const QVariantMap candidate = candidateForText(
+        firstController->candidatesForPage(0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(firstController->selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    firstController->commitSelectedText(QStringLiteral("Draft in first tab"));
+
+    QVERIFY(firstSession->hasDrafts());
+    QVERIFY(!secondSession->hasDrafts());
+    QVERIFY(tabs.hasDrafts());
+    QVERIFY(!tabs.closeSession(firstSession));
+    QCOMPARE(tabs.count(), 2);
+
+    firstController->discardDrafts();
+    QVERIFY(!firstSession->hasDrafts());
+    QVERIFY(tabs.closeSession(firstSession));
+    QCOMPARE(tabs.count(), 1);
+    QCOMPARE(tabs.currentIndex(), 0);
+    QCOMPARE(tabs.currentSession(), secondSession);
+    QVERIFY(!tabs.hasDrafts());
+}
+
+void PDFEditControllerTest::savesOnlyRequestedTab()
+{
+    const QString firstPath = m_temporaryDirectory.filePath(
+        QStringLiteral("tab-save-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("tab-save-second.pdf"));
+    const QString firstOutputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("tab-save-first-output.pdf"));
+    QVERIFY(createFontStylePdf(firstPath));
+    QVERIFY(createFontStylePdf(secondPath));
+
+    PDFTabModel tabs;
+    PDFDocumentSession *firstSession = tabs.open(QUrl::fromLocalFile(firstPath));
+    PDFDocumentSession *secondSession = tabs.open(QUrl::fromLocalFile(secondPath));
+    QVERIFY(firstSession);
+    QVERIFY(secondSession);
+
+    const auto addDraft = [](PDFDocumentSession *session, const QString &text) {
+        PDFEditController *controller = session->editController();
+        const QVariantMap candidate = candidateForText(
+            controller->candidatesForPage(0),
+            QString::fromLatin1(kRegularText));
+        if (candidate.isEmpty()
+            || !controller->selectCandidate(
+                0,
+                candidate.value(QStringLiteral("objectId")).toString())) {
+            return false;
+        }
+        controller->commitSelectedText(text);
+        return controller->hasDrafts();
+    };
+    QVERIFY(addDraft(firstSession, QStringLiteral("First tab draft")));
+    QVERIFY(addDraft(secondSession, QStringLiteral("Second tab draft")));
+
+    QSignalSpy saveFinishedSpy(&tabs, &PDFTabModel::sessionSaveFinished);
+    QVERIFY(tabs.requestSaveAs(
+        firstSession,
+        QUrl::fromLocalFile(firstOutputPath)));
+    QVERIFY(tabs.anySaving());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 5000);
+    QCOMPARE(saveFinishedSpy.constFirst().at(0).value<PDFDocumentSession *>(),
+             firstSession);
+    QCOMPARE(saveFinishedSpy.constFirst().at(1).toBool(), true);
+    QVERIFY(!tabs.anySaving());
+    QVERIFY(!firstSession->hasDrafts());
+    QVERIFY(secondSession->hasDrafts());
+    QCOMPARE(firstSession->document()->source().toLocalFile(), firstOutputPath);
+    QCOMPARE(secondSession->document()->source().toLocalFile(), secondPath);
+    QVERIFY(normalizedPageText(firstOutputPath).contains(
+        QStringLiteral("First tab draft")));
+    QVERIFY(normalizedPageText(secondPath).contains(
+        QString::fromLatin1(kRegularText)));
+}
+
+void PDFEditControllerTest::rejectsSaveAsOverAnotherOpenTab()
+{
+    const QString firstPath = m_temporaryDirectory.filePath(
+        QStringLiteral("tab-save-as-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("tab-save-as-second.pdf"));
+    QVERIFY(createFontStylePdf(firstPath));
+    QVERIFY(createFontStylePdf(secondPath));
+
+    PDFTabModel tabs;
+    PDFDocumentSession *firstSession = tabs.open(QUrl::fromLocalFile(firstPath));
+    PDFDocumentSession *secondSession = tabs.open(QUrl::fromLocalFile(secondPath));
+    QVERIFY(firstSession);
+    QVERIFY(secondSession);
+
+    QSignalSpy statusSpy(&tabs, &PDFTabModel::statusMessage);
+    QVERIFY(!tabs.requestSaveAs(firstSession, secondSession->document()->source()));
+    QCOMPARE(statusSpy.count(), 1);
+    QVERIFY(!firstSession->saving());
+    QCOMPARE(firstSession->document()->source().toLocalFile(), firstPath);
+    QCOMPARE(secondSession->document()->source().toLocalFile(), secondPath);
 }
 
 QTEST_MAIN(PDFEditControllerTest)

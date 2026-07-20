@@ -11,11 +11,18 @@ Item {
     required property PDFEditController editController
     property real zoom: 1.0
     property bool pooled: false
+    property int sessionChangeGeneration: 0
     readonly property real pageMargin: 32
     readonly property real viewWidth: ListView.view ? ListView.view.width : 0
 
     width: Math.max(viewWidth, document.maximumPageWidth * zoom + pageMargin * 2)
     height: pageView.implicitHeight + pageLabel.implicitHeight + 12
+
+    function prepareForSessionChange() {
+        editOverlay.prepareForSessionChange()
+    }
+
+    onSessionChangeGenerationChanged: prepareForSessionChange()
 
     ListView.onPooled: pooled = true
     ListView.onReused: pooled = false
@@ -59,6 +66,8 @@ Item {
     }
 
     EditOverlay {
+        id: editOverlay
+
         x: pageView.x
         y: pageView.y
         width: pageView.width

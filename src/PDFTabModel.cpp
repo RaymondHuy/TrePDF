@@ -1,0 +1,426 @@
+#include "PDFTabModel.h"
+
+#include <QDir>
+#include <QFileInfo>
+#include <QtTranslation>
+
+PDFDocumentSession::PDFDocumentSession(QObject *parent)
+    : QObject(parent)
+    , m_document(new PDFDocument(this))
+    , m_editController(new PDFEditController(this))
+{
+    m_editController->setDocument(m_document);
+
+    connect(m_document,
+            &PDFDocument::sourceChanged,
+            this,
+            &PDFDocumentSession::refreshSourceState);
+    connect(m_editController,
+            &PDFEditController::historyStateChanged,
+            this,
+            [this]() {
+                emit hasDraftsChanged();
+            });
+    connect(m_editController,
+            &PDFEditController::savingChanged,
+            this,
+            &PDFDocumentSession::savingChanged);
+    connect(m_editController,
+            &PDFEditController::statusMessage,
+            this,
+            &PDFDocumentSession::statusMessage);
+    connect(m_editController,
+            &PDFEditController::saveFinished,
+            this,
+            &PDFDocumentSession::saveFinished);
+}
+
+PDFDocument *PDFDocumentSession::document() const
+{
+    return m_document;
+}
+
+PDFEditController *PDFDocumentSession::editController() const
+{
+    return m_editController;
+}
+
+QString PDFDocumentSession::title() const
+{
+    return m_title;
+}
+
+QString PDFDocumentSession::filePath() const
+{
+    return m_filePath;
+}
+
+qreal PDFDocumentSession::zoom() const
+{
+    return m_zoom;
+}
+
+qreal PDFDocumentSession::scrollX() const
+{
+    return m_scrollX;
+}
+
+qreal PDFDocumentSession::scrollY() const
+{
+    return m_scrollY;
+}
+
+bool PDFDocumentSession::panelCollapsed() const
+{
+    return m_panelCollapsed;
+}
+
+bool PDFDocumentSession::initialFitPending() const
+{
+    return m_initialFitPending;
+}
+
+bool PDFDocumentSession::hasDrafts() const
+{
+    return m_editController->hasDrafts();
+}
+
+bool PDFDocumentSession::saving() const
+{
+    return m_editController->saving();
+}
+
+void PDFDocumentSession::setZoom(qreal zoom)
+{
+    const qreal clampedZoom = qBound(0.1, zoom, 5.0);
+    if (qFuzzyCompare(m_zoom, clampedZoom)) {
+        return;
+    }
+
+    m_zoom = clampedZoom;
+    emit zoomChanged();
+}
+
+void PDFDocumentSession::setScrollX(qreal scrollX)
+{
+    const qreal clampedScrollX = qMax<qreal>(0.0, scrollX);
+    if (qFuzzyCompare(m_scrollX + 1.0, clampedScrollX + 1.0)) {
+        return;
+    }
+
+    m_scrollX = clampedScrollX;
+    emit scrollPositionChanged();
+}
+
+void PDFDocumentSession::setScrollY(qreal scrollY)
+{
+    const qreal clampedScrollY = qMax<qreal>(0.0, scrollY);
+    if (qFuzzyCompare(m_scrollY + 1.0, clampedScrollY + 1.0)) {
+        return;
+    }
+
+    m_scrollY = clampedScrollY;
+    emit scrollPositionChanged();
+}
+
+void PDFDocumentSession::setPanelCollapsed(bool collapsed)
+{
+    if (m_panelCollapsed == collapsed) {
+        return;
+    }
+
+    m_panelCollapsed = collapsed;
+    emit panelCollapsedChanged();
+}
+
+void PDFDocumentSession::setInitialFitPending(bool pending)
+{
+    if (m_initialFitPending == pending) {
+        return;
+    }
+
+    m_initialFitPending = pending;
+    emit initialFitPendingChanged();
+}
+
+bool PDFDocumentSession::open(const QUrl &source)
+{
+    if (!m_document->open(source)) {
+        return false;
+    }
+
+    m_scrollX = 0.0;
+    m_scrollY = 0.0;
+    m_initialFitPending = true;
+    emit scrollPositionChanged();
+    emit initialFitPendingChanged();
+    return true;
+}
+
+void PDFDocumentSession::prepareForDeactivation()
+{
+    m_editController->finishSelectedFrameResize();
+    m_editController->finishSelectedTextEdit();
+}
+
+void PDFDocumentSession::refreshSourceState()
+{
+    const QString newFilePath = m_document->source().isLocalFile()
+        ? QFileInfo(m_document->source().toLocalFile()).absoluteFilePath()
+        : QString();
+    if (m_filePath != newFilePath) {
+        m_filePath = newFilePath;
+        m_scrollX = 0.0;
+        m_scrollY = 0.0;
+        emit filePathChanged();
+        emit scrollPositionChanged();
+    }
+
+    const QString newTitle = m_filePath.isEmpty()
+        ? QString()
+        : QFileInfo(m_filePath).fileName();
+    if (m_title != newTitle) {
+        m_title = newTitle;
+        emit titleChanged();
+    }
+}
+
+PDFTabModel::PDFTabModel(QObject *parent)
+    : QAbstractListModel(parent)
+{
+}
+
+int PDFTabModel::rowCount(const QModelIndex &parent) const
+{
+    return parent.isValid() ? 0 : m_sessions.size();
+}
+
+QVariant PDFTabModel::data(const QModelIndex &index, int role) const
+{
+    if (!index.isValid() || index.row() < 0 || index.row() >= m_sessions.size()) {
+        return {};
+    }
+
+    return role == SessionRole
+        ? QVariant::fromValue(m_sessions.at(index.row()))
+        : QVariant();
+}
+
+QHash<int, QByteArray> PDFTabModel::roleNames() const
+{
+    return {{SessionRole, QByteArrayLiteral("session")}};
+}
+
+int PDFTabModel::count() const
+{
+    return m_sessions.size();
+}
+
+int PDFTabModel::currentIndex() const
+{
+    return m_currentIndex;
+}
+
+PDFDocumentSession *PDFTabModel::currentSession() const
+{
+    return sessionAt(m_currentIndex);
+}
+
+bool PDFTabModel::anySaving() const
+{
+    for (PDFDocumentSession *session : m_sessions) {
+        if (session->saving()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PDFTabModel::hasDrafts() const
+{
+    return firstDraftSession() != nullptr;
+}
+
+PDFDocumentSession *PDFTabModel::open(const QUrl &source)
+{
+    if (anySaving()) {
+        //% "Please wait for the PDF to finish saving."
+        emit statusMessage(qtTrId("WaitForPdfSave"));
+        return nullptr;
+    }
+
+    const QString identity = fileIdentity(source);
+    if (!identity.isEmpty()) {
+        for (int index = 0; index < m_sessions.size(); ++index) {
+            if (fileIdentity(m_sessions.at(index)->document()->source()) == identity) {
+                setCurrentIndex(index);
+                return m_sessions.at(index);
+            }
+        }
+    }
+
+    auto *session = new PDFDocumentSession(this);
+    if (!session->open(source)) {
+        emit statusMessage(session->document()->statusText());
+        delete session;
+        return nullptr;
+    }
+
+    const int insertionIndex = m_sessions.size();
+    beginInsertRows(QModelIndex(), insertionIndex, insertionIndex);
+    m_sessions.append(session);
+    connectSession(session);
+    endInsertRows();
+    emit countChanged();
+    setCurrentIndex(insertionIndex);
+    return session;
+}
+
+PDFDocumentSession *PDFTabModel::sessionAt(int index) const
+{
+    return index >= 0 && index < m_sessions.size()
+        ? m_sessions.at(index)
+        : nullptr;
+}
+
+int PDFTabModel::indexOf(PDFDocumentSession *session) const
+{
+    return m_sessions.indexOf(session);
+}
+
+bool PDFTabModel::closeSession(PDFDocumentSession *session)
+{
+    const int index = indexOf(session);
+    if (index < 0 || session->saving() || anySaving()) {
+        return false;
+    }
+
+    session->prepareForDeactivation();
+    if (session->hasDrafts()) {
+        return false;
+    }
+    const int oldCurrentIndex = m_currentIndex;
+    const bool removingCurrentSession = index == oldCurrentIndex;
+
+    beginRemoveRows(QModelIndex(), index, index);
+    m_sessions.removeAt(index);
+    if (m_sessions.isEmpty()) {
+        m_currentIndex = -1;
+    } else if (removingCurrentSession) {
+        m_currentIndex = qMin(index, m_sessions.size() - 1);
+    } else if (index < oldCurrentIndex) {
+        m_currentIndex = oldCurrentIndex - 1;
+    }
+    endRemoveRows();
+
+    emit countChanged();
+    if (m_currentIndex != oldCurrentIndex || removingCurrentSession) {
+        emit currentIndexChanged();
+    }
+    if (removingCurrentSession) {
+        emit currentSessionChanged();
+    }
+    emit hasDraftsChanged();
+    session->deleteLater();
+    return true;
+}
+
+bool PDFTabModel::requestSave(PDFDocumentSession *session)
+{
+    if (!contains(session) || anySaving()) {
+        return false;
+    }
+    return session->editController()->requestSave();
+}
+
+bool PDFTabModel::requestSaveAs(PDFDocumentSession *session, const QUrl &target)
+{
+    if (!contains(session) || anySaving()) {
+        return false;
+    }
+
+    const QString targetIdentity = fileIdentity(target);
+    if (!targetIdentity.isEmpty()) {
+        for (PDFDocumentSession *otherSession : m_sessions) {
+            if (otherSession != session
+                && fileIdentity(otherSession->document()->source()) == targetIdentity) {
+                //% "Another open tab is already using that PDF file."
+                emit statusMessage(qtTrId("CannotSaveOverOpenPdf"));
+                return false;
+            }
+        }
+    }
+
+    return session->editController()->requestSaveAs(target);
+}
+
+PDFDocumentSession *PDFTabModel::firstDraftSession() const
+{
+    for (PDFDocumentSession *session : m_sessions) {
+        if (session->hasDrafts()) {
+            return session;
+        }
+    }
+    return nullptr;
+}
+
+void PDFTabModel::finishAllEdits()
+{
+    for (PDFDocumentSession *session : m_sessions) {
+        session->prepareForDeactivation();
+    }
+}
+
+void PDFTabModel::setCurrentIndex(int index)
+{
+    if (index < 0 || index >= m_sessions.size() || index == m_currentIndex || anySaving()) {
+        return;
+    }
+
+    if (PDFDocumentSession *oldSession = currentSession()) {
+        oldSession->prepareForDeactivation();
+    }
+    m_currentIndex = index;
+    emit currentIndexChanged();
+    emit currentSessionChanged();
+}
+
+QString PDFTabModel::fileIdentity(const QUrl &source)
+{
+    if (!source.isLocalFile() || source.toLocalFile().isEmpty()) {
+        return {};
+    }
+
+    const QFileInfo fileInfo(source.toLocalFile());
+    const QString canonicalPath = fileInfo.canonicalFilePath();
+    return canonicalPath.isEmpty()
+        ? QDir::cleanPath(fileInfo.absoluteFilePath())
+        : canonicalPath;
+}
+
+bool PDFTabModel::contains(PDFDocumentSession *session) const
+{
+    return session && m_sessions.contains(session);
+}
+
+void PDFTabModel::connectSession(PDFDocumentSession *session)
+{
+    connect(session,
+            &PDFDocumentSession::statusMessage,
+            this,
+            &PDFTabModel::statusMessage);
+    connect(session,
+            &PDFDocumentSession::hasDraftsChanged,
+            this,
+            &PDFTabModel::hasDraftsChanged);
+    connect(session,
+            &PDFDocumentSession::savingChanged,
+            this,
+            &PDFTabModel::anySavingChanged);
+    connect(session,
+            &PDFDocumentSession::saveFinished,
+            this,
+            [this, session](bool succeeded) {
+                emit sessionSaveFinished(session, succeeded);
+            });
+}

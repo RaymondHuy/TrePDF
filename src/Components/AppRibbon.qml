@@ -32,6 +32,8 @@ Column {
     }
 
     Component.onCompleted: syncEditTool()
+    onDocumentChanged: syncEditTool()
+    onEditControllerChanged: syncEditTool()
 
     Connections {
         target: root.document

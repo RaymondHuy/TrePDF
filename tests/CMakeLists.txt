@@ -8,6 +8,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFEditController.h
     ../src/PDFSaveWriter.cpp
     ../src/PDFSaveWriter.h
+    ../src/PDFTabModel.cpp
+    ../src/PDFTabModel.h
     ../src/PDFiumSynchronization.h
 )
 
