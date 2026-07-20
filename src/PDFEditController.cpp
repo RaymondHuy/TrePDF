@@ -779,6 +779,112 @@ QStringList PDFEditController::availableFontFamilies() const
         selectedFontItalic());
 }
 
+QStringList PDFEditController::fontFamiliesForFilter(FontFilter filter) const
+{
+    struct FontRequirement {
+        bool bold = false;
+        bool italic = false;
+    };
+
+    QVector<FontRequirement> requirements;
+    const auto appendRequirement = [&requirements](
+                                       const CharacterFormat &format) {
+        const auto existing = std::find_if(
+            requirements.begin(),
+            requirements.end(),
+            [&format](const FontRequirement &requirement) {
+                return requirement.bold == format.fontBold
+                    && requirement.italic == format.fontItalic;
+            });
+        if (existing == requirements.end()) {
+            requirements.append(FontRequirement{
+                format.fontBold,
+                format.fontItalic});
+        }
+    };
+
+    if (m_hasSelection) {
+        const Draft draft = selectedDraftForDisplay();
+        qsizetype rangeStart = 0;
+        qsizetype rangeLength = 0;
+        selectedTextRangeForDraft(draft, rangeStart, rangeLength);
+        const qsizetype rangeEnd = rangeStart + rangeLength;
+        for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
+            const qsizetype spanStart = qMax<qsizetype>(rangeStart, span.start);
+            const qsizetype spanEnd = qMin<qsizetype>(
+                rangeEnd,
+                span.start + span.length);
+            if (spanEnd > spanStart) {
+                appendRequirement(span.format);
+            }
+        }
+        if (requirements.isEmpty()) {
+            appendRequirement(primaryCharacterFormat(draft));
+        }
+    } else {
+        requirements.append(FontRequirement{
+            selectedFontBold(),
+            selectedFontItalic()});
+    }
+
+    const auto familiesForRequirement = [filter](
+                                            const FontRequirement &requirement) {
+        switch (filter) {
+        case VietnameseFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Vietnamese,
+                requirement.bold,
+                requirement.italic));
+        case EnglishFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::English,
+                requirement.bold,
+                requirement.italic));
+        case ChineseFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Chinese,
+                requirement.bold,
+                requirement.italic));
+        case JapaneseFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Japanese,
+                requirement.bold,
+                requirement.italic));
+        case KoreanFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Korean,
+                requirement.bold,
+                requirement.italic));
+        }
+        return QStringList(ApplicationFonts::availableFontFamilies(
+            requirement.bold,
+            requirement.italic));
+    };
+
+    QStringList families;
+    bool firstRequirement = true;
+    for (const FontRequirement &requirement : std::as_const(requirements)) {
+        const QStringList requirementFamilies = familiesForRequirement(
+            requirement);
+        if (firstRequirement) {
+            families = requirementFamilies;
+            firstRequirement = false;
+            continue;
+        }
+        families.erase(
+            std::remove_if(
+                families.begin(),
+                families.end(),
+                [&requirementFamilies](const QString &family) {
+                    return !requirementFamilies.contains(
+                        family,
+                        Qt::CaseInsensitive);
+                }),
+            families.end());
+    }
+    return families;
+}
+
 int PDFEditController::selectedPage() const
 {
     return m_hasSelection ? m_selectedCandidate.page : -1;

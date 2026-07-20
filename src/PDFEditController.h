@@ -66,6 +66,15 @@ public:
     };
     Q_ENUM(Tool)
 
+    enum FontFilter {
+        VietnameseFonts,
+        EnglishFonts,
+        ChineseFonts,
+        JapaneseFonts,
+        KoreanFonts
+    };
+    Q_ENUM(FontFilter)
+
     explicit PDFEditController(QObject *parent = nullptr);
     ~PDFEditController() override;
 
@@ -125,6 +134,7 @@ public:
                                        bool fontBold,
                                        bool fontItalic,
                                        qreal pixelSize) const;
+    Q_INVOKABLE QStringList fontFamiliesForFilter(FontFilter filter) const;
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();

@@ -11,6 +11,7 @@ Rectangle {
     required property AppTheme theme
     required property bool collapsed
     required property var availableFontFamilies
+    required property var fontFamiliesForFilter
     required property string selectedFontFamily
     required property bool selectedFontBold
     required property bool selectedFontItalic
@@ -18,7 +19,30 @@ Rectangle {
     required property color selectedColor
     property bool formattingEnabled: false
 
-    readonly property var displayedFontFamilies: availableFontFamilies
+    property var displayedFontFamilies: availableFontFamilies
+    property int fontFamilyFilter: PDFEditController.VietnameseFonts
+    //% "Vietnamese"
+    readonly property string vietnameseFontsLabel: qsTrId("VietnameseFonts")
+    //% "English"
+    readonly property string englishFontsLabel: qsTrId("EnglishFonts")
+    //% "Chinese"
+    readonly property string chineseFontsLabel: qsTrId("ChineseFonts")
+    //% "Japanese"
+    readonly property string japaneseFontsLabel: qsTrId("JapaneseFonts")
+    //% "Korean"
+    readonly property string koreanFontsLabel: qsTrId("KoreanFonts")
+    readonly property var fontFilterOptions: [
+        { value: PDFEditController.VietnameseFonts,
+          label: vietnameseFontsLabel },
+        { value: PDFEditController.EnglishFonts,
+          label: englishFontsLabel },
+        { value: PDFEditController.ChineseFonts,
+          label: chineseFontsLabel },
+        { value: PDFEditController.JapaneseFonts,
+          label: japaneseFontsLabel },
+        { value: PDFEditController.KoreanFonts,
+          label: koreanFontsLabel }
+    ]
     readonly property int selectedFontFamilyIndex: {
         if (selectedFontFamily.length === 0)
             return -1
@@ -30,6 +54,20 @@ Rectangle {
         }
         return -1
     }
+
+    function refreshDisplayedFontFamilies() {
+        if (typeof root.fontFamiliesForFilter !== "function") {
+            root.displayedFontFamilies = root.availableFontFamilies
+            return
+        }
+        const families = root.fontFamiliesForFilter(root.fontFamilyFilter)
+        root.displayedFontFamilies = families === undefined || families === null
+            ? []
+            : families
+    }
+
+    onAvailableFontFamiliesChanged:
+        root.refreshDisplayedFontFamilies()
 
     signal collapsedChangeRequested(bool collapsed)
     signal fontFamilyChangeRequested(string fontFamily)
@@ -186,6 +224,155 @@ Rectangle {
                             clip: true
                             onActivated: root.fontFamilyChangeRequested(
                                 fontFamilyBox.currentText)
+
+                            popup: Popup {
+                                id: fontFamilyPopup
+
+                                x: Math.min(0, fontFamilyBox.width - width)
+                                y: fontFamilyBox.height
+                                width: Math.max(fontFamilyBox.width, 300)
+                                implicitHeight: contentItem.implicitHeight
+                                    + topPadding + bottomPadding
+                                height: Math.min(
+                                    implicitHeight,
+                                    420,
+                                    Math.max(
+                                        80,
+                                        root.height
+                                            - topMargin - bottomMargin))
+                                topMargin: 6
+                                bottomMargin: 6
+                                padding: 1
+                                palette: fontFamilyBox.palette
+                                closePolicy: Popup.CloseOnEscape
+                                    | Popup.CloseOnPressOutside
+                                onAboutToShow:
+                                    root.refreshDisplayedFontFamilies()
+
+                                contentItem: ColumnLayout {
+                                    spacing: 0
+
+                                    GridLayout {
+                                        Layout.fillWidth: true
+                                        Layout.margins: 6
+                                        columns: 3
+                                        columnSpacing: 4
+                                        rowSpacing: 4
+
+                                        Repeater {
+                                            model: root.fontFilterOptions.length
+
+                                            delegate: Button {
+                                                id: fontFilterButton
+
+                                                required property int index
+                                                readonly property var option:
+                                                    root.fontFilterOptions[index]
+
+                                                Layout.fillWidth: true
+                                                Layout.minimumWidth: 0
+                                                Layout.preferredWidth: 1
+                                                Layout.preferredHeight: 28
+                                                checkable: true
+                                                autoExclusive: true
+                                                checked: root.fontFamilyFilter
+                                                    === option.value
+                                                text: option.label
+                                                leftPadding: 6
+                                                rightPadding: 6
+                                                topPadding: 3
+                                                bottomPadding: 3
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    root.fontFamilyFilter =
+                                                        option.value
+                                                    root.refreshDisplayedFontFamilies()
+                                                    fontList.positionViewAtBeginning()
+                                                    fontFamilyBox.forceActiveFocus()
+                                                }
+
+                                                contentItem: Label {
+                                                    text: fontFilterButton.text
+                                                    color: fontFilterButton.checked
+                                                        ? root.theme.foxitDarkOrange
+                                                        : root.theme.ribbonTextColor
+                                                    font.pixelSize: 10
+                                                    horizontalAlignment:
+                                                        Text.AlignHCenter
+                                                    verticalAlignment:
+                                                        Text.AlignVCenter
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                background: Rectangle {
+                                                    radius: 5
+                                                    color: fontFilterButton.down
+                                                        ? "#f5dfcf"
+                                                        : fontFilterButton.checked
+                                                            || fontFilterButton.hovered
+                                                            ? root.theme.foxitPaleOrange
+                                                            : "transparent"
+                                                    border.width:
+                                                        fontFilterButton.checked
+                                                            ? 1 : 0
+                                                    border.color:
+                                                        root.theme.foxitBorderOrange
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 1
+                                        color: root.theme.ribbonBorder
+                                    }
+
+                                    Item {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        Layout.minimumHeight: 80
+                                        Layout.preferredHeight: Math.min(
+                                            300,
+                                            Math.max(80, fontList.contentHeight))
+
+                                        ListView {
+                                            id: fontList
+
+                                            anchors.fill: parent
+                                            clip: true
+                                            reuseItems: true
+                                            model: fontFamilyBox.delegateModel
+                                            currentIndex:
+                                                fontFamilyBox.highlightedIndex
+                                            highlightMoveDuration: 0
+                                            ScrollIndicator.vertical:
+                                                ScrollIndicator {}
+                                        }
+
+                                        Label {
+                                            anchors.fill: parent
+                                            anchors.margins: 12
+                                            visible: fontFamilyBox.count === 0
+                                            //% "No supported fonts match this filter."
+                                            text: qsTrId("NoFontsMatchFilter")
+                                            color: "#747176"
+                                            font.pixelSize: 11
+                                            horizontalAlignment:
+                                                Text.AlignHCenter
+                                            verticalAlignment:
+                                                Text.AlignVCenter
+                                            wrapMode: Text.Wrap
+                                        }
+                                    }
+                                }
+
+                                background: Rectangle {
+                                    color: fontFamilyBox.palette.window
+                                    border.width: 1
+                                    border.color: root.theme.ribbonBorder
+                                }
+                            }
 
                             background: Rectangle {
                                 radius: 6
