@@ -243,9 +243,11 @@ clipped or elided unintentionally.
   the PDF matrix continues to use the exact source scale.
 - Keep loaded font handles alive until all changed pages have called
   `FPDFPage_GenerateContent()` and the document has been serialized.
-- Write through `QSaveFile` and `FPDF_SaveAsCopy(FPDF_NO_INCREMENTAL)`. Commit
-  only after PDFium succeeds; any earlier error must leave the destination and
-  in-memory drafts untouched.
+- Write through `QSaveFile` and call `FPDF_SaveAsCopy()` with
+  `FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS`. The subset flag trims newly
+  embedded font programs to glyphs used by new text objects while leaving
+  original PDF font resources unchanged. Commit only after PDFium succeeds;
+  any earlier error must leave the destination and in-memory drafts untouched.
 - Preserve the earliest source z-order with `FPDFPage_InsertObjectAtIndex()`;
   added text is appended. Convert coordinates with `FPDF_DeviceToPage()` so
   CropBox offsets and page rotation follow the same mapping as the editor.
@@ -260,7 +262,7 @@ clipped or elided unintentionally.
   and eligible macOS system TrueType faces are supported. Resolve system faces
   with CoreText on the GUI thread and snapshot their bytes into the save
   request. Materialize TTC faces as standalone sfnt data before giving them to
-  PDFium. Accept only static `glyf/loca` faces up to 32 MiB whose OS/2 license
+  PDFium. Accept only static `glyf/loca` faces up to 64 MiB whose OS/2 license
   permits Installable or Editable embedding; reject CFF/CFF2, variable,
   color or bitmap-only, missing-glyph, Restricted, and Preview & Print-only
   faces rather than silently substituting them. Filter the font picker with a

@@ -414,8 +414,8 @@ variable, và `OS/2.fsType` cho phép Installable hoặc Editable embedding. K�
 quả được cache theo `(family, bold, italic)`; probe không dựng sfnt và không giữ
 font bytes. Font nguồn PDF bị lọc vẫn được hiển thị trong ô hiện tại nhưng không
 được chèn vào popup. API đổi family kiểm tra lại mọi style span trong range để
-caller ngoài QML không bypass bộ lọc. Coverage theo text và giới hạn 32 MiB vẫn
-được writer kiểm tra chính xác lúc Save.
+caller ngoài QML không bypass bộ lọc. Coverage theo text và giới hạn 64 MiB của
+system face được writer kiểm tra chính xác lúc Save.
 
 Popup vẫn là một dropdown duy nhất, với các bộ lọc `Tiếng Việt`, `Tiếng Anh`,
 `Tiếng Trung`, `Tiếng Nhật` và `Tiếng Hàn`. Nhóm tiếng Việt đòi đủ bộ ký tự Việt
@@ -1008,10 +1008,12 @@ tiếp tục sau signal `saveFinished(true)`.
    bảng của face đó và dựng một sfnt TrueType đơn-face. Cách này hỗ trợ cả font
    nằm trong TTC mà không để PDFium mặc định lấy face 0; bytes được snapshot vào
    save request trước khi worker chạy. Writer chỉ chấp nhận outline `glyf/loca`,
-   đủ glyph, không quá 32 MiB và `OS/2.fsType` cho phép Installable hoặc Editable
+   đủ glyph, không quá 64 MiB và `OS/2.fsType` cho phép Installable hoặc Editable
    embedding. Font CFF/CFF2, variable, color hoặc bitmap-only, Preview & Print-only hoặc
    Restricted sẽ làm save thất bại thay vì bị thay thế âm thầm. Các object không
-   sửa vẫn giữ font resource cũ. Underline được tạo thành path.
+   sửa vẫn giữ font resource cũ. Khi serialize, PDFium subset mỗi font mới nhúng
+   xuống tập glyph thực sự được các text object mới sử dụng; font resource gốc
+   của PDF không bị subset lại. Underline được tạo thành path.
    Resolver đồng thời đánh dấu font của từng run là font PDF nguồn, font nhúng
    mới hay PDF standard. Nếu run thật sự tái sử dụng font nguồn và stretch chưa
    bị người dùng đổi, writer ghi lại đúng `horizontalScale` ban đầu. Với font
@@ -1021,8 +1023,9 @@ tiếp tục sau signal `saveFinished(true)`.
    text PDF vốn condensed/expanded có chủ ý vẫn giữ nguyên scale.
 5. Xóa mọi text object nguồn của draft, insert replacement tại z-order sớm nhất
    của các object nguồn và gọi `FPDFPage_GenerateContent()` cho từng page đã đổi.
-6. Serialize bằng `FPDF_SaveAsCopy(FPDF_NO_INCREMENTAL)` qua `QSaveFile`; chỉ
-   commit file đích khi toàn bộ quá trình thành công.
+6. Serialize bằng `FPDF_SaveAsCopy()` với
+   `FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS` qua `QSaveFile`; chỉ commit file
+   đích khi toàn bộ quá trình thành công.
 7. Mở lại file đã lưu bằng `PDFDocument::open()`. Các signal đổi document/revision
    reset draft và undo/redo chỉ sau khi reopen thành công.
 

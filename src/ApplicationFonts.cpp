@@ -28,7 +28,7 @@
 
 namespace {
 
-constexpr qsizetype kMaximumSystemFontBytes = 32 * 1024 * 1024;
+constexpr qsizetype kMaximumSystemFontBytes = 64 * 1024 * 1024;
 constexpr int kFontLanguageCount = 5;
 
 QVector<uint> visibleCodePoints(const QString &text)

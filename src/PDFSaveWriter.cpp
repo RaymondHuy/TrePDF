@@ -1443,7 +1443,9 @@ PDFSaveWriter::Result writeDocument(FPDF_DOCUMENT document,
             -1,
             writer.errorString());
     }
-    if (!FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL)) {
+    constexpr FPDF_DWORD saveFlags =
+        FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS;
+    if (!FPDF_SaveAsCopy(document, &writer, saveFlags)) {
         return failure(
             PDFSaveWriter::Error::OutputWriteFailed,
             -1,

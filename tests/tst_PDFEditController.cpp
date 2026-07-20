@@ -590,10 +590,39 @@ QString fontFamilyName(FPDF_FONT font)
     return QString::fromUtf8(buffer);
 }
 
+bool hasSubsetFontPrefix(const QString &baseName)
+{
+    constexpr qsizetype prefixLength = 6;
+    if (baseName.size() <= prefixLength
+        || baseName.at(prefixLength) != QLatin1Char('+')) {
+        return false;
+    }
+    for (qsizetype index = 0; index < prefixLength; ++index) {
+        const QChar character = baseName.at(index);
+        if (character < QLatin1Char('A') || character > QLatin1Char('Z')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString compactFontName(const QString &name)
+{
+    QString result;
+    result.reserve(name.size());
+    for (const QChar character : name) {
+        if (character.isLetterOrNumber()) {
+            result.append(character.toLower());
+        }
+    }
+    return result;
+}
+
 struct TextObjectFontInfo {
     bool found = false;
     QString baseName;
     QString familyName;
+    size_t dataSize = 0;
     bool italic = false;
     int embedded = -1;
 };
@@ -619,6 +648,9 @@ TextObjectFontInfo textObjectFontInfo(const QString &filePath,
             info.found = font;
             info.baseName = baseFontName(object);
             info.familyName = fontFamilyName(font);
+            if (font) {
+                FPDFFont_GetFontData(font, nullptr, 0, &info.dataSize);
+            }
             int italicAngle = 0;
             info.italic = font
                 && FPDFFont_GetItalicAngle(font, &italicAngle)
@@ -2572,6 +2604,21 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial()
         editedFont.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive),
         expectedBold);
     QCOMPARE(editedFont.embedded, 1);
+    QVERIFY2(
+        hasSubsetFontPrefix(editedFont.baseName),
+        qPrintable(QStringLiteral("Expected subset font name, got: %1")
+                       .arg(editedFont.baseName)));
+    const QByteArray fullFontData = ApplicationFonts::bundledFontData(
+        QStringLiteral("Arial"),
+        expectedBold,
+        false);
+    QVERIFY(!fullFontData.isEmpty());
+    QVERIFY(editedFont.dataSize > 0);
+    QVERIFY2(
+        editedFont.dataSize < static_cast<size_t>(fullFontData.size()),
+        qPrintable(QStringLiteral("Expected subset font smaller than full face: %1 >= %2")
+                       .arg(editedFont.dataSize)
+                       .arg(fullFontData.size())));
 
     const TextObjectFontInfo untouchedFont = textObjectFontInfo(
         outputPath,
@@ -2597,19 +2644,30 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedSystemFont_data()
     QTest::addColumn<QString>("fontFamily");
     QTest::addColumn<bool>("fontBold");
     QTest::addColumn<bool>("fontItalic");
+    QTest::addColumn<QString>("expectedText");
 
     QTest::newRow("georgia-regular")
-        << QStringLiteral("Georgia") << false << false;
+        << QStringLiteral("Georgia") << false << false
+        << QStringLiteral("Tiếng Việt");
     QTest::newRow("georgia-bold")
-        << QStringLiteral("Georgia") << true << false;
+        << QStringLiteral("Georgia") << true << false
+        << QStringLiteral("Tiếng Việt");
     QTest::newRow("georgia-italic")
-        << QStringLiteral("Georgia") << false << true;
+        << QStringLiteral("Georgia") << false << true
+        << QStringLiteral("Tiếng Việt");
     QTest::newRow("georgia-bold-italic")
-        << QStringLiteral("Georgia") << true << true;
+        << QStringLiteral("Georgia") << true << true
+        << QStringLiteral("Tiếng Việt");
     // Helvetica Neue is stored in a TTC on macOS. The styled row verifies that the
     // selected face is materialized instead of PDFium loading collection face 0.
     QTest::newRow("helvetica-neue-ttc-bold-italic")
-        << QStringLiteral("Helvetica Neue") << true << true;
+        << QStringLiteral("Helvetica Neue") << true << true
+        << QStringLiteral("Tiếng Việt");
+    // Heiti TC's exact TrueType face is about 53 MiB. This verifies that a system
+    // face above the old 32 MiB limit reaches PDFium and is subset on save.
+    QTest::newRow("heiti-tc-large-ttc")
+        << QStringLiteral("Heiti TC") << false << false
+        << QStringLiteral("繁體漢字測試");
 }
 
 void PDFEditControllerTest::savesVietnameseEditWithEmbeddedSystemFont()
@@ -2617,21 +2675,24 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedSystemFont()
     QFETCH(QString, fontFamily);
     QFETCH(bool, fontBold);
     QFETCH(bool, fontItalic);
+    QFETCH(QString, expectedText);
 
     if (!ApplicationFonts::systemFontFamilies().contains(
             fontFamily,
             Qt::CaseInsensitive)) {
         QSKIP(qPrintable(QStringLiteral("Missing system font: %1").arg(fontFamily)));
     }
-    const ApplicationFonts::FontFaceData systemFace =
+    ApplicationFonts::FontFaceData systemFace =
         ApplicationFonts::systemFontFace(fontFamily, fontBold, fontItalic);
     if (!systemFace.isValid()) {
         QSKIP(qPrintable(QStringLiteral("System face unavailable: %1 (%2)")
                              .arg(fontFamily)
                              .arg(static_cast<int>(systemFace.error))));
     }
+    const size_t fullFontDataSize = static_cast<size_t>(systemFace.data.size());
+    systemFace.data.clear();
+    systemFace.data.squeeze();
 
-    const QString expectedText = QStringLiteral("Tiếng Việt");
     const QString editedText = expectedText.normalized(
         QString::NormalizationForm_D);
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -2671,11 +2732,12 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedSystemFont()
 
     const TextObjectFontInfo editedFont = textObjectFontInfo(
         outputPath,
-        QStringLiteral("Tiếng"));
+        expectedText.left(3));
     QVERIFY(editedFont.found);
+    const QString compactExpectedFamily = compactFontName(fontFamily);
     QVERIFY2(
-        editedFont.familyName.contains(fontFamily, Qt::CaseInsensitive)
-            || editedFont.baseName.contains(fontFamily, Qt::CaseInsensitive),
+        compactFontName(editedFont.familyName).contains(compactExpectedFamily)
+            || compactFontName(editedFont.baseName).contains(compactExpectedFamily),
         qPrintable(QStringLiteral("Saved font: %1 / %2")
                        .arg(editedFont.familyName, editedFont.baseName)));
     QCOMPARE(
@@ -2683,8 +2745,16 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedSystemFont()
         fontBold);
     QCOMPARE(editedFont.italic, fontItalic);
     QCOMPARE(editedFont.embedded, 1);
-    QVERIFY(editedFont.baseName.size() <= 6
-            || editedFont.baseName.at(6) != QLatin1Char('+'));
+    QVERIFY2(
+        hasSubsetFontPrefix(editedFont.baseName),
+        qPrintable(QStringLiteral("Expected subset font name, got: %1")
+                       .arg(editedFont.baseName)));
+    QVERIFY(editedFont.dataSize > 0);
+    QVERIFY2(
+        editedFont.dataSize < fullFontDataSize,
+        qPrintable(QStringLiteral("Expected subset font smaller than full face: %1 >= %2")
+                       .arg(editedFont.dataSize)
+                       .arg(fullFontDataSize)));
 
     const TextObjectFontInfo untouchedFont = textObjectFontInfo(
         outputPath,
@@ -2762,12 +2832,19 @@ void PDFEditControllerTest::preservesInheritedSystemFontForVietnamese()
         outputPath,
         expectedText);
     QVERIFY(editedFont.found);
+    const QString compactExpectedFamily = compactFontName(fontFamily);
     QVERIFY2(
-        editedFont.familyName.contains(fontFamily, Qt::CaseInsensitive)
-            || editedFont.baseName.contains(fontFamily, Qt::CaseInsensitive),
+        compactFontName(editedFont.familyName).contains(compactExpectedFamily)
+            || compactFontName(editedFont.baseName).contains(compactExpectedFamily),
         qPrintable(QStringLiteral("Saved font: %1 / %2")
                        .arg(editedFont.familyName, editedFont.baseName)));
     QCOMPARE(editedFont.embedded, 1);
+    QVERIFY2(
+        hasSubsetFontPrefix(editedFont.baseName),
+        qPrintable(QStringLiteral("Expected subset font name, got: %1")
+                       .arg(editedFont.baseName)));
+    QVERIFY(editedFont.dataSize > 0);
+    QVERIFY(editedFont.dataSize < static_cast<size_t>(systemFace.data.size()));
 }
 
 void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese_data()
