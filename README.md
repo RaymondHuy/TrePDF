@@ -37,14 +37,16 @@ written with the matching bundled Arial Unicode font instead of reusing a
 potentially incomplete PDF subset. Eligible newly selected macOS system fonts
 whose exact regular/bold/italic face is available are resolved with CoreText,
 snapshotted before the save worker starts, and embedded as CID Unicode TrueType
-fonts. TTC faces are materialized individually so PDFium does not select the
-wrong face. The font picker probes the exact active style and excludes known
+fonts. On serialization, PDFium subsets each newly embedded face to the glyphs
+used by the new text objects; original PDF font resources remain untouched. TTC
+faces are materialized individually so PDFium does not select the wrong face.
+The font picker probes the exact active style and excludes known
 incompatible system faces such as color, CFF/CFF2, variable, bitmap-only, or
 embedding-restricted fonts. A filtered source font can still be displayed as
 the current PDF font without being offered in the popup. Unedited objects keep
-their original font resources. Missing glyphs, faces larger than 32 MiB, and
-other failures discovered by the final content-specific check stop the save
-with an error and keep the draft intact.
+their original font resources. Missing glyphs, system faces larger than 64 MiB,
+and other failures discovered by the final content-specific check stop the
+save with an error and keep the draft intact.
 
 The same font dropdown provides Vietnamese, English, Chinese, Japanese, and
 Korean filters. Vietnamese uses full precomposed Vietnamese coverage; English
