@@ -7,6 +7,7 @@ namespace ApplicationFonts {
 
 enum class FontLanguage {
     Vietnamese,
+    English,
     Chinese,
     Japanese,
     Korean
@@ -39,9 +40,6 @@ const QStringList &availableFontFamilies(bool bold = false,
 const QStringList &fontFamiliesForLanguage(FontLanguage language,
                                            bool bold = false,
                                            bool italic = false);
-QStringList fontFamiliesSupportingText(const QString &text,
-                                       bool bold = false,
-                                       bool italic = false);
 bool isFontFaceSelectable(const QString &family, bool bold, bool italic);
 bool fontFaceSupportsText(const QString &family,
                           bool bold,

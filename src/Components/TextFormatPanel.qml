@@ -20,32 +20,28 @@ Rectangle {
     property bool formattingEnabled: false
 
     property var displayedFontFamilies: availableFontFamilies
-    property int fontFamilyFilter: PDFEditController.SuitableFonts
-    //% "Suitable"
-    readonly property string suitableFontsLabel: qsTrId("SuitableFonts")
+    property int fontFamilyFilter: PDFEditController.VietnameseFonts
     //% "Vietnamese"
     readonly property string vietnameseFontsLabel: qsTrId("VietnameseFonts")
+    //% "English"
+    readonly property string englishFontsLabel: qsTrId("EnglishFonts")
     //% "Chinese"
     readonly property string chineseFontsLabel: qsTrId("ChineseFonts")
     //% "Japanese"
     readonly property string japaneseFontsLabel: qsTrId("JapaneseFonts")
     //% "Korean"
     readonly property string koreanFontsLabel: qsTrId("KoreanFonts")
-    //% "All"
-    readonly property string allFontsLabel: qsTrId("AllFonts")
     readonly property var fontFilterOptions: [
-        { value: PDFEditController.SuitableFonts,
-          label: suitableFontsLabel },
         { value: PDFEditController.VietnameseFonts,
           label: vietnameseFontsLabel },
+        { value: PDFEditController.EnglishFonts,
+          label: englishFontsLabel },
         { value: PDFEditController.ChineseFonts,
           label: chineseFontsLabel },
         { value: PDFEditController.JapaneseFonts,
           label: japaneseFontsLabel },
         { value: PDFEditController.KoreanFonts,
-          label: koreanFontsLabel },
-        { value: PDFEditController.AllFonts,
-          label: allFontsLabel }
+          label: koreanFontsLabel }
     ]
     readonly property int selectedFontFamilyIndex: {
         if (selectedFontFamily.length === 0)

@@ -46,14 +46,13 @@ their original font resources. Missing glyphs, faces larger than 32 MiB, and
 other failures discovered by the final content-specific check stop the save
 with an error and keep the draft intact.
 
-The same font dropdown provides Suitable, Vietnamese, Chinese, Japanese,
-Korean, and All filters. Suitable checks the exact glyph coverage of the
-selected text range (or the whole draft when no range is selected) without Qt
-font fallback. Vietnamese uses full precomposed Vietnamese coverage; CJK groups
-combine Qt writing-system metadata with an exact-face glyph probe. Language
-filters only narrow the already save-compatible face list, and one family may
-appear in more than one group. A mixed-style selection intersects the results
-for every regular/bold/italic face it actually uses.
+The same font dropdown provides Vietnamese, English, Chinese, Japanese, and
+Korean filters. Vietnamese uses full precomposed Vietnamese coverage; English
+uses Latin writing-system metadata plus an exact-face Basic Latin probe; CJK
+groups combine Qt writing-system metadata with an exact-face glyph probe.
+Language filters only narrow the already save-compatible face list, and one
+family may appear in more than one group. A mixed-style selection intersects
+the results for every regular/bold/italic face it actually uses.
 
 For edited runs that still reuse their original PDF font, Save preserves the
 exact inherited horizontal text scale. Runs using a newly embedded or standard

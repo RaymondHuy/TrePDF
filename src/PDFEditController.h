@@ -67,12 +67,11 @@ public:
     Q_ENUM(Tool)
 
     enum FontFilter {
-        SuitableFonts,
         VietnameseFonts,
+        EnglishFonts,
         ChineseFonts,
         JapaneseFonts,
-        KoreanFonts,
-        AllFonts
+        KoreanFonts
     };
     Q_ENUM(FontFilter)
 

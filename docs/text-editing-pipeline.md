@@ -417,18 +417,15 @@ font bytes. Font nguồn PDF bị lọc vẫn được hiển thị trong ô hi�
 caller ngoài QML không bypass bộ lọc. Coverage theo text và giới hạn 32 MiB vẫn
 được writer kiểm tra chính xác lúc Save.
 
-Popup vẫn là một dropdown duy nhất, với các bộ lọc `Phù hợp`, `Tiếng Việt`,
-`Tiếng Trung`, `Tiếng Nhật`, `Tiếng Hàn` và `Tất cả`. `Phù hợp` kiểm tra glyph
-trên đúng face/style cho range đang bôi đen; nếu không có range thì kiểm tra toàn
-draft. Text được tách theo grapheme, chuẩn hóa NFC và lấy style ở đầu cluster
-giống save writer; probe bỏ qua whitespace và không cho font fallback che ký tự
-thiếu. Nhóm tiếng Việt đòi đủ bộ ký tự Việt dựng sẵn. Ba nhóm CJK dùng
-`QFontDatabase::writingSystems()` để phân loại family rồi xác nhận một chuỗi
-glyph đại diện trên exact face. Mọi nhóm đều lọc từ danh sách face đã qua kiểm
-tra khả năng Save, và một family có thể thuộc nhiều nhóm. Nếu range có nhiều
-style, controller lấy giao của danh sách cho mọi face regular/bold/italic thực
-sự xuất hiện; vì vậy popup không đưa ra family mà setter sẽ từ chối sau khi
-người dùng chọn.
+Popup vẫn là một dropdown duy nhất, với các bộ lọc `Tiếng Việt`, `Tiếng Anh`,
+`Tiếng Trung`, `Tiếng Nhật` và `Tiếng Hàn`. Nhóm tiếng Việt đòi đủ bộ ký tự Việt
+dựng sẵn. Nhóm tiếng Anh kết hợp metadata Latin với probe Basic Latin trên
+exact face. Ba nhóm CJK dùng `QFontDatabase::writingSystems()` để phân loại
+family rồi xác nhận một chuỗi glyph đại diện trên exact face. Mọi nhóm đều lọc
+từ danh sách face đã qua kiểm tra khả năng Save, và một family có thể thuộc
+nhiều nhóm. Nếu range có nhiều style, controller lấy giao của danh sách cho mọi
+face regular/bold/italic thực sự xuất hiện; vì vậy popup không đưa ra family mà
+setter sẽ từ chối sau khi người dùng chọn.
 
 Khi người dùng chọn family mới, các
 `Draft.characterSpans[].format.fontFamily` giao với range đang chọn được cập
