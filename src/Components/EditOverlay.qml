@@ -306,7 +306,7 @@ Item {
             const paragraphStyle = "margin:0;white-space:pre-wrap;text-align:"
                 + alignment + ";"
             html += "<p style=\"" + escapeHtmlAttribute(paragraphStyle) + "\">"
-                + (content.length > 0 ? content : "<br/>") + "</p>"
+                + content + "</p>"
         }
         return html + "</body></html>"
     }
