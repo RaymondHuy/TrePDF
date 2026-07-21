@@ -2,8 +2,8 @@
 
 TrePDF is a Qt Quick Controls desktop PDF reader powered by PDFium. The app
 supports multiple PDFs in independent tabs, continuous page viewing,
-asynchronous rendering, rich-text content edits, Save/Save As, and an ID-based
-localization system with Vietnamese enabled by default.
+asynchronous rendering, rich-text content edits, image insertion, Save/Save As,
+and an ID-based localization system with Vietnamese enabled by default.
 
 Each document tab owns its PDF handle, draft/undo history, selection, zoom,
 scroll position, and formatting-panel state. Only the active tab creates page
@@ -15,6 +15,12 @@ Changes remain undoable session drafts until Save or Save As writes them into a
 PDF. Compatible text objects on the same visual line are grouped into one
 editable candidate while retaining every source object path for draft rendering
 and persistence.
+
+The Image tool changes the page cursor to a placement `+`. Clicking a page opens
+the local image picker; the chosen PNG, JPEG, BMP, GIF, WebP, or TIFF is decoded
+and snapshotted immediately, displayed as a resizable session draft, and added
+to undo/redo. Save/Save As embeds the pixels as a PDF image object, preserving
+the editor geometry on cropped and rotated pages.
 
 Draft geometry keeps immutable PDF source bounds separate from the layout frame
 and laid-out content bounds. Existing PDF text seeds its frame from the Qt text

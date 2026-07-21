@@ -108,6 +108,9 @@ Item {
                     selectedColor: root.session.editController.selectedColor
                     formattingEnabled:
                         root.session.editController.selectedEditable
+                        && (root.session.editController.selectedKind === "text"
+                            || root.session.editController.selectedKind
+                                === "addedText")
                     onFontFamilyChangeRequested: fontFamily => {
                         root.session.editController.setSelectedFontFamily(fontFamily)
                     }

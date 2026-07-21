@@ -7,6 +7,7 @@
 #include <QColor>
 #include <QFont>
 #include <QHash>
+#include <QImage>
 #include <QObject>
 #include <QPointF>
 #include <QPointer>
@@ -62,7 +63,8 @@ public:
         BrowseTool,
         SelectTool,
         EditTextTool,
-        AddTextTool
+        AddTextTool,
+        AddImageTool
     };
     Q_ENUM(Tool)
 
@@ -123,6 +125,11 @@ public:
     Q_INVOKABLE QVariantList draftsForPage(int page) const;
     Q_INVOKABLE QVariantMap candidateAt(int page, qreal x, qreal y);
     Q_INVOKABLE QVariantMap addText(int page, qreal x, qreal y);
+    Q_INVOKABLE void requestAddImage(int page, qreal x, qreal y);
+    Q_INVOKABLE QVariantMap addImage(int page,
+                                     qreal x,
+                                     qreal y,
+                                     const QUrl &source);
     Q_INVOKABLE QFont fontForDisplay(const QString &fontFamily,
                                      int fontStretch,
                                      bool fontBold,
@@ -153,6 +160,7 @@ public:
     Q_INVOKABLE void finishSelectedTextEdit();
     Q_INVOKABLE void cancelSelectedTextEdit();
     Q_INVOKABLE void commitSelectedText(const QString &text);
+    Q_INVOKABLE void deleteSelectedObject();
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void discardDrafts();
@@ -171,6 +179,7 @@ signals:
     void pageDataChanged(int page);
     void draftRenderStateChanged(int page, quint64 revision, bool immediate);
     void statusMessage(const QString &message);
+    void imageFileRequested(int page, qreal x, qreal y);
     void saveFinished(bool succeeded);
 
 private:
@@ -228,6 +237,7 @@ private:
         bool limited = false;
         bool added = false;
         quint64 addedOrder = 0;
+        QImage image;
         QString reason;
     };
 
@@ -376,7 +386,7 @@ private:
     QHash<QString, Draft> m_drafts;
     QHash<int, quint64> m_pageDraftRevisions;
     quint64 m_nextDraftRevision = 0;
-    quint64 m_nextAddedTextId = 0;
+    quint64 m_nextAddedObjectId = 0;
     QVector<Command> m_undoStack;
     QVector<Command> m_redoStack;
     QHash<QString, QString> m_pdfEmbeddedFontFamilyCache;

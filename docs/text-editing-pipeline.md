@@ -1207,3 +1207,37 @@ Text được lưu
     + QSaveFile commit thành công
     + PDFDocument mở lại file kết quả thành công
 ```
+
+## 20. Luồng Add Image
+
+Nút `Hình ảnh` đặt controller vào `AddImageTool`. `EditOverlay` dùng cùng con
+trỏ dấu cộng của Add Text; click trên page gọi `requestAddImage(page, x, y)` và
+`Main.qml` mở một `FileDialog` chọn ảnh local.
+
+Controller đọc ảnh bằng `QImageReader` với auto-transform, giới hạn file ở
+64 MiB và ảnh decode ở 40 megapixel, rồi snapshot `QImage::Format_ARGB32` vào
+candidate `addedImage`. Frame ban đầu có cạnh lớn nhất bằng 25% page, giữ đúng
+tỷ lệ ảnh theo kích thước page và được đặt quanh điểm click. Draft ảnh dùng
+cùng `frameRect`, bốn edge resize handle, command snapshot, undo/redo, discard
+và selection với draft text; `contentBounds` của ảnh luôn bằng `frameRect`.
+
+QML hiển thị draft bằng `DraftImageView`, một `QQuickPaintedItem` vẽ trực tiếp
+QImage snapshot thay vì mở lại đường dẫn file gốc. Vì vậy preview và nội dung
+Save không thể lệch nhau nếu file được đổi tên, thay nội dung hoặc bị xóa. Khi
+Save/Save As, `PDFSaveWriter::prepare()` copy QImage vào request trước khi worker
+chạy. Writer tạo `FPDF_PAGEOBJ_IMAGE`, copy pixel BGRA vào bitmap do PDFium sở
+hữu và giữ bitmap sống đến sau `FPDFPage_GenerateContent()`.
+
+Ma trận ảnh được dựng từ ba điểm đã đổi bằng `FPDF_DeviceToPage()`:
+
+```text
+bottomLeft  = pagePoint(frame.left,  frame.bottom)
+bottomRight = pagePoint(frame.right, frame.bottom)
+topLeft     = pagePoint(frame.left,  frame.top)
+```
+
+Hai vector `bottomRight - bottomLeft` và `topLeft - bottomLeft` cùng origin
+`bottomLeft` tạo matrix của image object. Nhờ vậy ảnh lưu lại đúng vị trí trên
+page có CropBox offset hoặc rotation. Ảnh mới được append theo `addedOrder`, gọi
+`FPDFPage_GenerateContent()` chung với các draft khác và chỉ xuất hiện trong
+file đích sau khi transaction `QSaveFile` commit thành công.

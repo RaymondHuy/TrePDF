@@ -51,7 +51,8 @@ Item {
     readonly property bool addTextCursorActive: addTextCursorReady
         && interactionActive
         && !editing
-        && controller.tool === PDFEditController.AddTextTool
+        && (controller.tool === PDFEditController.AddTextTool
+            || controller.tool === PDFEditController.AddImageTool)
         && hitArea.containsMouse
 
     signal selectedDraftContentBoundsSyncRequested()
@@ -494,6 +495,7 @@ Item {
     function candidateAtPosition(x, y) {
         if (!interactionActive
                 || controller.tool === PDFEditController.AddTextTool
+                || controller.tool === PDFEditController.AddImageTool
                 || width <= 0
                 || height <= 0) {
             return ({})
@@ -525,6 +527,18 @@ Item {
         })
     }
 
+    function beginAddingImage(x, y) {
+        if (controller.tool !== PDFEditController.AddImageTool
+                || width <= 0
+                || height <= 0) {
+            return
+        }
+
+        if (editing)
+            commitEditing()
+        controller.requestAddImage(page, x / width, y / height)
+    }
+
     function selectCandidate(candidate) {
         if (editing && editingObjectId !== candidate.objectId)
             commitEditing()
@@ -546,7 +560,8 @@ Item {
     }
 
     function beginEditing(candidate) {
-        if (!candidate.editable
+        if (!isTextBoxCandidate(candidate)
+                || !candidate.editable
                 || (controller.tool !== PDFEditController.EditTextTool
                     && controller.tool !== PDFEditController.SelectTool)) {
             return
@@ -616,15 +631,16 @@ Item {
 
         beginEditing({
             objectId: controller.selectedObjectId,
+            kind: controller.selectedKind,
             editable: controller.selectedEditable
         })
     }
 
-    function deleteSelectedText() {
+    function deleteSelectedObject() {
         if (controller.selectedPage !== page || !controller.selectedEditable)
             return
 
-        controller.commitSelectedText("")
+        controller.deleteSelectedObject()
         controller.clearSelection()
         hoverCandidate = ({})
         hideSelectCursor()
@@ -636,7 +652,8 @@ Item {
         const selectable = []
         for (let index = 0; index < candidates.length; ++index) {
             if (controller.tool !== PDFEditController.EditTextTool
-                    || candidates[index].editable) {
+                    || (candidates[index].editable
+                        && candidates[index].kind !== "addedImage")) {
                 selectable.push(candidates[index])
             }
         }
@@ -819,7 +836,7 @@ Item {
                 + root.fallbackBleed
                 - textPageY
             readonly property real contentBottom: textTop
-                + draftText.implicitHeight
+                + (isImage ? 0 : draftText.implicitHeight)
                 + root.fallbackBleed
             readonly property real textHeight: Math.max(
                 1,
@@ -834,12 +851,15 @@ Item {
                 fontPixelSize)
             readonly property bool hovered: root.hasCandidate(root.hoverCandidate)
                 && root.hoverCandidate.objectId === modelData.objectId
+            readonly property bool isImage: modelData.kind === "addedImage"
             readonly property bool hasText: modelData.text.length > 0
+            readonly property bool hasContent: isImage || hasText
             readonly property bool selected: root.controller.selectedPage === root.page
                 && root.controller.selectedObjectId === modelData.objectId
 
             function syncSelectedContentBounds() {
                 if (!selected
+                        || isImage
                         || modelData.restoration === true
                         || root.controller.selectedObjectId !== modelData.objectId) {
                     return
@@ -938,10 +958,22 @@ Item {
                 font: draftItem.displayFont
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                 elide: Text.ElideNone
+                visible: !draftItem.isImage
                 onImplicitHeightChanged: {
                     if (draftItem.selected && root.resizingFrame)
                         Qt.callLater(root.syncSelectedDraftContentBounds)
                 }
+            }
+
+            DraftImageView {
+                x: draftItem.frameX - draftItem.x
+                y: draftItem.frameY - draftItem.y
+                width: draftItem.frameWidth
+                height: draftItem.frameHeight
+                sourceImage: draftItem.modelData.image
+                smooth: true
+                visible: draftItem.isImage
+                Accessible.ignored: true
             }
 
             Rectangle {
@@ -956,7 +988,7 @@ Item {
                 visible: root.interactionActive
                     && !root.editing
                     && draftItem.modelData.restoration !== true
-                    && draftItem.hasText
+                    && draftItem.hasContent
                     && draftItem.hovered
                     && !draftItem.selected
             }
@@ -965,12 +997,15 @@ Item {
                 anchors.fill: parent
                 enabled: root.interactionActive
                     && draftItem.modelData.restoration !== true
-                    && draftItem.hasText
+                    && draftItem.hasContent
                     && root.controller.tool !== PDFEditController.AddTextTool
+                    && root.controller.tool !== PDFEditController.AddImageTool
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
                 preventStealing: false
-                cursorShape: root.controller.tool === PDFEditController.SelectTool
+                cursorShape: draftItem.isImage
+                    ? Qt.ArrowCursor
+                    : root.controller.tool === PDFEditController.SelectTool
                     ? root.selectCursorActive ? Qt.BlankCursor : Qt.ArrowCursor
                     : Qt.IBeamCursor
                 onEntered: {
@@ -1006,7 +1041,10 @@ Item {
                         root.selectCandidate(draftItem.modelData)
                     }
                 }
-                onDoubleClicked: root.beginEditing(draftItem.modelData)
+                onDoubleClicked: {
+                    if (!draftItem.isImage)
+                        root.beginEditing(draftItem.modelData)
+                }
             }
         }
     }
@@ -1022,6 +1060,7 @@ Item {
         cursorShape: root.selectCursorActive || root.addTextCursorActive
             ? Qt.BlankCursor
             : root.controller.tool === PDFEditController.AddTextTool
+                    || root.controller.tool === PDFEditController.AddImageTool
             ? Qt.IBeamCursor
             : root.hasCandidate(root.hoverCandidate)
             ? root.hoverCandidate.editable ? Qt.IBeamCursor : Qt.ForbiddenCursor
@@ -1045,6 +1084,10 @@ Item {
                 root.beginAddingText(mouse.x, mouse.y)
                 return
             }
+            if (root.controller.tool === PDFEditController.AddImageTool) {
+                root.beginAddingImage(mouse.x, mouse.y)
+                return
+            }
 
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
             if (root.hasCandidate(root.hoverCandidate)) {
@@ -1064,7 +1107,8 @@ Item {
             }
         }
         onDoubleClicked: mouse => {
-            if (root.controller.tool === PDFEditController.AddTextTool)
+            if (root.controller.tool === PDFEditController.AddTextTool
+                    || root.controller.tool === PDFEditController.AddImageTool)
                 return
 
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
@@ -1097,8 +1141,11 @@ Item {
     Popup {
         id: selectionActions
 
+        readonly property bool imageSelection:
+            root.controller.selectedKind === "addedImage"
+
         parent: root
-        width: 136
+        width: imageSelection ? 71 : 136
         height: 62
         padding: 4
         modal: false
@@ -1146,6 +1193,7 @@ Item {
                 icon.height: 24
                 icon.color: "transparent"
                 font.pixelSize: 10
+                visible: !selectionActions.imageSelection
 
                 background: Rectangle {
                     radius: 4
@@ -1188,7 +1236,7 @@ Item {
 
                 onClicked: {
                     selectionActions.close()
-                    root.deleteSelectedText()
+                    root.deleteSelectedObject()
                 }
             }
         }
@@ -1531,7 +1579,9 @@ Item {
             && root.controller.selectedObjectId.length > 0
             && root.controller.selectedEditable
             && (root.editing
-                || root.controller.tool !== PDFEditController.AddTextTool)
+                || (root.controller.tool !== PDFEditController.AddTextTool
+                    && root.controller.tool !== PDFEditController.AddImageTool)
+                || root.controller.selectedKind === "addedImage")
 
         Rectangle {
             anchors.fill: parent
@@ -1556,6 +1606,14 @@ Item {
                 required property var modelData
                 property rect dragStartFrameRect: Qt.rect(0, 0, 0, 0)
                 property point dragStartPosition: Qt.point(0, 0)
+                readonly property string accessibilityName: {
+                    if (root.controller.selectedKind === "addedImage") {
+                        //% "Resize image"
+                        return qsTrId("ResizeImage")
+                    }
+                    //% "Resize text box"
+                    return qsTrId("ResizeTextBox")
+                }
 
                 x: modelData.horizontal < 0
                     ? -width / 2
@@ -1591,8 +1649,7 @@ Item {
                     cursorShape: resizeHandle.modelData.cursor
                     activeFocusOnTab: true
                     Accessible.role: Accessible.Button
-                    //% "Resize text box"
-                    Accessible.name: qsTrId("ResizeTextBox")
+                    Accessible.name: resizeHandle.accessibilityName
 
                     onPressed: mouse => {
                         forceActiveFocus()
