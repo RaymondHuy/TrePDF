@@ -2,6 +2,8 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditController.cpp
     ../src/ApplicationFonts.cpp
     ../src/ApplicationFonts.h
+    ../src/DraftImageItem.cpp
+    ../src/DraftImageItem.h
     ../src/PDFDocument.cpp
     ../src/PDFDocument.h
     ../src/PDFEditController.cpp
@@ -30,6 +32,7 @@ target_link_libraries(trepdf_edit_controller_tests
     PRIVATE
         Qt6::Gui
         Qt6::Qml
+        Qt6::Quick
         Qt6::Test
         PDFium::PDFium
 )

@@ -24,6 +24,10 @@ ApplicationWindow {
     property PDFDocumentSession pendingSession: null
     property PDFDocumentSession saveAsSession: null
     property PDFDocumentSession workspaceSession: null
+    property PDFEditController imageInsertController: null
+    property int imageInsertPage: -1
+    property real imageInsertX: 0
+    property real imageInsertY: 0
     readonly property PDFDocumentSession activeSession: tabModel.currentSession
     readonly property PDFDocument activeDocument: activeSession
         ? activeSession.document
@@ -121,6 +125,31 @@ ApplicationWindow {
         saveAsSession = activeSession
         saveAsDialog.selectedFile = saveAsSession.document.source
         saveAsDialog.open()
+    }
+
+    function requestImageFile(controller, page, x, y) {
+        imageInsertController = controller
+        imageInsertPage = page
+        imageInsertX = x
+        imageInsertY = y
+        imageDialog.open()
+    }
+
+    function clearImageInsertRequest() {
+        imageInsertController = null
+        imageInsertPage = -1
+        imageInsertX = 0
+        imageInsertY = 0
+    }
+
+    function insertSelectedImage(source) {
+        const controller = imageInsertController
+        const page = imageInsertPage
+        const x = imageInsertX
+        const y = imageInsertY
+        clearImageInsertRequest()
+        if (controller)
+            controller.addImage(page, x, y, source)
     }
 
     function saveFileAs(url) {
@@ -282,6 +311,18 @@ ApplicationWindow {
         }
     }
 
+    Connections {
+        target: window.activeEditController
+
+        function onImageFileRequested(page, x, y) {
+            window.requestImageFile(
+                window.activeEditController,
+                page,
+                x,
+                y)
+        }
+    }
+
     Shortcut {
         sequences: [StandardKey.Undo]
         enabled: window.activeSession !== null
@@ -336,6 +377,18 @@ ApplicationWindow {
         //% "PDF files (*.pdf)"
         nameFilters: [qsTrId("PdfFileFilter")]
         onAccepted: window.openFiles(selectedFiles)
+    }
+
+    FileDialog {
+        id: imageDialog
+
+        //% "Select Image"
+        title: qsTrId("SelectImage")
+        fileMode: FileDialog.OpenFile
+        //% "Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)"
+        nameFilters: [qsTrId("ImageFileFilter")]
+        onAccepted: window.insertSelectedImage(selectedFile)
+        onRejected: window.clearImageInsertRequest()
     }
 
     FileDialog {

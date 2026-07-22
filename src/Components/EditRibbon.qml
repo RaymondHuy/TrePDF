@@ -72,7 +72,8 @@ Flickable {
                 //% "Add Image"
                 toolTipText: qsTrId("AddImage")
                 iconSource: "../assets/icons/image-plus.svg"
-                onClicked: root.toolRequested(text)
+                primary: root.editController.tool === PDFEditController.AddImageTool
+                onClicked: root.editController.tool = PDFEditController.AddImageTool
             }
 
             RibbonButton {

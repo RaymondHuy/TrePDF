@@ -10,7 +10,7 @@
 
 TrePDF is a macOS desktop PDF reader built with Qt 6, Qt Quick Controls, QML,
 C++17, and PDFium. The current scope is PDF viewing plus draft editing and
-Save/Save As persistence for supported PDF text content.
+Save/Save As persistence for supported PDF text and newly inserted images.
 
 Current features:
 
@@ -21,6 +21,18 @@ Current features:
 - Page navigation, zoom, and fit-to-width controls.
 - Text draft editing with selection, undo, redo, discard, Save, and Save As.
   Drafts stay session-only until a save succeeds.
+- Add Image uses the same placement cursor and draft history as Add Text. After
+  the user clicks a page and chooses a supported local image, TrePDF snapshots
+  the decoded pixels, shows a resizable draft that preserves the initial aspect
+  ratio, and writes it as a PDF image object on Save/Save As.
+- Top-level PDF image objects can be selected and deleted with Backspace,
+  Delete, or the contextual Delete action. Deletion remains an undoable session
+  draft until Save/Save As removes the source object; images nested in Form
+  XObjects remain protected.
+- Added images and editable top-level source images can be dragged within the
+  page. A drag preserves image size and creates one undoable command. Source
+  image preview transforms run on the render worker, and Save/Save As translates
+  the original image matrix so pixels, orientation, and z-order remain intact.
 - Drafts use a rich-text model with UTF-16 text ranges, character spans,
   paragraph formats, a layout frame, and content bounds. The inline `TextEdit`
   supports multiple lines, wraps/reflows inside the layout frame, renders every
@@ -66,6 +78,8 @@ Current features:
   loading.
 - `src/ApplicationFonts.h/.cpp`: bundled-font registration and the separate
   bundled/system family catalogs used by draft font resolution.
+- `src/DraftImageItem.h/.cpp`: QML item that draws the snapshotted pixels of an
+  inserted-image draft without reopening the selected file path.
 - `src/Main.qml`: multi-tab coordination, menus, toolbar, and active workspace.
 - `src/PDFTabModel.h/.cpp`: per-tab document/edit sessions, active-tab state,
   duplicate-path protection, and cross-tab save guards.
@@ -74,8 +88,8 @@ Current features:
 - `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
   rich-text draft state, snapshot-based undo/redo history, and save commands.
 - `src/PDFSaveWriter.h/.cpp`: resolves source object paths, reflows rich-text
-  runs, embeds/reuses fonts, regenerates changed page content, and writes the
-  PDF transactionally.
+  runs, embeds/reuses fonts, creates added image objects, regenerates changed
+  page content, and writes the PDF transactionally.
 - `src/PDFPageItem.h/.cpp`: asynchronous rendering and scene graph texture
   upload for one page delegate.
 - `src/Components`: ribbon controls, document view, page delegates, and the
@@ -227,9 +241,12 @@ clipped or elided unintentionally.
   separate writer document from `PDFDocument::renderFilePath()`. Snapshot all
   draft/font/geometry data on the GUI thread, then run `PDFSaveWriter::save()`
   on a worker; the worker request must not retain controller/document pointers.
-- Resolve every `CandidatePart::objectPath` before removing source objects.
-  Only top-level page text is currently saveable; nested Form XObject text must
-  remain non-editable until its transform/clip/resource scope can be preserved.
+- Resolve every source object path before removing source objects. Only
+  top-level page text plus top-level image movement/deletion are currently
+  saveable; nested Form XObject content must remain non-editable until its
+  transform/clip/resource scope can be preserved. Keep moved source images in
+  place and translate their existing matrix; this preserves their resource,
+  orientation, size, and z-order.
   Remove source objects with `FPDFPage_RemoveObject()` and destroy each object
   only after a successful removal.
 - PDFium does not wrap text. Reflow the draft with `QTextLayout`, create text
@@ -251,8 +268,13 @@ clipped or elided unintentionally.
   original PDF font resources unchanged. Commit only after PDFium succeeds;
   any earlier error must leave the destination and in-memory drafts untouched.
 - Preserve the earliest source z-order with `FPDFPage_InsertObjectAtIndex()`;
-  added text is appended. Convert coordinates with `FPDF_DeviceToPage()` so
-  CropBox offsets and page rotation follow the same mapping as the editor.
+  added text and images are appended in insertion order. Convert coordinates
+  with `FPDF_DeviceToPage()` so CropBox offsets and page rotation follow the
+  same mapping as the editor.
+- Added images are decoded and size-limited on the GUI thread, then snapshotted
+  into the save request. Create a PDFium-owned BGRA bitmap and keep it alive
+  through `FPDFPage_GenerateContent()`; never make the save worker reopen the
+  selected image path.
 - Reopen the saved path through `PDFDocument::open()`. A successful reopen
   changes the document revision and resets drafts/undo/redo through the normal
   document-state signals. If reopen unexpectedly fails after commit, close the

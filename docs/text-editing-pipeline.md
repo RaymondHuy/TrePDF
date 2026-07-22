@@ -214,7 +214,9 @@ TrePDF xử lý đệ quy:
 
 - `FPDF_PAGEOBJ_FORM`: ghép ma trận của form rồi duyệt các child;
 - `FPDF_PAGEOBJ_TEXT`: có thể trở thành text candidate;
-- `FPDF_PAGEOBJ_IMAGE`: tạo candidate không editable để báo cần OCR;
+- `FPDF_PAGEOBJ_IMAGE`: tạo candidate hỗ trợ di chuyển/xóa; image top-level
+  editable nếu PDF cho phép sửa nội dung, còn image trong Form XObject không
+  editable;
 - các loại path/shading khác: bỏ qua.
 
 Ma trận parent `P` và ma trận local `L` được ghép thành `T = P × L`:
@@ -378,7 +380,8 @@ Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hi�
 | Text nằm trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip khi save |
 | Text xoay/skew/multiline | Có | Không | Layout chưa được hỗ trợ |
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
-| Image | Có | Không | Cần OCR |
+| Image top-level | Có | Có, chỉ để xóa, nếu PDF cho phép sửa | Không mở text editor |
+| Image trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip/resource khi save |
 | FreeText annotation | Có | Không | Draft editor chưa hỗ trợ annotation |
 | Widget/form field | Có | Không | Draft editor chưa hỗ trợ form field |
 | Add Text do TrePDF tạo | Có | Có nếu PDF cho phép sửa | Không phải object gốc trong PDF |
@@ -713,6 +716,10 @@ Trong Select tool, click text editable mở popup Edit/Delete. Trong Edit Text
 tool, double-click mở editor trực tiếp. Nhấn Enter trên candidate đang chọn
 cũng mở editor.
 
+Click image top-level trong Select tool mở popup chỉ có Delete. Khi image đang
+được chọn, Backspace hoặc Delete tạo draft xóa; image nguồn không có resize
+handle và không mở inline text editor.
+
 ## 10. Khi người dùng bấm Edit
 
 ### 10.1 Trạng thái C++
@@ -1023,8 +1030,10 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
    bounds PDFium; sau khi mở lại, hệ số đó trở thành scale nguồn được bảo toàn.
    Vì vậy chuỗi Save/reopen không lấy phần bù cũ nhân thêm ở mỗi lần lưu, còn
    text PDF vốn condensed/expanded có chủ ý vẫn giữ nguyên scale.
-5. Xóa mọi text object nguồn của draft, insert replacement tại z-order sớm nhất
-   của các object nguồn và gọi `FPDFPage_GenerateContent()` cho từng page đã đổi.
+5. Xóa mọi source object của draft, insert replacement tại z-order sớm nhất của
+   các object nguồn nếu draft có nội dung thay thế, rồi gọi
+   `FPDFPage_GenerateContent()` cho từng page đã đổi. Draft xóa image không tạo
+   replacement object.
 6. Serialize bằng `FPDF_SaveAsCopy()` với
    `FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS` qua `QSaveFile`; chỉ commit file
    đích khi toàn bộ quá trình thành công.
@@ -1207,3 +1216,68 @@ Text được lưu
     + QSaveFile commit thành công
     + PDFDocument mở lại file kết quả thành công
 ```
+
+## 20. Luồng Add Image
+
+Nút `Hình ảnh` đặt controller vào `AddImageTool`. `EditOverlay` dùng cùng con
+trỏ dấu cộng của Add Text; click trên page gọi `requestAddImage(page, x, y)` và
+`Main.qml` mở một `FileDialog` chọn ảnh local.
+
+Controller đọc ảnh bằng `QImageReader` với auto-transform, giới hạn file ở
+64 MiB và ảnh decode ở 40 megapixel, rồi snapshot `QImage::Format_ARGB32` vào
+candidate `addedImage`. Frame ban đầu có cạnh lớn nhất bằng 25% page, giữ đúng
+tỷ lệ ảnh theo kích thước page và được đặt quanh điểm click. Draft ảnh dùng
+cùng `frameRect`, bốn edge resize handle, thao tác kéo để đổi vị trí, command
+snapshot, undo/redo, discard và selection với draft text; `contentBounds` của
+ảnh luôn bằng `frameRect`. Mỗi lần kéo mở một geometry transaction và chỉ tạo
+một undo command khi thả chuột.
+
+QML hiển thị draft bằng `DraftImageView`, một `QQuickPaintedItem` vẽ trực tiếp
+QImage snapshot thay vì mở lại đường dẫn file gốc. Vì vậy preview và nội dung
+Save không thể lệch nhau nếu file được đổi tên, thay nội dung hoặc bị xóa. Khi
+Save/Save As, `PDFSaveWriter::prepare()` copy QImage vào request trước khi worker
+chạy. Writer tạo `FPDF_PAGEOBJ_IMAGE`, copy pixel BGRA vào bitmap do PDFium sở
+hữu và giữ bitmap sống đến sau `FPDFPage_GenerateContent()`.
+
+Ma trận ảnh được dựng từ ba điểm đã đổi bằng `FPDF_DeviceToPage()`:
+
+```text
+bottomLeft  = pagePoint(frame.left,  frame.bottom)
+bottomRight = pagePoint(frame.right, frame.bottom)
+topLeft     = pagePoint(frame.left,  frame.top)
+```
+
+Hai vector `bottomRight - bottomLeft` và `topLeft - bottomLeft` cùng origin
+`bottomLeft` tạo matrix của image object. Nhờ vậy ảnh lưu lại đúng vị trí trên
+page có CropBox offset hoặc rotation. Ảnh mới được append theo `addedOrder`, gọi
+`FPDFPage_GenerateContent()` chung với các draft khác và chỉ xuất hiện trong
+file đích sau khi transaction `QSaveFile` commit thành công.
+
+## 21. Luồng di chuyển và xóa image có sẵn
+
+Image top-level được scan với `kind = "image"`, giữ `objectPath` và source rect
+và hỗ trợ kéo đổi vị trí mà không đổi kích thước. Trong lúc kéo, draft cập nhật
+`frameRect` còn source rect bất biến để fallback mask vẫn che đúng vị trí gốc.
+Hit-test dùng frame mới, và cả một gesture chỉ tạo một command undo/redo.
+
+Preview không decode hoặc giữ thêm bitmap của image nguồn trên GUI thread.
+`PDFPageItem` copy `objectPath`, source rect và frame rect vào render request;
+worker tạm cộng độ dịch chuyển vào `e/f` của matrix image, render page, rồi khôi
+phục matrix trước khi tái sử dụng worker document. Khi Save/Save As, writer áp
+dụng cùng phép dịch lên image object trong document riêng và không remove/recreate
+object, nên giữ nguyên pixel resource, rotation/skew, kích thước và z-order.
+
+Backspace, Delete và contextual Delete tạo một `Draft` có `deleted = true`;
+candidate bị loại khỏi hit-test/candidate list, selection được clear và command
+đầy đủ được đưa vào undo stack.
+
+Trong lúc chưa save, `PDFPageItem` suppress image object theo `objectPath` trên
+worker document để render page sạch. Fallback mask che source rect cho đến khi
+clean texture đúng revision sẵn sàng. Undo gỡ draft và render lại image nguồn;
+redo áp draft xóa trở lại.
+
+Khi Save/Save As, writer resolve toàn bộ source path trước khi thay đổi page,
+gọi `FPDFPage_RemoveObject()` rồi destroy image object, không tạo replacement,
+và chạy `FPDFPage_GenerateContent()`. File chỉ được commit qua `QSaveFile` sau
+khi toàn bộ page thành công; draft/history chỉ clear sau khi file kết quả mở
+lại được. Image trong Form XObject không được đánh dấu editable.

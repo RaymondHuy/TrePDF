@@ -33,6 +33,7 @@ public:
         SourceObjectRemovalFailed,
         FontUnavailable,
         TextObjectCreationFailed,
+        ImageObjectCreationFailed,
         PageContentGenerationFailed,
         OutputOpenFailed,
         OutputWriteFailed,

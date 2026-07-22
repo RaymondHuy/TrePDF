@@ -54,6 +54,8 @@ qt_add_qml_module(trepdf
     SOURCES
         src/ApplicationFonts.cpp
         src/ApplicationFonts.h
+        src/DraftImageItem.cpp
+        src/DraftImageItem.h
         src/PDFDocument.cpp
         src/PDFDocument.h
         src/PDFEditController.cpp
