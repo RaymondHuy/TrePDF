@@ -1301,7 +1301,6 @@ void PDFEditControllerTest::serializesPdfiumAcrossThreads()
                 QThread::msleep(1);
             }
         });
-        connect(worker, &QThread::finished, worker, &QObject::deleteLater);
         worker->start();
 
         startedWhileLocked = workerStarted->tryAcquire(1, 1000);
@@ -1313,9 +1312,9 @@ void PDFEditControllerTest::serializesPdfiumAcrossThreads()
     const bool finished = worker->wait(2500);
     if (!finished) {
         worker->requestInterruption();
-    } else {
-        delete worker;
+        worker->wait();
     }
+    delete worker;
 
     QVERIFY(startedWhileLocked);
     QVERIFY(remainedBlocked);
@@ -1384,7 +1383,6 @@ void PDFEditControllerTest::reschedulesCancelledHoverForSamePage()
             QThread::msleep(1);
         }
     });
-    connect(holder, &QThread::finished, holder, &QObject::deleteLater);
     holder->start();
     const bool holderStarted = holderLocked->tryAcquire(1, 1000);
 
@@ -1400,9 +1398,9 @@ void PDFEditControllerTest::reschedulesCancelledHoverForSamePage()
     const bool holderFinished = holder->wait(2500);
     if (!holderFinished) {
         holder->requestInterruption();
-    } else {
-        delete holder;
+        holder->wait();
     }
+    delete holder;
 
     QVERIFY(holderStarted);
     QVERIFY(holderFinished);
@@ -1445,7 +1443,6 @@ void PDFEditControllerTest::defersUncachedHoverWhilePdfiumIsBusy()
             QThread::msleep(1);
         }
     });
-    connect(holder, &QThread::finished, holder, &QObject::deleteLater);
     holder->start();
     const bool holderStarted = holderLocked->tryAcquire(1, 1000);
 
@@ -1459,9 +1456,9 @@ void PDFEditControllerTest::defersUncachedHoverWhilePdfiumIsBusy()
     const bool holderFinished = holder->wait(2500);
     if (!holderFinished) {
         holder->requestInterruption();
-    } else {
-        delete holder;
+        holder->wait();
     }
+    delete holder;
 
     QVERIFY(holderStarted);
     QVERIFY(holderFinished);
@@ -1496,11 +1493,6 @@ void PDFEditControllerTest::defersUncachedHoverWhilePdfiumIsBusy()
                 QThread::msleep(1);
             }
         });
-    connect(
-        cachedHolder,
-        &QThread::finished,
-        cachedHolder,
-        &QObject::deleteLater);
     cachedHolder->start();
     const bool cachedHolderStarted = cachedHolderLocked->tryAcquire(1, 1000);
 
@@ -1516,9 +1508,9 @@ void PDFEditControllerTest::defersUncachedHoverWhilePdfiumIsBusy()
     const bool cachedHolderFinished = cachedHolder->wait(2500);
     if (!cachedHolderFinished) {
         cachedHolder->requestInterruption();
-    } else {
-        delete cachedHolder;
+        cachedHolder->wait();
     }
+    delete cachedHolder;
 
     QVERIFY(cachedHolderStarted);
     QVERIFY(cachedHolderFinished);
