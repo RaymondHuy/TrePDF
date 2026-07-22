@@ -59,6 +59,50 @@ constexpr qsizetype kMaximumRegisteredFontBytes = 64 * 1024 * 1024;
 constexpr qsizetype kMaximumRegisteredFontCount = 128;
 constexpr qsizetype kMaximumRejectedFontFingerprints = 128;
 constexpr FS_MATRIX kIdentityMatrix{1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
+constexpr char kPreservedPaintMark[] = "TrePDFPreservedPaint";
+
+bool pageObjectHasContentMark(FPDF_PAGEOBJECT object,
+                              const QString &expectedName)
+{
+    assertPDFiumProcessLockHeld();
+    const int markCount = FPDFPageObj_CountMarks(object);
+    for (int index = 0; index < markCount; ++index) {
+        FPDF_PAGEOBJECTMARK mark = FPDFPageObj_GetMark(
+            object,
+            static_cast<unsigned long>(index));
+        unsigned long byteLength = 0;
+        if (!mark
+            || !FPDFPageObjMark_GetName(mark, nullptr, 0, &byteLength)
+            || byteLength < sizeof(FPDF_WCHAR)) {
+            continue;
+        }
+        QVector<FPDF_WCHAR> buffer(
+            static_cast<qsizetype>(
+                (byteLength + sizeof(FPDF_WCHAR) - 1)
+                / sizeof(FPDF_WCHAR)),
+            0);
+        unsigned long actualByteLength = 0;
+        if (!FPDFPageObjMark_GetName(
+                mark,
+                buffer.data(),
+                byteLength,
+                &actualByteLength)) {
+            continue;
+        }
+        qsizetype characterCount = static_cast<qsizetype>(
+            actualByteLength / sizeof(FPDF_WCHAR));
+        while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
+            --characterCount;
+        }
+        const QString name = QString::fromUtf16(
+            reinterpret_cast<const char16_t *>(buffer.constData()),
+            characterCount);
+        if (name == expectedName) {
+            return true;
+        }
+    }
+    return false;
+}
 
 bool candidateScanCancelled(
     const std::shared_ptr<std::atomic_bool> &cancellation)
@@ -3313,6 +3357,12 @@ void PDFEditController::appendPageObjectCandidates(
     }
 
     if (type != FPDF_PAGEOBJ_TEXT && type != FPDF_PAGEOBJ_IMAGE) {
+        return;
+    }
+    if (type == FPDF_PAGEOBJ_IMAGE
+        && pageObjectHasContentMark(
+            pageObject,
+            QString::fromLatin1(kPreservedPaintMark))) {
         return;
     }
 

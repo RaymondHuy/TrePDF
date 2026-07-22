@@ -33,6 +33,10 @@ constexpr qreal kMinimumObjectWidth = 0.01;
 constexpr qreal kMinimumScale = 0.1;
 constexpr qreal kMaximumScale = 10.0;
 constexpr int kCoordinateScale = 64;
+constexpr qreal kUnsupportedPaintRasterScale = 4.0;
+constexpr qint64 kMaximumUnsupportedPaintPixels = 8 * 1024 * 1024;
+constexpr int kPaintColorTolerance = 12;
+constexpr char kPreservedPaintMark[] = "TrePDFPreservedPaint";
 
 struct SaveFormat {
     QString fontFamily;
@@ -1042,6 +1046,531 @@ PDFSaveWriter::Result failure(PDFSaveWriter::Error error,
     return result;
 }
 
+struct RasterizedPaint {
+    int topLevelIndex = -1;
+    FPDF_PAGEOBJECT sourceObject = nullptr;
+    FPDF_PAGEOBJECT replacementObject = nullptr;
+    FPDF_BITMAP bitmap = nullptr;
+};
+
+class RasterizedPaints
+{
+public:
+    RasterizedPaints() = default;
+
+    ~RasterizedPaints()
+    {
+        if (!m_paints.isEmpty()) {
+            assertPDFiumProcessLockHeld();
+        }
+        for (RasterizedPaint &paint : m_paints) {
+            if (paint.replacementObject) {
+                FPDFPageObj_Destroy(paint.replacementObject);
+            }
+            if (paint.bitmap) {
+                FPDFBitmap_Destroy(paint.bitmap);
+            }
+        }
+    }
+
+    QVector<RasterizedPaint> &values()
+    {
+        return m_paints;
+    }
+
+    Q_DISABLE_COPY_MOVE(RasterizedPaints)
+
+private:
+    QVector<RasterizedPaint> m_paints;
+};
+
+bool restorePageObjectActivity(
+    const QVector<FPDF_PAGEOBJECT> &objects,
+    const QVector<FPDF_BOOL> &activeStates)
+{
+    assertPDFiumProcessLockHeld();
+    bool restored = objects.size() == activeStates.size();
+    const qsizetype count = qMin(objects.size(), activeStates.size());
+    for (qsizetype index = 0; index < count; ++index) {
+        FPDF_BOOL currentActive = false;
+        if (!FPDFPageObj_GetIsActive(objects.at(index), &currentActive)
+            || (currentActive != activeStates.at(index)
+                && !FPDFPageObj_SetIsActive(
+                    objects.at(index),
+                    activeStates.at(index)))) {
+            restored = false;
+        }
+    }
+    return restored;
+}
+
+bool renderIsolatedPageObject(FPDF_PAGE page,
+                              int objectIndex,
+                              QImage &image,
+                              FS_MATRIX &imageMatrix)
+{
+    assertPDFiumProcessLockHeld();
+    const int objectCount = FPDFPage_CountObjects(page);
+    if (objectIndex < 0 || objectIndex >= objectCount) {
+        return false;
+    }
+
+    QVector<FPDF_PAGEOBJECT> objects;
+    QVector<FPDF_BOOL> activeStates;
+    objects.reserve(objectCount);
+    activeStates.reserve(objectCount);
+    for (int index = 0; index < objectCount; ++index) {
+        FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+        FPDF_BOOL active = false;
+        if (!object || !FPDFPageObj_GetIsActive(object, &active)) {
+            return false;
+        }
+        objects.append(object);
+        activeStates.append(active);
+    }
+    if (!activeStates.at(objectIndex)) {
+        return false;
+    }
+
+    bool isolated = true;
+    for (int index = 0; index < objectCount; ++index) {
+        const FPDF_BOOL desiredActive = index == objectIndex;
+        if (activeStates.at(index) != desiredActive
+            && !FPDFPageObj_SetIsActive(objects.at(index), desiredActive)) {
+            isolated = false;
+            break;
+        }
+    }
+    if (!isolated) {
+        restorePageObjectActivity(objects, activeStates);
+        return false;
+    }
+
+    float left = 0.0F;
+    float bottom = 0.0F;
+    float right = 0.0F;
+    float top = 0.0F;
+    FPDF_PAGEOBJECT object = objects.at(objectIndex);
+    const bool boundsAvailable = FPDFPageObj_GetBounds(
+        object,
+        &left,
+        &bottom,
+        &right,
+        &top);
+    const qreal width = static_cast<qreal>(right - left);
+    const qreal height = static_cast<qreal>(top - bottom);
+    if (!boundsAvailable
+        || !std::isfinite(width)
+        || !std::isfinite(height)
+        || width <= 0.0
+        || height <= 0.0) {
+        restorePageObjectActivity(objects, activeStates);
+        return false;
+    }
+
+    const qreal pageWidth = FPDF_GetPageWidthF(page);
+    const qreal pageHeight = FPDF_GetPageHeightF(page);
+    if (!std::isfinite(pageWidth)
+        || !std::isfinite(pageHeight)
+        || pageWidth <= 0.0
+        || pageHeight <= 0.0) {
+        restorePageObjectActivity(objects, activeStates);
+        return false;
+    }
+
+    qreal scale = kUnsupportedPaintRasterScale;
+    const qreal requestedPixels = pageWidth * pageHeight * scale * scale;
+    if (requestedPixels > kMaximumUnsupportedPaintPixels) {
+        scale = std::sqrt(
+            static_cast<qreal>(kMaximumUnsupportedPaintPixels)
+            / (pageWidth * pageHeight));
+    }
+    if (!std::isfinite(scale) || scale < 0.25) {
+        restorePageObjectActivity(objects, activeStates);
+        return false;
+    }
+
+    const int pagePixelWidth = qCeil(pageWidth * scale);
+    const int pagePixelHeight = qCeil(pageHeight * scale);
+    if (pagePixelWidth <= 0
+        || pagePixelHeight <= 0
+        || static_cast<qint64>(pagePixelWidth) * pagePixelHeight
+            > kMaximumUnsupportedPaintPixels + 16384) {
+        restorePageObjectActivity(objects, activeStates);
+        return false;
+    }
+
+    QImage renderedPage(
+        pagePixelWidth,
+        pagePixelHeight,
+        QImage::Format_ARGB32);
+    renderedPage.fill(Qt::transparent);
+    FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
+        pagePixelWidth,
+        pagePixelHeight,
+        FPDFBitmap_BGRA,
+        renderedPage.bits(),
+        renderedPage.bytesPerLine());
+    if (!bitmap) {
+        restorePageObjectActivity(objects, activeStates);
+        return false;
+    }
+    FPDF_RenderPageBitmap(
+        bitmap,
+        page,
+        0,
+        0,
+        pagePixelWidth,
+        pagePixelHeight,
+        0,
+        0);
+    FPDFBitmap_Destroy(bitmap);
+
+    if (!restorePageObjectActivity(objects, activeStates)) {
+        image = {};
+        return false;
+    }
+
+    const qreal padding = 2.0 / scale;
+    const qreal paddedLeft = static_cast<qreal>(left) - padding;
+    const qreal paddedBottom = static_cast<qreal>(bottom) - padding;
+    const qreal paddedRight = static_cast<qreal>(right) + padding;
+    const qreal paddedTop = static_cast<qreal>(top) + padding;
+    const QPointF pageCorners[] = {
+        QPointF(paddedLeft, paddedBottom),
+        QPointF(paddedRight, paddedBottom),
+        QPointF(paddedRight, paddedTop),
+        QPointF(paddedLeft, paddedTop),
+    };
+    int minimumX = pagePixelWidth;
+    int minimumY = pagePixelHeight;
+    int maximumX = 0;
+    int maximumY = 0;
+    for (const QPointF &corner : pageCorners) {
+        int deviceX = 0;
+        int deviceY = 0;
+        if (!FPDF_PageToDevice(
+                page,
+                0,
+                0,
+                pagePixelWidth,
+                pagePixelHeight,
+                0,
+                corner.x(),
+                corner.y(),
+                &deviceX,
+                &deviceY)) {
+            return false;
+        }
+        minimumX = qMin(minimumX, deviceX);
+        minimumY = qMin(minimumY, deviceY);
+        maximumX = qMax(maximumX, deviceX);
+        maximumY = qMax(maximumY, deviceY);
+    }
+    const QRect crop = QRect(
+        QPoint(minimumX, minimumY),
+        QPoint(maximumX, maximumY))
+                           .normalized()
+                           .intersected(renderedPage.rect());
+    if (crop.isEmpty()) {
+        return false;
+    }
+    image = renderedPage.copy(crop);
+
+    double bottomLeftX = 0.0;
+    double bottomLeftY = 0.0;
+    double bottomRightX = 0.0;
+    double bottomRightY = 0.0;
+    double topLeftX = 0.0;
+    double topLeftY = 0.0;
+    const int cropRight = crop.x() + crop.width();
+    const int cropBottom = crop.y() + crop.height();
+    if (!FPDF_DeviceToPage(
+            page,
+            0,
+            0,
+            pagePixelWidth,
+            pagePixelHeight,
+            0,
+            crop.left(),
+            cropBottom,
+            &bottomLeftX,
+            &bottomLeftY)
+        || !FPDF_DeviceToPage(
+            page,
+            0,
+            0,
+            pagePixelWidth,
+            pagePixelHeight,
+            0,
+            cropRight,
+            cropBottom,
+            &bottomRightX,
+            &bottomRightY)
+        || !FPDF_DeviceToPage(
+            page,
+            0,
+            0,
+            pagePixelWidth,
+            pagePixelHeight,
+            0,
+            crop.left(),
+            crop.top(),
+            &topLeftX,
+            &topLeftY)) {
+        image = {};
+        return false;
+    }
+    imageMatrix = FS_MATRIX{
+        static_cast<float>(bottomRightX - bottomLeftX),
+        static_cast<float>(bottomRightY - bottomLeftY),
+        static_cast<float>(topLeftX - bottomLeftX),
+        static_cast<float>(topLeftY - bottomLeftY),
+        static_cast<float>(bottomLeftX),
+        static_cast<float>(bottomLeftY)};
+    return true;
+}
+
+bool colorsApproximatelyEqual(const QColor &left, const QColor &right)
+{
+    return qAbs(left.red() - right.red()) <= kPaintColorTolerance
+        && qAbs(left.green() - right.green()) <= kPaintColorTolerance
+        && qAbs(left.blue() - right.blue()) <= kPaintColorTolerance;
+}
+
+bool renderedPaintDiffersFromSerializableColors(FPDF_PAGEOBJECT object,
+                                                const QImage &image)
+{
+    unsigned int fillRed = 0;
+    unsigned int fillGreen = 0;
+    unsigned int fillBlue = 0;
+    unsigned int fillAlpha = 0;
+    const bool fillAvailable = FPDFPageObj_GetFillColor(
+        object,
+        &fillRed,
+        &fillGreen,
+        &fillBlue,
+        &fillAlpha);
+    const QColor fillColor(
+        static_cast<int>(fillRed),
+        static_cast<int>(fillGreen),
+        static_cast<int>(fillBlue),
+        static_cast<int>(fillAlpha));
+
+    FPDF_BOOL strokes = false;
+    int fillMode = FPDF_FILLMODE_NONE;
+    const bool drawModeAvailable = FPDFPath_GetDrawMode(
+        object,
+        &fillMode,
+        &strokes);
+    unsigned int strokeRed = 0;
+    unsigned int strokeGreen = 0;
+    unsigned int strokeBlue = 0;
+    unsigned int strokeAlpha = 0;
+    const bool strokeAvailable = drawModeAvailable
+        && strokes
+        && FPDFPageObj_GetStrokeColor(
+            object,
+            &strokeRed,
+            &strokeGreen,
+            &strokeBlue,
+            &strokeAlpha);
+    const QColor strokeColor(
+        static_cast<int>(strokeRed),
+        static_cast<int>(strokeGreen),
+        static_cast<int>(strokeBlue),
+        static_cast<int>(strokeAlpha));
+
+    int opaquePixels = 0;
+    int unexpectedPixels = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            const QColor color = QColor::fromRgba(line[x]);
+            if (color.alpha() < 240) {
+                continue;
+            }
+            ++opaquePixels;
+            const bool matchesFill = fillAvailable
+                && colorsApproximatelyEqual(color, fillColor);
+            const bool matchesStroke = strokeAvailable
+                && colorsApproximatelyEqual(color, strokeColor);
+            if (!matchesFill && !matchesStroke) {
+                ++unexpectedPixels;
+            }
+        }
+    }
+    if (opaquePixels == 0) {
+        return false;
+    }
+    return !fillAvailable
+        || unexpectedPixels >= qMax(8, opaquePixels / 200);
+}
+
+bool createRasterizedPaint(FPDF_DOCUMENT document,
+                           FPDF_PAGE page,
+                           FPDF_PAGEOBJECT sourceObject,
+                           int topLevelIndex,
+                           const QImage &sourceImage,
+                           const FS_MATRIX &imageMatrix,
+                           RasterizedPaints &paints)
+{
+    assertPDFiumProcessLockHeld();
+    const QImage image = sourceImage.format() == QImage::Format_ARGB32
+        ? sourceImage
+        : sourceImage.convertToFormat(QImage::Format_ARGB32);
+    FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
+        image.width(),
+        image.height(),
+        FPDFBitmap_BGRA,
+        nullptr,
+        0);
+    if (!bitmap) {
+        return false;
+    }
+
+    void *const bitmapBuffer = FPDFBitmap_GetBuffer(bitmap);
+    const int bitmapStride = FPDFBitmap_GetStride(bitmap);
+    const qsizetype rowBytes = static_cast<qsizetype>(image.width()) * 4;
+    if (!bitmapBuffer || bitmapStride < rowBytes) {
+        FPDFBitmap_Destroy(bitmap);
+        return false;
+    }
+    for (int row = 0; row < image.height(); ++row) {
+        std::memcpy(
+            static_cast<uchar *>(bitmapBuffer)
+                + static_cast<qsizetype>(row) * bitmapStride,
+            image.constScanLine(row),
+            static_cast<size_t>(rowBytes));
+    }
+
+    FPDF_PAGEOBJECT imageObject = FPDFPageObj_NewImageObj(document);
+    FPDF_PAGE loadedPages[] = {page};
+    const bool configured = imageObject
+        && FPDFPageObj_AddMark(imageObject, kPreservedPaintMark)
+        && FPDFImageObj_SetBitmap(loadedPages, 1, imageObject, bitmap)
+        && FPDFPageObj_SetMatrix(imageObject, &imageMatrix);
+    if (!configured) {
+        if (imageObject) {
+            FPDFPageObj_Destroy(imageObject);
+        }
+        FPDFBitmap_Destroy(bitmap);
+        return false;
+    }
+
+    paints.values().append(RasterizedPaint{
+        topLevelIndex,
+        sourceObject,
+        imageObject,
+        bitmap});
+    return true;
+}
+
+PDFSaveWriter::Result prepareUnsupportedPaints(
+    FPDF_DOCUMENT document,
+    FPDF_PAGE page,
+    FPDF_PAGE inspectionPage,
+    int pageIndex,
+    RasterizedPaints &paints)
+{
+    assertPDFiumProcessLockHeld();
+    const int objectCount = FPDFPage_CountObjects(page);
+    if (objectCount != FPDFPage_CountObjects(inspectionPage)) {
+        return failure(PDFSaveWriter::Error::SourceObjectMissing, pageIndex);
+    }
+
+    for (int index = 0; index < objectCount; ++index) {
+        FPDF_PAGEOBJECT inspectionObject = FPDFPage_GetObject(
+            inspectionPage,
+            index);
+        FPDF_PAGEOBJECT sourceObject = FPDFPage_GetObject(page, index);
+        if (!inspectionObject
+            || !sourceObject
+            || FPDFPageObj_GetType(inspectionObject)
+                != FPDFPageObj_GetType(sourceObject)) {
+            return failure(PDFSaveWriter::Error::SourceObjectMissing, pageIndex);
+        }
+
+        const int objectType = FPDFPageObj_GetType(inspectionObject);
+        if (objectType != FPDF_PAGEOBJ_PATH
+            && objectType != FPDF_PAGEOBJ_SHADING) {
+            continue;
+        }
+        if (objectType == FPDF_PAGEOBJ_PATH) {
+            int fillMode = FPDF_FILLMODE_NONE;
+            FPDF_BOOL strokes = false;
+            if (!FPDFPath_GetDrawMode(
+                    inspectionObject,
+                    &fillMode,
+                    &strokes)
+                || fillMode == FPDF_FILLMODE_NONE) {
+                continue;
+            }
+        }
+
+        QImage renderedObject;
+        FS_MATRIX imageMatrix{};
+        if (!renderIsolatedPageObject(
+                inspectionPage,
+                index,
+                renderedObject,
+                imageMatrix)) {
+            return failure(
+                PDFSaveWriter::Error::ImageObjectCreationFailed,
+                pageIndex);
+        }
+        const bool unsupportedPaint = objectType == FPDF_PAGEOBJ_SHADING
+            || renderedPaintDiffersFromSerializableColors(
+                inspectionObject,
+                renderedObject);
+        if (unsupportedPaint
+            && !createRasterizedPaint(
+                document,
+                page,
+                sourceObject,
+                index,
+                renderedObject,
+                imageMatrix,
+                paints)) {
+            return failure(
+                PDFSaveWriter::Error::ImageObjectCreationFailed,
+                pageIndex);
+        }
+    }
+    return {};
+}
+
+bool replaceUnsupportedPaints(FPDF_PAGE page, RasterizedPaints &paints)
+{
+    assertPDFiumProcessLockHeld();
+    QVector<RasterizedPaint> &values = paints.values();
+    std::sort(
+        values.begin(),
+        values.end(),
+        [](const RasterizedPaint &left, const RasterizedPaint &right) {
+            return left.topLevelIndex > right.topLevelIndex;
+        });
+    for (RasterizedPaint &paint : values) {
+        if (!FPDFPage_RemoveObject(page, paint.sourceObject)) {
+            return false;
+        }
+        FPDFPageObj_Destroy(paint.sourceObject);
+        paint.sourceObject = nullptr;
+
+        FPDF_PAGEOBJECT replacement = paint.replacementObject;
+        const bool inserted = FPDFPage_InsertObjectAtIndex(
+            page,
+            replacement,
+            static_cast<size_t>(paint.topLevelIndex));
+        // InsertObjectAtIndex() takes ownership on both success and failure.
+        paint.replacementObject = nullptr;
+        if (!inserted) {
+            return false;
+        }
+    }
+    return true;
+}
+
 QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
                                              const SaveDraft &draft,
                                              PDFSaveWriter::Result &result)
@@ -1515,6 +2044,7 @@ void destroyPreparedObjects(QVector<PreparedDraft> &preparedDrafts)
 }
 
 PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
+                                      FPDF_DOCUMENT inspectionDocument,
                                       int pageIndex,
                                       const QVector<SaveDraft> &drafts,
                                       FontResolver &fontResolver)
@@ -1523,6 +2053,10 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     FPDF_PAGE loadedPage = FPDF_LoadPage(document, pageIndex);
     PdfPageHandle page(loadedPage);
     if (!page.get()) {
+        return failure(PDFSaveWriter::Error::PageLoadFailed, pageIndex);
+    }
+    PdfPageHandle inspectionPage(FPDF_LoadPage(inspectionDocument, pageIndex));
+    if (!inspectionPage.get()) {
         return failure(PDFSaveWriter::Error::PageLoadFailed, pageIndex);
     }
 
@@ -1542,6 +2076,33 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         page.get(),
         pageWidth,
         pageHeight);
+    RasterizedPaints rasterizedPaints;
+    const bool modifiesExistingObject = std::any_of(
+        drafts.cbegin(),
+        drafts.cend(),
+        [](const SaveDraft &draft) {
+            return !draft.added;
+        });
+    if (modifiesExistingObject) {
+        // PDFium's content generator cannot serialize pattern and shading
+        // paints. Replacing only those painted objects with isolated bitmaps
+        // keeps the rest of the page vector/searchable when a source content
+        // stream must be regenerated for an edit, deletion, or image move.
+        const PDFSaveWriter::Result paintResult = prepareUnsupportedPaints(
+            document,
+            page.get(),
+            inspectionPage.get(),
+            pageIndex,
+            rasterizedPaints);
+        if (!paintResult.succeeded()) {
+            return paintResult;
+        }
+        if (!replaceUnsupportedPaints(page.get(), rasterizedPaints)) {
+            return failure(
+                PDFSaveWriter::Error::ImageObjectCreationFailed,
+                pageIndex);
+        }
+    }
     const int originalObjectCount = FPDFPage_CountObjects(page.get());
     QVector<PreparedDraft> preparedDrafts;
     preparedDrafts.reserve(drafts.size());
@@ -1925,6 +2486,13 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     if (!document.get()) {
         return failure(Error::SourceOpenFailed);
     }
+    // Render-only inspection happens on a second worker-owned handle so that
+    // temporary page-object activation changes never dirty the writer page.
+    PdfDocumentHandle inspectionDocument(
+        FPDF_LoadDocument(encodedSourcePath.constData(), nullptr));
+    if (!inspectionDocument.get()) {
+        return failure(Error::SourceOpenFailed);
+    }
 
     FontResolver fontResolver(document.get());
     qsizetype start = 0;
@@ -1940,6 +2508,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             request.m_data->drafts.cbegin() + end);
         const Result result = applyPageDrafts(
             document.get(),
+            inspectionDocument.get(),
             request.m_data->drafts.at(start).page,
             pageDrafts,
             fontResolver);

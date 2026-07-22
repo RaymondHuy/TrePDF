@@ -73,6 +73,147 @@ private:
     QFile m_file;
 };
 
+bool writePdfObjects(const QString &filePath,
+                     const QVector<QByteArray> &objects)
+{
+    QByteArray data("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
+    QVector<qint64> offsets(objects.size() + 1, 0);
+    for (qsizetype index = 0; index < objects.size(); ++index) {
+        offsets[index + 1] = data.size();
+        data += QByteArray::number(index + 1);
+        data += " 0 obj\n";
+        data += objects.at(index);
+        data += "\nendobj\n";
+    }
+
+    const qint64 xrefOffset = data.size();
+    data += "xref\n0 ";
+    data += QByteArray::number(objects.size() + 1);
+    data += "\n0000000000 65535 f \n";
+    for (qsizetype index = 1; index < offsets.size(); ++index) {
+        data += QByteArray::number(offsets.at(index)).rightJustified(10, '0');
+        data += " 00000 n \n";
+    }
+    data += "trailer\n<< /Size ";
+    data += QByteArray::number(objects.size() + 1);
+    data += " /Root 1 0 R >>\nstartxref\n";
+    data += QByteArray::number(xrefOffset);
+    data += "\n%%EOF\n";
+
+    QFile file(filePath);
+    return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
+        && file.write(data) == data.size();
+}
+
+bool createPatternFillPdf(const QString &filePath)
+{
+    const QByteArray pageContent(
+        "q\n"
+        "/Pattern cs\n"
+        "/P1 scn\n"
+        "20 20 160 80 re f\n"
+        "Q\n"
+        "BT\n"
+        "/F1 20 Tf\n"
+        "20 160 Td\n"
+        "(Pattern edit text) Tj\n"
+        "ET\n");
+    const QByteArray patternContent(
+        "1 0 0 rg 0 0 10 10 re f\n"
+        "0 1 0 rg 10 0 10 10 re f\n"
+        "0 0 1 rg 0 10 10 10 re f\n"
+        "1 1 0 rg 10 10 10 10 re f\n");
+    const auto streamObject = [](const QByteArray &dictionary,
+                                 const QByteArray &stream) {
+        return dictionary + " /Length " + QByteArray::number(stream.size())
+            + " >>\nstream\n" + stream + "endstream";
+    };
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /F1 4 0 R >> "
+                "/Pattern << /P1 6 0 R >> >> /Contents 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+            streamObject("<<", pageContent),
+            streamObject(
+                "<< /Type /Pattern /PatternType 1 /PaintType 1 "
+                "/TilingType 1 /BBox [0 0 20 20] /XStep 20 /YStep 20 "
+                "/Resources << >>",
+                patternContent),
+        });
+}
+
+QImage renderFirstPage(const QString &filePath, const QSize &pixelSize)
+{
+    PDFiumProcessLock pdfiumLock;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    QImage image(pixelSize, QImage::Format_ARGB32);
+    image.fill(Qt::white);
+    FPDF_BITMAP bitmap = page
+        ? FPDFBitmap_CreateEx(
+              image.width(),
+              image.height(),
+              FPDFBitmap_BGRA,
+              image.bits(),
+              image.bytesPerLine())
+        : nullptr;
+    if (bitmap) {
+        FPDF_RenderPageBitmap(
+            bitmap,
+            page,
+            0,
+            0,
+            image.width(),
+            image.height(),
+            0,
+            0);
+        FPDFBitmap_Destroy(bitmap);
+    } else {
+        image = {};
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return image;
+}
+
+bool containsPatternColors(const QImage &image)
+{
+    bool red = false;
+    bool green = false;
+    bool blue = false;
+    bool yellow = false;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QColor color = image.pixelColor(x, y);
+            red = red || (color.red() > 220
+                          && color.green() < 40
+                          && color.blue() < 40);
+            green = green || (color.green() > 220
+                              && color.red() < 40
+                              && color.blue() < 40);
+            blue = blue || (color.blue() > 220
+                            && color.red() < 40
+                            && color.green() < 40);
+            yellow = yellow || (color.red() > 220
+                                && color.green() > 220
+                                && color.blue() < 40);
+        }
+    }
+    return red && green && blue && yellow;
+}
+
 bool addTextObject(FPDF_DOCUMENT document,
                    FPDF_PAGE page,
                    const char *fontName,
@@ -1182,6 +1323,7 @@ private slots:
     void appliesFontStylesToDisplayFont_data();
     void appliesFontStylesToDisplayFont();
     void savesEditedTextRoundTrip();
+    void preservesPatternFilledGraphicsWhenSavingText();
     void savesVietnameseEditWithEmbeddedArial_data();
     void savesVietnameseEditWithEmbeddedArial();
     void savesVietnameseEditWithEmbeddedSystemFont_data();
@@ -2958,6 +3100,46 @@ void PDFEditControllerTest::savesEditedTextRoundTrip()
     const QString sourceText = normalizedPageText(sourcePath);
     QVERIFY(sourceText.contains(QString::fromLatin1(kGroupedText)));
     QVERIFY(!sourceText.contains(QStringLiteral("Saved grouped text")));
+}
+
+void PDFEditControllerTest::preservesPatternFilledGraphicsWhenSavingText()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("pattern-fill-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("pattern-fill-output.pdf"));
+    QVERIFY(createPatternFillPdf(sourcePath));
+    QVERIFY(containsPatternColors(renderFirstPage(sourcePath, QSize(200, 200))));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QStringLiteral("Pattern edit text"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Pattern text edit"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(normalizedPageText(outputPath).contains(
+        QStringLiteral("Pattern text edit")));
+    const QString verificationPath = qEnvironmentVariable(
+        "TREPDF_PATTERN_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(outputPath, verificationPath));
+    }
+    QVERIFY(containsPatternColors(renderFirstPage(outputPath, QSize(200, 200))));
+    const QVariantList savedCandidates = waitForCandidates(controller, 0);
+    QVERIFY(!candidateForText(
+                 savedCandidates,
+                 QStringLiteral("Pattern text edit"))
+                 .isEmpty());
+    QVERIFY(candidateForKind(savedCandidates, QStringLiteral("image")).isEmpty());
 }
 
 void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial_data()
