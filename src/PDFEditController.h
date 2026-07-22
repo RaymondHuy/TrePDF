@@ -59,6 +59,12 @@ class PDFEditController : public QObject
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
 
 public:
+    struct DraftImageMove {
+        QVector<int> objectPath;
+        QRectF sourceRect;
+        QRectF frameRect;
+    };
+
     enum Tool {
         BrowseTool,
         SelectTool,
@@ -119,6 +125,7 @@ public:
     QString selectedReason() const;
     quint64 draftRevisionForPage(int page) const;
     QVector<QVector<int>> draftedTextObjectPathsForPage(int page) const;
+    QVector<DraftImageMove> draftedImageMovesForPage(int page) const;
     bool allDraftedTextObjectsSuppressibleForPage(int page) const;
 
     Q_INVOKABLE QVariantList candidatesForPage(int page);

@@ -491,6 +491,24 @@ Item {
         return Qt.rect(left, top, right - left, bottom - top)
     }
 
+    function movedFrameRect(startFrameRect, deltaX, deltaY) {
+        const pageWidth = Math.max(1, root.width)
+        const pageHeight = Math.max(1, root.height)
+        const frameWidth = Number(startFrameRect.width)
+        const frameHeight = Number(startFrameRect.height)
+        const left = Math.max(
+            0,
+            Math.min(
+                1 - frameWidth,
+                Number(startFrameRect.x) + deltaX / pageWidth))
+        const top = Math.max(
+            0,
+            Math.min(
+                1 - frameHeight,
+                Number(startFrameRect.y) + deltaY / pageHeight))
+        return Qt.rect(left, top, frameWidth, frameHeight)
+    }
+
     function cancelFrameResize() {
         if (!resizingFrame)
             return
@@ -1099,7 +1117,7 @@ Item {
         Accessible.role: Accessible.Pane
         //% "PDF edit surface"
         Accessible.name: qsTrId("PdfEditSurface")
-        //% "Use Tab or arrow keys to select content, Enter to edit text, and Backspace or Delete to remove images"
+        //% "Use Tab or arrow keys to select content, Enter to edit text, drag images to move, and Backspace or Delete to remove images"
         Accessible.description: qsTrId("PdfEditSurfaceDescription")
 
         onEntered: root.updateHoverAtPosition(mouseX, mouseY)
@@ -1626,6 +1644,88 @@ Item {
             border.width: 2
             border.color: root.editBoxColor
             Accessible.ignored: true
+        }
+
+        MouseArea {
+            id: moveImageMouse
+
+            property rect dragStartFrameRect: Qt.rect(0, 0, 0, 0)
+            property point dragStartPosition: Qt.point(0, 0)
+
+            anchors.fill: parent
+            enabled: !root.editing
+                && root.isImageKind(root.controller.selectedKind)
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.SizeAllCursor
+            activeFocusOnTab: true
+            Accessible.role: Accessible.Button
+            //% "Move image"
+            Accessible.name: qsTrId("MoveImage")
+
+            function commitKeyboardMove(deltaX, deltaY) {
+                const startFrameRect = resizeOverlay.layoutFrameRect
+                root.controller.beginSelectedFrameResize()
+                root.resizingFrame = true
+                root.resizingObjectId = root.controller.selectedObjectId
+                root.controller.updateSelectedFrameRect(
+                    root.movedFrameRect(startFrameRect, deltaX, deltaY))
+                root.controller.finishSelectedFrameResize()
+                root.resizingFrame = false
+                root.resizingObjectId = ""
+                root.reloadData()
+            }
+
+            onPressed: mouse => {
+                forceActiveFocus()
+                selectionActions.close()
+                dragStartFrameRect = resizeOverlay.layoutFrameRect
+                dragStartPosition = mapToItem(root, mouse.x, mouse.y)
+                root.controller.beginSelectedFrameResize()
+                root.resizingFrame = true
+                root.resizingObjectId = root.controller.selectedObjectId
+                mouse.accepted = true
+            }
+            onPositionChanged: mouse => {
+                if (!pressed || !root.resizingFrame)
+                    return
+
+                const currentPosition = mapToItem(root, mouse.x, mouse.y)
+                root.controller.updateSelectedFrameRect(root.movedFrameRect(
+                    dragStartFrameRect,
+                    currentPosition.x - dragStartPosition.x,
+                    currentPosition.y - dragStartPosition.y))
+            }
+            onReleased: {
+                if (!root.resizingFrame)
+                    return
+
+                root.controller.finishSelectedFrameResize()
+                root.resizingFrame = false
+                root.resizingObjectId = ""
+                root.reloadData()
+            }
+            onCanceled: root.cancelFrameResize()
+
+            Keys.onPressed: event => {
+                const step = (event.modifiers & Qt.ShiftModifier) ? 10 : 1
+                let deltaX = 0
+                let deltaY = 0
+                if (event.key === Qt.Key_Left)
+                    deltaX = -step
+                else if (event.key === Qt.Key_Right)
+                    deltaX = step
+                else if (event.key === Qt.Key_Up)
+                    deltaY = -step
+                else if (event.key === Qt.Key_Down)
+                    deltaY = step
+                else
+                    return
+
+                commitKeyboardMove(deltaX, deltaY)
+                event.accepted = true
+            }
         }
 
         Repeater {

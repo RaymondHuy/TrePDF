@@ -270,6 +270,132 @@ private:
     bool m_restoreSucceeded = true;
 };
 
+class ScopedPageImageMoves
+{
+public:
+    ~ScopedPageImageMoves()
+    {
+        restore();
+    }
+
+    bool apply(FPDF_PAGE page,
+               const QSize &deviceSize,
+               const QVector<PDFEditController::DraftImageMove> &moves)
+    {
+        if (!page || deviceSize.isEmpty()) {
+            return moves.isEmpty();
+        }
+
+        for (const PDFEditController::DraftImageMove &move : moves) {
+            if (move.objectPath.size() != 1) {
+                restore();
+                return false;
+            }
+
+            FPDF_PAGEOBJECT object = pageObjectAtPath(page, move.objectPath);
+            if (!object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_IMAGE) {
+                restore();
+                return false;
+            }
+            const auto duplicate = std::find_if(
+                m_states.cbegin(),
+                m_states.cend(),
+                [object](const State &state) { return state.object == object; });
+            if (duplicate != m_states.cend()) {
+                restore();
+                return false;
+            }
+
+            FS_MATRIX originalMatrix{};
+            if (!FPDFPageObj_GetMatrix(object, &originalMatrix)) {
+                restore();
+                return false;
+            }
+
+            QPointF sourcePoint;
+            QPointF targetPoint;
+            if (!pagePoint(
+                    page,
+                    deviceSize,
+                    move.sourceRect.topLeft(),
+                    sourcePoint)
+                || !pagePoint(
+                    page,
+                    deviceSize,
+                    move.frameRect.topLeft(),
+                    targetPoint)) {
+                restore();
+                return false;
+            }
+
+            FS_MATRIX movedMatrix = originalMatrix;
+            movedMatrix.e += static_cast<float>(targetPoint.x() - sourcePoint.x());
+            movedMatrix.f += static_cast<float>(targetPoint.y() - sourcePoint.y());
+            m_states.append(State{object, originalMatrix});
+            if (!FPDFPageObj_SetMatrix(object, &movedMatrix)) {
+                restore();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool restore()
+    {
+        if (m_restored) {
+            return m_restoreSucceeded;
+        }
+
+        m_restored = true;
+        for (auto state = m_states.crbegin(); state != m_states.crend(); ++state) {
+            if (!FPDFPageObj_SetMatrix(state->object, &state->matrix)) {
+                m_restoreSucceeded = false;
+            }
+        }
+        m_states.clear();
+        return m_restoreSucceeded;
+    }
+
+    bool restorationSucceeded() const
+    {
+        return m_restoreSucceeded;
+    }
+
+private:
+    struct State {
+        FPDF_PAGEOBJECT object = nullptr;
+        FS_MATRIX matrix{};
+    };
+
+    static bool pagePoint(FPDF_PAGE page,
+                          const QSize &deviceSize,
+                          const QPointF &normalizedPoint,
+                          QPointF &point)
+    {
+        double pageX = 0.0;
+        double pageY = 0.0;
+        if (!FPDF_DeviceToPage(
+                page,
+                0,
+                0,
+                deviceSize.width(),
+                deviceSize.height(),
+                0,
+                qRound(normalizedPoint.x() * deviceSize.width()),
+                qRound(normalizedPoint.y() * deviceSize.height()),
+                &pageX,
+                &pageY)) {
+            return false;
+        }
+        point = QPointF(pageX, pageY);
+        return true;
+    }
+
+    QVector<State> m_states;
+    bool m_restored = false;
+    bool m_restoreSucceeded = true;
+};
+
 struct PageRenderResult {
     QImage image;
     bool suppressionApplied = false;
@@ -282,6 +408,7 @@ PageRenderResult renderPageFromFile(const QString &filePath,
                                     const QColor &background,
                                     qreal devicePixelRatio,
                                     const QVector<QVector<int>> &draftObjectPaths,
+                                    const QVector<PDFEditController::DraftImageMove> &draftImageMoves,
                                     const CancellationFlag &cancellation)
 {
     if (filePath.isEmpty() || page < 0 || pixelSize.isEmpty() || isCancelled(cancellation)) {
@@ -327,16 +454,25 @@ PageRenderResult renderPageFromFile(const QString &filePath,
     FPDFBitmap_FillRect(bitmap, 0, 0, pixelSize.width(), pixelSize.height(), pdfiumColor(background));
 
     bool suppressionApplied = draftObjectPaths.isEmpty();
+    bool imageMovesApplied = draftImageMoves.isEmpty();
     bool renderDocumentReusable = true;
     bool renderPerformed = false;
     {
         ScopedPageObjectSuppression suppression;
+        ScopedPageImageMoves imageMoves;
         if (!draftObjectPaths.isEmpty()) {
             suppressionApplied = suppression.suppress(pdfPage, draftObjectPaths);
         }
+        if (!draftImageMoves.isEmpty()) {
+            imageMovesApplied = imageMoves.apply(
+                pdfPage,
+                pixelSize,
+                draftImageMoves);
+        }
 
         if (!isCancelled(cancellation)
-            && (suppressionApplied || suppression.restorationSucceeded())) {
+            && (suppressionApplied || suppression.restorationSucceeded())
+            && (imageMovesApplied || imageMoves.restorationSucceeded())) {
             FPDF_RenderPageBitmap(
                 bitmap,
                 pdfPage,
@@ -348,7 +484,10 @@ PageRenderResult renderPageFromFile(const QString &filePath,
                 FPDF_ANNOT);
             renderPerformed = true;
         }
-        renderDocumentReusable = suppression.restore();
+        const bool imageRestoreSucceeded = imageMoves.restore();
+        const bool suppressionRestoreSucceeded = suppression.restore();
+        renderDocumentReusable = imageRestoreSucceeded
+            && suppressionRestoreSucceeded;
     }
 
     FPDFBitmap_Destroy(bitmap);
@@ -362,7 +501,7 @@ PageRenderResult renderPageFromFile(const QString &filePath,
     }
 
     image.setDevicePixelRatio(devicePixelRatio);
-    return PageRenderResult{image, suppressionApplied};
+    return PageRenderResult{image, suppressionApplied && imageMovesApplied};
 }
 
 } // namespace
@@ -862,6 +1001,10 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             && editController->document() == document
         ? editController->draftedTextObjectPathsForPage(page)
         : QVector<QVector<int>>();
+    const QVector<PDFEditController::DraftImageMove> draftImageMoves = editController
+            && editController->document() == document
+        ? editController->draftedImageMovesForPage(page)
+        : QVector<PDFEditController::DraftImageMove>();
     const bool allDraftObjectsSuppressible = !editController
         || editController->document() != document
         || editController->allDraftedTextObjectsSuppressibleForPage(page);
@@ -891,6 +1034,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                                     background,
                                     draftRevision,
                                     draftObjectPaths,
+                                    draftImageMoves,
                                     allDraftObjectsSuppressible,
                                     requestId,
                                     cancellation]() {
@@ -902,6 +1046,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             background,
             devicePixelRatio,
             draftObjectPaths,
+            draftImageMoves,
             cancellation);
         result.suppressionApplied = result.suppressionApplied
             && allDraftObjectsSuppressible;

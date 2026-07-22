@@ -1033,11 +1033,14 @@ RichSaveInspection inspectRichSave(const QString &filePath)
 struct ImageSaveInspection {
     bool readable = false;
     bool pixelsReadable = false;
+    bool matrixReadable = false;
     int count = 0;
+    int firstTopLevelIndex = -1;
     unsigned int pixelWidth = 0;
     unsigned int pixelHeight = 0;
     QColor topLeftPixel;
     QColor bottomLeftPixel;
+    FS_MATRIX matrix{};
 };
 
 ImageSaveInspection inspectImages(const QString &filePath)
@@ -1056,6 +1059,10 @@ ImageSaveInspection inspectImages(const QString &filePath)
             }
             ++inspection.count;
             if (inspection.count == 1) {
+                inspection.firstTopLevelIndex = index;
+                inspection.matrixReadable = FPDFPageObj_GetMatrix(
+                    object,
+                    &inspection.matrix);
                 FPDFImageObj_GetImagePixelSize(
                     object,
                     &inspection.pixelWidth,
@@ -1166,8 +1173,11 @@ private slots:
     void savesAddedTextRoundTrip();
     void rendersAddedImageSnapshot();
     void addsImageWithUndoRedo();
+    void movesAddedImageWithUndoRedo();
+    void movesTopLevelImageWithUndoRedo();
     void deletesTopLevelImageWithUndoRedo();
     void savesAddedImageRoundTrip();
+    void savesMovedTopLevelImageRoundTrip();
     void savesDeletedTopLevelImageRoundTrip();
     void preservesAddedTextLayerOrder();
     void savesRichMultilineTextRoundTrip();
@@ -3568,6 +3578,136 @@ void PDFEditControllerTest::addsImageWithUndoRedo()
     QCOMPARE(controller.selectedContentBounds(), resizedFrame);
 }
 
+void PDFEditControllerTest::movesAddedImageWithUndoRedo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("move-added-image-source.pdf"));
+    const QString imagePath = m_temporaryDirectory.filePath(
+        QStringLiteral("move-added-image.png"));
+    QVERIFY(createFontStylePdf(sourcePath));
+    QImage image(80, 40, QImage::Format_ARGB32);
+    image.fill(QColor(QStringLiteral("#4b8fd8")));
+    QVERIFY(image.save(imagePath, "PNG"));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap added = controller.addImage(
+        0,
+        0.2,
+        0.55,
+        QUrl::fromLocalFile(imagePath));
+    QVERIFY(!added.isEmpty());
+    const QString objectId = added.value(QStringLiteral("objectId")).toString();
+    const QRectF originalFrame = added.value(QStringLiteral("frameRect")).toRectF();
+    const qreal movedX = originalFrame.right() + 0.03;
+    QVERIFY(movedX + originalFrame.width() < 1.0);
+    const QRectF movedFrame(
+        movedX,
+        originalFrame.y() + 0.08,
+        originalFrame.width(),
+        originalFrame.height());
+
+    QVERIFY(controller.selectCandidate(0, objectId));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(movedFrame);
+    controller.finishSelectedFrameResize();
+
+    QCOMPARE(controller.selectedFrameRect(), movedFrame);
+    QCOMPARE(controller.selectedContentBounds(), movedFrame);
+    QCOMPARE(controller.draftedImageMovesForPage(0).size(), 0);
+    QCOMPARE(
+        controller.candidateAt(0, movedFrame.center().x(), movedFrame.center().y())
+            .value(QStringLiteral("objectId")).toString(),
+        objectId);
+    QVERIFY(controller.candidateAt(
+        0,
+        originalFrame.center().x(),
+        originalFrame.center().y()).value(QStringLiteral("objectId")).toString()
+        != objectId);
+
+    controller.undo();
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    controller.redo();
+    QCOMPARE(controller.selectedFrameRect(), movedFrame);
+}
+
+void PDFEditControllerTest::movesTopLevelImageWithUndoRedo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("move-image-source.pdf"));
+    QVERIFY(createTopLevelImagePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap imageCandidate = candidateForKind(
+        controller.candidatesForPage(0),
+        QStringLiteral("image"));
+    QVERIFY2(!imageCandidate.isEmpty(), "Top-level image candidate was not discovered");
+    const QString objectId = imageCandidate
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QRectF originalFrame = imageCandidate
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const qreal movedX = qMax<qreal>(0.0, originalFrame.x() - 0.3);
+    const qreal movedY = qMin<qreal>(
+        1.0 - originalFrame.height(),
+        originalFrame.y() + 0.12);
+    const QRectF requestedFrame(
+        movedX,
+        movedY,
+        originalFrame.width() * 0.5,
+        originalFrame.height() * 0.5);
+    const QRectF movedFrame(
+        movedX,
+        movedY,
+        originalFrame.width(),
+        originalFrame.height());
+    QVERIFY(movedFrame != originalFrame);
+
+    QVERIFY(controller.selectCandidate(0, objectId));
+    controller.beginSelectedFrameResize();
+    QVERIFY(controller.textEditActive());
+    controller.updateSelectedFrameRect(requestedFrame);
+    QCOMPARE(controller.selectedFrameRect(), movedFrame);
+    QCOMPARE(controller.selectedContentBounds(), movedFrame);
+    controller.finishSelectedFrameResize();
+
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 0);
+    const QVector<PDFEditController::DraftImageMove> moves
+        = controller.draftedImageMovesForPage(0);
+    QCOMPARE(moves.size(), 1);
+    QCOMPARE(moves.constFirst().sourceRect, originalFrame);
+    QCOMPARE(moves.constFirst().frameRect, movedFrame);
+    QCOMPARE(moves.constFirst().objectPath.size(), 1);
+    QCOMPARE(
+        controller.candidateAt(0, movedFrame.center().x(), movedFrame.center().y())
+            .value(QStringLiteral("objectId")).toString(),
+        objectId);
+    QVERIFY(controller.candidateAt(
+        0,
+        originalFrame.center().x(),
+        originalFrame.center().y()).value(QStringLiteral("objectId")).toString()
+        != objectId);
+
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QCOMPARE(controller.draftedImageMovesForPage(0).size(), 0);
+
+    controller.redo();
+    QVERIFY(controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), movedFrame);
+    QCOMPARE(controller.draftedImageMovesForPage(0).size(), 1);
+}
+
 void PDFEditControllerTest::deletesTopLevelImageWithUndoRedo()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -3724,6 +3864,84 @@ void PDFEditControllerTest::savesAddedImageRoundTrip()
     QVERIFY(qAbs(savedRect.y() - frame.y()) < 0.001);
     QVERIFY(qAbs(savedRect.width() - frame.width()) < 0.001);
     QVERIFY(qAbs(savedRect.height() - frame.height()) < 0.001);
+}
+
+void PDFEditControllerTest::savesMovedTopLevelImageRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-move-image-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-move-image-output.pdf"));
+    QVERIFY(createTopLevelImagePdf(sourcePath));
+
+    const ImageSaveInspection sourceInspection = inspectImages(sourcePath);
+    QVERIFY(sourceInspection.readable);
+    QVERIFY(sourceInspection.matrixReadable);
+    QCOMPARE(sourceInspection.count, 1);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap imageCandidate = candidateForKind(
+        controller.candidatesForPage(0),
+        QStringLiteral("image"));
+    QVERIFY2(!imageCandidate.isEmpty(), "Top-level image candidate was not discovered");
+    const QRectF originalFrame = imageCandidate
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QRectF movedFrame(
+        qMax<qreal>(0.0, originalFrame.x() - 0.2),
+        qMin<qreal>(1.0 - originalFrame.height(), originalFrame.y() + 0.1),
+        originalFrame.width(),
+        originalFrame.height());
+    QVERIFY(movedFrame != originalFrame);
+    QVERIFY(controller.selectCandidate(
+        0,
+        imageCandidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(movedFrame);
+    controller.finishSelectedFrameResize();
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+    QVERIFY(!controller.hasDrafts());
+
+    const ImageSaveInspection savedInspection = inspectImages(outputPath);
+    QVERIFY(savedInspection.readable);
+    QVERIFY(savedInspection.matrixReadable);
+    QCOMPARE(savedInspection.count, 1);
+    QCOMPARE(savedInspection.firstTopLevelIndex, sourceInspection.firstTopLevelIndex);
+    QCOMPARE(savedInspection.pixelWidth, sourceInspection.pixelWidth);
+    QCOMPARE(savedInspection.pixelHeight, sourceInspection.pixelHeight);
+    QCOMPARE(savedInspection.pixelsReadable, sourceInspection.pixelsReadable);
+    QCOMPARE(savedInspection.topLeftPixel, sourceInspection.topLeftPixel);
+    QCOMPARE(savedInspection.bottomLeftPixel, sourceInspection.bottomLeftPixel);
+    QVERIFY(qAbs(savedInspection.matrix.a - sourceInspection.matrix.a) < 0.001F);
+    QVERIFY(qAbs(savedInspection.matrix.b - sourceInspection.matrix.b) < 0.001F);
+    QVERIFY(qAbs(savedInspection.matrix.c - sourceInspection.matrix.c) < 0.001F);
+    QVERIFY(qAbs(savedInspection.matrix.d - sourceInspection.matrix.d) < 0.001F);
+    QVERIFY(qAbs(savedInspection.matrix.e - sourceInspection.matrix.e) > 1.0F);
+    QVERIFY(qAbs(savedInspection.matrix.f - sourceInspection.matrix.f) > 1.0F);
+    QVERIFY(normalizedPageText(outputPath).contains(
+        QString::fromLatin1(kImageFixtureText)));
+
+    const QVariantMap savedCandidate = candidateForKind(
+        controller.candidatesForPage(0),
+        QStringLiteral("image"));
+    QVERIFY(!savedCandidate.isEmpty());
+    const QRectF savedRect = savedCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    QVERIFY(qAbs(savedRect.x() - movedFrame.x()) < 0.001);
+    QVERIFY(qAbs(savedRect.y() - movedFrame.y()) < 0.001);
+    QVERIFY(qAbs(savedRect.width() - movedFrame.width()) < 0.001);
+    QVERIFY(qAbs(savedRect.height() - movedFrame.height()) < 0.001);
+
+    const ImageSaveInspection unchangedSourceInspection = inspectImages(sourcePath);
+    QVERIFY(unchangedSourceInspection.matrixReadable);
+    QCOMPARE(unchangedSourceInspection.matrix.e, sourceInspection.matrix.e);
+    QCOMPARE(unchangedSourceInspection.matrix.f, sourceInspection.matrix.f);
 }
 
 void PDFEditControllerTest::savesDeletedTopLevelImageRoundTrip()

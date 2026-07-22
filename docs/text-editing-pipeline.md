@@ -214,8 +214,9 @@ TrePDF xử lý đệ quy:
 
 - `FPDF_PAGEOBJ_FORM`: ghép ma trận của form rồi duyệt các child;
 - `FPDF_PAGEOBJ_TEXT`: có thể trở thành text candidate;
-- `FPDF_PAGEOBJ_IMAGE`: tạo candidate delete-only; image top-level editable nếu
-  PDF cho phép sửa nội dung, còn image trong Form XObject không editable;
+- `FPDF_PAGEOBJ_IMAGE`: tạo candidate hỗ trợ di chuyển/xóa; image top-level
+  editable nếu PDF cho phép sửa nội dung, còn image trong Form XObject không
+  editable;
 - các loại path/shading khác: bỏ qua.
 
 Ma trận parent `P` và ma trận local `L` được ghép thành `T = P × L`:
@@ -1226,8 +1227,10 @@ Controller đọc ảnh bằng `QImageReader` với auto-transform, giới hạn
 64 MiB và ảnh decode ở 40 megapixel, rồi snapshot `QImage::Format_ARGB32` vào
 candidate `addedImage`. Frame ban đầu có cạnh lớn nhất bằng 25% page, giữ đúng
 tỷ lệ ảnh theo kích thước page và được đặt quanh điểm click. Draft ảnh dùng
-cùng `frameRect`, bốn edge resize handle, command snapshot, undo/redo, discard
-và selection với draft text; `contentBounds` của ảnh luôn bằng `frameRect`.
+cùng `frameRect`, bốn edge resize handle, thao tác kéo để đổi vị trí, command
+snapshot, undo/redo, discard và selection với draft text; `contentBounds` của
+ảnh luôn bằng `frameRect`. Mỗi lần kéo mở một geometry transaction và chỉ tạo
+một undo command khi thả chuột.
 
 QML hiển thị draft bằng `DraftImageView`, một `QQuickPaintedItem` vẽ trực tiếp
 QImage snapshot thay vì mở lại đường dẫn file gốc. Vì vậy preview và nội dung
@@ -1250,12 +1253,23 @@ page có CropBox offset hoặc rotation. Ảnh mới được append theo `added
 `FPDFPage_GenerateContent()` chung với các draft khác và chỉ xuất hiện trong
 file đích sau khi transaction `QSaveFile` commit thành công.
 
-## 21. Luồng xóa image có sẵn
+## 21. Luồng di chuyển và xóa image có sẵn
 
 Image top-level được scan với `kind = "image"`, giữ `objectPath` và source rect
-nhưng chỉ hỗ trợ thao tác xóa. Backspace, Delete và contextual Delete tạo một
-`Draft` có `deleted = true`; candidate bị loại khỏi hit-test/candidate list,
-selection được clear và command đầy đủ được đưa vào undo stack.
+và hỗ trợ kéo đổi vị trí mà không đổi kích thước. Trong lúc kéo, draft cập nhật
+`frameRect` còn source rect bất biến để fallback mask vẫn che đúng vị trí gốc.
+Hit-test dùng frame mới, và cả một gesture chỉ tạo một command undo/redo.
+
+Preview không decode hoặc giữ thêm bitmap của image nguồn trên GUI thread.
+`PDFPageItem` copy `objectPath`, source rect và frame rect vào render request;
+worker tạm cộng độ dịch chuyển vào `e/f` của matrix image, render page, rồi khôi
+phục matrix trước khi tái sử dụng worker document. Khi Save/Save As, writer áp
+dụng cùng phép dịch lên image object trong document riêng và không remove/recreate
+object, nên giữ nguyên pixel resource, rotation/skew, kích thước và z-order.
+
+Backspace, Delete và contextual Delete tạo một `Draft` có `deleted = true`;
+candidate bị loại khỏi hit-test/candidate list, selection được clear và command
+đầy đủ được đưa vào undo stack.
 
 Trong lúc chưa save, `PDFPageItem` suppress image object theo `objectPath` trên
 worker document để render page sạch. Fallback mask che source rect cho đến khi

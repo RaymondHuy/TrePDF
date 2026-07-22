@@ -1082,6 +1082,35 @@ QVector<QVector<int>> PDFEditController::draftedTextObjectPathsForPage(int page)
     return objectPaths;
 }
 
+QVector<PDFEditController::DraftImageMove>
+PDFEditController::draftedImageMovesForPage(int page) const
+{
+    QVector<DraftImageMove> moves;
+    for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
+        const Candidate &candidate = draft->candidate;
+        if (candidate.page != page
+            || candidate.kind != QLatin1String("image")
+            || draft->deleted
+            || !candidate.renderSuppressible
+            || candidate.objectPath.size() != 1
+            || candidate.geometry.sourceRect.topLeft() == draft->frameRect.topLeft()) {
+            continue;
+        }
+        moves.append(DraftImageMove{
+            candidate.objectPath,
+            candidate.geometry.sourceRect,
+            draft->frameRect});
+    }
+
+    std::sort(moves.begin(), moves.end(), [](const DraftImageMove &left,
+                                             const DraftImageMove &right) {
+        return std::lexicographical_compare(
+            left.objectPath.cbegin(), left.objectPath.cend(),
+            right.objectPath.cbegin(), right.objectPath.cend());
+    });
+    return moves;
+}
+
 bool PDFEditController::allDraftedTextObjectsSuppressibleForPage(int page) const
 {
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
@@ -1196,13 +1225,21 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
             return;
         }
 
-        const QRectF &sourceRect = candidate.geometry.sourceRect;
-        const QRectF hitRect = sourceRect.adjusted(-0.0025, -0.0025, 0.0025, 0.0025);
+        const bool imageCandidate = candidate.kind == QLatin1String("image")
+            || candidate.kind == QLatin1String("addedImage");
+        const QRectF candidateRect = imageCandidate && draft != m_drafts.cend()
+            ? draft->frameRect
+            : candidate.geometry.sourceRect;
+        const QRectF hitRect = candidateRect.adjusted(
+            -0.0025,
+            -0.0025,
+            0.0025,
+            0.0025);
         if (!hitRect.contains(point)) {
             return;
         }
 
-        const qreal area = sourceRect.width() * sourceRect.height();
+        const qreal area = candidateRect.width() * candidateRect.height();
         const bool isBetter = !bestCandidate
             || (candidate.added && !bestCandidate->added)
             || (candidate.added == bestCandidate->added
@@ -1721,8 +1758,7 @@ void PDFEditController::beginSelectedFrameResize()
 {
     if (m_frameResizeActive
         || !m_hasSelection
-        || !m_selectedCandidate.editable
-        || m_selectedCandidate.kind == QLatin1String("image")) {
+        || !m_selectedCandidate.editable) {
         return;
     }
 
@@ -1758,9 +1794,20 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         return;
     }
 
-    const QRectF boundedRect(left, top, right - left, bottom - top);
     Draft draft = selectedDraftForDisplay();
-    const bool imageDraft = draft.candidate.kind == QLatin1String("addedImage");
+    QRectF boundedRect(left, top, right - left, bottom - top);
+    const bool sourceImageDraft = draft.candidate.kind == QLatin1String("image");
+    const bool imageDraft = sourceImageDraft
+        || draft.candidate.kind == QLatin1String("addedImage");
+    if (sourceImageDraft) {
+        const qreal width = qBound<qreal>(0.0, draft.frameRect.width(), 1.0);
+        const qreal height = qBound<qreal>(0.0, draft.frameRect.height(), 1.0);
+        boundedRect = QRectF(
+            qBound<qreal>(0.0, boundedRect.x(), 1.0 - width),
+            qBound<qreal>(0.0, boundedRect.y(), 1.0 - height),
+            width,
+            height);
+    }
     const qreal previousContentHeight = qMax(
         draft.frameRect.height(),
         draft.contentBounds.bottom() - draft.frameRect.y());

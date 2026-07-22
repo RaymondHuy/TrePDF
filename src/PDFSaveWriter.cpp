@@ -76,6 +76,7 @@ struct SaveDraft {
     QString text;
     QVector<SaveSpan> characterSpans;
     QVector<SaveParagraph> paragraphFormats;
+    QRectF sourceRect;
     QRectF frameRect;
     QImage image;
     QPointF layoutOrigin;
@@ -107,11 +108,15 @@ struct SourceObject {
 
 struct PreparedDraft {
     SaveDraft::Kind kind = SaveDraft::Kind::Text;
+    QString objectId;
     QVector<SourceObject> sources;
     QVector<FPDF_PAGEOBJECT> objects;
     QVector<FPDF_BITMAP> bitmaps;
     int insertionIndex = 0;
     bool append = false;
+    bool movesSourceImage = false;
+    QRectF sourceRect;
+    QRectF frameRect;
 };
 
 class PdfDocumentHandle
@@ -1185,6 +1190,58 @@ PDFSaveWriter::Result createImageDraftObject(
     return {};
 }
 
+PDFSaveWriter::Result moveSourceImageObject(
+    const SaveDraft &draft,
+    const SourceObject &source,
+    qreal pageWidth,
+    qreal pageHeight,
+    const PageCoordinateMapper &coordinateMapper)
+{
+    if (!source.object
+        || source.parentForm
+        || draft.sourceRect.isEmpty()
+        || draft.frameRect.isEmpty()) {
+        return failure(
+            PDFSaveWriter::Error::ImageObjectCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    const QPointF sourceTopLeft(
+        draft.sourceRect.x() * pageWidth,
+        draft.sourceRect.y() * pageHeight);
+    const QPointF targetTopLeft(
+        draft.frameRect.x() * pageWidth,
+        draft.frameRect.y() * pageHeight);
+    QPointF sourcePagePoint;
+    QPointF targetPagePoint;
+    FS_MATRIX matrix{};
+    if (!coordinateMapper.pagePoint(
+            sourceTopLeft.x(),
+            sourceTopLeft.y(),
+            sourcePagePoint)
+        || !coordinateMapper.pagePoint(
+            targetTopLeft.x(),
+            targetTopLeft.y(),
+            targetPagePoint)
+        || !FPDFPageObj_GetMatrix(source.object, &matrix)) {
+        return failure(
+            PDFSaveWriter::Error::ImageObjectCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    matrix.e += static_cast<float>(targetPagePoint.x() - sourcePagePoint.x());
+    matrix.f += static_cast<float>(targetPagePoint.y() - sourcePagePoint.y());
+    if (!FPDFPageObj_SetMatrix(source.object, &matrix)) {
+        return failure(
+            PDFSaveWriter::Error::ImageObjectCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+    return {};
+}
+
 PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                                          FPDF_PAGE page,
                                          const SaveDraft &draft,
@@ -1200,6 +1257,9 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
         return {};
     }
     if (draft.kind == SaveDraft::Kind::Image) {
+        if (!draft.added) {
+            return {};
+        }
         return createImageDraftObject(
             document,
             page,
@@ -1480,6 +1540,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     for (const SaveDraft &draft : drafts) {
         PreparedDraft prepared;
         prepared.kind = draft.kind;
+        prepared.objectId = draft.objectId;
         PDFSaveWriter::Result sourceResult;
         prepared.sources = sourceObjectsForDraft(
             page.get(),
@@ -1490,6 +1551,11 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
             return sourceResult;
         }
         prepared.append = prepared.sources.isEmpty();
+        prepared.movesSourceImage = prepared.kind == SaveDraft::Kind::Image
+            && !draft.added
+            && !draft.deleted;
+        prepared.sourceRect = draft.sourceRect;
+        prepared.frameRect = draft.frameRect;
         prepared.insertionIndex = prepared.append
             ? originalObjectCount
             : prepared.sources.constFirst().topLevelIndex;
@@ -1531,6 +1597,36 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         preparedDrafts.append(std::move(prepared));
     }
 
+    for (qsizetype index = 0; index < preparedDrafts.size(); ++index) {
+        PreparedDraft &prepared = preparedDrafts[index];
+        if (!prepared.movesSourceImage) {
+            continue;
+        }
+        if (prepared.sources.size() != 1) {
+            destroyPreparedObjects(preparedDrafts);
+            return failure(
+                PDFSaveWriter::Error::UnsupportedSourceObject,
+                pageIndex);
+        }
+
+        SaveDraft moveDraft;
+        moveDraft.kind = SaveDraft::Kind::Image;
+        moveDraft.page = pageIndex;
+        moveDraft.objectId = prepared.objectId;
+        moveDraft.sourceRect = prepared.sourceRect;
+        moveDraft.frameRect = prepared.frameRect;
+        const PDFSaveWriter::Result moveResult = moveSourceImageObject(
+            moveDraft,
+            prepared.sources.constFirst(),
+            pageWidth,
+            pageHeight,
+            coordinateMapper);
+        if (!moveResult.succeeded()) {
+            destroyPreparedObjects(preparedDrafts);
+            return moveResult;
+        }
+    }
+
     std::stable_sort(
         preparedDrafts.begin(),
         preparedDrafts.end(),
@@ -1540,27 +1636,29 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
 
     QSet<FPDF_PAGEOBJECT> removed;
     for (PreparedDraft &prepared : preparedDrafts) {
-        for (const SourceObject &source : std::as_const(prepared.sources)) {
-            if (removed.contains(source.object)) {
-                continue;
+        if (!prepared.movesSourceImage) {
+            for (const SourceObject &source : std::as_const(prepared.sources)) {
+                if (removed.contains(source.object)) {
+                    continue;
+                }
+                if (source.parentForm) {
+                    destroyPreparedObjects(preparedDrafts);
+                    return failure(
+                        PDFSaveWriter::Error::UnsupportedSourceObject,
+                        pageIndex);
+                }
+                const bool succeeded = FPDFPage_RemoveObject(
+                    page.get(),
+                    source.object);
+                if (!succeeded) {
+                    destroyPreparedObjects(preparedDrafts);
+                    return failure(
+                        PDFSaveWriter::Error::SourceObjectRemovalFailed,
+                        pageIndex);
+                }
+                removed.insert(source.object);
+                FPDFPageObj_Destroy(source.object);
             }
-            if (source.parentForm) {
-                destroyPreparedObjects(preparedDrafts);
-                return failure(
-                    PDFSaveWriter::Error::UnsupportedSourceObject,
-                    pageIndex);
-            }
-            const bool succeeded = FPDFPage_RemoveObject(
-                page.get(),
-                source.object);
-            if (!succeeded) {
-                destroyPreparedObjects(preparedDrafts);
-                return failure(
-                    PDFSaveWriter::Error::SourceObjectRemovalFailed,
-                    pageIndex);
-            }
-            removed.insert(source.object);
-            FPDFPageObj_Destroy(source.object);
         }
 
         const int insertionIndex = prepared.append
@@ -1730,6 +1828,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.objectId = draft->candidate.objectId;
         saveDraft.originalText = draft->candidate.text;
         saveDraft.text = draft->text;
+        saveDraft.sourceRect = draft->candidate.geometry.sourceRect;
         saveDraft.frameRect = draft->frameRect;
         saveDraft.layoutOrigin = PDFEditController::layoutOriginForDraft(*draft);
         saveDraft.hasBaseline = draft->candidate.hasBaseline;

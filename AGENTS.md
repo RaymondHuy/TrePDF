@@ -29,6 +29,10 @@ Current features:
   Delete, or the contextual Delete action. Deletion remains an undoable session
   draft until Save/Save As removes the source object; images nested in Form
   XObjects remain protected.
+- Added images and editable top-level source images can be dragged within the
+  page. A drag preserves image size and creates one undoable command. Source
+  image preview transforms run on the render worker, and Save/Save As translates
+  the original image matrix so pixels, orientation, and z-order remain intact.
 - Drafts use a rich-text model with UTF-16 text ranges, character spans,
   paragraph formats, a layout frame, and content bounds. The inline `TextEdit`
   supports multiple lines, wraps/reflows inside the layout frame, renders every
@@ -238,9 +242,11 @@ clipped or elided unintentionally.
   draft/font/geometry data on the GUI thread, then run `PDFSaveWriter::save()`
   on a worker; the worker request must not retain controller/document pointers.
 - Resolve every source object path before removing source objects. Only
-  top-level page text and top-level image deletion are currently saveable;
-  nested Form XObject content must remain non-editable until its
-  transform/clip/resource scope can be preserved.
+  top-level page text plus top-level image movement/deletion are currently
+  saveable; nested Form XObject content must remain non-editable until its
+  transform/clip/resource scope can be preserved. Keep moved source images in
+  place and translate their existing matrix; this preserves their resource,
+  orientation, size, and z-order.
   Remove source objects with `FPDFPage_RemoveObject()` and destroy each object
   only after a successful removal.
 - PDFium does not wrap text. Reflow the draft with `QTextLayout`, create text

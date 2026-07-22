@@ -19,15 +19,17 @@ and persistence.
 The Image tool changes the page cursor to a placement `+`. Clicking a page opens
 the local image picker; the chosen PNG, JPEG, BMP, GIF, WebP, or TIFF is decoded
 and snapshotted immediately, displayed as a resizable session draft, and added
-to undo/redo. Save/Save As embeds the pixels as a PDF image object, preserving
-the editor geometry on cropped and rotated pages.
+to undo/redo. The draft can also be dragged to a new position. Save/Save As
+embeds the pixels as a PDF image object, preserving the editor geometry on
+cropped and rotated pages.
 
-Existing top-level PDF images can be selected in Select mode and removed with
-Backspace, Delete, or the contextual Delete action. The source image disappears
-from the draft preview immediately, deletion participates in undo/redo, and the
-PDF object is removed only after Save/Save As succeeds. Images nested inside a
-Form XObject remain non-editable because their transform, clip, and resource
-scope cannot yet be rewritten safely.
+Existing top-level PDF images can be selected in Select mode, dragged without
+changing their size, or removed with Backspace, Delete, or the contextual
+Delete action. Movement and deletion participate in undo/redo and remain
+session drafts until Save/Save As succeeds. Moving an existing image translates
+its original PDF matrix, preserving its pixels, orientation, and z-order.
+Images nested inside a Form XObject remain non-editable because their transform,
+clip, and resource scope cannot yet be rewritten safely.
 
 Draft geometry keeps immutable PDF source bounds separate from the layout frame
 and laid-out content bounds. Existing PDF text seeds its frame from the Qt text
@@ -89,15 +91,17 @@ Save writes the current file atomically; Save As preserves the source file and
 opens the saved copy. The controller snapshots the draft on the GUI thread and
 runs serialization on a worker so the interface can keep painting its saving
 state. The writer uses a separate PDFium document, replaces every source object
-represented by a draft, lays out multiline/rich-text runs, calls
+that needs replacement or deletion, translates moved source images, lays out
+multiline/rich-text runs, calls
 `FPDFPage_GenerateContent()`, and only clears undo history after the saved PDF
 has reopened successfully.
 
 Editable source text is currently limited to top-level page objects with Fill,
 Stroke, or Fill+Stroke rendering. Text used as a clipping path or nested inside
 a Form XObject remains viewable but is not offered as safely editable content.
-Top-level image objects are delete-only; TrePDF does not expose their pixels as
-editable text and does not permit deletion inside a Form XObject.
+Top-level image objects support position changes and deletion; TrePDF does not
+expose their pixels as editable text and does not permit either operation inside
+a Form XObject.
 
 Edit mode also shows a collapsible text-formatting panel on the right with font
 family, size, color, bold, italic, and underline controls. Font family, bold,
