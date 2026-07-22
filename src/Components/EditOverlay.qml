@@ -60,6 +60,11 @@ Item {
     visible: !pooled && (interactionActive || drafts.length > 0)
     enabled: interactionActive
 
+    Keys.onPressed: event => {
+        if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete)
+            event.accepted = root.deleteSelectedImage()
+    }
+
     function reloadData() {
         if (pooled) {
             drafts = []
@@ -81,6 +86,8 @@ Item {
                     continue
 
                 if (previousDraft.added === true)
+                    continue
+                else if (previousDraft.kind === "image")
                     continue
                 else if (previousDraft.restoration === true)
                     displayedDrafts.push(previousDraft)
@@ -423,6 +430,14 @@ Item {
                 || candidate.kind === "freeText")
     }
 
+    function isImageKind(kind) {
+        return kind === "image" || kind === "addedImage"
+    }
+
+    function isImageCandidate(candidate) {
+        return hasCandidate(candidate) && isImageKind(candidate.kind)
+    }
+
     function updateSelectCursor(x, y, candidate) {
         if (controller.tool !== PDFEditController.SelectTool
                 || !isTextBoxCandidate(candidate)) {
@@ -638,13 +653,22 @@ Item {
 
     function deleteSelectedObject() {
         if (controller.selectedPage !== page || !controller.selectedEditable)
-            return
+            return false
 
         controller.deleteSelectedObject()
         controller.clearSelection()
         hoverCandidate = ({})
         hideSelectCursor()
         reloadData()
+        return true
+    }
+
+    function deleteSelectedImage() {
+        if (editing || !isImageKind(controller.selectedKind))
+            return false
+
+        selectionActions.close()
+        return deleteSelectedObject()
     }
 
     function selectRelativeCandidate(direction) {
@@ -653,7 +677,7 @@ Item {
         for (let index = 0; index < candidates.length; ++index) {
             if (controller.tool !== PDFEditController.EditTextTool
                     || (candidates[index].editable
-                        && candidates[index].kind !== "addedImage")) {
+                        && !isImageCandidate(candidates[index]))) {
                 selectable.push(candidates[index])
             }
         }
@@ -851,9 +875,10 @@ Item {
                 fontPixelSize)
             readonly property bool hovered: root.hasCandidate(root.hoverCandidate)
                 && root.hoverCandidate.objectId === modelData.objectId
-            readonly property bool isImage: modelData.kind === "addedImage"
+            readonly property bool isImage: root.isImageCandidate(modelData)
             readonly property bool hasText: modelData.text.length > 0
-            readonly property bool hasContent: isImage || hasText
+            readonly property bool hasContent:
+                modelData.deleted !== true && (isImage || hasText)
             readonly property bool selected: root.controller.selectedPage === root.page
                 && root.controller.selectedObjectId === modelData.objectId
 
@@ -973,6 +998,7 @@ Item {
                 sourceImage: draftItem.modelData.image
                 smooth: true
                 visible: draftItem.isImage
+                    && draftItem.modelData.deleted !== true
                 Accessible.ignored: true
             }
 
@@ -1063,13 +1089,17 @@ Item {
                     || root.controller.tool === PDFEditController.AddImageTool
             ? Qt.IBeamCursor
             : root.hasCandidate(root.hoverCandidate)
-            ? root.hoverCandidate.editable ? Qt.IBeamCursor : Qt.ForbiddenCursor
+            ? !root.hoverCandidate.editable
+                ? Qt.ForbiddenCursor
+                : root.isImageCandidate(root.hoverCandidate)
+                    ? Qt.ArrowCursor
+                    : Qt.IBeamCursor
             : Qt.ArrowCursor
         activeFocusOnTab: true
         Accessible.role: Accessible.Pane
         //% "PDF edit surface"
         Accessible.name: qsTrId("PdfEditSurface")
-        //% "Use Tab or arrow keys to select content, then press Enter to edit text"
+        //% "Use Tab or arrow keys to select content, Enter to edit text, and Backspace or Delete to remove images"
         Accessible.description: qsTrId("PdfEditSurfaceDescription")
 
         onEntered: root.updateHoverAtPosition(mouseX, mouseY)
@@ -1142,7 +1172,7 @@ Item {
         id: selectionActions
 
         readonly property bool imageSelection:
-            root.controller.selectedKind === "addedImage"
+            root.isImageKind(root.controller.selectedKind)
 
         parent: root
         width: imageSelection ? 71 : 136
@@ -1178,6 +1208,12 @@ Item {
 
         contentItem: Row {
             spacing: 2
+            focus: true
+
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete)
+                    event.accepted = root.deleteSelectedImage()
+            }
 
             ToolButton {
                 id: editAction
@@ -1593,7 +1629,7 @@ Item {
         }
 
         Repeater {
-            model: [
+            model: root.controller.selectedKind === "image" ? [] : [
                 { horizontal: 0, vertical: -1, cursor: Qt.SizeVerCursor },
                 { horizontal: 1, vertical: 0, cursor: Qt.SizeHorCursor },
                 { horizontal: 0, vertical: 1, cursor: Qt.SizeVerCursor },

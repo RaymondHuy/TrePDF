@@ -88,6 +88,7 @@ struct SaveDraft {
     quint64 addedOrder = 0;
     bool hasBaseline = false;
     bool added = false;
+    bool deleted = false;
 };
 
 struct LayoutRun {
@@ -856,7 +857,7 @@ SourceObject sourceObjectAtPath(FPDF_PAGE page, const QVector<int> &objectPath)
             result.parentForm,
             static_cast<unsigned long>(childIndex));
     }
-    if (!result.object || FPDFPageObj_GetType(result.object) != FPDF_PAGEOBJ_TEXT) {
+    if (!result.object) {
         return {};
     }
     return result;
@@ -1047,6 +1048,16 @@ QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
                 draft.objectId);
             return {};
         }
+        const int expectedType = draft.kind == SaveDraft::Kind::Image
+            ? FPDF_PAGEOBJ_IMAGE
+            : FPDF_PAGEOBJ_TEXT;
+        if (FPDFPageObj_GetType(source.object) != expectedType) {
+            result = failure(
+                PDFSaveWriter::Error::SourceObjectMissing,
+                draft.page,
+                draft.objectId);
+            return {};
+        }
         if (!seen.contains(source.object)) {
             seen.insert(source.object);
             objects.append(source);
@@ -1185,6 +1196,9 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                                          QVector<FPDF_PAGEOBJECT> &objects,
                                          QVector<FPDF_BITMAP> &bitmaps)
 {
+    if (draft.deleted) {
+        return {};
+    }
     if (draft.kind == SaveDraft::Kind::Image) {
         return createImageDraftObject(
             document,
@@ -1485,13 +1499,16 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 source.topLevelIndex);
         }
 
-        FPDF_FONT originalFont = prepared.sources.isEmpty()
-            ? nullptr
-            : FPDFTextObj_GetFont(prepared.sources.constFirst().object);
-        for (const SourceObject &source : std::as_const(prepared.sources)) {
-            if (FPDFTextObj_GetFont(source.object) != originalFont) {
-                originalFont = nullptr;
-                break;
+        FPDF_FONT originalFont = prepared.kind == SaveDraft::Kind::Text
+                && !prepared.sources.isEmpty()
+            ? FPDFTextObj_GetFont(prepared.sources.constFirst().object)
+            : nullptr;
+        if (prepared.kind == SaveDraft::Kind::Text) {
+            for (const SourceObject &source : std::as_const(prepared.sources)) {
+                if (FPDFTextObj_GetFont(source.object) != originalFont) {
+                    originalFont = nullptr;
+                    break;
+                }
             }
         }
         const PDFSaveWriter::Result createResult = createDraftObjects(
@@ -1704,7 +1721,9 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
          draft != controller.m_drafts.cend();
          ++draft) {
         SaveDraft saveDraft;
-        saveDraft.kind = draft->candidate.kind == QLatin1String("addedImage")
+        const bool imageDraft = draft->candidate.kind == QLatin1String("addedImage")
+            || draft->candidate.kind == QLatin1String("image");
+        saveDraft.kind = imageDraft
             ? SaveDraft::Kind::Image
             : SaveDraft::Kind::Text;
         saveDraft.page = draft->candidate.page;
@@ -1716,7 +1735,17 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.hasBaseline = draft->candidate.hasBaseline;
         saveDraft.added = draft->candidate.added;
         saveDraft.addedOrder = draft->candidate.addedOrder;
-        saveDraft.image = draft->candidate.image;
+        saveDraft.deleted = draft->deleted;
+        saveDraft.image = draft->deleted ? QImage() : draft->candidate.image;
+        if (!draft->candidate.parts.isEmpty()) {
+            for (const PDFEditController::CandidatePart &part : draft->candidate.parts) {
+                if (!part.objectPath.isEmpty()) {
+                    saveDraft.sourceObjectPaths.append(part.objectPath);
+                }
+            }
+        } else if (!draft->candidate.objectPath.isEmpty()) {
+            saveDraft.sourceObjectPaths.append(draft->candidate.objectPath);
+        }
         if (saveDraft.kind == SaveDraft::Kind::Image) {
             data->drafts.append(std::move(saveDraft));
             continue;
@@ -1728,15 +1757,6 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.originalStrokeColor = draft->candidate.strokeColor;
         saveDraft.originalStrokeWidth = draft->candidate.strokeWidth;
         saveDraft.originalRenderMode = draft->candidate.textRenderMode;
-        if (!draft->candidate.parts.isEmpty()) {
-            for (const PDFEditController::CandidatePart &part : draft->candidate.parts) {
-                if (!part.objectPath.isEmpty()) {
-                    saveDraft.sourceObjectPaths.append(part.objectPath);
-                }
-            }
-        } else if (!draft->candidate.objectPath.isEmpty()) {
-            saveDraft.sourceObjectPaths.append(draft->candidate.objectPath);
-        }
         for (const PDFEditController::CharacterSpan &span : draft->characterSpans) {
             saveDraft.characterSpans.append(SaveSpan{
                 span.start,

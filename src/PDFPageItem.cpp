@@ -193,9 +193,7 @@ FPDF_PAGEOBJECT pageObjectAtPath(FPDF_PAGE page, const QVector<int> &objectPath)
         object = FPDFFormObj_GetObject(object, static_cast<unsigned long>(childIndex));
     }
 
-    return object && FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_TEXT
-        ? object
-        : nullptr;
+    return object;
 }
 
 class ScopedPageObjectSuppression

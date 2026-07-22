@@ -22,6 +22,13 @@ and snapshotted immediately, displayed as a resizable session draft, and added
 to undo/redo. Save/Save As embeds the pixels as a PDF image object, preserving
 the editor geometry on cropped and rotated pages.
 
+Existing top-level PDF images can be selected in Select mode and removed with
+Backspace, Delete, or the contextual Delete action. The source image disappears
+from the draft preview immediately, deletion participates in undo/redo, and the
+PDF object is removed only after Save/Save As succeeds. Images nested inside a
+Form XObject remain non-editable because their transform, clip, and resource
+scope cannot yet be rewritten safely.
+
 Draft geometry keeps immutable PDF source bounds separate from the layout frame
 and laid-out content bounds. Existing PDF text seeds its frame from the Qt text
 width so the original line fits. When its inline editor opens, TrePDF
@@ -89,6 +96,8 @@ has reopened successfully.
 Editable source text is currently limited to top-level page objects with Fill,
 Stroke, or Fill+Stroke rendering. Text used as a clipping path or nested inside
 a Form XObject remains viewable but is not offered as safely editable content.
+Top-level image objects are delete-only; TrePDF does not expose their pixels as
+editable text and does not permit deletion inside a Form XObject.
 
 Edit mode also shows a collapsible text-formatting panel on the right with font
 family, size, color, bold, italic, and underline controls. Font family, bold,

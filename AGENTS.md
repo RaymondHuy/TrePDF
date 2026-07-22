@@ -25,6 +25,10 @@ Current features:
   the user clicks a page and chooses a supported local image, TrePDF snapshots
   the decoded pixels, shows a resizable draft that preserves the initial aspect
   ratio, and writes it as a PDF image object on Save/Save As.
+- Top-level PDF image objects can be selected and deleted with Backspace,
+  Delete, or the contextual Delete action. Deletion remains an undoable session
+  draft until Save/Save As removes the source object; images nested in Form
+  XObjects remain protected.
 - Drafts use a rich-text model with UTF-16 text ranges, character spans,
   paragraph formats, a layout frame, and content bounds. The inline `TextEdit`
   supports multiple lines, wraps/reflows inside the layout frame, renders every
@@ -233,9 +237,10 @@ clipped or elided unintentionally.
   separate writer document from `PDFDocument::renderFilePath()`. Snapshot all
   draft/font/geometry data on the GUI thread, then run `PDFSaveWriter::save()`
   on a worker; the worker request must not retain controller/document pointers.
-- Resolve every `CandidatePart::objectPath` before removing source objects.
-  Only top-level page text is currently saveable; nested Form XObject text must
-  remain non-editable until its transform/clip/resource scope can be preserved.
+- Resolve every source object path before removing source objects. Only
+  top-level page text and top-level image deletion are currently saveable;
+  nested Form XObject content must remain non-editable until its
+  transform/clip/resource scope can be preserved.
   Remove source objects with `FPDFPage_RemoveObject()` and destroy each object
   only after a successful removal.
 - PDFium does not wrap text. Reflow the draft with `QTextLayout`, create text

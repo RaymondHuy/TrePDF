@@ -63,9 +63,17 @@ bool isTextCandidateKind(const QString &kind)
         || kind == QLatin1String("addedText");
 }
 
-bool draftRepresentsDeletion(const QString &kind, const QString &text)
+bool draftRepresentsDeletion(const QString &kind,
+                             const QString &text,
+                             bool explicitlyDeleted)
 {
-    return isTextCandidateKind(kind) && text.isEmpty();
+    return explicitlyDeleted || (isTextCandidateKind(kind) && text.isEmpty());
+}
+
+bool draftSuppressesSourceObjects(const QString &kind, bool deleted)
+{
+    return kind == QLatin1String("text")
+        || (kind == QLatin1String("image") && deleted);
 }
 
 bool sameFontFamily(const QString &left, const QString &right)
@@ -654,7 +662,7 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
         //% "An edited object could not be found on page %1."
         return qtTrId("PdfSaveSourceObjectMissing").arg(result.page + 1);
     case PDFSaveWriter::Error::SourceObjectRemovalFailed:
-        //% "An original object could not be replaced on page %1."
+        //% "An original object could not be removed or replaced on page %1."
         return qtTrId("PdfSaveObjectRemovalFailed").arg(result.page + 1);
     case PDFSaveWriter::Error::FontUnavailable: {
         if (result.unsupportedCodePoint != 0) {
@@ -1051,7 +1059,7 @@ QVector<QVector<int>> PDFEditController::draftedTextObjectPathsForPage(int page)
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
         const Candidate &candidate = draft->candidate;
         if (candidate.page == page
-            && candidate.kind == QLatin1String("text")
+            && draftSuppressesSourceObjects(candidate.kind, draft->deleted)
             && candidate.renderSuppressible) {
             if (!candidate.parts.isEmpty()) {
                 for (const CandidatePart &part : candidate.parts) {
@@ -1079,7 +1087,7 @@ bool PDFEditController::allDraftedTextObjectsSuppressibleForPage(int page) const
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
         const Candidate &candidate = draft->candidate;
         if (candidate.page == page
-            && candidate.kind == QLatin1String("text")
+            && draftSuppressesSourceObjects(candidate.kind, draft->deleted)
             && !candidate.renderSuppressible) {
             return false;
         }
@@ -1096,7 +1104,7 @@ QVariantList PDFEditController::candidatesForPage(int page)
         const QString key = draftKey(candidate.page, candidate.objectId);
         const auto draft = m_drafts.constFind(key);
         if (draft != m_drafts.cend()
-            && draftRepresentsDeletion(candidate.kind, draft->text)) {
+            && draftRepresentsDeletion(candidate.kind, draft->text, draft->deleted)) {
             continue;
         }
         const Draft displayDraft = draft == m_drafts.cend()
@@ -1111,7 +1119,7 @@ QVariantList PDFEditController::candidatesForPage(int page)
 
         const auto draft = m_drafts.constFind(draftKey(page, candidate.objectId));
         if (draft != m_drafts.cend()
-            && draftRepresentsDeletion(candidate.kind, draft->text)) {
+            && draftRepresentsDeletion(candidate.kind, draft->text, draft->deleted)) {
             continue;
         }
         const Draft displayDraft = draft == m_drafts.cend()
@@ -1184,7 +1192,7 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
         const auto draft = m_drafts.constFind(
             draftKey(candidate.page, candidate.objectId));
         if (draft != m_drafts.cend()
-            && draftRepresentsDeletion(candidate.kind, draft->text)) {
+            && draftRepresentsDeletion(candidate.kind, draft->text, draft->deleted)) {
             return;
         }
 
@@ -1616,7 +1624,7 @@ bool PDFEditController::selectCandidate(int page, const QString &objectId)
     }
     const auto draft = m_drafts.constFind(draftKey(page, objectId));
     if (draft != m_drafts.cend()
-        && draftRepresentsDeletion(candidate->kind, draft->text)) {
+        && draftRepresentsDeletion(candidate->kind, draft->text, draft->deleted)) {
         clearSelection();
         return false;
     }
@@ -1640,7 +1648,7 @@ void PDFEditController::clearSelection()
 void PDFEditController::beginSelectedTextEdit()
 {
     if (m_hasSelection
-        && m_selectedCandidate.kind == QLatin1String("addedImage")) {
+        && !isTextCandidateKind(m_selectedCandidate.kind)) {
         return;
     }
     beginSelectedTextEditSession(true);
@@ -1711,7 +1719,10 @@ void PDFEditController::updateSelectedTextPreview(const QString &text)
 
 void PDFEditController::beginSelectedFrameResize()
 {
-    if (m_frameResizeActive || !m_hasSelection || !m_selectedCandidate.editable) {
+    if (m_frameResizeActive
+        || !m_hasSelection
+        || !m_selectedCandidate.editable
+        || m_selectedCandidate.kind == QLatin1String("image")) {
         return;
     }
 
@@ -2153,7 +2164,9 @@ void PDFEditController::cancelSelectedTextEdit()
 
 void PDFEditController::commitSelectedText(const QString &text)
 {
-    if (!m_hasSelection || !m_selectedCandidate.editable) {
+    if (!m_hasSelection
+        || !m_selectedCandidate.editable
+        || !isTextCandidateKind(m_selectedCandidate.kind)) {
         if (m_hasSelection && !m_selectedCandidate.reason.isEmpty()) {
             emit statusMessage(m_selectedCandidate.reason);
         }
@@ -2200,7 +2213,7 @@ void PDFEditController::deleteSelectedObject()
     if (!m_hasSelection || !m_selectedCandidate.editable) {
         return;
     }
-    if (m_selectedCandidate.kind != QLatin1String("addedImage")) {
+    if (isTextCandidateKind(m_selectedCandidate.kind)) {
         commitSelectedText(QString());
         return;
     }
@@ -2210,7 +2223,26 @@ void PDFEditController::deleteSelectedObject()
         m_selectedCandidate.page,
         m_selectedCandidate.objectId);
     const auto existingDraft = m_drafts.constFind(key);
-    if (existingDraft == m_drafts.cend()) {
+    if (m_selectedCandidate.kind == QLatin1String("addedImage")) {
+        if (existingDraft == m_drafts.cend()) {
+            return;
+        }
+
+        Command command;
+        command.key = key;
+        command.page = m_selectedCandidate.page;
+        command.objectId = m_selectedCandidate.objectId;
+        command.hadBefore = true;
+        command.before = *existingDraft;
+        command.hadAfter = false;
+        command.after = command.before;
+        m_undoStack.append(command);
+        m_redoStack.clear();
+        applyDraftState(command, true, true);
+        emit historyStateChanged();
+        return;
+    }
+    if (m_selectedCandidate.kind != QLatin1String("image")) {
         return;
     }
 
@@ -2218,10 +2250,16 @@ void PDFEditController::deleteSelectedObject()
     command.key = key;
     command.page = m_selectedCandidate.page;
     command.objectId = m_selectedCandidate.objectId;
-    command.hadBefore = true;
-    command.before = *existingDraft;
-    command.hadAfter = false;
+    command.hadBefore = existingDraft != m_drafts.cend();
+    command.before = command.hadBefore
+        ? *existingDraft
+        : initialDraftForCandidate(m_selectedCandidate);
+    if (command.before.deleted) {
+        return;
+    }
+    command.hadAfter = true;
     command.after = command.before;
+    command.after.deleted = true;
     m_undoStack.append(command);
     m_redoStack.clear();
     applyDraftState(command, true, true);
@@ -2745,8 +2783,18 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
         candidate.kind = QStringLiteral("image");
         //% "Image"
         candidate.label = qtTrId("Image");
-        //% "This content is an image. OCR is required to edit its text."
-        candidate.reason = qtTrId("ImageTextRequiresOcr");
+        const bool editingAllowed = documentAllowsEditing();
+        const bool topLevelObject = objectPath.size() == 1;
+        candidate.editable = editingAllowed && topLevelObject;
+        candidate.renderSuppressible = true;
+        candidate.limited = true;
+        if (!editingAllowed) {
+            //% "This PDF does not permit content editing."
+            candidate.reason = qtTrId("PdfEditingNotPermitted");
+        } else if (!topLevelObject) {
+            //% "Images inside a PDF form object cannot be deleted safely yet."
+            candidate.reason = qtTrId("PdfFormImageDeleteUnsupported");
+        }
         candidates.append(candidate);
         return;
     }
@@ -3247,6 +3295,7 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("sourceRect"), candidate.geometry.sourceRect);
     map.insert(QStringLiteral("frameRect"), draft.frameRect);
     map.insert(QStringLiteral("contentBounds"), draft.contentBounds);
+    map.insert(QStringLiteral("deleted"), draft.deleted);
     map.insert(QStringLiteral("sourceRects"), candidateSourceRects(candidate));
     map.insert(QStringLiteral("grouped"), candidate.parts.size() > 1);
     map.insert(QStringLiteral("hasBaseline"), candidate.hasBaseline);
@@ -3485,7 +3534,8 @@ bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
         && sameCharacterSpans(left.characterSpans, right.characterSpans)
         && sameParagraphFormats(left.paragraphFormats, right.paragraphFormats)
         && left.frameRect == right.frameRect
-        && left.contentBounds == right.contentBounds;
+        && left.contentBounds == right.contentBounds
+        && left.deleted == right.deleted;
 }
 
 void PDFEditController::setDraftText(Draft &draft, const QString &text)
@@ -3967,7 +4017,7 @@ void PDFEditController::applyDraftState(const Command &command,
         && m_selectedCandidate.objectId == command.objectId;
     const bool selectionWasRemoved = candidate.added && !shouldExist;
     const bool selectionWasDeleted = shouldExist
-        && draftRepresentsDeletion(candidate.kind, draft.text);
+        && draftRepresentsDeletion(candidate.kind, draft.text, draft.deleted);
     if (selectedCandidateChanged
         && (selectionWasRemoved || selectionWasDeleted)) {
         setSelection(nullptr);

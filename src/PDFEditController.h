@@ -287,6 +287,7 @@ private:
         QVector<ParagraphFormat> paragraphFormats;
         QRectF frameRect;
         QRectF contentBounds;
+        bool deleted = false;
     };
 
     struct Command {
