@@ -3500,6 +3500,7 @@ void PDFEditControllerTest::addsImageWithUndoRedo()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    controller.setTool(PDFEditController::AddImageTool);
 
     const QPointF insertionPoint(0.2, 0.65);
     const QVariantMap added = controller.addImage(
@@ -3512,6 +3513,7 @@ void PDFEditControllerTest::addsImageWithUndoRedo()
     QCOMPARE(added.value(QStringLiteral("added")).toBool(), true);
     QCOMPARE(added.value(QStringLiteral("imagePixelWidth")).toInt(), 80);
     QCOMPARE(added.value(QStringLiteral("imagePixelHeight")).toInt(), 40);
+    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
     const QString objectId = added.value(QStringLiteral("objectId")).toString();
     const QRectF frame = added.value(QStringLiteral("frameRect")).toRectF();
     QVERIFY(frame.contains(insertionPoint));

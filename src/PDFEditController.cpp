@@ -1483,6 +1483,7 @@ QVariantMap PDFEditController::addImage(int page,
     m_undoStack.append(command);
     m_redoStack.clear();
 
+    setTool(SelectTool);
     setSelection(&addedCandidate);
     markDraftStateChanged(page, true);
     emit historyStateChanged();
