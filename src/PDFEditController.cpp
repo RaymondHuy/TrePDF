@@ -14,6 +14,7 @@
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QFontMetricsF>
+#include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMutexLocker>
@@ -30,8 +31,8 @@
 
 namespace {
 
-constexpr unsigned long kModifyContentsPermission = 1UL << 3;
 constexpr int kCoordinateMapExtent = 100000;
+constexpr qsizetype kMaximumCachedCandidatePages = 12;
 constexpr qreal kAddedTextWidthRatio = 0.25;
 constexpr qreal kAddedTextMinimumWidthRatio = 0.02;
 constexpr qreal kAddedTextHeightRatio = 0.04;
@@ -55,7 +56,139 @@ constexpr int kPdfFontFlagItalic = 1 << 6;
 constexpr int kPdfFontFlagForceBold = 1 << 18;
 constexpr qsizetype kMaximumEmbeddedFontBytes = 32 * 1024 * 1024;
 constexpr qsizetype kMaximumRegisteredFontBytes = 64 * 1024 * 1024;
+constexpr qsizetype kMaximumRegisteredFontCount = 128;
+constexpr qsizetype kMaximumRejectedFontFingerprints = 128;
 constexpr FS_MATRIX kIdentityMatrix{1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
+
+bool candidateScanCancelled(
+    const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    return cancellation
+        && cancellation->load(std::memory_order_relaxed);
+}
+
+QThreadPool &candidateScanThreadPool()
+{
+    static QThreadPool pool;
+    static const bool configured = []() {
+        pool.setMaxThreadCount(1);
+        pool.setExpiryTimeout(30000);
+        return true;
+    }();
+    Q_UNUSED(configured);
+    return pool;
+}
+
+class CandidateScanDocument final
+{
+public:
+    CandidateScanDocument() = default;
+
+    ~CandidateScanDocument()
+    {
+        // The pool can expire its worker independently of a scan transaction.
+        PDFiumProcessLock pdfiumLock;
+        closeLocked();
+    }
+
+    FPDF_DOCUMENT documentLocked(const QString &filePath, int revision)
+    {
+        assertPDFiumProcessLockHeld();
+        if (m_document && m_filePath == filePath && m_revision == revision) {
+            return m_document;
+        }
+
+        closeLocked();
+        const QByteArray encodedPath = QFile::encodeName(filePath);
+        m_document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+        if (m_document) {
+            m_filePath = filePath;
+            m_revision = revision;
+        }
+        return m_document;
+    }
+
+    Q_DISABLE_COPY_MOVE(CandidateScanDocument)
+
+private:
+    void closeLocked()
+    {
+        assertPDFiumProcessLockHeld();
+        if (m_document) {
+            FPDF_CloseDocument(m_document);
+        }
+        m_document = nullptr;
+        m_filePath.clear();
+        m_revision = -1;
+    }
+
+    FPDF_DOCUMENT m_document = nullptr;
+    QString m_filePath;
+    int m_revision = -1;
+};
+
+class CandidateScanWorkQueue final
+{
+public:
+    CandidateScanWorkQueue() = default;
+
+    void submit(std::function<void()> work,
+                std::function<void()> dropped)
+    {
+        std::function<void()> previouslyDropped;
+        bool startWorker = false;
+        {
+            QMutexLocker locker(&m_mutex);
+            previouslyDropped = std::move(m_pendingDropped);
+            m_pendingWork = std::move(work);
+            m_pendingDropped = std::move(dropped);
+            if (!m_workerActive) {
+                m_workerActive = true;
+                startWorker = true;
+            }
+        }
+
+        if (previouslyDropped) {
+            previouslyDropped();
+        }
+        if (startWorker) {
+            candidateScanThreadPool().start(QRunnable::create([this]() {
+                drain();
+            }));
+        }
+    }
+
+    Q_DISABLE_COPY_MOVE(CandidateScanWorkQueue)
+
+private:
+    void drain()
+    {
+        while (true) {
+            std::function<void()> work;
+            {
+                QMutexLocker locker(&m_mutex);
+                if (!m_pendingWork) {
+                    m_workerActive = false;
+                    return;
+                }
+                work = std::move(m_pendingWork);
+                m_pendingDropped = {};
+            }
+            work();
+        }
+    }
+
+    QMutex m_mutex;
+    std::function<void()> m_pendingWork;
+    std::function<void()> m_pendingDropped;
+    bool m_workerActive = false;
+};
+
+CandidateScanWorkQueue &candidateScanWorkQueue()
+{
+    static CandidateScanWorkQueue queue;
+    return queue;
+}
 
 bool isTextCandidateKind(const QString &kind)
 {
@@ -715,6 +848,9 @@ PDFEditController::PDFEditController(QObject *parent)
 
 PDFEditController::~PDFEditController()
 {
+    if (m_candidateScanCancellation) {
+        m_candidateScanCancellation->store(true, std::memory_order_relaxed);
+    }
     clearRegisteredFonts();
 }
 
@@ -1212,7 +1348,7 @@ QVariantList PDFEditController::draftsForPage(int page) const
 
 QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
 {
-    const QVector<Candidate> &candidates = ensurePageCandidates(page);
+    ensureCacheRevision();
     const QPointF point(x, y);
     const Candidate *bestCandidate = nullptr;
     qreal bestArea = 0.0;
@@ -1253,14 +1389,29 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
         }
     };
 
-    for (auto candidate = candidates.crbegin(); candidate != candidates.crend(); ++candidate) {
-        considerCandidate(*candidate);
-    }
+    // Added items always win the existing hit-test tie-break. Check them first
+    // so Add Image -> Select hover never needs to enter PDFium while its draft
+    // render is active.
     for (auto candidate = m_addedCandidates.crbegin();
          candidate != m_addedCandidates.crend();
          ++candidate) {
         if (candidate->page == page) {
             considerCandidate(*candidate);
+        }
+    }
+
+    if (!bestCandidate) {
+        // A cache miss never enters PDFium from the QML hover callback. One
+        // serial worker scan runs at a time and repeated misses coalesce to the
+        // latest requested page.
+        requestPageCandidateScan(page);
+        const QVector<Candidate> *candidates = cachedPageCandidates(page);
+        if (candidates) {
+            for (auto candidate = candidates->crbegin();
+                 candidate != candidates->crend();
+                 ++candidate) {
+                considerCandidate(*candidate);
+            }
         }
     }
 
@@ -1529,72 +1680,125 @@ int PDFEditController::displayFontStretch(const QString &fontFamily,
         qMax(1, qRound(pixelSize)));
 }
 
-QString PDFEditController::resolvedFontFamily(FPDF_PAGEOBJECT textObject,
-                                              const QString &text)
+void PDFEditController::snapshotFontResolutionLocked(
+    FPDF_PAGEOBJECT textObject,
+    Candidate &candidate,
+    const CandidateScanRequest &request,
+    QHash<FPDF_FONT, FontResolutionSnapshot> &fontResolutionCache,
+    qsizetype &embeddedFontDataBytes)
 {
+    assertPDFiumProcessLockHeld();
     FPDF_FONT font = FPDFTextObj_GetFont(textObject);
     if (!font) {
-        return {};
+        return;
     }
 
-    const QString expectedFamily = pdfFontName(font, false);
-    const QString baseName = pdfFontName(font, true);
-    const QString cacheKey = (baseName.isEmpty() ? expectedFamily : baseName)
-        + QLatin1Char('#')
-        + QString::number(
-            static_cast<qulonglong>(reinterpret_cast<quintptr>(font)),
-            16);
-    const QString bundledFamily = matchingFontFamily(
-        font,
-        ApplicationFonts::bundledFontFamilies());
-    const QString systemFamily = matchingFontFamily(
-        font,
-        ApplicationFonts::systemFontFamilies());
-    QString embeddedFamily;
-    const auto cachedEmbeddedFamily = m_pdfEmbeddedFontFamilyCache.constFind(cacheKey);
-    if (cachedEmbeddedFamily != m_pdfEmbeddedFontFamilyCache.cend()) {
-        embeddedFamily = cachedEmbeddedFamily.value();
-    } else {
-        embeddedFamily = registerEmbeddedFont(font, expectedFamily);
-        m_pdfEmbeddedFontFamilyCache.insert(cacheKey, embeddedFamily);
+    auto cachedSnapshot = fontResolutionCache.constFind(font);
+    if (cachedSnapshot == fontResolutionCache.cend()) {
+        FontResolutionSnapshot snapshot;
+        snapshot.scanIndex = static_cast<int>(fontResolutionCache.size());
+        snapshot.expectedFamily = pdfFontName(font, false);
+        snapshot.bundledFamily = matchingFontFamily(
+            font,
+            request.bundledFontFamilies);
+        snapshot.systemFamily = matchingFontFamily(
+            font,
+            request.systemFontFamilies);
+        snapshot.identity = normalizedPdfFontIdentity(font);
+        snapshot.bold = pdfFontIsBold(font);
+        snapshot.italic = pdfFontIsItalic(font);
+
+        const qsizetype remainingSnapshotBytes = qMax<qsizetype>(
+            0,
+            request.maximumEmbeddedFontSnapshotBytes - embeddedFontDataBytes);
+        if (remainingSnapshotBytes > 0 && FPDFFont_GetIsEmbedded(font) == 1) {
+            size_t fontByteCount = 0;
+            if (FPDFFont_GetFontData(font, nullptr, 0, &fontByteCount)
+                && fontByteCount > 0
+                && fontByteCount <= static_cast<size_t>(kMaximumEmbeddedFontBytes)
+                && fontByteCount <= static_cast<size_t>(remainingSnapshotBytes)) {
+                snapshot.embeddedFontData.resize(
+                    static_cast<qsizetype>(fontByteCount));
+                size_t actualByteCount = fontByteCount;
+                if (!FPDFFont_GetFontData(
+                        font,
+                        reinterpret_cast<uint8_t *>(
+                            snapshot.embeddedFontData.data()),
+                        fontByteCount,
+                        &actualByteCount)
+                    || actualByteCount == 0
+                    || actualByteCount > fontByteCount) {
+                    snapshot.embeddedFontData.clear();
+                } else {
+                    snapshot.embeddedFontData.resize(
+                        static_cast<qsizetype>(actualByteCount));
+                    embeddedFontDataBytes += snapshot.embeddedFontData.size();
+                }
+            }
+        }
+
+        fontResolutionCache.insert(font, std::move(snapshot));
+        cachedSnapshot = fontResolutionCache.constFind(font);
     }
 
-    if (fontSupportsText(embeddedFamily, text)) {
-        return embeddedFamily;
-    }
-    if (fontSupportsText(bundledFamily, text)) {
-        return bundledFamily;
-    }
-
-    return fontSupportsText(systemFamily, text) ? systemFamily : QString();
+    candidate.fontIdentity = cachedSnapshot->identity;
+    candidate.fontBold = cachedSnapshot->bold;
+    candidate.fontItalic = cachedSnapshot->italic;
+    candidate.pendingFontSnapshotIndex = cachedSnapshot->scanIndex;
+    candidate.pendingFontExpectedFamily = cachedSnapshot->expectedFamily;
+    candidate.pendingBundledFontFamily = cachedSnapshot->bundledFamily;
+    candidate.pendingSystemFontFamily = cachedSnapshot->systemFamily;
+    candidate.pendingEmbeddedFontData = cachedSnapshot->embeddedFontData;
 }
 
-QString PDFEditController::registerEmbeddedFont(FPDF_FONT font,
-                                                const QString &expectedFamily)
+void PDFEditController::resolveCandidateFontFamily(
+    Candidate &candidate,
+    QHash<int, QString> &resolvedEmbeddedFamilies)
 {
-    if (!font || FPDFFont_GetIsEmbedded(font) != 1) {
-        return {};
+    assertPDFiumProcessLockNotHeld();
+    QString embeddedFamily;
+    const auto resolvedFamily = resolvedEmbeddedFamilies.constFind(
+        candidate.pendingFontSnapshotIndex);
+    if (resolvedFamily != resolvedEmbeddedFamilies.cend()) {
+        embeddedFamily = resolvedFamily.value();
+    } else {
+        embeddedFamily = registerEmbeddedFont(
+            candidate.pendingEmbeddedFontData,
+            candidate.pendingFontExpectedFamily);
+        resolvedEmbeddedFamilies.insert(
+            candidate.pendingFontSnapshotIndex,
+            embeddedFamily);
     }
 
-    size_t fontByteCount = 0;
-    if (!FPDFFont_GetFontData(font, nullptr, 0, &fontByteCount)
-        || fontByteCount == 0
-        || fontByteCount > static_cast<size_t>(kMaximumEmbeddedFontBytes)) {
-        return {};
+    if (fontSupportsText(embeddedFamily, candidate.text)) {
+        candidate.fontFamily = embeddedFamily;
+    } else if (fontSupportsText(
+                   candidate.pendingBundledFontFamily,
+                   candidate.text)) {
+        candidate.fontFamily = candidate.pendingBundledFontFamily;
+    } else if (fontSupportsText(
+                   candidate.pendingSystemFontFamily,
+                   candidate.text)) {
+        candidate.fontFamily = candidate.pendingSystemFontFamily;
+    } else {
+        candidate.fontFamily.clear();
     }
 
-    QByteArray fontData(static_cast<qsizetype>(fontByteCount), '\0');
-    size_t actualByteCount = fontByteCount;
-    if (!FPDFFont_GetFontData(
-            font,
-            reinterpret_cast<uint8_t *>(fontData.data()),
-            fontByteCount,
-            &actualByteCount)
-        || actualByteCount == 0
-        || actualByteCount > fontByteCount) {
+    candidate.pendingFontSnapshotIndex = -1;
+    candidate.pendingFontExpectedFamily.clear();
+    candidate.pendingBundledFontFamily.clear();
+    candidate.pendingSystemFontFamily.clear();
+    candidate.pendingEmbeddedFontData.clear();
+}
+
+QString PDFEditController::registerEmbeddedFont(
+    const QByteArray &fontData,
+    const QString &expectedFamily)
+{
+    assertPDFiumProcessLockNotHeld();
+    if (fontData.isEmpty()) {
         return {};
     }
-    fontData.resize(static_cast<qsizetype>(actualByteCount));
 
     const QByteArray fingerprint = QCryptographicHash::hash(
         fontData,
@@ -1603,21 +1807,28 @@ QString PDFEditController::registerEmbeddedFont(FPDF_FONT font,
     if (registeredFamily != m_registeredFontFamilies.cend()) {
         return registeredFamily.value();
     }
-    if (fontData.size() > kMaximumRegisteredFontBytes - m_registeredFontBytes) {
-        m_registeredFontFamilies.insert(fingerprint, QString());
+    if (m_rejectedFontFingerprints.contains(fingerprint)) {
+        return {};
+    }
+    if (m_registeredFontIds.size() >= kMaximumRegisteredFontCount
+        || fontData.size() > kMaximumRegisteredFontBytes - m_registeredFontBytes) {
+        rememberRejectedFontFingerprint(fingerprint);
         return {};
     }
 
+    // Mark the fingerprint before calling Qt. Adding an application font emits
+    // fontDatabaseChanged synchronously; a re-entrant candidate finalization
+    // must not try to register the same bytes recursively.
+    rememberRejectedFontFingerprint(fingerprint);
+
     const int fontId = QFontDatabase::addApplicationFontFromData(fontData);
     if (fontId < 0) {
-        m_registeredFontFamilies.insert(fingerprint, QString());
         return {};
     }
 
     const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
     if (families.isEmpty()) {
         QFontDatabase::removeApplicationFont(fontId);
-        m_registeredFontFamilies.insert(fingerprint, QString());
         return {};
     }
 
@@ -1631,12 +1842,28 @@ QString PDFEditController::registerEmbeddedFont(FPDF_FONT font,
 
     m_registeredFontIds.append(fontId);
     m_registeredFontBytes += fontData.size();
+    m_rejectedFontFingerprints.remove(fingerprint);
+    m_rejectedFontFingerprintLru.removeAll(fingerprint);
     m_registeredFontFamilies.insert(fingerprint, family);
     return family;
 }
 
+void PDFEditController::rememberRejectedFontFingerprint(
+    const QByteArray &fingerprint)
+{
+    m_rejectedFontFingerprints.insert(fingerprint);
+    m_rejectedFontFingerprintLru.removeAll(fingerprint);
+    m_rejectedFontFingerprintLru.append(fingerprint);
+    while (m_rejectedFontFingerprintLru.size()
+           > kMaximumRejectedFontFingerprints) {
+        const QByteArray oldest = m_rejectedFontFingerprintLru.takeFirst();
+        m_rejectedFontFingerprints.remove(oldest);
+    }
+}
+
 void PDFEditController::clearRegisteredFonts()
 {
+    assertPDFiumProcessLockNotHeld();
     for (auto fontId = m_registeredFontIds.crbegin();
          fontId != m_registeredFontIds.crend();
          ++fontId) {
@@ -1644,7 +1871,8 @@ void PDFEditController::clearRegisteredFonts()
     }
     m_registeredFontIds.clear();
     m_registeredFontFamilies.clear();
-    m_pdfEmbeddedFontFamilyCache.clear();
+    m_rejectedFontFingerprints.clear();
+    m_rejectedFontFingerprintLru.clear();
     m_registeredFontBytes = 0;
 }
 
@@ -2555,7 +2783,12 @@ bool PDFEditController::completeSave(
 
 void PDFEditController::resetSession()
 {
+    if (m_candidateScanCancellation) {
+        m_candidateScanCancellation->store(true, std::memory_order_relaxed);
+    }
+    m_pendingCandidateScanPage = -1;
     m_pageCandidates.clear();
+    m_pageCandidateLru.clear();
     m_addedCandidates.clear();
     m_drafts.clear();
     m_pageDraftRevisions.clear();
@@ -2597,7 +2830,12 @@ void PDFEditController::ensureCacheRevision()
     }
 
     m_cachedRevision = revision;
+    if (m_candidateScanCancellation) {
+        m_candidateScanCancellation->store(true, std::memory_order_relaxed);
+    }
+    m_pendingCandidateScanPage = -1;
     m_pageCandidates.clear();
+    m_pageCandidateLru.clear();
 }
 
 const QVector<PDFEditController::Candidate> &PDFEditController::ensurePageCandidates(int page)
@@ -2609,33 +2847,305 @@ const QVector<PDFEditController::Candidate> &PDFEditController::ensurePageCandid
         return empty;
     }
 
-    auto cached = m_pageCandidates.find(page);
-    if (cached == m_pageCandidates.end()) {
-        cached = m_pageCandidates.insert(page, scanPage(page));
+    if (!m_pageCandidates.contains(page)) {
+        requestPageCandidateScan(page);
+        return empty;
     }
-    return cached.value();
+    touchPageCandidateCache(page);
+    prunePageCandidateCache(page);
+    return m_pageCandidates.constFind(page).value();
 }
 
-QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex)
+const QVector<PDFEditController::Candidate> *PDFEditController::cachedPageCandidates(
+    int page)
+{
+    ensureCacheRevision();
+    if (!m_document
+        || !m_document->isLoaded()
+        || page < 0
+        || page >= m_document->pageCount()) {
+        return nullptr;
+    }
+
+    auto cached = m_pageCandidates.constFind(page);
+    if (cached != m_pageCandidates.cend()) {
+        touchPageCandidateCache(page);
+        cached = m_pageCandidates.constFind(page);
+    }
+    return cached == m_pageCandidates.cend() ? nullptr : &cached.value();
+}
+
+void PDFEditController::requestPageCandidateScan(int page)
+{
+    ensureCacheRevision();
+    if (!m_document
+        || !m_document->isLoaded()
+        || page < 0
+        || page >= m_document->pageCount()
+        || m_pageCandidates.contains(page)) {
+        return;
+    }
+
+    if (m_document->pageSize(page).isEmpty()) {
+        return;
+    }
+
+    if (m_candidateScanInFlight) {
+        if (m_candidateScanInFlightPage != page
+            || candidateScanCancelled(m_candidateScanCancellation)) {
+            // Keep exactly one running request plus the latest requested page.
+            m_pendingCandidateScanPage = page;
+            if (m_candidateScanCancellation) {
+                m_candidateScanCancellation->store(
+                    true,
+                    std::memory_order_relaxed);
+            }
+        }
+        return;
+    }
+
+    m_pendingCandidateScanPage = page;
+    startPendingCandidateScan();
+}
+
+void PDFEditController::startPendingCandidateScan()
+{
+    if (m_candidateScanInFlight || m_pendingCandidateScanPage < 0) {
+        return;
+    }
+
+    const int page = m_pendingCandidateScanPage;
+    m_pendingCandidateScanPage = -1;
+    if (m_pageCandidates.contains(page)) {
+        return;
+    }
+
+    const CandidateScanRequest request = candidateScanRequest(page);
+    if (request.page < 0) {
+        return;
+    }
+
+    m_candidateScanInFlight = true;
+    m_candidateScanInFlightPage = page;
+    m_candidateScanCancellation = std::make_shared<std::atomic_bool>(false);
+    const std::shared_ptr<std::atomic_bool> cancellation
+        = m_candidateScanCancellation;
+    const QPointer<PDFEditController> controller(this);
+    const auto deliver = [controller, request, cancellation](
+                             QVector<Candidate> candidates,
+                             bool cancelled) {
+        if (!controller) {
+            return;
+        }
+        QMetaObject::invokeMethod(
+            controller.data(),
+            [controller,
+             request,
+             candidates = std::move(candidates),
+             cancellation,
+             cancelled]() mutable {
+                if (controller) {
+                    controller->completePageCandidateScan(
+                        request,
+                        std::move(candidates),
+                        cancelled || candidateScanCancelled(cancellation));
+                }
+            },
+            Qt::QueuedConnection);
+    };
+    const auto deliverDropped = [controller, cancellation]() {
+        cancellation->store(true, std::memory_order_relaxed);
+        if (!controller) {
+            return;
+        }
+        // A globally superseded request never ran, so do not retain its font
+        // catalog or enqueue an empty candidate result. Each controller has at
+        // most one such completion outstanding because its in-flight state is
+        // reset only by this callback.
+        QMetaObject::invokeMethod(
+            controller.data(),
+            [controller, cancellation]() {
+                if (controller) {
+                    controller->completeDroppedPageCandidateScan(cancellation);
+                }
+            },
+            Qt::QueuedConnection);
+    };
+    candidateScanWorkQueue().submit(
+        [request, cancellation, deliver]() mutable {
+            QVector<Candidate> candidates = scanPageFromFile(
+                request,
+                cancellation);
+            deliver(
+                std::move(candidates),
+                candidateScanCancelled(cancellation));
+        },
+        std::move(deliverDropped));
+}
+
+void PDFEditController::completePageCandidateScan(
+    const CandidateScanRequest &request,
+    QVector<Candidate> candidates,
+    bool cancelled)
+{
+    m_candidateScanInFlight = false;
+    m_candidateScanInFlightPage = -1;
+    m_candidateScanCancellation.reset();
+    ensureCacheRevision();
+
+    const bool requestStillCurrent = !cancelled
+        && m_document
+        && m_document->isLoaded()
+        && m_document->renderRevision() == request.revision
+        && m_document->renderFilePath() == request.filePath
+        && request.page >= 0
+        && request.page < m_document->pageCount()
+        && m_document->pageSize(request.page) == request.pageSize;
+    if (requestStillCurrent && !m_pageCandidates.contains(request.page)) {
+        m_pageCandidates.insert(
+            request.page,
+            finalizePageCandidates(
+                std::move(candidates),
+                request.page,
+                request.pageSize));
+        touchPageCandidateCache(request.page);
+        prunePageCandidateCache(request.page);
+        emit pageCandidatesReady(request.page);
+    }
+
+    startPendingCandidateScan();
+}
+
+void PDFEditController::completeDroppedPageCandidateScan(
+    const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    if (m_candidateScanCancellation != cancellation) {
+        return;
+    }
+
+    m_candidateScanInFlight = false;
+    m_candidateScanInFlightPage = -1;
+    m_candidateScanCancellation.reset();
+    ensureCacheRevision();
+    startPendingCandidateScan();
+}
+
+void PDFEditController::touchPageCandidateCache(int page)
+{
+    m_pageCandidateLru.removeAll(page);
+    m_pageCandidateLru.append(page);
+}
+
+bool PDFEditController::isPageCandidateCachePinned(int page) const
+{
+    if (page == m_pendingCandidateScanPage
+        || (m_hasSelection
+            && !m_selectedCandidate.added
+            && m_selectedCandidate.page == page)) {
+        return true;
+    }
+
+    return std::any_of(
+        m_drafts.cbegin(),
+        m_drafts.cend(),
+        [page](const Draft &draft) {
+            return !draft.candidate.added && draft.candidate.page == page;
+        });
+}
+
+void PDFEditController::prunePageCandidateCache(int protectedPage)
+{
+    while (m_pageCandidates.size() > kMaximumCachedCandidatePages) {
+        bool removedPage = false;
+        for (qsizetype index = 0; index < m_pageCandidateLru.size(); ++index) {
+            const int page = m_pageCandidateLru.at(index);
+            if (page == protectedPage || isPageCandidateCachePinned(page)) {
+                continue;
+            }
+
+            m_pageCandidateLru.removeAt(index);
+            m_pageCandidates.remove(page);
+            removedPage = true;
+            break;
+        }
+        if (!removedPage) {
+            // Draft and selection state may legitimately pin more than the
+            // normal viewport-sized cache budget.
+            break;
+        }
+    }
+}
+
+PDFEditController::CandidateScanRequest PDFEditController::candidateScanRequest(
+    int page) const
+{
+    CandidateScanRequest request;
+    if (!m_document
+        || !m_document->isLoaded()
+        || page < 0
+        || page >= m_document->pageCount()) {
+        return request;
+    }
+
+    request.filePath = m_document->renderFilePath();
+    request.revision = m_document->renderRevision();
+    request.page = page;
+    request.pageSize = m_document->pageSize(page);
+    request.editingAllowed = documentAllowsEditing();
+    request.bundledFontFamilies = ApplicationFonts::bundledFontFamilies();
+    request.systemFontFamilies = ApplicationFonts::systemFontFamilies();
+    // A fixed per-scan budget keeps peak memory bounded while still allowing a
+    // later page to fingerprint and reuse an already registered font after the
+    // registration byte budget has been reached.
+    request.maximumEmbeddedFontSnapshotBytes = kMaximumRegisteredFontBytes;
+    if (request.filePath.isEmpty() || request.pageSize.isEmpty()) {
+        request.page = -1;
+    }
+    return request;
+}
+
+QVector<PDFEditController::Candidate> PDFEditController::scanPageFromFile(
+    const CandidateScanRequest &request,
+    const std::shared_ptr<std::atomic_bool> &cancellation)
 {
     QVector<Candidate> candidates;
-    if (!m_document || !m_document->m_document) {
+    if (candidateScanCancelled(cancellation)) {
+        return candidates;
+    }
+    PDFiumProcessLock pdfiumLock;
+    if (candidateScanCancelled(cancellation)) {
         return candidates;
     }
 
-    const QSizeF pageSize = m_document->pageSize(pageIndex);
-    if (pageSize.isEmpty()) {
+    thread_local CandidateScanDocument candidateDocument;
+    FPDF_DOCUMENT document = candidateDocument.documentLocked(
+        request.filePath,
+        request.revision);
+    if (document) {
+        candidates = scanPageLocked(document, request, cancellation);
+    }
+    return candidates;
+}
+
+QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
+    FPDF_DOCUMENT document,
+    const CandidateScanRequest &request,
+    const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    assertPDFiumProcessLockHeld();
+    QVector<Candidate> candidates;
+    if (!document || candidateScanCancelled(cancellation)) {
         return candidates;
     }
 
-    FPDF_PAGE page = nullptr;
+    if (request.pageSize.isEmpty()) {
+        return candidates;
+    }
+
+    FPDF_PAGE page = FPDF_LoadPage(document, request.page);
     FPDF_TEXTPAGE textPage = nullptr;
-    {
-        QMutexLocker pageLoadLock(&pdfiumPageLoadMutex());
-        page = FPDF_LoadPage(m_document->m_document, pageIndex);
-        if (page) {
-            textPage = FPDFText_LoadPage(page);
-        }
+    if (page) {
+        textPage = FPDFText_LoadPage(page);
     }
     if (!page) {
         return candidates;
@@ -2644,7 +3154,9 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex)
     QHash<FPDF_PAGEOBJECT, TextObjectLayout> textObjectLayouts;
     if (textPage) {
         const int characterCount = FPDFText_CountChars(textPage);
-        for (int index = 0; index < characterCount; ++index) {
+        for (int index = 0;
+             index < characterCount && !candidateScanCancelled(cancellation);
+             ++index) {
             FPDF_PAGEOBJECT textObject = FPDFText_GetTextObject(textPage, index);
             if (!textObject) {
                 continue;
@@ -2697,8 +3209,12 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex)
         }
     }
 
+    QHash<FPDF_FONT, FontResolutionSnapshot> fontResolutionCache;
+    qsizetype embeddedFontDataBytes = 0;
     const int objectCount = FPDFPage_CountObjects(page);
-    for (int index = 0; index < objectCount; ++index) {
+    for (int index = 0;
+         index < objectCount && !candidateScanCancelled(cancellation);
+         ++index) {
         appendPageObjectCandidates(
             page,
             FPDFPage_GetObject(page, index),
@@ -2706,38 +3222,66 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPage(int pageIndex)
             textPage,
             textObjectLayouts,
             kIdentityMatrix,
-            pageSize,
-            candidates);
+            request,
+            candidates,
+            fontResolutionCache,
+            embeddedFontDataBytes,
+            cancellation);
     }
-    appendAnnotationCandidates(page, pageIndex, pageSize, candidates);
+    if (!candidateScanCancelled(cancellation)) {
+        appendAnnotationCandidates(page, request, candidates, cancellation);
+    }
 
     if (textPage) {
         FPDFText_ClosePage(textPage);
     }
     FPDF_ClosePage(page);
 
-    for (Candidate &candidate : candidates) {
-        candidate.page = pageIndex;
-    }
-    candidates = groupTextLineCandidates(std::move(candidates), pageSize);
-    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate &left, const Candidate &right) {
-        return left.editable < right.editable;
-    });
     return candidates;
 }
 
-void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
-                                                   FPDF_PAGEOBJECT pageObject,
-                                                   const QVector<int> &objectPath,
-                                                   FPDF_TEXTPAGE textPage,
-                                                   const QHash<FPDF_PAGEOBJECT, TextObjectLayout> &textObjectLayouts,
-                                                   const FS_MATRIX &containerTransform,
-                                                   const QSizeF &pageSize,
-                                                   QVector<Candidate> &candidates)
+QVector<PDFEditController::Candidate> PDFEditController::finalizePageCandidates(
+    QVector<Candidate> candidates,
+    int page,
+    const QSizeF &pageSize)
 {
-    if (!pageObject) {
+    assertPDFiumProcessLockNotHeld();
+    QHash<int, QString> resolvedEmbeddedFamilies;
+    for (Candidate &candidate : candidates) {
+        if (candidate.kind == QLatin1String("text")) {
+            resolveCandidateFontFamily(candidate, resolvedEmbeddedFamilies);
+            expandInitialTextFrame(candidate, pageSize);
+        }
+        candidate.page = page;
+    }
+    candidates = groupTextLineCandidates(std::move(candidates), pageSize);
+    std::stable_sort(
+        candidates.begin(),
+        candidates.end(),
+        [](const Candidate &left, const Candidate &right) {
+            return left.editable < right.editable;
+        });
+    return candidates;
+}
+
+void PDFEditController::appendPageObjectCandidates(
+    FPDF_PAGE page,
+    FPDF_PAGEOBJECT pageObject,
+    const QVector<int> &objectPath,
+    FPDF_TEXTPAGE textPage,
+    const QHash<FPDF_PAGEOBJECT, TextObjectLayout> &textObjectLayouts,
+    const FS_MATRIX &containerTransform,
+    const CandidateScanRequest &request,
+    QVector<Candidate> &candidates,
+    QHash<FPDF_FONT, FontResolutionSnapshot> &fontResolutionCache,
+    qsizetype &embeddedFontDataBytes,
+    const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    assertPDFiumProcessLockHeld();
+    if (!pageObject || candidateScanCancelled(cancellation)) {
         return;
     }
+    const QSizeF &pageSize = request.pageSize;
 
     const int type = FPDFPageObj_GetType(pageObject);
     if (type == FPDF_PAGEOBJ_FORM) {
@@ -2747,7 +3291,9 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
         }
         const FS_MATRIX childTransform = combinedTransform(containerTransform, formTransform);
         const int count = FPDFFormObj_CountObjects(pageObject);
-        for (int index = 0; index < count; ++index) {
+        for (int index = 0;
+             index < count && !candidateScanCancelled(cancellation);
+             ++index) {
             QVector<int> childPath = objectPath;
             childPath.append(index);
             appendPageObjectCandidates(
@@ -2757,8 +3303,11 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
                 textPage,
                 textObjectLayouts,
                 childTransform,
-                pageSize,
-                candidates);
+                request,
+                candidates,
+                fontResolutionCache,
+                embeddedFontDataBytes,
+                cancellation);
         }
         return;
     }
@@ -2831,7 +3380,7 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
         candidate.kind = QStringLiteral("image");
         //% "Image"
         candidate.label = qtTrId("Image");
-        const bool editingAllowed = documentAllowsEditing();
+        const bool editingAllowed = request.editingAllowed;
         const bool topLevelObject = objectPath.size() == 1;
         candidate.editable = editingAllowed && topLevelObject;
         candidate.renderSuppressible = true;
@@ -2870,11 +3419,12 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
     //% "Text"
     candidate.label = qtTrId("Text");
     candidate.text = text;
-    FPDF_FONT pdfFont = FPDFTextObj_GetFont(pageObject);
-    candidate.fontFamily = resolvedFontFamily(pageObject, candidate.text);
-    candidate.fontIdentity = normalizedPdfFontIdentity(pdfFont);
-    candidate.fontBold = pdfFontIsBold(pdfFont);
-    candidate.fontItalic = pdfFontIsItalic(pdfFont);
+    snapshotFontResolutionLocked(
+        pageObject,
+        candidate,
+        request,
+        fontResolutionCache,
+        embeddedFontDataBytes);
     candidate.fontSizeRatio = qMax<qreal>(
         0.0,
         normalizedFontSize(page, pageSize, textTransform, fontSize));
@@ -2895,7 +3445,7 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
         candidate.strokeWidth = qMax<qreal>(0.0, strokeWidth);
     }
     candidate.color = textColor(pageObject, renderMode);
-    const bool editingAllowed = documentAllowsEditing();
+    const bool editingAllowed = request.editingAllowed;
     const bool topLevelObject = objectPath.size() == 1;
     candidate.editable = editingAllowed
         && suppressionSupported
@@ -2925,7 +3475,6 @@ void PDFEditController::appendPageObjectCandidates(FPDF_PAGE page,
     part.text = candidate.text;
     part.hasBaseline = candidate.hasBaseline;
     candidate.parts.append(part);
-    expandInitialTextFrame(candidate, pageSize);
     candidates.append(candidate);
 }
 
@@ -3150,12 +3699,16 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
 }
 
 void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
-                                                   int pageIndex,
-                                                   const QSizeF &pageSize,
-                                                   QVector<Candidate> &candidates) const
+                                                   const CandidateScanRequest &request,
+                                                   QVector<Candidate> &candidates,
+                                                   const std::shared_ptr<std::atomic_bool> &cancellation)
 {
+    assertPDFiumProcessLockHeld();
+    const QSizeF &pageSize = request.pageSize;
     const int annotationCount = FPDFPage_GetAnnotCount(page);
-    for (int index = 0; index < annotationCount; ++index) {
+    for (int index = 0;
+         index < annotationCount && !candidateScanCancelled(cancellation);
+         ++index) {
         FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(page, index);
         if (!annotation) {
             continue;
@@ -3187,7 +3740,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
         }
 
         Candidate candidate;
-        candidate.page = pageIndex;
+        candidate.page = request.page;
         candidate.objectId = QStringLiteral("annotation:") + QString::number(index);
         setInitialGeometry(candidate, rect);
         candidate.fontFamily = QStringLiteral("Helvetica");
@@ -3207,7 +3760,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             candidate.text = annotationString(annotation, "V");
         }
 
-        if (!documentAllowsEditing()) {
+        if (!request.editingAllowed) {
             //% "This PDF does not permit content editing."
             candidate.reason = qtTrId("PdfEditingNotPermitted");
         } else {
@@ -3378,12 +3931,11 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
 
 bool PDFEditController::documentAllowsEditing() const
 {
-    if (!m_document || !m_document->m_document) {
-        return false;
-    }
-
-    const unsigned long permissions = FPDF_GetDocPermissions(m_document->m_document);
-    return permissions == 0xffffffffUL || (permissions & kModifyContentsPermission) != 0;
+    // PDFDocument snapshots permissions inside its open/metadata PDFium
+    // transaction, so GUI actions never need a nested or standalone API call.
+    return m_document
+        && m_document->m_document
+        && m_document->m_allowsContentEditing;
 }
 
 QString PDFEditController::draftKey(int page, const QString &objectId) const

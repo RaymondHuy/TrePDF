@@ -73,6 +73,9 @@ Item {
             return
         }
 
+        if (interactionActive)
+            controller.candidatesForPage(page)
+
         const previousDrafts = drafts
         const currentDrafts = controller.draftsForPage(page)
         const displayedDrafts = []
@@ -750,6 +753,14 @@ Item {
         function onPageDataChanged(changedPage) {
             if (changedPage < 0 || changedPage === root.page)
                 root.reloadData()
+        }
+
+        function onPageCandidatesReady(readyPage) {
+            if (readyPage === root.page
+                    && root.interactionActive
+                    && hitArea.containsMouse) {
+                root.updateHoverAtPosition(hitArea.mouseX, hitArea.mouseY)
+            }
         }
 
         function onToolChanged() {

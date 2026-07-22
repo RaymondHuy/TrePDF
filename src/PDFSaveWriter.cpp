@@ -14,7 +14,6 @@
 #include <QFontMetricsF>
 #include <QHash>
 #include <QImage>
-#include <QMutexLocker>
 #include <QRawFont>
 #include <QSaveFile>
 #include <QSet>
@@ -130,6 +129,7 @@ public:
     ~PdfDocumentHandle()
     {
         if (m_document) {
+            assertPDFiumProcessLockHeld();
             FPDF_CloseDocument(m_document);
         }
     }
@@ -138,6 +138,8 @@ public:
     {
         return m_document;
     }
+
+    Q_DISABLE_COPY_MOVE(PdfDocumentHandle)
 
 private:
     FPDF_DOCUMENT m_document = nullptr;
@@ -154,6 +156,7 @@ public:
     ~PdfPageHandle()
     {
         if (m_page) {
+            assertPDFiumProcessLockHeld();
             FPDF_ClosePage(m_page);
         }
     }
@@ -162,6 +165,8 @@ public:
     {
         return m_page;
     }
+
+    Q_DISABLE_COPY_MOVE(PdfPageHandle)
 
 private:
     FPDF_PAGE m_page = nullptr;
@@ -886,10 +891,14 @@ public:
     explicit FontResolver(FPDF_DOCUMENT document)
         : m_document(document)
     {
+        assertPDFiumProcessLockHeld();
     }
 
     ~FontResolver()
     {
+        if (!m_loadedFonts.isEmpty()) {
+            assertPDFiumProcessLockHeld();
+        }
         for (FPDF_FONT font : std::as_const(m_loadedFonts)) {
             FPDFFont_Close(font);
         }
@@ -958,6 +967,8 @@ public:
                 : ResolvedFont::Source::None
         };
     }
+
+    Q_DISABLE_COPY_MOVE(FontResolver)
 
 private:
     bool embeddedFontSupportsText(const SaveFormat &format,
@@ -1508,11 +1519,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                                       const QVector<SaveDraft> &drafts,
                                       FontResolver &fontResolver)
 {
-    FPDF_PAGE loadedPage = nullptr;
-    {
-        QMutexLocker pageLoadLock(&pdfiumPageLoadMutex());
-        loadedPage = FPDF_LoadPage(document, pageIndex);
-    }
+    assertPDFiumProcessLockHeld();
+    FPDF_PAGE loadedPage = FPDF_LoadPage(document, pageIndex);
     PdfPageHandle page(loadedPage);
     if (!page.get()) {
         return failure(PDFSaveWriter::Error::PageLoadFailed, pageIndex);
@@ -1695,6 +1703,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
 PDFSaveWriter::Result writeDocument(FPDF_DOCUMENT document,
                                     const QString &targetFilePath)
 {
+    assertPDFiumProcessLockHeld();
     SaveFileWriter writer(targetFilePath);
     if (!writer.open()) {
         return failure(
@@ -1908,6 +1917,10 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
 
     const QByteArray encodedSourcePath = QFile::encodeName(
         request.m_data->sourceFilePath);
+    // This is the sole owner of the writer PDFium transaction. The request is
+    // an immutable GUI-thread snapshot, and completion is posted only after
+    // this function returns and releases the process lock.
+    PDFiumProcessLock pdfiumLock;
     PdfDocumentHandle document(FPDF_LoadDocument(encodedSourcePath.constData(), nullptr));
     if (!document.get()) {
         return failure(Error::SourceOpenFailed);

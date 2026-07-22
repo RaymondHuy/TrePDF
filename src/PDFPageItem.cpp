@@ -116,18 +116,24 @@ RenderWorkQueue &renderWorkQueue()
 class PDFiumRenderDocument
 {
 public:
+    PDFiumRenderDocument() = default;
+
     ~PDFiumRenderDocument()
     {
-        close();
+        // The thread-local document can be destroyed by QThreadPool teardown,
+        // outside renderPageFromFile()'s transaction.
+        PDFiumProcessLock pdfiumLock;
+        closeLocked();
     }
 
-    FPDF_DOCUMENT document(const QString &filePath, int revision)
+    FPDF_DOCUMENT documentLocked(const QString &filePath, int revision)
     {
+        assertPDFiumProcessLockHeld();
         if (m_document && m_filePath == filePath && m_revision == revision) {
             return m_document;
         }
 
-        close();
+        closeLocked();
 
         const QByteArray encodedPath = QFile::encodeName(filePath);
         m_document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
@@ -138,14 +144,18 @@ public:
         return m_document;
     }
 
-    void reset()
+    void resetLocked()
     {
-        close();
+        assertPDFiumProcessLockHeld();
+        closeLocked();
     }
 
+    Q_DISABLE_COPY_MOVE(PDFiumRenderDocument)
+
 private:
-    void close()
+    void closeLocked()
     {
+        assertPDFiumProcessLockHeld();
         if (m_document) {
             FPDF_CloseDocument(m_document);
         }
@@ -169,6 +179,7 @@ FPDF_DWORD pdfiumColor(const QColor &color)
 
 FPDF_PAGEOBJECT pageObjectAtPath(FPDF_PAGE page, const QVector<int> &objectPath)
 {
+    assertPDFiumProcessLockHeld();
     if (!page || objectPath.isEmpty()) {
         return nullptr;
     }
@@ -206,6 +217,7 @@ public:
 
     bool suppress(FPDF_PAGE page, const QVector<QVector<int>> &objectPaths)
     {
+        assertPDFiumProcessLockHeld();
         QVector<FPDF_PAGEOBJECT> objects;
         objects.reserve(objectPaths.size());
         for (const QVector<int> &objectPath : objectPaths) {
@@ -240,6 +252,7 @@ public:
 
     bool restore()
     {
+        assertPDFiumProcessLockHeld();
         if (m_restored) {
             return m_restoreSucceeded;
         }
@@ -282,6 +295,7 @@ public:
                const QSize &deviceSize,
                const QVector<PDFEditController::DraftImageMove> &moves)
     {
+        assertPDFiumProcessLockHeld();
         if (!page || deviceSize.isEmpty()) {
             return moves.isEmpty();
         }
@@ -342,6 +356,7 @@ public:
 
     bool restore()
     {
+        assertPDFiumProcessLockHeld();
         if (m_restored) {
             return m_restoreSucceeded;
         }
@@ -372,6 +387,7 @@ private:
                           const QPointF &normalizedPoint,
                           QPointF &point)
     {
+        assertPDFiumProcessLockHeld();
         double pageX = 0.0;
         double pageY = 0.0;
         if (!FPDF_DeviceToPage(
@@ -415,85 +431,91 @@ PageRenderResult renderPageFromFile(const QString &filePath,
         return {};
     }
 
-    thread_local PDFiumRenderDocument renderDocument;
-    FPDF_DOCUMENT document = nullptr;
-    FPDF_PAGE pdfPage = nullptr;
-    {
-        QMutexLocker pageLoadLock(&pdfiumPageLoadMutex());
-        document = renderDocument.document(filePath, revision);
-        if (document && !isCancelled(cancellation)) {
-            pdfPage = FPDF_LoadPage(document, page);
-        }
-    }
-    if (!pdfPage || isCancelled(cancellation)) {
-        if (pdfPage) {
-            FPDF_ClosePage(pdfPage);
-        }
-        return {};
-    }
-
     QImage image(pixelSize, QImage::Format_RGB32);
     if (image.isNull() || isCancelled(cancellation)) {
-        FPDF_ClosePage(pdfPage);
         return {};
     }
     image.fill(background);
 
-    FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
-        pixelSize.width(),
-        pixelSize.height(),
-        FPDFBitmap_BGRA,
-        image.bits(),
-        image.bytesPerLine());
-
-    if (!bitmap) {
-        FPDF_ClosePage(pdfPage);
-        return {};
-    }
-
-    FPDFBitmap_FillRect(bitmap, 0, 0, pixelSize.width(), pixelSize.height(), pdfiumColor(background));
-
     bool suppressionApplied = draftObjectPaths.isEmpty();
     bool imageMovesApplied = draftImageMoves.isEmpty();
-    bool renderDocumentReusable = true;
     bool renderPerformed = false;
     {
-        ScopedPageObjectSuppression suppression;
-        ScopedPageImageMoves imageMoves;
-        if (!draftObjectPaths.isEmpty()) {
-            suppressionApplied = suppression.suppress(pdfPage, draftObjectPaths);
-        }
-        if (!draftImageMoves.isEmpty()) {
-            imageMovesApplied = imageMoves.apply(
-                pdfPage,
-                pixelSize,
-                draftImageMoves);
+        // One process-wide transaction covers every PDFium call, including
+        // restoring temporary draft transforms and destroying all page/bitmap
+        // handles. Cancellation is checked again after waiting for the lock.
+        PDFiumProcessLock pdfiumLock;
+        if (isCancelled(cancellation)) {
+            return {};
         }
 
-        if (!isCancelled(cancellation)
-            && (suppressionApplied || suppression.restorationSucceeded())
-            && (imageMovesApplied || imageMoves.restorationSucceeded())) {
-            FPDF_RenderPageBitmap(
-                bitmap,
-                pdfPage,
-                0,
-                0,
-                pixelSize.width(),
-                pixelSize.height(),
-                0,
-                FPDF_ANNOT);
-            renderPerformed = true;
+        thread_local PDFiumRenderDocument renderDocument;
+        FPDF_DOCUMENT document = renderDocument.documentLocked(filePath, revision);
+        FPDF_PAGE pdfPage = document ? FPDF_LoadPage(document, page) : nullptr;
+        if (!pdfPage || isCancelled(cancellation)) {
+            if (pdfPage) {
+                FPDF_ClosePage(pdfPage);
+            }
+            return {};
         }
-        const bool imageRestoreSucceeded = imageMoves.restore();
-        const bool suppressionRestoreSucceeded = suppression.restore();
-        renderDocumentReusable = imageRestoreSucceeded
-            && suppressionRestoreSucceeded;
-    }
 
-    FPDFBitmap_Destroy(bitmap);
-    FPDF_ClosePage(pdfPage);
-    if (!renderDocumentReusable) {
-        renderDocument.reset();
+        FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
+            pixelSize.width(),
+            pixelSize.height(),
+            FPDFBitmap_BGRA,
+            image.bits(),
+            image.bytesPerLine());
+        if (!bitmap) {
+            FPDF_ClosePage(pdfPage);
+            return {};
+        }
+        FPDFBitmap_FillRect(
+            bitmap,
+            0,
+            0,
+            pixelSize.width(),
+            pixelSize.height(),
+            pdfiumColor(background));
+
+        bool renderDocumentReusable = true;
+        {
+            ScopedPageObjectSuppression suppression;
+            ScopedPageImageMoves imageMoves;
+            if (!draftObjectPaths.isEmpty()) {
+                suppressionApplied = suppression.suppress(pdfPage, draftObjectPaths);
+            }
+            if (!draftImageMoves.isEmpty()) {
+                imageMovesApplied = imageMoves.apply(
+                    pdfPage,
+                    pixelSize,
+                    draftImageMoves);
+            }
+
+            if (!isCancelled(cancellation)
+                && (suppressionApplied || suppression.restorationSucceeded())
+                && (imageMovesApplied || imageMoves.restorationSucceeded())) {
+                FPDF_RenderPageBitmap(
+                    bitmap,
+                    pdfPage,
+                    0,
+                    0,
+                    pixelSize.width(),
+                    pixelSize.height(),
+                    0,
+                    FPDF_ANNOT);
+                renderPerformed = true;
+            }
+            const bool imageRestoreSucceeded = imageMoves.restore();
+            const bool suppressionRestoreSucceeded = suppression.restore();
+            renderDocumentReusable = imageRestoreSucceeded
+                && suppressionRestoreSucceeded;
+        }
+
+        FPDFBitmap_Destroy(bitmap);
+        FPDF_ClosePage(pdfPage);
+        if (!renderDocumentReusable) {
+            renderDocument.resetLocked();
+        }
     }
 
     if (!renderPerformed || isCancelled(cancellation)) {
