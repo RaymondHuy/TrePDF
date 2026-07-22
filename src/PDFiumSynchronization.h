@@ -36,7 +36,9 @@ public:
     explicit PDFiumProcessLock(Mode mode = Mode::Blocking)
     {
         bool &ownedByCurrentThread = pdfiumProcessLockOwnedByCurrentThread();
-        Q_ASSERT(!ownedByCurrentThread);
+        if (ownedByCurrentThread) {
+            qFatal("Nested PDFiumProcessLock acquisition would deadlock; PDFium transactions must not be re-entrant.");
+        }
         if (mode == Mode::Blocking) {
             pdfiumProcessMutex().lock();
             m_locked = true;
