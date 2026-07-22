@@ -126,7 +126,7 @@ bool createPatternFillPdf(const QString &filePath)
     const auto streamObject = [](const QByteArray &dictionary,
                                  const QByteArray &stream) {
         return dictionary + " /Length " + QByteArray::number(stream.size())
-            + " >>\nstream\n" + stream + "endstream";
+            + " >>\nstream\n" + stream + "\nendstream";
     };
 
     return writePdfObjects(
