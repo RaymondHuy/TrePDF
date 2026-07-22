@@ -105,19 +105,32 @@ bool writePdfObjects(const QString &filePath,
         && file.write(data) == data.size();
 }
 
-bool createPatternFillPdf(const QString &filePath)
+enum class PatternPaintMode {
+    Fill,
+    Stroke
+};
+
+bool createPatternPaintPdf(const QString &filePath, PatternPaintMode mode)
 {
-    const QByteArray pageContent(
-        "q\n"
-        "/Pattern cs\n"
-        "/P1 scn\n"
-        "20 20 160 80 re f\n"
-        "Q\n"
-        "BT\n"
-        "/F1 20 Tf\n"
-        "20 160 Td\n"
-        "(Pattern edit text) Tj\n"
-        "ET\n");
+    const QByteArray paintContent = mode == PatternPaintMode::Fill
+        ? QByteArray(
+              "/Pattern cs\n"
+              "/P1 scn\n"
+              "20 20 160 80 re f\n")
+        : QByteArray(
+              "/Pattern CS\n"
+              "/P1 SCN\n"
+              "12 w\n"
+              "20 20 160 80 re S\n");
+    const QByteArray pageContent = QByteArray("q\n")
+        + paintContent
+        + QByteArray(
+              "Q\n"
+              "BT\n"
+              "/F1 20 Tf\n"
+              "20 160 Td\n"
+              "(Pattern edit text) Tj\n"
+              "ET\n");
     const QByteArray patternContent(
         "1 0 0 rg 0 0 10 10 re f\n"
         "0 1 0 rg 10 0 10 10 re f\n"
@@ -147,6 +160,16 @@ bool createPatternFillPdf(const QString &filePath)
                 "/Resources << >>",
                 patternContent),
         });
+}
+
+bool createPatternFillPdf(const QString &filePath)
+{
+    return createPatternPaintPdf(filePath, PatternPaintMode::Fill);
+}
+
+bool createPatternStrokePdf(const QString &filePath)
+{
+    return createPatternPaintPdf(filePath, PatternPaintMode::Stroke);
 }
 
 QImage renderFirstPage(const QString &filePath, const QSize &pixelSize)
@@ -1324,6 +1347,7 @@ private slots:
     void appliesFontStylesToDisplayFont();
     void savesEditedTextRoundTrip();
     void preservesPatternFilledGraphicsWhenSavingText();
+    void preservesPatternStrokedGraphicsWhenSavingText();
     void savesVietnameseEditWithEmbeddedArial_data();
     void savesVietnameseEditWithEmbeddedArial();
     void savesVietnameseEditWithEmbeddedSystemFont_data();
@@ -3133,6 +3157,40 @@ void PDFEditControllerTest::preservesPatternFilledGraphicsWhenSavingText()
         QFile::remove(verificationPath);
         QVERIFY(QFile::copy(outputPath, verificationPath));
     }
+    QVERIFY(containsPatternColors(renderFirstPage(outputPath, QSize(200, 200))));
+    const QVariantList savedCandidates = waitForCandidates(controller, 0);
+    QVERIFY(!candidateForText(
+                 savedCandidates,
+                 QStringLiteral("Pattern text edit"))
+                 .isEmpty());
+    QVERIFY(candidateForKind(savedCandidates, QStringLiteral("image")).isEmpty());
+}
+
+void PDFEditControllerTest::preservesPatternStrokedGraphicsWhenSavingText()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("pattern-stroke-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("pattern-stroke-output.pdf"));
+    QVERIFY(createPatternStrokePdf(sourcePath));
+    QVERIFY(containsPatternColors(renderFirstPage(sourcePath, QSize(200, 200))));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QStringLiteral("Pattern edit text"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Pattern text edit"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(normalizedPageText(outputPath).contains(
+        QStringLiteral("Pattern text edit")));
     QVERIFY(containsPatternColors(renderFirstPage(outputPath, QSize(200, 200))));
     const QVariantList savedCandidates = waitForCandidates(controller, 0);
     QVERIFY(!candidateForText(

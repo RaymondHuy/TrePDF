@@ -1503,7 +1503,7 @@ PDFSaveWriter::Result prepareUnsupportedPaints(
                     inspectionObject,
                     &fillMode,
                     &strokes)
-                || fillMode == FPDF_FILLMODE_NONE) {
+                || (fillMode == FPDF_FILLMODE_NONE && !strokes)) {
                 continue;
             }
         }
