@@ -4,16 +4,20 @@
 #include "PDFEditController.h"
 #include "PDFSaveWriter.h"
 #include "PDFTabModel.h"
+#include "PDFiumSynchronization.h"
 
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetricsF>
 #include <QImage>
 #include <QPainter>
 #include <QRawFont>
+#include <QSemaphore>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QThread>
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
@@ -25,6 +29,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace {
 
@@ -460,7 +465,7 @@ bool createTopLevelImagePdf(const QString &filePath)
         ? FPDFPageObj_NewImageObj(document)
         : nullptr;
     FPDF_PAGE loadedPages[] = {page};
-    bool imageInserted = false;
+    bool imageInsertionAttempted = false;
     bool succeeded = page
         && bitmap
         && imageObject
@@ -474,7 +479,8 @@ bool createTopLevelImagePdf(const QString &filePath)
             60.0,
             360.0,
             620.0)
-        && (imageInserted = FPDFPage_InsertObject(page, imageObject))
+        && (imageInsertionAttempted = true)
+        && FPDFPage_InsertObject(page, imageObject)
         && addTextObject(
             document,
             page,
@@ -484,7 +490,9 @@ bool createTopLevelImagePdf(const QString &filePath)
             740.0)
         && FPDFPage_GenerateContent(page);
 
-    if (imageObject && !imageInserted) {
+    // FPDFPage_InsertObject() takes ownership on success and frees the object
+    // itself on failure. Only destroy objects that never reached that call.
+    if (imageObject && !imageInsertionAttempted) {
         FPDFPageObj_Destroy(imageObject);
     }
     if (bitmap) {
@@ -554,6 +562,20 @@ QVariantMap candidateForKind(const QVariantList &candidates, const QString &kind
         }
     }
     return {};
+}
+
+QVariantList waitForCandidates(PDFEditController &controller, int page)
+{
+    QSignalSpy candidatesReadySpy(
+        &controller,
+        &PDFEditController::pageCandidatesReady);
+    QVariantList candidates = controller.candidatesForPage(page);
+    if (candidates.isEmpty() && candidatesReadySpy.isEmpty()) {
+        candidatesReadySpy.wait(2000);
+    }
+    return candidates.isEmpty()
+        ? controller.candidatesForPage(page)
+        : candidates;
 }
 
 QString pageText(const QString &filePath, int pageIndex = 0)
@@ -1121,6 +1143,10 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void serializesPdfiumAcrossThreads();
+    void discoversUncachedHoverOffGuiThread();
+    void reschedulesCancelledHoverForSamePage();
+    void defersUncachedHoverWhilePdfiumIsBusy();
     void registersBundledFonts();
     void filtersUnsupportedSystemFonts();
     void filtersFontFamiliesByLanguage();
@@ -1217,7 +1243,7 @@ void PDFEditControllerTest::initTestCase()
     QVERIFY2(m_document.open(QUrl::fromLocalFile(pdfPath)), "Could not open the PDF test fixture");
 
     m_controller.setDocument(&m_document);
-    const QVariantList candidates = m_controller.candidatesForPage(0);
+    const QVariantList candidates = waitForCandidates(m_controller, 0);
     m_regularCandidate = candidateForText(candidates, QString::fromLatin1(kRegularText));
     m_boldCandidate = candidateForText(candidates, QString::fromLatin1(kBoldText));
     m_groupedCandidate = candidateForText(candidates, QString::fromLatin1(kGroupedText));
@@ -1249,6 +1275,250 @@ void PDFEditControllerTest::initTestCase()
     QVERIFY2(!m_rightColumnCandidate.isEmpty(), "Right column candidate was not discovered");
     QVERIFY2(!m_uprightCandidate.isEmpty(), "Upright candidate was not discovered");
     QVERIFY2(!m_obliqueCandidate.isEmpty(), "Oblique candidate was not discovered");
+}
+
+void PDFEditControllerTest::serializesPdfiumAcrossThreads()
+{
+    const auto workerStarted = std::make_shared<QSemaphore>();
+    const auto workerAcquired = std::make_shared<QSemaphore>();
+    QThread *worker = nullptr;
+    bool startedWhileLocked = false;
+    bool remainedBlocked = false;
+    {
+        PDFiumProcessLock mainThreadLock;
+        worker = QThread::create([workerStarted, workerAcquired]() {
+            workerStarted->release();
+            QElapsedTimer deadline;
+            deadline.start();
+            while (!QThread::currentThread()->isInterruptionRequested()
+                   && deadline.elapsed() < 2000) {
+                PDFiumProcessLock workerLock(
+                    PDFiumProcessLock::Mode::TryLock);
+                if (workerLock.isLocked()) {
+                    workerAcquired->release();
+                    return;
+                }
+                QThread::msleep(1);
+            }
+        });
+        worker->start();
+
+        startedWhileLocked = workerStarted->tryAcquire(1, 1000);
+        remainedBlocked = startedWhileLocked
+            && !workerAcquired->tryAcquire(1, 100);
+    }
+
+    const bool acquiredAfterUnlock = workerAcquired->tryAcquire(1, 1000);
+    const bool finished = worker->wait(2500);
+    if (!finished) {
+        worker->requestInterruption();
+        worker->wait();
+    }
+    delete worker;
+
+    QVERIFY(startedWhileLocked);
+    QVERIFY(remainedBlocked);
+    QVERIFY(acquiredAfterUnlock);
+    QVERIFY(finished);
+}
+
+void PDFEditControllerTest::discoversUncachedHoverOffGuiThread()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("async-hover-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QSignalSpy candidatesReadySpy(
+        &controller,
+        &PDFEditController::pageCandidatesReady);
+
+    QElapsedTimer hoverTimer;
+    hoverTimer.start();
+    const QVariantMap initialHover = controller.candidateAt(0, 0.5, 0.5);
+    const qint64 hoverMilliseconds = hoverTimer.elapsed();
+
+    QVERIFY(initialHover.isEmpty());
+    QVERIFY2(
+        hoverMilliseconds < 250,
+        qPrintable(QStringLiteral("Uncached hover took %1 ms")
+                       .arg(hoverMilliseconds)));
+    QTRY_VERIFY_WITH_TIMEOUT(candidatesReadySpy.size() > 0, 2000);
+    QVERIFY(!candidateForText(
+                 waitForCandidates(controller, 0),
+                 QString::fromLatin1(kRegularText))
+                 .isEmpty());
+}
+
+void PDFEditControllerTest::reschedulesCancelledHoverForSamePage()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("rescheduled-hover-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QSignalSpy candidatesReadySpy(
+        &controller,
+        &PDFEditController::pageCandidatesReady);
+
+    const auto holderLocked = std::make_shared<QSemaphore>();
+    const auto releaseHolder = std::make_shared<QSemaphore>();
+    QThread *holder = QThread::create([holderLocked, releaseHolder]() {
+        QElapsedTimer deadline;
+        deadline.start();
+        while (!QThread::currentThread()->isInterruptionRequested()
+               && deadline.elapsed() < 2000) {
+            PDFiumProcessLock holderLock(PDFiumProcessLock::Mode::TryLock);
+            if (holderLock.isLocked()) {
+                holderLocked->release();
+                releaseHolder->tryAcquire(1, 1000);
+                return;
+            }
+            QThread::msleep(1);
+        }
+    });
+    holder->start();
+    const bool holderStarted = holderLocked->tryAcquire(1, 1000);
+
+    QVariantMap initialHover;
+    QVariantMap rescheduledHover;
+    if (holderStarted) {
+        initialHover = controller.candidateAt(0, 0.5, 0.5);
+        controller.setDocument(nullptr);
+        controller.setDocument(&document);
+        rescheduledHover = controller.candidateAt(0, 0.5, 0.5);
+    }
+    releaseHolder->release();
+    const bool holderFinished = holder->wait(2500);
+    if (!holderFinished) {
+        holder->requestInterruption();
+        holder->wait();
+    }
+    delete holder;
+
+    QVERIFY(holderStarted);
+    QVERIFY(holderFinished);
+    QVERIFY(initialHover.isEmpty());
+    QVERIFY(rescheduledHover.isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(candidatesReadySpy.size() > 0, 2000);
+    QVERIFY(!candidateForText(
+                 waitForCandidates(controller, 0),
+                 QString::fromLatin1(kRegularText))
+                 .isEmpty());
+}
+
+void PDFEditControllerTest::defersUncachedHoverWhilePdfiumIsBusy()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("deferred-hover-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QSignalSpy candidatesReadySpy(
+        &controller,
+        &PDFEditController::pageCandidatesReady);
+
+    const auto holderLocked = std::make_shared<QSemaphore>();
+    const auto releaseHolder = std::make_shared<QSemaphore>();
+    QThread *holder = QThread::create([holderLocked, releaseHolder]() {
+        QElapsedTimer deadline;
+        deadline.start();
+        while (!QThread::currentThread()->isInterruptionRequested()
+               && deadline.elapsed() < 2000) {
+            PDFiumProcessLock holderLock(PDFiumProcessLock::Mode::TryLock);
+            if (holderLock.isLocked()) {
+                holderLocked->release();
+                releaseHolder->tryAcquire(1, 1000);
+                return;
+            }
+            QThread::msleep(1);
+        }
+    });
+    holder->start();
+    const bool holderStarted = holderLocked->tryAcquire(1, 1000);
+
+    QElapsedTimer hoverTimer;
+    hoverTimer.start();
+    const QVariantMap uncachedHover = holderStarted
+        ? controller.candidateAt(0, 0.5, 0.5)
+        : QVariantMap();
+    const qint64 uncachedHoverMilliseconds = hoverTimer.elapsed();
+    releaseHolder->release();
+    const bool holderFinished = holder->wait(2500);
+    if (!holderFinished) {
+        holder->requestInterruption();
+        holder->wait();
+    }
+    delete holder;
+
+    QVERIFY(holderStarted);
+    QVERIFY(holderFinished);
+    QVERIFY(uncachedHover.isEmpty());
+    QVERIFY2(
+        uncachedHoverMilliseconds < 250,
+        qPrintable(QStringLiteral("Uncached hover waited %1 ms")
+                       .arg(uncachedHoverMilliseconds)));
+    QTRY_VERIFY_WITH_TIMEOUT(candidatesReadySpy.size() > 0, 2000);
+
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!candidate.isEmpty());
+    const QRectF sourceRect = candidate.value(QStringLiteral("sourceRect")).toRectF();
+    QVERIFY(!sourceRect.isEmpty());
+
+    const auto cachedHolderLocked = std::make_shared<QSemaphore>();
+    const auto releaseCachedHolder = std::make_shared<QSemaphore>();
+    QThread *cachedHolder = QThread::create(
+        [cachedHolderLocked, releaseCachedHolder]() {
+            QElapsedTimer deadline;
+            deadline.start();
+            while (!QThread::currentThread()->isInterruptionRequested()
+                   && deadline.elapsed() < 2000) {
+                PDFiumProcessLock holderLock(PDFiumProcessLock::Mode::TryLock);
+                if (holderLock.isLocked()) {
+                    cachedHolderLocked->release();
+                    releaseCachedHolder->tryAcquire(1, 1000);
+                    return;
+                }
+                QThread::msleep(1);
+            }
+        });
+    cachedHolder->start();
+    const bool cachedHolderStarted = cachedHolderLocked->tryAcquire(1, 1000);
+
+    hoverTimer.restart();
+    const QVariantMap cachedHover = cachedHolderStarted
+        ? controller.candidateAt(
+              0,
+              sourceRect.center().x(),
+              sourceRect.center().y())
+        : QVariantMap();
+    const qint64 cachedHoverMilliseconds = hoverTimer.elapsed();
+    releaseCachedHolder->release();
+    const bool cachedHolderFinished = cachedHolder->wait(2500);
+    if (!cachedHolderFinished) {
+        cachedHolder->requestInterruption();
+        cachedHolder->wait();
+    }
+    delete cachedHolder;
+
+    QVERIFY(cachedHolderStarted);
+    QVERIFY(cachedHolderFinished);
+    QVERIFY(!cachedHover.isEmpty());
+    QVERIFY2(
+        cachedHoverMilliseconds < 250,
+        qPrintable(QStringLiteral("Cached hover waited %1 ms")
+                       .arg(cachedHoverMilliseconds)));
 }
 
 void PDFEditControllerTest::registersBundledFonts()
@@ -1691,7 +1961,7 @@ void PDFEditControllerTest::hidesDeletedTextFromInteraction()
             .value(QStringLiteral("objectId"))
             .toString(),
         objectId);
-    QVERIFY(containsObject(m_controller.candidatesForPage(0)));
+    QVERIFY(containsObject(waitForCandidates(m_controller, 0)));
     QVERIFY(m_controller.selectCandidate(0, objectId));
     m_controller.commitSelectedText(QString());
 
@@ -1704,7 +1974,7 @@ void PDFEditControllerTest::hidesDeletedTextFromInteraction()
     QVERIFY(m_controller.candidateAt(0, hitPoint.x(), hitPoint.y())
         .value(QStringLiteral("objectId"))
         .toString() != objectId);
-    QVERIFY(!containsObject(m_controller.candidatesForPage(0)));
+    QVERIFY(!containsObject(waitForCandidates(m_controller, 0)));
     QVERIFY(!m_controller.selectCandidate(0, objectId));
     QVERIFY(m_controller.selectedObjectId().isEmpty());
 
@@ -1714,14 +1984,14 @@ void PDFEditControllerTest::hidesDeletedTextFromInteraction()
             .value(QStringLiteral("objectId"))
             .toString(),
         objectId);
-    QVERIFY(containsObject(m_controller.candidatesForPage(0)));
+    QVERIFY(containsObject(waitForCandidates(m_controller, 0)));
     QVERIFY(m_controller.selectCandidate(0, objectId));
 
     m_controller.redo();
     QVERIFY(m_controller.candidateAt(0, hitPoint.x(), hitPoint.y())
         .value(QStringLiteral("objectId"))
         .toString() != objectId);
-    QVERIFY(!containsObject(m_controller.candidatesForPage(0)));
+    QVERIFY(!containsObject(waitForCandidates(m_controller, 0)));
     QVERIFY(m_controller.selectedObjectId().isEmpty());
     m_controller.discardDrafts();
 }
@@ -2070,7 +2340,7 @@ void PDFEditControllerTest::resetsStretchWhenChangingFontFamily()
     controller.setDocument(&document);
     const QString text = QString::fromLatin1(kStretchedText);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         text);
     QVERIFY(!candidate.isEmpty());
     QCOMPARE(
@@ -2128,7 +2398,7 @@ void PDFEditControllerTest::resetsStretchWhenChangingFontFamily()
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     const QVariantMap savedCandidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         text);
     QVERIFY(!savedCandidate.isEmpty());
     const int savedStretch = savedCandidate
@@ -2161,7 +2431,7 @@ void PDFEditControllerTest::normalizesSourceStretchWhenReselectingFontFamily()
     controller.setDocument(&document);
     const QString text = QString::fromLatin1(kStretchedText);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         text);
     QVERIFY(!candidate.isEmpty());
     QCOMPARE(
@@ -2217,7 +2487,7 @@ void PDFEditControllerTest::preservesSourceHorizontalScaleWhenResizing()
 
     for (int round = 1; round <= 2; ++round) {
         const QVariantMap candidate = candidateForText(
-            controller.candidatesForPage(0),
+            waitForCandidates(controller, 0),
             text);
         QVERIFY(!candidate.isEmpty());
         QVERIFY(controller.selectCandidate(
@@ -2269,7 +2539,7 @@ void PDFEditControllerTest::preservesSourceScaleForUnchangedRichTextRuns()
     controller.setDocument(&document);
     const QString text = QString::fromLatin1(kStretchedText);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         text);
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(
@@ -2341,7 +2611,7 @@ void PDFEditControllerTest::keepsAddedDidotScaleStableAcrossRepeatedSaves()
     for (int round = 1; round <= 5; ++round) {
         if (round > 1) {
             const QVariantMap candidate = candidateForText(
-                controller.candidatesForPage(0),
+                waitForCandidates(controller, 0),
                 text);
             QVERIFY(!candidate.isEmpty());
             QVERIFY(controller.selectCandidate(
@@ -2369,7 +2639,7 @@ void PDFEditControllerTest::keepsAddedDidotScaleStableAcrossRepeatedSaves()
         QVERIFY(textObjectMatrix(finalOutputPath, text, matrix));
         const qreal savedScale = horizontalScale(matrix);
         const QVariantMap savedCandidate = candidateForText(
-            controller.candidatesForPage(0),
+            waitForCandidates(controller, 0),
             text);
         QVERIFY(!savedCandidate.isEmpty());
         const QString savedFamily = savedCandidate
@@ -2658,7 +2928,7 @@ void PDFEditControllerTest::savesEditedTextRoundTrip()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QString::fromLatin1(kGroupedText));
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(
@@ -2743,7 +3013,7 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         sourceText);
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(
@@ -2876,7 +3146,7 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedSystemFont()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(
@@ -2984,7 +3254,7 @@ void PDFEditControllerTest::preservesInheritedSystemFontForVietnamese()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         sourceText);
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(
@@ -3098,7 +3368,7 @@ void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
     QVERIFY(controller.selectCandidate(
         0,
@@ -3176,7 +3446,7 @@ void PDFEditControllerTest::preservesEmbeddedFontForFormatOnlyVietnameseEdit()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         editedText);
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(
@@ -3213,7 +3483,7 @@ void PDFEditControllerTest::savesNormalizedVietnameseRichText()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
     QVERIFY(controller.selectCandidate(
         0,
@@ -3269,7 +3539,7 @@ void PDFEditControllerTest::savesCurrentFileRoundTrip()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QString::fromLatin1(kBoldText));
     QVERIFY(controller.selectCandidate(
         0,
@@ -3328,7 +3598,7 @@ void PDFEditControllerTest::savesMultipleDraftsOnSamePage()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
-    const QVariantList candidates = controller.candidatesForPage(0);
+    const QVariantList candidates = waitForCandidates(controller, 0);
     const QVariantMap regularCandidate = candidateForText(
         candidates,
         QString::fromLatin1(kRegularText));
@@ -3364,7 +3634,7 @@ void PDFEditControllerTest::savesExpandedFrameBeforeRightColumn()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
-    const QVariantList candidates = controller.candidatesForPage(0);
+    const QVariantList candidates = waitForCandidates(controller, 0);
     const QVariantMap leftCandidate = candidateForText(
         candidates,
         QString::fromLatin1(kLeftColumnText));
@@ -3410,7 +3680,7 @@ void PDFEditControllerTest::savesDeletedTextRoundTrip()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(
@@ -3538,7 +3808,7 @@ void PDFEditControllerTest::addsImageWithUndoRedo()
     QVERIFY(controller.draftsForPage(0).isEmpty());
     QVERIFY(!controller.hasDrafts());
     QVERIFY(controller.canRedo());
-    const QVariantList afterUndo = controller.candidatesForPage(0);
+    const QVariantList afterUndo = waitForCandidates(controller, 0);
     QVERIFY(std::none_of(
         afterUndo.cbegin(),
         afterUndo.cend(),
@@ -3549,7 +3819,7 @@ void PDFEditControllerTest::addsImageWithUndoRedo()
 
     controller.redo();
     QCOMPARE(controller.draftsForPage(0).size(), 1);
-    const QVariantList afterRedo = controller.candidatesForPage(0);
+    const QVariantList afterRedo = waitForCandidates(controller, 0);
     const auto restored = std::find_if(
         afterRedo.cbegin(),
         afterRedo.cend(),
@@ -3646,7 +3916,7 @@ void PDFEditControllerTest::movesTopLevelImageWithUndoRedo()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap imageCandidate = candidateForKind(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QStringLiteral("image"));
     QVERIFY2(!imageCandidate.isEmpty(), "Top-level image candidate was not discovered");
     const QString objectId = imageCandidate
@@ -3722,7 +3992,7 @@ void PDFEditControllerTest::deletesTopLevelImageWithUndoRedo()
     controller.setDocument(&document);
 
     const QVariantMap imageCandidate = candidateForKind(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QStringLiteral("image"));
     QVERIFY2(!imageCandidate.isEmpty(), "Top-level image candidate was not discovered");
     QCOMPARE(imageCandidate.value(QStringLiteral("editable")).toBool(), true);
@@ -3773,7 +4043,7 @@ void PDFEditControllerTest::deletesTopLevelImageWithUndoRedo()
         objectId);
     QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 1);
     QVERIFY(controller.allDraftedTextObjectsSuppressibleForPage(0));
-    QVERIFY(!containsImage(controller.candidatesForPage(0)));
+    QVERIFY(!containsImage(waitForCandidates(controller, 0)));
     QVERIFY(controller.candidateAt(0, hitPoint.x(), hitPoint.y())
         .value(QStringLiteral("objectId"))
         .toString() != objectId);
@@ -3784,7 +4054,7 @@ void PDFEditControllerTest::deletesTopLevelImageWithUndoRedo()
     QVERIFY(!controller.hasDrafts());
     QVERIFY(controller.canRedo());
     QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 0);
-    QVERIFY(containsImage(controller.candidatesForPage(0)));
+    QVERIFY(containsImage(waitForCandidates(controller, 0)));
     QCOMPARE(
         controller.candidateAt(0, hitPoint.x(), hitPoint.y())
             .value(QStringLiteral("objectId"))
@@ -3797,7 +4067,7 @@ void PDFEditControllerTest::deletesTopLevelImageWithUndoRedo()
     QVERIFY(controller.hasDrafts());
     QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 1);
     QCOMPARE(controller.selectedObjectId(), QString());
-    QVERIFY(!containsImage(controller.candidatesForPage(0)));
+    QVERIFY(!containsImage(waitForCandidates(controller, 0)));
     QVERIFY(controller.candidateAt(0, hitPoint.x(), hitPoint.y())
         .value(QStringLiteral("objectId"))
         .toString() != objectId);
@@ -3851,7 +4121,7 @@ void PDFEditControllerTest::savesAddedImageRoundTrip()
     QVERIFY(inspection.bottomLeftPixel.blue() > inspection.bottomLeftPixel.red());
     QCOMPARE(inspectImages(sourcePath).count, 0);
 
-    const QVariantList savedCandidates = controller.candidatesForPage(0);
+    const QVariantList savedCandidates = waitForCandidates(controller, 0);
     const auto savedImage = std::find_if(
         savedCandidates.cbegin(),
         savedCandidates.cend(),
@@ -3886,7 +4156,7 @@ void PDFEditControllerTest::savesMovedTopLevelImageRoundTrip()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap imageCandidate = candidateForKind(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QStringLiteral("image"));
     QVERIFY2(!imageCandidate.isEmpty(), "Top-level image candidate was not discovered");
     const QRectF originalFrame = imageCandidate
@@ -3929,7 +4199,7 @@ void PDFEditControllerTest::savesMovedTopLevelImageRoundTrip()
         QString::fromLatin1(kImageFixtureText)));
 
     const QVariantMap savedCandidate = candidateForKind(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QStringLiteral("image"));
     QVERIFY(!savedCandidate.isEmpty());
     const QRectF savedRect = savedCandidate
@@ -3963,7 +4233,7 @@ void PDFEditControllerTest::savesDeletedTopLevelImageRoundTrip()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap imageCandidate = candidateForKind(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QStringLiteral("image"));
     QVERIFY2(!imageCandidate.isEmpty(), "Top-level image candidate was not discovered");
     QVERIFY(imageCandidate.value(QStringLiteral("editable")).toBool());
@@ -4035,7 +4305,7 @@ void PDFEditControllerTest::savesRichMultilineTextRoundTrip()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
     QVERIFY(controller.selectCandidate(
         0,
@@ -4073,7 +4343,7 @@ void PDFEditControllerTest::savesOffsetCropCoordinates()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QStringLiteral("Offset crop text"));
     QVERIFY(!candidate.isEmpty());
     QVERIFY(candidate.value(QStringLiteral("editable")).toBool());
@@ -4128,7 +4398,7 @@ void PDFEditControllerTest::preservesStrokeAppearanceAndRejectsClipping()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
-    const QVariantList candidates = controller.candidatesForPage(0);
+    const QVariantList candidates = waitForCandidates(controller, 0);
     const QVariantMap strokeCandidate = candidateForText(
         candidates,
         QStringLiteral("Stroke text"));
@@ -4167,7 +4437,7 @@ void PDFEditControllerTest::savesAsynchronously()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
     QVERIFY(controller.selectCandidate(
         0,
@@ -4203,7 +4473,7 @@ void PDFEditControllerTest::keepsDraftsWhenSaveFails()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
-        controller.candidatesForPage(0),
+        waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
     QVERIFY(controller.selectCandidate(
         0,
@@ -4298,7 +4568,7 @@ void PDFEditControllerTest::keepsTabDraftsIndependent()
 
     PDFEditController *firstController = firstSession->editController();
     const QVariantMap candidate = candidateForText(
-        firstController->candidatesForPage(0),
+        waitForCandidates(*firstController, 0),
         QString::fromLatin1(kRegularText));
     QVERIFY(!candidate.isEmpty());
     QVERIFY(firstController->selectCandidate(
@@ -4341,7 +4611,7 @@ void PDFEditControllerTest::savesOnlyRequestedTab()
     const auto addDraft = [](PDFDocumentSession *session, const QString &text) {
         PDFEditController *controller = session->editController();
         const QVariantMap candidate = candidateForText(
-            controller->candidatesForPage(0),
+            waitForCandidates(*controller, 0),
             QString::fromLatin1(kRegularText));
         if (candidate.isEmpty()
             || !controller->selectCandidate(

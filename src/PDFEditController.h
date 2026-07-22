@@ -12,6 +12,7 @@
 #include <QPointF>
 #include <QPointer>
 #include <QRectF>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -19,7 +20,9 @@
 #include <QVector>
 #include <QtQml/qqmlregistration.h>
 
+#include <atomic>
 #include <functional>
+#include <memory>
 
 class PDFEditController : public QObject
 {
@@ -184,6 +187,7 @@ signals:
     void textEditActiveChanged();
     void selectionChanged();
     void pageDataChanged(int page);
+    void pageCandidatesReady(int page);
     void draftRenderStateChanged(int page, quint64 revision, bool immediate);
     void statusMessage(const QString &message);
     void imageFileRequested(int page, qreal x, qreal y);
@@ -246,6 +250,33 @@ private:
         quint64 addedOrder = 0;
         QImage image;
         QString reason;
+        int pendingFontSnapshotIndex = -1;
+        QString pendingFontExpectedFamily;
+        QString pendingBundledFontFamily;
+        QString pendingSystemFontFamily;
+        QByteArray pendingEmbeddedFontData;
+    };
+
+    struct CandidateScanRequest {
+        QString filePath;
+        int revision = -1;
+        int page = -1;
+        QSizeF pageSize;
+        bool editingAllowed = false;
+        QStringList bundledFontFamilies;
+        QStringList systemFontFamilies;
+        qsizetype maximumEmbeddedFontSnapshotBytes = 0;
+    };
+
+    struct FontResolutionSnapshot {
+        QString expectedFamily;
+        QString bundledFamily;
+        QString systemFamily;
+        QString identity;
+        QByteArray embeddedFontData;
+        int scanIndex = -1;
+        bool bold = false;
+        bool italic = false;
     };
 
     struct CharacterFormat {
@@ -321,21 +352,49 @@ private:
                       const QString &expectedSourceFilePath);
     void ensureCacheRevision();
     const QVector<Candidate> &ensurePageCandidates(int page);
-    QVector<Candidate> scanPage(int page);
-    void appendPageObjectCandidates(FPDF_PAGE page,
-                                    FPDF_PAGEOBJECT pageObject,
-                                    const QVector<int> &objectPath,
-                                    FPDF_TEXTPAGE textPage,
-                                    const QHash<FPDF_PAGEOBJECT, TextObjectLayout> &textObjectLayouts,
-                                    const FS_MATRIX &containerTransform,
-                                    const QSizeF &pageSize,
-                                    QVector<Candidate> &candidates);
+    const QVector<Candidate> *cachedPageCandidates(int page);
+    void requestPageCandidateScan(int page);
+    void startPendingCandidateScan();
+    void completePageCandidateScan(
+        const CandidateScanRequest &request,
+        QVector<Candidate> candidates,
+        bool cancelled);
+    void completeDroppedPageCandidateScan(
+        const std::shared_ptr<std::atomic_bool> &cancellation);
+    void touchPageCandidateCache(int page);
+    void prunePageCandidateCache(int protectedPage);
+    bool isPageCandidateCachePinned(int page) const;
+    CandidateScanRequest candidateScanRequest(int page) const;
+    static QVector<Candidate> scanPageFromFile(
+        const CandidateScanRequest &request,
+        const std::shared_ptr<std::atomic_bool> &cancellation);
+    static QVector<Candidate> scanPageLocked(
+        FPDF_DOCUMENT document,
+        const CandidateScanRequest &request,
+        const std::shared_ptr<std::atomic_bool> &cancellation = {});
+    QVector<Candidate> finalizePageCandidates(
+        QVector<Candidate> candidates,
+        int page,
+        const QSizeF &pageSize);
+    static void appendPageObjectCandidates(
+        FPDF_PAGE page,
+        FPDF_PAGEOBJECT pageObject,
+        const QVector<int> &objectPath,
+        FPDF_TEXTPAGE textPage,
+        const QHash<FPDF_PAGEOBJECT, TextObjectLayout> &textObjectLayouts,
+        const FS_MATRIX &containerTransform,
+        const CandidateScanRequest &request,
+        QVector<Candidate> &candidates,
+        QHash<FPDF_FONT, FontResolutionSnapshot> &fontResolutionCache,
+        qsizetype &embeddedFontDataBytes,
+        const std::shared_ptr<std::atomic_bool> &cancellation);
     QVector<Candidate> groupTextLineCandidates(QVector<Candidate> candidates,
                                                const QSizeF &pageSize) const;
-    void appendAnnotationCandidates(FPDF_PAGE page,
-                                    int pageIndex,
-                                    const QSizeF &pageSize,
-                                    QVector<Candidate> &candidates) const;
+    static void appendAnnotationCandidates(
+        FPDF_PAGE page,
+        const CandidateScanRequest &request,
+        QVector<Candidate> &candidates,
+        const std::shared_ptr<std::atomic_bool> &cancellation);
     const Candidate *findCandidate(int page, const QString &objectId);
     QVariantList candidateSourceRects(const Candidate &candidate) const;
     QVariantList characterSpanMaps(const QVector<CharacterSpan> &spans) const;
@@ -382,14 +441,30 @@ private:
     bool removeAddedCandidate(int page, const QString &objectId);
     void updateSelectedTextFromDraft();
     void setSelection(const Candidate *candidate);
-    QString resolvedFontFamily(FPDF_PAGEOBJECT textObject, const QString &text);
-    QString registerEmbeddedFont(FPDF_FONT font, const QString &expectedFamily);
+    static void snapshotFontResolutionLocked(
+        FPDF_PAGEOBJECT textObject,
+        Candidate &candidate,
+        const CandidateScanRequest &request,
+        QHash<FPDF_FONT, FontResolutionSnapshot> &fontResolutionCache,
+        qsizetype &embeddedFontDataBytes);
+    void resolveCandidateFontFamily(
+        Candidate &candidate,
+        QHash<int, QString> &resolvedEmbeddedFamilies);
+    QString registerEmbeddedFont(
+        const QByteArray &fontData,
+        const QString &expectedFamily);
+    void rememberRejectedFontFingerprint(const QByteArray &fingerprint);
     void clearRegisteredFonts();
 
     QPointer<PDFDocument> m_document;
     Tool m_tool = BrowseTool;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
+    QVector<int> m_pageCandidateLru;
+    int m_pendingCandidateScanPage = -1;
+    int m_candidateScanInFlightPage = -1;
+    bool m_candidateScanInFlight = false;
+    std::shared_ptr<std::atomic_bool> m_candidateScanCancellation;
     QVector<Candidate> m_addedCandidates;
     QHash<QString, Draft> m_drafts;
     QHash<int, quint64> m_pageDraftRevisions;
@@ -397,8 +472,9 @@ private:
     quint64 m_nextAddedObjectId = 0;
     QVector<Command> m_undoStack;
     QVector<Command> m_redoStack;
-    QHash<QString, QString> m_pdfEmbeddedFontFamilyCache;
     QHash<QByteArray, QString> m_registeredFontFamilies;
+    QSet<QByteArray> m_rejectedFontFingerprints;
+    QVector<QByteArray> m_rejectedFontFingerprintLru;
     QVector<int> m_registeredFontIds;
     qsizetype m_registeredFontBytes = 0;
     Candidate m_selectedCandidate;

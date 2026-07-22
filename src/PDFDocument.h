@@ -59,7 +59,7 @@ signals:
 private:
     friend class PDFEditController;
 
-    void closeDocument();
+    void closeDocumentLocked();
     void setStatusText(const QString &statusText);
     void emitDocumentStateChanged();
 
@@ -71,5 +71,6 @@ private:
     int m_pageCount = 0;
     int m_currentPage = 0;
     int m_revision = 0;
+    bool m_allowsContentEditing = false;
     QString m_statusText;
 };

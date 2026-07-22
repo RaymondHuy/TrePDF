@@ -1,20 +1,27 @@
 #include "PDFDocument.h"
+#include "PDFiumSynchronization.h"
 
 #include <QFile>
 #include <QtTranslation>
 
+#include <utility>
+
 namespace {
+
+constexpr unsigned long kModifyContentsPermission = 1UL << 3;
 
 class PdfiumRuntime
 {
 public:
     PdfiumRuntime()
     {
+        PDFiumProcessLock pdfiumLock;
         FPDF_InitLibrary();
     }
 
     ~PdfiumRuntime()
     {
+        PDFiumProcessLock pdfiumLock;
         FPDF_DestroyLibrary();
     }
 };
@@ -25,9 +32,9 @@ PdfiumRuntime &pdfiumRuntime()
     return runtime;
 }
 
-QString pdfiumErrorText()
+QString pdfiumErrorText(unsigned long error)
 {
-    switch (FPDF_GetLastError()) {
+    switch (error) {
     case FPDF_ERR_SUCCESS:
         //% "No error"
         return qtTrId("NoError");
@@ -67,7 +74,8 @@ PDFDocument::PDFDocument(QObject *parent)
 
 PDFDocument::~PDFDocument()
 {
-    closeDocument();
+    PDFiumProcessLock pdfiumLock;
+    closeDocumentLocked();
 }
 
 QUrl PDFDocument::source() const
@@ -120,30 +128,54 @@ bool PDFDocument::open(const QUrl &source)
 
     const QString filePath = source.toLocalFile();
     const QByteArray encodedPath = QFile::encodeName(filePath);
-    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
-    if (!document) {
-        setStatusText(pdfiumErrorText());
+    unsigned long error = FPDF_ERR_SUCCESS;
+    bool opened = false;
+    {
+        // This is the sole owner of the PDFium open/metadata/old-document-close
+        // transaction. QObject signals are emitted only after the lock is gone.
+        PDFiumProcessLock pdfiumLock;
+        FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+        if (!document) {
+            error = FPDF_GetLastError();
+        } else {
+            const int pageCount = FPDF_GetPageCount(document);
+            QVector<QSizeF> pageSizes;
+            pageSizes.reserve(pageCount);
+            qreal maximumPageWidth = 0.0;
+            for (int page = 0; page < pageCount; ++page) {
+                double width = 0.0;
+                double height = 0.0;
+                const QSizeF size = FPDF_GetPageSizeByIndex(
+                                        document,
+                                        page,
+                                        &width,
+                                        &height)
+                    ? QSizeF(width, height)
+                    : QSizeF();
+                pageSizes.append(size);
+                maximumPageWidth = qMax(maximumPageWidth, size.width());
+            }
+            const unsigned long permissions = FPDF_GetDocPermissions(document);
+
+            closeDocumentLocked();
+            m_document = document;
+            m_source = source;
+            m_filePath = filePath;
+            m_pageCount = pageCount;
+            m_currentPage = 0;
+            m_pageSizes = std::move(pageSizes);
+            m_maximumPageWidth = maximumPageWidth;
+            m_allowsContentEditing = permissions == 0xffffffffUL
+                || (permissions & kModifyContentsPermission) != 0;
+            ++m_revision;
+            opened = true;
+        }
+    }
+
+    if (!opened) {
+        setStatusText(pdfiumErrorText(error));
         return false;
     }
-
-    closeDocument();
-
-    m_document = document;
-    m_source = source;
-    m_filePath = filePath;
-    m_pageCount = FPDF_GetPageCount(m_document);
-    m_currentPage = 0;
-    m_pageSizes.reserve(m_pageCount);
-    for (int page = 0; page < m_pageCount; ++page) {
-        double width = 0.0;
-        double height = 0.0;
-        const QSizeF size = FPDF_GetPageSizeByIndex(m_document, page, &width, &height)
-            ? QSizeF(width, height)
-            : QSizeF();
-        m_pageSizes.append(size);
-        m_maximumPageWidth = qMax(m_maximumPageWidth, size.width());
-    }
-    ++m_revision;
     //% "Loaded %n page(s)"
     setStatusText(qtTrId("LoadedPageCount", m_pageCount));
     emitDocumentStateChanged();
@@ -157,7 +189,10 @@ void PDFDocument::close()
         return;
     }
 
-    closeDocument();
+    {
+        PDFiumProcessLock pdfiumLock;
+        closeDocumentLocked();
+    }
     //% "No document open"
     setStatusText(qtTrId("NoDocumentOpen"));
     emitDocumentStateChanged();
@@ -208,8 +243,9 @@ int PDFDocument::renderRevision() const
     return m_revision;
 }
 
-void PDFDocument::closeDocument()
+void PDFDocument::closeDocumentLocked()
 {
+    assertPDFiumProcessLockHeld();
     if (m_document) {
         FPDF_CloseDocument(m_document);
     }
@@ -221,6 +257,7 @@ void PDFDocument::closeDocument()
     m_maximumPageWidth = 0.0;
     m_pageCount = 0;
     m_currentPage = 0;
+    m_allowsContentEditing = false;
     ++m_revision;
 }
 
