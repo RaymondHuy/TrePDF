@@ -111,6 +111,8 @@ Item {
                     selectedFontUnderline:
                         root.session.editController.selectedFontUnderline
                     selectedColor: root.session.editController.selectedColor
+                    selectedParagraphAlignment:
+                        root.session.editController.selectedParagraphAlignment
                     formattingEnabled:
                         root.session.editController.selectedEditable
                         && (root.session.editController.selectedKind === "text"
@@ -148,6 +150,10 @@ Item {
                     }
                     onFontColorChangeRequested: color => {
                         root.session.editController.setSelectedColor(color)
+                    }
+                    onParagraphAlignmentChangeRequested: alignment => {
+                        root.session.editController.setSelectedParagraphAlignment(
+                            alignment)
                     }
                     onCollapsedChangeRequested: collapsed => {
                         root.session.panelCollapsed = collapsed

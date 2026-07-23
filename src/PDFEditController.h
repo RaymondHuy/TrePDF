@@ -58,6 +58,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool selectedFontItalic READ selectedFontItalic NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedFontUnderline READ selectedFontUnderline NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(QColor selectedColor READ selectedColor NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(int selectedParagraphAlignment READ selectedParagraphAlignment NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
 
@@ -85,6 +86,14 @@ public:
         KoreanFonts
     };
     Q_ENUM(FontFilter)
+
+    enum ParagraphAlignment {
+        LeftAlignment,
+        RightAlignment,
+        CenterAlignment,
+        JustifyAlignment
+    };
+    Q_ENUM(ParagraphAlignment)
 
     explicit PDFEditController(QObject *parent = nullptr);
     ~PDFEditController() override;
@@ -124,6 +133,7 @@ public:
     bool selectedFontItalic() const;
     bool selectedFontUnderline() const;
     QColor selectedColor() const;
+    int selectedParagraphAlignment() const;
     bool selectedEditable() const;
     QString selectedReason() const;
     quint64 draftRevisionForPage(int page) const;
@@ -177,6 +187,7 @@ public:
     Q_INVOKABLE void setSelectedFontItalic(bool enabled);
     Q_INVOKABLE void setSelectedFontUnderline(bool enabled);
     Q_INVOKABLE void setSelectedColor(const QColor &color);
+    Q_INVOKABLE void setSelectedParagraphAlignment(ParagraphAlignment alignment);
     Q_INVOKABLE void finishSelectedTextEdit();
     Q_INVOKABLE void cancelSelectedTextEdit();
     Q_INVOKABLE void commitSelectedText(const QString &text);
@@ -318,13 +329,6 @@ private:
         qsizetype insertedLength = 0;
     };
 
-    enum class ParagraphAlignment {
-        Left,
-        Center,
-        Right,
-        Justify
-    };
-
     enum class ParagraphListStyle {
         None,
         Bullet,
@@ -334,7 +338,7 @@ private:
     struct ParagraphFormat {
         qsizetype start = 0;
         qsizetype length = 0;
-        ParagraphAlignment alignment = ParagraphAlignment::Left;
+        ParagraphAlignment alignment = LeftAlignment;
         ParagraphListStyle listStyle = ParagraphListStyle::None;
         int listLevel = 0;
         int listStart = 1;
@@ -465,6 +469,9 @@ private:
     void selectedTextRangeForDraft(const Draft &draft,
                                    qsizetype &start,
                                    qsizetype &length) const;
+    void selectedParagraphRangeForDraft(const Draft &draft,
+                                        qsizetype &first,
+                                        qsizetype &last) const;
     void resetTextEditDisplayState();
     void resetTypingFormat();
     void rebaseTypingFormat(const Draft &draft);

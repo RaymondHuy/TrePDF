@@ -316,9 +316,10 @@ Item {
                 fallbackFormat,
                 baseRatio,
                 basePixelSize)
-            const paragraphStyle = "margin:0;white-space:pre-wrap;text-align:"
-                + alignment + ";"
-            html += "<p style=\"" + escapeHtmlAttribute(paragraphStyle) + "\">"
+            const paragraphStyle = "margin:0;white-space:pre-wrap;"
+            // Qt Rich Text supports block alignment through the align attribute.
+            html += "<p align=\"" + escapeHtmlAttribute(alignment)
+                + "\" style=\"" + escapeHtmlAttribute(paragraphStyle) + "\">"
                 + content + "</p>"
         }
         return html + "</body></html>"

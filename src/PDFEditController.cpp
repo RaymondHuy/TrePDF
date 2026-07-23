@@ -1231,6 +1231,29 @@ QColor PDFEditController::selectedColor() const
         : QColor(Qt::black);
 }
 
+int PDFEditController::selectedParagraphAlignment() const
+{
+    if (!m_hasSelection || !isTextCandidateKind(m_selectedCandidate.kind)) {
+        return -1;
+    }
+
+    const Draft draft = selectedDraftForDisplay();
+    qsizetype first = -1;
+    qsizetype last = -1;
+    selectedParagraphRangeForDraft(draft, first, last);
+    if (first < 0 || last < first) {
+        return -1;
+    }
+
+    const ParagraphAlignment alignment = draft.paragraphFormats.at(first).alignment;
+    for (qsizetype index = first + 1; index <= last; ++index) {
+        if (draft.paragraphFormats.at(index).alignment != alignment) {
+            return -1;
+        }
+    }
+    return static_cast<int>(alignment);
+}
+
 bool PDFEditController::selectedEditable() const
 {
     return m_hasSelection && m_selectedCandidate.editable;
@@ -2524,6 +2547,60 @@ void PDFEditController::setSelectedColor(const QColor &color)
     }
     rebaseTypingFormat(draft);
     updateSelectedDraft(draft);
+
+    if (finishImmediately) {
+        finishSelectedTextEdit();
+    }
+}
+
+void PDFEditController::setSelectedParagraphAlignment(
+    ParagraphAlignment alignment)
+{
+    switch (alignment) {
+    case LeftAlignment:
+    case RightAlignment:
+    case CenterAlignment:
+    case JustifyAlignment:
+        break;
+    default:
+        return;
+    }
+
+    if (!m_hasSelection
+        || !m_selectedCandidate.editable
+        || !isTextCandidateKind(m_selectedCandidate.kind)) {
+        return;
+    }
+
+    const bool finishImmediately = !m_textEditActive;
+    if (finishImmediately) {
+        beginSelectedTextEdit();
+    }
+    if (!m_textEditActive || !m_hasSelection) {
+        return;
+    }
+
+    Draft draft = selectedDraftForDisplay();
+    qsizetype first = -1;
+    qsizetype last = -1;
+    if (finishImmediately) {
+        first = 0;
+        last = draft.paragraphFormats.size() - 1;
+    } else {
+        selectedParagraphRangeForDraft(draft, first, last);
+    }
+
+    bool changed = false;
+    for (qsizetype index = first; index >= 0 && index <= last; ++index) {
+        ParagraphFormat &format = draft.paragraphFormats[index];
+        if (format.alignment != alignment) {
+            format.alignment = alignment;
+            changed = true;
+        }
+    }
+    if (changed) {
+        updateSelectedDraft(draft);
+    }
 
     if (finishImmediately) {
         finishSelectedTextEdit();
@@ -4140,13 +4217,13 @@ QVariantList PDFEditController::paragraphFormatMaps(
 {
     const auto alignmentName = [](ParagraphAlignment alignment) {
         switch (alignment) {
-        case ParagraphAlignment::Left:
+        case LeftAlignment:
             return QStringLiteral("left");
-        case ParagraphAlignment::Center:
+        case CenterAlignment:
             return QStringLiteral("center");
-        case ParagraphAlignment::Right:
+        case RightAlignment:
             return QStringLiteral("right");
-        case ParagraphAlignment::Justify:
+        case JustifyAlignment:
             return QStringLiteral("justify");
         }
         return QStringLiteral("left");
@@ -4558,6 +4635,7 @@ PDFEditController::TextChange PDFEditController::setDraftText(
     change.removedLength = oldLength - commonPrefix - commonSuffix;
     change.insertedLength = newLength - commonPrefix - commonSuffix;
 
+    const QVector<ParagraphFormat> oldParagraphFormats = draft.paragraphFormats;
     const CharacterFormat fallbackFormat = primaryCharacterFormat(draft);
     QVector<CharacterFormat> oldFormats(oldLength, fallbackFormat);
     for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
@@ -4616,12 +4694,38 @@ PDFEditController::TextChange PDFEditController::setDraftText(
         }
     }
 
-    const ParagraphFormat paragraphPrototype = draft.paragraphFormats.isEmpty()
-        ? ParagraphFormat()
-        : draft.paragraphFormats.constFirst();
+    QVector<ParagraphFormat> newParagraphFormats = paragraphFormatsForText(
+        text,
+        ParagraphFormat());
+    const auto oldParagraphAt = [&oldParagraphFormats](qsizetype position) {
+        for (const ParagraphFormat &format : oldParagraphFormats) {
+            if (position >= format.start
+                && position <= format.start + format.length) {
+                return format;
+            }
+        }
+        return oldParagraphFormats.isEmpty()
+            ? ParagraphFormat()
+            : oldParagraphFormats.constLast();
+    };
+    for (ParagraphFormat &format : newParagraphFormats) {
+        qsizetype oldPosition = change.start;
+        if (format.start < change.start) {
+            oldPosition = format.start;
+        } else if (format.start >= change.start + change.insertedLength) {
+            oldPosition = format.start
+                - change.insertedLength
+                + change.removedLength;
+        }
+        ParagraphFormat inheritedFormat = oldParagraphAt(
+            qBound<qsizetype>(0, oldPosition, oldLength));
+        inheritedFormat.start = format.start;
+        inheritedFormat.length = format.length;
+        format = inheritedFormat;
+    }
     draft.text = text;
     draft.characterSpans = std::move(newSpans);
-    draft.paragraphFormats = paragraphFormatsForText(text, paragraphPrototype);
+    draft.paragraphFormats = std::move(newParagraphFormats);
     return change;
 }
 
@@ -4898,6 +5002,54 @@ void PDFEditController::selectedTextRangeForDraft(const Draft &draft,
 
     start = 0;
     length = textLength;
+}
+
+void PDFEditController::selectedParagraphRangeForDraft(
+    const Draft &draft,
+    qsizetype &first,
+    qsizetype &last) const
+{
+    first = -1;
+    last = -1;
+    if (draft.paragraphFormats.isEmpty()) {
+        return;
+    }
+    if (!m_textEditActive) {
+        first = 0;
+        last = draft.paragraphFormats.size() - 1;
+        return;
+    }
+
+    const qsizetype textLength = draft.text.size();
+    const qsizetype rangeStart = qBound<qsizetype>(
+        0,
+        m_selectedTextRangeStart,
+        textLength);
+    const qsizetype rangeLength = qBound<qsizetype>(
+        0,
+        m_selectedTextRangeLength,
+        textLength - rangeStart);
+    const qsizetype rangeEnd = rangeLength > 0
+        ? rangeStart + rangeLength - 1
+        : rangeStart;
+    const auto paragraphAt = [&draft](qsizetype position) {
+        for (qsizetype index = 0;
+             index < draft.paragraphFormats.size();
+             ++index) {
+            const ParagraphFormat &format = draft.paragraphFormats.at(index);
+            if (position >= format.start
+                && position <= format.start + format.length) {
+                return index;
+            }
+        }
+        return draft.paragraphFormats.size() - 1;
+    };
+
+    first = paragraphAt(rangeStart);
+    last = paragraphAt(rangeEnd);
+    if (last < first) {
+        std::swap(first, last);
+    }
 }
 
 void PDFEditController::resetTextEditDisplayState()

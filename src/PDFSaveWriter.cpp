@@ -2435,16 +2435,16 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         for (const PDFEditController::ParagraphFormat &paragraph : draft->paragraphFormats) {
             Qt::Alignment alignment = Qt::AlignLeft;
             switch (paragraph.alignment) {
-            case PDFEditController::ParagraphAlignment::Left:
+            case PDFEditController::LeftAlignment:
                 alignment = Qt::AlignLeft;
                 break;
-            case PDFEditController::ParagraphAlignment::Center:
+            case PDFEditController::CenterAlignment:
                 alignment = Qt::AlignHCenter;
                 break;
-            case PDFEditController::ParagraphAlignment::Right:
+            case PDFEditController::RightAlignment:
                 alignment = Qt::AlignRight;
                 break;
-            case PDFEditController::ParagraphAlignment::Justify:
+            case PDFEditController::JustifyAlignment:
                 alignment = Qt::AlignJustify;
                 break;
             }

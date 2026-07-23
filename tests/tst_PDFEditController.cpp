@@ -1347,6 +1347,7 @@ private slots:
     void appliesTypingFormatBetweenRepeatedCharacters();
     void preservesEditorUndoWhenFormattingSelection();
     void formatsSelectedRangeInMultilineDraft();
+    void alignsSelectedParagraphsWithUndoRedo();
     void calibratesDisplayStretchToPdfScale_data();
     void calibratesDisplayStretchToPdfScale();
     void appliesFontStylesToDisplayFont_data();
@@ -3303,6 +3304,73 @@ void PDFEditControllerTest::formatsSelectedRangeInMultilineDraft()
         m_controller.draftsForPage(0).constFirst().toMap()
             .value(QStringLiteral("characterSpans")).toList().size(),
         3);
+
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::alignsSelectedParagraphsWithUndoRedo()
+{
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QString text = QStringLiteral("First\nSecond\nThird");
+    m_controller.beginSelectedTextEdit();
+    m_controller.updateSelectedTextPreview(text);
+    m_controller.setSelectedTextRange(7, 0);
+    QCOMPARE(
+        m_controller.selectedParagraphAlignment(),
+        static_cast<int>(PDFEditController::LeftAlignment));
+
+    m_controller.setSelectedParagraphAlignment(
+        PDFEditController::CenterAlignment);
+    QCOMPARE(
+        m_controller.selectedParagraphAlignment(),
+        static_cast<int>(PDFEditController::CenterAlignment));
+
+    QVariantList paragraphs = m_controller.draftsForPage(0)
+                                  .constFirst()
+                                  .toMap()
+                                  .value(QStringLiteral("paragraphFormats"))
+                                  .toList();
+    QCOMPARE(paragraphs.size(), 3);
+    QCOMPARE(
+        paragraphs.at(0).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("left"));
+    QCOMPARE(
+        paragraphs.at(1).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("center"));
+    QCOMPARE(
+        paragraphs.at(2).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("left"));
+
+    m_controller.updateSelectedTextPreview(
+        QStringLiteral("First\nSecond!\nThird"));
+    paragraphs = m_controller.draftsForPage(0)
+                     .constFirst()
+                     .toMap()
+                     .value(QStringLiteral("paragraphFormats"))
+                     .toList();
+    QCOMPARE(
+        paragraphs.at(1).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("center"));
+
+    m_controller.setSelectedTextRange(0, text.size());
+    QCOMPARE(m_controller.selectedParagraphAlignment(), -1);
+    m_controller.finishSelectedTextEdit();
+
+    QVERIFY(m_controller.canUndo());
+    m_controller.undo();
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+    m_controller.redo();
+    paragraphs = m_controller.draftsForPage(0)
+                     .constFirst()
+                     .toMap()
+                     .value(QStringLiteral("paragraphFormats"))
+                     .toList();
+    QCOMPARE(
+        paragraphs.at(1).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("center"));
 
     m_controller.discardDrafts();
 }
