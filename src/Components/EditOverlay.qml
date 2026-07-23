@@ -21,6 +21,8 @@ Item {
     property bool loadingEditorText: false
     property bool syncingEditorPreview: false
     property bool syncingEditorGeometry: false
+    property bool applyingEditorDocumentFormat: false
+    property bool suppressNextEditorReload: false
     property bool editorLayoutDirty: false
     property bool resizingFrame: false
     property string resizingObjectId: ""
@@ -335,6 +337,11 @@ Item {
         }
     }
 
+    function selectedBaseFormat() {
+        const spans = controller.selectedCharacterSpans
+        return spans.length > 0 ? spans[0] : selectedFallbackFormat()
+    }
+
     function editorPlainText() {
         return editor.getText(0, editor.length)
             .replace(/\u2028/g, "\n")
@@ -397,13 +404,28 @@ Item {
         controller.setSelectedTextRange(start, end - start)
     }
 
+    function syncEditorDocumentFontStyles() {
+        if (!editing
+                || loadingEditorText
+                || syncingEditorPreview
+                || applyingEditorDocumentFormat
+                || editorPlainText() !== controller.selectedText) {
+            return
+        }
+
+        suppressNextEditorReload = true
+        const changed = controller.syncEditorFontStyles(editor.textDocument)
+        if (!changed)
+            suppressNextEditorReload = false
+    }
+
     function loadEditorRichText(cursorPosition, selectionStart, selectionEnd) {
         loadingEditorText = true
         editor.text = richTextHtml(
             controller.selectedText,
             controller.selectedCharacterSpans,
             controller.selectedParagraphFormats,
-            selectedFallbackFormat(),
+            selectedBaseFormat(),
             editorFrame.baseFontPixelSize)
         const maximumPosition = editor.length
         const start = Math.max(0, Math.min(maximumPosition, selectionStart))
@@ -631,7 +653,9 @@ Item {
         }
 
         syncingEditorPreview = true
-        controller.updateSelectedTextPreview(editorPlainText())
+        controller.updateSelectedTextPreview(
+            editorPlainText(),
+            editor.cursorPosition)
         syncingEditorPreview = false
         editing = false
         editingObjectId = ""
@@ -665,6 +689,7 @@ Item {
         if (controller.selectedPage !== page || !controller.selectedEditable)
             return
 
+        selectionActions.close()
         beginEditing({
             objectId: controller.selectedObjectId,
             kind: controller.selectedKind,
@@ -793,6 +818,7 @@ Item {
                 root.editing = false
                 root.editingObjectId = ""
                 root.editorLayoutDirty = false
+                root.suppressNextEditorReload = false
                 return
             }
             if (root.editing
@@ -800,6 +826,12 @@ Item {
                     && !root.syncingEditorGeometry
                     && !root.loadingEditorText
                     && !root.resizingFrame) {
+                if (root.suppressNextEditorReload) {
+                    root.suppressNextEditorReload = false
+                    root.editorLayoutDirty = true
+                    Qt.callLater(root.syncEditorContentBounds)
+                    return
+                }
                 const cursorPosition = editor.cursorPosition
                 const selectionStart = editor.selectionStart
                 const selectionEnd = editor.selectionEnd
@@ -810,6 +842,32 @@ Item {
                 root.editorLayoutDirty = true
                 Qt.callLater(root.syncEditorContentBounds)
             }
+        }
+
+        function onTypingFormatApplied(start, length) {
+            if (root.editing) {
+                root.controller.applyTypingFormatToEditorDocument(
+                    editor.textDocument,
+                    start,
+                    length)
+            }
+        }
+
+        function onSelectionFontStyleApplied(start, length, style, enabled) {
+            if (!root.editing)
+                return
+
+            root.suppressNextEditorReload = true
+            root.applyingEditorDocumentFormat = true
+            const applied = root.controller.applyFontStyleToEditorDocument(
+                editor.textDocument,
+                start,
+                length,
+                style,
+                enabled)
+            root.applyingEditorDocumentFormat = false
+            if (!applied)
+                root.suppressNextEditorReload = false
         }
     }
 
@@ -1470,6 +1528,7 @@ Item {
                 * root.height)
         readonly property bool editsAddedText: root.controller.selectedKind === "addedText"
         readonly property bool editsGroupedText: root.controller.selectedSourceRects.length > 1
+        readonly property var baseFormat: root.selectedBaseFormat()
         readonly property real leftBleed: editsAddedText
             ? 0
             : root.editBoxLeftBleed
@@ -1481,13 +1540,15 @@ Item {
             : root.editBoxVerticalBleed
         readonly property real baseFontPixelSize: Math.max(
             editsAddedText ? root.minimumTextPixelSize : 1,
-            root.controller.selectedDisplayFontSizeRatio * root.height)
+            (Number(baseFormat.displayFontSizeRatio) > 0
+                ? Number(baseFormat.displayFontSizeRatio)
+                : Number(baseFormat.fontSizeRatio)) * root.height)
         readonly property font displayFont: root.controller.fontForDisplay(
-            root.controller.selectedFontFamily,
-            root.controller.selectedFontStretch,
-            root.controller.selectedFontBold,
-            root.controller.selectedFontItalic,
-            root.controller.selectedFontUnderline,
+            String(baseFormat.fontFamily || ""),
+            Number(baseFormat.fontStretch || 100),
+            baseFormat.fontBold === true,
+            baseFormat.fontItalic === true,
+            baseFormat.fontUnderline === true,
             baseFontPixelSize)
         readonly property bool usesBaseline: !editsAddedText
             && root.controller.selectedHasBaseline
@@ -1573,7 +1634,7 @@ Item {
             topPadding: 0
             bottomPadding: 0
             textMargin: 0
-            color: root.controller.selectedColor
+            color: editorFrame.baseFormat.color
             selectionColor: "#DCEBFF"
             selectedTextColor: root.theme.ribbonTextColor
             font: editorFrame.displayFont
@@ -1584,13 +1645,16 @@ Item {
             persistentSelection: true
             verticalAlignment: TextEdit.AlignTop
             clip: true
+            onTextChanged: Qt.callLater(root.syncEditorDocumentFontStyles)
             onTextEdited: {
                 if (root.loadingEditorText)
                     return
 
                 root.editorLayoutDirty = true
                 root.syncingEditorPreview = true
-                root.controller.updateSelectedTextPreview(root.editorPlainText())
+                root.controller.updateSelectedTextPreview(
+                    root.editorPlainText(),
+                    editor.cursorPosition)
                 root.syncingEditorPreview = false
                 root.syncEditorSelection()
                 Qt.callLater(root.syncEditorContentBounds)
@@ -1599,8 +1663,8 @@ Item {
                 if (root.editorLayoutDirty)
                     Qt.callLater(root.syncEditorContentBounds)
             }
-            onSelectionStartChanged: root.syncEditorSelection()
-            onSelectionEndChanged: root.syncEditorSelection()
+            onSelectionStartChanged: Qt.callLater(root.syncEditorSelection)
+            onSelectionEndChanged: Qt.callLater(root.syncEditorSelection)
 
             Keys.onEscapePressed: event => {
                 root.cancelEditing()

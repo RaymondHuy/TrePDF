@@ -12,11 +12,15 @@
 #include <QFontMetricsF>
 #include <QImage>
 #include <QPainter>
+#include <QQuickTextDocument>
 #include <QRawFont>
+#include <QQmlComponent>
+#include <QQmlEngine>
 #include <QSemaphore>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextCursor>
 #include <QThread>
 #include <QUrl>
 #include <QVariantList>
@@ -72,6 +76,170 @@ private:
 
     QFile m_file;
 };
+
+bool writePdfObjects(const QString &filePath,
+                     const QVector<QByteArray> &objects)
+{
+    QByteArray data("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
+    QVector<qint64> offsets(objects.size() + 1, 0);
+    for (qsizetype index = 0; index < objects.size(); ++index) {
+        offsets[index + 1] = data.size();
+        data += QByteArray::number(index + 1);
+        data += " 0 obj\n";
+        data += objects.at(index);
+        data += "\nendobj\n";
+    }
+
+    const qint64 xrefOffset = data.size();
+    data += "xref\n0 ";
+    data += QByteArray::number(objects.size() + 1);
+    data += "\n0000000000 65535 f \n";
+    for (qsizetype index = 1; index < offsets.size(); ++index) {
+        data += QByteArray::number(offsets.at(index)).rightJustified(10, '0');
+        data += " 00000 n \n";
+    }
+    data += "trailer\n<< /Size ";
+    data += QByteArray::number(objects.size() + 1);
+    data += " /Root 1 0 R >>\nstartxref\n";
+    data += QByteArray::number(xrefOffset);
+    data += "\n%%EOF\n";
+
+    QFile file(filePath);
+    return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
+        && file.write(data) == data.size();
+}
+
+enum class PatternPaintMode {
+    Fill,
+    Stroke
+};
+
+bool createPatternPaintPdf(const QString &filePath, PatternPaintMode mode)
+{
+    const QByteArray paintContent = mode == PatternPaintMode::Fill
+        ? QByteArray(
+              "/Pattern cs\n"
+              "/P1 scn\n"
+              "20 20 160 80 re f\n")
+        : QByteArray(
+              "/Pattern CS\n"
+              "/P1 SCN\n"
+              "12 w\n"
+              "20 20 160 80 re S\n");
+    const QByteArray pageContent = QByteArray("q\n")
+        + paintContent
+        + QByteArray(
+              "Q\n"
+              "BT\n"
+              "/F1 20 Tf\n"
+              "20 160 Td\n"
+              "(Pattern edit text) Tj\n"
+              "ET\n");
+    const QByteArray patternContent(
+        "1 0 0 rg 0 0 10 10 re f\n"
+        "0 1 0 rg 10 0 10 10 re f\n"
+        "0 0 1 rg 0 10 10 10 re f\n"
+        "1 1 0 rg 10 10 10 10 re f\n");
+    const auto streamObject = [](const QByteArray &dictionary,
+                                 const QByteArray &stream) {
+        return dictionary + " /Length " + QByteArray::number(stream.size())
+            + " >>\nstream\n" + stream + "\nendstream";
+    };
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /F1 4 0 R >> "
+                "/Pattern << /P1 6 0 R >> >> /Contents 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+            streamObject("<<", pageContent),
+            streamObject(
+                "<< /Type /Pattern /PatternType 1 /PaintType 1 "
+                "/TilingType 1 /BBox [0 0 20 20] /XStep 20 /YStep 20 "
+                "/Resources << >>",
+                patternContent),
+        });
+}
+
+bool createPatternFillPdf(const QString &filePath)
+{
+    return createPatternPaintPdf(filePath, PatternPaintMode::Fill);
+}
+
+bool createPatternStrokePdf(const QString &filePath)
+{
+    return createPatternPaintPdf(filePath, PatternPaintMode::Stroke);
+}
+
+QImage renderFirstPage(const QString &filePath, const QSize &pixelSize)
+{
+    PDFiumProcessLock pdfiumLock;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    QImage image(pixelSize, QImage::Format_ARGB32);
+    image.fill(Qt::white);
+    FPDF_BITMAP bitmap = page
+        ? FPDFBitmap_CreateEx(
+              image.width(),
+              image.height(),
+              FPDFBitmap_BGRA,
+              image.bits(),
+              image.bytesPerLine())
+        : nullptr;
+    if (bitmap) {
+        FPDF_RenderPageBitmap(
+            bitmap,
+            page,
+            0,
+            0,
+            image.width(),
+            image.height(),
+            0,
+            0);
+        FPDFBitmap_Destroy(bitmap);
+    } else {
+        image = {};
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return image;
+}
+
+bool containsPatternColors(const QImage &image)
+{
+    bool red = false;
+    bool green = false;
+    bool blue = false;
+    bool yellow = false;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QColor color = image.pixelColor(x, y);
+            red = red || (color.red() > 220
+                          && color.green() < 40
+                          && color.blue() < 40);
+            green = green || (color.green() > 220
+                              && color.red() < 40
+                              && color.blue() < 40);
+            blue = blue || (color.blue() > 220
+                            && color.red() < 40
+                            && color.green() < 40);
+            yellow = yellow || (color.red() > 220
+                                && color.green() > 220
+                                && color.blue() < 40);
+        }
+    }
+    return red && green && blue && yellow;
+}
 
 bool addTextObject(FPDF_DOCUMENT document,
                    FPDF_PAGE page,
@@ -1175,13 +1343,17 @@ private slots:
     void preservesSourceHorizontalScaleWhenResizing();
     void preservesSourceScaleForUnchangedRichTextRuns();
     void keepsAddedDidotScaleStableAcrossRepeatedSaves();
-    void changesFontStylesForCurrentEdit();
+    void appliesFontStylesToTypingAtCaret();
+    void appliesTypingFormatBetweenRepeatedCharacters();
+    void preservesEditorUndoWhenFormattingSelection();
     void formatsSelectedRangeInMultilineDraft();
     void calibratesDisplayStretchToPdfScale_data();
     void calibratesDisplayStretchToPdfScale();
     void appliesFontStylesToDisplayFont_data();
     void appliesFontStylesToDisplayFont();
     void savesEditedTextRoundTrip();
+    void preservesPatternFilledGraphicsWhenSavingText();
+    void preservesPatternStrokedGraphicsWhenSavingText();
     void savesVietnameseEditWithEmbeddedArial_data();
     void savesVietnameseEditWithEmbeddedArial();
     void savesVietnameseEditWithEmbeddedSystemFont_data();
@@ -1715,6 +1887,39 @@ void PDFEditControllerTest::intersectsFontFiltersAcrossMixedStyles()
     QCOMPARE(
         m_controller.fontFamiliesForFilter(PDFEditController::EnglishFonts),
         expectedEnglish);
+
+    m_controller.cancelSelectedTextEdit();
+    m_controller.clearSelection();
+    QVERIFY(!m_controller.hasDrafts());
+
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    const QString originalFamily = m_controller.selectedFontFamily();
+    m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedTextRange(1, 0);
+    m_controller.setSelectedFontBold(true);
+    QCOMPARE(
+        m_controller.fontFamiliesForFilter(PDFEditController::EnglishFonts),
+        expectedEnglish);
+
+    const QStringList regularEnglish =
+        ApplicationFonts::fontFamiliesForLanguage(
+            ApplicationFonts::FontLanguage::English,
+            false,
+            false);
+    QString regularOnlyFamily;
+    for (const QString &family : regularEnglish) {
+        if (!boldEnglish.contains(family, Qt::CaseInsensitive)) {
+            regularOnlyFamily = family;
+            break;
+        }
+    }
+    if (!regularOnlyFamily.isEmpty()) {
+        m_controller.setSelectedFontFamily(regularOnlyFamily);
+        QCOMPARE(m_controller.selectedFontFamily(), originalFamily);
+        QVERIFY(!m_controller.hasDrafts());
+    }
 
     m_controller.cancelSelectedTextEdit();
     m_controller.clearSelection();
@@ -2773,16 +2978,24 @@ void PDFEditControllerTest::calibratesDisplayStretchToPdfScale()
                        .arg(actualRatio, 0, 'f', 6)));
 }
 
-void PDFEditControllerTest::changesFontStylesForCurrentEdit()
+void PDFEditControllerTest::appliesFontStylesToTypingAtCaret()
 {
     QVERIFY(m_controller.selectCandidate(
         0,
         m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    const QString originalText = QString::fromLatin1(kRegularText);
+    const qsizetype caretPosition = 8;
+    const QString styledInsertion = QStringLiteral("new");
+    const QString regularInsertion = QStringLiteral(" plain");
+    QSignalSpy typingFormatAppliedSpy(
+        &m_controller,
+        &PDFEditController::typingFormatApplied);
     QVERIFY(!m_controller.selectedFontBold());
     QVERIFY(!m_controller.selectedFontItalic());
     QVERIFY(!m_controller.selectedFontUnderline());
 
     m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedTextRange(caretPosition, 0);
     m_controller.setSelectedFontBold(true);
     m_controller.setSelectedFontItalic(true);
     m_controller.setSelectedFontUnderline(true);
@@ -2790,40 +3003,240 @@ void PDFEditControllerTest::changesFontStylesForCurrentEdit()
     QVERIFY(m_controller.selectedFontBold());
     QVERIFY(m_controller.selectedFontItalic());
     QVERIFY(m_controller.selectedFontUnderline());
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+    QVERIFY(!m_controller.canUndo());
+
+    const QColor typingColor(QStringLiteral("#1565c0"));
+    m_controller.setSelectedColor(typingColor);
+    QCOMPARE(m_controller.selectedColor(), typingColor);
+
+    const QString styledText = originalText.left(caretPosition)
+        + styledInsertion
+        + originalText.mid(caretPosition);
+    const qsizetype styledCaret = caretPosition + styledInsertion.size();
+    m_controller.updateSelectedTextPreview(styledText, styledCaret);
+    QCOMPARE(typingFormatAppliedSpy.size(), 1);
+    m_controller.setSelectedTextRange(styledCaret, 0);
 
     QVariantList drafts = m_controller.draftsForPage(0);
     QCOMPARE(drafts.size(), 1);
     const QVariantMap styledDraft = drafts.constFirst().toMap();
-    QCOMPARE(styledDraft.value(QStringLiteral("fontBold")).toBool(), true);
-    QCOMPARE(styledDraft.value(QStringLiteral("fontItalic")).toBool(), true);
-    QCOMPARE(styledDraft.value(QStringLiteral("fontUnderline")).toBool(), true);
-
-    m_controller.finishSelectedTextEdit();
-    QVERIFY(m_controller.canUndo());
-
-    m_controller.undo();
-    QVERIFY(!m_controller.selectedFontBold());
-    QVERIFY(!m_controller.selectedFontItalic());
-    QVERIFY(!m_controller.selectedFontUnderline());
-    QVERIFY(m_controller.draftsForPage(0).isEmpty());
-
-    m_controller.redo();
+    QCOMPARE(styledDraft.value(QStringLiteral("text")).toString(), styledText);
+    const QVariantList styledSpans = styledDraft.value(
+        QStringLiteral("characterSpans")).toList();
+    QCOMPARE(styledSpans.size(), 3);
+    const QVariantMap styledSpan = styledSpans.at(1).toMap();
+    QCOMPARE(styledSpan.value(QStringLiteral("start")).toLongLong(), caretPosition);
+    QCOMPARE(
+        styledSpan.value(QStringLiteral("length")).toLongLong(),
+        styledInsertion.size());
+    QVERIFY(styledSpan.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(styledSpan.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(styledSpan.value(QStringLiteral("fontUnderline")).toBool());
+    QCOMPARE(
+        styledSpan.value(QStringLiteral("color")).value<QColor>(),
+        typingColor);
     QVERIFY(m_controller.selectedFontBold());
     QVERIFY(m_controller.selectedFontItalic());
     QVERIFY(m_controller.selectedFontUnderline());
 
-    m_controller.beginSelectedTextEdit();
     m_controller.setSelectedFontBold(false);
     m_controller.setSelectedFontItalic(false);
     m_controller.setSelectedFontUnderline(false);
     QVERIFY(!m_controller.selectedFontBold());
     QVERIFY(!m_controller.selectedFontItalic());
     QVERIFY(!m_controller.selectedFontUnderline());
-    m_controller.cancelSelectedTextEdit();
-    QVERIFY(m_controller.selectedFontBold());
-    QVERIFY(m_controller.selectedFontItalic());
-    QVERIFY(m_controller.selectedFontUnderline());
 
+    const QString finalText = styledText.left(styledCaret)
+        + regularInsertion
+        + styledText.mid(styledCaret);
+    m_controller.updateSelectedTextPreview(
+        finalText,
+        styledCaret + regularInsertion.size());
+    QCOMPARE(typingFormatAppliedSpy.size(), 2);
+    m_controller.setSelectedTextRange(
+        styledCaret + regularInsertion.size(),
+        0);
+
+    drafts = m_controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    const QVariantMap finalDraft = drafts.constFirst().toMap();
+    QCOMPARE(finalDraft.value(QStringLiteral("text")).toString(), finalText);
+    const QVariantList finalSpans = finalDraft.value(
+        QStringLiteral("characterSpans")).toList();
+    QCOMPARE(finalSpans.size(), 3);
+    const QVariantMap prefixSpan = finalSpans.at(0).toMap();
+    const QVariantMap finalStyledSpan = finalSpans.at(1).toMap();
+    const QVariantMap suffixSpan = finalSpans.at(2).toMap();
+    QCOMPARE(prefixSpan.value(QStringLiteral("length")).toLongLong(), caretPosition);
+    QVERIFY(!prefixSpan.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(!prefixSpan.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(!prefixSpan.value(QStringLiteral("fontUnderline")).toBool());
+    QVERIFY(finalStyledSpan.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(finalStyledSpan.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(finalStyledSpan.value(QStringLiteral("fontUnderline")).toBool());
+    QCOMPARE(
+        suffixSpan.value(QStringLiteral("start")).toLongLong(),
+        styledCaret);
+    QVERIFY(!suffixSpan.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(!suffixSpan.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(!suffixSpan.value(QStringLiteral("fontUnderline")).toBool());
+
+    m_controller.finishSelectedTextEdit();
+    QVERIFY(m_controller.canUndo());
+    m_controller.undo();
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+    m_controller.redo();
+    QCOMPARE(
+        m_controller.draftsForPage(0).constFirst().toMap()
+            .value(QStringLiteral("characterSpans")).toList().size(),
+        3);
+
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::appliesTypingFormatBetweenRepeatedCharacters()
+{
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    m_controller.beginSelectedTextEdit();
+    m_controller.updateSelectedTextPreview(QStringLiteral("aaa"));
+    m_controller.setSelectedTextRange(1, 0);
+    m_controller.setSelectedFontBold(true);
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        QByteArrayLiteral(
+            "import QtQuick\n"
+            "TextEdit { textFormat: TextEdit.RichText; text: \"aaa\" }"),
+        QUrl());
+    std::unique_ptr<QObject> textEdit(component.create());
+    QVERIFY2(textEdit, qPrintable(component.errorString()));
+    auto *quickDocument = textEdit->property("textDocument")
+                              .value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QVERIFY(textDocument);
+    textDocument->clearUndoRedoStacks();
+    QVERIFY(QMetaObject::invokeMethod(
+        textEdit.get(),
+        "insert",
+        Q_ARG(int, 1),
+        Q_ARG(QString, QStringLiteral("a"))));
+
+    m_controller.updateSelectedTextPreview(QStringLiteral("aaaa"), 2);
+    m_controller.applyTypingFormatToEditorDocument(quickDocument, 1, 1);
+    m_controller.setSelectedTextRange(2, 0);
+
+    QTextCursor formattedCursor(textDocument);
+    formattedCursor.setPosition(1);
+    formattedCursor.setPosition(2, QTextCursor::KeepAnchor);
+    QCOMPARE(formattedCursor.charFormat().fontWeight(), QFont::Bold);
+    textDocument->undo();
+    QCOMPARE(textDocument->toPlainText(), QStringLiteral("aaa"));
+
+    const QVariantList drafts = m_controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    const QVariantMap draft = drafts.constFirst().toMap();
+    QCOMPARE(draft.value(QStringLiteral("text")).toString(), QStringLiteral("aaaa"));
+    const QVariantList spans = draft.value(
+        QStringLiteral("characterSpans")).toList();
+    QCOMPARE(spans.size(), 3);
+    QCOMPARE(spans.at(0).toMap().value(QStringLiteral("start")).toLongLong(), 0);
+    QCOMPARE(spans.at(0).toMap().value(QStringLiteral("length")).toLongLong(), 1);
+    QVERIFY(!spans.at(0).toMap().value(QStringLiteral("fontBold")).toBool());
+    QCOMPARE(spans.at(1).toMap().value(QStringLiteral("start")).toLongLong(), 1);
+    QCOMPARE(spans.at(1).toMap().value(QStringLiteral("length")).toLongLong(), 1);
+    QVERIFY(spans.at(1).toMap().value(QStringLiteral("fontBold")).toBool());
+    QCOMPARE(spans.at(2).toMap().value(QStringLiteral("start")).toLongLong(), 2);
+    QCOMPARE(spans.at(2).toMap().value(QStringLiteral("length")).toLongLong(), 2);
+    QVERIFY(!spans.at(2).toMap().value(QStringLiteral("fontBold")).toBool());
+
+    m_controller.cancelSelectedTextEdit();
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::preservesEditorUndoWhenFormattingSelection()
+{
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QString editedText = QStringLiteral("ABCDX");
+    m_controller.beginSelectedTextEdit();
+    m_controller.updateSelectedTextPreview(editedText);
+    m_controller.setSelectedTextRange(1, 2);
+    QSignalSpy selectionStyleSpy(
+        &m_controller,
+        &PDFEditController::selectionFontStyleApplied);
+    m_controller.setSelectedFontBold(true);
+    QCOMPARE(selectionStyleSpy.size(), 1);
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        QByteArrayLiteral(
+            "import QtQuick\n"
+            "TextEdit { textFormat: TextEdit.RichText; text: \"ABCD\" }"),
+        QUrl());
+    std::unique_ptr<QObject> textEdit(component.create());
+    QVERIFY2(textEdit, qPrintable(component.errorString()));
+    auto *quickDocument = textEdit->property("textDocument")
+                              .value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QVERIFY(textDocument);
+    textDocument->clearUndoRedoStacks();
+    QSignalSpy textChangedSpy(textEdit.get(), SIGNAL(textChanged()));
+    QVERIFY(QMetaObject::invokeMethod(
+        textEdit.get(),
+        "insert",
+        Q_ARG(int, 4),
+        Q_ARG(QString, QStringLiteral("X"))));
+    QCOMPARE(textDocument->toPlainText(), editedText);
+    const int signalsAfterInsertion = textChangedSpy.size();
+    QVERIFY(signalsAfterInsertion > 0);
+
+    const QList<QVariant> styleArguments = selectionStyleSpy.takeFirst();
+    QVERIFY(m_controller.applyFontStyleToEditorDocument(
+        quickDocument,
+        styleArguments.at(0).toInt(),
+        styleArguments.at(1).toInt(),
+        styleArguments.at(2).toInt(),
+        styleArguments.at(3).toBool()));
+    QVERIFY(textChangedSpy.size() > signalsAfterInsertion);
+
+    QTextCursor formattedCursor(textDocument);
+    formattedCursor.setPosition(1);
+    formattedCursor.setPosition(3, QTextCursor::KeepAnchor);
+    QCOMPARE(formattedCursor.charFormat().fontWeight(), QFont::Bold);
+
+    const int signalsAfterFormatting = textChangedSpy.size();
+    textDocument->undo();
+    QCOMPARE(textDocument->toPlainText(), editedText);
+    QVERIFY(textChangedSpy.size() > signalsAfterFormatting);
+    formattedCursor.setPosition(1);
+    formattedCursor.setPosition(3, QTextCursor::KeepAnchor);
+    QVERIFY(formattedCursor.charFormat().fontWeight() < QFont::Bold);
+    QVERIFY(m_controller.syncEditorFontStyles(quickDocument));
+
+    const QVariantList drafts = m_controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    const QVariantList spans = drafts.constFirst().toMap()
+                                   .value(QStringLiteral("characterSpans"))
+                                   .toList();
+    QCOMPARE(spans.size(), 1);
+    QVERIFY(!spans.constFirst().toMap()
+                 .value(QStringLiteral("fontBold"))
+                 .toBool());
+
+    textDocument->undo();
+    QCOMPARE(textDocument->toPlainText(), QStringLiteral("ABCD"));
+
+    m_controller.cancelSelectedTextEdit();
     m_controller.discardDrafts();
 }
 
@@ -2837,9 +3250,11 @@ void PDFEditControllerTest::formatsSelectedRangeInMultilineDraft()
     const QColor rangeColor(QStringLiteral("#c62828"));
     m_controller.beginSelectedTextEdit();
     m_controller.updateSelectedTextPreview(text);
-    m_controller.setSelectedTextRange(0, 3);
+    m_controller.setSelectedTextRange(4, 4);
     m_controller.setSelectedColor(rangeColor);
     m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedFontItalic(true);
+    m_controller.setSelectedFontUnderline(true);
 
     const QVariantList drafts = m_controller.draftsForPage(0);
     QCOMPARE(drafts.size(), 1);
@@ -2847,18 +3262,29 @@ void PDFEditControllerTest::formatsSelectedRangeInMultilineDraft()
     QCOMPARE(draft.value(QStringLiteral("text")).toString(), text);
 
     const QVariantList spans = draft.value(QStringLiteral("characterSpans")).toList();
-    QCOMPARE(spans.size(), 2);
+    QCOMPARE(spans.size(), 3);
     const QVariantMap firstSpan = spans.at(0).toMap();
     QCOMPARE(firstSpan.value(QStringLiteral("start")).toLongLong(), 0);
-    QCOMPARE(firstSpan.value(QStringLiteral("length")).toLongLong(), 3);
-    QCOMPARE(firstSpan.value(QStringLiteral("fontBold")).toBool(), true);
-    QCOMPARE(firstSpan.value(QStringLiteral("color")).value<QColor>(), rangeColor);
-    const QVariantMap remainingSpan = spans.at(1).toMap();
-    QCOMPARE(remainingSpan.value(QStringLiteral("start")).toLongLong(), 3);
+    QCOMPARE(firstSpan.value(QStringLiteral("length")).toLongLong(), 4);
+    QVERIFY(!firstSpan.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(!firstSpan.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(!firstSpan.value(QStringLiteral("fontUnderline")).toBool());
+    QVERIFY(firstSpan.value(QStringLiteral("color")).value<QColor>() != rangeColor);
+    const QVariantMap selectedSpan = spans.at(1).toMap();
+    QCOMPARE(selectedSpan.value(QStringLiteral("start")).toLongLong(), 4);
+    QCOMPARE(selectedSpan.value(QStringLiteral("length")).toLongLong(), 4);
+    QVERIFY(selectedSpan.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(selectedSpan.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(selectedSpan.value(QStringLiteral("fontUnderline")).toBool());
+    QCOMPARE(selectedSpan.value(QStringLiteral("color")).value<QColor>(), rangeColor);
+    const QVariantMap remainingSpan = spans.at(2).toMap();
+    QCOMPARE(remainingSpan.value(QStringLiteral("start")).toLongLong(), 8);
     QCOMPARE(
         remainingSpan.value(QStringLiteral("length")).toLongLong(),
-        text.size() - 3);
-    QCOMPARE(remainingSpan.value(QStringLiteral("fontBold")).toBool(), false);
+        text.size() - 8);
+    QVERIFY(!remainingSpan.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(!remainingSpan.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(!remainingSpan.value(QStringLiteral("fontUnderline")).toBool());
     QVERIFY(remainingSpan.value(QStringLiteral("color")).value<QColor>() != rangeColor);
 
     const QVariantList paragraphs = draft.value(
@@ -2876,7 +3302,7 @@ void PDFEditControllerTest::formatsSelectedRangeInMultilineDraft()
     QCOMPARE(
         m_controller.draftsForPage(0).constFirst().toMap()
             .value(QStringLiteral("characterSpans")).toList().size(),
-        2);
+        3);
 
     m_controller.discardDrafts();
 }
@@ -2958,6 +3384,80 @@ void PDFEditControllerTest::savesEditedTextRoundTrip()
     const QString sourceText = normalizedPageText(sourcePath);
     QVERIFY(sourceText.contains(QString::fromLatin1(kGroupedText)));
     QVERIFY(!sourceText.contains(QStringLiteral("Saved grouped text")));
+}
+
+void PDFEditControllerTest::preservesPatternFilledGraphicsWhenSavingText()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("pattern-fill-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("pattern-fill-output.pdf"));
+    QVERIFY(createPatternFillPdf(sourcePath));
+    QVERIFY(containsPatternColors(renderFirstPage(sourcePath, QSize(200, 200))));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QStringLiteral("Pattern edit text"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Pattern text edit"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(normalizedPageText(outputPath).contains(
+        QStringLiteral("Pattern text edit")));
+    const QString verificationPath = qEnvironmentVariable(
+        "TREPDF_PATTERN_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(outputPath, verificationPath));
+    }
+    QVERIFY(containsPatternColors(renderFirstPage(outputPath, QSize(200, 200))));
+    const QVariantList savedCandidates = waitForCandidates(controller, 0);
+    QVERIFY(!candidateForText(
+                 savedCandidates,
+                 QStringLiteral("Pattern text edit"))
+                 .isEmpty());
+    QVERIFY(candidateForKind(savedCandidates, QStringLiteral("image")).isEmpty());
+}
+
+void PDFEditControllerTest::preservesPatternStrokedGraphicsWhenSavingText()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("pattern-stroke-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("pattern-stroke-output.pdf"));
+    QVERIFY(createPatternStrokePdf(sourcePath));
+    QVERIFY(containsPatternColors(renderFirstPage(sourcePath, QSize(200, 200))));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QStringLiteral("Pattern edit text"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Pattern text edit"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(normalizedPageText(outputPath).contains(
+        QStringLiteral("Pattern text edit")));
+    QVERIFY(containsPatternColors(renderFirstPage(outputPath, QSize(200, 200))));
+    const QVariantList savedCandidates = waitForCandidates(controller, 0);
+    QVERIFY(!candidateForText(
+                 savedCandidates,
+                 QStringLiteral("Pattern text edit"))
+                 .isEmpty());
+    QVERIFY(candidateForKind(savedCandidates, QStringLiteral("image")).isEmpty());
 }
 
 void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial_data()

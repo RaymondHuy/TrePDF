@@ -22,6 +22,10 @@ Item {
         editOverlay.prepareForSessionChange()
     }
 
+    function beginSelectedEditing() {
+        editOverlay.beginSelectedEditing()
+    }
+
     onSessionChangeGenerationChanged: prepareForSessionChange()
 
     ListView.onPooled: pooled = true

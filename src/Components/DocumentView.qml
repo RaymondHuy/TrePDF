@@ -21,6 +21,7 @@ Rectangle {
     readonly property real contentY: viewer.contentY
 
     signal openRequested()
+    signal beginSelectedEditingRequested()
 
     color: "#f2efec"
 
@@ -64,6 +65,14 @@ Rectangle {
         editController.finishSelectedTextEdit()
         ++navigationGeneration
         pendingNavigationPage = -1
+    }
+
+    function beginSelectedEditing() {
+        if (editController.selectedPage < 0)
+            return false
+
+        beginSelectedEditingRequested()
+        return editController.textEditActive
     }
 
     function restorePosition(savedContentX, savedContentY) {
@@ -133,11 +142,25 @@ Rectangle {
         onContentYChanged: root.syncCurrentPageFromScroll()
 
         delegate: PdfPageDelegate {
+            id: pageDelegate
+
             theme: root.theme
             document: root.document
             editController: root.editController
             zoom: root.zoom
             sessionChangeGeneration: root.sessionChangeGeneration
+
+            Connections {
+                target: root
+
+                function onBeginSelectedEditingRequested() {
+                    if (!pageDelegate.pooled
+                            && pageDelegate.editController.selectedPage
+                                === pageDelegate.index) {
+                        pageDelegate.beginSelectedEditing()
+                    }
+                }
+            }
         }
     }
 

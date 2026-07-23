@@ -57,11 +57,18 @@ Current features:
   Save overwrites atomically through `QSaveFile`; Save As leaves the source
   untouched. Drafts and history are cleared only after the saved file reopens.
 - An edit-only, collapsible right-side text-formatting panel provides UI for
-  font family, size, color, bold, italic, and underline. Font family, bold,
-  italic, underline, and color update the current draft and support undo/redo;
-  size is not connected to draft formatting yet. The font picker filters system
-  faces by the active bold/italic style using a lightweight save-compatibility
-  probe; filtered PDF source fonts remain visible as the current value only.
+  font family, size, color, bold, italic, and underline. Materialized character
+  formatting participates in draft undo/redo; size is not connected to draft
+  formatting yet. During inline editing, bold/italic/underline apply to the
+  selected range; with only a caret they become the typing format for
+  subsequently inserted text without changing existing characters. Invoking
+  one of those controls on a selected text object opens its inline editor first
+  and leaves the caret at the end, so it never restyles the whole object. The
+  editor merges range formatting directly into its text document and syncs
+  B/I/U back after local undo/redo without replacing the rich-text document.
+  The font picker filters system faces by the active bold/italic style using a
+  lightweight save-compatibility probe; filtered PDF source fonts remain
+  visible as the current value only.
   Its single dropdown has Vietnamese, English, Chinese, Japanese, and Korean
   filters. Language groups narrow the same save-compatible exact-face list,
   intersecting every regular/bold/italic face used by a mixed-style selection.

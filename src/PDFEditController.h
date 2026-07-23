@@ -36,7 +36,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
     Q_PROPERTY(bool textEditActive READ textEditActive NOTIFY textEditActiveChanged FINAL)
     Q_PROPERTY(QStringList bundledFontFamilies READ bundledFontFamilies CONSTANT FINAL)
-    Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(int selectedPage READ selectedPage NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedObjectId READ selectedObjectId NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedKind READ selectedKind NOTIFY selectionChanged FINAL)
@@ -50,14 +50,14 @@ class PDFEditController : public QObject
     Q_PROPERTY(qreal selectedOriginX READ selectedOriginX NOTIFY selectionChanged FINAL)
     Q_PROPERTY(qreal selectedBaselineY READ selectedBaselineY NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedText READ selectedText NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(QString selectedFontFamily READ selectedFontFamily NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(qreal selectedFontSizeRatio READ selectedFontSizeRatio NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(qreal selectedDisplayFontSizeRatio READ selectedDisplayFontSizeRatio NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(int selectedFontStretch READ selectedFontStretch NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(bool selectedFontBold READ selectedFontBold NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(bool selectedFontItalic READ selectedFontItalic NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(bool selectedFontUnderline READ selectedFontUnderline NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(QColor selectedColor READ selectedColor NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QString selectedFontFamily READ selectedFontFamily NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(qreal selectedFontSizeRatio READ selectedFontSizeRatio NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(qreal selectedDisplayFontSizeRatio READ selectedDisplayFontSizeRatio NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(int selectedFontStretch READ selectedFontStretch NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(bool selectedFontBold READ selectedFontBold NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(bool selectedFontItalic READ selectedFontItalic NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(bool selectedFontUnderline READ selectedFontUnderline NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(QColor selectedColor READ selectedColor NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
 
@@ -151,11 +151,21 @@ public:
                                        bool fontBold,
                                        bool fontItalic,
                                        qreal pixelSize) const;
+    Q_INVOKABLE void applyTypingFormatToEditorDocument(QObject *textDocument,
+                                                       int start,
+                                                       int length) const;
+    Q_INVOKABLE bool applyFontStyleToEditorDocument(QObject *textDocument,
+                                                    int start,
+                                                    int length,
+                                                    int style,
+                                                    bool enabled) const;
+    Q_INVOKABLE bool syncEditorFontStyles(QObject *textDocument);
     Q_INVOKABLE QStringList fontFamiliesForFilter(FontFilter filter) const;
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
-    Q_INVOKABLE void updateSelectedTextPreview(const QString &text);
+    Q_INVOKABLE void updateSelectedTextPreview(const QString &text,
+                                               int cursorPosition = -1);
     Q_INVOKABLE void beginSelectedFrameResize();
     Q_INVOKABLE void updateSelectedFrameRect(const QRectF &frameRect);
     Q_INVOKABLE void updateSelectedContentBounds(const QRectF &contentBounds);
@@ -186,6 +196,12 @@ signals:
     void savingChanged();
     void textEditActiveChanged();
     void selectionChanged();
+    void textFormatStateChanged();
+    void typingFormatApplied(int start, int length);
+    void selectionFontStyleApplied(int start,
+                                   int length,
+                                   int style,
+                                   bool enabled);
     void pageDataChanged(int page);
     void pageCandidatesReady(int page);
     void draftRenderStateChanged(int page, quint64 revision, bool immediate);
@@ -294,6 +310,12 @@ private:
         qsizetype start = 0;
         qsizetype length = 0;
         CharacterFormat format;
+    };
+
+    struct TextChange {
+        qsizetype start = 0;
+        qsizetype removedLength = 0;
+        qsizetype insertedLength = 0;
     };
 
     enum class ParagraphAlignment {
@@ -408,6 +430,10 @@ private:
     void expandInitialTextFrame(Candidate &candidate, const QSizeF &pageSize) const;
     static CharacterFormat characterFormatForCandidate(const Candidate &candidate);
     static CharacterFormat primaryCharacterFormat(const Draft &draft);
+    static CharacterFormat characterFormatAtPosition(const Draft &draft,
+                                                      qsizetype position,
+                                                      bool preferPrevious);
+    CharacterFormat selectedCharacterFormatForDisplay() const;
     static QVector<ParagraphFormat> paragraphFormatsForText(
         const QString &text,
         const ParagraphFormat &prototype);
@@ -420,7 +446,12 @@ private:
     static bool sameParagraphFormats(const QVector<ParagraphFormat> &left,
                                      const QVector<ParagraphFormat> &right);
     static bool sameDraftContent(const Draft &left, const Draft &right);
-    static void setDraftText(Draft &draft, const QString &text);
+    static TextChange setDraftText(
+        Draft &draft,
+        const QString &text,
+        const CharacterFormat *typingFormat = nullptr,
+        qsizetype typingPosition = -1,
+        qsizetype cursorAfterEdit = -1);
     static void applyUnicodeFontFallback(Draft &draft);
     static bool updateCharacterFormats(
         Draft &draft,
@@ -435,6 +466,8 @@ private:
                                    qsizetype &start,
                                    qsizetype &length) const;
     void resetTextEditDisplayState();
+    void resetTypingFormat();
+    void rebaseTypingFormat(const Draft &draft);
     void resetFrameResizeState();
     void setSelectedFontStyle(FontStyle style, bool enabled);
     void applyDraftState(const Command &command, bool useAfterState, bool immediate);
@@ -484,6 +517,9 @@ private:
     bool m_textEditActive = false;
     qsizetype m_selectedTextRangeStart = 0;
     qsizetype m_selectedTextRangeLength = 0;
+    CharacterFormat m_typingCharacterFormat;
+    qsizetype m_typingCharacterFormatPosition = -1;
+    bool m_typingCharacterFormatActive = false;
     Command m_textEditCommand;
     Draft m_textEditDisplayDraft;
     bool m_textEditDisplayDraftActive = false;

@@ -32,6 +32,11 @@ Item {
         documentView.navigateToPage(page)
     }
 
+    function prepareInlineStyleChange() {
+        return session.editController.textEditActive
+            || documentView.beginSelectedEditing()
+    }
+
     function initializeView() {
         if (session.initialFitPending) {
             fitToWidth()
@@ -115,13 +120,31 @@ Item {
                         root.session.editController.setSelectedFontFamily(fontFamily)
                     }
                     onFontBoldChangeRequested: enabled => {
-                        root.session.editController.setSelectedFontBold(enabled)
+                        const editWasActive = root.session.editController.textEditActive
+                        if (root.prepareInlineStyleChange()) {
+                            root.session.editController.setSelectedFontBold(
+                                editWasActive
+                                    ? enabled
+                                    : !root.session.editController.selectedFontBold)
+                        }
                     }
                     onFontItalicChangeRequested: enabled => {
-                        root.session.editController.setSelectedFontItalic(enabled)
+                        const editWasActive = root.session.editController.textEditActive
+                        if (root.prepareInlineStyleChange()) {
+                            root.session.editController.setSelectedFontItalic(
+                                editWasActive
+                                    ? enabled
+                                    : !root.session.editController.selectedFontItalic)
+                        }
                     }
                     onFontUnderlineChangeRequested: enabled => {
-                        root.session.editController.setSelectedFontUnderline(enabled)
+                        const editWasActive = root.session.editController.textEditActive
+                        if (root.prepareInlineStyleChange()) {
+                            root.session.editController.setSelectedFontUnderline(
+                                editWasActive
+                                    ? enabled
+                                    : !root.session.editController.selectedFontUnderline)
+                        }
                     }
                     onFontColorChangeRequested: color => {
                         root.session.editController.setSelectedColor(color)
