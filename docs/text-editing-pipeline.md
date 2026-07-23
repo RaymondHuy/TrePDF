@@ -261,8 +261,10 @@ Nếu hai chuỗi chưa có whitespace ở ranh giới và gap lớn hơn `0.20 
 chèn một dấu cách. Gap lớn hơn giới hạn sẽ tách candidate để tránh nối nhầm hai
 cột. Khác style nguồn cũng tách candidate. Rich-text draft có thể lưu nhiều
 character span; `TextEdit` và draft overlay render từng span, còn các lệnh font,
-color, bold, italic và underline áp dụng vào range đang bôi đen. Nếu không có
-range, lệnh tiếp tục áp dụng cho toàn bộ draft để giữ hành vi cũ.
+color, bold, italic và underline áp dụng vào range đang bôi đen. Khi selection
+collapse thành caret, Bold/Italic/Underline chỉ cập nhật typing format tạm để
+các ký tự gõ tiếp theo nhận style mới; text hiện có không đổi. Font family và
+color vẫn áp dụng cho toàn draft nếu không có range.
 
 Candidate dòng nhận bbox union, baseline/origin và style của part đầu tiên.
 `renderSuppressible` chỉ true khi mọi part đều suppress được. Candidate nguồn
@@ -457,7 +459,9 @@ hoặc BaseFont name chứa "bold", "black" hoặc "heavy" (không phân biệt 
 ```
 
 Fallback theo tên cần thiết vì có PDF khai báo font bold nhưng weight vẫn trả
-về 400.
+về 400. Trong inline editor, nút Bold đổi format của range đang chọn hoặc typing
+format tại caret. Chỉ ký tự được gõ sau đó mới materialize typing format thành
+character span và draft.
 
 ### 7.3 Italic
 
@@ -582,6 +586,19 @@ Draft
 `CharacterFormat` hiện chứa family, font size ratio, display size ratio,
 stretch, bold, italic, underline và color. `ParagraphFormat` chứa alignment,
 list style (`none`, `bullet`, `decimal`), list level và số bắt đầu.
+
+Controller giữ thêm typing format tạm khi selection có length bằng `0`. Bấm
+Bold/Italic/Underline chỉ thay trạng thái này, không tạo draft hoặc undo command.
+Khi text mới được chèn đúng caret, `setDraftText()` dùng typing format cho range
+vừa chèn; di chuyển caret hoặc tạo selection sẽ trở về format tại vị trí mới.
+QML truyền cả vị trí caret sau edit để controller neo delta quanh vị trí gõ,
+tránh suy sai range khi chuỗi có ký tự lặp. Range mới chèn được merge B/I/U trực
+tiếp vào `QQuickTextDocument` bằng `QTextCursor` và nối với edit block trước đó;
+không reload toàn bộ rich HTML nên undo nội bộ của `TextEdit` vẫn xóa thao tác gõ
+và format trong một lần. Format cho range bôi đen cũng được merge trực tiếp bằng
+`QTextCursor` nhưng dùng edit block riêng. Sau undo/redo local, `onTextChanged`
+đọc lại B/I/U từ document vào character spans của controller, nên preview và dữ
+liệu Save không bị lệch nhau.
 
 Draft khởi tạo với một character span phủ toàn bộ text và một paragraph format
 cho mỗi đoạn phân tách bởi `\n`. Khi `TextEdit` gửi plain text mới, controller tìm
@@ -765,7 +782,10 @@ dùng con trỏ I-beam gốc của Qt. Vì vậy khi giữ chuột rồi kéo đ
 di chuyển liên tục theo vị trí kéo thay vì chỉ cập nhật sau khi thả chuột.
 Range selection của `TextEdit` được gửi về controller bằng UTF-16 start/length.
 Lệnh formatting tách span ở hai biên range, cập nhật phần giữa rồi merge lại
-những span kề nhau có cùng format.
+những span kề nhau có cùng format. Khi range collapse, trạng thái checked của
+Bold/Italic/Underline đọc format tại caret; thao tác toggle chuẩn bị style cho
+text gõ tiếp theo thay vì sửa toàn draft. Nếu editor chưa mở, bấm một trong ba
+nút sẽ mở editor của text đang chọn, đặt caret ở cuối rồi mới chuẩn bị style.
 
 ## 11. Công thức kích thước editor frame
 
@@ -952,6 +972,7 @@ gồm text, character spans, paragraph formats, `frameRect` và `contentBounds`.
 paragraph separator của Qt thành `\n`, rồi gọi `updateSelectedTextPreview()`:
 
 - cập nhật `Draft.text` và điều chỉnh character spans theo prefix/suffix;
+- nếu caret có typing format tạm, áp format đó chỉ cho range ký tự vừa chèn;
 - tái tạo range paragraph cho text hiện tại;
 - đo lại `TextEdit.contentHeight` và đồng bộ `Draft.contentBounds`, nên Enter
   làm box/handles nở xuống để chứa dòng mới;

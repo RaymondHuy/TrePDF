@@ -474,6 +474,7 @@ Rectangle {
                                 Layout.preferredWidth: 1
                                 Layout.preferredHeight: 58
                                 checkable: true
+                                focusPolicy: Qt.TabFocus
                                 checked: root.selectedFontBold
                                 display: AbstractButton.TextUnderIcon
                                 spacing: 3
@@ -513,6 +514,7 @@ Rectangle {
                                 Layout.preferredWidth: 1
                                 Layout.preferredHeight: 58
                                 checkable: true
+                                focusPolicy: Qt.TabFocus
                                 checked: root.selectedFontItalic
                                 display: AbstractButton.TextUnderIcon
                                 spacing: 3
@@ -552,6 +554,7 @@ Rectangle {
                                 Layout.preferredWidth: 1
                                 Layout.preferredHeight: 58
                                 checkable: true
+                                focusPolicy: Qt.TabFocus
                                 checked: root.selectedFontUnderline
                                 display: AbstractButton.TextUnderIcon
                                 spacing: 3

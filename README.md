@@ -106,7 +106,11 @@ a Form XObject.
 Edit mode also shows a collapsible text-formatting panel on the right with font
 family, size, color, bold, italic, and underline controls. Font family, bold,
 italic, underline, and color apply immediately to selected draft text and
-support undo/redo. Font size is currently UI-only.
+support undo/redo. While the inline editor is active, bold, italic, and
+underline affect only the highlighted range; with a collapsed caret they set
+the format of text typed next without restyling existing text. Using one of
+those controls on selected text automatically opens the inline editor with the
+caret at the end. Font size is currently UI-only.
 
 The complete editable-text discovery, geometry, font, baseline, overlay, and
 draft-rendering flow is documented in

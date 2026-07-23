@@ -18,9 +18,12 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMutexLocker>
+#include <QQuickTextDocument>
 #include <QRunnable>
 #include <QSet>
 #include <QStringList>
+#include <QTextCharFormat>
+#include <QTextCursor>
 #include <QThreadPool>
 #include <QVariantMap>
 #include <QtTranslation>
@@ -888,6 +891,11 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
 PDFEditController::PDFEditController(QObject *parent)
     : QObject(parent)
 {
+    connect(
+        this,
+        &PDFEditController::selectionChanged,
+        this,
+        &PDFEditController::textFormatStateChanged);
 }
 
 PDFEditController::~PDFEditController()
@@ -1026,6 +1034,11 @@ QStringList PDFEditController::fontFamiliesForFilter(FontFilter filter) const
         }
         if (requirements.isEmpty()) {
             appendRequirement(primaryCharacterFormat(draft));
+        }
+        if (m_textEditActive
+            && m_selectedTextRangeLength == 0
+            && m_typingCharacterFormatActive) {
+            appendRequirement(m_typingCharacterFormat);
         }
     } else {
         requirements.append(FontRequirement{
@@ -1167,14 +1180,14 @@ QString PDFEditController::selectedText() const
 QString PDFEditController::selectedFontFamily() const
 {
     return m_hasSelection
-        ? primaryCharacterFormat(selectedDraftForDisplay()).fontFamily
+        ? selectedCharacterFormatForDisplay().fontFamily
         : QString();
 }
 
 qreal PDFEditController::selectedFontSizeRatio() const
 {
     return m_hasSelection
-        ? primaryCharacterFormat(selectedDraftForDisplay()).fontSizeRatio
+        ? selectedCharacterFormatForDisplay().fontSizeRatio
         : 0.0;
 }
 
@@ -1183,7 +1196,7 @@ qreal PDFEditController::selectedDisplayFontSizeRatio() const
     if (!m_hasSelection) {
         return 0.0;
     }
-    const CharacterFormat format = primaryCharacterFormat(selectedDraftForDisplay());
+    const CharacterFormat format = selectedCharacterFormatForDisplay();
     return format.displayFontSizeRatio > 0.0
         ? format.displayFontSizeRatio
         : format.fontSizeRatio;
@@ -1192,29 +1205,29 @@ qreal PDFEditController::selectedDisplayFontSizeRatio() const
 int PDFEditController::selectedFontStretch() const
 {
     return m_hasSelection
-        ? primaryCharacterFormat(selectedDraftForDisplay()).fontStretch
+        ? selectedCharacterFormatForDisplay().fontStretch
         : QFont::Unstretched;
 }
 
 bool PDFEditController::selectedFontBold() const
 {
-    return m_hasSelection && primaryCharacterFormat(selectedDraftForDisplay()).fontBold;
+    return m_hasSelection && selectedCharacterFormatForDisplay().fontBold;
 }
 
 bool PDFEditController::selectedFontItalic() const
 {
-    return m_hasSelection && primaryCharacterFormat(selectedDraftForDisplay()).fontItalic;
+    return m_hasSelection && selectedCharacterFormatForDisplay().fontItalic;
 }
 
 bool PDFEditController::selectedFontUnderline() const
 {
-    return m_hasSelection && primaryCharacterFormat(selectedDraftForDisplay()).fontUnderline;
+    return m_hasSelection && selectedCharacterFormatForDisplay().fontUnderline;
 }
 
 QColor PDFEditController::selectedColor() const
 {
     return m_hasSelection
-        ? primaryCharacterFormat(selectedDraftForDisplay()).color
+        ? selectedCharacterFormatForDisplay().color
         : QColor(Qt::black);
 }
 
@@ -1724,6 +1737,158 @@ int PDFEditController::displayFontStretch(const QString &fontFamily,
         qMax(1, qRound(pixelSize)));
 }
 
+void PDFEditController::applyTypingFormatToEditorDocument(
+    QObject *textDocument,
+    int start,
+    int length) const
+{
+    auto *quickTextDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickTextDocument
+        ? quickTextDocument->textDocument()
+        : nullptr;
+    if (!document || !m_typingCharacterFormatActive || length <= 0) {
+        return;
+    }
+
+    const int maximumPosition = qMax(0, document->characterCount() - 1);
+    const int rangeStart = qBound(0, start, maximumPosition);
+    const int rangeEnd = qBound(
+        rangeStart,
+        rangeStart + length,
+        maximumPosition);
+    if (rangeEnd <= rangeStart) {
+        return;
+    }
+
+    QTextCharFormat format;
+    format.setFontWeight(
+        m_typingCharacterFormat.fontBold ? QFont::Bold : QFont::Normal);
+    format.setFontItalic(m_typingCharacterFormat.fontItalic);
+    format.setFontUnderline(m_typingCharacterFormat.fontUnderline);
+
+    QTextCursor cursor(document);
+    cursor.setPosition(rangeStart);
+    cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
+    cursor.joinPreviousEditBlock();
+    cursor.mergeCharFormat(format);
+    cursor.endEditBlock();
+}
+
+bool PDFEditController::applyFontStyleToEditorDocument(
+    QObject *textDocument,
+    int start,
+    int length,
+    int style,
+    bool enabled) const
+{
+    auto *quickTextDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickTextDocument
+        ? quickTextDocument->textDocument()
+        : nullptr;
+    if (!document || length <= 0
+        || style < static_cast<int>(FontStyle::Bold)
+        || style > static_cast<int>(FontStyle::Underline)) {
+        return false;
+    }
+
+    const int maximumPosition = qMax(0, document->characterCount() - 1);
+    const int rangeStart = qBound(0, start, maximumPosition);
+    const int rangeEnd = qBound(
+        rangeStart,
+        rangeStart + length,
+        maximumPosition);
+    if (rangeEnd <= rangeStart) {
+        return false;
+    }
+
+    QTextCharFormat format;
+    switch (static_cast<FontStyle>(style)) {
+    case FontStyle::Bold:
+        format.setFontWeight(enabled ? QFont::Bold : QFont::Normal);
+        break;
+    case FontStyle::Italic:
+        format.setFontItalic(enabled);
+        break;
+    case FontStyle::Underline:
+        format.setFontUnderline(enabled);
+        break;
+    }
+
+    QTextCursor cursor(document);
+    cursor.setPosition(rangeStart);
+    cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
+    cursor.beginEditBlock();
+    cursor.mergeCharFormat(format);
+    cursor.endEditBlock();
+    return true;
+}
+
+bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
+{
+    auto *quickTextDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickTextDocument
+        ? quickTextDocument->textDocument()
+        : nullptr;
+    if (!document || !m_textEditActive || !m_hasSelection) {
+        return false;
+    }
+
+    Draft draft = selectedDraftForDisplay();
+    if (document->toPlainText() != draft.text || draft.text.isEmpty()) {
+        return false;
+    }
+
+    const qsizetype textLength = draft.text.size();
+    const CharacterFormat fallbackFormat = primaryCharacterFormat(draft);
+    QVector<CharacterFormat> formats(textLength, fallbackFormat);
+    for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
+        const qsizetype spanStart = qBound<qsizetype>(0, span.start, textLength);
+        const qsizetype spanEnd = qBound<qsizetype>(
+            spanStart,
+            span.start + span.length,
+            textLength);
+        for (qsizetype position = spanStart; position < spanEnd; ++position) {
+            formats[position] = span.format;
+        }
+    }
+
+    QTextCursor cursor(document);
+    for (qsizetype position = 0; position < textLength; ++position) {
+        cursor.setPosition(static_cast<int>(position));
+        cursor.setPosition(static_cast<int>(position + 1), QTextCursor::KeepAnchor);
+        const QTextCharFormat editorFormat = cursor.charFormat();
+        CharacterFormat &format = formats[position];
+        format.fontBold = editorFormat.fontWeight() >= QFont::Bold;
+        format.fontItalic = editorFormat.fontItalic();
+        format.fontUnderline = editorFormat.fontUnderline();
+    }
+
+    QVector<CharacterSpan> spans;
+    qsizetype spanStart = 0;
+    CharacterFormat spanFormat = formats.constFirst();
+    for (qsizetype position = 1; position <= formats.size(); ++position) {
+        if (position < formats.size()
+            && sameCharacterFormat(spanFormat, formats.at(position))) {
+            continue;
+        }
+        spans.append(CharacterSpan{
+            spanStart,
+            position - spanStart,
+            spanFormat});
+        if (position < formats.size()) {
+            spanStart = position;
+            spanFormat = formats.at(position);
+        }
+    }
+    if (sameCharacterSpans(draft.characterSpans, spans)) {
+        return false;
+    }
+
+    draft.characterSpans = std::move(spans);
+    updateSelectedDraft(draft);
+    return true;
+}
+
 void PDFEditController::snapshotFontResolutionLocked(
     FPDF_PAGEOBJECT textObject,
     Candidate &candidate,
@@ -2003,6 +2168,7 @@ void PDFEditController::beginSelectedTextEditSession(bool expandFrame)
         }
     }
     m_textEditInitialDisplayFrameRect = m_textEditDisplayDraft.frameRect;
+    resetTypingFormat();
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     m_textEditActive = true;
@@ -2010,7 +2176,8 @@ void PDFEditController::beginSelectedTextEditSession(bool expandFrame)
     emit selectionChanged();
 }
 
-void PDFEditController::updateSelectedTextPreview(const QString &text)
+void PDFEditController::updateSelectedTextPreview(const QString &text,
+                                                  int cursorPosition)
 {
     if (!m_textEditActive) {
         beginSelectedTextEdit();
@@ -2023,8 +2190,32 @@ void PDFEditController::updateSelectedTextPreview(const QString &text)
     if (draft.text == text) {
         return;
     }
-    setDraftText(draft, text);
+    const TextChange change = setDraftText(
+        draft,
+        text,
+        m_typingCharacterFormatActive ? &m_typingCharacterFormat : nullptr,
+        m_typingCharacterFormatPosition,
+        static_cast<qsizetype>(cursorPosition));
+    bool shouldSyncEditorFormat = false;
+    if (m_typingCharacterFormatActive) {
+        const bool typingChange = change.start == m_typingCharacterFormatPosition
+            || change.start + change.removedLength
+                == m_typingCharacterFormatPosition;
+        if (typingChange) {
+            shouldSyncEditorFormat = change.insertedLength > 0;
+            m_typingCharacterFormatPosition = change.start + change.insertedLength;
+            m_selectedTextRangeStart = m_typingCharacterFormatPosition;
+            m_selectedTextRangeLength = 0;
+        } else {
+            resetTypingFormat();
+        }
+    }
     updateSelectedDraft(draft);
+    if (shouldSyncEditorFormat) {
+        emit typingFormatApplied(
+            static_cast<int>(change.start),
+            static_cast<int>(change.insertedLength));
+    }
 }
 
 void PDFEditController::beginSelectedFrameResize()
@@ -2175,14 +2366,28 @@ void PDFEditController::setSelectedTextRange(int start, int length)
     }
 
     const qsizetype textLength = m_selectedText.size();
-    m_selectedTextRangeStart = qBound<qsizetype>(
+    const qsizetype rangeStart = qBound<qsizetype>(
         0,
         static_cast<qsizetype>(start),
         textLength);
-    m_selectedTextRangeLength = qBound<qsizetype>(
+    const qsizetype rangeLength = qBound<qsizetype>(
         0,
         static_cast<qsizetype>(length),
-        textLength - m_selectedTextRangeStart);
+        textLength - rangeStart);
+    const bool rangeChanged = rangeStart != m_selectedTextRangeStart
+        || rangeLength != m_selectedTextRangeLength;
+    bool typingFormatChanged = false;
+    if (m_typingCharacterFormatActive
+        && (rangeLength > 0
+            || rangeStart != m_typingCharacterFormatPosition)) {
+        resetTypingFormat();
+        typingFormatChanged = true;
+    }
+    m_selectedTextRangeStart = rangeStart;
+    m_selectedTextRangeLength = rangeLength;
+    if (rangeChanged || typingFormatChanged) {
+        emit textFormatStateChanged();
+    }
 }
 
 void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
@@ -2225,6 +2430,15 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
             return;
         }
     }
+    if (m_textEditActive
+        && m_selectedTextRangeLength == 0
+        && m_typingCharacterFormatActive
+        && !ApplicationFonts::isFontFaceSelectable(
+            fontFamily,
+            m_typingCharacterFormat.fontBold,
+            m_typingCharacterFormat.fontItalic)) {
+        return;
+    }
 
     const bool finishImmediately = !m_textEditActive;
     if (finishImmediately) {
@@ -2253,6 +2467,7 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
         }
         return;
     }
+    rebaseTypingFormat(draft);
     updateSelectedDraft(draft);
 
     if (finishImmediately) {
@@ -2307,6 +2522,7 @@ void PDFEditController::setSelectedColor(const QColor &color)
         }
         return;
     }
+    rebaseTypingFormat(draft);
     updateSelectedDraft(draft);
 
     if (finishImmediately) {
@@ -2320,34 +2536,66 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
         return;
     }
 
+    const auto updatedStyle = [style, enabled](CharacterFormat format) {
+        switch (style) {
+        case FontStyle::Bold:
+            format.fontBold = enabled;
+            break;
+        case FontStyle::Italic:
+            format.fontItalic = enabled;
+            break;
+        case FontStyle::Underline:
+            format.fontUnderline = enabled;
+            break;
+        }
+        return format;
+    };
+    const auto faceIsSelectable = [](const CharacterFormat &format) {
+        const bool knownFamily = ApplicationFonts::bundledFontFamilies().contains(
+                format.fontFamily,
+                Qt::CaseInsensitive)
+            || ApplicationFonts::systemFontFamilies().contains(
+                format.fontFamily,
+                Qt::CaseInsensitive);
+        return !knownFamily
+            || ApplicationFonts::isFontFaceSelectable(
+                format.fontFamily,
+                format.fontBold,
+                format.fontItalic);
+    };
+
     Draft draft = selectedDraftForDisplay();
+    if (m_textEditActive && m_selectedTextRangeLength == 0) {
+        const qsizetype caretPosition = qBound<qsizetype>(
+            0,
+            m_selectedTextRangeStart,
+            draft.text.size());
+        const CharacterFormat currentFormat = selectedCharacterFormatForDisplay();
+        const CharacterFormat typingFormat = updatedStyle(currentFormat);
+        if ((style != FontStyle::Underline && !faceIsSelectable(typingFormat))
+            || sameCharacterFormat(currentFormat, typingFormat)) {
+            return;
+        }
+
+        const CharacterFormat inheritedFormat = characterFormatAtPosition(
+            draft,
+            caretPosition,
+            true);
+        if (sameCharacterFormat(typingFormat, inheritedFormat)) {
+            resetTypingFormat();
+        } else {
+            m_typingCharacterFormat = typingFormat;
+            m_typingCharacterFormatPosition = caretPosition;
+            m_typingCharacterFormatActive = true;
+        }
+        emit textFormatStateChanged();
+        return;
+    }
+
     qsizetype rangeStart = 0;
     qsizetype rangeLength = 0;
     selectedTextRangeForDraft(draft, rangeStart, rangeLength);
     if (style != FontStyle::Underline) {
-        const auto faceRemainsSelectable = [style, enabled](
-                                               const CharacterFormat &format) {
-            const bool knownFamily = ApplicationFonts::bundledFontFamilies().contains(
-                    format.fontFamily,
-                    Qt::CaseInsensitive)
-                || ApplicationFonts::systemFontFamilies().contains(
-                    format.fontFamily,
-                    Qt::CaseInsensitive);
-            if (!knownFamily) {
-                return true;
-            }
-            const bool bold = style == FontStyle::Bold
-                ? enabled
-                : format.fontBold;
-            const bool italic = style == FontStyle::Italic
-                ? enabled
-                : format.fontItalic;
-            return ApplicationFonts::isFontFaceSelectable(
-                format.fontFamily,
-                bold,
-                italic);
-        };
-
         const qsizetype rangeEnd = rangeStart + rangeLength;
         bool checkedSpan = false;
         for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
@@ -2359,12 +2607,12 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
                 continue;
             }
             checkedSpan = true;
-            if (!faceRemainsSelectable(span.format)) {
+            if (!faceIsSelectable(updatedStyle(span.format))) {
                 return;
             }
         }
         if (!checkedSpan
-            && !faceRemainsSelectable(primaryCharacterFormat(draft))) {
+            && !faceIsSelectable(updatedStyle(primaryCharacterFormat(draft)))) {
             return;
         }
     }
@@ -2382,24 +2630,21 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
         draft,
         rangeStart,
         rangeLength,
-        [style, enabled](CharacterFormat &format) {
-            switch (style) {
-            case FontStyle::Bold:
-                format.fontBold = enabled;
-                break;
-            case FontStyle::Italic:
-                format.fontItalic = enabled;
-                break;
-            case FontStyle::Underline:
-                format.fontUnderline = enabled;
-                break;
-            }
+        [&updatedStyle](CharacterFormat &format) {
+            format = updatedStyle(format);
         });
     if (!changed) {
         if (finishImmediately) {
             finishSelectedTextEdit();
         }
         return;
+    }
+    if (m_textEditActive && rangeLength > 0) {
+        emit selectionFontStyleApplied(
+            static_cast<int>(rangeStart),
+            static_cast<int>(rangeLength),
+            static_cast<int>(style),
+            enabled);
     }
     updateSelectedDraft(draft);
 
@@ -4071,6 +4316,68 @@ PDFEditController::CharacterFormat PDFEditController::primaryCharacterFormat(
         : draft.characterSpans.constFirst().format;
 }
 
+PDFEditController::CharacterFormat PDFEditController::characterFormatAtPosition(
+    const Draft &draft,
+    qsizetype position,
+    bool preferPrevious)
+{
+    if (draft.characterSpans.isEmpty()) {
+        return characterFormatForCandidate(draft.candidate);
+    }
+
+    const qsizetype textLength = draft.text.size();
+    if (textLength <= 0) {
+        return draft.characterSpans.constFirst().format;
+    }
+
+    const qsizetype boundedPosition = qBound<qsizetype>(0, position, textLength);
+    const qsizetype characterIndex = preferPrevious && boundedPosition > 0
+        ? boundedPosition - 1
+        : qMin(boundedPosition, textLength - 1);
+    for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
+        const qsizetype spanStart = qBound<qsizetype>(0, span.start, textLength);
+        const qsizetype spanEnd = qBound<qsizetype>(
+            spanStart,
+            span.start + span.length,
+            textLength);
+        if (characterIndex >= spanStart && characterIndex < spanEnd) {
+            return span.format;
+        }
+    }
+
+    return primaryCharacterFormat(draft);
+}
+
+PDFEditController::CharacterFormat
+PDFEditController::selectedCharacterFormatForDisplay() const
+{
+    if (!m_hasSelection) {
+        return CharacterFormat();
+    }
+
+    const Draft draft = selectedDraftForDisplay();
+    if (!m_textEditActive) {
+        return primaryCharacterFormat(draft);
+    }
+
+    const qsizetype textLength = draft.text.size();
+    const qsizetype rangeStart = qBound<qsizetype>(
+        0,
+        m_selectedTextRangeStart,
+        textLength);
+    const qsizetype rangeLength = qBound<qsizetype>(
+        0,
+        m_selectedTextRangeLength,
+        textLength - rangeStart);
+    if (rangeLength == 0
+        && m_typingCharacterFormatActive
+        && m_typingCharacterFormatPosition == rangeStart) {
+        return m_typingCharacterFormat;
+    }
+
+    return characterFormatAtPosition(draft, rangeStart, rangeLength == 0);
+}
+
 QVector<PDFEditController::ParagraphFormat> PDFEditController::paragraphFormatsForText(
     const QString &text,
     const ParagraphFormat &prototype)
@@ -4188,10 +4495,15 @@ bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
         && left.deleted == right.deleted;
 }
 
-void PDFEditController::setDraftText(Draft &draft, const QString &text)
+PDFEditController::TextChange PDFEditController::setDraftText(
+    Draft &draft,
+    const QString &text,
+    const CharacterFormat *typingFormat,
+    qsizetype typingPosition,
+    qsizetype cursorAfterEdit)
 {
     if (draft.text == text) {
-        return;
+        return TextChange();
     }
 
     const qsizetype oldLength = draft.text.size();
@@ -4210,6 +4522,41 @@ void PDFEditController::setDraftText(Draft &draft, const QString &text)
                == text.at(newLength - commonSuffix - 1)) {
         ++commonSuffix;
     }
+
+    if (typingFormat
+        && typingPosition >= 0
+        && cursorAfterEdit >= 0
+        && cursorAfterEdit <= newLength) {
+        const qsizetype lengthDelta = newLength - oldLength;
+        if (lengthDelta > 0) {
+            const qsizetype anchoredStart = cursorAfterEdit - lengthDelta;
+            if (anchoredStart == typingPosition
+                && anchoredStart >= 0
+                && draft.text.first(anchoredStart) == text.first(anchoredStart)
+                && draft.text.sliced(anchoredStart)
+                    == text.sliced(cursorAfterEdit)) {
+                commonPrefix = anchoredStart;
+                commonSuffix = oldLength - anchoredStart;
+            }
+        } else if (lengthDelta < 0) {
+            const qsizetype removedLength = -lengthDelta;
+            const qsizetype anchoredStart = cursorAfterEdit;
+            if ((anchoredStart == typingPosition
+                 || anchoredStart + removedLength == typingPosition)
+                && anchoredStart + removedLength <= oldLength
+                && draft.text.first(anchoredStart) == text.first(anchoredStart)
+                && draft.text.sliced(anchoredStart + removedLength)
+                    == text.sliced(anchoredStart)) {
+                commonPrefix = anchoredStart;
+                commonSuffix = oldLength - anchoredStart - removedLength;
+            }
+        }
+    }
+
+    TextChange change;
+    change.start = commonPrefix;
+    change.removedLength = oldLength - commonPrefix - commonSuffix;
+    change.insertedLength = newLength - commonPrefix - commonSuffix;
 
     const CharacterFormat fallbackFormat = primaryCharacterFormat(draft);
     QVector<CharacterFormat> oldFormats(oldLength, fallbackFormat);
@@ -4230,14 +4577,19 @@ void PDFEditController::setDraftText(Draft &draft, const QString &text)
     } else if (commonPrefix < oldFormats.size()) {
         insertedFormat = oldFormats.at(commonPrefix);
     }
+    if (typingFormat
+        && change.insertedLength > 0
+        && (change.start == typingPosition
+            || change.start + change.removedLength == typingPosition)) {
+        insertedFormat = *typingFormat;
+    }
 
     QVector<CharacterFormat> newFormats;
     newFormats.reserve(newLength);
     for (qsizetype index = 0; index < commonPrefix; ++index) {
         newFormats.append(oldFormats.at(index));
     }
-    const qsizetype insertedLength = newLength - commonPrefix - commonSuffix;
-    for (qsizetype index = 0; index < insertedLength; ++index) {
+    for (qsizetype index = 0; index < change.insertedLength; ++index) {
         newFormats.append(insertedFormat);
     }
     const qsizetype oldSuffixStart = oldLength - commonSuffix;
@@ -4270,6 +4622,7 @@ void PDFEditController::setDraftText(Draft &draft, const QString &text)
     draft.text = text;
     draft.characterSpans = std::move(newSpans);
     draft.paragraphFormats = paragraphFormatsForText(text, paragraphPrototype);
+    return change;
 }
 
 void PDFEditController::applyUnicodeFontFallback(Draft &draft)
@@ -4549,11 +4902,37 @@ void PDFEditController::selectedTextRangeForDraft(const Draft &draft,
 
 void PDFEditController::resetTextEditDisplayState()
 {
+    resetTypingFormat();
     m_textEditDisplayDraft = Draft();
     m_textEditDisplayDraftActive = false;
     m_textEditFrameAutomaticallyExpanded = false;
     m_textEditGeometryExplicitlyChanged = false;
     m_textEditInitialDisplayFrameRect = QRectF();
+}
+
+void PDFEditController::resetTypingFormat()
+{
+    m_typingCharacterFormat = CharacterFormat();
+    m_typingCharacterFormatPosition = -1;
+    m_typingCharacterFormatActive = false;
+}
+
+void PDFEditController::rebaseTypingFormat(const Draft &draft)
+{
+    if (!m_typingCharacterFormatActive) {
+        return;
+    }
+
+    const bool fontBold = m_typingCharacterFormat.fontBold;
+    const bool fontItalic = m_typingCharacterFormat.fontItalic;
+    const bool fontUnderline = m_typingCharacterFormat.fontUnderline;
+    m_typingCharacterFormat = characterFormatAtPosition(
+        draft,
+        m_typingCharacterFormatPosition,
+        true);
+    m_typingCharacterFormat.fontBold = fontBold;
+    m_typingCharacterFormat.fontItalic = fontItalic;
+    m_typingCharacterFormat.fontUnderline = fontUnderline;
 }
 
 void PDFEditController::resetFrameResizeState()
@@ -4710,6 +5089,7 @@ void PDFEditController::updateSelectedTextFromDraft()
 void PDFEditController::setSelection(const Candidate *candidate)
 {
     resetFrameResizeState();
+    resetTypingFormat();
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     if (!candidate) {
