@@ -143,7 +143,7 @@ bool createPatternPaintPdf(const QString &filePath, PatternPaintMode mode)
     const auto streamObject = [](const QByteArray &dictionary,
                                  const QByteArray &stream) {
         return dictionary + " /Length " + QByteArray::number(stream.size())
-            + " >>\nstream\n" + stream + "endstream";
+            + " >>\nstream\n" + stream + "\nendstream";
     };
 
     return writePdfObjects(
