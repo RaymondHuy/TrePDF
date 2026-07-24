@@ -70,6 +70,11 @@ qreal PDFDocumentSession::scrollY() const
     return m_scrollY;
 }
 
+int PDFDocumentSession::viewRotation() const
+{
+    return m_viewRotation;
+}
+
 bool PDFDocumentSession::panelCollapsed() const
 {
     return m_panelCollapsed;
@@ -123,6 +128,18 @@ void PDFDocumentSession::setScrollY(qreal scrollY)
     emit scrollPositionChanged();
 }
 
+void PDFDocumentSession::setViewRotation(int rotation)
+{
+    const int quarterTurns = qRound(static_cast<qreal>(rotation) / 90.0);
+    const int normalizedRotation = ((quarterTurns % 4) + 4) % 4 * 90;
+    if (m_viewRotation == normalizedRotation) {
+        return;
+    }
+
+    m_viewRotation = normalizedRotation;
+    emit viewRotationChanged();
+}
+
 void PDFDocumentSession::setPanelCollapsed(bool collapsed)
 {
     if (m_panelCollapsed == collapsed) {
@@ -151,10 +168,16 @@ bool PDFDocumentSession::open(const QUrl &source)
 
     m_scrollX = 0.0;
     m_scrollY = 0.0;
+    setViewRotation(0);
     m_initialFitPending = true;
     emit scrollPositionChanged();
     emit initialFitPendingChanged();
     return true;
+}
+
+void PDFDocumentSession::rotateView(int quarterTurns)
+{
+    setViewRotation(m_viewRotation + quarterTurns * 90);
 }
 
 void PDFDocumentSession::prepareForDeactivation()

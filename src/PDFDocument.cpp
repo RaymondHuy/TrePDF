@@ -118,6 +118,11 @@ qreal PDFDocument::maximumPageWidth() const
     return m_maximumPageWidth;
 }
 
+qreal PDFDocument::maximumPageHeight() const
+{
+    return m_maximumPageHeight;
+}
+
 bool PDFDocument::open(const QUrl &source)
 {
     if (!source.isLocalFile()) {
@@ -142,6 +147,7 @@ bool PDFDocument::open(const QUrl &source)
             QVector<QSizeF> pageSizes;
             pageSizes.reserve(pageCount);
             qreal maximumPageWidth = 0.0;
+            qreal maximumPageHeight = 0.0;
             for (int page = 0; page < pageCount; ++page) {
                 double width = 0.0;
                 double height = 0.0;
@@ -154,6 +160,7 @@ bool PDFDocument::open(const QUrl &source)
                     : QSizeF();
                 pageSizes.append(size);
                 maximumPageWidth = qMax(maximumPageWidth, size.width());
+                maximumPageHeight = qMax(maximumPageHeight, size.height());
             }
             const unsigned long permissions = FPDF_GetDocPermissions(document);
 
@@ -165,6 +172,7 @@ bool PDFDocument::open(const QUrl &source)
             m_currentPage = 0;
             m_pageSizes = std::move(pageSizes);
             m_maximumPageWidth = maximumPageWidth;
+            m_maximumPageHeight = maximumPageHeight;
             m_allowsContentEditing = permissions == 0xffffffffUL
                 || (permissions & kModifyContentsPermission) != 0;
             ++m_revision;
@@ -255,6 +263,7 @@ void PDFDocument::closeDocumentLocked()
     m_filePath.clear();
     m_pageSizes.clear();
     m_maximumPageWidth = 0.0;
+    m_maximumPageHeight = 0.0;
     m_pageCount = 0;
     m_currentPage = 0;
     m_allowsContentEditing = false;

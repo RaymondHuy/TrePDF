@@ -18,18 +18,33 @@ Item {
     }
 
     function fitToWidth() {
+        const maximumViewPageWidth = session.viewRotation % 180 === 0
+            ? session.document.maximumPageWidth
+            : session.document.maximumPageHeight
         if (!session.document.loaded
-                || session.document.maximumPageWidth <= 0
+                || maximumViewPageWidth <= 0
                 || documentView.viewportWidth <= 0) {
             return
         }
 
         setZoom((documentView.viewportWidth - 96)
-                / session.document.maximumPageWidth)
+                / maximumViewPageWidth)
     }
 
     function navigateToPage(page) {
         documentView.navigateToPage(page)
+    }
+
+    function rotateView(quarterTurns) {
+        if (!session.document.loaded)
+            return
+
+        const currentPage = session.document.currentPage
+        session.rotateView(quarterTurns)
+        Qt.callLater(function() {
+            if (root.session.document.loaded)
+                documentView.navigateToPage(currentPage)
+        })
     }
 
     function prepareInlineStyleChange() {
@@ -79,6 +94,7 @@ Item {
             document: root.session.document
             editController: root.session.editController
             zoom: root.session.zoom
+            viewRotation: root.session.viewRotation
             transientStatus: root.transientStatus
             onOpenRequested: root.openRequested()
         }

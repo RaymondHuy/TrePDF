@@ -19,6 +19,9 @@ Current features:
 - Virtualized continuous scrolling with reusable QML delegates.
 - Asynchronous page rendering on a worker thread.
 - Page navigation, zoom, and fit-to-width controls.
+- Per-tab left/right view rotation in 90-degree steps. Rotation is a scene-graph
+  view transform only: it rotates the page texture and edit overlay together
+  without changing PDF page geometry, drafts, or saved content.
 - Text draft editing with selection, undo, redo, discard, Save, and Save As.
   Drafts stay session-only until a save succeeds.
 - Add Image uses the same placement cursor and draft history as Add Text. After
@@ -240,6 +243,9 @@ clipped or elided unintentionally.
 - `clip: true` is intentional for the scrolling viewport.
 - Keep QML imports versionless and use `QtQuick.Controls.Basic` when customizing
   control internals.
+- Keep view rotation on the shared page-surface container so `PDFPageView` and
+  `EditOverlay` receive the same transform. Do not feed view rotation back into
+  `PDFDocument::pageSize()` or save-time normalized coordinates.
 - Wrap user-visible text in `qsTrId()` using the localization rules above.
 
 ### PDF Save Architecture
@@ -352,5 +358,7 @@ exited normally. This is a regression scenario worth repeating after changes to
 
 ## CodeGraph
 
-The repository currently has no initialized `.codegraph` index. If CodeGraph is
-available in a future session, ask the user before running `codegraph init -i`.
+The repository has an initialized `.codegraph` index. Use the configured
+CodeGraph tools for structural code exploration and impact analysis before
+editing. The index watches source changes automatically; treat `.codegraph`
+runtime files as local tooling state and do not commit them.

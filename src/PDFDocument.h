@@ -24,6 +24,7 @@ class PDFDocument : public QObject
     Q_PROPERTY(qreal currentPageWidth READ currentPageWidth NOTIFY currentPageSizeChanged FINAL)
     Q_PROPERTY(qreal currentPageHeight READ currentPageHeight NOTIFY currentPageSizeChanged FINAL)
     Q_PROPERTY(qreal maximumPageWidth READ maximumPageWidth NOTIFY pageCountChanged FINAL)
+    Q_PROPERTY(qreal maximumPageHeight READ maximumPageHeight NOTIFY pageCountChanged FINAL)
 
 public:
     explicit PDFDocument(QObject *parent = nullptr);
@@ -37,6 +38,7 @@ public:
     qreal currentPageWidth() const;
     qreal currentPageHeight() const;
     qreal maximumPageWidth() const;
+    qreal maximumPageHeight() const;
 
     Q_INVOKABLE bool open(const QUrl &source);
     Q_INVOKABLE void close();
@@ -68,6 +70,7 @@ private:
     QString m_filePath;
     QVector<QSizeF> m_pageSizes;
     qreal m_maximumPageWidth = 0.0;
+    qreal m_maximumPageHeight = 0.0;
     int m_pageCount = 0;
     int m_currentPage = 0;
     int m_revision = 0;
