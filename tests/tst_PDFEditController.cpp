@@ -1369,6 +1369,7 @@ private slots:
     void followsCurrentRightColumnDraftBoundary();
     void hidesDeletedTextFromInteraction();
     void persistsExpandedFrameForTextChanges();
+    void persistsExpandedFrameForParagraphAlignment();
     void keepsStandaloneResizeFrameUnexpanded();
     void keepsMixedStylesAsSeparateCandidates();
     void keepsDistantColumnsAsSeparateCandidates();
@@ -1408,6 +1409,7 @@ private slots:
     void savesUnchangedCopyRoundTrip();
     void savesMultipleDraftsOnSamePage();
     void savesExpandedFrameBeforeRightColumn();
+    void savesParagraphAlignmentOnlyEdit();
     void savesDeletedTextRoundTrip();
     void savesAddedTextRoundTrip();
     void rendersAddedImageSnapshot();
@@ -2366,6 +2368,56 @@ void PDFEditControllerTest::persistsExpandedFrameForTextChanges()
     m_controller.redo();
     QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
     QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::persistsExpandedFrameForParagraphAlignment()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF sourceRect = m_controller.selectedSourceRect();
+    const QRectF originalFrameRect = m_controller.selectedFrameRect();
+    m_controller.beginSelectedTextEdit();
+    const QRectF expandedFrameRect = m_controller.selectedFrameRect();
+    QVERIFY(expandedFrameRect.right() > originalFrameRect.right());
+
+    m_controller.setSelectedParagraphAlignment(
+        PDFEditController::RightAlignment);
+    m_controller.finishSelectedTextEdit();
+
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    QCOMPARE(
+        m_controller.selectedParagraphAlignment(),
+        static_cast<int>(PDFEditController::RightAlignment));
+    const QVariantList drafts = m_controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    const QVariantMap draft = drafts.constFirst().toMap();
+    QCOMPARE(
+        draft.value(QStringLiteral("frameRect")).toRectF(),
+        expandedFrameRect);
+    QCOMPARE(
+        draft.value(QStringLiteral("paragraphFormats"))
+            .toList()
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("alignment"))
+            .toString(),
+        QStringLiteral("right"));
+
+    m_controller.undo();
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+
+    m_controller.redo();
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+    QCOMPARE(
+        m_controller.selectedParagraphAlignment(),
+        static_cast<int>(PDFEditController::RightAlignment));
     m_controller.discardDrafts();
 }
 
@@ -4365,6 +4417,49 @@ void PDFEditControllerTest::savesExpandedFrameBeforeRightColumn()
     const QString savedText = normalizedPageText(outputPath);
     QVERIFY(savedText.contains(editedText));
     QVERIFY(savedText.contains(QString::fromLatin1(kRightColumnText)));
+}
+
+void PDFEditControllerTest::savesParagraphAlignmentOnlyEdit()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-alignment-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-alignment-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString text = QString::fromLatin1(kRegularText);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0),
+        text);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF originalFrameRect = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    const QRectF expandedFrameRect = controller.selectedFrameRect();
+    QVERIFY(expandedFrameRect.right() > originalFrameRect.right());
+    controller.setSelectedParagraphAlignment(
+        PDFEditController::RightAlignment);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedFrameRect(), expandedFrameRect);
+
+    QPointF sourceOrigin;
+    QVERIFY(textObjectOrigin(sourcePath, text, sourceOrigin));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QPointF savedOrigin;
+    QVERIFY(textObjectOrigin(outputPath, text, savedOrigin));
+    QVERIFY2(
+        savedOrigin.x() > sourceOrigin.x() + 1.0,
+        qPrintable(QStringLiteral(
+            "Expected right alignment to move text right from %1, got %2")
+                       .arg(sourceOrigin.x(), 0, 'f', 3)
+                       .arg(savedOrigin.x(), 0, 'f', 3)));
 }
 
 void PDFEditControllerTest::savesDeletedTextRoundTrip()

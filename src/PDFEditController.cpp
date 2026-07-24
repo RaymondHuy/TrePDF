@@ -2749,7 +2749,10 @@ void PDFEditController::finishSelectedTextEdit()
     Draft finalizedDraft = selectedDraftForDisplay();
     if (m_textEditFrameAutomaticallyExpanded
         && !m_textEditGeometryExplicitlyChanged
-        && finalizedDraft.text == baseline.before.text) {
+        && finalizedDraft.text == baseline.before.text
+        && sameParagraphFormats(
+            finalizedDraft.paragraphFormats,
+            baseline.before.paragraphFormats)) {
         finalizedDraft.frameRect = baseline.before.frameRect;
         finalizedDraft.contentBounds = baseline.before.contentBounds;
     }
