@@ -20,6 +20,8 @@ class PDFDocumentSession : public QObject
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
     Q_PROPERTY(qreal scrollX READ scrollX WRITE setScrollX NOTIFY scrollPositionChanged FINAL)
     Q_PROPERTY(qreal scrollY READ scrollY WRITE setScrollY NOTIFY scrollPositionChanged FINAL)
+    Q_PROPERTY(int viewRotation READ viewRotation WRITE setViewRotation
+                   NOTIFY viewRotationChanged FINAL)
     Q_PROPERTY(bool panelCollapsed READ panelCollapsed WRITE setPanelCollapsed
                    NOTIFY panelCollapsedChanged FINAL)
     Q_PROPERTY(bool initialFitPending READ initialFitPending WRITE setInitialFitPending
@@ -37,6 +39,7 @@ public:
     qreal zoom() const;
     qreal scrollX() const;
     qreal scrollY() const;
+    int viewRotation() const;
     bool panelCollapsed() const;
     bool initialFitPending() const;
     bool hasDrafts() const;
@@ -45,10 +48,12 @@ public:
     void setZoom(qreal zoom);
     void setScrollX(qreal scrollX);
     void setScrollY(qreal scrollY);
+    void setViewRotation(int rotation);
     void setPanelCollapsed(bool collapsed);
     void setInitialFitPending(bool pending);
 
     bool open(const QUrl &source);
+    Q_INVOKABLE void rotateView(int quarterTurns);
     Q_INVOKABLE void prepareForDeactivation();
 
 signals:
@@ -56,6 +61,7 @@ signals:
     void filePathChanged();
     void zoomChanged();
     void scrollPositionChanged();
+    void viewRotationChanged();
     void panelCollapsedChanged();
     void initialFitPendingChanged();
     void hasDraftsChanged();
@@ -73,6 +79,7 @@ private:
     qreal m_zoom = 1.0;
     qreal m_scrollX = 0.0;
     qreal m_scrollY = 0.0;
+    int m_viewRotation = 0;
     bool m_panelCollapsed = false;
     bool m_initialFitPending = true;
 };

@@ -309,6 +309,12 @@ pixelHeight = normalizedHeight * overlayHeight
 
 Do overlay trùng với page view, công thức vẫn đúng khi zoom thay đổi.
 
+Xoay chế độ xem không thay đổi các tọa độ normalized này. `PDFPageView` và
+`EditOverlay` nằm trong cùng một page-surface container, rồi container được xoay
+trên scene graph theo trạng thái riêng của tab. Vì texture và overlay nhận cùng
+transform, hit-test, selection và draft vẫn trùng nhau; `PDFDocument::pageSize()`
+và tọa độ dùng khi Save tiếp tục giữ nguyên theo PDF nguồn.
+
 ## 6. Công thức quyết định text nào editable
 
 Điều kiện hiện tại rất rõ:

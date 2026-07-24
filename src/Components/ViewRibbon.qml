@@ -16,6 +16,7 @@ Flickable {
     signal zoomOutRequested()
     signal zoomInRequested()
     signal fitWidthRequested()
+    signal rotateRequested(int quarterTurns)
     signal toolRequested(string toolName)
 
     clip: true
@@ -150,7 +151,7 @@ Flickable {
                 //% "Rotate Left"
                 text: qsTrId("RotateLeft")
                 iconSource: "../assets/icons/rotate-ccw.svg"
-                onClicked: root.toolRequested(text)
+                onClicked: root.rotateRequested(-1)
             }
 
             RibbonButton {
@@ -159,7 +160,7 @@ Flickable {
                 //% "Rotate Right"
                 text: qsTrId("RotateRight")
                 iconSource: "../assets/icons/rotate-cw.svg"
-                onClicked: root.toolRequested(text)
+                onClicked: root.rotateRequested(1)
             }
         }
 

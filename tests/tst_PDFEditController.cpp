@@ -1428,6 +1428,7 @@ private slots:
     void savesAsynchronously();
     void keepsDraftsWhenSaveFails();
     void opensDocumentsInIndependentTabs();
+    void keepsViewRotationIndependentAcrossTabs();
     void clearsTabIdentityWhenDocumentCloses();
     void keepsTabDraftsIndependent();
     void savesOnlyRequestedTab();
@@ -5326,6 +5327,39 @@ void PDFEditControllerTest::opensDocumentsInIndependentTabs()
     QCOMPARE(tabs.currentIndex(), 0);
     QCOMPARE(firstSession->zoom(), 1.75);
     QCOMPARE(firstSession->scrollY(), 420.0);
+}
+
+void PDFEditControllerTest::keepsViewRotationIndependentAcrossTabs()
+{
+    const QString firstPath = m_temporaryDirectory.filePath(
+        QStringLiteral("rotation-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("rotation-second.pdf"));
+    QVERIFY(createFontStylePdf(firstPath));
+    QVERIFY(createFontStylePdf(secondPath));
+
+    PDFTabModel tabs;
+    PDFDocumentSession *firstSession = tabs.open(QUrl::fromLocalFile(firstPath));
+    PDFDocumentSession *secondSession = tabs.open(QUrl::fromLocalFile(secondPath));
+    QVERIFY(firstSession);
+    QVERIFY(secondSession);
+
+    QSignalSpy rotationSpy(firstSession, &PDFDocumentSession::viewRotationChanged);
+    firstSession->rotateView(1);
+    QCOMPARE(firstSession->viewRotation(), 90);
+    QCOMPARE(secondSession->viewRotation(), 0);
+    QCOMPARE(rotationSpy.count(), 1);
+
+    firstSession->rotateView(-2);
+    QCOMPARE(firstSession->viewRotation(), 270);
+    QCOMPARE(rotationSpy.count(), 2);
+
+    firstSession->setViewRotation(450);
+    QCOMPARE(firstSession->viewRotation(), 90);
+    QCOMPARE(rotationSpy.count(), 3);
+
+    firstSession->setViewRotation(90);
+    QCOMPARE(rotationSpy.count(), 3);
 }
 
 void PDFEditControllerTest::clearsTabIdentityWhenDocumentCloses()

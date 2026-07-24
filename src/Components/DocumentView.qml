@@ -12,6 +12,7 @@ Rectangle {
     required property PDFDocument document
     required property PDFEditController editController
     property real zoom: 1.0
+    property int viewRotation: 0
     property string transientStatus
     property int pendingNavigationPage: -1
     property int navigationGeneration: 0
@@ -148,6 +149,7 @@ Rectangle {
             document: root.document
             editController: root.editController
             zoom: root.zoom
+            viewRotation: root.viewRotation
             sessionChangeGeneration: root.sessionChangeGeneration
 
             Connections {

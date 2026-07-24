@@ -19,6 +19,7 @@ Column {
     signal zoomOutRequested()
     signal zoomInRequested()
     signal fitWidthRequested()
+    signal rotateRequested(int quarterTurns)
     signal toolRequested(string toolName)
 
     spacing: 0
@@ -57,6 +58,7 @@ Column {
             onZoomOutRequested: root.zoomOutRequested()
             onZoomInRequested: root.zoomInRequested()
             onFitWidthRequested: root.fitWidthRequested()
+            onRotateRequested: quarterTurns => root.rotateRequested(quarterTurns)
             onToolRequested: toolName => root.toolRequested(toolName)
         }
     }

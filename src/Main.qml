@@ -84,6 +84,17 @@ ApplicationWindow {
             workspace.navigateToPage(page)
     }
 
+    function rotateView(quarterTurns) {
+        if (!activeSession || !activeDocument.loaded)
+            return
+
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.rotateView(quarterTurns)
+        else
+            activeSession.rotateView(quarterTurns)
+    }
+
     function switchToTab(index) {
         if (index === tabModel.currentIndex || tabModel.anySaving)
             return
@@ -507,6 +518,7 @@ ApplicationWindow {
                     : 1.0)
             }
             onFitWidthRequested: window.fitToWidth()
+            onRotateRequested: quarterTurns => window.rotateView(quarterTurns)
             onToolRequested: toolName => window.showComingSoon(toolName)
         }
 
