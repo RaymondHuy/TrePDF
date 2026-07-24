@@ -194,9 +194,6 @@ Item {
         const rawFamily = format.fontFamily === undefined
             ? ""
             : String(format.fontFamily)
-        const family = rawFamily
-            .replace(/\\/g, "\\\\")
-            .replace(/'/g, "\\'")
         const displayRatio = Number(format.displayFontSizeRatio) > 0
             ? Number(format.displayFontSizeRatio)
             : Number(format.fontSizeRatio)
@@ -205,12 +202,23 @@ Item {
             : 1
         const fontBold = format.fontBold === true
         const fontItalic = format.fontItalic === true
+        const fontUnderline = format.fontUnderline === true
         const effectiveBasePixelSize = Number(basePixelSize) > 0
             ? Number(basePixelSize)
             : Math.max(1, baseRatio * root.height)
         const displayPixelSize = Math.max(
             1,
             Math.round(relativeSize * effectiveBasePixelSize))
+        const displayFont = controller.fontForDisplay(
+            rawFamily,
+            Number(format.fontStretch || 100),
+            fontBold,
+            fontItalic,
+            fontUnderline,
+            displayPixelSize)
+        const family = String(displayFont.family || rawFamily)
+            .replace(/\\/g, "\\\\")
+            .replace(/'/g, "\\'")
         const displayStretch = controller.displayFontStretch(
             rawFamily,
             Number(format.fontStretch || 100),
@@ -222,7 +230,7 @@ Item {
             + "font-weight:" + (fontBold ? "700" : "400") + ";"
             + "font-style:" + (fontItalic ? "italic" : "normal") + ";"
             + "text-decoration:"
-            + (format.fontUnderline === true ? "underline" : "none") + ";"
+            + (fontUnderline ? "underline" : "none") + ";"
             + "color:" + cssColor(format.color) + ";"
         if (family.length > 0)
             style += "font-family:'" + family + "';"
@@ -316,9 +324,10 @@ Item {
                 fallbackFormat,
                 baseRatio,
                 basePixelSize)
-            const paragraphStyle = "margin:0;white-space:pre-wrap;text-align:"
-                + alignment + ";"
-            html += "<p style=\"" + escapeHtmlAttribute(paragraphStyle) + "\">"
+            const paragraphStyle = "margin:0;white-space:pre-wrap;"
+            // Qt Rich Text supports block alignment through the align attribute.
+            html += "<p align=\"" + escapeHtmlAttribute(alignment)
+                + "\" style=\"" + escapeHtmlAttribute(paragraphStyle) + "\">"
                 + content + "</p>"
         }
         return html + "</body></html>"

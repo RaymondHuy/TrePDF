@@ -116,8 +116,9 @@ từ draft hiện tại và chỉ nới cạnh phải. Mép trái, cạnh trên 
 trung điểm khoảng trắng trước candidate đó; nếu không có vật cản, biên edit đi
 đến lề phải suy ra từ lề trái/nội dung của page. Frame này không thay đổi
 `sourceRect`, vùng hit-test hoặc source masks. Nó chỉ được ghi vào draft khi
-text thật sự đổi hoặc người dùng resize rõ ràng; mở rồi đóng editor, gửi lại
-đúng text cũ hoặc nhấn Esc đều phục hồi frame trước đó.
+text thật sự đổi, paragraph format thay đổi hoặc người dùng resize rõ ràng; mở
+rồi đóng editor không thay đổi gì, gửi lại đúng text và paragraph format cũ,
+hoặc nhấn Esc đều phục hồi frame trước đó.
 
 Midpoint được tính từ initial/source frame bất biến nên mở sửa nhiều lần không
 làm cạnh phải bò dần sang cột kế. Với candidate cản đã có draft, thuật toán dùng
@@ -753,8 +754,8 @@ Controller lưu snapshot rich-text draft trước edit vào `m_textEditCommand`,
 đó tạo display draft với frame tạm mở rộng theo phần còn lại của cột/trang và
 đặt `textEditActive = true`. Display draft chưa phải session draft. Chưa có
 draft mới cho đến khi text, spans, paragraph formats hoặc geometry thực sự thay
-đổi; nếu text cuối cùng vẫn bằng snapshot và không resize, geometry tự mở rộng
-bị loại bỏ khi kết thúc edit.
+đổi; nếu text và paragraph formats cuối cùng vẫn bằng snapshot và không resize,
+geometry tự mở rộng bị loại bỏ khi kết thúc edit.
 
 Candidate dòng vẫn dùng đúng một draft key `page|lineObjectId`. Rich-text spans
 không được chia ngược về từng source part trong session; `CandidatePart` giữ

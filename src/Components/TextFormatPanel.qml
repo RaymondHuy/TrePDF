@@ -17,6 +17,7 @@ Rectangle {
     required property bool selectedFontItalic
     required property bool selectedFontUnderline
     required property color selectedColor
+    required property int selectedParagraphAlignment
     property bool formattingEnabled: false
 
     property var displayedFontFamilies: availableFontFamilies
@@ -31,6 +32,14 @@ Rectangle {
     readonly property string japaneseFontsLabel: qsTrId("JapaneseFonts")
     //% "Korean"
     readonly property string koreanFontsLabel: qsTrId("KoreanFonts")
+    //% "Align left"
+    readonly property string alignLeftLabel: qsTrId("AlignLeft")
+    //% "Align right"
+    readonly property string alignRightLabel: qsTrId("AlignRight")
+    //% "Align center"
+    readonly property string alignCenterLabel: qsTrId("AlignCenter")
+    //% "Justify"
+    readonly property string justifyLabel: qsTrId("Justify")
     readonly property var fontFilterOptions: [
         { value: PDFEditController.VietnameseFonts,
           label: vietnameseFontsLabel },
@@ -42,6 +51,20 @@ Rectangle {
           label: japaneseFontsLabel },
         { value: PDFEditController.KoreanFonts,
           label: koreanFontsLabel }
+    ]
+    readonly property var paragraphAlignmentOptions: [
+        { value: PDFEditController.LeftAlignment,
+          label: alignLeftLabel,
+          iconSource: "../assets/icons/align-left.svg" },
+        { value: PDFEditController.RightAlignment,
+          label: alignRightLabel,
+          iconSource: "../assets/icons/align-right.svg" },
+        { value: PDFEditController.CenterAlignment,
+          label: alignCenterLabel,
+          iconSource: "../assets/icons/align-center.svg" },
+        { value: PDFEditController.JustifyAlignment,
+          label: justifyLabel,
+          iconSource: "../assets/icons/align-justify.svg" }
     ]
     readonly property int selectedFontFamilyIndex: {
         if (selectedFontFamily.length === 0)
@@ -75,9 +98,14 @@ Rectangle {
     signal fontItalicChangeRequested(bool enabled)
     signal fontUnderlineChangeRequested(bool enabled)
     signal fontColorChangeRequested(color color)
+    signal paragraphAlignmentChangeRequested(int alignment)
 
     implicitWidth: collapsed ? 42 : 264
     color: theme.ribbonSurface
+
+    ButtonGroup {
+        id: paragraphAlignmentGroup
+    }
 
     Rectangle {
         anchors.left: parent.left
@@ -642,6 +670,63 @@ Rectangle {
                                 border.color: colorButton.enabled
                                     ? root.theme.ribbonBorder
                                     : "#ddd9d6"
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Repeater {
+                                model: root.paragraphAlignmentOptions
+
+                                delegate: ToolButton {
+                                    id: alignmentButton
+
+                                    required property var modelData
+
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    Layout.preferredWidth: 1
+                                    Layout.preferredHeight: 38
+                                    checkable: true
+                                    focusPolicy: Qt.TabFocus
+                                    checked: root.selectedParagraphAlignment
+                                        === modelData.value
+                                    ButtonGroup.group: paragraphAlignmentGroup
+                                    display: AbstractButton.IconOnly
+                                    icon.source: modelData.iconSource
+                                    icon.width: 20
+                                    icon.height: 20
+                                    icon.color: !enabled
+                                        ? "#aaa8a6"
+                                        : checked
+                                            ? root.theme.foxitDarkOrange
+                                            : "transparent"
+                                    Accessible.name: modelData.label
+                                    ToolTip.text: modelData.label
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 500
+                                    onClicked:
+                                        root.paragraphAlignmentChangeRequested(
+                                            modelData.value)
+
+                                    background: Rectangle {
+                                        radius: 4
+                                        color: !alignmentButton.enabled
+                                            ? "#f4f1ef"
+                                            : alignmentButton.down
+                                                ? "#f5dfcf"
+                                                : alignmentButton.checked
+                                                    || alignmentButton.hovered
+                                                    ? root.theme.foxitPaleOrange
+                                                    : "#ffffff"
+                                        border.width: 1
+                                        border.color: alignmentButton.checked
+                                            ? root.theme.foxitBorderOrange
+                                            : root.theme.ribbonBorder
+                                    }
+                                }
                             }
                         }
                     }

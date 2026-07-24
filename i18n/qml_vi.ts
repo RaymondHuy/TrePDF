@@ -23,7 +23,7 @@
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Components/DocumentView.qml" line="160"/>
+        <location filename="../src/Components/DocumentView.qml" line="183"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="44"/>
@@ -90,7 +90,7 @@
     </message>
     <message id="Edit">
         <location filename="../src/Components/AppRibbon.qml" line="122"/>
-        <location filename="../src/Components/EditOverlay.qml" line="1244"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1314"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
@@ -111,45 +111,45 @@
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="151"/>
-        <location filename="../src/PDFDocument.cpp" line="65"/>
-        <location filename="../src/PDFDocument.cpp" line="162"/>
+        <location filename="../src/Components/DocumentView.qml" line="174"/>
+        <location filename="../src/PDFDocument.cpp" line="72"/>
+        <location filename="../src/PDFDocument.cpp" line="197"/>
         <source>No document open</source>
         <translation>Chưa mở tài liệu</translation>
     </message>
     <message id="PdfEditSurface">
-        <location filename="../src/Components/EditOverlay.qml" line="1119"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1189"/>
         <source>PDF edit surface</source>
         <translation>Vùng chỉnh sửa PDF</translation>
     </message>
     <message id="PdfEditSurfaceDescription">
-        <location filename="../src/Components/EditOverlay.qml" line="1121"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1191"/>
         <source>Use Tab or arrow keys to select content, Enter to edit text, drag images to move, and Backspace or Delete to remove images</source>
         <oldsource>Use Tab or arrow keys to select content, Enter to edit text, and Backspace or Delete to remove images</oldsource>
         <translation>Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo để di chuyển hình ảnh và Backspace hoặc Delete để xóa hình ảnh</translation>
     </message>
     <message id="Delete">
-        <location filename="../src/Components/EditOverlay.qml" line="1275"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1345"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
     <message id="MoveImage">
-        <location filename="../src/Components/EditOverlay.qml" line="1665"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1741"/>
         <source>Move image</source>
         <translation>Di chuyển hình ảnh</translation>
     </message>
     <message id="ResizeImage">
-        <location filename="../src/Components/EditOverlay.qml" line="1748"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1824"/>
         <source>Resize image</source>
         <translation>Đổi kích thước hình ảnh</translation>
     </message>
     <message id="ResizeTextBox">
-        <location filename="../src/Components/EditOverlay.qml" line="1751"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1827"/>
         <source>Resize text box</source>
         <translation>Đổi kích thước hộp văn bản</translation>
     </message>
     <message id="ApplyOrCancelEditHint">
-        <location filename="../src/Components/EditOverlay.qml" line="1907"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1983"/>
         <source>Ctrl/Cmd+Enter to apply · Esc to cancel</source>
         <oldsource>Enter to apply · Esc to cancel</oldsource>
         <translation>Ctrl/Cmd+Enter để áp dụng · Esc để hủy</translation>
@@ -171,7 +171,7 @@
     </message>
     <message id="AddText">
         <location filename="../src/Components/EditRibbon.qml" line="55"/>
-        <location filename="../src/PDFEditController.cpp" line="1301"/>
+        <location filename="../src/PDFEditController.cpp" line="1532"/>
         <source>Add Text</source>
         <translation>Thêm văn bản</translation>
     </message>
@@ -182,8 +182,8 @@
     </message>
     <message id="Image">
         <location filename="../src/Components/EditRibbon.qml" line="71"/>
-        <location filename="../src/PDFEditController.cpp" line="1461"/>
-        <location filename="../src/PDFEditController.cpp" line="2832"/>
+        <location filename="../src/PDFEditController.cpp" line="1692"/>
+        <location filename="../src/PDFEditController.cpp" line="3754"/>
         <source>Image</source>
         <translation>Hình ảnh</translation>
     </message>
@@ -219,7 +219,7 @@
     </message>
     <message id="Underline">
         <location filename="../src/Components/EditRibbon.qml" line="118"/>
-        <location filename="../src/Components/TextFormatPanel.qml" line="559"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="590"/>
         <source>Underline</source>
         <translation>Gạch chân</translation>
     </message>
@@ -244,7 +244,7 @@
         <translation>Làm lại</translation>
     </message>
     <message id="PageNumber">
-        <location filename="../src/Components/PdfPageDelegate.qml" line="88"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="92"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -424,61 +424,61 @@
         <translation>Tìm kiếm</translation>
     </message>
     <message id="NoError">
-        <location filename="../src/PDFDocument.cpp" line="33"/>
+        <location filename="../src/PDFDocument.cpp" line="40"/>
         <source>No error</source>
         <translation>Không có lỗi</translation>
     </message>
     <message id="UnknownPdfiumError">
-        <location filename="../src/PDFDocument.cpp" line="36"/>
+        <location filename="../src/PDFDocument.cpp" line="43"/>
         <source>Unknown PDFium error</source>
         <translation>Lỗi PDFium không xác định</translation>
     </message>
     <message id="FileOpenOrReadFailed">
-        <location filename="../src/PDFDocument.cpp" line="39"/>
+        <location filename="../src/PDFDocument.cpp" line="46"/>
         <source>The file could not be opened or read</source>
         <translation>Không thể mở hoặc đọc tệp</translation>
     </message>
     <message id="InvalidPdfFile">
-        <location filename="../src/PDFDocument.cpp" line="42"/>
+        <location filename="../src/PDFDocument.cpp" line="49"/>
         <source>The file is not a valid PDF</source>
         <translation>Tệp không phải là PDF hợp lệ</translation>
     </message>
     <message id="PdfPasswordRequired">
-        <location filename="../src/PDFDocument.cpp" line="45"/>
+        <location filename="../src/PDFDocument.cpp" line="52"/>
         <source>The PDF requires a password</source>
         <translation>Tệp PDF yêu cầu mật khẩu</translation>
     </message>
     <message id="UnsupportedPdfSecurity">
-        <location filename="../src/PDFDocument.cpp" line="48"/>
+        <location filename="../src/PDFDocument.cpp" line="55"/>
         <source>The PDF security handler is unsupported</source>
         <translation>Không hỗ trợ trình xử lý bảo mật của tệp PDF</translation>
     </message>
     <message id="PdfPageLoadFailed">
-        <location filename="../src/PDFDocument.cpp" line="51"/>
+        <location filename="../src/PDFDocument.cpp" line="58"/>
         <source>The requested PDF page could not be loaded</source>
         <translation>Không thể tải trang PDF được yêu cầu</translation>
     </message>
     <message id="UnknownPdfiumStatus">
-        <location filename="../src/PDFDocument.cpp" line="54"/>
+        <location filename="../src/PDFDocument.cpp" line="61"/>
         <source>PDFium failed with an unknown status</source>
         <translation>PDFium gặp lỗi với trạng thái không xác định</translation>
     </message>
     <message id="LocalPdfFilesOnly">
-        <location filename="../src/PDFDocument.cpp" line="117"/>
-        <location filename="../src/PDFEditController.cpp" line="2407"/>
-        <location filename="../src/PDFEditController.cpp" line="2455"/>
+        <location filename="../src/PDFDocument.cpp" line="125"/>
+        <location filename="../src/PDFEditController.cpp" line="3002"/>
+        <location filename="../src/PDFEditController.cpp" line="3050"/>
         <source>Only local PDF files are supported</source>
         <translation>Chỉ hỗ trợ tệp PDF trên máy</translation>
     </message>
     <message id="LoadedPageCount" numerus="yes">
-        <location filename="../src/PDFDocument.cpp" line="148"/>
+        <location filename="../src/PDFDocument.cpp" line="180"/>
         <source>Loaded %n page(s)</source>
         <translation>
             <numerusform>Đã tải %n trang</numerusform>
         </translation>
     </message>
     <message id="AllDraftChangesDiscarded">
-        <location filename="../src/PDFEditController.cpp" line="2377"/>
+        <location filename="../src/PDFEditController.cpp" line="2972"/>
         <source>All draft changes were discarded.</source>
         <translation>Đã bỏ tất cả thay đổi nháp.</translation>
     </message>
@@ -487,247 +487,267 @@
         <translation type="vanished">Nội dung này là hình ảnh. Cần OCR để chỉnh sửa văn bản.</translation>
     </message>
     <message id="Text">
-        <location filename="../src/PDFEditController.cpp" line="2870"/>
+        <location filename="../src/PDFEditController.cpp" line="3792"/>
         <source>Text</source>
         <translation>Văn bản</translation>
     </message>
     <message id="PdfEditingNotPermitted">
-        <location filename="../src/PDFEditController.cpp" line="1288"/>
-        <location filename="../src/PDFEditController.cpp" line="1353"/>
-        <location filename="../src/PDFEditController.cpp" line="1376"/>
-        <location filename="../src/PDFEditController.cpp" line="2840"/>
-        <location filename="../src/PDFEditController.cpp" line="2907"/>
-        <location filename="../src/PDFEditController.cpp" line="3211"/>
+        <location filename="../src/PDFEditController.cpp" line="1519"/>
+        <location filename="../src/PDFEditController.cpp" line="1584"/>
+        <location filename="../src/PDFEditController.cpp" line="1607"/>
+        <location filename="../src/PDFEditController.cpp" line="3762"/>
+        <location filename="../src/PDFEditController.cpp" line="3830"/>
+        <location filename="../src/PDFEditController.cpp" line="4137"/>
         <source>This PDF does not permit content editing.</source>
         <translation>Tệp PDF này không cho phép chỉnh sửa nội dung.</translation>
     </message>
     <message id="NoPdfOpenForSaving">
-        <location filename="../src/PDFEditController.cpp" line="651"/>
-        <location filename="../src/PDFEditController.cpp" line="2384"/>
-        <location filename="../src/PDFEditController.cpp" line="2402"/>
-        <location filename="../src/PDFEditController.cpp" line="2431"/>
-        <location filename="../src/PDFEditController.cpp" line="2450"/>
+        <location filename="../src/PDFEditController.cpp" line="831"/>
+        <location filename="../src/PDFEditController.cpp" line="2979"/>
+        <location filename="../src/PDFEditController.cpp" line="2997"/>
+        <location filename="../src/PDFEditController.cpp" line="3026"/>
+        <location filename="../src/PDFEditController.cpp" line="3045"/>
         <source>No PDF is open.</source>
         <translation>Chưa mở tệp PDF.</translation>
     </message>
     <message id="PdfSaveSourceOpenFailed">
-        <location filename="../src/PDFEditController.cpp" line="654"/>
+        <location filename="../src/PDFEditController.cpp" line="834"/>
         <source>The source PDF could not be opened for saving.</source>
         <translation>Không thể mở tệp PDF nguồn để lưu.</translation>
     </message>
     <message id="PdfSavePageLoadFailed">
-        <location filename="../src/PDFEditController.cpp" line="657"/>
+        <location filename="../src/PDFEditController.cpp" line="837"/>
         <source>Page %1 could not be loaded while saving.</source>
         <translation>Không thể tải trang %1 trong khi lưu.</translation>
     </message>
     <message id="PdfSaveUnsupportedSourceObject">
-        <location filename="../src/PDFEditController.cpp" line="660"/>
+        <location filename="../src/PDFEditController.cpp" line="840"/>
         <source>Page %1 contains edited text that cannot be saved safely yet.</source>
         <translation>Trang %1 chứa văn bản đã sửa chưa thể lưu an toàn.</translation>
     </message>
     <message id="PdfSaveSourceObjectMissing">
-        <location filename="../src/PDFEditController.cpp" line="663"/>
+        <location filename="../src/PDFEditController.cpp" line="843"/>
         <source>An edited object could not be found on page %1.</source>
         <translation>Không tìm thấy đối tượng đã chỉnh sửa trên trang %1.</translation>
     </message>
     <message id="PdfSaveObjectRemovalFailed">
-        <location filename="../src/PDFEditController.cpp" line="666"/>
+        <location filename="../src/PDFEditController.cpp" line="846"/>
         <source>An original object could not be removed or replaced on page %1.</source>
         <translation>Không thể xóa hoặc thay thế đối tượng gốc trên trang %1.</translation>
     </message>
     <message id="PdfSaveFontMissingCharacter">
-        <location filename="../src/PDFEditController.cpp" line="680"/>
+        <location filename="../src/PDFEditController.cpp" line="860"/>
         <source>The font “%1” does not support the character “%2” (%3). Choose a different font.</source>
         <translation>Phông chữ “%1” không hỗ trợ ký tự “%2” (%3). Hãy chọn phông chữ khác.</translation>
     </message>
     <message id="PdfSaveFontUnavailable">
-        <location filename="../src/PDFEditController.cpp" line="684"/>
+        <location filename="../src/PDFEditController.cpp" line="864"/>
         <source>The font %1 cannot be embedded in the saved PDF.</source>
         <translation>Không thể nhúng phông chữ %1 vào tệp PDF đã lưu.</translation>
     </message>
     <message id="PdfSaveTextCreationFailed">
-        <location filename="../src/PDFEditController.cpp" line="688"/>
+        <location filename="../src/PDFEditController.cpp" line="868"/>
         <source>Saved text could not be created on page %1.</source>
         <translation>Không thể tạo văn bản đã lưu trên trang %1.</translation>
     </message>
     <message id="PdfSaveImageCreationFailed">
-        <location filename="../src/PDFEditController.cpp" line="691"/>
+        <location filename="../src/PDFEditController.cpp" line="871"/>
         <source>The image could not be created on page %1.</source>
         <translation>Không thể tạo hình ảnh trên trang %1.</translation>
     </message>
     <message id="PdfSavePageGenerationFailed">
-        <location filename="../src/PDFEditController.cpp" line="694"/>
+        <location filename="../src/PDFEditController.cpp" line="874"/>
         <source>Page %1 could not be finalized for saving.</source>
         <translation>Không thể hoàn tất trang %1 để lưu.</translation>
     </message>
     <message id="PdfSaveOutputOpenFailed">
-        <location filename="../src/PDFEditController.cpp" line="697"/>
+        <location filename="../src/PDFEditController.cpp" line="877"/>
         <source>The destination file could not be opened: %1</source>
         <translation>Không thể mở tệp đích: %1</translation>
     </message>
     <message id="PdfSaveOutputWriteFailed">
-        <location filename="../src/PDFEditController.cpp" line="700"/>
+        <location filename="../src/PDFEditController.cpp" line="880"/>
         <source>The PDF could not be written: %1</source>
         <translation>Không thể ghi tệp PDF: %1</translation>
     </message>
     <message id="PdfSaveOutputCommitFailed">
-        <location filename="../src/PDFEditController.cpp" line="703"/>
+        <location filename="../src/PDFEditController.cpp" line="883"/>
         <source>The saved PDF could not replace the destination file: %1</source>
         <translation>Không thể thay thế tệp đích bằng tệp PDF đã lưu: %1</translation>
     </message>
     <message id="PdfSaveFailed">
-        <location filename="../src/PDFEditController.cpp" line="706"/>
+        <location filename="../src/PDFEditController.cpp" line="886"/>
         <source>The PDF could not be saved.</source>
         <translation>Không thể lưu tệp PDF.</translation>
     </message>
     <message id="LocalImageFilesOnly">
-        <location filename="../src/PDFEditController.cpp" line="1381"/>
+        <location filename="../src/PDFEditController.cpp" line="1612"/>
         <source>Only local image files are supported.</source>
         <translation>Chỉ hỗ trợ tệp hình ảnh trên máy.</translation>
     </message>
     <message id="SelectedImageOpenFailed">
-        <location filename="../src/PDFEditController.cpp" line="1390"/>
-        <location filename="../src/PDFEditController.cpp" line="1416"/>
+        <location filename="../src/PDFEditController.cpp" line="1621"/>
+        <location filename="../src/PDFEditController.cpp" line="1647"/>
         <source>The selected image could not be opened.</source>
         <translation>Không thể mở hình ảnh đã chọn.</translation>
     </message>
     <message id="SelectedImageTooLarge">
-        <location filename="../src/PDFEditController.cpp" line="1395"/>
-        <location filename="../src/PDFEditController.cpp" line="1409"/>
-        <location filename="../src/PDFEditController.cpp" line="1421"/>
+        <location filename="../src/PDFEditController.cpp" line="1626"/>
+        <location filename="../src/PDFEditController.cpp" line="1640"/>
+        <location filename="../src/PDFEditController.cpp" line="1652"/>
         <source>The selected image is too large. Choose an image up to 40 megapixels and 64 MiB.</source>
         <translation>Hình ảnh đã chọn quá lớn. Hãy chọn ảnh tối đa 40 megapixel và 64 MiB.</translation>
     </message>
     <message id="NoDraftChangesToSave">
-        <location filename="../src/PDFEditController.cpp" line="2389"/>
-        <location filename="../src/PDFEditController.cpp" line="2436"/>
+        <location filename="../src/PDFEditController.cpp" line="2984"/>
+        <location filename="../src/PDFEditController.cpp" line="3031"/>
         <source>There are no draft changes to save.</source>
         <translation>Không có thay đổi nháp nào để lưu.</translation>
     </message>
     <message id="PdfSavedButReopenFailed">
-        <location filename="../src/PDFEditController.cpp" line="2544"/>
+        <location filename="../src/PDFEditController.cpp" line="3139"/>
         <source>The PDF was saved, but TrePDF could not reopen it.</source>
         <translation>Đã lưu tệp PDF nhưng TrePDF không thể mở lại tệp.</translation>
     </message>
     <message id="PdfSavedFile">
-        <location filename="../src/PDFEditController.cpp" line="2532"/>
-        <location filename="../src/PDFEditController.cpp" line="2550"/>
+        <location filename="../src/PDFEditController.cpp" line="3127"/>
+        <location filename="../src/PDFEditController.cpp" line="3145"/>
         <source>Saved %1</source>
         <translation>Đã lưu %1</translation>
     </message>
     <message id="PdfFormImageDeleteUnsupported">
-        <location filename="../src/PDFEditController.cpp" line="2843"/>
+        <location filename="../src/PDFEditController.cpp" line="3765"/>
         <source>Images inside a PDF form object cannot be deleted safely yet.</source>
         <translation>Chưa thể xóa an toàn hình ảnh nằm trong đối tượng biểu mẫu PDF.</translation>
     </message>
     <message id="PdfTextClippingEditUnsupported">
-        <location filename="../src/PDFEditController.cpp" line="2910"/>
+        <location filename="../src/PDFEditController.cpp" line="3833"/>
         <source>Text clipping render modes cannot be edited safely yet.</source>
         <translation>Chưa thể chỉnh sửa an toàn văn bản dùng chế độ cắt xén.</translation>
     </message>
     <message id="PdfFormTextSaveUnsupported">
-        <location filename="../src/PDFEditController.cpp" line="2913"/>
+        <location filename="../src/PDFEditController.cpp" line="3836"/>
         <source>Text inside a PDF form object cannot be saved safely yet.</source>
         <translation>Chưa thể lưu an toàn văn bản nằm trong đối tượng biểu mẫu PDF.</translation>
     </message>
     <message id="InlineEditorUnsupportedTextLayout">
-        <location filename="../src/PDFEditController.cpp" line="2916"/>
+        <location filename="../src/PDFEditController.cpp" line="3839"/>
         <source>Rotated, transformed, or multiline text is not supported by the inline draft editor yet.</source>
         <translation>Trình chỉnh sửa bản nháp tại chỗ chưa hỗ trợ văn bản xoay, biến đổi hoặc nhiều dòng.</translation>
     </message>
     <message id="FreeTextAnnotation">
-        <location filename="../src/PDFEditController.cpp" line="3200"/>
+        <location filename="../src/PDFEditController.cpp" line="4126"/>
         <source>Free text annotation</source>
         <translation>Chú thích văn bản tự do</translation>
     </message>
     <message id="FormField">
-        <location filename="../src/PDFEditController.cpp" line="3205"/>
+        <location filename="../src/PDFEditController.cpp" line="4131"/>
         <source>Form field</source>
         <translation>Trường biểu mẫu</translation>
     </message>
     <message id="DraftEditorUnsupportedAnnotations">
-        <location filename="../src/PDFEditController.cpp" line="3214"/>
+        <location filename="../src/PDFEditController.cpp" line="4140"/>
         <source>Editing form fields and free-text annotations is not available in this draft editor yet.</source>
         <translation>Trình chỉnh sửa bản nháp này chưa hỗ trợ chỉnh sửa trường biểu mẫu và chú thích văn bản tự do.</translation>
     </message>
     <message id="VietnameseFonts">
-        <location filename="../src/Components/TextFormatPanel.qml" line="25"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="26"/>
         <source>Vietnamese</source>
         <translation>Tiếng Việt</translation>
     </message>
     <message id="EnglishFonts">
-        <location filename="../src/Components/TextFormatPanel.qml" line="27"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="28"/>
         <source>English</source>
         <translation>Tiếng Anh</translation>
     </message>
     <message id="ChineseFonts">
-        <location filename="../src/Components/TextFormatPanel.qml" line="29"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="30"/>
         <source>Chinese</source>
         <translation>Tiếng Trung</translation>
     </message>
     <message id="JapaneseFonts">
-        <location filename="../src/Components/TextFormatPanel.qml" line="31"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="32"/>
         <source>Japanese</source>
         <translation>Tiếng Nhật</translation>
     </message>
     <message id="KoreanFonts">
-        <location filename="../src/Components/TextFormatPanel.qml" line="33"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="34"/>
         <source>Korean</source>
         <translation>Tiếng Hàn</translation>
     </message>
+    <message id="AlignLeft">
+        <location filename="../src/Components/TextFormatPanel.qml" line="36"/>
+        <source>Align left</source>
+        <translation>Căn trái</translation>
+    </message>
+    <message id="AlignRight">
+        <location filename="../src/Components/TextFormatPanel.qml" line="38"/>
+        <source>Align right</source>
+        <translation>Căn phải</translation>
+    </message>
+    <message id="AlignCenter">
+        <location filename="../src/Components/TextFormatPanel.qml" line="40"/>
+        <source>Align center</source>
+        <translation>Căn giữa</translation>
+    </message>
+    <message id="Justify">
+        <location filename="../src/Components/TextFormatPanel.qml" line="42"/>
+        <source>Justify</source>
+        <translation>Căn đều hai bên</translation>
+    </message>
     <message id="ExpandTextFormatting">
-        <location filename="../src/Components/TextFormatPanel.qml" line="105"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="133"/>
         <source>Expand text formatting</source>
         <translation>Mở rộng định dạng văn bản</translation>
     </message>
     <message id="TextFormatting">
-        <location filename="../src/Components/TextFormatPanel.qml" line="147"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="175"/>
         <source>Text Formatting</source>
         <translation>Định dạng văn bản</translation>
     </message>
     <message id="CollapseTextFormatting">
-        <location filename="../src/Components/TextFormatPanel.qml" line="164"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="192"/>
         <source>Collapse text formatting</source>
         <translation>Thu gọn định dạng văn bản</translation>
     </message>
     <message id="SelectEditableTextForFormatting">
-        <location filename="../src/Components/TextFormatPanel.qml" line="186"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="214"/>
         <source>Select editable text to enable formatting.</source>
         <translation>Chọn văn bản có thể chỉnh sửa để bật định dạng.</translation>
     </message>
     <message id="FontFamily">
-        <location filename="../src/Components/TextFormatPanel.qml" line="211"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="239"/>
         <source>Font family</source>
         <translation>Phông chữ</translation>
     </message>
     <message id="NoFontsMatchFilter">
-        <location filename="../src/Components/TextFormatPanel.qml" line="358"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="386"/>
         <source>No supported fonts match this filter.</source>
         <translation>Không có phông chữ được hỗ trợ phù hợp với bộ lọc này.</translation>
     </message>
     <message id="FontSize">
-        <location filename="../src/Components/TextFormatPanel.qml" line="392"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="420"/>
         <source>Font size</source>
         <translation>Cỡ chữ</translation>
     </message>
     <message id="FontStyle">
-        <location filename="../src/Components/TextFormatPanel.qml" line="459"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="487"/>
         <source>Style</source>
         <translation>Kiểu chữ</translation>
     </message>
     <message id="Bold">
-        <location filename="../src/Components/TextFormatPanel.qml" line="481"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="510"/>
         <source>Bold</source>
         <translation>Đậm</translation>
     </message>
     <message id="Italic">
-        <location filename="../src/Components/TextFormatPanel.qml" line="520"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="550"/>
         <source>Italic</source>
         <translation>Nghiêng</translation>
     </message>
     <message id="FontColor">
-        <location filename="../src/Components/TextFormatPanel.qml" line="591"/>
-        <location filename="../src/Components/TextFormatPanel.qml" line="654"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="622"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="742"/>
         <source>Font color</source>
         <translation>Màu chữ</translation>
     </message>

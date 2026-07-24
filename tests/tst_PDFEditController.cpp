@@ -48,6 +48,7 @@ constexpr char kUprightText[] = "Upright";
 constexpr char kObliqueText[] = "Oblique";
 constexpr char kStretchedText[] = "Scale";
 constexpr char kImageFixtureText[] = "Image fixture text";
+constexpr char kFontCollisionTargetText[] = "Wxyz";
 
 class PdfFileWriter : public FPDF_FILEWRITE
 {
@@ -107,6 +108,44 @@ bool writePdfObjects(const QString &filePath,
     QFile file(filePath);
     return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
         && file.write(data) == data.size();
+}
+
+bool createArialSubsetCollisionSourcePdf(const QString &filePath)
+{
+    const QByteArray pageContent(
+        "BT\n"
+        "/F1 10 Tf\n"
+        "40 760 Td\n"
+        "(\\301) Tj\n"
+        "ET\n"
+        "BT\n"
+        "/F2 10 Tf\n"
+        "40 700 Td\n"
+        "(Wxyz) Tj\n"
+        "ET\n");
+    const QByteArray contentStream = QByteArray("<< /Length ")
+        + QByteArray::number(pageContent.size())
+        + QByteArray(" >>\nstream\n")
+        + pageContent
+        + QByteArray("endstream");
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                "/Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> "
+                "/Contents 6 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Courier "
+                "/Encoding /WinAnsiEncoding >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Arial "
+                "/Encoding /WinAnsiEncoding >>"),
+            contentStream,
+        });
 }
 
 enum class PatternPaintMode {
@@ -1316,6 +1355,7 @@ private slots:
     void reschedulesCancelledHoverForSamePage();
     void defersUncachedHoverWhilePdfiumIsBusy();
     void registersBundledFonts();
+    void keepsArialLayoutStableAfterEmbeddedSubsetCollision();
     void filtersUnsupportedSystemFonts();
     void filtersFontFamiliesByLanguage();
     void intersectsFontFiltersAcrossMixedStyles();
@@ -1329,6 +1369,7 @@ private slots:
     void followsCurrentRightColumnDraftBoundary();
     void hidesDeletedTextFromInteraction();
     void persistsExpandedFrameForTextChanges();
+    void persistsExpandedFrameForParagraphAlignment();
     void keepsStandaloneResizeFrameUnexpanded();
     void keepsMixedStylesAsSeparateCandidates();
     void keepsDistantColumnsAsSeparateCandidates();
@@ -1347,6 +1388,7 @@ private slots:
     void appliesTypingFormatBetweenRepeatedCharacters();
     void preservesEditorUndoWhenFormattingSelection();
     void formatsSelectedRangeInMultilineDraft();
+    void alignsSelectedParagraphsWithUndoRedo();
     void calibratesDisplayStretchToPdfScale_data();
     void calibratesDisplayStretchToPdfScale();
     void appliesFontStylesToDisplayFont_data();
@@ -1367,6 +1409,7 @@ private slots:
     void savesUnchangedCopyRoundTrip();
     void savesMultipleDraftsOnSamePage();
     void savesExpandedFrameBeforeRightColumn();
+    void savesParagraphAlignmentOnlyEdit();
     void savesDeletedTextRoundTrip();
     void savesAddedTextRoundTrip();
     void rendersAddedImageSnapshot();
@@ -1719,6 +1762,98 @@ void PDFEditControllerTest::registersBundledFonts()
         QVERIFY(!uniqueFamilies.contains(family, Qt::CaseInsensitive));
         uniqueFamilies.append(family);
     }
+}
+
+void PDFEditControllerTest::keepsArialLayoutStableAfterEmbeddedSubsetCollision()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("arial-collision-source.pdf"));
+    const QString collisionPath = m_temporaryDirectory.filePath(
+        QStringLiteral("arial-collision-subset.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("arial-collision-output.pdf"));
+    QVERIFY(createArialSubsetCollisionSourcePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    const QVariantMap seedCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QStringLiteral("Á"));
+    QVERIFY(!seedCandidate.isEmpty());
+    QVERIFY(seedCandidate.value(QStringLiteral("fontFamily")).toString()
+            != QStringLiteral("Arial"));
+    QVERIFY(controller.selectCandidate(
+        0,
+        seedCandidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(0, QStringLiteral("Á").size());
+    controller.setSelectedFontFamily(QStringLiteral("Arial"));
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(collisionPath)));
+
+    const TextObjectFontInfo embeddedFont = textObjectFontInfo(
+        collisionPath,
+        QStringLiteral("Á"));
+    QVERIFY(embeddedFont.found);
+    QCOMPARE(embeddedFont.embedded, 1);
+    QVERIFY(hasSubsetFontPrefix(embeddedFont.baseName));
+    QCOMPARE(embeddedFont.familyName, QStringLiteral("Arial"));
+
+    const TextObjectFontInfo sourceFont = textObjectFontInfo(
+        collisionPath,
+        QString::fromLatin1(kFontCollisionTargetText));
+    QVERIFY(sourceFont.found);
+    QCOMPARE(sourceFont.embedded, 0);
+    QCOMPARE(sourceFont.familyName, QStringLiteral("Arial"));
+
+    const QVariantMap targetCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kFontCollisionTargetText));
+    QVERIFY(!targetCandidate.isEmpty());
+    QCOMPARE(
+        targetCandidate.value(QStringLiteral("fontFamily")).toString(),
+        QStringLiteral("Arial"));
+    QVERIFY(controller.selectCandidate(
+        0,
+        targetCandidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+
+    const QSizeF pageSize = document.pageSize(0);
+    const qreal layoutWidth = (
+        controller.selectedFrameRect().right() - controller.selectedOriginX())
+        * pageSize.width();
+    const QFont previewFont = controller.fontForDisplay(
+        controller.selectedFontFamily(),
+        controller.selectedFontStretch(),
+        controller.selectedFontBold(),
+        controller.selectedFontItalic(),
+        controller.selectedFontUnderline(),
+        controller.selectedDisplayFontSizeRatio() * pageSize.height());
+    const QFontMetricsF previewMetrics(previewFont);
+    QString editedText = QString::fromLatin1(kFontCollisionTargetText);
+    while (editedText.size() < 1024) {
+        const QString extendedText = editedText + QLatin1Char('x');
+        if (previewMetrics.horizontalAdvance(extendedText)
+            >= layoutWidth - 8.0) {
+            break;
+        }
+        editedText = extendedText;
+    }
+    QVERIFY(layoutWidth > 0.0);
+    QVERIFY(editedText.size()
+            > QString::fromLatin1(kFontCollisionTargetText).size());
+    QVERIFY(previewMetrics.horizontalAdvance(editedText) < layoutWidth - 8.0);
+    QVERIFY(previewMetrics.horizontalAdvance(editedText) > layoutWidth * 0.75);
+
+    controller.updateSelectedTextPreview(editedText);
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY2(
+        topLevelTextObjects(outputPath).contains(editedText),
+        qPrintable(topLevelTextObjects(outputPath).join(QLatin1Char('|'))));
 }
 
 void PDFEditControllerTest::filtersUnsupportedSystemFonts()
@@ -2233,6 +2368,56 @@ void PDFEditControllerTest::persistsExpandedFrameForTextChanges()
     m_controller.redo();
     QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
     QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::persistsExpandedFrameForParagraphAlignment()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF sourceRect = m_controller.selectedSourceRect();
+    const QRectF originalFrameRect = m_controller.selectedFrameRect();
+    m_controller.beginSelectedTextEdit();
+    const QRectF expandedFrameRect = m_controller.selectedFrameRect();
+    QVERIFY(expandedFrameRect.right() > originalFrameRect.right());
+
+    m_controller.setSelectedParagraphAlignment(
+        PDFEditController::RightAlignment);
+    m_controller.finishSelectedTextEdit();
+
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    QCOMPARE(
+        m_controller.selectedParagraphAlignment(),
+        static_cast<int>(PDFEditController::RightAlignment));
+    const QVariantList drafts = m_controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    const QVariantMap draft = drafts.constFirst().toMap();
+    QCOMPARE(
+        draft.value(QStringLiteral("frameRect")).toRectF(),
+        expandedFrameRect);
+    QCOMPARE(
+        draft.value(QStringLiteral("paragraphFormats"))
+            .toList()
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("alignment"))
+            .toString(),
+        QStringLiteral("right"));
+
+    m_controller.undo();
+    QCOMPARE(m_controller.selectedFrameRect(), originalFrameRect);
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+
+    m_controller.redo();
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrameRect);
+    QCOMPARE(
+        m_controller.selectedParagraphAlignment(),
+        static_cast<int>(PDFEditController::RightAlignment));
     m_controller.discardDrafts();
 }
 
@@ -3307,6 +3492,73 @@ void PDFEditControllerTest::formatsSelectedRangeInMultilineDraft()
     m_controller.discardDrafts();
 }
 
+void PDFEditControllerTest::alignsSelectedParagraphsWithUndoRedo()
+{
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+
+    const QString text = QStringLiteral("First\nSecond\nThird");
+    m_controller.beginSelectedTextEdit();
+    m_controller.updateSelectedTextPreview(text);
+    m_controller.setSelectedTextRange(7, 0);
+    QCOMPARE(
+        m_controller.selectedParagraphAlignment(),
+        static_cast<int>(PDFEditController::LeftAlignment));
+
+    m_controller.setSelectedParagraphAlignment(
+        PDFEditController::CenterAlignment);
+    QCOMPARE(
+        m_controller.selectedParagraphAlignment(),
+        static_cast<int>(PDFEditController::CenterAlignment));
+
+    QVariantList paragraphs = m_controller.draftsForPage(0)
+                                  .constFirst()
+                                  .toMap()
+                                  .value(QStringLiteral("paragraphFormats"))
+                                  .toList();
+    QCOMPARE(paragraphs.size(), 3);
+    QCOMPARE(
+        paragraphs.at(0).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("left"));
+    QCOMPARE(
+        paragraphs.at(1).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("center"));
+    QCOMPARE(
+        paragraphs.at(2).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("left"));
+
+    m_controller.updateSelectedTextPreview(
+        QStringLiteral("First\nSecond!\nThird"));
+    paragraphs = m_controller.draftsForPage(0)
+                     .constFirst()
+                     .toMap()
+                     .value(QStringLiteral("paragraphFormats"))
+                     .toList();
+    QCOMPARE(
+        paragraphs.at(1).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("center"));
+
+    m_controller.setSelectedTextRange(0, text.size());
+    QCOMPARE(m_controller.selectedParagraphAlignment(), -1);
+    m_controller.finishSelectedTextEdit();
+
+    QVERIFY(m_controller.canUndo());
+    m_controller.undo();
+    QVERIFY(m_controller.draftsForPage(0).isEmpty());
+    m_controller.redo();
+    paragraphs = m_controller.draftsForPage(0)
+                     .constFirst()
+                     .toMap()
+                     .value(QStringLiteral("paragraphFormats"))
+                     .toList();
+    QCOMPARE(
+        paragraphs.at(1).toMap().value(QStringLiteral("alignment")).toString(),
+        QStringLiteral("center"));
+
+    m_controller.discardDrafts();
+}
+
 void PDFEditControllerTest::appliesFontStylesToDisplayFont_data()
 {
     QTest::addColumn<bool>("fontBold");
@@ -4165,6 +4417,49 @@ void PDFEditControllerTest::savesExpandedFrameBeforeRightColumn()
     const QString savedText = normalizedPageText(outputPath);
     QVERIFY(savedText.contains(editedText));
     QVERIFY(savedText.contains(QString::fromLatin1(kRightColumnText)));
+}
+
+void PDFEditControllerTest::savesParagraphAlignmentOnlyEdit()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-alignment-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-alignment-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString text = QString::fromLatin1(kRegularText);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0),
+        text);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+
+    const QRectF originalFrameRect = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    const QRectF expandedFrameRect = controller.selectedFrameRect();
+    QVERIFY(expandedFrameRect.right() > originalFrameRect.right());
+    controller.setSelectedParagraphAlignment(
+        PDFEditController::RightAlignment);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedFrameRect(), expandedFrameRect);
+
+    QPointF sourceOrigin;
+    QVERIFY(textObjectOrigin(sourcePath, text, sourceOrigin));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QPointF savedOrigin;
+    QVERIFY(textObjectOrigin(outputPath, text, savedOrigin));
+    QVERIFY2(
+        savedOrigin.x() > sourceOrigin.x() + 1.0,
+        qPrintable(QStringLiteral(
+            "Expected right alignment to move text right from %1, got %2")
+                       .arg(sourceOrigin.x(), 0, 'f', 3)
+                       .arg(savedOrigin.x(), 0, 'f', 3)));
 }
 
 void PDFEditControllerTest::savesDeletedTextRoundTrip()

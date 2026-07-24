@@ -86,6 +86,10 @@ qt_add_qml_module(trepdf
         src/Components/ViewRibbon.qml
     RESOURCES
         src/assets/icons/add.svg
+        src/assets/icons/align-center.svg
+        src/assets/icons/align-justify.svg
+        src/assets/icons/align-left.svg
+        src/assets/icons/align-right.svg
         src/assets/icons/bold-text.svg
         src/assets/icons/calendar-days.svg
         src/assets/icons/chevron-left.svg
