@@ -1988,32 +1988,41 @@ void PDFEditController::resolveCandidateFontFamily(
     QHash<int, QString> &resolvedEmbeddedFamilies)
 {
     assertPDFiumProcessLockNotHeld();
-    QString embeddedFamily;
-    const auto resolvedFamily = resolvedEmbeddedFamilies.constFind(
-        candidate.pendingFontSnapshotIndex);
-    if (resolvedFamily != resolvedEmbeddedFamilies.cend()) {
-        embeddedFamily = resolvedFamily.value();
-    } else {
-        embeddedFamily = registerEmbeddedFont(
-            candidate.pendingEmbeddedFontData,
-            candidate.pendingFontExpectedFamily);
-        resolvedEmbeddedFamilies.insert(
-            candidate.pendingFontSnapshotIndex,
-            embeddedFamily);
-    }
-
-    if (fontSupportsText(embeddedFamily, candidate.text)) {
-        candidate.fontFamily = embeddedFamily;
-    } else if (fontSupportsText(
-                   candidate.pendingBundledFontFamily,
-                   candidate.text)) {
+    // Resolve known exact faces before registering a PDF-embedded face.
+    // Embedded fonts are commonly subsetted but retain their original family
+    // name. Registering such a subset first can make QFontDatabase select it
+    // instead of the complete bundled/system face for every later object with
+    // that family.
+    if (ApplicationFonts::fontFaceSupportsText(
+            candidate.pendingBundledFontFamily,
+            candidate.fontBold,
+            candidate.fontItalic,
+            candidate.text)) {
         candidate.fontFamily = candidate.pendingBundledFontFamily;
-    } else if (fontSupportsText(
+    } else if (ApplicationFonts::fontFaceSupportsText(
                    candidate.pendingSystemFontFamily,
+                   candidate.fontBold,
+                   candidate.fontItalic,
                    candidate.text)) {
         candidate.fontFamily = candidate.pendingSystemFontFamily;
     } else {
-        candidate.fontFamily.clear();
+        QString embeddedFamily;
+        const auto resolvedFamily = resolvedEmbeddedFamilies.constFind(
+            candidate.pendingFontSnapshotIndex);
+        if (resolvedFamily != resolvedEmbeddedFamilies.cend()) {
+            embeddedFamily = resolvedFamily.value();
+        } else {
+            embeddedFamily = registerEmbeddedFont(
+                candidate.pendingEmbeddedFontData,
+                candidate.pendingFontExpectedFamily);
+            resolvedEmbeddedFamilies.insert(
+                candidate.pendingFontSnapshotIndex,
+                embeddedFamily);
+        }
+
+        candidate.fontFamily = fontSupportsText(embeddedFamily, candidate.text)
+            ? embeddedFamily
+            : QString();
     }
 
     candidate.pendingFontSnapshotIndex = -1;

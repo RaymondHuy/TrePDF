@@ -48,6 +48,7 @@ constexpr char kUprightText[] = "Upright";
 constexpr char kObliqueText[] = "Oblique";
 constexpr char kStretchedText[] = "Scale";
 constexpr char kImageFixtureText[] = "Image fixture text";
+constexpr char kFontCollisionTargetText[] = "Wxyz";
 
 class PdfFileWriter : public FPDF_FILEWRITE
 {
@@ -107,6 +108,44 @@ bool writePdfObjects(const QString &filePath,
     QFile file(filePath);
     return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
         && file.write(data) == data.size();
+}
+
+bool createArialSubsetCollisionSourcePdf(const QString &filePath)
+{
+    const QByteArray pageContent(
+        "BT\n"
+        "/F1 10 Tf\n"
+        "40 760 Td\n"
+        "(\\301) Tj\n"
+        "ET\n"
+        "BT\n"
+        "/F2 10 Tf\n"
+        "40 700 Td\n"
+        "(Wxyz) Tj\n"
+        "ET\n");
+    const QByteArray contentStream = QByteArray("<< /Length ")
+        + QByteArray::number(pageContent.size())
+        + QByteArray(" >>\nstream\n")
+        + pageContent
+        + QByteArray("endstream");
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                "/Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> "
+                "/Contents 6 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Courier "
+                "/Encoding /WinAnsiEncoding >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Arial "
+                "/Encoding /WinAnsiEncoding >>"),
+            contentStream,
+        });
 }
 
 enum class PatternPaintMode {
@@ -1316,6 +1355,7 @@ private slots:
     void reschedulesCancelledHoverForSamePage();
     void defersUncachedHoverWhilePdfiumIsBusy();
     void registersBundledFonts();
+    void keepsArialLayoutStableAfterEmbeddedSubsetCollision();
     void filtersUnsupportedSystemFonts();
     void filtersFontFamiliesByLanguage();
     void intersectsFontFiltersAcrossMixedStyles();
@@ -1720,6 +1760,98 @@ void PDFEditControllerTest::registersBundledFonts()
         QVERIFY(!uniqueFamilies.contains(family, Qt::CaseInsensitive));
         uniqueFamilies.append(family);
     }
+}
+
+void PDFEditControllerTest::keepsArialLayoutStableAfterEmbeddedSubsetCollision()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("arial-collision-source.pdf"));
+    const QString collisionPath = m_temporaryDirectory.filePath(
+        QStringLiteral("arial-collision-subset.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("arial-collision-output.pdf"));
+    QVERIFY(createArialSubsetCollisionSourcePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    const QVariantMap seedCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QStringLiteral("Á"));
+    QVERIFY(!seedCandidate.isEmpty());
+    QVERIFY(seedCandidate.value(QStringLiteral("fontFamily")).toString()
+            != QStringLiteral("Arial"));
+    QVERIFY(controller.selectCandidate(
+        0,
+        seedCandidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(0, QStringLiteral("Á").size());
+    controller.setSelectedFontFamily(QStringLiteral("Arial"));
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(collisionPath)));
+
+    const TextObjectFontInfo embeddedFont = textObjectFontInfo(
+        collisionPath,
+        QStringLiteral("Á"));
+    QVERIFY(embeddedFont.found);
+    QCOMPARE(embeddedFont.embedded, 1);
+    QVERIFY(hasSubsetFontPrefix(embeddedFont.baseName));
+    QCOMPARE(embeddedFont.familyName, QStringLiteral("Arial"));
+
+    const TextObjectFontInfo sourceFont = textObjectFontInfo(
+        collisionPath,
+        QString::fromLatin1(kFontCollisionTargetText));
+    QVERIFY(sourceFont.found);
+    QCOMPARE(sourceFont.embedded, 0);
+    QCOMPARE(sourceFont.familyName, QStringLiteral("Arial"));
+
+    const QVariantMap targetCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kFontCollisionTargetText));
+    QVERIFY(!targetCandidate.isEmpty());
+    QCOMPARE(
+        targetCandidate.value(QStringLiteral("fontFamily")).toString(),
+        QStringLiteral("Arial"));
+    QVERIFY(controller.selectCandidate(
+        0,
+        targetCandidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+
+    const QSizeF pageSize = document.pageSize(0);
+    const qreal layoutWidth = (
+        controller.selectedFrameRect().right() - controller.selectedOriginX())
+        * pageSize.width();
+    const QFont previewFont = controller.fontForDisplay(
+        controller.selectedFontFamily(),
+        controller.selectedFontStretch(),
+        controller.selectedFontBold(),
+        controller.selectedFontItalic(),
+        controller.selectedFontUnderline(),
+        controller.selectedDisplayFontSizeRatio() * pageSize.height());
+    const QFontMetricsF previewMetrics(previewFont);
+    QString editedText = QString::fromLatin1(kFontCollisionTargetText);
+    while (editedText.size() < 1024) {
+        const QString extendedText = editedText + QLatin1Char('x');
+        if (previewMetrics.horizontalAdvance(extendedText)
+            >= layoutWidth - 8.0) {
+            break;
+        }
+        editedText = extendedText;
+    }
+    QVERIFY(layoutWidth > 0.0);
+    QVERIFY(editedText.size()
+            > QString::fromLatin1(kFontCollisionTargetText).size());
+    QVERIFY(previewMetrics.horizontalAdvance(editedText) < layoutWidth - 8.0);
+    QVERIFY(previewMetrics.horizontalAdvance(editedText) > layoutWidth * 0.75);
+
+    controller.updateSelectedTextPreview(editedText);
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY2(
+        topLevelTextObjects(outputPath).contains(editedText),
+        qPrintable(topLevelTextObjects(outputPath).join(QLatin1Char('|'))));
 }
 
 void PDFEditControllerTest::filtersUnsupportedSystemFonts()
