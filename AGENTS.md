@@ -36,6 +36,12 @@ Current features:
   page. A drag preserves image size and creates one undoable command. Source
   image preview transforms run on the render worker, and Save/Save As translates
   the original image matrix so pixels, orientation, and z-order remain intact.
+- Added text and editable top-level source text can be dragged by the selected
+  bounding box or arrow keys. A move is one undoable geometry command. When
+  source text is only moved, preview and Save/Save As translate every original
+  text-object matrix so its font, glyph encoding, paint, and z-order remain
+  intact; a content, format, or frame-size change still uses text reflow and
+  source-object replacement.
 - Drafts use a rich-text model with UTF-16 text ranges, character spans,
   paragraph formats, a layout frame, and content bounds. The inline `TextEdit`
   supports multiple lines, wraps/reflows inside the layout frame, renders every
@@ -259,7 +265,10 @@ clipped or elided unintentionally.
   saveable; nested Form XObject content must remain non-editable until its
   transform/clip/resource scope can be preserved. Keep moved source images in
   place and translate their existing matrix; this preserves their resource,
-  orientation, size, and z-order.
+  orientation, size, and z-order. Apply the same matrix-only path to editable
+  top-level source text when position is its only change; any text, character
+  format, paragraph format, or frame-size change must follow the existing
+  remove-and-reflow path.
   Remove source objects with `FPDFPage_RemoveObject()` and destroy each object
   only after a successful removal.
 - PDFium does not wrap text. Reflow the draft with `QTextLayout`, create text

@@ -1415,9 +1415,11 @@ private slots:
     void rendersAddedImageSnapshot();
     void addsImageWithUndoRedo();
     void movesAddedImageWithUndoRedo();
+    void movesTopLevelTextWithUndoRedo();
     void movesTopLevelImageWithUndoRedo();
     void deletesTopLevelImageWithUndoRedo();
     void savesAddedImageRoundTrip();
+    void savesMovedTopLevelTextRoundTrip();
     void savesMovedTopLevelImageRoundTrip();
     void savesDeletedTopLevelImageRoundTrip();
     void preservesAddedTextLayerOrder();
@@ -4684,7 +4686,7 @@ void PDFEditControllerTest::movesAddedImageWithUndoRedo()
 
     QCOMPARE(controller.selectedFrameRect(), movedFrame);
     QCOMPARE(controller.selectedContentBounds(), movedFrame);
-    QCOMPARE(controller.draftedImageMovesForPage(0).size(), 0);
+    QCOMPARE(controller.draftedObjectMovesForPage(0).size(), 0);
     QCOMPARE(
         controller.candidateAt(0, movedFrame.center().x(), movedFrame.center().y())
             .value(QStringLiteral("objectId")).toString(),
@@ -4699,6 +4701,90 @@ void PDFEditControllerTest::movesAddedImageWithUndoRedo()
     QCOMPARE(controller.selectedFrameRect(), originalFrame);
     controller.redo();
     QCOMPARE(controller.selectedFrameRect(), movedFrame);
+}
+
+void PDFEditControllerTest::movesTopLevelTextWithUndoRedo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("move-text-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kGroupedText));
+    QVERIFY2(!textCandidate.isEmpty(), "Top-level text candidate was not discovered");
+    const QString objectId = textCandidate
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QRectF originalFrame = textCandidate
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const auto translationForInterval = [](qreal start, qreal end) {
+        const qreal trailingSpace = 1.0 - end;
+        if (trailingSpace >= 0.05) {
+            return qMin<qreal>(0.08, trailingSpace);
+        }
+        return start >= 0.05
+            ? -qMin<qreal>(0.08, start)
+            : 0.0;
+    };
+    const QPointF translation(
+        translationForInterval(originalFrame.left(), originalFrame.right()),
+        translationForInterval(originalFrame.top(), originalFrame.bottom()));
+    QVERIFY(!qFuzzyIsNull(translation.x()));
+    QVERIFY(!qFuzzyIsNull(translation.y()));
+    const QRectF movedFrame = originalFrame.translated(translation);
+
+    QVERIFY(controller.selectCandidate(0, objectId));
+    controller.beginSelectedFrameResize();
+    QVERIFY(controller.textEditActive());
+    controller.updateSelectedFrameRect(movedFrame);
+    QCOMPARE(controller.selectedFrameRect(), movedFrame);
+    controller.finishSelectedFrameResize();
+
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    const QVariantList drafts = controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    QCOMPARE(
+        drafts.constFirst().toMap()
+            .value(QStringLiteral("sourceTextMoveOnly")).toBool(),
+        true);
+    QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 0);
+    const QVector<PDFEditController::DraftObjectMove> moves
+        = controller.draftedObjectMovesForPage(0);
+    QCOMPARE(moves.size(), 2);
+    for (const PDFEditController::DraftObjectMove &move : moves) {
+        QCOMPARE(move.kind, PDFEditController::DraftObjectMove::Kind::Text);
+        QCOMPARE(move.sourceRect, originalFrame);
+        QCOMPARE(move.frameRect, movedFrame);
+        QCOMPARE(move.objectPath.size(), 1);
+    }
+
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QCOMPARE(controller.draftedObjectMovesForPage(0).size(), 0);
+
+    controller.redo();
+    QVERIFY(controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), movedFrame);
+    QCOMPARE(controller.draftedObjectMovesForPage(0).size(), 2);
+
+    controller.commitSelectedText(QStringLiteral("Moved and edited PDF text"));
+    const QVariantList editedDrafts = controller.draftsForPage(0);
+    QCOMPARE(editedDrafts.size(), 1);
+    QCOMPARE(
+        editedDrafts.constFirst().toMap()
+            .value(QStringLiteral("sourceTextMoveOnly")).toBool(),
+        false);
+    QVERIFY(!controller.draftedTextObjectPathsForPage(0).isEmpty());
+    QCOMPARE(controller.draftedObjectMovesForPage(0).size(), 0);
 }
 
 void PDFEditControllerTest::movesTopLevelImageWithUndoRedo()
@@ -4749,9 +4835,10 @@ void PDFEditControllerTest::movesTopLevelImageWithUndoRedo()
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
     QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 0);
-    const QVector<PDFEditController::DraftImageMove> moves
-        = controller.draftedImageMovesForPage(0);
+    const QVector<PDFEditController::DraftObjectMove> moves
+        = controller.draftedObjectMovesForPage(0);
     QCOMPARE(moves.size(), 1);
+    QCOMPARE(moves.constFirst().kind, PDFEditController::DraftObjectMove::Kind::Image);
     QCOMPARE(moves.constFirst().sourceRect, originalFrame);
     QCOMPARE(moves.constFirst().frameRect, movedFrame);
     QCOMPARE(moves.constFirst().objectPath.size(), 1);
@@ -4768,12 +4855,12 @@ void PDFEditControllerTest::movesTopLevelImageWithUndoRedo()
     controller.undo();
     QVERIFY(!controller.hasDrafts());
     QCOMPARE(controller.selectedFrameRect(), originalFrame);
-    QCOMPARE(controller.draftedImageMovesForPage(0).size(), 0);
+    QCOMPARE(controller.draftedObjectMovesForPage(0).size(), 0);
 
     controller.redo();
     QVERIFY(controller.hasDrafts());
     QCOMPARE(controller.selectedFrameRect(), movedFrame);
-    QCOMPARE(controller.draftedImageMovesForPage(0).size(), 1);
+    QCOMPARE(controller.draftedObjectMovesForPage(0).size(), 1);
 }
 
 void PDFEditControllerTest::deletesTopLevelImageWithUndoRedo()
@@ -4932,6 +5019,97 @@ void PDFEditControllerTest::savesAddedImageRoundTrip()
     QVERIFY(qAbs(savedRect.y() - frame.y()) < 0.001);
     QVERIFY(qAbs(savedRect.width() - frame.width()) < 0.001);
     QVERIFY(qAbs(savedRect.height() - frame.height()) < 0.001);
+}
+
+void PDFEditControllerTest::savesMovedTopLevelTextRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-move-text-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-move-text-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    const QString text = QString::fromLatin1(kRegularText);
+    FS_MATRIX sourceMatrix{};
+    QVERIFY(textObjectMatrix(sourcePath, text, sourceMatrix));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        text);
+    QVERIFY2(!textCandidate.isEmpty(), "Top-level text candidate was not discovered");
+    const QRectF originalFrame = textCandidate
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QRectF originalSourceRect = textCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const auto translationForInterval = [](qreal start, qreal end) {
+        const qreal trailingSpace = 1.0 - end;
+        if (trailingSpace >= 0.05) {
+            return qMin<qreal>(0.08, trailingSpace);
+        }
+        return start >= 0.05
+            ? -qMin<qreal>(0.08, start)
+            : 0.0;
+    };
+    const QPointF translation(
+        translationForInterval(originalFrame.left(), originalFrame.right()),
+        translationForInterval(originalFrame.top(), originalFrame.bottom()));
+    QVERIFY(!qFuzzyIsNull(translation.x()));
+    QVERIFY(!qFuzzyIsNull(translation.y()));
+    const QRectF movedFrame = originalFrame.translated(translation);
+    QVERIFY(controller.selectCandidate(
+        0,
+        textCandidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(movedFrame);
+    controller.finishSelectedFrameResize();
+
+    const QVariantList drafts = controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    QCOMPARE(
+        drafts.constFirst().toMap()
+            .value(QStringLiteral("sourceTextMoveOnly")).toBool(),
+        true);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+    QVERIFY(!controller.hasDrafts());
+
+    FS_MATRIX savedMatrix{};
+    QVERIFY(textObjectMatrix(outputPath, text, savedMatrix));
+    QVERIFY(qAbs(savedMatrix.a - sourceMatrix.a) < 0.001F);
+    QVERIFY(qAbs(savedMatrix.b - sourceMatrix.b) < 0.001F);
+    QVERIFY(qAbs(savedMatrix.c - sourceMatrix.c) < 0.001F);
+    QVERIFY(qAbs(savedMatrix.d - sourceMatrix.d) < 0.001F);
+    QVERIFY(qAbs(savedMatrix.e - sourceMatrix.e) > 1.0F);
+    QVERIFY(qAbs(savedMatrix.f - sourceMatrix.f) > 1.0F);
+    QVERIFY(normalizedPageText(outputPath).contains(text));
+
+    const QVariantMap savedCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        text);
+    QVERIFY(!savedCandidate.isEmpty());
+    const QRectF savedRect = savedCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const QRectF expectedSavedRect = originalSourceRect.translated(translation);
+    QVERIFY(qAbs(savedRect.x() - expectedSavedRect.x()) < 0.001);
+    QVERIFY(qAbs(savedRect.y() - expectedSavedRect.y()) < 0.001);
+    QVERIFY(qAbs(savedRect.width() - expectedSavedRect.width()) < 0.001);
+    QVERIFY(qAbs(savedRect.height() - expectedSavedRect.height()) < 0.001);
+
+    FS_MATRIX unchangedSourceMatrix{};
+    QVERIFY(textObjectMatrix(sourcePath, text, unchangedSourceMatrix));
+    QCOMPARE(unchangedSourceMatrix.a, sourceMatrix.a);
+    QCOMPARE(unchangedSourceMatrix.b, sourceMatrix.b);
+    QCOMPARE(unchangedSourceMatrix.c, sourceMatrix.c);
+    QCOMPARE(unchangedSourceMatrix.d, sourceMatrix.d);
+    QCOMPARE(unchangedSourceMatrix.e, sourceMatrix.e);
+    QCOMPARE(unchangedSourceMatrix.f, sourceMatrix.f);
 }
 
 void PDFEditControllerTest::savesMovedTopLevelImageRoundTrip()

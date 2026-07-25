@@ -283,31 +283,35 @@ private:
     bool m_restoreSucceeded = true;
 };
 
-class ScopedPageImageMoves
+class ScopedPageObjectMoves
 {
 public:
-    ~ScopedPageImageMoves()
+    ~ScopedPageObjectMoves()
     {
         restore();
     }
 
     bool apply(FPDF_PAGE page,
                const QSize &deviceSize,
-               const QVector<PDFEditController::DraftImageMove> &moves)
+               const QVector<PDFEditController::DraftObjectMove> &moves)
     {
         assertPDFiumProcessLockHeld();
         if (!page || deviceSize.isEmpty()) {
             return moves.isEmpty();
         }
 
-        for (const PDFEditController::DraftImageMove &move : moves) {
+        for (const PDFEditController::DraftObjectMove &move : moves) {
             if (move.objectPath.size() != 1) {
                 restore();
                 return false;
             }
 
             FPDF_PAGEOBJECT object = pageObjectAtPath(page, move.objectPath);
-            if (!object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_IMAGE) {
+            const int expectedType
+                = move.kind == PDFEditController::DraftObjectMove::Kind::Text
+                ? FPDF_PAGEOBJ_TEXT
+                : FPDF_PAGEOBJ_IMAGE;
+            if (!object || FPDFPageObj_GetType(object) != expectedType) {
                 restore();
                 return false;
             }
@@ -424,7 +428,7 @@ PageRenderResult renderPageFromFile(const QString &filePath,
                                     const QColor &background,
                                     qreal devicePixelRatio,
                                     const QVector<QVector<int>> &draftObjectPaths,
-                                    const QVector<PDFEditController::DraftImageMove> &draftImageMoves,
+                                    const QVector<PDFEditController::DraftObjectMove> &draftObjectMoves,
                                     const CancellationFlag &cancellation)
 {
     if (filePath.isEmpty() || page < 0 || pixelSize.isEmpty() || isCancelled(cancellation)) {
@@ -438,7 +442,7 @@ PageRenderResult renderPageFromFile(const QString &filePath,
     image.fill(background);
 
     bool suppressionApplied = draftObjectPaths.isEmpty();
-    bool imageMovesApplied = draftImageMoves.isEmpty();
+    bool objectMovesApplied = draftObjectMoves.isEmpty();
     bool renderPerformed = false;
     {
         // One process-wide transaction covers every PDFium call, including
@@ -480,20 +484,20 @@ PageRenderResult renderPageFromFile(const QString &filePath,
         bool renderDocumentReusable = true;
         {
             ScopedPageObjectSuppression suppression;
-            ScopedPageImageMoves imageMoves;
+            ScopedPageObjectMoves objectMoves;
             if (!draftObjectPaths.isEmpty()) {
                 suppressionApplied = suppression.suppress(pdfPage, draftObjectPaths);
             }
-            if (!draftImageMoves.isEmpty()) {
-                imageMovesApplied = imageMoves.apply(
+            if (!draftObjectMoves.isEmpty()) {
+                objectMovesApplied = objectMoves.apply(
                     pdfPage,
                     pixelSize,
-                    draftImageMoves);
+                    draftObjectMoves);
             }
 
             if (!isCancelled(cancellation)
                 && (suppressionApplied || suppression.restorationSucceeded())
-                && (imageMovesApplied || imageMoves.restorationSucceeded())) {
+                && (objectMovesApplied || objectMoves.restorationSucceeded())) {
                 FPDF_RenderPageBitmap(
                     bitmap,
                     pdfPage,
@@ -505,9 +509,9 @@ PageRenderResult renderPageFromFile(const QString &filePath,
                     FPDF_ANNOT);
                 renderPerformed = true;
             }
-            const bool imageRestoreSucceeded = imageMoves.restore();
+            const bool objectRestoreSucceeded = objectMoves.restore();
             const bool suppressionRestoreSucceeded = suppression.restore();
-            renderDocumentReusable = imageRestoreSucceeded
+            renderDocumentReusable = objectRestoreSucceeded
                 && suppressionRestoreSucceeded;
         }
 
@@ -523,7 +527,7 @@ PageRenderResult renderPageFromFile(const QString &filePath,
     }
 
     image.setDevicePixelRatio(devicePixelRatio);
-    return PageRenderResult{image, suppressionApplied && imageMovesApplied};
+    return PageRenderResult{image, suppressionApplied && objectMovesApplied};
 }
 
 } // namespace
@@ -1023,10 +1027,10 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             && editController->document() == document
         ? editController->draftedTextObjectPathsForPage(page)
         : QVector<QVector<int>>();
-    const QVector<PDFEditController::DraftImageMove> draftImageMoves = editController
+    const QVector<PDFEditController::DraftObjectMove> draftObjectMoves = editController
             && editController->document() == document
-        ? editController->draftedImageMovesForPage(page)
-        : QVector<PDFEditController::DraftImageMove>();
+        ? editController->draftedObjectMovesForPage(page)
+        : QVector<PDFEditController::DraftObjectMove>();
     const bool allDraftObjectsSuppressible = !editController
         || editController->document() != document
         || editController->allDraftedTextObjectsSuppressibleForPage(page);
@@ -1056,7 +1060,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                                     background,
                                     draftRevision,
                                     draftObjectPaths,
-                                    draftImageMoves,
+                                    draftObjectMoves,
                                     allDraftObjectsSuppressible,
                                     requestId,
                                     cancellation]() {
@@ -1068,7 +1072,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             background,
             devicePixelRatio,
             draftObjectPaths,
-            draftImageMoves,
+            draftObjectMoves,
             cancellation);
         result.suppressionApplied = result.suppressionApplied
             && allDraftObjectsSuppressible;
