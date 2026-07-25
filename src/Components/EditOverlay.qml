@@ -26,6 +26,9 @@ Item {
     property bool editorLayoutDirty: false
     property bool resizingFrame: false
     property string resizingObjectId: ""
+    property bool editingSourceTextMoveOnly: false
+    property real editingSourceTranslationX: 0
+    property real editingSourceTranslationY: 0
     property string selectionActionsObjectId: ""
     property real selectCursorX: 0
     property real selectCursorY: 0
@@ -45,6 +48,8 @@ Item {
         && controller.tool !== PDFEditController.BrowseTool
     readonly property bool editorUsesCleanTexture: draftTextureReady
         && hasActiveDraft(editingObjectId)
+        && !(editingSourceTextMoveOnly
+            && activeDraft(editingObjectId).sourceTextMoveOnly === true)
     readonly property bool selectCursorReady: selectCursorImage.status === Image.Ready
     readonly property bool selectCursorActive: selectCursorReady
         && selectCursorVisible
@@ -126,6 +131,19 @@ Item {
             }
         }
         return false
+    }
+
+    function activeDraft(objectId) {
+        if (objectId.length === 0)
+            return ({})
+
+        for (let index = 0; index < drafts.length; ++index) {
+            if (drafts[index].objectId === objectId
+                    && drafts[index].restoration !== true) {
+                return drafts[index]
+            }
+        }
+        return ({})
     }
 
     function restorationOverlay(draft) {
@@ -468,6 +486,12 @@ Item {
         return kind === "image" || kind === "addedImage"
     }
 
+    function isMovableKind(kind) {
+        return isImageKind(kind)
+            || kind === "text"
+            || kind === "addedText"
+    }
+
     function isImageCandidate(candidate) {
         return hasCandidate(candidate) && isImageKind(candidate.kind)
     }
@@ -637,6 +661,19 @@ Item {
         if (!controller.selectCandidate(page, candidate.objectId))
             return
 
+        const currentDraft = activeDraft(candidate.objectId)
+        editingSourceTextMoveOnly
+            = currentDraft.sourceTextMoveOnly === true
+        if (editingSourceTextMoveOnly
+                && currentDraft.originalFrameRect !== undefined) {
+            editingSourceTranslationX = currentDraft.frameRect.x
+                - currentDraft.originalFrameRect.x
+            editingSourceTranslationY = currentDraft.frameRect.y
+                - currentDraft.originalFrameRect.y
+        } else {
+            editingSourceTranslationX = 0
+            editingSourceTranslationY = 0
+        }
         hideSelectCursor()
         controller.beginSelectedTextEdit()
         editingObjectId = candidate.objectId
@@ -668,6 +705,9 @@ Item {
         syncingEditorPreview = false
         editing = false
         editingObjectId = ""
+        editingSourceTextMoveOnly = false
+        editingSourceTranslationX = 0
+        editingSourceTranslationY = 0
         editorLayoutDirty = false
         controller.finishSelectedTextEdit()
         reloadData()
@@ -676,6 +716,9 @@ Item {
     function cancelEditing() {
         editing = false
         editingObjectId = ""
+        editingSourceTextMoveOnly = false
+        editingSourceTranslationX = 0
+        editingSourceTranslationY = 0
         editorLayoutDirty = false
         cancelFrameResize()
         controller.cancelSelectedTextEdit()
@@ -972,6 +1015,8 @@ Item {
             readonly property bool hovered: root.hasCandidate(root.hoverCandidate)
                 && root.hoverCandidate.objectId === modelData.objectId
             readonly property bool isImage: root.isImageCandidate(modelData)
+            readonly property bool sourceTextMoveOnly:
+                modelData.sourceTextMoveOnly === true
             readonly property bool hasText: modelData.text.length > 0
             readonly property bool hasContent:
                 modelData.deleted !== true && (isImage || hasText)
@@ -1080,6 +1125,8 @@ Item {
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                 elide: Text.ElideNone
                 visible: !draftItem.isImage
+                    && !(draftItem.sourceTextMoveOnly
+                        && root.draftTextureReady)
                 onImplicitHeightChanged: {
                     if (draftItem.selected && root.resizingFrame)
                         Qt.callLater(root.syncSelectedDraftContentBounds)
@@ -1195,7 +1242,7 @@ Item {
         Accessible.role: Accessible.Pane
         //% "PDF edit surface"
         Accessible.name: qsTrId("PdfEditSurface")
-        //% "Use Tab or arrow keys to select content, Enter to edit text, drag images to move, and Backspace or Delete to remove images"
+        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text or images to move them, and Backspace or Delete to remove images"
         Accessible.description: qsTrId("PdfEditSurfaceDescription")
 
         onEntered: root.updateHoverAtPosition(mouseX, mouseY)
@@ -1497,8 +1544,10 @@ Item {
 
             required property var modelData
 
-            readonly property real sourceX: modelData.x * root.width
-            readonly property real sourceY: modelData.y * root.height
+            readonly property real sourceX: (
+                modelData.x + root.editingSourceTranslationX) * root.width
+            readonly property real sourceY: (
+                modelData.y + root.editingSourceTranslationY) * root.height
             readonly property real sourceWidth: Math.max(1, modelData.width * root.width)
             readonly property real sourceHeight: Math.max(1, modelData.height * root.height)
             readonly property real maskedX: Math.max(0, sourceX - root.fallbackBleed)
@@ -1731,22 +1780,28 @@ Item {
         }
 
         MouseArea {
-            id: moveImageMouse
+            id: moveObjectMouse
 
             property rect dragStartFrameRect: Qt.rect(0, 0, 0, 0)
             property point dragStartPosition: Qt.point(0, 0)
 
             anchors.fill: parent
             enabled: !root.editing
-                && root.isImageKind(root.controller.selectedKind)
+                && root.isMovableKind(root.controller.selectedKind)
             acceptedButtons: Qt.LeftButton
             hoverEnabled: true
             preventStealing: true
             cursorShape: Qt.SizeAllCursor
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
-            //% "Move image"
-            Accessible.name: qsTrId("MoveImage")
+            Accessible.name: {
+                if (root.isImageKind(root.controller.selectedKind)) {
+                    //% "Move image"
+                    return qsTrId("MoveImage")
+                }
+                //% "Move text"
+                return qsTrId("MoveText")
+            }
 
             function commitKeyboardMove(deltaX, deltaY) {
                 const startFrameRect = resizeOverlay.layoutFrameRect
@@ -1791,8 +1846,27 @@ Item {
                 root.reloadData()
             }
             onCanceled: root.cancelFrameResize()
+            onDoubleClicked: mouse => {
+                if (root.controller.selectedKind !== "text"
+                        && root.controller.selectedKind !== "addedText") {
+                    return
+                }
+
+                root.cancelFrameResize()
+                root.beginSelectedEditing()
+                mouse.accepted = true
+            }
 
             Keys.onPressed: event => {
+                if ((event.key === Qt.Key_Return
+                        || event.key === Qt.Key_Enter)
+                        && (root.controller.selectedKind === "text"
+                            || root.controller.selectedKind === "addedText")) {
+                    root.beginSelectedEditing()
+                    event.accepted = true
+                    return
+                }
+
                 const step = (event.modifiers & Qt.ShiftModifier) ? 10 : 1
                 let deltaX = 0
                 let deltaY = 0

@@ -1276,6 +1276,7 @@ QVector<QVector<int>> PDFEditController::draftedTextObjectPathsForPage(int page)
         const Candidate &candidate = draft->candidate;
         if (candidate.page == page
             && draftSuppressesSourceObjects(candidate.kind, draft->deleted)
+            && !isSourceTextMoveOnly(*draft)
             && candidate.renderSuppressible) {
             if (!candidate.parts.isEmpty()) {
                 for (const CandidatePart &part : candidate.parts) {
@@ -1298,28 +1299,63 @@ QVector<QVector<int>> PDFEditController::draftedTextObjectPathsForPage(int page)
     return objectPaths;
 }
 
-QVector<PDFEditController::DraftImageMove>
-PDFEditController::draftedImageMovesForPage(int page) const
+QVector<PDFEditController::DraftObjectMove>
+PDFEditController::draftedObjectMovesForPage(int page) const
 {
-    QVector<DraftImageMove> moves;
+    QVector<DraftObjectMove> moves;
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
         const Candidate &candidate = draft->candidate;
-        if (candidate.page != page
-            || candidate.kind != QLatin1String("image")
-            || draft->deleted
-            || !candidate.renderSuppressible
-            || candidate.objectPath.size() != 1
-            || candidate.geometry.sourceRect.topLeft() == draft->frameRect.topLeft()) {
+        if (candidate.page != page || draft->deleted
+            || !candidate.renderSuppressible) {
             continue;
         }
-        moves.append(DraftImageMove{
-            candidate.objectPath,
-            candidate.geometry.sourceRect,
-            draft->frameRect});
+
+        if (candidate.kind == QLatin1String("image")
+            && candidate.objectPath.size() == 1
+            && candidate.geometry.sourceRect.topLeft()
+                != draft->frameRect.topLeft()) {
+            moves.append(DraftObjectMove{
+                DraftObjectMove::Kind::Image,
+                candidate.objectPath,
+                candidate.geometry.sourceRect,
+                draft->frameRect});
+            continue;
+        }
+
+        if (!isSourceTextMoveOnly(*draft)) {
+            continue;
+        }
+
+        const QRectF initialFrameRect
+            = (candidate.initialDraftFrameRect.isEmpty()
+                   ? candidate.geometry.sourceRect
+                   : candidate.initialDraftFrameRect)
+                  .normalized();
+        const QRectF movedFrameRect = draft->frameRect.normalized();
+        const auto appendTextMove = [
+            &moves,
+            &initialFrameRect,
+            &movedFrameRect](const QVector<int> &objectPath) {
+            if (objectPath.size() != 1) {
+                return;
+            }
+            moves.append(DraftObjectMove{
+                DraftObjectMove::Kind::Text,
+                objectPath,
+                initialFrameRect,
+                movedFrameRect});
+        };
+        if (candidate.parts.isEmpty()) {
+            appendTextMove(candidate.objectPath);
+        } else {
+            for (const CandidatePart &part : candidate.parts) {
+                appendTextMove(part.objectPath);
+            }
+        }
     }
 
-    std::sort(moves.begin(), moves.end(), [](const DraftImageMove &left,
-                                             const DraftImageMove &right) {
+    std::sort(moves.begin(), moves.end(), [](const DraftObjectMove &left,
+                                             const DraftObjectMove &right) {
         return std::lexicographical_compare(
             left.objectPath.cbegin(), left.objectPath.cend(),
             right.objectPath.cbegin(), right.objectPath.cend());
@@ -1333,6 +1369,7 @@ bool PDFEditController::allDraftedTextObjectsSuppressibleForPage(int page) const
         const Candidate &candidate = draft->candidate;
         if (candidate.page == page
             && draftSuppressesSourceObjects(candidate.kind, draft->deleted)
+            && !isSourceTextMoveOnly(*draft)
             && !candidate.renderSuppressible) {
             return false;
         }
@@ -2282,20 +2319,50 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
     }
 
     const QRectF normalizedRect = frameRect.normalized();
-    const qreal left = qBound<qreal>(0.0, normalizedRect.left(), 1.0);
-    const qreal top = qBound<qreal>(0.0, normalizedRect.top(), 1.0);
-    const qreal right = qBound<qreal>(0.0, normalizedRect.right(), 1.0);
-    const qreal bottom = qBound<qreal>(0.0, normalizedRect.bottom(), 1.0);
-    if (right - left <= 0.0 || bottom - top <= 0.0) {
-        return;
+    Draft draft = selectedDraftForDisplay();
+    const QRectF currentFrameRect = draft.frameRect.normalized();
+    constexpr qreal geometryEpsilon = 1e-9;
+    const bool movesFrame
+        = qAbs(normalizedRect.width() - currentFrameRect.width())
+              <= geometryEpsilon
+        && qAbs(normalizedRect.height() - currentFrameRect.height())
+               <= geometryEpsilon;
+
+    QRectF boundedRect;
+    QRectF resizedContentBounds;
+    if (movesFrame) {
+        const QRectF effectiveBounds = currentFrameRect.united(
+            draft.contentBounds.normalized());
+        const qreal requestedX
+            = normalizedRect.x() - currentFrameRect.x();
+        const qreal requestedY
+            = normalizedRect.y() - currentFrameRect.y();
+        const qreal translationX = qBound<qreal>(
+            -effectiveBounds.left(),
+            requestedX,
+            1.0 - effectiveBounds.right());
+        const qreal translationY = qBound<qreal>(
+            -effectiveBounds.top(),
+            requestedY,
+            1.0 - effectiveBounds.bottom());
+        const QPointF translation(translationX, translationY);
+        boundedRect = currentFrameRect.translated(translation);
+        resizedContentBounds = draft.contentBounds.translated(translation);
+    } else {
+        const qreal left = qBound<qreal>(0.0, normalizedRect.left(), 1.0);
+        const qreal top = qBound<qreal>(0.0, normalizedRect.top(), 1.0);
+        const qreal right = qBound<qreal>(0.0, normalizedRect.right(), 1.0);
+        const qreal bottom = qBound<qreal>(0.0, normalizedRect.bottom(), 1.0);
+        if (right - left <= 0.0 || bottom - top <= 0.0) {
+            return;
+        }
+        boundedRect = QRectF(left, top, right - left, bottom - top);
     }
 
-    Draft draft = selectedDraftForDisplay();
-    QRectF boundedRect(left, top, right - left, bottom - top);
     const bool sourceImageDraft = draft.candidate.kind == QLatin1String("image");
     const bool imageDraft = sourceImageDraft
         || draft.candidate.kind == QLatin1String("addedImage");
-    if (sourceImageDraft) {
+    if (!movesFrame && sourceImageDraft) {
         const qreal width = qBound<qreal>(0.0, draft.frameRect.width(), 1.0);
         const qreal height = qBound<qreal>(0.0, draft.frameRect.height(), 1.0);
         boundedRect = QRectF(
@@ -2304,18 +2371,20 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
             width,
             height);
     }
-    const qreal previousContentHeight = qMax(
-        draft.frameRect.height(),
-        draft.contentBounds.bottom() - draft.frameRect.y());
-    const QRectF resizedContentBounds = imageDraft
-        ? boundedRect
-        : QRectF(
-            boundedRect.x(),
-            boundedRect.y(),
-            boundedRect.width(),
-            qMin(
-                1.0 - boundedRect.y(),
-                qMax(boundedRect.height(), previousContentHeight)));
+    if (!movesFrame) {
+        const qreal previousContentHeight = qMax(
+            draft.frameRect.height(),
+            draft.contentBounds.bottom() - draft.frameRect.y());
+        resizedContentBounds = imageDraft
+            ? boundedRect
+            : QRectF(
+                  boundedRect.x(),
+                  boundedRect.y(),
+                  boundedRect.width(),
+                  qMin(
+                      1.0 - boundedRect.y(),
+                      qMax(boundedRect.height(), previousContentHeight)));
+    }
     if (draft.frameRect == boundedRect
         && draft.contentBounds == resizedContentBounds) {
         return;
@@ -4306,6 +4375,9 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("editable"), candidate.editable);
     map.insert(QStringLiteral("limited"), candidate.limited);
     map.insert(QStringLiteral("added"), candidate.added);
+    map.insert(
+        QStringLiteral("sourceTextMoveOnly"),
+        isSourceTextMoveOnly(draft));
     map.insert(QStringLiteral("image"), candidate.image);
     map.insert(QStringLiteral("imagePixelWidth"), candidate.image.width());
     map.insert(QStringLiteral("imagePixelHeight"), candidate.image.height());
@@ -4582,6 +4654,85 @@ bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
         && left.frameRect == right.frameRect
         && left.contentBounds == right.contentBounds
         && left.deleted == right.deleted;
+}
+
+bool PDFEditController::isSourceTextMoveOnly(const Draft &draft)
+{
+    const Candidate &candidate = draft.candidate;
+    if (candidate.kind != QLatin1String("text")
+        || candidate.added
+        || draft.deleted
+        || !candidate.editable
+        || !candidate.renderSuppressible) {
+        return false;
+    }
+
+    const auto hasTopLevelSourcePath = [](const QVector<int> &objectPath) {
+        return objectPath.size() == 1;
+    };
+    if (candidate.parts.isEmpty()) {
+        if (!hasTopLevelSourcePath(candidate.objectPath)
+            || candidate.geometry.sourceRect.isEmpty()) {
+            return false;
+        }
+    } else {
+        for (const CandidatePart &part : candidate.parts) {
+            if (!hasTopLevelSourcePath(part.objectPath)
+                || part.sourceRect.isEmpty()) {
+                return false;
+            }
+        }
+    }
+
+    constexpr qreal geometryEpsilon = 1e-9;
+    const auto nearlyEqual = [](qreal left, qreal right) {
+        return qAbs(left - right) <= geometryEpsilon;
+    };
+    const QRectF initialFrameRect
+        = (candidate.initialDraftFrameRect.isEmpty()
+               ? candidate.geometry.sourceRect
+               : candidate.initialDraftFrameRect)
+              .normalized();
+    if (initialFrameRect.isEmpty()
+        || !nearlyEqual(draft.frameRect.width(), initialFrameRect.width())
+        || !nearlyEqual(
+            draft.frameRect.height(),
+            initialFrameRect.height())) {
+        return false;
+    }
+
+    const QPointF translation
+        = draft.frameRect.topLeft() - initialFrameRect.topLeft();
+    if (nearlyEqual(translation.x(), 0.0)
+        && nearlyEqual(translation.y(), 0.0)) {
+        return false;
+    }
+
+    const Draft initialDraft = initialDraftForCandidate(candidate);
+    if (draft.text != initialDraft.text
+        || !sameCharacterSpans(
+            draft.characterSpans,
+            initialDraft.characterSpans)
+        || !sameParagraphFormats(
+            draft.paragraphFormats,
+            initialDraft.paragraphFormats)) {
+        return false;
+    }
+
+    const QRectF expectedContentBounds
+        = initialDraft.contentBounds.translated(translation);
+    return nearlyEqual(
+               draft.contentBounds.x(),
+               expectedContentBounds.x())
+        && nearlyEqual(
+               draft.contentBounds.y(),
+               expectedContentBounds.y())
+        && nearlyEqual(
+               draft.contentBounds.width(),
+               expectedContentBounds.width())
+        && nearlyEqual(
+               draft.contentBounds.height(),
+               expectedContentBounds.height());
 }
 
 PDFEditController::TextChange PDFEditController::setDraftText(

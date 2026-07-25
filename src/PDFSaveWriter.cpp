@@ -93,6 +93,7 @@ struct SaveDraft {
     bool hasBaseline = false;
     bool added = false;
     bool deleted = false;
+    bool movesSourceObjects = false;
 };
 
 struct LayoutRun {
@@ -117,7 +118,7 @@ struct PreparedDraft {
     QVector<FPDF_BITMAP> bitmaps;
     int insertionIndex = 0;
     bool append = false;
-    bool movesSourceImage = false;
+    bool movesSourceObjects = false;
     QRectF sourceRect;
     QRectF frameRect;
 };
@@ -1730,19 +1731,23 @@ PDFSaveWriter::Result createImageDraftObject(
     return {};
 }
 
-PDFSaveWriter::Result moveSourceImageObject(
+PDFSaveWriter::Result moveSourceObject(
     const SaveDraft &draft,
     const SourceObject &source,
     qreal pageWidth,
     qreal pageHeight,
     const PageCoordinateMapper &coordinateMapper)
 {
+    const PDFSaveWriter::Error moveError
+        = draft.kind == SaveDraft::Kind::Image
+        ? PDFSaveWriter::Error::ImageObjectCreationFailed
+        : PDFSaveWriter::Error::TextObjectCreationFailed;
     if (!source.object
         || source.parentForm
         || draft.sourceRect.isEmpty()
         || draft.frameRect.isEmpty()) {
         return failure(
-            PDFSaveWriter::Error::ImageObjectCreationFailed,
+            moveError,
             draft.page,
             draft.objectId);
     }
@@ -1766,7 +1771,7 @@ PDFSaveWriter::Result moveSourceImageObject(
             targetPagePoint)
         || !FPDFPageObj_GetMatrix(source.object, &matrix)) {
         return failure(
-            PDFSaveWriter::Error::ImageObjectCreationFailed,
+            moveError,
             draft.page,
             draft.objectId);
     }
@@ -1775,7 +1780,7 @@ PDFSaveWriter::Result moveSourceImageObject(
     matrix.f += static_cast<float>(targetPagePoint.y() - sourcePagePoint.y());
     if (!FPDFPageObj_SetMatrix(source.object, &matrix)) {
         return failure(
-            PDFSaveWriter::Error::ImageObjectCreationFailed,
+            moveError,
             draft.page,
             draft.objectId);
     }
@@ -1794,6 +1799,9 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                                          QVector<FPDF_BITMAP> &bitmaps)
 {
     if (draft.deleted) {
+        return {};
+    }
+    if (draft.movesSourceObjects) {
         return {};
     }
     if (draft.kind == SaveDraft::Kind::Image) {
@@ -2087,7 +2095,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         // PDFium's content generator cannot serialize pattern and shading
         // paints. Replacing only those painted objects with isolated bitmaps
         // keeps the rest of the page vector/searchable when a source content
-        // stream must be regenerated for an edit, deletion, or image move.
+        // stream must be regenerated for an edit, deletion, or object move.
         const PDFSaveWriter::Result paintResult = prepareUnsupportedPaints(
             document,
             page.get(),
@@ -2120,9 +2128,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
             return sourceResult;
         }
         prepared.append = prepared.sources.isEmpty();
-        prepared.movesSourceImage = prepared.kind == SaveDraft::Kind::Image
-            && !draft.added
-            && !draft.deleted;
+        prepared.movesSourceObjects = draft.movesSourceObjects;
         prepared.sourceRect = draft.sourceRect;
         prepared.frameRect = draft.frameRect;
         prepared.insertionIndex = prepared.append
@@ -2168,10 +2174,10 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
 
     for (qsizetype index = 0; index < preparedDrafts.size(); ++index) {
         PreparedDraft &prepared = preparedDrafts[index];
-        if (!prepared.movesSourceImage) {
+        if (!prepared.movesSourceObjects) {
             continue;
         }
-        if (prepared.sources.size() != 1) {
+        if (prepared.sources.isEmpty()) {
             destroyPreparedObjects(preparedDrafts);
             return failure(
                 PDFSaveWriter::Error::UnsupportedSourceObject,
@@ -2179,20 +2185,22 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         }
 
         SaveDraft moveDraft;
-        moveDraft.kind = SaveDraft::Kind::Image;
+        moveDraft.kind = prepared.kind;
         moveDraft.page = pageIndex;
         moveDraft.objectId = prepared.objectId;
         moveDraft.sourceRect = prepared.sourceRect;
         moveDraft.frameRect = prepared.frameRect;
-        const PDFSaveWriter::Result moveResult = moveSourceImageObject(
-            moveDraft,
-            prepared.sources.constFirst(),
-            pageWidth,
-            pageHeight,
-            coordinateMapper);
-        if (!moveResult.succeeded()) {
-            destroyPreparedObjects(preparedDrafts);
-            return moveResult;
+        for (const SourceObject &source : std::as_const(prepared.sources)) {
+            const PDFSaveWriter::Result moveResult = moveSourceObject(
+                moveDraft,
+                source,
+                pageWidth,
+                pageHeight,
+                coordinateMapper);
+            if (!moveResult.succeeded()) {
+                destroyPreparedObjects(preparedDrafts);
+                return moveResult;
+            }
         }
     }
 
@@ -2205,7 +2213,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
 
     QSet<FPDF_PAGEOBJECT> removed;
     for (PreparedDraft &prepared : preparedDrafts) {
-        if (!prepared.movesSourceImage) {
+        if (!prepared.movesSourceObjects) {
             for (const SourceObject &source : std::as_const(prepared.sources)) {
                 if (removed.contains(source.object)) {
                     continue;
@@ -2389,6 +2397,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
          draft != controller.m_drafts.cend();
          ++draft) {
         SaveDraft saveDraft;
+        const bool sourceTextMoveOnly
+            = PDFEditController::isSourceTextMoveOnly(*draft);
         const bool imageDraft = draft->candidate.kind == QLatin1String("addedImage")
             || draft->candidate.kind == QLatin1String("image");
         saveDraft.kind = imageDraft
@@ -2398,13 +2408,21 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.objectId = draft->candidate.objectId;
         saveDraft.originalText = draft->candidate.text;
         saveDraft.text = draft->text;
-        saveDraft.sourceRect = draft->candidate.geometry.sourceRect;
+        saveDraft.sourceRect = sourceTextMoveOnly
+            ? (draft->candidate.initialDraftFrameRect.isEmpty()
+                   ? draft->candidate.geometry.sourceRect
+                   : draft->candidate.initialDraftFrameRect)
+            : draft->candidate.geometry.sourceRect;
         saveDraft.frameRect = draft->frameRect;
         saveDraft.layoutOrigin = PDFEditController::layoutOriginForDraft(*draft);
         saveDraft.hasBaseline = draft->candidate.hasBaseline;
         saveDraft.added = draft->candidate.added;
         saveDraft.addedOrder = draft->candidate.addedOrder;
         saveDraft.deleted = draft->deleted;
+        saveDraft.movesSourceObjects = sourceTextMoveOnly
+            || (saveDraft.kind == SaveDraft::Kind::Image
+                && !saveDraft.added
+                && !saveDraft.deleted);
         saveDraft.image = draft->deleted ? QImage() : draft->candidate.image;
         if (!draft->candidate.parts.isEmpty()) {
             for (const PDFEditController::CandidatePart &part : draft->candidate.parts) {
@@ -2415,7 +2433,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         } else if (!draft->candidate.objectPath.isEmpty()) {
             saveDraft.sourceObjectPaths.append(draft->candidate.objectPath);
         }
-        if (saveDraft.kind == SaveDraft::Kind::Image) {
+        if (saveDraft.kind == SaveDraft::Kind::Image
+            || sourceTextMoveOnly) {
             data->drafts.append(std::move(saveDraft));
             continue;
         }

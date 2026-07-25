@@ -63,7 +63,13 @@ class PDFEditController : public QObject
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
 
 public:
-    struct DraftImageMove {
+    struct DraftObjectMove {
+        enum class Kind {
+            Text,
+            Image
+        };
+
+        Kind kind = Kind::Text;
         QVector<int> objectPath;
         QRectF sourceRect;
         QRectF frameRect;
@@ -138,7 +144,7 @@ public:
     QString selectedReason() const;
     quint64 draftRevisionForPage(int page) const;
     QVector<QVector<int>> draftedTextObjectPathsForPage(int page) const;
-    QVector<DraftImageMove> draftedImageMovesForPage(int page) const;
+    QVector<DraftObjectMove> draftedObjectMovesForPage(int page) const;
     bool allDraftedTextObjectsSuppressibleForPage(int page) const;
 
     Q_INVOKABLE QVariantList candidatesForPage(int page);
@@ -450,6 +456,7 @@ private:
     static bool sameParagraphFormats(const QVector<ParagraphFormat> &left,
                                      const QVector<ParagraphFormat> &right);
     static bool sameDraftContent(const Draft &left, const Draft &right);
+    static bool isSourceTextMoveOnly(const Draft &draft);
     static TextChange setDraftText(
         Draft &draft,
         const QString &text,
