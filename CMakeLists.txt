@@ -85,6 +85,7 @@ qt_add_qml_module(trepdf
         src/Components/TextFormatPanel.qml
         src/Components/ViewRibbon.qml
     RESOURCES
+        src/assets/icons/add-page.svg
         src/assets/icons/add.svg
         src/assets/icons/align-center.svg
         src/assets/icons/align-justify.svg
@@ -94,6 +95,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/calendar-days.svg
         src/assets/icons/chevron-left.svg
         src/assets/icons/chevron-right.svg
+        src/assets/icons/delete-page.svg
         src/assets/icons/edit-text.svg
         src/assets/icons/folder-open.svg
         src/assets/icons/highlighter.svg

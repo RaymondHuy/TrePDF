@@ -34,6 +34,8 @@ public:
         FontUnavailable,
         TextObjectCreationFailed,
         ImageObjectCreationFailed,
+        PageCreationFailed,
+        PageDeletionFailed,
         PageContentGenerationFailed,
         OutputOpenFailed,
         OutputWriteFailed,

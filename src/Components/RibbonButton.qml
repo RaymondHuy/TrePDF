@@ -11,6 +11,7 @@ ToolButton {
     property bool requiresDocument: true
     property bool primary: false
     property bool signing: false
+    property bool preserveIconColors: false
 
     implicitWidth: Math.max(80, implicitContentWidth + leftPadding + rightPadding)
     implicitHeight: 56
@@ -26,13 +27,15 @@ ToolButton {
     icon.source: iconSource
     icon.width: 22
     icon.height: 22
-    icon.color: !enabled
-        ? "#aaa8a6"
-        : signing
-            ? theme.signGreen
-            : primary
-                ? theme.foxitDarkOrange
-                : "#4a4b50"
+    icon.color: preserveIconColors
+        ? "transparent"
+        : !enabled
+            ? "#aaa8a6"
+            : signing
+                ? theme.signGreen
+                : primary
+                    ? theme.foxitDarkOrange
+                    : "#4a4b50"
 
     background: Rectangle {
         radius: 4

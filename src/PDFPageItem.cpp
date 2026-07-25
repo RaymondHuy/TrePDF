@@ -423,15 +423,19 @@ struct PageRenderResult {
 
 PageRenderResult renderPageFromFile(const QString &filePath,
                                     int revision,
-                                    int page,
+                                    int sourcePage,
                                     const QSize &pixelSize,
                                     const QColor &background,
                                     qreal devicePixelRatio,
+                                    bool blankPage,
                                     const QVector<QVector<int>> &draftObjectPaths,
                                     const QVector<PDFEditController::DraftObjectMove> &draftObjectMoves,
                                     const CancellationFlag &cancellation)
 {
-    if (filePath.isEmpty() || page < 0 || pixelSize.isEmpty() || isCancelled(cancellation)) {
+    if (filePath.isEmpty()
+        || (!blankPage && sourcePage < 0)
+        || pixelSize.isEmpty()
+        || isCancelled(cancellation)) {
         return {};
     }
 
@@ -440,6 +444,11 @@ PageRenderResult renderPageFromFile(const QString &filePath,
         return {};
     }
     image.fill(background);
+
+    if (blankPage) {
+        image.setDevicePixelRatio(devicePixelRatio);
+        return PageRenderResult{image, true};
+    }
 
     bool suppressionApplied = draftObjectPaths.isEmpty();
     bool objectMovesApplied = draftObjectMoves.isEmpty();
@@ -455,7 +464,9 @@ PageRenderResult renderPageFromFile(const QString &filePath,
 
         thread_local PDFiumRenderDocument renderDocument;
         FPDF_DOCUMENT document = renderDocument.documentLocked(filePath, revision);
-        FPDF_PAGE pdfPage = document ? FPDF_LoadPage(document, page) : nullptr;
+        FPDF_PAGE pdfPage = document
+            ? FPDF_LoadPage(document, sourcePage)
+            : nullptr;
         if (!pdfPage || isCancelled(cancellation)) {
             if (pdfPage) {
                 FPDF_ClosePage(pdfPage);
@@ -1021,8 +1032,10 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
     const quint64 requestId = ++m_requestSerial;
     PDFDocument *document = m_document.data();
     const int page = m_page;
+    const int sourcePage = document->sourcePageIndex(page);
     const qreal zoom = m_zoom;
     const QColor background = m_pageColor;
+    const bool blankPage = document->isTransientBlankPage(page);
     const QVector<QVector<int>> draftObjectPaths = editController
             && editController->document() == document
         ? editController->draftedTextObjectPathsForPage(page)
@@ -1054,10 +1067,12 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                                     editController,
                                     revision,
                                     page,
+                                    sourcePage,
                                     zoom,
                                     devicePixelRatio,
                                     pixelSize,
                                     background,
+                                    blankPage,
                                     draftRevision,
                                     draftObjectPaths,
                                     draftObjectMoves,
@@ -1067,10 +1082,11 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
         PageRenderResult result = renderPageFromFile(
             filePath,
             revision,
-            page,
+            sourcePage,
             pixelSize,
             background,
             devicePixelRatio,
+            blankPage,
             draftObjectPaths,
             draftObjectMoves,
             cancellation);

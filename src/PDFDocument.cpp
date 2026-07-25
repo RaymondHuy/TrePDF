@@ -9,6 +9,7 @@
 namespace {
 
 constexpr unsigned long kModifyContentsPermission = 1UL << 3;
+constexpr unsigned long kAssembleDocumentPermission = 1UL << 10;
 
 class PdfiumRuntime
 {
@@ -163,18 +164,31 @@ bool PDFDocument::open(const QUrl &source)
                 maximumPageHeight = qMax(maximumPageHeight, size.height());
             }
             const unsigned long permissions = FPDF_GetDocPermissions(document);
+            const int securityRevision = FPDF_GetSecurityHandlerRevision(document);
 
             closeDocumentLocked();
             m_document = document;
             m_source = source;
             m_filePath = filePath;
+            m_sourcePageCount = pageCount;
             m_pageCount = pageCount;
             m_currentPage = 0;
-            m_pageSizes = std::move(pageSizes);
+            m_sourcePageSizes = std::move(pageSizes);
+            m_pageSizes = m_sourcePageSizes;
+            m_displaySourcePages.clear();
+            m_displaySourcePages.reserve(pageCount);
+            for (int page = 0; page < pageCount; ++page) {
+                m_displaySourcePages.append(page);
+            }
+            m_transientBlankPageSizes.clear();
             m_maximumPageWidth = maximumPageWidth;
             m_maximumPageHeight = maximumPageHeight;
             m_allowsContentEditing = permissions == 0xffffffffUL
                 || (permissions & kModifyContentsPermission) != 0;
+            m_allowsPageAssembly = permissions == 0xffffffffUL
+                || (securityRevision >= 3
+                        ? (permissions & kAssembleDocumentPermission) != 0
+                        : (permissions & kModifyContentsPermission) != 0);
             ++m_revision;
             opened = true;
         }
@@ -251,6 +265,28 @@ int PDFDocument::renderRevision() const
     return m_revision;
 }
 
+int PDFDocument::sourcePageCount() const
+{
+    return m_sourcePageCount;
+}
+
+int PDFDocument::sourcePageIndex(int page) const
+{
+    if (!m_document
+        || page < 0
+        || page >= m_displaySourcePages.size()) {
+        return -1;
+    }
+    return m_displaySourcePages.at(page);
+}
+
+bool PDFDocument::isTransientBlankPage(int page) const
+{
+    return m_document
+        && page >= m_displaySourcePages.size()
+        && page < m_pageCount;
+}
+
 void PDFDocument::closeDocumentLocked()
 {
     assertPDFiumProcessLockHeld();
@@ -261,12 +297,17 @@ void PDFDocument::closeDocumentLocked()
     m_document = nullptr;
     m_source = QUrl();
     m_filePath.clear();
+    m_sourcePageSizes.clear();
     m_pageSizes.clear();
+    m_displaySourcePages.clear();
+    m_transientBlankPageSizes.clear();
     m_maximumPageWidth = 0.0;
     m_maximumPageHeight = 0.0;
+    m_sourcePageCount = 0;
     m_pageCount = 0;
     m_currentPage = 0;
     m_allowsContentEditing = false;
+    m_allowsPageAssembly = false;
     ++m_revision;
 }
 
@@ -287,4 +328,59 @@ void PDFDocument::emitDocumentStateChanged()
     emit currentPageChanged();
     emit loadedChanged();
     emit currentPageSizeChanged();
+}
+
+void PDFDocument::setTransientPageStructure(
+    const QSet<int> &deletedSourcePages,
+    const QVector<QSizeF> &blankPageSizes)
+{
+    if (!m_document) {
+        return;
+    }
+
+    QVector<int> displaySourcePages;
+    QVector<QSizeF> pageSizes;
+    displaySourcePages.reserve(m_sourcePageCount);
+    pageSizes.reserve(m_sourcePageCount + blankPageSizes.size());
+    for (int sourcePage = 0; sourcePage < m_sourcePageCount; ++sourcePage) {
+        if (deletedSourcePages.contains(sourcePage)) {
+            continue;
+        }
+        displaySourcePages.append(sourcePage);
+        pageSizes.append(m_sourcePageSizes.value(sourcePage));
+    }
+    pageSizes.append(blankPageSizes);
+    if (m_displaySourcePages == displaySourcePages
+        && m_transientBlankPageSizes == blankPageSizes
+        && m_pageSizes == pageSizes) {
+        return;
+    }
+
+    const int previousCurrentPage = m_currentPage;
+    m_displaySourcePages = std::move(displaySourcePages);
+    m_transientBlankPageSizes = blankPageSizes;
+    m_pageSizes = std::move(pageSizes);
+    m_pageCount = static_cast<int>(m_pageSizes.size());
+    if (m_pageCount > 0) {
+        m_currentPage = qBound(0, m_currentPage, m_pageCount - 1);
+    } else {
+        m_currentPage = 0;
+    }
+    updatePageMetrics();
+
+    emit pageCountChanged();
+    if (m_currentPage != previousCurrentPage) {
+        emit currentPageChanged();
+    }
+    emit currentPageSizeChanged();
+}
+
+void PDFDocument::updatePageMetrics()
+{
+    m_maximumPageWidth = 0.0;
+    m_maximumPageHeight = 0.0;
+    for (const QSizeF &size : std::as_const(m_pageSizes)) {
+        m_maximumPageWidth = qMax(m_maximumPageWidth, size.width());
+        m_maximumPageHeight = qMax(m_maximumPageHeight, size.height());
+    }
 }

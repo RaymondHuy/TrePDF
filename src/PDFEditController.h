@@ -156,6 +156,8 @@ public:
                                      qreal x,
                                      qreal y,
                                      const QUrl &source);
+    Q_INVOKABLE int addBlankPage();
+    Q_INVOKABLE int deleteCurrentPage();
     Q_INVOKABLE QFont fontForDisplay(const QString &fontFamily,
                                      int fontStretch,
                                      bool fontBold,
@@ -198,8 +200,8 @@ public:
     Q_INVOKABLE void cancelSelectedTextEdit();
     Q_INVOKABLE void commitSelectedText(const QString &text);
     Q_INVOKABLE void deleteSelectedObject();
-    Q_INVOKABLE void undo();
-    Q_INVOKABLE void redo();
+    Q_INVOKABLE int undo();
+    Q_INVOKABLE int redo();
     Q_INVOKABLE void discardDrafts();
     Q_INVOKABLE bool save();
     Q_INVOKABLE bool saveAs(const QUrl &target);
@@ -294,6 +296,7 @@ private:
         QString filePath;
         int revision = -1;
         int page = -1;
+        int sourcePage = -1;
         QSizeF pageSize;
         bool editingAllowed = false;
         QStringList bundledFontFamilies;
@@ -360,7 +363,23 @@ private:
         bool deleted = false;
     };
 
+    struct PageState {
+        QSet<int> deletedSourcePages;
+        QVector<QSizeF> addedBlankPageSizes;
+        QVector<Candidate> addedCandidates;
+        QHash<QString, Draft> drafts;
+        int currentPage = 0;
+        bool hasSelection = false;
+        Candidate selectedCandidate;
+    };
+
     struct Command {
+        enum class Kind {
+            ObjectDraft,
+            PageStructure
+        };
+
+        Kind kind = Kind::ObjectDraft;
         QString key;
         int page = -1;
         QString objectId;
@@ -368,6 +387,8 @@ private:
         Draft before;
         bool hadAfter = false;
         Draft after;
+        PageState pageStateBefore;
+        PageState pageStateAfter;
     };
 
     enum class FontStyle {
@@ -433,6 +454,7 @@ private:
     QVariantList paragraphFormatMaps(const QVector<ParagraphFormat> &formats) const;
     QVariantMap candidateMap(const Draft &draft) const;
     bool documentAllowsEditing() const;
+    bool documentAllowsPageAssembly() const;
     QString draftKey(int page, const QString &objectId) const;
     void markDraftStateChanged(int page, bool immediate);
     void requestDraftRender(int page, bool immediate);
@@ -485,6 +507,8 @@ private:
     void resetFrameResizeState();
     void setSelectedFontStyle(FontStyle style, bool enabled);
     void applyDraftState(const Command &command, bool useAfterState, bool immediate);
+    PageState capturePageState() const;
+    void applyPageState(const PageState &state);
     bool removeAddedCandidate(int page, const QString &objectId);
     void updateSelectedTextFromDraft();
     void setSelection(const Candidate *candidate);
@@ -513,6 +537,8 @@ private:
     bool m_candidateScanInFlight = false;
     std::shared_ptr<std::atomic_bool> m_candidateScanCancellation;
     QVector<Candidate> m_addedCandidates;
+    QVector<QSizeF> m_addedBlankPageSizes;
+    QSet<int> m_deletedSourcePages;
     QHash<QString, Draft> m_drafts;
     QHash<int, quint64> m_pageDraftRevisions;
     quint64 m_nextDraftRevision = 0;
