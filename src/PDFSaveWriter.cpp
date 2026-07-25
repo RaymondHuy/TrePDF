@@ -2302,6 +2302,8 @@ PDFSaveWriter::Result writeDocument(FPDF_DOCUMENT document,
 struct PDFSaveWriter::Request::Data {
     QString sourceFilePath;
     QString targetFilePath;
+    QVector<int> deletedSourcePages;
+    QVector<QSizeF> blankPageSizes;
     QVector<SaveDraft> drafts;
 };
 
@@ -2319,6 +2321,14 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
     auto data = std::make_shared<Request::Data>();
     data->sourceFilePath = controller.m_document->renderFilePath();
     data->targetFilePath = targetFilePath;
+    data->deletedSourcePages.reserve(controller.m_deletedSourcePages.size());
+    for (int page : controller.m_deletedSourcePages) {
+        data->deletedSourcePages.append(page);
+    }
+    std::sort(
+        data->deletedSourcePages.begin(),
+        data->deletedSourcePages.end());
+    data->blankPageSizes = controller.m_addedBlankPageSizes;
     data->drafts.reserve(controller.m_drafts.size());
     QHash<QString, QByteArray> bundledFaceCache;
     QHash<QString, ApplicationFonts::FontFaceData> systemFaceCache;
@@ -2511,6 +2521,53 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         FPDF_LoadDocument(encodedSourcePath.constData(), nullptr));
     if (!inspectionDocument.get()) {
         return failure(Error::SourceOpenFailed);
+    }
+
+    const int sourcePageCount = FPDF_GetPageCount(document.get());
+    if (sourcePageCount < 0
+        || FPDF_GetPageCount(inspectionDocument.get()) != sourcePageCount) {
+        return failure(Error::SourceOpenFailed);
+    }
+    for (auto page = request.m_data->deletedSourcePages.crbegin();
+         page != request.m_data->deletedSourcePages.crend();
+         ++page) {
+        if (*page < 0 || *page >= sourcePageCount) {
+            return failure(Error::PageDeletionFailed, *page);
+        }
+        FPDFPage_Delete(document.get(), *page);
+        FPDFPage_Delete(inspectionDocument.get(), *page);
+    }
+    const int firstBlankPage = sourcePageCount
+        - static_cast<int>(request.m_data->deletedSourcePages.size());
+    if (FPDF_GetPageCount(document.get()) != firstBlankPage
+        || FPDF_GetPageCount(inspectionDocument.get()) != firstBlankPage) {
+        const int failedPage = request.m_data->deletedSourcePages.isEmpty()
+            ? -1
+            : request.m_data->deletedSourcePages.constFirst();
+        return failure(Error::PageDeletionFailed, failedPage);
+    }
+    for (qsizetype offset = 0;
+         offset < request.m_data->blankPageSizes.size();
+         ++offset) {
+        const int pageIndex = firstBlankPage + static_cast<int>(offset);
+        const QSizeF pageSize = request.m_data->blankPageSizes.at(offset);
+        if (pageSize.isEmpty()) {
+            return failure(Error::PageCreationFailed, pageIndex);
+        }
+
+        PdfPageHandle page(FPDFPage_New(
+            document.get(),
+            pageIndex,
+            pageSize.width(),
+            pageSize.height()));
+        PdfPageHandle inspectionPage(FPDFPage_New(
+            inspectionDocument.get(),
+            pageIndex,
+            pageSize.width(),
+            pageSize.height()));
+        if (!page.get() || !inspectionPage.get()) {
+            return failure(Error::PageCreationFailed, pageIndex);
+        }
     }
 
     FontResolver fontResolver(document.get());

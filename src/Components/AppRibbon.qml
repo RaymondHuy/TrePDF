@@ -16,6 +16,7 @@ Column {
     signal saveRequested()
     signal saveAsRequested()
     signal pageRequested(int page)
+    signal deletePageRequested(int page)
     signal zoomOutRequested()
     signal zoomInRequested()
     signal fitWidthRequested()
@@ -70,6 +71,8 @@ Column {
             theme: root.theme
             document: root.document
             editController: root.editController
+            onPageRequested: page => root.pageRequested(page)
+            onDeletePageRequested: page => root.deletePageRequested(page)
             onToolRequested: toolName => root.toolRequested(toolName)
         }
     }

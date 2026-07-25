@@ -98,6 +98,12 @@ multiline/rich-text runs, calls
 `FPDFPage_GenerateContent()`, and only clears undo history after the saved PDF
 has reopened successfully.
 
+The Edit ribbon can also append a blank page using the current page size or
+delete the current page while keeping at least one page in the document. These
+page operations participate in undo, redo, and discard like other session
+drafts. Save and Save As persist the resulting page order without changing the
+source file during Save As.
+
 Editable source text is currently limited to top-level page objects with Fill,
 Stroke, or Fill+Stroke rendering. Text used as a clipping path or nested inside
 a Form XObject remains viewable but is not offered as safely editable content.

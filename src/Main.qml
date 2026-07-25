@@ -24,6 +24,8 @@ ApplicationWindow {
     property PDFDocumentSession pendingSession: null
     property PDFDocumentSession saveAsSession: null
     property PDFDocumentSession workspaceSession: null
+    property PDFDocumentSession deletePageSession: null
+    property int deletePageIndex: -1
     property PDFEditController imageInsertController: null
     property int imageInsertPage: -1
     property real imageInsertX: 0
@@ -171,6 +173,39 @@ ApplicationWindow {
                 prepareActiveWorkspace()
             tabModel.requestSaveAs(session, url)
         }
+    }
+
+    function requestDeletePage(page) {
+        if (!activeSession
+            || tabModel.anySaving
+            || page < 0
+            || page >= activeDocument.pageCount
+            || activeDocument.pageCount <= 1) {
+            return
+        }
+
+        deletePageSession = activeSession
+        deletePageIndex = page
+        deletePagePopup.open()
+    }
+
+    function confirmDeletePage() {
+        const session = deletePageSession
+        const page = deletePageIndex
+        deletePagePopup.close()
+        if (!session
+            || session !== activeSession
+            || session.saving
+            || page < 0
+            || page >= session.document.pageCount
+            || session.document.pageCount <= 1) {
+            return
+        }
+
+        session.document.currentPage = page
+        const nextPage = session.editController.deleteCurrentPage()
+        if (nextPage >= 0)
+            goToPage(nextPage)
     }
 
     function beginDraftPrompt(action, session) {
@@ -340,7 +375,11 @@ ApplicationWindow {
             && window.activeEditController.canUndo
             && !window.activeEditController.textEditActive
             && !tabModel.anySaving
-        onActivated: window.activeEditController.undo()
+        onActivated: {
+            const page = window.activeEditController.undo()
+            if (page >= 0)
+                window.goToPage(page)
+        }
     }
 
     Shortcut {
@@ -349,7 +388,11 @@ ApplicationWindow {
             && window.activeEditController.canRedo
             && !window.activeEditController.textEditActive
             && !tabModel.anySaving
-        onActivated: window.activeEditController.redo()
+        onActivated: {
+            const page = window.activeEditController.redo()
+            if (page >= 0)
+                window.goToPage(page)
+        }
     }
 
     Shortcut {
@@ -494,6 +537,69 @@ ApplicationWindow {
         }
     }
 
+    Popup {
+        id: deletePagePopup
+
+        x: Math.round((window.width - width) / 2)
+        y: Math.round((window.height - height) / 2)
+        width: Math.min(400, window.width - 32)
+        height: deletePageContent.implicitHeight + 32
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+        onClosed: {
+            window.deletePageSession = null
+            window.deletePageIndex = -1
+        }
+
+        background: Rectangle {
+            radius: 6
+            color: "#fffdfb"
+            border.color: appTheme.ribbonBorder
+            border.width: 1
+        }
+
+        contentItem: ColumnLayout {
+            id: deletePageContent
+
+            spacing: 18
+
+            Label {
+                Layout.fillWidth: true
+                //% "Do you want to delete page %1?"
+                text: qsTrId("ConfirmDeletePageQuestion").arg(
+                    window.deletePageIndex + 1)
+                color: appTheme.ribbonTextColor
+                font.pixelSize: 18
+                font.weight: Font.DemiBold
+                wrapMode: Text.Wrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Button {
+                    //% "Cancel"
+                    text: qsTrId("Cancel")
+                    onClicked: deletePagePopup.close()
+                }
+
+                OrangeButton {
+                    Layout.preferredWidth: 104
+                    theme: appTheme
+                    //% "Delete"
+                    text: qsTrId("Delete")
+                    onClicked: window.confirmDeletePage()
+                }
+            }
+        }
+    }
+
     header: Column {
         width: window.width
 
@@ -507,6 +613,7 @@ ApplicationWindow {
             onSaveRequested: window.requestSave()
             onSaveAsRequested: window.requestSaveAs()
             onPageRequested: page => window.goToPage(page)
+            onDeletePageRequested: page => window.requestDeletePage(page)
             onZoomOutRequested: {
                 window.setZoom(window.activeSession
                     ? window.activeSession.zoom / 1.15

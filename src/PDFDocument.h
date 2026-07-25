@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QSet>
 #include <QSize>
 #include <QSizeF>
 #include <QString>
@@ -49,6 +50,9 @@ public:
 
     QString renderFilePath() const;
     int renderRevision() const;
+    int sourcePageCount() const;
+    int sourcePageIndex(int page) const;
+    bool isTransientBlankPage(int page) const;
 
 signals:
     void sourceChanged();
@@ -64,16 +68,24 @@ private:
     void closeDocumentLocked();
     void setStatusText(const QString &statusText);
     void emitDocumentStateChanged();
+    void setTransientPageStructure(const QSet<int> &deletedSourcePages,
+                                   const QVector<QSizeF> &blankPageSizes);
+    void updatePageMetrics();
 
     FPDF_DOCUMENT m_document = nullptr;
     QUrl m_source;
     QString m_filePath;
+    QVector<QSizeF> m_sourcePageSizes;
     QVector<QSizeF> m_pageSizes;
+    QVector<int> m_displaySourcePages;
+    QVector<QSizeF> m_transientBlankPageSizes;
     qreal m_maximumPageWidth = 0.0;
     qreal m_maximumPageHeight = 0.0;
+    int m_sourcePageCount = 0;
     int m_pageCount = 0;
     int m_currentPage = 0;
     int m_revision = 0;
     bool m_allowsContentEditing = false;
+    bool m_allowsPageAssembly = false;
     QString m_statusText;
 };

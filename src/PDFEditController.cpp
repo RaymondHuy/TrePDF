@@ -869,6 +869,12 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::ImageObjectCreationFailed:
         //% "The image could not be created on page %1."
         return qtTrId("PdfSaveImageCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::PageCreationFailed:
+        //% "Blank page %1 could not be created while saving."
+        return qtTrId("PdfSavePageCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::PageDeletionFailed:
+        //% "Page %1 could not be deleted while saving."
+        return qtTrId("PdfSavePageDeletionFailed").arg(result.page + 1);
     case PDFSaveWriter::Error::PageContentGenerationFailed:
         //% "Page %1 could not be finalized for saving."
         return qtTrId("PdfSavePageGenerationFailed").arg(result.page + 1);
@@ -925,7 +931,6 @@ void PDFEditController::setDocument(PDFDocument *document)
     if (m_document) {
         connect(m_document, &PDFDocument::sourceChanged, this, &PDFEditController::resetSession);
         connect(m_document, &PDFDocument::loadedChanged, this, &PDFEditController::resetSession);
-        connect(m_document, &PDFDocument::pageCountChanged, this, &PDFEditController::resetSession);
         connect(m_document, &QObject::destroyed, this, [this]() {
             m_document = nullptr;
             resetSession();
@@ -958,7 +963,9 @@ void PDFEditController::setTool(Tool tool)
 
 bool PDFEditController::hasDrafts() const
 {
-    return !m_drafts.isEmpty();
+    return !m_drafts.isEmpty()
+        || !m_addedBlankPageSizes.isEmpty()
+        || !m_deletedSourcePages.isEmpty();
 }
 
 bool PDFEditController::canUndo() const
@@ -1756,6 +1763,135 @@ QVariantMap PDFEditController::addImage(int page,
     markDraftStateChanged(page, true);
     emit historyStateChanged();
     return candidateMap(draft);
+}
+
+int PDFEditController::addBlankPage()
+{
+    if (!m_document || !m_document->isLoaded() || m_saving) {
+        return -1;
+    }
+    if (!documentAllowsPageAssembly()) {
+        //% "This PDF does not permit adding or deleting pages."
+        emit statusMessage(qtTrId("PdfPageAssemblyNotPermitted"));
+        return -1;
+    }
+
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    QSizeF pageSize = m_document->pageSize(m_document->currentPage());
+    if (pageSize.isEmpty() && m_document->sourcePageCount() > 0) {
+        pageSize = m_document->pageSize(0);
+    }
+    if (pageSize.isEmpty()) {
+        pageSize = QSizeF(595.0, 842.0);
+    }
+
+    Command command;
+    command.kind = Command::Kind::PageStructure;
+    command.page = m_document->pageCount();
+    command.pageStateBefore = capturePageState();
+    command.pageStateAfter = command.pageStateBefore;
+    command.pageStateAfter.addedBlankPageSizes.append(pageSize);
+    command.pageStateAfter.currentPage = command.page;
+    command.pageStateAfter.hasSelection = false;
+    command.pageStateAfter.selectedCandidate = Candidate();
+    applyDraftState(command, true, true);
+    m_undoStack.append(command);
+    m_redoStack.clear();
+    emit historyStateChanged();
+    return command.page;
+}
+
+int PDFEditController::deleteCurrentPage()
+{
+    if (!m_document || !m_document->isLoaded() || m_saving) {
+        return -1;
+    }
+    if (!documentAllowsPageAssembly()) {
+        //% "This PDF does not permit adding or deleting pages."
+        emit statusMessage(qtTrId("PdfPageAssemblyNotPermitted"));
+        return -1;
+    }
+    if (m_document->pageCount() <= 1) {
+        //% "A PDF must contain at least one page."
+        emit statusMessage(qtTrId("CannotDeleteOnlyPage"));
+        return -1;
+    }
+
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+
+    const int deletedPage = m_document->currentPage();
+    const int deletedSourcePage = m_document->sourcePageIndex(deletedPage);
+    Command command;
+    command.kind = Command::Kind::PageStructure;
+    command.page = deletedPage;
+    command.pageStateBefore = capturePageState();
+    command.pageStateAfter = command.pageStateBefore;
+
+    if (deletedSourcePage >= 0) {
+        command.pageStateAfter.deletedSourcePages.insert(deletedSourcePage);
+    } else {
+        const int keptSourcePageCount = m_document->sourcePageCount()
+            - command.pageStateAfter.deletedSourcePages.size();
+        const int blankPage = deletedPage - keptSourcePageCount;
+        if (blankPage < 0
+            || blankPage >= command.pageStateAfter.addedBlankPageSizes.size()) {
+            return -1;
+        }
+        command.pageStateAfter.addedBlankPageSizes.removeAt(blankPage);
+    }
+
+    QVector<Candidate> shiftedCandidates;
+    shiftedCandidates.reserve(command.pageStateAfter.addedCandidates.size());
+    for (Candidate candidate
+         : std::as_const(command.pageStateAfter.addedCandidates)) {
+        if (candidate.page == deletedPage) {
+            continue;
+        }
+        if (candidate.page > deletedPage) {
+            --candidate.page;
+        }
+        shiftedCandidates.append(std::move(candidate));
+    }
+    command.pageStateAfter.addedCandidates = std::move(shiftedCandidates);
+
+    QHash<QString, Draft> shiftedDrafts;
+    shiftedDrafts.reserve(command.pageStateAfter.drafts.size());
+    for (Draft draft : std::as_const(command.pageStateAfter.drafts)) {
+        if (draft.candidate.page == deletedPage) {
+            continue;
+        }
+        if (draft.candidate.page > deletedPage) {
+            --draft.candidate.page;
+        }
+        shiftedDrafts.insert(
+            draftKey(draft.candidate.page, draft.candidate.objectId),
+            std::move(draft));
+    }
+    command.pageStateAfter.drafts = std::move(shiftedDrafts);
+
+    if (command.pageStateAfter.hasSelection) {
+        if (command.pageStateAfter.selectedCandidate.page == deletedPage) {
+            command.pageStateAfter.hasSelection = false;
+            command.pageStateAfter.selectedCandidate = Candidate();
+        } else if (command.pageStateAfter.selectedCandidate.page > deletedPage) {
+            --command.pageStateAfter.selectedCandidate.page;
+        }
+    }
+    const int remainingPageCount = m_document->sourcePageCount()
+        - command.pageStateAfter.deletedSourcePages.size()
+        + command.pageStateAfter.addedBlankPageSizes.size();
+    command.pageStateAfter.currentPage = qBound(
+        0,
+        deletedPage,
+        remainingPageCount - 1);
+
+    applyDraftState(command, true, true);
+    m_undoStack.append(command);
+    m_redoStack.clear();
+    emit historyStateChanged();
+    return m_document->currentPage();
 }
 
 QFont PDFEditController::fontForDisplay(const QString &fontFamily,
@@ -2989,36 +3125,45 @@ void PDFEditController::deleteSelectedObject()
     emit historyStateChanged();
 }
 
-void PDFEditController::undo()
+int PDFEditController::undo()
 {
-    if (m_textEditActive || m_undoStack.isEmpty()) {
-        return;
+    if (m_saving || m_textEditActive || m_undoStack.isEmpty()) {
+        return -1;
     }
 
     const Command command = m_undoStack.takeLast();
     applyDraftState(command, false, true);
     m_redoStack.append(command);
     emit historyStateChanged();
+    return command.kind == Command::Kind::PageStructure && m_document
+        ? m_document->currentPage()
+        : -1;
 }
 
-void PDFEditController::redo()
+int PDFEditController::redo()
 {
-    if (m_textEditActive || m_redoStack.isEmpty()) {
-        return;
+    if (m_saving || m_textEditActive || m_redoStack.isEmpty()) {
+        return -1;
     }
 
     const Command command = m_redoStack.takeLast();
     applyDraftState(command, true, true);
     m_undoStack.append(command);
     emit historyStateChanged();
+    return command.kind == Command::Kind::PageStructure && m_document
+        ? m_document->currentPage()
+        : -1;
 }
 
 void PDFEditController::discardDrafts()
 {
-    if (!m_textEditActive
-        && m_drafts.isEmpty()
-        && m_undoStack.isEmpty()
-        && m_redoStack.isEmpty()) {
+    if (m_saving
+        || (!m_textEditActive
+            && m_drafts.isEmpty()
+            && m_addedBlankPageSizes.isEmpty()
+            && m_deletedSourcePages.isEmpty()
+            && m_undoStack.isEmpty()
+            && m_redoStack.isEmpty())) {
         return;
     }
 
@@ -3037,6 +3182,13 @@ void PDFEditController::discardDrafts()
     m_textEditCommand = Command();
     resetTextEditDisplayState();
     m_addedCandidates.clear();
+    m_addedBlankPageSizes.clear();
+    m_deletedSourcePages.clear();
+    if (m_document) {
+        m_document->setTransientPageStructure(
+            m_deletedSourcePages,
+            m_addedBlankPageSizes);
+    }
     m_drafts.clear();
     m_undoStack.clear();
     m_redoStack.clear();
@@ -3237,6 +3389,13 @@ void PDFEditController::resetSession()
     m_pageCandidates.clear();
     m_pageCandidateLru.clear();
     m_addedCandidates.clear();
+    m_addedBlankPageSizes.clear();
+    m_deletedSourcePages.clear();
+    if (m_document) {
+        m_document->setTransientPageStructure(
+            m_deletedSourcePages,
+            m_addedBlankPageSizes);
+    }
     m_drafts.clear();
     m_pageDraftRevisions.clear();
     m_undoStack.clear();
@@ -3294,6 +3453,13 @@ const QVector<PDFEditController::Candidate> &PDFEditController::ensurePageCandid
         return empty;
     }
 
+    if (m_document->isTransientBlankPage(page)
+        && !m_pageCandidates.contains(page)) {
+        m_pageCandidates.insert(page, {});
+        touchPageCandidateCache(page);
+        prunePageCandidateCache(page);
+        emit pageCandidatesReady(page);
+    }
     if (!m_pageCandidates.contains(page)) {
         requestPageCandidateScan(page);
         return empty;
@@ -3333,6 +3499,13 @@ void PDFEditController::requestPageCandidateScan(int page)
         return;
     }
 
+    if (m_document->isTransientBlankPage(page)) {
+        m_pageCandidates.insert(page, {});
+        touchPageCandidateCache(page);
+        prunePageCandidateCache(page);
+        emit pageCandidatesReady(page);
+        return;
+    }
     if (m_document->pageSize(page).isEmpty()) {
         return;
     }
@@ -3447,6 +3620,7 @@ void PDFEditController::completePageCandidateScan(
         && m_document->renderFilePath() == request.filePath
         && request.page >= 0
         && request.page < m_document->pageCount()
+        && m_document->sourcePageIndex(request.page) == request.sourcePage
         && m_document->pageSize(request.page) == request.pageSize;
     if (requestStillCurrent && !m_pageCandidates.contains(request.page)) {
         m_pageCandidates.insert(
@@ -3537,6 +3711,7 @@ PDFEditController::CandidateScanRequest PDFEditController::candidateScanRequest(
     request.filePath = m_document->renderFilePath();
     request.revision = m_document->renderRevision();
     request.page = page;
+    request.sourcePage = m_document->sourcePageIndex(page);
     request.pageSize = m_document->pageSize(page);
     request.editingAllowed = documentAllowsEditing();
     request.bundledFontFamilies = ApplicationFonts::bundledFontFamilies();
@@ -3545,8 +3720,11 @@ PDFEditController::CandidateScanRequest PDFEditController::candidateScanRequest(
     // later page to fingerprint and reuse an already registered font after the
     // registration byte budget has been reached.
     request.maximumEmbeddedFontSnapshotBytes = kMaximumRegisteredFontBytes;
-    if (request.filePath.isEmpty() || request.pageSize.isEmpty()) {
+    if (request.filePath.isEmpty()
+        || request.sourcePage < 0
+        || request.pageSize.isEmpty()) {
         request.page = -1;
+        request.sourcePage = -1;
     }
     return request;
 }
@@ -3589,7 +3767,7 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
         return candidates;
     }
 
-    FPDF_PAGE page = FPDF_LoadPage(document, request.page);
+    FPDF_PAGE page = FPDF_LoadPage(document, request.sourcePage);
     FPDF_TEXTPAGE textPage = nullptr;
     if (page) {
         textPage = FPDFText_LoadPage(page);
@@ -4392,6 +4570,13 @@ bool PDFEditController::documentAllowsEditing() const
     return m_document
         && m_document->m_document
         && m_document->m_allowsContentEditing;
+}
+
+bool PDFEditController::documentAllowsPageAssembly() const
+{
+    return m_document
+        && m_document->m_document
+        && m_document->m_allowsPageAssembly;
 }
 
 QString PDFEditController::draftKey(int page, const QString &objectId) const
@@ -5312,6 +5497,14 @@ void PDFEditController::applyDraftState(const Command &command,
                                         bool useAfterState,
                                         bool immediate)
 {
+    if (command.kind == Command::Kind::PageStructure) {
+        applyPageState(
+            useAfterState
+                ? command.pageStateAfter
+                : command.pageStateBefore);
+        return;
+    }
+
     const bool shouldExist = useAfterState ? command.hadAfter : command.hadBefore;
     Draft draft = useAfterState ? command.after : command.before;
     Candidate candidate = draft.candidate;
@@ -5375,6 +5568,51 @@ void PDFEditController::applyDraftState(const Command &command,
     } else {
         requestDraftRender(command.page, immediate);
     }
+}
+
+PDFEditController::PageState PDFEditController::capturePageState() const
+{
+    PageState state;
+    state.deletedSourcePages = m_deletedSourcePages;
+    state.addedBlankPageSizes = m_addedBlankPageSizes;
+    state.addedCandidates = m_addedCandidates;
+    state.drafts = m_drafts;
+    state.currentPage = m_document ? m_document->currentPage() : 0;
+    state.hasSelection = m_hasSelection;
+    state.selectedCandidate = m_selectedCandidate;
+    return state;
+}
+
+void PDFEditController::applyPageState(const PageState &state)
+{
+    if (!m_document || !m_document->isLoaded()) {
+        return;
+    }
+
+    if (m_candidateScanCancellation) {
+        m_candidateScanCancellation->store(true, std::memory_order_relaxed);
+    }
+    m_pendingCandidateScanPage = -1;
+    m_pageCandidates.clear();
+    m_pageCandidateLru.clear();
+    m_pageDraftRevisions.clear();
+
+    m_deletedSourcePages = state.deletedSourcePages;
+    m_addedBlankPageSizes = state.addedBlankPageSizes;
+    m_addedCandidates = state.addedCandidates;
+    m_drafts = state.drafts;
+    m_document->setTransientPageStructure(
+        m_deletedSourcePages,
+        m_addedBlankPageSizes);
+    m_document->setCurrentPage(state.currentPage);
+
+    if (state.hasSelection) {
+        const Candidate selectedCandidate = state.selectedCandidate;
+        setSelection(&selectedCandidate);
+    } else {
+        setSelection(nullptr);
+    }
+    emit pageDataChanged(-1);
 }
 
 bool PDFEditController::removeAddedCandidate(int page, const QString &objectId)
