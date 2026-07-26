@@ -11,8 +11,11 @@
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QMouseEvent>
+#include <QVariantMap>
 
 #include <fpdf_fwlevent.h>
+
+#include <utility>
 
 PDFFormView::PDFFormView(QQuickItem *parent)
     : QQuickItem(parent)
@@ -20,6 +23,13 @@ PDFFormView::PDFFormView(QQuickItem *parent)
     setFlag(ItemAcceptsInputMethod, true);
     setAcceptedMouseButtons(Qt::NoButton);
     setCursor(Qt::ArrowCursor);
+    m_choiceFieldsRefreshTimer.setInterval(40);
+    m_choiceFieldsRefreshTimer.setSingleShot(true);
+    connect(
+        &m_choiceFieldsRefreshTimer,
+        &QTimer::timeout,
+        this,
+        &PDFFormView::loadChoiceFields);
 }
 
 PDFFormController *PDFFormView::controller() const
@@ -37,6 +47,11 @@ bool PDFFormView::interactive() const
     return m_interactive;
 }
 
+QVariantList PDFFormView::choiceFields() const
+{
+    return m_choiceFields;
+}
+
 void PDFFormView::setController(PDFFormController *controller)
 {
     if (m_controller == controller) {
@@ -45,6 +60,7 @@ void PDFFormView::setController(PDFFormController *controller)
     if (m_controller) {
         disconnect(m_controller, nullptr, this, nullptr);
     }
+    clearChoiceFields();
     m_controller = controller;
     if (m_controller) {
         connect(
@@ -57,15 +73,41 @@ void PDFFormView::setController(PDFFormController *controller)
             &PDFFormController::inputStateChanged,
             this,
             &PDFFormView::updateCursor);
+        connect(
+            m_controller,
+            &PDFFormController::formRenderStateChanged,
+            this,
+            [this](int page, quint64) {
+                if (page < 0 || page == m_page) {
+                    requestChoiceFields();
+                }
+            });
+        connect(
+            m_controller,
+            &PDFFormController::interactiveChanged,
+            this,
+            &PDFFormView::requestChoiceFields);
+        connect(
+            m_controller,
+            &PDFFormController::documentChanged,
+            this,
+            [this]() {
+                clearChoiceFields();
+                requestChoiceFields();
+            });
         connect(m_controller, &QObject::destroyed, this, [this]() {
             m_controller = nullptr;
             m_pointerInside = false;
             m_mouseDown = false;
+            ++m_choiceFieldsRequestSerial;
+            m_choiceFieldsRefreshTimer.stop();
+            clearChoiceFields();
             updateInputMethod();
             updateCursor();
             emit controllerChanged();
         });
     }
+    requestChoiceFields();
     updateInputMethod();
     updateCursor();
     emit controllerChanged();
@@ -77,6 +119,8 @@ void PDFFormView::setPage(int page)
         return;
     }
     m_page = page;
+    clearChoiceFields();
+    requestChoiceFields();
     emit pageChanged();
 }
 
@@ -95,9 +139,82 @@ void PDFFormView::setInteractive(bool interactive)
             setFocus(false);
         }
     }
+    requestChoiceFields();
     updateInputMethod();
     updateCursor();
     emit interactiveChanged();
+}
+
+void PDFFormView::selectChoiceOption(
+    int sourcePage,
+    int annotationIndex,
+    int optionIndex,
+    bool selected,
+    bool toggle,
+    const QString &identityToken)
+{
+    if (!m_interactive
+        || !m_controller
+        || !m_controller->document()
+        || m_controller->document()->sourcePageIndex(m_page)
+            != sourcePage) {
+        requestChoiceFields();
+        return;
+    }
+    m_controller->selectChoiceOption(
+        m_page,
+        annotationIndex,
+        optionIndex,
+        selected,
+        sourcePage,
+        toggle,
+        identityToken);
+    forceActiveFocus(Qt::MouseFocusReason);
+}
+
+void PDFFormView::focusChoiceField(
+    int sourcePage,
+    int annotationIndex,
+    const QString &identityToken)
+{
+    if (!m_interactive
+        || !m_controller
+        || !m_controller->document()
+        || m_controller->document()->sourcePageIndex(m_page)
+            != sourcePage) {
+        requestChoiceFields();
+        emit choiceFieldFocusFinished(
+            sourcePage,
+            annotationIndex,
+            identityToken,
+            false);
+        return;
+    }
+    m_controller->focusChoiceField(
+        m_page,
+        annotationIndex,
+        sourcePage,
+        identityToken,
+        [view = QPointer<PDFFormView>(this),
+         controller = QPointer<PDFFormController>(m_controller),
+         sourcePage,
+         annotationIndex,
+         identityToken](bool focused) {
+            if (!view
+                || view->m_controller != controller
+                || !controller
+                || !controller->document()
+                || controller->document()->sourcePageIndex(view->m_page)
+                    != sourcePage) {
+                return;
+            }
+            emit view->choiceFieldFocusFinished(
+                sourcePage,
+                annotationIndex,
+                identityToken,
+                focused);
+        });
+    forceActiveFocus(Qt::MouseFocusReason);
 }
 
 bool PDFFormView::event(QEvent *event)
@@ -452,6 +569,103 @@ void PDFFormView::sendPointerEvent(
         eventModifiers(modifiers, leftButtonDown),
         position,
         QSize(qMax(1, qRound(width())), qMax(1, qRound(height()))));
+}
+
+void PDFFormView::requestChoiceFields()
+{
+    ++m_choiceFieldsRequestSerial;
+    m_choiceFieldsRefreshTimer.stop();
+    if (!m_interactive || !m_controller || m_page < 0) {
+        clearChoiceFields();
+        return;
+    }
+    m_choiceFieldsRefreshTimer.start();
+}
+
+void PDFFormView::loadChoiceFields()
+{
+    if (!m_interactive || !m_controller || m_page < 0) {
+        clearChoiceFields();
+        return;
+    }
+    const quint64 requestSerial = m_choiceFieldsRequestSerial;
+    const int requestedPage = m_page;
+    QPointer<PDFFormView> view(this);
+    QPointer<PDFFormController> controller(m_controller);
+    m_controller->requestChoiceFields(
+        requestedPage,
+        [view,
+         controller,
+         requestedPage,
+         requestSerial](
+            QVector<PDFFormWorker::ChoiceField> fields) {
+            if (!view
+                || view->m_controller != controller
+                || view->m_page != requestedPage
+                || view->m_choiceFieldsRequestSerial != requestSerial
+                || !view->m_interactive) {
+                return;
+            }
+
+            QVariantList choiceFields;
+            choiceFields.reserve(fields.size());
+            for (const PDFFormWorker::ChoiceField &field : fields) {
+                QVariantList selectedIndices;
+                selectedIndices.reserve(field.selectedIndices.size());
+                for (int selectedIndex : field.selectedIndices) {
+                    selectedIndices.append(selectedIndex);
+                }
+
+                const QRectF &rect = field.normalizedRect;
+                QVariantMap choiceField;
+                choiceField.insert(
+                    QStringLiteral("annotationIndex"),
+                    field.annotationIndex);
+                choiceField.insert(
+                    QStringLiteral("sourcePage"),
+                    field.sourcePage);
+                choiceField.insert(
+                    QStringLiteral("comboBox"),
+                    field.fieldType == FPDF_FORMFIELD_COMBOBOX);
+                choiceField.insert(QStringLiteral("x"), rect.x());
+                choiceField.insert(QStringLiteral("y"), rect.y());
+                choiceField.insert(QStringLiteral("width"), rect.width());
+                choiceField.insert(QStringLiteral("height"), rect.height());
+                choiceField.insert(
+                    QStringLiteral("accessibleName"),
+                    field.accessibleName);
+                choiceField.insert(
+                    QStringLiteral("identityToken"),
+                    field.identityToken);
+                choiceField.insert(
+                    QStringLiteral("options"),
+                    field.options);
+                choiceField.insert(
+                    QStringLiteral("selectedIndices"),
+                    selectedIndices);
+                choiceField.insert(
+                    QStringLiteral("readOnly"),
+                    field.readOnly);
+                choiceField.insert(
+                    QStringLiteral("multiSelect"),
+                    field.multiSelect);
+                choiceFields.append(choiceField);
+            }
+            if (view->m_choiceFields == choiceFields) {
+                return;
+            }
+            view->m_choiceFields = std::move(choiceFields);
+            emit view->choiceFieldsChanged();
+        });
+}
+
+void PDFFormView::clearChoiceFields()
+{
+    if (m_choiceFields.isEmpty()) {
+        return;
+    }
+    m_choiceFields.clear();
+    emit choiceFieldsChanged();
 }
 
 void PDFFormView::updateInputMethod()

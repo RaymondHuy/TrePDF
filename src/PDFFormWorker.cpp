@@ -3,6 +3,7 @@
 #include "PDFiumSynchronization.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QFile>
 #include <QHash>
@@ -28,6 +29,10 @@
 #include <fpdf_save.h>
 
 namespace {
+
+// PDF 1.7, table 8.75. PDFium does not currently expose this choice-field
+// flag in fpdf_annot.h.
+constexpr int kChoiceCommitOnSelectionChange = 1 << 26;
 
 QThreadPool &formRenderThreadPool()
 {
@@ -268,6 +273,117 @@ void postResult(Result result, const Callback &callback)
             callback(std::move(result));
         },
         Qt::QueuedConnection);
+}
+
+template<typename Getter>
+QString formWideString(const Getter &getter)
+{
+    const unsigned long byteCount = getter(nullptr, 0);
+    if (byteCount <= sizeof(FPDF_WCHAR)
+        || byteCount > 1024UL * 1024UL
+        || byteCount % sizeof(FPDF_WCHAR) != 0) {
+        return {};
+    }
+    QVector<FPDF_WCHAR> buffer(
+        static_cast<qsizetype>(byteCount / sizeof(FPDF_WCHAR)));
+    if (getter(buffer.data(), byteCount) != byteCount) {
+        return {};
+    }
+    return QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(buffer.constData()),
+        buffer.size() - 1);
+}
+
+QString choiceFieldIdentityToken(
+    FPDF_FORMHANDLE formHandle,
+    FPDF_ANNOTATION annotation,
+    int sourcePage)
+{
+    if (!formHandle || !annotation || sourcePage < 0) {
+        return {};
+    }
+    const int optionCount = FPDFAnnot_GetOptionCount(
+        formHandle,
+        annotation);
+    FS_RECTF rect = {};
+    if (optionCount < 0
+        || optionCount > 4096
+        || !FPDFAnnot_GetRect(annotation, &rect)) {
+        return {};
+    }
+
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    const auto addBytes = [&hash](const QByteArray &value) {
+        hash.addData(QByteArray::number(value.size()));
+        hash.addData(QByteArrayLiteral(":"));
+        hash.addData(value);
+        hash.addData(QByteArrayLiteral(";"));
+    };
+    const auto addInteger = [&addBytes](int value) {
+        addBytes(QByteArray::number(value));
+    };
+    const auto addReal = [&addBytes](float value) {
+        addBytes(QByteArray::number(
+            static_cast<double>(value),
+            'g',
+            17));
+    };
+    const auto addString = [&addBytes](const QString &value) {
+        addBytes(value.toUtf8());
+    };
+
+    addInteger(sourcePage);
+    addInteger(FPDFAnnot_GetSubtype(annotation));
+    addInteger(FPDFAnnot_GetFlags(annotation));
+    addInteger(FPDFAnnot_GetFormFieldType(formHandle, annotation));
+    addInteger(FPDFAnnot_GetFormFieldFlags(formHandle, annotation));
+    addReal(rect.left);
+    addReal(rect.top);
+    addReal(rect.right);
+    addReal(rect.bottom);
+    addString(formWideString(
+        [formHandle, annotation](FPDF_WCHAR *buffer,
+                                 unsigned long byteCount) {
+            return FPDFAnnot_GetFormFieldName(
+                formHandle,
+                annotation,
+                buffer,
+                byteCount);
+        }));
+    addString(formWideString(
+        [formHandle, annotation](FPDF_WCHAR *buffer,
+                                 unsigned long byteCount) {
+            return FPDFAnnot_GetFormFieldAlternateName(
+                formHandle,
+                annotation,
+                buffer,
+                byteCount);
+        }));
+    addInteger(optionCount);
+
+    qsizetype totalOptionCharacters = 0;
+    for (int optionIndex = 0;
+         optionIndex < optionCount;
+         ++optionIndex) {
+        const QString label = formWideString(
+            [formHandle,
+             annotation,
+             optionIndex](FPDF_WCHAR *buffer,
+                          unsigned long byteCount) {
+                return FPDFAnnot_GetOptionLabel(
+                    formHandle,
+                    annotation,
+                    optionIndex,
+                    buffer,
+                    byteCount);
+            });
+        totalOptionCharacters += label.size();
+        if (totalOptionCharacters > 1024 * 1024) {
+            return {};
+        }
+        addString(label);
+    }
+    return QString::fromLatin1(hash.result().toHex());
 }
 
 class SnapshotDeliveryGuard
@@ -792,6 +908,569 @@ public:
         FORM_OnBeforeClosePage(formPage, m_formHandle);
         FPDF_ClosePage(formPage);
         return previewReusable;
+    }
+
+    PDFFormWorker::ChoiceFieldsResult choiceFieldsLocked(
+        const PDFFormWorker::DocumentKey &key,
+        int page,
+        int sourcePage)
+    {
+        assertPDFiumProcessLockHeld();
+        PDFFormWorker::ChoiceFieldsResult result;
+        result.page = page;
+        if (!documentLocked(key)
+            || !m_formHandle
+            || sourcePage < 0
+            || sourcePage >= FPDF_GetPageCount(m_document)) {
+            return result;
+        }
+
+        FPDF_PAGE formPage = nullptr;
+        bool temporaryPage = false;
+        if (m_activePage && m_activeSourcePage == sourcePage) {
+            formPage = m_activePage;
+        } else {
+            const auto scriptPage = m_javaScriptPages.constFind(sourcePage);
+            if (scriptPage != m_javaScriptPages.cend()) {
+                formPage = scriptPage.value();
+            } else {
+                formPage = FPDF_LoadPage(m_document, sourcePage);
+                if (!formPage) {
+                    return result;
+                }
+                FORM_OnAfterLoadPage(formPage, m_formHandle);
+                temporaryPage = true;
+            }
+        }
+
+        constexpr int kNormalizedDeviceExtent = 1000000;
+        constexpr int kMaximumChoiceOptions = 4096;
+        int focusedAnnotationIndex = -1;
+        int focusedSourcePage = -1;
+        QString focusedFieldName;
+        QVector<bool> focusedSelections;
+        if (m_activePage) {
+            int focusedPage = -1;
+            FPDF_ANNOTATION focusedAnnotation = nullptr;
+            if (FORM_GetFocusedAnnot(
+                    m_formHandle,
+                    &focusedPage,
+                    &focusedAnnotation)
+                && focusedAnnotation
+                && focusedPage == m_activeSourcePage) {
+                focusedSourcePage = focusedPage;
+                focusedAnnotationIndex = FPDFPage_GetAnnotIndex(
+                    m_activePage,
+                    focusedAnnotation);
+                focusedFieldName = formWideString(
+                    [this,
+                     focusedAnnotation](FPDF_WCHAR *buffer,
+                                        unsigned long byteCount) {
+                        return FPDFAnnot_GetFormFieldName(
+                            m_formHandle,
+                            focusedAnnotation,
+                            buffer,
+                            byteCount);
+                    });
+                const int focusedOptionCount
+                    = FPDFAnnot_GetOptionCount(
+                        m_formHandle,
+                        focusedAnnotation);
+                if (focusedOptionCount >= 0
+                    && focusedOptionCount
+                        <= kMaximumChoiceOptions) {
+                    focusedSelections.reserve(focusedOptionCount);
+                    for (int optionIndex = 0;
+                         optionIndex < focusedOptionCount;
+                         ++optionIndex) {
+                        focusedSelections.append(
+                            FORM_IsIndexSelected(
+                                m_formHandle,
+                                m_activePage,
+                                optionIndex));
+                    }
+                }
+            }
+            if (focusedAnnotation) {
+                FPDFPage_CloseAnnot(focusedAnnotation);
+            }
+        }
+        const int annotationCount = FPDFPage_GetAnnotCount(formPage);
+        for (int annotationIndex = 0;
+             annotationIndex < annotationCount;
+             ++annotationIndex) {
+            FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+                formPage,
+                annotationIndex);
+            if (!annotation) {
+                continue;
+            }
+
+            const int annotationFlags = FPDFAnnot_GetFlags(annotation);
+            const int fieldType = FPDFAnnot_GetFormFieldType(
+                m_formHandle,
+                annotation);
+            const int fieldFlags = FPDFAnnot_GetFormFieldFlags(
+                m_formHandle,
+                annotation);
+            const bool hidden
+                = annotationFlags
+                    & (FPDF_ANNOT_FLAG_INVISIBLE
+                       | FPDF_ANNOT_FLAG_HIDDEN
+                       | FPDF_ANNOT_FLAG_NOVIEW);
+            const bool editableCombo
+                = fieldType == FPDF_FORMFIELD_COMBOBOX
+                && (fieldFlags & FPDF_FORMFLAG_CHOICE_EDIT);
+            const bool commitOnSelectionChange
+                = fieldFlags & kChoiceCommitOnSelectionChange;
+            const int optionCount = FPDFAnnot_GetOptionCount(
+                m_formHandle,
+                annotation);
+            FS_RECTF rect = {};
+            if (FPDFAnnot_GetSubtype(annotation) != FPDF_ANNOT_WIDGET
+                || hidden
+                || (fieldType != FPDF_FORMFIELD_COMBOBOX
+                    && fieldType != FPDF_FORMFIELD_LISTBOX)
+                || editableCombo
+                || commitOnSelectionChange
+                || FPDFAnnot_HasKey(annotation, "A")
+                || FPDFAnnot_HasKey(annotation, "AA")
+                || optionCount < 0
+                || optionCount > kMaximumChoiceOptions
+                || !FPDFAnnot_GetRect(annotation, &rect)) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+
+            const double pageXs[4] = {
+                rect.left,
+                rect.left,
+                rect.right,
+                rect.right,
+            };
+            const double pageYs[4] = {
+                rect.bottom,
+                rect.top,
+                rect.bottom,
+                rect.top,
+            };
+            int minimumX = kNormalizedDeviceExtent;
+            int minimumY = kNormalizedDeviceExtent;
+            int maximumX = 0;
+            int maximumY = 0;
+            bool mapped = true;
+            for (int corner = 0; corner < 4; ++corner) {
+                int deviceX = 0;
+                int deviceY = 0;
+                if (!FPDF_PageToDevice(
+                        formPage,
+                        0,
+                        0,
+                        kNormalizedDeviceExtent,
+                        kNormalizedDeviceExtent,
+                        0,
+                        pageXs[corner],
+                        pageYs[corner],
+                        &deviceX,
+                        &deviceY)) {
+                    mapped = false;
+                    break;
+                }
+                minimumX = qMin(minimumX, deviceX);
+                minimumY = qMin(minimumY, deviceY);
+                maximumX = qMax(maximumX, deviceX);
+                maximumY = qMax(maximumY, deviceY);
+            }
+            if (!mapped) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+
+            QRectF normalizedRect(
+                static_cast<qreal>(minimumX) / kNormalizedDeviceExtent,
+                static_cast<qreal>(minimumY) / kNormalizedDeviceExtent,
+                static_cast<qreal>(maximumX - minimumX)
+                    / kNormalizedDeviceExtent,
+                static_cast<qreal>(maximumY - minimumY)
+                    / kNormalizedDeviceExtent);
+            normalizedRect = normalizedRect.intersected(
+                QRectF(0.0, 0.0, 1.0, 1.0));
+            if (normalizedRect.isEmpty()) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+
+            PDFFormWorker::ChoiceField field;
+            field.annotationIndex = annotationIndex;
+            field.sourcePage = sourcePage;
+            field.fieldType = fieldType;
+            field.normalizedRect = normalizedRect;
+            field.readOnly
+                = (fieldFlags & FPDF_FORMFLAG_READONLY)
+                || (annotationFlags & FPDF_ANNOT_FLAG_READONLY);
+            field.multiSelect
+                = fieldType == FPDF_FORMFIELD_LISTBOX
+                && (fieldFlags & FPDF_FORMFLAG_CHOICE_MULTI_SELECT);
+            const QString fieldName = formWideString(
+                [this, annotation](FPDF_WCHAR *buffer,
+                                   unsigned long byteCount) {
+                    return FPDFAnnot_GetFormFieldName(
+                        m_formHandle,
+                        annotation,
+                        buffer,
+                        byteCount);
+                });
+            field.accessibleName = formWideString(
+                [this, annotation](FPDF_WCHAR *buffer,
+                                   unsigned long byteCount) {
+                    return FPDFAnnot_GetFormFieldAlternateName(
+                        m_formHandle,
+                        annotation,
+                        buffer,
+                        byteCount);
+                });
+            if (field.accessibleName.isEmpty()) {
+                field.accessibleName = fieldName;
+            }
+            field.identityToken = choiceFieldIdentityToken(
+                m_formHandle,
+                annotation,
+                sourcePage);
+            if (field.identityToken.isEmpty()) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+            const bool usesFocusedSelection
+                = optionCount == focusedSelections.size()
+                && ((sourcePage == focusedSourcePage
+                        && annotationIndex
+                            == focusedAnnotationIndex)
+                    || (!fieldName.isEmpty()
+                        && fieldName == focusedFieldName));
+
+            field.options.reserve(optionCount);
+            qsizetype totalOptionCharacters = 0;
+            bool optionsTooLarge = false;
+            for (int optionIndex = 0;
+                 optionIndex < optionCount;
+                 ++optionIndex) {
+                const QString label = formWideString(
+                    [this,
+                     annotation,
+                     optionIndex](FPDF_WCHAR *buffer,
+                                  unsigned long byteCount) {
+                        return FPDFAnnot_GetOptionLabel(
+                            m_formHandle,
+                            annotation,
+                            optionIndex,
+                            buffer,
+                            byteCount);
+                    });
+                totalOptionCharacters += label.size();
+                if (totalOptionCharacters > 1024 * 1024) {
+                    optionsTooLarge = true;
+                    break;
+                }
+                field.options.append(label);
+                const bool optionSelected
+                    = usesFocusedSelection
+                    ? focusedSelections.at(optionIndex)
+                    : FPDFAnnot_IsOptionSelected(
+                          m_formHandle,
+                          annotation,
+                          optionIndex);
+                if (optionSelected) {
+                    field.selectedIndices.append(optionIndex);
+                }
+            }
+            if (optionsTooLarge) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+            result.fields.append(std::move(field));
+            FPDFPage_CloseAnnot(annotation);
+        }
+
+        if (temporaryPage) {
+            FORM_OnBeforeClosePage(formPage, m_formHandle);
+            FPDF_ClosePage(formPage);
+        }
+        result.succeeded = true;
+        return result;
+    }
+
+    PDFFormWorker::InteractionResult focusChoiceFieldLocked(
+        const PDFFormWorker::DocumentKey &key,
+        int page,
+        int sourcePage,
+        int annotationIndex,
+        const QString &expectedIdentityToken)
+    {
+        assertPDFiumProcessLockHeld();
+        PDFFormWorker::InteractionResult result;
+        result.page = page;
+        beginEvent(page, true);
+        if (!documentLocked(key)
+            || !m_formHandle
+            || annotationIndex < 0
+            || !ensureActivePageLocked(sourcePage, page)) {
+            finishEvent(result);
+            return result;
+        }
+
+        FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+            m_activePage,
+            annotationIndex);
+        if (!annotation) {
+            finishEvent(result);
+            return result;
+        }
+        const int fieldType = FPDFAnnot_GetFormFieldType(
+            m_formHandle,
+            annotation);
+        const int fieldFlags = FPDFAnnot_GetFormFieldFlags(
+            m_formHandle,
+            annotation);
+        const int annotationFlags = FPDFAnnot_GetFlags(annotation);
+        const bool hidden
+            = annotationFlags
+                & (FPDF_ANNOT_FLAG_INVISIBLE
+                   | FPDF_ANNOT_FLAG_HIDDEN
+                   | FPDF_ANNOT_FLAG_NOVIEW);
+        const bool editableCombo
+            = fieldType == FPDF_FORMFIELD_COMBOBOX
+            && (fieldFlags & FPDF_FORMFLAG_CHOICE_EDIT);
+        const bool commitOnSelectionChange
+            = fieldFlags & kChoiceCommitOnSelectionChange;
+        const bool readOnly
+            = (fieldFlags & FPDF_FORMFLAG_READONLY)
+            || (annotationFlags & FPDF_ANNOT_FLAG_READONLY);
+        const QString identityToken = choiceFieldIdentityToken(
+            m_formHandle,
+            annotation,
+            sourcePage);
+        if (!hidden
+            && !editableCombo
+            && !commitOnSelectionChange
+            && !readOnly
+            && !FPDFAnnot_HasKey(annotation, "A")
+            && !FPDFAnnot_HasKey(annotation, "AA")
+            && !identityToken.isEmpty()
+            && (expectedIdentityToken.isEmpty()
+                || identityToken == expectedIdentityToken)
+            && (fieldType == FPDF_FORMFIELD_COMBOBOX
+                || fieldType == FPDF_FORMFIELD_LISTBOX)) {
+            result.handled = FORM_SetFocusedAnnot(
+                m_formHandle,
+                annotation);
+        }
+        FPDFPage_CloseAnnot(annotation);
+        finishEvent(result);
+        return result;
+    }
+
+    PDFFormWorker::InteractionResult selectChoiceOptionLocked(
+        const PDFFormWorker::DocumentKey &key,
+        int page,
+        int sourcePage,
+        int annotationIndex,
+        int optionIndex,
+        bool selected,
+        bool toggle,
+        const QString &expectedIdentityToken)
+    {
+        assertPDFiumProcessLockHeld();
+        PDFFormWorker::InteractionResult result;
+        result.page = page;
+        beginEvent(page, true);
+        if (!documentLocked(key)
+            || !m_formHandle
+            || annotationIndex < 0
+            || optionIndex < 0
+            || !ensureActivePageLocked(sourcePage, page)) {
+            finishEvent(result);
+            return result;
+        }
+
+        FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+            m_activePage,
+            annotationIndex);
+        if (!annotation) {
+            finishEvent(result);
+            return result;
+        }
+
+        const int fieldType = FPDFAnnot_GetFormFieldType(
+            m_formHandle,
+            annotation);
+        const int fieldFlags = FPDFAnnot_GetFormFieldFlags(
+            m_formHandle,
+            annotation);
+        const int annotationFlags = FPDFAnnot_GetFlags(annotation);
+        const int optionCount = FPDFAnnot_GetOptionCount(
+            m_formHandle,
+            annotation);
+        const bool supportedType
+            = fieldType == FPDF_FORMFIELD_COMBOBOX
+            || fieldType == FPDF_FORMFIELD_LISTBOX;
+        const bool hidden
+            = annotationFlags
+                & (FPDF_ANNOT_FLAG_INVISIBLE
+                   | FPDF_ANNOT_FLAG_HIDDEN
+                   | FPDF_ANNOT_FLAG_NOVIEW);
+        const bool editableCombo
+            = fieldType == FPDF_FORMFIELD_COMBOBOX
+            && (fieldFlags & FPDF_FORMFLAG_CHOICE_EDIT);
+        const bool commitOnSelectionChange
+            = fieldFlags & kChoiceCommitOnSelectionChange;
+        const bool readOnly
+            = (fieldFlags & FPDF_FORMFLAG_READONLY)
+            || (annotationFlags & FPDF_ANNOT_FLAG_READONLY);
+        if (!supportedType
+            || FPDFAnnot_GetSubtype(annotation) != FPDF_ANNOT_WIDGET
+            || hidden
+            || editableCombo
+            || commitOnSelectionChange
+            || readOnly
+            || FPDFAnnot_HasKey(annotation, "A")
+            || FPDFAnnot_HasKey(annotation, "AA")
+            || optionIndex >= optionCount) {
+            FPDFPage_CloseAnnot(annotation);
+            finishEvent(result);
+            return result;
+        }
+        const QString identityToken = choiceFieldIdentityToken(
+            m_formHandle,
+            annotation,
+            sourcePage);
+        if (identityToken.isEmpty()
+            || (!expectedIdentityToken.isEmpty()
+                && identityToken != expectedIdentityToken)
+            || !FORM_SetFocusedAnnot(m_formHandle, annotation)) {
+            FPDFPage_CloseAnnot(annotation);
+            finishEvent(result);
+            return result;
+        }
+
+        int focusedPage = -1;
+        FPDF_ANNOTATION focusedAnnotation = nullptr;
+        if (!FORM_GetFocusedAnnot(
+                m_formHandle,
+                &focusedPage,
+                &focusedAnnotation)
+            || !focusedAnnotation
+            || focusedPage != sourcePage
+            || FPDFPage_GetAnnotIndex(
+                   m_activePage,
+                   focusedAnnotation)
+                != annotationIndex) {
+            if (focusedAnnotation) {
+                FPDFPage_CloseAnnot(focusedAnnotation);
+            }
+            FPDFPage_CloseAnnot(annotation);
+            finishEvent(result);
+            return result;
+        }
+        const int focusedFieldType = FPDFAnnot_GetFormFieldType(
+            m_formHandle,
+            focusedAnnotation);
+        const int focusedFieldFlags = FPDFAnnot_GetFormFieldFlags(
+            m_formHandle,
+            focusedAnnotation);
+        const int focusedOptionCount = FPDFAnnot_GetOptionCount(
+            m_formHandle,
+            focusedAnnotation);
+        const int focusedAnnotationFlags = FPDFAnnot_GetFlags(
+            focusedAnnotation);
+        const bool focusedHidden
+            = focusedAnnotationFlags
+                & (FPDF_ANNOT_FLAG_INVISIBLE
+                   | FPDF_ANNOT_FLAG_HIDDEN
+                   | FPDF_ANNOT_FLAG_NOVIEW);
+        const bool focusedEditableCombo
+            = focusedFieldType == FPDF_FORMFIELD_COMBOBOX
+            && (focusedFieldFlags & FPDF_FORMFLAG_CHOICE_EDIT);
+        const bool focusedCommitOnSelectionChange
+            = focusedFieldFlags & kChoiceCommitOnSelectionChange;
+        const bool focusedReadOnly
+            = (focusedFieldFlags & FPDF_FORMFLAG_READONLY)
+            || (focusedAnnotationFlags & FPDF_ANNOT_FLAG_READONLY);
+        const bool focusedMultiSelect
+            = focusedFieldType == FPDF_FORMFIELD_LISTBOX
+            && (focusedFieldFlags
+                & FPDF_FORMFLAG_CHOICE_MULTI_SELECT);
+        const bool originalMultiSelect
+            = fieldType == FPDF_FORMFIELD_LISTBOX
+            && (fieldFlags & FPDF_FORMFLAG_CHOICE_MULTI_SELECT);
+        if (FPDFAnnot_GetSubtype(focusedAnnotation) != FPDF_ANNOT_WIDGET
+            || focusedFieldType != fieldType
+            || focusedOptionCount != optionCount
+            || optionIndex >= focusedOptionCount
+            || focusedHidden
+            || focusedEditableCombo
+            || focusedCommitOnSelectionChange
+            || focusedReadOnly
+            || FPDFAnnot_HasKey(focusedAnnotation, "A")
+            || FPDFAnnot_HasKey(focusedAnnotation, "AA")
+            || focusedMultiSelect != originalMultiSelect) {
+            FPDFPage_CloseAnnot(focusedAnnotation);
+            FPDFPage_CloseAnnot(annotation);
+            finishEvent(result);
+            return result;
+        }
+        const QString focusedIdentityToken = choiceFieldIdentityToken(
+            m_formHandle,
+            focusedAnnotation,
+            sourcePage);
+        FPDFPage_CloseAnnot(focusedAnnotation);
+        FPDFPage_CloseAnnot(annotation);
+        if (focusedIdentityToken.isEmpty()
+            || focusedIdentityToken != identityToken
+            || (!expectedIdentityToken.isEmpty()
+                && focusedIdentityToken
+                    != expectedIdentityToken)) {
+            finishEvent(result);
+            return result;
+        }
+
+        QVector<bool> selectedBefore;
+        selectedBefore.reserve(optionCount);
+        for (int index = 0; index < optionCount; ++index) {
+            selectedBefore.append(FORM_IsIndexSelected(
+                m_formHandle,
+                m_activePage,
+                index));
+        }
+
+        const bool multiSelect
+            = focusedMultiSelect;
+        const bool selectedValue = multiSelect && toggle
+            ? !selectedBefore.at(optionIndex)
+            : selected;
+        const bool handled = FORM_SetIndexSelected(
+            m_formHandle,
+            m_activePage,
+            optionIndex,
+            fieldType == FPDF_FORMFIELD_COMBOBOX || !multiSelect
+                ? true
+                : selectedValue);
+
+        bool selectionChanged = false;
+        for (int index = 0; index < optionCount; ++index) {
+            if (selectedBefore.at(index)
+                != static_cast<bool>(FORM_IsIndexSelected(
+                    m_formHandle,
+                    m_activePage,
+                    index))) {
+                selectionChanged = true;
+                break;
+            }
+        }
+        finishEvent(result);
+        result.handled = handled;
+        result.changed = result.changed || selectionChanged;
+        result.invalidated = result.invalidated || selectionChanged;
+        return result;
     }
 
     PDFFormWorker::InteractionResult pointerEventLocked(
@@ -1473,12 +2152,24 @@ private:
                     &annotation)) {
                 result.hasFocus = annotation != nullptr && focusedPage >= 0;
                 if (annotation) {
+                    if (focusedPage == m_activeSourcePage && m_activePage) {
+                        result.focusedPage = m_activePageIndex;
+                        result.focusedAnnotationIndex
+                            = FPDFPage_GetAnnotIndex(
+                                m_activePage,
+                                annotation);
+                    }
                     const int fieldType = FPDFAnnot_GetFormFieldType(
+                        m_formHandle,
+                        annotation);
+                    const int fieldFlags = FPDFAnnot_GetFormFieldFlags(
                         m_formHandle,
                         annotation);
                     result.acceptsTextInput
                         = fieldType == FPDF_FORMFIELD_TEXTFIELD
-                        || fieldType == FPDF_FORMFIELD_COMBOBOX;
+                        || (fieldType == FPDF_FORMFIELD_COMBOBOX
+                            && (fieldFlags
+                                & FPDF_FORMFLAG_CHOICE_EDIT));
                     FPDFPage_CloseAnnot(annotation);
                 }
             }
@@ -1709,6 +2400,96 @@ void submitPageChange(const DocumentKey &key,
                         page,
                         sourcePage);
                 }
+            }
+            postResult(std::move(result), callback);
+        });
+}
+
+void inspectChoiceFields(const DocumentKey &key,
+                         int page,
+                         int sourcePage,
+                         const ChoiceFieldsCallback &callback)
+{
+    workQueue().submitCommand(
+        key.sessionId,
+        [key, page, sourcePage, callback]() {
+            ChoiceFieldsResult result;
+            {
+                PDFiumProcessLock pdfiumLock;
+                result = formDocumentForSession(key.sessionId)
+                             .choiceFieldsLocked(
+                                 key,
+                                 page,
+                                 sourcePage);
+            }
+            postResult(std::move(result), callback);
+        });
+}
+
+void submitChoiceSelection(const DocumentKey &key,
+                           int page,
+                           int sourcePage,
+                           int annotationIndex,
+                           int optionIndex,
+                           bool selected,
+                           bool toggle,
+                           const QString &expectedIdentityToken,
+                           const InteractionCallback &callback)
+{
+    workQueue().submitCommand(
+        key.sessionId,
+        [key,
+         page,
+         sourcePage,
+         annotationIndex,
+         optionIndex,
+         selected,
+         toggle,
+         expectedIdentityToken,
+         callback]() {
+            InteractionResult result;
+            {
+                PDFiumProcessLock pdfiumLock;
+                result = formDocumentForSession(key.sessionId)
+                             .selectChoiceOptionLocked(
+                                 key,
+                                 page,
+                                 sourcePage,
+                                 annotationIndex,
+                                 optionIndex,
+                                 selected,
+                                 toggle,
+                                 expectedIdentityToken);
+            }
+            postResult(std::move(result), callback);
+        });
+}
+
+void submitChoiceFocus(const DocumentKey &key,
+                       int page,
+                       int sourcePage,
+                       int annotationIndex,
+                       const QString &expectedIdentityToken,
+                       const InteractionCallback &callback)
+{
+    workQueue().submitCommand(
+        key.sessionId,
+        [key,
+         page,
+         sourcePage,
+         annotationIndex,
+         expectedIdentityToken,
+         callback]() {
+            InteractionResult result;
+            {
+                PDFiumProcessLock pdfiumLock;
+                result = formDocumentForSession(key.sessionId)
+                             .focusChoiceFieldLocked(
+                                 key,
+                                 page,
+                                 sourcePage,
+                                 annotationIndex,
+                                 expectedIdentityToken);
             }
             postResult(std::move(result), callback);
         });

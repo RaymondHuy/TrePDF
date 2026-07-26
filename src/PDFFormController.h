@@ -22,6 +22,10 @@ class PDFFormController : public QObject
     Q_PROPERTY(bool hasFocus READ hasFocus NOTIFY inputStateChanged FINAL)
     Q_PROPERTY(bool acceptsTextInput READ acceptsTextInput
                    NOTIFY inputStateChanged FINAL)
+    Q_PROPERTY(int focusedPage READ focusedPage
+                   NOTIFY inputStateChanged FINAL)
+    Q_PROPERTY(int focusedAnnotationIndex READ focusedAnnotationIndex
+                   NOTIFY inputStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(int cursorType READ cursorType NOTIFY inputStateChanged FINAL)
@@ -35,6 +39,9 @@ class PDFFormController : public QObject
 public:
     using SnapshotCompletion
         = std::function<void(bool, const QString &, const QString &)>;
+    using ChoiceFieldsCompletion
+        = std::function<void(QVector<PDFFormWorker::ChoiceField>)>;
+    using ChoiceFocusCompletion = std::function<void(bool)>;
 
     explicit PDFFormController(QObject *parent = nullptr);
     ~PDFFormController() override;
@@ -46,6 +53,8 @@ public:
     bool hasDrafts() const;
     bool hasFocus() const;
     bool acceptsTextInput() const;
+    int focusedPage() const;
+    int focusedAnnotationIndex() const;
     bool canUndo() const;
     bool canRedo() const;
     bool focusRequestPending() const;
@@ -73,6 +82,20 @@ public:
     void discardChanges();
     void exportSnapshot(const SnapshotCompletion &completion);
     bool exportSnapshotBlocking(QString &filePath, QString &error);
+    void requestChoiceFields(int page,
+                             const ChoiceFieldsCompletion &completion);
+    void selectChoiceOption(int page,
+                            int annotationIndex,
+                            int optionIndex,
+                            bool selected,
+                            int expectedSourcePage = -1,
+                            bool toggle = false,
+                            const QString &expectedIdentityToken = {});
+    void focusChoiceField(int page,
+                          int annotationIndex,
+                          int expectedSourcePage = -1,
+                          const QString &expectedIdentityToken = {},
+                          const ChoiceFocusCompletion &completion = {});
     Q_INVOKABLE bool confirmExternalLink(quint64 requestId);
     Q_INVOKABLE void cancelExternalLink(quint64 requestId);
 
@@ -132,6 +155,8 @@ private:
     bool m_hasDrafts = false;
     bool m_hasFocus = false;
     bool m_acceptsTextInput = false;
+    int m_focusedPage = -1;
+    int m_focusedAnnotationIndex = -1;
     bool m_canUndo = false;
     bool m_canRedo = false;
     int m_pendingFocusRequestCount = 0;

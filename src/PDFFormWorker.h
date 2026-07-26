@@ -2,8 +2,11 @@
 
 #include <QByteArray>
 #include <QPointF>
+#include <QRectF>
 #include <QSize>
 #include <QString>
+#include <QStringList>
+#include <QVector>
 
 #include <array>
 #include <functional>
@@ -40,6 +43,8 @@ struct InteractionResult {
     bool canUndo = false;
     bool canRedo = false;
     int page = -1;
+    int focusedPage = -1;
+    int focusedAnnotationIndex = -1;
     int cursorType = FXCT_ARROW;
     QString selectedText;
     std::optional<GoToRequest> goTo;
@@ -66,6 +71,25 @@ struct PageChangeResult {
     InteractionResult interaction;
 };
 
+struct ChoiceField {
+    int annotationIndex = -1;
+    int sourcePage = -1;
+    int fieldType = FPDF_FORMFIELD_UNKNOWN;
+    QRectF normalizedRect;
+    QString accessibleName;
+    QString identityToken;
+    QStringList options;
+    QVector<int> selectedIndices;
+    bool readOnly = false;
+    bool multiSelect = false;
+};
+
+struct ChoiceFieldsResult {
+    bool succeeded = false;
+    int page = -1;
+    QVector<ChoiceField> fields;
+};
+
 enum class PointerEventType {
     Move,
     Press,
@@ -87,6 +111,7 @@ using InteractionCallback = std::function<void(InteractionResult)>;
 using SnapshotCallback = std::function<void(SnapshotResult)>;
 using JavaScriptCallback = std::function<void(JavaScriptResult)>;
 using PageChangeCallback = std::function<void(PageChangeResult)>;
+using ChoiceFieldsCallback = std::function<void(ChoiceFieldsResult)>;
 using PageCallback = std::function<bool(FPDF_DOCUMENT,
                                         FPDF_FORMHANDLE,
                                         FPDF_PAGE,
@@ -127,6 +152,25 @@ void submitPageChange(const DocumentKey &key,
                       int page,
                       int sourcePage,
                       const PageChangeCallback &callback);
+void inspectChoiceFields(const DocumentKey &key,
+                         int page,
+                         int sourcePage,
+                         const ChoiceFieldsCallback &callback);
+void submitChoiceSelection(const DocumentKey &key,
+                           int page,
+                           int sourcePage,
+                           int annotationIndex,
+                           int optionIndex,
+                           bool selected,
+                           bool toggle,
+                           const QString &expectedIdentityToken,
+                           const InteractionCallback &callback);
+void submitChoiceFocus(const DocumentKey &key,
+                       int page,
+                       int sourcePage,
+                       int annotationIndex,
+                       const QString &expectedIdentityToken,
+                       const InteractionCallback &callback);
 void resetSession(quint64 sessionId,
                   const InteractionCallback &callback = {});
 void destroySession(quint64 sessionId);
