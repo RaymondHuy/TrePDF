@@ -82,6 +82,7 @@ qt_add_qml_module(trepdf
         src/Components/DocumentWorkspace.qml
         src/Components/EditOverlay.qml
         src/Components/EditRibbon.qml
+        src/Components/FormChoiceOverlay.qml
         src/Components/OrangeButton.qml
         src/Components/PdfPageDelegate.qml
         src/Components/RibbonButton.qml

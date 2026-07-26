@@ -15,7 +15,12 @@ Item {
     property bool pooled: false
     property int sessionChangeGeneration: 0
     readonly property real pageMargin: 32
+    readonly property Item viewportItem: ListView.view
     readonly property real viewWidth: ListView.view ? ListView.view.width : 0
+    readonly property real viewContentX:
+        ListView.view ? ListView.view.contentX : 0
+    readonly property real viewContentY:
+        ListView.view ? ListView.view.contentY : 0
     readonly property int normalizedViewRotation:
         ((viewRotation % 360) + 360) % 360
     readonly property bool quarterTurn:
@@ -95,6 +100,8 @@ Item {
         }
 
         PDFFormView {
+            id: formView
+
             anchors.fill: pageView
             controller: pageCard.pooled ? null : pageCard.formController
             page: pageCard.index
@@ -102,7 +109,78 @@ Item {
                 && pageCard.formController.interactive
                 && !pageCard.editController.saving
                 && pageCard.editController.tool === PDFEditController.BrowseTool
+            activeFocusOnTab: interactive
             z: 1
+
+            Keys.onPressed: event => {
+                event.accepted = choiceOverlay.handleKey(
+                    event.key,
+                    event.modifiers,
+                    event.text)
+            }
+
+            onChoiceFieldFocusFinished: (sourcePage,
+                                         annotationIndex,
+                                         identityToken,
+                                         focused) => {
+                choiceOverlay.completeComboFocus(
+                    sourcePage,
+                    annotationIndex,
+                    identityToken,
+                    focused)
+            }
+
+            FormChoiceOverlay {
+                id: choiceOverlay
+
+                anchors.fill: parent
+                theme: pageCard.theme
+                fields: formView.choiceFields
+                interactive: formView.interactive
+                page: pageCard.index
+                focusedAnnotationIndex:
+                    pageCard.formController.focusedPage
+                        === pageCard.index
+                    ? pageCard.formController.focusedAnnotationIndex
+                    : -1
+                viewportItem: pageCard.viewportItem
+                viewportContentX: pageCard.viewContentX
+                viewportContentY: pageCard.viewContentY
+                viewportTransformState: [
+                    pageCard.normalizedViewRotation,
+                    pageCard.zoom,
+                    pageCard.width,
+                    pageCard.height,
+                    pageFrame.x,
+                    pageFrame.y,
+                    pageSurface.x,
+                    pageSurface.y,
+                    pageSurface.width,
+                    pageSurface.height
+                ]
+
+                onFieldFocusRequested: (sourcePage,
+                                        annotationIndex,
+                                        identityToken) =>
+                    formView.focusChoiceField(
+                        sourcePage,
+                        annotationIndex,
+                        identityToken)
+                onOptionSelected: (sourcePage,
+                                   annotationIndex,
+                                   optionIndex,
+                                   selected,
+                                   toggle,
+                                   identityToken) => {
+                    formView.selectChoiceOption(
+                        sourcePage,
+                        annotationIndex,
+                        optionIndex,
+                        selected,
+                        toggle,
+                        identityToken)
+                }
+            }
         }
 
         EditOverlay {

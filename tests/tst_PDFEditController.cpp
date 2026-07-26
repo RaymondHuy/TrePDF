@@ -28,7 +28,9 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <fpdf_annot.h>
 #include <fpdf_edit.h>
+#include <fpdf_formfill.h>
 #include <fpdf_save.h>
 #include <fpdf_text.h>
 #include <fpdf_transformpage.h>
@@ -176,6 +178,123 @@ bool createPushButtonActionPdf(
                 "/NeedAppearances false >>"),
             appearanceStream,
         });
+}
+
+bool createChoiceFieldsPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray(
+                "<< /Type /Catalog /Pages 2 0 R "
+                "/AcroForm 7 0 R >>"),
+            QByteArray(
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R "
+                "/MediaBox [0 0 360 480] /Resources << >> "
+                "/Annots [4 0 R 5 0 R 6 0 R 9 0 R 10 0 R 11 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Ch "
+                "/Ff 131072 /T (Transport) /TU (Transport choice) "
+                "/P 3 0 R /F 4 /Rect [20 400 180 430] "
+                "/Opt [(Airplane) (Bicycle) (Car)] "
+                "/V (Airplane) /I [0] /DA (/Helv 12 Tf 0 g) >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Ch "
+                "/Ff 0 /T (Month) /TU (Month list) "
+                "/P 3 0 R /F 4 /Rect [20 260 180 380] "
+                "/Opt [(March) (April) (May) (June)] "
+                "/V (April) /I [1] /DA (/Helv 12 Tf 0 g) >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Ch "
+                "/Ff 2097152 /T (Colors) /TU (Color list) "
+                "/P 3 0 R /F 4 /Rect [200 260 340 380] "
+                "/Opt [(Red) (Yellow) (Blue)] "
+                "/V [(Red) (Blue)] /I [0 2] "
+                "/DA (/Helv 12 Tf 0 g) >>"),
+            QByteArray(
+                "<< /Fields [4 0 R 5 0 R 6 0 R 9 0 R 10 0 R 11 0 R] "
+                "/NeedAppearances true "
+                "/DA (/Helv 12 Tf 0 g) "
+                "/DR << /Font << /Helv 8 0 R >> >> >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 "
+                "/BaseFont /Helvetica >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Ch "
+                "/Ff 393216 /T (EditableTransport) "
+                "/P 3 0 R /F 4 /Rect [20 210 180 240] "
+                "/Opt [(Airplane) (Bicycle)] "
+                "/V (Airplane) /I [0] /DA (/Helv 12 Tf 0 g) >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Ch "
+                "/Ff 67239936 /T (ImmediateTransport) "
+                "/P 3 0 R /F 4 /Rect [200 210 340 240] "
+                "/Opt [(Airplane) (Bicycle)] "
+                "/V (Airplane) /I [0] /DA (/Helv 12 Tf 0 g) >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Ch "
+                "/Ff 131072 /T (ScriptedTransport) "
+                "/P 3 0 R /F 4 /Rect [20 160 180 190] "
+                "/Opt [(Airplane) (Bicycle)] "
+                "/V (Airplane) /I [0] /DA (/Helv 12 Tf 0 g) "
+                "/AA << /D << /S /JavaScript /JS () >> >> >>"),
+        });
+}
+
+QVector<int> selectedChoiceOptions(
+    const QString &filePath,
+    int annotationIndex)
+{
+    PDFiumProcessLock pdfiumLock;
+    QVector<int> selectedIndices;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    if (!document) {
+        return selectedIndices;
+    }
+
+    FPDF_FORMFILLINFO formFillInfo = {};
+    formFillInfo.version = 2;
+    formFillInfo.xfa_disabled = true;
+    FPDF_FORMHANDLE formHandle = FPDFDOC_InitFormFillEnvironment(
+        document,
+        &formFillInfo);
+    FPDF_PAGE page = FPDF_LoadPage(document, 0);
+    if (formHandle && page) {
+        FORM_OnAfterLoadPage(page, formHandle);
+        FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+            page,
+            annotationIndex);
+        if (annotation) {
+            const int optionCount = FPDFAnnot_GetOptionCount(
+                formHandle,
+                annotation);
+            for (int optionIndex = 0;
+                 optionIndex < optionCount;
+                 ++optionIndex) {
+                if (FPDFAnnot_IsOptionSelected(
+                        formHandle,
+                        annotation,
+                        optionIndex)) {
+                    selectedIndices.append(optionIndex);
+                }
+            }
+            FPDFPage_CloseAnnot(annotation);
+        }
+        FORM_OnBeforeClosePage(page, formHandle);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (formHandle) {
+        FPDFDOC_ExitFormFillEnvironment(formHandle);
+    }
+    FPDF_CloseDocument(document);
+    return selectedIndices;
 }
 
 bool createArialSubsetCollisionSourcePdf(const QString &filePath)
@@ -1484,6 +1603,7 @@ class PDFEditControllerTest : public QObject
 private slots:
     void initTestCase();
     void enablesFormScriptingAutomatically();
+    void customizesChoiceFieldsAndPersistsSelection();
     void routesPushButtonActions_data();
     void routesPushButtonActions();
     void blocksUnsupportedFormUriSchemes();
@@ -1662,6 +1782,166 @@ void PDFEditControllerTest::enablesFormScriptingAutomatically()
         !controller.javascriptTransitionPending(),
         5000);
     QCOMPARE(enableFailedSpy.count(), 0);
+}
+
+void PDFEditControllerTest::customizesChoiceFieldsAndPersistsSelection()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("choice-fields.pdf"));
+    QVERIFY(createChoiceFieldsPdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormController controller;
+    controller.setDocument(&document);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    QVERIFY(controller.interactive());
+
+    QVector<PDFFormWorker::ChoiceField> fields;
+    bool inspectionCompleted = false;
+    controller.requestChoiceFields(
+        0,
+        [&fields, &inspectionCompleted](
+            QVector<PDFFormWorker::ChoiceField> inspectedFields) {
+            fields = std::move(inspectedFields);
+            inspectionCompleted = true;
+        });
+    QTRY_VERIFY_WITH_TIMEOUT(inspectionCompleted, 5000);
+    QCOMPARE(fields.size(), 3);
+
+    const PDFFormWorker::ChoiceField combo = fields.at(0);
+    QCOMPARE(combo.annotationIndex, 0);
+    QCOMPARE(combo.sourcePage, 0);
+    QCOMPARE(combo.fieldType, FPDF_FORMFIELD_COMBOBOX);
+    QCOMPARE(
+        combo.accessibleName,
+        QStringLiteral("Transport choice"));
+    QVERIFY(!combo.identityToken.isEmpty());
+    QCOMPARE(
+        combo.options,
+        QStringList({
+            QStringLiteral("Airplane"),
+            QStringLiteral("Bicycle"),
+            QStringLiteral("Car"),
+        }));
+    QCOMPARE(combo.selectedIndices, QVector<int>({0}));
+    QVERIFY(!combo.readOnly);
+    QVERIFY(!combo.multiSelect);
+    QVERIFY(qAbs(combo.normalizedRect.x() - 20.0 / 360.0) < 0.00001);
+    QVERIFY(qAbs(combo.normalizedRect.y() - 50.0 / 480.0) < 0.00001);
+    QVERIFY(qAbs(combo.normalizedRect.width() - 160.0 / 360.0) < 0.00001);
+    QVERIFY(qAbs(combo.normalizedRect.height() - 30.0 / 480.0) < 0.00001);
+
+    const PDFFormWorker::ChoiceField singleList = fields.at(1);
+    QCOMPARE(singleList.fieldType, FPDF_FORMFIELD_LISTBOX);
+    QCOMPARE(singleList.selectedIndices, QVector<int>({1}));
+    QVERIFY(!singleList.multiSelect);
+
+    const PDFFormWorker::ChoiceField multiList = fields.at(2);
+    QCOMPARE(multiList.fieldType, FPDF_FORMFIELD_LISTBOX);
+    QCOMPARE(multiList.selectedIndices, QVector<int>({0, 2}));
+    QVERIFY(multiList.multiSelect);
+
+    bool focusCompleted = false;
+    bool focusSucceeded = false;
+    controller.focusChoiceField(
+        0,
+        combo.annotationIndex,
+        combo.sourcePage,
+        combo.identityToken,
+        [&focusCompleted, &focusSucceeded](bool focused) {
+            focusSucceeded = focused;
+            focusCompleted = true;
+        });
+    QTRY_VERIFY_WITH_TIMEOUT(focusCompleted, 5000);
+    QVERIFY(focusSucceeded);
+    QCOMPARE(controller.focusedPage(), 0);
+    QCOMPARE(
+        controller.focusedAnnotationIndex(),
+        combo.annotationIndex);
+
+    controller.selectChoiceOption(
+        0,
+        combo.annotationIndex,
+        2,
+        true,
+        combo.sourcePage,
+        false,
+        combo.identityToken);
+    controller.selectChoiceOption(
+        0,
+        singleList.annotationIndex,
+        3,
+        true,
+        singleList.sourcePage,
+        false,
+        singleList.identityToken);
+    controller.selectChoiceOption(
+        0,
+        multiList.annotationIndex,
+        0,
+        false,
+        multiList.sourcePage,
+        true,
+        multiList.identityToken);
+    controller.selectChoiceOption(
+        0,
+        multiList.annotationIndex,
+        1,
+        true,
+        multiList.sourcePage,
+        true,
+        multiList.identityToken);
+    // Toggle twice before either async refresh completes. The worker must
+    // resolve each toggle against live PDFium state, not a stale QML snapshot.
+    controller.selectChoiceOption(
+        0,
+        multiList.annotationIndex,
+        2,
+        false,
+        multiList.sourcePage,
+        true,
+        multiList.identityToken);
+    controller.selectChoiceOption(
+        0,
+        multiList.annotationIndex,
+        2,
+        false,
+        multiList.sourcePage,
+        true,
+        multiList.identityToken);
+    QTRY_VERIFY_WITH_TIMEOUT(controller.hasDrafts(), 5000);
+
+    fields.clear();
+    inspectionCompleted = false;
+    controller.requestChoiceFields(
+        0,
+        [&fields, &inspectionCompleted](
+            QVector<PDFFormWorker::ChoiceField> inspectedFields) {
+            fields = std::move(inspectedFields);
+            inspectionCompleted = true;
+        });
+    QTRY_VERIFY_WITH_TIMEOUT(inspectionCompleted, 5000);
+    QCOMPARE(fields.size(), 3);
+    QCOMPARE(fields.at(0).selectedIndices, QVector<int>({2}));
+    QCOMPARE(fields.at(1).selectedIndices, QVector<int>({3}));
+    QCOMPARE(fields.at(2).selectedIndices, QVector<int>({1, 2}));
+    // PDFium does not expose undo history for non-editable choice fields,
+    // including selections made through its native key and pointer paths.
+    // Keep the custom controls aligned with that focus-local form behavior.
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+
+    QString snapshotPath;
+    QString error;
+    QVERIFY2(
+        controller.exportSnapshotBlocking(snapshotPath, error),
+        qPrintable(error));
+    QCOMPARE(selectedChoiceOptions(snapshotPath, 0), QVector<int>({2}));
+    QCOMPARE(selectedChoiceOptions(snapshotPath, 1), QVector<int>({3}));
+    QCOMPARE(
+        selectedChoiceOptions(snapshotPath, 2),
+        QVector<int>({1, 2}));
+    QVERIFY(QFile::remove(snapshotPath));
 }
 
 void PDFEditControllerTest::routesPushButtonActions_data()

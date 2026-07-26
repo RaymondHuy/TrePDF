@@ -4,6 +4,8 @@
 
 #include <QPointF>
 #include <QQuickItem>
+#include <QTimer>
+#include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
 class QFocusEvent;
@@ -21,6 +23,8 @@ class PDFFormView : public QQuickItem
     Q_PROPERTY(int page READ page WRITE setPage NOTIFY pageChanged FINAL)
     Q_PROPERTY(bool interactive READ interactive WRITE setInteractive
                    NOTIFY interactiveChanged FINAL)
+    Q_PROPERTY(QVariantList choiceFields READ choiceFields
+                   NOTIFY choiceFieldsChanged FINAL)
 
 public:
     explicit PDFFormView(QQuickItem *parent = nullptr);
@@ -28,15 +32,30 @@ public:
     PDFFormController *controller() const;
     int page() const;
     bool interactive() const;
+    QVariantList choiceFields() const;
 
     void setController(PDFFormController *controller);
     void setPage(int page);
     void setInteractive(bool interactive);
+    Q_INVOKABLE void selectChoiceOption(int sourcePage,
+                                        int annotationIndex,
+                                        int optionIndex,
+                                        bool selected,
+                                        bool toggle,
+                                        const QString &identityToken);
+    Q_INVOKABLE void focusChoiceField(int sourcePage,
+                                      int annotationIndex,
+                                      const QString &identityToken);
 
 signals:
     void controllerChanged();
     void pageChanged();
     void interactiveChanged();
+    void choiceFieldsChanged();
+    void choiceFieldFocusFinished(int sourcePage,
+                                  int annotationIndex,
+                                  const QString &identityToken,
+                                  bool focused);
 
 protected:
     bool event(QEvent *event) override;
@@ -63,6 +82,9 @@ private:
                           const QPointF &position,
                           Qt::KeyboardModifiers modifiers,
                           bool leftButtonDown);
+    void requestChoiceFields();
+    void loadChoiceFields();
+    void clearChoiceFields();
     void updateInputMethod();
     void updateCursor();
 
@@ -72,4 +94,7 @@ private:
     bool m_pointerInside = false;
     bool m_mouseDown = false;
     QPointF m_lastPointerPosition;
+    QVariantList m_choiceFields;
+    quint64 m_choiceFieldsRequestSerial = 0;
+    QTimer m_choiceFieldsRefreshTimer;
 };

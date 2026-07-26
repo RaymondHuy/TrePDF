@@ -101,6 +101,16 @@ bool PDFFormController::acceptsTextInput() const
     return m_acceptsTextInput;
 }
 
+int PDFFormController::focusedPage() const
+{
+    return m_focusedPage;
+}
+
+int PDFFormController::focusedAnnotationIndex() const
+{
+    return m_focusedAnnotationIndex;
+}
+
 bool PDFFormController::canUndo() const
 {
     return m_canUndo;
@@ -275,11 +285,15 @@ void PDFFormController::discardChanges()
     const bool historyChanged = hasDrafts() || m_canUndo || m_canRedo;
     const bool inputChanged = m_hasFocus
         || m_acceptsTextInput
+        || m_focusedPage >= 0
+        || m_focusedAnnotationIndex >= 0
         || m_pendingFocusRequestCount > 0
         || m_cursorType != FXCT_ARROW;
     m_hasDrafts = false;
     m_hasFocus = false;
     m_acceptsTextInput = false;
+    m_focusedPage = -1;
+    m_focusedAnnotationIndex = -1;
     m_canUndo = false;
     m_canRedo = false;
     m_pendingFocusRequestCount = 0;
@@ -369,6 +383,146 @@ bool PDFFormController::exportSnapshotBlocking(
     return true;
 }
 
+void PDFFormController::requestChoiceFields(
+    int page,
+    const ChoiceFieldsCompletion &completion)
+{
+    if (!completion) {
+        return;
+    }
+    if (!m_interactive || !m_document || !m_document->isLoaded()) {
+        completion({});
+        return;
+    }
+    const int sourcePage = m_document->sourcePageIndex(page);
+    if (sourcePage < 0) {
+        completion({});
+        return;
+    }
+
+    const PDFFormWorker::DocumentKey key = documentKey();
+    const quint64 generation = m_generation;
+    QPointer<PDFFormController> controller(this);
+    PDFFormWorker::inspectChoiceFields(
+        key,
+        page,
+        sourcePage,
+        [controller,
+         key,
+         generation,
+         page,
+         sourcePage,
+         completion](PDFFormWorker::ChoiceFieldsResult result) {
+            if (!controller
+                || controller->m_generation != generation
+                || !sameDocumentKey(controller->documentKey(), key)
+                || !controller->m_document
+                || controller->m_document->sourcePageIndex(page)
+                    != sourcePage
+                || !result.succeeded
+                || result.page != page) {
+                completion({});
+                return;
+            }
+            completion(std::move(result.fields));
+        });
+}
+
+void PDFFormController::selectChoiceOption(
+    int page,
+    int annotationIndex,
+    int optionIndex,
+    bool selected,
+    int expectedSourcePage,
+    bool toggle,
+    const QString &expectedIdentityToken)
+{
+    if (!m_interactive || !m_document || !m_document->isLoaded()) {
+        return;
+    }
+    const int sourcePage = m_document->sourcePageIndex(page);
+    if (sourcePage < 0
+        || (expectedSourcePage >= 0
+            && sourcePage != expectedSourcePage)
+        || annotationIndex < 0
+        || optionIndex < 0) {
+        return;
+    }
+
+    const PDFFormWorker::DocumentKey key = documentKey();
+    const quint64 generation = m_generation;
+    beginPendingMutation();
+    ++m_pendingFocusRequestCount;
+    PDFFormWorker::submitChoiceSelection(
+        key,
+        page,
+        sourcePage,
+        annotationIndex,
+        optionIndex,
+        selected,
+        toggle,
+        expectedIdentityToken,
+        interactionCallback(key, generation, false, true, true));
+}
+
+void PDFFormController::focusChoiceField(
+    int page,
+    int annotationIndex,
+    int expectedSourcePage,
+    const QString &expectedIdentityToken,
+    const ChoiceFocusCompletion &completion)
+{
+    if (!m_interactive || !m_document || !m_document->isLoaded()) {
+        if (completion) {
+            completion(false);
+        }
+        return;
+    }
+    const int sourcePage = m_document->sourcePageIndex(page);
+    if (sourcePage < 0
+        || (expectedSourcePage >= 0
+            && sourcePage != expectedSourcePage)
+        || annotationIndex < 0) {
+        if (completion) {
+            completion(false);
+        }
+        return;
+    }
+
+    const PDFFormWorker::DocumentKey key = documentKey();
+    const quint64 generation = m_generation;
+    beginPendingMutation();
+    ++m_pendingFocusRequestCount;
+    QPointer<PDFFormController> controller(this);
+    PDFFormWorker::InteractionCallback interaction
+        = interactionCallback(key, generation, false, true, true);
+    PDFFormWorker::submitChoiceFocus(
+        key,
+        page,
+        sourcePage,
+        annotationIndex,
+        expectedIdentityToken,
+        [interaction = std::move(interaction),
+         controller,
+         completion,
+         key,
+         generation,
+         page,
+         annotationIndex](PDFFormWorker::InteractionResult result) mutable {
+            const bool focused
+                = controller
+                && controller->m_generation == generation
+                && sameDocumentKey(controller->documentKey(), key)
+                && result.hasFocus
+                && result.focusedPage == page
+                && result.focusedAnnotationIndex == annotationIndex;
+            interaction(std::move(result));
+            if (completion) {
+                completion(focused);
+            }
+        });
+}
+
 bool PDFFormController::confirmExternalLink(quint64 requestId)
 {
     if (requestId == 0
@@ -420,12 +574,16 @@ void PDFFormController::refreshDocumentState()
     const bool historyChanged = hasDrafts() || m_canUndo || m_canRedo;
     const bool inputChanged = m_hasFocus
         || m_acceptsTextInput
+        || m_focusedPage >= 0
+        || m_focusedAnnotationIndex >= 0
         || m_pendingFocusRequestCount > 0
         || m_cursorType != FXCT_ARROW;
     m_interactive = interactive;
     m_hasDrafts = false;
     m_hasFocus = false;
     m_acceptsTextInput = false;
+    m_focusedPage = -1;
+    m_focusedAnnotationIndex = -1;
     m_canUndo = false;
     m_canRedo = false;
     m_pendingFocusRequestCount = 0;
@@ -474,6 +632,7 @@ void PDFFormController::handlePageStructureChange(
 {
     ++m_navigationEpoch;
     clearPendingExternalLink(true);
+    invalidateFormPages(-1);
     if (currentPageMappingChanged) {
         submitCurrentPageChange();
     }
@@ -771,6 +930,9 @@ void PDFFormController::applyInteractionResult(
     const bool previousCanRedo = m_canRedo;
     const bool previousHasFocus = m_hasFocus;
     const bool previousAcceptsTextInput = m_acceptsTextInput;
+    const int previousFocusedPage = m_focusedPage;
+    const int previousFocusedAnnotationIndex
+        = m_focusedAnnotationIndex;
     const int previousCursorType = m_cursorType;
 
     m_hasDrafts = m_hasDrafts || result.changed;
@@ -778,6 +940,9 @@ void PDFFormController::applyInteractionResult(
     m_canRedo = result.canRedo;
     m_hasFocus = result.hasFocus;
     m_acceptsTextInput = result.hasFocus && result.acceptsTextInput;
+    m_focusedPage = result.hasFocus ? result.focusedPage : -1;
+    m_focusedAnnotationIndex
+        = result.hasFocus ? result.focusedAnnotationIndex : -1;
     m_cursorType = result.cursorType;
 
     if (copyResultToClipboard && !result.selectedText.isEmpty()) {
@@ -791,6 +956,9 @@ void PDFFormController::applyInteractionResult(
         || previousCanRedo != m_canRedo;
     const bool inputChanged = previousHasFocus != m_hasFocus
         || previousAcceptsTextInput != m_acceptsTextInput
+        || previousFocusedPage != m_focusedPage
+        || previousFocusedAnnotationIndex
+            != m_focusedAnnotationIndex
         || previousCursorType != m_cursorType;
     if (result.invalidated
         || result.changed
