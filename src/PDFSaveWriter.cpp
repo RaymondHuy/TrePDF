@@ -2309,7 +2309,8 @@ struct PDFSaveWriter::Request::Data {
 
 PDFSaveWriter::Request PDFSaveWriter::prepare(
     const PDFEditController &controller,
-    const QString &targetFilePath)
+    const QString &targetFilePath,
+    const QString &sourceFilePathOverride)
 {
     Request request;
     if (!controller.m_document
@@ -2319,7 +2320,9 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
     }
 
     auto data = std::make_shared<Request::Data>();
-    data->sourceFilePath = controller.m_document->renderFilePath();
+    data->sourceFilePath = sourceFilePathOverride.isEmpty()
+        ? controller.m_document->renderFilePath()
+        : sourceFilePathOverride;
     data->targetFilePath = targetFilePath;
     data->deletedSourcePages.reserve(controller.m_deletedSourcePages.size());
     for (int page : controller.m_deletedSourcePages) {

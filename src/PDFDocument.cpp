@@ -9,6 +9,8 @@
 namespace {
 
 constexpr unsigned long kModifyContentsPermission = 1UL << 3;
+constexpr unsigned long kModifyAnnotationsPermission = 1UL << 5;
+constexpr unsigned long kFillFormsPermission = 1UL << 8;
 constexpr unsigned long kAssembleDocumentPermission = 1UL << 10;
 
 class PdfiumRuntime
@@ -17,7 +19,12 @@ public:
     PdfiumRuntime()
     {
         PDFiumProcessLock pdfiumLock;
-        FPDF_InitLibrary();
+        FPDF_LIBRARY_CONFIG config = {};
+        config.version = 2;
+        config.m_pUserFontPaths = nullptr;
+        config.m_pIsolate = nullptr;
+        config.m_v8EmbedderSlot = 0;
+        FPDF_InitLibraryWithConfig(&config);
     }
 
     ~PdfiumRuntime()
@@ -189,6 +196,10 @@ bool PDFDocument::open(const QUrl &source)
                 || (securityRevision >= 3
                         ? (permissions & kAssembleDocumentPermission) != 0
                         : (permissions & kModifyContentsPermission) != 0);
+            m_allowsFormFilling = permissions == 0xffffffffUL
+                || (securityRevision >= 3
+                        ? (permissions & kFillFormsPermission) != 0
+                        : (permissions & kModifyAnnotationsPermission) != 0);
             ++m_revision;
             opened = true;
         }
@@ -280,11 +291,26 @@ int PDFDocument::sourcePageIndex(int page) const
     return m_displaySourcePages.at(page);
 }
 
+int PDFDocument::displayPageIndexForSourcePage(int sourcePage) const
+{
+    if (!m_document
+        || sourcePage < 0
+        || sourcePage >= m_sourcePageCount) {
+        return -1;
+    }
+    return m_displaySourcePages.indexOf(sourcePage);
+}
+
 bool PDFDocument::isTransientBlankPage(int page) const
 {
     return m_document
         && page >= m_displaySourcePages.size()
         && page < m_pageCount;
+}
+
+bool PDFDocument::allowsFormFilling() const
+{
+    return m_document && m_allowsFormFilling;
 }
 
 void PDFDocument::closeDocumentLocked()
@@ -308,6 +334,7 @@ void PDFDocument::closeDocumentLocked()
     m_currentPage = 0;
     m_allowsContentEditing = false;
     m_allowsPageAssembly = false;
+    m_allowsFormFilling = false;
     ++m_revision;
 }
 
@@ -357,6 +384,10 @@ void PDFDocument::setTransientPageStructure(
     }
 
     const int previousCurrentPage = m_currentPage;
+    const int previousCurrentSourcePage
+        = sourcePageIndex(previousCurrentPage);
+    const bool previousCurrentPageWasTransient
+        = isTransientBlankPage(previousCurrentPage);
     m_displaySourcePages = std::move(displaySourcePages);
     m_transientBlankPageSizes = blankPageSizes;
     m_pageSizes = std::move(pageSizes);
@@ -373,6 +404,13 @@ void PDFDocument::setTransientPageStructure(
         emit currentPageChanged();
     }
     emit currentPageSizeChanged();
+    const bool currentPageMappingChanged
+        = m_currentPage == previousCurrentPage
+        && (sourcePageIndex(m_currentPage)
+                != previousCurrentSourcePage
+            || isTransientBlankPage(m_currentPage)
+                != previousCurrentPageWasTransient);
+    emit pageStructureChanged(currentPageMappingChanged);
 }
 
 void PDFDocument::updatePageMetrics()

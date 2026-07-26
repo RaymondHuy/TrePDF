@@ -26,6 +26,11 @@ ApplicationWindow {
     property PDFDocumentSession workspaceSession: null
     property PDFDocumentSession deletePageSession: null
     property int deletePageIndex: -1
+    property PDFDocumentSession externalLinkSession: null
+    property var externalLinkRequestId: 0
+    property string externalLinkAuthority: ""
+    property string externalLinkDisplayUrl: ""
+    property bool externalLinkInsecureHttp: false
     property PDFEditController imageInsertController: null
     property int imageInsertPage: -1
     property real imageInsertX: 0
@@ -208,6 +213,74 @@ ApplicationWindow {
             goToPage(nextPage)
     }
 
+    function clearExternalLinkPrompt() {
+        externalLinkSession = null
+        externalLinkRequestId = 0
+        externalLinkAuthority = ""
+        externalLinkDisplayUrl = ""
+        externalLinkInsecureHttp = false
+    }
+
+    function cancelExternalLinkPrompt() {
+        const session = externalLinkSession
+        const requestId = externalLinkRequestId
+        clearExternalLinkPrompt()
+        if (externalLinkPopup.opened)
+            externalLinkPopup.close()
+        if (session && Number(requestId) !== 0)
+            session.formController.cancelExternalLink(requestId)
+    }
+
+    function requestExternalLink(session, requestId, authority,
+                                 displayUrl, insecureHttp) {
+        if (!session
+            || session !== activeSession
+            || Number(requestId) === 0
+            || Number(externalLinkRequestId) !== 0) {
+            if (session && Number(requestId) !== 0)
+                session.formController.cancelExternalLink(requestId)
+            return
+        }
+
+        externalLinkSession = session
+        externalLinkRequestId = requestId
+        externalLinkAuthority = authority
+        externalLinkDisplayUrl = displayUrl
+        externalLinkInsecureHttp = insecureHttp
+        externalLinkPopup.open()
+    }
+
+    function finishExternalLinkRequest(session, requestId) {
+        if (session !== externalLinkSession
+            || Number(requestId) !== Number(externalLinkRequestId)) {
+            return
+        }
+
+        clearExternalLinkPrompt()
+        if (externalLinkPopup.opened)
+            externalLinkPopup.close()
+    }
+
+    function confirmExternalLink() {
+        const session = externalLinkSession
+        const requestId = externalLinkRequestId
+        clearExternalLinkPrompt()
+        externalLinkPopup.close()
+        if (!session
+            || session !== activeSession
+            || !session.document.loaded
+            || Number(requestId) === 0) {
+            if (session && Number(requestId) !== 0)
+                session.formController.cancelExternalLink(requestId)
+            return
+        }
+
+        if (!session.formController.confirmExternalLink(requestId)) {
+            //% "The link could not be opened in your default browser."
+            showStatus(qsTrId("ExternalLinkOpenFailed"))
+        }
+    }
+
     function beginDraftPrompt(action, session) {
         pendingDraftAction = action
         pendingSession = session
@@ -308,6 +381,10 @@ ApplicationWindow {
     }
 
     onActiveSessionChanged: {
+        if (Number(externalLinkRequestId) !== 0
+            && externalLinkSession !== activeSession) {
+            cancelExternalLinkPrompt()
+        }
         if (!openingFiles)
             rebuildWorkspace()
     }
@@ -348,12 +425,30 @@ ApplicationWindow {
         document: emptyDocument
     }
 
+    PDFFormController {
+        id: emptyFormController
+
+        document: emptyDocument
+    }
+
     PDFTabModel {
         id: tabModel
 
         onStatusMessage: message => window.showStatus(message)
         onSessionSaveFinished: (session, succeeded) => {
             window.finishPendingDraftAction(session, succeeded)
+        }
+        onExternalLinkRequested:
+            (session, requestId, authority, displayUrl, insecureHttp) => {
+                window.requestExternalLink(
+                    session,
+                    requestId,
+                    authority,
+                    displayUrl,
+                    insecureHttp)
+            }
+        onExternalLinkRequestCancelled: (session, requestId) => {
+            window.finishExternalLinkRequest(session, requestId)
         }
     }
 
@@ -456,6 +551,128 @@ ApplicationWindow {
         defaultSuffix: "pdf"
         onAccepted: window.saveFileAs(selectedFile)
         onRejected: window.saveAsSession = null
+    }
+
+    Popup {
+        id: externalLinkPopup
+
+        x: Math.round((window.width - width) / 2)
+        y: Math.round((window.height - height) / 2)
+        width: Math.min(520, window.width - 32)
+        height: externalLinkContent.implicitHeight + 32
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+        onOpened: externalLinkCancelButton.forceActiveFocus()
+        onClosed: {
+            if (Number(window.externalLinkRequestId) !== 0)
+                window.cancelExternalLinkPrompt()
+        }
+
+        background: Rectangle {
+            radius: 6
+            color: "#fffdfb"
+            border.color: appTheme.ribbonBorder
+            border.width: 1
+        }
+
+        contentItem: ColumnLayout {
+            id: externalLinkContent
+
+            spacing: 14
+
+            Label {
+                Layout.fillWidth: true
+                //% "Open link to %1?"
+                text: qsTrId("OpenExternalLinkQuestion").arg(
+                    window.externalLinkAuthority)
+                textFormat: Text.PlainText
+                color: appTheme.ribbonTextColor
+                font.pixelSize: 18
+                font.weight: Font.DemiBold
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+            }
+
+            Label {
+                Layout.fillWidth: true
+                //% "“%1” wants to open this address in your default browser."
+                text: qsTrId("ExternalLinkDocumentWantsToOpen").arg(
+                    window.externalLinkSession
+                        ? window.externalLinkSession.title
+                        : "")
+                textFormat: Text.PlainText
+                color: "#656268"
+                wrapMode: Text.Wrap
+            }
+
+            ScrollView {
+                id: externalLinkUrlScroll
+
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(
+                    104,
+                    Math.max(52, externalLinkUrlText.implicitHeight))
+                clip: true
+
+                TextArea {
+                    id: externalLinkUrlText
+
+                    width: externalLinkUrlScroll.availableWidth
+                    text: window.externalLinkDisplayUrl
+                    textFormat: TextEdit.PlainText
+                    color: appTheme.ribbonTextColor
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextEdit.WrapAnywhere
+                    padding: 10
+
+                    background: Rectangle {
+                        color: "#f7f3ef"
+                        border.color: appTheme.ribbonBorder
+                        border.width: 1
+                        radius: 4
+                    }
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: window.externalLinkInsecureHttp
+                //% "This link uses HTTP, so the connection may not be secure."
+                text: qsTrId("InsecureHttpLinkWarning")
+                textFormat: Text.PlainText
+                color: "#9a4d16"
+                font.weight: Font.DemiBold
+                wrapMode: Text.Wrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Button {
+                    id: externalLinkCancelButton
+
+                    //% "Cancel"
+                    text: qsTrId("Cancel")
+                    onClicked: window.cancelExternalLinkPrompt()
+                }
+
+                OrangeButton {
+                    Layout.preferredWidth: 148
+                    theme: appTheme
+                    //% "Open in Browser"
+                    text: qsTrId("OpenInBrowser")
+                    onClicked: window.confirmExternalLink()
+                }
+            }
+        }
     }
 
     Popup {
@@ -646,6 +863,7 @@ ApplicationWindow {
         theme: appTheme
         document: emptyDocument
         editController: emptyEditController
+        formController: emptyFormController
         transientStatus: window.transientStatus
         onOpenRequested: window.requestOpen()
     }

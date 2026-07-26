@@ -1,24 +1,19 @@
 #include "PDFPageItem.h"
+#include "PDFFormWorker.h"
 #include "PDFiumSynchronization.h"
 
 #include <algorithm>
-#include <functional>
 #include <utility>
 
 #include <QCoreApplication>
-#include <QFile>
-#include <QHash>
 #include <QMetaObject>
-#include <QMutexLocker>
 #include <QPointer>
-#include <QQueue>
-#include <QRunnable>
 #include <QSGSimpleTextureNode>
 #include <QSGTexture>
-#include <QThreadPool>
 #include <QQuickWindow>
 
 #include <fpdf_edit.h>
+#include <fpdf_formfill.h>
 
 namespace {
 
@@ -28,146 +23,6 @@ bool isCancelled(const CancellationFlag &cancellation)
 {
     return cancellation && cancellation->load(std::memory_order_relaxed);
 }
-
-QThreadPool &renderThreadPool()
-{
-    static QThreadPool pool;
-    static const bool configured = []() {
-        pool.setMaxThreadCount(1);
-        pool.setExpiryTimeout(10000);
-        return true;
-    }();
-    Q_UNUSED(configured);
-    return pool;
-}
-
-class RenderWorkQueue
-{
-public:
-    void submit(PDFPageItem *item, std::function<void()> work)
-    {
-        bool startWorker = false;
-        {
-            QMutexLocker locker(&m_mutex);
-            if (!m_pending.contains(item)) {
-                m_order.enqueue(item);
-            }
-            m_pending.insert(item, std::move(work));
-            if (!m_workerActive) {
-                m_workerActive = true;
-                startWorker = true;
-            }
-        }
-
-        if (startWorker) {
-            renderThreadPool().start(QRunnable::create([this]() {
-                drain();
-            }));
-        }
-    }
-
-    void cancel(PDFPageItem *item)
-    {
-        QMutexLocker locker(&m_mutex);
-        m_pending.remove(item);
-        m_order.removeAll(item);
-    }
-
-private:
-    void drain()
-    {
-        while (true) {
-            std::function<void()> work;
-            {
-                QMutexLocker locker(&m_mutex);
-                while (!m_order.isEmpty()) {
-                    PDFPageItem *item = m_order.dequeue();
-                    auto pending = m_pending.find(item);
-                    if (pending == m_pending.end()) {
-                        continue;
-                    }
-                    work = std::move(pending.value());
-                    m_pending.erase(pending);
-                    break;
-                }
-
-                if (!work) {
-                    m_workerActive = false;
-                    return;
-                }
-            }
-
-            work();
-        }
-    }
-
-    QMutex m_mutex;
-    QHash<PDFPageItem *, std::function<void()>> m_pending;
-    QQueue<PDFPageItem *> m_order;
-    bool m_workerActive = false;
-};
-
-RenderWorkQueue &renderWorkQueue()
-{
-    static RenderWorkQueue queue;
-    return queue;
-}
-
-class PDFiumRenderDocument
-{
-public:
-    PDFiumRenderDocument() = default;
-
-    ~PDFiumRenderDocument()
-    {
-        // The thread-local document can be destroyed by QThreadPool teardown,
-        // outside renderPageFromFile()'s transaction.
-        PDFiumProcessLock pdfiumLock;
-        closeLocked();
-    }
-
-    FPDF_DOCUMENT documentLocked(const QString &filePath, int revision)
-    {
-        assertPDFiumProcessLockHeld();
-        if (m_document && m_filePath == filePath && m_revision == revision) {
-            return m_document;
-        }
-
-        closeLocked();
-
-        const QByteArray encodedPath = QFile::encodeName(filePath);
-        m_document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
-        if (m_document) {
-            m_filePath = filePath;
-            m_revision = revision;
-        }
-        return m_document;
-    }
-
-    void resetLocked()
-    {
-        assertPDFiumProcessLockHeld();
-        closeLocked();
-    }
-
-    Q_DISABLE_COPY_MOVE(PDFiumRenderDocument)
-
-private:
-    void closeLocked()
-    {
-        assertPDFiumProcessLockHeld();
-        if (m_document) {
-            FPDF_CloseDocument(m_document);
-        }
-        m_document = nullptr;
-        m_filePath.clear();
-        m_revision = -1;
-    }
-
-    FPDF_DOCUMENT m_document = nullptr;
-    QString m_filePath;
-    int m_revision = -1;
-};
 
 FPDF_DWORD pdfiumColor(const QColor &color)
 {
@@ -421,18 +276,18 @@ struct PageRenderResult {
     bool suppressionApplied = false;
 };
 
-PageRenderResult renderPageFromFile(const QString &filePath,
-                                    int revision,
-                                    int sourcePage,
-                                    const QSize &pixelSize,
-                                    const QColor &background,
-                                    qreal devicePixelRatio,
-                                    bool blankPage,
-                                    const QVector<QVector<int>> &draftObjectPaths,
-                                    const QVector<PDFEditController::DraftObjectMove> &draftObjectMoves,
-                                    const CancellationFlag &cancellation)
+PageRenderResult renderPageFromFile(
+    const PDFFormWorker::DocumentKey &formDocument,
+    int sourcePage,
+    const QSize &pixelSize,
+    const QColor &background,
+    qreal devicePixelRatio,
+    bool blankPage,
+    const QVector<QVector<int>> &draftObjectPaths,
+    const QVector<PDFEditController::DraftObjectMove> &draftObjectMoves,
+    const CancellationFlag &cancellation)
 {
-    if (filePath.isEmpty()
+    if (!formDocument.isValid()
         || (!blankPage && sourcePage < 0)
         || pixelSize.isEmpty()
         || isCancelled(cancellation)) {
@@ -462,75 +317,88 @@ PageRenderResult renderPageFromFile(const QString &filePath,
             return {};
         }
 
-        thread_local PDFiumRenderDocument renderDocument;
-        FPDF_DOCUMENT document = renderDocument.documentLocked(filePath, revision);
-        FPDF_PAGE pdfPage = document
-            ? FPDF_LoadPage(document, sourcePage)
-            : nullptr;
-        if (!pdfPage || isCancelled(cancellation)) {
-            if (pdfPage) {
-                FPDF_ClosePage(pdfPage);
-            }
-            return {};
-        }
+        PDFFormWorker::withPageLocked(
+            formDocument,
+            sourcePage,
+            [&](FPDF_DOCUMENT,
+                FPDF_FORMHANDLE formHandle,
+                FPDF_PAGE previewPage,
+                FPDF_PAGE formPage) {
+                if (!previewPage || !formPage || isCancelled(cancellation)) {
+                    return true;
+                }
 
-        FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
-            pixelSize.width(),
-            pixelSize.height(),
-            FPDFBitmap_BGRA,
-            image.bits(),
-            image.bytesPerLine());
-        if (!bitmap) {
-            FPDF_ClosePage(pdfPage);
-            return {};
-        }
-        FPDFBitmap_FillRect(
-            bitmap,
-            0,
-            0,
-            pixelSize.width(),
-            pixelSize.height(),
-            pdfiumColor(background));
-
-        bool renderDocumentReusable = true;
-        {
-            ScopedPageObjectSuppression suppression;
-            ScopedPageObjectMoves objectMoves;
-            if (!draftObjectPaths.isEmpty()) {
-                suppressionApplied = suppression.suppress(pdfPage, draftObjectPaths);
-            }
-            if (!draftObjectMoves.isEmpty()) {
-                objectMovesApplied = objectMoves.apply(
-                    pdfPage,
-                    pixelSize,
-                    draftObjectMoves);
-            }
-
-            if (!isCancelled(cancellation)
-                && (suppressionApplied || suppression.restorationSucceeded())
-                && (objectMovesApplied || objectMoves.restorationSucceeded())) {
-                FPDF_RenderPageBitmap(
+                FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
+                    pixelSize.width(),
+                    pixelSize.height(),
+                    FPDFBitmap_BGRA,
+                    image.bits(),
+                    image.bytesPerLine());
+                if (!bitmap) {
+                    return true;
+                }
+                FPDFBitmap_FillRect(
                     bitmap,
-                    pdfPage,
                     0,
                     0,
                     pixelSize.width(),
                     pixelSize.height(),
-                    0,
-                    FPDF_ANNOT);
-                renderPerformed = true;
-            }
-            const bool objectRestoreSucceeded = objectMoves.restore();
-            const bool suppressionRestoreSucceeded = suppression.restore();
-            renderDocumentReusable = objectRestoreSucceeded
-                && suppressionRestoreSucceeded;
-        }
+                    pdfiumColor(background));
 
-        FPDFBitmap_Destroy(bitmap);
-        FPDF_ClosePage(pdfPage);
-        if (!renderDocumentReusable) {
-            renderDocument.resetLocked();
-        }
+                bool renderDocumentReusable = true;
+                {
+                    ScopedPageObjectSuppression suppression;
+                    ScopedPageObjectMoves objectMoves;
+                    if (!draftObjectPaths.isEmpty()) {
+                        suppressionApplied = suppression.suppress(
+                            previewPage,
+                            draftObjectPaths);
+                    }
+                    if (!draftObjectMoves.isEmpty()) {
+                        objectMovesApplied = objectMoves.apply(
+                            previewPage,
+                            pixelSize,
+                            draftObjectMoves);
+                    }
+
+                    if (!isCancelled(cancellation)
+                        && (suppressionApplied
+                            || suppression.restorationSucceeded())
+                        && (objectMovesApplied
+                            || objectMoves.restorationSucceeded())) {
+                        FPDF_RenderPageBitmap(
+                            bitmap,
+                            previewPage,
+                            0,
+                            0,
+                            pixelSize.width(),
+                            pixelSize.height(),
+                            0,
+                            FPDF_ANNOT);
+                        if (formHandle) {
+                            FPDF_FFLDraw(
+                                formHandle,
+                                bitmap,
+                                formPage,
+                                0,
+                                0,
+                                pixelSize.width(),
+                                pixelSize.height(),
+                                0,
+                                FPDF_ANNOT);
+                        }
+                        renderPerformed = true;
+                    }
+                    const bool objectRestoreSucceeded = objectMoves.restore();
+                    const bool suppressionRestoreSucceeded
+                        = suppression.restore();
+                    renderDocumentReusable = objectRestoreSucceeded
+                        && suppressionRestoreSucceeded;
+                }
+
+                FPDFBitmap_Destroy(bitmap);
+                return renderDocumentReusable;
+            });
     }
 
     if (!renderPerformed || isCancelled(cancellation)) {
@@ -566,6 +434,11 @@ PDFDocument *PDFPageItem::document() const
 PDFEditController *PDFPageItem::editController() const
 {
     return m_editController;
+}
+
+PDFFormController *PDFPageItem::formController() const
+{
+    return m_formController;
 }
 
 int PDFPageItem::page() const
@@ -644,6 +517,39 @@ void PDFPageItem::setEditController(PDFEditController *editController)
 
     invalidateCache();
     emit editControllerChanged();
+}
+
+void PDFPageItem::setFormController(PDFFormController *formController)
+{
+    if (m_formController == formController) {
+        return;
+    }
+
+    if (m_formController) {
+        disconnect(m_formController, nullptr, this, nullptr);
+    }
+
+    m_formController = formController;
+    if (m_formController) {
+        connect(
+            m_formController,
+            &PDFFormController::formRenderStateChanged,
+            this,
+            &PDFPageItem::handleFormRenderStateChanged);
+        connect(
+            m_formController,
+            &PDFFormController::documentChanged,
+            this,
+            &PDFPageItem::invalidateCache);
+        connect(m_formController, &QObject::destroyed, this, [this]() {
+            m_formController = nullptr;
+            invalidateCache();
+            emit formControllerChanged();
+        });
+    }
+
+    invalidateCache();
+    emit formControllerChanged();
 }
 
 void PDFPageItem::setPage(int page)
@@ -731,6 +637,7 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         m_textureDirty = false;
         m_pendingTextureRequestId = 0;
         m_pendingTextureDraftRevision = 0;
+        m_pendingTextureFormRevision = 0;
         m_pendingSuppressionApplied = false;
         m_clearTexture = false;
         return nullptr;
@@ -749,6 +656,7 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     if (m_textureDirty) {
         const quint64 textureRequestId = m_pendingTextureRequestId;
         const quint64 textureDraftRevision = m_pendingTextureDraftRevision;
+        const quint64 textureFormRevision = m_pendingTextureFormRevision;
         const bool suppressionApplied = m_pendingSuppressionApplied;
         QQuickWindow *quickWindow = window();
         QSGTexture *texture = quickWindow
@@ -758,6 +666,7 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         m_textureDirty = false;
         m_pendingTextureRequestId = 0;
         m_pendingTextureDraftRevision = 0;
+        m_pendingTextureFormRevision = 0;
         m_pendingSuppressionApplied = false;
 
         if (!texture) {
@@ -771,11 +680,13 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         QMetaObject::invokeMethod(this, [item,
                                          textureRequestId,
                                          textureDraftRevision,
+                                         textureFormRevision,
                                          suppressionApplied]() {
             if (item) {
                 item->markTextureReady(
                     textureRequestId,
                     textureDraftRevision,
+                    textureFormRevision,
                     suppressionApplied);
             }
         }, Qt::QueuedConnection);
@@ -807,6 +718,7 @@ void PDFPageItem::invalidateCache()
     m_clearTexture = true;
     m_pendingTextureRequestId = 0;
     m_pendingTextureDraftRevision = 0;
+    m_pendingTextureFormRevision = 0;
     m_pendingSuppressionApplied = false;
     m_cachedPixelSize = QSize();
     m_cachedPage = -1;
@@ -816,6 +728,8 @@ void PDFPageItem::invalidateCache()
     m_cachedDocument = nullptr;
     m_cachedDraftRevision = 0;
     m_cachedEditController = nullptr;
+    m_cachedFormRevision = 0;
+    m_cachedFormController = nullptr;
     m_renderPending = false;
     m_requestedPixelSize = QSize();
     m_requestedPage = -1;
@@ -825,6 +739,8 @@ void PDFPageItem::invalidateCache()
     m_requestedDocument = nullptr;
     m_requestedDraftRevision = 0;
     m_requestedEditController = nullptr;
+    m_requestedFormRevision = 0;
+    m_requestedFormController = nullptr;
     m_cacheDirty = true;
     setDraftTextureCurrent(false);
     setDraftTextureReady(false);
@@ -840,6 +756,7 @@ void PDFPageItem::invalidateDraftCache(bool immediate)
     m_textureDirty = false;
     m_pendingTextureRequestId = 0;
     m_pendingTextureDraftRevision = 0;
+    m_pendingTextureFormRevision = 0;
     m_pendingSuppressionApplied = false;
     m_renderPending = false;
     m_requestedPixelSize = QSize();
@@ -850,6 +767,8 @@ void PDFPageItem::invalidateDraftCache(bool immediate)
     m_requestedDocument = nullptr;
     m_requestedDraftRevision = 0;
     m_requestedEditController = nullptr;
+    m_requestedFormRevision = 0;
+    m_requestedFormController = nullptr;
     m_cacheDirty = true;
     setDraftTextureCurrent(false);
     setDraftTextureReady(false);
@@ -864,7 +783,7 @@ void PDFPageItem::invalidateDraftCache(bool immediate)
 
 void PDFPageItem::cancelPendingRender()
 {
-    renderWorkQueue().cancel(this);
+    PDFFormWorker::cancelRender(this);
     if (m_renderCancellation) {
         m_renderCancellation->store(true, std::memory_order_relaxed);
         m_renderCancellation.reset();
@@ -903,12 +822,45 @@ void PDFPageItem::handleDraftRenderStateChanged(int page,
     invalidateDraftCache(true);
 }
 
+void PDFPageItem::handleFormRenderStateChanged(int page, quint64 revision)
+{
+    if ((page >= 0 && page != m_page)
+        || revision != currentFormRevision()) {
+        return;
+    }
+
+    const bool matchingRequest = m_renderPending
+        && m_requestedFormRevision == revision
+        && m_requestedDocument == m_document.data()
+        && m_requestedFormController == m_formController.data();
+    const bool matchingPendingTexture = m_textureDirty
+        && m_pendingTextureFormRevision == revision;
+    const bool matchingTexture = !m_cacheDirty
+        && m_cachedFormRevision == revision
+        && m_cachedDocument == m_document.data()
+        && m_cachedFormController == m_formController.data();
+    if (matchingRequest || matchingPendingTexture || matchingTexture) {
+        return;
+    }
+
+    invalidateDraftCache(true);
+}
+
 quint64 PDFPageItem::currentDraftRevision() const
 {
     if (!m_editController || m_editController->document() != m_document.data()) {
         return 0;
     }
     return m_editController->draftRevisionForPage(m_page);
+}
+
+quint64 PDFPageItem::currentFormRevision() const
+{
+    if (!m_formController
+        || m_formController->document() != m_document.data()) {
+        return 0;
+    }
+    return m_formController->formRevisionForPage(m_page);
 }
 
 void PDFPageItem::setDraftTextureCurrent(bool current)
@@ -931,6 +883,7 @@ void PDFPageItem::setDraftTextureReady(bool ready)
 
 void PDFPageItem::markTextureReady(quint64 requestId,
                                    quint64 draftRevision,
+                                   quint64 formRevision,
                                    bool suppressionApplied)
 {
     QQuickWindow *quickWindow = window();
@@ -947,9 +900,12 @@ void PDFPageItem::markTextureReady(quint64 requestId,
         || !qFuzzyCompare(m_cachedDevicePixelRatio, devicePixelRatio)
         || m_cachedPixelSize != pixelSize
         || draftRevision != currentDraftRevision()
+        || formRevision != currentFormRevision()
         || m_cachedDraftRevision != draftRevision
+        || m_cachedFormRevision != formRevision
         || m_cachedDocument != m_document.data()
-        || m_cachedEditController != m_editController.data()) {
+        || m_cachedEditController != m_editController.data()
+        || m_cachedFormController != m_formController.data()) {
         return;
     }
 
@@ -986,6 +942,7 @@ void PDFPageItem::requestRenderForCurrentSize()
         qMax(1, qRound(height() * devicePixelRatio)));
     const int revision = m_document->renderRevision();
     const quint64 draftRevision = currentDraftRevision();
+    const quint64 formRevision = currentFormRevision();
     const bool cacheMatches = !m_cacheDirty
         && m_cachedPixelSize == pixelSize
         && m_cachedPage == m_page
@@ -994,7 +951,9 @@ void PDFPageItem::requestRenderForCurrentSize()
         && m_cachedRevision == revision
         && m_cachedDocument == m_document.data()
         && m_cachedDraftRevision == draftRevision
-        && m_cachedEditController == m_editController.data();
+        && m_cachedEditController == m_editController.data()
+        && m_cachedFormRevision == formRevision
+        && m_cachedFormController == m_formController.data();
 
     if (!cacheMatches) {
         requestRender(pixelSize, devicePixelRatio);
@@ -1014,7 +973,9 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
 
     const int revision = m_document->renderRevision();
     PDFEditController *editController = m_editController.data();
+    PDFFormController *formController = m_formController.data();
     const quint64 draftRevision = currentDraftRevision();
+    const quint64 formRevision = currentFormRevision();
     if (m_renderPending
         && m_requestedPixelSize == pixelSize
         && m_requestedPage == m_page
@@ -1023,7 +984,9 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
         && m_requestedRevision == revision
         && m_requestedDocument == m_document.data()
         && m_requestedDraftRevision == draftRevision
-        && m_requestedEditController == editController) {
+        && m_requestedEditController == editController
+        && m_requestedFormRevision == formRevision
+        && m_requestedFormController == formController) {
         return;
     }
 
@@ -1036,6 +999,13 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
     const qreal zoom = m_zoom;
     const QColor background = m_pageColor;
     const bool blankPage = document->isTransientBlankPage(page);
+    PDFFormWorker::DocumentKey formDocument;
+    if (formController && formController->document() == document) {
+        formDocument = formController->documentKey();
+    } else {
+        formDocument.filePath = filePath;
+        formDocument.revision = revision;
+    }
     const QVector<QVector<int>> draftObjectPaths = editController
             && editController->document() == document
         ? editController->draftedTextObjectPathsForPage(page)
@@ -1060,28 +1030,31 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
     m_requestedDocument = document;
     m_requestedDraftRevision = draftRevision;
     m_requestedEditController = editController;
+    m_requestedFormRevision = formRevision;
+    m_requestedFormController = formController;
 
-    renderWorkQueue().submit(this, [item,
-                                    filePath,
-                                    document,
-                                    editController,
-                                    revision,
-                                    page,
-                                    sourcePage,
-                                    zoom,
-                                    devicePixelRatio,
-                                    pixelSize,
-                                    background,
-                                    blankPage,
-                                    draftRevision,
-                                    draftObjectPaths,
-                                    draftObjectMoves,
-                                    allDraftObjectsSuppressible,
-                                    requestId,
-                                    cancellation]() {
+    PDFFormWorker::submitRender(this, formDocument.sessionId, [item,
+                                       formDocument,
+                                       document,
+                                       editController,
+                                       formController,
+                                       revision,
+                                       page,
+                                       sourcePage,
+                                       zoom,
+                                       devicePixelRatio,
+                                       pixelSize,
+                                       background,
+                                       blankPage,
+                                       draftRevision,
+                                       formRevision,
+                                       draftObjectPaths,
+                                       draftObjectMoves,
+                                       allDraftObjectsSuppressible,
+                                       requestId,
+                                       cancellation]() {
         PageRenderResult result = renderPageFromFile(
-            filePath,
-            revision,
+            formDocument,
             sourcePage,
             pixelSize,
             background,
@@ -1104,12 +1077,14 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
         QMetaObject::invokeMethod(app, [item,
                                         document,
                                         editController,
+                                        formController,
                                         revision,
                                         page,
                                         zoom,
                                         devicePixelRatio,
                                         pixelSize,
                                         draftRevision,
+                                        formRevision,
                                         result = std::move(result),
                                         requestId,
                                         cancellation]() {
@@ -1121,12 +1096,14 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                 requestId,
                 document,
                 editController,
+                formController,
                 revision,
                 page,
                 zoom,
                 devicePixelRatio,
                 pixelSize,
                 draftRevision,
+                formRevision,
                 result.suppressionApplied,
                 result.image);
         }, Qt::QueuedConnection);
@@ -1136,12 +1113,14 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
 void PDFPageItem::handleRenderResult(quint64 requestId,
                                      PDFDocument *document,
                                      PDFEditController *editController,
+                                     PDFFormController *formController,
                                      int revision,
                                      int page,
                                      qreal zoom,
                                      qreal devicePixelRatio,
                                      const QSize &pixelSize,
                                      quint64 draftRevision,
+                                     quint64 formRevision,
                                      bool suppressionApplied,
                                      const QImage &image)
 {
@@ -1158,13 +1137,16 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
         || !m_document
         || m_document->renderRevision() != revision
         || m_editController.data() != editController
+        || m_formController.data() != formController
         || page != m_page
         || !qFuzzyCompare(zoom, m_zoom)
         || !qFuzzyCompare(devicePixelRatio, currentDevicePixelRatio)
         || pixelSize != m_requestedPixelSize
         || pixelSize != currentPixelSize
         || draftRevision != m_requestedDraftRevision
-        || draftRevision != currentDraftRevision()) {
+        || draftRevision != currentDraftRevision()
+        || formRevision != m_requestedFormRevision
+        || formRevision != currentFormRevision()) {
         return;
     }
 
@@ -1184,11 +1166,14 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
     m_cachedDocument = document;
     m_cachedDraftRevision = draftRevision;
     m_cachedEditController = editController;
+    m_cachedFormRevision = formRevision;
+    m_cachedFormController = formController;
     m_cacheDirty = false;
     m_textureDirty = true;
     m_clearTexture = false;
     m_pendingTextureRequestId = requestId;
     m_pendingTextureDraftRevision = draftRevision;
+    m_pendingTextureFormRevision = formRevision;
     m_pendingSuppressionApplied = suppressionApplied;
 
     update();

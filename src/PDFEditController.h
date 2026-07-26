@@ -24,6 +24,8 @@
 #include <functional>
 #include <memory>
 
+class PDFFormController;
+
 class PDFEditController : public QObject
 {
     Q_OBJECT
@@ -106,6 +108,8 @@ public:
 
     PDFDocument *document() const;
     void setDocument(PDFDocument *document);
+    PDFFormController *formController() const;
+    void setFormController(PDFFormController *formController);
 
     Tool tool() const;
     void setTool(Tool tool);
@@ -402,7 +406,15 @@ private:
                       const QString &targetFilePath,
                       PDFDocument *expectedDocument,
                       int expectedRevision,
-                      const QString &expectedSourceFilePath);
+                      const QString &expectedSourceFilePath,
+                      const QString &temporarySourceFilePath = {});
+    void startAsyncSave(
+        const QString &targetFilePath,
+        PDFDocument *expectedDocument,
+        int expectedRevision,
+        const QString &expectedSourceFilePath,
+        const QString &sourceFilePathOverride = {},
+        const QString &temporarySourceFilePath = {});
     void ensureCacheRevision();
     const QVector<Candidate> &ensurePageCandidates(int page);
     const QVector<Candidate> *cachedPageCandidates(int page);
@@ -528,6 +540,7 @@ private:
     void clearRegisteredFonts();
 
     QPointer<PDFDocument> m_document;
+    QPointer<PDFFormController> m_formController;
     Tool m_tool = BrowseTool;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;

@@ -27,6 +27,7 @@ public:
         None,
         SourceUnavailable,
         SourceOpenFailed,
+        FormSnapshotFailed,
         PageLoadFailed,
         UnsupportedSourceObject,
         SourceObjectMissing,
@@ -57,6 +58,7 @@ public:
     static Result save(const PDFEditController &controller,
                        const QString &targetFilePath);
     static Request prepare(const PDFEditController &controller,
-                           const QString &targetFilePath);
+                           const QString &targetFilePath,
+                           const QString &sourceFilePathOverride = {});
     static Result save(const Request &request);
 };

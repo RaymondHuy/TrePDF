@@ -52,7 +52,9 @@ public:
     int renderRevision() const;
     int sourcePageCount() const;
     int sourcePageIndex(int page) const;
+    int displayPageIndexForSourcePage(int sourcePage) const;
     bool isTransientBlankPage(int page) const;
+    bool allowsFormFilling() const;
 
 signals:
     void sourceChanged();
@@ -61,6 +63,7 @@ signals:
     void loadedChanged();
     void statusTextChanged();
     void currentPageSizeChanged();
+    void pageStructureChanged(bool currentPageMappingChanged);
 
 private:
     friend class PDFEditController;
@@ -87,5 +90,6 @@ private:
     int m_revision = 0;
     bool m_allowsContentEditing = false;
     bool m_allowsPageAssembly = false;
+    bool m_allowsFormFilling = false;
     QString m_statusText;
 };

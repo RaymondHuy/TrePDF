@@ -93,6 +93,7 @@ Item {
             theme: root.theme
             document: root.session.document
             editController: root.session.editController
+            formController: root.session.formController
             zoom: root.session.zoom
             viewRotation: root.session.viewRotation
             transientStatus: root.transientStatus

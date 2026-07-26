@@ -2,6 +2,7 @@
 
 #include "PDFDocument.h"
 #include "PDFEditController.h"
+#include "PDFFormController.h"
 
 #include <atomic>
 #include <memory>
@@ -21,6 +22,7 @@ class PDFPageItem : public QQuickItem
     QML_NAMED_ELEMENT(PDFPageView)
     Q_PROPERTY(PDFDocument *document READ document WRITE setDocument NOTIFY documentChanged FINAL)
     Q_PROPERTY(PDFEditController *editController READ editController WRITE setEditController NOTIFY editControllerChanged FINAL)
+    Q_PROPERTY(PDFFormController *formController READ formController WRITE setFormController NOTIFY formControllerChanged FINAL)
     Q_PROPERTY(int page READ page WRITE setPage NOTIFY pageChanged FINAL)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
     Q_PROPERTY(QColor pageColor READ pageColor WRITE setPageColor NOTIFY pageColorChanged FINAL)
@@ -33,6 +35,7 @@ public:
 
     PDFDocument *document() const;
     PDFEditController *editController() const;
+    PDFFormController *formController() const;
     int page() const;
     qreal zoom() const;
     QColor pageColor() const;
@@ -41,6 +44,7 @@ public:
 
     void setDocument(PDFDocument *document);
     void setEditController(PDFEditController *editController);
+    void setFormController(PDFFormController *formController);
     void setPage(int page);
     void setZoom(qreal zoom);
     void setPageColor(const QColor &pageColor);
@@ -48,6 +52,7 @@ public:
 signals:
     void documentChanged();
     void editControllerChanged();
+    void formControllerChanged();
     void pageChanged();
     void zoomChanged();
     void pageColorChanged();
@@ -66,11 +71,14 @@ private:
     void invalidateDraftCache(bool immediate);
     void cancelPendingRender();
     void handleDraftRenderStateChanged(int page, quint64 revision, bool immediate);
+    void handleFormRenderStateChanged(int page, quint64 revision);
     quint64 currentDraftRevision() const;
+    quint64 currentFormRevision() const;
     void setDraftTextureCurrent(bool current);
     void setDraftTextureReady(bool ready);
     void markTextureReady(quint64 requestId,
                           quint64 draftRevision,
+                          quint64 formRevision,
                           bool suppressionApplied);
     void scheduleRender();
     void requestRenderForCurrentSize();
@@ -78,17 +86,20 @@ private:
     void handleRenderResult(quint64 requestId,
                             PDFDocument *document,
                             PDFEditController *editController,
+                            PDFFormController *formController,
                             int revision,
                             int page,
                             qreal zoom,
                             qreal devicePixelRatio,
                             const QSize &pixelSize,
                             quint64 draftRevision,
+                            quint64 formRevision,
                             bool suppressionApplied,
                             const QImage &image);
 
     QPointer<PDFDocument> m_document;
     QPointer<PDFEditController> m_editController;
+    QPointer<PDFFormController> m_formController;
     int m_page = 0;
     qreal m_zoom = 1.0;
     QColor m_pageColor = Qt::white;
@@ -108,6 +119,8 @@ private:
     PDFDocument *m_cachedDocument = nullptr;
     quint64 m_cachedDraftRevision = 0;
     PDFEditController *m_cachedEditController = nullptr;
+    quint64 m_cachedFormRevision = 0;
+    PDFFormController *m_cachedFormController = nullptr;
     bool m_renderPending = false;
     QSize m_requestedPixelSize;
     int m_requestedPage = -1;
@@ -117,8 +130,11 @@ private:
     PDFDocument *m_requestedDocument = nullptr;
     quint64 m_requestedDraftRevision = 0;
     PDFEditController *m_requestedEditController = nullptr;
+    quint64 m_requestedFormRevision = 0;
+    PDFFormController *m_requestedFormController = nullptr;
     quint64 m_pendingTextureRequestId = 0;
     quint64 m_pendingTextureDraftRevision = 0;
+    quint64 m_pendingTextureFormRevision = 0;
     bool m_pendingSuppressionApplied = false;
     std::shared_ptr<std::atomic_bool> m_renderCancellation;
     quint64 m_requestSerial = 0;
