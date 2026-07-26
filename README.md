@@ -8,9 +8,16 @@ Vietnamese enabled by default.
 
 Standard AcroForm widgets are rendered and interactive in Browse mode. Text
 fields support focus, selection, typing, IME commits, clipboard shortcuts, and
-field-local undo/redo; checkboxes, radio buttons, choice fields, and form
-buttons that do not need host integration use their native PDF behavior. Field
-values participate in the per-tab draft guard and persist through Save/Save As.
+field-local undo/redo. Eligible fixed-choice combo boxes and list boxes use a
+Qt Quick overlay synchronized with the PDFium form session; it supports single
+and multiple selection, accessible field labels, and keyboard navigation plus
+type-ahead for combo popups. Editable combo boxes, choice fields that commit on
+selection or define field actions, and controls too small for a safe custom
+presentation stay on PDFium's native interaction path. Checkboxes, radio
+buttons, and form buttons that do not need host integration also use their
+native PDF behavior. PDFium does not expose undo/redo history for non-editable
+choice fields, but all field values participate in the per-tab draft guard and
+persist through Save/Save As.
 PDF JavaScript is enabled automatically so form calculations, validation,
 formatting, field visibility, and document/page actions work without a
 per-document prompt, matching the normal reader experience. TrePDF keeps its

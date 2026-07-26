@@ -9,8 +9,9 @@
 ## Project Summary
 
 TrePDF is a macOS desktop PDF reader built with Qt 6, Qt Quick Controls, QML,
-C++17, and PDFium. The current scope is PDF viewing plus draft editing and
-Save/Save As persistence for supported PDF text and newly inserted images.
+C++17, and PDFium. The current scope includes PDF viewing, sandboxed AcroForm
+interaction, draft editing for supported text, images, and page operations,
+and Save/Save As persistence.
 
 Current features:
 
@@ -22,6 +23,13 @@ Current features:
 - Per-tab left/right view rotation in 90-degree steps. Rotation is a scene-graph
   view transform only: it rotates the page texture and edit overlay together
   without changing PDF page geometry, drafts, or saved content.
+- Standard AcroForm widgets are interactive in Browse mode. Eligible
+  fixed-choice combo boxes and list boxes use a Qt Quick overlay synchronized
+  with the worker-owned PDFium form session; choice fields with editable text,
+  commit-on-selection behavior, field actions, or unsafe display geometry stay
+  on the native PDFium interaction path. Form values participate in the
+  per-tab draft guard and Save/Save As, while PDFium does not expose undo/redo
+  history for non-editable choice fields.
 - Text draft editing with selection, undo, redo, discard, Save, and Save As.
   Drafts stay session-only until a save succeeds.
 - Add Image uses the same placement cursor and draft history as Add Text. After
@@ -103,11 +111,21 @@ Current features:
   navigation state, and source file path.
 - `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
   rich-text draft state, snapshot-based undo/redo history, and save commands.
+- `src/PDFFormController.h/.cpp`: per-tab AcroForm state, asynchronous form
+  interaction, host actions, focus state, draft guards, and choice-field
+  requests.
+- `src/PDFFormWorker.h/.cpp`: serialized worker-owned PDFium form sessions,
+  native widget events, choice-field inspection/mutation, form rendering, and
+  save snapshots.
+- `src/PDFFormView.h/.cpp`: QQuickItem bridge for native pointer, keyboard, and
+  IME events plus the asynchronous choice-field model exposed to QML.
 - `src/PDFSaveWriter.h/.cpp`: resolves source object paths, reflows rich-text
   runs, embeds/reuses fonts, creates added image objects, regenerates changed
   page content, and writes the PDF transactionally.
 - `src/PDFPageItem.h/.cpp`: asynchronous rendering and scene graph texture
   upload for one page delegate.
+- `src/Components/FormChoiceOverlay.qml`: custom combo-box and list-box
+  presentation for the safe subset of AcroForm choice fields.
 - `src/Components`: ribbon controls, document view, page delegates, and the
   draft editing overlay.
 - `third_party/pdfium`: prebuilt arm64 PDFium headers and library. Treat this as
@@ -253,6 +271,37 @@ clipped or elided unintentionally.
   `EditOverlay` receive the same transform. Do not feed view rotation back into
   `PDFDocument::pageSize()` or save-time normalized coordinates.
 - Wrap user-visible text in `qsTrId()` using the localization rules above.
+
+### Form Interaction Architecture
+
+- `PDFFormWorker` owns the form-session `FPDF_DOCUMENT` and `FPDF_FORMHANDLE`
+  on a serialized single-worker queue. Keep all PDFium form access under the
+  process-wide PDFium lock; GUI-thread controllers and QML must never access
+  those handles directly.
+- `PDFFormView` remains the native pointer, keyboard, and IME bridge. It also
+  requests choice-field snapshots asynchronously and refreshes them after form
+  render-state, page, document, or interactivity changes. Reject stale results
+  using the controller generation, document key, and current source-page
+  mapping.
+- `FormChoiceOverlay` may replace the presentation only for visible Widget
+  annotations that are fixed-choice combo boxes or list boxes with valid
+  geometry and bounded option data. Editable combo boxes, fields with
+  commit-on-selection, `/A` or `/AA` actions, and controls too small for safe
+  custom presentation must remain on PDFium's native path. Read-only fields may
+  be shown by the overlay but must remain disabled.
+- Before focusing or changing a choice, resolve the current source page and
+  annotation again and validate its identity token. Never trust an annotation
+  index alone after page insertion, deletion, document reopen, or an async
+  refresh. Resolve rapid multi-select toggles against live worker state rather
+  than a stale QML snapshot.
+- Keep `PDFFormView`, `FormChoiceOverlay`, the page texture, and `EditOverlay`
+  inside the same rotated page-surface container. Constrain combo popups to the
+  visible `ListView` viewport and clear pending/open popup state when the page,
+  document, interaction mode, or delegate lifetime changes.
+- Choice mutations use the existing per-tab form draft guard and snapshot-based
+  Save/Save As workflow. PDFium does not expose undo/redo for non-editable
+  choice fields; do not advertise or synthesize that history without a separate
+  design that preserves PDF form focus and action semantics.
 
 ### PDF Save Architecture
 
