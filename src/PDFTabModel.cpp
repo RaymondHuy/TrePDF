@@ -8,8 +8,11 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
     : QObject(parent)
     , m_document(new PDFDocument(this))
     , m_editController(new PDFEditController(this))
+    , m_formController(new PDFFormController(this))
 {
+    m_formController->setDocument(m_document);
     m_editController->setDocument(m_document);
+    m_editController->setFormController(m_formController);
 
     connect(m_document,
             &PDFDocument::sourceChanged,
@@ -33,6 +36,26 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
             &PDFEditController::saveFinished,
             this,
             &PDFDocumentSession::saveFinished);
+    connect(
+        m_formController,
+        &PDFFormController::externalLinkRequested,
+        this,
+        &PDFDocumentSession::externalLinkRequested);
+    connect(
+        m_formController,
+        &PDFFormController::externalLinkRequestCancelled,
+        this,
+        &PDFDocumentSession::externalLinkRequestCancelled);
+    connect(
+        m_formController,
+        &PDFFormController::javascriptEnableFailed,
+        this,
+        [this]() {
+            //% "Some automatic form features are unavailable in “%1”."
+            emit statusMessage(
+                qtTrId("AutomaticFormFeaturesUnavailableForDocument")
+                    .arg(m_title));
+        });
 }
 
 PDFDocument *PDFDocumentSession::document() const
@@ -43,6 +66,11 @@ PDFDocument *PDFDocumentSession::document() const
 PDFEditController *PDFDocumentSession::editController() const
 {
     return m_editController;
+}
+
+PDFFormController *PDFDocumentSession::formController() const
+{
+    return m_formController;
 }
 
 QString PDFDocumentSession::title() const
@@ -184,6 +212,7 @@ void PDFDocumentSession::prepareForDeactivation()
 {
     m_editController->finishSelectedFrameResize();
     m_editController->finishSelectedTextEdit();
+    m_formController->killFocus();
 }
 
 void PDFDocumentSession::refreshSourceState()
@@ -446,4 +475,34 @@ void PDFTabModel::connectSession(PDFDocumentSession *session)
             [this, session](bool succeeded) {
                 emit sessionSaveFinished(session, succeeded);
             });
+    connect(
+        session,
+        &PDFDocumentSession::externalLinkRequested,
+        this,
+        [this, session](
+            quint64 requestId,
+            const QString &authority,
+            const QString &displayUrl,
+            bool insecureHttp) {
+            if (!contains(session)) {
+                return;
+            }
+            emit externalLinkRequested(
+                session,
+                requestId,
+                authority,
+                displayUrl,
+                insecureHttp);
+        });
+    connect(
+        session,
+        &PDFDocumentSession::externalLinkRequestCancelled,
+        this,
+        [this, session](quint64 requestId) {
+            if (contains(session)) {
+                emit externalLinkRequestCancelled(
+                    session,
+                    requestId);
+            }
+        });
 }

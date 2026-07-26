@@ -1,5 +1,6 @@
 #include "PDFEditController.h"
 #include "ApplicationFonts.h"
+#include "PDFFormController.h"
 #include "PDFSaveWriter.h"
 #include "PDFiumSynchronization.h"
 
@@ -9,6 +10,7 @@
 #include <utility>
 
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QFont>
 #include <QFontDatabase>
@@ -832,6 +834,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::SourceOpenFailed:
         //% "The source PDF could not be opened for saving."
         return qtTrId("PdfSaveSourceOpenFailed");
+    case PDFSaveWriter::Error::FormSnapshotFailed:
+        //% "The PDF could not be saved."
+        return qtTrId("PdfSaveFailed");
     case PDFSaveWriter::Error::PageLoadFailed:
         //% "Page %1 could not be loaded while saving."
         return qtTrId("PdfSavePageLoadFailed").arg(result.page + 1);
@@ -942,6 +947,35 @@ void PDFEditController::setDocument(PDFDocument *document)
     emit documentChanged();
 }
 
+PDFFormController *PDFEditController::formController() const
+{
+    return m_formController;
+}
+
+void PDFEditController::setFormController(
+    PDFFormController *formController)
+{
+    if (m_formController == formController) {
+        return;
+    }
+    if (m_formController) {
+        disconnect(m_formController, nullptr, this, nullptr);
+    }
+    m_formController = formController;
+    if (m_formController) {
+        connect(
+            m_formController,
+            &PDFFormController::historyStateChanged,
+            this,
+            &PDFEditController::historyStateChanged);
+        connect(m_formController, &QObject::destroyed, this, [this]() {
+            m_formController = nullptr;
+            emit historyStateChanged();
+        });
+    }
+    emit historyStateChanged();
+}
+
 PDFEditController::Tool PDFEditController::tool() const
 {
     return m_tool;
@@ -965,17 +999,20 @@ bool PDFEditController::hasDrafts() const
 {
     return !m_drafts.isEmpty()
         || !m_addedBlankPageSizes.isEmpty()
-        || !m_deletedSourcePages.isEmpty();
+        || !m_deletedSourcePages.isEmpty()
+        || (m_formController && m_formController->hasDrafts());
 }
 
 bool PDFEditController::canUndo() const
 {
-    return !m_undoStack.isEmpty();
+    return !m_undoStack.isEmpty()
+        || (m_formController && m_formController->canUndo());
 }
 
 bool PDFEditController::canRedo() const
 {
-    return !m_redoStack.isEmpty();
+    return !m_redoStack.isEmpty()
+        || (m_formController && m_formController->canRedo());
 }
 
 bool PDFEditController::saving() const
@@ -3127,7 +3164,13 @@ void PDFEditController::deleteSelectedObject()
 
 int PDFEditController::undo()
 {
-    if (m_saving || m_textEditActive || m_undoStack.isEmpty()) {
+    if (m_saving || m_textEditActive) {
+        return -1;
+    }
+    if (m_undoStack.isEmpty()) {
+        if (m_formController && m_formController->canUndo()) {
+            m_formController->undo();
+        }
         return -1;
     }
 
@@ -3142,7 +3185,13 @@ int PDFEditController::undo()
 
 int PDFEditController::redo()
 {
-    if (m_saving || m_textEditActive || m_redoStack.isEmpty()) {
+    if (m_saving || m_textEditActive) {
+        return -1;
+    }
+    if (m_redoStack.isEmpty()) {
+        if (m_formController && m_formController->canRedo()) {
+            m_formController->redo();
+        }
         return -1;
     }
 
@@ -3163,7 +3212,11 @@ void PDFEditController::discardDrafts()
             && m_addedBlankPageSizes.isEmpty()
             && m_deletedSourcePages.isEmpty()
             && m_undoStack.isEmpty()
-            && m_redoStack.isEmpty())) {
+            && m_redoStack.isEmpty()
+            && (!m_formController
+                || (!m_formController->hasDrafts()
+                    && !m_formController->canUndo()
+                    && !m_formController->canRedo())))) {
         return;
     }
 
@@ -3192,6 +3245,9 @@ void PDFEditController::discardDrafts()
     m_drafts.clear();
     m_undoStack.clear();
     m_redoStack.clear();
+    if (m_formController) {
+        m_formController->discardChanges();
+    }
     setSelection(nullptr);
     for (int page : std::as_const(affectedPages)) {
         markDraftStateChanged(page, true);
@@ -3243,13 +3299,37 @@ bool PDFEditController::saveAs(const QUrl &target)
     m_saving = true;
     emit savingChanged();
     const QString targetFilePath = QFileInfo(target.toLocalFile()).absoluteFilePath();
-    const PDFSaveWriter::Result result = PDFSaveWriter::save(*this, targetFilePath);
+    QString temporarySourceFilePath;
+    QString sourceFilePathOverride;
+    QString snapshotError;
+    if (m_formController && m_formController->hasDrafts()) {
+        if (!m_formController->exportSnapshotBlocking(
+                temporarySourceFilePath,
+                snapshotError)) {
+            return completeSave(
+                PDFSaveWriter::Result{
+                    PDFSaveWriter::Error::FormSnapshotFailed,
+                    snapshotError},
+                targetFilePath,
+                expectedDocument,
+                expectedRevision,
+                expectedSourceFilePath);
+        }
+        sourceFilePathOverride = temporarySourceFilePath;
+    }
+
+    const PDFSaveWriter::Request request = PDFSaveWriter::prepare(
+        *this,
+        targetFilePath,
+        sourceFilePathOverride);
+    const PDFSaveWriter::Result result = PDFSaveWriter::save(request);
     return completeSave(
         result,
         targetFilePath,
         expectedDocument,
         expectedRevision,
-        expectedSourceFilePath);
+        expectedSourceFilePath,
+        temporarySourceFilePath);
 }
 
 bool PDFEditController::requestSave()
@@ -3286,52 +3366,129 @@ bool PDFEditController::requestSaveAs(const QUrl &target)
 
     finishSelectedTextEdit();
     const QString targetFilePath = QFileInfo(target.toLocalFile()).absoluteFilePath();
-    const PDFSaveWriter::Request request = PDFSaveWriter::prepare(
-        *this,
-        targetFilePath);
-    if (!request.isValid()) {
-        emit statusMessage(saveFailureText(PDFSaveWriter::Result{
-            PDFSaveWriter::Error::SourceUnavailable}));
-        return false;
-    }
-
-    QPointer<PDFEditController> controller(this);
     PDFDocument *const expectedDocument = m_document.data();
     const int expectedRevision = m_document->renderRevision();
     const QString expectedSourceFilePath = m_document->renderFilePath();
     m_saving = true;
     emit savingChanged();
+
+    if (m_formController && m_formController->hasDrafts()) {
+        QPointer<PDFEditController> controller(this);
+        m_formController->exportSnapshot(
+            [controller,
+             targetFilePath,
+             expectedDocument,
+             expectedRevision,
+             expectedSourceFilePath](
+                bool succeeded,
+                const QString &snapshotFilePath,
+                const QString &error) {
+                if (!controller) {
+                    if (!snapshotFilePath.isEmpty()) {
+                        QFile::remove(snapshotFilePath);
+                    }
+                    return;
+                }
+                if (!succeeded) {
+                    controller->completeSave(
+                        PDFSaveWriter::Result{
+                            PDFSaveWriter::Error::FormSnapshotFailed,
+                            error},
+                        targetFilePath,
+                        expectedDocument,
+                        expectedRevision,
+                        expectedSourceFilePath);
+                    return;
+                }
+                controller->startAsyncSave(
+                    targetFilePath,
+                    expectedDocument,
+                    expectedRevision,
+                    expectedSourceFilePath,
+                    snapshotFilePath,
+                    snapshotFilePath);
+            });
+        return true;
+    }
+
+    startAsyncSave(
+        targetFilePath,
+        expectedDocument,
+        expectedRevision,
+        expectedSourceFilePath);
+    return true;
+}
+
+void PDFEditController::startAsyncSave(
+    const QString &targetFilePath,
+    PDFDocument *expectedDocument,
+    int expectedRevision,
+    const QString &expectedSourceFilePath,
+    const QString &sourceFilePathOverride,
+    const QString &temporarySourceFilePath)
+{
+    const PDFSaveWriter::Request request = PDFSaveWriter::prepare(
+        *this,
+        targetFilePath,
+        sourceFilePathOverride);
+    if (!request.isValid()) {
+        completeSave(
+            PDFSaveWriter::Result{
+                PDFSaveWriter::Error::SourceUnavailable},
+            targetFilePath,
+            expectedDocument,
+            expectedRevision,
+            expectedSourceFilePath,
+            temporarySourceFilePath);
+        return;
+    }
+
+    QPointer<PDFEditController> controller(this);
     QThreadPool::globalInstance()->start(QRunnable::create(
         [controller,
          expectedDocument,
          expectedRevision,
          expectedSourceFilePath,
          request,
-         targetFilePath]() {
+         targetFilePath,
+         temporarySourceFilePath]() {
             PDFSaveWriter::Result result = PDFSaveWriter::save(request);
             if (!controller) {
+                if (!temporarySourceFilePath.isEmpty()) {
+                    QFile::remove(temporarySourceFilePath);
+                }
+                return;
+            }
+            QObject *app = QCoreApplication::instance();
+            if (!app) {
+                if (!temporarySourceFilePath.isEmpty()) {
+                    QFile::remove(temporarySourceFilePath);
+                }
                 return;
             }
             QMetaObject::invokeMethod(
-                controller.data(),
+                app,
                 [controller,
                  expectedDocument,
                  expectedRevision,
                  expectedSourceFilePath,
                  result = std::move(result),
-                 targetFilePath]() {
+                 targetFilePath,
+                 temporarySourceFilePath]() {
                     if (controller) {
                         controller->completeSave(
                             result,
                             targetFilePath,
                             expectedDocument,
                             expectedRevision,
-                            expectedSourceFilePath);
+                            expectedSourceFilePath,
+                            temporarySourceFilePath);
+                    } else if (!temporarySourceFilePath.isEmpty()) {
+                        QFile::remove(temporarySourceFilePath);
                     }
                 },
                 Qt::QueuedConnection);
         }));
-    return true;
 }
 
 bool PDFEditController::completeSave(
@@ -3339,8 +3496,12 @@ bool PDFEditController::completeSave(
     const QString &targetFilePath,
     PDFDocument *expectedDocument,
     int expectedRevision,
-    const QString &expectedSourceFilePath)
+    const QString &expectedSourceFilePath,
+    const QString &temporarySourceFilePath)
 {
+    if (!temporarySourceFilePath.isEmpty()) {
+        QFile::remove(temporarySourceFilePath);
+    }
     if (!result.succeeded()) {
         m_saving = false;
         emit savingChanged();

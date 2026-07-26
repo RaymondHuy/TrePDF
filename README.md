@@ -6,6 +6,22 @@ asynchronous rendering, per-tab left/right view rotation, rich-text content
 edits, image insertion, Save/Save As, and an ID-based localization system with
 Vietnamese enabled by default.
 
+Standard AcroForm widgets are rendered and interactive in Browse mode. Text
+fields support focus, selection, typing, IME commits, clipboard shortcuts, and
+field-local undo/redo; checkboxes, radio buttons, choice fields, and form
+buttons that do not need host integration use their native PDF behavior. Field
+values participate in the per-tab draft guard and persist through Save/Save As.
+PDF JavaScript is enabled automatically so form calculations, validation,
+formatting, field visibility, and document/page actions work without a
+per-document prompt, matching the normal reader experience. TrePDF keeps its
+safe-reading sandbox active: internal page destinations navigate inside the
+document when activated by the user, while user-activated HTTP and HTTPS links
+show their destination and require explicit confirmation before opening in the
+default browser. Other URI schemes, files, email, printing, form submission,
+dialogs, and JavaScript timers remain blocked. PDFium's public API does not
+provide a hard execution timeout, so a malicious synchronous script can still
+make the app unresponsive.
+
 Each document tab owns its PDF handle, draft/undo history, selection, zoom,
 scroll position, and formatting-panel state. Only the active tab creates page
 delegates and textures. Opening an already-open canonical path activates its

@@ -11,6 +11,7 @@ Rectangle {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    required property PDFFormController formController
     property real zoom: 1.0
     property int viewRotation: 0
     property string transientStatus
@@ -105,6 +106,18 @@ Rectangle {
             document.setCurrentPage(page)
     }
 
+    Connections {
+        target: root.formController
+
+        function onPageRollbackRequested(page) {
+            root.navigateToPage(page)
+        }
+
+        function onPageNavigationRequested(page) {
+            root.navigateToPage(page)
+        }
+    }
+
     ListView {
         id: viewer
 
@@ -148,6 +161,7 @@ Rectangle {
             theme: root.theme
             document: root.document
             editController: root.editController
+            formController: root.formController
             zoom: root.zoom
             viewRotation: root.viewRotation
             sessionChangeGeneration: root.sessionChangeGeneration
@@ -206,6 +220,7 @@ Rectangle {
             anchors.leftMargin: 14
             anchors.rightMargin: 14
             text: root.transientStatus
+            textFormat: Text.PlainText
             color: "white"
             elide: Text.ElideRight
             horizontalAlignment: Text.AlignHCenter

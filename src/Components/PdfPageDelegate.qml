@@ -9,6 +9,7 @@ Item {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    required property PDFFormController formController
     property real zoom: 1.0
     property int viewRotation: 0
     property bool pooled: false
@@ -75,6 +76,7 @@ Item {
 
             document: pageCard.pooled ? null : pageCard.document
             editController: pageCard.pooled ? null : pageCard.editController
+            formController: pageCard.pooled ? null : pageCard.formController
             page: pageCard.index
             zoom: pageCard.zoom
             pageColor: "white"
@@ -90,6 +92,17 @@ Item {
                 : "#c6cad1"
             border.width: pageCard.index === pageCard.document.currentPage ? 2 : 1
             visible: pageView.width > 0 && pageView.height > 0
+        }
+
+        PDFFormView {
+            anchors.fill: pageView
+            controller: pageCard.pooled ? null : pageCard.formController
+            page: pageCard.index
+            interactive: !pageCard.pooled
+                && pageCard.formController.interactive
+                && !pageCard.editController.saving
+                && pageCard.editController.tool === PDFEditController.BrowseTool
+            z: 1
         }
 
         EditOverlay {

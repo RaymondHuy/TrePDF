@@ -2,6 +2,8 @@
 #include "DraftImageItem.h"
 #include "PDFDocument.h"
 #include "PDFEditController.h"
+#include "PDFFormController.h"
+#include "PDFFormWorker.h"
 #include "PDFSaveWriter.h"
 #include "PDFTabModel.h"
 #include "PDFiumSynchronization.h"
@@ -108,6 +110,72 @@ bool writePdfObjects(const QString &filePath,
     QFile file(filePath);
     return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
         && file.write(data) == data.size();
+}
+
+bool createPushButtonActionPdf(
+    const QString &filePath,
+    const QByteArray &uri = QByteArray("https://example.com/"))
+{
+    const QByteArray appearanceContent(
+        "q\n"
+        "0.96 0.94 0.91 rg\n"
+        "0 0 80 40 re f\n"
+        "0.75 0.35 0.10 RG\n"
+        "1 w\n"
+        "0.5 0.5 79 39 re S\n"
+        "Q\n");
+    const QByteArray appearanceStream
+        = QByteArray(
+              "<< /Type /XObject /Subtype /Form /FormType 1 "
+              "/BBox [0 0 80 40] /Resources << >> /Length ")
+        + QByteArray::number(appearanceContent.size())
+        + QByteArray(" >>\nstream\n")
+        + appearanceContent
+        + QByteArray("endstream");
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray(
+                "<< /Type /Catalog /Pages 2 0 R "
+                "/AcroForm 9 0 R >>"),
+            QByteArray(
+                "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] "
+                "/Count 3 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R "
+                "/MediaBox [0 0 360 480] /Resources << >> >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R "
+                "/MediaBox [0 0 360 480] /Resources << >> "
+                "/Annots [6 0 R 7 0 R 8 0 R] >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R "
+                "/MediaBox [0 0 360 480] /Resources << >> >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Btn "
+                "/Ff 65536 /T (PrevButton) /P 4 0 R /F 4 "
+                "/Rect [20 400 100 440] /H /P "
+                "/AP << /N 10 0 R >> "
+                "/A << /S /GoTo /D [3 0 R /Fit] >> >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Btn "
+                "/Ff 65536 /T (UriButton) /P 4 0 R /F 4 "
+                "/Rect [140 400 220 440] /H /P "
+                "/AP << /N 10 0 R >> /A << /S /URI /URI (")
+                + uri
+                + QByteArray(") >> >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Btn "
+                "/Ff 65536 /T (NextButton) /P 4 0 R /F 4 "
+                "/Rect [260 400 340 440] /H /P "
+                "/AP << /N 10 0 R >> "
+                "/A << /S /GoTo /D [5 0 R /Fit] >> >>"),
+            QByteArray(
+                "<< /Fields [6 0 R 7 0 R 8 0 R] "
+                "/NeedAppearances false >>"),
+            appearanceStream,
+        });
 }
 
 bool createArialSubsetCollisionSourcePdf(const QString &filePath)
@@ -1415,6 +1483,11 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void enablesFormScriptingAutomatically();
+    void routesPushButtonActions_data();
+    void routesPushButtonActions();
+    void blocksUnsupportedFormUriSchemes();
+    void forwardsExternalLinkRequestsThroughTabModel();
     void serializesPdfiumAcrossThreads();
     void discoversUncachedHoverOffGuiThread();
     void reschedulesCancelledHoverForSamePage();
@@ -1568,6 +1641,234 @@ void PDFEditControllerTest::initTestCase()
     QVERIFY2(!m_rightColumnCandidate.isEmpty(), "Right column candidate was not discovered");
     QVERIFY2(!m_uprightCandidate.isEmpty(), "Upright candidate was not discovered");
     QVERIFY2(!m_obliqueCandidate.isEmpty(), "Oblique candidate was not discovered");
+}
+
+void PDFEditControllerTest::enablesFormScriptingAutomatically()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("automatic-form-scripting.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormController controller;
+    controller.setDocument(&document);
+    QSignalSpy enableFailedSpy(
+        &controller,
+        &PDFFormController::javascriptEnableFailed);
+
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    QTRY_VERIFY_WITH_TIMEOUT(controller.javascriptEnabled(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !controller.javascriptTransitionPending(),
+        5000);
+    QCOMPARE(enableFailedSpy.count(), 0);
+}
+
+void PDFEditControllerTest::routesPushButtonActions_data()
+{
+    QTest::addColumn<QPointF>("clickPosition");
+    QTest::addColumn<int>("initialCurrentPage");
+    QTest::addColumn<int>("expectedPage");
+    QTest::addColumn<bool>("expectExternalLink");
+
+    QTest::newRow("goto-prev")
+        << QPointF(60.0, 60.0)
+        << 1
+        << 0
+        << false;
+    QTest::newRow("goto-prev-while-model-already-targets-page")
+        << QPointF(60.0, 60.0)
+        << 0
+        << 0
+        << false;
+    QTest::newRow("uri-https")
+        << QPointF(180.0, 60.0)
+        << 1
+        << -1
+        << true;
+    QTest::newRow("goto-next")
+        << QPointF(300.0, 60.0)
+        << 1
+        << 2
+        << false;
+}
+
+void PDFEditControllerTest::routesPushButtonActions()
+{
+    QFETCH(QPointF, clickPosition);
+    QFETCH(int, initialCurrentPage);
+    QFETCH(int, expectedPage);
+    QFETCH(bool, expectExternalLink);
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("form-actions-%1.pdf").arg(
+            QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(createPushButtonActionPdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormController controller;
+    controller.setDocument(&document);
+    QSignalSpy navigationSpy(
+        &controller,
+        &PDFFormController::pageNavigationRequested);
+    QSignalSpy externalLinkSpy(
+        &controller,
+        &PDFFormController::externalLinkRequested);
+    QSignalSpy cancelledLinkSpy(
+        &controller,
+        &PDFFormController::externalLinkRequestCancelled);
+    QSignalSpy enableFailedSpy(
+        &controller,
+        &PDFFormController::javascriptEnableFailed);
+
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    QVERIFY(controller.interactive());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.javascriptEnabled(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !controller.javascriptTransitionPending(),
+        5000);
+    QCOMPARE(enableFailedSpy.count(), 0);
+
+    document.setCurrentPage(initialCurrentPage);
+    QCOMPARE(document.currentPage(), initialCurrentPage);
+    const QSize deviceSize(360, 480);
+    controller.pointerEvent(
+        1,
+        PDFFormWorker::PointerEventType::Press,
+        0,
+        clickPosition,
+        deviceSize);
+    controller.pointerEvent(
+        1,
+        PDFFormWorker::PointerEventType::Release,
+        0,
+        clickPosition,
+        deviceSize);
+
+    if (expectExternalLink) {
+        QTRY_COMPARE_WITH_TIMEOUT(externalLinkSpy.count(), 1, 5000);
+        QCOMPARE(navigationSpy.count(), 0);
+        QCOMPARE(document.currentPage(), initialCurrentPage);
+        const QList<QVariant> arguments
+            = externalLinkSpy.takeFirst();
+        const quint64 requestId = arguments.at(0).toULongLong();
+        QVERIFY(requestId != 0);
+        QCOMPARE(
+            arguments.at(1).toString(),
+            QStringLiteral("example.com"));
+        QCOMPARE(
+            arguments.at(2).toString(),
+            QStringLiteral("https://example.com/"));
+        QCOMPARE(arguments.at(3).toBool(), false);
+        controller.cancelExternalLink(requestId);
+        QCOMPARE(cancelledLinkSpy.count(), 1);
+    } else {
+        QTRY_COMPARE_WITH_TIMEOUT(navigationSpy.count(), 1, 5000);
+        QCOMPARE(
+            navigationSpy.constFirst().constFirst().toInt(),
+            expectedPage);
+        QTRY_COMPARE_WITH_TIMEOUT(
+            document.currentPage(),
+            expectedPage,
+            5000);
+        QCOMPARE(externalLinkSpy.count(), 0);
+    }
+}
+
+void PDFEditControllerTest::blocksUnsupportedFormUriSchemes()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("form-actions-blocked-uri.pdf"));
+    QVERIFY(createPushButtonActionPdf(
+        sourcePath,
+        QByteArray("file:///tmp/blocked")));
+
+    PDFDocument document;
+    PDFFormController controller;
+    controller.setDocument(&document);
+    QSignalSpy navigationSpy(
+        &controller,
+        &PDFFormController::pageNavigationRequested);
+    QSignalSpy externalLinkSpy(
+        &controller,
+        &PDFFormController::externalLinkRequested);
+
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    QTRY_VERIFY_WITH_TIMEOUT(controller.javascriptEnabled(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !controller.javascriptTransitionPending(),
+        5000);
+    document.setCurrentPage(1);
+
+    controller.pointerEvent(
+        1,
+        PDFFormWorker::PointerEventType::Press,
+        0,
+        QPointF(180.0, 60.0),
+        QSize(360, 480));
+    controller.pointerEvent(
+        1,
+        PDFFormWorker::PointerEventType::Release,
+        0,
+        QPointF(180.0, 60.0),
+        QSize(360, 480));
+
+    QVERIFY(controller.hasDrafts());
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.hasDrafts(), 5000);
+    QCOMPARE(externalLinkSpy.count(), 0);
+    QCOMPARE(navigationSpy.count(), 0);
+    QCOMPARE(document.currentPage(), 1);
+}
+
+void PDFEditControllerTest::forwardsExternalLinkRequestsThroughTabModel()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("form-actions-tab-model.pdf"));
+    QVERIFY(createPushButtonActionPdf(sourcePath));
+
+    PDFTabModel tabs;
+    QSignalSpy externalLinkSpy(
+        &tabs,
+        &PDFTabModel::externalLinkRequested);
+    PDFDocumentSession *session = tabs.open(
+        QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        session->formController()->javascriptEnabled(),
+        5000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !session->formController()->javascriptTransitionPending(),
+        5000);
+    session->document()->setCurrentPage(1);
+
+    session->formController()->pointerEvent(
+        1,
+        PDFFormWorker::PointerEventType::Press,
+        0,
+        QPointF(180.0, 60.0),
+        QSize(360, 480));
+    session->formController()->pointerEvent(
+        1,
+        PDFFormWorker::PointerEventType::Release,
+        0,
+        QPointF(180.0, 60.0),
+        QSize(360, 480));
+
+    QTRY_COMPARE_WITH_TIMEOUT(externalLinkSpy.count(), 1, 5000);
+    const QList<QVariant> arguments = externalLinkSpy.takeFirst();
+    QCOMPARE(
+        arguments.at(0).value<PDFDocumentSession *>(),
+        session);
+    const quint64 requestId = arguments.at(1).toULongLong();
+    QVERIFY(requestId != 0);
+    QCOMPARE(
+        arguments.at(2).toString(),
+        QStringLiteral("example.com"));
+    QCOMPARE(
+        arguments.at(3).toString(),
+        QStringLiteral("https://example.com/"));
+    QCOMPARE(arguments.at(4).toBool(), false);
+    session->formController()->cancelExternalLink(requestId);
 }
 
 void PDFEditControllerTest::serializesPdfiumAcrossThreads()
@@ -4471,6 +4772,9 @@ void PDFEditControllerTest::deletesSourcePageWithUndoRedoAndDiscard()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    QSignalSpy pageStructureSpy(
+        &document,
+        &PDFDocument::pageStructureChanged);
     document.setCurrentPage(1);
 
     QCOMPARE(document.pageCount(), 3);
@@ -4479,6 +4783,9 @@ void PDFEditControllerTest::deletesSourcePageWithUndoRedoAndDiscard()
     QCOMPARE(document.sourcePageIndex(0), 0);
     QCOMPARE(document.sourcePageIndex(1), 1);
     QCOMPARE(document.sourcePageIndex(2), 2);
+    QCOMPARE(document.displayPageIndexForSourcePage(0), 0);
+    QCOMPARE(document.displayPageIndexForSourcePage(1), 1);
+    QCOMPARE(document.displayPageIndexForSourcePage(2), 2);
 
     QCOMPARE(controller.deleteCurrentPage(), 1);
     QCOMPARE(document.pageCount(), 2);
@@ -4486,6 +4793,13 @@ void PDFEditControllerTest::deletesSourcePageWithUndoRedoAndDiscard()
     QCOMPARE(document.pageSize(1), QSizeF(500.0, 700.0));
     QCOMPARE(document.sourcePageIndex(0), 0);
     QCOMPARE(document.sourcePageIndex(1), 2);
+    QCOMPARE(document.displayPageIndexForSourcePage(0), 0);
+    QCOMPARE(document.displayPageIndexForSourcePage(1), -1);
+    QCOMPARE(document.displayPageIndexForSourcePage(2), 1);
+    QCOMPARE(pageStructureSpy.count(), 1);
+    QCOMPARE(
+        pageStructureSpy.constFirst().constFirst().toBool(),
+        true);
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
     QVERIFY(!controller.canRedo());
