@@ -15,6 +15,8 @@ Item {
     required property PDFEditController controller
 
     property var drafts: []
+    property var contentDrafts: []
+    property var highlightDrafts: []
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
@@ -33,6 +35,9 @@ Item {
     property real selectCursorX: 0
     property real selectCursorY: 0
     property bool selectCursorVisible: false
+    property bool highlighting: false
+    property point highlightStart: Qt.point(0, 0)
+    property point highlightCurrent: Qt.point(0, 0)
     readonly property real fallbackBleed: 2
     readonly property real editBoxRadius: 4
     readonly property color editBoxColor: "#f5a55a"
@@ -44,7 +49,14 @@ Item {
     readonly property real resizeHandleSize: 8
     readonly property real resizeHandleHitSize: 24
     readonly property real minimumResizePixelSize: 24
+    readonly property real minimumHighlightDragSize: 3
+    readonly property rect activeHighlightRect: Qt.rect(
+        Math.min(highlightStart.x, highlightCurrent.x),
+        Math.min(highlightStart.y, highlightCurrent.y),
+        Math.abs(highlightCurrent.x - highlightStart.x),
+        Math.abs(highlightCurrent.y - highlightStart.y))
     readonly property bool interactionActive: !pooled
+        && !controller.saving
         && controller.tool !== PDFEditController.BrowseTool
     readonly property bool editorUsesCleanTexture: draftTextureReady
         && hasActiveDraft(editingObjectId)
@@ -69,13 +81,16 @@ Item {
 
     Keys.onPressed: event => {
         if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete)
-            event.accepted = root.deleteSelectedImage()
+            event.accepted = root.deleteSelectedNonText()
     }
 
     function reloadData() {
         if (pooled) {
             drafts = []
+            contentDrafts = []
+            highlightDrafts = []
             hoverCandidate = ({})
+            cancelHighlight()
             hideSelectCursor()
             return
         }
@@ -105,7 +120,18 @@ Item {
                     displayedDrafts.push(restorationOverlay(previousDraft))
             }
         }
+        const displayedContentDrafts = []
+        const displayedHighlightDrafts = []
+        for (let index = 0; index < displayedDrafts.length; ++index) {
+            const draft = displayedDrafts[index]
+            if (draft.kind === "highlight")
+                displayedHighlightDrafts.push(draft)
+            else
+                displayedContentDrafts.push(draft)
+        }
         drafts = displayedDrafts
+        contentDrafts = displayedContentDrafts
+        highlightDrafts = displayedHighlightDrafts
         if (!interactionActive) {
             hoverCandidate = ({})
             hideSelectCursor()
@@ -486,6 +512,10 @@ Item {
         return kind === "image" || kind === "addedImage"
     }
 
+    function isHighlightKind(kind) {
+        return kind === "highlight"
+    }
+
     function isMovableKind(kind) {
         return isImageKind(kind)
             || kind === "text"
@@ -587,6 +617,7 @@ Item {
         if (!interactionActive
                 || controller.tool === PDFEditController.AddTextTool
                 || controller.tool === PDFEditController.AddImageTool
+                || controller.tool === PDFEditController.HighlightTool
                 || width <= 0
                 || height <= 0) {
             return ({})
@@ -628,6 +659,59 @@ Item {
         if (editing)
             commitEditing()
         controller.requestAddImage(page, x / width, y / height)
+    }
+
+    function beginHighlight(x, y) {
+        if (controller.tool !== PDFEditController.HighlightTool
+                || width <= 0
+                || height <= 0) {
+            return
+        }
+
+        if (editing)
+            commitEditing()
+        selectionActions.close()
+        controller.clearSelection()
+        hoverCandidate = ({})
+        hideSelectCursor()
+        highlightStart = Qt.point(
+            Math.max(0, Math.min(width, x)),
+            Math.max(0, Math.min(height, y)))
+        highlightCurrent = highlightStart
+        highlighting = true
+    }
+
+    function updateHighlight(x, y) {
+        if (!highlighting)
+            return
+
+        highlightCurrent = Qt.point(
+            Math.max(0, Math.min(width, x)),
+            Math.max(0, Math.min(height, y)))
+    }
+
+    function finishHighlight(x, y) {
+        if (!highlighting)
+            return
+
+        updateHighlight(x, y)
+        const selectionRect = activeHighlightRect
+        highlighting = false
+        if (selectionRect.width < minimumHighlightDragSize
+                || selectionRect.height < minimumHighlightDragSize) {
+            return
+        }
+
+        controller.addHighlight(page, Qt.rect(
+            selectionRect.x / width,
+            selectionRect.y / height,
+            selectionRect.width / width,
+            selectionRect.height / height))
+        reloadData()
+    }
+
+    function cancelHighlight() {
+        highlighting = false
     }
 
     function selectCandidate(candidate) {
@@ -761,21 +845,29 @@ Item {
         return true
     }
 
-    function deleteSelectedImage() {
-        if (editing || !isImageKind(controller.selectedKind))
+    function deleteSelectedNonText() {
+        if (editing
+                || (!isImageKind(controller.selectedKind)
+                    && !isHighlightKind(controller.selectedKind))) {
             return false
+        }
 
         selectionActions.close()
         return deleteSelectedObject()
     }
 
     function selectRelativeCandidate(direction) {
+        if (controller.tool !== PDFEditController.SelectTool
+                && controller.tool !== PDFEditController.EditTextTool) {
+            return false
+        }
+
         const candidates = controller.candidatesForPage(page)
         const selectable = []
         for (let index = 0; index < candidates.length; ++index) {
             if (controller.tool !== PDFEditController.EditTextTool
                     || (candidates[index].editable
-                        && !isImageCandidate(candidates[index]))) {
+                        && isTextBoxCandidate(candidates[index]))) {
                 selectable.push(candidates[index])
             }
         }
@@ -802,6 +894,7 @@ Item {
 
     onPageChanged: {
         selectionActions.close()
+        cancelHighlight()
         cancelFrameResize()
         if (editing)
             commitEditing()
@@ -810,6 +903,7 @@ Item {
 
     onPooledChanged: {
         selectionActions.close()
+        cancelHighlight()
         if (pooled)
             cancelFrameResize()
         if (pooled && editing)
@@ -817,7 +911,11 @@ Item {
         reloadData()
     }
 
-    onInteractionActiveChanged: reloadData()
+    onInteractionActiveChanged: {
+        if (!interactionActive)
+            cancelHighlight()
+        reloadData()
+    }
     onDraftTextureCurrentChanged: {
         if (draftTextureCurrent)
             reloadData()
@@ -842,6 +940,7 @@ Item {
 
         function onToolChanged() {
             selectionActions.close()
+            root.cancelHighlight()
             root.cancelFrameResize()
             if (root.editing)
                 root.commitEditing()
@@ -924,7 +1023,37 @@ Item {
     }
 
     Repeater {
-        model: root.drafts
+        model: root.highlightDrafts
+
+        delegate: Item {
+            id: highlightItem
+
+            required property var modelData
+
+            width: root.width
+            height: root.height
+            z: 0
+
+            Repeater {
+                model: highlightItem.modelData.highlightRects
+
+                delegate: Rectangle {
+                    required property var modelData
+
+                    x: modelData.x * root.width
+                    y: modelData.y * root.height
+                    width: Math.max(1, modelData.width * root.width)
+                    height: Math.max(1, modelData.height * root.height)
+                    color: highlightItem.modelData.highlightColor
+                    visible: highlightItem.modelData.deleted !== true
+                    Accessible.ignored: true
+                }
+            }
+        }
+    }
+
+    Repeater {
+        model: root.contentDrafts
 
         delegate: Item {
             id: draftItem
@@ -1169,6 +1298,7 @@ Item {
                     && draftItem.hasContent
                     && root.controller.tool !== PDFEditController.AddTextTool
                     && root.controller.tool !== PDFEditController.AddImageTool
+                    && root.controller.tool !== PDFEditController.HighlightTool
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
                 preventStealing: false
@@ -1225,9 +1355,12 @@ Item {
         enabled: root.interactionActive
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton
-        preventStealing: false
+        preventStealing: root.controller.tool
+            === PDFEditController.HighlightTool
         cursorShape: root.selectCursorActive || root.addTextCursorActive
             ? Qt.BlankCursor
+            : root.controller.tool === PDFEditController.HighlightTool
+                ? Qt.CrossCursor
             : root.controller.tool === PDFEditController.AddTextTool
                     || root.controller.tool === PDFEditController.AddImageTool
             ? Qt.IBeamCursor
@@ -1236,23 +1369,40 @@ Item {
                 ? Qt.ForbiddenCursor
                 : root.isImageCandidate(root.hoverCandidate)
                     ? Qt.ArrowCursor
+                    : root.isHighlightKind(root.hoverCandidate.kind)
+                        ? Qt.PointingHandCursor
                     : Qt.IBeamCursor
             : Qt.ArrowCursor
         activeFocusOnTab: true
         Accessible.role: Accessible.Pane
         //% "PDF edit surface"
         Accessible.name: qsTrId("PdfEditSurface")
-        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text or images to move them, and Backspace or Delete to remove images"
+        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text or images to move them, or drag with Highlight to mark an area"
         Accessible.description: qsTrId("PdfEditSurfaceDescription")
 
         onEntered: root.updateHoverAtPosition(mouseX, mouseY)
-        onPositionChanged: mouse => root.updateHoverAtPosition(mouse.x, mouse.y)
+        onPositionChanged: mouse => {
+            if (root.highlighting)
+                root.updateHighlight(mouse.x, mouse.y)
+            else
+                root.updateHoverAtPosition(mouse.x, mouse.y)
+        }
         onExited: {
             root.hideSelectCursor()
             root.hoverCandidate = ({})
         }
-        onPressed: forceActiveFocus()
+        onPressed: mouse => {
+            forceActiveFocus()
+            if (root.controller.tool === PDFEditController.HighlightTool) {
+                root.beginHighlight(mouse.x, mouse.y)
+                mouse.accepted = true
+            }
+        }
+        onReleased: mouse => root.finishHighlight(mouse.x, mouse.y)
+        onCanceled: root.cancelHighlight()
         onClicked: mouse => {
+            if (root.controller.tool === PDFEditController.HighlightTool)
+                return
             if (root.controller.tool === PDFEditController.AddTextTool) {
                 root.beginAddingText(mouse.x, mouse.y)
                 return
@@ -1281,7 +1431,8 @@ Item {
         }
         onDoubleClicked: mouse => {
             if (root.controller.tool === PDFEditController.AddTextTool
-                    || root.controller.tool === PDFEditController.AddImageTool)
+                    || root.controller.tool === PDFEditController.AddImageTool
+                    || root.controller.tool === PDFEditController.HighlightTool)
                 return
 
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
@@ -1297,6 +1448,12 @@ Item {
             root.beginSelectedEditing()
             event.accepted = true
         }
+        Keys.onEscapePressed: event => {
+            if (root.highlighting) {
+                root.cancelHighlight()
+                event.accepted = true
+            }
+        }
         Keys.onTabPressed: event => {
             event.accepted = root.selectRelativeCandidate(1)
         }
@@ -1311,14 +1468,28 @@ Item {
         }
     }
 
+    Rectangle {
+        x: root.activeHighlightRect.x
+        y: root.activeHighlightRect.y
+        width: Math.max(1, root.activeHighlightRect.width)
+        height: Math.max(1, root.activeHighlightRect.height)
+        color: "#30ffeb3b"
+        border.width: 1
+        border.color: "#f9a825"
+        visible: root.highlighting
+        z: 5
+        Accessible.ignored: true
+    }
+
     Popup {
         id: selectionActions
 
-        readonly property bool imageSelection:
+        readonly property bool compactSelection:
             root.isImageKind(root.controller.selectedKind)
+            || root.isHighlightKind(root.controller.selectedKind)
 
         parent: root
-        width: imageSelection ? 71 : 136
+        width: compactSelection ? 71 : 136
         height: 62
         padding: 4
         modal: false
@@ -1355,7 +1526,7 @@ Item {
 
             Keys.onPressed: event => {
                 if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete)
-                    event.accepted = root.deleteSelectedImage()
+                    event.accepted = root.deleteSelectedNonText()
             }
 
             ToolButton {
@@ -1372,7 +1543,7 @@ Item {
                 icon.height: 24
                 icon.color: "transparent"
                 font.pixelSize: 10
-                visible: !selectionActions.imageSelection
+                visible: !selectionActions.compactSelection
 
                 background: Rectangle {
                     radius: 4
@@ -1767,7 +1938,8 @@ Item {
             && root.controller.selectedEditable
             && (root.editing
                 || (root.controller.tool !== PDFEditController.AddTextTool
-                    && root.controller.tool !== PDFEditController.AddImageTool)
+                    && root.controller.tool !== PDFEditController.AddImageTool
+                    && root.controller.tool !== PDFEditController.HighlightTool)
                 || root.controller.selectedKind === "addedImage")
 
         Rectangle {
@@ -1887,7 +2059,8 @@ Item {
         }
 
         Repeater {
-            model: root.controller.selectedKind === "image" ? [] : [
+            model: root.controller.selectedKind === "image"
+                    || root.controller.selectedKind === "highlight" ? [] : [
                 { horizontal: 0, vertical: -1, cursor: Qt.SizeVerCursor },
                 { horizontal: 1, vertical: 0, cursor: Qt.SizeHorCursor },
                 { horizontal: 0, vertical: 1, cursor: Qt.SizeVerCursor },

@@ -40,6 +40,12 @@ PDF. Compatible text objects on the same visual line are grouped into one
 editable candidate while retaining every source object path for draft rendering
 and persistence.
 
+The Highlight tool lets the user drag a rectangular yellow mark over any page
+area. Highlights are per-tab session drafts with undo, redo, discard, selection,
+and deletion support. Save and Save As persist them as standard PDF highlight
+annotations with quad points, opacity, and print visibility; a highlight-only
+save does not regenerate the page content stream.
+
 The Image tool changes the page cursor to a placement `+`. Clicking a page opens
 the local image picker; the chosen PNG, JPEG, BMP, GIF, WebP, or TIFF is decoded
 and snapshotted immediately, displayed as a resizable session draft, and added
@@ -121,11 +127,11 @@ multiline/rich-text runs, calls
 `FPDFPage_GenerateContent()`, and only clears undo history after the saved PDF
 has reopened successfully.
 
-The Edit ribbon can also append a blank page using the current page size or
-delete the current page while keeping at least one page in the document. These
-page operations participate in undo, redo, and discard like other session
-drafts. Save and Save As persist the resulting page order without changing the
-source file during Save As.
+The Edit ribbon can also insert a blank page immediately after the current page
+using its page size, or delete the current page while keeping at least one page
+in the document. These page operations participate in undo, redo, and discard
+like other session drafts. Save and Save As persist the resulting page order
+without changing the source file during Save As.
 
 Editable source text is currently limited to top-level page objects with Fill,
 Stroke, or Fill+Stroke rendering. Text used as a clipping path or nested inside

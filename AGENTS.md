@@ -16,6 +16,12 @@ and Save/Save As persistence.
 Current features:
 
 - Open multiple local PDF files in independent tabs and close them separately.
+- Insert a blank page immediately after the current page or delete the current
+  page, with undo/redo/discard and Save/Save As persistence.
+- Add rectangular yellow highlight annotations with a drag tool. Highlights
+  remain undoable session drafts, can be selected and deleted, and persist
+  through Save/Save As without rewriting page content streams on
+  annotation-only pages.
 - Render every page through PDFium.
 - Virtualized continuous scrolling with reusable QML delegates.
 - Asynchronous page rendering on a worker thread.
@@ -338,6 +344,10 @@ clipped or elided unintentionally.
   embedded font programs to glyphs used by new text objects while leaving
   original PDF font resources unchanged. Commit only after PDFium succeeds;
   any earlier error must leave the destination and in-memory drafts untouched.
+- Persist highlight drafts as `FPDF_ANNOT_HIGHLIGHT` annotations with explicit
+  quad points, bounding rectangles, color/opacity, and the Print flag. Adding
+  annotations alone must not call `FPDFPage_GenerateContent()`; mixed
+  text/image edits still regenerate the affected page content normally.
 - Preserve the earliest source z-order with `FPDFPage_InsertObjectAtIndex()`;
   added text and images are appended in insertion order. Convert coordinates
   with `FPDF_DeviceToPage()` so CropBox offsets and page rotation follow the

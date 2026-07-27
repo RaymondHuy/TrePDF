@@ -23,6 +23,7 @@
 #include <QTextOption>
 #include <QVector>
 
+#include <fpdf_annot.h>
 #include <fpdf_edit.h>
 #include <fpdf_save.h>
 
@@ -68,7 +69,8 @@ struct SaveParagraph {
 struct SaveDraft {
     enum class Kind {
         Text,
-        Image
+        Image,
+        Highlight
     };
 
     Kind kind = Kind::Text;
@@ -81,6 +83,8 @@ struct SaveDraft {
     QVector<SaveParagraph> paragraphFormats;
     QRectF sourceRect;
     QRectF frameRect;
+    QVector<QRectF> highlightRects;
+    QColor highlightColor;
     QImage image;
     QPointF layoutOrigin;
     SaveFormat originalFormat;
@@ -175,6 +179,33 @@ public:
 
 private:
     FPDF_PAGE m_page = nullptr;
+};
+
+class PdfAnnotationHandle
+{
+public:
+    explicit PdfAnnotationHandle(FPDF_ANNOTATION annotation = nullptr)
+        : m_annotation(annotation)
+    {
+    }
+
+    ~PdfAnnotationHandle()
+    {
+        if (m_annotation) {
+            assertPDFiumProcessLockHeld();
+            FPDFPage_CloseAnnot(m_annotation);
+        }
+    }
+
+    FPDF_ANNOTATION get() const
+    {
+        return m_annotation;
+    }
+
+    Q_DISABLE_COPY_MOVE(PdfAnnotationHandle)
+
+private:
+    FPDF_ANNOTATION m_annotation = nullptr;
 };
 
 class SaveFileWriter : public FPDF_FILEWRITE
@@ -2051,6 +2082,154 @@ void destroyPreparedObjects(QVector<PreparedDraft> &preparedDrafts)
     }
 }
 
+PDFSaveWriter::Result createHighlightAnnotation(
+    FPDF_PAGE page,
+    const SaveDraft &draft,
+    qreal pageWidth,
+    qreal pageHeight,
+    const PageCoordinateMapper &coordinateMapper)
+{
+    QVector<FS_QUADPOINTSF> quadPoints;
+    quadPoints.reserve(draft.highlightRects.size());
+    bool hasBounds = false;
+    qreal minimumX = 0.0;
+    qreal maximumX = 0.0;
+    qreal minimumY = 0.0;
+    qreal maximumY = 0.0;
+    const auto includePoint = [
+        &hasBounds,
+        &minimumX,
+        &maximumX,
+        &minimumY,
+        &maximumY](const QPointF &point) {
+        if (!hasBounds) {
+            minimumX = maximumX = point.x();
+            minimumY = maximumY = point.y();
+            hasBounds = true;
+            return;
+        }
+        minimumX = qMin(minimumX, point.x());
+        maximumX = qMax(maximumX, point.x());
+        minimumY = qMin(minimumY, point.y());
+        maximumY = qMax(maximumY, point.y());
+    };
+    const auto finitePoint = [](const QPointF &point) {
+        return std::isfinite(point.x()) && std::isfinite(point.y());
+    };
+
+    for (const QRectF &highlightRect : draft.highlightRects) {
+        if (!std::isfinite(highlightRect.x())
+            || !std::isfinite(highlightRect.y())
+            || !std::isfinite(highlightRect.width())
+            || !std::isfinite(highlightRect.height())) {
+            continue;
+        }
+        const QRectF normalizedRect = highlightRect.normalized().intersected(
+            QRectF(0.0, 0.0, 1.0, 1.0));
+        if (normalizedRect.isEmpty()) {
+            continue;
+        }
+
+        const QRectF deviceRect(
+            normalizedRect.x() * pageWidth,
+            normalizedRect.y() * pageHeight,
+            normalizedRect.width() * pageWidth,
+            normalizedRect.height() * pageHeight);
+        QPointF topLeft;
+        QPointF topRight;
+        QPointF bottomLeft;
+        QPointF bottomRight;
+        if (!coordinateMapper.pagePoint(
+                deviceRect.left(),
+                deviceRect.top(),
+                topLeft)
+            || !coordinateMapper.pagePoint(
+                deviceRect.right(),
+                deviceRect.top(),
+                topRight)
+            || !coordinateMapper.pagePoint(
+                deviceRect.left(),
+                deviceRect.bottom(),
+                bottomLeft)
+            || !coordinateMapper.pagePoint(
+                deviceRect.right(),
+                deviceRect.bottom(),
+                bottomRight)
+            || !finitePoint(topLeft)
+            || !finitePoint(topRight)
+            || !finitePoint(bottomLeft)
+            || !finitePoint(bottomRight)) {
+            continue;
+        }
+
+        quadPoints.append(FS_QUADPOINTSF{
+            static_cast<float>(topLeft.x()),
+            static_cast<float>(topLeft.y()),
+            static_cast<float>(topRight.x()),
+            static_cast<float>(topRight.y()),
+            static_cast<float>(bottomLeft.x()),
+            static_cast<float>(bottomLeft.y()),
+            static_cast<float>(bottomRight.x()),
+            static_cast<float>(bottomRight.y())});
+        includePoint(topLeft);
+        includePoint(topRight);
+        includePoint(bottomLeft);
+        includePoint(bottomRight);
+    }
+
+    if (quadPoints.isEmpty() || !hasBounds) {
+        return failure(
+            PDFSaveWriter::Error::HighlightAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    PdfAnnotationHandle annotation(
+        FPDFPage_CreateAnnot(page, FPDF_ANNOT_HIGHLIGHT));
+    const QColor color = draft.highlightColor.isValid()
+        ? draft.highlightColor.toRgb()
+        : QColor(255, 235, 59, 96);
+    if (!annotation.get()
+        || !FPDFAnnot_SetColor(
+            annotation.get(),
+            FPDFANNOT_COLORTYPE_Color,
+            static_cast<unsigned int>(color.red()),
+            static_cast<unsigned int>(color.green()),
+            static_cast<unsigned int>(color.blue()),
+            static_cast<unsigned int>(color.alpha()))
+        || !FPDFAnnot_SetFlags(
+            annotation.get(),
+            FPDF_ANNOT_FLAG_PRINT)) {
+        return failure(
+            PDFSaveWriter::Error::HighlightAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+    for (const FS_QUADPOINTSF &quadPoint : std::as_const(quadPoints)) {
+        if (!FPDFAnnot_AppendAttachmentPoints(
+                annotation.get(),
+                &quadPoint)) {
+            return failure(
+                PDFSaveWriter::Error::HighlightAnnotationCreationFailed,
+                draft.page,
+                draft.objectId);
+        }
+    }
+
+    FS_RECTF annotationRect{};
+    annotationRect.left = static_cast<float>(minimumX);
+    annotationRect.top = static_cast<float>(maximumY);
+    annotationRect.right = static_cast<float>(maximumX);
+    annotationRect.bottom = static_cast<float>(minimumY);
+    if (!FPDFAnnot_SetRect(annotation.get(), &annotationRect)) {
+        return failure(
+            PDFSaveWriter::Error::HighlightAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+    return {};
+}
+
 PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                                       FPDF_DOCUMENT inspectionDocument,
                                       int pageIndex,
@@ -2085,11 +2264,18 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         pageWidth,
         pageHeight);
     RasterizedPaints rasterizedPaints;
+    const bool hasPageObjectDrafts = std::any_of(
+        drafts.cbegin(),
+        drafts.cend(),
+        [](const SaveDraft &draft) {
+            return draft.kind != SaveDraft::Kind::Highlight;
+        });
     const bool modifiesExistingObject = std::any_of(
         drafts.cbegin(),
         drafts.cend(),
         [](const SaveDraft &draft) {
-            return !draft.added;
+            return draft.kind != SaveDraft::Kind::Highlight
+                && !draft.added;
         });
     if (modifiesExistingObject) {
         // PDFium's content generator cannot serialize pattern and shading
@@ -2115,6 +2301,9 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     QVector<PreparedDraft> preparedDrafts;
     preparedDrafts.reserve(drafts.size());
     for (const SaveDraft &draft : drafts) {
+        if (draft.kind == SaveDraft::Kind::Highlight) {
+            continue;
+        }
         PreparedDraft prepared;
         prepared.kind = draft.kind;
         prepared.objectId = draft.objectId;
@@ -2259,13 +2448,30 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         }
     }
 
-    if (!FPDFPage_GenerateContent(page.get())) {
+    if (hasPageObjectDrafts
+        && !FPDFPage_GenerateContent(page.get())) {
         destroyPreparedObjects(preparedDrafts);
         return failure(
             PDFSaveWriter::Error::PageContentGenerationFailed,
             pageIndex);
     }
     destroyPreparedObjects(preparedDrafts);
+
+    for (const SaveDraft &draft : drafts) {
+        if (draft.kind != SaveDraft::Kind::Highlight) {
+            continue;
+        }
+        const PDFSaveWriter::Result highlightResult
+            = createHighlightAnnotation(
+                page.get(),
+                draft,
+                pageWidth,
+                pageHeight,
+                coordinateMapper);
+        if (!highlightResult.succeeded()) {
+            return highlightResult;
+        }
+    }
     return {};
 }
 
@@ -2303,7 +2509,7 @@ struct PDFSaveWriter::Request::Data {
     QString sourceFilePath;
     QString targetFilePath;
     QVector<int> deletedSourcePages;
-    QVector<QSizeF> blankPageSizes;
+    QVector<PDFPageInsertion> pageInsertions;
     QVector<SaveDraft> drafts;
 };
 
@@ -2331,7 +2537,13 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
     std::sort(
         data->deletedSourcePages.begin(),
         data->deletedSourcePages.end());
-    data->blankPageSizes = controller.m_addedBlankPageSizes;
+    data->pageInsertions = controller.m_pageInsertions;
+    std::sort(
+        data->pageInsertions.begin(),
+        data->pageInsertions.end(),
+        [](const PDFPageInsertion &left, const PDFPageInsertion &right) {
+            return left.page < right.page;
+        });
     data->drafts.reserve(controller.m_drafts.size());
     QHash<QString, QByteArray> bundledFaceCache;
     QHash<QString, ApplicationFonts::FontFaceData> systemFaceCache;
@@ -2414,9 +2626,13 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             = PDFEditController::isSourceTextMoveOnly(*draft);
         const bool imageDraft = draft->candidate.kind == QLatin1String("addedImage")
             || draft->candidate.kind == QLatin1String("image");
-        saveDraft.kind = imageDraft
-            ? SaveDraft::Kind::Image
-            : SaveDraft::Kind::Text;
+        const bool highlightDraft
+            = draft->candidate.kind == QLatin1String("highlight");
+        saveDraft.kind = highlightDraft
+            ? SaveDraft::Kind::Highlight
+            : imageDraft
+                ? SaveDraft::Kind::Image
+                : SaveDraft::Kind::Text;
         saveDraft.page = draft->candidate.page;
         saveDraft.objectId = draft->candidate.objectId;
         saveDraft.originalText = draft->candidate.text;
@@ -2427,6 +2643,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
                    : draft->candidate.initialDraftFrameRect)
             : draft->candidate.geometry.sourceRect;
         saveDraft.frameRect = draft->frameRect;
+        saveDraft.highlightRects = draft->candidate.highlightRects;
+        saveDraft.highlightColor = draft->candidate.highlightColor;
         saveDraft.layoutOrigin = PDFEditController::layoutOriginForDraft(*draft);
         saveDraft.hasBaseline = draft->candidate.hasBaseline;
         saveDraft.added = draft->candidate.added;
@@ -2437,6 +2655,10 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
                 && !saveDraft.added
                 && !saveDraft.deleted);
         saveDraft.image = draft->deleted ? QImage() : draft->candidate.image;
+        if (saveDraft.kind == SaveDraft::Kind::Highlight) {
+            data->drafts.append(std::move(saveDraft));
+            continue;
+        }
         if (!draft->candidate.parts.isEmpty()) {
             for (const PDFEditController::CandidatePart &part : draft->candidate.parts) {
                 if (!part.objectPath.isEmpty()) {
@@ -2540,37 +2762,44 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         FPDFPage_Delete(document.get(), *page);
         FPDFPage_Delete(inspectionDocument.get(), *page);
     }
-    const int firstBlankPage = sourcePageCount
+    const int remainingSourcePageCount = sourcePageCount
         - static_cast<int>(request.m_data->deletedSourcePages.size());
-    if (FPDF_GetPageCount(document.get()) != firstBlankPage
-        || FPDF_GetPageCount(inspectionDocument.get()) != firstBlankPage) {
+    if (FPDF_GetPageCount(document.get()) != remainingSourcePageCount
+        || FPDF_GetPageCount(inspectionDocument.get())
+            != remainingSourcePageCount) {
         const int failedPage = request.m_data->deletedSourcePages.isEmpty()
             ? -1
             : request.m_data->deletedSourcePages.constFirst();
         return failure(Error::PageDeletionFailed, failedPage);
     }
-    for (qsizetype offset = 0;
-         offset < request.m_data->blankPageSizes.size();
-         ++offset) {
-        const int pageIndex = firstBlankPage + static_cast<int>(offset);
-        const QSizeF pageSize = request.m_data->blankPageSizes.at(offset);
-        if (pageSize.isEmpty()) {
+    int previousInsertionPage = -1;
+    for (const PDFPageInsertion &insertion
+         : request.m_data->pageInsertions) {
+        const int pageIndex = insertion.page;
+        const int currentPageCount = FPDF_GetPageCount(document.get());
+        if (pageIndex <= previousInsertionPage
+            || pageIndex < 0
+            || pageIndex > currentPageCount
+            || FPDF_GetPageCount(inspectionDocument.get())
+                != currentPageCount
+            || insertion.size.isEmpty()) {
             return failure(Error::PageCreationFailed, pageIndex);
         }
 
         PdfPageHandle page(FPDFPage_New(
             document.get(),
             pageIndex,
-            pageSize.width(),
-            pageSize.height()));
+            insertion.size.width(),
+            insertion.size.height()));
         PdfPageHandle inspectionPage(FPDFPage_New(
             inspectionDocument.get(),
             pageIndex,
-            pageSize.width(),
-            pageSize.height()));
+            insertion.size.width(),
+            insertion.size.height()));
         if (!page.get() || !inspectionPage.get()) {
             return failure(Error::PageCreationFailed, pageIndex);
         }
+        previousInsertionPage = pageIndex;
     }
 
     FontResolver fontResolver(document.get());

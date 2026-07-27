@@ -187,11 +187,13 @@ bool PDFDocument::open(const QUrl &source)
             for (int page = 0; page < pageCount; ++page) {
                 m_displaySourcePages.append(page);
             }
-            m_transientBlankPageSizes.clear();
+            m_pageInsertions.clear();
             m_maximumPageWidth = maximumPageWidth;
             m_maximumPageHeight = maximumPageHeight;
             m_allowsContentEditing = permissions == 0xffffffffUL
                 || (permissions & kModifyContentsPermission) != 0;
+            m_allowsAnnotations = permissions == 0xffffffffUL
+                || (permissions & kModifyAnnotationsPermission) != 0;
             m_allowsPageAssembly = permissions == 0xffffffffUL
                 || (securityRevision >= 3
                         ? (permissions & kAssembleDocumentPermission) != 0
@@ -304,8 +306,9 @@ int PDFDocument::displayPageIndexForSourcePage(int sourcePage) const
 bool PDFDocument::isTransientBlankPage(int page) const
 {
     return m_document
-        && page >= m_displaySourcePages.size()
-        && page < m_pageCount;
+        && page >= 0
+        && page < m_displaySourcePages.size()
+        && m_displaySourcePages.at(page) < 0;
 }
 
 bool PDFDocument::allowsFormFilling() const
@@ -326,13 +329,14 @@ void PDFDocument::closeDocumentLocked()
     m_sourcePageSizes.clear();
     m_pageSizes.clear();
     m_displaySourcePages.clear();
-    m_transientBlankPageSizes.clear();
+    m_pageInsertions.clear();
     m_maximumPageWidth = 0.0;
     m_maximumPageHeight = 0.0;
     m_sourcePageCount = 0;
     m_pageCount = 0;
     m_currentPage = 0;
     m_allowsContentEditing = false;
+    m_allowsAnnotations = false;
     m_allowsPageAssembly = false;
     m_allowsFormFilling = false;
     ++m_revision;
@@ -359,7 +363,8 @@ void PDFDocument::emitDocumentStateChanged()
 
 void PDFDocument::setTransientPageStructure(
     const QSet<int> &deletedSourcePages,
-    const QVector<QSizeF> &blankPageSizes)
+    const QVector<PDFPageInsertion> &pageInsertions,
+    int currentPage)
 {
     if (!m_document) {
         return;
@@ -367,8 +372,8 @@ void PDFDocument::setTransientPageStructure(
 
     QVector<int> displaySourcePages;
     QVector<QSizeF> pageSizes;
-    displaySourcePages.reserve(m_sourcePageCount);
-    pageSizes.reserve(m_sourcePageCount + blankPageSizes.size());
+    displaySourcePages.reserve(m_sourcePageCount + pageInsertions.size());
+    pageSizes.reserve(m_sourcePageCount + pageInsertions.size());
     for (int sourcePage = 0; sourcePage < m_sourcePageCount; ++sourcePage) {
         if (deletedSourcePages.contains(sourcePage)) {
             continue;
@@ -376,27 +381,55 @@ void PDFDocument::setTransientPageStructure(
         displaySourcePages.append(sourcePage);
         pageSizes.append(m_sourcePageSizes.value(sourcePage));
     }
-    pageSizes.append(blankPageSizes);
-    if (m_displaySourcePages == displaySourcePages
-        && m_transientBlankPageSizes == blankPageSizes
-        && m_pageSizes == pageSizes) {
-        return;
+
+    int previousInsertionPage = -1;
+    for (const PDFPageInsertion &insertion : pageInsertions) {
+        const bool insertionValid
+            = insertion.page > previousInsertionPage
+            && insertion.page >= 0
+            && insertion.page <= displaySourcePages.size()
+            && !insertion.size.isEmpty();
+        Q_ASSERT_X(
+            insertionValid,
+            "PDFDocument::setTransientPageStructure",
+            "Page insertions must have sorted, unique, valid display indexes");
+        if (!insertionValid) {
+            return;
+        }
+        displaySourcePages.insert(insertion.page, -1);
+        pageSizes.insert(insertion.page, insertion.size);
+        previousInsertionPage = insertion.page;
     }
 
+    const int nextCurrentPage = pageSizes.isEmpty()
+        ? 0
+        : qBound(
+            0,
+            currentPage >= 0 ? currentPage : m_currentPage,
+            static_cast<int>(pageSizes.size()) - 1);
+    const bool structureChanged
+        = m_displaySourcePages != displaySourcePages
+        || m_pageInsertions != pageInsertions
+        || m_pageSizes != pageSizes;
+    if (!structureChanged) {
+        if (m_currentPage == nextCurrentPage) {
+            return;
+        }
+        m_currentPage = nextCurrentPage;
+        emit currentPageChanged();
+        emit currentPageSizeChanged();
+        return;
+    }
     const int previousCurrentPage = m_currentPage;
     const int previousCurrentSourcePage
         = sourcePageIndex(previousCurrentPage);
     const bool previousCurrentPageWasTransient
         = isTransientBlankPage(previousCurrentPage);
     m_displaySourcePages = std::move(displaySourcePages);
-    m_transientBlankPageSizes = blankPageSizes;
+    m_pageInsertions = pageInsertions;
     m_pageSizes = std::move(pageSizes);
     m_pageCount = static_cast<int>(m_pageSizes.size());
-    if (m_pageCount > 0) {
-        m_currentPage = qBound(0, m_currentPage, m_pageCount - 1);
-    } else {
-        m_currentPage = 0;
-    }
+    m_currentPage = nextCurrentPage;
     updatePageMetrics();
 
     emit pageCountChanged();

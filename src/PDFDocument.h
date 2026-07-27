@@ -13,6 +13,17 @@
 
 class PDFEditController;
 
+struct PDFPageInsertion
+{
+    int page = -1;
+    QSizeF size;
+
+    bool operator==(const PDFPageInsertion &other) const
+    {
+        return page == other.page && size == other.size;
+    }
+};
+
 class PDFDocument : public QObject
 {
     Q_OBJECT
@@ -72,7 +83,8 @@ private:
     void setStatusText(const QString &statusText);
     void emitDocumentStateChanged();
     void setTransientPageStructure(const QSet<int> &deletedSourcePages,
-                                   const QVector<QSizeF> &blankPageSizes);
+                                   const QVector<PDFPageInsertion> &pageInsertions,
+                                   int currentPage = -1);
     void updatePageMetrics();
 
     FPDF_DOCUMENT m_document = nullptr;
@@ -81,7 +93,7 @@ private:
     QVector<QSizeF> m_sourcePageSizes;
     QVector<QSizeF> m_pageSizes;
     QVector<int> m_displaySourcePages;
-    QVector<QSizeF> m_transientBlankPageSizes;
+    QVector<PDFPageInsertion> m_pageInsertions;
     qreal m_maximumPageWidth = 0.0;
     qreal m_maximumPageHeight = 0.0;
     int m_sourcePageCount = 0;
@@ -89,6 +101,7 @@ private:
     int m_currentPage = 0;
     int m_revision = 0;
     bool m_allowsContentEditing = false;
+    bool m_allowsAnnotations = false;
     bool m_allowsPageAssembly = false;
     bool m_allowsFormFilling = false;
     QString m_statusText;

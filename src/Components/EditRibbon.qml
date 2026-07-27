@@ -148,8 +148,14 @@ Flickable {
                 documentLoaded: root.document.loaded
                 //% "Highlight"
                 text: qsTrId("Highlight")
-                iconSource: "../assets/icons/highlighter.svg"
-                onClicked: root.toolRequested(text)
+                iconSource: "../assets/icons/highlight.svg"
+                preserveIconColors: true
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.HighlightTool
+                onClicked: root.editController.tool
+                    = PDFEditController.HighlightTool
             }
 
             RibbonButton {

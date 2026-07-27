@@ -82,7 +82,8 @@ public:
         SelectTool,
         EditTextTool,
         AddTextTool,
-        AddImageTool
+        AddImageTool,
+        HighlightTool
     };
     Q_ENUM(Tool)
 
@@ -160,6 +161,8 @@ public:
                                      qreal x,
                                      qreal y,
                                      const QUrl &source);
+    Q_INVOKABLE QVariantMap addHighlight(int page,
+                                         const QRectF &selectionRect);
     Q_INVOKABLE int addBlankPage();
     Q_INVOKABLE int deleteCurrentPage();
     Q_INVOKABLE QFont fontForDisplay(const QString &fontFamily,
@@ -288,6 +291,8 @@ private:
         bool added = false;
         quint64 addedOrder = 0;
         QImage image;
+        QVector<QRectF> highlightRects;
+        QColor highlightColor;
         QString reason;
         int pendingFontSnapshotIndex = -1;
         QString pendingFontExpectedFamily;
@@ -369,7 +374,7 @@ private:
 
     struct PageState {
         QSet<int> deletedSourcePages;
-        QVector<QSizeF> addedBlankPageSizes;
+        QVector<PDFPageInsertion> pageInsertions;
         QVector<Candidate> addedCandidates;
         QHash<QString, Draft> drafts;
         int currentPage = 0;
@@ -466,6 +471,7 @@ private:
     QVariantList paragraphFormatMaps(const QVector<ParagraphFormat> &formats) const;
     QVariantMap candidateMap(const Draft &draft) const;
     bool documentAllowsEditing() const;
+    bool documentAllowsAnnotations() const;
     bool documentAllowsPageAssembly() const;
     QString draftKey(int page, const QString &objectId) const;
     void markDraftStateChanged(int page, bool immediate);
@@ -550,7 +556,7 @@ private:
     bool m_candidateScanInFlight = false;
     std::shared_ptr<std::atomic_bool> m_candidateScanCancellation;
     QVector<Candidate> m_addedCandidates;
-    QVector<QSizeF> m_addedBlankPageSizes;
+    QVector<PDFPageInsertion> m_pageInsertions;
     QSet<int> m_deletedSourcePages;
     QHash<QString, Draft> m_drafts;
     QHash<int, quint64> m_pageDraftRevisions;
