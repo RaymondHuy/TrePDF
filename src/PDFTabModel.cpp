@@ -9,10 +9,14 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
     , m_document(new PDFDocument(this))
     , m_editController(new PDFEditController(this))
     , m_formController(new PDFFormController(this))
+    , m_formDesignerController(new PDFFormDesignerController(this))
 {
+    m_formDesignerController->setDocument(m_document);
     m_formController->setDocument(m_document);
+    m_formDesignerController->setFormController(m_formController);
     m_editController->setDocument(m_document);
     m_editController->setFormController(m_formController);
+    m_editController->setFormDesignerController(m_formDesignerController);
 
     connect(m_document,
             &PDFDocument::sourceChanged,
@@ -71,6 +75,11 @@ PDFEditController *PDFDocumentSession::editController() const
 PDFFormController *PDFDocumentSession::formController() const
 {
     return m_formController;
+}
+
+PDFFormDesignerController *PDFDocumentSession::formDesignerController() const
+{
+    return m_formDesignerController;
 }
 
 QString PDFDocumentSession::title() const
@@ -212,6 +221,8 @@ void PDFDocumentSession::prepareForDeactivation()
 {
     m_editController->finishSelectedFrameResize();
     m_editController->finishSelectedTextEdit();
+    m_formDesignerController->clearTextFieldFocus();
+    m_formDesignerController->clearTextFieldSelection();
     m_formController->killFocus();
 }
 

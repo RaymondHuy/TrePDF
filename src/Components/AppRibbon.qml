@@ -11,6 +11,13 @@ Column {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    property bool textFieldToolSelected: false
+    readonly property bool viewTabActive: ribbonTabs.currentIndex === 0
+    readonly property bool editTabActive: ribbonTabs.currentIndex === 1
+    readonly property bool formsTabActive: ribbonTabs.currentIndex === 2
+    readonly property bool textFieldToolActive: formsTabActive
+        && textFieldToolSelected
+        && document.loaded
 
     signal openRequested()
     signal saveRequested()
@@ -26,6 +33,9 @@ Column {
     spacing: 0
 
     function syncEditTool() {
+        if (!document.loaded || ribbonTabs.currentIndex !== 2)
+            textFieldToolSelected = false
+
         if (!document.loaded || ribbonTabs.currentIndex !== 1) {
             editController.tool = PDFEditController.BrowseTool
         } else if (editController.tool === PDFEditController.BrowseTool) {
@@ -34,8 +44,14 @@ Column {
     }
 
     Component.onCompleted: syncEditTool()
-    onDocumentChanged: syncEditTool()
-    onEditControllerChanged: syncEditTool()
+    onDocumentChanged: {
+        textFieldToolSelected = false
+        syncEditTool()
+    }
+    onEditControllerChanged: {
+        textFieldToolSelected = false
+        syncEditTool()
+    }
 
     Connections {
         target: root.document
@@ -78,6 +94,19 @@ Column {
     }
 
     Component {
+        id: formRibbonComponent
+
+        FormRibbon {
+            theme: root.theme
+            document: root.document
+            textFieldToolSelected: root.textFieldToolSelected
+            onTextFieldToolRequested: {
+                root.textFieldToolSelected = !root.textFieldToolSelected
+            }
+        }
+    }
+
+    Component {
         id: signRibbonComponent
 
         SignRibbon {
@@ -109,7 +138,7 @@ Column {
             TabBar {
                 id: ribbonTabs
 
-                Layout.preferredWidth: 312
+                Layout.preferredWidth: 416
                 Layout.fillHeight: true
                 spacing: 0
                 background: Item {}
@@ -125,6 +154,12 @@ Column {
                     theme: root.theme
                     //% "Edit"
                     text: qsTrId("Edit")
+                }
+
+                RibbonTabButton {
+                    theme: root.theme
+                    //% "Forms"
+                    text: qsTrId("Forms")
                 }
 
                 RibbonTabButton {
@@ -193,7 +228,9 @@ Column {
                 ? viewRibbonComponent
                 : ribbonTabs.currentIndex === 1
                     ? editRibbonComponent
-                    : signRibbonComponent
+                    : ribbonTabs.currentIndex === 2
+                        ? formRibbonComponent
+                        : signRibbonComponent
         }
     }
 }

@@ -428,6 +428,60 @@ void PDFFormController::requestChoiceFields(
         });
 }
 
+void PDFFormController::requestTrePDFTextFields(
+    const TrePDFTextFieldsCompletion &completion)
+{
+    if (!completion) {
+        return;
+    }
+    const quint64 requestSerial = ++m_trePDFTextFieldsRequestSerial;
+    QPointer<PDFFormController> controller(this);
+    QMetaObject::invokeMethod(
+        this,
+        [controller, requestSerial, completion]() {
+            if (!controller
+                || controller->m_trePDFTextFieldsRequestSerial
+                    != requestSerial
+                || !controller->m_document
+                || !controller->m_document->isLoaded()) {
+                completion(false, {});
+                return;
+            }
+
+            const PDFFormWorker::DocumentKey key
+                = controller->documentKey();
+            if (!key.isValid()) {
+                completion(false, {});
+                return;
+            }
+            const quint64 generation = controller->m_generation;
+            PDFFormWorker::inspectTrePDFTextFields(
+                key,
+                [controller,
+                 key,
+                 generation,
+                 requestSerial,
+                 completion](
+                    PDFFormWorker::TrePDFTextFieldsResult result) {
+                    if (!controller
+                        || controller->m_trePDFTextFieldsRequestSerial
+                            != requestSerial
+                        || controller->m_generation != generation
+                        || !sameDocumentKey(
+                            controller->documentKey(),
+                            key)
+                        || !controller->m_document
+                        || !controller->m_document->isLoaded()
+                        || !result.succeeded) {
+                        completion(false, {});
+                        return;
+                    }
+                    completion(true, std::move(result.fields));
+                });
+        },
+        Qt::QueuedConnection);
+}
+
 void PDFFormController::selectChoiceOption(
     int page,
     int annotationIndex,
@@ -565,12 +619,14 @@ void PDFFormController::refreshDocumentState()
     m_ignoreNextCurrentPageChange = false;
     PDFFormWorker::resetSession(m_sessionId);
 
+    const PDFFormWorker::DocumentKey key = documentKey();
     const bool interactive = m_document
         && m_document->isLoaded()
         && m_document->allowsFormFilling();
     const bool didInteractiveChange = m_interactive != interactive;
     const bool didJavaScriptChange = m_javascriptEnabled;
-    const bool didJavaScriptPendingChange = m_javascriptTransitionPending;
+    const bool didJavaScriptPendingChange
+        = m_javascriptTransitionPending != key.isValid();
     const bool historyChanged = hasDrafts() || m_canUndo || m_canRedo;
     const bool inputChanged = m_hasFocus
         || m_acceptsTextInput
@@ -590,7 +646,7 @@ void PDFFormController::refreshDocumentState()
     m_cursorType = FXCT_ARROW;
     m_pendingMutationCount = 0;
     m_javascriptEnabled = false;
-    m_javascriptTransitionPending = false;
+    m_javascriptTransitionPending = key.isValid();
     invalidateFormPages(-1);
     if (didInteractiveChange) {
         emit interactiveChanged();
@@ -608,7 +664,6 @@ void PDFFormController::refreshDocumentState()
         emit javascriptTransitionPendingChanged();
     }
 
-    const PDFFormWorker::DocumentKey key = documentKey();
     const quint64 generation = m_generation;
     if (key.isValid()) {
         // PDFDocument emits sourceChanged and loadedChanged in one state

@@ -12,6 +12,12 @@ Rectangle {
     required property PDFDocument document
     required property PDFEditController editController
     required property PDFFormController formController
+    required property PDFFormDesignerController formDesignerController
+    property bool formsTabActive: false
+    property bool editTabActive: false
+    property bool formFieldsVisible: false
+    property bool formFieldsInteractive: false
+    property bool textFieldToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
     property string transientStatus
@@ -162,6 +168,12 @@ Rectangle {
             document: root.document
             editController: root.editController
             formController: root.formController
+            formDesignerController: root.formDesignerController
+            formsTabActive: root.formsTabActive
+            editTabActive: root.editTabActive
+            formFieldsVisible: root.formFieldsVisible
+            formFieldsInteractive: root.formFieldsInteractive
+            textFieldToolActive: root.textFieldToolActive
             zoom: root.zoom
             viewRotation: root.viewRotation
             sessionChangeGeneration: root.sessionChangeGeneration

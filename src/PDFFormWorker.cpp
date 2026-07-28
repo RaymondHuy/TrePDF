@@ -16,8 +16,10 @@
 #include <QSemaphore>
 #include <QSet>
 #include <QThreadPool>
+#include <QUuid>
 #include <QVector>
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -110,6 +112,26 @@ public:
         return true;
     }
 
+    bool submitBackgroundCommand(quint64 sessionId,
+                                 std::function<void()> work)
+    {
+        bool startWorker = false;
+        {
+            QMutexLocker locker(&m_mutex);
+            if (m_destroyedSessions.contains(sessionId)) {
+                return false;
+            }
+            m_backgroundCommands.enqueue(PendingCommand{
+                sessionId,
+                false,
+                -1,
+                std::move(work)});
+            startWorker = activateWorkerLocked();
+        }
+        startWorkerIfNeeded(startWorker);
+        return true;
+    }
+
     void resetSession(quint64 sessionId, std::function<void()> work)
     {
         bool startWorker = false;
@@ -194,21 +216,37 @@ private:
             std::function<void()> work;
             {
                 QMutexLocker locker(&m_mutex);
-                // Input is intentionally prioritized over queued page renders.
-                // A render already in progress still completes normally and is
-                // rejected by the GUI if its form revision became stale.
+                // Input/reset commands stay responsive. Page renders and
+                // background discovery then alternate so a long document scan
+                // cannot leave the viewport waiting for every page to finish.
+                // A render already in progress still completes normally and
+                // is rejected by the GUI if its form revision became stale.
                 if (!m_commands.isEmpty()) {
                     work = std::move(m_commands.dequeue().work);
                 } else {
-                    while (!m_renderOrder.isEmpty()) {
-                        const void *owner = m_renderOrder.dequeue();
-                        auto pending = m_pendingRenders.find(owner);
-                        if (pending == m_pendingRenders.end()) {
-                            continue;
+                    if (m_preferBackgroundCommand
+                        && !m_backgroundCommands.isEmpty()) {
+                        work = std::move(
+                            m_backgroundCommands.dequeue().work);
+                        m_preferBackgroundCommand = false;
+                    } else {
+                        while (!m_renderOrder.isEmpty()) {
+                            const void *owner = m_renderOrder.dequeue();
+                            auto pending = m_pendingRenders.find(owner);
+                            if (pending == m_pendingRenders.end()) {
+                                continue;
+                            }
+                            work = std::move(pending->work);
+                            m_pendingRenders.erase(pending);
+                            m_preferBackgroundCommand = true;
+                            break;
                         }
-                        work = std::move(pending->work);
-                        m_pendingRenders.erase(pending);
-                        break;
+                        if (!work
+                            && !m_backgroundCommands.isEmpty()) {
+                            work = std::move(
+                                m_backgroundCommands.dequeue().work);
+                            m_preferBackgroundCommand = false;
+                        }
                     }
                 }
 
@@ -241,13 +279,26 @@ private:
             }
         }
         m_commands.swap(retainedCommands);
+
+        QQueue<PendingCommand> retainedBackgroundCommands;
+        while (!m_backgroundCommands.isEmpty()) {
+            PendingCommand command = std::move(
+                m_backgroundCommands.dequeue());
+            if (command.sessionId != sessionId) {
+                retainedBackgroundCommands.enqueue(
+                    std::move(command));
+            }
+        }
+        m_backgroundCommands.swap(retainedBackgroundCommands);
     }
 
     QMutex m_mutex;
     QHash<const void *, PendingRender> m_pendingRenders;
     QQueue<const void *> m_renderOrder;
     QQueue<PendingCommand> m_commands;
+    QQueue<PendingCommand> m_backgroundCommands;
     QSet<quint64> m_destroyedSessions;
+    bool m_preferBackgroundCommand = false;
     bool m_workerActive = false;
 };
 
@@ -275,6 +326,64 @@ void postResult(Result result, const Callback &callback)
         Qt::QueuedConnection);
 }
 
+struct TrePDFTextFieldsScanState {
+    PDFFormWorker::DocumentKey key;
+    PDFFormWorker::TrePDFTextFieldsCallback callback;
+    PDFFormWorker::TrePDFTextFieldsResult result;
+    QSet<QString> fieldIds;
+    QMutex resultMutex;
+    std::atomic_bool finished = false;
+    int pageCount = -1;
+    int nextSourcePage = 0;
+};
+
+using TrePDFTextFieldsScan
+    = std::shared_ptr<TrePDFTextFieldsScanState>;
+
+QMutex &trePDFTextFieldsScanRegistryMutex()
+{
+    static QMutex mutex;
+    return mutex;
+}
+
+QHash<quint64, TrePDFTextFieldsScan> &trePDFTextFieldsScanRegistry()
+{
+    static QHash<quint64, TrePDFTextFieldsScan> registry;
+    return registry;
+}
+
+void finishTrePDFTextFieldsScan(
+    const TrePDFTextFieldsScan &scan,
+    bool succeeded)
+{
+    if (!scan
+        || scan->finished.exchange(
+            true,
+            std::memory_order_acq_rel)) {
+        return;
+    }
+
+    PDFFormWorker::TrePDFTextFieldsResult result;
+    {
+        QMutexLocker resultLocker(&scan->resultMutex);
+        if (succeeded) {
+            scan->result.succeeded = true;
+            result = std::move(scan->result);
+        }
+    }
+    {
+        QMutexLocker registryLocker(
+            &trePDFTextFieldsScanRegistryMutex());
+        auto &registry = trePDFTextFieldsScanRegistry();
+        const auto active = registry.constFind(scan->key.sessionId);
+        if (active != registry.cend()
+            && active.value() == scan) {
+            registry.remove(scan->key.sessionId);
+        }
+    }
+    postResult(std::move(result), scan->callback);
+}
+
 template<typename Getter>
 QString formWideString(const Getter &getter)
 {
@@ -292,6 +401,108 @@ QString formWideString(const Getter &getter)
     return QString::fromUtf16(
         reinterpret_cast<const char16_t *>(buffer.constData()),
         buffer.size() - 1);
+}
+
+bool isTrePDFTextFieldId(const QString &id)
+{
+    static const QString prefix = QStringLiteral("text-field-");
+    constexpr qsizetype uuidLength = 36;
+    if (!id.startsWith(prefix)) {
+        return false;
+    }
+
+    const QString suffix = id.sliced(prefix.size());
+    if (suffix.size() == uuidLength) {
+        const QUuid uuid = QUuid::fromString(suffix);
+        if (!uuid.isNull()
+            && uuid.toString(QUuid::WithoutBraces).compare(
+                   suffix,
+                   Qt::CaseInsensitive)
+                == 0) {
+            return true;
+        }
+    }
+
+    // Early TrePDF form drafts used a positive sequence number as /NM.
+    // Accept that exact legacy shape, but do not treat arbitrary annotations
+    // sharing the text-field prefix as designer-owned widgets.
+    if (suffix.isEmpty()
+        || suffix.size() > 20
+        || suffix.front() == QLatin1Char('0')) {
+        return false;
+    }
+    for (const QChar character : suffix) {
+        if (!character.isDigit()) {
+            return false;
+        }
+    }
+    bool converted = false;
+    const qulonglong sequence = suffix.toULongLong(&converted);
+    return converted && sequence > 0;
+}
+
+std::optional<QRectF> normalizedAnnotationRect(
+    FPDF_PAGE page,
+    FPDF_ANNOTATION annotation)
+{
+    constexpr int normalizedDeviceExtent = 1000000;
+    FS_RECTF rect = {};
+    if (!page
+        || !annotation
+        || !FPDFAnnot_GetRect(annotation, &rect)) {
+        return std::nullopt;
+    }
+
+    const double pageXs[4] = {
+        rect.left,
+        rect.left,
+        rect.right,
+        rect.right,
+    };
+    const double pageYs[4] = {
+        rect.bottom,
+        rect.top,
+        rect.bottom,
+        rect.top,
+    };
+    int minimumX = normalizedDeviceExtent;
+    int minimumY = normalizedDeviceExtent;
+    int maximumX = 0;
+    int maximumY = 0;
+    for (int corner = 0; corner < 4; ++corner) {
+        int deviceX = 0;
+        int deviceY = 0;
+        if (!FPDF_PageToDevice(
+                page,
+                0,
+                0,
+                normalizedDeviceExtent,
+                normalizedDeviceExtent,
+                0,
+                pageXs[corner],
+                pageYs[corner],
+                &deviceX,
+                &deviceY)) {
+            return std::nullopt;
+        }
+        minimumX = qMin(minimumX, deviceX);
+        minimumY = qMin(minimumY, deviceY);
+        maximumX = qMax(maximumX, deviceX);
+        maximumY = qMax(maximumY, deviceY);
+    }
+
+    QRectF normalizedRect(
+        static_cast<qreal>(minimumX) / normalizedDeviceExtent,
+        static_cast<qreal>(minimumY) / normalizedDeviceExtent,
+        static_cast<qreal>(maximumX - minimumX)
+            / normalizedDeviceExtent,
+        static_cast<qreal>(maximumY - minimumY)
+            / normalizedDeviceExtent);
+    normalizedRect = normalizedRect.intersected(
+        QRectF(0.0, 0.0, 1.0, 1.0));
+    return normalizedRect.isEmpty()
+        ? std::nullopt
+        : std::optional<QRectF>(normalizedRect);
 }
 
 QString choiceFieldIdentityToken(
@@ -1197,6 +1408,166 @@ public:
         }
         result.succeeded = true;
         return result;
+    }
+
+    std::optional<int> beginTrePDFTextFieldsScanLocked(
+        const PDFFormWorker::DocumentKey &key)
+    {
+        assertPDFiumProcessLockHeld();
+        if (!documentLocked(key) || !m_formHandle) {
+            return std::nullopt;
+        }
+        if (FPDF_GetFormType(m_document) == FORMTYPE_NONE) {
+            return 0;
+        }
+        return FPDF_GetPageCount(m_document);
+    }
+
+    bool trePDFTextFieldsPageLocked(
+        const PDFFormWorker::DocumentKey &key,
+        int sourcePage,
+        QVector<PDFFormWorker::TrePDFTextField> &fields)
+    {
+        assertPDFiumProcessLockHeld();
+        fields.clear();
+        if (!m_document
+            || !m_formHandle
+            || m_filePath != key.filePath
+            || m_revision != key.revision
+            || sourcePage < 0
+            || sourcePage >= FPDF_GetPageCount(m_document)) {
+            return false;
+        }
+
+        FPDF_PAGE formPage = nullptr;
+        bool temporaryPage = false;
+        if (m_activePage && m_activeSourcePage == sourcePage) {
+            formPage = m_activePage;
+        } else {
+            const auto scriptPage = m_javaScriptPages.constFind(
+                sourcePage);
+            if (scriptPage != m_javaScriptPages.cend()) {
+                formPage = scriptPage.value();
+            } else {
+                formPage = FPDF_LoadPage(m_document, sourcePage);
+                if (!formPage) {
+                    return false;
+                }
+                FORM_OnAfterLoadPage(formPage, m_formHandle);
+                temporaryPage = true;
+            }
+        }
+
+        const int annotationCount = FPDFPage_GetAnnotCount(formPage);
+        for (int annotationIndex = 0;
+             annotationIndex < annotationCount;
+             ++annotationIndex) {
+            FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+                formPage,
+                annotationIndex);
+            if (!annotation) {
+                continue;
+            }
+
+            const bool textWidget
+                = FPDFAnnot_GetSubtype(annotation)
+                      == FPDF_ANNOT_WIDGET
+                && FPDFAnnot_GetFormFieldType(
+                       m_formHandle,
+                       annotation)
+                    == FPDF_FORMFIELD_TEXTFIELD;
+            if (!textWidget) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+
+            const QString id = formWideString(
+                [annotation](FPDF_WCHAR *buffer,
+                             unsigned long byteCount) {
+                    return FPDFAnnot_GetStringValue(
+                        annotation,
+                        "NM",
+                        buffer,
+                        byteCount);
+                });
+            if (!isTrePDFTextFieldId(id)) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+
+            const std::optional<QRectF> normalizedRect
+                = normalizedAnnotationRect(formPage, annotation);
+            if (!normalizedRect) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+
+            PDFFormWorker::TrePDFTextField field;
+            field.id = id;
+            field.name = formWideString(
+                [this,
+                 annotation](FPDF_WCHAR *buffer,
+                              unsigned long byteCount) {
+                    return FPDFAnnot_GetFormFieldName(
+                        m_formHandle,
+                        annotation,
+                        buffer,
+                        byteCount);
+                });
+            if (field.name.isEmpty()) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+            field.tooltip = formWideString(
+                [this,
+                 annotation](FPDF_WCHAR *buffer,
+                              unsigned long byteCount) {
+                    return FPDFAnnot_GetFormFieldAlternateName(
+                        m_formHandle,
+                        annotation,
+                        buffer,
+                        byteCount);
+                });
+            field.value = formWideString(
+                [this,
+                 annotation](FPDF_WCHAR *buffer,
+                              unsigned long byteCount) {
+                    return FPDFAnnot_GetFormFieldValue(
+                        m_formHandle,
+                        annotation,
+                        buffer,
+                        byteCount);
+                });
+            field.defaultValue = formWideString(
+                [annotation](FPDF_WCHAR *buffer,
+                             unsigned long byteCount) {
+                    return FPDFAnnot_GetStringValue(
+                        annotation,
+                        "DV",
+                        buffer,
+                        byteCount);
+                });
+            const int fieldFlags = FPDFAnnot_GetFormFieldFlags(
+                m_formHandle,
+                annotation);
+            const int annotationFlags = FPDFAnnot_GetFlags(annotation);
+            field.flags = fieldFlags
+                & (FPDF_FORMFLAG_READONLY
+                   | FPDF_FORMFLAG_REQUIRED);
+            if (annotationFlags & FPDF_ANNOT_FLAG_READONLY) {
+                field.flags |= FPDF_FORMFLAG_READONLY;
+            }
+            field.sourcePage = sourcePage;
+            field.normalizedRect = *normalizedRect;
+            fields.append(std::move(field));
+            FPDFPage_CloseAnnot(annotation);
+        }
+
+        if (temporaryPage) {
+            FORM_OnBeforeClosePage(formPage, m_formHandle);
+            FPDF_ClosePage(formPage);
+        }
+        return true;
     }
 
     PDFFormWorker::InteractionResult focusChoiceFieldLocked(
@@ -2246,6 +2617,120 @@ PDFiumFormDocument &formDocumentForSession(quint64 sessionId)
     return *found->second;
 }
 
+void submitTrePDFTextFieldsScanPage(
+    const TrePDFTextFieldsScan &scan);
+
+void runTrePDFTextFieldsScanPage(
+    const TrePDFTextFieldsScan &scan)
+{
+    if (!scan
+        || scan->finished.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    QVector<PDFFormWorker::TrePDFTextField> pageFields;
+    bool pageSucceeded = true;
+    bool scanComplete = false;
+    {
+        PDFiumProcessLock pdfiumLock;
+        if (scan->finished.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        PDFiumFormDocument &document = formDocumentForSession(
+            scan->key.sessionId);
+        if (scan->pageCount < 0) {
+            const std::optional<int> pageCount
+                = document.beginTrePDFTextFieldsScanLocked(scan->key);
+            if (!pageCount) {
+                pageSucceeded = false;
+            } else {
+                scan->pageCount = *pageCount;
+            }
+        }
+
+        if (pageSucceeded) {
+            scanComplete
+                = scan->nextSourcePage >= scan->pageCount;
+            if (!scanComplete) {
+                pageSucceeded = document.trePDFTextFieldsPageLocked(
+                    scan->key,
+                    scan->nextSourcePage,
+                    pageFields);
+            }
+        }
+    }
+
+    if (scan->finished.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (!pageSucceeded) {
+        finishTrePDFTextFieldsScan(scan, false);
+        return;
+    }
+    if (scanComplete) {
+        finishTrePDFTextFieldsScan(scan, true);
+        return;
+    }
+
+    bool duplicateFieldId = false;
+    bool allPagesScanned = false;
+    {
+        QMutexLocker resultLocker(&scan->resultMutex);
+        if (scan->finished.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        QSet<QString> pageFieldIds;
+        for (const PDFFormWorker::TrePDFTextField &field
+             : std::as_const(pageFields)) {
+            if (pageFieldIds.contains(field.id)
+                || scan->fieldIds.contains(field.id)) {
+                duplicateFieldId = true;
+                break;
+            }
+            pageFieldIds.insert(field.id);
+        }
+        if (!duplicateFieldId) {
+            scan->fieldIds.unite(pageFieldIds);
+            scan->result.fields += std::move(pageFields);
+            ++scan->nextSourcePage;
+            allPagesScanned
+                = scan->nextSourcePage >= scan->pageCount;
+        }
+    }
+
+    if (duplicateFieldId) {
+        finishTrePDFTextFieldsScan(scan, false);
+    } else if (allPagesScanned) {
+        finishTrePDFTextFieldsScan(scan, true);
+    } else {
+        // Requeue on the background lane so pointer/key/reset commands can run
+        // immediately and page renders alternate with discovery pages. A
+        // request replacement or session reset marks this scan finished before
+        // purging; even the narrow enqueue-after-purge race therefore produces
+        // only a no-op continuation.
+        submitTrePDFTextFieldsScanPage(scan);
+    }
+}
+
+void submitTrePDFTextFieldsScanPage(
+    const TrePDFTextFieldsScan &scan)
+{
+    if (!scan
+        || scan->finished.load(std::memory_order_acquire)) {
+        return;
+    }
+    const bool submitted = workQueue().submitBackgroundCommand(
+        scan->key.sessionId,
+        [scan]() {
+            runTrePDFTextFieldsScanPage(scan);
+        });
+    if (!submitted) {
+        finishTrePDFTextFieldsScan(scan, false);
+    }
+}
+
 } // namespace
 
 namespace PDFFormWorker {
@@ -2426,6 +2911,25 @@ void inspectChoiceFields(const DocumentKey &key,
         });
 }
 
+void inspectTrePDFTextFields(
+    const DocumentKey &key,
+    const TrePDFTextFieldsCallback &callback)
+{
+    auto scan = std::make_shared<TrePDFTextFieldsScanState>();
+    scan->key = key;
+    scan->callback = callback;
+
+    TrePDFTextFieldsScan replacedScan;
+    {
+        QMutexLocker locker(&trePDFTextFieldsScanRegistryMutex());
+        auto &registry = trePDFTextFieldsScanRegistry();
+        replacedScan = registry.value(key.sessionId);
+        registry.insert(key.sessionId, scan);
+    }
+    finishTrePDFTextFieldsScan(replacedScan, false);
+    submitTrePDFTextFieldsScanPage(scan);
+}
+
 void submitChoiceSelection(const DocumentKey &key,
                            int page,
                            int sourcePage,
@@ -2497,24 +3001,42 @@ void submitChoiceFocus(const DocumentKey &key,
 
 void resetSession(quint64 sessionId, const InteractionCallback &callback)
 {
-    workQueue().resetSession(sessionId, [sessionId, callback]() {
-        {
-            PDFiumProcessLock pdfiumLock;
-            formRegistry().erase(sessionId);
-        }
-        InteractionResult result;
-        result.invalidated = true;
-        result.page = -1;
-        postResult(std::move(result), callback);
-    });
+    TrePDFTextFieldsScan cancelledScan;
+    {
+        // Keep scan replacement and queue purging in one critical section.
+        // Otherwise a request from another caller could be registered after
+        // cancellation but immediately before resetSession() purges its first
+        // command, leaving that request without a completion callback.
+        QMutexLocker locker(&trePDFTextFieldsScanRegistryMutex());
+        auto &registry = trePDFTextFieldsScanRegistry();
+        cancelledScan = registry.take(sessionId);
+        workQueue().resetSession(sessionId, [sessionId, callback]() {
+            {
+                PDFiumProcessLock pdfiumLock;
+                formRegistry().erase(sessionId);
+            }
+            InteractionResult result;
+            result.invalidated = true;
+            result.page = -1;
+            postResult(std::move(result), callback);
+        });
+    }
+    finishTrePDFTextFieldsScan(cancelledScan, false);
 }
 
 void destroySession(quint64 sessionId)
 {
-    workQueue().destroySession(sessionId, [sessionId]() {
-        PDFiumProcessLock pdfiumLock;
-        formRegistry().erase(sessionId);
-    });
+    TrePDFTextFieldsScan cancelledScan;
+    {
+        QMutexLocker locker(&trePDFTextFieldsScanRegistryMutex());
+        auto &registry = trePDFTextFieldsScanRegistry();
+        cancelledScan = registry.take(sessionId);
+        workQueue().destroySession(sessionId, [sessionId]() {
+            PDFiumProcessLock pdfiumLock;
+            formRegistry().erase(sessionId);
+        });
+    }
+    finishTrePDFTextFieldsScan(cancelledScan, false);
 }
 
 void exportSnapshot(const DocumentKey &key,

@@ -56,12 +56,20 @@ qt_add_qml_module(trepdf
         src/ApplicationFonts.h
         src/DraftImageItem.cpp
         src/DraftImageItem.h
+        src/FormFieldLayer.cpp
+        src/FormFieldLayer.h
+        src/PDFAcroFormCanonicalizer.cpp
+        src/PDFAcroFormCanonicalizer.h
+        src/PDFAcroFormWriter.cpp
+        src/PDFAcroFormWriter.h
         src/PDFDocument.cpp
         src/PDFDocument.h
         src/PDFEditController.cpp
         src/PDFEditController.h
         src/PDFFormController.cpp
         src/PDFFormController.h
+        src/PDFFormDesignerController.cpp
+        src/PDFFormDesignerController.h
         src/PDFFormView.cpp
         src/PDFFormView.h
         src/PDFFormWorker.cpp
@@ -83,6 +91,8 @@ qt_add_qml_module(trepdf
         src/Components/EditOverlay.qml
         src/Components/EditRibbon.qml
         src/Components/FormChoiceOverlay.qml
+        src/Components/FormRibbon.qml
+        src/Components/FormTextFieldOverlay.qml
         src/Components/OrangeButton.qml
         src/Components/PdfPageDelegate.qml
         src/Components/RibbonButton.qml
@@ -133,6 +143,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/square-check-big.svg
         src/assets/icons/strikethrough.svg
         src/assets/icons/triangle.svg
+        src/assets/icons/text-input.svg
         src/assets/icons/type.svg
         src/assets/icons/underline.svg
         src/assets/icons/underline-text.svg

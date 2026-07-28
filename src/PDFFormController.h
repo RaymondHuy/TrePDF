@@ -41,6 +41,9 @@ public:
         = std::function<void(bool, const QString &, const QString &)>;
     using ChoiceFieldsCompletion
         = std::function<void(QVector<PDFFormWorker::ChoiceField>)>;
+    using TrePDFTextFieldsCompletion = std::function<void(
+        bool,
+        QVector<PDFFormWorker::TrePDFTextField>)>;
     using ChoiceFocusCompletion = std::function<void(bool)>;
 
     explicit PDFFormController(QObject *parent = nullptr);
@@ -84,6 +87,8 @@ public:
     bool exportSnapshotBlocking(QString &filePath, QString &error);
     void requestChoiceFields(int page,
                              const ChoiceFieldsCompletion &completion);
+    void requestTrePDFTextFields(
+        const TrePDFTextFieldsCompletion &completion);
     void selectChoiceOption(int page,
                             int annotationIndex,
                             int optionIndex,
@@ -164,6 +169,7 @@ private:
     int m_pendingMutationCount = 0;
     quint64 m_javascriptRequestSerial = 0;
     quint64 m_pageChangeRequestSerial = 0;
+    quint64 m_trePDFTextFieldsRequestSerial = 0;
     quint64 m_navigationEpoch = 0;
     quint64 m_nextExternalLinkRequestId = 0;
     quint64 m_pendingExternalLinkRequestId = 0;

@@ -40,6 +40,7 @@ public:
         PageCreationFailed,
         PageDeletionFailed,
         PageContentGenerationFailed,
+        AcroFormCreationFailed,
         OutputOpenFailed,
         OutputWriteFailed,
         OutputCommitFailed

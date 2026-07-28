@@ -3,6 +3,7 @@
 #include "PDFDocument.h"
 #include "PDFEditController.h"
 #include "PDFFormController.h"
+#include "PDFFormDesignerController.h"
 
 #include <QAbstractListModel>
 #include <QUrl>
@@ -17,6 +18,8 @@ class PDFDocumentSession : public QObject
     Q_PROPERTY(PDFDocument *document READ document CONSTANT FINAL)
     Q_PROPERTY(PDFEditController *editController READ editController CONSTANT FINAL)
     Q_PROPERTY(PDFFormController *formController READ formController CONSTANT FINAL)
+    Q_PROPERTY(PDFFormDesignerController *formDesignerController
+                   READ formDesignerController CONSTANT FINAL)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged FINAL)
     Q_PROPERTY(QString filePath READ filePath NOTIFY filePathChanged FINAL)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
@@ -37,6 +40,7 @@ public:
     PDFDocument *document() const;
     PDFEditController *editController() const;
     PDFFormController *formController() const;
+    PDFFormDesignerController *formDesignerController() const;
     QString title() const;
     QString filePath() const;
     qreal zoom() const;
@@ -83,6 +87,7 @@ private:
     PDFDocument *m_document = nullptr;
     PDFEditController *m_editController = nullptr;
     PDFFormController *m_formController = nullptr;
+    PDFFormDesignerController *m_formDesignerController = nullptr;
     QString m_title;
     QString m_filePath;
     qreal m_zoom = 1.0;

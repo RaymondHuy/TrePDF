@@ -1,6 +1,7 @@
 #include "PDFEditController.h"
 #include "ApplicationFonts.h"
 #include "PDFFormController.h"
+#include "PDFFormDesignerController.h"
 #include "PDFSaveWriter.h"
 #include "PDFiumSynchronization.h"
 
@@ -1152,6 +1153,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::PageContentGenerationFailed:
         //% "Page %1 could not be finalized for saving."
         return qtTrId("PdfSavePageGenerationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::AcroFormCreationFailed:
+        //% "The AcroForm fields could not be created: %1"
+        return qtTrId("PdfSaveAcroFormCreationFailed").arg(result.detail);
     case PDFSaveWriter::Error::OutputOpenFailed:
         //% "The destination file could not be opened: %1"
         return qtTrId("PdfSaveOutputOpenFailed").arg(result.detail);
@@ -1250,6 +1254,39 @@ void PDFEditController::setFormController(
     emit historyStateChanged();
 }
 
+PDFFormDesignerController *PDFEditController::formDesignerController() const
+{
+    return m_formDesignerController;
+}
+
+void PDFEditController::setFormDesignerController(
+    PDFFormDesignerController *formDesignerController)
+{
+    if (m_formDesignerController == formDesignerController) {
+        return;
+    }
+    if (m_formDesignerController) {
+        disconnect(m_formDesignerController, nullptr, this, nullptr);
+    }
+    m_formDesignerController = formDesignerController;
+    if (m_formDesignerController) {
+        connect(
+            m_formDesignerController,
+            &PDFFormDesignerController::draftStateChanged,
+            this,
+            &PDFEditController::historyStateChanged);
+        connect(
+            m_formDesignerController,
+            &QObject::destroyed,
+            this,
+            [this]() {
+                m_formDesignerController = nullptr;
+                emit historyStateChanged();
+            });
+    }
+    emit historyStateChanged();
+}
+
 PDFEditController::Tool PDFEditController::tool() const
 {
     return m_tool;
@@ -1309,7 +1346,9 @@ bool PDFEditController::hasDrafts() const
     return !m_drafts.isEmpty()
         || !m_pageInsertions.isEmpty()
         || !m_deletedSourcePages.isEmpty()
-        || (m_formController && m_formController->hasDrafts());
+        || (m_formController && m_formController->hasDrafts())
+        || (m_formDesignerController
+            && m_formDesignerController->hasDrafts());
 }
 
 bool PDFEditController::canUndo() const
@@ -3936,7 +3975,9 @@ void PDFEditController::discardDrafts()
             && (!m_formController
                 || (!m_formController->hasDrafts()
                     && !m_formController->canUndo()
-                    && !m_formController->canRedo())))) {
+                    && !m_formController->canRedo()))
+            && (!m_formDesignerController
+                || !m_formDesignerController->hasDrafts()))) {
         return;
     }
 
@@ -3967,6 +4008,9 @@ void PDFEditController::discardDrafts()
     m_redoStack.clear();
     if (m_formController) {
         m_formController->discardChanges();
+    }
+    if (m_formDesignerController) {
+        m_formDesignerController->resetFromDocument();
     }
     setSelection(nullptr);
     for (int page : std::as_const(affectedPages)) {

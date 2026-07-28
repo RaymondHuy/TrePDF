@@ -9,6 +9,11 @@ Item {
 
     required property AppTheme theme
     required property PDFDocumentSession session
+    property bool formsTabActive: false
+    property bool editTabActive: false
+    property bool formFieldsVisible: false
+    property bool formFieldsInteractive: false
+    property bool textFieldToolActive: false
     property string transientStatus
 
     signal openRequested()
@@ -94,6 +99,12 @@ Item {
             document: root.session.document
             editController: root.session.editController
             formController: root.session.formController
+            formDesignerController: root.session.formDesignerController
+            formsTabActive: root.formsTabActive
+            editTabActive: root.editTabActive
+            formFieldsVisible: root.formFieldsVisible
+            formFieldsInteractive: root.formFieldsInteractive
+            textFieldToolActive: root.textFieldToolActive
             zoom: root.session.zoom
             viewRotation: root.session.viewRotation
             transientStatus: root.transientStatus
