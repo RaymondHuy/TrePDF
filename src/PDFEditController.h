@@ -32,6 +32,7 @@ class PDFEditController : public QObject
     QML_ELEMENT
     Q_PROPERTY(PDFDocument *document READ document WRITE setDocument NOTIFY documentChanged FINAL)
     Q_PROPERTY(Tool tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
+    Q_PROPERTY(QColor highlightColor READ highlightColor WRITE setHighlightColor NOTIFY highlightColorChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
@@ -82,7 +83,8 @@ public:
         SelectTool,
         EditTextTool,
         AddTextTool,
-        AddImageTool
+        AddImageTool,
+        HighlightTool
     };
     Q_ENUM(Tool)
 
@@ -113,6 +115,8 @@ public:
 
     Tool tool() const;
     void setTool(Tool tool);
+    QColor highlightColor() const;
+    void setHighlightColor(const QColor &color);
 
     bool hasDrafts() const;
     bool canUndo() const;
@@ -160,6 +164,8 @@ public:
                                      qreal x,
                                      qreal y,
                                      const QUrl &source);
+    Q_INVOKABLE QVariantMap addHighlight(int page,
+                                         const QRectF &selectionRect);
     Q_INVOKABLE int addBlankPage();
     Q_INVOKABLE int deleteCurrentPage();
     Q_INVOKABLE QFont fontForDisplay(const QString &fontFamily,
@@ -215,6 +221,7 @@ public:
 signals:
     void documentChanged();
     void toolChanged();
+    void highlightColorChanged();
     void historyStateChanged();
     void savingChanged();
     void textEditActiveChanged();
@@ -288,6 +295,8 @@ private:
         bool added = false;
         quint64 addedOrder = 0;
         QImage image;
+        QVector<QRectF> highlightRects;
+        QColor highlightColor;
         QString reason;
         int pendingFontSnapshotIndex = -1;
         QString pendingFontExpectedFamily;
@@ -369,7 +378,7 @@ private:
 
     struct PageState {
         QSet<int> deletedSourcePages;
-        QVector<QSizeF> addedBlankPageSizes;
+        QVector<PDFPageInsertion> pageInsertions;
         QVector<Candidate> addedCandidates;
         QHash<QString, Draft> drafts;
         int currentPage = 0;
@@ -466,6 +475,7 @@ private:
     QVariantList paragraphFormatMaps(const QVector<ParagraphFormat> &formats) const;
     QVariantMap candidateMap(const Draft &draft) const;
     bool documentAllowsEditing() const;
+    bool documentAllowsAnnotations() const;
     bool documentAllowsPageAssembly() const;
     QString draftKey(int page, const QString &objectId) const;
     void markDraftStateChanged(int page, bool immediate);
@@ -542,6 +552,7 @@ private:
     QPointer<PDFDocument> m_document;
     QPointer<PDFFormController> m_formController;
     Tool m_tool = BrowseTool;
+    QColor m_highlightColor;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
     QVector<int> m_pageCandidateLru;
@@ -550,7 +561,7 @@ private:
     bool m_candidateScanInFlight = false;
     std::shared_ptr<std::atomic_bool> m_candidateScanCancellation;
     QVector<Candidate> m_addedCandidates;
-    QVector<QSizeF> m_addedBlankPageSizes;
+    QVector<PDFPageInsertion> m_pageInsertions;
     QSet<int> m_deletedSourcePages;
     QHash<QString, Draft> m_drafts;
     QHash<int, quint64> m_pageDraftRevisions;

@@ -1511,6 +1511,89 @@ RichSaveInspection inspectRichSave(const QString &filePath)
     return inspection;
 }
 
+struct HighlightSaveInspection {
+    bool readable = false;
+    int count = 0;
+    QColor color;
+    int flags = 0;
+    FS_RECTF rect{};
+    QVector<FS_QUADPOINTSF> quadPoints;
+};
+
+HighlightSaveInspection inspectHighlights(const QString &filePath,
+                                          int pageIndex = 0)
+{
+    PDFiumProcessLock pdfiumLock;
+    HighlightSaveInspection inspection;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document
+        ? FPDF_LoadPage(document, pageIndex)
+        : nullptr;
+    inspection.readable = document && page;
+    if (page) {
+        const int annotationCount = FPDFPage_GetAnnotCount(page);
+        for (int index = 0; index < annotationCount; ++index) {
+            FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(page, index);
+            if (!annotation) {
+                continue;
+            }
+            if (FPDFAnnot_GetSubtype(annotation) != FPDF_ANNOT_HIGHLIGHT) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+
+            ++inspection.count;
+            if (inspection.count == 1) {
+                unsigned int red = 0;
+                unsigned int green = 0;
+                unsigned int blue = 0;
+                unsigned int alpha = 0;
+                if (FPDFAnnot_GetColor(
+                        annotation,
+                        FPDFANNOT_COLORTYPE_Color,
+                        &red,
+                        &green,
+                        &blue,
+                        &alpha)) {
+                    inspection.color = QColor::fromRgb(
+                        red,
+                        green,
+                        blue,
+                        alpha);
+                }
+                inspection.flags = FPDFAnnot_GetFlags(annotation);
+                FPDFAnnot_GetRect(annotation, &inspection.rect);
+                const size_t quadCount
+                    = FPDFAnnot_CountAttachmentPoints(annotation);
+                inspection.quadPoints.reserve(
+                    static_cast<qsizetype>(quadCount));
+                for (size_t quadIndex = 0;
+                     quadIndex < quadCount;
+                     ++quadIndex) {
+                    FS_QUADPOINTSF quad{};
+                    if (FPDFAnnot_GetAttachmentPoints(
+                            annotation,
+                            quadIndex,
+                            &quad)) {
+                        inspection.quadPoints.append(quad);
+                    }
+                }
+            }
+            FPDFPage_CloseAnnot(annotation);
+        }
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return inspection;
+}
+
 struct ImageSaveInspection {
     bool readable = false;
     bool pixelsReadable = false;
@@ -1663,8 +1746,14 @@ private slots:
     void rejectsUnsupportedSystemFontForVietnamese();
     void preservesEmbeddedFontForFormatOnlyVietnameseEdit();
     void savesNormalizedVietnameseRichText();
+    void addsHighlightWithUndoRedoAndDiscard();
+    void savesHighlightAnnotationRoundTrip();
+    void savesHighlightAlongsideTextEdit();
+    void preservesPatternGraphicsWhenSavingHighlight();
     void addsBlankPageWithUndoRedoAndDiscard();
     void savesBlankPageRoundTrip();
+    void savesEditAfterInsertingEarlierPage();
+    void savesMultipleInsertedPagesAfterUndoRedo();
     void deletesSourcePageWithUndoRedoAndDiscard();
     void refusesToDeleteOnlyPage();
     void deletesTransientBlankPage();
@@ -4939,6 +5028,229 @@ void PDFEditControllerTest::savesNormalizedVietnameseRichText()
     QVERIFY(secondLine.f < firstLine.f - 1.0F);
 }
 
+void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("add-highlight-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QCOMPARE(controller.highlightColor(), QColor(255, 235, 59, 96));
+    QSignalSpy highlightColorSpy(
+        &controller,
+        &PDFEditController::highlightColorChanged);
+    const QColor chosenColor(255, 128, 171, 96);
+    controller.setHighlightColor(chosenColor);
+    QCOMPARE(controller.highlightColor(), chosenColor);
+    QCOMPARE(highlightColorSpy.count(), 1);
+    controller.setHighlightColor(chosenColor);
+    QCOMPARE(highlightColorSpy.count(), 1);
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
+    controller.setTool(PDFEditController::HighlightTool);
+
+    const QRectF selectionRect = textCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const QVariantMap highlight = controller.addHighlight(
+        0,
+        selectionRect);
+    QCOMPARE(
+        highlight.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("highlight"));
+    QCOMPARE(
+        highlight.value(QStringLiteral("sourceRect")).toRectF(),
+        selectionRect);
+    QCOMPARE(
+        highlight.value(QStringLiteral("highlightColor")).value<QColor>(),
+        chosenColor);
+    QCOMPARE(
+        highlight.value(QStringLiteral("highlightRects")).toList().size(),
+        1);
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(
+        candidateForKind(
+            controller.candidatesForPage(0),
+            QStringLiteral("highlight"))
+            .value(QStringLiteral("objectId"))
+            .toString(),
+        highlight.value(QStringLiteral("objectId")).toString());
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QVERIFY(!controller.canRedo());
+
+    controller.setTool(PDFEditController::SelectTool);
+    QCOMPARE(
+        controller.candidateAt(
+            0,
+            selectionRect.center().x(),
+            selectionRect.center().y())
+            .value(QStringLiteral("kind"))
+            .toString(),
+        QStringLiteral("highlight"));
+    controller.setTool(PDFEditController::EditTextTool);
+    QCOMPARE(
+        controller.candidateAt(
+            0,
+            selectionRect.center().x(),
+            selectionRect.center().y())
+            .value(QStringLiteral("objectId"))
+            .toString(),
+        textCandidate.value(QStringLiteral("objectId")).toString());
+
+    controller.setHighlightColor(QColor(79, 195, 247, 96));
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(candidateForKind(
+                controller.candidatesForPage(0),
+                QStringLiteral("highlight"))
+                .isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(controller.canRedo());
+
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("highlightColor"))
+            .value<QColor>(),
+        chosenColor);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QVERIFY(!controller.canRedo());
+
+    controller.discardDrafts();
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+}
+
+void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-highlight-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-highlight-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QSizeF pageSize = document.pageSize(0);
+    const QRectF selectionRect(0.10, 0.20, 0.30, 0.05);
+    const QColor highlightColor(139, 195, 74, 96);
+    controller.setHighlightColor(highlightColor);
+    QVERIFY(!controller.addHighlight(0, selectionRect).isEmpty());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+
+    const HighlightSaveInspection sourceInspection
+        = inspectHighlights(sourcePath);
+    QVERIFY(sourceInspection.readable);
+    QCOMPARE(sourceInspection.count, 0);
+
+    const HighlightSaveInspection inspection
+        = inspectHighlights(outputPath);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.count, 1);
+    QCOMPARE(inspection.color, highlightColor);
+    QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
+    QCOMPARE(inspection.quadPoints.size(), 1);
+
+    const qreal expectedLeft = selectionRect.left() * pageSize.width();
+    const qreal expectedRight = selectionRect.right() * pageSize.width();
+    const qreal expectedTop = (1.0 - selectionRect.top())
+        * pageSize.height();
+    const qreal expectedBottom = (1.0 - selectionRect.bottom())
+        * pageSize.height();
+    const auto closeEnough = [](qreal actual, qreal expected) {
+        return qAbs(actual - expected) < 0.05;
+    };
+    QVERIFY(closeEnough(inspection.rect.left, expectedLeft));
+    QVERIFY(closeEnough(inspection.rect.right, expectedRight));
+    QVERIFY(closeEnough(inspection.rect.top, expectedTop));
+    QVERIFY(closeEnough(inspection.rect.bottom, expectedBottom));
+    const FS_QUADPOINTSF quad = inspection.quadPoints.constFirst();
+    QVERIFY(closeEnough(quad.x1, expectedLeft));
+    QVERIFY(closeEnough(quad.y1, expectedTop));
+    QVERIFY(closeEnough(quad.x2, expectedRight));
+    QVERIFY(closeEnough(quad.y2, expectedTop));
+    QVERIFY(closeEnough(quad.x3, expectedLeft));
+    QVERIFY(closeEnough(quad.y3, expectedBottom));
+    QVERIFY(closeEnough(quad.x4, expectedRight));
+    QVERIFY(closeEnough(quad.y4, expectedBottom));
+}
+
+void PDFEditControllerTest::savesHighlightAlongsideTextEdit()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-highlight-text-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-highlight-text-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
+    QVERIFY(!controller.addHighlight(
+        0,
+        QRectF(0.12, 0.16, 0.25, 0.04)).isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        textCandidate.value(QStringLiteral("objectId")).toString()));
+    const QString editedText = QStringLiteral("Highlighted edited text");
+    controller.commitSelectedText(editedText);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(normalizedPageText(outputPath).contains(editedText));
+    const HighlightSaveInspection inspection
+        = inspectHighlights(outputPath);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.count, 1);
+    QCOMPARE(inspection.quadPoints.size(), 1);
+}
+
+void PDFEditControllerTest::preservesPatternGraphicsWhenSavingHighlight()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-highlight-pattern-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-highlight-pattern-output.pdf"));
+    QVERIFY(createPatternFillPdf(sourcePath));
+    QVERIFY(containsPatternColors(renderFirstPage(sourcePath, QSize(200, 200))));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.addHighlight(
+        0,
+        QRectF(0.70, 0.10, 0.20, 0.05)).isEmpty());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const HighlightSaveInspection inspection
+        = inspectHighlights(outputPath);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.count, 1);
+    QVERIFY(containsPatternColors(renderFirstPage(outputPath, QSize(200, 200))));
+}
+
 void PDFEditControllerTest::addsBlankPageWithUndoRedoAndDiscard()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -4950,52 +5262,70 @@ void PDFEditControllerTest::addsBlankPageWithUndoRedoAndDiscard()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     QCOMPARE(document.pageCount(), 2);
     QCOMPARE(document.sourcePageCount(), 2);
-    document.setCurrentPage(1);
-    const QSizeF currentPageSize = document.pageSize(1);
-    QCOMPARE(currentPageSize, QSizeF(320.0, 480.0));
+    const QSizeF currentPageSize = document.pageSize(0);
+    const QSizeF followingPageSize = document.pageSize(1);
+    QCOMPARE(currentPageSize, QSizeF(595.0, 842.0));
+    QCOMPARE(followingPageSize, QSizeF(320.0, 480.0));
     controller.setDocument(&document);
 
     QSignalSpy pageCountSpy(&document, &PDFDocument::pageCountChanged);
+    QSignalSpy pageStructureSpy(
+        &document,
+        &PDFDocument::pageStructureChanged);
     const int addedPage = controller.addBlankPage();
 
-    QCOMPARE(addedPage, 2);
+    QCOMPARE(addedPage, 1);
     QCOMPARE(document.pageCount(), 3);
     QCOMPARE(document.currentPage(), addedPage);
     QCOMPARE(document.pageSize(addedPage), currentPageSize);
     QVERIFY(document.isTransientBlankPage(addedPage));
+    QCOMPARE(document.sourcePageIndex(0), 0);
+    QCOMPARE(document.sourcePageIndex(1), -1);
+    QCOMPARE(document.sourcePageIndex(2), 1);
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
     QVERIFY(!controller.canRedo());
     QCOMPARE(pageCountSpy.count(), 1);
+    QCOMPARE(pageStructureSpy.count(), 1);
+    QCOMPARE(pageStructureSpy.constLast().constFirst().toBool(), false);
 
-    QCOMPARE(controller.undo(), 1);
+    QCOMPARE(controller.undo(), 0);
     QCOMPARE(document.pageCount(), 2);
-    QCOMPARE(document.currentPage(), 1);
-    QVERIFY(document.pageSize(addedPage).isEmpty());
+    QCOMPARE(document.currentPage(), 0);
+    QCOMPARE(document.pageSize(addedPage), followingPageSize);
     QVERIFY(!document.isTransientBlankPage(addedPage));
+    QCOMPARE(document.sourcePageIndex(addedPage), 1);
     QVERIFY(!controller.hasDrafts());
     QVERIFY(!controller.canUndo());
     QVERIFY(controller.canRedo());
     QCOMPARE(pageCountSpy.count(), 2);
+    QCOMPARE(pageStructureSpy.count(), 2);
+    QCOMPARE(pageStructureSpy.constLast().constFirst().toBool(), false);
 
     QCOMPARE(controller.redo(), addedPage);
     QCOMPARE(document.pageCount(), 3);
     QCOMPARE(document.currentPage(), addedPage);
     QCOMPARE(document.pageSize(addedPage), currentPageSize);
     QVERIFY(document.isTransientBlankPage(addedPage));
+    QCOMPARE(document.sourcePageIndex(2), 1);
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
     QVERIFY(!controller.canRedo());
     QCOMPARE(pageCountSpy.count(), 3);
+    QCOMPARE(pageStructureSpy.count(), 3);
+    QCOMPARE(pageStructureSpy.constLast().constFirst().toBool(), false);
 
     controller.discardDrafts();
     QCOMPARE(document.pageCount(), 2);
-    QVERIFY(document.pageSize(addedPage).isEmpty());
+    QCOMPARE(document.pageSize(addedPage), followingPageSize);
     QVERIFY(!document.isTransientBlankPage(addedPage));
+    QCOMPARE(document.sourcePageIndex(addedPage), 1);
     QVERIFY(!controller.hasDrafts());
     QVERIFY(!controller.canUndo());
     QVERIFY(!controller.canRedo());
     QCOMPARE(pageCountSpy.count(), 4);
+    QCOMPARE(pageStructureSpy.count(), 4);
+    QCOMPARE(pageStructureSpy.constLast().constFirst().toBool(), true);
 }
 
 void PDFEditControllerTest::savesBlankPageRoundTrip()
@@ -5009,13 +5339,15 @@ void PDFEditControllerTest::savesBlankPageRoundTrip()
     PDFDocument document;
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
-    document.setCurrentPage(1);
-    const QSizeF currentPageSize = document.pageSize(1);
+    const QSizeF currentPageSize = document.pageSize(0);
+    const QSizeF followingPageSize = document.pageSize(1);
     controller.setDocument(&document);
 
     const int addedPage = controller.addBlankPage();
-    QCOMPARE(addedPage, 2);
+    QCOMPARE(addedPage, 1);
     QCOMPARE(document.pageSize(addedPage), currentPageSize);
+    QCOMPARE(document.sourcePageIndex(addedPage), -1);
+    QCOMPARE(document.sourcePageIndex(2), 1);
     QVERIFY(controller.hasDrafts());
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
@@ -5031,15 +5363,152 @@ void PDFEditControllerTest::savesBlankPageRoundTrip()
     PDFDocument savedDocument;
     QVERIFY(savedDocument.open(QUrl::fromLocalFile(outputPath)));
     QCOMPARE(savedDocument.pageCount(), 3);
-    QCOMPARE(savedDocument.pageSize(0), QSizeF(595.0, 842.0));
-    QCOMPARE(savedDocument.pageSize(1), currentPageSize);
+    QCOMPARE(savedDocument.pageSize(0), currentPageSize);
     QCOMPARE(savedDocument.pageSize(addedPage), currentPageSize);
+    QCOMPARE(savedDocument.pageSize(2), followingPageSize);
     QVERIFY(normalizedPageText(outputPath, addedPage).isEmpty());
 
     PDFDocument sourceDocument;
     QVERIFY(sourceDocument.open(QUrl::fromLocalFile(sourcePath)));
     QCOMPARE(sourceDocument.pageCount(), 2);
-    QCOMPARE(sourceDocument.pageSize(1), currentPageSize);
+    QCOMPARE(sourceDocument.pageSize(0), currentPageSize);
+    QCOMPARE(sourceDocument.pageSize(1), followingPageSize);
+}
+
+void PDFEditControllerTest::savesEditAfterInsertingEarlierPage()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-inserted-page-edit-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-inserted-page-edit-output.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    const QVariantMap sourceCandidate = candidateForText(
+        waitForCandidates(controller, 1),
+        QStringLiteral("Second fixture page"));
+    QVERIFY(!sourceCandidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        1,
+        sourceCandidate.value(QStringLiteral("objectId")).toString()));
+    const QString editedText = QStringLiteral("Edited page after insertion");
+    controller.commitSelectedText(editedText);
+    QCOMPARE(controller.draftsForPage(1).size(), 1);
+
+    document.setCurrentPage(0);
+    QCOMPARE(controller.addBlankPage(), 1);
+    QCOMPARE(document.pageCount(), 4);
+    QCOMPARE(document.currentPage(), 1);
+    QCOMPARE(document.sourcePageIndex(0), 0);
+    QCOMPARE(document.sourcePageIndex(1), -1);
+    QCOMPARE(document.sourcePageIndex(2), 1);
+    QCOMPARE(document.sourcePageIndex(3), 2);
+    QVERIFY(document.isTransientBlankPage(1));
+    QVERIFY(controller.draftsForPage(1).isEmpty());
+    const QVariantList shiftedCandidates = waitForCandidates(controller, 2);
+    QVERIFY(!candidateForText(shiftedCandidates, editedText).isEmpty());
+    QCOMPARE(controller.draftsForPage(2).size(), 1);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QCOMPARE(document.pageCount(), 4);
+    QCOMPARE(document.sourcePageCount(), 4);
+    QCOMPARE(document.pageSize(0), QSizeF(240.0, 360.0));
+    QCOMPARE(document.pageSize(1), QSizeF(240.0, 360.0));
+    QCOMPARE(document.pageSize(2), QSizeF(320.0, 480.0));
+    QCOMPARE(document.pageSize(3), QSizeF(500.0, 700.0));
+    QVERIFY(normalizedPageText(outputPath, 0).contains(
+        QStringLiteral("First fixture page")));
+    QVERIFY(normalizedPageText(outputPath, 1).isEmpty());
+    QVERIFY(normalizedPageText(outputPath, 2).contains(editedText));
+    QVERIFY(normalizedPageText(outputPath, 3).contains(
+        QStringLiteral("Third fixture page")));
+    QVERIFY(!controller.hasDrafts());
+
+    PDFDocument sourceDocument;
+    QVERIFY(sourceDocument.open(QUrl::fromLocalFile(sourcePath)));
+    QCOMPARE(sourceDocument.pageCount(), 3);
+    QVERIFY(normalizedPageText(sourcePath, 1).contains(
+        QStringLiteral("Second fixture page")));
+    QVERIFY(!normalizedPageText(sourcePath, 1).contains(editedText));
+}
+
+void PDFEditControllerTest::savesMultipleInsertedPagesAfterUndoRedo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-multiple-inserted-pages-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-multiple-inserted-pages-output.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    QCOMPARE(controller.addBlankPage(), 1);
+    document.setCurrentPage(2);
+    QCOMPARE(controller.addBlankPage(), 3);
+    document.setCurrentPage(0);
+    QCOMPARE(controller.addBlankPage(), 1);
+
+    QCOMPARE(document.pageCount(), 6);
+    QCOMPARE(document.sourcePageIndex(0), 0);
+    QCOMPARE(document.sourcePageIndex(1), -1);
+    QCOMPARE(document.sourcePageIndex(2), -1);
+    QCOMPARE(document.sourcePageIndex(3), 1);
+    QCOMPARE(document.sourcePageIndex(4), -1);
+    QCOMPARE(document.sourcePageIndex(5), 2);
+
+    document.setCurrentPage(3);
+    QCOMPARE(controller.deleteCurrentPage(), 3);
+    QCOMPARE(document.pageCount(), 5);
+    QCOMPARE(document.sourcePageIndex(3), -1);
+    QCOMPARE(document.sourcePageIndex(4), 2);
+
+    document.setCurrentPage(2);
+    QCOMPARE(controller.deleteCurrentPage(), 2);
+    QCOMPARE(document.pageCount(), 4);
+    QCOMPARE(document.sourcePageIndex(0), 0);
+    QCOMPARE(document.sourcePageIndex(1), -1);
+    QCOMPARE(document.sourcePageIndex(2), -1);
+    QCOMPARE(document.sourcePageIndex(3), 2);
+
+    QCOMPARE(controller.undo(), 2);
+    QCOMPARE(document.pageCount(), 5);
+    QCOMPARE(controller.undo(), 3);
+    QCOMPARE(document.pageCount(), 6);
+    QCOMPARE(document.sourcePageIndex(3), 1);
+    QCOMPARE(controller.redo(), 3);
+    QCOMPARE(document.pageCount(), 5);
+    QCOMPARE(controller.redo(), 2);
+    QCOMPARE(document.pageCount(), 4);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QCOMPARE(document.pageCount(), 4);
+    QCOMPARE(document.pageSize(0), QSizeF(240.0, 360.0));
+    QCOMPARE(document.pageSize(1), QSizeF(240.0, 360.0));
+    QCOMPARE(document.pageSize(2), QSizeF(320.0, 480.0));
+    QCOMPARE(document.pageSize(3), QSizeF(500.0, 700.0));
+    QVERIFY(normalizedPageText(outputPath, 0).contains(
+        QStringLiteral("First fixture page")));
+    QVERIFY(normalizedPageText(outputPath, 1).isEmpty());
+    QVERIFY(normalizedPageText(outputPath, 2).isEmpty());
+    QVERIFY(normalizedPageText(outputPath, 3).contains(
+        QStringLiteral("Third fixture page")));
+    QVERIFY(!normalizedPageText(outputPath, 0).contains(
+        QStringLiteral("Second fixture page")));
+    QVERIFY(!normalizedPageText(outputPath, 3).contains(
+        QStringLiteral("Second fixture page")));
+
+    PDFDocument sourceDocument;
+    QVERIFY(sourceDocument.open(QUrl::fromLocalFile(sourcePath)));
+    QCOMPARE(sourceDocument.pageCount(), 3);
+    QVERIFY(normalizedPageText(sourcePath, 1).contains(
+        QStringLiteral("Second fixture page")));
 }
 
 void PDFEditControllerTest::deletesSourcePageWithUndoRedoAndDiscard()

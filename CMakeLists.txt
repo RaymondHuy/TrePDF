@@ -105,7 +105,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/delete-page.svg
         src/assets/icons/edit-text.svg
         src/assets/icons/folder-open.svg
-        src/assets/icons/highlighter.svg
+        src/assets/icons/highlight.svg
         src/assets/icons/image-plus.svg
         src/assets/icons/italic-font.svg
         src/assets/icons/link-2.svg
