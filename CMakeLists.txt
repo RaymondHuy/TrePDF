@@ -88,6 +88,7 @@ qt_add_qml_module(trepdf
         src/Components/RibbonButton.qml
         src/Components/RibbonGroup.qml
         src/Components/RibbonTabButton.qml
+        src/Components/ShapeDraftView.qml
         src/Components/SignRibbon.qml
         src/Components/TextFormatPanel.qml
         src/Components/ViewRibbon.qml
@@ -98,23 +99,28 @@ qt_add_qml_module(trepdf
         src/assets/icons/align-justify.svg
         src/assets/icons/align-left.svg
         src/assets/icons/align-right.svg
+        src/assets/icons/arrow.svg
         src/assets/icons/bold-text.svg
         src/assets/icons/calendar-days.svg
         src/assets/icons/chevron-left.svg
         src/assets/icons/chevron-right.svg
         src/assets/icons/delete-page.svg
+        src/assets/icons/diamond.svg
         src/assets/icons/edit-text.svg
         src/assets/icons/folder-open.svg
         src/assets/icons/highlight.svg
         src/assets/icons/image-plus.svg
         src/assets/icons/italic-font.svg
+        src/assets/icons/line.svg
         src/assets/icons/link-2.svg
         src/assets/icons/maximize-2.svg
         src/assets/icons/mouse-pointer-2.svg
         src/assets/icons/mouse-pointer-filled-orange.svg
+        src/assets/icons/oval.svg
         src/assets/icons/panel-left.svg
         src/assets/icons/pen-line.svg
         src/assets/icons/redo-2.svg
+        src/assets/icons/rectangle.svg
         src/assets/icons/remove-text.svg
         src/assets/icons/rotate-ccw.svg
         src/assets/icons/rotate-cw.svg
@@ -126,6 +132,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/signature.svg
         src/assets/icons/square-check-big.svg
         src/assets/icons/strikethrough.svg
+        src/assets/icons/triangle.svg
         src/assets/icons/type.svg
         src/assets/icons/underline.svg
         src/assets/icons/underline-text.svg

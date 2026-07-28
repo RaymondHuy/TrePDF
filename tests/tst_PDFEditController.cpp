@@ -1594,6 +1594,135 @@ HighlightSaveInspection inspectHighlights(const QString &filePath,
     return inspection;
 }
 
+struct ShapeSaveInspection {
+    bool readable = false;
+    int count = 0;
+    int filledCount = 0;
+    int openCount = 0;
+    int bezierCount = 0;
+    int blackStrokeCount = 0;
+    int transparentFillCount = 0;
+    QVector<QVector<QPointF>> normalizedPathPoints;
+};
+
+ShapeSaveInspection inspectShapePaths(const QString &filePath)
+{
+    ShapeSaveInspection inspection;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    inspection.readable = document && page;
+    if (page) {
+        const qreal pageWidth = FPDF_GetPageWidthF(page);
+        const qreal pageHeight = FPDF_GetPageHeightF(page);
+        const int deviceWidth = qMax(1, qRound(pageWidth * 1000.0));
+        const int deviceHeight = qMax(1, qRound(pageHeight * 1000.0));
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int objectIndex = 0;
+             objectIndex < objectCount;
+             ++objectIndex) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(
+                page,
+                objectIndex);
+            if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_PATH) {
+                continue;
+            }
+
+            ++inspection.count;
+            int fillMode = FPDF_FILLMODE_NONE;
+            FPDF_BOOL stroke = false;
+            if (FPDFPath_GetDrawMode(object, &fillMode, &stroke)
+                && fillMode != FPDF_FILLMODE_NONE) {
+                ++inspection.filledCount;
+                unsigned int red = 0;
+                unsigned int green = 0;
+                unsigned int blue = 0;
+                unsigned int alpha = 0;
+                if (FPDFPageObj_GetFillColor(
+                        object,
+                        &red,
+                        &green,
+                        &blue,
+                        &alpha)
+                    && alpha == 0) {
+                    ++inspection.transparentFillCount;
+                }
+            } else {
+                ++inspection.openCount;
+            }
+
+            unsigned int red = 0;
+            unsigned int green = 0;
+            unsigned int blue = 0;
+            unsigned int alpha = 0;
+            if (FPDFPageObj_GetStrokeColor(
+                    object,
+                    &red,
+                    &green,
+                    &blue,
+                    &alpha)
+                && red == 0
+                && green == 0
+                && blue == 0
+                && alpha == 255) {
+                ++inspection.blackStrokeCount;
+            }
+
+            const int segmentCount = FPDFPath_CountSegments(object);
+            QVector<QPointF> normalizedPoints;
+            normalizedPoints.reserve(segmentCount);
+            for (int segmentIndex = 0;
+                 segmentIndex < segmentCount;
+                 ++segmentIndex) {
+                FPDF_PATHSEGMENT segment = FPDFPath_GetPathSegment(
+                    object,
+                    segmentIndex);
+                float pageX = 0.0F;
+                float pageY = 0.0F;
+                int deviceX = 0;
+                int deviceY = 0;
+                if (segment
+                    && FPDFPathSegment_GetPoint(
+                        segment,
+                        &pageX,
+                        &pageY)
+                    && FPDF_PageToDevice(
+                        page,
+                        0,
+                        0,
+                        deviceWidth,
+                        deviceHeight,
+                        0,
+                        pageX,
+                        pageY,
+                        &deviceX,
+                        &deviceY)) {
+                    normalizedPoints.append(QPointF(
+                        static_cast<qreal>(deviceX) / deviceWidth,
+                        static_cast<qreal>(deviceY) / deviceHeight));
+                }
+                if (segment
+                    && FPDFPathSegment_GetType(segment)
+                        == FPDF_SEGMENT_BEZIERTO) {
+                    ++inspection.bezierCount;
+                    break;
+                }
+            }
+            inspection.normalizedPathPoints.append(
+                std::move(normalizedPoints));
+        }
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return inspection;
+}
+
 struct ImageSaveInspection {
     bool readable = false;
     bool pixelsReadable = false;
@@ -1772,6 +1901,8 @@ private slots:
     void rendersAddedImageSnapshot();
     void addsImageWithUndoRedo();
     void movesAddedImageWithUndoRedo();
+    void addsShapeWithUndoRedo();
+    void savesShapesRoundTrip();
     void movesTopLevelTextWithUndoRedo();
     void movesTopLevelImageWithUndoRedo();
     void deletesTopLevelImageWithUndoRedo();
@@ -6310,6 +6441,273 @@ void PDFEditControllerTest::movesAddedImageWithUndoRedo()
     QCOMPARE(controller.selectedFrameRect(), originalFrame);
     controller.redo();
     QCOMPARE(controller.selectedFrameRect(), movedFrame);
+}
+
+void PDFEditControllerTest::addsShapeWithUndoRedo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("add-shape-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::ArrowShape);
+    controller.setTool(PDFEditController::AddShapeTool);
+
+    const QPointF startPoint(0.18, 0.42);
+    const QPointF endPoint(0.62, 0.425);
+    const QPointF constrainedEnd = controller.constrainedShapeEnd(
+        0,
+        startPoint,
+        endPoint);
+    QCOMPARE(constrainedEnd.x(), endPoint.x());
+    QCOMPARE(constrainedEnd.y(), startPoint.y());
+    const QSizeF pageSize = document.pageSize(0);
+    QVERIFY(controller.shapeDragIsValid(0, startPoint, endPoint));
+    QVERIFY(!controller.shapeDragIsValid(
+        0,
+        startPoint,
+        QPointF(
+            startPoint.x() + 2.0 / pageSize.width(),
+            startPoint.y())));
+    const QVariantMap added = controller.addShape(
+        0,
+        startPoint,
+        endPoint);
+    QVERIFY(!added.isEmpty());
+    QCOMPARE(
+        added.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("addedShape"));
+    QCOMPARE(
+        added.value(QStringLiteral("shapeType")).toInt(),
+        static_cast<int>(PDFEditController::ArrowShape));
+    QCOMPARE(
+        added.value(QStringLiteral("shapeStrokeColor")).value<QColor>(),
+        QColor(Qt::black));
+    QCOMPARE(
+        added.value(QStringLiteral("shapeFillColor")).value<QColor>(),
+        QColor(Qt::transparent));
+    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QVERIFY(!controller.canRedo());
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+
+    const QString objectId = added
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QRectF frame = added
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QPointF shapeStart = added
+        .value(QStringLiteral("shapeStart"))
+        .toPointF();
+    const QPointF shapeEnd = added
+        .value(QStringLiteral("shapeEnd"))
+        .toPointF();
+    QVERIFY(frame.contains(startPoint));
+    QVERIFY(frame.contains(constrainedEnd));
+    QVERIFY(qAbs(shapeStart.y() - 0.5) < 0.001);
+    QVERIFY(qAbs(shapeEnd.y() - 0.5) < 0.001);
+    const QPointF savedStart(
+        frame.x() + shapeStart.x() * frame.width(),
+        frame.y() + shapeStart.y() * frame.height());
+    const QPointF savedEnd(
+        frame.x() + shapeEnd.x() * frame.width(),
+        frame.y() + shapeEnd.y() * frame.height());
+    QVERIFY(QLineF(savedStart, startPoint).length() < 0.00001);
+    QVERIFY(QLineF(savedEnd, constrainedEnd).length() < 0.00001);
+    const qreal strokeWidthRatio = added
+        .value(QStringLiteral("shapeStrokeWidthRatio"))
+        .toReal();
+    const qreal hitTolerancePoints = controller.shapeHitToleranceRatio(
+        0,
+        strokeWidthRatio) * pageSize.height();
+    QVERIFY(qAbs(hitTolerancePoints - 3.0) < 0.001);
+    const qreal strokeWidthPoints = qMax<qreal>(
+        0.75,
+        strokeWidthRatio * pageSize.height());
+    const qreal lineLengthPoints = QLineF(
+        QPointF(
+            startPoint.x() * pageSize.width(),
+            startPoint.y() * pageSize.height()),
+        QPointF(
+            constrainedEnd.x() * pageSize.width(),
+            constrainedEnd.y() * pageSize.height())).length();
+    const qreal arrowHalfWidth = qMin(
+        qMax<qreal>(6.0, strokeWidthPoints * 4.0),
+        lineLengthPoints * 0.35) * 0.55;
+    QVERIFY(frame.height() * pageSize.height()
+        >= 2.0 * (arrowHalfWidth + strokeWidthPoints / 2.0) - 0.001);
+    QCOMPARE(controller.selectedObjectId(), objectId);
+    QCOMPARE(
+        controller.candidateAt(0, frame.center().x(), frame.center().y())
+            .value(QStringLiteral("objectId")).toString(),
+        objectId);
+
+    const QRectF resizedFrame(
+        frame.x() + 0.04,
+        frame.y() + 0.05,
+        frame.width() * 0.75,
+        frame.height() * 2.0);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resizedFrame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), resizedFrame);
+    QCOMPARE(controller.selectedContentBounds(), resizedFrame);
+
+    controller.undo();
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    controller.redo();
+    QCOMPARE(controller.selectedFrameRect(), resizedFrame);
+
+    controller.deleteSelectedObject();
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(controller.candidateAt(
+        0,
+        resizedFrame.center().x(),
+        resizedFrame.center().y()).isEmpty());
+
+    controller.undo();
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QCOMPARE(controller.selectedFrameRect(), resizedFrame);
+
+    controller.setShapeType(PDFEditController::LineShape);
+    controller.setTool(PDFEditController::AddShapeTool);
+    const QVariantMap diagonalLine = controller.addShape(
+        0,
+        QPointF(0.10, 0.10),
+        QPointF(0.50, 0.50));
+    QVERIFY(!diagonalLine.isEmpty());
+    const QString diagonalLineId = diagonalLine
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QCOMPARE(
+        controller.candidateAt(0, 0.30, 0.30)
+            .value(QStringLiteral("objectId")).toString(),
+        diagonalLineId);
+    QVERIFY(
+        controller.candidateAt(0, 0.10, 0.50)
+            .value(QStringLiteral("objectId")).toString()
+        != diagonalLineId);
+
+    controller.setShapeType(PDFEditController::DiamondShape);
+    controller.setTool(PDFEditController::AddShapeTool);
+    const QVariantMap transparentDiamond = controller.addShape(
+        0,
+        QPointF(0.65, 0.10),
+        QPointF(0.85, 0.30));
+    QVERIFY(!transparentDiamond.isEmpty());
+    const QString transparentDiamondId = transparentDiamond
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(
+        controller.candidateAt(0, 0.75, 0.20)
+            .value(QStringLiteral("objectId")).toString()
+        != transparentDiamondId);
+    QCOMPARE(
+        controller.candidateAt(0, 0.75, 0.10)
+            .value(QStringLiteral("objectId")).toString(),
+        transparentDiamondId);
+
+    controller.discardDrafts();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+}
+
+void PDFEditControllerTest::savesShapesRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-shapes-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-shapes-output.pdf"));
+    QVERIFY(createOffsetCropPdf(sourcePath));
+    const ShapeSaveInspection sourceInspection
+        = inspectShapePaths(sourcePath);
+    QVERIFY(sourceInspection.readable);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    struct ShapeInput {
+        PDFEditController::ShapeType type;
+        QPointF start;
+        QPointF end;
+    };
+    const QVector<ShapeInput> shapes{
+        {PDFEditController::RectangleShape, {0.08, 0.12}, {0.28, 0.24}},
+        {PDFEditController::EllipseShape, {0.38, 0.12}, {0.58, 0.24}},
+        {PDFEditController::LineShape, {0.68, 0.22}, {0.88, 0.12}},
+        {PDFEditController::ArrowShape, {0.08, 0.38}, {0.28, 0.385}},
+        {PDFEditController::TriangleShape, {0.38, 0.30}, {0.58, 0.42}},
+        {PDFEditController::DiamondShape, {0.68, 0.30}, {0.88, 0.42}},
+    };
+    QVector<QPointF> expectedEnds;
+    expectedEnds.reserve(shapes.size());
+    for (const ShapeInput &shape : shapes) {
+        controller.setShapeType(shape.type);
+        controller.setTool(PDFEditController::AddShapeTool);
+        expectedEnds.append(controller.constrainedShapeEnd(
+            0,
+            shape.start,
+            shape.end));
+        QVERIFY(!controller.addShape(
+            0,
+            shape.start,
+            shape.end).isEmpty());
+    }
+    QCOMPARE(controller.draftsForPage(0).size(), shapes.size());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+
+    const ShapeSaveInspection savedInspection
+        = inspectShapePaths(outputPath);
+    QVERIFY(savedInspection.readable);
+    QCOMPARE(
+        savedInspection.count,
+        sourceInspection.count + shapes.size());
+    QVERIFY(savedInspection.filledCount
+        >= sourceInspection.filledCount + 4);
+    QVERIFY(savedInspection.openCount
+        >= sourceInspection.openCount + 2);
+    QVERIFY(savedInspection.bezierCount
+        >= sourceInspection.bezierCount + 1);
+    QVERIFY(savedInspection.blackStrokeCount
+        >= sourceInspection.blackStrokeCount + shapes.size());
+    QVERIFY(savedInspection.transparentFillCount
+        >= sourceInspection.transparentFillCount + 4);
+    const auto verifyOpenPathEndpoints = [&savedInspection,
+                                          &sourceInspection,
+                                          &shapes,
+                                          &expectedEnds](
+                                             qsizetype shapeIndex) {
+        const qsizetype pathIndex = sourceInspection.count + shapeIndex;
+        QVERIFY(pathIndex
+            < savedInspection.normalizedPathPoints.size());
+        const QVector<QPointF> &points
+            = savedInspection.normalizedPathPoints.at(pathIndex);
+        QVERIFY(points.size() >= 2);
+        QVERIFY(QLineF(points.at(0), shapes.at(shapeIndex).start).length()
+            < 0.002);
+        QVERIFY(QLineF(points.at(1), expectedEnds.at(shapeIndex)).length()
+            < 0.002);
+    };
+    verifyOpenPathEndpoints(2);
+    verifyOpenPathEndpoints(3);
+
+    const QString verificationPath = qEnvironmentVariable(
+        "TREPDF_SHAPE_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(outputPath, verificationPath));
+    }
 }
 
 void PDFEditControllerTest::movesTopLevelTextWithUndoRedo()

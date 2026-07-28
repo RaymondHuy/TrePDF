@@ -23,6 +23,11 @@ Current features:
   their chosen color as undoable session drafts, can be selected and deleted,
   and persist through Save/Save As without rewriting page content streams on
   annotation-only pages.
+- Draw rectangles, ovals, lines, arrows, triangles, and diamonds from the
+  Shapes dropdown. Added shapes are vector session drafts that can be selected,
+  moved, resized, deleted, undone/redone, and persisted as PDF path objects.
+  New shapes use a black outline with transparent fill; near-axis lines and
+  arrows snap horizontally or vertically.
 - Render every page through PDFium.
 - Virtualized continuous scrolling with reusable QML delegates.
 - Asynchronous page rendering on a worker thread.
@@ -133,6 +138,8 @@ Current features:
   upload for one page delegate.
 - `src/Components/FormChoiceOverlay.qml`: custom combo-box and list-box
   presentation for the safe subset of AcroForm choice fields.
+- `src/Components/ShapeDraftView.qml`: shared Qt Quick Shapes preview used by
+  the ribbon palette, drag preview, and added-shape draft delegates.
 - `src/Components`: ribbon controls, document view, page delegates, and the
   draft editing overlay.
 - `third_party/pdfium`: prebuilt arm64 PDFium headers and library. Treat this as
@@ -349,6 +356,10 @@ clipped or elided unintentionally.
   quad points, bounding rectangles, color/opacity, and the Print flag. Adding
   annotations alone must not call `FPDFPage_GenerateContent()`; mixed
   text/image edits still regenerate the affected page content normally.
+- Persist added shapes as top-level PDF path objects. Convert every path point
+  through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
+  editor; keep ovals vector by using cubic Bézier segments and retain
+  insertion order with the other added page objects.
 - Preserve the earliest source z-order with `FPDFPage_InsertObjectAtIndex()`;
   added text and images are appended in insertion order. Convert coordinates
   with `FPDF_DeviceToPage()` so CropBox offsets and page rotation follow the

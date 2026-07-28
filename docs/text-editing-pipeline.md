@@ -1309,3 +1309,33 @@ gọi `FPDFPage_RemoveObject()` rồi destroy image object, không tạo replace
 và chạy `FPDFPage_GenerateContent()`. File chỉ được commit qua `QSaveFile` sau
 khi toàn bộ page thành công; draft/history chỉ clear sau khi file kết quả mở
 lại được. Image trong Form XObject không được đánh dấu editable.
+
+## 22. Luồng vẽ hình dạng
+
+Nút `Hình dạng` mở dropdown gồm hình chữ nhật, oval, đường thẳng, mũi tên, tam
+giác và hình thoi. Chọn một mục đặt controller vào `AddShapeTool`; kéo trên
+`EditOverlay` tạo preview bằng `ShapeDraftView` dùng `QtQuick.Shapes`, không dùng
+Canvas hoặc ảnh raster.
+
+Controller nhận hai đầu kéo ở tọa độ normalized và tạo candidate
+`kind = "addedShape"`. `frameRect` là box chọn/resize; với đường thẳng hoặc mũi
+tên, `shapeStartRatio` và `shapeEndRatio` giữ hướng kéo bên trong frame. Frame
+mỏng theo một trục được nới tối thiểu để vẫn hit-test và resize được nhưng hai
+đầu đường vẫn nằm đúng tại điểm nhấn/thả. Đường thẳng và mũi tên gần ngang hoặc
+gần dọc được controller snap về đúng trục; preview gọi cùng hàm constraint nên
+không nhảy vị trí lúc thả chuột. Sau khi tạo, tool trở về `SelectTool`; shape hỗ
+trợ kéo, bốn edge handle, phím mũi tên, Delete, undo/redo và discard qua cùng
+snapshot `Draft` với text và image.
+
+Khi Save/Save As, `PDFSaveWriter` đổi các điểm từ editor sang page bằng
+`FPDF_DeviceToPage()` rồi tạo top-level `FPDF_PAGEOBJ_PATH`:
+
+- hình chữ nhật, tam giác và hình thoi là path đóng;
+- oval dùng bốn cubic Bézier, nên vẫn là vector;
+- đường thẳng là path mở;
+- mũi tên là đường chính cộng hai cạnh đầu mũi tên trong cùng path.
+
+Mặc định fill trong suốt và stroke đen được ghi bằng màu RGBA; line cap và line
+join dùng kiểu tròn. Shape mới được chèn theo `addedOrder`, gọi
+`FPDFPage_GenerateContent()` cùng các draft page-object khác và chỉ tồn tại
+trong file sau khi transaction `QSaveFile` commit thành công.
