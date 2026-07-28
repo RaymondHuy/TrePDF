@@ -64,15 +64,10 @@ Flickable {
         id: swatch
 
         required property color swatchColor
-        property int swatchWidth: 40
-        property int swatchHeight: 22
 
-        width: swatchWidth
-        height: swatchHeight
-        leftPadding: 3
-        rightPadding: 3
-        topPadding: 3
-        bottomPadding: 3
+        width: 38
+        height: 26
+        padding: 3
         checkable: true
         checked: root.sameHighlightColor(
             root.editController.highlightColor,
@@ -82,35 +77,34 @@ Flickable {
         Accessible.name: qsTrId("ChooseHighlightColor")
         onClicked: root.selectHighlightColor(swatchColor)
 
-        contentItem: Item {
-            Rectangle {
-                anchors.fill: parent
-                radius: 1
-                color: swatch.swatchColor
-                border.width: 1
-                border.color: "#b8b5b2"
-                Accessible.ignored: true
-            }
+        contentItem: Rectangle {
+            radius: 3
+            color: swatch.swatchColor
+            border.width: 1
+            border.color: "#c9c3be"
+            Accessible.ignored: true
 
             Label {
                 anchors.centerIn: parent
                 visible: swatch.checked
                 text: "\u2713"
                 color: root.highlightCheckColor(swatch.swatchColor)
-                font.pixelSize: Math.min(13, swatch.swatchHeight - 6)
+                font.pixelSize: 13
                 font.bold: true
                 Accessible.ignored: true
             }
         }
 
         background: Rectangle {
-            radius: 3
+            radius: 5
             color: swatch.down
                 ? "#f5dfcf"
-                : swatch.hovered || swatch.checked
+                : swatch.hovered || swatch.visualFocus || swatch.checked
                     ? root.theme.foxitPaleOrange
                     : "transparent"
-            border.width: swatch.checked ? 2 : swatch.hovered ? 1 : 0
+            border.width: swatch.checked
+                ? 2
+                : swatch.hovered || swatch.visualFocus ? 1 : 0
             border.color: swatch.checked
                 ? root.theme.foxitDarkOrange
                 : root.theme.foxitBorderOrange
@@ -291,19 +285,19 @@ Flickable {
 
                     x: 0
                     y: highlightButton.height
-                    width: 236
-                    padding: 10
+                    width: 234
+                    padding: 12
                     focus: true
                     closePolicy: Popup.CloseOnEscape
                         | Popup.CloseOnPressOutsideParent
 
                     contentItem: Column {
-                        spacing: 6
+                        spacing: 10
 
                         Grid {
                             columns: 5
-                            columnSpacing: 4
-                            rowSpacing: 4
+                            columnSpacing: 5
+                            rowSpacing: 5
 
                             Repeater {
                                 model: root.highlightColors
@@ -316,13 +310,20 @@ Flickable {
                             }
                         }
 
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: "#eee8e4"
+                            Accessible.ignored: true
+                        }
+
                         ToolButton {
                             id: moreHighlightColorsButton
 
                             width: parent.width
-                            height: 30
-                            leftPadding: 5
-                            rightPadding: 5
+                            height: 32
+                            leftPadding: 7
+                            rightPadding: 7
                             //% "More colors…"
                             text: qsTrId("HighlightMoreColors")
                             onClicked: {
@@ -333,27 +334,64 @@ Flickable {
                                 highlightColorDialog.open()
                             }
 
-                            contentItem: Label {
-                                text: moreHighlightColorsButton.text
-                                color: root.theme.ribbonTextColor
-                                horizontalAlignment: Text.AlignLeft
-                                verticalAlignment: Text.AlignVCenter
+                            contentItem: Row {
+                                spacing: 8
+
+                                Grid {
+                                    y: Math.round(
+                                        (parent.height - height) / 2)
+                                    columns: 2
+                                    columnSpacing: 1
+                                    rowSpacing: 1
+                                    Accessible.ignored: true
+
+                                    Repeater {
+                                        model: [
+                                            "#ffeb3b", "#ec407a",
+                                            "#42a5f5", "#66bb6a"
+                                        ]
+
+                                        delegate: Rectangle {
+                                            required property var modelData
+
+                                            width: 6
+                                            height: 6
+                                            radius: 1
+                                            color: modelData
+                                            Accessible.ignored: true
+                                        }
+                                    }
+                                }
+
+                                Label {
+                                    height: parent.height
+                                    text: moreHighlightColorsButton.text
+                                    color: root.theme.ribbonTextColor
+                                    font.pixelSize: 11
+                                    verticalAlignment: Text.AlignVCenter
+                                }
                             }
 
                             background: Rectangle {
-                                radius: 3
+                                radius: 5
                                 color: moreHighlightColorsButton.down
                                     ? "#f5dfcf"
                                     : moreHighlightColorsButton.hovered
+                                        || moreHighlightColorsButton.visualFocus
                                         ? root.theme.foxitPaleOrange
                                         : "transparent"
+                                border.width:
+                                    moreHighlightColorsButton.visualFocus
+                                        ? 1
+                                        : 0
+                                border.color: root.theme.foxitBorderOrange
                             }
                         }
                     }
 
                     background: Rectangle {
-                        radius: 6
-                        color: "#ffffff"
+                        radius: 8
+                        color: root.theme.ribbonSurface
                         border.width: 1
                         border.color: root.theme.ribbonBorder
                     }
