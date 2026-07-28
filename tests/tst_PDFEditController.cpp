@@ -536,6 +536,65 @@ qsizetype changedPixelCount(const QImage &left,
     return changedPixels;
 }
 
+QRect changedPixelBounds(const QImage &left,
+                         const QImage &right,
+                         const QRect &area)
+{
+    if (left.isNull()
+        || right.isNull()
+        || left.size() != right.size()) {
+        return {};
+    }
+
+    const QRect boundedArea = area.intersected(left.rect());
+    QRect bounds;
+    for (int y = boundedArea.top(); y <= boundedArea.bottom(); ++y) {
+        for (int x = boundedArea.left(); x <= boundedArea.right(); ++x) {
+            const QColor leftColor = left.pixelColor(x, y);
+            const QColor rightColor = right.pixelColor(x, y);
+            const bool changed
+                = qAbs(leftColor.red() - rightColor.red()) > 8
+                || qAbs(leftColor.green() - rightColor.green()) > 8
+                || qAbs(leftColor.blue() - rightColor.blue()) > 8;
+            if (changed) {
+                bounds = bounds.united(QRect(x, y, 1, 1));
+            }
+        }
+    }
+    return bounds;
+}
+
+QRect darkChangedPixelBounds(const QImage &left,
+                             const QImage &right,
+                             const QRect &area)
+{
+    if (left.isNull()
+        || right.isNull()
+        || left.size() != right.size()) {
+        return {};
+    }
+
+    const QRect boundedArea = area.intersected(left.rect());
+    QRect bounds;
+    for (int y = boundedArea.top(); y <= boundedArea.bottom(); ++y) {
+        for (int x = boundedArea.left(); x <= boundedArea.right(); ++x) {
+            const QColor leftColor = left.pixelColor(x, y);
+            const QColor rightColor = right.pixelColor(x, y);
+            const bool changed
+                = qAbs(leftColor.red() - rightColor.red()) > 8
+                || qAbs(leftColor.green() - rightColor.green()) > 8
+                || qAbs(leftColor.blue() - rightColor.blue()) > 8;
+            const bool dark = rightColor.red() < 96
+                && rightColor.green() < 96
+                && rightColor.blue() < 96;
+            if (changed && dark) {
+                bounds = bounds.united(QRect(x, y, 1, 1));
+            }
+        }
+    }
+    return bounds;
+}
+
 bool containsPatternColors(const QImage &image)
 {
     bool red = false;
@@ -2731,6 +2790,69 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
             pageWithForms,
             fieldArea(0.40))
         > 100);
+    const QRect appearanceBounds = changedPixelBounds(
+        pageWithoutForms,
+        pageWithForms,
+        fieldArea(0.28).adjusted(-2, -2, 2, 2));
+    QVERIFY(!appearanceBounds.isEmpty());
+    constexpr int cornerExtent = 4;
+    const QVector<QRect> cornerArms{
+        QRect(appearanceBounds.left(),
+              appearanceBounds.top(),
+              cornerExtent,
+              1),
+        QRect(appearanceBounds.left(),
+              appearanceBounds.top(),
+              1,
+              cornerExtent),
+        QRect(appearanceBounds.right() - cornerExtent + 1,
+              appearanceBounds.top(),
+              cornerExtent,
+              1),
+        QRect(appearanceBounds.right(),
+              appearanceBounds.top(),
+              1,
+              cornerExtent),
+        QRect(appearanceBounds.left(),
+              appearanceBounds.bottom(),
+              cornerExtent,
+              1),
+        QRect(appearanceBounds.left(),
+              appearanceBounds.bottom() - cornerExtent + 1,
+              1,
+              cornerExtent),
+        QRect(appearanceBounds.right() - cornerExtent + 1,
+              appearanceBounds.bottom(),
+              cornerExtent,
+              1),
+        QRect(appearanceBounds.right(),
+              appearanceBounds.bottom() - cornerExtent + 1,
+              1,
+              cornerExtent)};
+    for (qsizetype arm = 0; arm < cornerArms.size(); ++arm) {
+        const qsizetype changedArmPixels = changedPixelCount(
+            pageWithoutForms,
+            pageWithForms,
+            cornerArms.at(arm));
+        QVERIFY2(
+            changedArmPixels >= cornerExtent - 1,
+            qPrintable(QStringLiteral(
+                "AcroForm text-field corner arm %1 contains only %2 "
+                "changed pixels; its border must remain square.")
+                           .arg(arm)
+                           .arg(changedArmPixels)));
+    }
+    const QRect textBounds = darkChangedPixelBounds(
+        pageWithoutForms,
+        pageWithForms,
+        fieldArea(0.28).adjusted(4, 4, -4, -4));
+    QVERIFY(!textBounds.isEmpty());
+    QVERIFY2(
+        textBounds.height() >= 7 && textBounds.height() <= 18,
+        qPrintable(QStringLiteral(
+            "The unfocused AcroForm appearance rendered text %1 px high; "
+            "it must stay consistent with the 12 pt native editor.")
+                       .arg(textBounds.height())));
 
     PDFDocumentSession freshSession;
     QVERIFY(freshSession.open(QUrl::fromLocalFile(sourcePath)));

@@ -513,16 +513,18 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
         const bool readOnly
             = (field.flags & PDFFormDesignerController::ReadOnly) != 0;
         const qreal borderWidth = selected ? 2.0 : 1.0;
+        const qreal fieldRadius
+            = field.type == PDFFormDesignerController::Text ? 0.0 : 5.0;
         appendRoundedRect(&geometryVertices,
                           fieldRect,
-                          5.0,
+                          fieldRadius,
                           selected ? m_accentColor : defaultBorder);
         appendRoundedRect(&geometryVertices,
                           fieldRect.adjusted(borderWidth,
                                              borderWidth,
                                              -borderWidth,
                                              -borderWidth),
-                          qMax(0.0, 5.0 - borderWidth),
+                          qMax(0.0, fieldRadius - borderWidth),
                           readOnly ? readOnlyBackground : Qt::white);
 
         QRectF contentRect = fieldRect.adjusted(7.0, 2.0, -7.0, -2.0);

@@ -402,7 +402,7 @@ Item {
                         || root.formsActive
                     ? 2
                     : 1
-                radius: 5
+                radius: 0
             }
         }
     }

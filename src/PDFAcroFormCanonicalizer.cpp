@@ -15,6 +15,8 @@
 
 namespace {
 
+constexpr qreal kTextFieldFontSize = 12.0;
+
 struct XrefEntry {
     qint64 offset = -1;
     int generation = 0;
@@ -767,6 +769,15 @@ QByteArray pdfNumber(qreal value)
     return number == "-0" ? QByteArrayLiteral("0") : number;
 }
 
+QByteArray textFieldDefaultAppearance(QByteArrayView fontResourceName)
+{
+    return QByteArrayLiteral("/")
+        + QByteArray(fontResourceName.data(), fontResourceName.size())
+        + ' '
+        + pdfNumber(kTextFieldFontSize)
+        + QByteArrayLiteral(" Tf 0 g");
+}
+
 QImage textFieldAppearanceImage(
     const PDFAcroFormCanonicalizer::TextField &field)
 {
@@ -791,17 +802,21 @@ QImage textFieldAppearanceImage(
     painter.setPen(QPen(QColor(140, 140, 140), qMax(1.0, rasterScale)));
     painter.setBrush(Qt::NoBrush);
     const qreal borderInset = qMax(0.5, rasterScale / 2.0);
-    painter.drawRoundedRect(
+    painter.drawRect(
         QRectF(
             borderInset,
             borderInset,
             pixelWidth - 2.0 * borderInset,
-            pixelHeight - 2.0 * borderInset),
-        5.0 * rasterScale,
-        5.0 * rasterScale);
+            pixelHeight - 2.0 * borderInset));
 
     QFont font(QStringLiteral("Helvetica"));
-    font.setPixelSize(qBound(10, qRound(pixelHeight * 0.42), 96));
+    const qreal pixelsPerPointY
+        = field.pageRect.height() > 0.0
+        ? pixelHeight / field.pageRect.height()
+        : rasterScale;
+    font.setPixelSize(qMax(
+        1,
+        qRound(kTextFieldFontSize * pixelsPerPointY)));
     painter.setFont(font);
     painter.setPen(QColor(32, 33, 36));
     const qreal horizontalPadding = qMax(4.0, pixelHeight * 0.1);
@@ -932,10 +947,10 @@ QByteArray textFieldWidgetObject(
             + QByteArray::number(pageReference.generation)
             + QByteArrayLiteral(" R");
     }
-    object += QByteArrayLiteral(" /F 4 /DA (/")
-        + fontResourceName
+    object += QByteArrayLiteral(" /F 4 /DA (")
+        + textFieldDefaultAppearance(fontResourceName)
         + QByteArrayLiteral(
-            " 12 Tf 0 g) "
+            ") "
             "/MK << /BG [1 1 1] /BC [0.55 0.55 0.55] >> "
             "/BS << /W 1 /S /S >> /AP << /N ")
         + QByteArray::number(appearanceObjectNumber)
@@ -1644,16 +1659,16 @@ QByteArray updatedAcroFormObject(const ParsedPdf &pdf,
                 "/DA") < 0) {
             dictionary.insert(
                 dictionary.size() - 2,
-                QByteArrayLiteral(" /DA (/")
-                    + fontResourceName
-                    + QByteArrayLiteral(" 12 Tf 0 g)"));
+                QByteArrayLiteral(" /DA (")
+                    + textFieldDefaultAppearance(fontResourceName)
+                    + QByteArrayLiteral(")"));
         }
     } else {
         dictionary = QByteArrayLiteral("<< /Fields ")
             + referenceArray(references)
-            + QByteArrayLiteral(" /NeedAppearances false /DA (/")
-            + fontResourceName
-            + QByteArrayLiteral(" 12 Tf 0 g) >>");
+            + QByteArrayLiteral(" /NeedAppearances false /DA (")
+            + textFieldDefaultAppearance(fontResourceName)
+            + QByteArrayLiteral(") >>");
     }
     if (!ensureFormFontResource(
             pdf,
