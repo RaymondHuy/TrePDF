@@ -38,6 +38,9 @@ Item {
     property bool highlighting: false
     property point highlightStart: Qt.point(0, 0)
     property point highlightCurrent: Qt.point(0, 0)
+    property bool drawingShape: false
+    property point shapeStart: Qt.point(0, 0)
+    property point shapeCurrent: Qt.point(0, 0)
     readonly property real fallbackBleed: 2
     readonly property real editBoxRadius: 4
     readonly property color editBoxColor: "#f5a55a"
@@ -55,6 +58,11 @@ Item {
         Math.min(highlightStart.y, highlightCurrent.y),
         Math.abs(highlightCurrent.x - highlightStart.x),
         Math.abs(highlightCurrent.y - highlightStart.y))
+    readonly property rect activeShapeRect: Qt.rect(
+        Math.min(shapeStart.x, shapeCurrent.x),
+        Math.min(shapeStart.y, shapeCurrent.y),
+        Math.max(1, Math.abs(shapeCurrent.x - shapeStart.x)),
+        Math.max(1, Math.abs(shapeCurrent.y - shapeStart.y)))
     readonly property bool interactionActive: !pooled
         && !controller.saving
         && controller.tool !== PDFEditController.BrowseTool
@@ -91,6 +99,7 @@ Item {
             highlightDrafts = []
             hoverCandidate = ({})
             cancelHighlight()
+            cancelShape()
             hideSelectCursor()
             return
         }
@@ -516,14 +525,193 @@ Item {
         return kind === "highlight"
     }
 
+    function isShapeKind(kind) {
+        return kind === "addedShape"
+    }
+
     function isMovableKind(kind) {
         return isImageKind(kind)
+            || isShapeKind(kind)
             || kind === "text"
             || kind === "addedText"
     }
 
     function isImageCandidate(candidate) {
         return hasCandidate(candidate) && isImageKind(candidate.kind)
+    }
+
+    function isShapeCandidate(candidate) {
+        return hasCandidate(candidate) && isShapeKind(candidate.kind)
+    }
+
+    function shapeDraft(objectId) {
+        for (let index = 0; index < contentDrafts.length; ++index) {
+            if (contentDrafts[index].objectId === objectId)
+                return contentDrafts[index]
+        }
+        return ({})
+    }
+
+    function distanceToSegment(point, start, end) {
+        const deltaX = end.x - start.x
+        const deltaY = end.y - start.y
+        const lengthSquared = deltaX * deltaX + deltaY * deltaY
+        if (lengthSquared <= 0)
+            return Math.hypot(point.x - start.x, point.y - start.y)
+
+        const projection = Math.max(
+            0,
+            Math.min(
+                1,
+                ((point.x - start.x) * deltaX
+                    + (point.y - start.y) * deltaY)
+                    / lengthSquared))
+        return Math.hypot(
+            point.x - (start.x + projection * deltaX),
+            point.y - (start.y + projection * deltaY))
+    }
+
+    function polygonContainsPoint(
+            points, point, tolerance, includeInterior) {
+        let inside = false
+        for (let index = 0, previous = points.length - 1;
+                index < points.length;
+                previous = index++) {
+            if (distanceToSegment(
+                    point,
+                    points[previous],
+                    points[index]) <= tolerance) {
+                return true
+            }
+
+            const current = points[index]
+            const prior = points[previous]
+            if ((current.y > point.y) !== (prior.y > point.y)
+                    && point.x < (prior.x - current.x)
+                        * (point.y - current.y)
+                        / (prior.y - current.y)
+                        + current.x) {
+                inside = !inside
+            }
+        }
+        return includeInterior && inside
+    }
+
+    function shapeContainsPoint(candidate, point, shapeWidth, shapeHeight) {
+        if (!isShapeCandidate(candidate)
+                || shapeWidth <= 0
+                || shapeHeight <= 0) {
+            return false
+        }
+
+        const strokeRatio = candidate.shapeStrokeWidthRatio !== undefined
+            ? Number(candidate.shapeStrokeWidthRatio)
+            : 0
+        const strokeWidth = Math.max(1.25, strokeRatio * root.height)
+        const inset = Math.min(
+            strokeWidth / 2,
+            shapeWidth / 4,
+            shapeHeight / 4)
+        const left = inset
+        const top = inset
+        const right = shapeWidth - inset
+        const bottom = shapeHeight - inset
+        const centerX = (left + right) / 2
+        const centerY = (top + bottom) / 2
+        const tolerance = root.controller.shapeHitToleranceRatio(
+            root.page,
+            strokeRatio) * root.height
+        const includeInterior = candidate.shapeFillColor !== undefined
+            && Number(candidate.shapeFillColor.a) > 0
+        const boundedRatio = value => Math.max(
+            0,
+            Math.min(1, Number(value)))
+        const lineRatioPoint = ratio => Qt.point(
+            boundedRatio(ratio.x) * shapeWidth,
+            boundedRatio(ratio.y) * shapeHeight)
+        const startRatio = candidate.shapeStart !== undefined
+            ? candidate.shapeStart
+            : Qt.point(0, 0)
+        const endRatio = candidate.shapeEnd !== undefined
+            ? candidate.shapeEnd
+            : Qt.point(1, 1)
+
+        switch (Number(candidate.shapeType)) {
+        case PDFEditController.RectangleShape:
+            return polygonContainsPoint([
+                Qt.point(left, top),
+                Qt.point(right, top),
+                Qt.point(right, bottom),
+                Qt.point(left, bottom)
+            ], point, tolerance, includeInterior)
+        case PDFEditController.EllipseShape: {
+            const radiusX = (right - left) / 2
+            const radiusY = (bottom - top) / 2
+            const deltaX = point.x - centerX
+            const deltaY = point.y - centerY
+            const outerX = deltaX / (radiusX + tolerance)
+            const outerY = deltaY / (radiusY + tolerance)
+            const insideOuter = outerX * outerX + outerY * outerY <= 1
+            if (!insideOuter
+                    || includeInterior
+                    || radiusX <= tolerance
+                    || radiusY <= tolerance) {
+                return insideOuter
+            }
+
+            const innerX = deltaX / (radiusX - tolerance)
+            const innerY = deltaY / (radiusY - tolerance)
+            return innerX * innerX + innerY * innerY >= 1
+        }
+        case PDFEditController.LineShape:
+            return distanceToSegment(
+                point,
+                lineRatioPoint(startRatio),
+                lineRatioPoint(endRatio)) <= tolerance
+        case PDFEditController.ArrowShape: {
+            const start = lineRatioPoint(startRatio)
+            const end = lineRatioPoint(endRatio)
+            if (distanceToSegment(point, start, end) <= tolerance)
+                return true
+
+            const deltaX = end.x - start.x
+            const deltaY = end.y - start.y
+            const length = Math.hypot(deltaX, deltaY)
+            if (length <= 0)
+                return false
+
+            const unitX = deltaX / length
+            const unitY = deltaY / length
+            const headLength = Math.min(
+                Math.max(6, strokeWidth * 4),
+                length * 0.35)
+            const halfWidth = headLength * 0.55
+            const baseX = end.x - unitX * headLength
+            const baseY = end.y - unitY * headLength
+            const headLeft = Qt.point(
+                baseX - unitY * halfWidth,
+                baseY + unitX * halfWidth)
+            const headRight = Qt.point(
+                baseX + unitY * halfWidth,
+                baseY - unitX * halfWidth)
+            return distanceToSegment(point, headLeft, end) <= tolerance
+                || distanceToSegment(point, end, headRight) <= tolerance
+        }
+        case PDFEditController.TriangleShape:
+            return polygonContainsPoint([
+                Qt.point(centerX, top),
+                Qt.point(right, bottom),
+                Qt.point(left, bottom)
+            ], point, tolerance, includeInterior)
+        case PDFEditController.DiamondShape:
+            return polygonContainsPoint([
+                Qt.point(centerX, top),
+                Qt.point(right, centerY),
+                Qt.point(centerX, bottom),
+                Qt.point(left, centerY)
+            ], point, tolerance, includeInterior)
+        }
+        return false
     }
 
     function updateSelectCursor(x, y, candidate) {
@@ -617,6 +805,7 @@ Item {
         if (!interactionActive
                 || controller.tool === PDFEditController.AddTextTool
                 || controller.tool === PDFEditController.AddImageTool
+                || controller.tool === PDFEditController.AddShapeTool
                 || controller.tool === PDFEditController.HighlightTool
                 || width <= 0
                 || height <= 0) {
@@ -659,6 +848,74 @@ Item {
         if (editing)
             commitEditing()
         controller.requestAddImage(page, x / width, y / height)
+    }
+
+    function beginShape(x, y) {
+        if (controller.tool !== PDFEditController.AddShapeTool
+                || width <= 0
+                || height <= 0) {
+            return
+        }
+
+        if (editing)
+            commitEditing()
+        selectionActions.close()
+        controller.clearSelection()
+        hoverCandidate = ({})
+        hideSelectCursor()
+        shapeStart = Qt.point(
+            Math.max(0, Math.min(width, x)),
+            Math.max(0, Math.min(height, y)))
+        shapeCurrent = shapeStart
+        drawingShape = true
+    }
+
+    function updateShape(x, y) {
+        if (!drawingShape)
+            return
+
+        const boundedCurrent = Qt.point(
+            Math.max(0, Math.min(width, x)),
+            Math.max(0, Math.min(height, y)))
+        const constrainedEnd = controller.constrainedShapeEnd(
+            page,
+            Qt.point(shapeStart.x / width, shapeStart.y / height),
+            Qt.point(
+                boundedCurrent.x / width,
+                boundedCurrent.y / height))
+        shapeCurrent = Qt.point(
+            constrainedEnd.x * width,
+            constrainedEnd.y * height)
+    }
+
+    function finishShape(x, y) {
+        if (!drawingShape)
+            return
+
+        updateShape(x, y)
+        const normalizedStart = Qt.point(
+            shapeStart.x / width,
+            shapeStart.y / height)
+        const normalizedEnd = Qt.point(
+            shapeCurrent.x / width,
+            shapeCurrent.y / height)
+        drawingShape = false
+        if (!controller.shapeDragIsValid(
+                page,
+                normalizedStart,
+                normalizedEnd)) {
+            return
+        }
+
+        controller.addShape(
+            page,
+            normalizedStart,
+            normalizedEnd)
+        reloadData()
+    }
+
+    function cancelShape() {
+        drawingShape = false
     }
 
     function beginHighlight(x, y) {
@@ -848,7 +1105,8 @@ Item {
     function deleteSelectedNonText() {
         if (editing
                 || (!isImageKind(controller.selectedKind)
-                    && !isHighlightKind(controller.selectedKind))) {
+                    && !isHighlightKind(controller.selectedKind)
+                    && !isShapeKind(controller.selectedKind))) {
             return false
         }
 
@@ -895,6 +1153,7 @@ Item {
     onPageChanged: {
         selectionActions.close()
         cancelHighlight()
+        cancelShape()
         cancelFrameResize()
         if (editing)
             commitEditing()
@@ -904,6 +1163,7 @@ Item {
     onPooledChanged: {
         selectionActions.close()
         cancelHighlight()
+        cancelShape()
         if (pooled)
             cancelFrameResize()
         if (pooled && editing)
@@ -912,8 +1172,10 @@ Item {
     }
 
     onInteractionActiveChanged: {
-        if (!interactionActive)
+        if (!interactionActive) {
             cancelHighlight()
+            cancelShape()
+        }
         reloadData()
     }
     onDraftTextureCurrentChanged: {
@@ -941,6 +1203,7 @@ Item {
         function onToolChanged() {
             selectionActions.close()
             root.cancelHighlight()
+            root.cancelShape()
             root.cancelFrameResize()
             if (root.editing)
                 root.commitEditing()
@@ -1128,7 +1391,7 @@ Item {
                 + root.fallbackBleed
                 - textPageY
             readonly property real contentBottom: textTop
-                + (isImage ? 0 : draftText.implicitHeight)
+                + (isImage || isShape ? 0 : draftText.implicitHeight)
                 + root.fallbackBleed
             readonly property real textHeight: Math.max(
                 1,
@@ -1144,17 +1407,19 @@ Item {
             readonly property bool hovered: root.hasCandidate(root.hoverCandidate)
                 && root.hoverCandidate.objectId === modelData.objectId
             readonly property bool isImage: root.isImageCandidate(modelData)
+            readonly property bool isShape: root.isShapeCandidate(modelData)
             readonly property bool sourceTextMoveOnly:
                 modelData.sourceTextMoveOnly === true
             readonly property bool hasText: modelData.text.length > 0
             readonly property bool hasContent:
-                modelData.deleted !== true && (isImage || hasText)
+                modelData.deleted !== true && (isImage || isShape || hasText)
             readonly property bool selected: root.controller.selectedPage === root.page
                 && root.controller.selectedObjectId === modelData.objectId
 
             function syncSelectedContentBounds() {
                 if (!selected
                         || isImage
+                        || isShape
                         || modelData.restoration === true
                         || root.controller.selectedObjectId !== modelData.objectId) {
                     return
@@ -1254,6 +1519,7 @@ Item {
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                 elide: Text.ElideNone
                 visible: !draftItem.isImage
+                    && !draftItem.isShape
                     && !(draftItem.sourceTextMoveOnly
                         && root.draftTextureReady)
                 onImplicitHeightChanged: {
@@ -1270,6 +1536,38 @@ Item {
                 sourceImage: draftItem.modelData.image
                 smooth: true
                 visible: draftItem.isImage
+                    && draftItem.modelData.deleted !== true
+                Accessible.ignored: true
+            }
+
+            ShapeDraftView {
+                x: draftItem.frameX - draftItem.x
+                y: draftItem.frameY - draftItem.y
+                width: draftItem.frameWidth
+                height: draftItem.frameHeight
+                shapeType: draftItem.modelData.shapeType !== undefined
+                    ? draftItem.modelData.shapeType
+                    : PDFEditController.RectangleShape
+                startRatio: draftItem.modelData.shapeStart !== undefined
+                    ? draftItem.modelData.shapeStart
+                    : Qt.point(0, 0)
+                endRatio: draftItem.modelData.shapeEnd !== undefined
+                    ? draftItem.modelData.shapeEnd
+                    : Qt.point(1, 1)
+                fillColor: draftItem.modelData.shapeFillColor !== undefined
+                    ? draftItem.modelData.shapeFillColor
+                    : "transparent"
+                strokeColor: draftItem.modelData.shapeStrokeColor !== undefined
+                    ? draftItem.modelData.shapeStrokeColor
+                    : "transparent"
+                strokeWidth: Math.max(
+                    1.25,
+                    Number(
+                        draftItem.modelData.shapeStrokeWidthRatio
+                            !== undefined
+                            ? draftItem.modelData.shapeStrokeWidthRatio
+                            : 0) * root.height)
+                visible: draftItem.isShape
                     && draftItem.modelData.deleted !== true
                 Accessible.ignored: true
             }
@@ -1296,13 +1594,15 @@ Item {
                 enabled: root.interactionActive
                     && draftItem.modelData.restoration !== true
                     && draftItem.hasContent
+                    && !draftItem.isShape
                     && root.controller.tool !== PDFEditController.AddTextTool
                     && root.controller.tool !== PDFEditController.AddImageTool
+                    && root.controller.tool !== PDFEditController.AddShapeTool
                     && root.controller.tool !== PDFEditController.HighlightTool
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
                 preventStealing: false
-                cursorShape: draftItem.isImage
+                cursorShape: draftItem.isImage || draftItem.isShape
                     ? Qt.ArrowCursor
                     : root.controller.tool === PDFEditController.SelectTool
                     ? root.selectCursorActive ? Qt.BlankCursor : Qt.ArrowCursor
@@ -1341,7 +1641,7 @@ Item {
                     }
                 }
                 onDoubleClicked: {
-                    if (!draftItem.isImage)
+                    if (!draftItem.isImage && !draftItem.isShape)
                         root.beginEditing(draftItem.modelData)
                 }
             }
@@ -1356,10 +1656,12 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton
         preventStealing: root.controller.tool
-            === PDFEditController.HighlightTool
+                === PDFEditController.HighlightTool
+            || root.controller.tool === PDFEditController.AddShapeTool
         cursorShape: root.selectCursorActive || root.addTextCursorActive
             ? Qt.BlankCursor
             : root.controller.tool === PDFEditController.HighlightTool
+                    || root.controller.tool === PDFEditController.AddShapeTool
                 ? Qt.CrossCursor
             : root.controller.tool === PDFEditController.AddTextTool
                     || root.controller.tool === PDFEditController.AddImageTool
@@ -1368,6 +1670,7 @@ Item {
             ? !root.hoverCandidate.editable
                 ? Qt.ForbiddenCursor
                 : root.isImageCandidate(root.hoverCandidate)
+                        || root.isShapeCandidate(root.hoverCandidate)
                     ? Qt.ArrowCursor
                     : root.isHighlightKind(root.hoverCandidate.kind)
                         ? Qt.PointingHandCursor
@@ -1377,13 +1680,15 @@ Item {
         Accessible.role: Accessible.Pane
         //% "PDF edit surface"
         Accessible.name: qsTrId("PdfEditSurface")
-        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text or images to move them, or drag with Highlight to mark an area"
+        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text, images, or shapes to move them, drag with Shapes to draw, or drag with Highlight to mark an area"
         Accessible.description: qsTrId("PdfEditSurfaceDescription")
 
         onEntered: root.updateHoverAtPosition(mouseX, mouseY)
         onPositionChanged: mouse => {
             if (root.highlighting)
                 root.updateHighlight(mouse.x, mouse.y)
+            else if (root.drawingShape)
+                root.updateShape(mouse.x, mouse.y)
             else
                 root.updateHoverAtPosition(mouse.x, mouse.y)
         }
@@ -1396,13 +1701,26 @@ Item {
             if (root.controller.tool === PDFEditController.HighlightTool) {
                 root.beginHighlight(mouse.x, mouse.y)
                 mouse.accepted = true
+            } else if (root.controller.tool
+                    === PDFEditController.AddShapeTool) {
+                root.beginShape(mouse.x, mouse.y)
+                mouse.accepted = true
             }
         }
-        onReleased: mouse => root.finishHighlight(mouse.x, mouse.y)
-        onCanceled: root.cancelHighlight()
+        onReleased: mouse => {
+            root.finishHighlight(mouse.x, mouse.y)
+            root.finishShape(mouse.x, mouse.y)
+        }
+        onCanceled: {
+            root.cancelHighlight()
+            root.cancelShape()
+        }
         onClicked: mouse => {
-            if (root.controller.tool === PDFEditController.HighlightTool)
+            if (root.controller.tool === PDFEditController.HighlightTool
+                    || root.controller.tool
+                        === PDFEditController.AddShapeTool) {
                 return
+            }
             if (root.controller.tool === PDFEditController.AddTextTool) {
                 root.beginAddingText(mouse.x, mouse.y)
                 return
@@ -1432,6 +1750,7 @@ Item {
         onDoubleClicked: mouse => {
             if (root.controller.tool === PDFEditController.AddTextTool
                     || root.controller.tool === PDFEditController.AddImageTool
+                    || root.controller.tool === PDFEditController.AddShapeTool
                     || root.controller.tool === PDFEditController.HighlightTool)
                 return
 
@@ -1451,6 +1770,9 @@ Item {
         Keys.onEscapePressed: event => {
             if (root.highlighting) {
                 root.cancelHighlight()
+                event.accepted = true
+            } else if (root.drawingShape) {
+                root.cancelShape()
                 event.accepted = true
             }
         }
@@ -1481,11 +1803,36 @@ Item {
         Accessible.ignored: true
     }
 
+    ShapeDraftView {
+        x: root.activeShapeRect.x
+        y: root.activeShapeRect.y
+        width: root.activeShapeRect.width
+        height: root.activeShapeRect.height
+        shapeType: root.controller.shapeType
+        startRatio: Qt.point(
+            (root.shapeStart.x - root.activeShapeRect.x)
+                / root.activeShapeRect.width,
+            (root.shapeStart.y - root.activeShapeRect.y)
+                / root.activeShapeRect.height)
+        endRatio: Qt.point(
+            (root.shapeCurrent.x - root.activeShapeRect.x)
+                / root.activeShapeRect.width,
+            (root.shapeCurrent.y - root.activeShapeRect.y)
+                / root.activeShapeRect.height)
+        fillColor: "transparent"
+        strokeColor: "#000000"
+        strokeWidth: 2
+        visible: root.drawingShape
+        z: 5
+        Accessible.ignored: true
+    }
+
     Popup {
         id: selectionActions
 
         readonly property bool compactSelection:
             root.isImageKind(root.controller.selectedKind)
+            || root.isShapeKind(root.controller.selectedKind)
             || root.isHighlightKind(root.controller.selectedKind)
 
         parent: root
@@ -1915,6 +2262,8 @@ Item {
     Item {
         id: resizeOverlay
 
+        readonly property var selectedDraft:
+            root.shapeDraft(root.controller.selectedObjectId)
         readonly property rect layoutFrameRect: root.controller.selectedFrameRect
         readonly property rect contentBounds: root.controller.selectedContentBounds
         readonly property rect frameRect: Qt.rect(
@@ -1939,8 +2288,8 @@ Item {
             && (root.editing
                 || (root.controller.tool !== PDFEditController.AddTextTool
                     && root.controller.tool !== PDFEditController.AddImageTool
-                    && root.controller.tool !== PDFEditController.HighlightTool)
-                || root.controller.selectedKind === "addedImage")
+                    && root.controller.tool !== PDFEditController.AddShapeTool
+                    && root.controller.tool !== PDFEditController.HighlightTool))
 
         Rectangle {
             anchors.fill: parent
@@ -1960,6 +2309,26 @@ Item {
             anchors.fill: parent
             enabled: !root.editing
                 && root.isMovableKind(root.controller.selectedKind)
+            containmentMask: QtObject {
+                function contains(point) {
+                    if (!root.isShapeKind(root.controller.selectedKind))
+                        return true
+
+                    return root.shapeContainsPoint(
+                        resizeOverlay.selectedDraft,
+                        Qt.point(
+                            point.x - root.boundingBoxPadding,
+                            point.y - root.boundingBoxPadding),
+                        Math.max(
+                            1,
+                            resizeOverlay.width
+                                - 2 * root.boundingBoxPadding),
+                        Math.max(
+                            1,
+                            resizeOverlay.height
+                                - 2 * root.boundingBoxPadding))
+                }
+            }
             acceptedButtons: Qt.LeftButton
             hoverEnabled: true
             preventStealing: true
@@ -1970,6 +2339,10 @@ Item {
                 if (root.isImageKind(root.controller.selectedKind)) {
                     //% "Move image"
                     return qsTrId("MoveImage")
+                }
+                if (root.isShapeKind(root.controller.selectedKind)) {
+                    //% "Move shape"
+                    return qsTrId("MoveShape")
                 }
                 //% "Move text"
                 return qsTrId("MoveText")
@@ -2077,6 +2450,10 @@ Item {
                     if (root.controller.selectedKind === "addedImage") {
                         //% "Resize image"
                         return qsTrId("ResizeImage")
+                    }
+                    if (root.isShapeKind(root.controller.selectedKind)) {
+                        //% "Resize shape"
+                        return qsTrId("ResizeShape")
                     }
                     //% "Resize text box"
                     return qsTrId("ResizeTextBox")

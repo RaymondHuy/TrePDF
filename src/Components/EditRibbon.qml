@@ -22,6 +22,32 @@ Flickable {
         "#ec407a", "#ab47bc", "#42a5f5", "#26c6da", "#66bb6a",
         "#fff176", "#b39ddb", "#f48fb1", "#90caf9", "#a5d6a7"
     ]
+    readonly property var shapeOptions: [
+        {
+            type: PDFEditController.RectangleShape,
+            icon: "../assets/icons/rectangle.svg"
+        },
+        {
+            type: PDFEditController.EllipseShape,
+            icon: "../assets/icons/oval.svg"
+        },
+        {
+            type: PDFEditController.LineShape,
+            icon: "../assets/icons/line.svg"
+        },
+        {
+            type: PDFEditController.ArrowShape,
+            icon: "../assets/icons/arrow.svg"
+        },
+        {
+            type: PDFEditController.TriangleShape,
+            icon: "../assets/icons/triangle.svg"
+        },
+        {
+            type: PDFEditController.DiamondShape,
+            icon: "../assets/icons/diamond.svg"
+        }
+    ]
 
     clip: true
     contentWidth: ribbonRow.implicitWidth + 16
@@ -58,6 +84,36 @@ Flickable {
         highlightColorPopup.close()
         editController.highlightColor = highlightColorWithOpacity(color)
         editController.tool = PDFEditController.HighlightTool
+    }
+
+    function shapeName(shapeType) {
+        switch (shapeType) {
+        case PDFEditController.RectangleShape:
+            //% "Rectangle"
+            return qsTrId("RectangleShape")
+        case PDFEditController.EllipseShape:
+            //% "Oval"
+            return qsTrId("OvalShape")
+        case PDFEditController.LineShape:
+            //% "Line"
+            return qsTrId("LineShape")
+        case PDFEditController.ArrowShape:
+            //% "Arrow"
+            return qsTrId("ArrowShape")
+        case PDFEditController.TriangleShape:
+            //% "Triangle"
+            return qsTrId("TriangleShape")
+        case PDFEditController.DiamondShape:
+            //% "Diamond"
+            return qsTrId("DiamondShape")
+        }
+        return ""
+    }
+
+    function selectShape(shapeType) {
+        shapePopup.close()
+        editController.shapeType = shapeType
+        editController.tool = PDFEditController.AddShapeTool
     }
 
     component HighlightColorSwatch: ToolButton {
@@ -106,6 +162,65 @@ Flickable {
                 ? 2
                 : swatch.hovered || swatch.visualFocus ? 1 : 0
             border.color: swatch.checked
+                ? root.theme.foxitDarkOrange
+                : root.theme.foxitBorderOrange
+        }
+    }
+
+    component ShapeOptionButton: ToolButton {
+        id: shapeOption
+
+        required property int optionType
+        required property url optionIconSource
+
+        width: 92
+        height: 66
+        padding: 5
+        checkable: true
+        checked: root.editController.tool === PDFEditController.AddShapeTool
+            && root.editController.shapeType === optionType
+        focusPolicy: Qt.TabFocus
+        Accessible.name: root.shapeName(optionType)
+        onClicked: root.selectShape(optionType)
+
+        contentItem: Column {
+            spacing: 3
+
+            Image {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 46
+                height: 30
+                source: shapeOption.optionIconSource
+                sourceSize: Qt.size(width * 3, height * 3)
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
+                Accessible.ignored: true
+            }
+
+            Label {
+                width: parent.width
+                text: root.shapeName(shapeOption.optionType)
+                color: root.theme.ribbonTextColor
+                font.pixelSize: 10
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+            }
+        }
+
+        background: Rectangle {
+            radius: 5
+            color: shapeOption.down
+                ? "#f5dfcf"
+                : shapeOption.hovered
+                        || shapeOption.visualFocus
+                        || shapeOption.checked
+                    ? root.theme.foxitPaleOrange
+                    : "transparent"
+            border.width: shapeOption.checked
+                ? 2
+                : shapeOption.hovered || shapeOption.visualFocus ? 1 : 0
+            border.color: shapeOption.checked
                 ? root.theme.foxitDarkOrange
                 : root.theme.foxitBorderOrange
         }
@@ -182,12 +297,62 @@ Flickable {
             }
 
             RibbonButton {
+                id: shapeButton
+
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Shapes"
                 text: qsTrId("Shapes")
                 iconSource: "../assets/icons/shapes.svg"
-                onClicked: root.toolRequested(text)
+                menuIndicatorVisible: true
+                //% "Choose shape"
+                menuToolTipText: qsTrId("ChooseShape")
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.AddShapeTool
+                onClicked: shapePopup.open()
+                onMenuRequested: shapePopup.open()
+                onEnabledChanged: {
+                    if (!enabled)
+                        shapePopup.close()
+                }
+
+                Popup {
+                    id: shapePopup
+
+                    x: shapeButton.width - width
+                    y: shapeButton.height
+                    width: 300
+                    padding: 8
+                    focus: true
+                    closePolicy: Popup.CloseOnEscape
+                        | Popup.CloseOnPressOutsideParent
+
+                    contentItem: Grid {
+                        columns: 3
+                        columnSpacing: 4
+                        rowSpacing: 4
+
+                        Repeater {
+                            model: root.shapeOptions
+
+                            delegate: ShapeOptionButton {
+                                required property var modelData
+
+                                optionType: modelData.type
+                                optionIconSource: modelData.icon
+                            }
+                        }
+                    }
+
+                    background: Rectangle {
+                        radius: 7
+                        color: root.theme.ribbonSurface
+                        border.width: 1
+                        border.color: root.theme.ribbonBorder
+                    }
+                }
             }
         }
 

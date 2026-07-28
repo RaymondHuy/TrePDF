@@ -20,6 +20,7 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMutexLocker>
+#include <QPolygonF>
 #include <QQuickTextDocument>
 #include <QRunnable>
 #include <QSet>
@@ -43,6 +44,10 @@ constexpr qreal kAddedTextMinimumWidthRatio = 0.02;
 constexpr qreal kAddedTextHeightRatio = 0.04;
 constexpr qreal kAddedTextFontSizeRatio = 0.022;
 constexpr qreal kAddedImageMaximumDimensionRatio = 0.25;
+constexpr qreal kMinimumShapeDragPoints = 3.0;
+constexpr qreal kMinimumShapeFramePoints = 6.0;
+constexpr qreal kAddedShapeStrokeWidthRatio = 0.0022;
+constexpr qreal kShapeAxisSnapRatio = 0.12;
 constexpr qreal kMinimumHighlightDimensionRatio = 0.0005;
 constexpr int kHighlightRed = 255;
 constexpr int kHighlightGreen = 235;
@@ -248,6 +253,259 @@ bool isTextCandidateKind(const QString &kind)
 {
     return kind == QLatin1String("text")
         || kind == QLatin1String("addedText");
+}
+
+bool isShapeCandidateKind(const QString &kind)
+{
+    return kind == QLatin1String("addedShape");
+}
+
+bool isSupportedShapeType(PDFEditController::ShapeType shapeType)
+{
+    switch (shapeType) {
+    case PDFEditController::RectangleShape:
+    case PDFEditController::EllipseShape:
+    case PDFEditController::LineShape:
+    case PDFEditController::ArrowShape:
+    case PDFEditController::TriangleShape:
+    case PDFEditController::DiamondShape:
+        return true;
+    }
+    return false;
+}
+
+QString shapeLabel(PDFEditController::ShapeType shapeType)
+{
+    switch (shapeType) {
+    case PDFEditController::RectangleShape:
+        //% "Rectangle"
+        return qtTrId("RectangleShape");
+    case PDFEditController::EllipseShape:
+        //% "Oval"
+        return qtTrId("OvalShape");
+    case PDFEditController::LineShape:
+        //% "Line"
+        return qtTrId("LineShape");
+    case PDFEditController::ArrowShape:
+        //% "Arrow"
+        return qtTrId("ArrowShape");
+    case PDFEditController::TriangleShape:
+        //% "Triangle"
+        return qtTrId("TriangleShape");
+    case PDFEditController::DiamondShape:
+        //% "Diamond"
+        return qtTrId("DiamondShape");
+    }
+    return {};
+}
+
+qreal distanceToSegment(const QPointF &point,
+                        const QPointF &start,
+                        const QPointF &end)
+{
+    const QPointF segment = end - start;
+    const qreal lengthSquared = QPointF::dotProduct(segment, segment);
+    if (lengthSquared <= 0.0) {
+        return std::hypot(point.x() - start.x(), point.y() - start.y());
+    }
+
+    const qreal projection = qBound<qreal>(
+        0.0,
+        QPointF::dotProduct(point - start, segment) / lengthSquared,
+        1.0);
+    const QPointF nearest = start + projection * segment;
+    return std::hypot(point.x() - nearest.x(), point.y() - nearest.y());
+}
+
+bool polygonContainsPoint(const QPolygonF &polygon,
+                          const QPointF &point,
+                          qreal tolerance,
+                          bool includeInterior)
+{
+    if (includeInterior
+        && polygon.containsPoint(point, Qt::OddEvenFill)) {
+        return true;
+    }
+
+    for (qsizetype index = 0; index < polygon.size(); ++index) {
+        const QPointF &start = polygon.at(index);
+        const QPointF &end = polygon.at((index + 1) % polygon.size());
+        if (distanceToSegment(point, start, end) <= tolerance) {
+            return true;
+        }
+    }
+    return false;
+}
+
+qreal shapeStrokeWidthPoints(qreal strokeWidthRatio, qreal pageHeight)
+{
+    return qMax<qreal>(0.75, strokeWidthRatio * pageHeight);
+}
+
+qreal shapeHitTolerancePoints(qreal strokeWidthRatio, qreal pageHeight)
+{
+    return qMax<qreal>(
+        3.0,
+        shapeStrokeWidthPoints(strokeWidthRatio, pageHeight) / 2.0 + 2.0);
+}
+
+bool shapeDragIsLongEnough(const QSizeF &pageSize,
+                           const QPointF &startPoint,
+                           const QPointF &endPoint)
+{
+    return !pageSize.isEmpty()
+        && std::hypot(
+               (endPoint.x() - startPoint.x()) * pageSize.width(),
+               (endPoint.y() - startPoint.y()) * pageSize.height())
+            >= kMinimumShapeDragPoints;
+}
+
+bool shapeContainsPoint(PDFEditController::ShapeType shapeType,
+                        const QRectF &normalizedFrame,
+                        const QPointF &startRatio,
+                        const QPointF &endRatio,
+                        qreal strokeWidthRatio,
+                        const QColor &fillColor,
+                        const QSizeF &pageSize,
+                        const QPointF &normalizedPoint)
+{
+    if (normalizedFrame.isEmpty() || pageSize.isEmpty()) {
+        return false;
+    }
+
+    const QRectF frame(
+        normalizedFrame.x() * pageSize.width(),
+        normalizedFrame.y() * pageSize.height(),
+        normalizedFrame.width() * pageSize.width(),
+        normalizedFrame.height() * pageSize.height());
+    const QPointF point(
+        normalizedPoint.x() * pageSize.width(),
+        normalizedPoint.y() * pageSize.height());
+    const qreal strokeWidth = shapeStrokeWidthPoints(
+        strokeWidthRatio,
+        pageSize.height());
+    const qreal inset = std::min({
+        strokeWidth / 2.0,
+        frame.width() / 4.0,
+        frame.height() / 4.0});
+    const QRectF drawingRect = frame.adjusted(
+        inset,
+        inset,
+        -inset,
+        -inset);
+    if (drawingRect.isEmpty()) {
+        return false;
+    }
+
+    const qreal tolerance = shapeHitTolerancePoints(
+        strokeWidthRatio,
+        pageSize.height());
+    const auto lineRatioPoint = [&frame](const QPointF &ratio) {
+        return QPointF(
+            frame.x()
+                + qBound<qreal>(0.0, ratio.x(), 1.0)
+                    * frame.width(),
+            frame.y()
+                + qBound<qreal>(0.0, ratio.y(), 1.0)
+                    * frame.height());
+    };
+    const bool includeInterior = fillColor.isValid()
+        && fillColor.alpha() > 0;
+
+    switch (shapeType) {
+    case PDFEditController::RectangleShape: {
+        QPolygonF polygon;
+        polygon << drawingRect.topLeft()
+                << drawingRect.topRight()
+                << drawingRect.bottomRight()
+                << drawingRect.bottomLeft();
+        return polygonContainsPoint(
+            polygon,
+            point,
+            tolerance,
+            includeInterior);
+    }
+    case PDFEditController::EllipseShape: {
+        const qreal radiusX = drawingRect.width() / 2.0;
+        const qreal radiusY = drawingRect.height() / 2.0;
+        const qreal deltaX = point.x() - drawingRect.center().x();
+        const qreal deltaY = point.y() - drawingRect.center().y();
+        const qreal outerX = deltaX / (radiusX + tolerance);
+        const qreal outerY = deltaY / (radiusY + tolerance);
+        const bool insideOuter
+            = outerX * outerX + outerY * outerY <= 1.0;
+        if (!insideOuter
+            || includeInterior
+            || radiusX <= tolerance
+            || radiusY <= tolerance) {
+            return insideOuter;
+        }
+
+        const qreal innerX = deltaX / (radiusX - tolerance);
+        const qreal innerY = deltaY / (radiusY - tolerance);
+        return innerX * innerX + innerY * innerY >= 1.0;
+    }
+    case PDFEditController::LineShape:
+        return distanceToSegment(
+                   point,
+                   lineRatioPoint(startRatio),
+                   lineRatioPoint(endRatio))
+            <= tolerance;
+    case PDFEditController::ArrowShape: {
+        const QPointF start = lineRatioPoint(startRatio);
+        const QPointF end = lineRatioPoint(endRatio);
+        if (distanceToSegment(point, start, end) <= tolerance) {
+            return true;
+        }
+
+        const QPointF direction = end - start;
+        const qreal length = std::hypot(direction.x(), direction.y());
+        if (length <= 0.0) {
+            return false;
+        }
+        const QPointF unit = direction / length;
+        const QPointF normal(-unit.y(), unit.x());
+        const qreal headLength = qMin(
+            qMax<qreal>(6.0, strokeWidth * 4.0),
+            length * 0.35);
+        const qreal halfWidth = headLength * 0.55;
+        const QPointF headBase = end - unit * headLength;
+        return distanceToSegment(
+                   point,
+                   headBase + normal * halfWidth,
+                   end)
+                <= tolerance
+            || distanceToSegment(
+                   point,
+                   end,
+                   headBase - normal * halfWidth)
+                <= tolerance;
+    }
+    case PDFEditController::TriangleShape: {
+        QPolygonF polygon;
+        polygon << QPointF(drawingRect.center().x(), drawingRect.top())
+                << drawingRect.bottomRight()
+                << drawingRect.bottomLeft();
+        return polygonContainsPoint(
+            polygon,
+            point,
+            tolerance,
+            includeInterior);
+    }
+    case PDFEditController::DiamondShape: {
+        QPolygonF polygon;
+        polygon << QPointF(drawingRect.center().x(), drawingRect.top())
+                << QPointF(drawingRect.right(), drawingRect.center().y())
+                << QPointF(drawingRect.center().x(), drawingRect.bottom())
+                << QPointF(drawingRect.left(), drawingRect.center().y());
+        return polygonContainsPoint(
+            polygon,
+            point,
+            tolerance,
+            includeInterior);
+    }
+    }
+    return false;
 }
 
 bool draftRepresentsDeletion(const QString &kind,
@@ -879,6 +1137,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::ImageObjectCreationFailed:
         //% "The image could not be created on page %1."
         return qtTrId("PdfSaveImageCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::ShapeObjectCreationFailed:
+        //% "The shape could not be created on page %1."
+        return qtTrId("PdfSaveShapeCreationFailed").arg(result.page + 1);
     case PDFSaveWriter::Error::HighlightAnnotationCreationFailed:
         //% "The highlight could not be created on page %1."
         return qtTrId("PdfSaveHighlightCreationFailed").arg(result.page + 1);
@@ -1006,6 +1267,21 @@ void PDFEditController::setTool(Tool tool)
         clearSelection();
     }
     emit toolChanged();
+}
+
+PDFEditController::ShapeType PDFEditController::shapeType() const
+{
+    return m_shapeType;
+}
+
+void PDFEditController::setShapeType(ShapeType shapeType)
+{
+    if (!isSupportedShapeType(shapeType) || m_shapeType == shapeType) {
+        return;
+    }
+
+    m_shapeType = shapeType;
+    emit shapeTypeChanged();
 }
 
 QColor PDFEditController::highlightColor() const
@@ -1544,6 +1820,9 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
 {
     ensureCacheRevision();
     const QPointF point(x, y);
+    const QSizeF pageSize = m_document
+        ? m_document->pageSize(page)
+        : QSizeF();
     const Candidate *bestCandidate = nullptr;
     qreal bestArea = 0.0;
 
@@ -1559,9 +1838,12 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
             return;
         }
 
-        const bool imageCandidate = candidate.kind == QLatin1String("image")
-            || candidate.kind == QLatin1String("addedImage");
-        const QRectF candidateRect = imageCandidate && draft != m_drafts.cend()
+        const bool draftGeometryCandidate
+            = candidate.kind == QLatin1String("image")
+            || candidate.kind == QLatin1String("addedImage")
+            || isShapeCandidateKind(candidate.kind);
+        const QRectF candidateRect
+            = draftGeometryCandidate && draft != m_drafts.cend()
             ? draft->frameRect
             : candidate.geometry.sourceRect;
         const QRectF hitRect = candidateRect.adjusted(
@@ -1570,6 +1852,18 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
             0.0025,
             0.0025);
         if (!hitRect.contains(point)) {
+            return;
+        }
+        if (isShapeCandidateKind(candidate.kind)
+            && !shapeContainsPoint(
+                candidate.shapeType,
+                candidateRect,
+                candidate.shapeStartRatio,
+                candidate.shapeEndRatio,
+                candidate.shapeStrokeWidthRatio,
+                candidate.fillColor,
+                pageSize,
+                point)) {
             return;
         }
 
@@ -1837,6 +2131,278 @@ QVariantMap PDFEditController::addImage(int page,
     markDraftStateChanged(page, true);
     emit historyStateChanged();
     return candidateMap(draft);
+}
+
+QVariantMap PDFEditController::addShape(int page,
+                                        const QPointF &startPoint,
+                                        const QPointF &endPoint)
+{
+    if (!m_document
+        || !m_document->isLoaded()
+        || m_saving
+        || page < 0
+        || page >= m_document->pageCount()) {
+        return {};
+    }
+    if (!documentAllowsEditing()) {
+        //% "This PDF does not permit content editing."
+        emit statusMessage(qtTrId("PdfEditingNotPermitted"));
+        return {};
+    }
+    if (!std::isfinite(startPoint.x())
+        || !std::isfinite(startPoint.y())
+        || !std::isfinite(endPoint.x())
+        || !std::isfinite(endPoint.y())
+        || !isSupportedShapeType(m_shapeType)) {
+        return {};
+    }
+
+    const QSizeF pageSize = m_document->pageSize(page);
+    if (pageSize.isEmpty()) {
+        return {};
+    }
+
+    const QPointF boundedStart(
+        qBound<qreal>(0.0, startPoint.x(), 1.0),
+        qBound<qreal>(0.0, startPoint.y(), 1.0));
+    const QPointF boundedEnd(
+        qBound<qreal>(0.0, endPoint.x(), 1.0),
+        qBound<qreal>(0.0, endPoint.y(), 1.0));
+    const QPointF shapeEnd = constrainedShapeEnd(
+        page,
+        boundedStart,
+        boundedEnd);
+    if (!shapeDragIsLongEnough(pageSize, boundedStart, shapeEnd)) {
+        return {};
+    }
+
+    const qreal minimumWidth = qMin<qreal>(
+        1.0,
+        kMinimumShapeFramePoints / pageSize.width());
+    const qreal minimumHeight = qMin<qreal>(
+        1.0,
+        kMinimumShapeFramePoints / pageSize.height());
+    const auto expandedInterval = [](qreal first,
+                                     qreal second,
+                                     qreal minimumSize) {
+        const qreal minimum = qMin(first, second);
+        const qreal maximum = qMax(first, second);
+        if (maximum - minimum >= minimumSize) {
+            return QPair<qreal, qreal>(minimum, maximum);
+        }
+        const qreal center = (first + second) / 2.0;
+        const qreal start = qBound<qreal>(
+            0.0,
+            center - minimumSize / 2.0,
+            1.0 - minimumSize);
+        return QPair<qreal, qreal>(start, start + minimumSize);
+    };
+    qreal frameLeft = qMin(boundedStart.x(), shapeEnd.x());
+    qreal frameTop = qMin(boundedStart.y(), shapeEnd.y());
+    qreal frameRight = qMax(boundedStart.x(), shapeEnd.x());
+    qreal frameBottom = qMax(boundedStart.y(), shapeEnd.y());
+    if (m_shapeType == LineShape || m_shapeType == ArrowShape) {
+        const qreal strokeWidth = shapeStrokeWidthPoints(
+            kAddedShapeStrokeWidthRatio,
+            pageSize.height());
+        const auto includeDevicePoint = [&frameLeft,
+                                         &frameTop,
+                                         &frameRight,
+                                         &frameBottom,
+                                         &pageSize](
+                                            const QPointF &point) {
+            const qreal normalizedX = point.x() / pageSize.width();
+            const qreal normalizedY = point.y() / pageSize.height();
+            frameLeft = qMin(frameLeft, normalizedX);
+            frameTop = qMin(frameTop, normalizedY);
+            frameRight = qMax(frameRight, normalizedX);
+            frameBottom = qMax(frameBottom, normalizedY);
+        };
+        if (m_shapeType == ArrowShape) {
+            const QPointF startDevice(
+                boundedStart.x() * pageSize.width(),
+                boundedStart.y() * pageSize.height());
+            const QPointF endDevice(
+                shapeEnd.x() * pageSize.width(),
+                shapeEnd.y() * pageSize.height());
+            const QPointF direction = endDevice - startDevice;
+            const qreal length = std::hypot(
+                direction.x(),
+                direction.y());
+            const QPointF unit = direction / length;
+            const QPointF normal(-unit.y(), unit.x());
+            const qreal headLength = qMin(
+                qMax<qreal>(6.0, strokeWidth * 4.0),
+                length * 0.35);
+            const qreal halfWidth = headLength * 0.55;
+            const QPointF headBase = endDevice - unit * headLength;
+            includeDevicePoint(headBase + normal * halfWidth);
+            includeDevicePoint(headBase - normal * halfWidth);
+        }
+
+        const qreal halfStroke = strokeWidth / 2.0;
+        frameLeft = qMax<qreal>(
+            0.0,
+            frameLeft - halfStroke / pageSize.width());
+        frameTop = qMax<qreal>(
+            0.0,
+            frameTop - halfStroke / pageSize.height());
+        frameRight = qMin<qreal>(
+            1.0,
+            frameRight + halfStroke / pageSize.width());
+        frameBottom = qMin<qreal>(
+            1.0,
+            frameBottom + halfStroke / pageSize.height());
+    }
+    const auto horizontal = expandedInterval(
+        frameLeft,
+        frameRight,
+        minimumWidth);
+    const auto vertical = expandedInterval(
+        frameTop,
+        frameBottom,
+        minimumHeight);
+    const QRectF frameRect(
+        horizontal.first,
+        vertical.first,
+        horizontal.second - horizontal.first,
+        vertical.second - vertical.first);
+    const auto pointRatio = [&frameRect](const QPointF &point) {
+        return QPointF(
+            qBound<qreal>(
+                0.0,
+                (point.x() - frameRect.x()) / frameRect.width(),
+                1.0),
+            qBound<qreal>(
+                0.0,
+                (point.y() - frameRect.y()) / frameRect.height(),
+                1.0));
+    };
+
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    Candidate candidate;
+    candidate.page = page;
+    candidate.addedOrder = ++m_nextAddedObjectId;
+    candidate.objectId = QStringLiteral("added-shape:")
+        + QString::number(candidate.addedOrder);
+    candidate.kind = QStringLiteral("addedShape");
+    candidate.label = shapeLabel(m_shapeType);
+    candidate.editable = true;
+    candidate.added = true;
+    candidate.shapeType = m_shapeType;
+    candidate.shapeStartRatio = pointRatio(boundedStart);
+    candidate.shapeEndRatio = pointRatio(shapeEnd);
+    candidate.shapeStrokeWidthRatio = kAddedShapeStrokeWidthRatio;
+    candidate.strokeColor = QColor(Qt::black);
+    candidate.fillColor = QColor(Qt::transparent);
+    setInitialGeometry(candidate, frameRect);
+
+    m_addedCandidates.append(std::move(candidate));
+    const Candidate &addedCandidate = m_addedCandidates.constLast();
+    const Draft draft = initialDraftForCandidate(addedCandidate);
+    const QString key = draftKey(page, addedCandidate.objectId);
+    m_drafts.insert(key, draft);
+
+    Command command;
+    command.key = key;
+    command.page = page;
+    command.objectId = addedCandidate.objectId;
+    command.hadBefore = false;
+    command.before = draft;
+    command.hadAfter = true;
+    command.after = draft;
+    m_undoStack.append(command);
+    m_redoStack.clear();
+
+    setTool(SelectTool);
+    setSelection(&addedCandidate);
+    markDraftStateChanged(page, true);
+    emit historyStateChanged();
+    return candidateMap(draft);
+}
+
+QPointF PDFEditController::constrainedShapeEnd(
+    int page,
+    const QPointF &startPoint,
+    const QPointF &endPoint) const
+{
+    const QPointF boundedStart(
+        qBound<qreal>(0.0, startPoint.x(), 1.0),
+        qBound<qreal>(0.0, startPoint.y(), 1.0));
+    QPointF boundedEnd(
+        qBound<qreal>(0.0, endPoint.x(), 1.0),
+        qBound<qreal>(0.0, endPoint.y(), 1.0));
+    if ((m_shapeType != LineShape && m_shapeType != ArrowShape)
+        || !m_document) {
+        return boundedEnd;
+    }
+
+    const QSizeF pageSize = m_document->pageSize(page);
+    if (pageSize.isEmpty()) {
+        return boundedEnd;
+    }
+
+    const qreal deltaX = (boundedEnd.x() - boundedStart.x())
+        * pageSize.width();
+    const qreal deltaY = (boundedEnd.y() - boundedStart.y())
+        * pageSize.height();
+    const qreal absoluteX = qAbs(deltaX);
+    const qreal absoluteY = qAbs(deltaY);
+    if (absoluteY <= absoluteX * kShapeAxisSnapRatio) {
+        boundedEnd.setY(boundedStart.y());
+    } else if (absoluteX <= absoluteY * kShapeAxisSnapRatio) {
+        boundedEnd.setX(boundedStart.x());
+    }
+    return boundedEnd;
+}
+
+bool PDFEditController::shapeDragIsValid(
+    int page,
+    const QPointF &startPoint,
+    const QPointF &endPoint) const
+{
+    if (!m_document
+        || !std::isfinite(startPoint.x())
+        || !std::isfinite(startPoint.y())
+        || !std::isfinite(endPoint.x())
+        || !std::isfinite(endPoint.y())) {
+        return false;
+    }
+
+    const QSizeF pageSize = m_document->pageSize(page);
+    if (pageSize.isEmpty()) {
+        return false;
+    }
+
+    const QPointF boundedStart(
+        qBound<qreal>(0.0, startPoint.x(), 1.0),
+        qBound<qreal>(0.0, startPoint.y(), 1.0));
+    const QPointF boundedEnd(
+        qBound<qreal>(0.0, endPoint.x(), 1.0),
+        qBound<qreal>(0.0, endPoint.y(), 1.0));
+    return shapeDragIsLongEnough(
+        pageSize,
+        boundedStart,
+        constrainedShapeEnd(page, boundedStart, boundedEnd));
+}
+
+qreal PDFEditController::shapeHitToleranceRatio(
+    int page,
+    qreal strokeWidthRatio) const
+{
+    if (!m_document || !std::isfinite(strokeWidthRatio)) {
+        return 0.0;
+    }
+
+    const QSizeF pageSize = m_document->pageSize(page);
+    if (pageSize.isEmpty()) {
+        return 0.0;
+    }
+    return shapeHitTolerancePoints(
+               qMax<qreal>(0.0, strokeWidthRatio),
+               pageSize.height())
+        / pageSize.height();
 }
 
 QVariantMap PDFEditController::addHighlight(int page,
@@ -2684,8 +3250,9 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
     }
 
     const bool sourceImageDraft = draft.candidate.kind == QLatin1String("image");
-    const bool imageDraft = sourceImageDraft
-        || draft.candidate.kind == QLatin1String("addedImage");
+    const bool fixedBoundsDraft = sourceImageDraft
+        || draft.candidate.kind == QLatin1String("addedImage")
+        || isShapeCandidateKind(draft.candidate.kind);
     if (!movesFrame && sourceImageDraft) {
         const qreal width = qBound<qreal>(0.0, draft.frameRect.width(), 1.0);
         const qreal height = qBound<qreal>(0.0, draft.frameRect.height(), 1.0);
@@ -2699,7 +3266,7 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         const qreal previousContentHeight = qMax(
             draft.frameRect.height(),
             draft.contentBounds.bottom() - draft.frameRect.y());
-        resizedContentBounds = imageDraft
+        resizedContentBounds = fixedBoundsDraft
             ? boundedRect
             : QRectF(
                   boundedRect.x(),
@@ -3271,6 +3838,7 @@ void PDFEditController::deleteSelectedObject()
         m_selectedCandidate.objectId);
     const auto existingDraft = m_drafts.constFind(key);
     if (m_selectedCandidate.kind == QLatin1String("addedImage")
+        || isShapeCandidateKind(m_selectedCandidate.kind)
         || m_selectedCandidate.kind == QLatin1String("highlight")) {
         if (existingDraft == m_drafts.cend()) {
             return;
@@ -4878,6 +5446,16 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("imagePixelWidth"), candidate.image.width());
     map.insert(QStringLiteral("imagePixelHeight"), candidate.image.height());
     map.insert(
+        QStringLiteral("shapeType"),
+        static_cast<int>(candidate.shapeType));
+    map.insert(QStringLiteral("shapeStart"), candidate.shapeStartRatio);
+    map.insert(QStringLiteral("shapeEnd"), candidate.shapeEndRatio);
+    map.insert(QStringLiteral("shapeFillColor"), candidate.fillColor);
+    map.insert(QStringLiteral("shapeStrokeColor"), candidate.strokeColor);
+    map.insert(
+        QStringLiteral("shapeStrokeWidthRatio"),
+        candidate.shapeStrokeWidthRatio);
+    map.insert(
         QStringLiteral("highlightRects"),
         candidate.highlightRects.isEmpty()
             ? QVariantList()
@@ -5793,6 +6371,7 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
     const auto existingDraft = m_drafts.constFind(key);
     const bool matchesOriginal
         = m_selectedCandidate.kind != QLatin1String("addedImage")
+        && !isShapeCandidateKind(m_selectedCandidate.kind)
         && sameDraftContent(normalizedDraft, originalDraft);
     bool changed = false;
     if (matchesOriginal) {

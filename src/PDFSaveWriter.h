@@ -35,6 +35,7 @@ public:
         FontUnavailable,
         TextObjectCreationFailed,
         ImageObjectCreationFailed,
+        ShapeObjectCreationFailed,
         HighlightAnnotationCreationFailed,
         PageCreationFailed,
         PageDeletionFailed,

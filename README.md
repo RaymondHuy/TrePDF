@@ -48,6 +48,15 @@ selected color as a standard PDF highlight annotation with quad points, opacity,
 and print visibility; a highlight-only save does not regenerate the page
 content stream.
 
+The Shapes dropdown offers rectangles, ovals, lines, arrows, triangles, and
+diamonds. After choosing a shape, drag over a page to create a vector session
+draft with a black outline and transparent fill, then select it to move, resize,
+or delete it. Near-horizontal and near-vertical lines and arrows snap to their
+axis. Shape creation and geometry changes participate in undo, redo, and
+discard. Save and Save As write shapes as PDF path objects, including cubic
+Bézier ovals, so they remain sharp when zoomed and keep the same placement on
+cropped or rotated pages.
+
 The Image tool changes the page cursor to a placement `+`. Clicking a page opens
 the local image picker; the chosen PNG, JPEG, BMP, GIF, WebP, or TIFF is decoded
 and snapshotted immediately, displayed as a resizable session draft, and added

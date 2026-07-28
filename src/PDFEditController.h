@@ -32,6 +32,7 @@ class PDFEditController : public QObject
     QML_ELEMENT
     Q_PROPERTY(PDFDocument *document READ document WRITE setDocument NOTIFY documentChanged FINAL)
     Q_PROPERTY(Tool tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
+    Q_PROPERTY(ShapeType shapeType READ shapeType WRITE setShapeType NOTIFY shapeTypeChanged FINAL)
     Q_PROPERTY(QColor highlightColor READ highlightColor WRITE setHighlightColor NOTIFY highlightColorChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
@@ -84,9 +85,20 @@ public:
         EditTextTool,
         AddTextTool,
         AddImageTool,
+        AddShapeTool,
         HighlightTool
     };
     Q_ENUM(Tool)
+
+    enum ShapeType {
+        RectangleShape,
+        EllipseShape,
+        LineShape,
+        ArrowShape,
+        TriangleShape,
+        DiamondShape
+    };
+    Q_ENUM(ShapeType)
 
     enum FontFilter {
         VietnameseFonts,
@@ -115,6 +127,8 @@ public:
 
     Tool tool() const;
     void setTool(Tool tool);
+    ShapeType shapeType() const;
+    void setShapeType(ShapeType shapeType);
     QColor highlightColor() const;
     void setHighlightColor(const QColor &color);
 
@@ -164,6 +178,18 @@ public:
                                      qreal x,
                                      qreal y,
                                      const QUrl &source);
+    Q_INVOKABLE QVariantMap addShape(int page,
+                                     const QPointF &startPoint,
+                                     const QPointF &endPoint);
+    Q_INVOKABLE QPointF constrainedShapeEnd(int page,
+                                            const QPointF &startPoint,
+                                            const QPointF &endPoint) const;
+    Q_INVOKABLE bool shapeDragIsValid(int page,
+                                      const QPointF &startPoint,
+                                      const QPointF &endPoint) const;
+    Q_INVOKABLE qreal shapeHitToleranceRatio(
+        int page,
+        qreal strokeWidthRatio) const;
     Q_INVOKABLE QVariantMap addHighlight(int page,
                                          const QRectF &selectionRect);
     Q_INVOKABLE int addBlankPage();
@@ -221,6 +247,7 @@ public:
 signals:
     void documentChanged();
     void toolChanged();
+    void shapeTypeChanged();
     void highlightColorChanged();
     void historyStateChanged();
     void savingChanged();
@@ -295,6 +322,10 @@ private:
         bool added = false;
         quint64 addedOrder = 0;
         QImage image;
+        ShapeType shapeType = RectangleShape;
+        QPointF shapeStartRatio;
+        QPointF shapeEndRatio = QPointF(1.0, 1.0);
+        qreal shapeStrokeWidthRatio = 0.0;
         QVector<QRectF> highlightRects;
         QColor highlightColor;
         QString reason;
@@ -552,6 +583,7 @@ private:
     QPointer<PDFDocument> m_document;
     QPointer<PDFFormController> m_formController;
     Tool m_tool = BrowseTool;
+    ShapeType m_shapeType = RectangleShape;
     QColor m_highlightColor;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
