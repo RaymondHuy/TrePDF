@@ -63,10 +63,13 @@ ToolButton {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         width: 18
+        topInset: 1
+        rightInset: 1
+        bottomInset: 1
         visible: control.menuIndicatorVisible
         focusPolicy: Qt.TabFocus
         text: "\u25be"
-        font.pixelSize: 11
+        font.pixelSize: 17
         Accessible.name: control.menuToolTipText
         onClicked: control.menuRequested()
 
