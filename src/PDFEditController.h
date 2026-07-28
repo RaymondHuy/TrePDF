@@ -32,6 +32,7 @@ class PDFEditController : public QObject
     QML_ELEMENT
     Q_PROPERTY(PDFDocument *document READ document WRITE setDocument NOTIFY documentChanged FINAL)
     Q_PROPERTY(Tool tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
+    Q_PROPERTY(QColor highlightColor READ highlightColor WRITE setHighlightColor NOTIFY highlightColorChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
@@ -114,6 +115,8 @@ public:
 
     Tool tool() const;
     void setTool(Tool tool);
+    QColor highlightColor() const;
+    void setHighlightColor(const QColor &color);
 
     bool hasDrafts() const;
     bool canUndo() const;
@@ -218,6 +221,7 @@ public:
 signals:
     void documentChanged();
     void toolChanged();
+    void highlightColorChanged();
     void historyStateChanged();
     void savingChanged();
     void textEditActiveChanged();
@@ -548,6 +552,7 @@ private:
     QPointer<PDFDocument> m_document;
     QPointer<PDFFormController> m_formController;
     Tool m_tool = BrowseTool;
+    QColor m_highlightColor;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
     QVector<int> m_pageCandidateLru;

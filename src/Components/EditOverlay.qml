@@ -1473,9 +1473,9 @@ Item {
         y: root.activeHighlightRect.y
         width: Math.max(1, root.activeHighlightRect.width)
         height: Math.max(1, root.activeHighlightRect.height)
-        color: "#30ffeb3b"
+        color: root.controller.highlightColor
         border.width: 1
-        border.color: "#f9a825"
+        border.color: "#8a8785"
         visible: root.highlighting
         z: 5
         Accessible.ignored: true

@@ -5038,6 +5038,16 @@ void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    QCOMPARE(controller.highlightColor(), QColor(255, 235, 59, 96));
+    QSignalSpy highlightColorSpy(
+        &controller,
+        &PDFEditController::highlightColorChanged);
+    const QColor chosenColor(255, 128, 171, 96);
+    controller.setHighlightColor(chosenColor);
+    QCOMPARE(controller.highlightColor(), chosenColor);
+    QCOMPARE(highlightColorSpy.count(), 1);
+    controller.setHighlightColor(chosenColor);
+    QCOMPARE(highlightColorSpy.count(), 1);
     const QVariantMap textCandidate = candidateForText(
         waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
@@ -5058,7 +5068,7 @@ void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
         selectionRect);
     QCOMPARE(
         highlight.value(QStringLiteral("highlightColor")).value<QColor>(),
-        QColor(255, 235, 59, 96));
+        chosenColor);
     QCOMPARE(
         highlight.value(QStringLiteral("highlightRects")).toList().size(),
         1);
@@ -5093,6 +5103,7 @@ void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
             .toString(),
         textCandidate.value(QStringLiteral("objectId")).toString());
 
+    controller.setHighlightColor(QColor(79, 195, 247, 96));
     QCOMPARE(controller.undo(), -1);
     QVERIFY(controller.draftsForPage(0).isEmpty());
     QVERIFY(candidateForKind(
@@ -5104,6 +5115,13 @@ void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
 
     QCOMPARE(controller.redo(), -1);
     QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("highlightColor"))
+            .value<QColor>(),
+        chosenColor);
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
     QVERIFY(!controller.canRedo());
@@ -5129,6 +5147,8 @@ void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
     controller.setDocument(&document);
     const QSizeF pageSize = document.pageSize(0);
     const QRectF selectionRect(0.10, 0.20, 0.30, 0.05);
+    const QColor highlightColor(139, 195, 74, 96);
+    controller.setHighlightColor(highlightColor);
     QVERIFY(!controller.addHighlight(0, selectionRect).isEmpty());
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
@@ -5144,7 +5164,7 @@ void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
         = inspectHighlights(outputPath);
     QVERIFY(inspection.readable);
     QCOMPARE(inspection.count, 1);
-    QCOMPARE(inspection.color, QColor(255, 235, 59, 96));
+    QCOMPARE(inspection.color, highlightColor);
     QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
     QCOMPARE(inspection.quadPoints.size(), 1);
 

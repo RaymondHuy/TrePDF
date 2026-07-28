@@ -40,11 +40,13 @@ PDF. Compatible text objects on the same visual line are grouped into one
 editable candidate while retaining every source object path for draft rendering
 and persistence.
 
-The Highlight tool lets the user drag a rectangular yellow mark over any page
-area. Highlights are per-tab session drafts with undo, redo, discard, selection,
-and deletion support. Save and Save As persist them as standard PDF highlight
-annotations with quad points, opacity, and print visibility; a highlight-only
-save does not regenerate the page content stream.
+The Highlight split button offers a compact curated marker-color grid and a
+system picker for custom colors before the user drags a rectangular mark over
+any page area. Highlights are per-tab session drafts with undo, redo,
+discard, selection, and deletion support. Save and Save As persist each draft's
+selected color as a standard PDF highlight annotation with quad points, opacity,
+and print visibility; a highlight-only save does not regenerate the page
+content stream.
 
 The Image tool changes the page cursor to a placement `+`. Clicking a page opens
 the local image picker; the chosen PNG, JPEG, BMP, GIF, WebP, or TIFF is decoded

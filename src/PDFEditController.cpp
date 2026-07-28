@@ -909,6 +909,11 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
 
 PDFEditController::PDFEditController(QObject *parent)
     : QObject(parent)
+    , m_highlightColor(
+          kHighlightRed,
+          kHighlightGreen,
+          kHighlightBlue,
+          kHighlightAlpha)
 {
     connect(
         this,
@@ -1001,6 +1006,26 @@ void PDFEditController::setTool(Tool tool)
         clearSelection();
     }
     emit toolChanged();
+}
+
+QColor PDFEditController::highlightColor() const
+{
+    return m_highlightColor;
+}
+
+void PDFEditController::setHighlightColor(const QColor &color)
+{
+    if (!color.isValid()) {
+        return;
+    }
+
+    const QColor normalizedColor = color.toRgb();
+    if (m_highlightColor == normalizedColor) {
+        return;
+    }
+
+    m_highlightColor = normalizedColor;
+    emit highlightColorChanged();
 }
 
 bool PDFEditController::hasDrafts() const
@@ -1856,11 +1881,7 @@ QVariantMap PDFEditController::addHighlight(int page,
     candidate.editable = true;
     candidate.added = true;
     candidate.highlightRects.append(normalizedRect);
-    candidate.highlightColor = QColor(
-        kHighlightRed,
-        kHighlightGreen,
-        kHighlightBlue,
-        kHighlightAlpha);
+    candidate.highlightColor = m_highlightColor;
     setInitialGeometry(candidate, normalizedRect);
 
     m_addedCandidates.append(std::move(candidate));
