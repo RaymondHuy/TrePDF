@@ -38,6 +38,8 @@ Flickable {
                 //% "Drag on the page to add a text field"
                 toolTipText: qsTrId("DragToAddTextField")
                 iconSource: "../assets/icons/text-input.svg"
+                icon.width: 32
+                icon.height: 32
                 preserveIconColors: true
                 primary: root.textFieldToolSelected
                 onClicked: root.textFieldToolRequested()

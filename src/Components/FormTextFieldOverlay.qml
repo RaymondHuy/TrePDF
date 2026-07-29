@@ -21,6 +21,10 @@ Item {
     property real placementStartY: 0
     property string pendingFocusFieldId: ""
     property string loadedEditorFieldId: ""
+    readonly property real resizeHandleSize: 8
+    readonly property real resizeHandleHitSize: 24
+    readonly property real minimumResizeWidth: 60
+    readonly property real minimumResizeHeight: 24
 
     function resetPlacement() {
         placementRect = Qt.rect(0, 0, 0, 0)
@@ -34,6 +38,51 @@ Item {
             Math.min(placementStartY, boundedY),
             Math.abs(boundedX - placementStartX),
             Math.abs(boundedY - placementStartY))
+    }
+
+    function resizedFieldRect(startRect, horizontal, vertical, deltaX, deltaY) {
+        const pageWidth = Math.max(1, root.width)
+        const pageHeight = Math.max(1, root.height)
+        const minimumWidth = Math.min(
+            Number(startRect.width),
+            root.minimumResizeWidth / pageWidth)
+        const minimumHeight = Math.min(
+            Number(startRect.height),
+            root.minimumResizeHeight / pageHeight)
+        let left = Number(startRect.x)
+        let top = Number(startRect.y)
+        let right = left + Number(startRect.width)
+        let bottom = top + Number(startRect.height)
+
+        if (horizontal < 0) {
+            left = Math.max(
+                0,
+                Math.min(
+                    right - minimumWidth,
+                    left + deltaX / pageWidth))
+        } else if (horizontal > 0) {
+            right = Math.min(
+                1,
+                Math.max(
+                    left + minimumWidth,
+                    right + deltaX / pageWidth))
+        }
+
+        if (vertical < 0) {
+            top = Math.max(
+                0,
+                Math.min(
+                    bottom - minimumHeight,
+                    top + deltaY / pageHeight))
+        } else if (vertical > 0) {
+            bottom = Math.min(
+                1,
+                Math.max(
+                    top + minimumHeight,
+                    bottom + deltaY / pageHeight))
+        }
+
+        return Qt.rect(left, top, right - left, bottom - top)
     }
 
     function syncActiveTextEditor() {
@@ -114,6 +163,7 @@ Item {
 
     function prepareForSessionChange() {
         pendingFocusFieldId = ""
+        activeFieldFrame.cancelResize()
         resetPlacement()
     }
 
@@ -125,12 +175,16 @@ Item {
         }
     }
     onFieldsVisibleChanged: {
-        if (!fieldsVisible)
+        if (!fieldsVisible) {
+            activeFieldFrame.cancelResize()
             controller.clearTextFieldFocus()
+        }
     }
     onFieldsInteractiveChanged: {
-        if (!fieldsInteractive)
+        if (!fieldsInteractive) {
+            activeFieldFrame.cancelResize()
             controller.clearTextFieldFocus()
+        }
     }
     onTextFieldToolActiveChanged: {
         if (!textFieldToolActive)
@@ -183,6 +237,129 @@ Item {
         z: 1
     }
 
+    component EdgeResizeHandle: Item {
+        id: resizeHandle
+
+        required property int horizontal
+        required property int vertical
+        required property int resizeCursor
+        property rect dragStartRect: Qt.rect(0, 0, 0, 0)
+        property point dragStartPosition: Qt.point(0, 0)
+
+        x: horizontal < 0
+            ? -width / 2
+            : horizontal > 0
+                ? activeFieldFrame.width - width / 2
+                : (activeFieldFrame.width - width) / 2
+        y: vertical < 0
+            ? -height / 2
+            : vertical > 0
+                ? activeFieldFrame.height - height / 2
+                : (activeFieldFrame.height - height) / 2
+        width: root.resizeHandleHitSize
+        height: root.resizeHandleHitSize
+        visible: root.formsActive
+            && root.fieldsInteractive
+            && !root.pooled
+            && !formFieldLayer.activeFieldSourceBacked
+        z: 20
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: root.resizeHandleSize
+            height: root.resizeHandleSize
+            radius: width / 2
+            color: "#f5a55a"
+            border.width: 1
+            border.color: "#fffdfb"
+            Accessible.ignored: true
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: resizeHandle.resizeCursor
+            activeFocusOnTab: true
+            Accessible.role: Accessible.Button
+            //% "Resize text box"
+            Accessible.name: qsTrId("ResizeTextBox")
+
+            onPressed: mouse => {
+                const fieldId = formFieldLayer.activeFieldId
+                if (fieldId.length === 0) {
+                    mouse.accepted = false
+                    return
+                }
+
+                resizeHandle.dragStartRect
+                    = formFieldLayer.activeFieldRect
+                resizeHandle.dragStartPosition = mapToItem(
+                    root,
+                    mouse.x,
+                    mouse.y)
+                activeFieldFrame.beginResize(
+                    fieldId,
+                    resizeHandle.dragStartRect)
+                mouse.accepted = true
+            }
+            onPositionChanged: mouse => {
+                if (!pressed || !activeFieldFrame.resizing)
+                    return
+
+                const currentPosition = mapToItem(
+                    root,
+                    mouse.x,
+                    mouse.y)
+                activeFieldFrame.updateResize(
+                    root.resizedFieldRect(
+                        resizeHandle.dragStartRect,
+                        resizeHandle.horizontal,
+                        resizeHandle.vertical,
+                        currentPosition.x
+                            - resizeHandle.dragStartPosition.x,
+                        currentPosition.y
+                            - resizeHandle.dragStartPosition.y))
+            }
+            onReleased: activeFieldFrame.finishResize()
+            onCanceled: activeFieldFrame.cancelResize()
+
+            Keys.onPressed: event => {
+                const step = (event.modifiers & Qt.ShiftModifier) ? 10 : 1
+                let deltaX = 0
+                let deltaY = 0
+                if (resizeHandle.horizontal !== 0) {
+                    if (event.key === Qt.Key_Left)
+                        deltaX = -step
+                    else if (event.key === Qt.Key_Right)
+                        deltaX = step
+                }
+                if (resizeHandle.vertical !== 0) {
+                    if (event.key === Qt.Key_Up)
+                        deltaY = -step
+                    else if (event.key === Qt.Key_Down)
+                        deltaY = step
+                }
+                if (deltaX === 0 && deltaY === 0)
+                    return
+
+                const fieldId = formFieldLayer.activeFieldId
+                const startRect = formFieldLayer.activeFieldRect
+                activeFieldFrame.beginResize(fieldId, startRect)
+                activeFieldFrame.updateResize(
+                    root.resizedFieldRect(
+                        startRect,
+                        resizeHandle.horizontal,
+                        resizeHandle.vertical,
+                        deltaX,
+                        deltaY))
+                activeFieldFrame.finishResize()
+                event.accepted = true
+            }
+        }
+    }
+
     FormFieldLayer {
         id: formFieldLayer
 
@@ -210,19 +387,61 @@ Item {
         id: activeFieldFrame
 
         property bool resizing: false
-        property real resizedWidth: 0
-        property real resizedHeight: 0
+        property rect resizedRect: Qt.rect(0, 0, 0, 0)
+        property string resizingFieldId: ""
 
-        x: formFieldLayer.activeFieldRect.x * root.width
-        y: formFieldLayer.activeFieldRect.y * root.height
-        width: resizing
-            ? resizedWidth
-            : formFieldLayer.activeFieldRect.width * root.width
-        height: resizing
-            ? resizedHeight
-            : formFieldLayer.activeFieldRect.height * root.height
+        x: (resizing
+            ? resizedRect.x
+            : formFieldLayer.activeFieldRect.x) * root.width
+        y: (resizing
+            ? resizedRect.y
+            : formFieldLayer.activeFieldRect.y) * root.height
+        width: (resizing
+            ? resizedRect.width
+            : formFieldLayer.activeFieldRect.width) * root.width
+        height: (resizing
+            ? resizedRect.height
+            : formFieldLayer.activeFieldRect.height) * root.height
         visible: formFieldLayer.activeFieldId.length > 0
         z: 4
+
+        function beginResize(fieldId, fieldRect) {
+            if (fieldId.length === 0 || fieldRect.width <= 0
+                    || fieldRect.height <= 0)
+                return
+
+            resizingFieldId = fieldId
+            resizedRect = fieldRect
+            resizing = true
+        }
+
+        function updateResize(fieldRect) {
+            if (resizing)
+                resizedRect = fieldRect
+        }
+
+        function finishResize() {
+            if (!resizing)
+                return
+
+            const fieldId = resizingFieldId
+            const fieldRect = resizedRect
+            if (fieldId.length > 0 && root.width > 0 && root.height > 0) {
+                root.controller.setTextFieldRect(
+                    fieldId,
+                    fieldRect.x,
+                    fieldRect.y,
+                    fieldRect.width,
+                    fieldRect.height)
+            }
+            resizing = false
+            resizingFieldId = ""
+        }
+
+        function cancelResize() {
+            resizing = false
+            resizingFieldId = ""
+        }
 
         Rectangle {
             anchors.fill: parent
@@ -274,7 +493,7 @@ Item {
             padding: 0
             font.pixelSize: 16
             font.bold: true
-            z: 20
+            z: 30
             //% "Delete"
             Accessible.name: qsTrId("Delete")
             onClicked: root.controller.removeTextField(
@@ -292,61 +511,28 @@ Item {
             }
         }
 
-        Rectangle {
-            id: resizeHandle
+        EdgeResizeHandle {
+            horizontal: 0
+            vertical: -1
+            resizeCursor: Qt.SizeVerCursor
+        }
 
-            x: activeFieldFrame.width - width / 2
-            y: activeFieldFrame.height - height / 2
-            width: 12
-            height: 12
-            visible: root.formsActive
-                && !formFieldLayer.activeFieldSourceBacked
-            radius: 3
-            color: "white"
-            border.color: root.theme.foxitDarkOrange
-            border.width: 2
-            z: 20
+        EdgeResizeHandle {
+            horizontal: 1
+            vertical: 0
+            resizeCursor: Qt.SizeHorCursor
+        }
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.LeftButton
-                cursorShape: Qt.SizeFDiagCursor
-                preventStealing: true
+        EdgeResizeHandle {
+            horizontal: 0
+            vertical: 1
+            resizeCursor: Qt.SizeVerCursor
+        }
 
-                onPressed: {
-                    activeFieldFrame.resizedWidth = activeFieldFrame.width
-                    activeFieldFrame.resizedHeight = activeFieldFrame.height
-                    activeFieldFrame.resizing = true
-                }
-                onPositionChanged: mouse => {
-                    if (!pressed)
-                        return
-
-                    const position = mapToItem(root, mouse.x, mouse.y)
-                    const maximumWidth = root.width - activeFieldFrame.x
-                    const maximumHeight = root.height - activeFieldFrame.y
-                    const minimumWidth = Math.min(60, maximumWidth)
-                    const minimumHeight = Math.min(24, maximumHeight)
-                    activeFieldFrame.resizedWidth = Math.max(
-                        minimumWidth,
-                        Math.min(maximumWidth,
-                                 position.x - activeFieldFrame.x))
-                    activeFieldFrame.resizedHeight = Math.max(
-                        minimumHeight,
-                        Math.min(maximumHeight,
-                                 position.y - activeFieldFrame.y))
-                }
-                onReleased: {
-                    root.controller.setTextFieldRect(
-                        formFieldLayer.activeFieldId,
-                        activeFieldFrame.x / root.width,
-                        activeFieldFrame.y / root.height,
-                        activeFieldFrame.resizedWidth / root.width,
-                        activeFieldFrame.resizedHeight / root.height)
-                    activeFieldFrame.resizing = false
-                }
-                onCanceled: activeFieldFrame.resizing = false
-            }
+        EdgeResizeHandle {
+            horizontal: -1
+            vertical: 0
+            resizeCursor: Qt.SizeHorCursor
         }
     }
 
