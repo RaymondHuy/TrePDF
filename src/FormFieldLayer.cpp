@@ -43,6 +43,41 @@ struct ColoredVertex
     QColor color;
 };
 
+qreal alignedDeviceCoordinate(qreal coordinate, qreal devicePixelRatio)
+{
+    return qRound64(coordinate * devicePixelRatio)
+        / devicePixelRatio;
+}
+
+QRectF alignedDeviceRect(const QRectF &rect, qreal devicePixelRatio)
+{
+    const qreal left = alignedDeviceCoordinate(
+        rect.left(),
+        devicePixelRatio);
+    const qreal top = alignedDeviceCoordinate(
+        rect.top(),
+        devicePixelRatio);
+    const qreal right = alignedDeviceCoordinate(
+        rect.right(),
+        devicePixelRatio);
+    const qreal bottom = alignedDeviceCoordinate(
+        rect.bottom(),
+        devicePixelRatio);
+    return QRectF(
+        QPointF(left, top),
+        QPointF(
+            qMax(left + 1.0 / devicePixelRatio, right),
+            qMax(top + 1.0 / devicePixelRatio, bottom)));
+}
+
+qreal alignedDeviceWidth(qreal width, qreal devicePixelRatio)
+{
+    return qMax<qreal>(
+        1.0,
+        qRound64(width * devicePixelRatio))
+        / devicePixelRatio;
+}
+
 void appendTriangle(QVector<ColoredVertex> *vertices,
                     const QPointF &first,
                     const QPointF &second,
@@ -572,27 +607,42 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
     const qreal minimumTextFieldPadding
         = PDFFormAppearance::kTextFieldMinimumHorizontalPaddingPoints
         * m_pointScale;
+    const qreal devicePixelRatio = qMax<qreal>(
+        1.0,
+        window()->devicePixelRatio());
     for (const RenderField &field : m_renderFields) {
         if (field.id == m_activeFieldId
             && field.type == PDFFormDesignerController::Text) {
             continue;
         }
-        const QRectF fieldRect = itemRect(field.normalizedRect);
-        if (fieldRect.isEmpty()) {
+        const QRectF rawFieldRect = itemRect(field.normalizedRect);
+        if (rawFieldRect.isEmpty()) {
             continue;
         }
 
         const bool textField
             = field.type == PDFFormDesignerController::Text;
+        // Source Widget rectangles commonly return with fractional coordinates
+        // after a Save/reopen cycle. Keep both opposite edges on the same
+        // physical-pixel phase so a one-point border cannot rasterize as one
+        // pixel on one side and two pixels on the other.
+        const QRectF fieldRect = textField
+            ? alignedDeviceRect(rawFieldRect, devicePixelRatio)
+            : rawFieldRect;
         const bool selected = m_formsActive && field.selected;
         const bool readOnly
             = (field.flags & PDFFormDesignerController::ReadOnly) != 0;
-        const qreal borderWidth = selected
+        const qreal requestedBorderWidth = selected
             ? 2.0
             : textField
                 ? PDFFormAppearance::kTextFieldBorderPointWidth
                     * m_pointScale
                 : 1.0;
+        const qreal borderWidth = textField
+            ? alignedDeviceWidth(
+                  requestedBorderWidth,
+                  devicePixelRatio)
+            : requestedBorderWidth;
         const qreal fieldRadius = textField ? 0.0 : 5.0;
         appendRoundedRect(&geometryVertices,
                           fieldRect,

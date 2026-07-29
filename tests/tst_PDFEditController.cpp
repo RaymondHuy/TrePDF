@@ -2963,10 +2963,32 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
             fieldArea(blankFieldRect))
         > 100);
     const QRect appearanceBounds = changedPixelBounds(
-        pageWithoutForms,
+        pageWithOneDesignerWidgetSuppressed,
         pageWithForms,
-        fieldArea(resizedFieldRect).adjusted(-2, -2, 2, 2));
+        pageWithForms.rect());
     QVERIFY(!appearanceBounds.isEmpty());
+    const QRect expectedAppearanceBounds = fieldArea(resizedFieldRect);
+    constexpr int appearanceEdgeTolerance = 2;
+    QVERIFY(
+        qAbs(
+            appearanceBounds.left()
+            - expectedAppearanceBounds.left())
+        <= appearanceEdgeTolerance);
+    QVERIFY(
+        qAbs(
+            appearanceBounds.top()
+            - expectedAppearanceBounds.top())
+        <= appearanceEdgeTolerance);
+    QVERIFY(
+        qAbs(
+            appearanceBounds.right()
+            - expectedAppearanceBounds.right())
+        <= appearanceEdgeTolerance);
+    QVERIFY(
+        qAbs(
+            appearanceBounds.bottom()
+            - expectedAppearanceBounds.bottom())
+        <= appearanceEdgeTolerance);
     constexpr int cornerExtent = 4;
     const QVector<QRect> cornerArms{
         QRect(appearanceBounds.left(),
