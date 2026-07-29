@@ -9,7 +9,8 @@ class PDFAcroFormCanonicalizer
 public:
     enum class Operation {
         Add,
-        Update
+        Update,
+        NormalizeAppearance
     };
 
     struct TextField {

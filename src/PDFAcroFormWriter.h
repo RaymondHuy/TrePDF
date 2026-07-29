@@ -19,6 +19,7 @@ public:
     enum class Operation {
         Add,
         Update,
+        NormalizeAppearance,
         Remove
     };
 

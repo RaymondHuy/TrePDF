@@ -1,5 +1,7 @@
 #include "PDFAcroFormCanonicalizer.h"
 
+#include "PDFFormAppearance.h"
+
 #include <QByteArray>
 #include <QFile>
 #include <QFont>
@@ -14,8 +16,6 @@
 #include <utility>
 
 namespace {
-
-constexpr qreal kTextFieldFontSize = 12.0;
 
 struct XrefEntry {
     qint64 offset = -1;
@@ -774,7 +774,7 @@ QByteArray textFieldDefaultAppearance(QByteArrayView fontResourceName)
     return QByteArrayLiteral("/")
         + QByteArray(fontResourceName.data(), fontResourceName.size())
         + ' '
-        + pdfNumber(kTextFieldFontSize)
+        + pdfNumber(PDFFormAppearance::kTextFieldFontPointSize)
         + QByteArrayLiteral(" Tf 0 g");
 }
 
@@ -799,9 +799,23 @@ QImage textFieldAppearanceImage(
 
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(QColor(140, 140, 140), qMax(1.0, rasterScale)));
+    const qreal pixelsPerPointX
+        = field.pageRect.width() > 0.0
+        ? pixelWidth / field.pageRect.width()
+        : rasterScale;
+    const qreal pixelsPerPointY
+        = field.pageRect.height() > 0.0
+        ? pixelHeight / field.pageRect.height()
+        : rasterScale;
+    const qreal borderPixelWidth = qMax(
+        1.0,
+        PDFFormAppearance::kTextFieldBorderPointWidth
+            * qMin(pixelsPerPointX, pixelsPerPointY));
+    painter.setPen(QPen(
+        QColor::fromRgb(PDFFormAppearance::kTextFieldBorderRgb),
+        borderPixelWidth));
     painter.setBrush(Qt::NoBrush);
-    const qreal borderInset = qMax(0.5, rasterScale / 2.0);
+    const qreal borderInset = qMax(0.5, borderPixelWidth / 2.0);
     painter.drawRect(
         QRectF(
             borderInset,
@@ -810,16 +824,18 @@ QImage textFieldAppearanceImage(
             pixelHeight - 2.0 * borderInset));
 
     QFont font(QStringLiteral("Helvetica"));
-    const qreal pixelsPerPointY
-        = field.pageRect.height() > 0.0
-        ? pixelHeight / field.pageRect.height()
-        : rasterScale;
     font.setPixelSize(qMax(
         1,
-        qRound(kTextFieldFontSize * pixelsPerPointY)));
+        qRound(
+            PDFFormAppearance::kTextFieldFontPointSize
+            * pixelsPerPointY)));
     painter.setFont(font);
     painter.setPen(QColor(32, 33, 36));
-    const qreal horizontalPadding = qMax(4.0, pixelHeight * 0.1);
+    const qreal horizontalPadding = qMax(
+        PDFFormAppearance::kTextFieldMinimumHorizontalPaddingPoints
+            * pixelsPerPointX,
+        pixelHeight
+            * PDFFormAppearance::kTextFieldHorizontalPaddingRatio);
     painter.drawText(
         QRectF(
             horizontalPadding,
@@ -954,7 +970,11 @@ QByteArray textFieldWidgetObject(
             "/MK << /BG [1 1 1] /BC [0.55 0.55 0.55] >> "
             "/BS << /W 1 /S /S >> /AP << /N ")
         + QByteArray::number(appearanceObjectNumber)
-        + QByteArrayLiteral(" 0 R >> >>\nendobj");
+        + QByteArrayLiteral(" 0 R >> /")
+        + QByteArray(PDFFormAppearance::kVersionKey)
+        + ' '
+        + QByteArray::number(PDFFormAppearance::kTextFieldVersion)
+        + QByteArrayLiteral(" >>\nendobj");
     return object;
 }
 
@@ -1418,6 +1438,164 @@ bool matchingDictionaryEnd(const char *data,
     }
     end = position;
     return true;
+}
+
+bool pdfValueEnd(const char *data,
+                 qsizetype size,
+                 qsizetype start,
+                 qsizetype &end)
+{
+    Cursor cursor(data, size, start);
+    cursor.skipWhitespaceAndComments();
+    start = cursor.position();
+    if (start >= size) {
+        return false;
+    }
+    if (data[start] == '(') {
+        end = start;
+        return skipLiteralString(data, size, end);
+    }
+    if (data[start] == '[') {
+        return matchingArrayEnd(data, size, start, end);
+    }
+    if (data[start] == '<') {
+        if (start + 1 < size && data[start + 1] == '<') {
+            return matchingDictionaryEnd(data, size, start, end);
+        }
+        end = start;
+        return skipHexString(data, size, end);
+    }
+    if (data[start] == '/') {
+        end = start + 1;
+        while (end < size && !isDelimiter(data[end])) {
+            ++end;
+        }
+        return end > start + 1;
+    }
+
+    ObjectReference reference;
+    if (parseReference(data, size, start, reference, &end)) {
+        return true;
+    }
+
+    end = start;
+    while (end < size && !isDelimiter(data[end])) {
+        ++end;
+    }
+    return end > start;
+}
+
+bool replaceTopLevelDictionaryValue(
+    QByteArray &object,
+    QByteArrayView key,
+    const QByteArray &replacement,
+    bool insertIfMissing,
+    QString &error)
+{
+    const qsizetype dictionaryStart = object.indexOf("<<");
+    qsizetype dictionaryEnd = -1;
+    if (dictionaryStart < 0
+        || !matchingDictionaryEnd(
+            object.constData(),
+            object.size(),
+            dictionaryStart,
+            dictionaryEnd)) {
+        error = QStringLiteral(
+            "A TrePDF Widget dictionary is malformed.");
+        return false;
+    }
+
+    qsizetype position = dictionaryStart + 2;
+    while (position < dictionaryEnd - 2) {
+        Cursor cursor(object.constData(), object.size(), position);
+        cursor.skipWhitespaceAndComments();
+        const qsizetype keyStart = cursor.position();
+        if (keyStart >= dictionaryEnd - 2) {
+            break;
+        }
+        if (object.at(keyStart) != '/') {
+            error = QStringLiteral(
+                "A TrePDF Widget dictionary entry is malformed.");
+            return false;
+        }
+
+        qsizetype keyEnd = keyStart + 1;
+        while (keyEnd < dictionaryEnd - 2
+               && !isDelimiter(object.at(keyEnd))) {
+            ++keyEnd;
+        }
+        Cursor valueCursor(
+            object.constData(),
+            object.size(),
+            keyEnd);
+        valueCursor.skipWhitespaceAndComments();
+        const qsizetype valueStart = valueCursor.position();
+        qsizetype valueEnd = -1;
+        if (valueStart >= dictionaryEnd - 2
+            || !pdfValueEnd(
+                object.constData(),
+                dictionaryEnd - 2,
+                valueStart,
+                valueEnd)) {
+            error = QStringLiteral(
+                "A TrePDF Widget dictionary value is malformed.");
+            return false;
+        }
+
+        const QByteArrayView currentKey(
+            object.constData() + keyStart,
+            keyEnd - keyStart);
+        if (currentKey == key) {
+            object.replace(
+                valueStart,
+                valueEnd - valueStart,
+                replacement);
+            return true;
+        }
+        position = valueEnd;
+    }
+
+    if (!insertIfMissing) {
+        return true;
+    }
+    object.insert(
+        dictionaryEnd - 2,
+        QByteArrayLiteral(" ")
+            + QByteArray(key.data(), key.size())
+            + ' '
+            + replacement);
+    return true;
+}
+
+QByteArray normalizedTextFieldAppearanceObject(
+    const QByteArray &existingObject,
+    int appearanceObjectNumber,
+    QString &error)
+{
+    // Keep field-level extensions such as /MaxLen, /Q and /AA intact. A
+    // legacy visual migration owns only the normal appearance and its marker.
+    QByteArray object = existingObject;
+    const QByteArray appearance
+        = QByteArrayLiteral("<< /N ")
+        + QByteArray::number(appearanceObjectNumber)
+        + QByteArrayLiteral(" 0 R >>");
+    const QByteArray version
+        = QByteArray::number(PDFFormAppearance::kTextFieldVersion);
+    if (!replaceTopLevelDictionaryValue(
+            object,
+            QByteArrayView("/AP"),
+            appearance,
+            true,
+            error)
+        || !replaceTopLevelDictionaryValue(
+            object,
+            QByteArrayView("/TrePDFApVersion"),
+            version,
+            true,
+            error)) {
+        return {};
+    }
+    return object;
 }
 
 bool dictionaryValue(const ParsedPdf &pdf,
@@ -1979,6 +2157,7 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
     struct ResolvedWidget {
         PlaceholderLocation placeholder;
         ObjectReference reference;
+        QByteArray existingObject;
         bool added = true;
     };
     QVector<ResolvedWidget> resolvedWidgets;
@@ -2015,6 +2194,7 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
         const ObjectReference reference = placeholder.isDirect()
             ? ObjectReference{nextObjectNumber++, 0}
             : placeholder.widget;
+        QByteArray existingWidget;
         if (!added
             && !visitedFieldObjects.contains(reference.number)) {
             error = QStringLiteral(
@@ -2023,7 +2203,7 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
             return false;
         }
         if (!added) {
-            const QByteArray existingWidget = completeObject(
+            existingWidget = completeObject(
                 pdf,
                 reference.number,
                 error);
@@ -2061,7 +2241,11 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
             return false;
         }
         resolvedWidgetObjectNumbers.insert(reference.number);
-        resolvedWidgets.append({placeholder, reference, added});
+        resolvedWidgets.append({
+            placeholder,
+            reference,
+            std::move(existingWidget),
+            added});
         widgetReferences.append(reference);
         if (added) {
             fields.append(reference);
@@ -2198,16 +2382,34 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
         }
         const int appearanceObjectNumber = nextObjectNumber++;
         const int imageObjectNumber = nextObjectNumber++;
-        incrementalObjects.append({
-            widgetReference,
-            textFieldWidgetObject(
+        QByteArray widgetObject;
+        if (textField.operation
+            == Operation::NormalizeAppearance) {
+            widgetObject = normalizedTextFieldAppearanceObject(
+                resolvedWidgets.at(index).existingObject,
+                appearanceObjectNumber,
+                error);
+        } else {
+            widgetObject = textFieldWidgetObject(
                 widgetReference,
                 textField,
                 appearanceObjectNumber,
                 placeholder.isDirect()
                     ? placeholder.container
                     : ObjectReference{},
-                defaultFontResourceName)});
+                defaultFontResourceName);
+        }
+        if (widgetObject.isEmpty()) {
+            if (error.isEmpty()) {
+                error = QStringLiteral(
+                    "The TrePDF Text Field dictionary could not be updated.");
+            }
+            file.unmap(mapped);
+            return false;
+        }
+        incrementalObjects.append({
+            widgetReference,
+            std::move(widgetObject)});
         incrementalObjects.append({
             ObjectReference{appearanceObjectNumber, 0},
             appearanceObject(

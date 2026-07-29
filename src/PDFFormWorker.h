@@ -97,6 +97,7 @@ struct TrePDFTextField {
     QString value;
     QString defaultValue;
     int flags = 0;
+    int appearanceVersion = 0;
     int sourcePage = -1;
     QRectF normalizedRect;
 };

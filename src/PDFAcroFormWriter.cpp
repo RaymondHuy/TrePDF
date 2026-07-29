@@ -211,7 +211,7 @@ bool resolveUnchangedUpdateValues(
     QHash<QString, int> unresolvedFields;
     for (int index = 0; index < fields.size(); ++index) {
         const PDFAcroFormWriter::Field &field = fields.at(index);
-        if (field.operation != PDFAcroFormWriter::Operation::Update
+        if (field.operation == PDFAcroFormWriter::Operation::Add
             || field.valueChanged) {
             continue;
         }
@@ -545,7 +545,11 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
             widgetFieldFlags(field),
             field.operation == Operation::Add
                 ? PDFAcroFormCanonicalizer::Operation::Add
-                : PDFAcroFormCanonicalizer::Operation::Update});
+                : field.operation
+                          == Operation::NormalizeAppearance
+                    ? PDFAcroFormCanonicalizer::Operation::
+                          NormalizeAppearance
+                    : PDFAcroFormCanonicalizer::Operation::Update});
     }
 
     SaveFileWriter writer(targetFilePath);

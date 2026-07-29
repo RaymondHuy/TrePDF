@@ -1,5 +1,6 @@
 #include "PDFFormWorker.h"
 
+#include "PDFFormAppearance.h"
 #include "PDFiumSynchronization.h"
 
 #include <QCoreApplication>
@@ -22,6 +23,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -1547,6 +1549,24 @@ public:
                         buffer,
                         byteCount);
                 });
+            float appearanceVersion = 0.0f;
+            if (FPDFAnnot_GetNumberValue(
+                    annotation,
+                    PDFFormAppearance::kVersionKey,
+                    &appearanceVersion)) {
+                const double parsedAppearanceVersion
+                    = static_cast<double>(appearanceVersion);
+                if (std::isfinite(parsedAppearanceVersion)
+                    && parsedAppearanceVersion >= 0.0
+                    && parsedAppearanceVersion
+                        <= static_cast<double>(
+                            std::numeric_limits<int>::max())
+                    && std::floor(parsedAppearanceVersion)
+                        == parsedAppearanceVersion) {
+                    field.appearanceVersion
+                        = static_cast<int>(parsedAppearanceVersion);
+                }
+            }
             const int fieldFlags = FPDFAnnot_GetFormFieldFlags(
                 m_formHandle,
                 annotation);

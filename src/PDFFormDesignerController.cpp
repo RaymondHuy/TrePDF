@@ -1,6 +1,7 @@
 #include "PDFFormDesignerController.h"
 
 #include "PDFDocument.h"
+#include "PDFFormAppearance.h"
 #include "PDFFormController.h"
 
 #include <QSet>
@@ -645,15 +646,37 @@ bool PDFFormDesignerController::hasDrafts() const
 }
 
 QVector<PDFFormDesignerController::SaveField>
-PDFFormDesignerController::saveFields() const
+PDFFormDesignerController::saveFields(
+    bool includeAppearanceNormalization) const
 {
     QVector<SaveField> fields;
     fields.reserve(m_fields.size());
+    QSet<int> normalizationPages;
+    if (includeAppearanceNormalization) {
+        // Normalize legacy peers only on pages where the user made a real
+        // form edit. This avoids rewriting every Widget in a large document.
+        for (const FormField &field : m_fields) {
+            if (field.changedProperties == NoPropertyChanges) {
+                continue;
+            }
+            const int page = displayPageForField(field);
+            if (page >= 0) {
+                normalizationPages.insert(page);
+            }
+        }
+    }
     for (const FormField &field : m_fields) {
-        if (field.changedProperties == NoPropertyChanges) {
+        const int page = displayPageForField(field);
+        const bool normalizeAppearance
+            = includeAppearanceNormalization
+            && field.sourceBacked
+            && field.appearanceVersion
+                < PDFFormAppearance::kTextFieldVersion
+            && normalizationPages.contains(page);
+        if (field.changedProperties == NoPropertyChanges
+            && !normalizeAppearance) {
             continue;
         }
-        const int page = displayPageForField(field);
         if (page < 0 || field.normalizedRect.isEmpty()) {
             continue;
         }
@@ -788,6 +811,7 @@ void PDFFormDesignerController::reloadSourceFields()
                 field.name = source.name;
                 field.tooltip = source.tooltip;
                 field.defaultValue = source.defaultValue;
+                field.appearanceVersion = source.appearanceVersion;
                 field.flags = (source.flags & FPDF_FORMFLAG_REQUIRED
                                    ? Required
                                    : NoFieldFlags)

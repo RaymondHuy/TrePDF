@@ -27,6 +27,19 @@ class FormFieldLayer : public QQuickItem
     Q_PROPERTY(bool sourceFieldsVisible READ sourceFieldsVisible
                    WRITE setSourceFieldsVisible
                    NOTIFY sourceFieldsVisibleChanged FINAL)
+    Q_PROPERTY(qreal pointScale READ pointScale WRITE setPointScale
+                   NOTIFY pointScaleChanged FINAL)
+    Q_PROPERTY(qreal textFieldFontPointSize READ textFieldFontPointSize
+                   CONSTANT FINAL)
+    Q_PROPERTY(qreal textFieldBorderPointWidth READ textFieldBorderPointWidth
+                   CONSTANT FINAL)
+    Q_PROPERTY(QColor textFieldBorderColor READ textFieldBorderColor
+                   CONSTANT FINAL)
+    Q_PROPERTY(qreal textFieldMinimumHorizontalPaddingPoints
+                   READ textFieldMinimumHorizontalPaddingPoints
+                   CONSTANT FINAL)
+    Q_PROPERTY(qreal textFieldHorizontalPaddingRatio
+                   READ textFieldHorizontalPaddingRatio CONSTANT FINAL)
     Q_PROPERTY(QColor accentColor READ accentColor WRITE setAccentColor
                    NOTIFY accentColorChanged FINAL)
     Q_PROPERTY(QString activeFieldId READ activeFieldId
@@ -52,6 +65,12 @@ public:
     bool fieldsVisible() const;
     bool fieldsInteractive() const;
     bool sourceFieldsVisible() const;
+    qreal pointScale() const;
+    qreal textFieldFontPointSize() const;
+    qreal textFieldBorderPointWidth() const;
+    QColor textFieldBorderColor() const;
+    qreal textFieldMinimumHorizontalPaddingPoints() const;
+    qreal textFieldHorizontalPaddingRatio() const;
     QColor accentColor() const;
     QString activeFieldId() const;
     QRectF activeFieldRect() const;
@@ -67,6 +86,7 @@ public:
     void setFieldsVisible(bool visible);
     void setFieldsInteractive(bool interactive);
     void setSourceFieldsVisible(bool visible);
+    void setPointScale(qreal scale);
     void setAccentColor(const QColor &color);
 
 signals:
@@ -77,6 +97,7 @@ signals:
     void fieldsVisibleChanged();
     void fieldsInteractiveChanged();
     void sourceFieldsVisibleChanged();
+    void pointScaleChanged();
     void accentColorChanged();
     void activeFieldChanged();
     void fieldActivated(const QString &fieldId);
@@ -111,8 +132,10 @@ private:
     bool m_fieldsVisible = false;
     bool m_fieldsInteractive = false;
     bool m_sourceFieldsVisible = false;
+    qreal m_pointScale = 1.0;
     QColor m_accentColor = QColor(QStringLiteral("#d85f12"));
     QFont m_renderFont;
+    QFont m_textFieldRenderFont;
     QVector<RenderField> m_renderFields;
     QString m_activeFieldId;
     QRectF m_activeFieldRect;

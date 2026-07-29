@@ -10,6 +10,7 @@ Item {
     required property AppTheme theme
     required property PDFFormDesignerController controller
     required property int page
+    required property real pagePointScale
     property bool pooled: false
     property bool formsActive: false
     property bool editActive: false
@@ -371,6 +372,7 @@ Item {
         fieldsVisible: root.fieldsVisible
         fieldsInteractive: root.fieldsInteractive
         accentColor: root.theme.foxitDarkOrange
+        pointScale: root.pagePointScale
         z: 2
 
         onFieldActivated: fieldId => {
@@ -545,15 +547,23 @@ Item {
                 && (root.formsActive
                     || !(formFieldLayer.activeFieldFlags
                          & PDFFormDesignerController.ReadOnly))
-            clip: false
+            clip: true
             selectByMouse: true
             activeFocusOnPress: true
-            leftPadding: 7
-            rightPadding: 7
-            topPadding: 2
-            bottomPadding: 2
+            leftPadding: Math.max(
+                formFieldLayer.textFieldMinimumHorizontalPaddingPoints
+                    * root.pagePointScale,
+                height * formFieldLayer.textFieldHorizontalPaddingRatio)
+            rightPadding: leftPadding
+            topPadding: 0
+            bottomPadding: 0
+            verticalAlignment: TextInput.AlignVCenter
             color: "#202124"
-            font.pixelSize: Math.max(10, Math.min(14, height * 0.5))
+            font.family: "Helvetica"
+            font.pixelSize: Math.max(
+                1,
+                formFieldLayer.textFieldFontPointSize
+                    * root.pagePointScale)
             //% "Enter text"
             placeholderText: qsTrId("EnterFormText")
 
@@ -582,11 +592,12 @@ Item {
                 border.color: activeTextEditor.activeFocus
                         || root.formsActive
                     ? root.theme.foxitDarkOrange
-                    : "#7f8c99"
+                    : formFieldLayer.textFieldBorderColor
                 border.width: activeTextEditor.activeFocus
                         || root.formsActive
                     ? 2
-                    : 1
+                    : formFieldLayer.textFieldBorderPointWidth
+                        * root.pagePointScale
                 radius: 0
             }
         }

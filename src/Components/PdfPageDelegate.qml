@@ -222,6 +222,7 @@ Item {
             theme: pageCard.theme
             controller: pageCard.formDesignerController
             page: pageCard.index
+            pagePointScale: pageCard.zoom
             pooled: pageCard.pooled
             formsActive: pageCard.formsTabActive
             editActive: pageCard.editTabActive

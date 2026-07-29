@@ -2911,11 +2911,16 @@ PDFSaveWriter::Result prepareAcroFormFields(
         target.tooltip = source.tooltip;
         target.value = source.value;
         target.defaultValue = source.defaultValue;
-        target.operation
-            = source.operation
-                    == PDFFormDesignerController::SaveField::Add
-            ? PDFAcroFormWriter::Operation::Add
-            : PDFAcroFormWriter::Operation::Update;
+        if (source.operation
+            == PDFFormDesignerController::SaveField::Add) {
+            target.operation = PDFAcroFormWriter::Operation::Add;
+        } else if (source.changedProperties
+                   == PDFFormDesignerController::NoPropertyChanges) {
+            target.operation
+                = PDFAcroFormWriter::Operation::NormalizeAppearance;
+        } else {
+            target.operation = PDFAcroFormWriter::Operation::Update;
+        }
         target.page = source.page;
         target.pageRect = pageRect;
         target.required = source.flags
@@ -2981,7 +2986,11 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         : sourceFilePathOverride;
     data->targetFilePath = targetFilePath;
     if (controller.m_formDesignerController) {
-        data->formFields = controller.m_formDesignerController->saveFields();
+        const bool normalizeSourceFieldAppearances
+            = controller.m_formDesignerController->hasDrafts();
+        data->formFields
+            = controller.m_formDesignerController->saveFields(
+                normalizeSourceFieldAppearances);
     }
     data->deletedSourcePages.reserve(controller.m_deletedSourcePages.size());
     for (int page : controller.m_deletedSourcePages) {

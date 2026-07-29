@@ -68,6 +68,7 @@ qt_add_qml_module(trepdf
         src/PDFEditController.h
         src/PDFFormController.cpp
         src/PDFFormController.h
+        src/PDFFormAppearance.h
         src/PDFFormDesignerController.cpp
         src/PDFFormDesignerController.h
         src/PDFFormView.cpp

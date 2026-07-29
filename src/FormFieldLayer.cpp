@@ -1,5 +1,7 @@
 #include "FormFieldLayer.h"
 
+#include "PDFFormAppearance.h"
+
 #include <QAbstractItemModel>
 #include <QFont>
 #include <QFontMetricsF>
@@ -187,24 +189,48 @@ void configureTextNode(QSGTextNode *node, const QRectF &viewport)
 void appendText(QSGTextNode *node,
                 const QString &value,
                 const QFont &baseFont,
-                const QRectF &rect)
+                const QRectF &rect,
+                int pixelSize,
+                bool elide)
 {
     if (!node || value.isEmpty() || rect.isEmpty()) {
         return;
     }
 
     QFont font = baseFont;
-    font.setPixelSize(qRound(qBound(10.0, rect.height() * 0.5, 14.0)));
+    font.setPixelSize(qMax(1, pixelSize));
     const QFontMetricsF metrics(font);
-    const QString elidedText = metrics.elidedText(
-        value,
-        Qt::ElideRight,
-        qMax(0.0, rect.width()));
-    if (elidedText.isEmpty()) {
+    QString displayText;
+    if (elide) {
+        displayText = metrics.elidedText(
+            value,
+            Qt::ElideRight,
+            qMax(0.0, rect.width()));
+    } else if (metrics.horizontalAdvance(value) <= rect.width()) {
+        displayText = value;
+    } else {
+        qsizetype minimum = 0;
+        qsizetype maximum = value.size();
+        while (minimum < maximum) {
+            const qsizetype candidate
+                = minimum + (maximum - minimum + 1) / 2;
+            if (metrics.horizontalAdvance(value.left(candidate))
+                <= rect.width()) {
+                minimum = candidate;
+            } else {
+                maximum = candidate - 1;
+            }
+        }
+        if (minimum > 0 && value.at(minimum - 1).isHighSurrogate()) {
+            --minimum;
+        }
+        displayText = value.left(minimum);
+    }
+    if (displayText.isEmpty()) {
         return;
     }
 
-    QTextLayout layout(elidedText, font);
+    QTextLayout layout(displayText, font);
     layout.beginLayout();
     QTextLine line = layout.createLine();
     if (!line.isValid()) {
@@ -224,6 +250,7 @@ void appendText(QSGTextNode *node,
 FormFieldLayer::FormFieldLayer(QQuickItem *parent)
     : QQuickItem(parent)
     , m_renderFont(QGuiApplication::font())
+    , m_textFieldRenderFont(QStringLiteral("Helvetica"))
 {
     setFlag(ItemHasContents, true);
     setAcceptedMouseButtons(Qt::LeftButton);
@@ -262,6 +289,36 @@ bool FormFieldLayer::fieldsInteractive() const
 bool FormFieldLayer::sourceFieldsVisible() const
 {
     return m_sourceFieldsVisible;
+}
+
+qreal FormFieldLayer::pointScale() const
+{
+    return m_pointScale;
+}
+
+qreal FormFieldLayer::textFieldFontPointSize() const
+{
+    return PDFFormAppearance::kTextFieldFontPointSize;
+}
+
+qreal FormFieldLayer::textFieldBorderPointWidth() const
+{
+    return PDFFormAppearance::kTextFieldBorderPointWidth;
+}
+
+QColor FormFieldLayer::textFieldBorderColor() const
+{
+    return QColor::fromRgb(PDFFormAppearance::kTextFieldBorderRgb);
+}
+
+qreal FormFieldLayer::textFieldMinimumHorizontalPaddingPoints() const
+{
+    return PDFFormAppearance::kTextFieldMinimumHorizontalPaddingPoints;
+}
+
+qreal FormFieldLayer::textFieldHorizontalPaddingRatio() const
+{
+    return PDFFormAppearance::kTextFieldHorizontalPaddingRatio;
 }
 
 QColor FormFieldLayer::accentColor() const
@@ -468,6 +525,17 @@ void FormFieldLayer::setSourceFieldsVisible(bool visible)
     emit sourceFieldsVisibleChanged();
 }
 
+void FormFieldLayer::setPointScale(qreal scale)
+{
+    scale = qMax(0.01, scale);
+    if (qFuzzyCompare(m_pointScale, scale)) {
+        return;
+    }
+    m_pointScale = scale;
+    update();
+    emit pointScaleChanged();
+}
+
 void FormFieldLayer::setAccentColor(const QColor &color)
 {
     if (m_accentColor == color || !color.isValid()) {
@@ -496,9 +564,14 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
     }
 
     const QColor defaultBorder(QStringLiteral("#7f8c99"));
+    const QColor textFieldBorder
+        = QColor::fromRgb(PDFFormAppearance::kTextFieldBorderRgb);
     const QColor readOnlyBackground(QStringLiteral("#f3f4f5"));
     const QColor darkControl(QStringLiteral("#5f6368"));
     const QColor signatureLine(QStringLiteral("#9aa0a6"));
+    const qreal minimumTextFieldPadding
+        = PDFFormAppearance::kTextFieldMinimumHorizontalPaddingPoints
+        * m_pointScale;
     for (const RenderField &field : m_renderFields) {
         if (field.id == m_activeFieldId
             && field.type == PDFFormDesignerController::Text) {
@@ -509,25 +582,53 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
             continue;
         }
 
+        const bool textField
+            = field.type == PDFFormDesignerController::Text;
         const bool selected = m_formsActive && field.selected;
         const bool readOnly
             = (field.flags & PDFFormDesignerController::ReadOnly) != 0;
-        const qreal borderWidth = selected ? 2.0 : 1.0;
-        const qreal fieldRadius
-            = field.type == PDFFormDesignerController::Text ? 0.0 : 5.0;
+        const qreal borderWidth = selected
+            ? 2.0
+            : textField
+                ? PDFFormAppearance::kTextFieldBorderPointWidth
+                    * m_pointScale
+                : 1.0;
+        const qreal fieldRadius = textField ? 0.0 : 5.0;
         appendRoundedRect(&geometryVertices,
                           fieldRect,
                           fieldRadius,
-                          selected ? m_accentColor : defaultBorder);
+                          selected
+                              ? m_accentColor
+                              : textField
+                                  ? textFieldBorder
+                                  : defaultBorder);
         appendRoundedRect(&geometryVertices,
                           fieldRect.adjusted(borderWidth,
                                              borderWidth,
                                              -borderWidth,
                                              -borderWidth),
                           qMax(0.0, fieldRadius - borderWidth),
-                          readOnly ? readOnlyBackground : Qt::white);
+                          readOnly && !textField
+                              ? readOnlyBackground
+                              : Qt::white);
 
-        QRectF contentRect = fieldRect.adjusted(7.0, 2.0, -7.0, -2.0);
+        const qreal horizontalPadding
+            = textField
+            ? qMax(
+                  minimumTextFieldPadding,
+                  fieldRect.height()
+                      * PDFFormAppearance::kTextFieldHorizontalPaddingRatio)
+            : 7.0;
+        const qreal verticalPadding = textField ? 0.0 : 2.0;
+        QRectF contentRect = fieldRect.adjusted(
+            horizontalPadding,
+            verticalPadding,
+            -horizontalPadding,
+            -verticalPadding);
+        const int defaultFontPixelSize = qRound(qBound(
+            10.0,
+            contentRect.height() * 0.5,
+            14.0));
         switch (field.type) {
         case PDFFormDesignerController::Checkbox: {
             const qreal side = qMax(
@@ -606,7 +707,13 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                 {center.x(), center.y() + arrowWidth / 3.0},
                 darkControl);
             contentRect.adjust(0.0, 0.0, -arrowWidth - 5.0, 0.0);
-            appendText(textNode, field.value, m_renderFont, contentRect);
+            appendText(
+                textNode,
+                field.value,
+                m_renderFont,
+                contentRect,
+                defaultFontPixelSize,
+                true);
             break;
         }
         case PDFFormDesignerController::Signature:
@@ -615,11 +722,33 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                             contentRect.bottomRight(),
                             1.0,
                             signatureLine);
-            appendText(textNode, field.value, m_renderFont, contentRect);
+            appendText(
+                textNode,
+                field.value,
+                m_renderFont,
+                contentRect,
+                defaultFontPixelSize,
+                true);
+            break;
+        case PDFFormDesignerController::Date:
+            appendText(
+                textNode,
+                field.value,
+                m_renderFont,
+                contentRect,
+                defaultFontPixelSize,
+                true);
             break;
         case PDFFormDesignerController::Text:
-        case PDFFormDesignerController::Date:
-            appendText(textNode, field.value, m_renderFont, contentRect);
+            appendText(
+                textNode,
+                field.value,
+                m_textFieldRenderFont,
+                contentRect,
+                qRound(
+                    PDFFormAppearance::kTextFieldFontPointSize
+                    * m_pointScale),
+                false);
             break;
         }
     }

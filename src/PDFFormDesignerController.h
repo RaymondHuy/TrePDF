@@ -158,7 +158,8 @@ public:
     void setDocument(PDFDocument *document);
     void refreshSourceFieldValues();
     bool hasDrafts() const;
-    QVector<SaveField> saveFields() const;
+    QVector<SaveField> saveFields(
+        bool includeAppearanceNormalization = false) const;
     void clear();
     void resetFromDocument();
 
@@ -184,6 +185,7 @@ private:
         QString defaultValue;
         QStringList options;
         int flags = NoFieldFlags;
+        int appearanceVersion = 0;
         bool sourceBacked = false;
         quint32 changedProperties = AllPropertiesChanged;
     };

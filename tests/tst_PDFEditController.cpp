@@ -1713,6 +1713,8 @@ struct AcroFormFieldInspection {
     QString value;
     FS_RECTF rect{};
     bool hasAppearance = false;
+    bool hasMaxLength = false;
+    float maxLength = 0.0f;
     bool pointHit = false;
     bool focusHandled = false;
 };
@@ -1810,6 +1812,10 @@ AcroFormFieldInspection inspectAcroFormField(
                 inspection.hasAppearance = FPDFAnnot_HasKey(
                     annotation,
                     "AP");
+                inspection.hasMaxLength = FPDFAnnot_GetNumberValue(
+                    annotation,
+                    "MaxLen",
+                    &inspection.maxLength);
             }
             FPDFPage_CloseAnnot(annotation);
         }
@@ -2141,6 +2147,7 @@ private slots:
     void storesTransientTextFieldsByPage();
     void savesTextFieldAsAcroForm();
     void rehydratesTextFieldAfterSamePathSave();
+    void normalizesLegacyTextFieldAppearances();
     void addsTextFieldToExistingAcroForm();
     void rejectsDuplicateAcroFormFieldNames();
     void enablesFormScriptingAutomatically();
@@ -2759,6 +2766,13 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QCOMPARE(
         geometryChange.constFirst().normalizedRect,
         resizedFieldRect);
+    const QVector<PDFFormDesignerController::SaveField>
+        fieldsWithAppearanceNormalization
+        = formDesigner.saveFields(true);
+    QCOMPARE(fieldsWithAppearanceNormalization.size(), 1);
+    QCOMPARE(
+        fieldsWithAppearanceNormalization.constFirst().id,
+        fieldId);
     QVERIFY(formDesigner.hasDrafts());
     QVERIFY(editController.requestSave());
     QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
@@ -3048,6 +3062,143 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         nativeValueAfterBackspace,
         10000);
     QVERIFY(!freshSession.formDesignerController()->hasDrafts());
+}
+
+void PDFEditControllerTest::normalizesLegacyTextFieldAppearances()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("legacy-appearance-source.pdf"));
+    const QString legacyPath = m_temporaryDirectory.filePath(
+        QStringLiteral("legacy-appearance.pdf"));
+    const QString normalizedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("normalized-appearance.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument sourceDocument;
+    QVERIFY(sourceDocument.open(QUrl::fromLocalFile(sourcePath)));
+    PDFFormDesignerController sourceDesigner;
+    sourceDesigner.setDocument(&sourceDocument);
+    PDFEditController sourceEditor;
+    sourceEditor.setDocument(&sourceDocument);
+    sourceEditor.setFormDesignerController(&sourceDesigner);
+
+    const QString editedFieldId = sourceDesigner.addTextField(
+        0,
+        0.1,
+        0.2,
+        0.35,
+        0.07);
+    const QString legacyFieldId = sourceDesigner.addTextField(
+        0,
+        0.55,
+        0.2,
+        0.35,
+        0.07);
+    QVERIFY(!editedFieldId.isEmpty());
+    QVERIFY(!legacyFieldId.isEmpty());
+    QVERIFY(sourceDesigner.setFieldName(
+        editedFieldId,
+        QStringLiteral("EditedPeer")));
+    QVERIFY(sourceDesigner.setFieldName(
+        legacyFieldId,
+        QStringLiteral("LegacyPeer")));
+    QVERIFY(sourceDesigner.setFieldValue(
+        editedFieldId,
+        QStringLiteral("Edited value")));
+    QVERIFY(sourceDesigner.setFieldValue(
+        legacyFieldId,
+        QStringLiteral("Legacy value")));
+    const PDFSaveWriter::Result initialSave = PDFSaveWriter::save(
+        sourceEditor,
+        legacyPath);
+    QVERIFY2(initialSave.succeeded(), qPrintable(initialSave.detail));
+
+    QFile legacyFile(legacyPath);
+    QVERIFY(legacyFile.open(QIODevice::ReadWrite));
+    QByteArray legacyBytes = legacyFile.readAll();
+    const QByteArray appearanceMarker("/TrePDFApVersion 1");
+    const qsizetype firstMarker = legacyBytes.indexOf(appearanceMarker);
+    const qsizetype secondMarker = legacyBytes.indexOf(
+        appearanceMarker,
+        firstMarker + appearanceMarker.size());
+    QVERIFY(firstMarker >= 0);
+    QVERIFY(secondMarker > firstMarker);
+    const QByteArray legacyMaxLength
+        = QByteArrayLiteral("/MaxLen 12")
+              .leftJustified(appearanceMarker.size(), ' ');
+    QCOMPARE(legacyMaxLength.size(), appearanceMarker.size());
+    legacyBytes.replace(
+        secondMarker,
+        appearanceMarker.size(),
+        legacyMaxLength);
+    QVERIFY(legacyFile.seek(0));
+    QCOMPARE(legacyFile.write(legacyBytes), legacyBytes.size());
+    QVERIFY(legacyFile.resize(legacyBytes.size()));
+    legacyFile.close();
+
+    PDFDocument legacyDocument;
+    PDFFormController legacyFormController;
+    PDFFormDesignerController legacyDesigner;
+    PDFEditController legacyEditor;
+    legacyFormController.setDocument(&legacyDocument);
+    legacyDesigner.setFormController(&legacyFormController);
+    legacyDesigner.setDocument(&legacyDocument);
+    legacyEditor.setDocument(&legacyDocument);
+    legacyEditor.setFormController(&legacyFormController);
+    legacyEditor.setFormDesignerController(&legacyDesigner);
+    QVERIFY(legacyDocument.open(QUrl::fromLocalFile(legacyPath)));
+    QTRY_COMPARE_WITH_TIMEOUT(legacyDesigner.rowCount(), 2, 10000);
+
+    QVERIFY(legacyDesigner.setFieldValue(
+        editedFieldId,
+        QStringLiteral("Trigger normalization")));
+    const QVector<PDFFormDesignerController::SaveField> saveFields
+        = legacyDesigner.saveFields(true);
+    QCOMPARE(saveFields.size(), 2);
+    const auto legacyField = std::find_if(
+        saveFields.cbegin(),
+        saveFields.cend(),
+        [&legacyFieldId](
+            const PDFFormDesignerController::SaveField &field) {
+            return field.id == legacyFieldId;
+        });
+    QVERIFY(legacyField != saveFields.cend());
+    QCOMPARE(
+        legacyField->changedProperties,
+        static_cast<quint32>(
+            PDFFormDesignerController::NoPropertyChanges));
+
+    const PDFSaveWriter::Result normalizedSave = PDFSaveWriter::save(
+        legacyEditor,
+        normalizedPath);
+    QVERIFY2(
+        normalizedSave.succeeded(),
+        qPrintable(normalizedSave.detail));
+    const AcroFormFieldInspection normalizedLegacyField
+        = inspectAcroFormField(
+            normalizedPath,
+            QStringLiteral("LegacyPeer"));
+    QVERIFY(normalizedLegacyField.readable);
+    QVERIFY(normalizedLegacyField.hasAppearance);
+    QVERIFY(normalizedLegacyField.hasMaxLength);
+    QCOMPARE(normalizedLegacyField.maxLength, 12.0f);
+
+    PDFDocument reopenedDocument;
+    PDFFormController reopenedFormController;
+    PDFFormDesignerController reopenedDesigner;
+    reopenedFormController.setDocument(&reopenedDocument);
+    reopenedDesigner.setFormController(&reopenedFormController);
+    reopenedDesigner.setDocument(&reopenedDocument);
+    QVERIFY(reopenedDocument.open(
+        QUrl::fromLocalFile(normalizedPath)));
+    QTRY_COMPARE_WITH_TIMEOUT(reopenedDesigner.rowCount(), 2, 10000);
+    QVERIFY(reopenedDesigner.setFieldValue(
+        editedFieldId,
+        QStringLiteral("Current appearance")));
+    const QVector<PDFFormDesignerController::SaveField>
+        currentAppearanceFields = reopenedDesigner.saveFields(true);
+    QCOMPARE(currentAppearanceFields.size(), 1);
+    QCOMPARE(currentAppearanceFields.constFirst().id, editedFieldId);
 }
 
 void PDFEditControllerTest::addsTextFieldToExistingAcroForm()
