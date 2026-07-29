@@ -4,12 +4,21 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/ApplicationFonts.h
     ../src/DraftImageItem.cpp
     ../src/DraftImageItem.h
+    ../src/FormFieldLayer.cpp
+    ../src/FormFieldLayer.h
+    ../src/PDFAcroFormCanonicalizer.cpp
+    ../src/PDFAcroFormCanonicalizer.h
+    ../src/PDFAcroFormWriter.cpp
+    ../src/PDFAcroFormWriter.h
     ../src/PDFDocument.cpp
     ../src/PDFDocument.h
     ../src/PDFEditController.cpp
     ../src/PDFEditController.h
     ../src/PDFFormController.cpp
     ../src/PDFFormController.h
+    ../src/PDFFormAppearance.h
+    ../src/PDFFormDesignerController.cpp
+    ../src/PDFFormDesignerController.h
     ../src/PDFFormWorker.cpp
     ../src/PDFFormWorker.h
     ../src/PDFSaveWriter.cpp
@@ -17,6 +26,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFTabModel.cpp
     ../src/PDFTabModel.h
     ../src/PDFiumSynchronization.h
+    ../src/PDFWidgetAnnotationSuppression.cpp
+    ../src/PDFWidgetAnnotationSuppression.h
 )
 
 if(TREPDF_BUNDLED_FONT_FILES)

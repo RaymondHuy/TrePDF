@@ -42,6 +42,10 @@ ApplicationWindow {
     readonly property PDFEditController activeEditController: activeSession
         ? activeSession.editController
         : emptyEditController
+    readonly property PDFFormDesignerController activeFormDesignerController:
+        activeSession
+            ? activeSession.formDesignerController
+            : emptyFormDesignerController
 
     palette.highlight: appTheme.foxitOrange
     palette.button: appTheme.foxitPaleOrange
@@ -431,6 +435,10 @@ ApplicationWindow {
         document: emptyDocument
     }
 
+    PDFFormDesignerController {
+        id: emptyFormDesignerController
+    }
+
     PDFTabModel {
         id: tabModel
 
@@ -469,6 +477,8 @@ ApplicationWindow {
         enabled: window.activeSession !== null
             && window.activeEditController.canUndo
             && !window.activeEditController.textEditActive
+            && !window.activeFormDesignerController.textFieldFocused
+            && !appRibbon.formsTabActive
             && !tabModel.anySaving
         onActivated: {
             const page = window.activeEditController.undo()
@@ -482,6 +492,8 @@ ApplicationWindow {
         enabled: window.activeSession !== null
             && window.activeEditController.canRedo
             && !window.activeEditController.textEditActive
+            && !window.activeFormDesignerController.textFieldFocused
+            && !appRibbon.formsTabActive
             && !tabModel.anySaving
         onActivated: {
             const page = window.activeEditController.redo()
@@ -821,6 +833,8 @@ ApplicationWindow {
         width: window.width
 
         AppRibbon {
+            id: appRibbon
+
             width: parent.width
             theme: appTheme
             document: window.activeDocument
@@ -864,6 +878,14 @@ ApplicationWindow {
         document: emptyDocument
         editController: emptyEditController
         formController: emptyFormController
+        formDesignerController: emptyFormDesignerController
+        formsTabActive: appRibbon.formsTabActive
+        editTabActive: appRibbon.editTabActive
+        formFieldsVisible: window.activeDocument.loaded
+        formFieldsInteractive: appRibbon.viewTabActive
+            || appRibbon.editTabActive
+            || appRibbon.formsTabActive
+        textFieldToolActive: appRibbon.textFieldToolActive
         transientStatus: window.transientStatus
         onOpenRequested: window.requestOpen()
     }
@@ -878,6 +900,13 @@ ApplicationWindow {
             DocumentWorkspace {
                 theme: appTheme
                 session: window.workspaceSession
+                formsTabActive: appRibbon.formsTabActive
+                editTabActive: appRibbon.editTabActive
+                formFieldsVisible: window.activeDocument.loaded
+                formFieldsInteractive: appRibbon.viewTabActive
+                    || appRibbon.editTabActive
+                    || appRibbon.formsTabActive
+                textFieldToolActive: appRibbon.textFieldToolActive
                 transientStatus: window.transientStatus
                 enabled: !tabModel.anySaving
                 onOpenRequested: window.requestOpen()

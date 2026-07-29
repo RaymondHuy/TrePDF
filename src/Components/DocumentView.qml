@@ -12,12 +12,21 @@ Rectangle {
     required property PDFDocument document
     required property PDFEditController editController
     required property PDFFormController formController
+    required property PDFFormDesignerController formDesignerController
+    property bool formsTabActive: false
+    property bool editTabActive: false
+    property bool formFieldsVisible: false
+    property bool formFieldsInteractive: false
+    property bool textFieldToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
     property string transientStatus
     property int pendingNavigationPage: -1
     property int navigationGeneration: 0
     property int sessionChangeGeneration: 0
+    property bool formDesignModePrepared: false
+    readonly property bool formDesignMode:
+        formsTabActive || editTabActive
     readonly property real viewportWidth: viewer.width
     readonly property real contentX: viewer.contentX
     readonly property real contentY: viewer.contentY
@@ -26,6 +35,18 @@ Rectangle {
     signal beginSelectedEditingRequested()
 
     color: "#f2efec"
+
+    function syncFormDesignMode() {
+        if (!formDesignMode) {
+            formDesignModePrepared = false
+            return
+        }
+        if (formDesignModePrepared)
+            return
+
+        formDesignModePrepared = true
+        formDesignerController.prepareForDesignMode()
+    }
 
     function navigateToPage(page) {
         if (!document.loaded || page < 0 || page >= document.pageCount)
@@ -106,6 +127,13 @@ Rectangle {
             document.setCurrentPage(page)
     }
 
+    onFormDesignModeChanged: syncFormDesignMode()
+    onFormDesignerControllerChanged: {
+        formDesignModePrepared = false
+        syncFormDesignMode()
+    }
+    Component.onCompleted: syncFormDesignMode()
+
     Connections {
         target: root.formController
 
@@ -162,6 +190,12 @@ Rectangle {
             document: root.document
             editController: root.editController
             formController: root.formController
+            formDesignerController: root.formDesignerController
+            formsTabActive: root.formsTabActive
+            editTabActive: root.editTabActive
+            formFieldsVisible: root.formFieldsVisible
+            formFieldsInteractive: root.formFieldsInteractive
+            textFieldToolActive: root.textFieldToolActive
             zoom: root.zoom
             viewRotation: root.viewRotation
             sessionChangeGeneration: root.sessionChangeGeneration

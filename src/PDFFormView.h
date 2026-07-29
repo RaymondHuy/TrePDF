@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PDFFormController.h"
+#include "PDFFormDesignerController.h"
 
 #include <QPointF>
 #include <QQuickItem>
@@ -20,6 +21,12 @@ class PDFFormView : public QQuickItem
     QML_ELEMENT
     Q_PROPERTY(PDFFormController *controller READ controller WRITE setController
                    NOTIFY controllerChanged FINAL)
+    Q_PROPERTY(PDFFormDesignerController *formDesignerController
+                   READ formDesignerController
+                   WRITE setFormDesignerController
+                   NOTIFY formDesignerControllerChanged FINAL)
+    Q_PROPERTY(bool formDesignMode READ formDesignMode WRITE setFormDesignMode
+                   NOTIFY formDesignModeChanged FINAL)
     Q_PROPERTY(int page READ page WRITE setPage NOTIFY pageChanged FINAL)
     Q_PROPERTY(bool interactive READ interactive WRITE setInteractive
                    NOTIFY interactiveChanged FINAL)
@@ -30,11 +37,16 @@ public:
     explicit PDFFormView(QQuickItem *parent = nullptr);
 
     PDFFormController *controller() const;
+    PDFFormDesignerController *formDesignerController() const;
+    bool formDesignMode() const;
     int page() const;
     bool interactive() const;
     QVariantList choiceFields() const;
 
     void setController(PDFFormController *controller);
+    void setFormDesignerController(
+        PDFFormDesignerController *formDesignerController);
+    void setFormDesignMode(bool formDesignMode);
     void setPage(int page);
     void setInteractive(bool interactive);
     Q_INVOKABLE void selectChoiceOption(int sourcePage,
@@ -49,6 +61,8 @@ public:
 
 signals:
     void controllerChanged();
+    void formDesignerControllerChanged();
+    void formDesignModeChanged();
     void pageChanged();
     void interactiveChanged();
     void choiceFieldsChanged();
@@ -85,13 +99,18 @@ private:
     void requestChoiceFields();
     void loadChoiceFields();
     void clearChoiceFields();
+    bool designerBlocksPointer(const QPointF &position) const;
     void updateInputMethod();
     void updateCursor();
 
     QPointer<PDFFormController> m_controller;
+    QPointer<PDFFormDesignerController> m_formDesignerController;
+    bool m_formDesignMode = false;
     int m_page = 0;
     bool m_interactive = false;
     bool m_pointerInside = false;
+    bool m_pointerOverDesignerSource = false;
+    bool m_designerPointerBlocked = false;
     bool m_mouseDown = false;
     QPointF m_lastPointerPosition;
     QVariantList m_choiceFields;

@@ -90,6 +90,23 @@ struct ChoiceFieldsResult {
     QVector<ChoiceField> fields;
 };
 
+struct TrePDFTextField {
+    QString id;
+    QString name;
+    QString tooltip;
+    QString value;
+    QString defaultValue;
+    int flags = 0;
+    int appearanceVersion = 0;
+    int sourcePage = -1;
+    QRectF normalizedRect;
+};
+
+struct TrePDFTextFieldsResult {
+    bool succeeded = false;
+    QVector<TrePDFTextField> fields;
+};
+
 enum class PointerEventType {
     Move,
     Press,
@@ -112,6 +129,8 @@ using SnapshotCallback = std::function<void(SnapshotResult)>;
 using JavaScriptCallback = std::function<void(JavaScriptResult)>;
 using PageChangeCallback = std::function<void(PageChangeResult)>;
 using ChoiceFieldsCallback = std::function<void(ChoiceFieldsResult)>;
+using TrePDFTextFieldsCallback
+    = std::function<void(TrePDFTextFieldsResult)>;
 using PageCallback = std::function<bool(FPDF_DOCUMENT,
                                         FPDF_FORMHANDLE,
                                         FPDF_PAGE,
@@ -156,6 +175,9 @@ void inspectChoiceFields(const DocumentKey &key,
                          int page,
                          int sourcePage,
                          const ChoiceFieldsCallback &callback);
+void inspectTrePDFTextFields(
+    const DocumentKey &key,
+    const TrePDFTextFieldsCallback &callback);
 void submitChoiceSelection(const DocumentKey &key,
                            int page,
                            int sourcePage,

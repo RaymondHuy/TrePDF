@@ -25,6 +25,7 @@
 #include <memory>
 
 class PDFFormController;
+class PDFFormDesignerController;
 
 class PDFEditController : public QObject
 {
@@ -124,6 +125,9 @@ public:
     void setDocument(PDFDocument *document);
     PDFFormController *formController() const;
     void setFormController(PDFFormController *formController);
+    PDFFormDesignerController *formDesignerController() const;
+    void setFormDesignerController(
+        PDFFormDesignerController *formDesignerController);
 
     Tool tool() const;
     void setTool(Tool tool);
@@ -582,6 +586,7 @@ private:
 
     QPointer<PDFDocument> m_document;
     QPointer<PDFFormController> m_formController;
+    QPointer<PDFFormDesignerController> m_formDesignerController;
     Tool m_tool = BrowseTool;
     ShapeType m_shapeType = RectangleShape;
     QColor m_highlightColor;

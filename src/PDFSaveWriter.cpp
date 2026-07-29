@@ -1,15 +1,20 @@
 #include "PDFSaveWriter.h"
 
 #include "ApplicationFonts.h"
+#include "PDFAcroFormWriter.h"
 #include "PDFEditController.h"
+#include "PDFFormDesignerController.h"
 #include "PDFiumSynchronization.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <utility>
 
 #include <QFile>
+#include <QFileInfo>
+#include <QDir>
 #include <QFont>
 #include <QFontMetricsF>
 #include <QHash>
@@ -21,6 +26,7 @@
 #include <QTextCharFormat>
 #include <QTextLayout>
 #include <QTextOption>
+#include <QTemporaryFile>
 #include <QVector>
 
 #include <fpdf_annot.h>
@@ -2780,6 +2786,177 @@ PDFSaveWriter::Result writeDocument(FPDF_DOCUMENT document,
     return {};
 }
 
+PDFSaveWriter::Result commitDocumentFile(const QString &sourceFilePath,
+                                         const QString &targetFilePath)
+{
+    QFile source(sourceFilePath);
+    if (!source.open(QIODevice::ReadOnly)) {
+        return failure(
+            PDFSaveWriter::Error::OutputOpenFailed,
+            -1,
+            source.errorString());
+    }
+
+    QSaveFile target(targetFilePath);
+    if (!target.open(QIODevice::WriteOnly)) {
+        return failure(
+            PDFSaveWriter::Error::OutputOpenFailed,
+            -1,
+            target.errorString());
+    }
+
+    constexpr qint64 chunkSize = 1024 * 1024;
+    QByteArray buffer;
+    buffer.resize(chunkSize);
+    while (true) {
+        const qint64 readCount = source.read(buffer.data(), buffer.size());
+        if (readCount < 0) {
+            return failure(
+                PDFSaveWriter::Error::OutputWriteFailed,
+                -1,
+                source.errorString());
+        }
+        if (readCount == 0) {
+            break;
+        }
+        if (target.write(buffer.constData(), readCount) != readCount) {
+            return failure(
+                PDFSaveWriter::Error::OutputWriteFailed,
+                -1,
+                target.errorString());
+        }
+    }
+    if (!target.commit()) {
+        return failure(
+            PDFSaveWriter::Error::OutputCommitFailed,
+            -1,
+            target.errorString());
+    }
+    return {};
+}
+
+PDFSaveWriter::Result prepareAcroFormFields(
+    FPDF_DOCUMENT document,
+    const QVector<PDFFormDesignerController::SaveField> &sourceFields,
+    QVector<PDFAcroFormWriter::Field> &targetFields)
+{
+    assertPDFiumProcessLockHeld();
+    targetFields.clear();
+    targetFields.reserve(sourceFields.size());
+    const int pageCount = FPDF_GetPageCount(document);
+    for (const PDFFormDesignerController::SaveField &source : sourceFields) {
+        if (source.page < 0
+            || source.page >= pageCount
+            || source.name.isEmpty()
+            || source.normalizedRect.isEmpty()) {
+            return failure(
+                PDFSaveWriter::Error::AcroFormCreationFailed,
+                source.page,
+                QStringLiteral("The form field snapshot is invalid."));
+        }
+
+        PdfPageHandle page(FPDF_LoadPage(document, source.page));
+        if (!page.get()) {
+            return failure(
+                PDFSaveWriter::Error::PageLoadFailed,
+                source.page);
+        }
+        const qreal pageWidth = FPDF_GetPageWidthF(page.get());
+        const qreal pageHeight = FPDF_GetPageHeightF(page.get());
+        if (pageWidth <= 0.0 || pageHeight <= 0.0) {
+            return failure(
+                PDFSaveWriter::Error::AcroFormCreationFailed,
+                source.page,
+                QStringLiteral("The form field page has invalid dimensions."));
+        }
+
+        const QRectF deviceRect(
+            source.normalizedRect.x() * pageWidth,
+            source.normalizedRect.y() * pageHeight,
+            source.normalizedRect.width() * pageWidth,
+            source.normalizedRect.height() * pageHeight);
+        const PageCoordinateMapper mapper(page.get(), pageWidth, pageHeight);
+        std::array<QPointF, 4> pagePoints;
+        if (!mapper.pagePoint(deviceRect.left(), deviceRect.top(), pagePoints[0])
+            || !mapper.pagePoint(deviceRect.right(), deviceRect.top(), pagePoints[1])
+            || !mapper.pagePoint(deviceRect.right(), deviceRect.bottom(), pagePoints[2])
+            || !mapper.pagePoint(deviceRect.left(), deviceRect.bottom(), pagePoints[3])) {
+            return failure(
+                PDFSaveWriter::Error::AcroFormCreationFailed,
+                source.page,
+                QStringLiteral("The form field coordinates could not be mapped."));
+        }
+
+        qreal left = pagePoints[0].x();
+        qreal right = left;
+        qreal top = pagePoints[0].y();
+        qreal bottom = top;
+        for (const QPointF &point : pagePoints) {
+            left = qMin(left, point.x());
+            right = qMax(right, point.x());
+            bottom = qMin(bottom, point.y());
+            top = qMax(top, point.y());
+        }
+        const QRectF pageRect(left, bottom, right - left, top - bottom);
+        if (pageRect.isEmpty()) {
+            return failure(
+                PDFSaveWriter::Error::AcroFormCreationFailed,
+                source.page,
+                QStringLiteral("The mapped form field rectangle is empty."));
+        }
+
+        PDFAcroFormWriter::Field target;
+        target.widgetId = source.id;
+        target.fieldName = source.name;
+        target.tooltip = source.tooltip;
+        target.value = source.value;
+        target.defaultValue = source.defaultValue;
+        if (source.operation
+            == PDFFormDesignerController::SaveField::Add) {
+            target.operation = PDFAcroFormWriter::Operation::Add;
+        } else if (source.changedProperties
+                   == PDFFormDesignerController::NoPropertyChanges) {
+            target.operation
+                = PDFAcroFormWriter::Operation::NormalizeAppearance;
+        } else {
+            target.operation = PDFAcroFormWriter::Operation::Update;
+        }
+        target.page = source.page;
+        target.pageRect = pageRect;
+        target.required = source.flags
+            & PDFFormDesignerController::Required;
+        target.readOnly = source.flags
+            & PDFFormDesignerController::ReadOnly;
+        target.valueChanged
+            = source.operation
+                    == PDFFormDesignerController::SaveField::Add
+            || (source.changedProperties
+                & PDFFormDesignerController::ValuePropertyChanged);
+        switch (source.type) {
+        case PDFFormDesignerController::Text:
+            target.type = PDFAcroFormWriter::FieldType::Text;
+            break;
+        case PDFFormDesignerController::Checkbox:
+            target.type = PDFAcroFormWriter::FieldType::Checkbox;
+            break;
+        case PDFFormDesignerController::RadioButton:
+            target.type = PDFAcroFormWriter::FieldType::RadioButton;
+            break;
+        case PDFFormDesignerController::Dropdown:
+            target.type = PDFAcroFormWriter::FieldType::Dropdown;
+            break;
+        case PDFFormDesignerController::Date:
+            target.type = PDFAcroFormWriter::FieldType::Date;
+            break;
+        case PDFFormDesignerController::Signature:
+            target.type = PDFAcroFormWriter::FieldType::Signature;
+            break;
+        }
+        targetFields.append(std::move(target));
+    }
+    return {};
+}
+
 } // namespace
 
 struct PDFSaveWriter::Request::Data {
@@ -2788,6 +2965,7 @@ struct PDFSaveWriter::Request::Data {
     QVector<int> deletedSourcePages;
     QVector<PDFPageInsertion> pageInsertions;
     QVector<SaveDraft> drafts;
+    QVector<PDFFormDesignerController::SaveField> formFields;
 };
 
 PDFSaveWriter::Request PDFSaveWriter::prepare(
@@ -2807,6 +2985,13 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         ? controller.m_document->renderFilePath()
         : sourceFilePathOverride;
     data->targetFilePath = targetFilePath;
+    if (controller.m_formDesignerController) {
+        const bool normalizeSourceFieldAppearances
+            = controller.m_formDesignerController->hasDrafts();
+        data->formFields
+            = controller.m_formDesignerController->saveFields(
+                normalizeSourceFieldAppearances);
+    }
     data->deletedSourcePages.reserve(controller.m_deletedSourcePages.size());
     for (int page : controller.m_deletedSourcePages) {
         data->deletedSourcePages.append(page);
@@ -3115,7 +3300,63 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         start = end;
     }
 
-    return writeDocument(document.get(), request.m_data->targetFilePath);
+    if (request.m_data->formFields.isEmpty()) {
+        return writeDocument(document.get(), request.m_data->targetFilePath);
+    }
+
+    QVector<PDFAcroFormWriter::Field> acroFormFields;
+    const Result fieldResult = prepareAcroFormFields(
+        document.get(),
+        request.m_data->formFields,
+        acroFormFields);
+    if (!fieldResult.succeeded()) {
+        return fieldResult;
+    }
+
+    const QFileInfo targetInfo(request.m_data->targetFilePath);
+    QTemporaryFile contentFile(
+        targetInfo.absoluteDir().filePath(
+            QStringLiteral(".trepdf-content-XXXXXX.pdf")));
+    if (!contentFile.open()) {
+        return failure(
+            Error::OutputOpenFailed,
+            -1,
+            contentFile.errorString());
+    }
+    const QString contentFilePath = contentFile.fileName();
+    contentFile.close();
+    const Result contentResult = writeDocument(
+        document.get(),
+        contentFilePath);
+    if (!contentResult.succeeded()) {
+        return contentResult;
+    }
+
+    QTemporaryFile formFile(
+        targetInfo.absoluteDir().filePath(
+            QStringLiteral(".trepdf-acroform-XXXXXX.pdf")));
+    if (!formFile.open()) {
+        return failure(
+            Error::OutputOpenFailed,
+            -1,
+            formFile.errorString());
+    }
+    const QString formFilePath = formFile.fileName();
+    formFile.close();
+    const PDFAcroFormWriter::Result acroFormResult
+        = PDFAcroFormWriter::write(
+            contentFilePath,
+            formFilePath,
+            acroFormFields);
+    if (!acroFormResult.succeeded) {
+        return failure(
+            Error::AcroFormCreationFailed,
+            -1,
+            acroFormResult.error);
+    }
+    return commitDocumentFile(
+        formFilePath,
+        request.m_data->targetFilePath);
 }
 
 PDFSaveWriter::Result PDFSaveWriter::save(const PDFEditController &controller,

@@ -37,6 +37,16 @@ PDFFormController *PDFFormView::controller() const
     return m_controller;
 }
 
+PDFFormDesignerController *PDFFormView::formDesignerController() const
+{
+    return m_formDesignerController;
+}
+
+bool PDFFormView::formDesignMode() const
+{
+    return m_formDesignMode;
+}
+
 int PDFFormView::page() const
 {
     return m_page;
@@ -98,6 +108,8 @@ void PDFFormView::setController(PDFFormController *controller)
         connect(m_controller, &QObject::destroyed, this, [this]() {
             m_controller = nullptr;
             m_pointerInside = false;
+            m_pointerOverDesignerSource = false;
+            m_designerPointerBlocked = false;
             m_mouseDown = false;
             ++m_choiceFieldsRequestSerial;
             m_choiceFieldsRefreshTimer.stop();
@@ -113,12 +125,55 @@ void PDFFormView::setController(PDFFormController *controller)
     emit controllerChanged();
 }
 
+void PDFFormView::setFormDesignerController(
+    PDFFormDesignerController *formDesignerController)
+{
+    if (m_formDesignerController == formDesignerController) {
+        return;
+    }
+    if (m_formDesignerController) {
+        disconnect(m_formDesignerController, nullptr, this, nullptr);
+    }
+    m_formDesignerController = formDesignerController;
+    if (m_formDesignerController) {
+        connect(
+            m_formDesignerController,
+            &QObject::destroyed,
+            this,
+            [this]() {
+                m_formDesignerController = nullptr;
+                m_pointerOverDesignerSource = false;
+                m_designerPointerBlocked = false;
+                updateCursor();
+                emit formDesignerControllerChanged();
+            });
+    }
+    m_pointerOverDesignerSource = false;
+    m_designerPointerBlocked = false;
+    updateCursor();
+    emit formDesignerControllerChanged();
+}
+
+void PDFFormView::setFormDesignMode(bool formDesignMode)
+{
+    if (m_formDesignMode == formDesignMode) {
+        return;
+    }
+    m_formDesignMode = formDesignMode;
+    m_pointerOverDesignerSource = false;
+    m_designerPointerBlocked = false;
+    updateCursor();
+    emit formDesignModeChanged();
+}
+
 void PDFFormView::setPage(int page)
 {
     if (m_page == page) {
         return;
     }
     m_page = page;
+    m_pointerOverDesignerSource = false;
+    m_designerPointerBlocked = false;
     clearChoiceFields();
     requestChoiceFields();
     emit pageChanged();
@@ -134,6 +189,8 @@ void PDFFormView::setInteractive(bool interactive)
     setAcceptHoverEvents(interactive);
     if (!m_interactive) {
         m_pointerInside = false;
+        m_pointerOverDesignerSource = false;
+        m_designerPointerBlocked = false;
         m_mouseDown = false;
         if (hasActiveFocus()) {
             setFocus(false);
@@ -262,6 +319,18 @@ void PDFFormView::hoverEnterEvent(QHoverEvent *event)
     }
     m_pointerInside = true;
     m_lastPointerPosition = event->position();
+    if (designerBlocksPointer(event->position())) {
+        m_pointerOverDesignerSource = true;
+        sendPointerEvent(
+            PDFFormWorker::PointerEventType::Move,
+            QPointF(-1.0, -1.0),
+            event->modifiers(),
+            false);
+        updateCursor();
+        event->accept();
+        return;
+    }
+    m_pointerOverDesignerSource = false;
     sendPointerEvent(
         PDFFormWorker::PointerEventType::Move,
         event->position(),
@@ -279,6 +348,22 @@ void PDFFormView::hoverMoveEvent(QHoverEvent *event)
     }
     m_pointerInside = true;
     m_lastPointerPosition = event->position();
+    const bool pointerOverDesignerSource
+        = designerBlocksPointer(event->position());
+    if (pointerOverDesignerSource) {
+        if (!m_pointerOverDesignerSource) {
+            sendPointerEvent(
+                PDFFormWorker::PointerEventType::Move,
+                QPointF(-1.0, -1.0),
+                event->modifiers(),
+                false);
+        }
+        m_pointerOverDesignerSource = true;
+        updateCursor();
+        event->accept();
+        return;
+    }
+    m_pointerOverDesignerSource = false;
     sendPointerEvent(
         PDFFormWorker::PointerEventType::Move,
         event->position(),
@@ -290,6 +375,7 @@ void PDFFormView::hoverMoveEvent(QHoverEvent *event)
 void PDFFormView::hoverLeaveEvent(QHoverEvent *event)
 {
     m_pointerInside = false;
+    m_pointerOverDesignerSource = false;
     if (m_interactive && m_controller) {
         sendPointerEvent(
             PDFFormWorker::PointerEventType::Move,
@@ -308,9 +394,19 @@ void PDFFormView::mousePressEvent(QMouseEvent *event)
         return;
     }
     m_pointerInside = true;
+    m_lastPointerPosition = event->position();
+    if (designerBlocksPointer(event->position())) {
+        m_pointerOverDesignerSource = true;
+        m_designerPointerBlocked = true;
+        m_mouseDown = false;
+        updateCursor();
+        event->accept();
+        return;
+    }
+    m_pointerOverDesignerSource = false;
+    m_designerPointerBlocked = false;
     m_mouseDown = true;
     forceActiveFocus(Qt::MouseFocusReason);
-    m_lastPointerPosition = event->position();
     sendPointerEvent(
         PDFFormWorker::PointerEventType::Press,
         event->position(),
@@ -321,6 +417,11 @@ void PDFFormView::mousePressEvent(QMouseEvent *event)
 
 void PDFFormView::mouseMoveEvent(QMouseEvent *event)
 {
+    if (m_designerPointerBlocked) {
+        m_lastPointerPosition = event->position();
+        event->accept();
+        return;
+    }
     if (!m_interactive || !m_controller || !m_mouseDown) {
         event->ignore();
         return;
@@ -336,6 +437,13 @@ void PDFFormView::mouseMoveEvent(QMouseEvent *event)
 
 void PDFFormView::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (m_designerPointerBlocked
+        && event->button() == Qt::LeftButton) {
+        m_lastPointerPosition = event->position();
+        m_designerPointerBlocked = false;
+        event->accept();
+        return;
+    }
     if (!m_interactive || !m_controller || !m_mouseDown
         || event->button() != Qt::LeftButton) {
         event->ignore();
@@ -358,8 +466,17 @@ void PDFFormView::mouseDoubleClickEvent(QMouseEvent *event)
         return;
     }
     m_pointerInside = true;
-    m_mouseDown = true;
     m_lastPointerPosition = event->position();
+    if (designerBlocksPointer(event->position())) {
+        m_pointerOverDesignerSource = true;
+        m_designerPointerBlocked = false;
+        m_mouseDown = false;
+        updateCursor();
+        event->accept();
+        return;
+    }
+    m_pointerOverDesignerSource = false;
+    m_mouseDown = true;
     sendPointerEvent(
         PDFFormWorker::PointerEventType::DoubleClick,
         event->position(),
@@ -370,13 +487,14 @@ void PDFFormView::mouseDoubleClickEvent(QMouseEvent *event)
 
 void PDFFormView::mouseUngrabEvent()
 {
-    if (m_mouseDown && m_controller) {
+    if (!m_designerPointerBlocked && m_mouseDown && m_controller) {
         sendPointerEvent(
             PDFFormWorker::PointerEventType::Release,
             QPointF(-1.0, -1.0),
             Qt::NoModifier,
             false);
     }
+    m_designerPointerBlocked = false;
     m_mouseDown = false;
     QQuickItem::mouseUngrabEvent();
 }
@@ -668,6 +786,21 @@ void PDFFormView::clearChoiceFields()
     emit choiceFieldsChanged();
 }
 
+bool PDFFormView::designerBlocksPointer(const QPointF &position) const
+{
+    if (!m_formDesignMode
+        || !m_formDesignerController
+        || m_page < 0
+        || width() <= 0.0
+        || height() <= 0.0) {
+        return false;
+    }
+
+    return m_formDesignerController->sourceTextFieldContainsPoint(
+        m_page,
+        QPointF(position.x() / width(), position.y() / height()));
+}
+
 void PDFFormView::updateInputMethod()
 {
     if (m_interactive
@@ -691,6 +824,7 @@ void PDFFormView::updateCursor()
     Qt::CursorShape cursor = Qt::ArrowCursor;
     if (m_interactive
         && m_pointerInside
+        && !m_pointerOverDesignerSource
         && m_controller) {
         switch (m_controller->cursorType()) {
         case FXCT_VBEAM:

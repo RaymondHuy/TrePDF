@@ -10,6 +10,12 @@ Item {
     required property PDFDocument document
     required property PDFEditController editController
     required property PDFFormController formController
+    required property PDFFormDesignerController formDesignerController
+    property bool formsTabActive: false
+    property bool editTabActive: false
+    property bool formFieldsVisible: false
+    property bool formFieldsInteractive: false
+    property bool textFieldToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
     property bool pooled: false
@@ -34,6 +40,7 @@ Item {
 
     function prepareForSessionChange() {
         editOverlay.prepareForSessionChange()
+        formTextFieldOverlay.prepareForSessionChange()
     }
 
     function beginSelectedEditing() {
@@ -82,6 +89,11 @@ Item {
             document: pageCard.pooled ? null : pageCard.document
             editController: pageCard.pooled ? null : pageCard.editController
             formController: pageCard.pooled ? null : pageCard.formController
+            formDesignerController: pageCard.pooled
+                ? null
+                : pageCard.formDesignerController
+            formDesignMode: !pageCard.pooled
+                && (pageCard.formsTabActive || pageCard.editTabActive)
             page: pageCard.index
             zoom: pageCard.zoom
             pageColor: "white"
@@ -104,11 +116,18 @@ Item {
 
             anchors.fill: pageView
             controller: pageCard.pooled ? null : pageCard.formController
+            formDesignerController: pageCard.pooled
+                ? null
+                : pageCard.formDesignerController
+            formDesignMode: !pageCard.pooled
+                && (pageCard.formsTabActive || pageCard.editTabActive)
             page: pageCard.index
             interactive: !pageCard.pooled
                 && pageCard.formController.interactive
+                && !pageCard.formController.javascriptTransitionPending
                 && !pageCard.editController.saving
                 && pageCard.editController.tool === PDFEditController.BrowseTool
+                && !pageCard.textFieldToolActive
             activeFocusOnTab: interactive
             z: 1
 
@@ -194,6 +213,23 @@ Item {
             draftTextureCurrent: pageView.draftTextureCurrent
             draftTextureReady: pageView.draftTextureReady
             z: 2
+        }
+
+        FormTextFieldOverlay {
+            id: formTextFieldOverlay
+
+            anchors.fill: pageView
+            theme: pageCard.theme
+            controller: pageCard.formDesignerController
+            page: pageCard.index
+            pagePointScale: pageCard.zoom
+            pooled: pageCard.pooled
+            formsActive: pageCard.formsTabActive
+            editActive: pageCard.editTabActive
+            fieldsVisible: pageCard.formFieldsVisible
+            fieldsInteractive: pageCard.formFieldsInteractive
+            textFieldToolActive: pageCard.textFieldToolActive
+            z: 3
         }
     }
 
