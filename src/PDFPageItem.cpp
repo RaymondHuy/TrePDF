@@ -950,8 +950,7 @@ void PDFPageItem::refreshSuppressedFormWidgetIds()
 {
     QStringList widgetIds;
     if (m_formDesignMode && m_formDesignerController && m_page >= 0) {
-        widgetIds = m_formDesignerController
-                        ->sourceTextFieldIdsForPage(m_page);
+        widgetIds = m_formDesignerController->sourceFieldIdsForPage(m_page);
         std::sort(widgetIds.begin(), widgetIds.end());
         widgetIds.removeDuplicates();
     }

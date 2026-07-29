@@ -17,6 +17,7 @@ Item {
     property bool fieldsVisible: false
     property bool fieldsInteractive: false
     property bool textFieldToolActive: false
+    property bool checkboxToolActive: false
     property rect placementRect: Qt.rect(0, 0, 0, 0)
     property real placementStartX: 0
     property real placementStartY: 0
@@ -26,6 +27,11 @@ Item {
     readonly property real resizeHandleHitSize: 24
     readonly property real minimumResizeWidth: 60
     readonly property real minimumResizeHeight: 24
+    readonly property int placementFieldType: textFieldToolActive
+        ? PDFFormDesignerController.Text
+        : checkboxToolActive
+            ? PDFFormDesignerController.Checkbox
+            : -1
 
     function resetPlacement() {
         placementRect = Qt.rect(0, 0, 0, 0)
@@ -34,6 +40,30 @@ Item {
     function updatePlacement(x, y) {
         const boundedX = Math.max(0, Math.min(width, x))
         const boundedY = Math.max(0, Math.min(height, y))
+        if (placementFieldType === PDFFormDesignerController.Checkbox) {
+            const deltaX = boundedX - placementStartX
+            const deltaY = boundedY - placementStartY
+            const directionX = deltaX < 0 ? -1 : 1
+            const directionY = deltaY < 0 ? -1 : 1
+            const maximumHorizontalSide = directionX < 0
+                ? placementStartX
+                : width - placementStartX
+            const maximumVerticalSide = directionY < 0
+                ? placementStartY
+                : height - placementStartY
+            const side = Math.min(
+                Math.max(Math.abs(deltaX), Math.abs(deltaY)),
+                maximumHorizontalSide,
+                maximumVerticalSide)
+            const endX = placementStartX + directionX * side
+            const endY = placementStartY + directionY * side
+            placementRect = Qt.rect(
+                Math.min(placementStartX, endX),
+                Math.min(placementStartY, endY),
+                side,
+                side)
+            return
+        }
         placementRect = Qt.rect(
             Math.min(placementStartX, boundedX),
             Math.min(placementStartY, boundedY),
@@ -133,19 +163,37 @@ Item {
         let fieldRect = placementRect
         const clickPlacement = fieldRect.width < 4 && fieldRect.height < 4
         if (clickPlacement) {
-            const defaultWidth = Math.min(160, width)
-            const defaultHeight = Math.min(28, height)
-            fieldRect = Qt.rect(
-                Math.min(placementStartX, width - defaultWidth),
-                Math.min(placementStartY, height - defaultHeight),
-                defaultWidth,
-                defaultHeight)
-        } else if (fieldRect.width < 20 || fieldRect.height < 18) {
+            if (placementFieldType
+                    === PDFFormDesignerController.Checkbox) {
+                const defaultSide = Math.min(
+                    24 * Math.max(0.1, pagePointScale),
+                    width,
+                    height)
+                fieldRect = Qt.rect(
+                    Math.min(placementStartX, width - defaultSide),
+                    Math.min(placementStartY, height - defaultSide),
+                    defaultSide,
+                    defaultSide)
+            } else {
+                const defaultWidth = Math.min(160, width)
+                const defaultHeight = Math.min(28, height)
+                fieldRect = Qt.rect(
+                    Math.min(placementStartX, width - defaultWidth),
+                    Math.min(placementStartY, height - defaultHeight),
+                    defaultWidth,
+                    defaultHeight)
+            }
+        } else if (placementFieldType
+                   === PDFFormDesignerController.Checkbox
+                   ? fieldRect.width
+                       < 12 * Math.max(0.1, pagePointScale)
+                   : fieldRect.width < 20 || fieldRect.height < 18) {
             resetPlacement()
             return
         }
 
-        const fieldId = controller.addTextField(
+        const fieldId = controller.addField(
+            placementFieldType,
             page,
             fieldRect.x / width,
             fieldRect.y / height,
@@ -155,11 +203,16 @@ Item {
         if (fieldId.length === 0)
             return
 
-        pendingFocusFieldId = fieldId
+        pendingFocusFieldId = placementFieldType
+            === PDFFormDesignerController.Text
+            ? fieldId
+            : ""
         controller.selectTextField(fieldId)
-        Qt.callLater(function() {
-            root.focusPendingTextField()
-        })
+        if (pendingFocusFieldId.length > 0) {
+            Qt.callLater(function() {
+                root.focusPendingTextField()
+            })
+        }
     }
 
     function prepareForSessionChange() {
@@ -191,13 +244,17 @@ Item {
         if (!textFieldToolActive)
             resetPlacement()
     }
+    onCheckboxToolActiveChanged: {
+        if (!checkboxToolActive)
+            resetPlacement()
+    }
 
     MouseArea {
         id: placementArea
 
         anchors.fill: parent
         enabled: root.formsActive
-            && root.textFieldToolActive
+            && root.placementFieldType >= 0
             && !root.pooled
         acceptedButtons: Qt.LeftButton
         cursorShape: enabled ? Qt.CrossCursor : Qt.ArrowCursor
@@ -283,8 +340,8 @@ Item {
             cursorShape: resizeHandle.resizeCursor
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
-            //% "Resize text box"
-            Accessible.name: qsTrId("ResizeTextBox")
+            //% "Resize form field"
+            Accessible.name: qsTrId("ResizeFormField")
 
             onPressed: mouse => {
                 const fieldId = formFieldLayer.activeFieldId
@@ -376,6 +433,31 @@ Item {
         z: 2
 
         onFieldActivated: fieldId => {
+            const field = root.controller.fieldData(fieldId)
+            if (Number(field.type)
+                    === PDFFormDesignerController.Checkbox) {
+                root.pendingFocusFieldId = ""
+                const readOnly
+                    = (Number(field.flags)
+                        & PDFFormDesignerController.ReadOnly) !== 0
+                const sourceBacked = Boolean(field.sourceBacked)
+                if (sourceBacked && !readOnly) {
+                    root.controller.activateSourceCheckbox(
+                        fieldId,
+                        root.width,
+                        root.height)
+                } else if (root.formsActive || !readOnly) {
+                    const value = String(field.value).toLowerCase()
+                    const checked = value === "yes"
+                        || value === "true"
+                        || value === "on"
+                        || value === "1"
+                    root.controller.setFieldValue(
+                        fieldId,
+                        checked ? "Off" : "Yes")
+                }
+                return
+            }
             root.pendingFocusFieldId = fieldId
             Qt.callLater(function() {
                 root.focusPendingTextField()
@@ -428,7 +510,7 @@ Item {
             const fieldId = resizingFieldId
             const fieldRect = resizedRect
             if (fieldId.length > 0 && root.width > 0 && root.height > 0) {
-                root.controller.setTextFieldRect(
+                root.controller.setFieldRect(
                     fieldId,
                     fieldRect.x,
                     fieldRect.y,
@@ -448,6 +530,9 @@ Item {
             anchors.fill: parent
             visible: formFieldLayer.activeFieldType
                 !== PDFFormDesignerController.Text
+                && (formFieldLayer.activeFieldType
+                        !== PDFFormDesignerController.Checkbox
+                    || activeFieldFrame.resizing)
             color: "transparent"
             border.color: root.theme.foxitDarkOrange
             border.width: root.formsActive ? 2 : 0
@@ -497,7 +582,7 @@ Item {
             z: 30
             //% "Delete"
             Accessible.name: qsTrId("Delete")
-            onClicked: root.controller.removeTextField(
+            onClicked: root.controller.removeField(
                 formFieldLayer.activeFieldId)
 
             background: Rectangle {

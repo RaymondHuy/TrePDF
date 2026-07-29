@@ -29,6 +29,12 @@ dialogs, and JavaScript timers remain blocked. PDFium's public API does not
 provide a hard execution timeout, so a malicious synchronous script can still
 make the app unresponsive.
 
+The Forms tab can add Text Field and Check Box widgets by clicking or dragging
+on a page. Added check boxes start unchecked, can be toggled, selected, resized,
+or deleted before Save, and persist as standard interactive AcroForm checkbox
+widgets with explicit checked and unchecked appearances. TrePDF rehydrates its
+saved fields after reopen so they remain available to the form designer.
+
 Each document tab owns its PDF handle, draft/undo history, selection, zoom,
 scroll position, and formatting-panel state. Only the active tab creates page
 delegates and textures. Opening an already-open canonical path activates its

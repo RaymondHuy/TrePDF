@@ -16,6 +16,7 @@ Item {
     property bool formFieldsVisible: false
     property bool formFieldsInteractive: false
     property bool textFieldToolActive: false
+    property bool checkboxToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
     property bool pooled: false
@@ -128,6 +129,7 @@ Item {
                 && !pageCard.editController.saving
                 && pageCard.editController.tool === PDFEditController.BrowseTool
                 && !pageCard.textFieldToolActive
+                && !pageCard.checkboxToolActive
             activeFocusOnTab: interactive
             z: 1
 
@@ -229,6 +231,7 @@ Item {
             fieldsVisible: pageCard.formFieldsVisible
             fieldsInteractive: pageCard.formFieldsInteractive
             textFieldToolActive: pageCard.textFieldToolActive
+            checkboxToolActive: pageCard.checkboxToolActive
             z: 3
         }
     }

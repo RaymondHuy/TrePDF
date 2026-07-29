@@ -7,24 +7,30 @@
 class PDFAcroFormCanonicalizer
 {
 public:
+    enum class FieldType {
+        Text,
+        Checkbox
+    };
+
     enum class Operation {
         Add,
         Update,
         NormalizeAppearance
     };
 
-    struct TextField {
+    struct Field {
         QString widgetId;
         QString fieldName;
         QString tooltip;
         QString value;
         QString defaultValue;
         QRectF pageRect;
+        FieldType type = FieldType::Text;
         int fieldFlags = 0;
         Operation operation = Operation::Add;
     };
 
-    static bool finalizeTextFields(const QString &filePath,
-                                   const QVector<TextField> &fields,
-                                   QString &error);
+    static bool finalizeFields(const QString &filePath,
+                               const QVector<Field> &fields,
+                               QString &error);
 };

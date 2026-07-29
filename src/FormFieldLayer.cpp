@@ -16,6 +16,7 @@
 #include <QSGTexture>
 #include <QSGVertexColorMaterial>
 #include <QTextLayout>
+#include <QTextOption>
 #include <QtMath>
 
 #include <algorithm>
@@ -34,6 +35,7 @@ bool checkedValue(const QString &value)
 {
     return value.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0
         || value.compare(QStringLiteral("yes"), Qt::CaseInsensitive) == 0
+        || value.compare(QStringLiteral("on"), Qt::CaseInsensitive) == 0
         || value == QStringLiteral("1");
 }
 
@@ -226,7 +228,8 @@ void appendText(QSGTextNode *node,
                 const QFont &baseFont,
                 const QRectF &rect,
                 int pixelSize,
-                bool elide)
+                bool elide,
+                Qt::Alignment horizontalAlignment = Qt::AlignLeft)
 {
     if (!node || value.isEmpty() || rect.isEmpty()) {
         return;
@@ -266,6 +269,9 @@ void appendText(QSGTextNode *node,
     }
 
     QTextLayout layout(displayText, font);
+    QTextOption textOption;
+    textOption.setAlignment(horizontalAlignment);
+    layout.setTextOption(textOption);
     layout.beginLayout();
     QTextLine line = layout.createLine();
     if (!line.isValid()) {
@@ -622,11 +628,13 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
 
         const bool textField
             = field.type == PDFFormDesignerController::Text;
+        const bool checkbox
+            = field.type == PDFFormDesignerController::Checkbox;
         // Source Widget rectangles commonly return with fractional coordinates
         // after a Save/reopen cycle. Keep both opposite edges on the same
         // physical-pixel phase so a one-point border cannot rasterize as one
         // pixel on one side and two pixels on the other.
-        const QRectF fieldRect = textField
+        const QRectF fieldRect = textField || checkbox
             ? alignedDeviceRect(rawFieldRect, devicePixelRatio)
             : rawFieldRect;
         const bool selected = m_formsActive && field.selected;
@@ -638,12 +646,16 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                 ? PDFFormAppearance::kTextFieldBorderPointWidth
                     * m_pointScale
                 : 1.0;
-        const qreal borderWidth = textField
+        const qreal borderWidth = textField || checkbox
             ? alignedDeviceWidth(
                   requestedBorderWidth,
                   devicePixelRatio)
             : requestedBorderWidth;
-        const qreal fieldRadius = textField ? 0.0 : 5.0;
+        const qreal fieldRadius = textField
+            ? 0.0
+            : checkbox
+                ? 2.0
+                : 5.0;
         appendRoundedRect(&geometryVertices,
                           fieldRect,
                           fieldRadius,
@@ -668,7 +680,9 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                   minimumTextFieldPadding,
                   fieldRect.height()
                       * PDFFormAppearance::kTextFieldHorizontalPaddingRatio)
-            : 7.0;
+            : checkbox
+                ? 0.0
+                : 7.0;
         const qreal verticalPadding = textField ? 0.0 : 2.0;
         QRectF contentRect = fieldRect.adjusted(
             horizontalPadding,
@@ -681,38 +695,24 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
             14.0));
         switch (field.type) {
         case PDFFormDesignerController::Checkbox: {
-            const qreal side = qMax(
-                4.0,
-                qMin(contentRect.width(), contentRect.height()));
-            const QRectF box(contentRect.x(),
-                             contentRect.center().y() - side / 2.0,
-                             side,
-                             side);
-            appendRoundedRect(&geometryVertices,
-                              box,
-                              2.0,
-                              defaultBorder);
-            appendRoundedRect(&geometryVertices,
-                              box.adjusted(1.0, 1.0, -1.0, -1.0),
-                              1.0,
-                              Qt::white);
             if (checkedValue(field.value)) {
-                const QPointF start(box.left() + side * 0.2,
-                                    box.center().y());
-                const QPointF middle(box.left() + side * 0.43,
-                                     box.bottom() - side * 0.2);
-                const QPointF end(box.right() - side * 0.16,
-                                  box.top() + side * 0.2);
-                appendThickLine(&geometryVertices,
-                                start,
-                                middle,
-                                2.0,
-                                m_accentColor);
-                appendThickLine(&geometryVertices,
-                                middle,
-                                end,
-                                2.0,
-                                m_accentColor);
+                const qreal side = qMax(
+                    4.0,
+                    qMin(fieldRect.width(), fieldRect.height()));
+                QFont checkboxFont = m_renderFont;
+                checkboxFont.setWeight(QFont::DemiBold);
+                appendText(
+                    textNode,
+                    QStringLiteral("\u2713"),
+                    checkboxFont,
+                    fieldRect.adjusted(
+                        borderWidth,
+                        borderWidth,
+                        -borderWidth,
+                        -borderWidth),
+                    qRound(side * 0.78),
+                    false,
+                    Qt::AlignHCenter);
             }
             break;
         }
