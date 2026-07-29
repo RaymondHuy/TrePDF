@@ -1998,6 +1998,15 @@ public:
                                      modifiers)
                     || result.handled;
             }
+        } else if (virtualKey == FWL_VKEY_Back) {
+            // PDFium treats Backspace as a control character. KeyDown alone
+            // reports it handled but does not edit the focused text widget.
+            result.handled = FORM_OnChar(
+                                 m_formHandle,
+                                 m_activePage,
+                                 FWL_VKEY_Back,
+                                 modifiers)
+                || result.handled;
         }
         if (virtualKey != FWL_VKEY_Unknown) {
             FORM_OnKeyUp(

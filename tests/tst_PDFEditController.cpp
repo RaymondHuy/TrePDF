@@ -33,6 +33,7 @@
 #include <fpdf_annot.h>
 #include <fpdf_edit.h>
 #include <fpdf_formfill.h>
+#include <fpdf_fwlevent.h>
 #include <fpdf_save.h>
 #include <fpdf_text.h>
 #include <fpdf_transformpage.h>
@@ -2828,6 +2829,9 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     formController.selectAll();
     formController.replaceSelection(
         QStringLiteral("Native value must survive"));
+    formController.keyEvent(FWL_VKEY_Back, 0, {});
+    const QString nativeValueAfterBackspace
+        = QStringLiteral("Native value must surviv");
     QTRY_VERIFY_WITH_TIMEOUT(formController.hasDrafts(), 5000);
     QCOMPARE(
         formDesigner.fieldData(fieldId)
@@ -2839,7 +2843,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         formDesigner.fieldData(fieldId)
             .value(QStringLiteral("value"))
             .toString(),
-        QStringLiteral("Native value must survive"),
+        nativeValueAfterBackspace,
         5000);
     QVERIFY(formDesigner.setFieldName(
         fieldId,
@@ -2867,7 +2871,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         QStringLiteral("PersistentTextRenamed"));
     QCOMPARE(
         hydrated.value(QStringLiteral("value")).toString(),
-        QStringLiteral("Native value must survive"));
+        nativeValueAfterBackspace);
     const AcroFormFieldInspection nativeValueSave
         = inspectAcroFormField(
             sourcePath,
@@ -2875,7 +2879,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QCOMPARE(nativeValueSave.widgetCount, 2);
     QCOMPARE(
         nativeValueSave.value,
-        QStringLiteral("Native value must survive"));
+        nativeValueAfterBackspace);
     QVERIFY(nativeValueSave.hasAppearance);
     QVERIFY(nativeValueSave.pointHit);
     QVERIFY(nativeValueSave.focusHandled);
@@ -3018,7 +3022,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         = freshSession.formDesignerController()->fieldData(fieldId);
     QCOMPARE(
         freshField.value(QStringLiteral("value")).toString(),
-        QStringLiteral("Native value must survive"));
+        nativeValueAfterBackspace);
     QCOMPARE(
         freshField.value(QStringLiteral("name")).toString(),
         QStringLiteral("PersistentTextRenamed"));
@@ -3041,7 +3045,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
             ->fieldData(fieldId)
             .value(QStringLiteral("value"))
             .toString(),
-        QStringLiteral("Native value must survive"),
+        nativeValueAfterBackspace,
         10000);
     QVERIFY(!freshSession.formDesignerController()->hasDrafts());
 }
