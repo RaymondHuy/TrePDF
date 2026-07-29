@@ -1,5 +1,6 @@
 #include "PDFPageItem.h"
 #include "PDFFormWorker.h"
+#include "PDFWidgetAnnotationSuppression.h"
 #include "PDFiumSynchronization.h"
 
 #include <algorithm>
@@ -285,6 +286,7 @@ PageRenderResult renderPageFromFile(
     bool blankPage,
     const QVector<QVector<int>> &draftObjectPaths,
     const QVector<PDFEditController::DraftObjectMove> &draftObjectMoves,
+    const QStringList &suppressedFormWidgetIds,
     const CancellationFlag &cancellation)
 {
     if (!formDocument.isValid()
@@ -307,6 +309,7 @@ PageRenderResult renderPageFromFile(
 
     bool suppressionApplied = draftObjectPaths.isEmpty();
     bool objectMovesApplied = draftObjectMoves.isEmpty();
+    bool widgetSuppressionApplied = suppressedFormWidgetIds.isEmpty();
     bool renderPerformed = false;
     {
         // One process-wide transaction covers every PDFium call, including
@@ -349,6 +352,8 @@ PageRenderResult renderPageFromFile(
                 {
                     ScopedPageObjectSuppression suppression;
                     ScopedPageObjectMoves objectMoves;
+                    PDFWidgetAnnotationSuppression widgetSuppression;
+                    QVector<PDFWidgetRenderPatch> widgetPatches;
                     if (!draftObjectPaths.isEmpty()) {
                         suppressionApplied = suppression.suppress(
                             previewPage,
@@ -360,12 +365,21 @@ PageRenderResult renderPageFromFile(
                             pixelSize,
                             draftObjectMoves);
                     }
+                    if (!suppressedFormWidgetIds.isEmpty()) {
+                        widgetSuppressionApplied
+                            = widgetSuppression.suppress(
+                                previewPage,
+                                suppressedFormWidgetIds);
+                    }
 
                     if (!isCancelled(cancellation)
                         && (suppressionApplied
                             || suppression.restorationSucceeded())
                         && (objectMovesApplied
-                            || objectMoves.restorationSucceeded())) {
+                            || objectMoves.restorationSucceeded())
+                        && (widgetSuppressionApplied
+                            || widgetSuppression
+                                .restorationSucceeded())) {
                         FPDF_RenderPageBitmap(
                             bitmap,
                             previewPage,
@@ -375,6 +389,17 @@ PageRenderResult renderPageFromFile(
                             pixelSize.height(),
                             0,
                             FPDF_ANNOT);
+                        if (widgetSuppressionApplied) {
+                            widgetSuppressionApplied
+                                = capturePDFWidgetRenderPatches(
+                                    previewPage,
+                                    pixelSize,
+                                    widgetSuppression.pageRects(),
+                                    image,
+                                    widgetPatches);
+                        }
+                        const bool widgetRestoreSucceeded
+                            = widgetSuppression.restore();
                         if (formHandle) {
                             FPDF_FFLDraw(
                                 formHandle,
@@ -387,13 +412,25 @@ PageRenderResult renderPageFromFile(
                                 0,
                                 FPDF_ANNOT);
                         }
+                        if (widgetSuppressionApplied) {
+                            widgetSuppressionApplied
+                                = restorePDFWidgetRenderPatches(
+                                    image,
+                                    widgetPatches);
+                        }
+                        renderDocumentReusable
+                            = widgetRestoreSucceeded;
                         renderPerformed = true;
                     }
                     const bool objectRestoreSucceeded = objectMoves.restore();
                     const bool suppressionRestoreSucceeded
                         = suppression.restore();
+                    const bool widgetRestoreSucceeded
+                        = widgetSuppression.restore();
                     renderDocumentReusable = objectRestoreSucceeded
-                        && suppressionRestoreSucceeded;
+                        && suppressionRestoreSucceeded
+                        && widgetRestoreSucceeded
+                        && renderDocumentReusable;
                 }
 
                 FPDFBitmap_Destroy(bitmap);
@@ -406,7 +443,11 @@ PageRenderResult renderPageFromFile(
     }
 
     image.setDevicePixelRatio(devicePixelRatio);
-    return PageRenderResult{image, suppressionApplied && objectMovesApplied};
+    return PageRenderResult{
+        image,
+        suppressionApplied
+            && objectMovesApplied
+            && widgetSuppressionApplied};
 }
 
 } // namespace
@@ -439,6 +480,16 @@ PDFEditController *PDFPageItem::editController() const
 PDFFormController *PDFPageItem::formController() const
 {
     return m_formController;
+}
+
+PDFFormDesignerController *PDFPageItem::formDesignerController() const
+{
+    return m_formDesignerController;
+}
+
+bool PDFPageItem::formDesignMode() const
+{
+    return m_formDesignMode;
 }
 
 int PDFPageItem::page() const
@@ -552,6 +603,54 @@ void PDFPageItem::setFormController(PDFFormController *formController)
     emit formControllerChanged();
 }
 
+void PDFPageItem::setFormDesignerController(
+    PDFFormDesignerController *formDesignerController)
+{
+    if (m_formDesignerController == formDesignerController) {
+        return;
+    }
+
+    if (m_formDesignerController) {
+        disconnect(m_formDesignerController, nullptr, this, nullptr);
+    }
+
+    m_formDesignerController = formDesignerController;
+    if (m_formDesignerController) {
+        connect(
+            m_formDesignerController,
+            &PDFFormDesignerController::textFieldsChanged,
+            this,
+            [this](int page) {
+                if (page < 0 || page == m_page) {
+                    refreshSuppressedFormWidgetIds();
+                }
+            });
+        connect(
+            m_formDesignerController,
+            &QObject::destroyed,
+            this,
+            [this]() {
+                m_formDesignerController = nullptr;
+                refreshSuppressedFormWidgetIds();
+                emit formDesignerControllerChanged();
+            });
+    }
+
+    refreshSuppressedFormWidgetIds();
+    emit formDesignerControllerChanged();
+}
+
+void PDFPageItem::setFormDesignMode(bool formDesignMode)
+{
+    if (m_formDesignMode == formDesignMode) {
+        return;
+    }
+
+    m_formDesignMode = formDesignMode;
+    refreshSuppressedFormWidgetIds();
+    emit formDesignModeChanged();
+}
+
 void PDFPageItem::setPage(int page)
 {
     if (m_page == page) {
@@ -559,6 +658,7 @@ void PDFPageItem::setPage(int page)
     }
 
     m_page = page;
+    refreshSuppressedFormWidgetIds();
     refreshMetrics();
     emit pageChanged();
 }
@@ -846,6 +946,23 @@ void PDFPageItem::handleFormRenderStateChanged(int page, quint64 revision)
     invalidateDraftCache(true);
 }
 
+void PDFPageItem::refreshSuppressedFormWidgetIds()
+{
+    QStringList widgetIds;
+    if (m_formDesignMode && m_formDesignerController && m_page >= 0) {
+        widgetIds = m_formDesignerController
+                        ->sourceTextFieldIdsForPage(m_page);
+        std::sort(widgetIds.begin(), widgetIds.end());
+        widgetIds.removeDuplicates();
+    }
+
+    if (m_suppressedFormWidgetIds == widgetIds) {
+        return;
+    }
+    m_suppressedFormWidgetIds = std::move(widgetIds);
+    invalidateCache();
+}
+
 quint64 PDFPageItem::currentDraftRevision() const
 {
     if (!m_editController || m_editController->document() != m_document.data()) {
@@ -1017,6 +1134,8 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
     const bool allDraftObjectsSuppressible = !editController
         || editController->document() != document
         || editController->allDraftedTextObjectsSuppressibleForPage(page);
+    const QStringList suppressedFormWidgetIds
+        = m_suppressedFormWidgetIds;
     const QPointer<PDFPageItem> item(this);
     const CancellationFlag cancellation = std::make_shared<std::atomic_bool>(false);
     m_renderCancellation = cancellation;
@@ -1050,6 +1169,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                                        formRevision,
                                        draftObjectPaths,
                                        draftObjectMoves,
+                                       suppressedFormWidgetIds,
                                        allDraftObjectsSuppressible,
                                        requestId,
                                        cancellation]() {
@@ -1062,6 +1182,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             blankPage,
             draftObjectPaths,
             draftObjectMoves,
+            suppressedFormWidgetIds,
             cancellation);
         result.suppressionApplied = result.suppressionApplied
             && allDraftObjectsSuppressible;

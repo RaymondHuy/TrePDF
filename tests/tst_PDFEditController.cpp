@@ -7,6 +7,7 @@
 #include "PDFFormWorker.h"
 #include "PDFSaveWriter.h"
 #include "PDFTabModel.h"
+#include "PDFWidgetAnnotationSuppression.h"
 #include "PDFiumSynchronization.h"
 
 #include <QElapsedTimer>
@@ -444,7 +445,8 @@ QImage renderFirstPage(const QString &filePath, const QSize &pixelSize)
 
 QImage renderFirstPageWithForms(
     const QString &filePath,
-    const QSize &pixelSize)
+    const QSize &pixelSize,
+    const QStringList &suppressedWidgetIds = {})
 {
     PDFiumProcessLock pdfiumLock;
     const QByteArray encodedPath = QFile::encodeName(filePath);
@@ -461,10 +463,14 @@ QImage renderFirstPageWithForms(
     if (page && formHandle) {
         FORM_OnAfterLoadPage(page, formHandle);
     }
+    PDFWidgetAnnotationSuppression widgetSuppression;
+    bool widgetsSuppressed
+        = widgetSuppression.suppress(page, suppressedWidgetIds);
+    QVector<PDFWidgetRenderPatch> widgetPatches;
 
     QImage image(pixelSize, QImage::Format_ARGB32);
     image.fill(Qt::white);
-    FPDF_BITMAP bitmap = page && formHandle
+    FPDF_BITMAP bitmap = page && formHandle && widgetsSuppressed
         ? FPDFBitmap_CreateEx(
               image.width(),
               image.height(),
@@ -482,6 +488,16 @@ QImage renderFirstPageWithForms(
             image.height(),
             0,
             FPDF_ANNOT);
+        if (!suppressedWidgetIds.isEmpty()) {
+            widgetsSuppressed = capturePDFWidgetRenderPatches(
+                page,
+                pixelSize,
+                widgetSuppression.pageRects(),
+                image,
+                widgetPatches);
+        }
+        const bool widgetFlagsRestored
+            = widgetSuppression.restore();
         FPDF_FFLDraw(
             formHandle,
             bitmap,
@@ -492,8 +508,20 @@ QImage renderFirstPageWithForms(
             image.height(),
             0,
             FPDF_ANNOT);
+        if (!suppressedWidgetIds.isEmpty()) {
+            widgetsSuppressed = widgetsSuppressed
+                && restorePDFWidgetRenderPatches(
+                    image,
+                    widgetPatches);
+        }
         FPDFBitmap_Destroy(bitmap);
+        if (!widgetFlagsRestored || !widgetsSuppressed) {
+            image = {};
+        }
     } else {
+        image = {};
+    }
+    if (!widgetSuppression.restore()) {
         image = {};
     }
     if (page && formHandle) {
@@ -2590,12 +2618,14 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     editController.setFormDesignerController(&formDesigner);
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
 
+    const QRectF initialFieldRect(0.18, 0.28, 0.42, 0.07);
+    const QRectF blankFieldRect(0.18, 0.40, 0.42, 0.07);
     const QString fieldId = formDesigner.addTextField(
         0,
-        0.18,
-        0.28,
-        0.42,
-        0.07);
+        initialFieldRect.x(),
+        initialFieldRect.y(),
+        initialFieldRect.width(),
+        initialFieldRect.height());
     QVERIFY(!fieldId.isEmpty());
     QVERIFY(formDesigner.setFieldName(
         fieldId,
@@ -2606,12 +2636,15 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QVERIFY(formDesigner.setFieldFlags(
         fieldId,
         PDFFormDesignerController::Required));
+    QVERIFY(!formDesigner.sourceTextFieldContainsPoint(
+        0,
+        initialFieldRect.center()));
     const QString blankFieldId = formDesigner.addTextField(
         0,
-        0.18,
-        0.40,
-        0.42,
-        0.07);
+        blankFieldRect.x(),
+        blankFieldRect.y(),
+        blankFieldRect.width(),
+        blankFieldRect.height());
     QVERIFY(!blankFieldId.isEmpty());
     QVERIFY(formDesigner.setFieldName(
         blankFieldId,
@@ -2631,6 +2664,21 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         QFileInfo(sourcePath).absoluteFilePath());
     QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
     QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+    QStringList sourceFieldIds
+        = formDesigner.sourceTextFieldIdsForPage(0);
+    sourceFieldIds.sort();
+    QStringList expectedSourceFieldIds{fieldId, blankFieldId};
+    expectedSourceFieldIds.sort();
+    QCOMPARE(sourceFieldIds, expectedSourceFieldIds);
+    QVERIFY(formDesigner.sourceTextFieldContainsPoint(
+        0,
+        initialFieldRect.center()));
+    QVERIFY(formDesigner.sourceTextFieldContainsPoint(
+        0,
+        blankFieldRect.center()));
+    QVERIFY(!formDesigner.sourceTextFieldContainsPoint(
+        0,
+        QPointF(0.9, 0.9)));
 
     QVariantMap hydrated = formDesigner.fieldData(fieldId);
     QCOMPARE(hydrated.value(QStringLiteral("id")).toString(), fieldId);
@@ -2666,9 +2714,50 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QVERIFY(blankSave.pointHit);
     QVERIFY(blankSave.focusHandled);
 
+    const QRectF resizedFieldRect(0.24, 0.20, 0.50, 0.10);
+    const auto normalizedRectsMatch = [](const QRectF &actual,
+                                         const QRectF &expected) {
+        constexpr qreal tolerance = 0.00005;
+        return qAbs(actual.x() - expected.x()) <= tolerance
+            && qAbs(actual.y() - expected.y()) <= tolerance
+            && qAbs(actual.width() - expected.width()) <= tolerance
+            && qAbs(actual.height() - expected.height()) <= tolerance;
+    };
     QVERIFY(formDesigner.setFieldValue(
         fieldId,
         QStringLiteral("Updated after reopen")));
+    QVERIFY(formDesigner.setTextFieldRect(
+        fieldId,
+        resizedFieldRect.x(),
+        resizedFieldRect.y(),
+        resizedFieldRect.width(),
+        resizedFieldRect.height()));
+    const QPointF exposedSourcePoint(0.20, 0.33);
+    const QPointF resizedOnlyPoint(0.70, 0.25);
+    QVERIFY(initialFieldRect.contains(exposedSourcePoint));
+    QVERIFY(!resizedFieldRect.contains(exposedSourcePoint));
+    QVERIFY(!initialFieldRect.contains(resizedOnlyPoint));
+    QVERIFY(resizedFieldRect.contains(resizedOnlyPoint));
+    QVERIFY(formDesigner.sourceTextFieldContainsPoint(
+        0,
+        exposedSourcePoint));
+    QVERIFY(!formDesigner.sourceTextFieldContainsPoint(
+        0,
+        resizedOnlyPoint));
+    const QVector<PDFFormDesignerController::SaveField> geometryChange
+        = formDesigner.saveFields();
+    QCOMPARE(geometryChange.size(), 1);
+    QCOMPARE(
+        geometryChange.constFirst().operation,
+        PDFFormDesignerController::SaveField::Update);
+    QCOMPARE(
+        geometryChange.constFirst().changedProperties,
+        static_cast<quint32>(
+            PDFFormDesignerController::ValuePropertyChanged
+            | PDFFormDesignerController::RectPropertyChanged));
+    QCOMPARE(
+        geometryChange.constFirst().normalizedRect,
+        resizedFieldRect);
     QVERIFY(formDesigner.hasDrafts());
     QVERIFY(editController.requestSave());
     QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
@@ -2677,11 +2766,20 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         true);
     QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
     QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+    QVERIFY(!formDesigner.sourceTextFieldContainsPoint(
+        0,
+        exposedSourcePoint));
+    QVERIFY(formDesigner.sourceTextFieldContainsPoint(
+        0,
+        resizedOnlyPoint));
 
     hydrated = formDesigner.fieldData(fieldId);
     QCOMPARE(
         hydrated.value(QStringLiteral("value")).toString(),
         QStringLiteral("Updated after reopen"));
+    QVERIFY(normalizedRectsMatch(
+        hydrated.value(QStringLiteral("rect")).toRectF(),
+        resizedFieldRect));
     QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
     const AcroFormFieldInspection secondSave
         = inspectAcroFormField(
@@ -2692,6 +2790,19 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QVERIFY(secondSave.hasAppearance);
     QVERIFY(secondSave.pointHit);
     QVERIFY(secondSave.focusHandled);
+    constexpr qreal rectTolerance = 0.05;
+    QVERIFY(qAbs(
+        secondSave.rect.left
+        - resizedFieldRect.left() * 595.0) <= rectTolerance);
+    QVERIFY(qAbs(
+        secondSave.rect.right
+        - resizedFieldRect.right() * 595.0) <= rectTolerance);
+    QVERIFY(qAbs(
+        secondSave.rect.bottom
+        - (1.0 - resizedFieldRect.bottom()) * 842.0) <= rectTolerance);
+    QVERIFY(qAbs(
+        secondSave.rect.top
+        - (1.0 - resizedFieldRect.top()) * 842.0) <= rectTolerance);
 
     QTRY_VERIFY_WITH_TIMEOUT(formController.javascriptEnabled(), 5000);
     QTRY_VERIFY_WITH_TIMEOUT(
@@ -2699,8 +2810,8 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         5000);
     const QSize nativeEditSize(595, 842);
     const QPointF nativeEditCenter(
-        0.39 * nativeEditSize.width(),
-        0.315 * nativeEditSize.height());
+        resizedFieldRect.center().x() * nativeEditSize.width(),
+        resizedFieldRect.center().y() * nativeEditSize.height());
     formController.pointerEvent(
         0,
         PDFFormWorker::PointerEventType::Press,
@@ -2723,6 +2834,13 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
             .value(QStringLiteral("value"))
             .toString(),
         QStringLiteral("Updated after reopen"));
+    formDesigner.prepareForDesignMode();
+    QTRY_COMPARE_WITH_TIMEOUT(
+        formDesigner.fieldData(fieldId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Native value must survive"),
+        5000);
     QVERIFY(formDesigner.setFieldName(
         fieldId,
         QStringLiteral("PersistentTextRenamed")));
@@ -2769,31 +2887,67 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     const QImage pageWithForms = renderFirstPageWithForms(
         sourcePath,
         renderSize);
+    const QImage pageWithDesignerWidgetsSuppressed
+        = renderFirstPageWithForms(
+            sourcePath,
+            renderSize,
+            {fieldId, blankFieldId});
+    const QImage pageWithOneDesignerWidgetSuppressed
+        = renderFirstPageWithForms(
+            sourcePath,
+            renderSize,
+            {fieldId});
     QVERIFY(!pageWithoutForms.isNull());
     QVERIFY(!pageWithForms.isNull());
-    const auto fieldArea = [&renderSize](qreal normalizedY) {
+    QVERIFY(!pageWithDesignerWidgetsSuppressed.isNull());
+    QVERIFY(!pageWithOneDesignerWidgetSuppressed.isNull());
+    const auto fieldArea = [&renderSize](const QRectF &normalizedRect) {
         return QRect(
-            qRound(0.18 * renderSize.width()),
-            qRound(normalizedY * renderSize.height()),
-            qRound(0.42 * renderSize.width()),
-            qRound(0.07 * renderSize.height()));
+            qRound(normalizedRect.x() * renderSize.width()),
+            qRound(normalizedRect.y() * renderSize.height()),
+            qRound(normalizedRect.width() * renderSize.width()),
+            qRound(normalizedRect.height() * renderSize.height()));
     };
     QVERIFY(
         changedPixelCount(
             pageWithoutForms,
             pageWithForms,
-            fieldArea(0.28))
+            fieldArea(resizedFieldRect))
         > 100);
     QVERIFY(
         changedPixelCount(
             pageWithoutForms,
             pageWithForms,
-            fieldArea(0.40))
+            fieldArea(blankFieldRect))
+        > 100);
+    QCOMPARE(
+        changedPixelCount(
+            pageWithoutForms,
+            pageWithDesignerWidgetsSuppressed,
+            fieldArea(resizedFieldRect)),
+        0);
+    QCOMPARE(
+        changedPixelCount(
+            pageWithoutForms,
+            pageWithDesignerWidgetsSuppressed,
+            fieldArea(blankFieldRect)),
+        0);
+    QCOMPARE(
+        changedPixelCount(
+            pageWithoutForms,
+            pageWithOneDesignerWidgetSuppressed,
+            fieldArea(resizedFieldRect)),
+        0);
+    QVERIFY(
+        changedPixelCount(
+            pageWithoutForms,
+            pageWithOneDesignerWidgetSuppressed,
+            fieldArea(blankFieldRect))
         > 100);
     const QRect appearanceBounds = changedPixelBounds(
         pageWithoutForms,
         pageWithForms,
-        fieldArea(0.28).adjusted(-2, -2, 2, 2));
+        fieldArea(resizedFieldRect).adjusted(-2, -2, 2, 2));
     QVERIFY(!appearanceBounds.isEmpty());
     constexpr int cornerExtent = 4;
     const QVector<QRect> cornerArms{
@@ -2845,7 +2999,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     const QRect textBounds = darkChangedPixelBounds(
         pageWithoutForms,
         pageWithForms,
-        fieldArea(0.28).adjusted(4, 4, -4, -4));
+        fieldArea(resizedFieldRect).adjusted(4, 4, -4, -4));
     QVERIFY(!textBounds.isEmpty());
     QVERIFY2(
         textBounds.height() >= 7 && textBounds.height() <= 18,
@@ -2868,6 +3022,9 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QCOMPARE(
         freshField.value(QStringLiteral("name")).toString(),
         QStringLiteral("PersistentTextRenamed"));
+    QVERIFY(normalizedRectsMatch(
+        freshField.value(QStringLiteral("rect")).toRectF(),
+        resizedFieldRect));
     QVERIFY(freshField.value(QStringLiteral("sourceBacked")).toBool());
     QVERIFY(!freshSession.formDesignerController()->hasDrafts());
     QVERIFY(freshSession.formDesignerController()->setFieldValue(

@@ -79,6 +79,8 @@ qt_add_qml_module(trepdf
         src/PDFTabModel.cpp
         src/PDFTabModel.h
         src/PDFiumSynchronization.h
+        src/PDFWidgetAnnotationSuppression.cpp
+        src/PDFWidgetAnnotationSuppression.h
         src/PDFPageItem.cpp
         src/PDFPageItem.h
     QML_FILES

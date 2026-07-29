@@ -24,6 +24,9 @@ Rectangle {
     property int pendingNavigationPage: -1
     property int navigationGeneration: 0
     property int sessionChangeGeneration: 0
+    property bool formDesignModePrepared: false
+    readonly property bool formDesignMode:
+        formsTabActive || editTabActive
     readonly property real viewportWidth: viewer.width
     readonly property real contentX: viewer.contentX
     readonly property real contentY: viewer.contentY
@@ -32,6 +35,18 @@ Rectangle {
     signal beginSelectedEditingRequested()
 
     color: "#f2efec"
+
+    function syncFormDesignMode() {
+        if (!formDesignMode) {
+            formDesignModePrepared = false
+            return
+        }
+        if (formDesignModePrepared)
+            return
+
+        formDesignModePrepared = true
+        formDesignerController.prepareForDesignMode()
+    }
 
     function navigateToPage(page) {
         if (!document.loaded || page < 0 || page >= document.pageCount)
@@ -111,6 +126,13 @@ Rectangle {
         if (page >= 0 && document.currentPage !== page)
             document.setCurrentPage(page)
     }
+
+    onFormDesignModeChanged: syncFormDesignMode()
+    onFormDesignerControllerChanged: {
+        formDesignModePrepared = false
+        syncFormDesignMode()
+    }
+    Component.onCompleted: syncFormDesignMode()
 
     Connections {
         target: root.formController

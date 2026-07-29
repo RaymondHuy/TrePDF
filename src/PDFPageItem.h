@@ -3,6 +3,7 @@
 #include "PDFDocument.h"
 #include "PDFEditController.h"
 #include "PDFFormController.h"
+#include "PDFFormDesignerController.h"
 
 #include <atomic>
 #include <memory>
@@ -23,6 +24,12 @@ class PDFPageItem : public QQuickItem
     Q_PROPERTY(PDFDocument *document READ document WRITE setDocument NOTIFY documentChanged FINAL)
     Q_PROPERTY(PDFEditController *editController READ editController WRITE setEditController NOTIFY editControllerChanged FINAL)
     Q_PROPERTY(PDFFormController *formController READ formController WRITE setFormController NOTIFY formControllerChanged FINAL)
+    Q_PROPERTY(PDFFormDesignerController *formDesignerController
+                   READ formDesignerController
+                   WRITE setFormDesignerController
+                   NOTIFY formDesignerControllerChanged FINAL)
+    Q_PROPERTY(bool formDesignMode READ formDesignMode WRITE setFormDesignMode
+                   NOTIFY formDesignModeChanged FINAL)
     Q_PROPERTY(int page READ page WRITE setPage NOTIFY pageChanged FINAL)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
     Q_PROPERTY(QColor pageColor READ pageColor WRITE setPageColor NOTIFY pageColorChanged FINAL)
@@ -36,6 +43,8 @@ public:
     PDFDocument *document() const;
     PDFEditController *editController() const;
     PDFFormController *formController() const;
+    PDFFormDesignerController *formDesignerController() const;
+    bool formDesignMode() const;
     int page() const;
     qreal zoom() const;
     QColor pageColor() const;
@@ -45,6 +54,9 @@ public:
     void setDocument(PDFDocument *document);
     void setEditController(PDFEditController *editController);
     void setFormController(PDFFormController *formController);
+    void setFormDesignerController(
+        PDFFormDesignerController *formDesignerController);
+    void setFormDesignMode(bool formDesignMode);
     void setPage(int page);
     void setZoom(qreal zoom);
     void setPageColor(const QColor &pageColor);
@@ -53,6 +65,8 @@ signals:
     void documentChanged();
     void editControllerChanged();
     void formControllerChanged();
+    void formDesignerControllerChanged();
+    void formDesignModeChanged();
     void pageChanged();
     void zoomChanged();
     void pageColorChanged();
@@ -72,6 +86,7 @@ private:
     void cancelPendingRender();
     void handleDraftRenderStateChanged(int page, quint64 revision, bool immediate);
     void handleFormRenderStateChanged(int page, quint64 revision);
+    void refreshSuppressedFormWidgetIds();
     quint64 currentDraftRevision() const;
     quint64 currentFormRevision() const;
     void setDraftTextureCurrent(bool current);
@@ -100,6 +115,9 @@ private:
     QPointer<PDFDocument> m_document;
     QPointer<PDFEditController> m_editController;
     QPointer<PDFFormController> m_formController;
+    QPointer<PDFFormDesignerController> m_formDesignerController;
+    bool m_formDesignMode = false;
+    QStringList m_suppressedFormWidgetIds;
     int m_page = 0;
     qreal m_zoom = 1.0;
     QColor m_pageColor = Qt::white;

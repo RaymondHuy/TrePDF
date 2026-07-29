@@ -89,6 +89,11 @@ Item {
             document: pageCard.pooled ? null : pageCard.document
             editController: pageCard.pooled ? null : pageCard.editController
             formController: pageCard.pooled ? null : pageCard.formController
+            formDesignerController: pageCard.pooled
+                ? null
+                : pageCard.formDesignerController
+            formDesignMode: !pageCard.pooled
+                && (pageCard.formsTabActive || pageCard.editTabActive)
             page: pageCard.index
             zoom: pageCard.zoom
             pageColor: "white"
@@ -111,6 +116,11 @@ Item {
 
             anchors.fill: pageView
             controller: pageCard.pooled ? null : pageCard.formController
+            formDesignerController: pageCard.pooled
+                ? null
+                : pageCard.formDesignerController
+            formDesignMode: !pageCard.pooled
+                && (pageCard.formsTabActive || pageCard.editTabActive)
             page: pageCard.index
             interactive: !pageCard.pooled
                 && pageCard.formController.interactive

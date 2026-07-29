@@ -124,6 +124,10 @@ public:
     Q_INVOKABLE QVariantMap fieldData(const QString &fieldId) const;
     Q_INVOKABLE QVariantList fieldsForPage(int page) const;
     Q_INVOKABLE QVariantList textFieldsForPage(int page) const;
+    QStringList sourceTextFieldIdsForPage(int page) const;
+    bool sourceTextFieldContainsPoint(
+        int page,
+        const QPointF &normalizedPoint) const;
     Q_INVOKABLE bool setFieldValue(const QString &fieldId,
                                    const QString &value);
     Q_INVOKABLE bool setFieldName(const QString &fieldId,
@@ -149,8 +153,10 @@ public:
     Q_INVOKABLE void clearTextFieldSelection();
     Q_INVOKABLE void setTextFieldFocused(const QString &fieldId, bool focused);
     Q_INVOKABLE void clearTextFieldFocus();
+    Q_INVOKABLE void prepareForDesignMode();
 
     void setDocument(PDFDocument *document);
+    void refreshSourceFieldValues();
     bool hasDrafts() const;
     QVector<SaveField> saveFields() const;
     void clear();
@@ -171,6 +177,7 @@ private:
         int sourcePage = -1;
         bool hasSourcePage = false;
         QRectF normalizedRect;
+        QRectF sourceNormalizedRect;
         QString value;
         QString name;
         QString tooltip;
@@ -194,4 +201,6 @@ private:
     QString m_selectedTextFieldId;
     quint64 m_nextFieldId = 0;
     quint64 m_sourceReloadSerial = 0;
+    quint64 m_sourceValueRefreshSerial = 0;
+    bool m_sourceValueRefreshPending = false;
 };

@@ -25,6 +25,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFTabModel.cpp
     ../src/PDFTabModel.h
     ../src/PDFiumSynchronization.h
+    ../src/PDFWidgetAnnotationSuppression.cpp
+    ../src/PDFWidgetAnnotationSuppression.h
 )
 
 if(TREPDF_BUNDLED_FONT_FILES)

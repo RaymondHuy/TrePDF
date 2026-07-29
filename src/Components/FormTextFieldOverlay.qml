@@ -258,10 +258,9 @@ Item {
                 : (activeFieldFrame.height - height) / 2
         width: root.resizeHandleHitSize
         height: root.resizeHandleHitSize
-        visible: root.formsActive
+        visible: (root.formsActive || root.editActive)
             && root.fieldsInteractive
             && !root.pooled
-            && !formFieldLayer.activeFieldSourceBacked
         z: 20
 
         Rectangle {

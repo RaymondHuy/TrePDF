@@ -222,6 +222,82 @@ void PDFFormDesignerController::setDocument(PDFDocument *document)
     reloadSourceFields();
 }
 
+void PDFFormDesignerController::prepareForDesignMode()
+{
+    if (!m_formController
+        || !m_document
+        || m_formController->document() != m_document) {
+        return;
+    }
+    m_formController->killFocus();
+    refreshSourceFieldValues();
+}
+
+void PDFFormDesignerController::refreshSourceFieldValues()
+{
+    if (m_sourceValueRefreshPending
+        || std::none_of(
+            m_fields.cbegin(),
+            m_fields.cend(),
+            [](const FormField &field) {
+                return field.type == Text && field.sourceBacked;
+            })
+        || !m_document
+        || !m_document->isLoaded()
+        || !m_formController
+        || m_formController->document() != m_document) {
+        return;
+    }
+
+    m_sourceValueRefreshPending = true;
+    const quint64 requestSerial = ++m_sourceValueRefreshSerial;
+    QPointer<PDFFormDesignerController> controller(this);
+    QPointer<PDFDocument> document(m_document);
+    m_formController->requestTrePDFTextFields(
+        [controller, document, requestSerial](
+            bool succeeded,
+            QVector<PDFFormWorker::TrePDFTextField> sourceFields) {
+            if (!controller
+                || controller->m_sourceValueRefreshSerial
+                    != requestSerial) {
+                return;
+            }
+            controller->m_sourceValueRefreshPending = false;
+            if (!document
+                || controller->m_document != document
+                || !succeeded) {
+                return;
+            }
+
+            for (int row = 0;
+                 row < controller->m_fields.size();
+                 ++row) {
+                FormField &field = controller->m_fields[row];
+                if (!field.sourceBacked
+                    || (field.changedProperties
+                        & ValuePropertyChanged)) {
+                    continue;
+                }
+                const auto source = std::find_if(
+                    sourceFields.cbegin(),
+                    sourceFields.cend(),
+                    [&field](
+                        const PDFFormWorker::TrePDFTextField &candidate) {
+                        return candidate.id == field.id;
+                    });
+                if (source == sourceFields.cend()
+                    || source->value == field.value) {
+                    continue;
+                }
+                field.value = source->value;
+                emit controller->dataChanged(
+                    controller->index(row),
+                    controller->index(row),
+                    {ValueRole});
+            }
+        });
+}
+
 QString PDFFormDesignerController::addField(int type,
                                             int page,
                                             qreal x,
@@ -305,6 +381,43 @@ QVariantList PDFFormDesignerController::textFieldsForPage(int page) const
         fields.append(value);
     }
     return fields;
+}
+
+QStringList PDFFormDesignerController::sourceTextFieldIdsForPage(
+    int page) const
+{
+    QStringList fieldIds;
+    for (const FormField &field : m_fields) {
+        if (field.type == Text
+            && field.sourceBacked
+            && displayPageForField(field) == page) {
+            fieldIds.append(field.id);
+        }
+    }
+    return fieldIds;
+}
+
+bool PDFFormDesignerController::sourceTextFieldContainsPoint(
+    int page,
+    const QPointF &normalizedPoint) const
+{
+    if (page < 0
+        || normalizedPoint.x() < 0.0
+        || normalizedPoint.x() > 1.0
+        || normalizedPoint.y() < 0.0
+        || normalizedPoint.y() > 1.0) {
+        return false;
+    }
+
+    return std::any_of(
+        m_fields.cbegin(),
+        m_fields.cend(),
+        [this, page, &normalizedPoint](const FormField &field) {
+            return field.type == Text
+                && field.sourceBacked
+                && displayPageForField(field) == page
+                && field.sourceNormalizedRect.contains(normalizedPoint);
+        });
 }
 
 bool PDFFormDesignerController::setFieldValue(const QString &fieldId,
@@ -613,6 +726,8 @@ QVariantMap PDFFormDesignerController::fieldToMap(const FormField &field) const
 
 void PDFFormDesignerController::reloadSourceFields()
 {
+    ++m_sourceValueRefreshSerial;
+    m_sourceValueRefreshPending = false;
     const quint64 requestSerial = ++m_sourceReloadSerial;
     clearTextFieldFocus();
     clearTextFieldSelection();
@@ -668,6 +783,7 @@ void PDFFormDesignerController::reloadSourceFields()
                 field.sourcePage = source.sourcePage;
                 field.hasSourcePage = true;
                 field.normalizedRect = source.normalizedRect;
+                field.sourceNormalizedRect = source.normalizedRect;
                 field.value = source.value;
                 field.name = source.name;
                 field.tooltip = source.tooltip;
