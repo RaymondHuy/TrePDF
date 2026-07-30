@@ -218,6 +218,7 @@ Item {
     function prepareForSessionChange() {
         pendingFocusFieldId = ""
         activeFieldFrame.cancelResize()
+        formFieldLayer.cancelFieldMove()
         resetPlacement()
     }
 
@@ -228,24 +229,34 @@ Item {
             controller.clearTextFieldSelection()
         }
     }
+    onEditActiveChanged: {
+        if (!editActive)
+            formFieldLayer.cancelFieldMove()
+    }
     onFieldsVisibleChanged: {
         if (!fieldsVisible) {
             activeFieldFrame.cancelResize()
+            formFieldLayer.cancelFieldMove()
             controller.clearTextFieldFocus()
         }
     }
     onFieldsInteractiveChanged: {
         if (!fieldsInteractive) {
             activeFieldFrame.cancelResize()
+            formFieldLayer.cancelFieldMove()
             controller.clearTextFieldFocus()
         }
     }
     onTextFieldToolActiveChanged: {
-        if (!textFieldToolActive)
+        if (textFieldToolActive)
+            formFieldLayer.cancelFieldMove()
+        else
             resetPlacement()
     }
     onCheckboxToolActiveChanged: {
-        if (!checkboxToolActive)
+        if (checkboxToolActive)
+            formFieldLayer.cancelFieldMove()
+        else
             resetPlacement()
     }
 
@@ -319,6 +330,7 @@ Item {
         visible: (root.formsActive || root.editActive)
             && root.fieldsInteractive
             && !root.pooled
+            && !formFieldLayer.moving
         z: 20
 
         Rectangle {
@@ -337,6 +349,30 @@ Item {
             acceptedButtons: Qt.LeftButton
             hoverEnabled: true
             preventStealing: true
+            containmentMask: QtObject {
+                function contains(point) {
+                    if (point.x < 0 || point.x >= resizeHandle.width
+                            || point.y < 0
+                            || point.y >= resizeHandle.height)
+                        return false
+
+                    const edgeInset = 3
+                    if (resizeHandle.horizontal < 0) {
+                        return point.x
+                            <= resizeHandle.width / 2 + edgeInset
+                    }
+                    if (resizeHandle.horizontal > 0) {
+                        return point.x
+                            >= resizeHandle.width / 2 - edgeInset
+                    }
+                    if (resizeHandle.vertical < 0) {
+                        return point.y
+                            <= resizeHandle.height / 2 + edgeInset
+                    }
+                    return point.y
+                        >= resizeHandle.height / 2 - edgeInset
+                }
+            }
             cursorShape: resizeHandle.resizeCursor
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
@@ -356,6 +392,7 @@ Item {
                     root,
                     mouse.x,
                     mouse.y)
+                formFieldLayer.cancelFieldMove()
                 activeFieldFrame.beginResize(
                     fieldId,
                     resizeHandle.dragStartRect)
@@ -428,6 +465,10 @@ Item {
         sourceFieldsVisible: root.formsActive || root.editActive
         fieldsVisible: root.fieldsVisible
         fieldsInteractive: root.fieldsInteractive
+        moveEnabled: (root.formsActive || root.editActive)
+            && root.fieldsInteractive
+            && root.placementFieldType < 0
+            && !root.pooled
         accentColor: root.theme.foxitDarkOrange
         pointScale: root.pagePointScale
         z: 2
@@ -464,6 +505,18 @@ Item {
             })
         }
         onActiveFieldChanged: root.syncActiveTextEditor()
+        onMovingChanged: {
+            if (!moving)
+                return
+
+            root.pendingFocusFieldId = ""
+            if (activeTextEditorLoader.status === Loader.Ready) {
+                const editor = activeTextEditorLoader.item as TextField
+                if (editor)
+                    editor.focus = false
+            }
+            root.controller.clearTextFieldFocus()
+        }
     }
 
     Item {
@@ -573,6 +626,7 @@ Item {
             visible: root.formsActive
                 && !formFieldLayer.activeFieldSourceBacked
                 && !activeFieldFrame.resizing
+                && !formFieldLayer.moving
             enabled: visible
             focusPolicy: Qt.NoFocus
             text: "\u00d7"
@@ -594,6 +648,149 @@ Item {
                         : "white"
                 border.color: root.theme.foxitDarkOrange
                 border.width: 1
+            }
+        }
+
+        Item {
+            id: moveFieldHandle
+
+            x: -width / 2
+            y: -height / 2
+            width: root.resizeHandleHitSize
+            height: root.resizeHandleHitSize
+            visible: formFieldLayer.moveEnabled
+                && formFieldLayer.activeFieldType
+                    === PDFFormDesignerController.Text
+                && !activeFieldFrame.resizing
+            z: 40
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 14
+                height: 14
+                radius: 3
+                color: "white"
+                border.color: root.theme.foxitDarkOrange
+                border.width: 1
+                Accessible.ignored: true
+
+                Item {
+                    anchors.centerIn: parent
+                    width: 6
+                    height: 6
+                    Accessible.ignored: true
+
+                    Rectangle {
+                        x: 0
+                        y: 0
+                        width: 2
+                        height: 2
+                        radius: 1
+                        color: root.theme.foxitDarkOrange
+                    }
+                    Rectangle {
+                        x: 4
+                        y: 0
+                        width: 2
+                        height: 2
+                        radius: 1
+                        color: root.theme.foxitDarkOrange
+                    }
+                    Rectangle {
+                        x: 0
+                        y: 4
+                        width: 2
+                        height: 2
+                        radius: 1
+                        color: root.theme.foxitDarkOrange
+                    }
+                    Rectangle {
+                        x: 4
+                        y: 4
+                        width: 2
+                        height: 2
+                        radius: 1
+                        color: root.theme.foxitDarkOrange
+                    }
+                }
+            }
+
+            MouseArea {
+                id: moveFieldMouse
+
+                property point dragStartPosition: Qt.point(0, 0)
+
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                hoverEnabled: true
+                preventStealing: true
+                cursorShape: Qt.SizeAllCursor
+                activeFocusOnTab: true
+                Accessible.role: Accessible.Button
+                //% "Move form field"
+                Accessible.name: qsTrId("MoveFormField")
+
+                onPressed: mouse => {
+                    forceActiveFocus()
+                    root.pendingFocusFieldId = ""
+                    activeFieldFrame.cancelResize()
+                    dragStartPosition = mapToItem(
+                        root,
+                        mouse.x,
+                        mouse.y)
+                    if (!formFieldLayer.beginFieldMove(
+                            formFieldLayer.activeFieldId)) {
+                        mouse.accepted = false
+                    }
+                }
+                onPositionChanged: mouse => {
+                    if (!pressed || !formFieldLayer.moving
+                            || root.width <= 0 || root.height <= 0)
+                        return
+
+                    const currentPosition = mapToItem(
+                        root,
+                        mouse.x,
+                        mouse.y)
+                    formFieldLayer.updateFieldMove(
+                        (currentPosition.x - dragStartPosition.x)
+                            / root.width,
+                        (currentPosition.y - dragStartPosition.y)
+                            / root.height)
+                }
+                onReleased: {
+                    if (formFieldLayer.moving)
+                        formFieldLayer.finishFieldMove()
+                }
+                onCanceled: formFieldLayer.cancelFieldMove()
+
+                Keys.onPressed: event => {
+                    const step = (event.modifiers & Qt.ShiftModifier)
+                        ? 10
+                        : 1
+                    let deltaX = 0
+                    let deltaY = 0
+                    if (event.key === Qt.Key_Left)
+                        deltaX = -step
+                    else if (event.key === Qt.Key_Right)
+                        deltaX = step
+                    else if (event.key === Qt.Key_Up)
+                        deltaY = -step
+                    else if (event.key === Qt.Key_Down)
+                        deltaY = step
+                    else
+                        return
+
+                    if (root.width <= 0 || root.height <= 0
+                            || !formFieldLayer.beginFieldMove(
+                                formFieldLayer.activeFieldId))
+                        return
+                    formFieldLayer.updateFieldMove(
+                        deltaX / root.width,
+                        deltaY / root.height)
+                    formFieldLayer.finishFieldMove()
+                    event.accepted = true
+                }
             }
         }
 

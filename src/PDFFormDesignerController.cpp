@@ -639,6 +639,31 @@ bool PDFFormDesignerController::setFieldRect(const QString &fieldId,
     return true;
 }
 
+bool PDFFormDesignerController::moveField(const QString &fieldId,
+                                          qreal x,
+                                          qreal y)
+{
+    const int row = rowForFieldId(fieldId);
+    if (row < 0 || !qIsFinite(x) || !qIsFinite(y)) {
+        return false;
+    }
+
+    const QRectF fieldRect = m_fields.at(row).normalizedRect;
+    const qreal boundedX = qBound(
+        0.0,
+        x,
+        qMax(0.0, 1.0 - fieldRect.width()));
+    const qreal boundedY = qBound(
+        0.0,
+        y,
+        qMax(0.0, 1.0 - fieldRect.height()));
+    return setFieldRect(fieldId,
+                        boundedX,
+                        boundedY,
+                        fieldRect.width(),
+                        fieldRect.height());
+}
+
 bool PDFFormDesignerController::setTextFieldRect(const QString &fieldId,
                                                  qreal x,
                                                  qreal y,

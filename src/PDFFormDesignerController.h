@@ -149,6 +149,9 @@ public:
                                   qreal y,
                                   qreal width,
                                   qreal height);
+    Q_INVOKABLE bool moveField(const QString &fieldId,
+                              qreal x,
+                              qreal y);
     Q_INVOKABLE bool setTextFieldRect(const QString &fieldId,
                                       qreal x,
                                       qreal y,

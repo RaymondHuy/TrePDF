@@ -166,9 +166,19 @@ the format of text typed next without restyling existing text. Using one of
 those controls on selected text automatically opens the inline editor with the
 caret at the end. Font size is currently UI-only.
 
-The complete editable-text discovery, geometry, font, baseline, overlay, and
-draft-rendering flow is documented in
-[`docs/text-editing-pipeline.md`](docs/text-editing-pipeline.md).
+## Source documentation
+
+- [`docs/source-file-map.md`](docs/source-file-map.md): architecture, ownership,
+  thread boundaries, main runtime flows, and an index of every current QML/C++
+  implementation file.
+- [`docs/qml-file-guide.md`](docs/qml-file-guide.md): detailed responsibilities,
+  inputs, outputs, lifecycle, and C++ relationships for all 20 QML files.
+- [`docs/cpp-file-guide.md`](docs/cpp-file-guide.md): detailed responsibilities,
+  ownership, threading, persistence boundaries, and tests for all 16 `src/` C++
+  implementations, the C++ test file, and support headers.
+- [`docs/text-editing-pipeline.md`](docs/text-editing-pipeline.md): the complete
+  editable-text discovery, geometry, font, baseline, overlay, and
+  draft-rendering flow.
 
 ## Build
 

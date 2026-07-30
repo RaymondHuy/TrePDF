@@ -200,7 +200,7 @@
     <message id="Delete">
         <location filename="../src/Main.qml" line="825"/>
         <location filename="../src/Components/EditOverlay.qml" line="1918"/>
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="572"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="638"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
@@ -495,12 +495,17 @@
         <translation>Nhấp hoặc kéo trên trang để thêm hộp kiểm</translation>
     </message>
     <message id="ResizeFormField">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="344"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="380"/>
         <source>Resize form field</source>
         <translation>Đổi kích thước trường biểu mẫu</translation>
     </message>
+    <message id="MoveFormField">
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="731"/>
+        <source>Move form field</source>
+        <translation>Di chuyển trường biểu mẫu</translation>
+    </message>
     <message id="EnterFormText">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="641"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="850"/>
         <source>Enter text</source>
         <translation>Nhập văn bản</translation>
     </message>

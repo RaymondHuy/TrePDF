@@ -1,5 +1,6 @@
 #include "ApplicationFonts.h"
 #include "DraftImageItem.h"
+#include "FormFieldLayer.h"
 #include "PDFDocument.h"
 #include "PDFEditController.h"
 #include "PDFFormController.h"
@@ -16,6 +17,7 @@
 #include <QFileInfo>
 #include <QFontMetricsF>
 #include <QImage>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QQuickTextDocument>
 #include <QRawFont>
@@ -41,6 +43,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 
 namespace {
@@ -406,6 +409,42 @@ bool createPatternStrokePdf(const QString &filePath)
     return createPatternPaintPdf(filePath, PatternPaintMode::Stroke);
 }
 
+bool createGrayscaleWhiteFillPdf(const QString &filePath)
+{
+    const QByteArray pageContent(
+        "/P <</MCID 0>> BDC\n"
+        "1 g\n"
+        "20 20 160 80 re f*\n"
+        "EMC\n"
+        "0 g\n"
+        "BT\n"
+        "/F1 20 Tf\n"
+        "20 160 Td\n"
+        "(Grayscale white fill) Tj\n"
+        "ET\n");
+    const auto contentStream = [](const QByteArray &content) {
+        return QByteArray("<< /Length ")
+            + QByteArray::number(content.size())
+            + QByteArray(" >>\nstream\n")
+            + content
+            + QByteArray("endstream");
+    };
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /F1 4 0 R >> >> "
+                "/Contents 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+            contentStream(pageContent),
+        });
+}
+
 QImage renderFirstPage(const QString &filePath, const QSize &pixelSize)
 {
     PDFiumProcessLock pdfiumLock;
@@ -448,7 +487,8 @@ QImage renderFirstPage(const QString &filePath, const QSize &pixelSize)
 QImage renderFirstPageWithForms(
     const QString &filePath,
     const QSize &pixelSize,
-    const QStringList &suppressedWidgetIds = {})
+    const QStringList &suppressedWidgetIds = {},
+    const QPointF &focusedNormalizedPoint = QPointF(-1.0, -1.0))
 {
     PDFiumProcessLock pdfiumLock;
     const QByteArray encodedPath = QFile::encodeName(filePath);
@@ -465,6 +505,33 @@ QImage renderFirstPageWithForms(
     if (page && formHandle) {
         FORM_OnAfterLoadPage(page, formHandle);
     }
+    bool focusPrepared = true;
+    if (focusedNormalizedPoint.x() >= 0.0
+        && focusedNormalizedPoint.x() <= 1.0
+        && focusedNormalizedPoint.y() >= 0.0
+        && focusedNormalizedPoint.y() <= 1.0) {
+        double pageX = 0.0;
+        double pageY = 0.0;
+        focusPrepared = formHandle
+            && page
+            && FPDF_DeviceToPage(
+                page,
+                0,
+                0,
+                pixelSize.width(),
+                pixelSize.height(),
+                0,
+                qRound(focusedNormalizedPoint.x() * pixelSize.width()),
+                qRound(focusedNormalizedPoint.y() * pixelSize.height()),
+                &pageX,
+                &pageY)
+            && FORM_OnFocus(
+                formHandle,
+                page,
+                0,
+                pageX,
+                pageY);
+    }
     PDFWidgetAnnotationSuppression widgetSuppression;
     bool widgetsSuppressed
         = widgetSuppression.suppress(page, suppressedWidgetIds);
@@ -472,7 +539,8 @@ QImage renderFirstPageWithForms(
 
     QImage image(pixelSize, QImage::Format_ARGB32);
     image.fill(Qt::white);
-    FPDF_BITMAP bitmap = page && formHandle && widgetsSuppressed
+    FPDF_BITMAP bitmap = page && formHandle && focusPrepared
+            && widgetsSuppressed
         ? FPDFBitmap_CreateEx(
               image.width(),
               image.height(),
@@ -2168,6 +2236,14 @@ ImageSaveInspection inspectImages(const QString &filePath)
     return inspection;
 }
 
+class TestableFormFieldLayer final : public FormFieldLayer
+{
+public:
+    using FormFieldLayer::mouseMoveEvent;
+    using FormFieldLayer::mousePressEvent;
+    using FormFieldLayer::mouseReleaseEvent;
+};
+
 } // namespace
 
 class PDFEditControllerTest : public QObject
@@ -2177,6 +2253,7 @@ class PDFEditControllerTest : public QObject
 private slots:
     void initTestCase();
     void storesTransientTextFieldsByPage();
+    void movesFormFieldsWithoutResizing();
     void savesTextFieldAsAcroForm();
     void savesAndRehydratesCheckbox();
     void rehydratesTextFieldAfterSamePathSave();
@@ -2235,6 +2312,7 @@ private slots:
     void savesEditedTextRoundTrip();
     void preservesPatternFilledGraphicsWhenSavingText();
     void preservesPatternStrokedGraphicsWhenSavingText();
+    void preservesGrayscaleWhiteFillWhenSavingText();
     void savesVietnameseEditWithEmbeddedArial_data();
     void savesVietnameseEditWithEmbeddedArial();
     void savesVietnameseEditWithEmbeddedSystemFont_data();
@@ -2514,6 +2592,183 @@ void PDFEditControllerTest::storesTransientTextFieldsByPage()
     QCOMPARE(fields.size(), 1);
     QCOMPARE(fields.constFirst().toMap().value(QStringLiteral("id")).toString(),
              sourceFieldId);
+}
+
+void PDFEditControllerTest::movesFormFieldsWithoutResizing()
+{
+    PDFFormDesignerController controller;
+    const QString textFieldId = controller.addTextField(
+        0,
+        0.1,
+        0.2,
+        0.4,
+        0.08);
+    const QString checkboxId = controller.addField(
+        PDFFormDesignerController::Checkbox,
+        0,
+        0.8,
+        0.8,
+        0.06,
+        0.06);
+    QVERIFY(!textFieldId.isEmpty());
+    QVERIFY(!checkboxId.isEmpty());
+
+    TestableFormFieldLayer fieldLayer;
+    fieldLayer.setWidth(1000);
+    fieldLayer.setHeight(1000);
+    fieldLayer.setController(&controller);
+    fieldLayer.setPage(0);
+    fieldLayer.setFieldsVisible(true);
+    fieldLayer.setFieldsInteractive(true);
+    fieldLayer.setMoveEnabled(true);
+    controller.selectTextField(textFieldId);
+    QSignalSpy dataChangedSpy(
+        &controller,
+        &QAbstractItemModel::dataChanged);
+
+    QVERIFY(fieldLayer.beginFieldMove(textFieldId));
+    QVERIFY(fieldLayer.moving());
+    QVERIFY(fieldLayer.updateFieldMove(1.0, 1.0));
+    QRectF previewRect = fieldLayer.activeFieldRect();
+    QVERIFY(qAbs(previewRect.x() - 0.6) < 0.000001);
+    QVERIFY(qAbs(previewRect.y() - 0.92) < 0.000001);
+    QVERIFY(qAbs(previewRect.width() - 0.4) < 0.000001);
+    QVERIFY(qAbs(previewRect.height() - 0.08) < 0.000001);
+    QVariantMap field = controller.fieldData(textFieldId);
+    QCOMPARE(field.value(QStringLiteral("x")).toReal(), 0.1);
+    QCOMPARE(field.value(QStringLiteral("y")).toReal(), 0.2);
+    QCOMPARE(dataChangedSpy.count(), 0);
+
+    fieldLayer.cancelFieldMove();
+    QVERIFY(!fieldLayer.moving());
+    previewRect = fieldLayer.activeFieldRect();
+    QCOMPARE(previewRect, QRectF(0.1, 0.2, 0.4, 0.08));
+    QCOMPARE(dataChangedSpy.count(), 0);
+
+    QVERIFY(fieldLayer.beginFieldMove(textFieldId));
+    QVERIFY(fieldLayer.updateFieldMove(0.2, 0.3));
+    QVERIFY(fieldLayer.finishFieldMove());
+    QVERIFY(!fieldLayer.moving());
+    field = controller.fieldData(textFieldId);
+    QCOMPARE(field.value(QStringLiteral("x")).toReal(), 0.3);
+    QCOMPARE(field.value(QStringLiteral("y")).toReal(), 0.5);
+    QCOMPARE(field.value(QStringLiteral("width")).toReal(), 0.4);
+    QCOMPARE(field.value(QStringLiteral("height")).toReal(), 0.08);
+    QCOMPARE(dataChangedSpy.count(), 1);
+
+    QVERIFY(controller.moveField(checkboxId, 0.98, -0.4));
+    field = controller.fieldData(checkboxId);
+    QVERIFY(qAbs(field.value(QStringLiteral("x")).toReal() - 0.94)
+            < 0.000001);
+    QCOMPARE(field.value(QStringLiteral("y")).toReal(), 0.0);
+    QCOMPARE(field.value(QStringLiteral("width")).toReal(), 0.06);
+    QCOMPARE(field.value(QStringLiteral("height")).toReal(), 0.06);
+    QCOMPARE(dataChangedSpy.count(), 2);
+
+    QVERIFY(controller.moveField(checkboxId, 0.94, 0.0));
+    QCOMPARE(dataChangedSpy.count(), 2);
+    QVERIFY(!controller.moveField(
+        QStringLiteral("missing-field"),
+        0.2,
+        0.3));
+    QVERIFY(!controller.moveField(
+        textFieldId,
+        std::numeric_limits<qreal>::quiet_NaN(),
+        0.3));
+
+    QSignalSpy fieldActivatedSpy(
+        &fieldLayer,
+        &FormFieldLayer::fieldActivated);
+    const QPointF checkboxCenter(970, 30);
+    QMouseEvent clickPress(
+        QEvent::MouseButtonPress,
+        checkboxCenter,
+        checkboxCenter,
+        Qt::LeftButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    fieldLayer.mousePressEvent(&clickPress);
+    QCOMPARE(fieldActivatedSpy.count(), 0);
+    QMouseEvent clickRelease(
+        QEvent::MouseButtonRelease,
+        checkboxCenter,
+        checkboxCenter,
+        Qt::LeftButton,
+        Qt::NoButton,
+        Qt::NoModifier);
+    fieldLayer.mouseReleaseEvent(&clickRelease);
+    QCOMPARE(fieldActivatedSpy.count(), 1);
+
+    QMouseEvent dragPress(
+        QEvent::MouseButtonPress,
+        checkboxCenter,
+        checkboxCenter,
+        Qt::LeftButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    fieldLayer.mousePressEvent(&dragPress);
+    const QPointF movedPointer = checkboxCenter + QPointF(-50, 50);
+    QMouseEvent dragMove(
+        QEvent::MouseMove,
+        movedPointer,
+        movedPointer,
+        Qt::NoButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    fieldLayer.mouseMoveEvent(&dragMove);
+    QMouseEvent dragRelease(
+        QEvent::MouseButtonRelease,
+        movedPointer,
+        movedPointer,
+        Qt::LeftButton,
+        Qt::NoButton,
+        Qt::NoModifier);
+    fieldLayer.mouseReleaseEvent(&dragRelease);
+    QCOMPARE(fieldActivatedSpy.count(), 1);
+    field = controller.fieldData(checkboxId);
+    QVERIFY(qAbs(field.value(QStringLiteral("x")).toReal() - 0.89)
+            < 0.000001);
+    QVERIFY(qAbs(field.value(QStringLiteral("y")).toReal() - 0.05)
+            < 0.000001);
+    QCOMPARE(field.value(QStringLiteral("width")).toReal(), 0.06);
+    QCOMPARE(field.value(QStringLiteral("height")).toReal(), 0.06);
+
+    const QPointF movedCheckboxCenter(920, 80);
+    QMouseEvent canceledPress(
+        QEvent::MouseButtonPress,
+        movedCheckboxCenter,
+        movedCheckboxCenter,
+        Qt::LeftButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    fieldLayer.mousePressEvent(&canceledPress);
+    const QPointF canceledPointer
+        = movedCheckboxCenter + QPointF(50, 50);
+    QMouseEvent canceledMove(
+        QEvent::MouseMove,
+        canceledPointer,
+        canceledPointer,
+        Qt::NoButton,
+        Qt::LeftButton,
+        Qt::NoModifier);
+    fieldLayer.mouseMoveEvent(&canceledMove);
+    QVERIFY(fieldLayer.moving());
+    fieldLayer.cancelFieldMove();
+    QVERIFY(!fieldLayer.moving());
+    QMouseEvent canceledRelease(
+        QEvent::MouseButtonRelease,
+        canceledPointer,
+        canceledPointer,
+        Qt::LeftButton,
+        Qt::NoButton,
+        Qt::NoModifier);
+    fieldLayer.mouseReleaseEvent(&canceledRelease);
+    QCOMPARE(fieldActivatedSpy.count(), 1);
+    field = controller.fieldData(checkboxId);
+    QVERIFY(qAbs(field.value(QStringLiteral("x")).toReal() - 0.89)
+            < 0.000001);
+    QVERIFY(qAbs(field.value(QStringLiteral("y")).toReal() - 0.05)
+            < 0.000001);
 }
 
 void PDFEditControllerTest::savesTextFieldAsAcroForm()
@@ -2818,6 +3073,30 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
              QStringLiteral("Off"));
     QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
     QVERIFY(!hydrated.value(QStringLiteral("dirty")).toBool());
+
+    const QSize focusedRenderSize(1190, 1684);
+    const QImage pageWithoutFocusedCheckbox = renderFirstPage(
+        sourcePath,
+        focusedRenderSize);
+    const QImage pageWithFocusedCheckboxSuppressed
+        = renderFirstPageWithForms(
+            sourcePath,
+            focusedRenderSize,
+            {fieldId},
+            resizedRect.center());
+    QVERIFY(!pageWithoutFocusedCheckbox.isNull());
+    QVERIFY(!pageWithFocusedCheckboxSuppressed.isNull());
+    const QRect focusedCheckboxArea(
+        qRound(resizedRect.x() * focusedRenderSize.width()),
+        qRound(resizedRect.y() * focusedRenderSize.height()),
+        qRound(resizedRect.width() * focusedRenderSize.width()),
+        qRound(resizedRect.height() * focusedRenderSize.height()));
+    QCOMPARE(
+        changedPixelCount(
+            pageWithoutFocusedCheckbox,
+            pageWithFocusedCheckboxSuppressed,
+            focusedCheckboxArea.adjusted(-8, -8, 8, 8)),
+        0);
     QVERIFY(formDesigner.sourceFieldContainsPoint(
         0,
         resizedRect.center()));
@@ -3143,6 +3422,12 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
             sourcePath,
             renderSize,
             {fieldId, blankFieldId});
+    const QImage pageWithFocusedDesignerWidgetsSuppressed
+        = renderFirstPageWithForms(
+            sourcePath,
+            renderSize,
+            {fieldId, blankFieldId},
+            resizedFieldRect.center());
     const QImage pageWithOneDesignerWidgetSuppressed
         = renderFirstPageWithForms(
             sourcePath,
@@ -3151,6 +3436,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QVERIFY(!pageWithoutForms.isNull());
     QVERIFY(!pageWithForms.isNull());
     QVERIFY(!pageWithDesignerWidgetsSuppressed.isNull());
+    QVERIFY(!pageWithFocusedDesignerWidgetsSuppressed.isNull());
     QVERIFY(!pageWithOneDesignerWidgetSuppressed.isNull());
     const auto fieldArea = [&renderSize](const QRectF &normalizedRect) {
         return QRect(
@@ -3182,6 +3468,12 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
             pageWithoutForms,
             pageWithDesignerWidgetsSuppressed,
             fieldArea(blankFieldRect)),
+        0);
+    QCOMPARE(
+        changedPixelCount(
+            pageWithoutForms,
+            pageWithFocusedDesignerWidgetsSuppressed,
+            fieldArea(resizedFieldRect).adjusted(-6, -6, 6, 6)),
         0);
     QCOMPARE(
         changedPixelCount(
@@ -6324,6 +6616,46 @@ void PDFEditControllerTest::preservesPatternStrokedGraphicsWhenSavingText()
                  QStringLiteral("Pattern text edit"))
                  .isEmpty());
     QVERIFY(candidateForKind(savedCandidates, QStringLiteral("image")).isEmpty());
+}
+
+void PDFEditControllerTest::preservesGrayscaleWhiteFillWhenSavingText()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("grayscale-white-fill-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("grayscale-white-fill-output.pdf"));
+    QVERIFY(createGrayscaleWhiteFillPdf(sourcePath));
+    const QImage sourceImage = renderFirstPage(sourcePath, QSize(200, 200));
+    QVERIFY(!sourceImage.isNull());
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QStringLiteral("Grayscale white fill"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Edited grayscale text"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QString verificationPath = qEnvironmentVariable(
+        "TREPDF_GRAYSCALE_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(outputPath, verificationPath));
+    }
+    const QImage outputImage = renderFirstPage(outputPath, QSize(200, 200));
+    QVERIFY(!outputImage.isNull());
+    QCOMPARE(
+        changedPixelCount(
+            sourceImage,
+            outputImage,
+            QRect(30, 110, 140, 60)),
+        0);
 }
 
 void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial_data()

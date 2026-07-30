@@ -24,6 +24,9 @@ class FormFieldLayer : public QQuickItem
                    NOTIFY fieldsVisibleChanged FINAL)
     Q_PROPERTY(bool fieldsInteractive READ fieldsInteractive
                    WRITE setFieldsInteractive NOTIFY fieldsInteractiveChanged FINAL)
+    Q_PROPERTY(bool moveEnabled READ moveEnabled WRITE setMoveEnabled
+                   NOTIFY moveEnabledChanged FINAL)
+    Q_PROPERTY(bool moving READ moving NOTIFY movingChanged FINAL)
     Q_PROPERTY(bool sourceFieldsVisible READ sourceFieldsVisible
                    WRITE setSourceFieldsVisible
                    NOTIFY sourceFieldsVisibleChanged FINAL)
@@ -64,6 +67,8 @@ public:
     bool formsActive() const;
     bool fieldsVisible() const;
     bool fieldsInteractive() const;
+    bool moveEnabled() const;
+    bool moving() const;
     bool sourceFieldsVisible() const;
     qreal pointScale() const;
     qreal textFieldFontPointSize() const;
@@ -85,9 +90,16 @@ public:
     void setFormsActive(bool active);
     void setFieldsVisible(bool visible);
     void setFieldsInteractive(bool interactive);
+    void setMoveEnabled(bool enabled);
     void setSourceFieldsVisible(bool visible);
     void setPointScale(qreal scale);
     void setAccentColor(const QColor &color);
+
+    Q_INVOKABLE bool beginFieldMove(const QString &fieldId);
+    Q_INVOKABLE bool updateFieldMove(qreal normalizedDeltaX,
+                                     qreal normalizedDeltaY);
+    Q_INVOKABLE bool finishFieldMove();
+    Q_INVOKABLE void cancelFieldMove();
 
 signals:
     void controllerChanged();
@@ -96,6 +108,8 @@ signals:
     void formsActiveChanged();
     void fieldsVisibleChanged();
     void fieldsInteractiveChanged();
+    void moveEnabledChanged();
+    void movingChanged();
     void sourceFieldsVisibleChanged();
     void pointScaleChanged();
     void accentColorChanged();
@@ -107,7 +121,12 @@ protected:
                              UpdatePaintNodeData *data) override;
     void geometryChange(const QRectF &newGeometry,
                         const QRectF &oldGeometry) override;
+    void hoverMoveEvent(QHoverEvent *event) override;
+    void hoverLeaveEvent(QHoverEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseUngrabEvent() override;
 
 private:
     struct RenderField
@@ -123,6 +142,8 @@ private:
 
     void refreshFields();
     void refreshActiveField();
+    void resetMoveState();
+    void resetPointerInteraction();
     QRectF itemRect(const QRectF &normalizedRect) const;
 
     PDFFormDesignerController *m_controller = nullptr;
@@ -131,6 +152,8 @@ private:
     bool m_formsActive = false;
     bool m_fieldsVisible = false;
     bool m_fieldsInteractive = false;
+    bool m_moveEnabled = false;
+    bool m_moving = false;
     bool m_sourceFieldsVisible = false;
     qreal m_pointScale = 1.0;
     QColor m_accentColor = QColor(QStringLiteral("#d85f12"));
@@ -143,4 +166,9 @@ private:
     int m_activeFieldType = -1;
     int m_activeFieldFlags = PDFFormDesignerController::NoFieldFlags;
     bool m_activeFieldSourceBacked = false;
+    QString m_movingFieldId;
+    QRectF m_moveStartRect;
+    QRectF m_movePreviewRect;
+    QString m_pressedFieldId;
+    QPointF m_pressPosition;
 };

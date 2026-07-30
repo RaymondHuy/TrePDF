@@ -622,7 +622,17 @@ void PDFPageItem::setFormDesignerController(
             this,
             [this](int page) {
                 if (page < 0 || page == m_page) {
-                    refreshSuppressedFormWidgetIds();
+                    const bool suppressionIdsChanged
+                        = refreshSuppressedFormWidgetIds();
+                    if (!suppressionIdsChanged
+                        && m_formDesignMode
+                        && !m_suppressedFormWidgetIds.isEmpty()) {
+                        // A source-backed field move keeps the same widget ID,
+                        // but the cached page may still contain its appearance
+                        // at the source rectangle. Render the suppressed page
+                        // again so only the designer overlay remains visible.
+                        invalidateDraftCache(true);
+                    }
                 }
             });
         connect(
@@ -946,7 +956,7 @@ void PDFPageItem::handleFormRenderStateChanged(int page, quint64 revision)
     invalidateDraftCache(true);
 }
 
-void PDFPageItem::refreshSuppressedFormWidgetIds()
+bool PDFPageItem::refreshSuppressedFormWidgetIds()
 {
     QStringList widgetIds;
     if (m_formDesignMode && m_formDesignerController && m_page >= 0) {
@@ -956,10 +966,11 @@ void PDFPageItem::refreshSuppressedFormWidgetIds()
     }
 
     if (m_suppressedFormWidgetIds == widgetIds) {
-        return;
+        return false;
     }
     m_suppressedFormWidgetIds = std::move(widgetIds);
     invalidateCache();
+    return true;
 }
 
 quint64 PDFPageItem::currentDraftRevision() const
