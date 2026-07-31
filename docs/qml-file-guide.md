@@ -41,6 +41,10 @@ Main.qml
     └── TextFormatPanel.qml
 ```
 
+Phần cấu trúc chồng lớp của một `PdfPageDelegate` được giải thích chi tiết hơn
+trong [overlay-architecture.md](overlay-architecture.md): z-order, hệ tọa độ,
+mode gate, pointer/focus routing, texture synchronization và pooling.
+
 ## Vỏ ứng dụng và ribbon
 
 ### [`src/Main.qml`](../src/Main.qml)
@@ -250,6 +254,9 @@ Retina đầy trang. Mọi state delegate phụ thuộc trang phải reset khi r
 - Edit overlay ở trên texture/form theo mode; form designer overlay quản lý field
   thiết kế và source widget.
 - Hiển thị số trang ngoài page surface.
+
+Xem [overlay-architecture.md](overlay-architecture.md) để có cây item, z-order
+và ma trận mode/input đầy đủ của bốn layer này.
 
 **Pooling:** `ListView.onPooled` đặt `pooled = true`, khiến child ngắt document,
 interaction và focus; `onReused` bật lại để request state của page mới. Đây là

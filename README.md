@@ -176,6 +176,9 @@ caret at the end. Font size is currently UI-only.
 - [`docs/cpp-file-guide.md`](docs/cpp-file-guide.md): detailed responsibilities,
   ownership, threading, persistence boundaries, and tests for all 16 `src/` C++
   implementations, the C++ test file, and support headers.
+- [`docs/overlay-architecture.md`](docs/overlay-architecture.md): the current
+  per-page overlay tree, stacking order, coordinate systems, mode gates, input
+  routing, texture synchronization, and pooling cleanup.
 - [`docs/text-editing-pipeline.md`](docs/text-editing-pipeline.md): the complete
   editable-text discovery, geometry, font, baseline, overlay, and
   draft-rendering flow.

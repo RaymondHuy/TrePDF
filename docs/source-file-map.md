@@ -16,6 +16,10 @@ Tại thời điểm cập nhật, phạm vi có:
 Tài liệu chuyên sâu về pipeline sửa text vẫn nằm ở
 [text-editing-pipeline.md](text-editing-pipeline.md).
 
+Cấu trúc chồng lớp trên từng trang — bao gồm `z`, hệ tọa độ, mode, input, render
+texture và cleanup khi delegate được pool — được mô tả riêng trong
+[overlay-architecture.md](overlay-architecture.md).
+
 ## Kiến trúc tổng thể
 
 ```mermaid
