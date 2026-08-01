@@ -306,6 +306,22 @@ Item {
         z: 1
     }
 
+    MouseArea {
+        anchors.fill: parent
+        enabled: root.formsActive
+            && root.fieldsInteractive
+            && root.placementFieldType < 0
+            && !root.pooled
+        acceptedButtons: Qt.LeftButton
+        z: 1
+
+        onPressed: mouse => {
+            root.controller.clearTextFieldFocus()
+            root.controller.clearTextFieldSelection()
+            mouse.accepted = false
+        }
+    }
+
     component EdgeResizeHandle: Item {
         id: resizeHandle
 

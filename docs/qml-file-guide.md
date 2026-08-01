@@ -32,12 +32,13 @@ Main.qml
     ├── DocumentView.qml
     │   └── PdfPageDelegate.qml (mỗi trang đang hiện)
     │       ├── PDFPageView (C++)
-    │       ├── PDFFormView (C++)
-    │       │   └── FormChoiceOverlay.qml
-    │       ├── EditOverlay.qml
-    │       │   └── ShapeDraftView.qml
-    │       └── FormTextFieldOverlay.qml
-    │           └── FormFieldLayer (C++)
+    │       └── PageInteractionOverlay.qml
+    │           ├── PDFFormView (C++)
+    │           │   └── FormChoiceOverlay.qml
+    │           ├── EditOverlay.qml
+    │           │   └── ShapeDraftView.qml
+    │           └── FormTextFieldOverlay.qml
+    │               └── FormFieldLayer (C++)
     └── TextFormatPanel.qml
 ```
 
@@ -243,24 +244,38 @@ Retina đầy trang. Mọi state delegate phụ thuộc trang phải reset khi r
 **Bố cục:**
 
 - Tính kích thước trang từ `document.pageSize(index)`, zoom và quarter-turn.
-- `pageSurface` dùng chung chứa `PDFPageView`, `PDFFormView`,
-  `FormChoiceOverlay`, `EditOverlay` và `FormTextFieldOverlay`.
+- `pageSurface` dùng chung chứa `PDFPageView` và
+  `PageInteractionOverlay`; coordinator này chứa runtime form, edit và form
+  designer.
 - Rotation 90° được áp lên chính container dùng chung này; do đó texture, hit
   target form và overlay edit luôn xoay cùng nhau, còn tọa độ lưu không đổi.
 - `PDFPageView` nhận edit/form/designer controller để render texture đã phản ánh
   suppression và draft preview.
-- `PDFFormView` xử lý input native; choice overlay nằm cùng hệ tọa độ và nhận
-  viewport transform để giới hạn popup.
-- Edit overlay ở trên texture/form theo mode; form designer overlay quản lý field
-  thiết kế và source widget.
+- Delegate chuyển controller, mode, texture revision và viewport transform vào
+  `PageInteractionOverlay`; coordinator xử lý z-order và cleanup chung.
 - Hiển thị số trang ngoài page surface.
 
 Xem [overlay-architecture.md](overlay-architecture.md) để có cây item, z-order
-và ma trận mode/input đầy đủ của bốn layer này.
+và ma trận mode/input đầy đủ của các nhánh này.
 
 **Pooling:** `ListView.onPooled` đặt `pooled = true`, khiến child ngắt document,
 interaction và focus; `onReused` bật lại để request state của page mới. Đây là
 invariant quan trọng nhất của tệp.
+
+### [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml)
+
+**Vai trò:** coordinator duy nhất cho interaction của một trang. Component này
+không vẽ và không tạo layer/FBO; nó đặt `PDFFormView`, `EditOverlay` và
+`FormTextFieldOverlay` vào cùng hệ tọa độ, tính điều kiện runtime form và chuyển
+choice-field handshake tới đúng controller. `PDFPageView.formDesignMode` cũng
+bind vào mode đã tính ở đây để suppression và interaction dùng cùng trạng thái.
+
+**Điều hướng pointer:** form designer nằm trên Edit nhưng `FormFieldLayer` chỉ
+hit bên trong rect field. Vùng trống vì vậy đi xuống Edit; Forms placement và
+background selection được xử lý bởi các `MouseArea` riêng trong form overlay.
+
+**API delegate:** `prepareForSessionChange()` gom cleanup của edit/designer;
+`beginSelectedEditing()` chuyển tiếp vào `EditOverlay`.
 
 ## Overlay sửa nội dung
 
@@ -462,7 +477,7 @@ không cần toàn bộ semantics của ribbon.
 | `PDFFormController` | `PDFFormController.cpp` | page delegate và `PDFFormView` |
 | `PDFFormDesignerController` | `PDFFormDesignerController.cpp` | form designer overlay/layer |
 | `PDFPageView` | `PDFPageItem.cpp` | `PdfPageDelegate.qml` |
-| `PDFFormView` | `PDFFormView.cpp` | `PdfPageDelegate.qml` |
+| `PDFFormView` | `PDFFormView.cpp` | `PageInteractionOverlay.qml` |
 | `DraftImageView` | `DraftImageItem.cpp` | `EditOverlay.qml` |
 | `FormFieldLayer` | `FormFieldLayer.cpp` | `FormTextFieldOverlay.qml` |
 
@@ -470,8 +485,8 @@ không cần toàn bộ semantics của ribbon.
 
 - Kiểm tra component có nằm trong page delegate được pool hay không; nếu có,
   thêm cleanup cho mọi state/gesture/timer/focus mới.
-- Giữ overlay, form view và page texture trong cùng `pageSurface` nếu chúng dùng
-  cùng tọa độ và rotation.
+- Giữ `PageInteractionOverlay` và page texture trong cùng `pageSurface`; thêm
+  interaction mới vào coordinator nếu dùng cùng tọa độ và rotation.
 - Không chuyển tọa độ view đã xoay ngược vào model/save; controller nhận normalized
   geometry của trang logic.
 - Không giữ pointer controller/session trong dialog callback nếu tab có thể đổi;

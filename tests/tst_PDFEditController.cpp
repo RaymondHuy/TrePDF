@@ -2253,6 +2253,7 @@ class PDFEditControllerTest : public QObject
 private slots:
     void initTestCase();
     void storesTransientTextFieldsByPage();
+    void limitsFormFieldPointerHitArea();
     void movesFormFieldsWithoutResizing();
     void savesTextFieldAsAcroForm();
     void savesAndRehydratesCheckbox();
@@ -2592,6 +2593,61 @@ void PDFEditControllerTest::storesTransientTextFieldsByPage()
     QCOMPARE(fields.size(), 1);
     QCOMPARE(fields.constFirst().toMap().value(QStringLiteral("id")).toString(),
              sourceFieldId);
+}
+
+void PDFEditControllerTest::limitsFormFieldPointerHitArea()
+{
+    PDFFormDesignerController controller;
+    const QString fieldId = controller.addTextField(
+        0,
+        0.1,
+        0.2,
+        0.4,
+        0.08);
+    QVERIFY(!fieldId.isEmpty());
+
+    TestableFormFieldLayer fieldLayer;
+    fieldLayer.setWidth(1000);
+    fieldLayer.setHeight(1000);
+    fieldLayer.setController(&controller);
+    fieldLayer.setPage(0);
+
+    const QPointF fieldCenter(300, 240);
+    const QPointF emptyPagePoint(800, 500);
+    QVERIFY(!fieldLayer.contains(fieldCenter));
+
+    fieldLayer.setFieldsVisible(true);
+    QVERIFY(!fieldLayer.contains(fieldCenter));
+
+    fieldLayer.setFieldsInteractive(true);
+    fieldLayer.setMoveEnabled(true);
+    QVERIFY(fieldLayer.acceptHoverEvents());
+    QVERIFY(fieldLayer.contains(fieldCenter));
+    QVERIFY(!fieldLayer.contains(emptyPagePoint));
+    QVERIFY(!fieldLayer.contains(QPointF(1001, 500)));
+
+    fieldLayer.setMoveEnabled(false);
+    QVERIFY(!fieldLayer.acceptHoverEvents());
+    QVERIFY(fieldLayer.contains(fieldCenter));
+
+    fieldLayer.setPage(1);
+    QVERIFY(!fieldLayer.contains(fieldCenter));
+    fieldLayer.setPage(0);
+    QVERIFY(fieldLayer.contains(fieldCenter));
+
+    fieldLayer.setPooled(true);
+    QVERIFY(!fieldLayer.contains(fieldCenter));
+    fieldLayer.setPooled(false);
+    QVERIFY(fieldLayer.contains(fieldCenter));
+
+    fieldLayer.setFieldsInteractive(false);
+    QVERIFY(!fieldLayer.contains(fieldCenter));
+    fieldLayer.setFieldsInteractive(true);
+    QVERIFY(fieldLayer.contains(fieldCenter));
+
+    QVERIFY(controller.moveField(fieldId, 0.5, 0.6));
+    QVERIFY(!fieldLayer.contains(fieldCenter));
+    QVERIFY(fieldLayer.contains(QPointF(700, 640)));
 }
 
 void PDFEditControllerTest::movesFormFieldsWithoutResizing()

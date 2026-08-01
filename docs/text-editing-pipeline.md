@@ -16,8 +16,9 @@ Các file chính:
   object gốc khi đã có draft.
 - [`PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp): thay object nguồn bằng các
   text run đã layout và ghi PDF theo transaction.
-- [`PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml): đặt
-  `EditOverlay` trùng chính xác lên `PDFPageView`.
+- [`PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) và
+  [`PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml):
+  đặt `EditOverlay` trùng chính xác lên `PDFPageView`.
 
 ## 1. Tổng quan luồng xử lý
 
@@ -165,9 +166,9 @@ Khi người dùng mở tab Edit, [`AppRibbon.qml`](../src/Components/AppRibbon.
 interactionActive = !pooled && tool != BrowseTool
 ```
 
-Mỗi page delegate có một `EditOverlay` trùng vị trí và kích thước với
-`PDFPageView`, vì vậy tọa độ normalized của C++ có thể đổi trực tiếp sang pixel
-QML.
+Mỗi page delegate có một `PageInteractionOverlay` trùng vị trí và kích thước
+với `PDFPageView`; `EditOverlay` fill coordinator này, vì vậy tọa độ normalized
+của C++ có thể đổi trực tiếp sang pixel QML.
 
 Candidate được quét theo nhu cầu khi QML gọi một trong các hàm như:
 
@@ -310,10 +311,10 @@ pixelHeight = normalizedHeight * overlayHeight
 Do overlay trùng với page view, công thức vẫn đúng khi zoom thay đổi.
 
 Xoay chế độ xem không thay đổi các tọa độ normalized này. `PDFPageView` và
-`EditOverlay` nằm trong cùng một page-surface container, rồi container được xoay
-trên scene graph theo trạng thái riêng của tab. Vì texture và overlay nhận cùng
-transform, hit-test, selection và draft vẫn trùng nhau; `PDFDocument::pageSize()`
-và tọa độ dùng khi Save tiếp tục giữ nguyên theo PDF nguồn.
+`PageInteractionOverlay` nằm trong cùng một page-surface container;
+`EditOverlay` là child fill coordinator. Cả nhánh được xoay trên scene graph theo
+trạng thái riêng của tab nên texture, hit-test, selection và draft vẫn trùng
+nhau; `PDFDocument::pageSize()` và tọa độ Save giữ nguyên theo PDF nguồn.
 
 ## 6. Công thức quyết định text nào editable
 

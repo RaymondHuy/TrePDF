@@ -8,6 +8,7 @@ mode, và cách chúng giữ đồng bộ với texture PDF bên dưới.
 Phạm vi chính là:
 
 - [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml)
+- [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml)
 - [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml)
 - [`src/Components/FormChoiceOverlay.qml`](../src/Components/FormChoiceOverlay.qml)
 - [`src/Components/FormTextFieldOverlay.qml`](../src/Components/FormTextFieldOverlay.qml)
@@ -34,10 +35,11 @@ DocumentView (ListView, reuseItems: true)
     ├── pageSurface                  mặt phẳng chung, rotation = viewRotation
     │   ├── PDFPageView              z 0: texture PDF từ worker
     │   ├── page border              z 0: vẽ sau texture nên nằm trên texture
-    │   ├── PDFFormView              z 1: bridge input form PDFium
-    │   │   └── FormChoiceOverlay    custom UI cho combo/list an toàn
-    │   ├── EditOverlay              z 2: draft và interaction Edit
-    │   └── FormTextFieldOverlay     z 3: form designer
+    │   └── PageInteractionOverlay   z 1: coordinator input của trang
+    │       ├── PDFFormView          z 1: bridge input form PDFium
+    │       │   └── FormChoiceOverlay
+    │       ├── EditOverlay          z 2: draft và interaction Edit
+    │       └── FormTextFieldOverlay z 3: form designer
     └── page label                   ngoài mặt phẳng trang
 ```
 
@@ -45,6 +47,13 @@ DocumentView (ListView, reuseItems: true)
 form designer phải là con của cùng một item này nếu chúng chia sẻ tọa độ trang.
 Nhờ vậy mọi lớp xoay đồng thời khi người dùng đổi `viewRotation`, còn dữ liệu
 lưu vẫn dùng geometry của trang logic ban đầu.
+
+`PageInteractionOverlay` chỉ là `Item` điều phối. Nó không vẽ, không clip,
+không bật `layer.enabled` và không tạo FBO/texture riêng. Việc thêm coordinator
+không thay đổi đường render full-page; nó gom mode, z-order, choice handshake và
+cleanup của ba nhánh tương tác vào một nơi. `PDFPageView.formDesignMode` bind
+vào mode của coordinator để suppression texture và ownership pointer không lệch
+trạng thái.
 
 ## 2. Thứ tự vẽ và ý nghĩa của `z`
 
@@ -54,6 +63,12 @@ lưu vẫn dùng geometry của trang logic ban đầu.
 |---:|---|---:|---|---|
 | 0 | `PDFPageView` | 0 | Texture nền do `PDFPageItem` render. | Không trực tiếp. |
 | 0 | viền trang `Rectangle` | 0 | Viền current page; được khai báo sau texture nên nằm trên texture cùng `z`. | Không. |
+| 1 | `PageInteractionOverlay` | 1 | Coordinator chứa toàn bộ runtime/edit/designer interaction. | Root không tự nhận input; child quyết định. |
+
+### Lớp bên trong `PageInteractionOverlay`
+
+| Thứ tự | Thành phần | `z` | Trách nhiệm | Có thể nhận input khi |
+|---:|---|---:|---|---|
 | 1 | `PDFFormView` | 1 | Pointer, keyboard, IME và cursor cho AcroForm native; host cho choice overlay. | Browse/runtime form hợp lệ. |
 | 2 | `EditOverlay` | 2 | Chọn/thêm/sửa/move/resize draft text, image, shape, highlight. | Tool edit khác Browse, không save/pool. |
 | 3 | `FormTextFieldOverlay` | 3 | Đặt, chọn, sửa, resize, move field form designer. | Tùy từng child/control; xem bên dưới. |
@@ -63,7 +78,7 @@ bên trong component không phải “z toàn cục”. Ví dụ combo popup có
 nhưng đó là thứ tự trong subtree `FormChoiceOverlay`; không được dùng số đó để
 kết luận popup vượt qua `EditOverlay` (`z: 2`) hay form designer (`z: 3`). Khi
 đánh giá chồng lớp giữa các overlay lớn, luôn bắt đầu từ `z` của con trực tiếp
-của `pageSurface`.
+của `PageInteractionOverlay`, rồi mới xét `z` nội bộ của từng nhánh.
 
 ### Lớp bên trong `EditOverlay`
 
@@ -88,6 +103,7 @@ này ra sao.
 | Nhóm | `z` nội bộ | Mục đích |
 |---|---:|---|
 | `placementArea` | 0 | Click/drag ở vùng trống để đặt Text Field hoặc Check Box. |
+| Background Forms | 1 | Bỏ focus/selection khi click vùng trống trong Forms rồi reject press để runtime bên dưới vẫn được hit; không enabled ở Edit nên không che cursor edit. |
 | Rectangle preview khi đặt | 1 | Hiện rect đang kéo. |
 | `FormFieldLayer` | 2 | Render field bằng scene graph; hit-test, click, checkbox toggle, drag move. |
 | `activeFieldFrame` | 4 | Neo editor TextField, viền active và các control của field đang chọn. |
@@ -121,7 +137,7 @@ Một field/draft có thể đi qua bốn hệ tọa độ. Tất cả sửa geo
 |---|---|---|---|
 | ListView/page card | px trong content đã scroll | `DocumentView` / `PdfPageDelegate` | Layout dọc, margin, vị trí trang. Không lưu geometry ở đây. |
 | `pageFrame` | px của envelope hiển thị | `PdfPageDelegate` | Đổi width/height khi xoay 90°/270°. Không phải mặt phẳng của PDF. |
-| `pageSurface` và các child overlay | px của trang logic chưa xoay | `PDFPageView`, ba overlay | Vẽ, hit-test và nhận pointer cục bộ. |
+| `pageSurface` và coordinator | px của trang logic chưa xoay | `PDFPageView`, `PageInteractionOverlay` và ba nhánh con | Vẽ, hit-test và nhận pointer cục bộ. |
 | Normalized page rect | `0..1` theo width/height trang logic | C++ controller/model | Draft, field designer, choice field và dữ liệu chuẩn bị Save. |
 
 Các overlay convert rect chuẩn hóa bằng cùng công thức:
@@ -202,7 +218,7 @@ render.
 mouse, focus, keyboard, clipboard shortcut và IME; sau đó gọi
 `PDFFormController`, rồi worker form PDFium.
 
-Điều kiện interactive do `PdfPageDelegate` đặt là:
+Điều kiện interactive do `PageInteractionOverlay` đặt là:
 
 ```text
 !pooled
@@ -288,6 +304,17 @@ cùng, giữ move preview cục bộ và chỉ gọi `PDFFormDesignerController:
 khi kết thúc kéo. `FormTextFieldOverlay` giữ các phần cần QML control: editor,
 placement preview, resize handles, delete và move handle.
 
+`FormFieldLayer::contains()` chỉ trả về `true` khi điểm nằm trong một field đang
+visible và interactive. Vì layer designer nằm trên Edit, giới hạn không gian này
+là phần quyết định ownership: trên field thì designer nhận hover/drag; ngoài
+field thì Qt Quick tiếp tục hit-test xuống `EditOverlay`. `moveEnabled` không
+được dùng làm điều kiện `contains()`, vì field vẫn cần nhận click chọn/activate
+khi không cho phép kéo.
+
+Khi một hit thực sự đi xuống Edit, `EditOverlay.pointerInteractionStarted()` báo
+coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-test không
+để lại đồng thời một field form và một object PDF cùng selected.
+
 ## 5. Mode quyết định lớp nào hoạt động
 
 | Mode UI | `PDFPageItem.formDesignMode` | Runtime form (`PDFFormView`) | `EditOverlay` | Form designer (`FormTextFieldOverlay`) |
@@ -317,16 +344,17 @@ hit** được ưu tiên. Cấu trúc ý định hiện tại là:
 
 ```text
 pointer trong pageSurface
-  ├── FormTextFieldOverlay (z 3)
-  │   ├── move/delete/resize/editor/field nếu có field tại điểm
-  │   └── placementArea ở vùng trống khi tool đặt field bật
-  ├── EditOverlay (z 2)
-  │   ├── resizeOverlay của object đang chọn
-  │   ├── draft-specific MouseArea
-  │   └── hitArea nền cho select/add/draw
-  ├── PDFFormView + FormChoiceOverlay (z 1)
-  │   ├── combo/list custom an toàn
-  │   └── native PDFium form input
+  ├── PageInteractionOverlay (coordinator, không tự bắt event)
+  │   ├── FormTextFieldOverlay (z 3)
+  │   │   ├── move/delete/resize/editor/field nếu contains(point)
+  │   │   └── placement/background Forms khi được bật
+  │   ├── EditOverlay (z 2)
+  │   │   ├── resizeOverlay của object đang chọn
+  │   │   ├── draft-specific MouseArea
+  │   │   └── hitArea nền cho select/add/draw
+  │   └── PDFFormView + FormChoiceOverlay (z 1)
+  │       ├── combo/list custom an toàn
+  │       └── native PDFium form input
   └── PDFPageView (z 0, chỉ texture)
 ```
 
@@ -412,6 +440,7 @@ Khi pooled:
 - `pageSurface.visible` thành false.
 - `PDFPageView` nhận document/controller `null`, hủy render cũ và không giữ
   texture của trang đang bị recycle.
+- `PageInteractionOverlay` chuyển `pooled` xuống ba nhánh và gom cleanup đồng bộ.
 - `PDFFormView` mất controller/interactivity; choice snapshot/pending refresh bị
   clear hoặc loại bằng request serial.
 - `EditOverlay.reloadData()` xóa drafts/candidates/hover và cancel shape/highlight.
@@ -425,7 +454,8 @@ pool phải nằm trong property/reset explicit hoặc controller session.
 
 `DocumentView.prepareForSessionChange()` tăng generation, hoàn tất editor/resize
 của controller và hủy navigation pending. `PdfPageDelegate` nghe
-`sessionChangeGeneration` rồi gọi:
+`sessionChangeGeneration` rồi gọi
+`PageInteractionOverlay.prepareForSessionChange()`. Coordinator tiếp tục gọi:
 
 - `EditOverlay.prepareForSessionChange()`;
 - `FormTextFieldOverlay.prepareForSessionChange()`.
@@ -447,8 +477,9 @@ controller pointer cùng page vào callback. `FormChoiceOverlay` đóng popup kh
 
 ## 9. Checklist khi thêm hoặc sửa overlay
 
-1. **Đặt đúng parent.** Overlay dùng tọa độ PDF phải nằm trong `pageSurface` và
-   `anchors.fill: pageView`, không đặt vào `pageFrame` hoặc `ListView` trực tiếp.
+1. **Đặt đúng parent.** Interaction dùng tọa độ PDF phải nằm trong
+   `PageInteractionOverlay`, còn coordinator nằm trong `pageSurface` và
+   `anchors.fill: pageView`; không đặt vào `pageFrame` hoặc `ListView` trực tiếp.
 2. **Chọn tầng gốc trước.** Xác định nó nằm dưới runtime form, giữa form/edit hay
    trên designer. Ghi rõ `z` và không so `z` nội bộ với sibling khác parent.
 3. **Tách visible khỏi enabled.** Preview chưa lưu có thể cần hiện khi không cho
@@ -470,7 +501,8 @@ controller pointer cùng page vào callback. `FormChoiceOverlay` đóng popup kh
 
 | Muốn thay đổi | Bắt đầu tại | Luôn kiểm thêm |
 |---|---|---|
-| Thêm lớp vẽ trên trang | `PdfPageDelegate.qml` | z cấp `pageSurface`, rotation, pooling. |
+| Thêm nhánh interaction trên trang | `PageInteractionOverlay.qml` | z nội bộ, mode ownership, focus và pooling. |
+| Đổi texture/khung trang | `PdfPageDelegate.qml` | `pageSurface`, rotation và kích thước delegate. |
 | Thêm tool edit/gesture | `EditOverlay.qml` | `PDFEditController`, `PDFPageItem` draft revision, Save writer. |
 | Đổi choice popup | `FormChoiceOverlay.qml` | `PDFFormView`, token/source-page validation, viewport mapping. |
 | Đổi form native input | `PDFFormView.cpp` | `PDFFormController`, worker, `designerBlocksPointer()`. |
@@ -479,5 +511,5 @@ controller pointer cùng page vào callback. `FormChoiceOverlay` đóng popup kh
 
 Tài liệu ngắn theo từng file vẫn nằm ở [qml-file-guide.md](qml-file-guide.md)
 và [cpp-file-guide.md](cpp-file-guide.md); tài liệu này nên được cập nhật mỗi khi
-có thêm một layer trực tiếp trong `pageSurface`, một mode mới, hoặc một đường
+có thêm một nhánh trong `PageInteractionOverlay`, một mode mới, hoặc một đường
 pointer/focus mới.

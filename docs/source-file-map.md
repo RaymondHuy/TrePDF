@@ -32,6 +32,7 @@ flowchart TD
     View["DocumentView\nListView ảo hóa"]
     Delegate["PdfPageDelegate\nMột trang đang hiện"]
     PageItem["PDFPageItem\nRender texture PDF"]
+    Interaction["PageInteractionOverlay\nĐiều phối input theo trang"]
     EditOverlay["EditOverlay\nEdit text/image/shape/highlight"]
     FormView["PDFFormView + FormChoiceOverlay\nForm PDFium đang chạy"]
     Designer["FormTextFieldOverlay + FormFieldLayer\nThiết kế form"]
@@ -51,9 +52,10 @@ flowchart TD
     Workspace --> View
     View --> Delegate
     Delegate --> PageItem
-    Delegate --> EditOverlay
-    Delegate --> FormView
-    Delegate --> Designer
+    Delegate --> Interaction
+    Interaction --> EditOverlay
+    Interaction --> FormView
+    Interaction --> Designer
     Session --> Document
     Session --> Edit
     Session --> Form
@@ -185,7 +187,8 @@ flowchart TD
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
 | [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel format cho một session. |
 | [`src/Components/DocumentView.qml`](../src/Components/DocumentView.qml) | ListView trang liên tục và ảo hóa. |
-| [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture và các overlay của một trang. |
+| [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, coordinator interaction, rotation và layout của một trang. |
+| [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml) | Gom mode, z-order, choice handshake và cleanup của runtime/edit/form designer. |
 | [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml) | Tương tác sửa nội dung trang. |
 | [`src/Components/FormChoiceOverlay.qml`](../src/Components/FormChoiceOverlay.qml) | Combo/list overlay cho choice field an toàn. |
 | [`src/Components/FormTextFieldOverlay.qml`](../src/Components/FormTextFieldOverlay.qml) | Đặt và chỉnh field thiết kế. |

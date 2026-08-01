@@ -83,6 +83,7 @@ public:
     int activeFieldType() const;
     int activeFieldFlags() const;
     bool activeFieldSourceBacked() const;
+    bool contains(const QPointF &point) const override;
 
     void setController(PDFFormDesignerController *controller);
     void setPage(int page);

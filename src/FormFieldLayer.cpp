@@ -409,6 +409,23 @@ bool FormFieldLayer::activeFieldSourceBacked() const
     return m_activeFieldSourceBacked;
 }
 
+bool FormFieldLayer::contains(const QPointF &point) const
+{
+    if (!QQuickItem::contains(point)
+        || !m_fieldsVisible
+        || !m_fieldsInteractive
+        || m_pooled) {
+        return false;
+    }
+
+    return std::any_of(
+        m_renderFields.crbegin(),
+        m_renderFields.crend(),
+        [this, &point](const RenderField &field) {
+            return itemRect(field.normalizedRect).contains(point);
+        });
+}
+
 void FormFieldLayer::setController(PDFFormDesignerController *controller)
 {
     if (m_controller == controller) {
