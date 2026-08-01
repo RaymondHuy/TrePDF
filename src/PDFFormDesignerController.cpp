@@ -425,6 +425,11 @@ bool PDFFormDesignerController::activateSourceCheckbox(
         0,
         position,
         deviceSize);
+    // The designer overlay owns selection while source Widgets are hidden.
+    // Leaving PDFium focused would make FPDF_FFLDraw paint its native focus
+    // adornment at sourceNormalizedRect, which is the stale pre-move position
+    // until the form draft is saved.
+    m_formController->killFocus();
     refreshSourceFieldValues();
     return true;
 }

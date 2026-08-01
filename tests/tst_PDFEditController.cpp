@@ -2988,14 +2988,30 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
     QVERIFY(formDesigner.setFieldFlags(
         fieldId,
         PDFFormDesignerController::Required));
+    const QRectF otherInitialRect(0.65, 0.30, 0.08, 0.08);
+    const QString otherCheckboxId = formDesigner.addField(
+        PDFFormDesignerController::Checkbox,
+        0,
+        otherInitialRect.x(),
+        otherInitialRect.y(),
+        otherInitialRect.width(),
+        otherInitialRect.height());
+    QVERIFY(otherCheckboxId.startsWith(
+        QStringLiteral("checkbox-field-")));
+    QVERIFY(formDesigner.setFieldName(
+        otherCheckboxId,
+        QStringLiteral("OtherChoice")));
 
     const QVector<PDFFormDesignerController::SaveField> addedFields
         = formDesigner.saveFields();
-    QCOMPARE(addedFields.size(), 1);
+    QCOMPARE(addedFields.size(), 2);
     QCOMPARE(addedFields.constFirst().type,
              PDFFormDesignerController::Checkbox);
     QCOMPARE(addedFields.constFirst().value, QStringLiteral("Yes"));
     QCOMPARE(addedFields.constFirst().defaultValue, QStringLiteral("Off"));
+    QCOMPARE(addedFields.constLast().type,
+             PDFFormDesignerController::Checkbox);
+    QCOMPARE(addedFields.constLast().value, QStringLiteral("Off"));
 
     QSignalSpy saveFinishedSpy(
         &editController,
@@ -3003,7 +3019,7 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
     QVERIFY(editController.requestSave());
     QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
     QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
-    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
     QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
 
     QVariantMap hydrated = formDesigner.fieldData(fieldId);
@@ -3013,8 +3029,11 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
              QStringLiteral("Yes"));
     QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
     QVERIFY(!hydrated.value(QStringLiteral("dirty")).toBool());
-    QCOMPARE(formDesigner.sourceFieldIdsForPage(0),
-             QStringList({fieldId}));
+    const QStringList sourceFieldIds
+        = formDesigner.sourceFieldIdsForPage(0);
+    QCOMPARE(sourceFieldIds.size(), 2);
+    QVERIFY(sourceFieldIds.contains(fieldId));
+    QVERIFY(sourceFieldIds.contains(otherCheckboxId));
     QVERIFY(formDesigner.sourceTextFieldIdsForPage(0).isEmpty());
     QVERIFY(formDesigner.sourceFieldContainsPoint(
         0,
@@ -3025,7 +3044,7 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
         QStringLiteral("AcceptTerms"));
     QVERIFY(inspection.readable);
     QCOMPARE(inspection.formType, FORMTYPE_ACRO_FORM);
-    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.widgetCount, 2);
     QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_CHECKBOX);
     QCOMPARE(inspection.value, QStringLiteral("Yes"));
     QCOMPARE(inspection.exportValue, QStringLiteral("Yes"));
@@ -3075,6 +3094,29 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
         QStringLiteral("Off"),
         5000);
 
+    const QRectF resizedRect(0.20, 0.30, 0.08, 0.08);
+    formDesigner.selectTextField(fieldId);
+    QVERIFY(formDesigner.setFieldRect(
+        fieldId,
+        resizedRect.x(),
+        resizedRect.y(),
+        resizedRect.width(),
+        resizedRect.height()));
+    formDesigner.selectTextField(otherCheckboxId);
+    QVERIFY(formDesigner.activateSourceCheckbox(
+        otherCheckboxId,
+        deviceSize.width(),
+        deviceSize.height()));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        formDesigner.fieldData(otherCheckboxId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Yes"),
+        5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formController.hasFocus(), 5000);
+    formDesigner.selectTextField(fieldId);
+    QCOMPARE(formDesigner.selectedTextFieldId(), fieldId);
+
     QVERIFY(formDesigner.activateSourceCheckbox(
         fieldId,
         deviceSize.width(),
@@ -3085,6 +3127,7 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
             .toString(),
         QStringLiteral("Yes"),
         5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formController.hasFocus(), 5000);
     QVERIFY(formDesigner.activateSourceCheckbox(
         fieldId,
         deviceSize.width(),
@@ -3095,14 +3138,15 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
             .toString(),
         QStringLiteral("Off"),
         5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formController.hasFocus(), 5000);
+    QCOMPARE(
+        formDesigner.fieldData(fieldId)
+            .value(QStringLiteral("rect"))
+            .toRectF(),
+        resizedRect);
+    QCOMPARE(formDesigner.fieldsForPage(0).size(), 2);
+    QCOMPARE(formDesigner.selectedTextFieldId(), fieldId);
 
-    const QRectF resizedRect(0.20, 0.30, 0.08, 0.08);
-    QVERIFY(formDesigner.setFieldRect(
-        fieldId,
-        resizedRect.x(),
-        resizedRect.y(),
-        resizedRect.width(),
-        resizedRect.height()));
     const QVector<PDFFormDesignerController::SaveField> resizedFields
         = formDesigner.saveFields(true);
     QCOMPARE(resizedFields.size(), 1);
@@ -3119,7 +3163,7 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
     QVERIFY(editController.requestSave());
     QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
     QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
-    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
     QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
 
     hydrated = formDesigner.fieldData(fieldId);
@@ -3163,7 +3207,7 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
     inspection = inspectAcroFormField(
         sourcePath,
         QStringLiteral("AcceptTerms"));
-    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.widgetCount, 2);
     QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_CHECKBOX);
     QCOMPARE(inspection.value, QStringLiteral("Off"));
     QCOMPARE(inspection.exportValue, QStringLiteral("Yes"));
