@@ -394,6 +394,11 @@ QString FormFieldLayer::activeFieldValue() const
     return m_activeFieldValue;
 }
 
+QStringList FormFieldLayer::activeFieldOptions() const
+{
+    return m_activeFieldOptions;
+}
+
 int FormFieldLayer::activeFieldType() const
 {
     return m_activeFieldType;
@@ -786,11 +791,13 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
             = field.type == PDFFormDesignerController::Text;
         const bool checkbox
             = field.type == PDFFormDesignerController::Checkbox;
+        const bool dropdown
+            = field.type == PDFFormDesignerController::Dropdown;
         // Source Widget rectangles commonly return with fractional coordinates
         // after a Save/reopen cycle. Keep both opposite edges on the same
         // physical-pixel phase so a one-point border cannot rasterize as one
         // pixel on one side and two pixels on the other.
-        const QRectF fieldRect = textField || checkbox
+        const QRectF fieldRect = textField || checkbox || dropdown
             ? alignedDeviceRect(rawFieldRect, devicePixelRatio)
             : rawFieldRect;
         const bool selected = m_formsActive && field.selected;
@@ -802,7 +809,7 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                 ? PDFFormAppearance::kTextFieldBorderPointWidth
                     * m_pointScale
                 : 1.0;
-        const qreal borderWidth = textField || checkbox
+        const qreal borderWidth = textField || checkbox || dropdown
             ? alignedDeviceWidth(
                   requestedBorderWidth,
                   devicePixelRatio)
@@ -1119,6 +1126,9 @@ void FormFieldLayer::refreshFields()
             field.value = m_controller->data(
                 modelIndex,
                 PDFFormDesignerController::ValueRole).toString();
+            field.options = m_controller->data(
+                modelIndex,
+                PDFFormDesignerController::OptionsRole).toStringList();
             field.flags = m_controller->data(
                 modelIndex,
                 PDFFormDesignerController::FlagsRole).toInt();
@@ -1168,6 +1178,7 @@ void FormFieldLayer::refreshActiveField()
     QString fieldId;
     QRectF fieldRect;
     QString fieldValue;
+    QStringList fieldOptions;
     int fieldType = -1;
     int fieldFlags = PDFFormDesignerController::NoFieldFlags;
     bool fieldSourceBacked = false;
@@ -1184,6 +1195,7 @@ void FormFieldLayer::refreshActiveField()
             fieldId = field->id;
             fieldRect = field->normalizedRect;
             fieldValue = field->value;
+            fieldOptions = field->options;
             fieldType = field->type;
             fieldFlags = field->flags;
             fieldSourceBacked = field->sourceBacked;
@@ -1192,6 +1204,7 @@ void FormFieldLayer::refreshActiveField()
 
     if (m_activeFieldId == fieldId && m_activeFieldRect == fieldRect
         && m_activeFieldValue == fieldValue
+        && m_activeFieldOptions == fieldOptions
         && m_activeFieldType == fieldType
         && m_activeFieldFlags == fieldFlags
         && m_activeFieldSourceBacked == fieldSourceBacked) {
@@ -1200,6 +1213,7 @@ void FormFieldLayer::refreshActiveField()
     m_activeFieldId = fieldId;
     m_activeFieldRect = fieldRect;
     m_activeFieldValue = fieldValue;
+    m_activeFieldOptions = fieldOptions;
     m_activeFieldType = fieldType;
     m_activeFieldFlags = fieldFlags;
     m_activeFieldSourceBacked = fieldSourceBacked;

@@ -250,6 +250,36 @@ bool createChoiceFieldsPdf(const QString &filePath)
         });
 }
 
+bool createTrePDFDropdownWithExportValuesPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray(
+                "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R "
+                "/MediaBox [0 0 360 480] /Resources << >> "
+                "/Annots [4 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Ch "
+                "/Ff 131072 /T (Transport) /TU (Transport choice) "
+                "/NM (dropdown-field-11111111-1111-1111-1111-111111111111) "
+                "/P 3 0 R /F 4 /Rect [20 400 180 430] "
+                "/Opt [[(Airplane) (Airplane)] [(bike) (Bicycle)] "
+                "[(car) (Car)]] /V (Airplane) /DV (Airplane) /I [0] "
+                "/DA (/Helv 12 Tf 0 g) >>"),
+            QByteArray(
+                "<< /Fields [4 0 R] /NeedAppearances true "
+                "/DA (/Helv 12 Tf 0 g) "
+                "/DR << /Font << /Helv 6 0 R >> >> >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+        });
+}
+
 QVector<int> selectedChoiceOptions(
     const QString &filePath,
     int annotationIndex)
@@ -1780,6 +1810,9 @@ struct AcroFormFieldInspection {
     int fieldFlags = 0;
     QString name;
     QString value;
+    QString defaultValue;
+    QStringList options;
+    QVector<int> selectedIndices;
     FS_RECTF rect{};
     bool hasAppearance = false;
     bool hasMaxLength = false;
@@ -1791,6 +1824,7 @@ struct AcroFormFieldInspection {
     int controlIndex = -1;
     bool hasAppearanceVersion = false;
     float appearanceVersion = 0.0f;
+    QString appearanceStream;
     bool pointHit = false;
     bool focusHandled = false;
 };
@@ -1884,6 +1918,43 @@ AcroFormFieldInspection inspectAcroFormField(
                             buffer,
                             byteCount);
                     });
+                inspection.defaultValue = readWideString(
+                    [annotation](FPDF_WCHAR *buffer,
+                                 unsigned long byteCount) {
+                        return FPDFAnnot_GetStringValue(
+                            annotation,
+                            "DV",
+                            buffer,
+                            byteCount);
+                    });
+                const int optionCount = FPDFAnnot_GetOptionCount(
+                    formHandle,
+                    annotation);
+                if (optionCount > 0) {
+                    inspection.options.reserve(optionCount);
+                    for (int optionIndex = 0;
+                         optionIndex < optionCount;
+                         ++optionIndex) {
+                        inspection.options.append(readWideString(
+                            [formHandle,
+                             annotation,
+                             optionIndex](FPDF_WCHAR *buffer,
+                                          unsigned long byteCount) {
+                                return FPDFAnnot_GetOptionLabel(
+                                    formHandle,
+                                    annotation,
+                                    optionIndex,
+                                    buffer,
+                                    byteCount);
+                            }));
+                        if (FPDFAnnot_IsOptionSelected(
+                                formHandle,
+                                annotation,
+                                optionIndex)) {
+                            inspection.selectedIndices.append(optionIndex);
+                        }
+                    }
+                }
                 FPDFAnnot_GetRect(annotation, &inspection.rect);
                 inspection.hasAppearance = FPDFAnnot_HasKey(
                     annotation,
@@ -1912,6 +1983,15 @@ AcroFormFieldInspection inspectAcroFormField(
                         annotation,
                         PDFFormAppearance::kVersionKey,
                         &inspection.appearanceVersion);
+                inspection.appearanceStream = readWideString(
+                    [annotation](FPDF_WCHAR *buffer,
+                                 unsigned long byteCount) {
+                        return FPDFAnnot_GetAP(
+                            annotation,
+                            FPDF_ANNOT_APPEARANCEMODE_NORMAL,
+                            buffer,
+                            byteCount);
+                    });
                 inspection.hasMaxLength = FPDFAnnot_GetNumberValue(
                     annotation,
                     "MaxLen",
@@ -2257,6 +2337,8 @@ private slots:
     void movesFormFieldsWithoutResizing();
     void savesTextFieldAsAcroForm();
     void savesAndRehydratesCheckbox();
+    void savesRehydratesAndInteractsWithDropdown();
+    void rejectsDropdownExportDisplayPairs();
     void rehydratesTextFieldAfterSamePathSave();
     void normalizesLegacyTextFieldAppearances();
     void addsTextFieldToExistingAcroForm();
@@ -3218,6 +3300,316 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
     QVERIFY(qAbs(inspection.rect.right - 166.6) < 1.0);
     QVERIFY(qAbs(inspection.rect.top - 589.4) < 1.0);
     QVERIFY(qAbs(inspection.rect.bottom - 522.04) < 1.0);
+}
+
+void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-dropdown.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+
+    const QStringList options({
+        QStringLiteral("Tùy chọn 1"),
+        QStringLiteral("Tùy chọn 2"),
+        QStringLiteral("Tùy chọn 3"),
+    });
+    const QRectF initialRect(0.16, 0.22, 0.40, 0.06);
+    const QString fieldId = formDesigner.addField(
+        PDFFormDesignerController::Dropdown,
+        0,
+        initialRect.x(),
+        initialRect.y(),
+        initialRect.width(),
+        initialRect.height());
+    QVERIFY(fieldId.startsWith(QStringLiteral("dropdown-field-")));
+    QVERIFY(formDesigner.setFieldName(
+        fieldId,
+        QStringLiteral("Transport")));
+    QVERIFY(formDesigner.setFieldOptions(fieldId, options));
+    QVERIFY(formDesigner.setFieldValue(
+        fieldId,
+        QStringLiteral("Tùy chọn 2")));
+    QVERIFY(formDesigner.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Required));
+
+    const QVector<PDFFormDesignerController::SaveField> addedFields
+        = formDesigner.saveFields();
+    QCOMPARE(addedFields.size(), 1);
+    QCOMPARE(addedFields.constFirst().type,
+             PDFFormDesignerController::Dropdown);
+    QCOMPARE(addedFields.constFirst().options, options);
+    QCOMPARE(addedFields.constFirst().value,
+             QStringLiteral("Tùy chọn 2"));
+    QCOMPARE(addedFields.constFirst().defaultValue,
+             QStringLiteral("Tùy chọn 1"));
+
+    QSignalSpy saveFinishedSpy(
+        &editController,
+        &PDFEditController::saveFinished);
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+    QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    QVariantMap hydrated = formDesigner.fieldData(fieldId);
+    QCOMPARE(hydrated.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::Dropdown);
+    QCOMPARE(hydrated.value(QStringLiteral("options")).toStringList(),
+             options);
+    QCOMPARE(hydrated.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Tùy chọn 2"));
+    QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
+    QVERIFY(!hydrated.value(QStringLiteral("dirty")).toBool());
+    QVERIFY(formDesigner.sourceFieldIdsForPage(0).contains(fieldId));
+    QVERIFY(formDesigner.sourceFieldContainsPoint(
+        0,
+        initialRect.center()));
+
+    AcroFormFieldInspection inspection = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("Transport"));
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.formType, FORMTYPE_ACRO_FORM);
+    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_COMBOBOX);
+    QVERIFY(inspection.fieldFlags & FPDF_FORMFLAG_CHOICE_COMBO);
+    QVERIFY(inspection.fieldFlags & FPDF_FORMFLAG_REQUIRED);
+    QVERIFY(!(inspection.fieldFlags & FPDF_FORMFLAG_CHOICE_EDIT));
+    QVERIFY(!(inspection.fieldFlags & FPDF_FORMFLAG_CHOICE_MULTI_SELECT));
+    QCOMPARE(inspection.name, QStringLiteral("Transport"));
+    QCOMPARE(inspection.value, QStringLiteral("Tùy chọn 2"));
+    QCOMPARE(inspection.defaultValue, QStringLiteral("Tùy chọn 1"));
+    QCOMPARE(inspection.options, options);
+    QCOMPARE(inspection.selectedIndices, QVector<int>({1}));
+    QVERIFY(inspection.hasAppearance);
+    QVERIFY(inspection.appearanceStream.contains(
+        QStringLiteral("/Im0 Do")));
+    QVERIFY(inspection.annotationFlags & FPDF_ANNOT_FLAG_PRINT);
+    QVERIFY(inspection.hasAppearanceVersion);
+    QCOMPARE(inspection.appearanceVersion,
+             static_cast<float>(PDFFormAppearance::kDropdownVersion));
+    QVERIFY(inspection.pointHit);
+
+    QTRY_VERIFY_WITH_TIMEOUT(formController.javascriptEnabled(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !formController.javascriptTransitionPending(),
+        5000);
+    QVector<PDFFormWorker::ChoiceField> choiceFields;
+    bool inspectionCompleted = false;
+    formController.requestChoiceFields(
+        0,
+        [&choiceFields, &inspectionCompleted](
+            QVector<PDFFormWorker::ChoiceField> fields) {
+            choiceFields = std::move(fields);
+            inspectionCompleted = true;
+        });
+    QTRY_VERIFY_WITH_TIMEOUT(inspectionCompleted, 5000);
+    QCOMPARE(choiceFields.size(), 1);
+    const PDFFormWorker::ChoiceField choice = choiceFields.constFirst();
+    QCOMPARE(choice.fieldType, FPDF_FORMFIELD_COMBOBOX);
+    QCOMPARE(choice.options, options);
+    QCOMPARE(choice.selectedIndices, QVector<int>({1}));
+    QVERIFY(!choice.readOnly);
+    QVERIFY(!choice.multiSelect);
+    QVERIFY(!choice.identityToken.isEmpty());
+
+    bool focusCompleted = false;
+    bool focusSucceeded = false;
+    formController.focusChoiceField(
+        0,
+        choice.annotationIndex,
+        choice.sourcePage,
+        choice.identityToken,
+        [&focusCompleted, &focusSucceeded](bool focused) {
+            focusSucceeded = focused;
+            focusCompleted = true;
+        });
+    QTRY_VERIFY_WITH_TIMEOUT(focusCompleted, 5000);
+    QVERIFY(focusSucceeded);
+    QVERIFY(formDesigner.activateSourceDropdown(fieldId, 2));
+    QTRY_VERIFY_WITH_TIMEOUT(formController.hasDrafts(), 5000);
+    QVERIFY(!formController.canUndo());
+    QVERIFY(!formController.canRedo());
+
+    choiceFields.clear();
+    inspectionCompleted = false;
+    formController.requestChoiceFields(
+        0,
+        [&choiceFields, &inspectionCompleted](
+            QVector<PDFFormWorker::ChoiceField> fields) {
+            choiceFields = std::move(fields);
+            inspectionCompleted = true;
+        });
+    QTRY_VERIFY_WITH_TIMEOUT(inspectionCompleted, 5000);
+    QCOMPARE(choiceFields.size(), 1);
+    QCOMPARE(choiceFields.constFirst().selectedIndices,
+             QVector<int>({2}));
+
+    QTRY_COMPARE_WITH_TIMEOUT(
+        formDesigner.fieldData(fieldId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Tùy chọn 3"),
+        5000);
+
+    // Saving only the native form draft must replace PDFium's regenerated
+    // text appearance with TrePDF's Unicode-safe raster appearance.
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    inspection = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("Transport"));
+    QCOMPARE(inspection.value, QStringLiteral("Tùy chọn 3"));
+    QVERIFY(inspection.appearanceStream.contains(
+        QStringLiteral("/Im0 Do")));
+    QCOMPARE(inspection.appearanceVersion,
+             static_cast<float>(PDFFormAppearance::kDropdownVersion));
+
+    formDesigner.prepareForDesignMode();
+    QTRY_COMPARE_WITH_TIMEOUT(
+        formDesigner.fieldData(fieldId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Tùy chọn 3"),
+        5000);
+
+    const QRectF resizedRect(0.22, 0.32, 0.46, 0.07);
+    QVERIFY(formDesigner.setFieldRect(
+        fieldId,
+        resizedRect.x(),
+        resizedRect.y(),
+        resizedRect.width(),
+        resizedRect.height()));
+    const QVector<PDFFormDesignerController::SaveField> resizedFields
+        = formDesigner.saveFields(true);
+    QCOMPARE(resizedFields.size(), 1);
+    QCOMPARE(resizedFields.constFirst().type,
+             PDFFormDesignerController::Dropdown);
+    QCOMPARE(resizedFields.constFirst().operation,
+             PDFFormDesignerController::SaveField::Update);
+    QCOMPARE(resizedFields.constFirst().changedProperties,
+             static_cast<quint32>(
+                 PDFFormDesignerController::RectPropertyChanged));
+    QCOMPARE(resizedFields.constFirst().value,
+             QStringLiteral("Tùy chọn 3"));
+    QCOMPARE(resizedFields.constFirst().defaultValue,
+             QStringLiteral("Tùy chọn 1"));
+    QCOMPARE(resizedFields.constFirst().options, options);
+
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 3, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    hydrated = formDesigner.fieldData(fieldId);
+    QCOMPARE(hydrated.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::Dropdown);
+    QCOMPARE(hydrated.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Tùy chọn 3"));
+    QCOMPARE(hydrated.value(QStringLiteral("options")).toStringList(),
+             options);
+    QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
+    QVERIFY(!hydrated.value(QStringLiteral("dirty")).toBool());
+    QVERIFY(!formDesigner.removeField(fieldId));
+
+    inspection = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("Transport"));
+    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_COMBOBOX);
+    QCOMPARE(inspection.value, QStringLiteral("Tùy chọn 3"));
+    QCOMPARE(inspection.defaultValue, QStringLiteral("Tùy chọn 1"));
+    QCOMPARE(inspection.options, options);
+    QCOMPARE(inspection.selectedIndices, QVector<int>({2}));
+    QVERIFY(inspection.hasAppearance);
+    QFile savedDropdown(sourcePath);
+    QVERIFY(savedDropdown.open(QIODevice::ReadOnly));
+    const QByteArray savedBytes = savedDropdown.readAll();
+    const QByteArray unicodeFontMarker
+        = QByteArrayLiteral("/")
+        + QByteArray(PDFFormAppearance::kFontVersionKey)
+        + ' '
+        + QByteArray::number(PDFFormAppearance::kFontVersion);
+    QCOMPARE(savedBytes.count(unicodeFontMarker), 1);
+    QVERIFY(savedBytes.contains("/Type0"));
+    QVERIFY(savedBytes.contains("/CIDToGIDMap"));
+    QVERIFY(qAbs(inspection.rect.left - 130.9) < 1.0);
+    QVERIFY(qAbs(inspection.rect.right - 404.6) < 1.0);
+    QVERIFY(qAbs(inspection.rect.top - 572.56) < 1.0);
+    QVERIFY(qAbs(inspection.rect.bottom - 513.62) < 1.0);
+    QVERIFY(formDesigner.sourceFieldContainsPoint(
+        0,
+        resizedRect.center()));
+    QVERIFY(!formDesigner.sourceFieldContainsPoint(
+        0,
+        initialRect.topLeft()));
+}
+
+void PDFEditControllerTest::rejectsDropdownExportDisplayPairs()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("dropdown-export-display-pairs.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("dropdown-export-display-pairs-saved.pdf"));
+    QVERIFY(createTrePDFDropdownWithExportValuesPdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 5000);
+
+    const QVariantMap field = formDesigner.fieldData(
+        QStringLiteral(
+            "dropdown-field-11111111-1111-1111-1111-111111111111"));
+    QCOMPARE(field.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::Dropdown);
+    QCOMPARE(field.value(QStringLiteral("options")).toStringList(),
+             QStringList({
+                 QStringLiteral("Airplane"),
+                 QStringLiteral("Bicycle"),
+                 QStringLiteral("Car"),
+             }));
+    QCOMPARE(field.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Airplane"));
+    QVERIFY(formDesigner.setFieldRect(
+        field.value(QStringLiteral("id")).toString(),
+        0.10,
+        0.20,
+        0.50,
+        0.08));
+
+    const PDFSaveWriter::Result result = PDFSaveWriter::save(
+        editController,
+        savedPath);
+    QCOMPARE(result.error, PDFSaveWriter::Error::AcroFormCreationFailed);
+    QVERIFY(!result.detail.isEmpty());
+    QVERIFY(!QFileInfo::exists(savedPath));
+    QVERIFY(QFileInfo::exists(sourcePath));
 }
 
 void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()

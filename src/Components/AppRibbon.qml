@@ -13,6 +13,7 @@ Column {
     required property PDFEditController editController
     property bool textFieldToolSelected: false
     property bool checkboxToolSelected: false
+    property bool dropdownToolSelected: false
     readonly property bool viewTabActive: ribbonTabs.currentIndex === 0
     readonly property bool editTabActive: ribbonTabs.currentIndex === 1
     readonly property bool formsTabActive: ribbonTabs.currentIndex === 2
@@ -21,6 +22,9 @@ Column {
         && document.loaded
     readonly property bool checkboxToolActive: formsTabActive
         && checkboxToolSelected
+        && document.loaded
+    readonly property bool dropdownToolActive: formsTabActive
+        && dropdownToolSelected
         && document.loaded
 
     signal openRequested()
@@ -40,6 +44,7 @@ Column {
         if (!document.loaded || ribbonTabs.currentIndex !== 2) {
             textFieldToolSelected = false
             checkboxToolSelected = false
+            dropdownToolSelected = false
         }
 
         if (!document.loaded || ribbonTabs.currentIndex !== 1) {
@@ -53,11 +58,13 @@ Column {
     onDocumentChanged: {
         textFieldToolSelected = false
         checkboxToolSelected = false
+        dropdownToolSelected = false
         syncEditTool()
     }
     onEditControllerChanged: {
         textFieldToolSelected = false
         checkboxToolSelected = false
+        dropdownToolSelected = false
         syncEditTool()
     }
 
@@ -109,13 +116,21 @@ Column {
             document: root.document
             textFieldToolSelected: root.textFieldToolSelected
             checkboxToolSelected: root.checkboxToolSelected
+            dropdownToolSelected: root.dropdownToolSelected
             onTextFieldToolRequested: {
                 root.textFieldToolSelected = !root.textFieldToolSelected
                 root.checkboxToolSelected = false
+                root.dropdownToolSelected = false
             }
             onCheckboxToolRequested: {
                 root.checkboxToolSelected = !root.checkboxToolSelected
                 root.textFieldToolSelected = false
+                root.dropdownToolSelected = false
+            }
+            onDropdownToolRequested: {
+                root.dropdownToolSelected = !root.dropdownToolSelected
+                root.textFieldToolSelected = false
+                root.checkboxToolSelected = false
             }
         }
     }

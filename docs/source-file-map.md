@@ -150,11 +150,12 @@ flowchart TD
 
 ### Thiết kế field mới
 
-1. `FormRibbon` bật tool Text Field hoặc Check Box.
+1. `FormRibbon` bật tool Text Field, Check Box hoặc Dropdown.
 2. `FormTextFieldOverlay` thu click/drag và gọi
    `PDFFormDesignerController::addField()` bằng tọa độ chuẩn hóa.
 3. `FormFieldLayer` vẽ model bằng scene graph, chọn/toggle/di chuyển field; QML
-   quản lý editor text, resize handle và nút xóa cho field transient.
+   quản lý editor text, ComboBox của Dropdown, resize handle và nút xóa cho
+   field transient.
 4. Controller cũng rehydrate các field do TrePDF đã lưu để tiếp tục chỉnh sửa
    sau khi mở lại.
 5. Khi Save, snapshot designer được đổi thành thao tác add/update/normalize;
@@ -182,7 +183,7 @@ flowchart TD
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/highlight/shape, history và page operation. |
-| [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field và Check Box. |
+| [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box và Dropdown. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
 | [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel format cho một session. |

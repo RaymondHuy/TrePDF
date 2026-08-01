@@ -4,6 +4,7 @@
 #include "PDFFormAppearance.h"
 #include "PDFFormController.h"
 
+#include <QCoreApplication>
 #include <QSet>
 #include <QUuid>
 #include <QVariantMap>
@@ -15,6 +16,40 @@
 #include <fpdf_annot.h>
 
 namespace {
+
+constexpr int kMaximumDropdownOptions = 4096;
+constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
+
+QStringList defaultDropdownOptions()
+{
+    QStringList options;
+    //% "Option 1"
+    options.append(qtTrId("DropdownOption1"));
+    //% "Option 2"
+    options.append(qtTrId("DropdownOption2"));
+    //% "Option 3"
+    options.append(qtTrId("DropdownOption3"));
+    return options;
+}
+
+bool validDropdownOptions(const QStringList &options)
+{
+    if (options.isEmpty() || options.size() > kMaximumDropdownOptions) {
+        return false;
+    }
+    QSet<QString> uniqueOptions;
+    qsizetype totalCharacters = 0;
+    for (const QString &option : options) {
+        totalCharacters += option.size();
+        if (option.isEmpty()
+            || totalCharacters > kMaximumDropdownOptionCharacters
+            || uniqueOptions.contains(option)) {
+            return false;
+        }
+        uniqueOptions.insert(option);
+    }
+    return true;
+}
 
 QRectF boundedFieldRect(qreal x,
                         qreal y,
@@ -279,13 +314,9 @@ void PDFFormDesignerController::refreshSourceFieldValues()
                 return;
             }
 
-            for (int row = 0;
-                 row < controller->m_fields.size();
-                 ++row) {
+            for (int row = 0; row < controller->m_fields.size(); ++row) {
                 FormField &field = controller->m_fields[row];
-                if (!field.sourceBacked
-                    || (field.changedProperties
-                        & ValuePropertyChanged)) {
+                if (!field.sourceBacked) {
                     continue;
                 }
                 const auto source = std::find_if(
@@ -295,15 +326,29 @@ void PDFFormDesignerController::refreshSourceFieldValues()
                         const PDFFormWorker::TrePDFTextField &candidate) {
                         return candidate.id == field.id;
                     });
-                if (source == sourceFields.cend()
-                    || source->value == field.value) {
+                if (source == sourceFields.cend()) {
                     continue;
                 }
-                field.value = source->value;
-                emit controller->dataChanged(
-                    controller->index(row),
-                    controller->index(row),
-                    {ValueRole});
+                field.sourceAnnotationIndex = source->annotationIndex;
+                field.sourceIdentityToken = source->identityToken;
+                QList<int> changedRoles;
+                if (!(field.changedProperties & ValuePropertyChanged)
+                    && source->value != field.value) {
+                    field.value = source->value;
+                    changedRoles.append(ValueRole);
+                }
+                if (field.type == Dropdown
+                    && !(field.changedProperties & OptionsPropertyChanged)
+                    && source->options != field.options) {
+                    field.options = source->options;
+                    changedRoles.append(OptionsRole);
+                }
+                if (!changedRoles.isEmpty()) {
+                    emit controller->dataChanged(
+                        controller->index(row),
+                        controller->index(row),
+                        changedRoles);
+                }
             }
             if (refreshQueued) {
                 controller->refreshSourceFieldValues();
@@ -352,6 +397,10 @@ QString PDFFormDesignerController::addField(int type,
             QStringLiteral("Yes"),
             QStringLiteral("Off"),
         };
+    } else if (field.type == Dropdown) {
+        field.options = defaultDropdownOptions();
+        field.value = field.options.constFirst();
+        field.defaultValue = field.value;
     }
 
     const int row = m_fields.size();
@@ -429,6 +478,53 @@ bool PDFFormDesignerController::activateSourceCheckbox(
     // Leaving PDFium focused would make FPDF_FFLDraw paint its native focus
     // adornment at sourceNormalizedRect, which is the stale pre-move position
     // until the form draft is saved.
+    m_formController->killFocus();
+    refreshSourceFieldValues();
+    return true;
+}
+
+bool PDFFormDesignerController::activateSourceDropdown(
+    const QString &fieldId,
+    int optionIndex)
+{
+    const int row = rowForFieldId(fieldId);
+    if (row < 0
+        || !m_document
+        || !m_document->isLoaded()
+        || !m_formController
+        || m_formController->document() != m_document
+        || !m_formController->interactive()) {
+        return false;
+    }
+
+    const FormField &field = m_fields.at(row);
+    if (field.type != Dropdown
+        || !field.sourceBacked
+        || !field.hasSourcePage
+        || field.sourcePage < 0
+        || field.sourceAnnotationIndex < 0
+        || field.sourceIdentityToken.isEmpty()
+        || optionIndex < 0
+        || optionIndex >= field.options.size()
+        || (field.flags & ReadOnly)) {
+        return false;
+    }
+
+    const int page = displayPageForField(field);
+    if (page < 0) {
+        return false;
+    }
+    m_formController->selectChoiceOption(
+        page,
+        field.sourceAnnotationIndex,
+        optionIndex,
+        true,
+        field.sourcePage,
+        false,
+        field.sourceIdentityToken);
+    // Keep native focus adornments out of the designer-owned source Widget.
+    // Both requests run on the serialized form worker, so the selection is
+    // committed before focus is cleared and the refreshed value is scanned.
     m_formController->killFocus();
     refreshSourceFieldValues();
     return true;
@@ -539,6 +635,9 @@ bool PDFFormDesignerController::setFieldValue(const QString &fieldId,
     }
 
     FormField &field = m_fields[row];
+    if (field.type == Dropdown && !field.options.contains(value)) {
+        return false;
+    }
     if (field.value == value) {
         return true;
     }
@@ -577,12 +676,26 @@ bool PDFFormDesignerController::setFieldOptions(const QString &fieldId,
     }
 
     FormField &field = m_fields[row];
+    if (field.type == Dropdown && !validDropdownOptions(options)) {
+        return false;
+    }
     if (field.options == options) {
         return true;
     }
     field.options = options;
     field.changedProperties |= OptionsPropertyChanged;
-    emit dataChanged(index(row), index(row), {OptionsRole, DirtyRole});
+    QList<int> changedRoles{OptionsRole, DirtyRole};
+    if (field.type == Dropdown) {
+        if (!field.options.contains(field.value)) {
+            field.value = field.options.constFirst();
+            field.changedProperties |= ValuePropertyChanged;
+            changedRoles.append(ValueRole);
+        }
+        if (!field.options.contains(field.defaultValue)) {
+            field.defaultValue = field.options.constFirst();
+        }
+    }
+    emit dataChanged(index(row), index(row), changedRoles);
     emit draftStateChanged();
     return true;
 }
@@ -781,7 +894,9 @@ bool PDFFormDesignerController::hasDrafts() const
 
 QVector<PDFFormDesignerController::SaveField>
 PDFFormDesignerController::saveFields(
-    bool includeAppearanceNormalization) const
+    bool includeAppearanceNormalization,
+    const QSet<int> &nativeAppearancePages,
+    bool normalizeAllNativeAppearances) const
 {
     QVector<SaveField> fields;
     fields.reserve(m_fields.size());
@@ -801,13 +916,26 @@ PDFFormDesignerController::saveFields(
     }
     for (const FormField &field : m_fields) {
         const int page = displayPageForField(field);
-        const bool normalizeAppearance
+        const int currentAppearanceVersion
+            = field.type == Text
+            ? PDFFormAppearance::kTextFieldVersion
+            : field.type == Dropdown
+                ? PDFFormAppearance::kDropdownVersion
+                : 0;
+        const bool normalizeLegacyAppearance
             = includeAppearanceNormalization
             && field.sourceBacked
-            && field.type == Text
+            && (field.type == Text || field.type == Dropdown)
             && field.appearanceVersion
-                < PDFFormAppearance::kTextFieldVersion
+                < currentAppearanceVersion
             && normalizationPages.contains(page);
+        const bool normalizeNativeAppearance
+            = field.sourceBacked
+            && (field.type == Text || field.type == Dropdown)
+            && (normalizeAllNativeAppearances
+                || nativeAppearancePages.contains(page));
+        const bool normalizeAppearance
+            = normalizeLegacyAppearance || normalizeNativeAppearance;
         if (field.changedProperties == NoPropertyChanges
             && !normalizeAppearance) {
             continue;
@@ -822,7 +950,7 @@ PDFFormDesignerController::saveFields(
         saved.value = field.value;
         saved.defaultValue = field.sourceBacked
             ? field.defaultValue
-            : field.type == Checkbox
+            : field.type == Checkbox || field.type == Dropdown
                 ? field.defaultValue
                 : field.value;
         saved.options = field.options;
@@ -930,7 +1058,8 @@ void PDFFormDesignerController::reloadSourceFields()
                 if (source.id.isEmpty()
                     || fieldIds.contains(source.id)
                     || (source.type != FPDF_FORMFIELD_TEXTFIELD
-                        && source.type != FPDF_FORMFIELD_CHECKBOX)
+                        && source.type != FPDF_FORMFIELD_CHECKBOX
+                        && source.type != FPDF_FORMFIELD_COMBOBOX)
                     || source.sourcePage < 0
                     || source.normalizedRect.isEmpty()
                     || document->displayPageIndexForSourcePage(
@@ -942,10 +1071,13 @@ void PDFFormDesignerController::reloadSourceFields()
                 field.id = source.id;
                 field.type = source.type == FPDF_FORMFIELD_CHECKBOX
                     ? Checkbox
-                    : Text;
+                    : source.type == FPDF_FORMFIELD_COMBOBOX
+                        ? Dropdown
+                        : Text;
                 field.page = document->displayPageIndexForSourcePage(
                     source.sourcePage);
                 field.sourcePage = source.sourcePage;
+                field.sourceAnnotationIndex = source.annotationIndex;
                 field.hasSourcePage = true;
                 field.normalizedRect = source.normalizedRect;
                 field.sourceNormalizedRect = source.normalizedRect;
@@ -953,6 +1085,8 @@ void PDFFormDesignerController::reloadSourceFields()
                 field.name = source.name;
                 field.tooltip = source.tooltip;
                 field.defaultValue = source.defaultValue;
+                field.options = source.options;
+                field.sourceIdentityToken = source.identityToken;
                 field.appearanceVersion = source.appearanceVersion;
                 field.flags = (source.flags & FPDF_FORMFLAG_REQUIRED
                                    ? Required

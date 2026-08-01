@@ -18,6 +18,7 @@ Item {
     property bool fieldsInteractive: false
     property bool textFieldToolActive: false
     property bool checkboxToolActive: false
+    property bool dropdownToolActive: false
     property rect placementRect: Qt.rect(0, 0, 0, 0)
     property real placementStartX: 0
     property real placementStartY: 0
@@ -31,7 +32,9 @@ Item {
         ? PDFFormDesignerController.Text
         : checkboxToolActive
             ? PDFFormDesignerController.Checkbox
-            : -1
+            : dropdownToolActive
+                ? PDFFormDesignerController.Dropdown
+                : -1
 
     function resetPlacement() {
         placementRect = Qt.rect(0, 0, 0, 0)
@@ -154,6 +157,17 @@ Item {
         editor.forceActiveFocus()
     }
 
+    function openActiveDropdown() {
+        if (activeDropdownEditorLoader.status !== Loader.Ready)
+            return
+
+        const editor = activeDropdownEditorLoader.item as ComboBox
+        if (!editor || !editor.enabled || editor.count <= 0)
+            return
+        editor.forceActiveFocus()
+        editor.popup.open()
+    }
+
     function finishPlacement() {
         if (width <= 0 || height <= 0) {
             resetPlacement()
@@ -255,6 +269,12 @@ Item {
     }
     onCheckboxToolActiveChanged: {
         if (checkboxToolActive)
+            formFieldLayer.cancelFieldMove()
+        else
+            resetPlacement()
+    }
+    onDropdownToolActiveChanged: {
+        if (dropdownToolActive)
             formFieldLayer.cancelFieldMove()
         else
             resetPlacement()
@@ -491,7 +511,8 @@ Item {
 
         onFieldActivated: fieldId => {
             const field = root.controller.fieldData(fieldId)
-            if (Number(field.type)
+            const fieldType = Number(field.type)
+            if (fieldType
                     === PDFFormDesignerController.Checkbox) {
                 root.pendingFocusFieldId = ""
                 const readOnly
@@ -515,6 +536,17 @@ Item {
                 }
                 return
             }
+            if (fieldType === PDFFormDesignerController.Dropdown) {
+                root.pendingFocusFieldId = ""
+                Qt.callLater(function() {
+                    root.openActiveDropdown()
+                })
+                return
+            }
+            if (fieldType !== PDFFormDesignerController.Text) {
+                root.pendingFocusFieldId = ""
+                return
+            }
             root.pendingFocusFieldId = fieldId
             Qt.callLater(function() {
                 root.focusPendingTextField()
@@ -530,6 +562,13 @@ Item {
                 const editor = activeTextEditorLoader.item as TextField
                 if (editor)
                     editor.focus = false
+            }
+            if (activeDropdownEditorLoader.status === Loader.Ready) {
+                const dropdown = activeDropdownEditorLoader.item as ComboBox
+                if (dropdown) {
+                    dropdown.popup.close()
+                    dropdown.focus = false
+                }
             }
             root.controller.clearTextFieldFocus()
         }
@@ -599,8 +638,10 @@ Item {
             anchors.fill: parent
             visible: formFieldLayer.activeFieldType
                 !== PDFFormDesignerController.Text
-                && (formFieldLayer.activeFieldType
+                && ((formFieldLayer.activeFieldType
                         !== PDFFormDesignerController.Checkbox
+                     && formFieldLayer.activeFieldType
+                        !== PDFFormDesignerController.Dropdown)
                     || activeFieldFrame.resizing)
             color: "transparent"
             border.color: root.theme.foxitDarkOrange
@@ -630,6 +671,16 @@ Item {
                     root.loadedEditorFieldId = ""
                 }
             }
+        }
+
+        Loader {
+            id: activeDropdownEditorLoader
+
+            anchors.fill: parent
+            active: activeFieldFrame.visible
+                && formFieldLayer.activeFieldType
+                    === PDFFormDesignerController.Dropdown
+            sourceComponent: activeDropdownEditorComponent
         }
 
         ToolButton {
@@ -675,8 +726,10 @@ Item {
             width: root.resizeHandleHitSize
             height: root.resizeHandleHitSize
             visible: formFieldLayer.moveEnabled
-                && formFieldLayer.activeFieldType
-                    === PDFFormDesignerController.Text
+                && (formFieldLayer.activeFieldType
+                        === PDFFormDesignerController.Text
+                    || formFieldLayer.activeFieldType
+                        === PDFFormDesignerController.Dropdown)
                 && !activeFieldFrame.resizing
             z: 40
 
@@ -897,6 +950,61 @@ Item {
                     : formFieldLayer.textFieldBorderPointWidth
                         * root.pagePointScale
                 radius: 0
+            }
+        }
+    }
+
+
+    Component {
+        id: activeDropdownEditorComponent
+
+        ComboBox {
+            id: activeDropdownEditor
+
+            model: formFieldLayer.activeFieldOptions
+            currentIndex: formFieldLayer.activeFieldOptions.indexOf(
+                formFieldLayer.activeFieldValue)
+            enabled: root.fieldsInteractive
+                && (root.formsActive
+                    || !(formFieldLayer.activeFieldFlags
+                         & PDFFormDesignerController.ReadOnly))
+            activeFocusOnTab: true
+            leftPadding: 7
+            rightPadding: 28
+
+            onActivated: index => {
+                if (index < 0
+                        || index >= formFieldLayer.activeFieldOptions.length
+                        || formFieldLayer.activeFieldId.length === 0) {
+                    return
+                }
+                const field = root.controller.fieldData(
+                    formFieldLayer.activeFieldId)
+                const sourceBacked = Boolean(field.sourceBacked)
+                const readOnly = (Number(field.flags)
+                    & PDFFormDesignerController.ReadOnly) !== 0
+                if (sourceBacked && !readOnly) {
+                    root.controller.activateSourceDropdown(
+                        formFieldLayer.activeFieldId,
+                        index)
+                } else {
+                    root.controller.setFieldValue(
+                        formFieldLayer.activeFieldId,
+                        String(formFieldLayer.activeFieldOptions[index]))
+                }
+            }
+
+            background: Rectangle {
+                color: "white"
+                border.color: activeDropdownEditor.activeFocus
+                        || root.formsActive
+                    ? root.theme.foxitDarkOrange
+                    : "#7f8c99"
+                border.width: activeDropdownEditor.activeFocus
+                        || root.formsActive
+                    ? 2
+                    : 1
+                radius: 5
             }
         }
     }

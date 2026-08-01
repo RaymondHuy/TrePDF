@@ -92,13 +92,16 @@ struct ChoiceFieldsResult {
 
 struct TrePDFTextField {
     QString id;
+    QString identityToken;
     QString name;
     QString tooltip;
     QString value;
     QString defaultValue;
+    QStringList options;
     int type = FPDF_FORMFIELD_UNKNOWN;
     int flags = 0;
     int appearanceVersion = 0;
+    int annotationIndex = -1;
     int sourcePage = -1;
     QRectF normalizedRect;
 };

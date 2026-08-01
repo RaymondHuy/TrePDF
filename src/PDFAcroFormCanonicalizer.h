@@ -2,6 +2,7 @@
 
 #include <QRectF>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 class PDFAcroFormCanonicalizer
@@ -9,7 +10,8 @@ class PDFAcroFormCanonicalizer
 public:
     enum class FieldType {
         Text,
-        Checkbox
+        Checkbox,
+        Dropdown
     };
 
     enum class Operation {
@@ -24,6 +26,7 @@ public:
         QString tooltip;
         QString value;
         QString defaultValue;
+        QStringList options;
         QRectF pageRect;
         FieldType type = FieldType::Text;
         int fieldFlags = 0;

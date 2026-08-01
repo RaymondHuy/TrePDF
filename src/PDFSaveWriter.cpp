@@ -3,6 +3,7 @@
 #include "ApplicationFonts.h"
 #include "PDFAcroFormWriter.h"
 #include "PDFEditController.h"
+#include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
 #include "PDFiumSynchronization.h"
 
@@ -2961,6 +2962,7 @@ PDFSaveWriter::Result prepareAcroFormFields(
         target.tooltip = source.tooltip;
         target.value = source.value;
         target.defaultValue = source.defaultValue;
+        target.options = source.options;
         if (source.operation
             == PDFFormDesignerController::SaveField::Add) {
             target.operation = PDFAcroFormWriter::Operation::Add;
@@ -2982,6 +2984,11 @@ PDFSaveWriter::Result prepareAcroFormFields(
                     == PDFFormDesignerController::SaveField::Add
             || (source.changedProperties
                 & PDFFormDesignerController::ValuePropertyChanged);
+        target.optionsChanged
+            = source.operation
+                    == PDFFormDesignerController::SaveField::Add
+            || (source.changedProperties
+                & PDFFormDesignerController::OptionsPropertyChanged);
         switch (source.type) {
         case PDFFormDesignerController::Text:
             target.type = PDFAcroFormWriter::FieldType::Text;
@@ -3038,9 +3045,20 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
     if (controller.m_formDesignerController) {
         const bool normalizeSourceFieldAppearances
             = controller.m_formDesignerController->hasDrafts();
+        const QSet<int> nativeAppearancePages
+            = controller.m_formController
+                && controller.m_formController->hasDrafts()
+            ? controller.m_formController->changedPages()
+            : QSet<int>();
+        const bool normalizeAllNativeAppearances
+            = controller.m_formController
+            && controller.m_formController->hasDrafts()
+            && controller.m_formController->allPagesChanged();
         data->formFields
             = controller.m_formDesignerController->saveFields(
-                normalizeSourceFieldAppearances);
+                normalizeSourceFieldAppearances,
+                nativeAppearancePages,
+                normalizeAllNativeAppearances);
     }
     data->deletedSourcePages.reserve(controller.m_deletedSourcePages.size());
     for (int page : controller.m_deletedSourcePages) {

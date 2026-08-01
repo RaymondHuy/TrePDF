@@ -15,6 +15,7 @@ Item {
     property bool formFieldsInteractive: false
     property bool textFieldToolActive: false
     property bool checkboxToolActive: false
+    property bool dropdownToolActive: false
     property string transientStatus
 
     signal openRequested()
@@ -107,6 +108,7 @@ Item {
             formFieldsInteractive: root.formFieldsInteractive
             textFieldToolActive: root.textFieldToolActive
             checkboxToolActive: root.checkboxToolActive
+            dropdownToolActive: root.dropdownToolActive
             zoom: root.session.zoom
             viewRotation: root.session.viewRotation
             transientStatus: root.transientStatus

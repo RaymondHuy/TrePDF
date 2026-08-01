@@ -7,6 +7,7 @@
 #include <QQuickItem>
 #include <QRectF>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QtQml/qqmlregistration.h>
 
@@ -51,6 +52,8 @@ class FormFieldLayer : public QQuickItem
                    NOTIFY activeFieldChanged FINAL)
     Q_PROPERTY(QString activeFieldValue READ activeFieldValue
                    NOTIFY activeFieldChanged FINAL)
+    Q_PROPERTY(QStringList activeFieldOptions READ activeFieldOptions
+                   NOTIFY activeFieldChanged FINAL)
     Q_PROPERTY(int activeFieldType READ activeFieldType
                    NOTIFY activeFieldChanged FINAL)
     Q_PROPERTY(int activeFieldFlags READ activeFieldFlags
@@ -80,6 +83,7 @@ public:
     QString activeFieldId() const;
     QRectF activeFieldRect() const;
     QString activeFieldValue() const;
+    QStringList activeFieldOptions() const;
     int activeFieldType() const;
     int activeFieldFlags() const;
     bool activeFieldSourceBacked() const;
@@ -136,6 +140,7 @@ private:
         int type = PDFFormDesignerController::Text;
         QRectF normalizedRect;
         QString value;
+        QStringList options;
         int flags = PDFFormDesignerController::NoFieldFlags;
         bool sourceBacked = false;
         bool selected = false;
@@ -164,6 +169,7 @@ private:
     QString m_activeFieldId;
     QRectF m_activeFieldRect;
     QString m_activeFieldValue;
+    QStringList m_activeFieldOptions;
     int m_activeFieldType = -1;
     int m_activeFieldFlags = PDFFormDesignerController::NoFieldFlags;
     bool m_activeFieldSourceBacked = false;

@@ -887,6 +887,7 @@ ApplicationWindow {
             || appRibbon.formsTabActive
         textFieldToolActive: appRibbon.textFieldToolActive
         checkboxToolActive: appRibbon.checkboxToolActive
+        dropdownToolActive: appRibbon.dropdownToolActive
         transientStatus: window.transientStatus
         onOpenRequested: window.requestOpen()
     }
@@ -909,6 +910,7 @@ ApplicationWindow {
                     || appRibbon.formsTabActive
                 textFieldToolActive: appRibbon.textFieldToolActive
                 checkboxToolActive: appRibbon.checkboxToolActive
+                dropdownToolActive: appRibbon.dropdownToolActive
                 transientStatus: window.transientStatus
                 enabled: !tabModel.anySaving
                 onOpenRequested: window.requestOpen()
