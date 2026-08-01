@@ -23,7 +23,7 @@
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Components/DocumentView.qml" line="235"/>
+        <location filename="../src/Components/DocumentView.qml" line="237"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="45"/>
@@ -148,94 +148,94 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="164"/>
+        <location filename="../src/Components/AppRibbon.qml" line="179"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="170"/>
-        <location filename="../src/Components/EditOverlay.qml" line="1887"/>
+        <location filename="../src/Components/AppRibbon.qml" line="185"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1892"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="176"/>
+        <location filename="../src/Components/AppRibbon.qml" line="191"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="182"/>
+        <location filename="../src/Components/AppRibbon.qml" line="197"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="207"/>
+        <location filename="../src/Components/AppRibbon.qml" line="222"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="211"/>
+        <location filename="../src/Components/AppRibbon.qml" line="226"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="226"/>
+        <location filename="../src/Components/DocumentView.qml" line="228"/>
         <location filename="../src/PDFDocument.cpp" line="80"/>
         <location filename="../src/PDFDocument.cpp" line="232"/>
         <source>No document open</source>
         <translation>Chưa mở tài liệu</translation>
     </message>
     <message id="PdfEditSurface">
-        <location filename="../src/Components/EditOverlay.qml" line="1682"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1686"/>
         <source>PDF edit surface</source>
         <translation>Vùng chỉnh sửa PDF</translation>
     </message>
     <message id="PdfEditSurfaceDescription">
-        <location filename="../src/Components/EditOverlay.qml" line="1684"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1688"/>
         <source>Use Tab or arrow keys to select content, Enter to edit text, drag selected text, images, or shapes to move them, drag with Shapes to draw, or drag with Highlight to mark an area</source>
         <oldsource>Use Tab or arrow keys to select content, Enter to edit text, drag selected text or images to move them, or drag with Highlight to mark an area</oldsource>
         <translation>Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo văn bản, hình ảnh hoặc hình dạng đã chọn để di chuyển, kéo bằng công cụ Hình dạng để vẽ, hoặc kéo bằng công cụ Tô sáng để đánh dấu một vùng</translation>
     </message>
     <message id="Delete">
         <location filename="../src/Main.qml" line="825"/>
-        <location filename="../src/Components/EditOverlay.qml" line="1918"/>
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="638"/>
+        <location filename="../src/Components/EditOverlay.qml" line="1923"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="705"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
     <message id="MoveImage">
-        <location filename="../src/Components/EditOverlay.qml" line="2341"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2346"/>
         <source>Move image</source>
         <translation>Di chuyển hình ảnh</translation>
     </message>
     <message id="MoveShape">
-        <location filename="../src/Components/EditOverlay.qml" line="2345"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2350"/>
         <source>Move shape</source>
         <translation>Di chuyển hình dạng</translation>
     </message>
     <message id="MoveText">
-        <location filename="../src/Components/EditOverlay.qml" line="2348"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2353"/>
         <source>Move text</source>
         <translation>Di chuyển văn bản</translation>
     </message>
     <message id="ResizeImage">
-        <location filename="../src/Components/EditOverlay.qml" line="2452"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2458"/>
         <source>Resize image</source>
         <translation>Đổi kích thước hình ảnh</translation>
     </message>
     <message id="ResizeShape">
-        <location filename="../src/Components/EditOverlay.qml" line="2456"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2462"/>
         <source>Resize shape</source>
         <translation>Đổi kích thước hình dạng</translation>
     </message>
     <message id="ResizeTextBox">
-        <location filename="../src/Components/EditOverlay.qml" line="2459"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2465"/>
         <source>Resize text box</source>
         <translation>Đổi kích thước hộp văn bản</translation>
     </message>
     <message id="ApplyOrCancelEditHint">
-        <location filename="../src/Components/EditOverlay.qml" line="2615"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2622"/>
         <source>Ctrl/Cmd+Enter to apply · Esc to cancel</source>
         <oldsource>Enter to apply · Esc to cancel</oldsource>
         <translation>Ctrl/Cmd+Enter để áp dụng · Esc để hủy</translation>
@@ -434,7 +434,7 @@
         <translation>Làm lại</translation>
     </message>
     <message id="PageNumber">
-        <location filename="../src/Components/PdfPageDelegate.qml" line="243"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="157"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -469,43 +469,53 @@
         <translation>Thêm ký tắt</translation>
     </message>
     <message id="Fields">
-        <location filename="../src/Components/FormRibbon.qml" line="33"/>
+        <location filename="../src/Components/FormRibbon.qml" line="35"/>
         <location filename="../src/Components/SignRibbon.qml" line="69"/>
         <source>Fields</source>
         <translation>Trường</translation>
     </message>
     <message id="TextFieldTool">
-        <location filename="../src/Components/FormRibbon.qml" line="39"/>
+        <location filename="../src/Components/FormRibbon.qml" line="41"/>
         <source>Text Field</source>
         <translation>Ô văn bản</translation>
     </message>
     <message id="DragToAddTextField">
-        <location filename="../src/Components/FormRibbon.qml" line="41"/>
+        <location filename="../src/Components/FormRibbon.qml" line="43"/>
         <source>Drag on the page to add a text field</source>
         <translation>Kéo trên trang để thêm ô văn bản</translation>
     </message>
     <message id="CheckboxTool">
-        <location filename="../src/Components/FormRibbon.qml" line="54"/>
+        <location filename="../src/Components/FormRibbon.qml" line="56"/>
         <source>Check Box</source>
         <translation>Hộp kiểm</translation>
     </message>
     <message id="ClickOrDragToAddCheckbox">
-        <location filename="../src/Components/FormRibbon.qml" line="56"/>
+        <location filename="../src/Components/FormRibbon.qml" line="58"/>
         <source>Click or drag on the page to add a check box</source>
         <translation>Nhấp hoặc kéo trên trang để thêm hộp kiểm</translation>
     </message>
+    <message id="DropdownTool">
+        <location filename="../src/Components/FormRibbon.qml" line="71"/>
+        <source>Dropdown</source>
+        <translation>Danh sách thả xuống</translation>
+    </message>
+    <message id="ClickOrDragToAddDropdown">
+        <location filename="../src/Components/FormRibbon.qml" line="73"/>
+        <source>Click or drag on the page to add a dropdown</source>
+        <translation>Nhấp hoặc kéo trên trang để thêm danh sách thả xuống</translation>
+    </message>
     <message id="ResizeFormField">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="380"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="416"/>
         <source>Resize form field</source>
         <translation>Đổi kích thước trường biểu mẫu</translation>
     </message>
     <message id="MoveFormField">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="731"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="800"/>
         <source>Move form field</source>
         <translation>Di chuyển trường biểu mẫu</translation>
     </message>
     <message id="EnterFormText">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="850"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="919"/>
         <source>Enter text</source>
         <translation>Nhập văn bản</translation>
     </message>
@@ -1066,6 +1076,21 @@
         <location filename="../src/PDFTabModel.cpp" line="411"/>
         <source>Another open tab is already using that PDF file.</source>
         <translation>Một tab đang mở khác đã sử dụng tệp PDF đó.</translation>
+    </message>
+    <message id="DropdownOption1">
+        <location filename="../src/PDFFormDesignerController.cpp" line="27"/>
+        <source>Option 1</source>
+        <translation>Tùy chọn 1</translation>
+    </message>
+    <message id="DropdownOption2">
+        <location filename="../src/PDFFormDesignerController.cpp" line="29"/>
+        <source>Option 2</source>
+        <translation>Tùy chọn 2</translation>
+    </message>
+    <message id="DropdownOption3">
+        <location filename="../src/PDFFormDesignerController.cpp" line="31"/>
+        <source>Option 3</source>
+        <translation>Tùy chọn 3</translation>
     </message>
 </context>
 </TS>

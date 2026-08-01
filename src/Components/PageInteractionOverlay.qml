@@ -19,6 +19,7 @@ Item {
     required property bool formFieldsInteractive
     required property bool textFieldToolActive
     required property bool checkboxToolActive
+    required property bool dropdownToolActive
     required property bool draftTextureCurrent
     required property bool draftTextureReady
     required property Item viewportItem
@@ -35,6 +36,7 @@ Item {
         && editController.tool === PDFEditController.BrowseTool
         && !textFieldToolActive
         && !checkboxToolActive
+        && !dropdownToolActive
 
     function prepareForSessionChange() {
         editOverlay.prepareForSessionChange()
@@ -151,6 +153,7 @@ Item {
         fieldsInteractive: root.formFieldsInteractive
         textFieldToolActive: root.textFieldToolActive
         checkboxToolActive: root.checkboxToolActive
+        dropdownToolActive: root.dropdownToolActive
         z: 3
     }
 }

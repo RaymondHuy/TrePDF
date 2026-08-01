@@ -163,6 +163,16 @@ quint64 PDFFormController::formRevisionForPage(int page) const
     return m_pageFormRevisions.value(page, m_allPagesFormRevision);
 }
 
+const QSet<int> &PDFFormController::changedPages() const
+{
+    return m_changedPages;
+}
+
+bool PDFFormController::allPagesChanged() const
+{
+    return m_allPagesChanged;
+}
+
 PDFFormWorker::DocumentKey PDFFormController::documentKey() const
 {
     PDFFormWorker::DocumentKey key;
@@ -290,6 +300,8 @@ void PDFFormController::discardChanges()
         || m_pendingFocusRequestCount > 0
         || m_cursorType != FXCT_ARROW;
     m_hasDrafts = false;
+    m_changedPages.clear();
+    m_allPagesChanged = false;
     m_hasFocus = false;
     m_acceptsTextInput = false;
     m_focusedPage = -1;
@@ -636,6 +648,8 @@ void PDFFormController::refreshDocumentState()
         || m_cursorType != FXCT_ARROW;
     m_interactive = interactive;
     m_hasDrafts = false;
+    m_changedPages.clear();
+    m_allPagesChanged = false;
     m_hasFocus = false;
     m_acceptsTextInput = false;
     m_focusedPage = -1;
@@ -990,6 +1004,14 @@ void PDFFormController::applyInteractionResult(
         = m_focusedAnnotationIndex;
     const int previousCursorType = m_cursorType;
 
+    if (result.changed) {
+        if (result.page < 0) {
+            m_allPagesChanged = true;
+            m_changedPages.clear();
+        } else if (!m_allPagesChanged) {
+            m_changedPages.insert(result.page);
+        }
+    }
     m_hasDrafts = m_hasDrafts || result.changed;
     m_canUndo = result.canUndo;
     m_canRedo = result.canRedo;

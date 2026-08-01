@@ -105,8 +105,8 @@ chỉ là state của workflow UI và phải được xóa khi popup đóng ho�
 **Vai trò:** host của bốn tab View, Edit, Forms, Sign và cầu nối giữa ribbon con
 với `Main.qml`.
 
-**Đầu vào:** `theme`, `document`, `editController`; giữ lựa chọn tool Text Field
-và Check Box của Forms.
+**Đầu vào:** `theme`, `document`, `editController`; giữ lựa chọn tool Text Field,
+Check Box và Dropdown của Forms.
 
 **Việc chính:**
 
@@ -115,7 +115,7 @@ và Check Box của Forms.
   workspace biết overlay nào được phép hiện/tương tác.
 - Khi rời Edit, đưa `PDFEditController.tool` về Browse; khi vào Edit, mặc định về
   Select để không giữ một placement/drawing tool từ phiên trước.
-- Khi chọn Forms tool, bảo đảm Text Field và Check Box loại trừ nhau.
+- Khi chọn Forms tool, bảo đảm Text Field, Check Box và Dropdown loại trừ nhau.
 - Chuyển tiếp signal Open/Save/Save As, page, delete page, zoom, fit, rotate và
   tool placeholder lên cửa sổ.
 
@@ -163,12 +163,11 @@ ghi Save; mọi thay đổi vẫn là draft.
 
 **Vai trò:** ribbon tối giản cho form designer hiện hỗ trợ đặt field.
 
-- Nhận document và hai cờ lựa chọn từ `AppRibbon`.
-- Phát `textFieldToolRequested()` hoặc `checkboxToolRequested()`.
+- Nhận document và ba cờ lựa chọn từ `AppRibbon`.
+- Phát signal tool cho Text Field, Check Box hoặc Dropdown.
 - Chỉ enable khi document đã load.
-- Các enum Radio/Dropdown/Date/Signature đã tồn tại ở model C++ để mở rộng, nhưng
-  ribbon hiện chỉ quảng bá Text Field và Check Box vì đây là hai loại có pipeline
-  lưu hoàn chỉnh.
+- Radio/Date/Signature vẫn là điểm mở rộng; ribbon chỉ quảng bá ba loại đã có
+  pipeline lưu hoàn chỉnh.
 
 ### [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml)
 
@@ -396,9 +395,10 @@ TrePDF rehydrate sau khi mở lại.
 
 **Đặt field:**
 
-- Khi Text Field hoặc Check Box tool active, MouseArea nền nhận click/drag.
+- Khi Text Field, Check Box hoặc Dropdown tool active, MouseArea nền nhận
+  click/drag.
 - Click tạo kích thước mặc định; drag tạo rect chuẩn hóa. Check Box ép hình vuông;
-  Text Field tôn trọng kích thước tối thiểu.
+  Text Field và Dropdown dùng hình chữ nhật và tôn trọng kích thước tối thiểu.
 - Sau khi tạo Text Field, lưu `pendingFocusFieldId` để editor chỉ focus sau khi
   model và loader đã sẵn sàng.
 
@@ -408,13 +408,17 @@ TrePDF rehydrate sau khi mở lại.
   value/type/flags/source-backed và xử lý click/toggle/drag move.
 - `Loader` tạo `TextField` native cho field text active; đồng bộ value vào
   controller nhưng tránh vòng lặp trong lúc nạp editor.
+- `Loader` tạo `ComboBox` cho Dropdown active từ options trong model và cập nhật
+  selected value transient qua designer controller; với source-backed field,
+  lựa chọn được chuyển qua PDFium form session rồi refresh lại model.
 - Active frame có bốn edge resize handles. Resize preview ở QML và commit qua
   `setFieldRect()` khi kết thúc; cancel phục hồi model.
 - Field có thể kéo trực tiếp sau ngưỡng drag. Field text được chọn còn có move
   handle ở góc và hỗ trợ phím mũi tên; C++ clamp top-left để giữ nguyên kích
   thước trong trang rồi gọi `moveField()` đúng một lần khi kết thúc.
-- Check Box có thể activate/toggle; field transient trong Forms mode có nút xóa.
-  Source-backed field được bảo vệ theo khả năng writer hiện tại.
+- Check Box có thể activate/toggle; Dropdown có thể mở/chọn option; field
+  transient trong Forms mode có nút xóa. Source-backed field được bảo vệ theo
+  khả năng writer hiện tại.
 
 **Phối hợp mode:** field có thể visible trong Forms hoặc Edit, nhưng placement,
 move, resize, editor và delete được gate riêng bằng `formsActive`, `editActive`,

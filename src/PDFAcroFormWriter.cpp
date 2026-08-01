@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QHash>
 #include <QSaveFile>
+#include <QSet>
 
 #include <fpdf_annot.h>
 #include <fpdf_formfill.h>
@@ -16,6 +17,10 @@
 #include <utility>
 
 namespace {
+
+constexpr int kMaximumDropdownOptions = 4096;
+constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
+constexpr int kChoiceCommitOnSelectionChange = 1 << 26;
 
 class PdfDocumentHandle
 {
@@ -170,8 +175,12 @@ private:
 
 int widgetFieldFlags(const PDFAcroFormWriter::Field &field)
 {
-    return (field.readOnly ? FPDF_FORMFLAG_READONLY : 0)
+    int flags = (field.readOnly ? FPDF_FORMFLAG_READONLY : 0)
         | (field.required ? FPDF_FORMFLAG_REQUIRED : 0);
+    if (field.type == PDFAcroFormWriter::FieldType::Dropdown) {
+        flags |= FPDF_FORMFLAG_CHOICE_COMBO;
+    }
+    return flags;
 }
 
 int pdfiumFieldType(PDFAcroFormWriter::FieldType type)
@@ -181,8 +190,9 @@ int pdfiumFieldType(PDFAcroFormWriter::FieldType type)
         return FPDF_FORMFIELD_TEXTFIELD;
     case PDFAcroFormWriter::FieldType::Checkbox:
         return FPDF_FORMFIELD_CHECKBOX;
-    case PDFAcroFormWriter::FieldType::RadioButton:
     case PDFAcroFormWriter::FieldType::Dropdown:
+        return FPDF_FORMFIELD_COMBOBOX;
+    case PDFAcroFormWriter::FieldType::RadioButton:
     case PDFAcroFormWriter::FieldType::Date:
     case PDFAcroFormWriter::FieldType::Signature:
         return FPDF_FORMFIELD_UNKNOWN;
@@ -203,6 +213,25 @@ QString normalizedCheckboxValue(const QString &value)
     return checkboxChecked(value)
         ? QStringLiteral("Yes")
         : QStringLiteral("Off");
+}
+
+bool validDropdownOptions(const QStringList &options)
+{
+    if (options.isEmpty() || options.size() > kMaximumDropdownOptions) {
+        return false;
+    }
+    QSet<QString> uniqueOptions;
+    qsizetype totalCharacters = 0;
+    for (const QString &option : options) {
+        totalCharacters += option.size();
+        if (option.isEmpty()
+            || totalCharacters > kMaximumDropdownOptionCharacters
+            || uniqueOptions.contains(option)) {
+            return false;
+        }
+        uniqueOptions.insert(option);
+    }
+    return true;
 }
 
 PDFAcroFormWriter::Result failure(const QString &message)
@@ -243,8 +272,14 @@ bool resolveUnchangedUpdateValues(
     QHash<QString, int> unresolvedFields;
     for (int index = 0; index < fields.size(); ++index) {
         const PDFAcroFormWriter::Field &field = fields.at(index);
-        if (field.operation == PDFAcroFormWriter::Operation::Add
-            || field.valueChanged) {
+        const bool preserveValue
+            = field.operation != PDFAcroFormWriter::Operation::Add
+            && !field.valueChanged;
+        const bool preserveOptions
+            = field.operation != PDFAcroFormWriter::Operation::Add
+            && field.type == PDFAcroFormWriter::FieldType::Dropdown
+            && !field.optionsChanged;
+        if (!preserveValue && !preserveOptions) {
             continue;
         }
         if (field.widgetId.isEmpty()
@@ -321,21 +356,58 @@ bool resolveUnchangedUpdateValues(
             }
             PDFAcroFormWriter::Field &resolvedField
                 = fields[*unresolved];
-            resolvedField.value
-                = resolvedField.type
-                        == PDFAcroFormWriter::FieldType::Checkbox
-                ? FPDFAnnot_IsChecked(form.get(), annotation.get())
-                    ? QStringLiteral("Yes")
-                    : QStringLiteral("Off")
-                : formWideString(
-                      [&form, &annotation](FPDF_WCHAR *buffer,
-                                           unsigned long byteCount) {
-                          return FPDFAnnot_GetFormFieldValue(
-                              form.get(),
-                              annotation.get(),
-                              buffer,
-                              byteCount);
-                      });
+            if (!resolvedField.valueChanged) {
+                resolvedField.value
+                    = resolvedField.type
+                            == PDFAcroFormWriter::FieldType::Checkbox
+                    ? FPDFAnnot_IsChecked(form.get(), annotation.get())
+                        ? QStringLiteral("Yes")
+                        : QStringLiteral("Off")
+                    : formWideString(
+                          [&form, &annotation](FPDF_WCHAR *buffer,
+                                               unsigned long byteCount) {
+                              return FPDFAnnot_GetFormFieldValue(
+                                  form.get(),
+                                  annotation.get(),
+                                  buffer,
+                                  byteCount);
+                          });
+            }
+            if (resolvedField.type
+                    == PDFAcroFormWriter::FieldType::Dropdown
+                && !resolvedField.optionsChanged) {
+                const int optionCount = FPDFAnnot_GetOptionCount(
+                    form.get(),
+                    annotation.get());
+                QStringList options;
+                if (optionCount > 0
+                    && optionCount <= kMaximumDropdownOptions) {
+                    options.reserve(optionCount);
+                    for (int optionIndex = 0;
+                         optionIndex < optionCount;
+                         ++optionIndex) {
+                        options.append(formWideString(
+                            [&form,
+                             &annotation,
+                             optionIndex](FPDF_WCHAR *buffer,
+                                          unsigned long byteCount) {
+                                return FPDFAnnot_GetOptionLabel(
+                                    form.get(),
+                                    annotation.get(),
+                                    optionIndex,
+                                    buffer,
+                                    byteCount);
+                            }));
+                    }
+                }
+                if (!validDropdownOptions(options)) {
+                    error = QStringLiteral(
+                        "An existing TrePDF Dropdown has invalid options.");
+                    pageSucceeded = false;
+                    break;
+                }
+                resolvedField.options = std::move(options);
+            }
             unresolvedFields.erase(unresolved);
         }
         FORM_OnBeforeClosePage(page.get(), form.get());
@@ -454,6 +526,8 @@ bool validateWrittenFields(
             const int expectedFlags = widgetFieldFlags(field);
             const bool checkbox
                 = field.type == PDFAcroFormWriter::FieldType::Checkbox;
+            const bool dropdown
+                = field.type == PDFAcroFormWriter::FieldType::Dropdown;
             const QString exportValue = checkbox
                 ? formWideString(
                       [&form, &annotation](FPDF_WCHAR *buffer,
@@ -490,6 +564,61 @@ bool validateWrittenFields(
                         appearanceVersion,
                         static_cast<float>(
                             PDFFormAppearance::kCheckboxVersion)));
+            const QString defaultValue = dropdown
+                ? formWideString(
+                      [&annotation](FPDF_WCHAR *buffer,
+                                    unsigned long byteCount) {
+                          return FPDFAnnot_GetStringValue(
+                              annotation.get(),
+                              "DV",
+                              buffer,
+                              byteCount);
+                      })
+                : QString();
+            bool dropdownMatches = !dropdown;
+            if (dropdown) {
+                const int optionCount = FPDFAnnot_GetOptionCount(
+                    form.get(),
+                    annotation.get());
+                QStringList options;
+                QVector<int> selectedIndices;
+                if (optionCount >= 0) {
+                    options.reserve(optionCount);
+                    for (int optionIndex = 0;
+                         optionIndex < optionCount;
+                         ++optionIndex) {
+                        options.append(formWideString(
+                            [&form,
+                             &annotation,
+                             optionIndex](FPDF_WCHAR *buffer,
+                                          unsigned long byteCount) {
+                                return FPDFAnnot_GetOptionLabel(
+                                    form.get(),
+                                    annotation.get(),
+                                    optionIndex,
+                                    buffer,
+                                    byteCount);
+                            }));
+                        if (FPDFAnnot_IsOptionSelected(
+                                form.get(),
+                                annotation.get(),
+                                optionIndex)) {
+                            selectedIndices.append(optionIndex);
+                        }
+                    }
+                }
+                const int expectedIndex = field.options.indexOf(field.value);
+                dropdownMatches = options == field.options
+                    && defaultValue == field.defaultValue
+                    && selectedIndices == QVector<int>({expectedIndex})
+                    && (FPDFAnnot_GetFlags(annotation.get())
+                        & FPDF_ANNOT_FLAG_PRINT)
+                    && hasAppearanceVersion
+                    && qFuzzyCompare(
+                        appearanceVersion,
+                        static_cast<float>(
+                            PDFFormAppearance::kDropdownVersion));
+            }
             constexpr qreal coordinateTolerance = 0.05;
             const bool matches = pageIndex == field.page
                 && FPDFAnnot_GetFormFieldType(
@@ -499,10 +628,17 @@ bool validateWrittenFields(
                 && fieldName == field.fieldName
                 && fieldValue == field.value
                 && checkboxMatches
+                && dropdownMatches
                 && (fieldFlags
                     & (FPDF_FORMFLAG_READONLY
-                       | FPDF_FORMFLAG_REQUIRED))
+                       | FPDF_FORMFLAG_REQUIRED
+                       | FPDF_FORMFLAG_CHOICE_COMBO
+                       | FPDF_FORMFLAG_CHOICE_EDIT
+                       | FPDF_FORMFLAG_CHOICE_MULTI_SELECT
+                       | kChoiceCommitOnSelectionChange))
                     == expectedFlags
+                && (FPDFAnnot_GetFlags(annotation.get())
+                    & FPDF_ANNOT_FLAG_PRINT)
                 && FPDFAnnot_HasKey(annotation.get(), "AP")
                 && FPDFAnnot_GetRect(annotation.get(), &rect)
                 && qAbs(rect.left - field.pageRect.left())
@@ -567,6 +703,13 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
         if (field.type == FieldType::Checkbox) {
             field.value = normalizedCheckboxValue(field.value);
             field.defaultValue = normalizedCheckboxValue(field.defaultValue);
+        } else if (field.type == FieldType::Dropdown) {
+            if (!validDropdownOptions(field.options)
+                || !field.options.contains(field.value)
+                || !field.options.contains(field.defaultValue)) {
+                return failure(QStringLiteral(
+                    "The Dropdown options or selected values are invalid."));
+            }
         }
     }
 
@@ -620,24 +763,39 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
             }
         }
 
-        formFields.append({
-            field.widgetId,
-            field.fieldName,
-            field.tooltip,
-            field.value,
-            field.defaultValue,
-            field.pageRect,
-            field.type == FieldType::Text
-                ? PDFAcroFormCanonicalizer::FieldType::Text
-                : PDFAcroFormCanonicalizer::FieldType::Checkbox,
-            widgetFieldFlags(field),
-            field.operation == Operation::Add
-                ? PDFAcroFormCanonicalizer::Operation::Add
-                : field.operation
-                          == Operation::NormalizeAppearance
-                    ? PDFAcroFormCanonicalizer::Operation::
-                          NormalizeAppearance
-                    : PDFAcroFormCanonicalizer::Operation::Update});
+        PDFAcroFormCanonicalizer::Field canonicalField;
+        canonicalField.widgetId = field.widgetId;
+        canonicalField.fieldName = field.fieldName;
+        canonicalField.tooltip = field.tooltip;
+        canonicalField.value = field.value;
+        canonicalField.defaultValue = field.defaultValue;
+        canonicalField.options = field.options;
+        canonicalField.pageRect = field.pageRect;
+        switch (field.type) {
+        case FieldType::Text:
+            canonicalField.type
+                = PDFAcroFormCanonicalizer::FieldType::Text;
+            break;
+        case FieldType::Checkbox:
+            canonicalField.type
+                = PDFAcroFormCanonicalizer::FieldType::Checkbox;
+            break;
+        case FieldType::Dropdown:
+            canonicalField.type
+                = PDFAcroFormCanonicalizer::FieldType::Dropdown;
+            break;
+        case FieldType::RadioButton:
+        case FieldType::Date:
+        case FieldType::Signature:
+            Q_UNREACHABLE();
+        }
+        canonicalField.fieldFlags = widgetFieldFlags(field);
+        canonicalField.operation = field.operation == Operation::Add
+            ? PDFAcroFormCanonicalizer::Operation::Add
+            : field.operation == Operation::NormalizeAppearance
+                ? PDFAcroFormCanonicalizer::Operation::NormalizeAppearance
+                : PDFAcroFormCanonicalizer::Operation::Update;
+        formFields.append(std::move(canonicalField));
     }
 
     SaveFileWriter writer(targetFilePath);

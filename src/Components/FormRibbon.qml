@@ -11,9 +11,11 @@ Flickable {
     required property PDFDocument document
     required property bool textFieldToolSelected
     required property bool checkboxToolSelected
+    required property bool dropdownToolSelected
 
     signal textFieldToolRequested()
     signal checkboxToolRequested()
+    signal dropdownToolRequested()
 
     clip: true
     contentWidth: ribbonRow.implicitWidth + 16
@@ -60,6 +62,21 @@ Flickable {
                 preserveIconColors: true
                 primary: root.checkboxToolSelected
                 onClicked: root.checkboxToolRequested()
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Dropdown"
+                text: qsTrId("DropdownTool")
+                //% "Click or drag on the page to add a dropdown"
+                toolTipText: qsTrId("ClickOrDragToAddDropdown")
+                iconSource: "../assets/icons/dropdown-menu.svg"
+                icon.width: 32
+                icon.height: 32
+                preserveIconColors: true
+                primary: root.dropdownToolSelected
+                onClicked: root.dropdownToolRequested()
             }
         }
     }

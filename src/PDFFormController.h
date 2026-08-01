@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QUrl>
 #include <QtQml/qqmlregistration.h>
 
@@ -66,6 +67,8 @@ public:
     void setJavaScriptEnabled(bool enabled);
     bool javascriptTransitionPending() const;
     quint64 formRevisionForPage(int page) const;
+    const QSet<int> &changedPages() const;
+    bool allPagesChanged() const;
     PDFFormWorker::DocumentKey documentKey() const;
 
     void pointerEvent(int page,
@@ -167,6 +170,8 @@ private:
     int m_pendingFocusRequestCount = 0;
     int m_cursorType = FXCT_ARROW;
     int m_pendingMutationCount = 0;
+    QSet<int> m_changedPages;
+    bool m_allPagesChanged = false;
     quint64 m_javascriptRequestSerial = 0;
     quint64 m_pageChangeRequestSerial = 0;
     quint64 m_trePDFTextFieldsRequestSerial = 0;

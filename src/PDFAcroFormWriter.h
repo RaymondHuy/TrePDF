@@ -2,6 +2,7 @@
 
 #include <QRectF>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 class PDFAcroFormWriter
@@ -29,6 +30,7 @@ public:
         QString tooltip;
         QString value;
         QString defaultValue;
+        QStringList options;
         FieldType type = FieldType::Text;
         Operation operation = Operation::Add;
         int page = -1;
@@ -36,6 +38,7 @@ public:
         bool required = false;
         bool readOnly = false;
         bool valueChanged = true;
+        bool optionsChanged = true;
     };
 
     struct Result {

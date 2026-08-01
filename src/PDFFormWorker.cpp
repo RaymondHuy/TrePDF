@@ -37,6 +37,8 @@ namespace {
 // PDF 1.7, table 8.75. PDFium does not currently expose this choice-field
 // flag in fpdf_annot.h.
 constexpr int kChoiceCommitOnSelectionChange = 1 << 26;
+constexpr int kMaximumChoiceOptions = 4096;
+constexpr qsizetype kMaximumChoiceOptionCharacters = 1024 * 1024;
 
 QThreadPool &formRenderThreadPool()
 {
@@ -411,7 +413,9 @@ bool isTrePDFDesignerFieldId(const QString &id, int fieldType)
         ? QStringLiteral("text-field-")
         : fieldType == FPDF_FORMFIELD_CHECKBOX
             ? QStringLiteral("checkbox-field-")
-            : QString();
+            : fieldType == FPDF_FORMFIELD_COMBOBOX
+                ? QStringLiteral("dropdown-field-")
+                : QString();
     constexpr qsizetype uuidLength = 36;
     if (prefix.isEmpty() || !id.startsWith(prefix)) {
         return false;
@@ -1164,7 +1168,6 @@ public:
         }
 
         constexpr int kNormalizedDeviceExtent = 1000000;
-        constexpr int kMaximumChoiceOptions = 4096;
         int focusedAnnotationIndex = -1;
         int focusedSourcePage = -1;
         QString focusedFieldName;
@@ -1485,7 +1488,8 @@ public:
                 = FPDFAnnot_GetSubtype(annotation)
                       == FPDF_ANNOT_WIDGET
                 && (fieldType == FPDF_FORMFIELD_TEXTFIELD
-                    || fieldType == FPDF_FORMFIELD_CHECKBOX);
+                    || fieldType == FPDF_FORMFIELD_CHECKBOX
+                    || fieldType == FPDF_FORMFIELD_COMBOBOX);
             if (!designerWidget) {
                 FPDFPage_CloseAnnot(annotation);
                 continue;
@@ -1515,6 +1519,7 @@ public:
             PDFFormWorker::TrePDFTextField field;
             field.id = id;
             field.type = fieldType;
+            field.annotationIndex = annotationIndex;
             field.name = formWideString(
                 [this,
                  annotation](FPDF_WCHAR *buffer,
@@ -1562,6 +1567,70 @@ public:
                         buffer,
                         byteCount);
                 });
+            if (fieldType == FPDF_FORMFIELD_COMBOBOX) {
+                const int choiceFlags = FPDFAnnot_GetFormFieldFlags(
+                    m_formHandle,
+                    annotation);
+                if (!(choiceFlags & FPDF_FORMFLAG_CHOICE_COMBO)
+                    || (choiceFlags & FPDF_FORMFLAG_CHOICE_EDIT)
+                    || (choiceFlags & FPDF_FORMFLAG_CHOICE_MULTI_SELECT)
+                    || (choiceFlags & kChoiceCommitOnSelectionChange)
+                    || FPDFAnnot_HasKey(annotation, "A")
+                    || FPDFAnnot_HasKey(annotation, "AA")) {
+                    FPDFPage_CloseAnnot(annotation);
+                    continue;
+                }
+                const int optionCount = FPDFAnnot_GetOptionCount(
+                    m_formHandle,
+                    annotation);
+                qsizetype totalOptionCharacters = 0;
+                QSet<QString> uniqueOptions;
+                bool validOptions = optionCount > 0
+                    && optionCount <= kMaximumChoiceOptions;
+                if (validOptions) {
+                    field.options.reserve(optionCount);
+                    for (int optionIndex = 0;
+                         optionIndex < optionCount;
+                         ++optionIndex) {
+                        const QString option = formWideString(
+                            [this,
+                             annotation,
+                             optionIndex](FPDF_WCHAR *buffer,
+                                          unsigned long byteCount) {
+                                return FPDFAnnot_GetOptionLabel(
+                                    m_formHandle,
+                                    annotation,
+                                    optionIndex,
+                                    buffer,
+                                    byteCount);
+                            });
+                        totalOptionCharacters += option.size();
+                        if (option.isEmpty()
+                            || totalOptionCharacters
+                                > kMaximumChoiceOptionCharacters
+                            || uniqueOptions.contains(option)) {
+                            validOptions = false;
+                            break;
+                        }
+                        uniqueOptions.insert(option);
+                        field.options.append(option);
+                    }
+                }
+                if (!validOptions
+                    || !field.options.contains(field.value)
+                    || !field.options.contains(field.defaultValue)) {
+                    FPDFPage_CloseAnnot(annotation);
+                    continue;
+                }
+                field.identityToken = choiceFieldIdentityToken(
+                    m_formHandle,
+                    annotation,
+                    sourcePage);
+                if (field.identityToken.isEmpty()) {
+                    FPDFPage_CloseAnnot(annotation);
+                    continue;
+                }
+            }
             float appearanceVersion = 0.0f;
             if (FPDFAnnot_GetNumberValue(
                     annotation,

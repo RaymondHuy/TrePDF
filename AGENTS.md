@@ -42,12 +42,13 @@ Current features:
   on the native PDFium interaction path. Form values participate in the
   per-tab draft guard and Save/Save As, while PDFium does not expose undo/redo
   history for non-editable choice fields.
-- The Forms tab can place Text Field and Check Box widgets. Check boxes use a
-  square click/drag placement tool beside Text Field, support selection,
-  toggling, resizing, and deletion while still transient, and persist as
-  interactive AcroForm button fields with explicit Yes/Off appearances.
-  TrePDF-authored text fields and check boxes are rehydrated after reopen so
-  their source widgets remain editable in the form designer.
+- The Forms tab can place Text Field, Check Box, and fixed single-select
+  Dropdown widgets. Check boxes use a square click/drag tool; dropdowns use a
+  rectangular tool and start with three localized options. All three support
+  selection, movement, resizing, and transient deletion; check boxes can be
+  toggled and dropdown values can be selected in the designer. They persist as
+  interactive AcroForm fields with explicit appearances and are rehydrated
+  after reopen, including dropdown options and selection.
 - Text draft editing with selection, undo, redo, discard, Save, and Save As.
   Drafts stay session-only until a save succeeds.
 - Add Image uses the same placement cursor and draft history as Add Text. After

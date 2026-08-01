@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QPointer>
 #include <QRectF>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -125,6 +126,8 @@ public:
     Q_INVOKABLE bool activateSourceCheckbox(const QString &fieldId,
                                             qreal viewWidth,
                                             qreal viewHeight);
+    Q_INVOKABLE bool activateSourceDropdown(const QString &fieldId,
+                                            int optionIndex);
     Q_INVOKABLE QVariantList fieldsForPage(int page) const;
     Q_INVOKABLE QVariantList textFieldsForPage(int page) const;
     QStringList sourceFieldIdsForPage(int page) const;
@@ -169,7 +172,9 @@ public:
     void refreshSourceFieldValues();
     bool hasDrafts() const;
     QVector<SaveField> saveFields(
-        bool includeAppearanceNormalization = false) const;
+        bool includeAppearanceNormalization = false,
+        const QSet<int> &nativeAppearancePages = {},
+        bool normalizeAllNativeAppearances = false) const;
     void clear();
     void resetFromDocument();
 
@@ -186,6 +191,7 @@ private:
         FieldType type = Text;
         int page = -1;
         int sourcePage = -1;
+        int sourceAnnotationIndex = -1;
         bool hasSourcePage = false;
         QRectF normalizedRect;
         QRectF sourceNormalizedRect;
@@ -194,6 +200,7 @@ private:
         QString tooltip;
         QString defaultValue;
         QStringList options;
+        QString sourceIdentityToken;
         int flags = NoFieldFlags;
         int appearanceVersion = 0;
         bool sourceBacked = false;

@@ -413,8 +413,8 @@ rehydrate.
 - Field có id, name, tooltip, value/default value, type, flags, display/source
   page, normalized rect, source-backed, appearance version và bitmask property
   đã thay đổi.
-- Enum model dự trù Text, Checkbox, RadioButton, Dropdown, Date, Signature; UI và
-  writer hoàn chỉnh hiện chỉ cho Text/Checkbox.
+- Enum model có Text, Checkbox, RadioButton, Dropdown, Date, Signature; UI và
+  writer hoàn chỉnh hiện hỗ trợ Text/Checkbox/Dropdown.
 - Expose roles cho `FormFieldLayer` và các API `fieldData()`/`fieldsForPage()` cho
   QML.
 
@@ -423,7 +423,8 @@ rehydrate.
 - Tạo field với tên duy nhất, default size/value/flags; helper riêng cho Text.
 - Đổi value/name/options/flags/rect; `moveField()` chỉ đổi top-left, giữ width/
   height và clamp field vào trang.
-- Chọn field, quản lý text focus, activate source checkbox, remove field transient.
+- Chọn field, quản lý text focus, activate source checkbox, chọn giá trị
+  Dropdown và remove field transient.
 - Map field qua page insertion/deletion; source-backed field giữ source page
   identity để update đúng widget sau save.
 
@@ -432,6 +433,8 @@ rehydrate.
 - `prepareForDesignMode()` yêu cầu `PDFFormWorker` inspect TrePDF fields.
 - Kiểm generation/document key trước khi thay model; đồng bộ appearance version
   để writer biết field nào chỉ cần normalize appearance.
+- Dropdown giữ annotation index và identity token; đổi lựa chọn source-backed đi
+  qua form worker rồi refresh model thay vì tạo một value draft tách khỏi PDFium.
 
 **Save snapshot:**
 
@@ -448,12 +451,12 @@ rehydrate.
 **Render:**
 
 - Lấy field model theo display page, visibility/source visibility và pooled state.
-- Dựng scene graph nodes cho Text Field, Check Box và presentation của các type
-  dự trù; vẽ border, background, text/check mark, selected/active state.
+- Dựng scene graph nodes cho Text Field, Check Box, Dropdown và presentation của
+  các type dự trù; vẽ border, background, text/check mark/arrow và selected state.
 - Dùng constants từ `PDFFormAppearance.h` để preview font, border và padding khớp
   appearance writer.
-- Expose active field id/rect/value/type/flags/source-backed để QML đặt editor,
-  frame và handles đúng vị trí.
+- Expose active field id/rect/value/options/type/flags/source-backed để QML đặt
+  editor, frame và handles đúng vị trí.
 
 **Pointer interaction:**
 
@@ -477,25 +480,26 @@ model state được snapshot thành dữ liệu render ở GUI thread.
 **Vai trò:** coordinator cấp cao ghi các field designer vào một PDF intermediate.
 
 **Input:** source file path, target path và vector `Field` chứa widget id/name/
-tooltip/value/default/rect/page/type/flags/operation.
+tooltip/value/default/options/rect/page/type/flags/operation.
 
 **Pipeline:**
 
 1. Yêu cầu caller đang giữ PDFium process lock và mở intermediate bằng PDFium.
-2. Với update không đổi value, đọc live value từ document để tránh designer
-   snapshot cũ ghi đè thay đổi form runtime/JavaScript.
-3. Chuẩn hóa Checkbox về `Yes`/`Off`; chuyển Required/ReadOnly thành form flags.
+2. Với update không đổi value/options, đọc live data từ document để tránh
+   designer snapshot cũ ghi đè thay đổi form runtime/JavaScript.
+3. Chuẩn hóa Checkbox về `Yes`/`Off`; kiểm Dropdown options/selection và chuyển
+   Required/ReadOnly/Combo thành form flags.
 4. Với field Add, tạo Square annotation placeholder có rect, `NM=widgetId` và
    Print flag. PDFium public API chưa tạo đầy đủ Widget dictionary cần thiết.
 5. Save bản có placeholder qua `QSaveFile` và PDFium.
 6. Gọi `PDFAcroFormCanonicalizer::finalizeFields()` để biến placeholder/update
    thành field/widget chuẩn và appearance rõ ràng.
 7. Mở lại file bằng PDFium, duyệt widget và kiểm type, name, id, value, flags,
-   appearance, rect và số lượng khớp đúng một lần.
+   options/selected index, appearance, rect và số lượng khớp đúng một lần.
 
-**Khả năng hiện tại:** cấu trúc enum có chỗ cho Radio/Dropdown/Date/Signature và
-Remove, nhưng `pdfiumFieldType()`/canonicalizer hiện chỉ triển khai Text và
-Checkbox với Add/Update/NormalizeAppearance. Type khác phải fail rõ ràng.
+**Khả năng hiện tại:** Text, Checkbox và fixed single-select Dropdown hỗ trợ
+Add/Update; Text còn hỗ trợ NormalizeAppearance. Radio/Date/Signature và Remove
+chưa triển khai nên phải fail rõ ràng.
 
 **Failure:** nếu canonicalize hoặc validation thất bại, xóa target intermediate
 để caller không dùng một PDF form nửa hoàn chỉnh.
@@ -524,6 +528,10 @@ API không thể dựng trực tiếp.
   tạo appearance stream để PDF reader hiển thị ổn định kể cả trước khi focus.
 - Tạo Checkbox Widget với `/AP` Off/Yes riêng, `/AS`, value/default value và
   vector check appearance.
+- Tạo Dropdown Widget `/FT /Ch` với Combo flag, `/Opt`, `/V`, `/DV`, `/I`, `/DA`
+  và appearance có nút mũi tên.
+- Chỉ cập nhật Dropdown có `/Opt` là mảng string trực tiếp; export/display pairs
+  bị từ chối để không làm mất export value khi canonicalize.
 - Với normalize-only text field, giữ field data hiện hữu và chỉ thay appearance
   dictionary/version cần thiết.
 - Bổ sung AcroForm vào Catalog nếu chưa có, cập nhật `/Fields`, default font
@@ -561,8 +569,8 @@ designer, rồi phục hồi document và pixel nền an toàn.
   field để có thể migrate giao diện mà không mất validation properties.
 - Chứa font size, border width/color và padding chuẩn của Text Field; cả
   `FormFieldLayer` và canonicalizer/writer phải dùng cùng giá trị.
-- Checkbox/text appearance version cho phép designer phát hiện field cũ cần
-  normalize khi mở lại.
+- Text/checkbox/dropdown có appearance version riêng; designer dùng version text
+  để phát hiện field cũ cần normalize khi mở lại.
 
 ### [`src/PDFiumSynchronization.h`](../src/PDFiumSynchronization.h)
 
@@ -585,8 +593,9 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
 
 **Nhóm coverage hiện tại:**
 
-- Form designer: lưu/rehydrate Text Field và Checkbox, move không resize,
-  appearance normalization, AcroForm sẵn có và tên field trùng.
+- Form designer: lưu/rehydrate Text Field, Checkbox và Dropdown, giữ lựa chọn/
+  options khi move-resize, appearance normalization, AcroForm sẵn có và tên
+  field trùng.
 - Form runtime: JavaScript tự bật, choice field tùy biến và persistence, push
   button action, URI sandbox, external-link routing và PDFium serialization
   giữa thread.
