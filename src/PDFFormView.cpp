@@ -796,7 +796,7 @@ bool PDFFormView::designerBlocksPointer(const QPointF &position) const
         return false;
     }
 
-    return m_formDesignerController->sourceTextFieldContainsPoint(
+    return m_formDesignerController->sourceFieldContainsPoint(
         m_page,
         QPointF(position.x() / width(), position.y() / height()));
 }

@@ -1453,6 +1453,46 @@ bool renderedPaintDiffersFromSerializableColors(FPDF_PAGEOBJECT object,
         || unexpectedPixels >= qMax(8, opaquePixels / 200);
 }
 
+bool materializeWhitePathFill(FPDF_PAGEOBJECT inspectionObject,
+                              FPDF_PAGEOBJECT sourceObject)
+{
+    int fillMode = FPDF_FILLMODE_NONE;
+    FPDF_BOOL strokes = false;
+    if (!FPDFPath_GetDrawMode(inspectionObject, &fillMode, &strokes)) {
+        return false;
+    }
+    if (fillMode == FPDF_FILLMODE_NONE) {
+        return true;
+    }
+
+    unsigned int red = 0;
+    unsigned int green = 0;
+    unsigned int blue = 0;
+    unsigned int alpha = 0;
+    if (!FPDFPageObj_GetFillColor(
+            inspectionObject,
+            &red,
+            &green,
+            &blue,
+            &alpha)) {
+        return false;
+    }
+    if (red != 255 || green != 255 || blue != 255 || alpha != 255) {
+        return true;
+    }
+
+    // Word-authored PDFs can expose a white DeviceGray path correctly while
+    // loaded, then let PDFium serialize that implicit paint as RGB black after
+    // nearby source objects are replaced. Marking only exact opaque-white
+    // fills explicitly avoids changing CMYK/ICC/spot paints with real color.
+    return FPDFPageObj_SetFillColor(
+        sourceObject,
+        red,
+        green,
+        blue,
+        alpha);
+}
+
 bool createRasterizedPaint(FPDF_DOCUMENT document,
                            FPDF_PAGE page,
                            FPDF_PAGEOBJECT sourceObject,
@@ -1569,8 +1609,8 @@ PDFSaveWriter::Result prepareUnsupportedPaints(
             || renderedPaintDiffersFromSerializableColors(
                 inspectionObject,
                 renderedObject);
-        if (unsupportedPaint
-            && !createRasterizedPaint(
+        if (unsupportedPaint) {
+            if (!createRasterizedPaint(
                 document,
                 page,
                 sourceObject,
@@ -1578,8 +1618,18 @@ PDFSaveWriter::Result prepareUnsupportedPaints(
                 renderedObject,
                 imageMatrix,
                 paints)) {
+                return failure(
+                    PDFSaveWriter::Error::ImageObjectCreationFailed,
+                    pageIndex);
+            }
+            continue;
+        }
+        if (objectType == FPDF_PAGEOBJ_PATH
+            && !materializeWhitePathFill(
+                inspectionObject,
+                sourceObject)) {
             return failure(
-                PDFSaveWriter::Error::ImageObjectCreationFailed,
+                PDFSaveWriter::Error::PageContentGenerationFailed,
                 pageIndex);
         }
     }
@@ -2558,9 +2608,9 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         });
     if (modifiesExistingObject) {
         // PDFium's content generator cannot serialize pattern and shading
-        // paints. Replacing only those painted objects with isolated bitmaps
-        // keeps the rest of the page vector/searchable when a source content
-        // stream must be regenerated for an edit, deletion, or object move.
+        // paints reliably, and can lose implicit opaque-white path fills while
+        // replacing nearby source objects. Preserve those paints before the
+        // source content stream is regenerated.
         const PDFSaveWriter::Result paintResult = prepareUnsupportedPaints(
             document,
             page.get(),

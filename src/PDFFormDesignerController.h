@@ -122,8 +122,15 @@ public:
                                      qreal width,
                                      qreal height);
     Q_INVOKABLE QVariantMap fieldData(const QString &fieldId) const;
+    Q_INVOKABLE bool activateSourceCheckbox(const QString &fieldId,
+                                            qreal viewWidth,
+                                            qreal viewHeight);
     Q_INVOKABLE QVariantList fieldsForPage(int page) const;
     Q_INVOKABLE QVariantList textFieldsForPage(int page) const;
+    QStringList sourceFieldIdsForPage(int page) const;
+    bool sourceFieldContainsPoint(
+        int page,
+        const QPointF &normalizedPoint) const;
     QStringList sourceTextFieldIdsForPage(int page) const;
     bool sourceTextFieldContainsPoint(
         int page,
@@ -142,6 +149,9 @@ public:
                                   qreal y,
                                   qreal width,
                                   qreal height);
+    Q_INVOKABLE bool moveField(const QString &fieldId,
+                              qreal x,
+                              qreal y);
     Q_INVOKABLE bool setTextFieldRect(const QString &fieldId,
                                       qreal x,
                                       qreal y,
@@ -205,4 +215,5 @@ private:
     quint64 m_sourceReloadSerial = 0;
     quint64 m_sourceValueRefreshSerial = 0;
     bool m_sourceValueRefreshPending = false;
+    bool m_sourceValueRefreshQueued = false;
 };

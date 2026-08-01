@@ -18,6 +18,7 @@ Rectangle {
     property bool formFieldsVisible: false
     property bool formFieldsInteractive: false
     property bool textFieldToolActive: false
+    property bool checkboxToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
     property string transientStatus
@@ -196,6 +197,7 @@ Rectangle {
             formFieldsVisible: root.formFieldsVisible
             formFieldsInteractive: root.formFieldsInteractive
             textFieldToolActive: root.textFieldToolActive
+            checkboxToolActive: root.checkboxToolActive
             zoom: root.zoom
             viewRotation: root.viewRotation
             sessionChangeGeneration: root.sessionChangeGeneration

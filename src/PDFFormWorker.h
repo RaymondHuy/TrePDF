@@ -96,6 +96,7 @@ struct TrePDFTextField {
     QString tooltip;
     QString value;
     QString defaultValue;
+    int type = FPDF_FORMFIELD_UNKNOWN;
     int flags = 0;
     int appearanceVersion = 0;
     int sourcePage = -1;

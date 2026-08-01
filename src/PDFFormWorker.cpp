@@ -405,11 +405,15 @@ QString formWideString(const Getter &getter)
         buffer.size() - 1);
 }
 
-bool isTrePDFTextFieldId(const QString &id)
+bool isTrePDFDesignerFieldId(const QString &id, int fieldType)
 {
-    static const QString prefix = QStringLiteral("text-field-");
+    const QString prefix = fieldType == FPDF_FORMFIELD_TEXTFIELD
+        ? QStringLiteral("text-field-")
+        : fieldType == FPDF_FORMFIELD_CHECKBOX
+            ? QStringLiteral("checkbox-field-")
+            : QString();
     constexpr qsizetype uuidLength = 36;
-    if (!id.startsWith(prefix)) {
+    if (prefix.isEmpty() || !id.startsWith(prefix)) {
         return false;
     }
 
@@ -424,10 +428,13 @@ bool isTrePDFTextFieldId(const QString &id)
             return true;
         }
     }
+    if (fieldType != FPDF_FORMFIELD_TEXTFIELD) {
+        return false;
+    }
 
     // Early TrePDF form drafts used a positive sequence number as /NM.
     // Accept that exact legacy shape, but do not treat arbitrary annotations
-    // sharing the text-field prefix as designer-owned widgets.
+    // sharing a designer prefix as TrePDF-owned widgets.
     if (suffix.isEmpty()
         || suffix.size() > 20
         || suffix.front() == QLatin1Char('0')) {
@@ -1471,14 +1478,15 @@ public:
                 continue;
             }
 
-            const bool textWidget
+            const int fieldType = FPDFAnnot_GetFormFieldType(
+                m_formHandle,
+                annotation);
+            const bool designerWidget
                 = FPDFAnnot_GetSubtype(annotation)
                       == FPDF_ANNOT_WIDGET
-                && FPDFAnnot_GetFormFieldType(
-                       m_formHandle,
-                       annotation)
-                    == FPDF_FORMFIELD_TEXTFIELD;
-            if (!textWidget) {
+                && (fieldType == FPDF_FORMFIELD_TEXTFIELD
+                    || fieldType == FPDF_FORMFIELD_CHECKBOX);
+            if (!designerWidget) {
                 FPDFPage_CloseAnnot(annotation);
                 continue;
             }
@@ -1492,7 +1500,7 @@ public:
                         buffer,
                         byteCount);
                 });
-            if (!isTrePDFTextFieldId(id)) {
+            if (!isTrePDFDesignerFieldId(id, fieldType)) {
                 FPDFPage_CloseAnnot(annotation);
                 continue;
             }
@@ -1506,6 +1514,7 @@ public:
 
             PDFFormWorker::TrePDFTextField field;
             field.id = id;
+            field.type = fieldType;
             field.name = formWideString(
                 [this,
                  annotation](FPDF_WCHAR *buffer,
@@ -1530,16 +1539,20 @@ public:
                         buffer,
                         byteCount);
                 });
-            field.value = formWideString(
-                [this,
-                 annotation](FPDF_WCHAR *buffer,
-                              unsigned long byteCount) {
-                    return FPDFAnnot_GetFormFieldValue(
-                        m_formHandle,
-                        annotation,
-                        buffer,
-                        byteCount);
-                });
+            field.value = fieldType == FPDF_FORMFIELD_CHECKBOX
+                ? FPDFAnnot_IsChecked(m_formHandle, annotation)
+                    ? QStringLiteral("Yes")
+                    : QStringLiteral("Off")
+                : formWideString(
+                      [this,
+                       annotation](FPDF_WCHAR *buffer,
+                                    unsigned long byteCount) {
+                          return FPDFAnnot_GetFormFieldValue(
+                              m_formHandle,
+                              annotation,
+                              buffer,
+                              byteCount);
+                      });
             field.defaultValue = formWideString(
                 [annotation](FPDF_WCHAR *buffer,
                              unsigned long byteCount) {

@@ -17,6 +17,7 @@ Item {
     property bool fieldsVisible: false
     property bool fieldsInteractive: false
     property bool textFieldToolActive: false
+    property bool checkboxToolActive: false
     property rect placementRect: Qt.rect(0, 0, 0, 0)
     property real placementStartX: 0
     property real placementStartY: 0
@@ -26,6 +27,11 @@ Item {
     readonly property real resizeHandleHitSize: 24
     readonly property real minimumResizeWidth: 60
     readonly property real minimumResizeHeight: 24
+    readonly property int placementFieldType: textFieldToolActive
+        ? PDFFormDesignerController.Text
+        : checkboxToolActive
+            ? PDFFormDesignerController.Checkbox
+            : -1
 
     function resetPlacement() {
         placementRect = Qt.rect(0, 0, 0, 0)
@@ -34,6 +40,30 @@ Item {
     function updatePlacement(x, y) {
         const boundedX = Math.max(0, Math.min(width, x))
         const boundedY = Math.max(0, Math.min(height, y))
+        if (placementFieldType === PDFFormDesignerController.Checkbox) {
+            const deltaX = boundedX - placementStartX
+            const deltaY = boundedY - placementStartY
+            const directionX = deltaX < 0 ? -1 : 1
+            const directionY = deltaY < 0 ? -1 : 1
+            const maximumHorizontalSide = directionX < 0
+                ? placementStartX
+                : width - placementStartX
+            const maximumVerticalSide = directionY < 0
+                ? placementStartY
+                : height - placementStartY
+            const side = Math.min(
+                Math.max(Math.abs(deltaX), Math.abs(deltaY)),
+                maximumHorizontalSide,
+                maximumVerticalSide)
+            const endX = placementStartX + directionX * side
+            const endY = placementStartY + directionY * side
+            placementRect = Qt.rect(
+                Math.min(placementStartX, endX),
+                Math.min(placementStartY, endY),
+                side,
+                side)
+            return
+        }
         placementRect = Qt.rect(
             Math.min(placementStartX, boundedX),
             Math.min(placementStartY, boundedY),
@@ -133,19 +163,37 @@ Item {
         let fieldRect = placementRect
         const clickPlacement = fieldRect.width < 4 && fieldRect.height < 4
         if (clickPlacement) {
-            const defaultWidth = Math.min(160, width)
-            const defaultHeight = Math.min(28, height)
-            fieldRect = Qt.rect(
-                Math.min(placementStartX, width - defaultWidth),
-                Math.min(placementStartY, height - defaultHeight),
-                defaultWidth,
-                defaultHeight)
-        } else if (fieldRect.width < 20 || fieldRect.height < 18) {
+            if (placementFieldType
+                    === PDFFormDesignerController.Checkbox) {
+                const defaultSide = Math.min(
+                    24 * Math.max(0.1, pagePointScale),
+                    width,
+                    height)
+                fieldRect = Qt.rect(
+                    Math.min(placementStartX, width - defaultSide),
+                    Math.min(placementStartY, height - defaultSide),
+                    defaultSide,
+                    defaultSide)
+            } else {
+                const defaultWidth = Math.min(160, width)
+                const defaultHeight = Math.min(28, height)
+                fieldRect = Qt.rect(
+                    Math.min(placementStartX, width - defaultWidth),
+                    Math.min(placementStartY, height - defaultHeight),
+                    defaultWidth,
+                    defaultHeight)
+            }
+        } else if (placementFieldType
+                   === PDFFormDesignerController.Checkbox
+                   ? fieldRect.width
+                       < 12 * Math.max(0.1, pagePointScale)
+                   : fieldRect.width < 20 || fieldRect.height < 18) {
             resetPlacement()
             return
         }
 
-        const fieldId = controller.addTextField(
+        const fieldId = controller.addField(
+            placementFieldType,
             page,
             fieldRect.x / width,
             fieldRect.y / height,
@@ -155,16 +203,22 @@ Item {
         if (fieldId.length === 0)
             return
 
-        pendingFocusFieldId = fieldId
+        pendingFocusFieldId = placementFieldType
+            === PDFFormDesignerController.Text
+            ? fieldId
+            : ""
         controller.selectTextField(fieldId)
-        Qt.callLater(function() {
-            root.focusPendingTextField()
-        })
+        if (pendingFocusFieldId.length > 0) {
+            Qt.callLater(function() {
+                root.focusPendingTextField()
+            })
+        }
     }
 
     function prepareForSessionChange() {
         pendingFocusFieldId = ""
         activeFieldFrame.cancelResize()
+        formFieldLayer.cancelFieldMove()
         resetPlacement()
     }
 
@@ -175,20 +229,34 @@ Item {
             controller.clearTextFieldSelection()
         }
     }
+    onEditActiveChanged: {
+        if (!editActive)
+            formFieldLayer.cancelFieldMove()
+    }
     onFieldsVisibleChanged: {
         if (!fieldsVisible) {
             activeFieldFrame.cancelResize()
+            formFieldLayer.cancelFieldMove()
             controller.clearTextFieldFocus()
         }
     }
     onFieldsInteractiveChanged: {
         if (!fieldsInteractive) {
             activeFieldFrame.cancelResize()
+            formFieldLayer.cancelFieldMove()
             controller.clearTextFieldFocus()
         }
     }
     onTextFieldToolActiveChanged: {
-        if (!textFieldToolActive)
+        if (textFieldToolActive)
+            formFieldLayer.cancelFieldMove()
+        else
+            resetPlacement()
+    }
+    onCheckboxToolActiveChanged: {
+        if (checkboxToolActive)
+            formFieldLayer.cancelFieldMove()
+        else
             resetPlacement()
     }
 
@@ -197,7 +265,7 @@ Item {
 
         anchors.fill: parent
         enabled: root.formsActive
-            && root.textFieldToolActive
+            && root.placementFieldType >= 0
             && !root.pooled
         acceptedButtons: Qt.LeftButton
         cursorShape: enabled ? Qt.CrossCursor : Qt.ArrowCursor
@@ -238,6 +306,22 @@ Item {
         z: 1
     }
 
+    MouseArea {
+        anchors.fill: parent
+        enabled: root.formsActive
+            && root.fieldsInteractive
+            && root.placementFieldType < 0
+            && !root.pooled
+        acceptedButtons: Qt.LeftButton
+        z: 1
+
+        onPressed: mouse => {
+            root.controller.clearTextFieldFocus()
+            root.controller.clearTextFieldSelection()
+            mouse.accepted = false
+        }
+    }
+
     component EdgeResizeHandle: Item {
         id: resizeHandle
 
@@ -262,6 +346,7 @@ Item {
         visible: (root.formsActive || root.editActive)
             && root.fieldsInteractive
             && !root.pooled
+            && !formFieldLayer.moving
         z: 20
 
         Rectangle {
@@ -280,11 +365,35 @@ Item {
             acceptedButtons: Qt.LeftButton
             hoverEnabled: true
             preventStealing: true
+            containmentMask: QtObject {
+                function contains(point) {
+                    if (point.x < 0 || point.x >= resizeHandle.width
+                            || point.y < 0
+                            || point.y >= resizeHandle.height)
+                        return false
+
+                    const edgeInset = 3
+                    if (resizeHandle.horizontal < 0) {
+                        return point.x
+                            <= resizeHandle.width / 2 + edgeInset
+                    }
+                    if (resizeHandle.horizontal > 0) {
+                        return point.x
+                            >= resizeHandle.width / 2 - edgeInset
+                    }
+                    if (resizeHandle.vertical < 0) {
+                        return point.y
+                            <= resizeHandle.height / 2 + edgeInset
+                    }
+                    return point.y
+                        >= resizeHandle.height / 2 - edgeInset
+                }
+            }
             cursorShape: resizeHandle.resizeCursor
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
-            //% "Resize text box"
-            Accessible.name: qsTrId("ResizeTextBox")
+            //% "Resize form field"
+            Accessible.name: qsTrId("ResizeFormField")
 
             onPressed: mouse => {
                 const fieldId = formFieldLayer.activeFieldId
@@ -299,6 +408,7 @@ Item {
                     root,
                     mouse.x,
                     mouse.y)
+                formFieldLayer.cancelFieldMove()
                 activeFieldFrame.beginResize(
                     fieldId,
                     resizeHandle.dragStartRect)
@@ -371,17 +481,58 @@ Item {
         sourceFieldsVisible: root.formsActive || root.editActive
         fieldsVisible: root.fieldsVisible
         fieldsInteractive: root.fieldsInteractive
+        moveEnabled: (root.formsActive || root.editActive)
+            && root.fieldsInteractive
+            && root.placementFieldType < 0
+            && !root.pooled
         accentColor: root.theme.foxitDarkOrange
         pointScale: root.pagePointScale
         z: 2
 
         onFieldActivated: fieldId => {
+            const field = root.controller.fieldData(fieldId)
+            if (Number(field.type)
+                    === PDFFormDesignerController.Checkbox) {
+                root.pendingFocusFieldId = ""
+                const readOnly
+                    = (Number(field.flags)
+                        & PDFFormDesignerController.ReadOnly) !== 0
+                const sourceBacked = Boolean(field.sourceBacked)
+                if (sourceBacked && !readOnly) {
+                    root.controller.activateSourceCheckbox(
+                        fieldId,
+                        root.width,
+                        root.height)
+                } else if (root.formsActive || !readOnly) {
+                    const value = String(field.value).toLowerCase()
+                    const checked = value === "yes"
+                        || value === "true"
+                        || value === "on"
+                        || value === "1"
+                    root.controller.setFieldValue(
+                        fieldId,
+                        checked ? "Off" : "Yes")
+                }
+                return
+            }
             root.pendingFocusFieldId = fieldId
             Qt.callLater(function() {
                 root.focusPendingTextField()
             })
         }
         onActiveFieldChanged: root.syncActiveTextEditor()
+        onMovingChanged: {
+            if (!moving)
+                return
+
+            root.pendingFocusFieldId = ""
+            if (activeTextEditorLoader.status === Loader.Ready) {
+                const editor = activeTextEditorLoader.item as TextField
+                if (editor)
+                    editor.focus = false
+            }
+            root.controller.clearTextFieldFocus()
+        }
     }
 
     Item {
@@ -428,7 +579,7 @@ Item {
             const fieldId = resizingFieldId
             const fieldRect = resizedRect
             if (fieldId.length > 0 && root.width > 0 && root.height > 0) {
-                root.controller.setTextFieldRect(
+                root.controller.setFieldRect(
                     fieldId,
                     fieldRect.x,
                     fieldRect.y,
@@ -448,6 +599,9 @@ Item {
             anchors.fill: parent
             visible: formFieldLayer.activeFieldType
                 !== PDFFormDesignerController.Text
+                && (formFieldLayer.activeFieldType
+                        !== PDFFormDesignerController.Checkbox
+                    || activeFieldFrame.resizing)
             color: "transparent"
             border.color: root.theme.foxitDarkOrange
             border.width: root.formsActive ? 2 : 0
@@ -488,6 +642,7 @@ Item {
             visible: root.formsActive
                 && !formFieldLayer.activeFieldSourceBacked
                 && !activeFieldFrame.resizing
+                && !formFieldLayer.moving
             enabled: visible
             focusPolicy: Qt.NoFocus
             text: "\u00d7"
@@ -497,7 +652,7 @@ Item {
             z: 30
             //% "Delete"
             Accessible.name: qsTrId("Delete")
-            onClicked: root.controller.removeTextField(
+            onClicked: root.controller.removeField(
                 formFieldLayer.activeFieldId)
 
             background: Rectangle {
@@ -509,6 +664,149 @@ Item {
                         : "white"
                 border.color: root.theme.foxitDarkOrange
                 border.width: 1
+            }
+        }
+
+        Item {
+            id: moveFieldHandle
+
+            x: -width / 2
+            y: -height / 2
+            width: root.resizeHandleHitSize
+            height: root.resizeHandleHitSize
+            visible: formFieldLayer.moveEnabled
+                && formFieldLayer.activeFieldType
+                    === PDFFormDesignerController.Text
+                && !activeFieldFrame.resizing
+            z: 40
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 14
+                height: 14
+                radius: 3
+                color: "white"
+                border.color: root.theme.foxitDarkOrange
+                border.width: 1
+                Accessible.ignored: true
+
+                Item {
+                    anchors.centerIn: parent
+                    width: 6
+                    height: 6
+                    Accessible.ignored: true
+
+                    Rectangle {
+                        x: 0
+                        y: 0
+                        width: 2
+                        height: 2
+                        radius: 1
+                        color: root.theme.foxitDarkOrange
+                    }
+                    Rectangle {
+                        x: 4
+                        y: 0
+                        width: 2
+                        height: 2
+                        radius: 1
+                        color: root.theme.foxitDarkOrange
+                    }
+                    Rectangle {
+                        x: 0
+                        y: 4
+                        width: 2
+                        height: 2
+                        radius: 1
+                        color: root.theme.foxitDarkOrange
+                    }
+                    Rectangle {
+                        x: 4
+                        y: 4
+                        width: 2
+                        height: 2
+                        radius: 1
+                        color: root.theme.foxitDarkOrange
+                    }
+                }
+            }
+
+            MouseArea {
+                id: moveFieldMouse
+
+                property point dragStartPosition: Qt.point(0, 0)
+
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                hoverEnabled: true
+                preventStealing: true
+                cursorShape: Qt.SizeAllCursor
+                activeFocusOnTab: true
+                Accessible.role: Accessible.Button
+                //% "Move form field"
+                Accessible.name: qsTrId("MoveFormField")
+
+                onPressed: mouse => {
+                    forceActiveFocus()
+                    root.pendingFocusFieldId = ""
+                    activeFieldFrame.cancelResize()
+                    dragStartPosition = mapToItem(
+                        root,
+                        mouse.x,
+                        mouse.y)
+                    if (!formFieldLayer.beginFieldMove(
+                            formFieldLayer.activeFieldId)) {
+                        mouse.accepted = false
+                    }
+                }
+                onPositionChanged: mouse => {
+                    if (!pressed || !formFieldLayer.moving
+                            || root.width <= 0 || root.height <= 0)
+                        return
+
+                    const currentPosition = mapToItem(
+                        root,
+                        mouse.x,
+                        mouse.y)
+                    formFieldLayer.updateFieldMove(
+                        (currentPosition.x - dragStartPosition.x)
+                            / root.width,
+                        (currentPosition.y - dragStartPosition.y)
+                            / root.height)
+                }
+                onReleased: {
+                    if (formFieldLayer.moving)
+                        formFieldLayer.finishFieldMove()
+                }
+                onCanceled: formFieldLayer.cancelFieldMove()
+
+                Keys.onPressed: event => {
+                    const step = (event.modifiers & Qt.ShiftModifier)
+                        ? 10
+                        : 1
+                    let deltaX = 0
+                    let deltaY = 0
+                    if (event.key === Qt.Key_Left)
+                        deltaX = -step
+                    else if (event.key === Qt.Key_Right)
+                        deltaX = step
+                    else if (event.key === Qt.Key_Up)
+                        deltaY = -step
+                    else if (event.key === Qt.Key_Down)
+                        deltaY = step
+                    else
+                        return
+
+                    if (root.width <= 0 || root.height <= 0
+                            || !formFieldLayer.beginFieldMove(
+                                formFieldLayer.activeFieldId))
+                        return
+                    formFieldLayer.updateFieldMove(
+                        deltaX / root.width,
+                        deltaY / root.height)
+                    formFieldLayer.finishFieldMove()
+                    event.accepted = true
+                }
             }
         }
 

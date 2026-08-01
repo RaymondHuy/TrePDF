@@ -83,6 +83,7 @@ Item {
         && hitArea.containsMouse
 
     signal selectedDraftContentBoundsSyncRequested()
+    signal pointerInteractionStarted()
 
     visible: !pooled && (interactionActive || drafts.length > 0)
     enabled: interactionActive
@@ -1629,7 +1630,10 @@ Item {
                         root.hoverCandidate = ({})
                     }
                 }
-                onPressed: hitArea.forceActiveFocus()
+                onPressed: {
+                    root.pointerInteractionStarted()
+                    hitArea.forceActiveFocus()
+                }
                 onClicked: mouse => {
                     if (root.controller.tool === PDFEditController.SelectTool) {
                         root.showSelectionActions(
@@ -1697,6 +1701,7 @@ Item {
             root.hoverCandidate = ({})
         }
         onPressed: mouse => {
+            root.pointerInteractionStarted()
             forceActiveFocus()
             if (root.controller.tool === PDFEditController.HighlightTool) {
                 root.beginHighlight(mouse.x, mouse.y)
@@ -2362,6 +2367,7 @@ Item {
             }
 
             onPressed: mouse => {
+                root.pointerInteractionStarted()
                 forceActiveFocus()
                 selectionActions.close()
                 dragStartFrameRect = resizeOverlay.layoutFrameRect
@@ -2496,6 +2502,7 @@ Item {
                     Accessible.name: resizeHandle.accessibilityName
 
                     onPressed: mouse => {
+                        root.pointerInteractionStarted()
                         forceActiveFocus()
                         resizeHandle.dragStartFrameRect
                             = resizeOverlay.frameRect

@@ -29,6 +29,12 @@ dialogs, and JavaScript timers remain blocked. PDFium's public API does not
 provide a hard execution timeout, so a malicious synchronous script can still
 make the app unresponsive.
 
+The Forms tab can add Text Field and Check Box widgets by clicking or dragging
+on a page. Added check boxes start unchecked, can be toggled, selected, resized,
+or deleted before Save, and persist as standard interactive AcroForm checkbox
+widgets with explicit checked and unchecked appearances. TrePDF rehydrates its
+saved fields after reopen so they remain available to the form designer.
+
 Each document tab owns its PDF handle, draft/undo history, selection, zoom,
 scroll position, and formatting-panel state. Only the active tab creates page
 delegates and textures. Opening an already-open canonical path activates its
@@ -160,9 +166,22 @@ the format of text typed next without restyling existing text. Using one of
 those controls on selected text automatically opens the inline editor with the
 caret at the end. Font size is currently UI-only.
 
-The complete editable-text discovery, geometry, font, baseline, overlay, and
-draft-rendering flow is documented in
-[`docs/text-editing-pipeline.md`](docs/text-editing-pipeline.md).
+## Source documentation
+
+- [`docs/source-file-map.md`](docs/source-file-map.md): architecture, ownership,
+  thread boundaries, main runtime flows, and an index of every current QML/C++
+  implementation file.
+- [`docs/qml-file-guide.md`](docs/qml-file-guide.md): detailed responsibilities,
+  inputs, outputs, lifecycle, and C++ relationships for all 20 QML files.
+- [`docs/cpp-file-guide.md`](docs/cpp-file-guide.md): detailed responsibilities,
+  ownership, threading, persistence boundaries, and tests for all 16 `src/` C++
+  implementations, the C++ test file, and support headers.
+- [`docs/overlay-architecture.md`](docs/overlay-architecture.md): the current
+  per-page overlay tree, stacking order, coordinate systems, mode gates, input
+  routing, texture synchronization, and pooling cleanup.
+- [`docs/text-editing-pipeline.md`](docs/text-editing-pipeline.md): the complete
+  editable-text discovery, geometry, font, baseline, overlay, and
+  draft-rendering flow.
 
 ## Build
 

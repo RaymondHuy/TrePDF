@@ -23,7 +23,7 @@
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Components/DocumentView.qml" line="211"/>
+        <location filename="../src/Components/DocumentView.qml" line="235"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="45"/>
@@ -148,39 +148,39 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="150"/>
+        <location filename="../src/Components/AppRibbon.qml" line="164"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="156"/>
+        <location filename="../src/Components/AppRibbon.qml" line="170"/>
         <location filename="../src/Components/EditOverlay.qml" line="1887"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="162"/>
+        <location filename="../src/Components/AppRibbon.qml" line="176"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="168"/>
+        <location filename="../src/Components/AppRibbon.qml" line="182"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="193"/>
+        <location filename="../src/Components/AppRibbon.qml" line="207"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="197"/>
+        <location filename="../src/Components/AppRibbon.qml" line="211"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="202"/>
+        <location filename="../src/Components/DocumentView.qml" line="226"/>
         <location filename="../src/PDFDocument.cpp" line="80"/>
         <location filename="../src/PDFDocument.cpp" line="232"/>
         <source>No document open</source>
@@ -200,7 +200,7 @@
     <message id="Delete">
         <location filename="../src/Main.qml" line="825"/>
         <location filename="../src/Components/EditOverlay.qml" line="1918"/>
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="279"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="638"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
@@ -434,7 +434,7 @@
         <translation>Làm lại</translation>
     </message>
     <message id="PageNumber">
-        <location filename="../src/Components/PdfPageDelegate.qml" line="229"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="243"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -469,23 +469,43 @@
         <translation>Thêm ký tắt</translation>
     </message>
     <message id="Fields">
-        <location filename="../src/Components/FormRibbon.qml" line="31"/>
+        <location filename="../src/Components/FormRibbon.qml" line="33"/>
         <location filename="../src/Components/SignRibbon.qml" line="69"/>
         <source>Fields</source>
         <translation>Trường</translation>
     </message>
     <message id="TextFieldTool">
-        <location filename="../src/Components/FormRibbon.qml" line="37"/>
+        <location filename="../src/Components/FormRibbon.qml" line="39"/>
         <source>Text Field</source>
         <translation>Ô văn bản</translation>
     </message>
     <message id="DragToAddTextField">
-        <location filename="../src/Components/FormRibbon.qml" line="39"/>
+        <location filename="../src/Components/FormRibbon.qml" line="41"/>
         <source>Drag on the page to add a text field</source>
         <translation>Kéo trên trang để thêm ô văn bản</translation>
     </message>
+    <message id="CheckboxTool">
+        <location filename="../src/Components/FormRibbon.qml" line="54"/>
+        <source>Check Box</source>
+        <translation>Hộp kiểm</translation>
+    </message>
+    <message id="ClickOrDragToAddCheckbox">
+        <location filename="../src/Components/FormRibbon.qml" line="56"/>
+        <source>Click or drag on the page to add a check box</source>
+        <translation>Nhấp hoặc kéo trên trang để thêm hộp kiểm</translation>
+    </message>
+    <message id="ResizeFormField">
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="380"/>
+        <source>Resize form field</source>
+        <translation>Đổi kích thước trường biểu mẫu</translation>
+    </message>
+    <message id="MoveFormField">
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="731"/>
+        <source>Move form field</source>
+        <translation>Di chuyển trường biểu mẫu</translation>
+    </message>
     <message id="EnterFormText">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="373"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="850"/>
         <source>Enter text</source>
         <translation>Nhập văn bản</translation>
     </message>

@@ -886,6 +886,7 @@ ApplicationWindow {
             || appRibbon.editTabActive
             || appRibbon.formsTabActive
         textFieldToolActive: appRibbon.textFieldToolActive
+        checkboxToolActive: appRibbon.checkboxToolActive
         transientStatus: window.transientStatus
         onOpenRequested: window.requestOpen()
     }
@@ -907,6 +908,7 @@ ApplicationWindow {
                     || appRibbon.editTabActive
                     || appRibbon.formsTabActive
                 textFieldToolActive: appRibbon.textFieldToolActive
+                checkboxToolActive: appRibbon.checkboxToolActive
                 transientStatus: window.transientStatus
                 enabled: !tabModel.anySaving
                 onOpenRequested: window.requestOpen()

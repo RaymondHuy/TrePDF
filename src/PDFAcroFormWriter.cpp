@@ -1,6 +1,7 @@
 #include "PDFAcroFormWriter.h"
 
 #include "PDFAcroFormCanonicalizer.h"
+#include "PDFFormAppearance.h"
 #include "PDFiumSynchronization.h"
 
 #include <QFile>
@@ -173,6 +174,37 @@ int widgetFieldFlags(const PDFAcroFormWriter::Field &field)
         | (field.required ? FPDF_FORMFLAG_REQUIRED : 0);
 }
 
+int pdfiumFieldType(PDFAcroFormWriter::FieldType type)
+{
+    switch (type) {
+    case PDFAcroFormWriter::FieldType::Text:
+        return FPDF_FORMFIELD_TEXTFIELD;
+    case PDFAcroFormWriter::FieldType::Checkbox:
+        return FPDF_FORMFIELD_CHECKBOX;
+    case PDFAcroFormWriter::FieldType::RadioButton:
+    case PDFAcroFormWriter::FieldType::Dropdown:
+    case PDFAcroFormWriter::FieldType::Date:
+    case PDFAcroFormWriter::FieldType::Signature:
+        return FPDF_FORMFIELD_UNKNOWN;
+    }
+    return FPDF_FORMFIELD_UNKNOWN;
+}
+
+bool checkboxChecked(const QString &value)
+{
+    return value.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0
+        || value.compare(QStringLiteral("yes"), Qt::CaseInsensitive) == 0
+        || value.compare(QStringLiteral("on"), Qt::CaseInsensitive) == 0
+        || value == QStringLiteral("1");
+}
+
+QString normalizedCheckboxValue(const QString &value)
+{
+    return checkboxChecked(value)
+        ? QStringLiteral("Yes")
+        : QStringLiteral("Off");
+}
+
 PDFAcroFormWriter::Result failure(const QString &message)
 {
     return {false, message};
@@ -281,21 +313,29 @@ bool resolveUnchangedUpdateValues(
             if (FPDFAnnot_GetFormFieldType(
                     form.get(),
                     annotation.get())
-                != FPDF_FORMFIELD_TEXTFIELD) {
+                != pdfiumFieldType(fields[*unresolved].type)) {
                 error = QStringLiteral(
-                    "An existing TrePDF Widget is not a Text Field.");
+                    "An existing TrePDF Widget has an unexpected field type.");
                 pageSucceeded = false;
                 break;
             }
-            fields[*unresolved].value = formWideString(
-                [&form, &annotation](FPDF_WCHAR *buffer,
-                                     unsigned long byteCount) {
-                    return FPDFAnnot_GetFormFieldValue(
-                        form.get(),
-                        annotation.get(),
-                        buffer,
-                        byteCount);
-                });
+            PDFAcroFormWriter::Field &resolvedField
+                = fields[*unresolved];
+            resolvedField.value
+                = resolvedField.type
+                        == PDFAcroFormWriter::FieldType::Checkbox
+                ? FPDFAnnot_IsChecked(form.get(), annotation.get())
+                    ? QStringLiteral("Yes")
+                    : QStringLiteral("Off")
+                : formWideString(
+                      [&form, &annotation](FPDF_WCHAR *buffer,
+                                           unsigned long byteCount) {
+                          return FPDFAnnot_GetFormFieldValue(
+                              form.get(),
+                              annotation.get(),
+                              buffer,
+                              byteCount);
+                      });
             unresolvedFields.erase(unresolved);
         }
         FORM_OnBeforeClosePage(page.get(), form.get());
@@ -305,13 +345,13 @@ bool resolveUnchangedUpdateValues(
     }
     if (!unresolvedFields.isEmpty()) {
         error = QStringLiteral(
-            "An existing TrePDF Text Field value could not be resolved.");
+            "An existing TrePDF form field value could not be resolved.");
         return false;
     }
     return true;
 }
 
-bool validateWrittenTextFields(
+bool validateWrittenFields(
     const QString &filePath,
     const QVector<PDFAcroFormWriter::Field> &fields,
     QString &error)
@@ -412,14 +452,53 @@ bool validateWrittenTextFields(
                 form.get(),
                 annotation.get());
             const int expectedFlags = widgetFieldFlags(field);
+            const bool checkbox
+                = field.type == PDFAcroFormWriter::FieldType::Checkbox;
+            const QString exportValue = checkbox
+                ? formWideString(
+                      [&form, &annotation](FPDF_WCHAR *buffer,
+                                           unsigned long byteCount) {
+                          return FPDFAnnot_GetFormFieldExportValue(
+                              form.get(),
+                              annotation.get(),
+                              buffer,
+                              byteCount);
+                      })
+                : QString();
+            float appearanceVersion = 0.0f;
+            const bool hasAppearanceVersion
+                = FPDFAnnot_GetNumberValue(
+                    annotation.get(),
+                    PDFFormAppearance::kVersionKey,
+                    &appearanceVersion);
+            const bool checkboxMatches = !checkbox
+                || (FPDFAnnot_IsChecked(form.get(), annotation.get())
+                        == checkboxChecked(field.value)
+                    && exportValue == QStringLiteral("Yes")
+                    && FPDFAnnot_GetFormControlCount(
+                           form.get(),
+                           annotation.get())
+                        == 1
+                    && FPDFAnnot_GetFormControlIndex(
+                           form.get(),
+                           annotation.get())
+                        == 0
+                    && (FPDFAnnot_GetFlags(annotation.get())
+                        & FPDF_ANNOT_FLAG_PRINT)
+                    && hasAppearanceVersion
+                    && qFuzzyCompare(
+                        appearanceVersion,
+                        static_cast<float>(
+                            PDFFormAppearance::kCheckboxVersion)));
             constexpr qreal coordinateTolerance = 0.05;
             const bool matches = pageIndex == field.page
                 && FPDFAnnot_GetFormFieldType(
                        form.get(),
                        annotation.get())
-                    == FPDF_FORMFIELD_TEXTFIELD
+                    == pdfiumFieldType(field.type)
                 && fieldName == field.fieldName
                 && fieldValue == field.value
+                && checkboxMatches
                 && (fieldFlags
                     & (FPDF_FORMFLAG_READONLY
                        | FPDF_FORMFLAG_REQUIRED))
@@ -436,7 +515,7 @@ bool validateWrittenTextFields(
                     <= coordinateTolerance;
             if (!matches || ++matchedFields[widgetId] != 1) {
                 error = QStringLiteral(
-                    "A written TrePDF Text Field failed PDFium validation.");
+                    "A written TrePDF form field failed PDFium validation.");
                 pageSucceeded = false;
                 break;
             }
@@ -452,7 +531,7 @@ bool validateWrittenTextFields(
          ++expected) {
         if (matchedFields.value(expected.key()) != 1) {
             error = QStringLiteral(
-                "A written TrePDF Text Field is missing after PDFium reopen.");
+                "A written TrePDF form field is missing after PDFium reopen.");
             return false;
         }
     }
@@ -484,12 +563,18 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
             resolveError)) {
         return failure(resolveError);
     }
+    for (Field &field : resolvedFields) {
+        if (field.type == FieldType::Checkbox) {
+            field.value = normalizedCheckboxValue(field.value);
+            field.defaultValue = normalizedCheckboxValue(field.defaultValue);
+        }
+    }
 
     const int pageCount = FPDF_GetPageCount(document.get());
-    QVector<PDFAcroFormCanonicalizer::TextField> textFields;
-    textFields.reserve(resolvedFields.size());
+    QVector<PDFAcroFormCanonicalizer::Field> formFields;
+    formFields.reserve(resolvedFields.size());
     for (const Field &field : std::as_const(resolvedFields)) {
-        if (field.type != FieldType::Text) {
+        if (pdfiumFieldType(field.type) == FPDF_FORMFIELD_UNKNOWN) {
             return failure(QStringLiteral(
                 "This AcroForm field type is not implemented yet."));
         }
@@ -535,13 +620,16 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
             }
         }
 
-        textFields.append({
+        formFields.append({
             field.widgetId,
             field.fieldName,
             field.tooltip,
             field.value,
             field.defaultValue,
             field.pageRect,
+            field.type == FieldType::Text
+                ? PDFAcroFormCanonicalizer::FieldType::Text
+                : PDFAcroFormCanonicalizer::FieldType::Checkbox,
             widgetFieldFlags(field),
             field.operation == Operation::Add
                 ? PDFAcroFormCanonicalizer::Operation::Add
@@ -568,14 +656,14 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
     }
 
     QString finalizeError;
-    if (!PDFAcroFormCanonicalizer::finalizeTextFields(
+    if (!PDFAcroFormCanonicalizer::finalizeFields(
             targetFilePath,
-            textFields,
+            formFields,
             finalizeError)) {
         QFile::remove(targetFilePath);
         return failure(finalizeError);
     }
-    if (!validateWrittenTextFields(
+    if (!validateWrittenFields(
             targetFilePath,
             resolvedFields,
             finalizeError)) {

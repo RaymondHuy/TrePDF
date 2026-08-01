@@ -6,6 +6,7 @@
 #include <QFont>
 #include <QFontMetricsF>
 #include <QGuiApplication>
+#include <QHoverEvent>
 #include <QLineF>
 #include <QMouseEvent>
 #include <QQuickWindow>
@@ -15,7 +16,9 @@
 #include <QSGTextNode>
 #include <QSGTexture>
 #include <QSGVertexColorMaterial>
+#include <QStyleHints>
 #include <QTextLayout>
+#include <QTextOption>
 #include <QtMath>
 
 #include <algorithm>
@@ -34,6 +37,7 @@ bool checkedValue(const QString &value)
 {
     return value.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0
         || value.compare(QStringLiteral("yes"), Qt::CaseInsensitive) == 0
+        || value.compare(QStringLiteral("on"), Qt::CaseInsensitive) == 0
         || value == QStringLiteral("1");
 }
 
@@ -226,7 +230,8 @@ void appendText(QSGTextNode *node,
                 const QFont &baseFont,
                 const QRectF &rect,
                 int pixelSize,
-                bool elide)
+                bool elide,
+                Qt::Alignment horizontalAlignment = Qt::AlignLeft)
 {
     if (!node || value.isEmpty() || rect.isEmpty()) {
         return;
@@ -266,6 +271,9 @@ void appendText(QSGTextNode *node,
     }
 
     QTextLayout layout(displayText, font);
+    QTextOption textOption;
+    textOption.setAlignment(horizontalAlignment);
+    layout.setTextOption(textOption);
     layout.beginLayout();
     QTextLine line = layout.createLine();
     if (!line.isValid()) {
@@ -319,6 +327,16 @@ bool FormFieldLayer::fieldsVisible() const
 bool FormFieldLayer::fieldsInteractive() const
 {
     return m_fieldsInteractive;
+}
+
+bool FormFieldLayer::moveEnabled() const
+{
+    return m_moveEnabled;
+}
+
+bool FormFieldLayer::moving() const
+{
+    return m_moving;
 }
 
 bool FormFieldLayer::sourceFieldsVisible() const
@@ -391,11 +409,29 @@ bool FormFieldLayer::activeFieldSourceBacked() const
     return m_activeFieldSourceBacked;
 }
 
+bool FormFieldLayer::contains(const QPointF &point) const
+{
+    if (!QQuickItem::contains(point)
+        || !m_fieldsVisible
+        || !m_fieldsInteractive
+        || m_pooled) {
+        return false;
+    }
+
+    return std::any_of(
+        m_renderFields.crbegin(),
+        m_renderFields.crend(),
+        [this, &point](const RenderField &field) {
+            return itemRect(field.normalizedRect).contains(point);
+        });
+}
+
 void FormFieldLayer::setController(PDFFormDesignerController *controller)
 {
     if (m_controller == controller) {
         return;
     }
+    resetPointerInteraction();
     if (m_controller) {
         disconnect(m_controller, nullptr, this, nullptr);
     }
@@ -493,6 +529,7 @@ void FormFieldLayer::setController(PDFFormDesignerController *controller)
                 this,
                 [this]() {
                     m_controller = nullptr;
+                    resetPointerInteraction();
                     refreshFields();
                     emit controllerChanged();
                 });
@@ -506,6 +543,7 @@ void FormFieldLayer::setPage(int page)
     if (m_page == page) {
         return;
     }
+    resetPointerInteraction();
     m_page = page;
     refreshFields();
     emit pageChanged();
@@ -516,6 +554,7 @@ void FormFieldLayer::setPooled(bool pooled)
     if (m_pooled == pooled) {
         return;
     }
+    resetPointerInteraction();
     m_pooled = pooled;
     refreshFields();
     emit pooledChanged();
@@ -526,6 +565,7 @@ void FormFieldLayer::setFormsActive(bool active)
     if (m_formsActive == active) {
         return;
     }
+    resetPointerInteraction();
     m_formsActive = active;
     refreshFields();
     emit formsActiveChanged();
@@ -536,6 +576,7 @@ void FormFieldLayer::setFieldsVisible(bool visible)
     if (m_fieldsVisible == visible) {
         return;
     }
+    resetPointerInteraction();
     m_fieldsVisible = visible;
     refreshFields();
     emit fieldsVisibleChanged();
@@ -546,8 +587,27 @@ void FormFieldLayer::setFieldsInteractive(bool interactive)
     if (m_fieldsInteractive == interactive) {
         return;
     }
+    if (!interactive) {
+        resetPointerInteraction();
+    }
     m_fieldsInteractive = interactive;
     emit fieldsInteractiveChanged();
+}
+
+void FormFieldLayer::setMoveEnabled(bool enabled)
+{
+    if (m_moveEnabled == enabled) {
+        return;
+    }
+    if (!enabled) {
+        resetPointerInteraction();
+    }
+    m_moveEnabled = enabled;
+    setAcceptHoverEvents(enabled);
+    if (!enabled) {
+        unsetCursor();
+    }
+    emit moveEnabledChanged();
 }
 
 void FormFieldLayer::setSourceFieldsVisible(bool visible)
@@ -555,6 +615,7 @@ void FormFieldLayer::setSourceFieldsVisible(bool visible)
     if (m_sourceFieldsVisible == visible) {
         return;
     }
+    resetPointerInteraction();
     m_sourceFieldsVisible = visible;
     refreshFields();
     emit sourceFieldsVisibleChanged();
@@ -579,6 +640,107 @@ void FormFieldLayer::setAccentColor(const QColor &color)
     m_accentColor = color;
     update();
     emit accentColorChanged();
+}
+
+bool FormFieldLayer::beginFieldMove(const QString &fieldId)
+{
+    if (!m_moveEnabled || !m_controller || !m_fieldsVisible
+        || !m_fieldsInteractive || m_pooled || fieldId.isEmpty()) {
+        return false;
+    }
+
+    if (m_moving) {
+        cancelFieldMove();
+    }
+    const auto field = std::find_if(
+        m_renderFields.cbegin(),
+        m_renderFields.cend(),
+        [&fieldId](const RenderField &candidate) {
+            return candidate.id == fieldId && candidate.selected;
+        });
+    if (field == m_renderFields.cend()
+        || field->normalizedRect.isEmpty()) {
+        return false;
+    }
+
+    m_movingFieldId = fieldId;
+    m_moveStartRect = field->normalizedRect;
+    m_movePreviewRect = m_moveStartRect;
+    m_moving = true;
+    emit movingChanged();
+    return true;
+}
+
+bool FormFieldLayer::updateFieldMove(qreal normalizedDeltaX,
+                                     qreal normalizedDeltaY)
+{
+    if (!m_moving
+        || !qIsFinite(normalizedDeltaX)
+        || !qIsFinite(normalizedDeltaY)) {
+        return false;
+    }
+
+    const qreal x = qBound(
+        0.0,
+        m_moveStartRect.x() + normalizedDeltaX,
+        qMax(0.0, 1.0 - m_moveStartRect.width()));
+    const qreal y = qBound(
+        0.0,
+        m_moveStartRect.y() + normalizedDeltaY,
+        qMax(0.0, 1.0 - m_moveStartRect.height()));
+    const QRectF previewRect(
+        x,
+        y,
+        m_moveStartRect.width(),
+        m_moveStartRect.height());
+    if (m_movePreviewRect == previewRect) {
+        return true;
+    }
+
+    const auto field = std::find_if(
+        m_renderFields.begin(),
+        m_renderFields.end(),
+        [this](const RenderField &candidate) {
+            return candidate.id == m_movingFieldId;
+        });
+    if (field == m_renderFields.end()) {
+        cancelFieldMove();
+        return false;
+    }
+
+    m_movePreviewRect = previewRect;
+    field->normalizedRect = previewRect;
+    refreshActiveField();
+    update();
+    return true;
+}
+
+bool FormFieldLayer::finishFieldMove()
+{
+    if (!m_moving) {
+        return false;
+    }
+
+    const QString fieldId = m_movingFieldId;
+    const QPointF topLeft = m_movePreviewRect.topLeft();
+    m_pressedFieldId.clear();
+    setKeepMouseGrab(false);
+    resetMoveState();
+    const bool moved = m_controller
+        && m_controller->moveField(fieldId, topLeft.x(), topLeft.y());
+    refreshFields();
+    return moved;
+}
+
+void FormFieldLayer::cancelFieldMove()
+{
+    m_pressedFieldId.clear();
+    setKeepMouseGrab(false);
+    if (!m_moving) {
+        return;
+    }
+    resetMoveState();
+    refreshFields();
 }
 
 QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
@@ -622,11 +784,13 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
 
         const bool textField
             = field.type == PDFFormDesignerController::Text;
+        const bool checkbox
+            = field.type == PDFFormDesignerController::Checkbox;
         // Source Widget rectangles commonly return with fractional coordinates
         // after a Save/reopen cycle. Keep both opposite edges on the same
         // physical-pixel phase so a one-point border cannot rasterize as one
         // pixel on one side and two pixels on the other.
-        const QRectF fieldRect = textField
+        const QRectF fieldRect = textField || checkbox
             ? alignedDeviceRect(rawFieldRect, devicePixelRatio)
             : rawFieldRect;
         const bool selected = m_formsActive && field.selected;
@@ -638,12 +802,16 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                 ? PDFFormAppearance::kTextFieldBorderPointWidth
                     * m_pointScale
                 : 1.0;
-        const qreal borderWidth = textField
+        const qreal borderWidth = textField || checkbox
             ? alignedDeviceWidth(
                   requestedBorderWidth,
                   devicePixelRatio)
             : requestedBorderWidth;
-        const qreal fieldRadius = textField ? 0.0 : 5.0;
+        const qreal fieldRadius = textField
+            ? 0.0
+            : checkbox
+                ? 2.0
+                : 5.0;
         appendRoundedRect(&geometryVertices,
                           fieldRect,
                           fieldRadius,
@@ -668,7 +836,9 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                   minimumTextFieldPadding,
                   fieldRect.height()
                       * PDFFormAppearance::kTextFieldHorizontalPaddingRatio)
-            : 7.0;
+            : checkbox
+                ? 0.0
+                : 7.0;
         const qreal verticalPadding = textField ? 0.0 : 2.0;
         QRectF contentRect = fieldRect.adjusted(
             horizontalPadding,
@@ -681,38 +851,24 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
             14.0));
         switch (field.type) {
         case PDFFormDesignerController::Checkbox: {
-            const qreal side = qMax(
-                4.0,
-                qMin(contentRect.width(), contentRect.height()));
-            const QRectF box(contentRect.x(),
-                             contentRect.center().y() - side / 2.0,
-                             side,
-                             side);
-            appendRoundedRect(&geometryVertices,
-                              box,
-                              2.0,
-                              defaultBorder);
-            appendRoundedRect(&geometryVertices,
-                              box.adjusted(1.0, 1.0, -1.0, -1.0),
-                              1.0,
-                              Qt::white);
             if (checkedValue(field.value)) {
-                const QPointF start(box.left() + side * 0.2,
-                                    box.center().y());
-                const QPointF middle(box.left() + side * 0.43,
-                                     box.bottom() - side * 0.2);
-                const QPointF end(box.right() - side * 0.16,
-                                  box.top() + side * 0.2);
-                appendThickLine(&geometryVertices,
-                                start,
-                                middle,
-                                2.0,
-                                m_accentColor);
-                appendThickLine(&geometryVertices,
-                                middle,
-                                end,
-                                2.0,
-                                m_accentColor);
+                const qreal side = qMax(
+                    4.0,
+                    qMin(fieldRect.width(), fieldRect.height()));
+                QFont checkboxFont = m_renderFont;
+                checkboxFont.setWeight(QFont::DemiBold);
+                appendText(
+                    textNode,
+                    QStringLiteral("\u2713"),
+                    checkboxFont,
+                    fieldRect.adjusted(
+                        borderWidth,
+                        borderWidth,
+                        -borderWidth,
+                        -borderWidth),
+                    qRound(side * 0.78),
+                    false,
+                    Qt::AlignHCenter);
             }
             break;
         }
@@ -825,6 +981,36 @@ void FormFieldLayer::geometryChange(const QRectF &newGeometry,
     }
 }
 
+void FormFieldLayer::hoverMoveEvent(QHoverEvent *event)
+{
+    if (!m_moveEnabled || !m_fieldsInteractive || m_pooled) {
+        unsetCursor();
+        event->ignore();
+        return;
+    }
+
+    const QPointF position = event->position();
+    const bool overField = std::any_of(
+        m_renderFields.crbegin(),
+        m_renderFields.crend(),
+        [this, &position](const RenderField &field) {
+            return itemRect(field.normalizedRect).contains(position);
+        });
+    if (overField) {
+        setCursor(Qt::SizeAllCursor);
+        event->accept();
+    } else {
+        unsetCursor();
+        event->ignore();
+    }
+}
+
+void FormFieldLayer::hoverLeaveEvent(QHoverEvent *event)
+{
+    unsetCursor();
+    event->accept();
+}
+
 void FormFieldLayer::mousePressEvent(QMouseEvent *event)
 {
     if (!m_controller || !m_fieldsVisible || !m_fieldsInteractive || m_pooled
@@ -847,9 +1033,63 @@ void FormFieldLayer::mousePressEvent(QMouseEvent *event)
         return;
     }
 
-    m_controller->selectTextField(hitField->id);
-    emit fieldActivated(hitField->id);
+    const QString fieldId = hitField->id;
+    m_controller->selectTextField(fieldId);
+    m_pressedFieldId = fieldId;
+    m_pressPosition = position;
+    setKeepMouseGrab(m_moveEnabled);
     event->accept();
+}
+
+void FormFieldLayer::mouseMoveEvent(QMouseEvent *event)
+{
+    if (m_pressedFieldId.isEmpty()
+        || !(event->buttons() & Qt::LeftButton)) {
+        event->ignore();
+        return;
+    }
+    if (!m_moveEnabled) {
+        event->ignore();
+        return;
+    }
+
+    const QPointF delta = event->position() - m_pressPosition;
+    if (!m_moving
+        && QLineF(QPointF(), delta).length()
+            >= QGuiApplication::styleHints()->startDragDistance()) {
+        beginFieldMove(m_pressedFieldId);
+    }
+    if (m_moving) {
+        updateFieldMove(
+            delta.x() / qMax(1.0, width()),
+            delta.y() / qMax(1.0, height()));
+    }
+    event->accept();
+}
+
+void FormFieldLayer::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton
+        || m_pressedFieldId.isEmpty()) {
+        event->ignore();
+        return;
+    }
+
+    const QString fieldId = m_pressedFieldId;
+    const bool moved = m_moving;
+    m_pressedFieldId.clear();
+    setKeepMouseGrab(false);
+    if (moved) {
+        finishFieldMove();
+    } else {
+        emit fieldActivated(fieldId);
+    }
+    event->accept();
+}
+
+void FormFieldLayer::mouseUngrabEvent()
+{
+    resetPointerInteraction();
 }
 
 void FormFieldLayer::refreshFields()
@@ -890,6 +1130,33 @@ void FormFieldLayer::refreshFields()
             }
             field.selected = field.id == selectedFieldId;
             m_renderFields.append(std::move(field));
+        }
+    }
+    if (m_moving) {
+        const auto movingField = std::find_if(
+            m_renderFields.begin(),
+            m_renderFields.end(),
+            [this](const RenderField &field) {
+                return field.id == m_movingFieldId && field.selected;
+            });
+        if (movingField == m_renderFields.end()) {
+            m_pressedFieldId.clear();
+            setKeepMouseGrab(false);
+            resetMoveState();
+        } else {
+            movingField->normalizedRect = m_movePreviewRect;
+        }
+    }
+    if (!m_pressedFieldId.isEmpty()) {
+        const bool pressedFieldStillSelected = std::any_of(
+            m_renderFields.cbegin(),
+            m_renderFields.cend(),
+            [this](const RenderField &field) {
+                return field.id == m_pressedFieldId && field.selected;
+            });
+        if (!pressedFieldStillSelected) {
+            m_pressedFieldId.clear();
+            setKeepMouseGrab(false);
         }
     }
     refreshActiveField();
@@ -937,6 +1204,23 @@ void FormFieldLayer::refreshActiveField()
     m_activeFieldFlags = fieldFlags;
     m_activeFieldSourceBacked = fieldSourceBacked;
     emit activeFieldChanged();
+}
+
+void FormFieldLayer::resetMoveState()
+{
+    if (!m_moving) {
+        return;
+    }
+    m_moving = false;
+    m_movingFieldId.clear();
+    m_moveStartRect = {};
+    m_movePreviewRect = {};
+    emit movingChanged();
+}
+
+void FormFieldLayer::resetPointerInteraction()
+{
+    cancelFieldMove();
 }
 
 QRectF FormFieldLayer::itemRect(const QRectF &normalizedRect) const

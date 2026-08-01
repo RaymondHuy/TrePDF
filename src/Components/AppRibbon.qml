@@ -12,11 +12,15 @@ Column {
     required property PDFDocument document
     required property PDFEditController editController
     property bool textFieldToolSelected: false
+    property bool checkboxToolSelected: false
     readonly property bool viewTabActive: ribbonTabs.currentIndex === 0
     readonly property bool editTabActive: ribbonTabs.currentIndex === 1
     readonly property bool formsTabActive: ribbonTabs.currentIndex === 2
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
+        && document.loaded
+    readonly property bool checkboxToolActive: formsTabActive
+        && checkboxToolSelected
         && document.loaded
 
     signal openRequested()
@@ -33,8 +37,10 @@ Column {
     spacing: 0
 
     function syncEditTool() {
-        if (!document.loaded || ribbonTabs.currentIndex !== 2)
+        if (!document.loaded || ribbonTabs.currentIndex !== 2) {
             textFieldToolSelected = false
+            checkboxToolSelected = false
+        }
 
         if (!document.loaded || ribbonTabs.currentIndex !== 1) {
             editController.tool = PDFEditController.BrowseTool
@@ -46,10 +52,12 @@ Column {
     Component.onCompleted: syncEditTool()
     onDocumentChanged: {
         textFieldToolSelected = false
+        checkboxToolSelected = false
         syncEditTool()
     }
     onEditControllerChanged: {
         textFieldToolSelected = false
+        checkboxToolSelected = false
         syncEditTool()
     }
 
@@ -100,8 +108,14 @@ Column {
             theme: root.theme
             document: root.document
             textFieldToolSelected: root.textFieldToolSelected
+            checkboxToolSelected: root.checkboxToolSelected
             onTextFieldToolRequested: {
                 root.textFieldToolSelected = !root.textFieldToolSelected
+                root.checkboxToolSelected = false
+            }
+            onCheckboxToolRequested: {
+                root.checkboxToolSelected = !root.checkboxToolSelected
+                root.textFieldToolSelected = false
             }
         }
     }

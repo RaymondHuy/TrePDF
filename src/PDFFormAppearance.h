@@ -9,6 +9,7 @@ namespace PDFFormAppearance {
 // properties can survive an appearance-only migration unchanged.
 inline constexpr char kVersionKey[] = "TrePDFApVersion";
 inline constexpr int kTextFieldVersion = 1;
+inline constexpr int kCheckboxVersion = 1;
 inline constexpr qreal kTextFieldFontPointSize = 12.0;
 inline constexpr qreal kTextFieldBorderPointWidth = 1.0;
 inline constexpr quint32 kTextFieldBorderRgb = 0xff8c8c8c;

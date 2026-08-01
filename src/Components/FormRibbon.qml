@@ -10,8 +10,10 @@ Flickable {
     required property AppTheme theme
     required property PDFDocument document
     required property bool textFieldToolSelected
+    required property bool checkboxToolSelected
 
     signal textFieldToolRequested()
+    signal checkboxToolRequested()
 
     clip: true
     contentWidth: ribbonRow.implicitWidth + 16
@@ -43,6 +45,21 @@ Flickable {
                 preserveIconColors: true
                 primary: root.textFieldToolSelected
                 onClicked: root.textFieldToolRequested()
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Check Box"
+                text: qsTrId("CheckboxTool")
+                //% "Click or drag on the page to add a check box"
+                toolTipText: qsTrId("ClickOrDragToAddCheckbox")
+                iconSource: "../assets/icons/square-check-big.svg"
+                icon.width: 32
+                icon.height: 32
+                preserveIconColors: true
+                primary: root.checkboxToolSelected
+                onClicked: root.checkboxToolRequested()
             }
         }
     }

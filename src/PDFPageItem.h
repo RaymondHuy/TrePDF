@@ -86,7 +86,7 @@ private:
     void cancelPendingRender();
     void handleDraftRenderStateChanged(int page, quint64 revision, bool immediate);
     void handleFormRenderStateChanged(int page, quint64 revision);
-    void refreshSuppressedFormWidgetIds();
+    bool refreshSuppressedFormWidgetIds();
     quint64 currentDraftRevision() const;
     quint64 currentFormRevision() const;
     void setDraftTextureCurrent(bool current);

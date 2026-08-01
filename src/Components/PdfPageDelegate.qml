@@ -16,6 +16,7 @@ Item {
     property bool formFieldsVisible: false
     property bool formFieldsInteractive: false
     property bool textFieldToolActive: false
+    property bool checkboxToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
     property bool pooled: false
@@ -39,12 +40,11 @@ Item {
     height: pageFrame.height + pageLabel.implicitHeight + 12
 
     function prepareForSessionChange() {
-        editOverlay.prepareForSessionChange()
-        formTextFieldOverlay.prepareForSessionChange()
+        pageInteractionOverlay.prepareForSessionChange()
     }
 
     function beginSelectedEditing() {
-        editOverlay.beginSelectedEditing()
+        pageInteractionOverlay.beginSelectedEditing()
     }
 
     onSessionChangeGenerationChanged: prepareForSessionChange()
@@ -92,8 +92,7 @@ Item {
             formDesignerController: pageCard.pooled
                 ? null
                 : pageCard.formDesignerController
-            formDesignMode: !pageCard.pooled
-                && (pageCard.formsTabActive || pageCard.editTabActive)
+            formDesignMode: pageInteractionOverlay.formDesignMode
             page: pageCard.index
             zoom: pageCard.zoom
             pageColor: "white"
@@ -111,125 +110,41 @@ Item {
             visible: pageView.width > 0 && pageView.height > 0
         }
 
-        PDFFormView {
-            id: formView
-
-            anchors.fill: pageView
-            controller: pageCard.pooled ? null : pageCard.formController
-            formDesignerController: pageCard.pooled
-                ? null
-                : pageCard.formDesignerController
-            formDesignMode: !pageCard.pooled
-                && (pageCard.formsTabActive || pageCard.editTabActive)
-            page: pageCard.index
-            interactive: !pageCard.pooled
-                && pageCard.formController.interactive
-                && !pageCard.formController.javascriptTransitionPending
-                && !pageCard.editController.saving
-                && pageCard.editController.tool === PDFEditController.BrowseTool
-                && !pageCard.textFieldToolActive
-            activeFocusOnTab: interactive
-            z: 1
-
-            Keys.onPressed: event => {
-                event.accepted = choiceOverlay.handleKey(
-                    event.key,
-                    event.modifiers,
-                    event.text)
-            }
-
-            onChoiceFieldFocusFinished: (sourcePage,
-                                         annotationIndex,
-                                         identityToken,
-                                         focused) => {
-                choiceOverlay.completeComboFocus(
-                    sourcePage,
-                    annotationIndex,
-                    identityToken,
-                    focused)
-            }
-
-            FormChoiceOverlay {
-                id: choiceOverlay
-
-                anchors.fill: parent
-                theme: pageCard.theme
-                fields: formView.choiceFields
-                interactive: formView.interactive
-                page: pageCard.index
-                focusedAnnotationIndex:
-                    pageCard.formController.focusedPage
-                        === pageCard.index
-                    ? pageCard.formController.focusedAnnotationIndex
-                    : -1
-                viewportItem: pageCard.viewportItem
-                viewportContentX: pageCard.viewContentX
-                viewportContentY: pageCard.viewContentY
-                viewportTransformState: [
-                    pageCard.normalizedViewRotation,
-                    pageCard.zoom,
-                    pageCard.width,
-                    pageCard.height,
-                    pageFrame.x,
-                    pageFrame.y,
-                    pageSurface.x,
-                    pageSurface.y,
-                    pageSurface.width,
-                    pageSurface.height
-                ]
-
-                onFieldFocusRequested: (sourcePage,
-                                        annotationIndex,
-                                        identityToken) =>
-                    formView.focusChoiceField(
-                        sourcePage,
-                        annotationIndex,
-                        identityToken)
-                onOptionSelected: (sourcePage,
-                                   annotationIndex,
-                                   optionIndex,
-                                   selected,
-                                   toggle,
-                                   identityToken) => {
-                    formView.selectChoiceOption(
-                        sourcePage,
-                        annotationIndex,
-                        optionIndex,
-                        selected,
-                        toggle,
-                        identityToken)
-                }
-            }
-        }
-
-        EditOverlay {
-            id: editOverlay
-
-            anchors.fill: pageView
-            page: pageCard.index
-            pooled: pageCard.pooled
-            theme: pageCard.theme
-            controller: pageCard.editController
-            draftTextureCurrent: pageView.draftTextureCurrent
-            draftTextureReady: pageView.draftTextureReady
-            z: 2
-        }
-
-        FormTextFieldOverlay {
-            id: formTextFieldOverlay
+        PageInteractionOverlay {
+            id: pageInteractionOverlay
 
             anchors.fill: pageView
             theme: pageCard.theme
-            controller: pageCard.formDesignerController
+            editController: pageCard.editController
+            formController: pageCard.formController
+            formDesignerController: pageCard.formDesignerController
             page: pageCard.index
             pagePointScale: pageCard.zoom
             pooled: pageCard.pooled
-            formsActive: pageCard.formsTabActive
-            editActive: pageCard.editTabActive
-            fieldsVisible: pageCard.formFieldsVisible
-            fieldsInteractive: pageCard.formFieldsInteractive
+            formsTabActive: pageCard.formsTabActive
+            editTabActive: pageCard.editTabActive
+            formFieldsVisible: pageCard.formFieldsVisible
+            formFieldsInteractive: pageCard.formFieldsInteractive
             textFieldToolActive: pageCard.textFieldToolActive
-            z: 3
+            checkboxToolActive: pageCard.checkboxToolActive
+            draftTextureCurrent: pageView.draftTextureCurrent
+            draftTextureReady: pageView.draftTextureReady
+            viewportItem: pageCard.viewportItem
+            viewportContentX: pageCard.viewContentX
+            viewportContentY: pageCard.viewContentY
+            viewportTransformState: [
+                pageCard.normalizedViewRotation,
+                pageCard.zoom,
+                pageCard.width,
+                pageCard.height,
+                pageFrame.x,
+                pageFrame.y,
+                pageSurface.x,
+                pageSurface.y,
+                pageSurface.width,
+                pageSurface.height
+            ]
+            z: 1
         }
     }
 

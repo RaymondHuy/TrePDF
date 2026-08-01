@@ -236,12 +236,15 @@ void PDFFormDesignerController::prepareForDesignMode()
 
 void PDFFormDesignerController::refreshSourceFieldValues()
 {
-    if (m_sourceValueRefreshPending
-        || std::none_of(
+    if (m_sourceValueRefreshPending) {
+        m_sourceValueRefreshQueued = true;
+        return;
+    }
+    if (std::none_of(
             m_fields.cbegin(),
             m_fields.cend(),
             [](const FormField &field) {
-                return field.type == Text && field.sourceBacked;
+                return field.sourceBacked;
             })
         || !m_document
         || !m_document->isLoaded()
@@ -264,9 +267,15 @@ void PDFFormDesignerController::refreshSourceFieldValues()
                 return;
             }
             controller->m_sourceValueRefreshPending = false;
+            const bool refreshQueued = std::exchange(
+                controller->m_sourceValueRefreshQueued,
+                false);
             if (!document
                 || controller->m_document != document
                 || !succeeded) {
+                if (refreshQueued) {
+                    controller->refreshSourceFieldValues();
+                }
                 return;
             }
 
@@ -295,6 +304,9 @@ void PDFFormDesignerController::refreshSourceFieldValues()
                     controller->index(row),
                     controller->index(row),
                     {ValueRole});
+            }
+            if (refreshQueued) {
+                controller->refreshSourceFieldValues();
             }
         });
 }
@@ -333,6 +345,14 @@ QString PDFFormDesignerController::addField(int type,
         field.hasSourcePage = field.sourcePage >= 0;
     }
     field.normalizedRect = normalizedRect;
+    if (field.type == Checkbox) {
+        field.value = QStringLiteral("Off");
+        field.defaultValue = field.value;
+        field.options = {
+            QStringLiteral("Yes"),
+            QStringLiteral("Off"),
+        };
+    }
 
     const int row = m_fields.size();
     beginInsertRows({}, row, row);
@@ -356,6 +376,62 @@ QVariantMap PDFFormDesignerController::fieldData(const QString &fieldId) const
 {
     const int row = rowForFieldId(fieldId);
     return row >= 0 ? fieldToMap(m_fields.at(row)) : QVariantMap{};
+}
+
+bool PDFFormDesignerController::activateSourceCheckbox(
+    const QString &fieldId,
+    qreal viewWidth,
+    qreal viewHeight)
+{
+    const int row = rowForFieldId(fieldId);
+    if (row < 0
+        || !m_document
+        || !m_document->isLoaded()
+        || !m_formController
+        || m_formController->document() != m_document
+        || !m_formController->interactive()
+        || viewWidth <= 0.0
+        || viewHeight <= 0.0) {
+        return false;
+    }
+
+    const FormField &field = m_fields.at(row);
+    if (field.type != Checkbox
+        || !field.sourceBacked
+        || field.sourceNormalizedRect.isEmpty()
+        || (field.flags & ReadOnly)) {
+        return false;
+    }
+
+    const int page = displayPageForField(field);
+    if (page < 0) {
+        return false;
+    }
+
+    const QPointF center = field.sourceNormalizedRect.center();
+    const QPointF position(center.x() * viewWidth,
+                           center.y() * viewHeight);
+    const QSize deviceSize(qMax(1, qRound(viewWidth)),
+                           qMax(1, qRound(viewHeight)));
+    m_formController->pointerEvent(
+        page,
+        PDFFormWorker::PointerEventType::Press,
+        0,
+        position,
+        deviceSize);
+    m_formController->pointerEvent(
+        page,
+        PDFFormWorker::PointerEventType::Release,
+        0,
+        position,
+        deviceSize);
+    // The designer overlay owns selection while source Widgets are hidden.
+    // Leaving PDFium focused would make FPDF_FFLDraw paint its native focus
+    // adornment at sourceNormalizedRect, which is the stale pre-move position
+    // until the form draft is saved.
+    m_formController->killFocus();
+    refreshSourceFieldValues();
+    return true;
 }
 
 QVariantList PDFFormDesignerController::fieldsForPage(int page) const
@@ -382,6 +458,39 @@ QVariantList PDFFormDesignerController::textFieldsForPage(int page) const
         fields.append(value);
     }
     return fields;
+}
+
+QStringList PDFFormDesignerController::sourceFieldIdsForPage(int page) const
+{
+    QStringList fieldIds;
+    for (const FormField &field : m_fields) {
+        if (field.sourceBacked && displayPageForField(field) == page) {
+            fieldIds.append(field.id);
+        }
+    }
+    return fieldIds;
+}
+
+bool PDFFormDesignerController::sourceFieldContainsPoint(
+    int page,
+    const QPointF &normalizedPoint) const
+{
+    if (page < 0
+        || normalizedPoint.x() < 0.0
+        || normalizedPoint.x() > 1.0
+        || normalizedPoint.y() < 0.0
+        || normalizedPoint.y() > 1.0) {
+        return false;
+    }
+
+    return std::any_of(
+        m_fields.cbegin(),
+        m_fields.cend(),
+        [this, page, &normalizedPoint](const FormField &field) {
+            return field.sourceBacked
+                && displayPageForField(field) == page
+                && field.sourceNormalizedRect.contains(normalizedPoint);
+        });
 }
 
 QStringList PDFFormDesignerController::sourceTextFieldIdsForPage(
@@ -535,6 +644,31 @@ bool PDFFormDesignerController::setFieldRect(const QString &fieldId,
     return true;
 }
 
+bool PDFFormDesignerController::moveField(const QString &fieldId,
+                                          qreal x,
+                                          qreal y)
+{
+    const int row = rowForFieldId(fieldId);
+    if (row < 0 || !qIsFinite(x) || !qIsFinite(y)) {
+        return false;
+    }
+
+    const QRectF fieldRect = m_fields.at(row).normalizedRect;
+    const qreal boundedX = qBound(
+        0.0,
+        x,
+        qMax(0.0, 1.0 - fieldRect.width()));
+    const qreal boundedY = qBound(
+        0.0,
+        y,
+        qMax(0.0, 1.0 - fieldRect.height()));
+    return setFieldRect(fieldId,
+                        boundedX,
+                        boundedY,
+                        fieldRect.width(),
+                        fieldRect.height());
+}
+
 bool PDFFormDesignerController::setTextFieldRect(const QString &fieldId,
                                                  qreal x,
                                                  qreal y,
@@ -670,6 +804,7 @@ PDFFormDesignerController::saveFields(
         const bool normalizeAppearance
             = includeAppearanceNormalization
             && field.sourceBacked
+            && field.type == Text
             && field.appearanceVersion
                 < PDFFormAppearance::kTextFieldVersion
             && normalizationPages.contains(page);
@@ -687,7 +822,9 @@ PDFFormDesignerController::saveFields(
         saved.value = field.value;
         saved.defaultValue = field.sourceBacked
             ? field.defaultValue
-            : field.value;
+            : field.type == Checkbox
+                ? field.defaultValue
+                : field.value;
         saved.options = field.options;
         saved.type = field.type;
         saved.page = page;
@@ -751,6 +888,7 @@ void PDFFormDesignerController::reloadSourceFields()
 {
     ++m_sourceValueRefreshSerial;
     m_sourceValueRefreshPending = false;
+    m_sourceValueRefreshQueued = false;
     const quint64 requestSerial = ++m_sourceReloadSerial;
     clearTextFieldFocus();
     clearTextFieldSelection();
@@ -791,6 +929,8 @@ void PDFFormDesignerController::reloadSourceFields()
             for (const PDFFormWorker::TrePDFTextField &source : sourceFields) {
                 if (source.id.isEmpty()
                     || fieldIds.contains(source.id)
+                    || (source.type != FPDF_FORMFIELD_TEXTFIELD
+                        && source.type != FPDF_FORMFIELD_CHECKBOX)
                     || source.sourcePage < 0
                     || source.normalizedRect.isEmpty()
                     || document->displayPageIndexForSourcePage(
@@ -800,7 +940,9 @@ void PDFFormDesignerController::reloadSourceFields()
                 fieldIds.insert(source.id);
                 FormField field;
                 field.id = source.id;
-                field.type = Text;
+                field.type = source.type == FPDF_FORMFIELD_CHECKBOX
+                    ? Checkbox
+                    : Text;
                 field.page = document->displayPageIndexForSourcePage(
                     source.sourcePage);
                 field.sourcePage = source.sourcePage;

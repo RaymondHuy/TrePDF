@@ -97,6 +97,7 @@ qt_add_qml_module(trepdf
         src/Components/FormRibbon.qml
         src/Components/FormTextFieldOverlay.qml
         src/Components/OrangeButton.qml
+        src/Components/PageInteractionOverlay.qml
         src/Components/PdfPageDelegate.qml
         src/Components/RibbonButton.qml
         src/Components/RibbonGroup.qml

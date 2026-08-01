@@ -11,6 +11,11 @@
 
 namespace {
 
+// FPDF_FFLDraw may paint the focused-widget dotted outline outside the
+// annotation rectangle. Capture that device-pixel fringe as well so restoring
+// the background does not leave a stale focus box behind.
+constexpr int kWidgetInteractionAdornmentMarginPixels = 4;
+
 QString annotationStringValue(FPDF_ANNOTATION annotation,
                               const char *key)
 {
@@ -101,7 +106,11 @@ bool capturePDFWidgetRenderPatches(
             minimumY,
             maximumX - minimumX,
             maximumY - minimumY)
-                                     .adjusted(-1, -1, 1, 1)
+                                     .adjusted(
+                                         -kWidgetInteractionAdornmentMarginPixels,
+                                         -kWidgetInteractionAdornmentMarginPixels,
+                                         kWidgetInteractionAdornmentMarginPixels,
+                                         kWidgetInteractionAdornmentMarginPixels)
                                      .intersected(
                                          QRect(QPoint(), pixelSize));
         if (deviceRect.isEmpty()) {

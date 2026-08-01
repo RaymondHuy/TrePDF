@@ -779,7 +779,7 @@ QByteArray textFieldDefaultAppearance(QByteArrayView fontResourceName)
 }
 
 QImage textFieldAppearanceImage(
-    const PDFAcroFormCanonicalizer::TextField &field)
+    const PDFAcroFormCanonicalizer::Field &field)
 {
     constexpr qreal rasterScale = 2.0;
     constexpr int maximumDimension = 2048;
@@ -922,7 +922,7 @@ QByteArray appearanceObject(int objectNumber,
 
 QByteArray textFieldWidgetObject(
     const ObjectReference &reference,
-    const PDFAcroFormCanonicalizer::TextField &field,
+    const PDFAcroFormCanonicalizer::Field &field,
     int appearanceObjectNumber,
     const ObjectReference &pageReference,
     QByteArrayView fontResourceName)
@@ -974,6 +974,140 @@ QByteArray textFieldWidgetObject(
         + QByteArray(PDFFormAppearance::kVersionKey)
         + ' '
         + QByteArray::number(PDFFormAppearance::kTextFieldVersion)
+        + QByteArrayLiteral(" >>\nendobj");
+    return object;
+}
+
+bool checkboxChecked(const QString &value)
+{
+    return value.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0
+        || value.compare(QStringLiteral("yes"), Qt::CaseInsensitive) == 0
+        || value.compare(QStringLiteral("on"), Qt::CaseInsensitive) == 0
+        || value == QStringLiteral("1");
+}
+
+QByteArray checkboxAppearanceObject(int objectNumber,
+                                    const QRectF &pageRect,
+                                    bool checked)
+{
+    const qreal widthValue = pageRect.width();
+    const qreal heightValue = pageRect.height();
+    const qreal shortestSide = qMin(widthValue, heightValue);
+    const qreal borderWidth = qBound(0.5, shortestSide / 16.0, 1.5);
+    const qreal borderInset = borderWidth / 2.0;
+    const QByteArray width = pdfNumber(widthValue);
+    const QByteArray height = pdfNumber(heightValue);
+    QByteArray content = QByteArrayLiteral("q 1 1 1 rg 0 0 ")
+        + width
+        + ' '
+        + height
+        + QByteArrayLiteral(" re f 0.55 0.55 0.55 RG ")
+        + pdfNumber(borderWidth)
+        + QByteArrayLiteral(" w ")
+        + pdfNumber(borderInset)
+        + ' '
+        + pdfNumber(borderInset)
+        + ' '
+        + pdfNumber(qMax(0.0, widthValue - borderWidth))
+        + ' '
+        + pdfNumber(qMax(0.0, heightValue - borderWidth))
+        + QByteArrayLiteral(" re S");
+    if (checked) {
+        content += QByteArrayLiteral(" 0.12 0.12 0.12 RG ")
+            + pdfNumber(qBound(1.0, shortestSide / 9.0, 2.5))
+            + QByteArrayLiteral(" w 1 J 1 j ")
+            + pdfNumber(widthValue * 0.20)
+            + ' '
+            + pdfNumber(heightValue * 0.52)
+            + QByteArrayLiteral(" m ")
+            + pdfNumber(widthValue * 0.43)
+            + ' '
+            + pdfNumber(heightValue * 0.28)
+            + QByteArrayLiteral(" l ")
+            + pdfNumber(widthValue * 0.82)
+            + ' '
+            + pdfNumber(heightValue * 0.76)
+            + QByteArrayLiteral(" l S");
+    }
+    content += QByteArrayLiteral(" Q");
+
+    return QByteArray::number(objectNumber)
+        + QByteArrayLiteral(
+            " 0 obj\n"
+            "<< /Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 ")
+        + width
+        + ' '
+        + height
+        + QByteArrayLiteral("] /Resources << >> /Length ")
+        + QByteArray::number(content.size())
+        + QByteArrayLiteral(" >>\nstream\n")
+        + content
+        + QByteArrayLiteral("\nendstream\nendobj");
+}
+
+QByteArray checkboxWidgetObject(
+    const ObjectReference &reference,
+    const PDFAcroFormCanonicalizer::Field &field,
+    int offAppearanceObjectNumber,
+    int onAppearanceObjectNumber,
+    const ObjectReference &pageReference)
+{
+    const QByteArray left = pdfNumber(field.pageRect.left());
+    const QByteArray bottom = pdfNumber(field.pageRect.top());
+    const QByteArray right = pdfNumber(field.pageRect.right());
+    const QByteArray top = pdfNumber(field.pageRect.bottom());
+    const bool checked = checkboxChecked(field.value);
+    const bool defaultChecked = checkboxChecked(field.defaultValue);
+    const QByteArray currentState = checked
+        ? QByteArrayLiteral("/Yes")
+        : QByteArrayLiteral("/Off");
+    const QByteArray defaultState = defaultChecked
+        ? QByteArrayLiteral("/Yes")
+        : QByteArrayLiteral("/Off");
+    QByteArray object = QByteArray::number(reference.number)
+        + ' '
+        + QByteArray::number(reference.generation)
+        + QByteArrayLiteral(
+            " obj\n"
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /Rect [")
+        + left
+        + ' '
+        + bottom
+        + ' '
+        + right
+        + ' '
+        + top
+        + QByteArrayLiteral("] /T ")
+        + encodedPdfString(field.fieldName)
+        + QByteArrayLiteral(" /TU ")
+        + encodedPdfString(field.tooltip)
+        + QByteArrayLiteral(" /V ")
+        + currentState
+        + QByteArrayLiteral(" /DV ")
+        + defaultState
+        + QByteArrayLiteral(" /AS ")
+        + currentState
+        + QByteArrayLiteral(" /NM ")
+        + encodedPdfString(field.widgetId)
+        + QByteArrayLiteral(" /Ff ")
+        + QByteArray::number(field.fieldFlags);
+    if (pageReference.number >= 0) {
+        object += QByteArrayLiteral(" /P ")
+            + QByteArray::number(pageReference.number)
+            + ' '
+            + QByteArray::number(pageReference.generation)
+            + QByteArrayLiteral(" R");
+    }
+    object += QByteArrayLiteral(
+        " /F 4 /MK << /BG [1 1 1] /BC [0.55 0.55 0.55] >> "
+        "/BS << /W 1 /S /S >> /AP << /N << /Off ")
+        + QByteArray::number(offAppearanceObjectNumber)
+        + QByteArrayLiteral(" 0 R /Yes ")
+        + QByteArray::number(onAppearanceObjectNumber)
+        + QByteArrayLiteral(" 0 R >> >> /")
+        + QByteArray(PDFFormAppearance::kVersionKey)
+        + ' '
+        + QByteArray::number(PDFFormAppearance::kCheckboxVersion)
         + QByteArrayLiteral(" >>\nendobj");
     return object;
 }
@@ -2014,12 +2148,12 @@ bool appendIncrementalUpdate(const QString &filePath,
 
 } // namespace
 
-bool PDFAcroFormCanonicalizer::finalizeTextFields(
+bool PDFAcroFormCanonicalizer::finalizeFields(
     const QString &filePath,
-    const QVector<TextField> &textFields,
+    const QVector<Field> &formFields,
     QString &error)
 {
-    if (textFields.isEmpty()) {
+    if (formFields.isEmpty()) {
         return true;
     }
 
@@ -2161,16 +2295,16 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
         bool added = true;
     };
     QVector<ResolvedWidget> resolvedWidgets;
-    resolvedWidgets.reserve(textFields.size());
+    resolvedWidgets.reserve(formFields.size());
     QList<ObjectReference> widgetReferences;
-    widgetReferences.reserve(textFields.size());
+    widgetReferences.reserve(formFields.size());
     QSet<int> resolvedWidgetObjectNumbers;
-    for (const TextField &textField : textFields) {
+    for (const Field &formField : formFields) {
         const bool added
-            = textField.operation == Operation::Add;
+            = formField.operation == Operation::Add;
         const PlaceholderLocation placeholder = annotationForWidgetId(
             pdf,
-            textField.widgetId,
+            formField.widgetId,
             added
                 ? QByteArrayView("/Square")
                 : QByteArrayView("/Widget"));
@@ -2217,9 +2351,13 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
                 fieldTypeKey >= 0
                     ? fieldTypeKey + QByteArrayView("/FT").size()
                     : existingWidget.size());
+            const QByteArrayView expectedFieldType
+                = formField.type == FieldType::Text
+                ? QByteArrayView("/Tx")
+                : QByteArrayView("/Btn");
             if (existingWidget.isEmpty()
                 || fieldTypeKey < 0
-                || !fieldTypeCursor.consume("/Tx")
+                || !fieldTypeCursor.consume(expectedFieldType)
                 || keyPosition(
                        existingWidget.constData(),
                        existingWidget.size(),
@@ -2229,7 +2367,7 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
                        existingWidget.size(),
                        "/Parent") >= 0) {
                 error = QStringLiteral(
-                    "The existing TrePDF Text Field structure is unsupported.");
+                    "The existing TrePDF form field structure is unsupported.");
                 file.unmap(mapped);
                 return false;
             }
@@ -2259,21 +2397,21 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
                 fieldNamesByObject.value(resolved.reference.number));
         }
     }
-    for (const TextField &textField : textFields) {
-        if (textField.fieldName.isEmpty()
-            || textField.fieldName.contains(QLatin1Char('.'))) {
+    for (const Field &formField : formFields) {
+        if (formField.fieldName.isEmpty()
+            || formField.fieldName.contains(QLatin1Char('.'))) {
             error = QStringLiteral(
                 "TrePDF AcroForm fields require a non-empty flat field name.");
             file.unmap(mapped);
             return false;
         }
-        if (occupiedFieldNames.contains(textField.fieldName)) {
+        if (occupiedFieldNames.contains(formField.fieldName)) {
             error = QStringLiteral(
                 "An AcroForm field with the same name already exists.");
             file.unmap(mapped);
             return false;
         }
-        occupiedFieldNames.insert(textField.fieldName);
+        occupiedFieldNames.insert(formField.fieldName);
     }
 
     QByteArray catalogObject = completeObject(pdf, pdf.root.number, error);
@@ -2291,7 +2429,7 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
         + QByteArray::number(defaultFontObjectNumber);
 
     QList<IncrementalObject> incrementalObjects;
-    incrementalObjects.reserve(textFields.size() * 4 + 3);
+    incrementalObjects.reserve(formFields.size() * 4 + 3);
 
     struct PageReplacement {
         qsizetype start = -1;
@@ -2358,51 +2496,93 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
 
     constexpr qint64 maximumAppearancePixels = 32 * 1024 * 1024;
     qint64 appearancePixels = 0;
-    for (qsizetype index = 0; index < textFields.size(); ++index) {
-        const TextField &textField = textFields.at(index);
+    for (qsizetype index = 0; index < formFields.size(); ++index) {
+        const Field &formField = formFields.at(index);
         const ObjectReference &widgetReference = widgetReferences.at(index);
         const PlaceholderLocation &placeholder
             = resolvedWidgets.at(index).placeholder;
-        const QImage appearanceImage = textFieldAppearanceImage(textField);
-        appearancePixels += static_cast<qint64>(appearanceImage.width())
-            * appearanceImage.height();
-        if (appearancePixels > maximumAppearancePixels) {
-            error = QStringLiteral(
-                "The combined Text Field appearances are too large.");
-            file.unmap(mapped);
-            return false;
-        }
-        const QByteArray compressedPixels = compressedRgbPixels(
-            appearanceImage);
-        if (appearanceImage.isNull() || compressedPixels.isEmpty()) {
-            error = QStringLiteral(
-                "The Text Field appearance could not be generated.");
-            file.unmap(mapped);
-            return false;
-        }
-        const int appearanceObjectNumber = nextObjectNumber++;
-        const int imageObjectNumber = nextObjectNumber++;
         QByteArray widgetObject;
-        if (textField.operation
-            == Operation::NormalizeAppearance) {
-            widgetObject = normalizedTextFieldAppearanceObject(
-                resolvedWidgets.at(index).existingObject,
-                appearanceObjectNumber,
-                error);
+        if (formField.type == FieldType::Text) {
+            const QImage appearanceImage = textFieldAppearanceImage(formField);
+            appearancePixels += static_cast<qint64>(appearanceImage.width())
+                * appearanceImage.height();
+            if (appearancePixels > maximumAppearancePixels) {
+                error = QStringLiteral(
+                    "The combined Text Field appearances are too large.");
+                file.unmap(mapped);
+                return false;
+            }
+            const QByteArray compressedPixels = compressedRgbPixels(
+                appearanceImage);
+            if (appearanceImage.isNull() || compressedPixels.isEmpty()) {
+                error = QStringLiteral(
+                    "The Text Field appearance could not be generated.");
+                file.unmap(mapped);
+                return false;
+            }
+            const int appearanceObjectNumber = nextObjectNumber++;
+            const int imageObjectNumber = nextObjectNumber++;
+            if (formField.operation == Operation::NormalizeAppearance) {
+                widgetObject = normalizedTextFieldAppearanceObject(
+                    resolvedWidgets.at(index).existingObject,
+                    appearanceObjectNumber,
+                    error);
+            } else {
+                widgetObject = textFieldWidgetObject(
+                    widgetReference,
+                    formField,
+                    appearanceObjectNumber,
+                    placeholder.isDirect()
+                        ? placeholder.container
+                        : ObjectReference{},
+                    defaultFontResourceName);
+            }
+            incrementalObjects.append({
+                ObjectReference{appearanceObjectNumber, 0},
+                appearanceObject(
+                    appearanceObjectNumber,
+                    imageObjectNumber,
+                    formField.pageRect)});
+            incrementalObjects.append({
+                ObjectReference{imageObjectNumber, 0},
+                imageObject(
+                    imageObjectNumber,
+                    appearanceImage,
+                    compressedPixels)});
         } else {
-            widgetObject = textFieldWidgetObject(
+            if (formField.operation == Operation::NormalizeAppearance) {
+                error = QStringLiteral(
+                    "Checkbox appearance-only normalization is unsupported.");
+                file.unmap(mapped);
+                return false;
+            }
+            const int offAppearanceObjectNumber = nextObjectNumber++;
+            const int onAppearanceObjectNumber = nextObjectNumber++;
+            widgetObject = checkboxWidgetObject(
                 widgetReference,
-                textField,
-                appearanceObjectNumber,
+                formField,
+                offAppearanceObjectNumber,
+                onAppearanceObjectNumber,
                 placeholder.isDirect()
                     ? placeholder.container
-                    : ObjectReference{},
-                defaultFontResourceName);
+                    : ObjectReference{});
+            incrementalObjects.append({
+                ObjectReference{offAppearanceObjectNumber, 0},
+                checkboxAppearanceObject(
+                    offAppearanceObjectNumber,
+                    formField.pageRect,
+                    false)});
+            incrementalObjects.append({
+                ObjectReference{onAppearanceObjectNumber, 0},
+                checkboxAppearanceObject(
+                    onAppearanceObjectNumber,
+                    formField.pageRect,
+                    true)});
         }
         if (widgetObject.isEmpty()) {
             if (error.isEmpty()) {
                 error = QStringLiteral(
-                    "The TrePDF Text Field dictionary could not be updated.");
+                    "The TrePDF form field dictionary could not be updated.");
             }
             file.unmap(mapped);
             return false;
@@ -2410,18 +2590,6 @@ bool PDFAcroFormCanonicalizer::finalizeTextFields(
         incrementalObjects.append({
             widgetReference,
             std::move(widgetObject)});
-        incrementalObjects.append({
-            ObjectReference{appearanceObjectNumber, 0},
-            appearanceObject(
-                appearanceObjectNumber,
-                imageObjectNumber,
-                textField.pageRect)});
-        incrementalObjects.append({
-            ObjectReference{imageObjectNumber, 0},
-            imageObject(
-                imageObjectNumber,
-                appearanceImage,
-                compressedPixels)});
     }
 
     if (!hasExistingAcroForm) {
