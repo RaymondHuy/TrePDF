@@ -588,6 +588,26 @@ bool PDFFormDesignerController::managesSourceChoiceField(
         });
 }
 
+bool PDFFormDesignerController::managesSourceWidget(
+    int page,
+    int annotationIndex,
+    const QString &widgetId) const
+{
+    if (page < 0 || annotationIndex < 0 || widgetId.isEmpty()) {
+        return false;
+    }
+
+    return std::any_of(
+        m_fields.cbegin(),
+        m_fields.cend(),
+        [this, page, annotationIndex, &widgetId](const FormField &field) {
+            return field.sourceBacked
+                && field.id == widgetId
+                && displayPageForField(field) == page
+                && field.sourceAnnotationIndex == annotationIndex;
+        });
+}
+
 bool PDFFormDesignerController::sourceFieldContainsPoint(
     int page,
     const QPointF &normalizedPoint) const

@@ -297,6 +297,8 @@ private:
     struct Candidate {
         int page = -1;
         QString objectId;
+        int sourceAnnotationIndex = -1;
+        QString sourceWidgetId;
         QVector<int> objectPath;
         QVector<CandidatePart> parts;
         QString kind;
@@ -583,6 +585,8 @@ private:
         const QString &expectedFamily);
     void rememberRejectedFontFingerprint(const QByteArray &fingerprint);
     void clearRegisteredFonts();
+    bool isDesignerManagedSourceWidget(const Candidate &candidate) const;
+    void notifyManagedWidgetVisibilityChanged(int page);
 
     QPointer<PDFDocument> m_document;
     QPointer<PDFFormController> m_formController;

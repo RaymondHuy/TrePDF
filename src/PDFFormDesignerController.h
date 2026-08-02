@@ -134,6 +134,9 @@ public:
     bool managesSourceChoiceField(int sourcePage,
                                   int annotationIndex,
                                   const QString &identityToken) const;
+    bool managesSourceWidget(int page,
+                             int annotationIndex,
+                             const QString &widgetId) const;
     bool sourceFieldContainsPoint(
         int page,
         const QPointF &normalizedPoint) const;

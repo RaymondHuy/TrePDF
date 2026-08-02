@@ -3496,6 +3496,40 @@ void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()
         choice.sourcePage,
         choice.annotationIndex,
         choice.identityToken + QStringLiteral("-stale")));
+    QVERIFY(formDesigner.managesSourceWidget(
+        0,
+        choice.annotationIndex,
+        fieldId));
+    QVERIFY(!formDesigner.managesSourceWidget(
+        0,
+        choice.annotationIndex,
+        fieldId + QStringLiteral("-stale")));
+    QVERIFY(!formDesigner.managesSourceWidget(
+        0,
+        choice.annotationIndex + 1,
+        fieldId));
+
+    editController.setFormDesignerController(nullptr);
+    const QVariantMap sourceWidgetCandidate = candidateForKind(
+        waitForCandidates(editController, 0),
+        QStringLiteral("widget"));
+    QVERIFY(!sourceWidgetCandidate.isEmpty());
+    QVERIFY(editController.selectCandidate(
+        0,
+        sourceWidgetCandidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(editController.selectedKind(), QStringLiteral("widget"));
+    editController.setFormDesignerController(&formDesigner);
+    QCOMPARE(editController.selectedPage(), -1);
+    QVERIFY(editController.selectedObjectId().isEmpty());
+    QVERIFY(candidateForKind(
+        editController.candidatesForPage(0),
+        QStringLiteral("widget")).isEmpty());
+    const QVariantMap sourcePositionCandidate = editController.candidateAt(
+        0,
+        initialRect.center().x(),
+        initialRect.center().y());
+    QVERIFY(sourcePositionCandidate.value(QStringLiteral("kind")).toString()
+            != QStringLiteral("widget"));
 
     PDFFormView formView;
     formView.setController(&formController);
@@ -3577,6 +3611,12 @@ void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()
         resizedRect.y(),
         resizedRect.width(),
         resizedRect.height()));
+    const QVariantMap oldPositionCandidate = editController.candidateAt(
+        0,
+        initialRect.center().x(),
+        initialRect.center().y());
+    QVERIFY(oldPositionCandidate.value(QStringLiteral("kind")).toString()
+            != QStringLiteral("widget"));
     const QVector<PDFFormDesignerController::SaveField> resizedFields
         = formDesigner.saveFields(true);
     QCOMPARE(resizedFields.size(), 1);
