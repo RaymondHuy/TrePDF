@@ -8,12 +8,14 @@
 #include <QHash>
 #include <QSaveFile>
 #include <QSet>
+#include <QUuid>
 
 #include <fpdf_annot.h>
 #include <fpdf_formfill.h>
 #include <fpdf_save.h>
 #include <fpdfview.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace {
@@ -21,6 +23,23 @@ namespace {
 constexpr int kMaximumDropdownOptions = 4096;
 constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
 constexpr int kChoiceCommitOnSelectionChange = 1 << 26;
+
+bool isTrePDFDropdownWidgetId(const QString &widgetId)
+{
+    constexpr qsizetype uuidLength = 36;
+    const QString prefix = QStringLiteral("dropdown-field-");
+    if (!widgetId.startsWith(prefix)
+        || widgetId.size() != prefix.size() + uuidLength) {
+        return false;
+    }
+    const QString suffix = widgetId.sliced(prefix.size());
+    const QUuid uuid = QUuid::fromString(suffix);
+    return !uuid.isNull()
+        && uuid.toString(QUuid::WithoutBraces).compare(
+               suffix,
+               Qt::CaseInsensitive)
+            == 0;
+}
 
 class PdfDocumentHandle
 {
@@ -272,6 +291,9 @@ bool resolveUnchangedUpdateValues(
     QHash<QString, int> unresolvedFields;
     for (int index = 0; index < fields.size(); ++index) {
         const PDFAcroFormWriter::Field &field = fields.at(index);
+        if (field.operation == PDFAcroFormWriter::Operation::Remove) {
+            continue;
+        }
         const bool preserveValue
             = field.operation != PDFAcroFormWriter::Operation::Add
             && !field.valueChanged;
@@ -446,8 +468,16 @@ bool validateWrittenFields(
         FPDFDOC_InitFormFillEnvironment(
             document.get(),
             &formFillInfo));
-    if (!form.get()
-        || FPDF_GetFormType(document.get()) != FORMTYPE_ACRO_FORM) {
+    const bool requiresFormSession = std::any_of(
+        fields.cbegin(),
+        fields.cend(),
+        [](const PDFAcroFormWriter::Field &field) {
+            return field.operation
+                != PDFAcroFormWriter::Operation::Remove;
+        });
+    if (requiresFormSession
+        && (!form.get()
+            || FPDF_GetFormType(document.get()) != FORMTYPE_ACRO_FORM)) {
         error = QStringLiteral(
             "The written PDF does not expose a valid AcroForm session.");
         return false;
@@ -472,7 +502,9 @@ bool validateWrittenFields(
                 "PDFium could not load a page from the written AcroForm PDF.");
             return false;
         }
-        FORM_OnAfterLoadPage(page.get(), form.get());
+        if (form.get()) {
+            FORM_OnAfterLoadPage(page.get(), form.get());
+        }
         bool pageSucceeded = true;
         const int annotationCount = FPDFPage_GetAnnotCount(page.get());
         for (int annotationIndex = 0;
@@ -501,6 +533,12 @@ bool validateWrittenFields(
             }
 
             const PDFAcroFormWriter::Field &field = **expected;
+            if (field.operation == PDFAcroFormWriter::Operation::Remove) {
+                error = QStringLiteral(
+                    "A removed TrePDF form field remains after PDFium reopen.");
+                pageSucceeded = false;
+                break;
+            }
             FS_RECTF rect = {};
             const QString fieldName = formWideString(
                 [&form, &annotation](FPDF_WCHAR *buffer,
@@ -656,7 +694,9 @@ bool validateWrittenFields(
                 break;
             }
         }
-        FORM_OnBeforeClosePage(page.get(), form.get());
+        if (form.get()) {
+            FORM_OnBeforeClosePage(page.get(), form.get());
+        }
         if (!pageSucceeded) {
             return false;
         }
@@ -665,6 +705,10 @@ bool validateWrittenFields(
     for (auto expected = expectedFields.cbegin();
          expected != expectedFields.cend();
          ++expected) {
+        if (expected.value()->operation
+            == PDFAcroFormWriter::Operation::Remove) {
+            continue;
+        }
         if (matchedFields.value(expected.key()) != 1) {
             error = QStringLiteral(
                 "A written TrePDF form field is missing after PDFium reopen.");
@@ -700,6 +744,9 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
         return failure(resolveError);
     }
     for (Field &field : resolvedFields) {
+        if (field.operation == Operation::Remove) {
+            continue;
+        }
         if (field.type == FieldType::Checkbox) {
             field.value = normalizedCheckboxValue(field.value);
             field.defaultValue = normalizedCheckboxValue(field.defaultValue);
@@ -721,11 +768,21 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
             return failure(QStringLiteral(
                 "This AcroForm field type is not implemented yet."));
         }
-        if (field.page < 0
-            || field.page >= pageCount
-            || field.pageRect.isEmpty()
-            || field.fieldName.isEmpty()
-            || field.widgetId.isEmpty()) {
+        const bool removing = field.operation == Operation::Remove;
+        if (removing && field.type != FieldType::Dropdown) {
+            return failure(QStringLiteral(
+                "Only TrePDF Dropdown fields can currently be removed."));
+        }
+        if (removing && !isTrePDFDropdownWidgetId(field.widgetId)) {
+            return failure(QStringLiteral(
+                "The removed Widget ID is not a TrePDF Dropdown ID."));
+        }
+        if (field.widgetId.isEmpty()
+            || (!removing
+                && (field.page < 0
+                    || field.page >= pageCount
+                    || field.pageRect.isEmpty()
+                    || field.fieldName.isEmpty()))) {
             return failure(QStringLiteral(
                 "The AcroForm Widget placement is invalid."));
         }
@@ -790,11 +847,24 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
             Q_UNREACHABLE();
         }
         canonicalField.fieldFlags = widgetFieldFlags(field);
-        canonicalField.operation = field.operation == Operation::Add
-            ? PDFAcroFormCanonicalizer::Operation::Add
-            : field.operation == Operation::NormalizeAppearance
-                ? PDFAcroFormCanonicalizer::Operation::NormalizeAppearance
-                : PDFAcroFormCanonicalizer::Operation::Update;
+        switch (field.operation) {
+        case Operation::Add:
+            canonicalField.operation
+                = PDFAcroFormCanonicalizer::Operation::Add;
+            break;
+        case Operation::Update:
+            canonicalField.operation
+                = PDFAcroFormCanonicalizer::Operation::Update;
+            break;
+        case Operation::NormalizeAppearance:
+            canonicalField.operation
+                = PDFAcroFormCanonicalizer::Operation::NormalizeAppearance;
+            break;
+        case Operation::Remove:
+            canonicalField.operation
+                = PDFAcroFormCanonicalizer::Operation::Remove;
+            break;
+        }
         formFields.append(std::move(canonicalField));
     }
 

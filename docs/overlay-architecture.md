@@ -108,7 +108,7 @@ này ra sao.
 | `FormFieldLayer` | 2 | Render field bằng scene graph; hit-test, click, checkbox toggle, drag move. |
 | `activeFieldFrame` | 4 | Neo editor TextField/Dropdown, viền active và control của field đang chọn. |
 | Edge resize handles | 20 | Nhận kéo/phím để resize. |
-| Nút xóa transient | 30 | Chỉ ở Forms mode và không source-backed. |
+| Nút xóa Text Field/Check Box transient | 30 | Chỉ ở Forms mode; Dropdown được xóa từ panel tùy chọn. |
 | Move handle của Text Field/Dropdown | 40 | Nhận kéo/phím để move qua API C++ chung. |
 
 `placementArea` cố ý nằm **dưới** `FormFieldLayer`. Khi tool đặt field đang
@@ -295,14 +295,16 @@ child được bật/tắt độc lập:
   `formsActive || editActive`.
 - `moveEnabled` chỉ true khi Forms hoặc Edit active, field interactive, không có
   placement tool và không pooled.
-- `activeFieldFrame`/resize handle chỉ hiện khi một field đã chọn; delete button
-  chỉ hiện ở Forms tab với field transient; TextField editor tôn trọng ReadOnly
-  khi không ở Forms tab.
+- `activeFieldFrame`/resize handle chỉ hiện khi một field đã chọn; nút xóa nổi
+  chỉ hiện cho Text Field/Check Box transient trong Forms tab. Dropdown
+  transient hoặc source-backed do TrePDF tạo được xóa từ panel tùy chọn;
+  TextField editor tôn trọng ReadOnly khi không ở Forms tab.
 
 `FormFieldLayer` C++ render vùng field bằng scene graph, hit-test từ field trên
 cùng, giữ move preview cục bộ và chỉ gọi `PDFFormDesignerController::moveField()`
 khi kết thúc kéo. `FormTextFieldOverlay` giữ các phần cần QML control: editor,
-placement preview, resize handles, delete và move handle.
+placement preview, resize handles, nút xóa Text Field/Check Box transient và
+move handle.
 
 `FormFieldLayer::contains()` chỉ trả về `true` khi điểm nằm trong một field đang
 visible và interactive. Vì layer designer nằm trên Edit, giới hạn không gian này
@@ -321,7 +323,7 @@ coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-tes
 |---|---|---|---|---|
 | View | `false` | Có thể interactive nếu form session sẵn sàng. | Không bắt input; draft vẫn có thể hiện. | Source-backed field bị ẩn; không đặt/move/resize. |
 | Edit | `true` | Không interactive vì tool là Select hoặc tool edit khác Browse. | Active: select, edit, add, shape, highlight theo tool. | Source-backed field hiện; action designer hỗ trợ vẫn gate theo read-only, nhưng không có placement/delete Forms-only. |
-| Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move các field được hỗ trợ. |
+| Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Dropdown source-backed được hỗ trợ có thể tạo draft xóa. |
 | Forms, tool đặt field | `true` | Bị tắt bởi cờ tool Text Field/Check Box/Dropdown. | Không active. | `placementArea` xử lý vùng trống; không move trong lúc placement tool bật. |
 | Đang Save hoặc delegate pooled | Không dùng để tương tác | Bị tắt/clear state. | Bị tắt; khi pooled còn xóa data/gesture cục bộ. | Hủy placement/resize/move/focus; khi pooled không render field. |
 
@@ -370,8 +372,9 @@ Trong Edit/Forms, `PDFFormView` có thêm guard C++ độc lập với z-order:
 
 1. `designerBlocksPointer()` đổi pointer px sang normalized rect.
 2. Nó hỏi `PDFFormDesignerController::sourceFieldContainsPoint()`.
-3. Nếu điểm nằm trong source-backed TrePDF field, form view không gửi press/move
-   vào PDFium; hover được gửi vị trí `(-1, -1)` để PDFium bỏ trạng thái hover.
+3. Nếu điểm nằm trong source-backed TrePDF field đang hiện hoặc tombstone của
+   Dropdown vừa xóa, form view không gửi press/move vào PDFium; hover được gửi
+   vị trí `(-1, -1)` để PDFium bỏ trạng thái hover.
 4. Cursor native cũng bị reset về arrow tại vùng đó.
 
 Nhờ vậy field mà designer overlay đang sở hữu sẽ không vừa focus native AcroForm
@@ -408,13 +411,14 @@ Overlay hiện tại phối hợp với render worker, không phải chỉ “v�
 ### Source widget của form designer
 
 1. Trong Edit/Forms, `PDFPageItem` lấy danh sách source widget id mà designer
-   đang hiển thị.
+   đang hiển thị hoặc đang giữ làm tombstone xóa draft.
 2. Worker render dùng `PDFWidgetAnnotationSuppression` để set Hidden tạm thời
    trên đúng Widget annotation, render page nền, capture vùng pixel liên quan,
    restore flags rồi chạy `FPDF_FFLDraw` cho form runtime.
 3. Pixel patch được dán trở lại trên widget đã suppress, kể cả fringe của dotted
    focus outline.
-4. `FormFieldLayer`/TextField QML vẽ widget designer một lần ở lớp 3.
+4. `FormFieldLayer`/TextField QML vẽ widget designer một lần ở lớp 3; widget có
+   tombstone xóa chỉ giữ nền đã patch nên biến mất ngay trước Save.
 
 Nếu thêm một overlay thay thế visual của source object, phải quyết định rõ nó:
 

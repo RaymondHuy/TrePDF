@@ -165,11 +165,6 @@ Rectangle {
     }
 
     function deleteDropdown() {
-        if (sourceBacked) {
-            //% "Saved dropdowns cannot be deleted yet."
-            errorText = qsTrId("SavedDropdownCannotBeDeleted")
-            return
-        }
         if (!controller.removeField(fieldId)) {
             //% "Could not delete the dropdown."
             errorText = qsTrId("DeleteDropdownFailed")
@@ -492,35 +487,18 @@ Rectangle {
                     color: root.theme.ribbonBorder
                 }
 
-                Label {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 16
-                    Layout.rightMargin: 16
-                    Layout.topMargin: 10
-                    visible: root.sourceBacked
-                    //% "Saved dropdowns cannot be deleted yet."
-                    text: qsTrId("SavedDropdownCannotBeDeleted")
-                    color: "#747176"
-                    font.pixelSize: 11
-                    wrapMode: Text.Wrap
-                }
-
                 Button {
                     id: deleteDropdownButton
 
                     Layout.fillWidth: true
                     Layout.leftMargin: 16
                     Layout.rightMargin: 16
-                    Layout.topMargin: root.sourceBacked ? 6 : 12
+                    Layout.topMargin: 12
                     Layout.bottomMargin: 16
                     Layout.preferredHeight: 34
-                    enabled: !root.sourceBacked
                     //% "Delete dropdown"
                     text: qsTrId("DeleteDropdown")
-                    //% "Saved dropdowns cannot be deleted yet."
-                    ToolTip.text: root.sourceBacked
-                        ? qsTrId("SavedDropdownCannotBeDeleted")
-                        : text
+                    ToolTip.text: text
                     ToolTip.visible: hovered
                     ToolTip.delay: 500
                     onClicked: root.deleteDropdown()

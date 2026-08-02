@@ -122,6 +122,23 @@ bool writePdfObjects(const QString &filePath,
         && file.write(data) == data.size();
 }
 
+bool createDropdownDeleteRegressionPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray(
+                "<< /Type /Catalog /Pages 2 0 R "
+                "/TrePDFRegression 4 0 R >>"),
+            QByteArray(
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R "
+                "/MediaBox [0 0 595 842] /Resources << >> >>"),
+            QByteArray("(<<)"),
+        });
+}
+
 bool createPushButtonActionPdf(
     const QString &filePath,
     const QByteArray &uri = QByteArray("https://example.com/"))
@@ -2340,6 +2357,8 @@ private slots:
     void savesTextFieldAsAcroForm();
     void savesAndRehydratesCheckbox();
     void savesRehydratesAndInteractsWithDropdown();
+    void deletesRehydratedDropdownWithoutChangingPeer();
+    void deletesDropdownWhenItsSourcePageIsDeleted();
     void rejectsDropdownExportDisplayPairs();
     void rehydratesTextFieldAfterSamePathSave();
     void normalizesLegacyTextFieldAppearances();
@@ -3677,7 +3696,8 @@ void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()
     QCOMPARE(hydrated.value(QStringLiteral("options")).toStringList(),
              editedOptions);
     QVERIFY(!hydrated.value(QStringLiteral("optionsDirty")).toBool());
-    QVERIFY(!formDesigner.removeField(fieldId));
+    QVERIFY(!formDesigner.removeField(
+        fieldId + QStringLiteral("-missing")));
 
     inspection = inspectAcroFormField(
         sourcePath,
@@ -3710,6 +3730,452 @@ void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()
     QVERIFY(!formDesigner.sourceFieldContainsPoint(
         0,
         initialRect.topLeft()));
+}
+
+void PDFEditControllerTest::deletesRehydratedDropdownWithoutChangingPeer()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-dropdown-delete.pdf"));
+    QVERIFY(createDropdownDeleteRegressionPdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+
+    const QStringList removedOptions({
+        QStringLiteral("Bus"),
+        QStringLiteral("Train"),
+        QStringLiteral("Plane"),
+    });
+    const QStringList peerOptions({
+        QStringLiteral("Hanoi"),
+        QStringLiteral("Da Nang"),
+        QStringLiteral("Ho Chi Minh City"),
+    });
+    const QRectF removedRect(0.12, 0.18, 0.34, 0.06);
+    const QRectF peerRect(0.54, 0.38, 0.36, 0.07);
+    const QString removedFieldId = formDesigner.addField(
+        PDFFormDesignerController::Dropdown,
+        0,
+        removedRect.x(),
+        removedRect.y(),
+        removedRect.width(),
+        removedRect.height());
+    const QString peerFieldId = formDesigner.addField(
+        PDFFormDesignerController::Dropdown,
+        0,
+        peerRect.x(),
+        peerRect.y(),
+        peerRect.width(),
+        peerRect.height());
+    QVERIFY(removedFieldId.startsWith(
+        QStringLiteral("dropdown-field-")));
+    QVERIFY(peerFieldId.startsWith(QStringLiteral("dropdown-field-")));
+    QVERIFY(formDesigner.setFieldName(
+        removedFieldId,
+        QStringLiteral("TransportToDelete")));
+    QVERIFY(formDesigner.setFieldOptions(
+        removedFieldId,
+        removedOptions));
+    QVERIFY(formDesigner.setFieldValue(
+        removedFieldId,
+        QStringLiteral("Train")));
+    QVERIFY(formDesigner.setFieldName(
+        peerFieldId,
+        QStringLiteral("DestinationToKeep")));
+    QVERIFY(formDesigner.setFieldOptions(peerFieldId, peerOptions));
+    QVERIFY(formDesigner.setFieldValue(
+        peerFieldId,
+        QStringLiteral("Da Nang")));
+
+    QSignalSpy saveFinishedSpy(
+        &editController,
+        &PDFEditController::saveFinished);
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+    QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+    QFile savedFixture(sourcePath);
+    QVERIFY(savedFixture.open(QIODevice::ReadOnly));
+    QByteArray savedFixtureBytes = savedFixture.readAll();
+    QVERIFY(savedFixtureBytes.contains(
+        QByteArrayLiteral("/TrePDFRegression 4 0 R")));
+    QVERIFY(savedFixtureBytes.contains(QByteArrayLiteral("(<<)")));
+
+    const QVariantMap rehydratedRemoved
+        = formDesigner.fieldData(removedFieldId);
+    const QVariantMap rehydratedPeer
+        = formDesigner.fieldData(peerFieldId);
+    QVERIFY(rehydratedRemoved.value(
+        QStringLiteral("sourceBacked")).toBool());
+    QVERIFY(rehydratedPeer.value(
+        QStringLiteral("sourceBacked")).toBool());
+
+    QVector<PDFFormWorker::ChoiceField> choiceFields;
+    bool choiceInspectionCompleted = false;
+    formController.requestChoiceFields(
+        0,
+        [&choiceFields, &choiceInspectionCompleted](
+            QVector<PDFFormWorker::ChoiceField> fields) {
+            choiceFields = std::move(fields);
+            choiceInspectionCompleted = true;
+        });
+    QTRY_VERIFY_WITH_TIMEOUT(choiceInspectionCompleted, 5000);
+    QCOMPARE(choiceFields.size(), 2);
+    const auto removedChoice = std::find_if(
+        choiceFields.cbegin(),
+        choiceFields.cend(),
+        [&removedRect](const PDFFormWorker::ChoiceField &choice) {
+            return qAbs(choice.normalizedRect.x() - removedRect.x())
+                    < 0.01
+                && qAbs(choice.normalizedRect.y() - removedRect.y())
+                    < 0.01;
+        });
+    QVERIFY(removedChoice != choiceFields.cend());
+    const int removedAnnotationIndex = removedChoice->annotationIndex;
+    const int removedSourcePage = removedChoice->sourcePage;
+    const QString removedIdentityToken = removedChoice->identityToken;
+    QVERIFY(!removedIdentityToken.isEmpty());
+
+    QVERIFY(formDesigner.removeField(removedFieldId));
+    QCOMPARE(formDesigner.rowCount(), 1);
+    QVERIFY(formDesigner.hasDrafts());
+    QVERIFY(formDesigner.fieldData(removedFieldId).isEmpty());
+    const QVariantList visibleFields = formDesigner.fieldsForPage(0);
+    QCOMPARE(visibleFields.size(), 1);
+    QCOMPARE(visibleFields.constFirst().toMap()
+                 .value(QStringLiteral("id"))
+                 .toString(),
+             peerFieldId);
+
+    const QStringList suppressedFieldIds
+        = formDesigner.sourceFieldIdsForPage(0);
+    QCOMPARE(suppressedFieldIds.size(), 2);
+    QVERIFY(suppressedFieldIds.contains(removedFieldId));
+    QVERIFY(suppressedFieldIds.contains(peerFieldId));
+    QVERIFY(formDesigner.managesSourceChoiceField(
+        removedSourcePage,
+        removedAnnotationIndex,
+        removedIdentityToken));
+    QVERIFY(formDesigner.managesSourceWidget(
+        0,
+        removedAnnotationIndex,
+        removedFieldId));
+    QVERIFY(formDesigner.sourceFieldContainsPoint(
+        0,
+        removedRect.center()));
+    QVERIFY(!formDesigner.sourceFieldContainsPoint(
+        0,
+        QPointF(0.98, 0.98)));
+
+    const QVector<PDFFormDesignerController::SaveField> removedFields
+        = formDesigner.saveFields();
+    QCOMPARE(removedFields.size(), 1);
+    QCOMPARE(removedFields.constFirst().id, removedFieldId);
+    QCOMPARE(removedFields.constFirst().type,
+             PDFFormDesignerController::Dropdown);
+    QCOMPARE(removedFields.constFirst().operation,
+             PDFFormDesignerController::SaveField::Remove);
+    QCOMPARE(removedFields.constFirst().page, 0);
+
+    editController.discardDrafts();
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        formDesigner.fieldData(removedFieldId)
+            .value(QStringLiteral("sourceBacked"))
+            .toBool(),
+        5000);
+    QCOMPARE(inspectAcroFormField(
+                 sourcePath,
+                 QStringLiteral("TransportToDelete"))
+                 .fieldType,
+             FPDF_FORMFIELD_COMBOBOX);
+
+    const QStringList addedOptions({
+        QStringLiteral("Standard"),
+        QStringLiteral("Express"),
+        QStringLiteral("Overnight"),
+    });
+    const QRectF addedRect(0.20, 0.64, 0.42, 0.06);
+    const QString addedFieldId = formDesigner.addField(
+        PDFFormDesignerController::Dropdown,
+        0,
+        addedRect.x(),
+        addedRect.y(),
+        addedRect.width(),
+        addedRect.height());
+    QVERIFY(addedFieldId.startsWith(QStringLiteral("dropdown-field-")));
+    QVERIFY(formDesigner.setFieldName(
+        addedFieldId,
+        QStringLiteral("DeliveryToAdd")));
+    QVERIFY(formDesigner.setFieldOptions(addedFieldId, addedOptions));
+    QVERIFY(formDesigner.setFieldValue(
+        addedFieldId,
+        QStringLiteral("Overnight")));
+    QVERIFY(formDesigner.removeField(removedFieldId));
+    const QVector<PDFFormDesignerController::SaveField> mixedFields
+        = formDesigner.saveFields();
+    QCOMPARE(mixedFields.size(), 2);
+    const auto addedSnapshot = std::find_if(
+        mixedFields.cbegin(),
+        mixedFields.cend(),
+        [](const PDFFormDesignerController::SaveField &field) {
+            return field.operation
+                == PDFFormDesignerController::SaveField::Add;
+        });
+    const auto removedSnapshot = std::find_if(
+        mixedFields.cbegin(),
+        mixedFields.cend(),
+        [](const PDFFormDesignerController::SaveField &field) {
+            return field.operation
+                == PDFFormDesignerController::SaveField::Remove;
+        });
+    QVERIFY(addedSnapshot != mixedFields.cend());
+    QVERIFY(removedSnapshot != mixedFields.cend());
+    QCOMPARE(addedSnapshot->id, addedFieldId);
+    QCOMPARE(addedSnapshot->name, QStringLiteral("DeliveryToAdd"));
+    QCOMPARE(addedSnapshot->options, addedOptions);
+    QCOMPARE(addedSnapshot->value, QStringLiteral("Overnight"));
+    QCOMPARE(removedSnapshot->id, removedFieldId);
+    QCOMPARE(removedSnapshot->operation,
+             PDFFormDesignerController::SaveField::Remove);
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+    QVERIFY(formDesigner.fieldData(removedFieldId).isEmpty());
+    savedFixture.close();
+    QVERIFY(savedFixture.open(QIODevice::ReadOnly));
+    savedFixtureBytes = savedFixture.readAll();
+    QVERIFY(savedFixtureBytes.contains(
+        QByteArrayLiteral("/TrePDFRegression 4 0 R")));
+    QVERIFY(savedFixtureBytes.contains(QByteArrayLiteral("(<<)")));
+
+    const QStringList remainingSourceFieldIds
+        = formDesigner.sourceFieldIdsForPage(0);
+    QCOMPARE(remainingSourceFieldIds.size(), 2);
+    QVERIFY(!remainingSourceFieldIds.contains(removedFieldId));
+    QVERIFY(remainingSourceFieldIds.contains(peerFieldId));
+    QVERIFY(remainingSourceFieldIds.contains(addedFieldId));
+    const QVariantMap remainingPeer
+        = formDesigner.fieldData(peerFieldId);
+    QVERIFY(remainingPeer.value(
+        QStringLiteral("sourceBacked")).toBool());
+    QCOMPARE(remainingPeer.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Da Nang"));
+    QCOMPARE(remainingPeer.value(QStringLiteral("options")).toStringList(),
+             peerOptions);
+    const QVariantMap remainingAdded
+        = formDesigner.fieldData(addedFieldId);
+    QVERIFY(remainingAdded.value(
+        QStringLiteral("sourceBacked")).toBool());
+    QCOMPARE(remainingAdded.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Overnight"));
+    QCOMPARE(remainingAdded.value(QStringLiteral("options")).toStringList(),
+             addedOptions);
+
+    const AcroFormFieldInspection deletedInspection
+        = inspectAcroFormField(
+            sourcePath,
+            QStringLiteral("TransportToDelete"));
+    QVERIFY(deletedInspection.readable);
+    QCOMPARE(deletedInspection.widgetCount, 2);
+    QCOMPARE(deletedInspection.fieldType, FPDF_FORMFIELD_UNKNOWN);
+    QVERIFY(deletedInspection.name.isEmpty());
+
+    const AcroFormFieldInspection peerInspection
+        = inspectAcroFormField(
+            sourcePath,
+            QStringLiteral("DestinationToKeep"));
+    QVERIFY(peerInspection.readable);
+    QCOMPARE(peerInspection.formType, FORMTYPE_ACRO_FORM);
+    QCOMPARE(peerInspection.widgetCount, 2);
+    QCOMPARE(peerInspection.fieldType, FPDF_FORMFIELD_COMBOBOX);
+    QCOMPARE(peerInspection.name,
+             QStringLiteral("DestinationToKeep"));
+    QCOMPARE(peerInspection.value, QStringLiteral("Da Nang"));
+    QCOMPARE(peerInspection.defaultValue, peerOptions.constFirst());
+    QCOMPARE(peerInspection.options, peerOptions);
+    QCOMPARE(peerInspection.selectedIndices, QVector<int>({1}));
+    QVERIFY(peerInspection.hasAppearance);
+    QVERIFY(qAbs(peerInspection.rect.left - 321.3) < 1.0);
+    QVERIFY(qAbs(peerInspection.rect.right - 535.5) < 1.0);
+    QVERIFY(qAbs(peerInspection.rect.top - 521.66) < 1.0);
+    QVERIFY(qAbs(peerInspection.rect.bottom - 462.72) < 1.0);
+
+    const AcroFormFieldInspection addedInspection
+        = inspectAcroFormField(
+            sourcePath,
+            QStringLiteral("DeliveryToAdd"));
+    QVERIFY(addedInspection.readable);
+    QCOMPARE(addedInspection.widgetCount, 2);
+    QCOMPARE(addedInspection.fieldType, FPDF_FORMFIELD_COMBOBOX);
+    QCOMPARE(addedInspection.name, QStringLiteral("DeliveryToAdd"));
+    QCOMPARE(addedInspection.value, QStringLiteral("Overnight"));
+    QCOMPARE(addedInspection.defaultValue, addedOptions.constFirst());
+    QCOMPARE(addedInspection.options, addedOptions);
+    QCOMPARE(addedInspection.selectedIndices, QVector<int>({2}));
+    QVERIFY(addedInspection.hasAppearance);
+    QVERIFY(qAbs(addedInspection.rect.left - 119.0) < 1.0);
+    QVERIFY(qAbs(addedInspection.rect.right - 368.9) < 1.0);
+    QVERIFY(qAbs(addedInspection.rect.top - 303.12) < 1.0);
+    QVERIFY(qAbs(addedInspection.rect.bottom - 252.6) < 1.0);
+}
+
+void PDFEditControllerTest::deletesDropdownWhenItsSourcePageIsDeleted()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("dropdown-delete-with-source-page.pdf"));
+    QVERIFY(createDifferentPageSizesPdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    QCOMPARE(document.pageCount(), 2);
+
+    const QString fieldName = QStringLiteral("ReusablePageZeroDropdown");
+    const QStringList initialOptions({
+        QStringLiteral("Alpha"),
+        QStringLiteral("Beta"),
+        QStringLiteral("Gamma"),
+    });
+    const QRectF initialRect(0.16, 0.20, 0.42, 0.07);
+    const QString removedFieldId = formDesigner.addField(
+        PDFFormDesignerController::Dropdown,
+        0,
+        initialRect.x(),
+        initialRect.y(),
+        initialRect.width(),
+        initialRect.height());
+    QVERIFY(!removedFieldId.isEmpty());
+    QVERIFY(formDesigner.setFieldName(removedFieldId, fieldName));
+    QVERIFY(formDesigner.setFieldOptions(
+        removedFieldId,
+        initialOptions));
+    QVERIFY(formDesigner.setFieldValue(
+        removedFieldId,
+        QStringLiteral("Beta")));
+
+    QSignalSpy saveFinishedSpy(
+        &editController,
+        &PDFEditController::saveFinished);
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+    QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+    QVERIFY(formDesigner.fieldData(removedFieldId)
+                .value(QStringLiteral("sourceBacked"))
+                .toBool());
+
+    QVERIFY(formDesigner.removeField(removedFieldId));
+    QCOMPARE(formDesigner.rowCount(), 0);
+    document.setCurrentPage(0);
+    QCOMPARE(editController.deleteCurrentPage(), 0);
+    QCOMPARE(document.pageCount(), 1);
+    QCOMPARE(document.sourcePageIndex(0), 1);
+    QCOMPARE(document.displayPageIndexForSourcePage(0), -1);
+
+    const QVector<PDFFormDesignerController::SaveField> removedFields
+        = formDesigner.saveFields();
+    QCOMPARE(removedFields.size(), 1);
+    QCOMPARE(removedFields.constFirst().id, removedFieldId);
+    QCOMPARE(removedFields.constFirst().operation,
+             PDFFormDesignerController::SaveField::Remove);
+    QCOMPARE(removedFields.constFirst().page, -1);
+    QVERIFY(editController.hasDrafts());
+
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(document.pageCount(), 1, 10000);
+    QCOMPARE(document.sourcePageCount(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 0, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!editController.hasDrafts(), 10000);
+    QVERIFY(formDesigner.fieldData(removedFieldId).isEmpty());
+    QVERIFY(formDesigner.sourceFieldIdsForPage(0).isEmpty());
+
+    AcroFormFieldInspection inspection = inspectAcroFormField(
+        sourcePath,
+        fieldName);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.widgetCount, 0);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_UNKNOWN);
+
+    const QStringList replacementOptions({
+        QStringLiteral("One"),
+        QStringLiteral("Two"),
+        QStringLiteral("Three"),
+    });
+    const QRectF replacementRect(0.22, 0.34, 0.52, 0.09);
+    const QString replacementFieldId = formDesigner.addField(
+        PDFFormDesignerController::Dropdown,
+        0,
+        replacementRect.x(),
+        replacementRect.y(),
+        replacementRect.width(),
+        replacementRect.height());
+    QVERIFY(!replacementFieldId.isEmpty());
+    QVERIFY(formDesigner.setFieldName(replacementFieldId, fieldName));
+    QVERIFY(formDesigner.setFieldOptions(
+        replacementFieldId,
+        replacementOptions));
+    QVERIFY(formDesigner.setFieldValue(
+        replacementFieldId,
+        QStringLiteral("Three")));
+
+    const QVector<PDFFormDesignerController::SaveField> replacementFields
+        = formDesigner.saveFields();
+    QCOMPARE(replacementFields.size(), 1);
+    QCOMPARE(replacementFields.constFirst().id, replacementFieldId);
+    QCOMPARE(replacementFields.constFirst().operation,
+             PDFFormDesignerController::SaveField::Add);
+    QCOMPARE(replacementFields.constFirst().name, fieldName);
+
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 3, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!editController.hasDrafts(), 10000);
+
+    const QVariantMap replacement
+        = formDesigner.fieldData(replacementFieldId);
+    QVERIFY(replacement.value(
+        QStringLiteral("sourceBacked")).toBool());
+    QCOMPARE(replacement.value(QStringLiteral("name")).toString(),
+             fieldName);
+    QCOMPARE(replacement.value(QStringLiteral("options")).toStringList(),
+             replacementOptions);
+    QCOMPARE(replacement.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Three"));
+
+    inspection = inspectAcroFormField(sourcePath, fieldName);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_COMBOBOX);
+    QCOMPARE(inspection.name, fieldName);
+    QCOMPARE(inspection.options, replacementOptions);
+    QCOMPARE(inspection.value, QStringLiteral("Three"));
+    QCOMPARE(inspection.selectedIndices, QVector<int>({2}));
 }
 
 void PDFEditControllerTest::rejectsDropdownExportDisplayPairs()

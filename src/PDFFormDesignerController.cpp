@@ -564,6 +564,11 @@ QStringList PDFFormDesignerController::sourceFieldIdsForPage(int page) const
             fieldIds.append(field.id);
         }
     }
+    for (const FormField &field : m_removedSourceFields) {
+        if (displayPageForField(field) == page) {
+            fieldIds.append(field.id);
+        }
+    }
     return fieldIds;
 }
 
@@ -576,16 +581,18 @@ bool PDFFormDesignerController::managesSourceChoiceField(
         return false;
     }
 
-    return std::any_of(
-        m_fields.cbegin(),
-        m_fields.cend(),
+    const auto matches =
         [sourcePage, annotationIndex, &identityToken](const FormField &field) {
             return field.type == Dropdown
                 && field.sourceBacked
                 && field.sourcePage == sourcePage
                 && field.sourceAnnotationIndex == annotationIndex
                 && field.sourceIdentityToken == identityToken;
-        });
+        };
+    return std::any_of(m_fields.cbegin(), m_fields.cend(), matches)
+        || std::any_of(m_removedSourceFields.cbegin(),
+                       m_removedSourceFields.cend(),
+                       matches);
 }
 
 bool PDFFormDesignerController::managesSourceWidget(
@@ -597,15 +604,17 @@ bool PDFFormDesignerController::managesSourceWidget(
         return false;
     }
 
-    return std::any_of(
-        m_fields.cbegin(),
-        m_fields.cend(),
+    const auto matches =
         [this, page, annotationIndex, &widgetId](const FormField &field) {
             return field.sourceBacked
                 && field.id == widgetId
                 && displayPageForField(field) == page
                 && field.sourceAnnotationIndex == annotationIndex;
-        });
+        };
+    return std::any_of(m_fields.cbegin(), m_fields.cend(), matches)
+        || std::any_of(m_removedSourceFields.cbegin(),
+                       m_removedSourceFields.cend(),
+                       matches);
 }
 
 bool PDFFormDesignerController::sourceFieldContainsPoint(
@@ -620,14 +629,16 @@ bool PDFFormDesignerController::sourceFieldContainsPoint(
         return false;
     }
 
-    return std::any_of(
-        m_fields.cbegin(),
-        m_fields.cend(),
+    const auto containsPoint =
         [this, page, &normalizedPoint](const FormField &field) {
             return field.sourceBacked
                 && displayPageForField(field) == page
                 && field.sourceNormalizedRect.contains(normalizedPoint);
-        });
+        };
+    return std::any_of(m_fields.cbegin(), m_fields.cend(), containsPoint)
+        || std::any_of(m_removedSourceFields.cbegin(),
+                       m_removedSourceFields.cend(),
+                       containsPoint);
 }
 
 QStringList PDFFormDesignerController::sourceTextFieldIdsForPage(
@@ -878,16 +889,24 @@ bool PDFFormDesignerController::setTextFieldRect(const QString &fieldId,
 bool PDFFormDesignerController::removeField(const QString &fieldId)
 {
     const int row = rowForFieldId(fieldId);
-    if (row < 0 || m_fields.at(row).sourceBacked) {
+    if (row < 0) {
         return false;
     }
 
-    const int page = displayPageForField(m_fields.at(row));
+    const FormField &field = m_fields.at(row);
+    if (field.sourceBacked && field.type != Dropdown) {
+        return false;
+    }
+
+    const int page = displayPageForField(field);
     if (m_focusedTextFieldId == fieldId) {
         clearTextFieldFocus();
     }
     if (m_selectedTextFieldId == fieldId) {
         clearTextFieldSelection();
+    }
+    if (field.sourceBacked) {
+        m_removedSourceFields.append(field);
     }
     beginRemoveRows({}, row, row);
     m_fields.removeAt(row);
@@ -948,14 +967,19 @@ void PDFFormDesignerController::clear()
     ++m_sourceReloadSerial;
     clearTextFieldFocus();
     clearTextFieldSelection();
-    if (m_fields.isEmpty()) {
+    const bool hadFields = !m_fields.isEmpty();
+    const bool hadRemovedSourceFields = !m_removedSourceFields.isEmpty();
+    if (!hadFields && !hadRemovedSourceFields) {
         m_nextFieldId = 0;
         return;
     }
 
-    beginRemoveRows({}, 0, m_fields.size() - 1);
-    m_fields.clear();
-    endRemoveRows();
+    if (hadFields) {
+        beginRemoveRows({}, 0, m_fields.size() - 1);
+        m_fields.clear();
+        endRemoveRows();
+    }
+    m_removedSourceFields.clear();
     m_nextFieldId = 0;
     emit textFieldsChanged(-1);
     emit draftStateChanged();
@@ -968,12 +992,13 @@ void PDFFormDesignerController::resetFromDocument()
 
 bool PDFFormDesignerController::hasDrafts() const
 {
-    return std::any_of(
-        m_fields.cbegin(),
-        m_fields.cend(),
-        [](const FormField &field) {
-            return field.changedProperties != NoPropertyChanges;
-        });
+    return !m_removedSourceFields.isEmpty()
+        || std::any_of(
+            m_fields.cbegin(),
+            m_fields.cend(),
+            [](const FormField &field) {
+                return field.changedProperties != NoPropertyChanges;
+            });
 }
 
 QVector<PDFFormDesignerController::SaveField>
@@ -983,7 +1008,7 @@ PDFFormDesignerController::saveFields(
     bool normalizeAllNativeAppearances) const
 {
     QVector<SaveField> fields;
-    fields.reserve(m_fields.size());
+    fields.reserve(m_fields.size() + m_removedSourceFields.size());
     QSet<int> normalizationPages;
     if (includeAppearanceNormalization) {
         // Normalize legacy peers only on pages where the user made a real
@@ -1048,6 +1073,23 @@ PDFFormDesignerController::saveFields(
         saved.changedProperties = field.changedProperties;
         fields.append(std::move(saved));
     }
+    for (const FormField &field : m_removedSourceFields) {
+        const int page = displayPageForField(field);
+        SaveField saved;
+        saved.id = field.id;
+        saved.name = field.name;
+        saved.tooltip = field.tooltip;
+        saved.value = field.value;
+        saved.defaultValue = field.defaultValue;
+        saved.options = field.options;
+        saved.type = field.type;
+        saved.page = page;
+        saved.normalizedRect = field.sourceNormalizedRect;
+        saved.flags = field.flags;
+        saved.operation = SaveField::Remove;
+        saved.changedProperties = NoPropertyChanges;
+        fields.append(std::move(saved));
+    }
     return fields;
 }
 
@@ -1107,10 +1149,15 @@ void PDFFormDesignerController::reloadSourceFields()
     const quint64 requestSerial = ++m_sourceReloadSerial;
     clearTextFieldFocus();
     clearTextFieldSelection();
+    const bool hadFields = !m_fields.isEmpty();
+    const bool hadRemovedSourceFields = !m_removedSourceFields.isEmpty();
     if (!m_fields.isEmpty()) {
         beginRemoveRows({}, 0, m_fields.size() - 1);
         m_fields.clear();
         endRemoveRows();
+    }
+    m_removedSourceFields.clear();
+    if (hadFields || hadRemovedSourceFields) {
         emit textFieldsChanged(-1);
         emit draftStateChanged();
     }
@@ -1201,7 +1248,7 @@ void PDFFormDesignerController::reloadSourceFields()
 
 void PDFFormDesignerController::handlePageStructureChanged()
 {
-    if (m_fields.isEmpty()) {
+    if (m_fields.isEmpty() && m_removedSourceFields.isEmpty()) {
         return;
     }
 

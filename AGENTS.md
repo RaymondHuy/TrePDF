@@ -48,7 +48,12 @@ Current features:
   selection, movement, resizing, and transient deletion; check boxes can be
   toggled and dropdown values can be selected in the designer. They persist as
   interactive AcroForm fields with explicit appearances and are rehydrated
-  after reopen, including dropdown options and selection.
+  after reopen, including dropdown options and selection. A TrePDF-created
+  Dropdown can also be deleted after rehydrate: deletion remains a Forms-mode
+  draft until Save/Save As, while Discard restores it. This source-backed
+  removal path is limited to top-level, single-widget TrePDF Dropdown fields;
+  source-backed Text Field/Check Box and arbitrary AcroForm choice-field
+  structures remain protected.
 - Text draft editing with selection, undo, redo, discard, Save, and Save As.
   Drafts stay session-only until a save succeeds.
 - Add Image uses the same placement cursor and draft history as Add Text. After

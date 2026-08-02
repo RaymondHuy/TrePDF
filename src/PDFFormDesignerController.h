@@ -83,7 +83,8 @@ public:
     {
         enum Operation {
             Add,
-            Update
+            Update,
+            Remove
         };
 
         QString id;
@@ -225,6 +226,7 @@ private:
     QPointer<PDFDocument> m_document;
     QPointer<PDFFormController> m_formController;
     QVector<FormField> m_fields;
+    QVector<FormField> m_removedSourceFields;
     QString m_focusedTextFieldId;
     QString m_selectedTextFieldId;
     quint64 m_nextFieldId = 0;

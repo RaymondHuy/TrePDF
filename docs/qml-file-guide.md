@@ -416,9 +416,12 @@ TrePDF rehydrate sau khi mở lại.
 - Field có thể kéo trực tiếp sau ngưỡng drag. Field text được chọn còn có move
   handle ở góc và hỗ trợ phím mũi tên; C++ clamp top-left để giữ nguyên kích
   thước trong trang rồi gọi `moveField()` đúng một lần khi kết thúc.
-- Check Box có thể activate/toggle; Dropdown có thể mở/chọn option; field
-  transient trong Forms mode có nút xóa. Source-backed field được bảo vệ theo
-  khả năng writer hiện tại.
+- Check Box có thể activate/toggle; Dropdown có thể mở/chọn option. Text Field
+  và Check Box transient có nút xóa nổi; Dropdown transient hoặc source-backed
+  do TrePDF tạo chỉ được xóa từ panel tùy chọn. Discard phục hồi, còn Save/Save
+  As mới gỡ field/Widget source-backed.
+  Source-backed Text Field/Check Box và Dropdown AcroForm ngoài phạm vi hẹp này
+  vẫn được bảo vệ.
 
 **Phối hợp mode:** field có thể visible trong Forms hoặc Edit, nhưng placement,
 move, resize, editor và delete được gate riêng bằng `formsActive`, `editActive`,

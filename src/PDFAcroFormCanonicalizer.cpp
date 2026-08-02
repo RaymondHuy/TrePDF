@@ -13,6 +13,7 @@
 #include <QPolygonF>
 #include <QRawFont>
 #include <QSet>
+#include <QUuid>
 
 #include <algorithm>
 #include <limits>
@@ -24,6 +25,23 @@ constexpr char kUnicodeFormFontPath[]
     = ":/trepdf/fonts/Arial/Arial-Regular.TTF";
 constexpr char kUnicodeFormFontBaseName[] = "ArialMT";
 constexpr char kUnicodeFormFontResourcePrefix[] = "TrePDFUF";
+
+bool isTrePDFDropdownWidgetId(const QString &widgetId)
+{
+    constexpr qsizetype uuidLength = 36;
+    const QString prefix = QStringLiteral("dropdown-field-");
+    if (!widgetId.startsWith(prefix)
+        || widgetId.size() != prefix.size() + uuidLength) {
+        return false;
+    }
+    const QString suffix = widgetId.sliced(prefix.size());
+    const QUuid uuid = QUuid::fromString(suffix);
+    return !uuid.isNull()
+        && uuid.toString(QUuid::WithoutBraces).compare(
+               suffix,
+               Qt::CaseInsensitive)
+            == 0;
+}
 
 struct UnicodeFormFontTemplate {
     QByteArray compressedFontData;
@@ -2001,6 +2019,453 @@ bool pdfValueEnd(const char *data,
     return end > start;
 }
 
+bool topLevelDictionaryValueRange(const QByteArray &object,
+                                  QByteArrayView key,
+                                  qsizetype &valueStart,
+                                  qsizetype &valueEnd,
+                                  QString &error)
+{
+    valueStart = -1;
+    valueEnd = -1;
+    Cursor objectCursor(object.constData(), object.size());
+    qint64 objectNumber = -1;
+    qint64 generation = -1;
+    if (!objectCursor.integer(objectNumber)
+        || !objectCursor.integer(generation)
+        || !objectCursor.consume("obj")) {
+        error = QStringLiteral("A PDF indirect object header is malformed.");
+        return false;
+    }
+    objectCursor.skipWhitespaceAndComments();
+    const qsizetype dictionaryStart = objectCursor.position();
+    qsizetype dictionaryEnd = -1;
+    if (dictionaryStart + 1 >= object.size()
+        || object.at(dictionaryStart) != '<'
+        || object.at(dictionaryStart + 1) != '<'
+        || !matchingDictionaryEnd(
+            object.constData(),
+            object.size(),
+            dictionaryStart,
+            dictionaryEnd)) {
+        error = QStringLiteral("A PDF dictionary is malformed.");
+        return false;
+    }
+
+    qsizetype position = dictionaryStart + 2;
+    while (position < dictionaryEnd - 2) {
+        Cursor cursor(object.constData(), object.size(), position);
+        cursor.skipWhitespaceAndComments();
+        const qsizetype keyStart = cursor.position();
+        if (keyStart >= dictionaryEnd - 2) {
+            break;
+        }
+        if (object.at(keyStart) != '/') {
+            error = QStringLiteral("A PDF dictionary entry is malformed.");
+            return false;
+        }
+
+        qsizetype keyEnd = keyStart + 1;
+        while (keyEnd < dictionaryEnd - 2
+               && !isDelimiter(object.at(keyEnd))) {
+            ++keyEnd;
+        }
+        Cursor valueCursor(object.constData(), object.size(), keyEnd);
+        valueCursor.skipWhitespaceAndComments();
+        const qsizetype candidateStart = valueCursor.position();
+        qsizetype candidateEnd = -1;
+        if (candidateStart >= dictionaryEnd - 2
+            || !pdfValueEnd(
+                object.constData(),
+                dictionaryEnd - 2,
+                candidateStart,
+                candidateEnd)) {
+            error = QStringLiteral("A PDF dictionary value is malformed.");
+            return false;
+        }
+
+        const QByteArrayView currentKey(
+            object.constData() + keyStart,
+            keyEnd - keyStart);
+        if (currentKey == key) {
+            valueStart = candidateStart;
+            valueEnd = candidateEnd;
+            return true;
+        }
+        position = candidateEnd;
+    }
+    return true;
+}
+
+bool objectForReference(const ParsedPdf &pdf,
+                        const ObjectReference &reference,
+                        const QHash<int, QByteArray> &rewrittenObjects,
+                        QByteArray &object,
+                        QString &error)
+{
+    const auto entry = pdf.entries.constFind(reference.number);
+    if (entry == pdf.entries.cend()
+        || entry->generation != reference.generation) {
+        error = QStringLiteral(
+            "A required PDF object reference is missing or stale.");
+        return false;
+    }
+    const auto rewritten = rewrittenObjects.constFind(reference.number);
+    if (rewritten != rewrittenObjects.cend()) {
+        object = *rewritten;
+        return true;
+    }
+    object = completeObject(pdf, reference.number, error);
+    return !object.isEmpty();
+}
+
+struct PageAnnotsArray {
+    ObjectReference reference;
+    QByteArray object;
+    qsizetype start = -1;
+    qsizetype end = -1;
+};
+
+bool pageAnnotsArray(const ParsedPdf &pdf,
+                     const ObjectReference &pageReference,
+                     const QHash<int, QByteArray> &rewrittenObjects,
+                     PageAnnotsArray &annots,
+                     QString &error)
+{
+    QByteArray pageObject;
+    if (!objectForReference(
+            pdf,
+            pageReference,
+            rewrittenObjects,
+            pageObject,
+            error)) {
+        return false;
+    }
+
+    qsizetype annotsStart = -1;
+    qsizetype annotsEnd = -1;
+    if (!topLevelDictionaryValueRange(
+            pageObject,
+            QByteArrayView("/Annots"),
+            annotsStart,
+            annotsEnd,
+            error)
+        || annotsStart < 0) {
+        if (error.isEmpty()) {
+            error = QStringLiteral(
+                "The Widget page has no direct Annots entry.");
+        }
+        return false;
+    }
+
+    if (pageObject.at(annotsStart) == '[') {
+        annots.reference = pageReference;
+        annots.object = std::move(pageObject);
+        annots.start = annotsStart;
+        annots.end = annotsEnd;
+        qsizetype checkedEnd = -1;
+        if (!matchingArrayEnd(
+                annots.object.constData(),
+                annots.object.size(),
+                annots.start,
+                checkedEnd)
+            || checkedEnd != annots.end) {
+            error = QStringLiteral(
+                "The Widget page Annots array is malformed.");
+            return false;
+        }
+    } else {
+        ObjectReference annotsReference;
+        qsizetype referenceEnd = -1;
+        if (!parseReference(
+                pageObject.constData(),
+                annotsEnd,
+                annotsStart,
+                annotsReference,
+                &referenceEnd)
+            || referenceEnd != annotsEnd
+            || !objectForReference(
+                pdf,
+                annotsReference,
+                rewrittenObjects,
+                annots.object,
+                error)) {
+            if (error.isEmpty()) {
+                error = QStringLiteral(
+                    "The Widget page Annots entry is unsupported.");
+            }
+            return false;
+        }
+        annots.reference = annotsReference;
+
+        Cursor objectCursor(
+            annots.object.constData(),
+            annots.object.size());
+        qint64 objectNumber = -1;
+        qint64 generation = -1;
+        if (!objectCursor.integer(objectNumber)
+            || !objectCursor.integer(generation)
+            || !objectCursor.consume("obj")
+            || objectNumber != annotsReference.number
+            || generation != annotsReference.generation) {
+            error = QStringLiteral(
+                "The indirect Widget Annots array object is malformed.");
+            return false;
+        }
+        objectCursor.skipWhitespaceAndComments();
+        annots.start = objectCursor.position();
+        if (annots.start >= annots.object.size()
+            || annots.object.at(annots.start) != '['
+            || !matchingArrayEnd(
+                annots.object.constData(),
+                annots.object.size(),
+                annots.start,
+                annots.end)) {
+            error = QStringLiteral(
+                "The indirect Widget Annots array is malformed.");
+            return false;
+        }
+        Cursor endCursor(
+            annots.object.constData(),
+            annots.object.size(),
+            annots.end);
+        if (!endCursor.consume("endobj")) {
+            error = QStringLiteral(
+                "The indirect Widget Annots array object is malformed.");
+            return false;
+        }
+    }
+    return true;
+}
+
+bool annotationReferenceSpans(
+    const PageAnnotsArray &annots,
+    const QHash<int, ObjectReference> &expectedReferences,
+    QHash<int, int> &matchCounts,
+    QVector<QPair<qsizetype, qsizetype>> &spans,
+    QString &error)
+{
+    qsizetype position = annots.start + 1;
+    while (position < annots.end - 1) {
+        Cursor itemCursor(
+            annots.object.constData(),
+            annots.object.size(),
+            position);
+        itemCursor.skipWhitespaceAndComments();
+        const qsizetype itemStart = itemCursor.position();
+        if (itemStart >= annots.end - 1) {
+            break;
+        }
+
+        ObjectReference candidate;
+        qsizetype itemEnd = -1;
+        if (parseReference(
+                annots.object.constData(),
+                annots.end - 1,
+                itemStart,
+                candidate,
+                &itemEnd)) {
+            const auto expected = expectedReferences.constFind(
+                candidate.number);
+            if (expected != expectedReferences.cend()
+                && *expected == candidate) {
+                ++matchCounts[candidate.number];
+                spans.append({itemStart, itemEnd});
+            }
+            position = itemEnd;
+            continue;
+        }
+
+        if (itemStart + 1 >= annots.end - 1
+            || annots.object.at(itemStart) != '<'
+            || annots.object.at(itemStart + 1) != '<'
+            || !pdfValueEnd(
+                annots.object.constData(),
+                annots.end - 1,
+                itemStart,
+                itemEnd)) {
+            error = QStringLiteral(
+                "The Widget page Annots array contains an unsupported entry.");
+            return false;
+        }
+        position = itemEnd;
+    }
+    return true;
+}
+
+bool pageForWidgetReference(const ParsedPdf &pdf,
+                            const ObjectReference &widgetReference,
+                            ObjectReference &pageReference,
+                            bool &located,
+                            QString &error)
+{
+    const QHash<int, QByteArray> noRewrites;
+    const QHash<int, ObjectReference> expectedReferences({
+        {widgetReference.number, widgetReference},
+    });
+    located = false;
+    for (auto entry = pdf.entries.cbegin();
+         entry != pdf.entries.cend();
+         ++entry) {
+        QString objectError;
+        const QByteArray object = completeObject(
+            pdf,
+            entry.key(),
+            objectError);
+        if (object.isEmpty()) {
+            continue;
+        }
+        Cursor objectCursor(object.constData(), object.size());
+        qint64 objectNumber = -1;
+        qint64 generation = -1;
+        if (!objectCursor.integer(objectNumber)
+            || !objectCursor.integer(generation)
+            || !objectCursor.consume("obj")
+            || objectNumber != entry.key()
+            || generation != entry->generation) {
+            error = QStringLiteral(
+                "A PDF indirect object header is malformed.");
+            return false;
+        }
+        objectCursor.skipWhitespaceAndComments();
+        const qsizetype objectValueStart = objectCursor.position();
+        if (objectValueStart + 1 >= object.size()
+            || object.at(objectValueStart) != '<'
+            || object.at(objectValueStart + 1) != '<') {
+            continue;
+        }
+        qsizetype typeStart = -1;
+        qsizetype typeEnd = -1;
+        if (!topLevelDictionaryValueRange(
+                object,
+                QByteArrayView("/Type"),
+                typeStart,
+                typeEnd,
+                objectError)) {
+            error = objectError;
+            return false;
+        }
+        if (typeStart < 0
+            || QByteArrayView(
+                   object.constData() + typeStart,
+                   typeEnd - typeStart)
+                != QByteArrayView("/Page")) {
+            continue;
+        }
+
+        qsizetype annotsStart = -1;
+        qsizetype annotsEnd = -1;
+        if (!topLevelDictionaryValueRange(
+                object,
+                QByteArrayView("/Annots"),
+                annotsStart,
+                annotsEnd,
+                objectError)) {
+            error = objectError;
+            return false;
+        }
+        if (annotsStart < 0) {
+            continue;
+        }
+
+        const ObjectReference candidatePage{
+            entry.key(),
+            entry->generation};
+        PageAnnotsArray annots;
+        if (!pageAnnotsArray(
+                pdf,
+                candidatePage,
+                noRewrites,
+                annots,
+                error)) {
+            return false;
+        }
+        QHash<int, int> matchCounts;
+        QVector<QPair<qsizetype, qsizetype>> ignoredSpans;
+        if (!annotationReferenceSpans(
+                annots,
+                expectedReferences,
+                matchCounts,
+                ignoredSpans,
+                error)) {
+            return false;
+        }
+        const int count = matchCounts.value(widgetReference.number);
+        if (count > 1 || (count == 1 && located)) {
+            error = QStringLiteral(
+                "The TrePDF Widget reference appears on multiple pages or more than once.");
+            return false;
+        }
+        if (count == 1) {
+            pageReference = candidatePage;
+            located = true;
+        }
+    }
+    return true;
+}
+
+bool removeWidgetReferencesFromPageAnnots(
+    const ParsedPdf &pdf,
+    const ObjectReference &pageReference,
+    const QVector<ObjectReference> &widgetReferences,
+    const QHash<int, QByteArray> &rewrittenObjects,
+    ObjectReference &rewrittenReference,
+    QByteArray &rewrittenObject,
+    QString &error)
+{
+    PageAnnotsArray annots;
+    if (!pageAnnotsArray(
+            pdf,
+            pageReference,
+            rewrittenObjects,
+            annots,
+            error)) {
+        return false;
+    }
+    QHash<int, ObjectReference> expectedReferences;
+    for (const ObjectReference &reference : widgetReferences) {
+        if (expectedReferences.contains(reference.number)) {
+            error = QStringLiteral(
+                "The Widget removal request contains duplicate references.");
+            return false;
+        }
+        expectedReferences.insert(reference.number, reference);
+    }
+    QHash<int, int> matchCounts;
+    QVector<QPair<qsizetype, qsizetype>> removals;
+    if (!annotationReferenceSpans(
+            annots,
+            expectedReferences,
+            matchCounts,
+            removals,
+            error)) {
+        return false;
+    }
+
+    for (auto expected = expectedReferences.cbegin();
+         expected != expectedReferences.cend();
+         ++expected) {
+        if (matchCounts.value(expected.key()) != 1) {
+            error = QStringLiteral(
+                "The TrePDF Widget reference is missing or duplicated in its page Annots array.");
+            return false;
+        }
+    }
+    std::sort(
+        removals.begin(),
+        removals.end(),
+        [](const auto &left, const auto &right) {
+            return left.first > right.first;
+        });
+    for (const auto &removal : std::as_const(removals)) {
+        annots.object.remove(
+            removal.first,
+            removal.second - removal.first);
+    }
+    rewrittenReference = annots.reference;
+    rewrittenObject = std::move(annots.object);
+    return true;
+}
+
 bool hasSimpleDirectStringOptions(const QByteArray &object)
 {
     const qsizetype optionsKey = keyPosition(
@@ -2507,6 +2972,8 @@ QByteArray updatedAcroFormObject(const ParsedPdf &pdf,
                                  QByteArrayView fontResourceName,
                                  QString &error)
 {
+    const bool installDefaultFont = defaultFont.number >= 0
+        && !fontResourceName.isEmpty();
     QByteArray dictionary;
     const QByteArrayView catalogView = objectView(pdf, pdf.root.number);
     if (catalogView.isEmpty()) {
@@ -2566,7 +3033,8 @@ QByteArray updatedAcroFormObject(const ParsedPdf &pdf,
                 dictionary.size() - 2,
                 QByteArrayLiteral(" /Fields ") + referenceArray(references));
         }
-        if (keyPosition(
+        if (installDefaultFont
+            && keyPosition(
                 dictionary.constData(),
                 dictionary.size(),
                 "/DA") < 0) {
@@ -2583,7 +3051,8 @@ QByteArray updatedAcroFormObject(const ParsedPdf &pdf,
             + textFieldDefaultAppearance(fontResourceName)
             + QByteArrayLiteral(") >>");
     }
-    if (!ensureFormFontResource(
+    if (installDefaultFont
+        && !ensureFormFontResource(
             pdf,
             dictionary,
             defaultFont,
@@ -3032,9 +3501,31 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
     QList<ObjectReference> widgetReferences;
     widgetReferences.reserve(formFields.size());
     QSet<int> resolvedWidgetObjectNumbers;
+    QHash<int, QVector<ObjectReference>> removedWidgetsByPage;
+    QHash<int, ObjectReference> removedPageReferences;
     for (const Field &formField : formFields) {
+        if (formField.widgetId.isEmpty()) {
+            error = QStringLiteral(
+                "TrePDF AcroForm operations require a non-empty Widget ID.");
+            file.unmap(mapped);
+            return false;
+        }
         const bool added
             = formField.operation == Operation::Add;
+        const bool removed
+            = formField.operation == Operation::Remove;
+        if (removed && formField.type != FieldType::Dropdown) {
+            error = QStringLiteral(
+                "Only TrePDF Dropdown fields can currently be removed.");
+            file.unmap(mapped);
+            return false;
+        }
+        if (removed && !isTrePDFDropdownWidgetId(formField.widgetId)) {
+            error = QStringLiteral(
+                "The removed Widget ID is not a TrePDF Dropdown ID.");
+            file.unmap(mapped);
+            return false;
+        }
         const PlaceholderLocation placeholder = annotationForWidgetId(
             pdf,
             formField.widgetId,
@@ -3093,7 +3584,8 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             if (existingWidget.isEmpty()
                 || fieldTypeKey < 0
                 || !fieldTypeCursor.consume(expectedFieldType)
-                || (formField.type == FieldType::Dropdown
+                || (!removed
+                    && formField.type == FieldType::Dropdown
                     && !hasSimpleDirectStringOptions(existingWidget))
                 || keyPosition(
                        existingWidget.constData(),
@@ -3116,6 +3608,43 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             return false;
         }
         resolvedWidgetObjectNumbers.insert(reference.number);
+        if (removed) {
+            if (std::count(
+                    fields.cbegin(),
+                    fields.cend(),
+                    reference) != 1) {
+                error = QStringLiteral(
+                    "Only a top-level single-Widget TrePDF field can be removed.");
+                file.unmap(mapped);
+                return false;
+            }
+            ObjectReference pageReference;
+            bool pageLocated = false;
+            if (!pageForWidgetReference(
+                    pdf,
+                    reference,
+                    pageReference,
+                    pageLocated,
+                    error)) {
+                file.unmap(mapped);
+                return false;
+            }
+            if (pageLocated) {
+                const auto previousPage = removedPageReferences.constFind(
+                    pageReference.number);
+                if (previousPage != removedPageReferences.cend()
+                    && !(*previousPage == pageReference)) {
+                    error = QStringLiteral(
+                        "The Widget removal request resolved a stale page reference.");
+                    file.unmap(mapped);
+                    return false;
+                }
+                removedPageReferences.insert(
+                    pageReference.number,
+                    pageReference);
+                removedWidgetsByPage[pageReference.number].append(reference);
+            }
+        }
         resolvedWidgets.append({
             placeholder,
             reference,
@@ -3124,6 +3653,8 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         widgetReferences.append(reference);
         if (added) {
             fields.append(reference);
+        } else if (removed) {
+            fields.removeOne(reference);
         }
     }
 
@@ -3135,6 +3666,9 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         }
     }
     for (const Field &formField : formFields) {
+        if (formField.operation == Operation::Remove) {
+            continue;
+        }
         if (formField.fieldName.isEmpty()
             || formField.fieldName.contains(QLatin1Char('.'))) {
             error = QStringLiteral(
@@ -3160,12 +3694,19 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
     const ObjectReference acroFormReference = hasExistingAcroForm
         ? sourceAcroFormReference
         : ObjectReference{nextObjectNumber++, 0};
+    const bool requiresFormFont = std::any_of(
+        formFields.cbegin(),
+        formFields.cend(),
+        [](const Field &field) {
+            return field.operation != Operation::Remove;
+        });
     const bool requiresUnicodeFont = std::any_of(
         formFields.cbegin(),
         formFields.cend(),
         [](const Field &field) {
-            return field.type == FieldType::Text
-                || field.type == FieldType::Dropdown;
+            return field.operation != Operation::Remove
+                && (field.type == FieldType::Text
+                    || field.type == FieldType::Dropdown);
         });
     FormFontResource defaultFontResource;
     struct UnicodeFontObjects {
@@ -3208,7 +3749,7 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
                 = QByteArrayLiteral(kUnicodeFormFontResourcePrefix)
                 + QByteArray::number(unicodeFontObjects.type0);
         }
-    } else {
+    } else if (requiresFormFont) {
         standardFontObjectNumber = nextObjectNumber++;
         defaultFontResource.reference
             = ObjectReference{standardFontObjectNumber, 0};
@@ -3226,6 +3767,8 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
     };
     QHash<int, QVector<PageReplacement>> pageReplacements;
     QHash<int, ObjectReference> pageReferences;
+    QHash<int, QByteArray> rewrittenObjects;
+    QHash<int, ObjectReference> rewrittenObjectReferences;
     for (const ResolvedWidget &resolved : std::as_const(resolvedWidgets)) {
         if (!resolved.added || !resolved.placeholder.isDirect()) {
             continue;
@@ -3243,11 +3786,13 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
          ++replacements) {
         const ObjectReference pageReference = pageReferences.value(
             replacements.key());
-        QByteArray pageObject = completeObject(
+        QByteArray pageObject;
+        if (!objectForReference(
             pdf,
-            pageReference.number,
-            error);
-        if (pageObject.isEmpty()) {
+            pageReference,
+            rewrittenObjects,
+            pageObject,
+            error)) {
             file.unmap(mapped);
             return false;
         }
@@ -3277,15 +3822,76 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
                 replacement.end - replacement.start,
                 reference);
         }
+        rewrittenObjects.insert(
+            pageReference.number,
+            std::move(pageObject));
+        rewrittenObjectReferences.insert(
+            pageReference.number,
+            pageReference);
+    }
+
+    QHash<int, int> annotsObjectOwnerPages;
+    for (auto removed = removedWidgetsByPage.cbegin();
+         removed != removedWidgetsByPage.cend();
+         ++removed) {
+        const ObjectReference pageReference
+            = removedPageReferences.value(removed.key());
+        ObjectReference rewrittenReference;
+        QByteArray rewrittenObject;
+        if (!removeWidgetReferencesFromPageAnnots(
+                pdf,
+                pageReference,
+                *removed,
+                rewrittenObjects,
+                rewrittenReference,
+                rewrittenObject,
+                error)) {
+            file.unmap(mapped);
+            return false;
+        }
+        const auto previousOwner = annotsObjectOwnerPages.constFind(
+            rewrittenReference.number);
+        if (previousOwner != annotsObjectOwnerPages.cend()
+            && *previousOwner != pageReference.number) {
+            error = QStringLiteral(
+                "A shared page Annots array cannot be modified safely.");
+            file.unmap(mapped);
+            return false;
+        }
+        const auto previousReference = rewrittenObjectReferences.constFind(
+            rewrittenReference.number);
+        if (previousReference != rewrittenObjectReferences.cend()
+            && !(*previousReference == rewrittenReference)) {
+            error = QStringLiteral(
+                "An incremental PDF object rewrite has a stale generation.");
+            file.unmap(mapped);
+            return false;
+        }
+        annotsObjectOwnerPages.insert(
+            rewrittenReference.number,
+            pageReference.number);
+        rewrittenObjects.insert(
+            rewrittenReference.number,
+            std::move(rewrittenObject));
+        rewrittenObjectReferences.insert(
+            rewrittenReference.number,
+            rewrittenReference);
+    }
+    for (auto rewritten = rewrittenObjects.begin();
+         rewritten != rewrittenObjects.end();
+         ++rewritten) {
         incrementalObjects.append({
-            pageReference,
-            std::move(pageObject)});
+            rewrittenObjectReferences.value(rewritten.key()),
+            std::move(rewritten.value())});
     }
 
     constexpr qint64 maximumAppearancePixels = 32 * 1024 * 1024;
     qint64 appearancePixels = 0;
     for (qsizetype index = 0; index < formFields.size(); ++index) {
         const Field &formField = formFields.at(index);
+        if (formField.operation == Operation::Remove) {
+            continue;
+        }
         const ObjectReference &widgetReference = widgetReferences.at(index);
         const PlaceholderLocation &placeholder
             = resolvedWidgets.at(index).placeholder;

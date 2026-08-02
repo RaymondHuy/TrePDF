@@ -694,6 +694,8 @@ Item {
             height: 20
             visible: root.formsActive
                 && !formFieldLayer.activeFieldSourceBacked
+                && formFieldLayer.activeFieldType
+                    !== PDFFormDesignerController.Dropdown
                 && !activeFieldFrame.resizing
                 && !formFieldLayer.moving
             enabled: visible
