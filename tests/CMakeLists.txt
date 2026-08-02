@@ -19,6 +19,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFFormAppearance.h
     ../src/PDFFormDesignerController.cpp
     ../src/PDFFormDesignerController.h
+    ../src/PDFFormView.cpp
+    ../src/PDFFormView.h
     ../src/PDFFormWorker.cpp
     ../src/PDFFormWorker.h
     ../src/PDFSaveWriter.cpp

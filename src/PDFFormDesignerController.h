@@ -131,6 +131,9 @@ public:
     Q_INVOKABLE QVariantList fieldsForPage(int page) const;
     Q_INVOKABLE QVariantList textFieldsForPage(int page) const;
     QStringList sourceFieldIdsForPage(int page) const;
+    bool managesSourceChoiceField(int sourcePage,
+                                  int annotationIndex,
+                                  const QString &identityToken) const;
     bool sourceFieldContainsPoint(
         int page,
         const QPointF &normalizedPoint) const;
@@ -144,6 +147,9 @@ public:
                                   const QString &name);
     Q_INVOKABLE bool setFieldOptions(const QString &fieldId,
                                      const QStringList &options);
+    Q_INVOKABLE bool renameFieldOption(const QString &fieldId,
+                                       int optionIndex,
+                                       const QString &option);
     Q_INVOKABLE bool setFieldFlags(const QString &fieldId, int flags);
     Q_INVOKABLE void setTextFieldText(const QString &fieldId,
                                       const QString &text);

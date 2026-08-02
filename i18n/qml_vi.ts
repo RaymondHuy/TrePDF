@@ -1092,5 +1092,80 @@
         <source>Option 3</source>
         <translation>Tùy chọn 3</translation>
     </message>
+    <message id="UpdateDropdownOptionsFailed">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="77"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="130"/>
+        <source>Could not update the dropdown options.</source>
+        <translation>Không thể cập nhật các tùy chọn của danh sách thả xuống.</translation>
+    </message>
+    <message id="EnterDropdownOptionValue">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="89"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="114"/>
+        <source>Enter an option value.</source>
+        <translation>Nhập một giá trị tùy chọn.</translation>
+    </message>
+    <message id="DropdownOptionsMustBeUnique">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="94"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="119"/>
+        <source>Dropdown options must be unique.</source>
+        <translation>Các tùy chọn trong danh sách thả xuống không được trùng nhau.</translation>
+    </message>
+    <message id="DropdownRequiresOneOption">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="157"/>
+        <source>A dropdown must contain at least one option.</source>
+        <translation>Danh sách thả xuống phải có ít nhất một tùy chọn.</translation>
+    </message>
+    <message id="SavedDropdownCannotBeDeleted">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="170"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="496"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="516"/>
+        <source>Saved dropdowns cannot be deleted yet.</source>
+        <translation>Chưa thể xóa danh sách thả xuống đã lưu.</translation>
+    </message>
+    <message id="DeleteDropdownFailed">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="175"/>
+        <source>Could not delete the dropdown.</source>
+        <translation>Không thể xóa danh sách thả xuống.</translation>
+    </message>
+    <message id="ExpandDropdownOptions">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="221"/>
+        <source>Expand dropdown options</source>
+        <translation>Mở rộng tùy chọn danh sách thả xuống</translation>
+    </message>
+    <message id="DropdownOptions">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="260"/>
+        <source>Dropdown options</source>
+        <translation>Tùy chọn danh sách thả xuống</translation>
+    </message>
+    <message id="CollapseDropdownOptions">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="278"/>
+        <source>Collapse dropdown options</source>
+        <translation>Thu gọn tùy chọn danh sách thả xuống</translation>
+    </message>
+    <message id="ManageDropdownOptionsHint">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="305"/>
+        <source>Add, edit, or remove values shown in this dropdown.</source>
+        <translation>Thêm, sửa hoặc xóa các giá trị hiển thị trong danh sách thả xuống.</translation>
+    </message>
+    <message id="NewDropdownOption">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="325"/>
+        <source>New option</source>
+        <translation>Tùy chọn mới</translation>
+    </message>
+    <message id="AddDropdownOption">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="342"/>
+        <source>Add option</source>
+        <translation>Thêm tùy chọn</translation>
+    </message>
+    <message id="RemoveDropdownOption">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="455"/>
+        <source>Remove option</source>
+        <translation>Xóa tùy chọn</translation>
+    </message>
+    <message id="DeleteDropdown">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="513"/>
+        <source>Delete dropdown</source>
+        <translation>Xóa danh sách thả xuống</translation>
+    </message>
 </context>
 </TS>

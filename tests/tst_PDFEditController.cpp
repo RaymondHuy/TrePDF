@@ -6,6 +6,7 @@
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
 #include "PDFFormAppearance.h"
+#include "PDFFormView.h"
 #include "PDFFormWorker.h"
 #include "PDFSaveWriter.h"
 #include "PDFTabModel.h"
@@ -2333,6 +2334,7 @@ class PDFEditControllerTest : public QObject
 private slots:
     void initTestCase();
     void storesTransientTextFieldsByPage();
+    void renamesDropdownOptionsWithoutLosingSelection();
     void limitsFormFieldPointerHitArea();
     void movesFormFieldsWithoutResizing();
     void savesTextFieldAsAcroForm();
@@ -2675,6 +2677,66 @@ void PDFEditControllerTest::storesTransientTextFieldsByPage()
     QCOMPARE(fields.size(), 1);
     QCOMPARE(fields.constFirst().toMap().value(QStringLiteral("id")).toString(),
              sourceFieldId);
+}
+
+void PDFEditControllerTest::renamesDropdownOptionsWithoutLosingSelection()
+{
+    PDFFormDesignerController controller;
+    const QString fieldId = controller.addField(
+        PDFFormDesignerController::Dropdown,
+        0,
+        0.1,
+        0.2,
+        0.4,
+        0.08);
+    QVERIFY(!fieldId.isEmpty());
+
+    const QStringList options({
+        QStringLiteral("Alpha"),
+        QStringLiteral("Beta"),
+        QStringLiteral("Gamma"),
+    });
+    QVERIFY(controller.setFieldOptions(fieldId, options));
+    QVERIFY(controller.setFieldValue(fieldId, QStringLiteral("Beta")));
+
+    QVERIFY(controller.renameFieldOption(
+        fieldId,
+        1,
+        QStringLiteral("Beta renamed")));
+    QVariantMap field = controller.fieldData(fieldId);
+    QCOMPARE(field.value(QStringLiteral("options")).toStringList(),
+             QStringList({QStringLiteral("Alpha"),
+                          QStringLiteral("Beta renamed"),
+                          QStringLiteral("Gamma")}));
+    QCOMPARE(field.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Beta renamed"));
+
+    QVERIFY(controller.renameFieldOption(
+        fieldId,
+        0,
+        QStringLiteral("Alpha renamed")));
+    const QVector<PDFFormDesignerController::SaveField> savedFields
+        = controller.saveFields();
+    QCOMPARE(savedFields.size(), 1);
+    QCOMPARE(savedFields.constFirst().defaultValue,
+             QStringLiteral("Alpha renamed"));
+    QCOMPARE(savedFields.constFirst().value,
+             QStringLiteral("Beta renamed"));
+
+    QVERIFY(!controller.renameFieldOption(
+        fieldId,
+        1,
+        QStringLiteral("Gamma")));
+    QVERIFY(!controller.renameFieldOption(fieldId, 1, QString{}));
+    QVERIFY(!controller.renameFieldOption(
+        fieldId,
+        3,
+        QStringLiteral("Out of range")));
+    field = controller.fieldData(fieldId);
+    QCOMPARE(field.value(QStringLiteral("options")).toStringList(),
+             QStringList({QStringLiteral("Alpha renamed"),
+                          QStringLiteral("Beta renamed"),
+                          QStringLiteral("Gamma")}));
 }
 
 void PDFEditControllerTest::limitsFormFieldPointerHitArea()
@@ -3426,6 +3488,25 @@ void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()
     QVERIFY(!choice.readOnly);
     QVERIFY(!choice.multiSelect);
     QVERIFY(!choice.identityToken.isEmpty());
+    QVERIFY(formDesigner.managesSourceChoiceField(
+        choice.sourcePage,
+        choice.annotationIndex,
+        choice.identityToken));
+    QVERIFY(!formDesigner.managesSourceChoiceField(
+        choice.sourcePage,
+        choice.annotationIndex,
+        choice.identityToken + QStringLiteral("-stale")));
+
+    PDFFormView formView;
+    formView.setController(&formController);
+    formView.setFormDesignerController(&formDesigner);
+    formView.setPage(0);
+    formView.setInteractive(true);
+    QTRY_COMPARE_WITH_TIMEOUT(formView.choiceFields().size(), 1, 5000);
+    formView.setFormDesignMode(true);
+    QCOMPARE(formView.choiceFields().size(), 0);
+    formView.setFormDesignMode(false);
+    QCOMPARE(formView.choiceFields().size(), 1);
 
     bool focusCompleted = false;
     bool focusSucceeded = false;
@@ -3527,6 +3608,35 @@ void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()
              options);
     QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
     QVERIFY(!hydrated.value(QStringLiteral("dirty")).toBool());
+
+    QStringList editedOptions = options;
+    editedOptions.append(QStringLiteral("Tùy chọn 4"));
+    QVERIFY(formDesigner.setFieldOptions(fieldId, editedOptions));
+    QVERIFY(formDesigner.setFieldValue(fieldId, editedOptions.constLast()));
+    editedOptions.removeAt(1);
+    QVERIFY(formDesigner.setFieldOptions(fieldId, editedOptions));
+    editedOptions[0] = QStringLiteral("Tùy chọn một");
+    QVERIFY(formDesigner.renameFieldOption(
+        fieldId,
+        0,
+        editedOptions.at(0)));
+    hydrated = formDesigner.fieldData(fieldId);
+    QCOMPARE(hydrated.value(QStringLiteral("options")).toStringList(),
+             editedOptions);
+    QVERIFY(hydrated.value(QStringLiteral("optionsDirty")).toBool());
+
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 4, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    hydrated = formDesigner.fieldData(fieldId);
+    QCOMPARE(hydrated.value(QStringLiteral("value")).toString(),
+             editedOptions.constLast());
+    QCOMPARE(hydrated.value(QStringLiteral("options")).toStringList(),
+             editedOptions);
+    QVERIFY(!hydrated.value(QStringLiteral("optionsDirty")).toBool());
     QVERIFY(!formDesigner.removeField(fieldId));
 
     inspection = inspectAcroFormField(
@@ -3534,9 +3644,9 @@ void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()
         QStringLiteral("Transport"));
     QCOMPARE(inspection.widgetCount, 1);
     QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_COMBOBOX);
-    QCOMPARE(inspection.value, QStringLiteral("Tùy chọn 3"));
-    QCOMPARE(inspection.defaultValue, QStringLiteral("Tùy chọn 1"));
-    QCOMPARE(inspection.options, options);
+    QCOMPARE(inspection.value, editedOptions.constLast());
+    QCOMPARE(inspection.defaultValue, editedOptions.constFirst());
+    QCOMPARE(inspection.options, editedOptions);
     QCOMPARE(inspection.selectedIndices, QVector<int>({2}));
     QVERIFY(inspection.hasAppearance);
     QFile savedDropdown(sourcePath);

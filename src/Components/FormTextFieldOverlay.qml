@@ -538,9 +538,11 @@ Item {
             }
             if (fieldType === PDFFormDesignerController.Dropdown) {
                 root.pendingFocusFieldId = ""
-                Qt.callLater(function() {
-                    root.openActiveDropdown()
-                })
+                if (!root.formsActive) {
+                    Qt.callLater(function() {
+                        root.openActiveDropdown()
+                    })
+                }
                 return
             }
             if (fieldType !== PDFFormDesignerController.Text) {
@@ -981,9 +983,10 @@ Item {
                 const field = root.controller.fieldData(
                     formFieldLayer.activeFieldId)
                 const sourceBacked = Boolean(field.sourceBacked)
+                const optionsDirty = Boolean(field.optionsDirty)
                 const readOnly = (Number(field.flags)
                     & PDFFormDesignerController.ReadOnly) !== 0
-                if (sourceBacked && !readOnly) {
+                if (sourceBacked && !readOnly && !optionsDirty) {
                     root.controller.activateSourceDropdown(
                         formFieldLayer.activeFieldId,
                         index)

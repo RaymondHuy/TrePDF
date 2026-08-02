@@ -567,6 +567,27 @@ QStringList PDFFormDesignerController::sourceFieldIdsForPage(int page) const
     return fieldIds;
 }
 
+bool PDFFormDesignerController::managesSourceChoiceField(
+    int sourcePage,
+    int annotationIndex,
+    const QString &identityToken) const
+{
+    if (sourcePage < 0 || annotationIndex < 0 || identityToken.isEmpty()) {
+        return false;
+    }
+
+    return std::any_of(
+        m_fields.cbegin(),
+        m_fields.cend(),
+        [sourcePage, annotationIndex, &identityToken](const FormField &field) {
+            return field.type == Dropdown
+                && field.sourceBacked
+                && field.sourcePage == sourcePage
+                && field.sourceAnnotationIndex == annotationIndex
+                && field.sourceIdentityToken == identityToken;
+        });
+}
+
 bool PDFFormDesignerController::sourceFieldContainsPoint(
     int page,
     const QPointF &normalizedPoint) const
@@ -695,6 +716,49 @@ bool PDFFormDesignerController::setFieldOptions(const QString &fieldId,
             field.defaultValue = field.options.constFirst();
         }
     }
+    emit dataChanged(index(row), index(row), changedRoles);
+    emit draftStateChanged();
+    return true;
+}
+
+bool PDFFormDesignerController::renameFieldOption(const QString &fieldId,
+                                                  int optionIndex,
+                                                  const QString &option)
+{
+    const int row = rowForFieldId(fieldId);
+    if (row < 0) {
+        return false;
+    }
+
+    FormField &field = m_fields[row];
+    if (field.type != Dropdown || optionIndex < 0
+        || optionIndex >= field.options.size()) {
+        return false;
+    }
+
+    const QString previousOption = field.options.at(optionIndex);
+    if (previousOption == option) {
+        return true;
+    }
+
+    QStringList options = field.options;
+    options[optionIndex] = option;
+    if (!validDropdownOptions(options)) {
+        return false;
+    }
+
+    field.options = std::move(options);
+    field.changedProperties |= OptionsPropertyChanged;
+    QList<int> changedRoles{OptionsRole, DirtyRole};
+    if (field.value == previousOption) {
+        field.value = option;
+        field.changedProperties |= ValuePropertyChanged;
+        changedRoles.append(ValueRole);
+    }
+    if (field.defaultValue == previousOption) {
+        field.defaultValue = option;
+    }
+
     emit dataChanged(index(row), index(row), changedRoles);
     emit draftStateChanged();
     return true;
@@ -1008,6 +1072,9 @@ QVariantMap PDFFormDesignerController::fieldToMap(const FormField &field) const
     value.insert(
         QStringLiteral("dirty"),
         field.changedProperties != NoPropertyChanges);
+    value.insert(
+        QStringLiteral("optionsDirty"),
+        bool(field.changedProperties & OptionsPropertyChanged));
     value.insert(QStringLiteral("sourceBacked"), field.sourceBacked);
     return value;
 }
