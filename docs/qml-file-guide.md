@@ -1,6 +1,6 @@
 # Hướng dẫn toàn bộ tệp QML
 
-Tài liệu này mô tả 20 tệp QML đang được đăng ký trong QML module `TrePDF`.
+Tài liệu này mô tả 23 tệp QML đang được đăng ký trong QML module `TrePDF`.
 Mỗi mục tập trung vào trách nhiệm, dữ liệu đi vào/đi ra, quan hệ với C++ và các
 ràng buộc vòng đời cần giữ khi sửa code.
 
@@ -39,7 +39,9 @@ Main.qml
     │           │   └── ShapeDraftView.qml
     │           └── FormTextFieldOverlay.qml
     │               └── FormFieldLayer (C++)
-    └── TextFormatPanel.qml
+    ├── TextFormatPanel.qml
+    ├── DropdownOptionsPanel.qml
+    └── RadioButtonOptionsPanel.qml
 ```
 
 Phần cấu trúc chồng lớp của một `PdfPageDelegate` được giải thích chi tiết hơn
@@ -106,7 +108,7 @@ chỉ là state của workflow UI và phải được xóa khi popup đóng ho�
 với `Main.qml`.
 
 **Đầu vào:** `theme`, `document`, `editController`; giữ lựa chọn tool Text Field,
-Check Box và Dropdown của Forms.
+Check Box, Radio Button và Dropdown của Forms.
 
 **Việc chính:**
 
@@ -115,7 +117,8 @@ Check Box và Dropdown của Forms.
   workspace biết overlay nào được phép hiện/tương tác.
 - Khi rời Edit, đưa `PDFEditController.tool` về Browse; khi vào Edit, mặc định về
   Select để không giữ một placement/drawing tool từ phiên trước.
-- Khi chọn Forms tool, bảo đảm Text Field, Check Box và Dropdown loại trừ nhau.
+- Khi chọn Forms tool, bảo đảm Text Field, Check Box, Radio Button và Dropdown
+  loại trừ nhau.
 - Chuyển tiếp signal Open/Save/Save As, page, delete page, zoom, fit, rotate và
   tool placeholder lên cửa sổ.
 
@@ -163,10 +166,10 @@ ghi Save; mọi thay đổi vẫn là draft.
 
 **Vai trò:** ribbon tối giản cho form designer hiện hỗ trợ đặt field.
 
-- Nhận document và ba cờ lựa chọn từ `AppRibbon`.
-- Phát signal tool cho Text Field, Check Box hoặc Dropdown.
+- Nhận document và bốn cờ lựa chọn từ `AppRibbon`.
+- Phát signal tool cho Text Field, Check Box, Radio Button hoặc Dropdown.
 - Chỉ enable khi document đã load.
-- Radio/Date/Signature vẫn là điểm mở rộng; ribbon chỉ quảng bá ba loại đã có
+- Date/Signature vẫn là điểm mở rộng; ribbon chỉ quảng bá bốn loại đã có
   pipeline lưu hoàn chỉnh.
 
 ### [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml)
@@ -203,8 +206,10 @@ ghi Save; mọi thay đổi vẫn là draft.
   truyền `session.viewRotation` và trạng thái tab/tool form.
 - Thực hiện Fit Width từ kích thước viewport và maximum page dimension đã xoay;
   initial-fit chỉ chạy khi session còn `initialFitPending`.
-- Load `TextFormatPanel` ở cạnh phải khi Edit active; panel collapsed được lưu
-  riêng theo session.
+- Load đúng một panel ở cạnh phải: `TextFormatPanel` khi Edit active,
+  `DropdownOptionsPanel` khi chọn Dropdown, hoặc `RadioButtonOptionsPanel` khi
+  chọn Radio Button trong Forms. Trạng thái collapsed được lưu riêng theo
+  session.
 - Chuyển các signal font family, bold/italic/underline, color và paragraph
   alignment vào `PDFEditController`.
 
@@ -357,6 +362,20 @@ font/style/color/alignment đang chọn và `formattingEnabled`.
 **Ràng buộc:** style button phải phản ánh state controller sau local editor
 undo/redo, không chỉ state click gần nhất trong panel.
 
+### [`src/Components/RadioButtonOptionsPanel.qml`](../src/Components/RadioButtonOptionsPanel.qml)
+
+**Vai trò:** panel bên phải cho Radio Button đang chọn trong Forms.
+
+- Đọc `field.name` làm Group ID; trim input và gọi `setFieldName()` khi kết thúc
+  chỉnh sửa. Workspace cũng flush edit đang pending trước Save/Save As để lệnh
+  lưu không chụp tên nhóm cũ khi ô nhập vẫn giữ focus. Group ID rỗng, có dấu
+  chấm hoặc xung đột với field không phải Radio bị controller từ chối.
+- Giải thích rõ các Radio cùng Group ID thuộc một nhóm và chỉ một member được
+  chọn.
+- Nút xóa ở cuối panel gọi `removeField()`, dùng được cho cả draft mới và Radio
+  source-backed do TrePDF tạo; thay đổi chỉ ghi vào PDF khi Save/Save As.
+- Nội dung panel nằm trong `Loader` để được hủy sạch khi thu gọn hoặc đổi field.
+
 ## Overlay form
 
 ### [`src/Components/FormChoiceOverlay.qml`](../src/Components/FormChoiceOverlay.qml)
@@ -395,10 +414,11 @@ TrePDF rehydrate sau khi mở lại.
 
 **Đặt field:**
 
-- Khi Text Field, Check Box hoặc Dropdown tool active, MouseArea nền nhận
-  click/drag.
-- Click tạo kích thước mặc định; drag tạo rect chuẩn hóa. Check Box ép hình vuông;
-  Text Field và Dropdown dùng hình chữ nhật và tôn trọng kích thước tối thiểu.
+- Khi Text Field, Check Box, Radio Button hoặc Dropdown tool active, MouseArea
+  nền nhận click/drag.
+- Click tạo kích thước mặc định; drag tạo rect chuẩn hóa. Check Box và Radio
+  Button ép hình vuông; Text Field và Dropdown dùng hình chữ nhật và tôn trọng
+  kích thước tối thiểu.
 - Sau khi tạo Text Field, lưu `pendingFocusFieldId` để editor chỉ focus sau khi
   model và loader đã sẵn sàng.
 
@@ -416,12 +436,12 @@ TrePDF rehydrate sau khi mở lại.
 - Field có thể kéo trực tiếp sau ngưỡng drag. Field text được chọn còn có move
   handle ở góc và hỗ trợ phím mũi tên; C++ clamp top-left để giữ nguyên kích
   thước trong trang rồi gọi `moveField()` đúng một lần khi kết thúc.
-- Check Box có thể activate/toggle; Dropdown có thể mở/chọn option. Text Field
-  và Check Box transient có nút xóa nổi; Dropdown transient hoặc source-backed
-  do TrePDF tạo chỉ được xóa từ panel tùy chọn. Discard phục hồi, còn Save/Save
-  As mới gỡ field/Widget source-backed.
-  Source-backed Text Field/Check Box và Dropdown AcroForm ngoài phạm vi hẹp này
-  vẫn được bảo vệ.
+- Check Box và Radio Button có thể activate/toggle; chọn một Radio sẽ tắt member
+  khác cùng Group ID. Dropdown có thể mở/chọn option. Text Field và Check Box
+  transient có nút xóa nổi; Dropdown và Radio Button transient hoặc
+  source-backed do TrePDF tạo được xóa từ panel tùy chọn. Discard phục hồi, còn
+  Save/Save As mới gỡ Widget source-backed. Source-backed Text Field/Check Box
+  và cấu trúc AcroForm ngoài phạm vi TrePDF vẫn được bảo vệ.
 
 **Phối hợp mode:** field có thể visible trong Forms hoặc Edit, nhưng placement,
 move, resize, editor và delete được gate riêng bằng `formsActive`, `editActive`,
@@ -482,7 +502,7 @@ không cần toàn bộ semantics của ribbon.
 | `PDFDocument` | `PDFDocument.cpp` | ribbon, view, delegate |
 | `PDFEditController` | `PDFEditController.cpp` | ribbon edit, overlay, panel format |
 | `PDFFormController` | `PDFFormController.cpp` | page delegate và `PDFFormView` |
-| `PDFFormDesignerController` | `PDFFormDesignerController.cpp` | form designer overlay/layer |
+| `PDFFormDesignerController` | `PDFFormDesignerController.cpp` | form designer overlay/layer và panel Dropdown/Radio |
 | `PDFPageView` | `PDFPageItem.cpp` | `PdfPageDelegate.qml` |
 | `PDFFormView` | `PDFFormView.cpp` | `PageInteractionOverlay.qml` |
 | `DraftImageView` | `DraftImageItem.cpp` | `EditOverlay.qml` |

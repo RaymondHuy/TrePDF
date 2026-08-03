@@ -61,6 +61,8 @@ constexpr char kObliqueText[] = "Oblique";
 constexpr char kStretchedText[] = "Scale";
 constexpr char kImageFixtureText[] = "Image fixture text";
 constexpr char kFontCollisionTargetText[] = "Wxyz";
+constexpr int kPdfButtonNoToggleToOff = 1 << 14;
+constexpr int kPdfButtonRadio = 1 << 15;
 
 class PdfFileWriter : public FPDF_FILEWRITE
 {
@@ -120,6 +122,49 @@ bool writePdfObjects(const QString &filePath,
     QFile file(filePath);
     return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
         && file.write(data) == data.size();
+}
+
+bool createLegacyTrePDFRadioButtonPdf(const QString &filePath)
+{
+    const QByteArray offContent(
+        "q 1 1 1 rg 0 0 18 18 re f 0 0 0 RG 1 w "
+        "2 2 14 14 re S Q");
+    const QByteArray onContent(
+        "q 1 1 1 rg 0 0 18 18 re f 0 0 0 RG 1 w "
+        "2 2 14 14 re S 0 0 0 rg 6 6 6 6 re f Q");
+    const auto appearanceObject = [](const QByteArray &content) {
+        return QByteArray(
+                   "<< /Type /XObject /Subtype /Form /FormType 1 "
+                   "/BBox [0 0 18 18] /Resources << >> /Length ")
+            + QByteArray::number(content.size())
+            + QByteArray(" >>\nstream\n")
+            + content
+            + QByteArray("\nendstream");
+    };
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray(
+                "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R "
+                "/MediaBox [0 0 595 842] /Resources << >> "
+                "/Annots [4 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 49152 "
+                "/T (PreferredContact) /TU (Preferred contact) "
+                "/NM (radio-field-11111111-1111-1111-1111-111111111111) "
+                "/P 3 0 R /F 4 /Rect [100 600 118 618] "
+                "/V /Yes /DV /Yes /AS /Yes "
+                "/AP << /N << /Off 6 0 R /Yes 7 0 R >> >> "
+                "/TrePDFApVersion 2 >>"),
+            QByteArray(
+                "<< /Fields [4 0 R] /NeedAppearances false >>"),
+            appearanceObject(offContent),
+            appearanceObject(onContent),
+        });
 }
 
 bool createDropdownDeleteRegressionPdf(const QString &filePath)
@@ -1826,6 +1871,7 @@ struct AcroFormFieldInspection {
     int widgetCount = 0;
     int fieldType = FPDF_FORMFIELD_UNKNOWN;
     int fieldFlags = 0;
+    QString widgetId;
     QString name;
     QString value;
     QString defaultValue;
@@ -1840,6 +1886,10 @@ struct AcroFormFieldInspection {
     int annotationFlags = 0;
     int controlCount = -1;
     int controlIndex = -1;
+    bool hasParent = false;
+    bool hasLocalFieldType = false;
+    bool hasLocalFieldFlags = false;
+    bool hasLocalValue = false;
     bool hasAppearanceVersion = false;
     float appearanceVersion = 0.0f;
     QString appearanceStream;
@@ -1850,7 +1900,8 @@ struct AcroFormFieldInspection {
 AcroFormFieldInspection inspectAcroFormField(
     const QString &filePath,
     const QString &targetFieldName = {},
-    int pageIndex = 0)
+    int pageIndex = 0,
+    const QString &targetWidgetId = {})
 {
     PDFiumProcessLock pdfiumLock;
     AcroFormFieldInspection inspection;
@@ -1917,15 +1968,27 @@ AcroFormFieldInspection inspectAcroFormField(
                         buffer,
                         byteCount);
                 });
+            const QString widgetId = readWideString(
+                [annotation](FPDF_WCHAR *buffer,
+                             unsigned long byteCount) {
+                    return FPDFAnnot_GetStringValue(
+                        annotation,
+                        "NM",
+                        buffer,
+                        byteCount);
+                });
             if (inspection.fieldType == FPDF_FORMFIELD_UNKNOWN
                 && (targetFieldName.isEmpty()
-                    || fieldName == targetFieldName)) {
+                    || fieldName == targetFieldName)
+                && (targetWidgetId.isEmpty()
+                    || widgetId == targetWidgetId)) {
                 inspection.fieldType = FPDFAnnot_GetFormFieldType(
                     formHandle,
                     annotation);
                 inspection.fieldFlags = FPDFAnnot_GetFormFieldFlags(
                     formHandle,
                     annotation);
+                inspection.widgetId = widgetId;
                 inspection.name = fieldName;
                 inspection.value = readWideString(
                     [formHandle, annotation](FPDF_WCHAR *buffer,
@@ -1945,6 +2008,36 @@ AcroFormFieldInspection inspectAcroFormField(
                             buffer,
                             byteCount);
                     });
+                if (inspection.defaultValue.isEmpty()) {
+                    FPDF_ANNOTATION parent = FPDFAnnot_GetLinkedAnnot(
+                        annotation,
+                        "Parent");
+                    if (parent) {
+                        inspection.defaultValue = readWideString(
+                            [parent](FPDF_WCHAR *buffer,
+                                     unsigned long byteCount) {
+                                return FPDFAnnot_GetStringValue(
+                                    parent,
+                                    "DV",
+                                    buffer,
+                                    byteCount);
+                            });
+                        FPDFPage_CloseAnnot(parent);
+                    }
+                }
+                if (inspection.fieldType == FPDF_FORMFIELD_RADIOBUTTON) {
+                    float defaultChecked = 0.0f;
+                    if (FPDFAnnot_GetNumberValue(
+                            annotation,
+                            PDFFormAppearance::kRadioButtonDefaultCheckedKey,
+                            &defaultChecked)) {
+                        inspection.defaultValue = defaultChecked != 0.0f
+                            ? QStringLiteral("Yes")
+                            : QStringLiteral("Off");
+                    } else if (inspection.defaultValue.isEmpty()) {
+                        inspection.defaultValue = QStringLiteral("Off");
+                    }
+                }
                 const int optionCount = FPDFAnnot_GetOptionCount(
                     formHandle,
                     annotation);
@@ -1996,6 +2089,18 @@ AcroFormFieldInspection inspectAcroFormField(
                 inspection.controlIndex = FPDFAnnot_GetFormControlIndex(
                     formHandle,
                     annotation);
+                inspection.hasParent = FPDFAnnot_HasKey(
+                    annotation,
+                    "Parent");
+                inspection.hasLocalFieldType = FPDFAnnot_HasKey(
+                    annotation,
+                    "FT");
+                inspection.hasLocalFieldFlags = FPDFAnnot_HasKey(
+                    annotation,
+                    "Ff");
+                inspection.hasLocalValue = FPDFAnnot_HasKey(
+                    annotation,
+                    "V");
                 inspection.hasAppearanceVersion
                     = FPDFAnnot_GetNumberValue(
                         annotation,
@@ -2046,6 +2151,115 @@ AcroFormFieldInspection inspectAcroFormField(
     }
     FPDF_CloseDocument(document);
     return inspection;
+}
+
+QVector<bool> clickAcroFormFieldTwice(
+    const QString &filePath,
+    const QString &targetFieldName,
+    int pageIndex = 0)
+{
+    PDFiumProcessLock pdfiumLock;
+    QVector<bool> states;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_FORMFILLINFO formFillInfo = {};
+    formFillInfo.version = 2;
+    formFillInfo.xfa_disabled = true;
+    FPDF_FORMHANDLE formHandle = document
+        ? FPDFDOC_InitFormFillEnvironment(document, &formFillInfo)
+        : nullptr;
+    FPDF_PAGE page = document
+        ? FPDF_LoadPage(document, pageIndex)
+        : nullptr;
+    if (formHandle && page) {
+        FORM_OnAfterLoadPage(page, formHandle);
+        const auto readWideString = [](auto getter) {
+            const unsigned long byteCount = getter(nullptr, 0);
+            if (byteCount < sizeof(FPDF_WCHAR)) {
+                return QString();
+            }
+            QVector<FPDF_WCHAR> buffer(
+                static_cast<qsizetype>(
+                    byteCount / sizeof(FPDF_WCHAR)));
+            const unsigned long actualByteCount = getter(
+                buffer.data(),
+                byteCount);
+            qsizetype characterCount = static_cast<qsizetype>(
+                actualByteCount / sizeof(FPDF_WCHAR));
+            while (characterCount > 0
+                   && buffer.at(characterCount - 1) == 0) {
+                --characterCount;
+            }
+            return QString::fromUtf16(
+                reinterpret_cast<const char16_t *>(buffer.constData()),
+                characterCount);
+        };
+        const int annotationCount = FPDFPage_GetAnnotCount(page);
+        for (int index = 0; index < annotationCount; ++index) {
+            FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(page, index);
+            if (!annotation) {
+                continue;
+            }
+            const QString fieldName = readWideString(
+                [formHandle, annotation](FPDF_WCHAR *buffer,
+                                         unsigned long byteCount) {
+                    return FPDFAnnot_GetFormFieldName(
+                        formHandle,
+                        annotation,
+                        buffer,
+                        byteCount);
+                });
+            FS_RECTF rect = {};
+            if (FPDFAnnot_GetSubtype(annotation) != FPDF_ANNOT_WIDGET
+                || fieldName != targetFieldName
+                || !FPDFAnnot_GetRect(annotation, &rect)) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+
+            const double centerX = (rect.left + rect.right) / 2.0;
+            const double centerY = (rect.bottom + rect.top) / 2.0;
+            states.append(FPDFAnnot_IsChecked(formHandle, annotation));
+            for (int click = 0; click < 2; ++click) {
+                FORM_OnFocus(
+                    formHandle,
+                    page,
+                    0,
+                    centerX,
+                    centerY);
+                FORM_OnLButtonDown(
+                    formHandle,
+                    page,
+                    0,
+                    centerX,
+                    centerY);
+                FORM_OnLButtonUp(
+                    formHandle,
+                    page,
+                    0,
+                    centerX,
+                    centerY);
+                states.append(FPDFAnnot_IsChecked(
+                    formHandle,
+                    annotation));
+            }
+            FPDFPage_CloseAnnot(annotation);
+            break;
+        }
+        FORM_OnBeforeClosePage(page, formHandle);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (formHandle) {
+        FPDFDOC_ExitFormFillEnvironment(formHandle);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return states;
 }
 
 HighlightSaveInspection inspectHighlights(const QString &filePath,
@@ -2351,11 +2565,15 @@ class PDFEditControllerTest : public QObject
 private slots:
     void initTestCase();
     void storesTransientTextFieldsByPage();
+    void storesTransientRadioButtons();
     void renamesDropdownOptionsWithoutLosingSelection();
     void limitsFormFieldPointerHitArea();
     void movesFormFieldsWithoutResizing();
     void savesTextFieldAsAcroForm();
     void savesAndRehydratesCheckbox();
+    void savesAndRehydratesRadioButton();
+    void savesRehydratesAndMutatesRadioButtonGroup();
+    void migratesLegacyMergedRadioButton();
     void savesRehydratesAndInteractsWithDropdown();
     void deletesRehydratedDropdownWithoutChangingPeer();
     void deletesDropdownWhenItsSourcePageIsDeleted();
@@ -2696,6 +2914,61 @@ void PDFEditControllerTest::storesTransientTextFieldsByPage()
     QCOMPARE(fields.size(), 1);
     QCOMPARE(fields.constFirst().toMap().value(QStringLiteral("id")).toString(),
              sourceFieldId);
+}
+
+void PDFEditControllerTest::storesTransientRadioButtons()
+{
+    PDFFormDesignerController controller;
+    const QRectF initialRect(0.16, 0.22, 0.05, 0.05);
+    const QString fieldId = controller.addField(
+        PDFFormDesignerController::RadioButton,
+        0,
+        initialRect.x(),
+        initialRect.y(),
+        initialRect.width(),
+        initialRect.height());
+
+    QVERIFY(fieldId.startsWith(QStringLiteral("radio-field-")));
+    QCOMPARE(controller.rowCount(), 1);
+    QVERIFY(controller.hasDrafts());
+    QVariantMap field = controller.fieldData(fieldId);
+    QCOMPARE(field.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(field.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Off"));
+    QCOMPARE(field.value(QStringLiteral("options")).toStringList(),
+             QStringList({QStringLiteral("Yes"), QStringLiteral("Off")}));
+    QCOMPARE(field.value(QStringLiteral("rect")).toRectF(), initialRect);
+
+    QVector<PDFFormDesignerController::SaveField> savedFields
+        = controller.saveFields();
+    QCOMPARE(savedFields.size(), 1);
+    QCOMPARE(savedFields.constFirst().type,
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(savedFields.constFirst().operation,
+             PDFFormDesignerController::SaveField::Add);
+    QCOMPARE(savedFields.constFirst().value, QStringLiteral("Off"));
+    QCOMPARE(savedFields.constFirst().defaultValue, QStringLiteral("Off"));
+    QCOMPARE(savedFields.constFirst().normalizedRect, initialRect);
+
+    QVERIFY(!controller.setFieldValue(fieldId, QStringLiteral("On")));
+    QVERIFY(controller.setFieldValue(fieldId, QStringLiteral("Yes")));
+    field = controller.fieldData(fieldId);
+    QCOMPARE(field.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Yes"));
+    savedFields = controller.saveFields();
+    QCOMPARE(savedFields.size(), 1);
+    QCOMPARE(savedFields.constFirst().type,
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(savedFields.constFirst().value, QStringLiteral("Yes"));
+    QCOMPARE(savedFields.constFirst().defaultValue, QStringLiteral("Off"));
+
+    QVERIFY(controller.removeField(fieldId));
+    QCOMPARE(controller.rowCount(), 0);
+    QVERIFY(controller.fieldData(fieldId).isEmpty());
+    QVERIFY(controller.fieldsForPage(0).isEmpty());
+    QVERIFY(controller.saveFields().isEmpty());
+    QVERIFY(!controller.hasDrafts());
 }
 
 void PDFEditControllerTest::renamesDropdownOptionsWithoutLosingSelection()
@@ -3381,6 +3654,716 @@ void PDFEditControllerTest::savesAndRehydratesCheckbox()
     QVERIFY(qAbs(inspection.rect.right - 166.6) < 1.0);
     QVERIFY(qAbs(inspection.rect.top - 589.4) < 1.0);
     QVERIFY(qAbs(inspection.rect.bottom - 522.04) < 1.0);
+}
+
+void PDFEditControllerTest::savesAndRehydratesRadioButton()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-radio-source.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-radio-saved.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+
+    const QRectF initialRect(0.18, 0.26, 0.06, 0.06);
+    const auto normalizedRectsMatch = [](const QRectF &actual,
+                                         const QRectF &expected) {
+        constexpr qreal tolerance = 0.0001;
+        return qAbs(actual.x() - expected.x()) < tolerance
+            && qAbs(actual.y() - expected.y()) < tolerance
+            && qAbs(actual.width() - expected.width()) < tolerance
+            && qAbs(actual.height() - expected.height()) < tolerance;
+    };
+    const QString fieldId = formDesigner.addField(
+        PDFFormDesignerController::RadioButton,
+        0,
+        initialRect.x(),
+        initialRect.y(),
+        initialRect.width(),
+        initialRect.height());
+    QVERIFY(fieldId.startsWith(QStringLiteral("radio-field-")));
+    QCOMPARE(
+        formDesigner.fieldData(fieldId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Off"));
+    QVERIFY(formDesigner.setFieldName(
+        fieldId,
+        QStringLiteral("PreferredContact")));
+    QVERIFY(formDesigner.setFieldValue(fieldId, QStringLiteral("Yes")));
+    QVERIFY(formDesigner.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Required));
+
+    QVector<PDFFormDesignerController::SaveField> savedFields
+        = formDesigner.saveFields();
+    QCOMPARE(savedFields.size(), 1);
+    QCOMPARE(savedFields.constFirst().type,
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(savedFields.constFirst().operation,
+             PDFFormDesignerController::SaveField::Add);
+    QCOMPARE(savedFields.constFirst().value, QStringLiteral("Yes"));
+    QCOMPARE(savedFields.constFirst().defaultValue, QStringLiteral("Off"));
+    QCOMPARE(savedFields.constFirst().normalizedRect, initialRect);
+
+    QSignalSpy saveFinishedSpy(
+        &editController,
+        &PDFEditController::saveFinished);
+    QVERIFY(editController.requestSaveAs(QUrl::fromLocalFile(savedPath)));
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+    QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+    QCOMPARE(document.source().toLocalFile(), savedPath);
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    const AcroFormFieldInspection untouchedSource
+        = inspectAcroFormField(sourcePath);
+    QVERIFY(untouchedSource.readable);
+    QCOMPARE(untouchedSource.widgetCount, 0);
+
+    QVariantMap hydrated = formDesigner.fieldData(fieldId);
+    QCOMPARE(hydrated.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(hydrated.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Yes"));
+    QVERIFY(normalizedRectsMatch(
+        hydrated.value(QStringLiteral("rect")).toRectF(),
+        initialRect));
+    QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
+    QVERIFY(!hydrated.value(QStringLiteral("dirty")).toBool());
+    QVERIFY(formDesigner.sourceFieldIdsForPage(0).contains(fieldId));
+    QVERIFY(formDesigner.sourceTextFieldIdsForPage(0).isEmpty());
+    QVERIFY(formDesigner.sourceFieldContainsPoint(0, initialRect.center()));
+
+    AcroFormFieldInspection inspection = inspectAcroFormField(
+        savedPath,
+        QStringLiteral("PreferredContact"));
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.formType, FORMTYPE_ACRO_FORM);
+    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_RADIOBUTTON);
+    QCOMPARE(inspection.name, QStringLiteral("PreferredContact"));
+    QCOMPARE(inspection.value, fieldId);
+    QCOMPARE(inspection.defaultValue, QStringLiteral("Off"));
+    QCOMPARE(inspection.exportValue, fieldId);
+    QVERIFY(inspection.checked);
+    QVERIFY(inspection.fieldFlags & FPDF_FORMFLAG_REQUIRED);
+    QCOMPARE(
+        inspection.fieldFlags
+            & (kPdfButtonNoToggleToOff | kPdfButtonRadio),
+        kPdfButtonRadio);
+    QVERIFY(inspection.annotationFlags & FPDF_ANNOT_FLAG_PRINT);
+    QVERIFY(inspection.hasAppearance);
+    QVERIFY(!inspection.appearanceStream.isEmpty());
+    QVERIFY(inspection.appearanceStream.contains("0 0 0 RG"));
+    QVERIFY(inspection.appearanceStream.contains("0 0 0 rg"));
+    QVERIFY(inspection.hasAppearanceVersion);
+    QCOMPARE(inspection.appearanceVersion,
+             static_cast<float>(
+                 PDFFormAppearance::kRadioButtonVersion));
+    QCOMPARE(inspection.controlCount, 1);
+    QCOMPARE(inspection.controlIndex, 0);
+    QVERIFY(inspection.hasParent);
+    QVERIFY(!inspection.hasLocalFieldType);
+    QVERIFY(!inspection.hasLocalFieldFlags);
+    QVERIFY(!inspection.hasLocalValue);
+    QVERIFY(inspection.pointHit);
+    QCOMPARE(
+        clickAcroFormFieldTwice(
+            savedPath,
+            QStringLiteral("PreferredContact")),
+        QVector<bool>({true, true, true}));
+    QVERIFY(qAbs(inspection.rect.left
+                 - initialRect.left() * 595.0)
+            < 1.0);
+    QVERIFY(qAbs(inspection.rect.right
+                 - initialRect.right() * 595.0)
+            < 1.0);
+    QVERIFY(qAbs(inspection.rect.top
+                 - (1.0 - initialRect.top()) * 842.0)
+            < 1.0);
+    QVERIFY(qAbs(inspection.rect.bottom
+                 - (1.0 - initialRect.bottom()) * 842.0)
+            < 1.0);
+
+    formDesigner.prepareForDesignMode();
+    const QString renamedGroupId
+        = QStringLiteral("PreferredContactRenamed");
+    QVERIFY(formDesigner.setFieldName(fieldId, renamedGroupId));
+    QVERIFY(formDesigner.setFieldValue(fieldId, QStringLiteral("Off")));
+    const QRectF movedRect(0.38,
+                           0.34,
+                           initialRect.width(),
+                           initialRect.height());
+    QVERIFY(formDesigner.moveField(
+        fieldId,
+        movedRect.x(),
+        movedRect.y()));
+    QVERIFY(normalizedRectsMatch(
+        formDesigner.fieldData(fieldId)
+            .value(QStringLiteral("rect"))
+            .toRectF(),
+        movedRect));
+    const QRectF finalRect(0.42, 0.38, 0.08, 0.07);
+    QVERIFY(formDesigner.setFieldRect(
+        fieldId,
+        finalRect.x(),
+        finalRect.y(),
+        finalRect.width(),
+        finalRect.height()));
+
+    savedFields = formDesigner.saveFields(true);
+    QCOMPARE(savedFields.size(), 1);
+    QCOMPARE(savedFields.constFirst().type,
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(savedFields.constFirst().operation,
+             PDFFormDesignerController::SaveField::Update);
+    QCOMPARE(savedFields.constFirst().changedProperties,
+             static_cast<quint32>(
+                 PDFFormDesignerController::NamePropertyChanged
+                 | PDFFormDesignerController::ValuePropertyChanged
+                 | PDFFormDesignerController::RectPropertyChanged));
+    QCOMPARE(savedFields.constFirst().name, renamedGroupId);
+    QCOMPARE(savedFields.constFirst().value, QStringLiteral("Off"));
+    QCOMPARE(savedFields.constFirst().defaultValue, QStringLiteral("Off"));
+    QCOMPARE(savedFields.constFirst().normalizedRect, finalRect);
+
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    hydrated = formDesigner.fieldData(fieldId);
+    QCOMPARE(hydrated.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(hydrated.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Off"));
+    QCOMPARE(hydrated.value(QStringLiteral("name")).toString(),
+             renamedGroupId);
+    QVERIFY(normalizedRectsMatch(
+        hydrated.value(QStringLiteral("rect")).toRectF(),
+        finalRect));
+    QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
+    QVERIFY(!hydrated.value(QStringLiteral("dirty")).toBool());
+    QVERIFY(formDesigner.sourceFieldContainsPoint(0, finalRect.center()));
+    QVERIFY(!formDesigner.sourceFieldContainsPoint(0, initialRect.center()));
+
+    inspection = inspectAcroFormField(
+        savedPath,
+        renamedGroupId);
+    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_RADIOBUTTON);
+    QCOMPARE(inspection.name, renamedGroupId);
+    QCOMPARE(inspection.value, QStringLiteral("Off"));
+    QCOMPARE(inspection.defaultValue, QStringLiteral("Off"));
+    QCOMPARE(inspection.exportValue, fieldId);
+    QVERIFY(!inspection.checked);
+    QCOMPARE(
+        inspection.fieldFlags
+            & (kPdfButtonNoToggleToOff | kPdfButtonRadio),
+        kPdfButtonRadio);
+    QVERIFY(inspection.annotationFlags & FPDF_ANNOT_FLAG_PRINT);
+    QVERIFY(inspection.hasAppearance);
+    QVERIFY(!inspection.appearanceStream.isEmpty());
+    QVERIFY(inspection.hasParent);
+    QVERIFY(!inspection.hasLocalFieldType);
+    QVERIFY(!inspection.hasLocalFieldFlags);
+    QVERIFY(!inspection.hasLocalValue);
+    QCOMPARE(
+        clickAcroFormFieldTwice(
+            savedPath,
+            renamedGroupId),
+        QVector<bool>({false, true, true}));
+    QVERIFY(inspection.hasAppearanceVersion);
+    QCOMPARE(inspection.appearanceVersion,
+             static_cast<float>(
+                 PDFFormAppearance::kRadioButtonVersion));
+    QVERIFY(qAbs(inspection.rect.left
+                 - finalRect.left() * 595.0)
+            < 1.0);
+    QVERIFY(qAbs(inspection.rect.right
+                 - finalRect.right() * 595.0)
+            < 1.0);
+    QVERIFY(qAbs(inspection.rect.top
+                 - (1.0 - finalRect.top()) * 842.0)
+            < 1.0);
+    QVERIFY(qAbs(inspection.rect.bottom
+                 - (1.0 - finalRect.bottom()) * 842.0)
+            < 1.0);
+}
+
+void PDFEditControllerTest::savesRehydratesAndMutatesRadioButtonGroup()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-radio-group-source.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-radio-group-saved.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+
+    const QString groupId = QStringLiteral("PreferredChannel");
+    const QRectF firstRect(0.14, 0.24, 0.06, 0.06);
+    const QRectF secondRect(0.32, 0.24, 0.06, 0.06);
+    const QString firstId = formDesigner.addField(
+        PDFFormDesignerController::RadioButton,
+        0,
+        firstRect.x(),
+        firstRect.y(),
+        firstRect.width(),
+        firstRect.height());
+    const QString secondId = formDesigner.addField(
+        PDFFormDesignerController::RadioButton,
+        0,
+        secondRect.x(),
+        secondRect.y(),
+        secondRect.width(),
+        secondRect.height());
+    QVERIFY(firstId.startsWith(QStringLiteral("radio-field-")));
+    QVERIFY(secondId.startsWith(QStringLiteral("radio-field-")));
+    QVERIFY(firstId != secondId);
+    QVERIFY(formDesigner.setFieldName(firstId, groupId));
+    QVERIFY(formDesigner.setFieldName(secondId, groupId));
+    QVERIFY(formDesigner.setFieldFlags(
+        firstId,
+        PDFFormDesignerController::Required));
+
+    QVERIFY(formDesigner.setFieldValue(firstId, QStringLiteral("Yes")));
+    QCOMPARE(
+        formDesigner.fieldData(firstId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Yes"));
+    QCOMPARE(
+        formDesigner.fieldData(secondId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Off"));
+    QVERIFY(formDesigner.setFieldValue(secondId, QStringLiteral("Yes")));
+    QCOMPARE(
+        formDesigner.fieldData(firstId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Off"));
+    QCOMPARE(
+        formDesigner.fieldData(secondId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Yes"));
+
+    const auto savedFieldForId = [](
+        const QVector<PDFFormDesignerController::SaveField> &fields,
+        const QString &fieldId)
+        -> const PDFFormDesignerController::SaveField * {
+        const auto field = std::find_if(
+            fields.cbegin(),
+            fields.cend(),
+            [&fieldId](const PDFFormDesignerController::SaveField &candidate) {
+                return candidate.id == fieldId;
+            });
+        return field != fields.cend() ? &*field : nullptr;
+    };
+
+    QVector<PDFFormDesignerController::SaveField> savedFields
+        = formDesigner.saveFields();
+    QCOMPARE(savedFields.size(), 2);
+    const PDFFormDesignerController::SaveField *firstSaved
+        = savedFieldForId(savedFields, firstId);
+    const PDFFormDesignerController::SaveField *secondSaved
+        = savedFieldForId(savedFields, secondId);
+    QVERIFY(firstSaved);
+    QVERIFY(secondSaved);
+    QCOMPARE(firstSaved->type, PDFFormDesignerController::RadioButton);
+    QCOMPARE(secondSaved->type, PDFFormDesignerController::RadioButton);
+    QCOMPARE(firstSaved->operation,
+             PDFFormDesignerController::SaveField::Add);
+    QCOMPARE(secondSaved->operation,
+             PDFFormDesignerController::SaveField::Add);
+    QCOMPARE(firstSaved->name, groupId);
+    QCOMPARE(secondSaved->name, groupId);
+    QCOMPARE(firstSaved->value, QStringLiteral("Off"));
+    QCOMPARE(secondSaved->value, QStringLiteral("Yes"));
+    QCOMPARE(firstSaved->defaultValue, QStringLiteral("Off"));
+    QCOMPARE(secondSaved->defaultValue, QStringLiteral("Off"));
+    QCOMPARE(firstSaved->flags,
+             static_cast<int>(PDFFormDesignerController::Required));
+    QCOMPARE(secondSaved->flags,
+             static_cast<int>(PDFFormDesignerController::Required));
+
+    QSignalSpy saveFinishedSpy(
+        &editController,
+        &PDFEditController::saveFinished);
+    QVERIFY(editController.requestSaveAs(QUrl::fromLocalFile(savedPath)));
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+    QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+    QCOMPARE(document.source().toLocalFile(), savedPath);
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    const AcroFormFieldInspection untouchedSource
+        = inspectAcroFormField(sourcePath);
+    QVERIFY(untouchedSource.readable);
+    QCOMPARE(untouchedSource.widgetCount, 0);
+
+    QVariantMap firstHydrated = formDesigner.fieldData(firstId);
+    QVariantMap secondHydrated = formDesigner.fieldData(secondId);
+    QCOMPARE(firstHydrated.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(secondHydrated.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(firstHydrated.value(QStringLiteral("name")).toString(), groupId);
+    QCOMPARE(secondHydrated.value(QStringLiteral("name")).toString(), groupId);
+    QCOMPARE(firstHydrated.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Off"));
+    QCOMPARE(secondHydrated.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Yes"));
+    QVERIFY(firstHydrated.value(QStringLiteral("sourceBacked")).toBool());
+    QVERIFY(secondHydrated.value(QStringLiteral("sourceBacked")).toBool());
+    QVERIFY(!firstHydrated.value(QStringLiteral("dirty")).toBool());
+    QVERIFY(!secondHydrated.value(QStringLiteral("dirty")).toBool());
+
+    AcroFormFieldInspection firstInspection = inspectAcroFormField(
+        savedPath,
+        groupId,
+        0,
+        firstId);
+    AcroFormFieldInspection secondInspection = inspectAcroFormField(
+        savedPath,
+        groupId,
+        0,
+        secondId);
+    QVERIFY(firstInspection.readable);
+    QVERIFY(secondInspection.readable);
+    QCOMPARE(firstInspection.formType, FORMTYPE_ACRO_FORM);
+    QCOMPARE(firstInspection.widgetCount, 2);
+    QCOMPARE(secondInspection.widgetCount, 2);
+    QCOMPARE(firstInspection.fieldType, FPDF_FORMFIELD_RADIOBUTTON);
+    QCOMPARE(secondInspection.fieldType, FPDF_FORMFIELD_RADIOBUTTON);
+    QCOMPARE(firstInspection.widgetId, firstId);
+    QCOMPARE(secondInspection.widgetId, secondId);
+    QCOMPARE(firstInspection.name, groupId);
+    QCOMPARE(secondInspection.name, groupId);
+    QCOMPARE(firstInspection.value, secondId);
+    QCOMPARE(secondInspection.value, secondId);
+    QCOMPARE(firstInspection.defaultValue, QStringLiteral("Off"));
+    QCOMPARE(secondInspection.defaultValue, QStringLiteral("Off"));
+    QCOMPARE(firstInspection.exportValue, firstId);
+    QCOMPARE(secondInspection.exportValue, secondId);
+    QVERIFY(!firstInspection.checked);
+    QVERIFY(secondInspection.checked);
+    QCOMPARE(
+        firstInspection.fieldFlags
+            & (kPdfButtonNoToggleToOff | kPdfButtonRadio),
+        kPdfButtonRadio);
+    QCOMPARE(
+        secondInspection.fieldFlags
+            & (kPdfButtonNoToggleToOff | kPdfButtonRadio),
+        kPdfButtonRadio);
+    QVERIFY(firstInspection.fieldFlags & FPDF_FORMFLAG_REQUIRED);
+    QVERIFY(secondInspection.fieldFlags & FPDF_FORMFLAG_REQUIRED);
+    QVERIFY(firstInspection.annotationFlags & FPDF_ANNOT_FLAG_PRINT);
+    QVERIFY(secondInspection.annotationFlags & FPDF_ANNOT_FLAG_PRINT);
+    QVERIFY(firstInspection.hasAppearance);
+    QVERIFY(secondInspection.hasAppearance);
+    QVERIFY(!firstInspection.appearanceStream.isEmpty());
+    QVERIFY(!secondInspection.appearanceStream.isEmpty());
+    QVERIFY(firstInspection.hasAppearanceVersion);
+    QVERIFY(secondInspection.hasAppearanceVersion);
+    QCOMPARE(firstInspection.appearanceVersion,
+             static_cast<float>(
+                 PDFFormAppearance::kRadioButtonVersion));
+    QCOMPARE(secondInspection.appearanceVersion,
+             static_cast<float>(
+                 PDFFormAppearance::kRadioButtonVersion));
+    QVERIFY(firstInspection.hasParent);
+    QVERIFY(secondInspection.hasParent);
+    QVERIFY(!firstInspection.hasLocalFieldType);
+    QVERIFY(!secondInspection.hasLocalFieldType);
+    QVERIFY(!firstInspection.hasLocalFieldFlags);
+    QVERIFY(!secondInspection.hasLocalFieldFlags);
+    QVERIFY(!firstInspection.hasLocalValue);
+    QVERIFY(!secondInspection.hasLocalValue);
+    QCOMPARE(firstInspection.controlCount, 2);
+    QCOMPARE(secondInspection.controlCount, 2);
+    QVERIFY(firstInspection.controlIndex >= 0);
+    QVERIFY(secondInspection.controlIndex >= 0);
+    QVERIFY(firstInspection.controlIndex != secondInspection.controlIndex);
+
+    formDesigner.prepareForDesignMode();
+    QVERIFY(formDesigner.setFieldValue(firstId, QStringLiteral("Yes")));
+    QCOMPARE(
+        formDesigner.fieldData(firstId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Yes"));
+    QCOMPARE(
+        formDesigner.fieldData(secondId)
+            .value(QStringLiteral("value"))
+            .toString(),
+        QStringLiteral("Off"));
+    const QRectF movedFirstRect(0.20, 0.34, 0.08, 0.07);
+    QVERIFY(formDesigner.moveField(
+        firstId,
+        movedFirstRect.x(),
+        movedFirstRect.y()));
+    QVERIFY(formDesigner.setFieldRect(
+        firstId,
+        movedFirstRect.x(),
+        movedFirstRect.y(),
+        movedFirstRect.width(),
+        movedFirstRect.height()));
+
+    savedFields = formDesigner.saveFields(true);
+    QCOMPARE(savedFields.size(), 2);
+    firstSaved = savedFieldForId(savedFields, firstId);
+    secondSaved = savedFieldForId(savedFields, secondId);
+    QVERIFY(firstSaved);
+    QVERIFY(secondSaved);
+    QCOMPARE(firstSaved->operation,
+             PDFFormDesignerController::SaveField::Update);
+    QCOMPARE(secondSaved->operation,
+             PDFFormDesignerController::SaveField::Update);
+    QCOMPARE(firstSaved->value, QStringLiteral("Yes"));
+    QCOMPARE(secondSaved->value, QStringLiteral("Off"));
+    QVERIFY(firstSaved->changedProperties
+            & PDFFormDesignerController::ValuePropertyChanged);
+    QVERIFY(firstSaved->changedProperties
+            & PDFFormDesignerController::RectPropertyChanged);
+    QCOMPARE(secondSaved->changedProperties,
+             static_cast<quint32>(
+                 PDFFormDesignerController::ValuePropertyChanged));
+
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    firstInspection = inspectAcroFormField(
+        savedPath,
+        groupId,
+        0,
+        firstId);
+    secondInspection = inspectAcroFormField(
+        savedPath,
+        groupId,
+        0,
+        secondId);
+    QCOMPARE(firstInspection.value, firstId);
+    QCOMPARE(secondInspection.value, firstId);
+    QCOMPARE(firstInspection.exportValue, firstId);
+    QCOMPARE(secondInspection.exportValue, secondId);
+    QVERIFY(firstInspection.checked);
+    QVERIFY(!secondInspection.checked);
+    QCOMPARE(firstInspection.controlCount, 2);
+    QCOMPARE(secondInspection.controlCount, 2);
+    QVERIFY(firstInspection.controlIndex != secondInspection.controlIndex);
+    QVERIFY(qAbs(firstInspection.rect.left
+                 - movedFirstRect.left() * 595.0)
+            < 1.0);
+    QVERIFY(qAbs(firstInspection.rect.right
+                 - movedFirstRect.right() * 595.0)
+            < 1.0);
+    QVERIFY(qAbs(firstInspection.rect.top
+                 - (1.0 - movedFirstRect.top()) * 842.0)
+            < 1.0);
+    QVERIFY(qAbs(firstInspection.rect.bottom
+                 - (1.0 - movedFirstRect.bottom()) * 842.0)
+            < 1.0);
+
+    QVERIFY(formDesigner.removeField(secondId));
+    QCOMPARE(formDesigner.rowCount(), 1);
+    QVERIFY(formDesigner.hasDrafts());
+    savedFields = formDesigner.saveFields();
+    QCOMPARE(savedFields.size(), 2);
+    firstSaved = savedFieldForId(savedFields, firstId);
+    secondSaved = savedFieldForId(savedFields, secondId);
+    QVERIFY(firstSaved);
+    QVERIFY(secondSaved);
+    QCOMPARE(firstSaved->operation,
+             PDFFormDesignerController::SaveField::Update);
+    QCOMPARE(firstSaved->changedProperties,
+             static_cast<quint32>(
+                 PDFFormDesignerController::NoPropertyChanges));
+    QCOMPARE(secondSaved->operation,
+             PDFFormDesignerController::SaveField::Remove);
+
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 3, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+    QVERIFY(formDesigner.fieldData(secondId).isEmpty());
+    firstHydrated = formDesigner.fieldData(firstId);
+    QCOMPARE(firstHydrated.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::RadioButton);
+    QCOMPARE(firstHydrated.value(QStringLiteral("name")).toString(), groupId);
+    QCOMPARE(firstHydrated.value(QStringLiteral("value")).toString(),
+             QStringLiteral("Yes"));
+    QVERIFY(firstHydrated.value(QStringLiteral("sourceBacked")).toBool());
+    const QStringList sourceFieldIds
+        = formDesigner.sourceFieldIdsForPage(0);
+    QCOMPARE(sourceFieldIds.size(), 1);
+    QCOMPARE(sourceFieldIds.constFirst(), firstId);
+
+    firstInspection = inspectAcroFormField(
+        savedPath,
+        groupId,
+        0,
+        firstId);
+    QCOMPARE(firstInspection.widgetCount, 1);
+    QCOMPARE(firstInspection.fieldType, FPDF_FORMFIELD_RADIOBUTTON);
+    QCOMPARE(firstInspection.value, firstId);
+    QCOMPARE(firstInspection.defaultValue, QStringLiteral("Off"));
+    QCOMPARE(firstInspection.exportValue, firstId);
+    QVERIFY(firstInspection.checked);
+    QCOMPARE(firstInspection.controlCount, 1);
+    QCOMPARE(firstInspection.controlIndex, 0);
+    QVERIFY(firstInspection.hasAppearance);
+    QVERIFY(firstInspection.hasParent);
+    const AcroFormFieldInspection removedInspection = inspectAcroFormField(
+        savedPath,
+        groupId,
+        0,
+        secondId);
+    QCOMPARE(removedInspection.widgetCount, 1);
+    QCOMPARE(removedInspection.fieldType, FPDF_FORMFIELD_UNKNOWN);
+}
+
+void PDFEditControllerTest::migratesLegacyMergedRadioButton()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("legacy-merged-radio.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("migrated-radio.pdf"));
+    QVERIFY(createLegacyTrePDFRadioButtonPdf(sourcePath));
+
+    AcroFormFieldInspection inspection = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("PreferredContact"));
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_RADIOBUTTON);
+    QVERIFY(inspection.checked);
+    QCOMPARE(inspection.defaultValue, QStringLiteral("Yes"));
+    QVERIFY(!inspection.hasParent);
+    QCOMPARE(inspection.appearanceVersion, 2.0f);
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+
+    const QString fieldId
+        = QStringLiteral(
+            "radio-field-11111111-1111-1111-1111-111111111111");
+    QCOMPARE(
+        formDesigner.fieldData(fieldId)
+            .value(QStringLiteral("type"))
+            .toInt(),
+        PDFFormDesignerController::RadioButton);
+    formDesigner.prepareForDesignMode();
+    QVERIFY(formDesigner.setFieldValue(fieldId, QStringLiteral("Off")));
+    QVector<PDFFormDesignerController::SaveField> radioFields
+        = formDesigner.saveFields(true);
+    QCOMPARE(radioFields.size(), 1);
+    QCOMPARE(radioFields.constFirst().defaultValue,
+             QStringLiteral("Yes"));
+
+    QSignalSpy saveFinishedSpy(
+        &editController,
+        &PDFEditController::saveFinished);
+    QVERIFY(editController.requestSaveAs(QUrl::fromLocalFile(savedPath)));
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+    QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    const AcroFormFieldInspection untouchedSource = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("PreferredContact"));
+    QVERIFY(!untouchedSource.hasParent);
+    QCOMPARE(untouchedSource.appearanceVersion, 2.0f);
+
+    inspection = inspectAcroFormField(
+        savedPath,
+        QStringLiteral("PreferredContact"));
+    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_RADIOBUTTON);
+    QCOMPARE(inspection.value, QStringLiteral("Off"));
+    QCOMPARE(inspection.defaultValue, QStringLiteral("Yes"));
+    QVERIFY(!inspection.checked);
+    QCOMPARE(
+        inspection.fieldFlags
+            & (kPdfButtonNoToggleToOff | kPdfButtonRadio),
+        kPdfButtonRadio);
+    QVERIFY(inspection.hasParent);
+    QVERIFY(!inspection.hasLocalFieldType);
+    QVERIFY(!inspection.hasLocalFieldFlags);
+    QVERIFY(!inspection.hasLocalValue);
+    QCOMPARE(inspection.appearanceVersion,
+             static_cast<float>(
+                 PDFFormAppearance::kRadioButtonVersion));
+
+    formDesigner.prepareForDesignMode();
+    const QRectF hydratedRect = formDesigner.fieldData(fieldId)
+                                    .value(QStringLiteral("rect"))
+                                    .toRectF();
+    QVERIFY(formDesigner.setFieldRect(
+        fieldId,
+        hydratedRect.x() + 0.01,
+        hydratedRect.y(),
+        hydratedRect.width(),
+        hydratedRect.height()));
+    radioFields = formDesigner.saveFields();
+    QCOMPARE(radioFields.size(), 1);
+    QCOMPARE(radioFields.constFirst().defaultValue,
+             QStringLiteral("Yes"));
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    inspection = inspectAcroFormField(
+        savedPath,
+        QStringLiteral("PreferredContact"));
+    QCOMPARE(inspection.value, QStringLiteral("Off"));
+    QCOMPARE(inspection.defaultValue, QStringLiteral("Yes"));
+    QVERIFY(!inspection.checked);
+    QCOMPARE(
+        clickAcroFormFieldTwice(
+            savedPath,
+            QStringLiteral("PreferredContact")),
+        QVector<bool>({false, true, true}));
 }
 
 void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()

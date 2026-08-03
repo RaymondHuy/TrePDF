@@ -46,6 +46,13 @@ ApplicationWindow {
         activeSession
             ? activeSession.formDesignerController
             : emptyFormDesignerController
+    readonly property bool activeWorkspaceHasPendingEdits: {
+        if (workspaceLoader.status !== Loader.Ready)
+            return false
+
+        const workspace = workspaceLoader.item as DocumentWorkspace
+        return workspace ? workspace.hasPendingPanelEdits : false
+    }
 
     palette.highlight: appTheme.foxitOrange
     palette.button: appTheme.foxitPaleOrange
@@ -61,9 +68,10 @@ ApplicationWindow {
     function prepareActiveWorkspace() {
         const workspace = activeWorkspace()
         if (workspace)
-            workspace.prepareForDeactivation()
-        else if (activeSession)
+            return workspace.prepareForDeactivation()
+        if (activeSession)
             activeSession.prepareForDeactivation()
+        return true
     }
 
     function rebuildWorkspace() {
@@ -110,7 +118,8 @@ ApplicationWindow {
         if (index === tabModel.currentIndex || tabModel.anySaving)
             return
 
-        prepareActiveWorkspace()
+        if (!prepareActiveWorkspace())
+            return
         tabModel.currentIndex = index
     }
 
@@ -125,7 +134,8 @@ ApplicationWindow {
     }
 
     function openFiles(urls) {
-        prepareActiveWorkspace()
+        if (!prepareActiveWorkspace())
+            return
         openingFiles = true
         for (let index = 0; index < urls.length; ++index)
             tabModel.open(urls[index])
@@ -134,14 +144,17 @@ ApplicationWindow {
     }
 
     function requestSave() {
-        if (activeSession) {
-            prepareActiveWorkspace()
+        if (activeSession && prepareActiveWorkspace()) {
             tabModel.requestSave(activeSession)
         }
     }
 
     function requestSaveAs() {
         if (!activeSession || tabModel.anySaving)
+            return
+
+        const workspace = activeWorkspace()
+        if (workspace && !workspace.commitPendingPanelEdits())
             return
 
         saveAsSession = activeSession
@@ -178,8 +191,10 @@ ApplicationWindow {
         const session = saveAsSession
         saveAsSession = null
         if (session) {
-            if (session === activeSession)
-                prepareActiveWorkspace()
+            if (session === activeSession
+                    && !prepareActiveWorkspace()) {
+                return
+            }
             tabModel.requestSaveAs(session, url)
         }
     }
@@ -312,10 +327,12 @@ ApplicationWindow {
             return
         }
 
-        if (session === activeSession)
-            prepareActiveWorkspace()
-        else
+        if (session === activeSession) {
+            if (!prepareActiveWorkspace())
+                return
+        } else {
             session.prepareForDeactivation()
+        }
 
         if (session.hasDrafts) {
             beginDraftPrompt("close", session)
@@ -398,7 +415,8 @@ ApplicationWindow {
             return
 
         close.accepted = false
-        prepareActiveWorkspace()
+        if (!prepareActiveWorkspace())
+            return
         tabModel.finishAllEdits()
         if (tabModel.anySaving) {
             //% "Please wait for the PDF to finish saving."
@@ -505,7 +523,8 @@ ApplicationWindow {
     Shortcut {
         sequences: [StandardKey.Save]
         enabled: window.activeDocument.loaded
-            && window.activeEditController.hasDrafts
+            && (window.activeEditController.hasDrafts
+                || window.activeWorkspaceHasPendingEdits)
             && !tabModel.anySaving
         onActivated: window.requestSave()
     }
@@ -839,6 +858,7 @@ ApplicationWindow {
             theme: appTheme
             document: window.activeDocument
             editController: window.activeEditController
+            hasPendingPanelEdits: window.activeWorkspaceHasPendingEdits
             enabled: !tabModel.anySaving
             onOpenRequested: window.requestOpen()
             onSaveRequested: window.requestSave()
@@ -887,6 +907,7 @@ ApplicationWindow {
             || appRibbon.formsTabActive
         textFieldToolActive: appRibbon.textFieldToolActive
         checkboxToolActive: appRibbon.checkboxToolActive
+        radioButtonToolActive: appRibbon.radioButtonToolActive
         dropdownToolActive: appRibbon.dropdownToolActive
         transientStatus: window.transientStatus
         onOpenRequested: window.requestOpen()
@@ -910,6 +931,7 @@ ApplicationWindow {
                     || appRibbon.formsTabActive
                 textFieldToolActive: appRibbon.textFieldToolActive
                 checkboxToolActive: appRibbon.checkboxToolActive
+                radioButtonToolActive: appRibbon.radioButtonToolActive
                 dropdownToolActive: appRibbon.dropdownToolActive
                 transientStatus: window.transientStatus
                 enabled: !tabModel.anySaving

@@ -8,6 +8,9 @@ Flickable {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    property bool hasPendingPanelEdits: false
+    readonly property bool hasUnsavedChanges:
+        editController.hasDrafts || hasPendingPanelEdits
 
     signal openRequested()
     signal saveRequested()
@@ -58,9 +61,9 @@ Flickable {
                 toolTipText: qsTrId("SavePdf")
                 iconSource: "../assets/icons/save.svg"
                 enabled: root.document.loaded
-                    && root.editController.hasDrafts
+                    && root.hasUnsavedChanges
                     && !root.editController.saving
-                primary: root.editController.hasDrafts
+                primary: root.hasUnsavedChanges
                 onClicked: root.saveRequested()
             }
 

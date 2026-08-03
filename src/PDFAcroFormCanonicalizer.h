@@ -11,6 +11,7 @@ public:
     enum class FieldType {
         Text,
         Checkbox,
+        RadioButton,
         Dropdown
     };
 

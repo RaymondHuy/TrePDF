@@ -148,6 +148,28 @@ void appendRoundedRect(QVector<ColoredVertex> *vertices,
     }
 }
 
+void appendEllipse(QVector<ColoredVertex> *vertices,
+                   const QRectF &rect,
+                   const QColor &color)
+{
+    if (rect.isEmpty()) {
+        return;
+    }
+
+    constexpr int segments = 32;
+    const QPointF center = rect.center();
+    const qreal radiusX = rect.width() / 2.0;
+    const qreal radiusY = rect.height() / 2.0;
+    QPointF previous(center.x() + radiusX, center.y());
+    for (int segment = 1; segment <= segments; ++segment) {
+        const qreal angle = 2.0 * M_PI * segment / segments;
+        const QPointF next(center.x() + qCos(angle) * radiusX,
+                           center.y() + qSin(angle) * radiusY);
+        appendTriangle(vertices, center, previous, next, color);
+        previous = next;
+    }
+}
+
 void appendThickLine(QVector<ColoredVertex> *vertices,
                      const QPointF &start,
                      const QPointF &end,
@@ -770,6 +792,7 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
         = QColor::fromRgb(PDFFormAppearance::kTextFieldBorderRgb);
     const QColor readOnlyBackground(QStringLiteral("#f3f4f5"));
     const QColor darkControl(QStringLiteral("#5f6368"));
+    const QColor radioButtonControl(Qt::black);
     const QColor signatureLine(QStringLiteral("#9aa0a6"));
     const qreal minimumTextFieldPadding
         = PDFFormAppearance::kTextFieldMinimumHorizontalPaddingPoints
@@ -791,13 +814,16 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
             = field.type == PDFFormDesignerController::Text;
         const bool checkbox
             = field.type == PDFFormDesignerController::Checkbox;
+        const bool radioButton
+            = field.type == PDFFormDesignerController::RadioButton;
         const bool dropdown
             = field.type == PDFFormDesignerController::Dropdown;
         // Source Widget rectangles commonly return with fractional coordinates
         // after a Save/reopen cycle. Keep both opposite edges on the same
         // physical-pixel phase so a one-point border cannot rasterize as one
         // pixel on one side and two pixels on the other.
-        const QRectF fieldRect = textField || checkbox || dropdown
+        const QRectF fieldRect
+            = textField || checkbox || radioButton || dropdown
             ? alignedDeviceRect(rawFieldRect, devicePixelRatio)
             : rawFieldRect;
         const bool selected = m_formsActive && field.selected;
@@ -809,7 +835,8 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                 ? PDFFormAppearance::kTextFieldBorderPointWidth
                     * m_pointScale
                 : 1.0;
-        const qreal borderWidth = textField || checkbox || dropdown
+        const qreal borderWidth
+            = textField || checkbox || radioButton || dropdown
             ? alignedDeviceWidth(
                   requestedBorderWidth,
                   devicePixelRatio)
@@ -819,23 +846,25 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
             : checkbox
                 ? 2.0
                 : 5.0;
-        appendRoundedRect(&geometryVertices,
-                          fieldRect,
-                          fieldRadius,
-                          selected
-                              ? m_accentColor
-                              : textField
-                                  ? textFieldBorder
-                                  : defaultBorder);
-        appendRoundedRect(&geometryVertices,
-                          fieldRect.adjusted(borderWidth,
-                                             borderWidth,
-                                             -borderWidth,
-                                             -borderWidth),
-                          qMax(0.0, fieldRadius - borderWidth),
-                          readOnly && !textField
-                              ? readOnlyBackground
-                              : Qt::white);
+        if (!radioButton) {
+            appendRoundedRect(&geometryVertices,
+                              fieldRect,
+                              fieldRadius,
+                              selected
+                                  ? m_accentColor
+                                  : textField
+                                      ? textFieldBorder
+                                      : defaultBorder);
+            appendRoundedRect(&geometryVertices,
+                              fieldRect.adjusted(borderWidth,
+                                                 borderWidth,
+                                                 -borderWidth,
+                                                 -borderWidth),
+                              qMax(0.0, fieldRadius - borderWidth),
+                              readOnly && !textField
+                                  ? readOnlyBackground
+                                  : Qt::white);
+        }
 
         const qreal horizontalPadding
             = textField
@@ -843,10 +872,10 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                   minimumTextFieldPadding,
                   fieldRect.height()
                       * PDFFormAppearance::kTextFieldHorizontalPaddingRatio)
-            : checkbox
+            : checkbox || radioButton
                 ? 0.0
                 : 7.0;
-        const qreal verticalPadding = textField ? 0.0 : 2.0;
+        const qreal verticalPadding = textField || radioButton ? 0.0 : 2.0;
         QRectF contentRect = fieldRect.adjusted(
             horizontalPadding,
             verticalPadding,
@@ -880,30 +909,47 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
             break;
         }
         case PDFFormDesignerController::RadioButton: {
+            const qreal unalignedSide
+                = qMin(contentRect.width(), contentRect.height())
+                * PDFFormAppearance::kRadioButtonVisualScale;
             const qreal side = qMax(
-                4.0,
-                qMin(contentRect.width(), contentRect.height()));
-            const QRectF circle(contentRect.x(),
-                                contentRect.center().y() - side / 2.0,
+                1.0 / devicePixelRatio,
+                qRound64(unalignedSide * devicePixelRatio)
+                    / devicePixelRatio);
+            const QPointF center = contentRect.center();
+            const QRectF circle(center.x() - side / 2.0,
+                                center.y() - side / 2.0,
                                 side,
                                 side);
-            appendRoundedRect(&geometryVertices,
-                              circle,
-                              side / 2.0,
-                              defaultBorder);
-            appendRoundedRect(&geometryVertices,
-                              circle.adjusted(1.0, 1.0, -1.0, -1.0),
-                              side / 2.0 - 1.0,
-                              Qt::white);
+            const qreal radioBorderWidth = alignedDeviceWidth(
+                qBound(
+                    PDFFormAppearance::kRadioButtonMinimumBorderPointWidth
+                        * m_pointScale,
+                    side / 12.0,
+                    PDFFormAppearance::kRadioButtonBorderPointWidth
+                        * m_pointScale),
+                devicePixelRatio);
+            appendEllipse(&geometryVertices,
+                          circle,
+                          radioButtonControl);
+            appendEllipse(
+                &geometryVertices,
+                circle.adjusted(radioBorderWidth,
+                                radioBorderWidth,
+                                -radioBorderWidth,
+                                -radioBorderWidth),
+                readOnly ? readOnlyBackground : Qt::white);
             if (checkedValue(field.value)) {
-                const QRectF dot = circle.adjusted(side * 0.28,
-                                                   side * 0.28,
-                                                   -side * 0.28,
-                                                   -side * 0.28);
-                appendRoundedRect(&geometryVertices,
-                                  dot,
-                                  dot.width() / 2.0,
-                                  m_accentColor);
+                const qreal dotRadius
+                    = (side / 2.0 - radioBorderWidth / 2.0)
+                    * PDFFormAppearance::kRadioButtonDotRadiusRatio;
+                const QRectF dot(center.x() - dotRadius,
+                                 center.y() - dotRadius,
+                                 dotRadius * 2.0,
+                                 dotRadius * 2.0);
+                appendEllipse(&geometryVertices,
+                              dot,
+                              radioButtonControl);
             }
             break;
         }

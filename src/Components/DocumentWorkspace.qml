@@ -15,6 +15,7 @@ Item {
     property bool formFieldsInteractive: false
     property bool textFieldToolActive: false
     property bool checkboxToolActive: false
+    property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
     property string transientStatus
     readonly property string selectedFormFieldId:
@@ -26,6 +27,18 @@ Item {
         && selectedFormFieldId.length > 0
         && Number(selectedFormField.type)
             === PDFFormDesignerController.Dropdown
+    readonly property bool radioButtonOptionsPanelActive: formsTabActive
+        && selectedFormFieldId.length > 0
+        && Number(selectedFormField.type)
+            === PDFFormDesignerController.RadioButton
+    readonly property bool hasPendingPanelEdits: {
+        if (radioButtonOptionsPanelLoader.status !== Loader.Ready)
+            return false
+
+        const panel = radioButtonOptionsPanelLoader.item
+            as RadioButtonOptionsPanel
+        return panel ? panel.groupNameEditPending : false
+    }
 
     signal openRequested()
 
@@ -81,11 +94,24 @@ Item {
         }
     }
 
+    function commitPendingPanelEdits() {
+        if (radioButtonOptionsPanelLoader.status !== Loader.Ready)
+            return true
+
+        const panel = radioButtonOptionsPanelLoader.item
+            as RadioButtonOptionsPanel
+        return panel ? panel.commitPendingEdit() : true
+    }
+
     function prepareForDeactivation() {
+        if (!commitPendingPanelEdits())
+            return false
+
         documentView.prepareForSessionChange()
         session.scrollX = documentView.contentX
         session.scrollY = documentView.contentY
         session.prepareForDeactivation()
+        return true
     }
 
     Component.onDestruction: prepareForDeactivation()
@@ -117,6 +143,7 @@ Item {
             formFieldsInteractive: root.formFieldsInteractive
             textFieldToolActive: root.textFieldToolActive
             checkboxToolActive: root.checkboxToolActive
+            radioButtonToolActive: root.radioButtonToolActive
             dropdownToolActive: root.dropdownToolActive
             zoom: root.session.zoom
             viewRotation: root.session.viewRotation
@@ -157,6 +184,7 @@ Item {
             Layout.fillHeight: true
             active: root.session.document.loaded
                 && !root.dropdownOptionsPanelActive
+                && !root.radioButtonOptionsPanelActive
                 && root.session.editController.tool !== PDFEditController.BrowseTool
             visible: active
 
@@ -221,6 +249,30 @@ Item {
                         root.session.editController.setSelectedParagraphAlignment(
                             alignment)
                     }
+                    onCollapsedChangeRequested: collapsed => {
+                        root.session.panelCollapsed = collapsed
+                    }
+                }
+            }
+        }
+
+        Loader {
+            id: radioButtonOptionsPanelLoader
+
+            Layout.preferredWidth: active
+                ? root.session.panelCollapsed ? 42 : 264
+                : 0
+            Layout.fillHeight: true
+            active: root.session.document.loaded
+                && root.radioButtonOptionsPanelActive
+            visible: active
+
+            sourceComponent: Component {
+                RadioButtonOptionsPanel {
+                    theme: root.theme
+                    controller: root.session.formDesignerController
+                    fieldId: root.selectedFormFieldId
+                    collapsed: root.session.panelCollapsed
                     onCollapsedChangeRequested: collapsed => {
                         root.session.panelCollapsed = collapsed
                     }

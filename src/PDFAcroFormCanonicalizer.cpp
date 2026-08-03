@@ -25,6 +25,8 @@ constexpr char kUnicodeFormFontPath[]
     = ":/trepdf/fonts/Arial/Arial-Regular.TTF";
 constexpr char kUnicodeFormFontBaseName[] = "ArialMT";
 constexpr char kUnicodeFormFontResourcePrefix[] = "TrePDFUF";
+constexpr int kButtonNoToggleToOff = 1 << 14;
+constexpr int kButtonRadio = 1 << 15;
 
 bool isTrePDFDropdownWidgetId(const QString &widgetId)
 {
@@ -41,6 +43,28 @@ bool isTrePDFDropdownWidgetId(const QString &widgetId)
                suffix,
                Qt::CaseInsensitive)
             == 0;
+}
+
+bool isTrePDFRadioButtonWidgetId(const QString &widgetId)
+{
+    constexpr qsizetype uuidLength = 36;
+    const QString prefix = QStringLiteral("radio-field-");
+    if (!widgetId.startsWith(prefix)
+        || widgetId.size() != prefix.size() + uuidLength) {
+        return false;
+    }
+    const QString suffix = widgetId.sliced(prefix.size());
+    const QUuid uuid = QUuid::fromString(suffix);
+    return !uuid.isNull()
+        && uuid.toString(QUuid::WithoutBraces).compare(
+               suffix,
+               Qt::CaseInsensitive)
+            == 0;
+}
+
+QByteArray radioButtonExportName(const QString &widgetId)
+{
+    return QByteArrayLiteral("/") + widgetId.toLatin1();
 }
 
 struct UnicodeFormFontTemplate {
@@ -87,6 +111,8 @@ struct ObjectReference {
         return number == other.number && generation == other.generation;
     }
 };
+
+QByteArray referenceArray(const QList<ObjectReference> &references);
 
 struct ParsedPdf {
     const char *data = nullptr;
@@ -1510,6 +1536,249 @@ QByteArray checkboxWidgetObject(
         + QByteArray::number(PDFFormAppearance::kCheckboxVersion)
         + QByteArrayLiteral(" >>\nendobj");
     return object;
+}
+
+QByteArray ellipsePath(qreal centerX,
+                       qreal centerY,
+                       qreal radiusX,
+                       qreal radiusY)
+{
+    constexpr qreal kBezierCircleControl = 0.5522847498307936;
+    const qreal controlX = radiusX * kBezierCircleControl;
+    const qreal controlY = radiusY * kBezierCircleControl;
+    return pdfNumber(centerX + radiusX)
+        + ' '
+        + pdfNumber(centerY)
+        + QByteArrayLiteral(" m ")
+        + pdfNumber(centerX + radiusX)
+        + ' '
+        + pdfNumber(centerY + controlY)
+        + ' '
+        + pdfNumber(centerX + controlX)
+        + ' '
+        + pdfNumber(centerY + radiusY)
+        + ' '
+        + pdfNumber(centerX)
+        + ' '
+        + pdfNumber(centerY + radiusY)
+        + QByteArrayLiteral(" c ")
+        + pdfNumber(centerX - controlX)
+        + ' '
+        + pdfNumber(centerY + radiusY)
+        + ' '
+        + pdfNumber(centerX - radiusX)
+        + ' '
+        + pdfNumber(centerY + controlY)
+        + ' '
+        + pdfNumber(centerX - radiusX)
+        + ' '
+        + pdfNumber(centerY)
+        + QByteArrayLiteral(" c ")
+        + pdfNumber(centerX - radiusX)
+        + ' '
+        + pdfNumber(centerY - controlY)
+        + ' '
+        + pdfNumber(centerX - controlX)
+        + ' '
+        + pdfNumber(centerY - radiusY)
+        + ' '
+        + pdfNumber(centerX)
+        + ' '
+        + pdfNumber(centerY - radiusY)
+        + QByteArrayLiteral(" c ")
+        + pdfNumber(centerX + controlX)
+        + ' '
+        + pdfNumber(centerY - radiusY)
+        + ' '
+        + pdfNumber(centerX + radiusX)
+        + ' '
+        + pdfNumber(centerY - controlY)
+        + ' '
+        + pdfNumber(centerX + radiusX)
+        + ' '
+        + pdfNumber(centerY)
+        + QByteArrayLiteral(" c");
+}
+
+QByteArray radioButtonAppearanceObject(int objectNumber,
+                                       const QRectF &pageRect,
+                                       bool checked)
+{
+    const qreal widthValue = pageRect.width();
+    const qreal heightValue = pageRect.height();
+    const qreal shortestSide = qMin(widthValue, heightValue);
+    const qreal visualSide
+        = shortestSide * PDFFormAppearance::kRadioButtonVisualScale;
+    const qreal borderWidth = qBound(
+        PDFFormAppearance::kRadioButtonMinimumBorderPointWidth,
+        visualSide / 12.0,
+        PDFFormAppearance::kRadioButtonBorderPointWidth);
+    const qreal centerX = widthValue / 2.0;
+    const qreal centerY = heightValue / 2.0;
+    const qreal outerRadius = qMax(
+        0.0,
+        visualSide / 2.0 - borderWidth / 2.0);
+    const QByteArray width = pdfNumber(widthValue);
+    const QByteArray height = pdfNumber(heightValue);
+    QByteArray content = QByteArrayLiteral(
+        "q 1 1 1 rg 0 0 0 RG ")
+        + pdfNumber(borderWidth)
+        + QByteArrayLiteral(" w ")
+        + ellipsePath(
+            centerX,
+            centerY,
+            outerRadius,
+            outerRadius)
+        + QByteArrayLiteral(" h B");
+    if (checked) {
+        const qreal dotRadius = outerRadius
+            * PDFFormAppearance::kRadioButtonDotRadiusRatio;
+        content += QByteArrayLiteral(" 0 0 0 rg ")
+            + ellipsePath(
+                centerX,
+                centerY,
+                dotRadius,
+                dotRadius)
+            + QByteArrayLiteral(" h f");
+    }
+    content += QByteArrayLiteral(" Q");
+
+    return QByteArray::number(objectNumber)
+        + QByteArrayLiteral(
+            " 0 obj\n"
+            "<< /Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 ")
+        + width
+        + ' '
+        + height
+        + QByteArrayLiteral("] /Resources << >> /Length ")
+        + QByteArray::number(content.size())
+        + QByteArrayLiteral(" >>\nstream\n")
+        + content
+        + QByteArrayLiteral("\nendstream\nendobj");
+}
+
+QByteArray radioButtonFieldObject(
+    const ObjectReference &reference,
+    const QString &fieldName,
+    const QString &tooltip,
+    int fieldFlags,
+    const QList<ObjectReference> &widgetReferences,
+    const QByteArray &currentState,
+    const QByteArray &defaultState)
+{
+    return QByteArray::number(reference.number)
+        + ' '
+        + QByteArray::number(reference.generation)
+        + QByteArrayLiteral(" obj\n<< /FT /Btn /Ff ")
+        + QByteArray::number(
+            (fieldFlags & ~kButtonNoToggleToOff) | kButtonRadio)
+        + QByteArrayLiteral(" /T ")
+        + encodedPdfString(fieldName)
+        + QByteArrayLiteral(" /TU ")
+        + encodedPdfString(tooltip)
+        + QByteArrayLiteral(" /V ")
+        + currentState
+        + QByteArrayLiteral(" /DV ")
+        + defaultState
+        + QByteArrayLiteral(" /Kids ")
+        + referenceArray(widgetReferences)
+        + QByteArrayLiteral(" >>\nendobj");
+}
+
+QByteArray radioButtonWidgetObject(
+    const ObjectReference &reference,
+    const ObjectReference &fieldReference,
+    const PDFAcroFormCanonicalizer::Field &field,
+    int offAppearanceObjectNumber,
+    int onAppearanceObjectNumber,
+    const ObjectReference &pageReference,
+    const QByteArray &exportState)
+{
+    const QByteArray left = pdfNumber(field.pageRect.left());
+    const QByteArray bottom = pdfNumber(field.pageRect.top());
+    const QByteArray right = pdfNumber(field.pageRect.right());
+    const QByteArray top = pdfNumber(field.pageRect.bottom());
+    const bool checked = checkboxChecked(field.value);
+    const bool defaultChecked = checkboxChecked(field.defaultValue);
+    const QByteArray currentState = checked
+        ? exportState
+        : QByteArrayLiteral("/Off");
+    QByteArray object = QByteArray::number(reference.number)
+        + ' '
+        + QByteArray::number(reference.generation)
+        + QByteArrayLiteral(
+            " obj\n"
+            "<< /Type /Annot /Subtype /Widget /Rect [")
+        + left
+        + ' '
+        + bottom
+        + ' '
+        + right
+        + ' '
+        + top
+        + QByteArrayLiteral("] /Parent ")
+        + QByteArray::number(fieldReference.number)
+        + ' '
+        + QByteArray::number(fieldReference.generation)
+        + QByteArrayLiteral(" R /AS ")
+        + currentState
+        + QByteArrayLiteral(" /NM ")
+        + encodedPdfString(field.widgetId)
+        + QByteArrayLiteral(" /")
+        + QByteArray(PDFFormAppearance::kRadioButtonDefaultCheckedKey)
+        + ' '
+        + (defaultChecked ? '1' : '0');
+    if (pageReference.number >= 0) {
+        object += QByteArrayLiteral(" /P ")
+            + QByteArray::number(pageReference.number)
+            + ' '
+            + QByteArray::number(pageReference.generation)
+            + QByteArrayLiteral(" R");
+    }
+    object += QByteArrayLiteral(
+        " /F 4 /MK << /BG [1 1 1] /BC [0 0 0] >> "
+        "/BS << /W 1 /S /S >> /AP << /N << /Off ")
+        + QByteArray::number(offAppearanceObjectNumber)
+        + QByteArrayLiteral(" 0 R ")
+        + exportState
+        + ' '
+        + QByteArray::number(onAppearanceObjectNumber)
+        + QByteArrayLiteral(" 0 R >> >> /")
+        + QByteArray(PDFFormAppearance::kVersionKey)
+        + ' '
+        + QByteArray::number(PDFFormAppearance::kRadioButtonVersion)
+        + QByteArrayLiteral(" >>\nendobj");
+    return object;
+}
+
+bool buttonFieldObjectMatches(const QByteArray &object, bool radioButton)
+{
+    const qsizetype fieldTypeKey = keyPosition(
+        object.constData(),
+        object.size(),
+        "/FT");
+    Cursor fieldTypeCursor(
+        object.constData(),
+        object.size(),
+        fieldTypeKey >= 0
+            ? fieldTypeKey + QByteArrayView("/FT").size()
+            : object.size());
+    qint64 fieldFlags = 0;
+    const qsizetype fieldFlagsKey = keyPosition(
+        object.constData(),
+        object.size(),
+        "/Ff");
+    if (fieldFlagsKey < 0) {
+        return false;
+    }
+    Cursor fieldFlagsCursor(
+        object.constData(),
+        object.size(),
+        fieldFlagsKey + QByteArrayView("/Ff").size());
+    return fieldTypeKey >= 0
+        && fieldTypeCursor.consume("/Btn")
+        && fieldFlagsCursor.integer(fieldFlags)
+        && ((fieldFlags & kButtonRadio) != 0) == radioButton;
 }
 
 bool skipLiteralString(const char *data,
@@ -3493,6 +3762,9 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
     struct ResolvedWidget {
         PlaceholderLocation placeholder;
         ObjectReference reference;
+        ObjectReference fieldReference;
+        ObjectReference sourceFieldReference;
+        QList<ObjectReference> sourceKids;
         QByteArray existingObject;
         bool added = true;
     };
@@ -3514,15 +3786,21 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             = formField.operation == Operation::Add;
         const bool removed
             = formField.operation == Operation::Remove;
-        if (removed && formField.type != FieldType::Dropdown) {
+        if (removed
+            && formField.type != FieldType::Dropdown
+            && formField.type != FieldType::RadioButton) {
             error = QStringLiteral(
-                "Only TrePDF Dropdown fields can currently be removed.");
+                "Only TrePDF Dropdown and Radio Button fields can currently be removed.");
             file.unmap(mapped);
             return false;
         }
-        if (removed && !isTrePDFDropdownWidgetId(formField.widgetId)) {
+        if (removed
+            && ((formField.type == FieldType::Dropdown
+                 && !isTrePDFDropdownWidgetId(formField.widgetId))
+                || (formField.type == FieldType::RadioButton
+                    && !isTrePDFRadioButtonWidgetId(formField.widgetId)))) {
             error = QStringLiteral(
-                "The removed Widget ID is not a TrePDF Dropdown ID.");
+                "The removed Widget ID is not a supported TrePDF form field ID.");
             file.unmap(mapped);
             return false;
         }
@@ -3552,6 +3830,11 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         const ObjectReference reference = placeholder.isDirect()
             ? ObjectReference{nextObjectNumber++, 0}
             : placeholder.widget;
+        ObjectReference fieldReference = reference;
+        ObjectReference sourceFieldReference = added
+            ? ObjectReference{}
+            : reference;
+        QList<ObjectReference> sourceKids;
         QByteArray existingWidget;
         if (!added
             && !visitedFieldObjects.contains(reference.number)) {
@@ -3565,40 +3848,117 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
                 pdf,
                 reference.number,
                 error);
-            const qsizetype fieldTypeKey = keyPosition(
-                existingWidget.constData(),
-                existingWidget.size(),
-                "/FT");
-            Cursor fieldTypeCursor(
-                existingWidget.constData(),
-                existingWidget.size(),
-                fieldTypeKey >= 0
-                    ? fieldTypeKey + QByteArrayView("/FT").size()
-                    : existingWidget.size());
-            const QByteArrayView expectedFieldType
-                = formField.type == FieldType::Text
-                ? QByteArrayView("/Tx")
-                : formField.type == FieldType::Dropdown
-                    ? QByteArrayView("/Ch")
-                    : QByteArrayView("/Btn");
-            if (existingWidget.isEmpty()
-                || fieldTypeKey < 0
-                || !fieldTypeCursor.consume(expectedFieldType)
-                || (!removed
-                    && formField.type == FieldType::Dropdown
-                    && !hasSimpleDirectStringOptions(existingWidget))
-                || keyPosition(
-                       existingWidget.constData(),
-                       existingWidget.size(),
-                       "/Kids") >= 0
-                || keyPosition(
-                       existingWidget.constData(),
-                       existingWidget.size(),
-                       "/Parent") >= 0) {
-                error = QStringLiteral(
-                    "The existing TrePDF form field structure is unsupported.");
+            if (existingWidget.isEmpty()) {
                 file.unmap(mapped);
                 return false;
+            }
+            if (formField.type == FieldType::RadioButton) {
+                const qsizetype parentKey = keyPosition(
+                    existingWidget.constData(),
+                    existingWidget.size(),
+                    "/Parent");
+                if (parentKey >= 0) {
+                    if (!parseReference(
+                            existingWidget.constData(),
+                            existingWidget.size(),
+                            parentKey + QByteArrayView("/Parent").size(),
+                            sourceFieldReference)) {
+                        error = QStringLiteral(
+                            "The TrePDF Radio Button Parent reference is malformed.");
+                        file.unmap(mapped);
+                        return false;
+                    }
+                    const QByteArray existingField = completeObject(
+                        pdf,
+                        sourceFieldReference.number,
+                        error);
+                    if (existingField.isEmpty()
+                        || !buttonFieldObjectMatches(existingField, true)
+                        || keyPosition(
+                               existingField.constData(),
+                               existingField.size(),
+                               "/Parent") >= 0
+                        || keyPosition(
+                               existingWidget.constData(),
+                               existingWidget.size(),
+                               "/Kids") >= 0
+                        || std::count(
+                               fields.cbegin(),
+                               fields.cend(),
+                               sourceFieldReference) != 1
+                        || !kidReferences(
+                               pdf,
+                               existingField,
+                               sourceKids,
+                               error)
+                        || sourceKids.isEmpty()
+                        || !sourceKids.contains(reference)) {
+                        if (error.isEmpty()) {
+                            error = QStringLiteral(
+                                "The existing TrePDF Radio Button field hierarchy is unsupported.");
+                        }
+                        file.unmap(mapped);
+                        return false;
+                    }
+                    fieldReference = sourceFieldReference;
+                } else {
+                    const qsizetype topLevelIndex = fields.indexOf(reference);
+                    if (!buttonFieldObjectMatches(existingWidget, true)
+                        || keyPosition(
+                               existingWidget.constData(),
+                               existingWidget.size(),
+                               "/Kids") >= 0
+                        || topLevelIndex < 0
+                        || std::count(
+                               fields.cbegin(),
+                               fields.cend(),
+                               reference) != 1) {
+                        error = QStringLiteral(
+                            "The existing TrePDF Radio Button field structure is unsupported.");
+                        file.unmap(mapped);
+                        return false;
+                    }
+                    sourceKids.append(reference);
+                }
+            } else {
+                const qsizetype fieldTypeKey = keyPosition(
+                    existingWidget.constData(),
+                    existingWidget.size(),
+                    "/FT");
+                Cursor fieldTypeCursor(
+                    existingWidget.constData(),
+                    existingWidget.size(),
+                    fieldTypeKey >= 0
+                        ? fieldTypeKey + QByteArrayView("/FT").size()
+                        : existingWidget.size());
+                const QByteArrayView expectedFieldType
+                    = formField.type == FieldType::Text
+                    ? QByteArrayView("/Tx")
+                    : formField.type == FieldType::Dropdown
+                        ? QByteArrayView("/Ch")
+                        : QByteArrayView("/Btn");
+                const bool buttonSubtypeMatches
+                    = formField.type != FieldType::Checkbox
+                    || buttonFieldObjectMatches(existingWidget, false);
+                if (fieldTypeKey < 0
+                    || !fieldTypeCursor.consume(expectedFieldType)
+                    || !buttonSubtypeMatches
+                    || (!removed
+                        && formField.type == FieldType::Dropdown
+                        && !hasSimpleDirectStringOptions(existingWidget))
+                    || keyPosition(
+                           existingWidget.constData(),
+                           existingWidget.size(),
+                           "/Kids") >= 0
+                    || keyPosition(
+                           existingWidget.constData(),
+                           existingWidget.size(),
+                           "/Parent") >= 0) {
+                    error = QStringLiteral(
+                        "The existing TrePDF form field structure is unsupported.");
+                    file.unmap(mapped);
+                    return false;
+                }
             }
         }
         if (resolvedWidgetObjectNumbers.contains(reference.number)) {
@@ -3609,10 +3969,11 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         }
         resolvedWidgetObjectNumbers.insert(reference.number);
         if (removed) {
-            if (std::count(
-                    fields.cbegin(),
-                    fields.cend(),
-                    reference) != 1) {
+            if (formField.type == FieldType::Dropdown
+                && std::count(
+                       fields.cbegin(),
+                       fields.cend(),
+                       reference) != 1) {
                 error = QStringLiteral(
                     "Only a top-level single-Widget TrePDF field can be removed.");
                 file.unmap(mapped);
@@ -3648,23 +4009,158 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         resolvedWidgets.append({
             placeholder,
             reference,
+            fieldReference,
+            sourceFieldReference,
+            std::move(sourceKids),
             std::move(existingWidget),
             added});
         widgetReferences.append(reference);
-        if (added) {
-            fields.append(reference);
-        } else if (removed) {
+        if (added && formField.type != FieldType::RadioButton) {
+            fields.append(fieldReference);
+        } else if (removed && formField.type == FieldType::Dropdown) {
             fields.removeOne(reference);
         }
     }
 
+    QHash<int, ObjectReference> sourceRadioParents;
+    QHash<int, QList<ObjectReference>> sourceRadioKids;
+    QHash<int, QList<ObjectReference>> processedRadioKids;
+    for (qsizetype index = 0; index < formFields.size(); ++index) {
+        const Field &formField = formFields.at(index);
+        const ResolvedWidget &resolved = resolvedWidgets.at(index);
+        if (formField.type != FieldType::RadioButton || resolved.added) {
+            continue;
+        }
+        const ObjectReference &sourceParent = resolved.sourceFieldReference;
+        if (sourceParent.number < 0 || resolved.sourceKids.isEmpty()) {
+            error = QStringLiteral(
+                "The existing TrePDF Radio Button group is incomplete.");
+            file.unmap(mapped);
+            return false;
+        }
+        const auto previousParent = sourceRadioParents.constFind(
+            sourceParent.number);
+        const auto previousKids = sourceRadioKids.constFind(
+            sourceParent.number);
+        if ((previousParent != sourceRadioParents.cend()
+             && !(*previousParent == sourceParent))
+            || (previousKids != sourceRadioKids.cend()
+                && *previousKids != resolved.sourceKids)) {
+            error = QStringLiteral(
+                "The existing TrePDF Radio Button group references are inconsistent.");
+            file.unmap(mapped);
+            return false;
+        }
+        sourceRadioParents.insert(sourceParent.number, sourceParent);
+        sourceRadioKids.insert(sourceParent.number, resolved.sourceKids);
+        processedRadioKids[sourceParent.number].append(resolved.reference);
+    }
+    for (auto sourceParent = sourceRadioParents.cbegin();
+         sourceParent != sourceRadioParents.cend();
+         ++sourceParent) {
+        const QList<ObjectReference> expectedKids = sourceRadioKids.value(
+            sourceParent.key());
+        const QList<ObjectReference> processedKids = processedRadioKids.value(
+            sourceParent.key());
+        if (expectedKids.size() != processedKids.size()
+            || std::any_of(
+                expectedKids.cbegin(),
+                expectedKids.cend(),
+                [&processedKids](const ObjectReference &kid) {
+                    return !processedKids.contains(kid);
+                })
+            || std::count(
+                   fields.cbegin(),
+                   fields.cend(),
+                   *sourceParent) != 1) {
+            error = QStringLiteral(
+                "The Radio Button save request does not contain the complete source group.");
+            file.unmap(mapped);
+            return false;
+        }
+        fields.removeOne(*sourceParent);
+    }
+
+    struct RadioGroupPlan {
+        QString fieldName;
+        QString tooltip;
+        int fieldFlags = 0;
+        ObjectReference reference;
+        QList<ObjectReference> widgets;
+        QByteArray currentState = QByteArrayLiteral("/Off");
+        QByteArray defaultState = QByteArrayLiteral("/Off");
+    };
+    QVector<RadioGroupPlan> radioGroups;
+    QHash<QString, int> radioGroupIndices;
+    for (qsizetype index = 0; index < formFields.size(); ++index) {
+        const Field &formField = formFields.at(index);
+        if (formField.type != FieldType::RadioButton
+            || formField.operation == Operation::Remove) {
+            continue;
+        }
+        if (!isTrePDFRadioButtonWidgetId(formField.widgetId)) {
+            error = QStringLiteral(
+                "The TrePDF Radio Button Widget ID is invalid.");
+            file.unmap(mapped);
+            return false;
+        }
+        int groupIndex = radioGroupIndices.value(formField.fieldName, -1);
+        if (groupIndex < 0) {
+            groupIndex = radioGroups.size();
+            radioGroupIndices.insert(formField.fieldName, groupIndex);
+            RadioGroupPlan group;
+            group.fieldName = formField.fieldName;
+            group.tooltip = formField.tooltip;
+            group.fieldFlags = formField.fieldFlags;
+            group.reference = ObjectReference{nextObjectNumber++, 0};
+            radioGroups.append(std::move(group));
+        }
+        RadioGroupPlan &group = radioGroups[groupIndex];
+        if (group.fieldFlags != formField.fieldFlags
+            || group.tooltip != formField.tooltip) {
+            error = QStringLiteral(
+                "Radio Buttons in one group must share flags and tooltip.");
+            file.unmap(mapped);
+            return false;
+        }
+        const QByteArray exportName = radioButtonExportName(
+            formField.widgetId);
+        if (checkboxChecked(formField.value)) {
+            if (group.currentState != QByteArrayLiteral("/Off")) {
+                error = QStringLiteral(
+                    "A Radio Button group has more than one selected Widget.");
+                file.unmap(mapped);
+                return false;
+            }
+            group.currentState = exportName;
+        }
+        if (checkboxChecked(formField.defaultValue)) {
+            if (group.defaultState != QByteArrayLiteral("/Off")) {
+                error = QStringLiteral(
+                    "A Radio Button group has more than one default Widget.");
+                file.unmap(mapped);
+                return false;
+            }
+            group.defaultState = exportName;
+        }
+        group.widgets.append(widgetReferences.at(index));
+        resolvedWidgets[index].fieldReference = group.reference;
+    }
+    for (const RadioGroupPlan &group : std::as_const(radioGroups)) {
+        fields.append(group.reference);
+    }
+
     QSet<QString> occupiedFieldNames = fieldNames;
     for (const ResolvedWidget &resolved : std::as_const(resolvedWidgets)) {
-        if (!resolved.added) {
-            occupiedFieldNames.remove(
-                fieldNamesByObject.value(resolved.reference.number));
+        if (resolved.added) {
+            continue;
         }
+        occupiedFieldNames.remove(
+            fieldNamesByObject.value(resolved.reference.number));
+        occupiedFieldNames.remove(
+            fieldNamesByObject.value(resolved.sourceFieldReference.number));
     }
+    QHash<QString, bool> requestedFieldNames;
     for (const Field &formField : formFields) {
         if (formField.operation == Operation::Remove) {
             continue;
@@ -3676,13 +4172,18 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             file.unmap(mapped);
             return false;
         }
-        if (occupiedFieldNames.contains(formField.fieldName)) {
+        const bool radioButton = formField.type == FieldType::RadioButton;
+        const auto requested = requestedFieldNames.constFind(
+            formField.fieldName);
+        if (occupiedFieldNames.contains(formField.fieldName)
+            || (requested != requestedFieldNames.cend()
+                && (!radioButton || !*requested))) {
             error = QStringLiteral(
                 "An AcroForm field with the same name already exists.");
             file.unmap(mapped);
             return false;
         }
-        occupiedFieldNames.insert(formField.fieldName);
+        requestedFieldNames.insert(formField.fieldName, radioButton);
     }
 
     QByteArray catalogObject = completeObject(pdf, pdf.root.number, error);
@@ -3893,6 +4394,8 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             continue;
         }
         const ObjectReference &widgetReference = widgetReferences.at(index);
+        const ObjectReference &fieldReference
+            = resolvedWidgets.at(index).fieldReference;
         const PlaceholderLocation &placeholder
             = resolvedWidgets.at(index).placeholder;
         QByteArray widgetObject;
@@ -3961,8 +4464,12 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
                     imageObjectNumber,
                     appearanceImage,
                     compressedPixels)});
-        } else if (formField.type == FieldType::Checkbox) {
-            if (formField.operation == Operation::NormalizeAppearance) {
+        } else if (formField.type == FieldType::Checkbox
+                   || formField.type == FieldType::RadioButton) {
+            const bool radioButton
+                = formField.type == FieldType::RadioButton;
+            if (!radioButton
+                && formField.operation == Operation::NormalizeAppearance) {
                 error = QStringLiteral(
                     "Checkbox appearance-only normalization is unsupported.");
                 file.unmap(mapped);
@@ -3970,26 +4477,63 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             }
             const int offAppearanceObjectNumber = nextObjectNumber++;
             const int onAppearanceObjectNumber = nextObjectNumber++;
-            widgetObject = checkboxWidgetObject(
-                widgetReference,
-                formField,
-                offAppearanceObjectNumber,
-                onAppearanceObjectNumber,
-                placeholder.isDirect()
-                    ? placeholder.container
-                    : ObjectReference{});
+            ObjectReference pageReference = placeholder.isDirect()
+                ? placeholder.container
+                : ObjectReference{};
+            if (radioButton && pageReference.number < 0) {
+                bool pageLocated = false;
+                if (!pageForWidgetReference(
+                        pdf,
+                        widgetReference,
+                        pageReference,
+                        pageLocated,
+                        error)
+                    || !pageLocated) {
+                    if (error.isEmpty()) {
+                        error = QStringLiteral(
+                            "The Radio Button page reference could not be resolved.");
+                    }
+                    file.unmap(mapped);
+                    return false;
+                }
+            }
+            widgetObject = radioButton
+                ? radioButtonWidgetObject(
+                      widgetReference,
+                      fieldReference,
+                      formField,
+                      offAppearanceObjectNumber,
+                      onAppearanceObjectNumber,
+                      pageReference,
+                      radioButtonExportName(formField.widgetId))
+                : checkboxWidgetObject(
+                      widgetReference,
+                      formField,
+                      offAppearanceObjectNumber,
+                      onAppearanceObjectNumber,
+                      pageReference);
             incrementalObjects.append({
                 ObjectReference{offAppearanceObjectNumber, 0},
-                checkboxAppearanceObject(
-                    offAppearanceObjectNumber,
-                    formField.pageRect,
-                    false)});
+                radioButton
+                    ? radioButtonAppearanceObject(
+                          offAppearanceObjectNumber,
+                          formField.pageRect,
+                          false)
+                    : checkboxAppearanceObject(
+                          offAppearanceObjectNumber,
+                          formField.pageRect,
+                          false)});
             incrementalObjects.append({
                 ObjectReference{onAppearanceObjectNumber, 0},
-                checkboxAppearanceObject(
-                    onAppearanceObjectNumber,
-                    formField.pageRect,
-                    true)});
+                radioButton
+                    ? radioButtonAppearanceObject(
+                          onAppearanceObjectNumber,
+                          formField.pageRect,
+                          true)
+                    : checkboxAppearanceObject(
+                          onAppearanceObjectNumber,
+                          formField.pageRect,
+                          true)});
         } else {
             error = QStringLiteral(
                 "This TrePDF form field type is unsupported.");
@@ -4007,6 +4551,18 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         incrementalObjects.append({
             widgetReference,
             std::move(widgetObject)});
+    }
+    for (const RadioGroupPlan &group : std::as_const(radioGroups)) {
+        incrementalObjects.append({
+            group.reference,
+            radioButtonFieldObject(
+                group.reference,
+                group.fieldName,
+                group.tooltip,
+                group.fieldFlags,
+                group.widgets,
+                group.currentState,
+                group.defaultState)});
     }
 
     if (!hasExistingAcroForm) {

@@ -18,6 +18,7 @@ Item {
     property bool fieldsInteractive: false
     property bool textFieldToolActive: false
     property bool checkboxToolActive: false
+    property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
     property rect placementRect: Qt.rect(0, 0, 0, 0)
     property real placementStartX: 0
@@ -28,13 +29,17 @@ Item {
     readonly property real resizeHandleHitSize: 24
     readonly property real minimumResizeWidth: 60
     readonly property real minimumResizeHeight: 24
+    readonly property real radioButtonDefaultSidePoints: 18
+    readonly property real radioButtonMinimumSidePoints: 10
     readonly property int placementFieldType: textFieldToolActive
         ? PDFFormDesignerController.Text
         : checkboxToolActive
             ? PDFFormDesignerController.Checkbox
-            : dropdownToolActive
-                ? PDFFormDesignerController.Dropdown
-                : -1
+            : radioButtonToolActive
+                ? PDFFormDesignerController.RadioButton
+                : dropdownToolActive
+                    ? PDFFormDesignerController.Dropdown
+                    : -1
 
     function resetPlacement() {
         placementRect = Qt.rect(0, 0, 0, 0)
@@ -43,7 +48,9 @@ Item {
     function updatePlacement(x, y) {
         const boundedX = Math.max(0, Math.min(width, x))
         const boundedY = Math.max(0, Math.min(height, y))
-        if (placementFieldType === PDFFormDesignerController.Checkbox) {
+        if (placementFieldType === PDFFormDesignerController.Checkbox
+                || placementFieldType
+                    === PDFFormDesignerController.RadioButton) {
             const deltaX = boundedX - placementStartX
             const deltaY = boundedY - placementStartY
             const directionX = deltaX < 0 ? -1 : 1
@@ -178,9 +185,15 @@ Item {
         const clickPlacement = fieldRect.width < 4 && fieldRect.height < 4
         if (clickPlacement) {
             if (placementFieldType
-                    === PDFFormDesignerController.Checkbox) {
+                    === PDFFormDesignerController.Checkbox
+                    || placementFieldType
+                        === PDFFormDesignerController.RadioButton) {
+                const defaultSidePoints = placementFieldType
+                    === PDFFormDesignerController.RadioButton
+                    ? radioButtonDefaultSidePoints
+                    : 24
                 const defaultSide = Math.min(
-                    24 * Math.max(0.1, pagePointScale),
+                    defaultSidePoints * Math.max(0.1, pagePointScale),
                     width,
                     height)
                 fieldRect = Qt.rect(
@@ -197,10 +210,15 @@ Item {
                     defaultWidth,
                     defaultHeight)
             }
-        } else if (placementFieldType
-                   === PDFFormDesignerController.Checkbox
+        } else if ((placementFieldType
+                        === PDFFormDesignerController.Checkbox
+                    || placementFieldType
+                        === PDFFormDesignerController.RadioButton)
                    ? fieldRect.width
-                       < 12 * Math.max(0.1, pagePointScale)
+                       < (placementFieldType
+                            === PDFFormDesignerController.RadioButton
+                            ? radioButtonMinimumSidePoints
+                            : 12) * Math.max(0.1, pagePointScale)
                    : fieldRect.width < 20 || fieldRect.height < 18) {
             resetPlacement()
             return
@@ -269,6 +287,12 @@ Item {
     }
     onCheckboxToolActiveChanged: {
         if (checkboxToolActive)
+            formFieldLayer.cancelFieldMove()
+        else
+            resetPlacement()
+    }
+    onRadioButtonToolActiveChanged: {
+        if (radioButtonToolActive)
             formFieldLayer.cancelFieldMove()
         else
             resetPlacement()
@@ -536,6 +560,30 @@ Item {
                 }
                 return
             }
+            if (fieldType
+                    === PDFFormDesignerController.RadioButton) {
+                root.pendingFocusFieldId = ""
+                const readOnly
+                    = (Number(field.flags)
+                        & PDFFormDesignerController.ReadOnly) !== 0
+                const sourceBacked = Boolean(field.sourceBacked)
+                if (sourceBacked && !readOnly && !root.formsActive) {
+                    root.controller.activateSourceCheckbox(
+                        fieldId,
+                        root.width,
+                        root.height)
+                } else if (root.formsActive || !readOnly) {
+                    const value = String(field.value).toLowerCase()
+                    const checked = value === "yes"
+                        || value === "true"
+                        || value === "on"
+                        || value === "1"
+                    root.controller.setFieldValue(
+                        fieldId,
+                        checked ? "Off" : "Yes")
+                }
+                return
+            }
             if (fieldType === PDFFormDesignerController.Dropdown) {
                 root.pendingFocusFieldId = ""
                 if (!root.formsActive) {
@@ -643,6 +691,8 @@ Item {
                 && ((formFieldLayer.activeFieldType
                         !== PDFFormDesignerController.Checkbox
                      && formFieldLayer.activeFieldType
+                        !== PDFFormDesignerController.RadioButton
+                     && formFieldLayer.activeFieldType
                         !== PDFFormDesignerController.Dropdown)
                     || activeFieldFrame.resizing)
             color: "transparent"
@@ -696,6 +746,8 @@ Item {
                 && !formFieldLayer.activeFieldSourceBacked
                 && formFieldLayer.activeFieldType
                     !== PDFFormDesignerController.Dropdown
+                && formFieldLayer.activeFieldType
+                    !== PDFFormDesignerController.RadioButton
                 && !activeFieldFrame.resizing
                 && !formFieldLayer.moving
             enabled: visible

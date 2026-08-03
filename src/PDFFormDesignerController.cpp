@@ -390,7 +390,7 @@ QString PDFFormDesignerController::addField(int type,
         field.hasSourcePage = field.sourcePage >= 0;
     }
     field.normalizedRect = normalizedRect;
-    if (field.type == Checkbox) {
+    if (field.type == Checkbox || field.type == RadioButton) {
         field.value = QStringLiteral("Off");
         field.defaultValue = field.value;
         field.options = {
@@ -445,7 +445,7 @@ bool PDFFormDesignerController::activateSourceCheckbox(
     }
 
     const FormField &field = m_fields.at(row);
-    if (field.type != Checkbox
+    if ((field.type != Checkbox && field.type != RadioButton)
         || !field.sourceBacked
         || field.sourceNormalizedRect.isEmpty()
         || (field.flags & ReadOnly)) {
@@ -690,13 +690,39 @@ bool PDFFormDesignerController::setFieldValue(const QString &fieldId,
     if (field.type == Dropdown && !field.options.contains(value)) {
         return false;
     }
-    if (field.value == value) {
-        return true;
+    if (field.type == RadioButton
+        && value != QStringLiteral("Yes")
+        && value != QStringLiteral("Off")) {
+        return false;
     }
-    field.value = value;
-    field.changedProperties |= ValuePropertyChanged;
-    emit dataChanged(index(row), index(row), {ValueRole, DirtyRole});
-    emit draftStateChanged();
+    bool changed = false;
+    if (field.type == RadioButton && value == QStringLiteral("Yes")) {
+        for (int peerRow = 0; peerRow < m_fields.size(); ++peerRow) {
+            FormField &peer = m_fields[peerRow];
+            if (peerRow == row
+                || peer.type != RadioButton
+                || peer.name != field.name
+                || peer.value == QStringLiteral("Off")) {
+                continue;
+            }
+            peer.value = QStringLiteral("Off");
+            peer.changedProperties |= ValuePropertyChanged;
+            emit dataChanged(
+                index(peerRow),
+                index(peerRow),
+                {ValueRole, DirtyRole});
+            changed = true;
+        }
+    }
+    if (field.value != value) {
+        field.value = value;
+        field.changedProperties |= ValuePropertyChanged;
+        emit dataChanged(index(row), index(row), {ValueRole, DirtyRole});
+        changed = true;
+    }
+    if (changed) {
+        emit draftStateChanged();
+    }
     return true;
 }
 
@@ -712,9 +738,71 @@ bool PDFFormDesignerController::setFieldName(const QString &fieldId,
     if (field.name == name) {
         return true;
     }
+    if (field.type == RadioButton
+        && (name.isEmpty()
+            || name != name.trimmed()
+            || name.contains(QLatin1Char('.')))) {
+        return false;
+    }
+
+    QList<int> targetGroupRows;
+    if (field.type == RadioButton) {
+        for (int peerRow = 0; peerRow < m_fields.size(); ++peerRow) {
+            if (peerRow == row || m_fields.at(peerRow).name != name) {
+                continue;
+            }
+            if (m_fields.at(peerRow).type != RadioButton) {
+                return false;
+            }
+            targetGroupRows.append(peerRow);
+        }
+    }
+
+    if (field.type == RadioButton
+        && field.value == QStringLiteral("Yes")) {
+        for (int peerRow : std::as_const(targetGroupRows)) {
+            FormField &peer = m_fields[peerRow];
+            if (peer.value == QStringLiteral("Off")) {
+                continue;
+            }
+            peer.value = QStringLiteral("Off");
+            peer.changedProperties |= ValuePropertyChanged;
+            emit dataChanged(
+                index(peerRow),
+                index(peerRow),
+                {ValueRole, DirtyRole});
+        }
+    }
+
+    if (field.type == RadioButton
+        && field.defaultValue == QStringLiteral("Yes")) {
+        for (int peerRow : std::as_const(targetGroupRows)) {
+            FormField &peer = m_fields[peerRow];
+            if (peer.defaultValue == QStringLiteral("Off")) {
+                continue;
+            }
+            peer.defaultValue = QStringLiteral("Off");
+            peer.changedProperties |= ValuePropertyChanged;
+            emit dataChanged(
+                index(peerRow),
+                index(peerRow),
+                {DirtyRole});
+        }
+    }
+
+    QList<int> changedRoles{NameRole, DirtyRole};
+    if (!targetGroupRows.isEmpty()) {
+        const FormField &targetGroup = m_fields.at(targetGroupRows.constFirst());
+        if (field.flags != targetGroup.flags) {
+            field.flags = targetGroup.flags;
+            field.changedProperties |= FlagsPropertyChanged;
+            changedRoles.append(FlagsRole);
+        }
+        field.tooltip = targetGroup.tooltip;
+    }
     field.name = name;
     field.changedProperties |= NamePropertyChanged;
-    emit dataChanged(index(row), index(row), {NameRole, DirtyRole});
+    emit dataChanged(index(row), index(row), changedRoles);
     emit draftStateChanged();
     return true;
 }
@@ -805,13 +893,29 @@ bool PDFFormDesignerController::setFieldFlags(const QString &fieldId, int flags)
     const int supportedFlags = Required | ReadOnly;
     flags &= supportedFlags;
     FormField &field = m_fields[row];
-    if (field.flags == flags) {
-        return true;
+    bool changed = false;
+    for (int peerRow = 0; peerRow < m_fields.size(); ++peerRow) {
+        FormField &peer = m_fields[peerRow];
+        if (peerRow != row
+            && (field.type != RadioButton
+                || peer.type != RadioButton
+                || peer.name != field.name)) {
+            continue;
+        }
+        if (peer.flags == flags) {
+            continue;
+        }
+        peer.flags = flags;
+        peer.changedProperties |= FlagsPropertyChanged;
+        emit dataChanged(
+            index(peerRow),
+            index(peerRow),
+            {FlagsRole, DirtyRole});
+        changed = true;
     }
-    field.flags = flags;
-    field.changedProperties |= FlagsPropertyChanged;
-    emit dataChanged(index(row), index(row), {FlagsRole, DirtyRole});
-    emit draftStateChanged();
+    if (changed) {
+        emit draftStateChanged();
+    }
     return true;
 }
 
@@ -894,7 +998,9 @@ bool PDFFormDesignerController::removeField(const QString &fieldId)
     }
 
     const FormField &field = m_fields.at(row);
-    if (field.sourceBacked && field.type != Dropdown) {
+    if (field.sourceBacked
+        && field.type != Dropdown
+        && field.type != RadioButton) {
         return false;
     }
 
@@ -1009,6 +1115,19 @@ PDFFormDesignerController::saveFields(
 {
     QVector<SaveField> fields;
     fields.reserve(m_fields.size() + m_removedSourceFields.size());
+    bool radioSnapshotRequired = std::any_of(
+            m_fields.cbegin(),
+            m_fields.cend(),
+            [](const FormField &field) {
+                return field.type == RadioButton
+                    && field.changedProperties != NoPropertyChanges;
+            })
+        || std::any_of(
+            m_removedSourceFields.cbegin(),
+            m_removedSourceFields.cend(),
+            [](const FormField &field) {
+                return field.type == RadioButton;
+            });
     QSet<int> normalizationPages;
     if (includeAppearanceNormalization) {
         // Normalize legacy peers only on pages where the user made a real
@@ -1022,6 +1141,18 @@ PDFFormDesignerController::saveFields(
                 normalizationPages.insert(page);
             }
         }
+        radioSnapshotRequired = radioSnapshotRequired
+            || std::any_of(
+                m_fields.cbegin(),
+                m_fields.cend(),
+                [this, &normalizationPages](const FormField &field) {
+                    return field.type == RadioButton
+                        && field.sourceBacked
+                        && field.appearanceVersion
+                            < PDFFormAppearance::kRadioButtonVersion
+                        && normalizationPages.contains(
+                            displayPageForField(field));
+                });
     }
     for (const FormField &field : m_fields) {
         const int page = displayPageForField(field);
@@ -1030,11 +1161,15 @@ PDFFormDesignerController::saveFields(
             ? PDFFormAppearance::kTextFieldVersion
             : field.type == Dropdown
                 ? PDFFormAppearance::kDropdownVersion
-                : 0;
+                : field.type == RadioButton
+                    ? PDFFormAppearance::kRadioButtonVersion
+                    : 0;
         const bool normalizeLegacyAppearance
             = includeAppearanceNormalization
             && field.sourceBacked
-            && (field.type == Text || field.type == Dropdown)
+            && (field.type == Text
+                || field.type == Dropdown
+                || field.type == RadioButton)
             && field.appearanceVersion
                 < currentAppearanceVersion
             && normalizationPages.contains(page);
@@ -1046,7 +1181,8 @@ PDFFormDesignerController::saveFields(
         const bool normalizeAppearance
             = normalizeLegacyAppearance || normalizeNativeAppearance;
         if (field.changedProperties == NoPropertyChanges
-            && !normalizeAppearance) {
+            && !normalizeAppearance
+            && !(radioSnapshotRequired && field.type == RadioButton)) {
             continue;
         }
         if (page < 0 || field.normalizedRect.isEmpty()) {
@@ -1059,7 +1195,9 @@ PDFFormDesignerController::saveFields(
         saved.value = field.value;
         saved.defaultValue = field.sourceBacked
             ? field.defaultValue
-            : field.type == Checkbox || field.type == Dropdown
+            : field.type == Checkbox
+                    || field.type == RadioButton
+                    || field.type == Dropdown
                 ? field.defaultValue
                 : field.value;
         saved.options = field.options;
@@ -1193,6 +1331,7 @@ void PDFFormDesignerController::reloadSourceFields()
                     || fieldIds.contains(source.id)
                     || (source.type != FPDF_FORMFIELD_TEXTFIELD
                         && source.type != FPDF_FORMFIELD_CHECKBOX
+                        && source.type != FPDF_FORMFIELD_RADIOBUTTON
                         && source.type != FPDF_FORMFIELD_COMBOBOX)
                     || source.sourcePage < 0
                     || source.normalizedRect.isEmpty()
@@ -1205,9 +1344,11 @@ void PDFFormDesignerController::reloadSourceFields()
                 field.id = source.id;
                 field.type = source.type == FPDF_FORMFIELD_CHECKBOX
                     ? Checkbox
-                    : source.type == FPDF_FORMFIELD_COMBOBOX
-                        ? Dropdown
-                        : Text;
+                    : source.type == FPDF_FORMFIELD_RADIOBUTTON
+                        ? RadioButton
+                        : source.type == FPDF_FORMFIELD_COMBOBOX
+                            ? Dropdown
+                            : Text;
                 field.page = document->displayPageIndexForSourcePage(
                     source.sourcePage);
                 field.sourcePage = source.sourcePage;

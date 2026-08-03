@@ -16,18 +16,38 @@
 #include <fpdfview.h>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace {
 
 constexpr int kMaximumDropdownOptions = 4096;
 constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
+constexpr int kButtonNoToggleToOff = 1 << 14;
+constexpr int kButtonRadio = 1 << 15;
 constexpr int kChoiceCommitOnSelectionChange = 1 << 26;
 
 bool isTrePDFDropdownWidgetId(const QString &widgetId)
 {
     constexpr qsizetype uuidLength = 36;
     const QString prefix = QStringLiteral("dropdown-field-");
+    if (!widgetId.startsWith(prefix)
+        || widgetId.size() != prefix.size() + uuidLength) {
+        return false;
+    }
+    const QString suffix = widgetId.sliced(prefix.size());
+    const QUuid uuid = QUuid::fromString(suffix);
+    return !uuid.isNull()
+        && uuid.toString(QUuid::WithoutBraces).compare(
+               suffix,
+               Qt::CaseInsensitive)
+            == 0;
+}
+
+bool isTrePDFRadioButtonWidgetId(const QString &widgetId)
+{
+    constexpr qsizetype uuidLength = 36;
+    const QString prefix = QStringLiteral("radio-field-");
     if (!widgetId.startsWith(prefix)
         || widgetId.size() != prefix.size() + uuidLength) {
         return false;
@@ -198,6 +218,9 @@ int widgetFieldFlags(const PDFAcroFormWriter::Field &field)
         | (field.required ? FPDF_FORMFLAG_REQUIRED : 0);
     if (field.type == PDFAcroFormWriter::FieldType::Dropdown) {
         flags |= FPDF_FORMFLAG_CHOICE_COMBO;
+    } else if (field.type
+               == PDFAcroFormWriter::FieldType::RadioButton) {
+        flags |= kButtonRadio;
     }
     return flags;
 }
@@ -209,9 +232,10 @@ int pdfiumFieldType(PDFAcroFormWriter::FieldType type)
         return FPDF_FORMFIELD_TEXTFIELD;
     case PDFAcroFormWriter::FieldType::Checkbox:
         return FPDF_FORMFIELD_CHECKBOX;
+    case PDFAcroFormWriter::FieldType::RadioButton:
+        return FPDF_FORMFIELD_RADIOBUTTON;
     case PDFAcroFormWriter::FieldType::Dropdown:
         return FPDF_FORMFIELD_COMBOBOX;
-    case PDFAcroFormWriter::FieldType::RadioButton:
     case PDFAcroFormWriter::FieldType::Date:
     case PDFAcroFormWriter::FieldType::Signature:
         return FPDF_FORMFIELD_UNKNOWN;
@@ -379,9 +403,13 @@ bool resolveUnchangedUpdateValues(
             PDFAcroFormWriter::Field &resolvedField
                 = fields[*unresolved];
             if (!resolvedField.valueChanged) {
-                resolvedField.value
+                const bool checkable
                     = resolvedField.type
-                            == PDFAcroFormWriter::FieldType::Checkbox
+                          == PDFAcroFormWriter::FieldType::Checkbox
+                    || resolvedField.type
+                          == PDFAcroFormWriter::FieldType::RadioButton;
+                resolvedField.value
+                    = checkable
                     ? FPDFAnnot_IsChecked(form.get(), annotation.get())
                         ? QStringLiteral("Yes")
                         : QStringLiteral("Off")
@@ -484,6 +512,8 @@ bool validateWrittenFields(
     }
 
     QHash<QString, const PDFAcroFormWriter::Field *> expectedFields;
+    QHash<QString, int> expectedRadioControlCounts;
+    QHash<QString, QString> expectedRadioValues;
     for (const PDFAcroFormWriter::Field &field : fields) {
         if (expectedFields.contains(field.widgetId)) {
             error = QStringLiteral(
@@ -491,6 +521,13 @@ bool validateWrittenFields(
             return false;
         }
         expectedFields.insert(field.widgetId, &field);
+        if (field.operation != PDFAcroFormWriter::Operation::Remove
+            && field.type == PDFAcroFormWriter::FieldType::RadioButton) {
+            ++expectedRadioControlCounts[field.fieldName];
+            if (checkboxChecked(field.value)) {
+                expectedRadioValues.insert(field.fieldName, field.widgetId);
+            }
+        }
     }
 
     QHash<QString, int> matchedFields;
@@ -562,11 +599,16 @@ bool validateWrittenFields(
                 form.get(),
                 annotation.get());
             const int expectedFlags = widgetFieldFlags(field);
-            const bool checkbox
-                = field.type == PDFAcroFormWriter::FieldType::Checkbox;
+            const bool checkable
+                = field.type == PDFAcroFormWriter::FieldType::Checkbox
+                || field.type
+                    == PDFAcroFormWriter::FieldType::RadioButton;
+            const bool radioButton
+                = field.type
+                == PDFAcroFormWriter::FieldType::RadioButton;
             const bool dropdown
                 = field.type == PDFAcroFormWriter::FieldType::Dropdown;
-            const QString exportValue = checkbox
+            const QString exportValue = checkable
                 ? formWideString(
                       [&form, &annotation](FPDF_WCHAR *buffer,
                                            unsigned long byteCount) {
@@ -583,25 +625,52 @@ bool validateWrittenFields(
                     annotation.get(),
                     PDFFormAppearance::kVersionKey,
                     &appearanceVersion);
-            const bool checkboxMatches = !checkbox
+            float radioDefaultChecked = 0.0f;
+            const bool radioDefaultMatches = !radioButton
+                || (FPDFAnnot_GetNumberValue(
+                        annotation.get(),
+                        PDFFormAppearance::kRadioButtonDefaultCheckedKey,
+                        &radioDefaultChecked)
+                    && std::isfinite(radioDefaultChecked)
+                    && radioDefaultChecked
+                        == (checkboxChecked(field.defaultValue)
+                                ? 1.0f
+                                : 0.0f));
+            const bool checkableMatches = !checkable
                 || (FPDFAnnot_IsChecked(form.get(), annotation.get())
                         == checkboxChecked(field.value)
-                    && exportValue == QStringLiteral("Yes")
+                    && exportValue
+                        == (radioButton
+                                ? field.widgetId
+                                : QStringLiteral("Yes"))
                     && FPDFAnnot_GetFormControlCount(
                            form.get(),
                            annotation.get())
-                        == 1
+                        == (radioButton
+                                ? expectedRadioControlCounts.value(
+                                      field.fieldName)
+                                : 1)
                     && FPDFAnnot_GetFormControlIndex(
                            form.get(),
                            annotation.get())
-                        == 0
+                        >= 0
+                    && FPDFAnnot_GetFormControlIndex(
+                           form.get(),
+                           annotation.get())
+                        < (radioButton
+                                ? expectedRadioControlCounts.value(
+                                      field.fieldName)
+                                : 1)
                     && (FPDFAnnot_GetFlags(annotation.get())
                         & FPDF_ANNOT_FLAG_PRINT)
+                    && radioDefaultMatches
                     && hasAppearanceVersion
                     && qFuzzyCompare(
                         appearanceVersion,
                         static_cast<float>(
-                            PDFFormAppearance::kCheckboxVersion)));
+                            radioButton
+                                ? PDFFormAppearance::kRadioButtonVersion
+                                : PDFFormAppearance::kCheckboxVersion)));
             const QString defaultValue = dropdown
                 ? formWideString(
                       [&annotation](FPDF_WCHAR *buffer,
@@ -664,8 +733,13 @@ bool validateWrittenFields(
                        annotation.get())
                     == pdfiumFieldType(field.type)
                 && fieldName == field.fieldName
-                && fieldValue == field.value
-                && checkboxMatches
+                && fieldValue
+                    == (radioButton
+                            ? expectedRadioValues.value(
+                                  field.fieldName,
+                                  QStringLiteral("Off"))
+                            : field.value)
+                && checkableMatches
                 && dropdownMatches
                 && (fieldFlags
                     & (FPDF_FORMFLAG_READONLY
@@ -673,6 +747,8 @@ bool validateWrittenFields(
                        | FPDF_FORMFLAG_CHOICE_COMBO
                        | FPDF_FORMFLAG_CHOICE_EDIT
                        | FPDF_FORMFLAG_CHOICE_MULTI_SELECT
+                       | kButtonNoToggleToOff
+                       | kButtonRadio
                        | kChoiceCommitOnSelectionChange))
                     == expectedFlags
                 && (FPDFAnnot_GetFlags(annotation.get())
@@ -747,7 +823,8 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
         if (field.operation == Operation::Remove) {
             continue;
         }
-        if (field.type == FieldType::Checkbox) {
+        if (field.type == FieldType::Checkbox
+            || field.type == FieldType::RadioButton) {
             field.value = normalizedCheckboxValue(field.value);
             field.defaultValue = normalizedCheckboxValue(field.defaultValue);
         } else if (field.type == FieldType::Dropdown) {
@@ -757,6 +834,47 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
                 return failure(QStringLiteral(
                     "The Dropdown options or selected values are invalid."));
             }
+        }
+    }
+    QHash<QString, QString> selectedRadioWidgets;
+    QHash<QString, QString> defaultRadioWidgets;
+    QHash<QString, int> radioGroupFlags;
+    QHash<QString, QString> radioGroupTooltips;
+    for (const Field &field : std::as_const(resolvedFields)) {
+        if (field.operation == Operation::Remove
+            || field.type != FieldType::RadioButton) {
+            continue;
+        }
+        if (!isTrePDFRadioButtonWidgetId(field.widgetId)) {
+            return failure(QStringLiteral(
+                "The Radio Button Widget ID is invalid."));
+        }
+        const int flags = widgetFieldFlags(field);
+        const auto existingFlags = radioGroupFlags.constFind(field.fieldName);
+        const auto existingTooltip = radioGroupTooltips.constFind(
+            field.fieldName);
+        if ((existingFlags != radioGroupFlags.cend()
+             && *existingFlags != flags)
+            || (existingTooltip != radioGroupTooltips.cend()
+                && *existingTooltip != field.tooltip)) {
+            return failure(QStringLiteral(
+                "Radio Buttons in one group must share flags and tooltip."));
+        }
+        radioGroupFlags.insert(field.fieldName, flags);
+        radioGroupTooltips.insert(field.fieldName, field.tooltip);
+        if (checkboxChecked(field.value)) {
+            if (selectedRadioWidgets.contains(field.fieldName)) {
+                return failure(QStringLiteral(
+                    "A Radio Button group has more than one selected Widget."));
+            }
+            selectedRadioWidgets.insert(field.fieldName, field.widgetId);
+        }
+        if (checkboxChecked(field.defaultValue)) {
+            if (defaultRadioWidgets.contains(field.fieldName)) {
+                return failure(QStringLiteral(
+                    "A Radio Button group has more than one default Widget."));
+            }
+            defaultRadioWidgets.insert(field.fieldName, field.widgetId);
         }
     }
 
@@ -769,13 +887,19 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
                 "This AcroForm field type is not implemented yet."));
         }
         const bool removing = field.operation == Operation::Remove;
-        if (removing && field.type != FieldType::Dropdown) {
+        if (removing
+            && field.type != FieldType::Dropdown
+            && field.type != FieldType::RadioButton) {
             return failure(QStringLiteral(
-                "Only TrePDF Dropdown fields can currently be removed."));
+                "Only TrePDF Dropdown and Radio Button fields can currently be removed."));
         }
-        if (removing && !isTrePDFDropdownWidgetId(field.widgetId)) {
+        if (removing
+            && ((field.type == FieldType::Dropdown
+                 && !isTrePDFDropdownWidgetId(field.widgetId))
+                || (field.type == FieldType::RadioButton
+                    && !isTrePDFRadioButtonWidgetId(field.widgetId)))) {
             return failure(QStringLiteral(
-                "The removed Widget ID is not a TrePDF Dropdown ID."));
+                "The removed Widget ID is not a supported TrePDF form field ID."));
         }
         if (field.widgetId.isEmpty()
             || (!removing
@@ -837,11 +961,14 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
             canonicalField.type
                 = PDFAcroFormCanonicalizer::FieldType::Checkbox;
             break;
+        case FieldType::RadioButton:
+            canonicalField.type
+                = PDFAcroFormCanonicalizer::FieldType::RadioButton;
+            break;
         case FieldType::Dropdown:
             canonicalField.type
                 = PDFAcroFormCanonicalizer::FieldType::Dropdown;
             break;
-        case FieldType::RadioButton:
         case FieldType::Date:
         case FieldType::Signature:
             Q_UNREACHABLE();

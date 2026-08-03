@@ -11,8 +11,12 @@ Column {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    property bool hasPendingPanelEdits: false
+    readonly property bool hasUnsavedChanges:
+        editController.hasDrafts || hasPendingPanelEdits
     property bool textFieldToolSelected: false
     property bool checkboxToolSelected: false
+    property bool radioButtonToolSelected: false
     property bool dropdownToolSelected: false
     readonly property bool viewTabActive: ribbonTabs.currentIndex === 0
     readonly property bool editTabActive: ribbonTabs.currentIndex === 1
@@ -22,6 +26,9 @@ Column {
         && document.loaded
     readonly property bool checkboxToolActive: formsTabActive
         && checkboxToolSelected
+        && document.loaded
+    readonly property bool radioButtonToolActive: formsTabActive
+        && radioButtonToolSelected
         && document.loaded
     readonly property bool dropdownToolActive: formsTabActive
         && dropdownToolSelected
@@ -44,6 +51,7 @@ Column {
         if (!document.loaded || ribbonTabs.currentIndex !== 2) {
             textFieldToolSelected = false
             checkboxToolSelected = false
+            radioButtonToolSelected = false
             dropdownToolSelected = false
         }
 
@@ -58,12 +66,14 @@ Column {
     onDocumentChanged: {
         textFieldToolSelected = false
         checkboxToolSelected = false
+        radioButtonToolSelected = false
         dropdownToolSelected = false
         syncEditTool()
     }
     onEditControllerChanged: {
         textFieldToolSelected = false
         checkboxToolSelected = false
+        radioButtonToolSelected = false
         dropdownToolSelected = false
         syncEditTool()
     }
@@ -83,6 +93,7 @@ Column {
             theme: root.theme
             document: root.document
             editController: root.editController
+            hasPendingPanelEdits: root.hasPendingPanelEdits
             onOpenRequested: root.openRequested()
             onSaveRequested: root.saveRequested()
             onSaveAsRequested: root.saveAsRequested()
@@ -116,21 +127,31 @@ Column {
             document: root.document
             textFieldToolSelected: root.textFieldToolSelected
             checkboxToolSelected: root.checkboxToolSelected
+            radioButtonToolSelected: root.radioButtonToolSelected
             dropdownToolSelected: root.dropdownToolSelected
             onTextFieldToolRequested: {
                 root.textFieldToolSelected = !root.textFieldToolSelected
                 root.checkboxToolSelected = false
+                root.radioButtonToolSelected = false
                 root.dropdownToolSelected = false
             }
             onCheckboxToolRequested: {
                 root.checkboxToolSelected = !root.checkboxToolSelected
                 root.textFieldToolSelected = false
+                root.radioButtonToolSelected = false
+                root.dropdownToolSelected = false
+            }
+            onRadioButtonToolRequested: {
+                root.radioButtonToolSelected = !root.radioButtonToolSelected
+                root.textFieldToolSelected = false
+                root.checkboxToolSelected = false
                 root.dropdownToolSelected = false
             }
             onDropdownToolRequested: {
                 root.dropdownToolSelected = !root.dropdownToolSelected
                 root.textFieldToolSelected = false
                 root.checkboxToolSelected = false
+                root.radioButtonToolSelected = false
             }
         }
     }
@@ -206,7 +227,7 @@ Column {
                 Layout.preferredWidth: draftStatusLabel.implicitWidth + 20
                 Layout.preferredHeight: 24
                 Layout.alignment: Qt.AlignVCenter
-                visible: root.editController.hasDrafts || root.editController.saving
+                visible: root.hasUnsavedChanges || root.editController.saving
                 radius: 12
                 color: root.theme.foxitPaleOrange
                 border.color: root.theme.foxitBorderOrange
