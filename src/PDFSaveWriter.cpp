@@ -2896,6 +2896,26 @@ PDFSaveWriter::Result prepareAcroFormFields(
     targetFields.reserve(sourceFields.size());
     const int pageCount = FPDF_GetPageCount(document);
     for (const PDFFormDesignerController::SaveField &source : sourceFields) {
+        if (source.operation
+            == PDFFormDesignerController::SaveField::Remove) {
+            if (source.type != PDFFormDesignerController::Dropdown
+                || source.id.isEmpty()
+                || source.page < -1
+                || source.page >= pageCount) {
+                return failure(
+                    PDFSaveWriter::Error::AcroFormCreationFailed,
+                    source.page,
+                    QStringLiteral(
+                        "The removed Dropdown snapshot is invalid."));
+            }
+            PDFAcroFormWriter::Field target;
+            target.widgetId = source.id;
+            target.type = PDFAcroFormWriter::FieldType::Dropdown;
+            target.operation = PDFAcroFormWriter::Operation::Remove;
+            target.page = source.page;
+            targetFields.append(std::move(target));
+            continue;
+        }
         if (source.page < 0
             || source.page >= pageCount
             || source.name.isEmpty()

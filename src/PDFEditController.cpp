@@ -1277,14 +1277,54 @@ void PDFEditController::setFormDesignerController(
             &PDFEditController::historyStateChanged);
         connect(
             m_formDesignerController,
+            &PDFFormDesignerController::textFieldsChanged,
+            this,
+            &PDFEditController::notifyManagedWidgetVisibilityChanged);
+        connect(
+            m_formDesignerController,
             &QObject::destroyed,
             this,
             [this]() {
                 m_formDesignerController = nullptr;
+                notifyManagedWidgetVisibilityChanged(-1);
                 emit historyStateChanged();
             });
     }
+    notifyManagedWidgetVisibilityChanged(-1);
     emit historyStateChanged();
+}
+
+bool PDFEditController::isDesignerManagedSourceWidget(
+    const Candidate &candidate) const
+{
+    // The annotation scan keeps the saved source rectangle until Save. The
+    // form designer owns both rendering and hit-testing at the draft rectangle,
+    // so exposing the same Widget here would create a stale hover target.
+    return candidate.kind == QLatin1String("widget")
+        && m_formDesignerController
+        && m_formDesignerController->managesSourceWidget(
+            candidate.page,
+            candidate.sourceAnnotationIndex,
+            candidate.sourceWidgetId);
+}
+
+void PDFEditController::notifyManagedWidgetVisibilityChanged(int page)
+{
+    if (m_hasSelection
+        && (page < 0 || m_selectedCandidate.page == page)
+        && isDesignerManagedSourceWidget(m_selectedCandidate)) {
+        clearSelection();
+    }
+
+    if (page >= 0) {
+        emit pageCandidatesReady(page);
+        return;
+    }
+
+    const QList<int> cachedPages = m_pageCandidates.keys();
+    for (int cachedPage : cachedPages) {
+        emit pageCandidatesReady(cachedPage);
+    }
 }
 
 PDFEditController::Tool PDFEditController::tool() const
@@ -1775,6 +1815,9 @@ QVariantList PDFEditController::candidatesForPage(int page)
     const QVector<Candidate> &candidates = ensurePageCandidates(page);
     result.reserve(candidates.size() + m_addedCandidates.size());
     for (const Candidate &candidate : candidates) {
+        if (isDesignerManagedSourceWidget(candidate)) {
+            continue;
+        }
         const QString key = draftKey(candidate.page, candidate.objectId);
         const auto draft = m_drafts.constFind(key);
         if (draft != m_drafts.cend()
@@ -1866,6 +1909,9 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
     qreal bestArea = 0.0;
 
     const auto considerCandidate = [&](const Candidate &candidate) {
+        if (isDesignerManagedSourceWidget(candidate)) {
+            return;
+        }
         if (m_tool == EditTextTool
             && candidate.kind == QLatin1String("highlight")) {
             return;
@@ -5298,6 +5344,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
         Candidate candidate;
         candidate.page = request.page;
         candidate.objectId = QStringLiteral("annotation:") + QString::number(index);
+        candidate.sourceAnnotationIndex = index;
         setInitialGeometry(candidate, rect);
         candidate.fontFamily = QStringLiteral("Helvetica");
         candidate.fontSizeRatio = qMax<qreal>(0.01, rect.height() * 0.65);
@@ -5311,6 +5358,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             candidate.text = annotationString(annotation, "Contents");
         } else {
             candidate.kind = QStringLiteral("widget");
+            candidate.sourceWidgetId = annotationString(annotation, "NM");
             //% "Form field"
             candidate.label = qtTrId("FormField");
             candidate.text = annotationString(annotation, "V");
@@ -5332,14 +5380,16 @@ const PDFEditController::Candidate *PDFEditController::findCandidate(int page,
                                                                      const QString &objectId)
 {
     for (const Candidate &candidate : std::as_const(m_addedCandidates)) {
-        if (candidate.page == page && candidate.objectId == objectId) {
+        if (candidate.page == page && candidate.objectId == objectId
+            && !isDesignerManagedSourceWidget(candidate)) {
             return &candidate;
         }
     }
 
     const QVector<Candidate> &candidates = ensurePageCandidates(page);
     for (const Candidate &candidate : candidates) {
-        if (candidate.objectId == objectId) {
+        if (candidate.objectId == objectId
+            && !isDesignerManagedSourceWidget(candidate)) {
             return &candidate;
         }
     }

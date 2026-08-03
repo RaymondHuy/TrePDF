@@ -59,7 +59,26 @@ bool PDFFormView::interactive() const
 
 QVariantList PDFFormView::choiceFields() const
 {
-    return m_choiceFields;
+    if (!m_formDesignMode || !m_formDesignerController) {
+        return m_choiceFields;
+    }
+
+    // The designer draws rehydrated TrePDF dropdowns at their draft rectangle.
+    // Keeping the runtime overlay for the same source widget would expose a
+    // stale second dropdown at the original rectangle after a move.
+    QVariantList visibleFields;
+    visibleFields.reserve(m_choiceFields.size());
+    for (const QVariant &choiceFieldValue : m_choiceFields) {
+        const QVariantMap choiceField = choiceFieldValue.toMap();
+        if (m_formDesignerController->managesSourceChoiceField(
+                choiceField.value(QStringLiteral("sourcePage")).toInt(),
+                choiceField.value(QStringLiteral("annotationIndex")).toInt(),
+                choiceField.value(QStringLiteral("identityToken")).toString())) {
+            continue;
+        }
+        visibleFields.append(choiceFieldValue);
+    }
+    return visibleFields;
 }
 
 void PDFFormView::setController(PDFFormController *controller)
@@ -138,6 +157,16 @@ void PDFFormView::setFormDesignerController(
     if (m_formDesignerController) {
         connect(
             m_formDesignerController,
+            &PDFFormDesignerController::textFieldsChanged,
+            this,
+            [this](int page) {
+                if (m_formDesignMode
+                    && (page < 0 || page == m_page)) {
+                    emit choiceFieldsChanged();
+                }
+            });
+        connect(
+            m_formDesignerController,
             &QObject::destroyed,
             this,
             [this]() {
@@ -145,12 +174,14 @@ void PDFFormView::setFormDesignerController(
                 m_pointerOverDesignerSource = false;
                 m_designerPointerBlocked = false;
                 updateCursor();
+                emit choiceFieldsChanged();
                 emit formDesignerControllerChanged();
             });
     }
     m_pointerOverDesignerSource = false;
     m_designerPointerBlocked = false;
     updateCursor();
+    emit choiceFieldsChanged();
     emit formDesignerControllerChanged();
 }
 
@@ -163,6 +194,7 @@ void PDFFormView::setFormDesignMode(bool formDesignMode)
     m_pointerOverDesignerSource = false;
     m_designerPointerBlocked = false;
     updateCursor();
+    emit choiceFieldsChanged();
     emit formDesignModeChanged();
 }
 

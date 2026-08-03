@@ -17,7 +17,8 @@ public:
     enum class Operation {
         Add,
         Update,
-        NormalizeAppearance
+        NormalizeAppearance,
+        Remove
     };
 
     struct Field {

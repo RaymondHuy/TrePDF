@@ -174,9 +174,10 @@ Tệp định nghĩa hai lớp có ownership khác nhau.
 - `ScopedPageObjectSuppression` ẩn source object đã bị draft thay/xóa.
 - `ScopedPageObjectMoves` áp ma trận preview cho source text/image chỉ-move rồi
   phục hồi object.
-- `PDFWidgetAnnotationSuppression` ẩn source widget đang được form designer vẽ;
-  capture nền vùng widget, cho `FPDF_FFLDraw` chạy để form khác vẫn đúng, rồi dán
-  nền lại trên widget bị suppress.
+- `PDFWidgetAnnotationSuppression` ẩn source widget đang được form designer vẽ
+  hoặc Dropdown đang giữ tombstone xóa draft; capture nền vùng widget, cho
+  `FPDF_FFLDraw` chạy để form khác vẫn đúng, rồi dán nền lại trên widget bị
+  suppress.
 - Chỉ tái sử dụng form document nếu mọi object transform, annotation flag và patch
   đều phục hồi thành công.
 
@@ -394,9 +395,9 @@ tuần tự.
 - Expose `choiceFields` và invokable focus/select để `FormChoiceOverlay` dùng.
   Refresh bất đồng bộ khi document/page/generation/render state thay đổi và loại
   response stale.
-- Khi form designer đang phủ một source-backed TrePDF field, chặn native pointer
-  path tại vùng đó để một click không vừa chọn designer field vừa sửa widget
-  PDFium bên dưới.
+- Khi form designer đang phủ một source-backed TrePDF field hoặc giữ tombstone
+  xóa Dropdown, chặn native pointer path tại vùng đó để một click không vừa tác
+  động designer draft vừa sửa widget PDFium bên dưới.
 - Khi inactive/pooled/controller đổi, clear focus, choice snapshot và pending
   refresh.
 
@@ -424,9 +425,10 @@ rehydrate.
 - Đổi value/name/options/flags/rect; `moveField()` chỉ đổi top-left, giữ width/
   height và clamp field vào trang.
 - Chọn field, quản lý text focus, activate source checkbox, chọn giá trị
-  Dropdown và remove field transient.
+  Dropdown, remove field transient và tạo tombstone khi xóa Dropdown
+  source-backed do TrePDF tạo.
 - Map field qua page insertion/deletion; source-backed field giữ source page
-  identity để update đúng widget sau save.
+  identity để update hoặc remove đúng widget sau save.
 
 **Rehydrate:**
 
@@ -438,10 +440,11 @@ rehydrate.
 
 **Save snapshot:**
 
-- `saveFields()` chỉ trả field add/update/normalize hợp lệ, kèm
-  `changedProperties` để writer không ghi đè value native nếu người dùng không
-  sửa value trong designer.
+- `saveFields()` trả field add/update/normalize hợp lệ và tombstone Dropdown dưới
+  dạng `Remove`; field còn lại kèm `changedProperties` để writer không ghi đè
+  value native nếu người dùng không sửa value trong designer.
 - Draft state của model tham gia guard chung qua edit controller/session.
+- Discard/reset xóa tombstone rồi rehydrate Dropdown nguồn từ document.
 
 ### [`src/FormFieldLayer.cpp`](../src/FormFieldLayer.cpp) và
 [`src/FormFieldLayer.h`](../src/FormFieldLayer.h)
@@ -488,18 +491,20 @@ tooltip/value/default/options/rect/page/type/flags/operation.
 2. Với update không đổi value/options, đọc live data từ document để tránh
    designer snapshot cũ ghi đè thay đổi form runtime/JavaScript.
 3. Chuẩn hóa Checkbox về `Yes`/`Off`; kiểm Dropdown options/selection và chuyển
-   Required/ReadOnly/Combo thành form flags.
+   Required/ReadOnly/Combo thành form flags. Với Remove, chỉ chấp nhận Dropdown
+   source-backed có widget id và page hợp lệ.
 4. Với field Add, tạo Square annotation placeholder có rect, `NM=widgetId` và
    Print flag. PDFium public API chưa tạo đầy đủ Widget dictionary cần thiết.
 5. Save bản có placeholder qua `QSaveFile` và PDFium.
 6. Gọi `PDFAcroFormCanonicalizer::finalizeFields()` để biến placeholder/update
-   thành field/widget chuẩn và appearance rõ ràng.
-7. Mở lại file bằng PDFium, duyệt widget và kiểm type, name, id, value, flags,
-   options/selected index, appearance, rect và số lượng khớp đúng một lần.
+   thành field/widget chuẩn, tạo appearance hoặc gỡ field/Widget cần remove.
+7. Mở lại file bằng PDFium, duyệt widget và kiểm field add/update khớp đúng một
+   lần, còn field Remove không tồn tại.
 
 **Khả năng hiện tại:** Text, Checkbox và fixed single-select Dropdown hỗ trợ
-Add/Update; Text còn hỗ trợ NormalizeAppearance. Radio/Date/Signature và Remove
-chưa triển khai nên phải fail rõ ràng.
+Add/Update; Text còn hỗ trợ NormalizeAppearance. Remove chỉ hỗ trợ top-level,
+single-widget Dropdown do TrePDF tạo. Radio/Date/Signature, Remove Text/Checkbox
+và cấu trúc Dropdown AcroForm khác phải fail rõ ràng.
 
 **Failure:** nếu canonicalize hoặc validation thất bại, xóa target intermediate
 để caller không dùng một PDF form nửa hoàn chỉnh.
@@ -515,7 +520,7 @@ API không thể dựng trực tiếp.
 - Memory-map file, parse trailer/xref/object reference/dictionary/string đủ cho
   trường hợp AcroForm cần xử lý.
 - Tìm Catalog, `/AcroForm`, `/Fields`, page annotation arrays, placeholder có
-  `NM` khớp widget id và field/widget hiện có cần update.
+  `NM` khớp widget id và field/widget hiện có cần update/remove.
 - Thu field names để phát hiện trùng tên và bảo toàn reference hiện hữu.
 - Đây không phải PDF editor tổng quát; parser chỉ nên mở rộng khi writer có test
   fixture tương ứng.
@@ -532,6 +537,8 @@ API không thể dựng trực tiếp.
   và appearance có nút mũi tên.
 - Chỉ cập nhật Dropdown có `/Opt` là mảng string trực tiếp; export/display pairs
   bị từ chối để không làm mất export value khi canonicalize.
+- Với Remove Dropdown, chỉ nhận TrePDF field top-level có đúng một Widget trên
+  page yêu cầu; cập nhật page `/Annots` và `/AcroForm /Fields` để bỏ reference.
 - Với normalize-only text field, giữ field data hiện hữu và chỉ thay appearance
   dictionary/version cần thiết.
 - Bổ sung AcroForm vào Catalog nếu chưa có, cập nhật `/Fields`, default font
@@ -594,8 +601,8 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
 **Nhóm coverage hiện tại:**
 
 - Form designer: lưu/rehydrate Text Field, Checkbox và Dropdown, giữ lựa chọn/
-  options khi move-resize, appearance normalization, AcroForm sẵn có và tên
-  field trùng.
+  options khi move-resize, xóa draft/Discard/Save round-trip cho TrePDF Dropdown,
+  appearance normalization, AcroForm sẵn có và tên field trùng.
 - Form runtime: JavaScript tự bật, choice field tùy biến và persistence, push
   button action, URI sandbox, external-link routing và PDFium serialization
   giữa thread.
@@ -651,7 +658,7 @@ thay thế kiểm thử native Metal thủ công.
   QML, CoreText live hoặc đường dẫn ảnh ban đầu.
 - Với source object, resolve tất cả path trước remove; ưu tiên matrix-only cho move
   để giữ resource và z-order.
-- Với form designer, test add, update, normalize, rehydrate và validation sau mở
-  lại; enum tồn tại không đồng nghĩa writer đã hỗ trợ type đó.
+- Với form designer, test add, update, normalize, rehydrate, remove Dropdown và
+  validation sau mở lại; enum tồn tại không đồng nghĩa writer đã hỗ trợ type đó.
 - Chạy build `trepdf`, `git diff --check` và test liên quan. Thay đổi render/lifecycle
   phải thử thêm trên Metal với scroll, zoom, close/reopen và quit.

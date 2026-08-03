@@ -35,7 +35,10 @@ dropdowns start with three localized options. Added fields can be selected,
 moved, resized, or deleted before Save and persist as standard interactive
 AcroForm widgets with explicit appearances. TrePDF rehydrates its saved fields,
 including dropdown options and selection, so they remain available to the form
-designer after reopen.
+designer after reopen. A TrePDF-created Dropdown can then be deleted as a Forms
+draft: Discard restores it, while Save or Save As removes its top-level,
+single-widget field and Widget annotation. Source-backed Text Field/Check Box
+and arbitrary AcroForm dropdown structures are not removed by this path.
 
 Each document tab owns its PDF handle, draft/undo history, selection, zoom,
 scroll position, and formatting-panel state. Only the active tab creates page

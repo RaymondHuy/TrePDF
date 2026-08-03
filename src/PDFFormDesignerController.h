@@ -83,7 +83,8 @@ public:
     {
         enum Operation {
             Add,
-            Update
+            Update,
+            Remove
         };
 
         QString id;
@@ -131,6 +132,12 @@ public:
     Q_INVOKABLE QVariantList fieldsForPage(int page) const;
     Q_INVOKABLE QVariantList textFieldsForPage(int page) const;
     QStringList sourceFieldIdsForPage(int page) const;
+    bool managesSourceChoiceField(int sourcePage,
+                                  int annotationIndex,
+                                  const QString &identityToken) const;
+    bool managesSourceWidget(int page,
+                             int annotationIndex,
+                             const QString &widgetId) const;
     bool sourceFieldContainsPoint(
         int page,
         const QPointF &normalizedPoint) const;
@@ -144,6 +151,9 @@ public:
                                   const QString &name);
     Q_INVOKABLE bool setFieldOptions(const QString &fieldId,
                                      const QStringList &options);
+    Q_INVOKABLE bool renameFieldOption(const QString &fieldId,
+                                       int optionIndex,
+                                       const QString &option);
     Q_INVOKABLE bool setFieldFlags(const QString &fieldId, int flags);
     Q_INVOKABLE void setTextFieldText(const QString &fieldId,
                                       const QString &text);
@@ -216,6 +226,7 @@ private:
     QPointer<PDFDocument> m_document;
     QPointer<PDFFormController> m_formController;
     QVector<FormField> m_fields;
+    QVector<FormField> m_removedSourceFields;
     QString m_focusedTextFieldId;
     QString m_selectedTextFieldId;
     quint64 m_nextFieldId = 0;

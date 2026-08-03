@@ -154,13 +154,18 @@ flowchart TD
 2. `FormTextFieldOverlay` thu click/drag và gọi
    `PDFFormDesignerController::addField()` bằng tọa độ chuẩn hóa.
 3. `FormFieldLayer` vẽ model bằng scene graph, chọn/toggle/di chuyển field; QML
-   quản lý editor text, ComboBox của Dropdown, resize handle và nút xóa cho
-   field transient.
+   quản lý editor text, ComboBox của Dropdown, resize handle và nút xóa nổi cho
+   Text Field/Check Box transient. Dropdown transient hoặc source-backed do
+   TrePDF tạo chỉ được xóa từ panel tùy chọn.
 4. Controller cũng rehydrate các field do TrePDF đã lưu để tiếp tục chỉnh sửa
-   sau khi mở lại.
-5. Khi Save, snapshot designer được đổi thành thao tác add/update/normalize;
+   sau khi mở lại. Xóa Dropdown source-backed tạo draft; Discard rehydrate lại
+   field, còn Save/Save As mới gỡ Widget và field khỏi PDF.
+5. Khi Save, snapshot designer được đổi thành thao tác add/update/normalize/remove;
    `PDFAcroFormWriter` tạo placeholder, `PDFAcroFormCanonicalizer` hoàn thiện
    dictionary/appearance/AcroForm, sau đó writer mở lại để kiểm chứng.
+
+`Remove` chỉ nhận top-level, single-widget Dropdown do TrePDF tạo; Text Field,
+Check Box source-backed và cấu trúc AcroForm Dropdown tùy ý vẫn được bảo vệ.
 
 ### Save và Save As
 

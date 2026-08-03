@@ -17,6 +17,15 @@ Item {
     property bool checkboxToolActive: false
     property bool dropdownToolActive: false
     property string transientStatus
+    readonly property string selectedFormFieldId:
+        session.formDesignerController.selectedFieldId
+    readonly property var selectedFormField: selectedFormFieldId.length > 0
+        ? session.formDesignerController.fieldData(selectedFormFieldId)
+        : ({})
+    readonly property bool dropdownOptionsPanelActive: formsTabActive
+        && selectedFormFieldId.length > 0
+        && Number(selectedFormField.type)
+            === PDFFormDesignerController.Dropdown
 
     signal openRequested()
 
@@ -116,6 +125,30 @@ Item {
         }
 
         Loader {
+            id: dropdownOptionsPanelLoader
+
+            Layout.preferredWidth: active
+                ? root.session.panelCollapsed ? 42 : 264
+                : 0
+            Layout.fillHeight: true
+            active: root.session.document.loaded
+                && root.dropdownOptionsPanelActive
+            visible: active
+
+            sourceComponent: Component {
+                DropdownOptionsPanel {
+                    theme: root.theme
+                    controller: root.session.formDesignerController
+                    fieldId: root.selectedFormFieldId
+                    collapsed: root.session.panelCollapsed
+                    onCollapsedChangeRequested: collapsed => {
+                        root.session.panelCollapsed = collapsed
+                    }
+                }
+            }
+        }
+
+        Loader {
             id: textFormatPanelLoader
 
             Layout.preferredWidth: active
@@ -123,6 +156,7 @@ Item {
                 : 0
             Layout.fillHeight: true
             active: root.session.document.loaded
+                && !root.dropdownOptionsPanelActive
                 && root.session.editController.tool !== PDFEditController.BrowseTool
             visible: active
 
