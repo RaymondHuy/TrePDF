@@ -148,9 +148,10 @@ void appendRoundedRect(QVector<ColoredVertex> *vertices,
     }
 }
 
-void appendEllipse(QVector<ColoredVertex> *vertices,
-                   const QRectF &rect,
-                   const QColor &color)
+void appendAntialiasedEllipse(QVector<ColoredVertex> *vertices,
+                              const QRectF &rect,
+                              const QColor &color,
+                              qreal antialiasWidth)
 {
     if (rect.isEmpty()) {
         return;
@@ -160,13 +161,37 @@ void appendEllipse(QVector<ColoredVertex> *vertices,
     const QPointF center = rect.center();
     const qreal radiusX = rect.width() / 2.0;
     const qreal radiusY = rect.height() / 2.0;
-    QPointF previous(center.x() + radiusX, center.y());
+    const qreal halfAntialiasWidth = qMin(
+        qMax(0.0, antialiasWidth) / 2.0,
+        qMin(radiusX, radiusY));
+    const qreal innerRadiusX = qMax(0.0, radiusX - halfAntialiasWidth);
+    const qreal innerRadiusY = qMax(0.0, radiusY - halfAntialiasWidth);
+    const qreal outerRadiusX = radiusX + halfAntialiasWidth;
+    const qreal outerRadiusY = radiusY + halfAntialiasWidth;
+    QColor transparentColor = color;
+    transparentColor.setAlpha(0);
+
+    QPointF previousInner(center.x() + innerRadiusX, center.y());
+    QPointF previousOuter(center.x() + outerRadiusX, center.y());
     for (int segment = 1; segment <= segments; ++segment) {
         const qreal angle = 2.0 * M_PI * segment / segments;
-        const QPointF next(center.x() + qCos(angle) * radiusX,
-                           center.y() + qSin(angle) * radiusY);
-        appendTriangle(vertices, center, previous, next, color);
-        previous = next;
+        const qreal cosine = qCos(angle);
+        const qreal sine = qSin(angle);
+        const QPointF nextInner(
+            center.x() + cosine * innerRadiusX,
+            center.y() + sine * innerRadiusY);
+        const QPointF nextOuter(
+            center.x() + cosine * outerRadiusX,
+            center.y() + sine * outerRadiusY);
+        appendTriangle(vertices, center, previousInner, nextInner, color);
+        vertices->append({previousInner, color});
+        vertices->append({previousOuter, transparentColor});
+        vertices->append({nextOuter, transparentColor});
+        vertices->append({previousInner, color});
+        vertices->append({nextOuter, transparentColor});
+        vertices->append({nextInner, color});
+        previousInner = nextInner;
+        previousOuter = nextOuter;
     }
 }
 
@@ -223,7 +248,9 @@ QSGGeometryNode *createGeometryNode(const QVector<ColoredVertex> &vertices)
     auto *node = new QSGGeometryNode;
     node->setGeometry(geometry);
     node->setFlag(QSGNode::OwnsGeometry, true);
-    node->setMaterial(new QSGVertexColorMaterial);
+    auto *material = new QSGVertexColorMaterial;
+    material->setFlag(QSGMaterial::Blending, true);
+    node->setMaterial(material);
     node->setFlag(QSGNode::OwnsMaterial, true);
     return node;
 }
@@ -799,7 +826,7 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
         * m_pointScale;
     const qreal devicePixelRatio = qMax<qreal>(
         1.0,
-        window()->devicePixelRatio());
+        window()->effectiveDevicePixelRatio());
     for (const RenderField &field : m_renderFields) {
         if (field.id == m_activeFieldId
             && field.type == PDFFormDesignerController::Text) {
@@ -921,24 +948,31 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                                 center.y() - side / 2.0,
                                 side,
                                 side);
-            const qreal radioBorderWidth = alignedDeviceWidth(
-                qBound(
-                    PDFFormAppearance::kRadioButtonMinimumBorderPointWidth
-                        * m_pointScale,
-                    side / 12.0,
-                    PDFFormAppearance::kRadioButtonBorderPointWidth
-                        * m_pointScale),
-                devicePixelRatio);
-            appendEllipse(&geometryVertices,
-                          circle,
-                          radioButtonControl);
-            appendEllipse(
+            const qreal antialiasWidth = 1.0 / devicePixelRatio;
+            const qreal radioBorderWidth = qMin(
+                side / 2.0,
+                qMax(
+                    alignedDeviceWidth(
+                        qBound(
+                            PDFFormAppearance::kRadioButtonMinimumBorderPointWidth
+                                * m_pointScale,
+                            side / 12.0,
+                            PDFFormAppearance::kRadioButtonBorderPointWidth
+                                * m_pointScale),
+                        devicePixelRatio),
+                    antialiasWidth * 1.5));
+            appendAntialiasedEllipse(&geometryVertices,
+                                     circle,
+                                     radioButtonControl,
+                                     antialiasWidth);
+            appendAntialiasedEllipse(
                 &geometryVertices,
                 circle.adjusted(radioBorderWidth,
                                 radioBorderWidth,
                                 -radioBorderWidth,
                                 -radioBorderWidth),
-                readOnly ? readOnlyBackground : Qt::white);
+                readOnly ? readOnlyBackground : Qt::white,
+                antialiasWidth);
             if (checkedValue(field.value)) {
                 const qreal dotRadius
                     = (side / 2.0 - radioBorderWidth / 2.0)
@@ -947,9 +981,10 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                                  center.y() - dotRadius,
                                  dotRadius * 2.0,
                                  dotRadius * 2.0);
-                appendEllipse(&geometryVertices,
-                              dot,
-                              radioButtonControl);
+                appendAntialiasedEllipse(&geometryVertices,
+                                         dot,
+                                         radioButtonControl,
+                                         antialiasWidth);
             }
             break;
         }
