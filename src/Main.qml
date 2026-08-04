@@ -76,11 +76,12 @@ ApplicationWindow {
 
     function rebuildWorkspace() {
         const workspace = activeWorkspace()
-        if (workspace)
-            workspace.prepareForDeactivation()
+        if (workspace && !workspace.prepareForDeactivation())
+            return false
         workspaceLoader.active = false
         workspaceSession = activeSession
         workspaceLoader.active = workspaceSession !== null
+        return true
     }
 
     function setZoom(value) {
