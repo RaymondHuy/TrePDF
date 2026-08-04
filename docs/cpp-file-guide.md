@@ -415,7 +415,7 @@ rehydrate.
   page, normalized rect, source-backed, appearance version và bitmask property
   đã thay đổi.
 - Enum model có Text, Checkbox, RadioButton, Dropdown, Date, Signature; UI và
-  writer hoàn chỉnh hiện hỗ trợ Text/Checkbox/Dropdown.
+  writer hoàn chỉnh hiện hỗ trợ Text/Checkbox/RadioButton/Dropdown.
 - Expose roles cho `FormFieldLayer` và các API `fieldData()`/`fieldsForPage()` cho
   QML.
 
@@ -424,9 +424,10 @@ rehydrate.
 - Tạo field với tên duy nhất, default size/value/flags; helper riêng cho Text.
 - Đổi value/name/options/flags/rect; `moveField()` chỉ đổi top-left, giữ width/
   height và clamp field vào trang.
-- Chọn field, quản lý text focus, activate source checkbox, chọn giá trị
-  Dropdown, remove field transient và tạo tombstone khi xóa Dropdown
-  source-backed do TrePDF tạo.
+- Chọn field, quản lý text focus, activate source checkbox/radio, chọn giá trị
+  Dropdown, remove field transient và tạo tombstone khi xóa Dropdown hoặc Radio
+  source-backed do TrePDF tạo. `name` của Radio là Group ID; đổi tên gộp/tách
+  nhóm và chọn một member sẽ tắt các member khác cùng tên.
 - Map field qua page insertion/deletion; source-backed field giữ source page
   identity để update hoặc remove đúng widget sau save.
 
@@ -454,8 +455,9 @@ rehydrate.
 **Render:**
 
 - Lấy field model theo display page, visibility/source visibility và pooled state.
-- Dựng scene graph nodes cho Text Field, Check Box, Dropdown và presentation của
-  các type dự trù; vẽ border, background, text/check mark/arrow và selected state.
+- Dựng scene graph nodes cho Text Field, Check Box, Radio Button, Dropdown và
+  presentation của các type dự trù; vẽ border, background, text/check mark/radio
+  dot/arrow và selected state.
 - Dùng constants từ `PDFFormAppearance.h` để preview font, border và padding khớp
   appearance writer.
 - Expose active field id/rect/value/options/type/flags/source-backed để QML đặt
@@ -463,8 +465,8 @@ rehydrate.
 
 **Pointer interaction:**
 
-- Hit-test field từ trên xuống, chọn field và phát `fieldActivated`; checkbox có
-  đường activate riêng.
+- Hit-test field từ trên xuống, chọn field và phát `fieldActivated`; checkbox và
+  radio có đường activate qua form runtime khi source-backed.
 - Khi `moveEnabled`, hover đặt `SizeAllCursor`; press giữ mouse grab, qua
   `startDragDistance` mới bắt đầu move để click thuần vẫn activate.
 - Move preview chỉ sửa `RenderField` cục bộ; `finishFieldMove()` gọi
@@ -490,21 +492,27 @@ tooltip/value/default/options/rect/page/type/flags/operation.
 1. Yêu cầu caller đang giữ PDFium process lock và mở intermediate bằng PDFium.
 2. Với update không đổi value/options, đọc live data từ document để tránh
    designer snapshot cũ ghi đè thay đổi form runtime/JavaScript.
-3. Chuẩn hóa Checkbox về `Yes`/`Off`; kiểm Dropdown options/selection và chuyển
-   Required/ReadOnly/Combo thành form flags. Với Remove, chỉ chấp nhận Dropdown
-   source-backed có widget id và page hợp lệ.
+3. Chuẩn hóa Checkbox/Radio Button về `Yes`/`Off`; kiểm Dropdown
+   options/selection và chuyển Required/ReadOnly/Radio/Combo thành form flags.
+   Radio không đặt `NoToggleToOff` để PDF reader cho phép bỏ chọn. Với Remove,
+   chỉ chấp nhận Dropdown hoặc Radio source-backed có widget id hợp lệ.
 4. Với field Add, tạo Square annotation placeholder có rect, `NM=widgetId` và
    Print flag. PDFium public API chưa tạo đầy đủ Widget dictionary cần thiết.
 5. Save bản có placeholder qua `QSaveFile` và PDFium.
 6. Gọi `PDFAcroFormCanonicalizer::finalizeFields()` để biến placeholder/update
    thành field/widget chuẩn, tạo appearance hoặc gỡ field/Widget cần remove.
+   Mỗi Group ID Radio Button được ghi đúng một field cha trong
+   `/AcroForm/Fields`; các Widget con có `/Parent` và export value riêng để lựa
+   chọn loại trừ hoạt động ổn định trên các PDF reader bên ngoài.
 7. Mở lại file bằng PDFium, duyệt widget và kiểm field add/update khớp đúng một
    lần, còn field Remove không tồn tại.
 
-**Khả năng hiện tại:** Text, Checkbox và fixed single-select Dropdown hỗ trợ
-Add/Update; Text còn hỗ trợ NormalizeAppearance. Remove chỉ hỗ trợ top-level,
-single-widget Dropdown do TrePDF tạo. Radio/Date/Signature, Remove Text/Checkbox
-và cấu trúc Dropdown AcroForm khác phải fail rõ ràng.
+**Khả năng hiện tại:** Text, Checkbox, grouped Radio Button và fixed
+single-select Dropdown hỗ trợ Add/Update; Text và Radio còn hỗ trợ
+NormalizeAppearance. Remove hỗ trợ top-level, single-widget Dropdown và member
+Radio thuộc group do TrePDF tạo; group Radio còn lại được dựng lại khi xóa.
+Date/Signature, Remove Text/Checkbox và cấu trúc AcroForm ngoài phạm vi TrePDF
+phải fail rõ ràng.
 
 **Failure:** nếu canonicalize hoặc validation thất bại, xóa target intermediate
 để caller không dùng một PDF form nửa hoàn chỉnh.
@@ -533,12 +541,16 @@ API không thể dựng trực tiếp.
   tạo appearance stream để PDF reader hiển thị ổn định kể cả trước khi focus.
 - Tạo Checkbox Widget với `/AP` Off/Yes riêng, `/AS`, value/default value và
   vector check appearance.
+- Gom Radio theo Group ID thành một field cha `/FT /Btn` có `/Kids`; mỗi Widget
+  con giữ `/Parent`, export value riêng theo widget id và appearance Off/On.
 - Tạo Dropdown Widget `/FT /Ch` với Combo flag, `/Opt`, `/V`, `/DV`, `/I`, `/DA`
   và appearance có nút mũi tên.
 - Chỉ cập nhật Dropdown có `/Opt` là mảng string trực tiếp; export/display pairs
   bị từ chối để không làm mất export value khi canonicalize.
 - Với Remove Dropdown, chỉ nhận TrePDF field top-level có đúng một Widget trên
-  page yêu cầu; cập nhật page `/Annots` và `/AcroForm /Fields` để bỏ reference.
+  page yêu cầu. Với Remove Radio, yêu cầu snapshot đủ group nguồn và dựng lại
+  field cha từ các member còn lại. Cả hai cập nhật page `/Annots` và
+  `/AcroForm /Fields` để bỏ reference tương ứng.
 - Với normalize-only text field, giữ field data hiện hữu và chỉ thay appearance
   dictionary/version cần thiết.
 - Bổ sung AcroForm vào Catalog nếu chưa có, cập nhật `/Fields`, default font
@@ -576,8 +588,8 @@ designer, rồi phục hồi document và pixel nền an toàn.
   field để có thể migrate giao diện mà không mất validation properties.
 - Chứa font size, border width/color và padding chuẩn của Text Field; cả
   `FormFieldLayer` và canonicalizer/writer phải dùng cùng giá trị.
-- Text/checkbox/dropdown có appearance version riêng; designer dùng version text
-  để phát hiện field cũ cần normalize khi mở lại.
+- Text/checkbox/radio/dropdown có appearance version riêng; designer dùng version
+  tương ứng để phát hiện field cũ cần normalize khi mở lại.
 
 ### [`src/PDFiumSynchronization.h`](../src/PDFiumSynchronization.h)
 
@@ -600,9 +612,11 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
 
 **Nhóm coverage hiện tại:**
 
-- Form designer: lưu/rehydrate Text Field, Checkbox và Dropdown, giữ lựa chọn/
-  options khi move-resize, xóa draft/Discard/Save round-trip cho TrePDF Dropdown,
-  appearance normalization, AcroForm sẵn có và tên field trùng.
+- Form designer: lưu/rehydrate Text Field, Checkbox, grouped Radio Button và
+  Dropdown; giữ lựa chọn/options khi move-resize; kiểm mutual exclusion, Group
+  ID, export/control index và xóa member Radio; xóa draft/Discard/Save round-trip
+  cho TrePDF Dropdown; appearance normalization, AcroForm sẵn có và tên field
+  trùng.
 - Form runtime: JavaScript tự bật, choice field tùy biến và persistence, push
   button action, URI sandbox, external-link routing và PDFium serialization
   giữa thread.

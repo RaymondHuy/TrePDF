@@ -19,6 +19,7 @@ Item {
     required property bool formFieldsInteractive
     required property bool textFieldToolActive
     required property bool checkboxToolActive
+    required property bool radioButtonToolActive
     required property bool dropdownToolActive
     required property bool draftTextureCurrent
     required property bool draftTextureReady
@@ -36,6 +37,7 @@ Item {
         && editController.tool === PDFEditController.BrowseTool
         && !textFieldToolActive
         && !checkboxToolActive
+        && !radioButtonToolActive
         && !dropdownToolActive
 
     function prepareForSessionChange() {
@@ -153,6 +155,7 @@ Item {
         fieldsInteractive: root.formFieldsInteractive
         textFieldToolActive: root.textFieldToolActive
         checkboxToolActive: root.checkboxToolActive
+        radioButtonToolActive: root.radioButtonToolActive
         dropdownToolActive: root.dropdownToolActive
         z: 3
     }

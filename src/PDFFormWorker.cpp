@@ -413,9 +413,11 @@ bool isTrePDFDesignerFieldId(const QString &id, int fieldType)
         ? QStringLiteral("text-field-")
         : fieldType == FPDF_FORMFIELD_CHECKBOX
             ? QStringLiteral("checkbox-field-")
-            : fieldType == FPDF_FORMFIELD_COMBOBOX
-                ? QStringLiteral("dropdown-field-")
-                : QString();
+            : fieldType == FPDF_FORMFIELD_RADIOBUTTON
+                ? QStringLiteral("radio-field-")
+                : fieldType == FPDF_FORMFIELD_COMBOBOX
+                    ? QStringLiteral("dropdown-field-")
+                    : QString();
     constexpr qsizetype uuidLength = 36;
     if (prefix.isEmpty() || !id.startsWith(prefix)) {
         return false;
@@ -1489,6 +1491,7 @@ public:
                       == FPDF_ANNOT_WIDGET
                 && (fieldType == FPDF_FORMFIELD_TEXTFIELD
                     || fieldType == FPDF_FORMFIELD_CHECKBOX
+                    || fieldType == FPDF_FORMFIELD_RADIOBUTTON
                     || fieldType == FPDF_FORMFIELD_COMBOBOX);
             if (!designerWidget) {
                 FPDFPage_CloseAnnot(annotation);
@@ -1544,7 +1547,8 @@ public:
                         buffer,
                         byteCount);
                 });
-            field.value = fieldType == FPDF_FORMFIELD_CHECKBOX
+            field.value = (fieldType == FPDF_FORMFIELD_CHECKBOX
+                           || fieldType == FPDF_FORMFIELD_RADIOBUTTON)
                 ? FPDFAnnot_IsChecked(m_formHandle, annotation)
                     ? QStringLiteral("Yes")
                     : QStringLiteral("Off")
@@ -1567,6 +1571,56 @@ public:
                         buffer,
                         byteCount);
                 });
+            if (fieldType == FPDF_FORMFIELD_RADIOBUTTON
+                && field.defaultValue.isEmpty()) {
+                FPDF_ANNOTATION parent = FPDFAnnot_GetLinkedAnnot(
+                    annotation,
+                    "Parent");
+                if (parent) {
+                    field.defaultValue = formWideString(
+                        [parent](FPDF_WCHAR *buffer,
+                                 unsigned long byteCount) {
+                            return FPDFAnnot_GetStringValue(
+                                parent,
+                                "DV",
+                                buffer,
+                                byteCount);
+                        });
+                    FPDFPage_CloseAnnot(parent);
+                }
+            }
+            if (fieldType == FPDF_FORMFIELD_RADIOBUTTON) {
+                float defaultChecked = 0.0f;
+                const bool hasDefaultChecked
+                    = FPDFAnnot_GetNumberValue(
+                        annotation,
+                        PDFFormAppearance::kRadioButtonDefaultCheckedKey,
+                        &defaultChecked)
+                    && std::isfinite(defaultChecked)
+                    && (defaultChecked == 0.0f
+                        || defaultChecked == 1.0f);
+                if (hasDefaultChecked) {
+                    field.defaultValue = defaultChecked == 1.0f
+                        ? QStringLiteral("Yes")
+                        : QStringLiteral("Off");
+                } else {
+                    const QString exportValue = formWideString(
+                        [this,
+                         annotation](FPDF_WCHAR *buffer,
+                                      unsigned long byteCount) {
+                            return FPDFAnnot_GetFormFieldExportValue(
+                                m_formHandle,
+                                annotation,
+                                buffer,
+                                byteCount);
+                        });
+                    field.defaultValue
+                        = !exportValue.isEmpty()
+                            && field.defaultValue == exportValue
+                        ? QStringLiteral("Yes")
+                        : QStringLiteral("Off");
+                }
+            }
             if (fieldType == FPDF_FORMFIELD_COMBOBOX) {
                 const int choiceFlags = FPDFAnnot_GetFormFieldFlags(
                     m_formHandle,

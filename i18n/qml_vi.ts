@@ -23,7 +23,7 @@
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Components/DocumentView.qml" line="237"/>
+        <location filename="../src/Components/DocumentView.qml" line="239"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="45"/>
@@ -148,39 +148,39 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="179"/>
+        <location filename="../src/Components/AppRibbon.qml" line="196"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="185"/>
+        <location filename="../src/Components/AppRibbon.qml" line="202"/>
         <location filename="../src/Components/EditOverlay.qml" line="1892"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="191"/>
+        <location filename="../src/Components/AppRibbon.qml" line="208"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="197"/>
+        <location filename="../src/Components/AppRibbon.qml" line="214"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="222"/>
+        <location filename="../src/Components/AppRibbon.qml" line="239"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="226"/>
+        <location filename="../src/Components/AppRibbon.qml" line="243"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="228"/>
+        <location filename="../src/Components/DocumentView.qml" line="230"/>
         <location filename="../src/PDFDocument.cpp" line="80"/>
         <location filename="../src/PDFDocument.cpp" line="232"/>
         <source>No document open</source>
@@ -200,7 +200,7 @@
     <message id="Delete">
         <location filename="../src/Main.qml" line="825"/>
         <location filename="../src/Components/EditOverlay.qml" line="1923"/>
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="709"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="761"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
@@ -434,7 +434,7 @@
         <translation>Làm lại</translation>
     </message>
     <message id="PageNumber">
-        <location filename="../src/Components/PdfPageDelegate.qml" line="157"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="159"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -469,53 +469,63 @@
         <translation>Thêm ký tắt</translation>
     </message>
     <message id="Fields">
-        <location filename="../src/Components/FormRibbon.qml" line="35"/>
+        <location filename="../src/Components/FormRibbon.qml" line="37"/>
         <location filename="../src/Components/SignRibbon.qml" line="69"/>
         <source>Fields</source>
         <translation>Trường</translation>
     </message>
     <message id="TextFieldTool">
-        <location filename="../src/Components/FormRibbon.qml" line="41"/>
+        <location filename="../src/Components/FormRibbon.qml" line="43"/>
         <source>Text Field</source>
         <translation>Ô văn bản</translation>
     </message>
     <message id="DragToAddTextField">
-        <location filename="../src/Components/FormRibbon.qml" line="43"/>
+        <location filename="../src/Components/FormRibbon.qml" line="45"/>
         <source>Drag on the page to add a text field</source>
         <translation>Kéo trên trang để thêm ô văn bản</translation>
     </message>
     <message id="CheckboxTool">
-        <location filename="../src/Components/FormRibbon.qml" line="56"/>
+        <location filename="../src/Components/FormRibbon.qml" line="58"/>
         <source>Check Box</source>
         <translation>Hộp kiểm</translation>
     </message>
     <message id="ClickOrDragToAddCheckbox">
-        <location filename="../src/Components/FormRibbon.qml" line="58"/>
+        <location filename="../src/Components/FormRibbon.qml" line="60"/>
         <source>Click or drag on the page to add a check box</source>
         <translation>Nhấp hoặc kéo trên trang để thêm hộp kiểm</translation>
     </message>
+    <message id="RadioButtonTool">
+        <location filename="../src/Components/FormRibbon.qml" line="73"/>
+        <source>Radio Button</source>
+        <translation>Nút chọn</translation>
+    </message>
+    <message id="ClickOrDragToAddRadioButton">
+        <location filename="../src/Components/FormRibbon.qml" line="75"/>
+        <source>Click or drag on the page to add a radio button</source>
+        <translation>Nhấp hoặc kéo trên trang để thêm nút chọn</translation>
+    </message>
     <message id="DropdownTool">
-        <location filename="../src/Components/FormRibbon.qml" line="71"/>
+        <location filename="../src/Components/FormRibbon.qml" line="88"/>
         <source>Dropdown</source>
         <translation>Danh sách thả xuống</translation>
     </message>
     <message id="ClickOrDragToAddDropdown">
-        <location filename="../src/Components/FormRibbon.qml" line="73"/>
+        <location filename="../src/Components/FormRibbon.qml" line="90"/>
         <source>Click or drag on the page to add a dropdown</source>
         <translation>Nhấp hoặc kéo trên trang để thêm danh sách thả xuống</translation>
     </message>
     <message id="ResizeFormField">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="416"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="440"/>
         <source>Resize form field</source>
         <translation>Đổi kích thước trường biểu mẫu</translation>
     </message>
     <message id="MoveFormField">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="804"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="856"/>
         <source>Move form field</source>
         <translation>Di chuyển trường biểu mẫu</translation>
     </message>
     <message id="EnterFormText">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="923"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="975"/>
         <source>Enter text</source>
         <translation>Nhập văn bản</translation>
     </message>
@@ -1159,6 +1169,56 @@
         <location filename="../src/Components/DropdownOptionsPanel.qml" line="500"/>
         <source>Delete dropdown</source>
         <translation>Xóa danh sách thả xuống</translation>
+    </message>
+    <message id="EnterRadioGroupId">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="40"/>
+        <source>Enter a group ID.</source>
+        <translation>Vui lòng nhập ID nhóm.</translation>
+    </message>
+    <message id="UpdateRadioGroupFailed">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="46"/>
+        <source>Could not update the radio group.</source>
+        <translation>Không thể cập nhật nhóm nút chọn.</translation>
+    </message>
+    <message id="DeleteRadioButtonFailed">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="59"/>
+        <source>Could not delete the radio button.</source>
+        <translation>Không thể xóa nút chọn.</translation>
+    </message>
+    <message id="ExpandRadioGroupOptions">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="100"/>
+        <source>Expand radio group options</source>
+        <translation>Mở rộng tùy chọn nhóm nút chọn</translation>
+    </message>
+    <message id="RadioGroup">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="139"/>
+        <source>Radio group</source>
+        <translation>Nhóm nút chọn</translation>
+    </message>
+    <message id="CollapseRadioGroupOptions">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="157"/>
+        <source>Collapse radio group options</source>
+        <translation>Thu gọn tùy chọn nhóm nút chọn</translation>
+    </message>
+    <message id="RadioGroupIdHint">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="184"/>
+        <source>Radio buttons with the same group ID belong to one group.</source>
+        <translation>Các nút chọn có cùng ID nhóm sẽ thuộc cùng một nhóm.</translation>
+    </message>
+    <message id="RadioGroupId">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="196"/>
+        <source>Group ID</source>
+        <translation>ID nhóm</translation>
+    </message>
+    <message id="EnterRadioGroupIdPlaceholder">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="215"/>
+        <source>Enter group ID</source>
+        <translation>Nhập ID nhóm</translation>
+    </message>
+    <message id="DeleteRadioButton">
+        <location filename="../src/Components/RadioButtonOptionsPanel.qml" line="269"/>
+        <source>Delete radio button</source>
+        <translation>Xóa nút chọn</translation>
     </message>
 </context>
 </TS>

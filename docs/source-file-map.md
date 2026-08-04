@@ -150,22 +150,24 @@ flowchart TD
 
 ### Thiết kế field mới
 
-1. `FormRibbon` bật tool Text Field, Check Box hoặc Dropdown.
+1. `FormRibbon` bật tool Text Field, Check Box, Radio Button hoặc Dropdown.
 2. `FormTextFieldOverlay` thu click/drag và gọi
    `PDFFormDesignerController::addField()` bằng tọa độ chuẩn hóa.
 3. `FormFieldLayer` vẽ model bằng scene graph, chọn/toggle/di chuyển field; QML
    quản lý editor text, ComboBox của Dropdown, resize handle và nút xóa nổi cho
-   Text Field/Check Box transient. Dropdown transient hoặc source-backed do
-   TrePDF tạo chỉ được xóa từ panel tùy chọn.
-4. Controller cũng rehydrate các field do TrePDF đã lưu để tiếp tục chỉnh sửa
-   sau khi mở lại. Xóa Dropdown source-backed tạo draft; Discard rehydrate lại
-   field, còn Save/Save As mới gỡ Widget và field khỏi PDF.
+   Text Field/Check Box transient. Panel Radio cho phép nhập Group ID; Dropdown
+   và Radio transient hoặc source-backed do TrePDF tạo được xóa từ panel.
+4. Controller dùng Group ID làm tên field Radio, giữ mutual exclusion và
+   rehydrate các field do TrePDF đã lưu để tiếp tục chỉnh sửa sau khi mở lại.
+   Xóa Dropdown/Radio source-backed tạo draft; Discard rehydrate lại field, còn
+   Save/Save As mới gỡ Widget khỏi PDF.
 5. Khi Save, snapshot designer được đổi thành thao tác add/update/normalize/remove;
    `PDFAcroFormWriter` tạo placeholder, `PDFAcroFormCanonicalizer` hoàn thiện
    dictionary/appearance/AcroForm, sau đó writer mở lại để kiểm chứng.
 
-`Remove` chỉ nhận top-level, single-widget Dropdown do TrePDF tạo; Text Field,
-Check Box source-backed và cấu trúc AcroForm Dropdown tùy ý vẫn được bảo vệ.
+`Remove` nhận top-level, single-widget Dropdown và member Radio trong group do
+TrePDF tạo. Khi xóa Radio, writer dựng lại field cha với các member còn lại;
+Text Field, Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được bảo vệ.
 
 ### Save và Save As
 
@@ -188,10 +190,12 @@ Check Box source-backed và cấu trúc AcroForm Dropdown tùy ý vẫn được
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/highlight/shape, history và page operation. |
-| [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box và Dropdown. |
+| [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button và Dropdown. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
-| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel format cho một session. |
+| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel format/Dropdown/Radio cho một session. |
+| [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option và xóa Dropdown đang chọn. |
+| [`src/Components/RadioButtonOptionsPanel.qml`](../src/Components/RadioButtonOptionsPanel.qml) | Panel Group ID và xóa Radio Button đang chọn. |
 | [`src/Components/DocumentView.qml`](../src/Components/DocumentView.qml) | ListView trang liên tục và ảo hóa. |
 | [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, coordinator interaction, rotation và layout của một trang. |
 | [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml) | Gom mode, z-order, choice handshake và cleanup của runtime/edit/form designer. |

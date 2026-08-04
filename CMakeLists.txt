@@ -100,6 +100,7 @@ qt_add_qml_module(trepdf
         src/Components/OrangeButton.qml
         src/Components/PageInteractionOverlay.qml
         src/Components/PdfPageDelegate.qml
+        src/Components/RadioButtonOptionsPanel.qml
         src/Components/RibbonButton.qml
         src/Components/RibbonGroup.qml
         src/Components/RibbonTabButton.qml
@@ -135,8 +136,9 @@ qt_add_qml_module(trepdf
         src/assets/icons/oval.svg
         src/assets/icons/panel-left.svg
         src/assets/icons/pen-line.svg
-        src/assets/icons/redo-2.svg
+        src/assets/icons/radio.svg
         src/assets/icons/rectangle.svg
+        src/assets/icons/redo-2.svg
         src/assets/icons/remove-text.svg
         src/assets/icons/rotate-ccw.svg
         src/assets/icons/rotate-cw.svg

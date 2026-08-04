@@ -11,10 +11,12 @@ Flickable {
     required property PDFDocument document
     required property bool textFieldToolSelected
     required property bool checkboxToolSelected
+    required property bool radioButtonToolSelected
     required property bool dropdownToolSelected
 
     signal textFieldToolRequested()
     signal checkboxToolRequested()
+    signal radioButtonToolRequested()
     signal dropdownToolRequested()
 
     clip: true
@@ -62,6 +64,21 @@ Flickable {
                 preserveIconColors: true
                 primary: root.checkboxToolSelected
                 onClicked: root.checkboxToolRequested()
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Radio Button"
+                text: qsTrId("RadioButtonTool")
+                //% "Click or drag on the page to add a radio button"
+                toolTipText: qsTrId("ClickOrDragToAddRadioButton")
+                iconSource: "../assets/icons/radio.svg"
+                icon.width: 32
+                icon.height: 32
+                preserveIconColors: true
+                primary: root.radioButtonToolSelected
+                onClicked: root.radioButtonToolRequested()
             }
 
             RibbonButton {

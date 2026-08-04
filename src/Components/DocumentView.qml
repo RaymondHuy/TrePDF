@@ -19,6 +19,7 @@ Rectangle {
     property bool formFieldsInteractive: false
     property bool textFieldToolActive: false
     property bool checkboxToolActive: false
+    property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
@@ -199,6 +200,7 @@ Rectangle {
             formFieldsInteractive: root.formFieldsInteractive
             textFieldToolActive: root.textFieldToolActive
             checkboxToolActive: root.checkboxToolActive
+            radioButtonToolActive: root.radioButtonToolActive
             dropdownToolActive: root.dropdownToolActive
             zoom: root.zoom
             viewRotation: root.viewRotation

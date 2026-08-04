@@ -207,6 +207,7 @@ private:
         QRectF sourceNormalizedRect;
         QString value;
         QString name;
+        QString sourceRadioGroupName;
         QString tooltip;
         QString defaultValue;
         QStringList options;

@@ -2898,7 +2898,8 @@ PDFSaveWriter::Result prepareAcroFormFields(
     for (const PDFFormDesignerController::SaveField &source : sourceFields) {
         if (source.operation
             == PDFFormDesignerController::SaveField::Remove) {
-            if (source.type != PDFFormDesignerController::Dropdown
+            if ((source.type != PDFFormDesignerController::Dropdown
+                 && source.type != PDFFormDesignerController::RadioButton)
                 || source.id.isEmpty()
                 || source.page < -1
                 || source.page >= pageCount) {
@@ -2906,11 +2907,15 @@ PDFSaveWriter::Result prepareAcroFormFields(
                     PDFSaveWriter::Error::AcroFormCreationFailed,
                     source.page,
                     QStringLiteral(
-                        "The removed Dropdown snapshot is invalid."));
+                        "The removed form field snapshot is invalid."));
             }
             PDFAcroFormWriter::Field target;
             target.widgetId = source.id;
-            target.type = PDFAcroFormWriter::FieldType::Dropdown;
+            target.fieldName = source.name;
+            target.type = source.type
+                    == PDFFormDesignerController::RadioButton
+                ? PDFAcroFormWriter::FieldType::RadioButton
+                : PDFAcroFormWriter::FieldType::Dropdown;
             target.operation = PDFAcroFormWriter::Operation::Remove;
             target.page = source.page;
             targetFields.append(std::move(target));

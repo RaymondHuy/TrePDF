@@ -17,6 +17,7 @@ Item {
     property bool formFieldsInteractive: false
     property bool textFieldToolActive: false
     property bool checkboxToolActive: false
+    property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
@@ -128,6 +129,7 @@ Item {
             formFieldsInteractive: pageCard.formFieldsInteractive
             textFieldToolActive: pageCard.textFieldToolActive
             checkboxToolActive: pageCard.checkboxToolActive
+            radioButtonToolActive: pageCard.radioButtonToolActive
             dropdownToolActive: pageCard.dropdownToolActive
             draftTextureCurrent: pageView.draftTextureCurrent
             draftTextureReady: pageView.draftTextureReady
