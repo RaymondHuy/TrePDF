@@ -17,10 +17,13 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetricsF>
+#include <QGuiApplication>
 #include <QImage>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QQuickItemGrabResult>
 #include <QQuickTextDocument>
+#include <QQuickWindow>
 #include <QRawFont>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -2565,9 +2568,11 @@ class PDFEditControllerTest : public QObject
 private slots:
     void initTestCase();
     void storesTransientTextFieldsByPage();
+    void limitsTransientTextFieldInputLength();
     void storesTransientRadioButtons();
     void renamesDropdownOptionsWithoutLosingSelection();
     void limitsFormFieldPointerHitArea();
+    void rendersMultilineFormFieldPreview();
     void movesFormFieldsWithoutResizing();
     void savesTextFieldAsAcroForm();
     void savesAndRehydratesCheckbox();
@@ -2840,6 +2845,36 @@ void PDFEditControllerTest::storesTransientTextFieldsByPage()
     QCOMPARE(fields.constFirst().toMap().value(QStringLiteral("height")).toReal(),
              0.1);
 
+    QVERIFY(controller.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Required
+            | PDFFormDesignerController::Multiline));
+    QVERIFY(controller.setFieldMaxLength(fieldId, 6));
+    controller.setTextFieldText(fieldId, QStringLiteral("ab\ncdef"));
+    QVariantMap configuredTextField = controller.fieldData(fieldId);
+    QCOMPARE(
+        configuredTextField.value(QStringLiteral("flags")).toInt(),
+        PDFFormDesignerController::Required
+            | PDFFormDesignerController::Multiline);
+    QCOMPARE(
+        configuredTextField.value(QStringLiteral("maxLength")).toInt(),
+        6);
+    QCOMPARE(
+        configuredTextField.value(QStringLiteral("value")).toString(),
+        QStringLiteral("ab\ncde"));
+    QVERIFY(controller.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Required));
+    QCOMPARE(
+        controller.fieldData(fieldId)
+            .value(QStringLiteral("value")).toString(),
+        QStringLiteral("ab cde"));
+    QVERIFY(controller.setFieldMaxLength(fieldId, 0));
+    QCOMPARE(
+        controller.fieldData(fieldId)
+            .value(QStringLiteral("maxLength")).toInt(),
+        0);
+
     QVERIFY(controller.removeTextField(fieldId));
     QCOMPARE(rowsRemovedSpy.count(), 2);
     QVERIFY(!controller.textFieldFocused());
@@ -2915,6 +2950,67 @@ void PDFEditControllerTest::storesTransientTextFieldsByPage()
     QCOMPARE(fields.size(), 1);
     QCOMPARE(fields.constFirst().toMap().value(QStringLiteral("id")).toString(),
              sourceFieldId);
+}
+
+void PDFEditControllerTest::limitsTransientTextFieldInputLength()
+{
+    constexpr int maximumInputLength = 300000;
+    PDFFormDesignerController controller;
+    QCOMPARE(
+        controller.maximumTextFieldInputLength(),
+        maximumInputLength);
+
+    const QString fieldId = controller.addTextField(
+        0,
+        0.1,
+        0.1,
+        0.4,
+        0.2);
+    QVERIFY(!fieldId.isEmpty());
+    QVERIFY(controller.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Multiline));
+
+    QString oversizedValue(
+        maximumInputLength + 1,
+        QLatin1Char('a'));
+    oversizedValue[100] = QLatin1Char('\n');
+    controller.setTextFieldText(fieldId, oversizedValue);
+
+    const QString acceptedValue = controller.fieldData(fieldId)
+                                      .value(QStringLiteral("value"))
+                                      .toString();
+    QCOMPARE(acceptedValue.size(), maximumInputLength);
+    QCOMPARE(acceptedValue.at(100), QLatin1Char('\n'));
+    QCOMPARE(
+        controller.fieldData(fieldId)
+            .value(QStringLiteral("maxLength")).toInt(),
+        0);
+
+    QString surrogateBoundaryValue(
+        maximumInputLength - 1,
+        QLatin1Char('b'));
+    surrogateBoundaryValue.append(
+        QString::fromUtf8("\xF0\x9F\x98\x80"));
+    QCOMPARE(
+        surrogateBoundaryValue.size(),
+        maximumInputLength + 1);
+    controller.setTextFieldText(fieldId, surrogateBoundaryValue);
+    const QString surrogateSafeValue = controller.fieldData(fieldId)
+                                           .value(QStringLiteral("value"))
+                                           .toString();
+    QCOMPARE(
+        surrogateSafeValue.size(),
+        maximumInputLength - 1);
+    QVERIFY(!surrogateSafeValue.at(
+                 surrogateSafeValue.size() - 1).isHighSurrogate());
+
+    QVERIFY(controller.setFieldMaxLength(
+        fieldId,
+        maximumInputLength));
+    QVERIFY(!controller.setFieldMaxLength(
+        fieldId,
+        maximumInputLength + 1));
 }
 
 void PDFEditControllerTest::storesTransientRadioButtons()
@@ -3063,6 +3159,17 @@ void PDFEditControllerTest::limitsFormFieldPointerHitArea()
     QVERIFY(!fieldLayer.contains(emptyPagePoint));
     QVERIFY(!fieldLayer.contains(QPointF(1001, 500)));
 
+    controller.selectTextField(fieldId);
+    QCOMPARE(fieldLayer.activeFieldId(), fieldId);
+    QCOMPARE(fieldLayer.activeFieldMaxLength(), 0);
+    QVERIFY(controller.setFieldMaxLength(fieldId, 12));
+    QCOMPARE(fieldLayer.activeFieldMaxLength(), 12);
+    controller.clearTextFieldSelection();
+    QCOMPARE(fieldLayer.activeFieldId(), QString());
+    QCOMPARE(fieldLayer.activeFieldMaxLength(), 0);
+    controller.selectTextField(fieldId);
+    QCOMPARE(fieldLayer.activeFieldMaxLength(), 12);
+
     fieldLayer.setMoveEnabled(false);
     QVERIFY(!fieldLayer.acceptHoverEvents());
     QVERIFY(fieldLayer.contains(fieldCenter));
@@ -3085,6 +3192,75 @@ void PDFEditControllerTest::limitsFormFieldPointerHitArea()
     QVERIFY(controller.moveField(fieldId, 0.5, 0.6));
     QVERIFY(!fieldLayer.contains(fieldCenter));
     QVERIFY(fieldLayer.contains(QPointF(700, 640)));
+}
+
+void PDFEditControllerTest::rendersMultilineFormFieldPreview()
+{
+    if (QGuiApplication::screens().isEmpty()) {
+        QSKIP("The form preview needs a Qt Quick render screen.");
+    }
+
+    PDFFormDesignerController controller;
+    const QString fieldId = controller.addTextField(
+        0,
+        0.05,
+        0.08,
+        0.9,
+        0.84);
+    QVERIFY(!fieldId.isEmpty());
+    QVERIFY(controller.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Multiline));
+    QVERIFY(controller.setFieldValue(
+        fieldId,
+        QStringLiteral("Alpha\nBeta")));
+
+    QQuickWindow window;
+    window.setColor(Qt::white);
+    window.resize(320, 120);
+
+    TestableFormFieldLayer fieldLayer;
+    fieldLayer.setParentItem(window.contentItem());
+    fieldLayer.setWidth(window.width());
+    fieldLayer.setHeight(window.height());
+    fieldLayer.setController(&controller);
+    fieldLayer.setPage(0);
+    fieldLayer.setFieldsVisible(true);
+
+    window.show();
+    QTRY_VERIFY_WITH_TIMEOUT(window.isExposed(), 5000);
+    const QSharedPointer<QQuickItemGrabResult> grabResult
+        = fieldLayer.grabToImage(window.size());
+    QVERIFY(grabResult);
+    QSignalSpy readySpy(
+        grabResult.data(),
+        &QQuickItemGrabResult::ready);
+    if (grabResult->image().isNull()) {
+        QTRY_VERIFY_WITH_TIMEOUT(readySpy.count() > 0, 5000);
+    }
+    const QImage preview = grabResult->image();
+    QVERIFY(!preview.isNull());
+
+    int firstTextRow = preview.height();
+    int lastTextRow = -1;
+    for (int y = 8; y < preview.height() - 8; ++y) {
+        bool rowContainsText = false;
+        for (int x = 24; x < preview.width() - 24; ++x) {
+            const QColor pixel = preview.pixelColor(x, y);
+            if (pixel.red() < 100
+                && pixel.green() < 100
+                && pixel.blue() < 100) {
+                rowContainsText = true;
+                break;
+            }
+        }
+        if (rowContainsText) {
+            firstTextRow = qMin(firstTextRow, y);
+            lastTextRow = qMax(lastTextRow, y);
+        }
+    }
+    QVERIFY(firstTextRow < preview.height() / 3);
+    QVERIFY(lastTextRow - firstTextRow >= 16);
 }
 
 void PDFEditControllerTest::movesFormFieldsWithoutResizing()
@@ -3295,7 +3471,9 @@ void PDFEditControllerTest::savesTextFieldAsAcroForm()
         QStringLiteral("Nguyễn Văn A")));
     QVERIFY(formDesigner.setFieldFlags(
         fieldId,
-        PDFFormDesignerController::Required));
+        PDFFormDesignerController::Required
+            | PDFFormDesignerController::Multiline));
+    QVERIFY(formDesigner.setFieldMaxLength(fieldId, 32));
     const QString secondFieldId = formDesigner.addTextField(
         0,
         0.55,
@@ -3329,6 +3507,9 @@ void PDFEditControllerTest::savesTextFieldAsAcroForm()
     QCOMPARE(inspection.name, QStringLiteral("TênKháchHàng"));
     QCOMPARE(inspection.value, QStringLiteral("Nguyễn Văn A"));
     QVERIFY(inspection.fieldFlags & FPDF_FORMFLAG_REQUIRED);
+    QVERIFY(inspection.fieldFlags & FPDF_FORMFLAG_TEXT_MULTILINE);
+    QVERIFY(inspection.hasMaxLength);
+    QCOMPARE(inspection.maxLength, 32.0f);
     QVERIFY(inspection.hasAppearance);
     QVERIFY(inspection.pointHit);
     QVERIFY(inspection.focusHandled);
@@ -3344,6 +3525,7 @@ void PDFEditControllerTest::savesTextFieldAsAcroForm()
     QCOMPARE(secondInspection.fieldType, FPDF_FORMFIELD_TEXTFIELD);
     QCOMPARE(secondInspection.value, QStringLiteral("Second value"));
     QVERIFY(secondInspection.hasAppearance);
+    QVERIFY(!secondInspection.hasMaxLength);
 
     PDFFormController formController;
     PDFDocument reopened;
@@ -5373,7 +5555,9 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         QStringLiteral("First saved value")));
     QVERIFY(formDesigner.setFieldFlags(
         fieldId,
-        PDFFormDesignerController::Required));
+        PDFFormDesignerController::Required
+            | PDFFormDesignerController::Multiline));
+    QVERIFY(formDesigner.setFieldMaxLength(fieldId, 64));
     QVERIFY(!formDesigner.sourceTextFieldContainsPoint(
         0,
         initialFieldRect.center()));
@@ -5431,6 +5615,12 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QVERIFY(
         hydrated.value(QStringLiteral("flags")).toInt()
         & PDFFormDesignerController::Required);
+    QVERIFY(
+        hydrated.value(QStringLiteral("flags")).toInt()
+        & PDFFormDesignerController::Multiline);
+    QCOMPARE(
+        hydrated.value(QStringLiteral("maxLength")).toInt(),
+        64);
 
     const AcroFormFieldInspection firstSave
         = inspectAcroFormField(
@@ -5439,6 +5629,9 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QVERIFY(firstSave.readable);
     QCOMPARE(firstSave.widgetCount, 2);
     QCOMPARE(firstSave.value, QStringLiteral("First saved value"));
+    QVERIFY(firstSave.fieldFlags & FPDF_FORMFLAG_TEXT_MULTILINE);
+    QVERIFY(firstSave.hasMaxLength);
+    QCOMPARE(firstSave.maxLength, 64.0f);
     QVERIFY(firstSave.hasAppearance);
     QVERIFY(firstSave.pointHit);
     QVERIFY(firstSave.focusHandled);
@@ -5464,6 +5657,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QVERIFY(formDesigner.setFieldValue(
         fieldId,
         QStringLiteral("Updated after reopen")));
+    QVERIFY(formDesigner.setFieldMaxLength(fieldId, 0));
     QVERIFY(formDesigner.setTextFieldRect(
         fieldId,
         resizedFieldRect.x(),
@@ -5492,6 +5686,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         geometryChange.constFirst().changedProperties,
         static_cast<quint32>(
             PDFFormDesignerController::ValuePropertyChanged
+            | PDFFormDesignerController::MaxLengthPropertyChanged
             | PDFFormDesignerController::RectPropertyChanged));
     QCOMPARE(
         geometryChange.constFirst().normalizedRect,
@@ -5526,12 +5721,17 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         hydrated.value(QStringLiteral("rect")).toRectF(),
         resizedFieldRect));
     QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
+    QCOMPARE(
+        hydrated.value(QStringLiteral("maxLength")).toInt(),
+        0);
     const AcroFormFieldInspection secondSave
         = inspectAcroFormField(
             sourcePath,
             QStringLiteral("PersistentText"));
     QCOMPARE(secondSave.widgetCount, 2);
     QCOMPARE(secondSave.value, QStringLiteral("Updated after reopen"));
+    QVERIFY(secondSave.fieldFlags & FPDF_FORMFLAG_TEXT_MULTILINE);
+    QVERIFY(!secondSave.hasMaxLength);
     QVERIFY(secondSave.hasAppearance);
     QVERIFY(secondSave.pointHit);
     QVERIFY(secondSave.focusHandled);
@@ -5583,11 +5783,17 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
             .toString(),
         QStringLiteral("Updated after reopen"));
     formDesigner.prepareForDesignMode();
+    constexpr int tightenedMaxLength = 22;
+    const QString limitedNativeValue
+        = nativeValueAfterBackspace.first(tightenedMaxLength);
+    QVERIFY(formDesigner.setFieldMaxLength(
+        fieldId,
+        tightenedMaxLength));
     QTRY_COMPARE_WITH_TIMEOUT(
         formDesigner.fieldData(fieldId)
             .value(QStringLiteral("value"))
             .toString(),
-        nativeValueAfterBackspace,
+        limitedNativeValue,
         5000);
     QVERIFY(formDesigner.setFieldName(
         fieldId,
@@ -5600,7 +5806,11 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QCOMPARE(
         nameChange.constFirst().changedProperties,
         static_cast<quint32>(
-            PDFFormDesignerController::NamePropertyChanged));
+            PDFFormDesignerController::ValuePropertyChanged
+            | PDFFormDesignerController::NamePropertyChanged
+            | PDFFormDesignerController::MaxLengthPropertyChanged));
+    QCOMPARE(nameChange.constFirst().maxLength, tightenedMaxLength);
+    QCOMPARE(nameChange.constFirst().value, limitedNativeValue);
 
     QVERIFY(editController.requestSave());
     QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 3, 10000);
@@ -5615,7 +5825,10 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         QStringLiteral("PersistentTextRenamed"));
     QCOMPARE(
         hydrated.value(QStringLiteral("value")).toString(),
-        nativeValueAfterBackspace);
+        limitedNativeValue);
+    QCOMPARE(
+        hydrated.value(QStringLiteral("maxLength")).toInt(),
+        tightenedMaxLength);
     const AcroFormFieldInspection nativeValueSave
         = inspectAcroFormField(
             sourcePath,
@@ -5623,7 +5836,11 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
     QCOMPARE(nativeValueSave.widgetCount, 2);
     QCOMPARE(
         nativeValueSave.value,
-        nativeValueAfterBackspace);
+        limitedNativeValue);
+    QVERIFY(nativeValueSave.hasMaxLength);
+    QCOMPARE(
+        nativeValueSave.maxLength,
+        static_cast<float>(tightenedMaxLength));
     QVERIFY(nativeValueSave.hasAppearance);
     QVERIFY(nativeValueSave.pointHit);
     QVERIFY(nativeValueSave.focusHandled);
@@ -5801,7 +6018,7 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
         = freshSession.formDesignerController()->fieldData(fieldId);
     QCOMPARE(
         freshField.value(QStringLiteral("value")).toString(),
-        nativeValueAfterBackspace);
+        limitedNativeValue);
     QCOMPARE(
         freshField.value(QStringLiteral("name")).toString(),
         QStringLiteral("PersistentTextRenamed"));
@@ -5824,9 +6041,84 @@ void PDFEditControllerTest::rehydratesTextFieldAfterSamePathSave()
             ->fieldData(fieldId)
             .value(QStringLiteral("value"))
             .toString(),
-        nativeValueAfterBackspace,
+        limitedNativeValue,
         10000);
     QVERIFY(!freshSession.formDesignerController()->hasDrafts());
+
+    PDFFormDesignerController *freshDesigner
+        = freshSession.formDesignerController();
+    PDFEditController *freshEditor = freshSession.editController();
+    freshDesigner->selectTextField(fieldId);
+    freshDesigner->setTextFieldFocused(fieldId, true);
+    QVERIFY(freshDesigner->removeField(fieldId));
+    QCOMPARE(freshDesigner->rowCount(), 1);
+    QVERIFY(freshDesigner->fieldData(fieldId).isEmpty());
+    QVERIFY(freshDesigner->selectedTextFieldId().isEmpty());
+    QVERIFY(!freshDesigner->textFieldFocused());
+    QVERIFY(freshDesigner->hasDrafts());
+    const QStringList suppressedAfterRemoval
+        = freshDesigner->sourceFieldIdsForPage(0);
+    QCOMPARE(suppressedAfterRemoval.size(), 2);
+    QVERIFY(suppressedAfterRemoval.contains(fieldId));
+    QVERIFY(suppressedAfterRemoval.contains(blankFieldId));
+    const QVector<PDFFormDesignerController::SaveField> removalSnapshot
+        = freshDesigner->saveFields();
+    QCOMPARE(removalSnapshot.size(), 1);
+    QCOMPARE(removalSnapshot.constFirst().id, fieldId);
+    QCOMPARE(removalSnapshot.constFirst().type,
+             PDFFormDesignerController::Text);
+    QCOMPARE(removalSnapshot.constFirst().operation,
+             PDFFormDesignerController::SaveField::Remove);
+    QCOMPARE(removalSnapshot.constFirst().page, 0);
+
+    freshEditor->discardDrafts();
+    QTRY_COMPARE_WITH_TIMEOUT(freshDesigner->rowCount(), 2, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        freshDesigner->fieldData(fieldId)
+            .value(QStringLiteral("sourceBacked"))
+            .toBool(),
+        10000);
+    QVERIFY(!freshDesigner->hasDrafts());
+
+    QVERIFY(freshDesigner->removeField(fieldId));
+    QSignalSpy freshSaveFinishedSpy(
+        freshEditor,
+        &PDFEditController::saveFinished);
+    QVERIFY(freshEditor->requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(freshSaveFinishedSpy.count(), 1, 10000);
+    QVERIFY(freshSaveFinishedSpy.constFirst().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(freshDesigner->rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!freshDesigner->hasDrafts(), 10000);
+    QVERIFY(freshDesigner->fieldData(fieldId).isEmpty());
+    const QVariantMap remainingBlankField
+        = freshDesigner->fieldData(blankFieldId);
+    QCOMPARE(
+        remainingBlankField.value(QStringLiteral("name")).toString(),
+        QStringLiteral("PersistentBlank"));
+    QVERIFY(
+        remainingBlankField.value(QStringLiteral("sourceBacked")).toBool());
+
+    const AcroFormFieldInspection removedTextField
+        = inspectAcroFormField(
+            sourcePath,
+            QStringLiteral("PersistentTextRenamed"));
+    QVERIFY(removedTextField.readable);
+    QCOMPARE(removedTextField.widgetCount, 1);
+    QCOMPARE(
+        removedTextField.fieldType,
+        FPDF_FORMFIELD_UNKNOWN);
+    const AcroFormFieldInspection remainingTextField
+        = inspectAcroFormField(
+            sourcePath,
+            QStringLiteral("PersistentBlank"));
+    QVERIFY(remainingTextField.readable);
+    QCOMPARE(remainingTextField.widgetCount, 1);
+    QCOMPARE(
+        remainingTextField.fieldType,
+        FPDF_FORMFIELD_TEXTFIELD);
+    QVERIFY(remainingTextField.hasAppearance);
+    QVERIFY(remainingTextField.pointHit);
+    QVERIFY(remainingTextField.focusHandled);
 }
 
 void PDFEditControllerTest::normalizesLegacyTextFieldAppearances()

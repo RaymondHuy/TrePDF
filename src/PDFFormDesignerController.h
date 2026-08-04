@@ -26,6 +26,8 @@ class PDFFormDesignerController : public QAbstractListModel
                    NOTIFY textFieldSelectionChanged FINAL)
     Q_PROPERTY(QString selectedFieldId READ selectedTextFieldId
                    NOTIFY textFieldSelectionChanged FINAL)
+    Q_PROPERTY(int maximumTextFieldInputLength
+                   READ maximumTextFieldInputLength CONSTANT FINAL)
 
 public:
     enum FieldType {
@@ -41,7 +43,8 @@ public:
     enum FieldFlag {
         NoFieldFlags = 0,
         Required = 1 << 0,
-        ReadOnly = 1 << 1
+        ReadOnly = 1 << 1,
+        Multiline = 1 << 2
     };
     Q_ENUM(FieldFlag)
 
@@ -52,11 +55,13 @@ public:
         OptionsPropertyChanged = 1u << 2,
         FlagsPropertyChanged = 1u << 3,
         RectPropertyChanged = 1u << 4,
+        MaxLengthPropertyChanged = 1u << 5,
         AllPropertiesChanged = ValuePropertyChanged
             | NamePropertyChanged
             | OptionsPropertyChanged
             | FlagsPropertyChanged
             | RectPropertyChanged
+            | MaxLengthPropertyChanged
     };
 
     enum Role {
@@ -75,7 +80,8 @@ public:
         OptionsRole,
         FlagsRole,
         DirtyRole,
-        SourceBackedRole
+        SourceBackedRole,
+        MaxLengthRole
     };
     Q_ENUM(Role)
 
@@ -97,6 +103,7 @@ public:
         int page = -1;
         QRectF normalizedRect;
         int flags = NoFieldFlags;
+        int maxLength = 0;
         Operation operation = Add;
         quint32 changedProperties = AllPropertiesChanged;
     };
@@ -110,6 +117,7 @@ public:
     bool textFieldFocused() const;
     QString focusedTextFieldId() const;
     QString selectedTextFieldId() const;
+    int maximumTextFieldInputLength() const;
 
     void setFormController(PDFFormController *formController);
     Q_INVOKABLE QString addField(int type,
@@ -155,6 +163,8 @@ public:
                                        int optionIndex,
                                        const QString &option);
     Q_INVOKABLE bool setFieldFlags(const QString &fieldId, int flags);
+    Q_INVOKABLE bool setFieldMaxLength(const QString &fieldId,
+                                       int maxLength);
     Q_INVOKABLE void setTextFieldText(const QString &fieldId,
                                       const QString &text);
     Q_INVOKABLE bool setFieldRect(const QString &fieldId,
@@ -213,6 +223,7 @@ private:
         QStringList options;
         QString sourceIdentityToken;
         int flags = NoFieldFlags;
+        int maxLength = 0;
         int appearanceVersion = 0;
         bool sourceBacked = false;
         quint32 changedProperties = AllPropertiesChanged;

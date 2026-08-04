@@ -296,9 +296,9 @@ child được bật/tắt độc lập:
 - `moveEnabled` chỉ true khi Forms hoặc Edit active, field interactive, không có
   placement tool và không pooled.
 - `activeFieldFrame`/resize handle chỉ hiện khi một field đã chọn; nút xóa nổi
-  chỉ hiện cho Text Field/Check Box transient trong Forms tab. Dropdown và Radio
-  Button transient hoặc source-backed do TrePDF tạo được xóa từ panel tùy chọn;
-  TextField editor tôn trọng ReadOnly khi không ở Forms tab.
+  chỉ hiện cho Text Field/Check Box transient trong Forms tab. Text Field,
+  Dropdown và Radio Button transient hoặc source-backed do TrePDF tạo được xóa
+  từ panel tùy chọn; TextField editor tôn trọng ReadOnly khi không ở Forms tab.
 
 `FormFieldLayer` C++ render vùng field bằng scene graph, hit-test từ field trên
 cùng, giữ move preview cục bộ và chỉ gọi `PDFFormDesignerController::moveField()`
@@ -323,7 +323,7 @@ coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-tes
 |---|---|---|---|---|
 | View | `false` | Có thể interactive nếu form session sẵn sàng. | Không bắt input; draft vẫn có thể hiện. | Source-backed field bị ẩn; không đặt/move/resize. |
 | Edit | `true` | Không interactive vì tool là Select hoặc tool edit khác Browse. | Active: select, edit, add, shape, highlight theo tool. | Source-backed field hiện; action designer hỗ trợ vẫn gate theo read-only, nhưng không có placement/delete Forms-only. |
-| Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Dropdown source-backed được hỗ trợ có thể tạo draft xóa. |
+| Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Text Field/Dropdown source-backed được hỗ trợ có thể tạo draft xóa. |
 | Forms, tool đặt field | `true` | Bị tắt bởi cờ tool Text Field/Check Box/Radio Button/Dropdown. | Không active. | `placementArea` xử lý vùng trống; không move trong lúc placement tool bật. |
 | Đang Save hoặc delegate pooled | Không dùng để tương tác | Bị tắt/clear state. | Bị tắt; khi pooled còn xóa data/gesture cục bộ. | Hủy placement/resize/move/focus; khi pooled không render field. |
 

@@ -20,6 +20,64 @@ namespace {
 
 constexpr int kMaximumDropdownOptions = 4096;
 constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
+constexpr int kMaximumTextFieldInputLength = 300000;
+
+QString singleLineText(QString value)
+{
+    value.replace(QStringLiteral("\r\n"), QStringLiteral(" "));
+    value.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    value.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    value.replace(QChar::LineSeparator, QLatin1Char(' '));
+    value.replace(QChar::ParagraphSeparator, QLatin1Char(' '));
+    return value;
+}
+
+qsizetype effectiveTextFieldInputLength(int maxLength)
+{
+    return maxLength > 0
+        ? qMin(maxLength, kMaximumTextFieldInputLength)
+        : kMaximumTextFieldInputLength;
+}
+
+qsizetype safeTextPrefixLength(const QString &value, qsizetype maximumLength)
+{
+    qsizetype prefixLength = qMin(value.size(), maximumLength);
+    if (prefixLength > 0
+        && prefixLength < value.size()
+        && value.at(prefixLength - 1).isHighSurrogate()
+        && value.at(prefixLength).isLowSurrogate()) {
+        --prefixLength;
+    }
+    return prefixLength;
+}
+
+QString constrainedSourceTextFieldValue(QString value,
+                                        int flags,
+                                        int maxLength)
+{
+    if (!(flags & PDFFormDesignerController::Multiline)) {
+        value = singleLineText(std::move(value));
+    }
+    if (maxLength > 0 && value.size() > maxLength) {
+        value.truncate(safeTextPrefixLength(value, maxLength));
+    }
+    return value;
+}
+
+QString constrainedTextFieldValue(QString value,
+                                  int flags,
+                                  int maxLength)
+{
+    value = constrainedSourceTextFieldValue(
+        std::move(value),
+        flags,
+        maxLength);
+    const qsizetype inputLength = effectiveTextFieldInputLength(maxLength);
+    if (value.size() > inputLength) {
+        value.truncate(safeTextPrefixLength(value, inputLength));
+    }
+    return value;
+}
 
 QStringList defaultDropdownOptions()
 {
@@ -155,6 +213,8 @@ QVariant PDFFormDesignerController::data(const QModelIndex &index, int role) con
         return field.options;
     case FlagsRole:
         return field.flags;
+    case MaxLengthRole:
+        return field.maxLength;
     case DirtyRole:
         return field.changedProperties != NoPropertyChanges;
     case SourceBackedRole:
@@ -183,6 +243,7 @@ QHash<int, QByteArray> PDFFormDesignerController::roleNames() const
         {FlagsRole, "flags"},
         {DirtyRole, "dirty"},
         {SourceBackedRole, "sourceBacked"},
+        {MaxLengthRole, "maxLength"},
     };
 }
 
@@ -199,6 +260,11 @@ QString PDFFormDesignerController::focusedTextFieldId() const
 QString PDFFormDesignerController::selectedTextFieldId() const
 {
     return m_selectedTextFieldId;
+}
+
+int PDFFormDesignerController::maximumTextFieldInputLength() const
+{
+    return kMaximumTextFieldInputLength;
 }
 
 void PDFFormDesignerController::setFormController(
@@ -315,6 +381,7 @@ void PDFFormDesignerController::refreshSourceFieldValues()
                 return;
             }
 
+            bool constrainedTextValue = false;
             for (int row = 0; row < controller->m_fields.size(); ++row) {
                 FormField &field = controller->m_fields[row];
                 if (!field.sourceBacked) {
@@ -333,10 +400,24 @@ void PDFFormDesignerController::refreshSourceFieldValues()
                 field.sourceAnnotationIndex = source->annotationIndex;
                 field.sourceIdentityToken = source->identityToken;
                 QList<int> changedRoles;
-                if (!(field.changedProperties & ValuePropertyChanged)
-                    && source->value != field.value) {
-                    field.value = source->value;
-                    changedRoles.append(ValueRole);
+                if (!(field.changedProperties & ValuePropertyChanged)) {
+                    QString acceptedValue = field.type == Text
+                        ? constrainedSourceTextFieldValue(
+                              source->value,
+                              field.flags,
+                              field.maxLength)
+                        : source->value;
+                    const bool valueConstrained
+                        = acceptedValue != source->value;
+                    if (acceptedValue != field.value) {
+                        field.value = acceptedValue;
+                        changedRoles.append(ValueRole);
+                    }
+                    if (valueConstrained) {
+                        field.changedProperties |= ValuePropertyChanged;
+                        changedRoles.append(DirtyRole);
+                        constrainedTextValue = true;
+                    }
                 }
                 if (field.type == Dropdown
                     && !(field.changedProperties & OptionsPropertyChanged)
@@ -350,6 +431,9 @@ void PDFFormDesignerController::refreshSourceFieldValues()
                         controller->index(row),
                         changedRoles);
                 }
+            }
+            if (constrainedTextValue) {
+                emit controller->draftStateChanged();
             }
             if (refreshQueued) {
                 controller->refreshSourceFieldValues();
@@ -688,16 +772,21 @@ bool PDFFormDesignerController::setFieldValue(const QString &fieldId,
     }
 
     FormField &field = m_fields[row];
-    if (field.type == Dropdown && !field.options.contains(value)) {
+    QString acceptedValue = field.type == Text
+        ? constrainedTextFieldValue(value, field.flags, field.maxLength)
+        : value;
+    if (field.type == Dropdown
+        && !field.options.contains(acceptedValue)) {
         return false;
     }
     if (field.type == RadioButton
-        && value != QStringLiteral("Yes")
-        && value != QStringLiteral("Off")) {
+        && acceptedValue != QStringLiteral("Yes")
+        && acceptedValue != QStringLiteral("Off")) {
         return false;
     }
     bool changed = false;
-    if (field.type == RadioButton && value == QStringLiteral("Yes")) {
+    if (field.type == RadioButton
+        && acceptedValue == QStringLiteral("Yes")) {
         for (int peerRow = 0; peerRow < m_fields.size(); ++peerRow) {
             FormField &peer = m_fields[peerRow];
             if (peerRow == row
@@ -715,8 +804,8 @@ bool PDFFormDesignerController::setFieldValue(const QString &fieldId,
             changed = true;
         }
     }
-    if (field.value != value) {
-        field.value = value;
+    if (field.value != acceptedValue) {
+        field.value = acceptedValue;
         field.changedProperties |= ValuePropertyChanged;
         emit dataChanged(index(row), index(row), {ValueRole, DirtyRole});
         changed = true;
@@ -891,9 +980,10 @@ bool PDFFormDesignerController::setFieldFlags(const QString &fieldId, int flags)
         return false;
     }
 
-    const int supportedFlags = Required | ReadOnly;
-    flags &= supportedFlags;
     FormField &field = m_fields[row];
+    const int supportedFlags = Required | ReadOnly
+        | (field.type == Text ? Multiline : NoFieldFlags);
+    flags &= supportedFlags;
     bool changed = false;
     for (int peerRow = 0; peerRow < m_fields.size(); ++peerRow) {
         FormField &peer = m_fields[peerRow];
@@ -908,15 +998,70 @@ bool PDFFormDesignerController::setFieldFlags(const QString &fieldId, int flags)
         }
         peer.flags = flags;
         peer.changedProperties |= FlagsPropertyChanged;
+        QList<int> changedRoles{FlagsRole, DirtyRole};
+        if (peer.type == Text) {
+            const QString value = constrainedTextFieldValue(
+                peer.value,
+                peer.flags,
+                peer.maxLength);
+            const QString defaultValue = constrainedTextFieldValue(
+                peer.defaultValue,
+                peer.flags,
+                peer.maxLength);
+            if (value != peer.value) {
+                peer.value = value;
+                peer.changedProperties |= ValuePropertyChanged;
+                changedRoles.append(ValueRole);
+            }
+            peer.defaultValue = defaultValue;
+        }
         emit dataChanged(
             index(peerRow),
             index(peerRow),
-            {FlagsRole, DirtyRole});
+            changedRoles);
         changed = true;
     }
     if (changed) {
         emit draftStateChanged();
     }
+    return true;
+}
+
+bool PDFFormDesignerController::setFieldMaxLength(
+    const QString &fieldId,
+    int maxLength)
+{
+    const int row = rowForFieldId(fieldId);
+    if (row < 0
+        || m_fields.at(row).type != Text
+        || maxLength < 0
+        || maxLength > kMaximumTextFieldInputLength) {
+        return false;
+    }
+
+    FormField &field = m_fields[row];
+    if (field.maxLength == maxLength) {
+        return true;
+    }
+
+    field.maxLength = maxLength;
+    field.changedProperties |= MaxLengthPropertyChanged;
+    QList<int> changedRoles{MaxLengthRole, DirtyRole};
+    const QString value = constrainedTextFieldValue(
+        field.value,
+        field.flags,
+        maxLength);
+    if (value != field.value) {
+        field.value = value;
+        field.changedProperties |= ValuePropertyChanged;
+        changedRoles.append(ValueRole);
+    }
+    field.defaultValue = constrainedTextFieldValue(
+        field.defaultValue,
+        field.flags,
+        maxLength);
+    emit dataChanged(index(row), index(row), changedRoles);
+    emit draftStateChanged();
     return true;
 }
 
@@ -1000,6 +1145,7 @@ bool PDFFormDesignerController::removeField(const QString &fieldId)
 
     const FormField &field = m_fields.at(row);
     if (field.sourceBacked
+        && field.type != Text
         && field.type != Dropdown
         && field.type != RadioButton) {
         return false;
@@ -1267,6 +1413,7 @@ PDFFormDesignerController::saveFields(
         saved.page = page;
         saved.normalizedRect = field.normalizedRect;
         saved.flags = field.flags;
+        saved.maxLength = field.maxLength;
         saved.operation = field.sourceBacked
             ? SaveField::Update
             : SaveField::Add;
@@ -1286,6 +1433,7 @@ PDFFormDesignerController::saveFields(
         saved.page = page;
         saved.normalizedRect = field.sourceNormalizedRect;
         saved.flags = field.flags;
+        saved.maxLength = field.maxLength;
         saved.operation = SaveField::Remove;
         saved.changedProperties = NoPropertyChanges;
         fields.append(std::move(saved));
@@ -1331,6 +1479,7 @@ QVariantMap PDFFormDesignerController::fieldToMap(const FormField &field) const
     value.insert(QStringLiteral("name"), field.name);
     value.insert(QStringLiteral("options"), field.options);
     value.insert(QStringLiteral("flags"), field.flags);
+    value.insert(QStringLiteral("maxLength"), field.maxLength);
     value.insert(
         QStringLiteral("dirty"),
         field.changedProperties != NoPropertyChanges);
@@ -1433,7 +1582,13 @@ void PDFFormDesignerController::reloadSourceFields()
                                    : NoFieldFlags)
                     | (source.flags & FPDF_FORMFLAG_READONLY
                            ? ReadOnly
+                           : NoFieldFlags)
+                    | (field.type == Text
+                           && (source.flags
+                               & FPDF_FORMFLAG_TEXT_MULTILINE)
+                           ? Multiline
                            : NoFieldFlags);
+                field.maxLength = source.maxLength;
                 field.sourceBacked = true;
                 field.changedProperties = NoPropertyChanges;
                 hydratedFields.append(std::move(field));

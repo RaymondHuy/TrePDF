@@ -337,6 +337,70 @@ void appendText(QSGTextNode *node,
                         &layout);
 }
 
+void appendMultilineText(QSGTextNode *node,
+                         QString value,
+                         const QFont &baseFont,
+                         const QRectF &rect,
+                         int pixelSize)
+{
+    if (!node || value.isEmpty() || rect.isEmpty()) {
+        return;
+    }
+
+    value.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    value.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    value.replace(QChar::LineSeparator, QLatin1Char('\n'));
+    value.replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
+
+    QFont font = baseFont;
+    font.setPixelSize(qMax(1, pixelSize));
+    const QFontMetricsF metrics(font);
+    const QStringList paragraphs = value.split(
+        QLatin1Char('\n'),
+        Qt::KeepEmptyParts);
+    qreal lineTop = rect.top();
+    for (const QString &paragraph : paragraphs) {
+        if (paragraph.isEmpty()) {
+            if (lineTop + metrics.height() > rect.bottom()) {
+                return;
+            }
+            lineTop += metrics.height();
+            continue;
+        }
+
+        QString remaining = paragraph;
+        while (!remaining.isEmpty()) {
+            QTextLayout layout(remaining, font);
+            QTextOption textOption;
+            textOption.setAlignment(Qt::AlignLeft);
+            textOption.setWrapMode(
+                QTextOption::WrapAtWordBoundaryOrAnywhere);
+            layout.setTextOption(textOption);
+            layout.beginLayout();
+            QTextLine line = layout.createLine();
+            if (!line.isValid()) {
+                layout.endLayout();
+                return;
+            }
+            line.setLineWidth(rect.width());
+            line.setPosition({0.0, 0.0});
+            layout.endLayout();
+
+            if (lineTop + line.height() > rect.bottom()) {
+                return;
+            }
+            const qsizetype consumedCharacters
+                = line.textStart() + line.textLength();
+            if (consumedCharacters <= 0) {
+                return;
+            }
+            node->addTextLayout({rect.x(), lineTop}, &layout);
+            lineTop += line.height();
+            remaining.remove(0, consumedCharacters);
+        }
+    }
+}
+
 } // namespace
 
 FormFieldLayer::FormFieldLayer(QQuickItem *parent)
@@ -458,6 +522,11 @@ int FormFieldLayer::activeFieldFlags() const
     return m_activeFieldFlags;
 }
 
+int FormFieldLayer::activeFieldMaxLength() const
+{
+    return m_activeFieldMaxLength;
+}
+
 bool FormFieldLayer::activeFieldSourceBacked() const
 {
     return m_activeFieldSourceBacked;
@@ -561,6 +630,10 @@ void FormFieldLayer::setController(PDFFormDesignerController *controller)
                                 field->flags = m_controller->data(
                                     modelIndex,
                                     PDFFormDesignerController::FlagsRole).toInt();
+                                field->maxLength = m_controller->data(
+                                    modelIndex,
+                                    PDFFormDesignerController::MaxLengthRole)
+                                                       .toInt();
                                 field->sourceBacked = m_controller->data(
                                     modelIndex,
                                     PDFFormDesignerController::SourceBackedRole)
@@ -902,7 +975,13 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
             : checkbox || radioButton
                 ? 0.0
                 : 7.0;
-        const qreal verticalPadding = textField || radioButton ? 0.0 : 2.0;
+        const bool multilineTextField = textField
+            && (field.flags & PDFFormDesignerController::Multiline);
+        const qreal verticalPadding = multilineTextField
+            ? qMax(2.0, horizontalPadding * 0.35)
+            : textField || radioButton
+                ? 0.0
+                : 2.0;
         QRectF contentRect = fieldRect.adjusted(
             horizontalPadding,
             verticalPadding,
@@ -1033,17 +1112,28 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                 defaultFontPixelSize,
                 true);
             break;
-        case PDFFormDesignerController::Text:
-            appendText(
-                textNode,
-                field.value,
-                m_textFieldRenderFont,
-                contentRect,
-                qRound(
-                    PDFFormAppearance::kTextFieldFontPointSize
-                    * m_pointScale),
-                false);
+        case PDFFormDesignerController::Text: {
+            const int fontPixelSize = qRound(
+                PDFFormAppearance::kTextFieldFontPointSize
+                * m_pointScale);
+            if (multilineTextField) {
+                appendMultilineText(
+                    textNode,
+                    field.value,
+                    m_textFieldRenderFont,
+                    contentRect,
+                    fontPixelSize);
+            } else {
+                appendText(
+                    textNode,
+                    field.value,
+                    m_textFieldRenderFont,
+                    contentRect,
+                    fontPixelSize,
+                    false);
+            }
             break;
+        }
         }
     }
 
@@ -1213,6 +1303,9 @@ void FormFieldLayer::refreshFields()
             field.flags = m_controller->data(
                 modelIndex,
                 PDFFormDesignerController::FlagsRole).toInt();
+            field.maxLength = m_controller->data(
+                modelIndex,
+                PDFFormDesignerController::MaxLengthRole).toInt();
             field.sourceBacked = m_controller->data(
                 modelIndex,
                 PDFFormDesignerController::SourceBackedRole).toBool();
@@ -1262,6 +1355,7 @@ void FormFieldLayer::refreshActiveField()
     QStringList fieldOptions;
     int fieldType = -1;
     int fieldFlags = PDFFormDesignerController::NoFieldFlags;
+    int fieldMaxLength = 0;
     bool fieldSourceBacked = false;
 
     if (m_controller && m_fieldsVisible && !m_pooled) {
@@ -1279,6 +1373,7 @@ void FormFieldLayer::refreshActiveField()
             fieldOptions = field->options;
             fieldType = field->type;
             fieldFlags = field->flags;
+            fieldMaxLength = field->maxLength;
             fieldSourceBacked = field->sourceBacked;
         }
     }
@@ -1288,6 +1383,7 @@ void FormFieldLayer::refreshActiveField()
         && m_activeFieldOptions == fieldOptions
         && m_activeFieldType == fieldType
         && m_activeFieldFlags == fieldFlags
+        && m_activeFieldMaxLength == fieldMaxLength
         && m_activeFieldSourceBacked == fieldSourceBacked) {
         return;
     }
@@ -1297,6 +1393,7 @@ void FormFieldLayer::refreshActiveField()
     m_activeFieldOptions = fieldOptions;
     m_activeFieldType = fieldType;
     m_activeFieldFlags = fieldFlags;
+    m_activeFieldMaxLength = fieldMaxLength;
     m_activeFieldSourceBacked = fieldSourceBacked;
     emit activeFieldChanged();
 }

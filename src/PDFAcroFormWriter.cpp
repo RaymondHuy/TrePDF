@@ -23,9 +23,44 @@ namespace {
 
 constexpr int kMaximumDropdownOptions = 4096;
 constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
+constexpr int kMaximumTextFieldLength = 1000000;
 constexpr int kButtonNoToggleToOff = 1 << 14;
 constexpr int kButtonRadio = 1 << 15;
 constexpr int kChoiceCommitOnSelectionChange = 1 << 26;
+
+bool isTrePDFTextFieldWidgetId(const QString &widgetId)
+{
+    constexpr qsizetype uuidLength = 36;
+    const QString prefix = QStringLiteral("text-field-");
+    if (!widgetId.startsWith(prefix)) {
+        return false;
+    }
+    const QString suffix = widgetId.sliced(prefix.size());
+    if (suffix.size() == uuidLength) {
+        const QUuid uuid = QUuid::fromString(suffix);
+        if (!uuid.isNull()
+            && uuid.toString(QUuid::WithoutBraces).compare(
+                   suffix,
+                   Qt::CaseInsensitive)
+                == 0) {
+            return true;
+        }
+    }
+
+    if (suffix.isEmpty()
+        || suffix.size() > 20
+        || suffix.front() == QLatin1Char('0')) {
+        return false;
+    }
+    for (const QChar character : suffix) {
+        if (!character.isDigit()) {
+            return false;
+        }
+    }
+    bool converted = false;
+    const qulonglong sequence = suffix.toULongLong(&converted);
+    return converted && sequence > 0;
+}
 
 bool isTrePDFDropdownWidgetId(const QString &widgetId)
 {
@@ -218,6 +253,10 @@ int widgetFieldFlags(const PDFAcroFormWriter::Field &field)
         | (field.required ? FPDF_FORMFLAG_REQUIRED : 0);
     if (field.type == PDFAcroFormWriter::FieldType::Dropdown) {
         flags |= FPDF_FORMFLAG_CHOICE_COMBO;
+    } else if (field.type
+                   == PDFAcroFormWriter::FieldType::Text
+               && field.multiline) {
+        flags |= FPDF_FORMFLAG_TEXT_MULTILINE;
     } else if (field.type
                == PDFAcroFormWriter::FieldType::RadioButton) {
         flags |= kButtonRadio;
@@ -422,6 +461,18 @@ bool resolveUnchangedUpdateValues(
                                   buffer,
                                   byteCount);
                           });
+            }
+            if (resolvedField.type
+                    == PDFAcroFormWriter::FieldType::Text
+                && resolvedField.maxLength > 0
+                && resolvedField.value.size()
+                    > resolvedField.maxLength) {
+                // The PDFium form session can hold a newer native value than
+                // the designer snapshot when the limit was changed. Apply the
+                // requested limit to that live value instead of rejecting the
+                // otherwise valid save.
+                resolvedField.value.truncate(resolvedField.maxLength);
+                resolvedField.valueChanged = true;
             }
             if (resolvedField.type
                     == PDFAcroFormWriter::FieldType::Dropdown
@@ -726,6 +777,20 @@ bool validateWrittenFields(
                         static_cast<float>(
                             PDFFormAppearance::kDropdownVersion));
             }
+            bool maxLengthMatches = true;
+            if (field.type == PDFAcroFormWriter::FieldType::Text) {
+                float writtenMaxLength = 0.0f;
+                const bool hasMaxLength = FPDFAnnot_GetNumberValue(
+                    annotation.get(),
+                    "MaxLen",
+                    &writtenMaxLength);
+                maxLengthMatches = field.maxLength > 0
+                    ? hasMaxLength
+                        && std::isfinite(writtenMaxLength)
+                        && writtenMaxLength
+                            == static_cast<float>(field.maxLength)
+                    : !hasMaxLength;
+            }
             constexpr qreal coordinateTolerance = 0.05;
             const bool matches = pageIndex == field.page
                 && FPDFAnnot_GetFormFieldType(
@@ -744,6 +809,7 @@ bool validateWrittenFields(
                 && (fieldFlags
                     & (FPDF_FORMFLAG_READONLY
                        | FPDF_FORMFLAG_REQUIRED
+                       | FPDF_FORMFLAG_TEXT_MULTILINE
                        | FPDF_FORMFLAG_CHOICE_COMBO
                        | FPDF_FORMFLAG_CHOICE_EDIT
                        | FPDF_FORMFLAG_CHOICE_MULTI_SELECT
@@ -751,6 +817,7 @@ bool validateWrittenFields(
                        | kButtonRadio
                        | kChoiceCommitOnSelectionChange))
                     == expectedFlags
+                && maxLengthMatches
                 && (FPDFAnnot_GetFlags(annotation.get())
                     & FPDF_ANNOT_FLAG_PRINT)
                 && FPDFAnnot_HasKey(annotation.get(), "AP")
@@ -823,6 +890,20 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
         if (field.operation == Operation::Remove) {
             continue;
         }
+        if (field.type == FieldType::Text) {
+            if (field.maxLength < 0
+                || field.maxLength > kMaximumTextFieldLength
+                || (field.maxLength > 0
+                    && (field.value.size() > field.maxLength
+                        || field.defaultValue.size()
+                            > field.maxLength))) {
+                return failure(QStringLiteral(
+                    "The Text Field character limit is invalid."));
+            }
+        } else if (field.multiline || field.maxLength != 0) {
+            return failure(QStringLiteral(
+                "Only Text Fields support multi-line input and character limits."));
+        }
         if (field.type == FieldType::Checkbox
             || field.type == FieldType::RadioButton) {
             field.value = normalizedCheckboxValue(field.value);
@@ -888,13 +969,16 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
         }
         const bool removing = field.operation == Operation::Remove;
         if (removing
+            && field.type != FieldType::Text
             && field.type != FieldType::Dropdown
             && field.type != FieldType::RadioButton) {
             return failure(QStringLiteral(
-                "Only TrePDF Dropdown and Radio Button fields can currently be removed."));
+                "Only TrePDF Text Field, Dropdown, and Radio Button fields can currently be removed."));
         }
         if (removing
-            && ((field.type == FieldType::Dropdown
+            && ((field.type == FieldType::Text
+                 && !isTrePDFTextFieldWidgetId(field.widgetId))
+                || (field.type == FieldType::Dropdown
                  && !isTrePDFDropdownWidgetId(field.widgetId))
                 || (field.type == FieldType::RadioButton
                     && !isTrePDFRadioButtonWidgetId(field.widgetId)))) {
@@ -952,6 +1036,7 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
         canonicalField.defaultValue = field.defaultValue;
         canonicalField.options = field.options;
         canonicalField.pageRect = field.pageRect;
+        canonicalField.maxLength = field.maxLength;
         switch (field.type) {
         case FieldType::Text:
             canonicalField.type
