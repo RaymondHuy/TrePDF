@@ -396,8 +396,8 @@ tuần tự.
   Refresh bất đồng bộ khi document/page/generation/render state thay đổi và loại
   response stale.
 - Khi form designer đang phủ một source-backed TrePDF field hoặc giữ tombstone
-  xóa Dropdown, chặn native pointer path tại vùng đó để một click không vừa tác
-  động designer draft vừa sửa widget PDFium bên dưới.
+  xóa Text Field/Dropdown/Radio, chặn native pointer path tại vùng đó để một
+  click không vừa tác động designer draft vừa sửa widget PDFium bên dưới.
 - Khi inactive/pooled/controller đổi, clear focus, choice snapshot và pending
   refresh.
 
@@ -411,9 +411,9 @@ rehydrate.
 
 **Model:**
 
-- Field có id, name, tooltip, value/default value, type, flags, display/source
-  page, normalized rect, source-backed, appearance version và bitmask property
-  đã thay đổi.
+- Field có id, name, tooltip, value/default value, type, flags, giới hạn ký tự,
+  display/source page, normalized rect, source-backed, appearance version và
+  bitmask property đã thay đổi.
 - Enum model có Text, Checkbox, RadioButton, Dropdown, Date, Signature; UI và
   writer hoàn chỉnh hiện hỗ trợ Text/Checkbox/RadioButton/Dropdown.
 - Expose roles cho `FormFieldLayer` và các API `fieldData()`/`fieldsForPage()` cho
@@ -422,12 +422,13 @@ rehydrate.
 **Thao tác:**
 
 - Tạo field với tên duy nhất, default size/value/flags; helper riêng cho Text.
-- Đổi value/name/options/flags/rect; `moveField()` chỉ đổi top-left, giữ width/
-  height và clamp field vào trang.
+- Đổi value/name/options/flags/max length/rect; `moveField()` chỉ đổi top-left,
+  giữ width/height và clamp field vào trang. Text Field không multi-line được
+  chuẩn hóa về một dòng; max length dương được áp ngay lên value.
 - Chọn field, quản lý text focus, activate source checkbox/radio, chọn giá trị
-  Dropdown, remove field transient và tạo tombstone khi xóa Dropdown hoặc Radio
-  source-backed do TrePDF tạo. `name` của Radio là Group ID; đổi tên gộp/tách
-  nhóm và chọn một member sẽ tắt các member khác cùng tên.
+  Dropdown, remove field transient và tạo tombstone khi xóa Text Field,
+  Dropdown hoặc Radio source-backed do TrePDF tạo. `name` của Radio là Group ID;
+  đổi tên gộp/tách nhóm và chọn một member sẽ tắt các member khác cùng tên.
 - Map field qua page insertion/deletion; source-backed field giữ source page
   identity để update hoặc remove đúng widget sau save.
 
@@ -441,11 +442,12 @@ rehydrate.
 
 **Save snapshot:**
 
-- `saveFields()` trả field add/update/normalize hợp lệ và tombstone Dropdown dưới
-  dạng `Remove`; field còn lại kèm `changedProperties` để writer không ghi đè
-  value native nếu người dùng không sửa value trong designer.
+- `saveFields()` trả field add/update/normalize hợp lệ và tombstone Text
+  Field/Dropdown/Radio dưới dạng `Remove`; field còn lại kèm
+  `changedProperties` để writer không ghi đè value native nếu người dùng không
+  sửa value trong designer.
 - Draft state của model tham gia guard chung qua edit controller/session.
-- Discard/reset xóa tombstone rồi rehydrate Dropdown nguồn từ document.
+- Discard/reset xóa tombstone rồi rehydrate field nguồn từ document.
 
 ### [`src/FormFieldLayer.cpp`](../src/FormFieldLayer.cpp) và
 [`src/FormFieldLayer.h`](../src/FormFieldLayer.h)
@@ -495,7 +497,8 @@ tooltip/value/default/options/rect/page/type/flags/operation.
 3. Chuẩn hóa Checkbox/Radio Button về `Yes`/`Off`; kiểm Dropdown
    options/selection và chuyển Required/ReadOnly/Radio/Combo thành form flags.
    Radio không đặt `NoToggleToOff` để PDF reader cho phép bỏ chọn. Với Remove,
-   chỉ chấp nhận Dropdown hoặc Radio source-backed có widget id hợp lệ.
+   chỉ chấp nhận Text Field, Dropdown hoặc Radio source-backed có widget id hợp
+   lệ.
 4. Với field Add, tạo Square annotation placeholder có rect, `NM=widgetId` và
    Print flag. PDFium public API chưa tạo đầy đủ Widget dictionary cần thiết.
 5. Save bản có placeholder qua `QSaveFile` và PDFium.
@@ -509,10 +512,10 @@ tooltip/value/default/options/rect/page/type/flags/operation.
 
 **Khả năng hiện tại:** Text, Checkbox, grouped Radio Button và fixed
 single-select Dropdown hỗ trợ Add/Update; Text và Radio còn hỗ trợ
-NormalizeAppearance. Remove hỗ trợ top-level, single-widget Dropdown và member
-Radio thuộc group do TrePDF tạo; group Radio còn lại được dựng lại khi xóa.
-Date/Signature, Remove Text/Checkbox và cấu trúc AcroForm ngoài phạm vi TrePDF
-phải fail rõ ràng.
+NormalizeAppearance. Remove hỗ trợ top-level, single-widget Text Field/Dropdown
+và member Radio thuộc group do TrePDF tạo; group Radio còn lại được dựng lại
+khi xóa. Date/Signature, Remove Checkbox và cấu trúc AcroForm ngoài phạm vi
+TrePDF phải fail rõ ràng.
 
 **Failure:** nếu canonicalize hoặc validation thất bại, xóa target intermediate
 để caller không dùng một PDF form nửa hoàn chỉnh.
@@ -535,10 +538,11 @@ API không thể dựng trực tiếp.
 
 **Sinh object:**
 
-- Tạo/cập nhật Text Field Widget dictionary, field flags, `/DA`, `/DR`, value và
-  default value.
+- Tạo/cập nhật Text Field Widget dictionary, field flags, `/MaxLen`, `/DA`,
+  `/DR`, value và default value.
 - Render appearance text field thành image XObject có giới hạn tổng pixel, rồi
-  tạo appearance stream để PDF reader hiển thị ổn định kể cả trước khi focus.
+  tạo appearance stream để PDF reader hiển thị ổn định kể cả trước khi focus;
+  field multi-line được wrap và căn trên trong appearance.
 - Tạo Checkbox Widget với `/AP` Off/Yes riêng, `/AS`, value/default value và
   vector check appearance.
 - Gom Radio theo Group ID thành một field cha `/FT /Btn` có `/Kids`; mỗi Widget

@@ -47,16 +47,19 @@ Current features:
   click/drag tool; dropdowns use a rectangular tool and start with three
   localized options. All four support selection, movement, resizing, and
   transient deletion; check boxes and radio buttons can be toggled, and
-  dropdown values can be selected in the designer. A selected Radio Button has
-  a right-side panel for changing its Group ID and deleting the member. Radio
-  Buttons with the same Group ID persist as one AcroForm radio field with child
-  Widgets and mutually exclusive selection. TrePDF rehydrates radio groups,
-  state, dropdown options, and dropdown selection after reopen. A TrePDF-created
-  Dropdown or Radio Button can also be deleted after rehydrate: deletion remains
-  a Forms-mode draft until Save/Save As, while Discard restores it. Dropdown
-  removal is limited to top-level, single-widget TrePDF fields; Radio removal
-  rebuilds the remaining TrePDF-created group. Source-backed Text Field/Check
-  Box and arbitrary AcroForm structures remain protected.
+  dropdown values can be selected in the designer. A selected Text Field has a
+  right-side panel for enabling multi-line input and an optional maximum
+  character count; both persist through Save/Save As and rehydrate after reopen.
+  A selected Radio Button has a right-side panel for changing its Group ID and
+  deleting the member. Radio Buttons with the same Group ID persist as one
+  AcroForm radio field with child Widgets and mutually exclusive selection.
+  TrePDF rehydrates radio groups, state, dropdown options, and dropdown selection
+  after reopen. A TrePDF-created Text Field, Dropdown, or Radio Button can also
+  be deleted after rehydrate: deletion remains a Forms-mode draft until
+  Save/Save As, while Discard restores it. Text Field and Dropdown removal is
+  limited to top-level, single-widget TrePDF fields; Radio removal rebuilds the
+  remaining TrePDF-created group. Source-backed Check Box and arbitrary
+  AcroForm structures remain protected.
 - Text draft editing with selection, undo, redo, discard, Save, and Save As.
   Drafts stay session-only until a save succeeds.
 - Add Image uses the same placement cursor and draft history as Add Text. After

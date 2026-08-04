@@ -458,6 +458,11 @@ int FormFieldLayer::activeFieldFlags() const
     return m_activeFieldFlags;
 }
 
+int FormFieldLayer::activeFieldMaxLength() const
+{
+    return m_activeFieldMaxLength;
+}
+
 bool FormFieldLayer::activeFieldSourceBacked() const
 {
     return m_activeFieldSourceBacked;
@@ -561,6 +566,10 @@ void FormFieldLayer::setController(PDFFormDesignerController *controller)
                                 field->flags = m_controller->data(
                                     modelIndex,
                                     PDFFormDesignerController::FlagsRole).toInt();
+                                field->maxLength = m_controller->data(
+                                    modelIndex,
+                                    PDFFormDesignerController::MaxLengthRole)
+                                                       .toInt();
                                 field->sourceBacked = m_controller->data(
                                     modelIndex,
                                     PDFFormDesignerController::SourceBackedRole)
@@ -1213,6 +1222,9 @@ void FormFieldLayer::refreshFields()
             field.flags = m_controller->data(
                 modelIndex,
                 PDFFormDesignerController::FlagsRole).toInt();
+            field.maxLength = m_controller->data(
+                modelIndex,
+                PDFFormDesignerController::MaxLengthRole).toInt();
             field.sourceBacked = m_controller->data(
                 modelIndex,
                 PDFFormDesignerController::SourceBackedRole).toBool();
@@ -1262,6 +1274,7 @@ void FormFieldLayer::refreshActiveField()
     QStringList fieldOptions;
     int fieldType = -1;
     int fieldFlags = PDFFormDesignerController::NoFieldFlags;
+    int fieldMaxLength = 0;
     bool fieldSourceBacked = false;
 
     if (m_controller && m_fieldsVisible && !m_pooled) {
@@ -1279,6 +1292,7 @@ void FormFieldLayer::refreshActiveField()
             fieldOptions = field->options;
             fieldType = field->type;
             fieldFlags = field->flags;
+            fieldMaxLength = field->maxLength;
             fieldSourceBacked = field->sourceBacked;
         }
     }
@@ -1288,6 +1302,7 @@ void FormFieldLayer::refreshActiveField()
         && m_activeFieldOptions == fieldOptions
         && m_activeFieldType == fieldType
         && m_activeFieldFlags == fieldFlags
+        && m_activeFieldMaxLength == fieldMaxLength
         && m_activeFieldSourceBacked == fieldSourceBacked) {
         return;
     }
@@ -1297,6 +1312,7 @@ void FormFieldLayer::refreshActiveField()
     m_activeFieldOptions = fieldOptions;
     m_activeFieldType = fieldType;
     m_activeFieldFlags = fieldFlags;
+    m_activeFieldMaxLength = fieldMaxLength;
     m_activeFieldSourceBacked = fieldSourceBacked;
     emit activeFieldChanged();
 }

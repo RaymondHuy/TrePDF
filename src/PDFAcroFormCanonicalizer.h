@@ -32,6 +32,7 @@ public:
         QRectF pageRect;
         FieldType type = FieldType::Text;
         int fieldFlags = 0;
+        int maxLength = 0;
         Operation operation = Operation::Add;
     };
 

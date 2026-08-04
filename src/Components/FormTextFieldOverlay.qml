@@ -25,6 +25,9 @@ Item {
     property real placementStartY: 0
     property string pendingFocusFieldId: ""
     property string loadedEditorFieldId: ""
+    readonly property bool activeTextFieldMultiline:
+        (formFieldLayer.activeFieldFlags
+            & PDFFormDesignerController.Multiline) !== 0
     readonly property real resizeHandleSize: 8
     readonly property real resizeHandleHitSize: 24
     readonly property real minimumResizeWidth: 60
@@ -126,11 +129,11 @@ Item {
         return Qt.rect(left, top, right - left, bottom - top)
     }
 
-    function syncActiveTextEditor() {
-        if (activeTextEditorLoader.status !== Loader.Ready)
+    function syncSingleLineTextEditor() {
+        if (singleLineTextEditorLoader.status !== Loader.Ready)
             return
 
-        const editor = activeTextEditorLoader.item as TextField
+        const editor = singleLineTextEditorLoader.item as TextField
         if (!editor)
             return
         const fieldId = formFieldLayer.activeFieldId
@@ -151,17 +154,173 @@ Item {
             root.controller.setTextFieldFocused(fieldId, true)
     }
 
-    function focusPendingTextField() {
-        if (pendingFocusFieldId.length === 0
-                || formFieldLayer.activeFieldId !== pendingFocusFieldId
-                || activeTextEditorLoader.status !== Loader.Ready)
+    function syncMultilineTextEditor() {
+        if (multilineTextEditorLoader.status !== Loader.Ready)
             return
 
-        const editor = activeTextEditorLoader.item as TextField
+        const editor = multilineTextEditorLoader.item as TextArea
         if (!editor)
             return
-        pendingFocusFieldId = ""
-        editor.forceActiveFocus()
+        const fieldId = formFieldLayer.activeFieldId
+        const fieldChanged = root.loadedEditorFieldId !== fieldId
+        if (!fieldChanged
+                && editor.text === formFieldLayer.activeFieldValue)
+            return
+        if (fieldChanged && editor.activeFocus
+                && root.loadedEditorFieldId.length > 0) {
+            root.controller.setTextFieldFocused(
+                root.loadedEditorFieldId,
+                false)
+        }
+        root.loadedEditorFieldId = fieldId
+        if (editor.text !== formFieldLayer.activeFieldValue)
+            editor.text = formFieldLayer.activeFieldValue
+        if (fieldChanged && editor.activeFocus && fieldId.length > 0)
+            root.controller.setTextFieldFocused(fieldId, true)
+    }
+
+    function syncActiveTextEditor() {
+        if (root.activeTextFieldMultiline)
+            syncMultilineTextEditor()
+        else
+            syncSingleLineTextEditor()
+    }
+
+    function activeTextWithinLimit() {
+        const activeText = formFieldLayer.activeFieldValue
+        const maxLength = formFieldLayer.activeFieldMaxLength
+        return maxLength > 0 && activeText.length > maxLength
+            ? activeText.slice(0, maxLength)
+            : activeText
+    }
+
+    function restoreSingleLineTextLimit(fieldId) {
+        Qt.callLater(function() {
+            if (root.loadedEditorFieldId !== fieldId
+                    || singleLineTextEditorLoader.status
+                        !== Loader.Ready) {
+                return
+            }
+
+            const editor = singleLineTextEditorLoader.item as TextField
+            const maxLength = formFieldLayer.activeFieldMaxLength
+            if (!editor
+                    || maxLength <= 0
+                    || editor.text.length <= maxLength) {
+                return
+            }
+
+            const acceptedText = root.activeTextWithinLimit()
+            const restoredCursorPosition = Math.max(
+                0,
+                Math.min(
+                    acceptedText.length,
+                    editor.cursorPosition
+                        - (editor.text.length - acceptedText.length)))
+            editor.text = acceptedText
+            editor.cursorPosition = restoredCursorPosition
+        })
+    }
+
+    function restoreMultilineTextLimit(fieldId) {
+        Qt.callLater(function() {
+            if (root.loadedEditorFieldId !== fieldId
+                    || multilineTextEditorLoader.status
+                        !== Loader.Ready) {
+                return
+            }
+
+            const editor = multilineTextEditorLoader.item as TextArea
+            const maxLength = formFieldLayer.activeFieldMaxLength
+            if (!editor
+                    || maxLength <= 0
+                    || editor.text.length <= maxLength) {
+                return
+            }
+
+            const acceptedText = root.activeTextWithinLimit()
+            const restoredCursorPosition = Math.max(
+                0,
+                Math.min(
+                    acceptedText.length,
+                    editor.cursorPosition
+                        - (editor.text.length - acceptedText.length)))
+            editor.text = acceptedText
+            editor.cursorPosition = restoredCursorPosition
+        })
+    }
+
+    function commitActiveTextEditor() {
+        if (root.loadedEditorFieldId.length === 0)
+            return
+
+        if (singleLineTextEditorLoader.active
+                && singleLineTextEditorLoader.status === Loader.Ready) {
+            const singleLineEditor
+                = singleLineTextEditorLoader.item as TextField
+            if (singleLineEditor
+                    && singleLineEditor.text
+                        !== formFieldLayer.activeFieldValue) {
+                root.controller.setTextFieldText(
+                    root.loadedEditorFieldId,
+                    singleLineEditor.text)
+            }
+            return
+        }
+        if (multilineTextEditorLoader.active
+                && multilineTextEditorLoader.status === Loader.Ready) {
+            const multilineEditor
+                = multilineTextEditorLoader.item as TextArea
+            if (!multilineEditor
+                    || multilineEditor.text
+                        === formFieldLayer.activeFieldValue) {
+                return
+            }
+            root.controller.setTextFieldText(
+                root.loadedEditorFieldId,
+                multilineEditor.text)
+        }
+    }
+
+    function focusPendingTextField() {
+        if (pendingFocusFieldId.length === 0
+                || formFieldLayer.activeFieldId !== pendingFocusFieldId)
+            return
+
+        if (root.activeTextFieldMultiline) {
+            if (multilineTextEditorLoader.status !== Loader.Ready)
+                return
+            const multilineEditor
+                = multilineTextEditorLoader.item as TextArea
+            if (!multilineEditor)
+                return
+            pendingFocusFieldId = ""
+            multilineEditor.forceActiveFocus()
+        } else {
+            if (singleLineTextEditorLoader.status !== Loader.Ready)
+                return
+            const singleLineEditor
+                = singleLineTextEditorLoader.item as TextField
+            if (!singleLineEditor)
+                return
+            pendingFocusFieldId = ""
+            singleLineEditor.forceActiveFocus()
+        }
+    }
+
+    function clearLoadedTextEditorWhenInactive() {
+        Qt.callLater(function() {
+            if (singleLineTextEditorLoader.active
+                    || multilineTextEditorLoader.active
+                    || root.loadedEditorFieldId.length === 0) {
+                return
+            }
+
+            root.controller.setTextFieldFocused(
+                root.loadedEditorFieldId,
+                false)
+            root.loadedEditorFieldId = ""
+        })
     }
 
     function openActiveDropdown() {
@@ -248,6 +407,7 @@ Item {
     }
 
     function prepareForSessionChange() {
+        commitActiveTextEditor()
         pendingFocusFieldId = ""
         activeFieldFrame.cancelResize()
         formFieldLayer.cancelFieldMove()
@@ -618,10 +778,17 @@ Item {
                 return
 
             root.pendingFocusFieldId = ""
-            if (activeTextEditorLoader.status === Loader.Ready) {
-                const editor = activeTextEditorLoader.item as TextField
-                if (editor)
-                    editor.focus = false
+            if (singleLineTextEditorLoader.status === Loader.Ready) {
+                const singleLineEditor
+                    = singleLineTextEditorLoader.item as TextField
+                if (singleLineEditor)
+                    singleLineEditor.focus = false
+            }
+            if (multilineTextEditorLoader.status === Loader.Ready) {
+                const multilineEditor
+                    = multilineTextEditorLoader.item as TextArea
+                if (multilineEditor)
+                    multilineEditor.focus = false
             }
             if (activeDropdownEditorLoader.status === Loader.Ready) {
                 const dropdown = activeDropdownEditorLoader.item as ComboBox
@@ -712,26 +879,44 @@ Item {
         }
 
         Loader {
-            id: activeTextEditorLoader
+            id: singleLineTextEditorLoader
 
             anchors.fill: parent
             active: activeFieldFrame.visible
                 && formFieldLayer.activeFieldType
                     === PDFFormDesignerController.Text
+                && !root.activeTextFieldMultiline
             sourceComponent: activeTextEditorComponent
 
             onLoaded: {
                 root.loadedEditorFieldId = ""
-                root.syncActiveTextEditor()
+                root.syncSingleLineTextEditor()
                 root.focusPendingTextField()
             }
             onActiveChanged: {
-                if (!active && root.loadedEditorFieldId.length > 0) {
-                    root.controller.setTextFieldFocused(
-                        root.loadedEditorFieldId,
-                        false)
-                    root.loadedEditorFieldId = ""
-                }
+                if (!active)
+                    root.clearLoadedTextEditorWhenInactive()
+            }
+        }
+
+        Loader {
+            id: multilineTextEditorLoader
+
+            anchors.fill: parent
+            active: activeFieldFrame.visible
+                && formFieldLayer.activeFieldType
+                    === PDFFormDesignerController.Text
+                && root.activeTextFieldMultiline
+            sourceComponent: activeMultilineTextEditorComponent
+
+            onLoaded: {
+                root.loadedEditorFieldId = ""
+                root.syncMultilineTextEditor()
+                root.focusPendingTextField()
+            }
+            onActiveChanged: {
+                if (!active)
+                    root.clearLoadedTextEditorWhenInactive()
             }
         }
 
@@ -971,6 +1156,9 @@ Item {
             clip: true
             selectByMouse: true
             activeFocusOnPress: true
+            maximumLength: formFieldLayer.activeFieldMaxLength > 0
+                ? formFieldLayer.activeFieldMaxLength
+                : 1000000
             leftPadding: Math.max(
                 formFieldLayer.textFieldMinimumHorizontalPaddingPoints
                     * root.pagePointScale,
@@ -988,11 +1176,21 @@ Item {
             //% "Enter text"
             placeholderText: qsTrId("EnterFormText")
 
-            onTextEdited: {
-                if (root.loadedEditorFieldId.length > 0)
+            onTextChanged: {
+                const maxLength = formFieldLayer.activeFieldMaxLength
+                if (root.loadedEditorFieldId.length > 0
+                        && maxLength > 0
+                        && text.length > maxLength) {
+                    root.restoreSingleLineTextLimit(
+                        root.loadedEditorFieldId)
+                    return
+                }
+                if (root.loadedEditorFieldId.length > 0
+                        && text !== formFieldLayer.activeFieldValue) {
                     root.controller.setTextFieldText(
                         root.loadedEditorFieldId,
                         text)
+                }
             }
             onActiveFocusChanged: {
                 if (root.loadedEditorFieldId.length > 0)
@@ -1015,6 +1213,83 @@ Item {
                     ? root.theme.foxitDarkOrange
                     : formFieldLayer.textFieldBorderColor
                 border.width: activeTextEditor.activeFocus
+                        || root.formsActive
+                    ? 2
+                    : formFieldLayer.textFieldBorderPointWidth
+                        * root.pagePointScale
+                radius: 0
+            }
+        }
+    }
+
+    Component {
+        id: activeMultilineTextEditorComponent
+
+        TextArea {
+            id: activeMultilineTextEditor
+
+            enabled: root.fieldsInteractive
+                && (root.formsActive
+                    || !(formFieldLayer.activeFieldFlags
+                         & PDFFormDesignerController.ReadOnly))
+            clip: true
+            selectByMouse: true
+            activeFocusOnPress: true
+            wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+            leftPadding: Math.max(
+                formFieldLayer.textFieldMinimumHorizontalPaddingPoints
+                    * root.pagePointScale,
+                height * formFieldLayer.textFieldHorizontalPaddingRatio)
+            rightPadding: leftPadding
+            topPadding: Math.max(2, leftPadding * 0.35)
+            bottomPadding: topPadding
+            color: "#202124"
+            font.family: "Helvetica"
+            font.pixelSize: Math.max(
+                1,
+                formFieldLayer.textFieldFontPointSize
+                    * root.pagePointScale)
+            //% "Enter text"
+            placeholderText: qsTrId("EnterFormText")
+
+            onTextChanged: {
+                const maxLength = formFieldLayer.activeFieldMaxLength
+                if (root.loadedEditorFieldId.length > 0
+                        && maxLength > 0
+                        && text.length > maxLength) {
+                    root.restoreMultilineTextLimit(
+                        root.loadedEditorFieldId)
+                    return
+                }
+                if (root.loadedEditorFieldId.length > 0
+                        && text !== formFieldLayer.activeFieldValue) {
+                    root.controller.setTextFieldText(
+                        root.loadedEditorFieldId,
+                        text)
+                }
+            }
+            onActiveFocusChanged: {
+                if (root.loadedEditorFieldId.length > 0) {
+                    root.controller.setTextFieldFocused(
+                        root.loadedEditorFieldId,
+                        activeFocus)
+                }
+            }
+
+            TapHandler {
+                enabled: root.formsActive
+                acceptedButtons: Qt.LeftButton
+                onTapped: root.controller.selectTextField(
+                    root.loadedEditorFieldId)
+            }
+
+            background: Rectangle {
+                color: "white"
+                border.color: activeMultilineTextEditor.activeFocus
+                        || root.formsActive
+                    ? root.theme.foxitDarkOrange
+                    : formFieldLayer.textFieldBorderColor
+                border.width: activeMultilineTextEditor.activeFocus
                         || root.formsActive
                     ? 2
                     : formFieldLayer.textFieldBorderPointWidth

@@ -39,6 +39,7 @@ namespace {
 constexpr int kChoiceCommitOnSelectionChange = 1 << 26;
 constexpr int kMaximumChoiceOptions = 4096;
 constexpr qsizetype kMaximumChoiceOptionCharacters = 1024 * 1024;
+constexpr int kMaximumTextFieldLength = 1000000;
 
 QThreadPool &formRenderThreadPool()
 {
@@ -1710,8 +1711,32 @@ public:
             field.flags = fieldFlags
                 & (FPDF_FORMFLAG_READONLY
                    | FPDF_FORMFLAG_REQUIRED);
+            if (field.type == FPDF_FORMFIELD_TEXTFIELD) {
+                field.flags |= fieldFlags
+                    & FPDF_FORMFLAG_TEXT_MULTILINE;
+            }
             if (annotationFlags & FPDF_ANNOT_FLAG_READONLY) {
                 field.flags |= FPDF_FORMFLAG_READONLY;
+            }
+            if (field.type == FPDF_FORMFIELD_TEXTFIELD) {
+                float maxLength = 0.0f;
+                if (FPDFAnnot_GetNumberValue(
+                        annotation,
+                        "MaxLen",
+                        &maxLength)) {
+                    const double parsedMaxLength
+                        = static_cast<double>(maxLength);
+                    if (std::isfinite(parsedMaxLength)
+                        && parsedMaxLength > 0.0
+                        && parsedMaxLength
+                            <= static_cast<double>(
+                                kMaximumTextFieldLength)
+                        && std::floor(parsedMaxLength)
+                            == parsedMaxLength) {
+                        field.maxLength
+                            = static_cast<int>(parsedMaxLength);
+                    }
+                }
             }
             field.sourcePage = sourcePage;
             field.normalizedRect = *normalizedRect;

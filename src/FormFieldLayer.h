@@ -58,6 +58,8 @@ class FormFieldLayer : public QQuickItem
                    NOTIFY activeFieldChanged FINAL)
     Q_PROPERTY(int activeFieldFlags READ activeFieldFlags
                    NOTIFY activeFieldChanged FINAL)
+    Q_PROPERTY(int activeFieldMaxLength READ activeFieldMaxLength
+                   NOTIFY activeFieldChanged FINAL)
     Q_PROPERTY(bool activeFieldSourceBacked READ activeFieldSourceBacked
                    NOTIFY activeFieldChanged FINAL)
 
@@ -86,6 +88,7 @@ public:
     QStringList activeFieldOptions() const;
     int activeFieldType() const;
     int activeFieldFlags() const;
+    int activeFieldMaxLength() const;
     bool activeFieldSourceBacked() const;
     bool contains(const QPointF &point) const override;
 
@@ -142,6 +145,7 @@ private:
         QString value;
         QStringList options;
         int flags = PDFFormDesignerController::NoFieldFlags;
+        int maxLength = 0;
         bool sourceBacked = false;
         bool selected = false;
     };
@@ -172,6 +176,7 @@ private:
     QStringList m_activeFieldOptions;
     int m_activeFieldType = -1;
     int m_activeFieldFlags = PDFFormDesignerController::NoFieldFlags;
+    int m_activeFieldMaxLength = 0;
     bool m_activeFieldSourceBacked = false;
     QString m_movingFieldId;
     QRectF m_moveStartRect;

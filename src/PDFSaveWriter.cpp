@@ -2898,7 +2898,8 @@ PDFSaveWriter::Result prepareAcroFormFields(
     for (const PDFFormDesignerController::SaveField &source : sourceFields) {
         if (source.operation
             == PDFFormDesignerController::SaveField::Remove) {
-            if ((source.type != PDFFormDesignerController::Dropdown
+            if ((source.type != PDFFormDesignerController::Text
+                 && source.type != PDFFormDesignerController::Dropdown
                  && source.type != PDFFormDesignerController::RadioButton)
                 || source.id.isEmpty()
                 || source.page < -1
@@ -2912,10 +2913,11 @@ PDFSaveWriter::Result prepareAcroFormFields(
             PDFAcroFormWriter::Field target;
             target.widgetId = source.id;
             target.fieldName = source.name;
-            target.type = source.type
-                    == PDFFormDesignerController::RadioButton
-                ? PDFAcroFormWriter::FieldType::RadioButton
-                : PDFAcroFormWriter::FieldType::Dropdown;
+            target.type = source.type == PDFFormDesignerController::Text
+                ? PDFAcroFormWriter::FieldType::Text
+                : source.type == PDFFormDesignerController::RadioButton
+                    ? PDFAcroFormWriter::FieldType::RadioButton
+                    : PDFAcroFormWriter::FieldType::Dropdown;
             target.operation = PDFAcroFormWriter::Operation::Remove;
             target.page = source.page;
             targetFields.append(std::move(target));
@@ -3004,6 +3006,9 @@ PDFSaveWriter::Result prepareAcroFormFields(
             & PDFFormDesignerController::Required;
         target.readOnly = source.flags
             & PDFFormDesignerController::ReadOnly;
+        target.multiline = source.flags
+            & PDFFormDesignerController::Multiline;
+        target.maxLength = source.maxLength;
         target.valueChanged
             = source.operation
                     == PDFFormDesignerController::SaveField::Add

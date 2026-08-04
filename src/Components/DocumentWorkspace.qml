@@ -23,6 +23,10 @@ Item {
     readonly property var selectedFormField: selectedFormFieldId.length > 0
         ? session.formDesignerController.fieldData(selectedFormFieldId)
         : ({})
+    readonly property bool textFieldOptionsPanelActive: formsTabActive
+        && selectedFormFieldId.length > 0
+        && Number(selectedFormField.type)
+            === PDFFormDesignerController.Text
     readonly property bool dropdownOptionsPanelActive: formsTabActive
         && selectedFormFieldId.length > 0
         && Number(selectedFormField.type)
@@ -32,15 +36,28 @@ Item {
         && Number(selectedFormField.type)
             === PDFFormDesignerController.RadioButton
     readonly property bool hasPendingPanelEdits: {
-        if (radioButtonOptionsPanelLoader.status !== Loader.Ready)
-            return false
+        if (textFieldOptionsPanelLoader.status === Loader.Ready) {
+            const textPanel = textFieldOptionsPanelLoader.item
+                as TextFieldOptionsPanel
+            if (textPanel && textPanel.maxLengthEditPending)
+                return true
+        }
 
-        const panel = radioButtonOptionsPanelLoader.item
-            as RadioButtonOptionsPanel
-        return panel ? panel.groupNameEditPending : false
+        if (radioButtonOptionsPanelLoader.status === Loader.Ready) {
+            const radioPanel = radioButtonOptionsPanelLoader.item
+                as RadioButtonOptionsPanel
+            if (radioPanel && radioPanel.groupNameEditPending)
+                return true
+        }
+        return false
     }
 
     signal openRequested()
+
+    onTextFieldOptionsPanelActiveChanged: {
+        if (textFieldOptionsPanelActive)
+            session.panelCollapsed = false
+    }
 
     function setZoom(value) {
         session.zoom = Math.max(0.1, Math.min(5.0, value))
@@ -95,12 +112,20 @@ Item {
     }
 
     function commitPendingPanelEdits() {
-        if (radioButtonOptionsPanelLoader.status !== Loader.Ready)
-            return true
+        if (textFieldOptionsPanelLoader.status === Loader.Ready) {
+            const textPanel = textFieldOptionsPanelLoader.item
+                as TextFieldOptionsPanel
+            if (textPanel && !textPanel.commitPendingEdit())
+                return false
+        }
 
-        const panel = radioButtonOptionsPanelLoader.item
-            as RadioButtonOptionsPanel
-        return panel ? panel.commitPendingEdit() : true
+        if (radioButtonOptionsPanelLoader.status === Loader.Ready) {
+            const radioPanel = radioButtonOptionsPanelLoader.item
+                as RadioButtonOptionsPanel
+            if (radioPanel && !radioPanel.commitPendingEdit())
+                return false
+        }
+        return true
     }
 
     function prepareForDeactivation() {
@@ -152,6 +177,30 @@ Item {
         }
 
         Loader {
+            id: textFieldOptionsPanelLoader
+
+            Layout.preferredWidth: active
+                ? root.session.panelCollapsed ? 42 : 264
+                : 0
+            Layout.fillHeight: true
+            active: root.session.document.loaded
+                && root.textFieldOptionsPanelActive
+            visible: active
+
+            sourceComponent: Component {
+                TextFieldOptionsPanel {
+                    theme: root.theme
+                    controller: root.session.formDesignerController
+                    fieldId: root.selectedFormFieldId
+                    collapsed: root.session.panelCollapsed
+                    onCollapsedChangeRequested: collapsed => {
+                        root.session.panelCollapsed = collapsed
+                    }
+                }
+            }
+        }
+
+        Loader {
             id: dropdownOptionsPanelLoader
 
             Layout.preferredWidth: active
@@ -183,6 +232,7 @@ Item {
                 : 0
             Layout.fillHeight: true
             active: root.session.document.loaded
+                && !root.textFieldOptionsPanelActive
                 && !root.dropdownOptionsPanelActive
                 && !root.radioButtonOptionsPanelActive
                 && root.session.editController.tool !== PDFEditController.BrowseTool

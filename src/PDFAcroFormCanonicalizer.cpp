@@ -13,6 +13,7 @@
 #include <QPolygonF>
 #include <QRawFont>
 #include <QSet>
+#include <QTextOption>
 #include <QUuid>
 
 #include <algorithm>
@@ -25,8 +26,44 @@ constexpr char kUnicodeFormFontPath[]
     = ":/trepdf/fonts/Arial/Arial-Regular.TTF";
 constexpr char kUnicodeFormFontBaseName[] = "ArialMT";
 constexpr char kUnicodeFormFontResourcePrefix[] = "TrePDFUF";
+constexpr int kMaximumTextFieldLength = 1000000;
+constexpr int kTextFieldMultiline = 1 << 12;
 constexpr int kButtonNoToggleToOff = 1 << 14;
 constexpr int kButtonRadio = 1 << 15;
+
+bool isTrePDFTextFieldWidgetId(const QString &widgetId)
+{
+    constexpr qsizetype uuidLength = 36;
+    const QString prefix = QStringLiteral("text-field-");
+    if (!widgetId.startsWith(prefix)) {
+        return false;
+    }
+    const QString suffix = widgetId.sliced(prefix.size());
+    if (suffix.size() == uuidLength) {
+        const QUuid uuid = QUuid::fromString(suffix);
+        if (!uuid.isNull()
+            && uuid.toString(QUuid::WithoutBraces).compare(
+                   suffix,
+                   Qt::CaseInsensitive)
+                == 0) {
+            return true;
+        }
+    }
+
+    if (suffix.isEmpty()
+        || suffix.size() > 20
+        || suffix.front() == QLatin1Char('0')) {
+        return false;
+    }
+    for (const QChar character : suffix) {
+        if (!character.isDigit()) {
+            return false;
+        }
+    }
+    bool converted = false;
+    const qulonglong sequence = suffix.toULongLong(&converted);
+    return converted && sequence > 0;
+}
 
 bool isTrePDFDropdownWidgetId(const QString &widgetId)
 {
@@ -1167,17 +1204,31 @@ QImage textFieldAppearanceImage(
     const qreal dropdownButtonWidth = dropdown
         ? qMin<qreal>(pixelHeight, pixelWidth / 3.0)
         : 0.0;
-    painter.drawText(
-        QRectF(
-            horizontalPadding,
-            0,
-            qMax(
-                0.0,
-                pixelWidth - 2.0 * horizontalPadding
-                    - dropdownButtonWidth),
-            pixelHeight),
-        Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
-        field.value);
+    const bool multiline = !dropdown
+        && (field.fieldFlags & kTextFieldMultiline);
+    const qreal verticalPadding = multiline
+        ? qMax(borderPixelWidth + 1.0, horizontalPadding * 0.25)
+        : 0.0;
+    const QRectF textRect(
+        horizontalPadding,
+        verticalPadding,
+        qMax(
+            0.0,
+            pixelWidth - 2.0 * horizontalPadding
+                - dropdownButtonWidth),
+        qMax(0.0, pixelHeight - 2.0 * verticalPadding));
+    if (multiline) {
+        QTextOption textOption;
+        textOption.setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        textOption.setWrapMode(
+            QTextOption::WrapAtWordBoundaryOrAnywhere);
+        painter.drawText(textRect, field.value, textOption);
+    } else {
+        painter.drawText(
+            textRect,
+            Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+            field.value);
+    }
     if (dropdown) {
         const qreal buttonLeft = pixelWidth - dropdownButtonWidth;
         painter.setPen(QPen(
@@ -1315,6 +1366,10 @@ QByteArray textFieldWidgetObject(
         + encodedPdfString(field.widgetId)
         + QByteArrayLiteral(" /Ff ")
         + QByteArray::number(field.fieldFlags);
+    if (field.maxLength > 0) {
+        object += QByteArrayLiteral(" /MaxLen ")
+            + QByteArray::number(field.maxLength);
+    }
     if (pageReference.number >= 0) {
         object += QByteArrayLiteral(" /P ")
             + QByteArray::number(pageReference.number)
@@ -3787,15 +3842,18 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         const bool removed
             = formField.operation == Operation::Remove;
         if (removed
+            && formField.type != FieldType::Text
             && formField.type != FieldType::Dropdown
             && formField.type != FieldType::RadioButton) {
             error = QStringLiteral(
-                "Only TrePDF Dropdown and Radio Button fields can currently be removed.");
+                "Only TrePDF Text Field, Dropdown, and Radio Button fields can currently be removed.");
             file.unmap(mapped);
             return false;
         }
         if (removed
-            && ((formField.type == FieldType::Dropdown
+            && ((formField.type == FieldType::Text
+                 && !isTrePDFTextFieldWidgetId(formField.widgetId))
+                || (formField.type == FieldType::Dropdown
                  && !isTrePDFDropdownWidgetId(formField.widgetId))
                 || (formField.type == FieldType::RadioButton
                     && !isTrePDFRadioButtonWidgetId(formField.widgetId)))) {
@@ -3969,7 +4027,7 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         }
         resolvedWidgetObjectNumbers.insert(reference.number);
         if (removed) {
-            if (formField.type == FieldType::Dropdown
+            if (formField.type != FieldType::RadioButton
                 && std::count(
                        fields.cbegin(),
                        fields.cend(),
@@ -4017,7 +4075,8 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         widgetReferences.append(reference);
         if (added && formField.type != FieldType::RadioButton) {
             fields.append(fieldReference);
-        } else if (removed && formField.type == FieldType::Dropdown) {
+        } else if (removed
+                   && formField.type != FieldType::RadioButton) {
             fields.removeOne(reference);
         }
     }
@@ -4164,6 +4223,17 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
     for (const Field &formField : formFields) {
         if (formField.operation == Operation::Remove) {
             continue;
+        }
+        if ((formField.type == FieldType::Text
+             && (formField.maxLength < 0
+                 || formField.maxLength
+                     > kMaximumTextFieldLength))
+            || (formField.type != FieldType::Text
+                && formField.maxLength != 0)) {
+            error = QStringLiteral(
+                "The Text Field character limit is invalid.");
+            file.unmap(mapped);
+            return false;
         }
         if (formField.fieldName.isEmpty()
             || formField.fieldName.contains(QLatin1Char('.'))) {

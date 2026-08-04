@@ -34,15 +34,19 @@ single-select Dropdown widgets by clicking or dragging on a page. Check boxes
 and radio buttons use square placement and start unchecked; dropdowns start
 with three localized options. Added fields can be selected, moved, resized, or
 deleted before Save and persist as standard interactive AcroForm widgets with
-explicit appearances. Selecting a Radio Button opens a right-side panel where
-its Group ID can be edited or that member can be deleted. Radio Buttons with the
-same Group ID are written as one parent field with child Widgets, so selecting
-one clears the other members in TrePDF and external PDF readers. TrePDF
-rehydrates saved group membership, radio state, dropdown options, and dropdown
-selection after reopen. A TrePDF-created Dropdown or Radio Button can then be
-deleted as a Forms draft: Discard restores it, while Save or Save As removes the
-Widget and safely rebuilds any remaining Radio group. Source-backed Text
-Field/Check Box and arbitrary AcroForm structures are not removed by this path.
+explicit appearances. Selecting a Text Field opens a right-side panel for
+enabling multi-line input and an optional maximum character count; both settings
+are enforced by the designer and persist through Save/Save As. Selecting a Radio
+Button opens a right-side panel where its Group ID can be edited or that member
+can be deleted. Radio Buttons with the same Group ID are written as one parent
+field with child Widgets, so selecting one clears the other members in TrePDF
+and external PDF readers. TrePDF rehydrates saved text-field options, group
+membership, radio state, dropdown options, and dropdown selection after reopen.
+A TrePDF-created Text Field, Dropdown, or Radio Button can then be deleted as a
+Forms draft: Discard restores it, while Save or Save As removes the Widget and
+safely rebuilds any remaining Radio group. Text Field and Dropdown removal is
+limited to top-level, single-widget TrePDF fields; source-backed Check Box and
+arbitrary AcroForm structures are not removed by this path.
 
 Each document tab owns its PDF handle, draft/undo history, selection, zoom,
 scroll position, and formatting-panel state. Only the active tab creates page
