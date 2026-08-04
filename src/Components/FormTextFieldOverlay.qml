@@ -25,9 +25,19 @@ Item {
     property real placementStartY: 0
     property string pendingFocusFieldId: ""
     property string loadedEditorFieldId: ""
+    property bool syncingTextEditor: false
     readonly property bool activeTextFieldMultiline:
         (formFieldLayer.activeFieldFlags
             & PDFFormDesignerController.Multiline) !== 0
+    readonly property int activeTextFieldInputLengthLimit: Math.max(
+        1,
+        formFieldLayer.activeFieldMaxLength > 0
+            ? Math.min(
+                  controller.maximumTextFieldInputLength,
+                  formFieldLayer.activeFieldMaxLength)
+            : Math.max(
+                  controller.maximumTextFieldInputLength,
+                  formFieldLayer.activeFieldValue.length))
     readonly property real resizeHandleSize: 8
     readonly property real resizeHandleHitSize: 24
     readonly property real minimumResizeWidth: 60
@@ -148,8 +158,14 @@ Item {
                 false)
         }
         root.loadedEditorFieldId = fieldId
-        if (editor.text !== formFieldLayer.activeFieldValue)
-            editor.text = formFieldLayer.activeFieldValue
+        if (editor.text !== formFieldLayer.activeFieldValue) {
+            root.syncingTextEditor = true
+            try {
+                editor.text = formFieldLayer.activeFieldValue
+            } finally {
+                root.syncingTextEditor = false
+            }
+        }
         if (fieldChanged && editor.activeFocus && fieldId.length > 0)
             root.controller.setTextFieldFocused(fieldId, true)
     }
@@ -173,8 +189,14 @@ Item {
                 false)
         }
         root.loadedEditorFieldId = fieldId
-        if (editor.text !== formFieldLayer.activeFieldValue)
-            editor.text = formFieldLayer.activeFieldValue
+        if (editor.text !== formFieldLayer.activeFieldValue) {
+            root.syncingTextEditor = true
+            try {
+                editor.text = formFieldLayer.activeFieldValue
+            } finally {
+                root.syncingTextEditor = false
+            }
+        }
         if (fieldChanged && editor.activeFocus && fieldId.length > 0)
             root.controller.setTextFieldFocused(fieldId, true)
     }
@@ -186,11 +208,26 @@ Item {
             syncSingleLineTextEditor()
     }
 
+    function limitedTextPrefix(text, maxLength) {
+        let prefixLength = Math.min(text.length, maxLength)
+        if (prefixLength > 0 && prefixLength < text.length) {
+            const previousCodeUnit = text.charCodeAt(prefixLength - 1)
+            const nextCodeUnit = text.charCodeAt(prefixLength)
+            if (previousCodeUnit >= 0xD800
+                    && previousCodeUnit <= 0xDBFF
+                    && nextCodeUnit >= 0xDC00
+                    && nextCodeUnit <= 0xDFFF) {
+                --prefixLength
+            }
+        }
+        return text.slice(0, prefixLength)
+    }
+
     function activeTextWithinLimit() {
         const activeText = formFieldLayer.activeFieldValue
-        const maxLength = formFieldLayer.activeFieldMaxLength
-        return maxLength > 0 && activeText.length > maxLength
-            ? activeText.slice(0, maxLength)
+        const maxLength = root.activeTextFieldInputLengthLimit
+        return activeText.length > maxLength
+            ? root.limitedTextPrefix(activeText, maxLength)
             : activeText
     }
 
@@ -203,9 +240,8 @@ Item {
             }
 
             const editor = singleLineTextEditorLoader.item as TextField
-            const maxLength = formFieldLayer.activeFieldMaxLength
+            const maxLength = root.activeTextFieldInputLengthLimit
             if (!editor
-                    || maxLength <= 0
                     || editor.text.length <= maxLength) {
                 return
             }
@@ -223,31 +259,25 @@ Item {
     }
 
     function restoreMultilineTextLimit(fieldId) {
-        Qt.callLater(function() {
-            if (root.loadedEditorFieldId !== fieldId
-                    || multilineTextEditorLoader.status
-                        !== Loader.Ready) {
-                return
-            }
+        if (root.loadedEditorFieldId !== fieldId
+                || multilineTextEditorLoader.status !== Loader.Ready) {
+            return
+        }
 
-            const editor = multilineTextEditorLoader.item as TextArea
-            const maxLength = formFieldLayer.activeFieldMaxLength
-            if (!editor
-                    || maxLength <= 0
-                    || editor.text.length <= maxLength) {
-                return
-            }
+        const editor = multilineTextEditorLoader.item as TextArea
+        const maxLength = root.activeTextFieldInputLengthLimit
+        if (!editor || editor.text.length <= maxLength)
+            return
 
-            const acceptedText = root.activeTextWithinLimit()
-            const restoredCursorPosition = Math.max(
-                0,
-                Math.min(
-                    acceptedText.length,
-                    editor.cursorPosition
-                        - (editor.text.length - acceptedText.length)))
-            editor.text = acceptedText
-            editor.cursorPosition = restoredCursorPosition
-        })
+        const acceptedText = root.activeTextWithinLimit()
+        const restoredCursorPosition = Math.max(
+            0,
+            Math.min(
+                acceptedText.length,
+                editor.cursorPosition
+                    - (editor.text.length - acceptedText.length)))
+        editor.text = acceptedText
+        editor.cursorPosition = restoredCursorPosition
     }
 
     function commitActiveTextEditor() {
@@ -1156,9 +1186,7 @@ Item {
             clip: true
             selectByMouse: true
             activeFocusOnPress: true
-            maximumLength: formFieldLayer.activeFieldMaxLength > 0
-                ? formFieldLayer.activeFieldMaxLength
-                : 1000000
+            maximumLength: root.activeTextFieldInputLengthLimit
             leftPadding: Math.max(
                 formFieldLayer.textFieldMinimumHorizontalPaddingPoints
                     * root.pagePointScale,
@@ -1177,9 +1205,11 @@ Item {
             placeholderText: qsTrId("EnterFormText")
 
             onTextChanged: {
-                const maxLength = formFieldLayer.activeFieldMaxLength
+                if (root.syncingTextEditor)
+                    return
+
+                const maxLength = root.activeTextFieldInputLengthLimit
                 if (root.loadedEditorFieldId.length > 0
-                        && maxLength > 0
                         && text.length > maxLength) {
                     root.restoreSingleLineTextLimit(
                         root.loadedEditorFieldId)
@@ -1253,9 +1283,11 @@ Item {
             placeholderText: qsTrId("EnterFormText")
 
             onTextChanged: {
-                const maxLength = formFieldLayer.activeFieldMaxLength
+                if (root.syncingTextEditor)
+                    return
+
+                const maxLength = root.activeTextFieldInputLengthLimit
                 if (root.loadedEditorFieldId.length > 0
-                        && maxLength > 0
                         && text.length > maxLength) {
                     root.restoreMultilineTextLimit(
                         root.loadedEditorFieldId)

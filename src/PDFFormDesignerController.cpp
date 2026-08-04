@@ -20,7 +20,7 @@ namespace {
 
 constexpr int kMaximumDropdownOptions = 4096;
 constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
-constexpr int kMaximumTextFieldLength = 1000000;
+constexpr int kMaximumTextFieldInputLength = 300000;
 
 QString singleLineText(QString value)
 {
@@ -29,6 +29,53 @@ QString singleLineText(QString value)
     value.replace(QLatin1Char('\n'), QLatin1Char(' '));
     value.replace(QChar::LineSeparator, QLatin1Char(' '));
     value.replace(QChar::ParagraphSeparator, QLatin1Char(' '));
+    return value;
+}
+
+qsizetype effectiveTextFieldInputLength(int maxLength)
+{
+    return maxLength > 0
+        ? qMin(maxLength, kMaximumTextFieldInputLength)
+        : kMaximumTextFieldInputLength;
+}
+
+qsizetype safeTextPrefixLength(const QString &value, qsizetype maximumLength)
+{
+    qsizetype prefixLength = qMin(value.size(), maximumLength);
+    if (prefixLength > 0
+        && prefixLength < value.size()
+        && value.at(prefixLength - 1).isHighSurrogate()
+        && value.at(prefixLength).isLowSurrogate()) {
+        --prefixLength;
+    }
+    return prefixLength;
+}
+
+QString constrainedSourceTextFieldValue(QString value,
+                                        int flags,
+                                        int maxLength)
+{
+    if (!(flags & PDFFormDesignerController::Multiline)) {
+        value = singleLineText(std::move(value));
+    }
+    if (maxLength > 0 && value.size() > maxLength) {
+        value.truncate(safeTextPrefixLength(value, maxLength));
+    }
+    return value;
+}
+
+QString constrainedTextFieldValue(QString value,
+                                  int flags,
+                                  int maxLength)
+{
+    value = constrainedSourceTextFieldValue(
+        std::move(value),
+        flags,
+        maxLength);
+    const qsizetype inputLength = effectiveTextFieldInputLength(maxLength);
+    if (value.size() > inputLength) {
+        value.truncate(safeTextPrefixLength(value, inputLength));
+    }
     return value;
 }
 
@@ -215,6 +262,11 @@ QString PDFFormDesignerController::selectedTextFieldId() const
     return m_selectedTextFieldId;
 }
 
+int PDFFormDesignerController::maximumTextFieldInputLength() const
+{
+    return kMaximumTextFieldInputLength;
+}
+
 void PDFFormDesignerController::setFormController(
     PDFFormController *formController)
 {
@@ -349,17 +401,12 @@ void PDFFormDesignerController::refreshSourceFieldValues()
                 field.sourceIdentityToken = source->identityToken;
                 QList<int> changedRoles;
                 if (!(field.changedProperties & ValuePropertyChanged)) {
-                    QString acceptedValue = source->value;
-                    if (field.type == Text) {
-                        if (!(field.flags & Multiline)) {
-                            acceptedValue = singleLineText(
-                                std::move(acceptedValue));
-                        }
-                        if (field.maxLength > 0
-                            && acceptedValue.size() > field.maxLength) {
-                            acceptedValue.truncate(field.maxLength);
-                        }
-                    }
+                    QString acceptedValue = field.type == Text
+                        ? constrainedSourceTextFieldValue(
+                              source->value,
+                              field.flags,
+                              field.maxLength)
+                        : source->value;
                     const bool valueConstrained
                         = acceptedValue != source->value;
                     if (acceptedValue != field.value) {
@@ -725,16 +772,9 @@ bool PDFFormDesignerController::setFieldValue(const QString &fieldId,
     }
 
     FormField &field = m_fields[row];
-    QString acceptedValue = value;
-    if (field.type == Text) {
-        if (!(field.flags & Multiline)) {
-            acceptedValue = singleLineText(std::move(acceptedValue));
-        }
-        if (field.maxLength > 0
-            && acceptedValue.size() > field.maxLength) {
-            acceptedValue.truncate(field.maxLength);
-        }
-    }
+    QString acceptedValue = field.type == Text
+        ? constrainedTextFieldValue(value, field.flags, field.maxLength)
+        : value;
     if (field.type == Dropdown
         && !field.options.contains(acceptedValue)) {
         return false;
@@ -959,9 +999,15 @@ bool PDFFormDesignerController::setFieldFlags(const QString &fieldId, int flags)
         peer.flags = flags;
         peer.changedProperties |= FlagsPropertyChanged;
         QList<int> changedRoles{FlagsRole, DirtyRole};
-        if (peer.type == Text && !(peer.flags & Multiline)) {
-            const QString value = singleLineText(peer.value);
-            const QString defaultValue = singleLineText(peer.defaultValue);
+        if (peer.type == Text) {
+            const QString value = constrainedTextFieldValue(
+                peer.value,
+                peer.flags,
+                peer.maxLength);
+            const QString defaultValue = constrainedTextFieldValue(
+                peer.defaultValue,
+                peer.flags,
+                peer.maxLength);
             if (value != peer.value) {
                 peer.value = value;
                 peer.changedProperties |= ValuePropertyChanged;
@@ -989,7 +1035,7 @@ bool PDFFormDesignerController::setFieldMaxLength(
     if (row < 0
         || m_fields.at(row).type != Text
         || maxLength < 0
-        || maxLength > kMaximumTextFieldLength) {
+        || maxLength > kMaximumTextFieldInputLength) {
         return false;
     }
 
@@ -1001,14 +1047,19 @@ bool PDFFormDesignerController::setFieldMaxLength(
     field.maxLength = maxLength;
     field.changedProperties |= MaxLengthPropertyChanged;
     QList<int> changedRoles{MaxLengthRole, DirtyRole};
-    if (maxLength > 0 && field.value.size() > maxLength) {
-        field.value.truncate(maxLength);
+    const QString value = constrainedTextFieldValue(
+        field.value,
+        field.flags,
+        maxLength);
+    if (value != field.value) {
+        field.value = value;
         field.changedProperties |= ValuePropertyChanged;
         changedRoles.append(ValueRole);
     }
-    if (maxLength > 0 && field.defaultValue.size() > maxLength) {
-        field.defaultValue.truncate(maxLength);
-    }
+    field.defaultValue = constrainedTextFieldValue(
+        field.defaultValue,
+        field.flags,
+        maxLength);
     emit dataChanged(index(row), index(row), changedRoles);
     emit draftStateChanged();
     return true;

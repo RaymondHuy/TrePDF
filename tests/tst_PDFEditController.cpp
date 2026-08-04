@@ -2568,6 +2568,7 @@ class PDFEditControllerTest : public QObject
 private slots:
     void initTestCase();
     void storesTransientTextFieldsByPage();
+    void limitsTransientTextFieldInputLength();
     void storesTransientRadioButtons();
     void renamesDropdownOptionsWithoutLosingSelection();
     void limitsFormFieldPointerHitArea();
@@ -2949,6 +2950,67 @@ void PDFEditControllerTest::storesTransientTextFieldsByPage()
     QCOMPARE(fields.size(), 1);
     QCOMPARE(fields.constFirst().toMap().value(QStringLiteral("id")).toString(),
              sourceFieldId);
+}
+
+void PDFEditControllerTest::limitsTransientTextFieldInputLength()
+{
+    constexpr int maximumInputLength = 300000;
+    PDFFormDesignerController controller;
+    QCOMPARE(
+        controller.maximumTextFieldInputLength(),
+        maximumInputLength);
+
+    const QString fieldId = controller.addTextField(
+        0,
+        0.1,
+        0.1,
+        0.4,
+        0.2);
+    QVERIFY(!fieldId.isEmpty());
+    QVERIFY(controller.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Multiline));
+
+    QString oversizedValue(
+        maximumInputLength + 1,
+        QLatin1Char('a'));
+    oversizedValue[100] = QLatin1Char('\n');
+    controller.setTextFieldText(fieldId, oversizedValue);
+
+    const QString acceptedValue = controller.fieldData(fieldId)
+                                      .value(QStringLiteral("value"))
+                                      .toString();
+    QCOMPARE(acceptedValue.size(), maximumInputLength);
+    QCOMPARE(acceptedValue.at(100), QLatin1Char('\n'));
+    QCOMPARE(
+        controller.fieldData(fieldId)
+            .value(QStringLiteral("maxLength")).toInt(),
+        0);
+
+    QString surrogateBoundaryValue(
+        maximumInputLength - 1,
+        QLatin1Char('b'));
+    surrogateBoundaryValue.append(
+        QString::fromUtf8("\xF0\x9F\x98\x80"));
+    QCOMPARE(
+        surrogateBoundaryValue.size(),
+        maximumInputLength + 1);
+    controller.setTextFieldText(fieldId, surrogateBoundaryValue);
+    const QString surrogateSafeValue = controller.fieldData(fieldId)
+                                           .value(QStringLiteral("value"))
+                                           .toString();
+    QCOMPARE(
+        surrogateSafeValue.size(),
+        maximumInputLength - 1);
+    QVERIFY(!surrogateSafeValue.at(
+                 surrogateSafeValue.size() - 1).isHighSurrogate());
+
+    QVERIFY(controller.setFieldMaxLength(
+        fieldId,
+        maximumInputLength));
+    QVERIFY(!controller.setFieldMaxLength(
+        fieldId,
+        maximumInputLength + 1));
 }
 
 void PDFEditControllerTest::storesTransientRadioButtons()

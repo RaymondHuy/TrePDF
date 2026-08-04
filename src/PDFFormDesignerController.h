@@ -26,6 +26,8 @@ class PDFFormDesignerController : public QAbstractListModel
                    NOTIFY textFieldSelectionChanged FINAL)
     Q_PROPERTY(QString selectedFieldId READ selectedTextFieldId
                    NOTIFY textFieldSelectionChanged FINAL)
+    Q_PROPERTY(int maximumTextFieldInputLength
+                   READ maximumTextFieldInputLength CONSTANT FINAL)
 
 public:
     enum FieldType {
@@ -115,6 +117,7 @@ public:
     bool textFieldFocused() const;
     QString focusedTextFieldId() const;
     QString selectedTextFieldId() const;
+    int maximumTextFieldInputLength() const;
 
     void setFormController(PDFFormController *formController);
     Q_INVOKABLE QString addField(int type,

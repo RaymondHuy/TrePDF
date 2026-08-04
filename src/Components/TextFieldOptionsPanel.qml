@@ -37,7 +37,11 @@ Rectangle {
 
         multiline = (Number(field.flags)
             & PDFFormDesignerController.Multiline) !== 0
-        maxLength = Math.max(0, Number(field.maxLength))
+        maxLength = Math.max(
+            0,
+            Math.min(
+                controller.maximumTextFieldInputLength,
+                Number(field.maxLength)))
     }
 
     function showUpdateError() {
@@ -54,7 +58,9 @@ Rectangle {
     function stageMaxLength(value) {
         const updatedMaxLength = Math.max(
             1,
-            Math.min(1000000, Number(value)))
+            Math.min(
+                controller.maximumTextFieldInputLength,
+                Number(value)))
         maxLength = updatedMaxLength
 
         const field = controller.fieldData(fieldId)
@@ -343,7 +349,7 @@ Rectangle {
                     Layout.topMargin: 6
                     visible: root.maxLength > 0
                     from: 1
-                    to: 1000000
+                    to: root.controller.maximumTextFieldInputLength
                     value: root.maxLength > 0 ? root.maxLength : 100
                     editable: true
                     live: true
