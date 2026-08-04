@@ -527,7 +527,17 @@ Item {
         fieldsInteractive: root.fieldsInteractive
         moveEnabled: (root.formsActive || root.editActive)
             && root.fieldsInteractive
-            && root.placementFieldType < 0
+            && (root.placementFieldType < 0
+                || (formFieldLayer.activeFieldType
+                        === root.placementFieldType
+                    && (root.placementFieldType
+                            === PDFFormDesignerController.Checkbox
+                        || root.placementFieldType
+                            === PDFFormDesignerController.RadioButton
+                        || root.placementFieldType
+                            === PDFFormDesignerController.Dropdown
+                        || root.placementFieldType
+                            === PDFFormDesignerController.Text)))
             && !root.pooled
         accentColor: root.theme.foxitDarkOrange
         pointScale: root.pagePointScale
@@ -785,7 +795,11 @@ Item {
                 && (formFieldLayer.activeFieldType
                         === PDFFormDesignerController.Text
                     || formFieldLayer.activeFieldType
-                        === PDFFormDesignerController.Dropdown)
+                        === PDFFormDesignerController.Dropdown
+                    || formFieldLayer.activeFieldType
+                        === PDFFormDesignerController.Checkbox
+                    || formFieldLayer.activeFieldType
+                        === PDFFormDesignerController.RadioButton)
                 && !activeFieldFrame.resizing
             z: 40
 
