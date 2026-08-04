@@ -2573,6 +2573,7 @@ private slots:
     void savesAndRehydratesCheckbox();
     void savesAndRehydratesRadioButton();
     void savesRehydratesAndMutatesRadioButtonGroup();
+    void scopesRadioSnapshotsToAffectedGroups();
     void migratesLegacyMergedRadioButton();
     void savesRehydratesAndInteractsWithDropdown();
     void deletesRehydratedDropdownWithoutChangingPeer();
@@ -4250,6 +4251,132 @@ void PDFEditControllerTest::savesRehydratesAndMutatesRadioButtonGroup()
         secondId);
     QCOMPARE(removedInspection.widgetCount, 1);
     QCOMPARE(removedInspection.fieldType, FPDF_FORMFIELD_UNKNOWN);
+}
+
+void PDFEditControllerTest::scopesRadioSnapshotsToAffectedGroups()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-radio-scope-source.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-radio-scope-saved.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+
+    const QString firstGroup = QStringLiteral("FirstRadioGroup");
+    const QString secondGroup = QStringLiteral("SecondRadioGroup");
+    const auto addRadio = [&formDesigner](const QRectF &rect,
+                                          const QString &groupName) {
+        const QString id = formDesigner.addField(
+            PDFFormDesignerController::RadioButton,
+            0,
+            rect.x(),
+            rect.y(),
+            rect.width(),
+            rect.height());
+        return !id.isEmpty() && formDesigner.setFieldName(id, groupName)
+            ? id
+            : QString();
+    };
+    const QString firstGroupFirst = addRadio(
+        QRectF(0.12, 0.20, 0.05, 0.05),
+        firstGroup);
+    const QString firstGroupSecond = addRadio(
+        QRectF(0.22, 0.20, 0.05, 0.05),
+        firstGroup);
+    const QString secondGroupFirst = addRadio(
+        QRectF(0.12, 0.34, 0.05, 0.05),
+        secondGroup);
+    const QString secondGroupSecond = addRadio(
+        QRectF(0.22, 0.34, 0.05, 0.05),
+        secondGroup);
+    QVERIFY(!firstGroupFirst.isEmpty());
+    QVERIFY(!firstGroupSecond.isEmpty());
+    QVERIFY(!secondGroupFirst.isEmpty());
+    QVERIFY(!secondGroupSecond.isEmpty());
+
+    QSignalSpy saveFinishedSpy(
+        &editController,
+        &PDFEditController::saveFinished);
+    QVERIFY(editController.requestSaveAs(QUrl::fromLocalFile(savedPath)));
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+    QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 4, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    const auto sortedFieldIds = [](
+        const QVector<PDFFormDesignerController::SaveField> &fields) {
+        QStringList ids;
+        ids.reserve(fields.size());
+        for (const PDFFormDesignerController::SaveField &field : fields) {
+            ids.append(field.id);
+        }
+        ids.sort();
+        return ids;
+    };
+    const auto sortedIds = [](QStringList ids) {
+        ids.sort();
+        return ids;
+    };
+
+    formDesigner.prepareForDesignMode();
+    QVERIFY(formDesigner.moveField(firstGroupFirst, 0.16, 0.24));
+    QVector<PDFFormDesignerController::SaveField> savedFields
+        = formDesigner.saveFields();
+    QCOMPARE(
+        sortedFieldIds(savedFields),
+        sortedIds({firstGroupFirst, firstGroupSecond}));
+
+    formDesigner.resetFromDocument();
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 4, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    formDesigner.prepareForDesignMode();
+    QVERIFY(formDesigner.setFieldName(firstGroupFirst, secondGroup));
+    savedFields = formDesigner.saveFields();
+    QCOMPARE(
+        sortedFieldIds(savedFields),
+        sortedIds({
+            firstGroupFirst,
+            firstGroupSecond,
+            secondGroupFirst,
+            secondGroupSecond}));
+
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 4, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    const AcroFormFieldInspection firstGroupInspection
+        = inspectAcroFormField(
+            savedPath,
+            firstGroup,
+            0,
+            firstGroupSecond);
+    QVERIFY(firstGroupInspection.readable);
+    QCOMPARE(firstGroupInspection.fieldType, FPDF_FORMFIELD_RADIOBUTTON);
+    QCOMPARE(firstGroupInspection.controlCount, 1);
+
+    const AcroFormFieldInspection secondGroupInspection
+        = inspectAcroFormField(
+            savedPath,
+            secondGroup,
+            0,
+            firstGroupFirst);
+    QVERIFY(secondGroupInspection.readable);
+    QCOMPARE(secondGroupInspection.fieldType, FPDF_FORMFIELD_RADIOBUTTON);
+    QCOMPARE(secondGroupInspection.controlCount, 3);
 }
 
 void PDFEditControllerTest::migratesLegacyMergedRadioButton()

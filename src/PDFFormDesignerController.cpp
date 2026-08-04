@@ -5,6 +5,7 @@
 #include "PDFFormController.h"
 
 #include <QCoreApplication>
+#include <QHash>
 #include <QSet>
 #include <QUuid>
 #include <QVariantMap>
@@ -1115,19 +1116,47 @@ PDFFormDesignerController::saveFields(
 {
     QVector<SaveField> fields;
     fields.reserve(m_fields.size() + m_removedSourceFields.size());
-    bool radioSnapshotRequired = std::any_of(
-            m_fields.cbegin(),
-            m_fields.cend(),
-            [](const FormField &field) {
-                return field.type == RadioButton
-                    && field.changedProperties != NoPropertyChanges;
-            })
-        || std::any_of(
-            m_removedSourceFields.cbegin(),
-            m_removedSourceFields.cend(),
-            [](const FormField &field) {
-                return field.type == RadioButton;
-            });
+    QSet<QString> requiredRadioGroupNames;
+    QStringList pendingRadioGroupNames;
+    bool snapshotAllRadioGroups = false;
+    const auto requireRadioGroupName
+        = [&requiredRadioGroupNames,
+           &pendingRadioGroupNames](const QString &groupName) {
+              if (groupName.isEmpty()
+                  || requiredRadioGroupNames.contains(groupName)) {
+                  return;
+              }
+              requiredRadioGroupNames.insert(groupName);
+              pendingRadioGroupNames.append(groupName);
+          };
+    const auto requireRadioGroups
+        = [&requireRadioGroupName,
+           &snapshotAllRadioGroups](const FormField &field) {
+              if (field.type != RadioButton) {
+                  return;
+              }
+              if (field.sourceBacked
+                  && field.sourceRadioGroupName.isEmpty()) {
+                  snapshotAllRadioGroups = true;
+              }
+              requireRadioGroupName(field.name);
+              requireRadioGroupName(field.sourceRadioGroupName);
+          };
+    for (const FormField &field : m_fields) {
+        if (field.changedProperties != NoPropertyChanges) {
+            requireRadioGroups(field);
+        }
+    }
+    for (const FormField &field : m_removedSourceFields) {
+        if (field.type != RadioButton) {
+            continue;
+        }
+        if (field.sourceRadioGroupName.isEmpty()) {
+            snapshotAllRadioGroups = true;
+        } else {
+            requireRadioGroupName(field.sourceRadioGroupName);
+        }
+    }
     QSet<int> normalizationPages;
     if (includeAppearanceNormalization) {
         // Normalize legacy peers only on pages where the user made a real
@@ -1141,18 +1170,45 @@ PDFFormDesignerController::saveFields(
                 normalizationPages.insert(page);
             }
         }
-        radioSnapshotRequired = radioSnapshotRequired
-            || std::any_of(
-                m_fields.cbegin(),
-                m_fields.cend(),
-                [this, &normalizationPages](const FormField &field) {
-                    return field.type == RadioButton
-                        && field.sourceBacked
-                        && field.appearanceVersion
-                            < PDFFormAppearance::kRadioButtonVersion
-                        && normalizationPages.contains(
-                            displayPageForField(field));
-                });
+        for (const FormField &field : m_fields) {
+            if (field.type == RadioButton
+                && field.sourceBacked
+                && field.appearanceVersion
+                    < PDFFormAppearance::kRadioButtonVersion
+                && normalizationPages.contains(
+                    displayPageForField(field))) {
+                requireRadioGroups(field);
+            }
+        }
+    }
+    if (!snapshotAllRadioGroups && !pendingRadioGroupNames.isEmpty()) {
+        // A rename connects the immutable source group to the current target
+        // group. Walk the complete component so the canonicalizer receives
+        // every source sibling and every target member, even across pages.
+        QHash<QString, QSet<QString>> connectedRadioGroupNames;
+        for (const FormField &field : m_fields) {
+            if (field.type != RadioButton
+                || field.name.isEmpty()
+                || field.sourceRadioGroupName.isEmpty()
+                || field.name == field.sourceRadioGroupName) {
+                continue;
+            }
+            connectedRadioGroupNames[field.name].insert(
+                field.sourceRadioGroupName);
+            connectedRadioGroupNames[field.sourceRadioGroupName].insert(
+                field.name);
+        }
+        while (!pendingRadioGroupNames.isEmpty()) {
+            const QString groupName = pendingRadioGroupNames.takeLast();
+            const auto connected = connectedRadioGroupNames.constFind(
+                groupName);
+            if (connected == connectedRadioGroupNames.cend()) {
+                continue;
+            }
+            for (const QString &connectedGroupName : *connected) {
+                requireRadioGroupName(connectedGroupName);
+            }
+        }
     }
     for (const FormField &field : m_fields) {
         const int page = displayPageForField(field);
@@ -1180,9 +1236,15 @@ PDFFormDesignerController::saveFields(
                 || nativeAppearancePages.contains(page));
         const bool normalizeAppearance
             = normalizeLegacyAppearance || normalizeNativeAppearance;
+        const bool snapshotRadioGroup
+            = field.type == RadioButton
+            && (snapshotAllRadioGroups
+                || requiredRadioGroupNames.contains(field.name)
+                || requiredRadioGroupNames.contains(
+                    field.sourceRadioGroupName));
         if (field.changedProperties == NoPropertyChanges
             && !normalizeAppearance
-            && !(radioSnapshotRequired && field.type == RadioButton)) {
+            && !snapshotRadioGroup) {
             continue;
         }
         if (page < 0 || field.normalizedRect.isEmpty()) {
@@ -1358,6 +1420,9 @@ void PDFFormDesignerController::reloadSourceFields()
                 field.sourceNormalizedRect = source.normalizedRect;
                 field.value = source.value;
                 field.name = source.name;
+                if (field.type == RadioButton) {
+                    field.sourceRadioGroupName = source.name;
+                }
                 field.tooltip = source.tooltip;
                 field.defaultValue = source.defaultValue;
                 field.options = source.options;
