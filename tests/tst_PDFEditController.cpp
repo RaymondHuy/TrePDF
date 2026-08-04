@@ -17,10 +17,13 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetricsF>
+#include <QGuiApplication>
 #include <QImage>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QQuickItemGrabResult>
 #include <QQuickTextDocument>
+#include <QQuickWindow>
 #include <QRawFont>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -2568,6 +2571,7 @@ private slots:
     void storesTransientRadioButtons();
     void renamesDropdownOptionsWithoutLosingSelection();
     void limitsFormFieldPointerHitArea();
+    void rendersMultilineFormFieldPreview();
     void movesFormFieldsWithoutResizing();
     void savesTextFieldAsAcroForm();
     void savesAndRehydratesCheckbox();
@@ -3126,6 +3130,75 @@ void PDFEditControllerTest::limitsFormFieldPointerHitArea()
     QVERIFY(controller.moveField(fieldId, 0.5, 0.6));
     QVERIFY(!fieldLayer.contains(fieldCenter));
     QVERIFY(fieldLayer.contains(QPointF(700, 640)));
+}
+
+void PDFEditControllerTest::rendersMultilineFormFieldPreview()
+{
+    if (QGuiApplication::screens().isEmpty()) {
+        QSKIP("The form preview needs a Qt Quick render screen.");
+    }
+
+    PDFFormDesignerController controller;
+    const QString fieldId = controller.addTextField(
+        0,
+        0.05,
+        0.08,
+        0.9,
+        0.84);
+    QVERIFY(!fieldId.isEmpty());
+    QVERIFY(controller.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Multiline));
+    QVERIFY(controller.setFieldValue(
+        fieldId,
+        QStringLiteral("Alpha\nBeta")));
+
+    QQuickWindow window;
+    window.setColor(Qt::white);
+    window.resize(320, 120);
+
+    TestableFormFieldLayer fieldLayer;
+    fieldLayer.setParentItem(window.contentItem());
+    fieldLayer.setWidth(window.width());
+    fieldLayer.setHeight(window.height());
+    fieldLayer.setController(&controller);
+    fieldLayer.setPage(0);
+    fieldLayer.setFieldsVisible(true);
+
+    window.show();
+    QTRY_VERIFY_WITH_TIMEOUT(window.isExposed(), 5000);
+    const QSharedPointer<QQuickItemGrabResult> grabResult
+        = fieldLayer.grabToImage(window.size());
+    QVERIFY(grabResult);
+    QSignalSpy readySpy(
+        grabResult.data(),
+        &QQuickItemGrabResult::ready);
+    if (grabResult->image().isNull()) {
+        QTRY_VERIFY_WITH_TIMEOUT(readySpy.count() > 0, 5000);
+    }
+    const QImage preview = grabResult->image();
+    QVERIFY(!preview.isNull());
+
+    int firstTextRow = preview.height();
+    int lastTextRow = -1;
+    for (int y = 8; y < preview.height() - 8; ++y) {
+        bool rowContainsText = false;
+        for (int x = 24; x < preview.width() - 24; ++x) {
+            const QColor pixel = preview.pixelColor(x, y);
+            if (pixel.red() < 100
+                && pixel.green() < 100
+                && pixel.blue() < 100) {
+                rowContainsText = true;
+                break;
+            }
+        }
+        if (rowContainsText) {
+            firstTextRow = qMin(firstTextRow, y);
+            lastTextRow = qMax(lastTextRow, y);
+        }
+    }
+    QVERIFY(firstTextRow < preview.height() / 3);
+    QVERIFY(lastTextRow - firstTextRow >= 16);
 }
 
 void PDFEditControllerTest::movesFormFieldsWithoutResizing()
