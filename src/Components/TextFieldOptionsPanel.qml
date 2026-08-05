@@ -29,7 +29,9 @@ Rectangle {
         const field = controller.fieldData(fieldId)
         if (fieldId.length === 0
                 || Number(field.type)
-                    !== PDFFormDesignerController.Text) {
+                    !== PDFFormDesignerController.Text
+                || (Number(field.flags)
+                    & PDFFormDesignerController.Comb) !== 0) {
             multiline = false
             maxLength = 0
             return
@@ -66,7 +68,9 @@ Rectangle {
         const field = controller.fieldData(fieldId)
         if (fieldId.length === 0
                 || Number(field.type)
-                    !== PDFFormDesignerController.Text) {
+                    !== PDFFormDesignerController.Text
+                || (Number(field.flags)
+                    & PDFFormDesignerController.Comb) !== 0) {
             clearPendingEdit()
             return
         }
@@ -118,7 +122,7 @@ Rectangle {
             return
         }
 
-        multiline = enabled
+        refreshField()
         errorText = ""
     }
 
@@ -134,7 +138,7 @@ Rectangle {
         }
 
         clearPendingEdit()
-        maxLength = updatedMaxLength
+        refreshField()
         errorText = ""
     }
 

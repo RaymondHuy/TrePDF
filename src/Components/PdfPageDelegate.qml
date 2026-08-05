@@ -19,6 +19,7 @@ Item {
     property bool checkboxToolActive: false
     property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
+    property bool combFieldToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
     property bool pooled: false
@@ -131,6 +132,7 @@ Item {
             checkboxToolActive: pageCard.checkboxToolActive
             radioButtonToolActive: pageCard.radioButtonToolActive
             dropdownToolActive: pageCard.dropdownToolActive
+            combFieldToolActive: pageCard.combFieldToolActive
             draftTextureCurrent: pageView.draftTextureCurrent
             draftTextureReady: pageView.draftTextureReady
             viewportItem: pageCard.viewportItem

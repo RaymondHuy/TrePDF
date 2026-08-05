@@ -28,6 +28,7 @@ constexpr char kUnicodeFormFontBaseName[] = "ArialMT";
 constexpr char kUnicodeFormFontResourcePrefix[] = "TrePDFUF";
 constexpr int kMaximumTextFieldLength = 1000000;
 constexpr int kTextFieldMultiline = 1 << 12;
+constexpr int kTextFieldComb = 1 << 24;
 constexpr int kButtonNoToggleToOff = 1 << 14;
 constexpr int kButtonRadio = 1 << 15;
 
@@ -1206,6 +1207,10 @@ QImage textFieldAppearanceImage(
         : 0.0;
     const bool multiline = !dropdown
         && (field.fieldFlags & kTextFieldMultiline);
+    const bool comb = !dropdown
+        && !multiline
+        && field.maxLength > 0
+        && (field.fieldFlags & kTextFieldComb);
     const qreal verticalPadding = multiline
         ? qMax(borderPixelWidth + 1.0, horizontalPadding * 0.25)
         : 0.0;
@@ -1223,6 +1228,58 @@ QImage textFieldAppearanceImage(
         textOption.setWrapMode(
             QTextOption::WrapAtWordBoundaryOrAnywhere);
         painter.drawText(textRect, field.value, textOption);
+    } else if (comb) {
+        const QRectF combRect(
+            borderPixelWidth,
+            borderPixelWidth,
+            qMax(0.0, pixelWidth - 2.0 * borderPixelWidth),
+            qMax(0.0, pixelHeight - 2.0 * borderPixelWidth));
+        const qreal slotWidth = combRect.width() / field.maxLength;
+        if (slotWidth >= 1.0) {
+            painter.setPen(QPen(
+                QColor::fromRgb(
+                    PDFFormAppearance::kTextFieldBorderRgb),
+                borderPixelWidth));
+            for (int slot = 1; slot < field.maxLength; ++slot) {
+                const qreal x = combRect.left() + slotWidth * slot;
+                painter.drawLine(
+                    QPointF(x, combRect.top()),
+                    QPointF(x, combRect.bottom()));
+            }
+
+            painter.setPen(QColor(32, 33, 36));
+            int valueOffset = 0;
+            for (int slot = 0;
+                 slot < field.maxLength
+                 && valueOffset < field.value.size();
+                 ++slot) {
+                int characterLength = 1;
+                if (field.value.at(valueOffset).isHighSurrogate()
+                    && valueOffset + 1 < field.value.size()
+                    && field.value.at(valueOffset + 1).isLowSurrogate()) {
+                    characterLength = 2;
+                }
+                const QRectF slotRect(
+                    combRect.left() + slotWidth * slot,
+                    combRect.top(),
+                    slotWidth,
+                    combRect.height());
+                painter.drawText(
+                    slotRect,
+                    Qt::AlignCenter | Qt::TextSingleLine,
+                    field.value.mid(valueOffset, characterLength));
+                valueOffset += characterLength;
+            }
+        } else {
+            // More slots than visible pixels cannot be represented faithfully.
+            // Draw the value once and avoid an unbounded divider/cell loop.
+            painter.setPen(QColor(32, 33, 36));
+            painter.drawText(
+                textRect,
+                Qt::AlignLeft | Qt::AlignVCenter
+                    | Qt::TextSingleLine,
+                field.value);
+        }
     } else {
         painter.drawText(
             textRect,
@@ -4227,9 +4284,14 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         if ((formField.type == FieldType::Text
              && (formField.maxLength < 0
                  || formField.maxLength
-                     > kMaximumTextFieldLength))
+                     > kMaximumTextFieldLength
+                 || ((formField.fieldFlags & kTextFieldComb)
+                     && (formField.maxLength <= 0
+                         || (formField.fieldFlags
+                             & kTextFieldMultiline)))))
             || (formField.type != FieldType::Text
-                && formField.maxLength != 0)) {
+                && (formField.maxLength != 0
+                    || (formField.fieldFlags & kTextFieldComb)))) {
             error = QStringLiteral(
                 "The Text Field character limit is invalid.");
             file.unmap(mapped);

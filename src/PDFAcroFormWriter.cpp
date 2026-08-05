@@ -26,6 +26,8 @@ constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
 constexpr int kMaximumTextFieldLength = 1000000;
 constexpr int kButtonNoToggleToOff = 1 << 14;
 constexpr int kButtonRadio = 1 << 15;
+constexpr int kTextFieldDoNotScroll = 1 << 23;
+constexpr int kTextFieldComb = 1 << 24;
 constexpr int kChoiceCommitOnSelectionChange = 1 << 26;
 
 bool isTrePDFTextFieldWidgetId(const QString &widgetId)
@@ -253,10 +255,12 @@ int widgetFieldFlags(const PDFAcroFormWriter::Field &field)
         | (field.required ? FPDF_FORMFLAG_REQUIRED : 0);
     if (field.type == PDFAcroFormWriter::FieldType::Dropdown) {
         flags |= FPDF_FORMFLAG_CHOICE_COMBO;
-    } else if (field.type
-                   == PDFAcroFormWriter::FieldType::Text
-               && field.multiline) {
-        flags |= FPDF_FORMFLAG_TEXT_MULTILINE;
+    } else if (field.type == PDFAcroFormWriter::FieldType::Text) {
+        if (field.comb) {
+            flags |= kTextFieldDoNotScroll | kTextFieldComb;
+        } else if (field.multiline) {
+            flags |= FPDF_FORMFLAG_TEXT_MULTILINE;
+        }
     } else if (field.type
                == PDFAcroFormWriter::FieldType::RadioButton) {
         flags |= kButtonRadio;
@@ -810,6 +814,8 @@ bool validateWrittenFields(
                     & (FPDF_FORMFLAG_READONLY
                        | FPDF_FORMFLAG_REQUIRED
                        | FPDF_FORMFLAG_TEXT_MULTILINE
+                       | kTextFieldDoNotScroll
+                       | kTextFieldComb
                        | FPDF_FORMFLAG_CHOICE_COMBO
                        | FPDF_FORMFLAG_CHOICE_EDIT
                        | FPDF_FORMFLAG_CHOICE_MULTI_SELECT
@@ -893,6 +899,8 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
         if (field.type == FieldType::Text) {
             if (field.maxLength < 0
                 || field.maxLength > kMaximumTextFieldLength
+                || (field.comb
+                    && (field.multiline || field.maxLength <= 0))
                 || (field.maxLength > 0
                     && (field.value.size() > field.maxLength
                         || field.defaultValue.size()
@@ -900,7 +908,9 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
                 return failure(QStringLiteral(
                     "The Text Field character limit is invalid."));
             }
-        } else if (field.multiline || field.maxLength != 0) {
+        } else if (field.multiline
+                   || field.comb
+                   || field.maxLength != 0) {
             return failure(QStringLiteral(
                 "Only Text Fields support multi-line input and character limits."));
         }

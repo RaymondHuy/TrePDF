@@ -3008,6 +3008,8 @@ PDFSaveWriter::Result prepareAcroFormFields(
             & PDFFormDesignerController::ReadOnly;
         target.multiline = source.flags
             & PDFFormDesignerController::Multiline;
+        target.comb = source.flags
+            & PDFFormDesignerController::Comb;
         target.maxLength = source.maxLength;
         target.valueChanged
             = source.operation

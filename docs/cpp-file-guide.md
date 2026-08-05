@@ -421,10 +421,13 @@ rehydrate.
 
 **Thao tác:**
 
-- Tạo field với tên duy nhất, default size/value/flags; helper riêng cho Text.
+- Tạo field với tên duy nhất, default size/value/flags; helper riêng cho Text và
+  Comb Field. Comb vẫn là type Text, mặc định năm ô.
 - Đổi value/name/options/flags/max length/rect; `moveField()` chỉ đổi top-left,
   giữ width/height và clamp field vào trang. Text Field không multi-line được
-  chuẩn hóa về một dòng; max length dương được áp ngay lên value.
+  chuẩn hóa về một dòng; max length dương được áp ngay lên value. Flag Comb yêu
+  cầu max length dương, loại trừ Multiline, và khi đặt max length về `0` thì
+  controller tự gỡ Comb.
 - Chọn field, quản lý text focus, activate source checkbox/radio, chọn giá trị
   Dropdown, remove field transient và tạo tombstone khi xóa Text Field,
   Dropdown hoặc Radio source-backed do TrePDF tạo. `name` của Radio là Group ID;
@@ -439,6 +442,8 @@ rehydrate.
   để writer biết field nào chỉ cần normalize appearance.
 - Dropdown giữ annotation index và identity token; đổi lựa chọn source-backed đi
   qua form worker rồi refresh model thay vì tạo một value draft tách khỏi PDFium.
+- Text field có `/Ff` Comb hợp lệ cùng `/MaxLen` được map trở lại flag designer,
+  nên cell count và appearance tiếp tục chỉnh được sau reopen.
 
 **Save snapshot:**
 
@@ -459,7 +464,8 @@ rehydrate.
 - Lấy field model theo display page, visibility/source visibility và pooled state.
 - Dựng scene graph nodes cho Text Field, Check Box, Radio Button, Dropdown và
   presentation của các type dự trù; vẽ border, background, text/check mark/radio
-  dot/arrow và selected state.
+  dot/arrow và selected state. Với Text Field có flag Comb, layer chia đều rect
+  theo max length và căn ký tự giữa từng ô.
 - Dùng constants từ `PDFFormAppearance.h` để preview font, border và padding khớp
   appearance writer.
 - Expose active field id/rect/value/options/type/flags/source-backed để QML đặt
@@ -495,10 +501,11 @@ tooltip/value/default/options/rect/page/type/flags/operation.
 2. Với update không đổi value/options, đọc live data từ document để tránh
    designer snapshot cũ ghi đè thay đổi form runtime/JavaScript.
 3. Chuẩn hóa Checkbox/Radio Button về `Yes`/`Off`; kiểm Dropdown
-   options/selection và chuyển Required/ReadOnly/Radio/Combo thành form flags.
-   Radio không đặt `NoToggleToOff` để PDF reader cho phép bỏ chọn. Với Remove,
-   chỉ chấp nhận Text Field, Dropdown hoặc Radio source-backed có widget id hợp
-   lệ.
+   options/selection và chuyển Required/ReadOnly/Radio/Combo/Comb thành form
+   flags. Text Comb còn ghi `DoNotScroll`, yêu cầu `/MaxLen` dương và không cho
+   đồng thời Multiline. Radio không đặt `NoToggleToOff` để PDF reader cho phép
+   bỏ chọn. Với Remove, chỉ chấp nhận Text Field, Dropdown hoặc Radio
+   source-backed có widget id hợp lệ.
 4. Với field Add, tạo Square annotation placeholder có rect, `NM=widgetId` và
    Print flag. PDFium public API chưa tạo đầy đủ Widget dictionary cần thiết.
 5. Save bản có placeholder qua `QSaveFile` và PDFium.
@@ -539,10 +546,12 @@ API không thể dựng trực tiếp.
 **Sinh object:**
 
 - Tạo/cập nhật Text Field Widget dictionary, field flags, `/MaxLen`, `/DA`,
-  `/DR`, value và default value.
+  `/DR`, value và default value. Comb Field dùng `/FT /Tx`, cờ Comb chuẩn PDF và
+  một cell cho mỗi ký tự theo `/MaxLen`.
 - Render appearance text field thành image XObject có giới hạn tổng pixel, rồi
   tạo appearance stream để PDF reader hiển thị ổn định kể cả trước khi focus;
-  field multi-line được wrap và căn trên trong appearance.
+  field multi-line được wrap và căn trên trong appearance; field comb vẽ divider
+  và căn từng ký tự giữa cell.
 - Tạo Checkbox Widget với `/AP` Off/Yes riêng, `/AS`, value/default value và
   vector check appearance.
 - Gom Radio theo Group ID thành một field cha `/FT /Btn` có `/Kids`; mỗi Widget
@@ -616,11 +625,11 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
 
 **Nhóm coverage hiện tại:**
 
-- Form designer: lưu/rehydrate Text Field, Checkbox, grouped Radio Button và
-  Dropdown; giữ lựa chọn/options khi move-resize; kiểm mutual exclusion, Group
-  ID, export/control index và xóa member Radio; xóa draft/Discard/Save round-trip
-  cho TrePDF Dropdown; appearance normalization, AcroForm sẵn có và tên field
-  trùng.
+- Form designer: lưu/rehydrate Text Field, Comb Field, Checkbox, grouped Radio
+  Button và Dropdown; giữ lựa chọn/options khi move-resize; kiểm mutual
+  exclusion, Group ID, max length/comb constraints, export/control index và xóa
+  member Radio; xóa draft/Discard/Save round-trip cho TrePDF Dropdown;
+  appearance normalization, AcroForm sẵn có và tên field trùng.
 - Form runtime: JavaScript tự bật, choice field tùy biến và persistence, push
   button action, URI sandbox, external-link routing và PDFium serialization
   giữa thread.

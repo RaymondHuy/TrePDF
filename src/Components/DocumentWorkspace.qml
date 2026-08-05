@@ -17,16 +17,25 @@ Item {
     property bool checkboxToolActive: false
     property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
+    property bool combFieldToolActive: false
     property string transientStatus
     readonly property string selectedFormFieldId:
         session.formDesignerController.selectedFieldId
     readonly property var selectedFormField: selectedFormFieldId.length > 0
         ? session.formDesignerController.fieldData(selectedFormFieldId)
         : ({})
+    readonly property bool selectedFormFieldIsComb:
+        Number(selectedFormField.type) === PDFFormDesignerController.Text
+        && (Number(selectedFormField.flags)
+            & PDFFormDesignerController.Comb) !== 0
     readonly property bool textFieldOptionsPanelActive: formsTabActive
         && selectedFormFieldId.length > 0
         && Number(selectedFormField.type)
             === PDFFormDesignerController.Text
+        && !selectedFormFieldIsComb
+    readonly property bool combFieldOptionsPanelActive: formsTabActive
+        && selectedFormFieldId.length > 0
+        && selectedFormFieldIsComb
     readonly property bool dropdownOptionsPanelActive: formsTabActive
         && selectedFormFieldId.length > 0
         && Number(selectedFormField.type)
@@ -43,6 +52,13 @@ Item {
                 return true
         }
 
+        if (combFieldOptionsPanelLoader.status === Loader.Ready) {
+            const combPanel = combFieldOptionsPanelLoader.item
+                as CombFieldOptionsPanel
+            if (combPanel && combPanel.maxLengthEditPending)
+                return true
+        }
+
         if (radioButtonOptionsPanelLoader.status === Loader.Ready) {
             const radioPanel = radioButtonOptionsPanelLoader.item
                 as RadioButtonOptionsPanel
@@ -56,6 +72,11 @@ Item {
 
     onTextFieldOptionsPanelActiveChanged: {
         if (textFieldOptionsPanelActive)
+            session.panelCollapsed = false
+    }
+
+    onCombFieldOptionsPanelActiveChanged: {
+        if (combFieldOptionsPanelActive)
             session.panelCollapsed = false
     }
 
@@ -119,6 +140,13 @@ Item {
                 return false
         }
 
+        if (combFieldOptionsPanelLoader.status === Loader.Ready) {
+            const combPanel = combFieldOptionsPanelLoader.item
+                as CombFieldOptionsPanel
+            if (combPanel && !combPanel.commitPendingEdit())
+                return false
+        }
+
         if (radioButtonOptionsPanelLoader.status === Loader.Ready) {
             const radioPanel = radioButtonOptionsPanelLoader.item
                 as RadioButtonOptionsPanel
@@ -170,6 +198,7 @@ Item {
             checkboxToolActive: root.checkboxToolActive
             radioButtonToolActive: root.radioButtonToolActive
             dropdownToolActive: root.dropdownToolActive
+            combFieldToolActive: root.combFieldToolActive
             zoom: root.session.zoom
             viewRotation: root.session.viewRotation
             transientStatus: root.transientStatus
@@ -225,6 +254,30 @@ Item {
         }
 
         Loader {
+            id: combFieldOptionsPanelLoader
+
+            Layout.preferredWidth: active
+                ? root.session.panelCollapsed ? 42 : 264
+                : 0
+            Layout.fillHeight: true
+            active: root.session.document.loaded
+                && root.combFieldOptionsPanelActive
+            visible: active
+
+            sourceComponent: Component {
+                CombFieldOptionsPanel {
+                    theme: root.theme
+                    controller: root.session.formDesignerController
+                    fieldId: root.selectedFormFieldId
+                    collapsed: root.session.panelCollapsed
+                    onCollapsedChangeRequested: collapsed => {
+                        root.session.panelCollapsed = collapsed
+                    }
+                }
+            }
+        }
+
+        Loader {
             id: textFormatPanelLoader
 
             Layout.preferredWidth: active
@@ -233,6 +286,7 @@ Item {
             Layout.fillHeight: true
             active: root.session.document.loaded
                 && !root.textFieldOptionsPanelActive
+                && !root.combFieldOptionsPanelActive
                 && !root.dropdownOptionsPanelActive
                 && !root.radioButtonOptionsPanelActive
                 && root.session.editController.tool !== PDFEditController.BrowseTool

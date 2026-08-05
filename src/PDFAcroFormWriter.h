@@ -38,6 +38,7 @@ public:
         bool required = false;
         bool readOnly = false;
         bool multiline = false;
+        bool comb = false;
         int maxLength = 0;
         bool valueChanged = true;
         bool optionsChanged = true;

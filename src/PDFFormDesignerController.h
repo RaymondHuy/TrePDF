@@ -44,7 +44,8 @@ public:
         NoFieldFlags = 0,
         Required = 1 << 0,
         ReadOnly = 1 << 1,
-        Multiline = 1 << 2
+        Multiline = 1 << 2,
+        Comb = 1 << 3
     };
     Q_ENUM(FieldFlag)
 
@@ -127,6 +128,11 @@ public:
                                  qreal width,
                                  qreal height);
     Q_INVOKABLE QString addTextField(int page,
+                                     qreal x,
+                                     qreal y,
+                                     qreal width,
+                                     qreal height);
+    Q_INVOKABLE QString addCombField(int page,
                                      qreal x,
                                      qreal y,
                                      qreal width,

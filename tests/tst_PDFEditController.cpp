@@ -66,6 +66,8 @@ constexpr char kImageFixtureText[] = "Image fixture text";
 constexpr char kFontCollisionTargetText[] = "Wxyz";
 constexpr int kPdfButtonNoToggleToOff = 1 << 14;
 constexpr int kPdfButtonRadio = 1 << 15;
+constexpr int kPdfTextDoNotScroll = 1 << 23;
+constexpr int kPdfTextComb = 1 << 24;
 
 class PdfFileWriter : public FPDF_FILEWRITE
 {
@@ -2575,6 +2577,7 @@ private slots:
     void rendersMultilineFormFieldPreview();
     void movesFormFieldsWithoutResizing();
     void savesTextFieldAsAcroForm();
+    void savesAndRehydratesCombField();
     void savesAndRehydratesCheckbox();
     void savesAndRehydratesRadioButton();
     void savesRehydratesAndMutatesRadioButtonGroup();
@@ -3569,6 +3572,124 @@ void PDFEditControllerTest::savesTextFieldAsAcroForm()
             QStringLiteral("TênKháchHàng"));
     QCOMPARE(editedInspection.value, QStringLiteral("Đã chỉnh sửa"));
     QVERIFY(QFile::remove(snapshotPath));
+}
+
+void PDFEditControllerTest::savesAndRehydratesCombField()
+{
+    constexpr int defaultCombLength = 5;
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-comb-field.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+
+    const QString fieldId = formDesigner.addCombField(
+        0,
+        0.16,
+        0.24,
+        0.50,
+        0.07);
+    QVERIFY(!fieldId.isEmpty());
+    QVERIFY(formDesigner.setFieldName(
+        fieldId,
+        QStringLiteral("VerificationCode")));
+    QVERIFY(formDesigner.setFieldValue(
+        fieldId,
+        QStringLiteral("ABCDE")));
+
+    QVariantMap field = formDesigner.fieldData(fieldId);
+    QCOMPARE(
+        field.value(QStringLiteral("type")).toInt(),
+        PDFFormDesignerController::Text);
+    QVERIFY(
+        field.value(QStringLiteral("flags")).toInt()
+        & PDFFormDesignerController::Comb);
+    QVERIFY(
+        !(field.value(QStringLiteral("flags")).toInt()
+          & PDFFormDesignerController::Multiline));
+    QCOMPARE(
+        field.value(QStringLiteral("maxLength")).toInt(),
+        defaultCombLength);
+
+    QVERIFY(!formDesigner.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Comb
+            | PDFFormDesignerController::Multiline));
+    field = formDesigner.fieldData(fieldId);
+    QVERIFY(
+        field.value(QStringLiteral("flags")).toInt()
+        & PDFFormDesignerController::Comb);
+    QVERIFY(
+        !(field.value(QStringLiteral("flags")).toInt()
+          & PDFFormDesignerController::Multiline));
+
+    QVERIFY(formDesigner.setFieldMaxLength(fieldId, 0));
+    field = formDesigner.fieldData(fieldId);
+    QCOMPARE(field.value(QStringLiteral("maxLength")).toInt(), 0);
+    QVERIFY(
+        !(field.value(QStringLiteral("flags")).toInt()
+          & PDFFormDesignerController::Comb));
+    QVERIFY(formDesigner.setFieldMaxLength(
+        fieldId,
+        defaultCombLength));
+    QVERIFY(formDesigner.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Comb));
+
+    QSignalSpy saveFinishedSpy(
+        &editController,
+        &PDFEditController::saveFinished);
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+    QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    field = formDesigner.fieldData(fieldId);
+    QCOMPARE(
+        field.value(QStringLiteral("type")).toInt(),
+        PDFFormDesignerController::Text);
+    QVERIFY(field.value(QStringLiteral("sourceBacked")).toBool());
+    QVERIFY(!field.value(QStringLiteral("dirty")).toBool());
+    QVERIFY(
+        field.value(QStringLiteral("flags")).toInt()
+        & PDFFormDesignerController::Comb);
+    QVERIFY(
+        !(field.value(QStringLiteral("flags")).toInt()
+          & PDFFormDesignerController::Multiline));
+    QCOMPARE(
+        field.value(QStringLiteral("maxLength")).toInt(),
+        defaultCombLength);
+
+    const AcroFormFieldInspection inspection = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("VerificationCode"));
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.formType, FORMTYPE_ACRO_FORM);
+    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_TEXTFIELD);
+    QVERIFY(!inspection.hasParent);
+    QVERIFY(inspection.hasLocalFieldType);
+    QVERIFY(inspection.hasLocalFieldFlags);
+    QVERIFY(inspection.fieldFlags & kPdfTextComb);
+    QVERIFY(inspection.fieldFlags & kPdfTextDoNotScroll);
+    QVERIFY(!(inspection.fieldFlags & FPDF_FORMFLAG_TEXT_MULTILINE));
+    QVERIFY(inspection.hasMaxLength);
+    QCOMPARE(inspection.maxLength, float(defaultCombLength));
+    QCOMPARE(inspection.name, QStringLiteral("VerificationCode"));
+    QCOMPARE(inspection.value, QStringLiteral("ABCDE"));
+    QVERIFY(inspection.hasAppearance);
+    QVERIFY(inspection.pointHit);
 }
 
 void PDFEditControllerTest::savesAndRehydratesCheckbox()

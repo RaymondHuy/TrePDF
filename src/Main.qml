@@ -910,6 +910,7 @@ ApplicationWindow {
         checkboxToolActive: appRibbon.checkboxToolActive
         radioButtonToolActive: appRibbon.radioButtonToolActive
         dropdownToolActive: appRibbon.dropdownToolActive
+        combFieldToolActive: appRibbon.combFieldToolActive
         transientStatus: window.transientStatus
         onOpenRequested: window.requestOpen()
     }
@@ -934,6 +935,7 @@ ApplicationWindow {
                 checkboxToolActive: appRibbon.checkboxToolActive
                 radioButtonToolActive: appRibbon.radioButtonToolActive
                 dropdownToolActive: appRibbon.dropdownToolActive
+                combFieldToolActive: appRibbon.combFieldToolActive
                 transientStatus: window.transientStatus
                 enabled: !tabModel.anySaving
                 onOpenRequested: window.requestOpen()

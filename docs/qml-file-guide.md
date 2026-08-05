@@ -41,6 +41,7 @@ Main.qml
     │               └── FormFieldLayer (C++)
     ├── TextFormatPanel.qml
     ├── TextFieldOptionsPanel.qml
+    ├── CombFieldOptionsPanel.qml
     ├── DropdownOptionsPanel.qml
     └── RadioButtonOptionsPanel.qml
 ```
@@ -109,7 +110,7 @@ chỉ là state của workflow UI và phải được xóa khi popup đóng ho�
 với `Main.qml`.
 
 **Đầu vào:** `theme`, `document`, `editController`; giữ lựa chọn tool Text Field,
-Check Box, Radio Button và Dropdown của Forms.
+Check Box, Radio Button, Dropdown và Comb Field của Forms.
 
 **Việc chính:**
 
@@ -118,8 +119,8 @@ Check Box, Radio Button và Dropdown của Forms.
   workspace biết overlay nào được phép hiện/tương tác.
 - Khi rời Edit, đưa `PDFEditController.tool` về Browse; khi vào Edit, mặc định về
   Select để không giữ một placement/drawing tool từ phiên trước.
-- Khi chọn Forms tool, bảo đảm Text Field, Check Box, Radio Button và Dropdown
-  loại trừ nhau.
+- Khi chọn Forms tool, bảo đảm Text Field, Check Box, Radio Button, Dropdown và
+  Comb Field loại trừ nhau.
 - Chuyển tiếp signal Open/Save/Save As, page, delete page, zoom, fit, rotate và
   tool placeholder lên cửa sổ.
 
@@ -167,10 +168,11 @@ ghi Save; mọi thay đổi vẫn là draft.
 
 **Vai trò:** ribbon tối giản cho form designer hiện hỗ trợ đặt field.
 
-- Nhận document và bốn cờ lựa chọn từ `AppRibbon`.
-- Phát signal tool cho Text Field, Check Box, Radio Button hoặc Dropdown.
+- Nhận document và năm cờ lựa chọn từ `AppRibbon`.
+- Phát signal tool cho Text Field, Check Box, Radio Button, Dropdown hoặc Comb
+  Field; Comb nằm ngay cạnh Dropdown và dùng icon riêng.
 - Chỉ enable khi document đã load.
-- Date/Signature vẫn là điểm mở rộng; ribbon chỉ quảng bá bốn loại đã có
+- Date/Signature vẫn là điểm mở rộng; ribbon chỉ quảng bá năm loại đã có
   pipeline lưu hoàn chỉnh.
 
 ### [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml)
@@ -209,9 +211,10 @@ ghi Save; mọi thay đổi vẫn là draft.
   initial-fit chỉ chạy khi session còn `initialFitPending`.
 - Load đúng một panel ở cạnh phải: `TextFormatPanel` khi Edit active,
   `TextFieldOptionsPanel` khi chọn Text Field, `DropdownOptionsPanel` khi chọn
-  Dropdown, hoặc `RadioButtonOptionsPanel` khi chọn Radio Button trong Forms.
-  Khi Text Field vừa được chọn, panel của nó tự mở; trạng thái collapsed sau đó
-  vẫn được lưu riêng theo session.
+  Dropdown, `CombFieldOptionsPanel` khi chọn Comb Field, hoặc
+  `RadioButtonOptionsPanel` khi chọn Radio Button trong Forms. Khi Text Field
+  hoặc Comb Field vừa được chọn, panel tương ứng tự mở; trạng thái collapsed
+  sau đó vẫn được lưu riêng theo session.
 - Chuyển các signal font family, bold/italic/underline, color và paragraph
   alignment vào `PDFEditController`.
 
@@ -370,12 +373,25 @@ undo/redo, không chỉ state click gần nhất trong panel.
 
 - Bật/tắt flag multi-line mà không làm mất Required/ReadOnly hiện có.
 - Cho bật giới hạn ký tự tùy chọn; `0` nghĩa là không giới hạn, còn SpinBox nhận
-  giá trị từ 1 đến 1.000.000.
+  giá trị từ 1 đến 300.000.
 - Mọi thay đổi gọi trực tiếp `PDFFormDesignerController`; khi hạ giới hạn dưới
   độ dài hiện tại, controller cắt value ngay trong draft form.
 - Nút xóa ở cuối panel gọi `removeField()` cho cả Text Field mới tạo và
   source-backed do TrePDF tạo. Xóa source-backed chỉ là draft cho tới Save;
   Discard sẽ rehydrate field.
+- Nội dung panel nằm trong `Loader` và dùng trạng thái collapsed của session.
+
+### [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml)
+
+**Vai trò:** panel bên phải riêng cho Comb Field đang chọn trong Forms.
+
+- Chỉ hiển thị giới hạn ký tự bắt buộc; SpinBox nhận giá trị từ 1 đến 300.000
+  và giá trị này đồng thời là số ô của field.
+- Gọi `PDFFormDesignerController::setFieldMaxLength()` khi kết thúc chỉnh sửa;
+  workspace flush thay đổi pending trước Save/Save As hoặc khi đổi session.
+- Khi hạ giới hạn dưới độ dài value hiện tại, controller cắt value ngay trong
+  draft form và giữ flag Comb.
+- Nút xóa gọi `removeField()`; thay đổi chỉ ghi vào PDF khi Save/Save As.
 - Nội dung panel nằm trong `Loader` và dùng trạng thái collapsed của session.
 
 ### [`src/Components/RadioButtonOptionsPanel.qml`](../src/Components/RadioButtonOptionsPanel.qml)
@@ -430,13 +446,13 @@ TrePDF rehydrate sau khi mở lại.
 
 **Đặt field:**
 
-- Khi Text Field, Check Box, Radio Button hoặc Dropdown tool active, MouseArea
-  nền nhận click/drag.
+- Khi Text Field, Check Box, Radio Button, Dropdown hoặc Comb Field tool active,
+  MouseArea nền nhận click/drag.
 - Click tạo kích thước mặc định; drag tạo rect chuẩn hóa. Check Box và Radio
-  Button ép hình vuông; Text Field và Dropdown dùng hình chữ nhật và tôn trọng
-  kích thước tối thiểu.
-- Sau khi tạo Text Field, lưu `pendingFocusFieldId` để editor chỉ focus sau khi
-  model và loader đã sẵn sàng.
+  Button ép hình vuông; Text Field, Dropdown và Comb Field dùng hình chữ nhật và
+  tôn trọng kích thước tối thiểu.
+- Sau khi tạo Text Field hoặc Comb Field, lưu `pendingFocusFieldId` để editor
+  chỉ focus sau khi model và loader đã sẵn sàng.
 
 **Hiển thị và tương tác:**
 
@@ -444,7 +460,10 @@ TrePDF rehydrate sau khi mở lại.
   value/type/flags/source-backed và xử lý click/toggle/drag move.
 - `Loader` tạo `TextField` native cho field text active; đồng bộ value vào
   controller nhưng tránh vòng lặp trong lúc nạp editor. Field có flag multi-line
-  dùng `TextArea`, wrap nội dung và vẫn đồng bộ qua cùng controller.
+  dùng `TextArea`, wrap nội dung và vẫn đồng bộ qua cùng controller. Field có
+  flag comb vẽ divider, giới hạn input theo số ô, dùng cursor delegate rỗng để
+  không hiển thị caret qua mọi vòng đời focus và ánh xạ click/selection theo
+  từng ký tự Unicode.
 - `Loader` tạo `ComboBox` cho Dropdown active từ options trong model và cập nhật
   selected value transient qua designer controller; với source-backed field,
   lựa chọn được chuyển qua PDFium form session rồi refresh lại model.
@@ -454,11 +473,12 @@ TrePDF rehydrate sau khi mở lại.
   handle ở góc và hỗ trợ phím mũi tên; C++ clamp top-left để giữ nguyên kích
   thước trong trang rồi gọi `moveField()` đúng một lần khi kết thúc.
 - Check Box và Radio Button có thể activate/toggle; chọn một Radio sẽ tắt member
-  khác cùng Group ID. Dropdown có thể mở/chọn option. Text Field và Check Box
-  transient có nút xóa nổi; Text Field, Dropdown và Radio Button transient hoặc
-  source-backed do TrePDF tạo được xóa từ panel tùy chọn. Discard phục hồi, còn
-  Save/Save As mới gỡ Widget source-backed. Source-backed Check Box và cấu trúc
-  AcroForm ngoài phạm vi TrePDF vẫn được bảo vệ.
+  khác cùng Group ID. Dropdown có thể mở/chọn option. Text Field thường và Check
+  Box transient có nút xóa nổi; Text Field thường, Dropdown, Radio Button và
+  Comb Field transient hoặc source-backed do TrePDF tạo được xóa từ panel tùy
+  chọn. Discard phục hồi, còn Save/Save As mới gỡ Widget source-backed.
+  Source-backed Check Box và cấu trúc AcroForm ngoài phạm vi TrePDF vẫn được bảo
+  vệ.
 
 **Phối hợp mode:** field có thể visible trong Forms hoặc Edit, nhưng placement,
 move, resize, editor và delete được gate riêng bằng `formsActive`, `editActive`,
