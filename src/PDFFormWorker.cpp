@@ -37,6 +37,8 @@ namespace {
 // PDF 1.7, table 8.75. PDFium does not currently expose this choice-field
 // flag in fpdf_annot.h.
 constexpr int kChoiceCommitOnSelectionChange = 1 << 26;
+// PDFium's public annotation header does not expose the PDF Comb flag.
+constexpr int kTextFieldComb = 1 << 24;
 constexpr int kMaximumChoiceOptions = 4096;
 constexpr qsizetype kMaximumChoiceOptionCharacters = 1024 * 1024;
 constexpr int kMaximumTextFieldLength = 1000000;
@@ -1713,7 +1715,8 @@ public:
                    | FPDF_FORMFLAG_REQUIRED);
             if (field.type == FPDF_FORMFIELD_TEXTFIELD) {
                 field.flags |= fieldFlags
-                    & FPDF_FORMFLAG_TEXT_MULTILINE;
+                    & (FPDF_FORMFLAG_TEXT_MULTILINE
+                       | kTextFieldComb);
             }
             if (annotationFlags & FPDF_ANNOT_FLAG_READONLY) {
                 field.flags |= FPDF_FORMFLAG_READONLY;
@@ -1736,6 +1739,12 @@ public:
                         field.maxLength
                             = static_cast<int>(parsedMaxLength);
                     }
+                }
+                if ((field.flags & kTextFieldComb)
+                    && (field.maxLength <= 0
+                        || (field.flags
+                            & FPDF_FORMFLAG_TEXT_MULTILINE))) {
+                    field.flags &= ~kTextFieldComb;
                 }
             }
             field.sourcePage = sourcePage;

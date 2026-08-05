@@ -21,6 +21,7 @@ Rectangle {
     property bool checkboxToolActive: false
     property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
+    property bool combFieldToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
     property string transientStatus
@@ -202,6 +203,7 @@ Rectangle {
             checkboxToolActive: root.checkboxToolActive
             radioButtonToolActive: root.radioButtonToolActive
             dropdownToolActive: root.dropdownToolActive
+            combFieldToolActive: root.combFieldToolActive
             zoom: root.zoom
             viewRotation: root.viewRotation
             sessionChangeGeneration: root.sessionChangeGeneration

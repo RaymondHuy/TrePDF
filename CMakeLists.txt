@@ -88,6 +88,7 @@ qt_add_qml_module(trepdf
         src/Main.qml
         src/Components/AppRibbon.qml
         src/Components/AppTheme.qml
+        src/Components/CombFieldOptionsPanel.qml
         src/Components/DocumentView.qml
         src/Components/DocumentTabBar.qml
         src/Components/DocumentWorkspace.qml
@@ -121,6 +122,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/calendar-days.svg
         src/assets/icons/chevron-left.svg
         src/assets/icons/chevron-right.svg
+        src/assets/icons/comb-field.svg
         src/assets/icons/delete-page.svg
         src/assets/icons/diamond.svg
         src/assets/icons/dropdown-menu.svg

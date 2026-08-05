@@ -977,6 +977,10 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                 : 7.0;
         const bool multilineTextField = textField
             && (field.flags & PDFFormDesignerController::Multiline);
+        const bool combTextField = textField
+            && (field.flags & PDFFormDesignerController::Comb)
+            && field.maxLength > 0
+            && !multilineTextField;
         const qreal verticalPadding = multilineTextField
             ? qMax(2.0, horizontalPadding * 0.35)
             : textField || radioButton
@@ -1123,6 +1127,74 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                     m_textFieldRenderFont,
                     contentRect,
                     fontPixelSize);
+            } else if (combTextField) {
+                const QRectF combRect = fieldRect.adjusted(
+                    borderWidth,
+                    borderWidth,
+                    -borderWidth,
+                    -borderWidth);
+                const qreal slotWidth
+                    = combRect.width() / field.maxLength;
+                const bool cellsVisible = slotWidth
+                    >= 1.0 / devicePixelRatio;
+                if (!cellsVisible) {
+                    appendText(
+                        textNode,
+                        field.value,
+                        m_textFieldRenderFont,
+                        contentRect,
+                        fontPixelSize,
+                        false);
+                    break;
+                }
+
+                const qreal separatorWidth = alignedDeviceWidth(
+                    PDFFormAppearance::kTextFieldBorderPointWidth
+                        * m_pointScale,
+                    devicePixelRatio);
+                const QColor separatorColor = selected
+                    ? m_accentColor
+                    : textFieldBorder;
+                for (int slot = 1; slot < field.maxLength; ++slot) {
+                    const qreal separatorX = alignedDeviceCoordinate(
+                        combRect.left() + slotWidth * slot,
+                        devicePixelRatio);
+                    appendThickLine(
+                        &geometryVertices,
+                        {separatorX, combRect.top()},
+                        {separatorX, combRect.bottom()},
+                        separatorWidth,
+                        separatorColor);
+                }
+
+                qsizetype valueIndex = 0;
+                for (int slot = 0;
+                     slot < field.maxLength
+                     && valueIndex < field.value.size();
+                     ++slot) {
+                    qsizetype characterLength = 1;
+                    if (field.value.at(valueIndex).isHighSurrogate()
+                        && valueIndex + 1 < field.value.size()
+                        && field.value.at(valueIndex + 1).isLowSurrogate()) {
+                        characterLength = 2;
+                    }
+                    const QString character = field.value.sliced(
+                        valueIndex,
+                        characterLength);
+                    valueIndex += characterLength;
+                    appendText(
+                        textNode,
+                        character,
+                        m_textFieldRenderFont,
+                        QRectF(
+                            combRect.left() + slotWidth * slot,
+                            combRect.top(),
+                            slotWidth,
+                            combRect.height()),
+                        fontPixelSize,
+                        false,
+                        Qt::AlignHCenter);
+                }
             } else {
                 appendText(
                     textNode,

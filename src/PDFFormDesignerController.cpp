@@ -21,6 +21,9 @@ namespace {
 constexpr int kMaximumDropdownOptions = 4096;
 constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
 constexpr int kMaximumTextFieldInputLength = 300000;
+constexpr int kDefaultCombFieldLength = 5;
+// PDFium's public annotation header does not expose the PDF Comb flag.
+constexpr int kTextFieldComb = 1 << 24;
 
 QString singleLineText(QString value)
 {
@@ -506,6 +509,19 @@ QString PDFFormDesignerController::addTextField(int page,
     return addField(Text, page, x, y, width, height);
 }
 
+QString PDFFormDesignerController::addCombField(int page,
+                                                qreal x,
+                                                qreal y,
+                                                qreal width,
+                                                qreal height)
+{
+    const QString fieldId = addField(Text, page, x, y, width, height);
+    if (fieldId.isEmpty() || !setFieldFlags(fieldId, Comb)) {
+        return {};
+    }
+    return fieldId;
+}
+
 QVariantMap PDFFormDesignerController::fieldData(const QString &fieldId) const
 {
     const int row = rowForFieldId(fieldId);
@@ -982,8 +998,12 @@ bool PDFFormDesignerController::setFieldFlags(const QString &fieldId, int flags)
 
     FormField &field = m_fields[row];
     const int supportedFlags = Required | ReadOnly
-        | (field.type == Text ? Multiline : NoFieldFlags);
+        | (field.type == Text ? Multiline | Comb : NoFieldFlags);
     flags &= supportedFlags;
+    if ((flags & Multiline) && (flags & Comb)) {
+        return false;
+    }
+
     bool changed = false;
     for (int peerRow = 0; peerRow < m_fields.size(); ++peerRow) {
         FormField &peer = m_fields[peerRow];
@@ -993,12 +1013,25 @@ bool PDFFormDesignerController::setFieldFlags(const QString &fieldId, int flags)
                 || peer.name != field.name)) {
             continue;
         }
-        if (peer.flags == flags) {
+        const bool flagsChanged = peer.flags != flags;
+        const bool maxLengthChanged = peer.type == Text
+            && (flags & Comb)
+            && peer.maxLength <= 0;
+        if (!flagsChanged && !maxLengthChanged) {
             continue;
         }
-        peer.flags = flags;
-        peer.changedProperties |= FlagsPropertyChanged;
-        QList<int> changedRoles{FlagsRole, DirtyRole};
+
+        QList<int> changedRoles{DirtyRole};
+        if (flagsChanged) {
+            peer.flags = flags;
+            peer.changedProperties |= FlagsPropertyChanged;
+            changedRoles.append(FlagsRole);
+        }
+        if (maxLengthChanged) {
+            peer.maxLength = kDefaultCombFieldLength;
+            peer.changedProperties |= MaxLengthPropertyChanged;
+            changedRoles.append(MaxLengthRole);
+        }
         if (peer.type == Text) {
             const QString value = constrainedTextFieldValue(
                 peer.value,
@@ -1040,13 +1073,23 @@ bool PDFFormDesignerController::setFieldMaxLength(
     }
 
     FormField &field = m_fields[row];
-    if (field.maxLength == maxLength) {
+    const bool maxLengthChanged = field.maxLength != maxLength;
+    const bool flagsChanged = maxLength == 0 && (field.flags & Comb);
+    if (!maxLengthChanged && !flagsChanged) {
         return true;
     }
 
-    field.maxLength = maxLength;
-    field.changedProperties |= MaxLengthPropertyChanged;
-    QList<int> changedRoles{MaxLengthRole, DirtyRole};
+    QList<int> changedRoles{DirtyRole};
+    if (maxLengthChanged) {
+        field.maxLength = maxLength;
+        field.changedProperties |= MaxLengthPropertyChanged;
+        changedRoles.append(MaxLengthRole);
+    }
+    if (flagsChanged) {
+        field.flags &= ~Comb;
+        field.changedProperties |= FlagsPropertyChanged;
+        changedRoles.append(FlagsRole);
+    }
     const QString value = constrainedTextFieldValue(
         field.value,
         field.flags,
@@ -1587,6 +1630,13 @@ void PDFFormDesignerController::reloadSourceFields()
                            && (source.flags
                                & FPDF_FORMFLAG_TEXT_MULTILINE)
                            ? Multiline
+                           : NoFieldFlags)
+                    | (field.type == Text
+                           && source.maxLength > 0
+                           && !(source.flags
+                                & FPDF_FORMFLAG_TEXT_MULTILINE)
+                           && (source.flags & kTextFieldComb)
+                           ? Comb
                            : NoFieldFlags);
                 field.maxLength = source.maxLength;
                 field.sourceBacked = true;

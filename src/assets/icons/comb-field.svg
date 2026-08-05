@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="120" height="32" viewBox="0 0 120 32"
+     fill="none" role="img" aria-labelledby="title">
+  <title id="title">Comb field icon with letters A B C D E</title>
+
+  <rect x="1" y="1" width="118" height="30" rx="7"
+        stroke="#111111" stroke-width="2"/>
+
+  <path d="M24 1V31M48 1V31M72 1V31M96 1V31"
+        stroke="#111111" stroke-width="2"/>
+
+  <g fill="#111111"
+     font-family="Arial, Helvetica, sans-serif"
+     font-size="16"
+     font-weight="600"
+     text-anchor="middle"
+     dominant-baseline="middle">
+    <text x="12"  y="16.5">A</text>
+    <text x="36"  y="16.5">B</text>
+    <text x="60"  y="16.5">C</text>
+    <text x="84"  y="16.5">D</text>
+    <text x="108" y="16.5">E</text>
+  </g>
+</svg>

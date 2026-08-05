@@ -13,11 +13,13 @@ Flickable {
     required property bool checkboxToolSelected
     required property bool radioButtonToolSelected
     required property bool dropdownToolSelected
+    required property bool combFieldToolSelected
 
     signal textFieldToolRequested()
     signal checkboxToolRequested()
     signal radioButtonToolRequested()
     signal dropdownToolRequested()
+    signal combFieldToolRequested()
 
     clip: true
     contentWidth: ribbonRow.implicitWidth + 16
@@ -94,6 +96,21 @@ Flickable {
                 preserveIconColors: true
                 primary: root.dropdownToolSelected
                 onClicked: root.dropdownToolRequested()
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Comb Field"
+                text: qsTrId("CombFieldTool")
+                //% "Click or drag on the page to add a comb field"
+                toolTipText: qsTrId("ClickOrDragToAddCombField")
+                iconSource: "../assets/icons/comb-field.svg"
+                icon.width: 56
+                icon.height: 24
+                preserveIconColors: true
+                primary: root.combFieldToolSelected
+                onClicked: root.combFieldToolRequested()
             }
         }
     }

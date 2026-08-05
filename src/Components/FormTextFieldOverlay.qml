@@ -20,6 +20,7 @@ Item {
     property bool checkboxToolActive: false
     property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
+    property bool combFieldToolActive: false
     property rect placementRect: Qt.rect(0, 0, 0, 0)
     property real placementStartX: 0
     property real placementStartY: 0
@@ -29,6 +30,11 @@ Item {
     readonly property bool activeTextFieldMultiline:
         (formFieldLayer.activeFieldFlags
             & PDFFormDesignerController.Multiline) !== 0
+    readonly property bool activeTextFieldComb:
+        (formFieldLayer.activeFieldFlags
+            & PDFFormDesignerController.Comb) !== 0
+        && formFieldLayer.activeFieldMaxLength > 0
+        && !activeTextFieldMultiline
     readonly property int activeTextFieldInputLengthLimit: Math.max(
         1,
         formFieldLayer.activeFieldMaxLength > 0
@@ -44,7 +50,9 @@ Item {
     readonly property real minimumResizeHeight: 24
     readonly property real radioButtonDefaultSidePoints: 18
     readonly property real radioButtonMinimumSidePoints: 10
+    readonly property bool placementCombField: combFieldToolActive
     readonly property int placementFieldType: textFieldToolActive
+        || placementCombField
         ? PDFFormDesignerController.Text
         : checkboxToolActive
             ? PDFFormDesignerController.Checkbox
@@ -335,6 +343,10 @@ Item {
                 return
             pendingFocusFieldId = ""
             singleLineEditor.forceActiveFocus()
+            if (root.activeTextFieldComb) {
+                singleLineEditor.deselect()
+                singleLineEditor.cursorPosition = singleLineEditor.length
+            }
         }
     }
 
@@ -413,13 +425,20 @@ Item {
             return
         }
 
-        const fieldId = controller.addField(
-            placementFieldType,
-            page,
-            fieldRect.x / width,
-            fieldRect.y / height,
-            fieldRect.width / width,
-            fieldRect.height / height)
+        const fieldId = placementCombField
+            ? controller.addCombField(
+                  page,
+                  fieldRect.x / width,
+                  fieldRect.y / height,
+                  fieldRect.width / width,
+                  fieldRect.height / height)
+            : controller.addField(
+                  placementFieldType,
+                  page,
+                  fieldRect.x / width,
+                  fieldRect.y / height,
+                  fieldRect.width / width,
+                  fieldRect.height / height)
         resetPlacement()
         if (fieldId.length === 0)
             return
@@ -489,6 +508,12 @@ Item {
     }
     onDropdownToolActiveChanged: {
         if (dropdownToolActive)
+            formFieldLayer.cancelFieldMove()
+        else
+            resetPlacement()
+    }
+    onCombFieldToolActiveChanged: {
+        if (combFieldToolActive)
             formFieldLayer.cancelFieldMove()
         else
             resetPlacement()
@@ -969,6 +994,7 @@ Item {
             height: 20
             visible: root.formsActive
                 && !formFieldLayer.activeFieldSourceBacked
+                && !root.activeTextFieldComb
                 && formFieldLayer.activeFieldType
                     !== PDFFormDesignerController.Dropdown
                 && formFieldLayer.activeFieldType
@@ -1174,10 +1200,67 @@ Item {
     }
 
     Component {
+        id: hiddenCombCursorDelegate
+
+        Item {
+            width: 0
+            height: 0
+            visible: false
+        }
+    }
+
+    Component {
         id: activeTextEditorComponent
 
         TextField {
             id: activeTextEditor
+
+            readonly property int combSlotCount:
+                root.activeTextFieldComb
+                && formFieldLayer.activeFieldMaxLength <= 512
+                && formFieldLayer.activeFieldMaxLength
+                    <= Math.max(1, Math.floor(width))
+                    ? formFieldLayer.activeFieldMaxLength
+                    : 0
+            readonly property real combSlotWidth: combSlotCount > 0
+                ? width / combSlotCount
+                : 0
+            readonly property var combCharacters: combSlotCount > 0
+                ? Array.from(text)
+                : []
+            readonly property int combSelectionStartSlot:
+                combSlotForTextPosition(selectionStart)
+            readonly property int combSelectionEndSlot:
+                combSlotForTextPosition(selectionEnd)
+
+            function combSlotForTextPosition(position) {
+                const boundedPosition = Math.max(
+                    0,
+                    Math.min(text.length, Number(position)))
+                return Math.min(
+                    combSlotCount,
+                    Array.from(text.slice(0, boundedPosition)).length)
+            }
+
+            function combTextPositionForSlot(slot) {
+                const boundedSlot = Math.max(
+                    0,
+                    Math.min(
+                        combCharacters.length,
+                        Math.round(Number(slot))))
+                return combCharacters.slice(0, boundedSlot).join("").length
+            }
+
+            function placeCombCursorAt(positionX) {
+                if (combSlotCount <= 0 || combSlotWidth <= 0)
+                    return
+
+                const requestedSlot = Math.round(
+                    Math.max(0, Math.min(width, Number(positionX)))
+                        / combSlotWidth)
+                deselect()
+                cursorPosition = combTextPositionForSlot(requestedSlot)
+            }
 
             enabled: root.fieldsInteractive
                 && (root.formsActive
@@ -1186,16 +1269,22 @@ Item {
             clip: true
             selectByMouse: true
             activeFocusOnPress: true
+            cursorDelegate: root.activeTextFieldComb
+                ? hiddenCombCursorDelegate
+                : null
             maximumLength: root.activeTextFieldInputLengthLimit
-            leftPadding: Math.max(
-                formFieldLayer.textFieldMinimumHorizontalPaddingPoints
-                    * root.pagePointScale,
-                height * formFieldLayer.textFieldHorizontalPaddingRatio)
+            leftPadding: combSlotCount > 0
+                ? 0
+                : Math.max(
+                      formFieldLayer.textFieldMinimumHorizontalPaddingPoints
+                          * root.pagePointScale,
+                      height
+                          * formFieldLayer.textFieldHorizontalPaddingRatio)
             rightPadding: leftPadding
             topPadding: 0
             bottomPadding: 0
             verticalAlignment: TextInput.AlignVCenter
-            color: "#202124"
+            color: combSlotCount > 0 ? "transparent" : "#202124"
             font.family: "Helvetica"
             font.pixelSize: Math.max(
                 1,
@@ -1203,6 +1292,9 @@ Item {
                     * root.pagePointScale)
             //% "Enter text"
             placeholderText: qsTrId("EnterFormText")
+            placeholderTextColor: combSlotCount > 0
+                ? "transparent"
+                : palette.placeholderText
 
             onTextChanged: {
                 if (root.syncingTextEditor)
@@ -1232,8 +1324,58 @@ Item {
             TapHandler {
                 enabled: root.formsActive
                 acceptedButtons: Qt.LeftButton
-                onTapped: root.controller.selectTextField(
-                    root.loadedEditorFieldId)
+                onTapped: eventPoint => {
+                    root.controller.selectTextField(
+                        root.loadedEditorFieldId)
+                    activeTextEditor.placeCombCursorAt(
+                        eventPoint.position.x)
+                }
+            }
+
+            Repeater {
+                model: activeTextEditor.combSlotCount
+
+                delegate: Item {
+                    id: combCell
+
+                    required property int index
+                    readonly property bool selected:
+                        index >= Math.min(
+                            activeTextEditor.combSelectionStartSlot,
+                            activeTextEditor.combSelectionEndSlot)
+                        && index < Math.max(
+                            activeTextEditor.combSelectionStartSlot,
+                            activeTextEditor.combSelectionEndSlot)
+
+                    x: index * activeTextEditor.combSlotWidth
+                    width: activeTextEditor.combSlotWidth
+                    height: activeTextEditor.height
+                    z: 2
+                    Accessible.ignored: true
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 2
+                        visible: combCell.selected
+                        color: activeTextEditor.selectionColor
+                    }
+
+                    Text {
+                        anchors.fill: parent
+                        text: index < activeTextEditor.combCharacters.length
+                            ? activeTextEditor.combCharacters[index]
+                            : ""
+                        color: combCell.selected
+                            ? activeTextEditor.selectedTextColor
+                            : "#202124"
+                        font.family: activeTextEditor.font.family
+                        font.pixelSize: activeTextEditor.font.pixelSize
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                        Accessible.ignored: true
+                    }
+                }
             }
 
             background: Rectangle {
@@ -1248,6 +1390,27 @@ Item {
                     : formFieldLayer.textFieldBorderPointWidth
                         * root.pagePointScale
                 radius: 0
+
+                Repeater {
+                    model: Math.max(
+                        0,
+                        activeTextEditor.combSlotCount - 1)
+
+                    delegate: Rectangle {
+                        required property int index
+
+                        x: (index + 1)
+                            * activeTextEditor.combSlotWidth
+                            - width / 2
+                        y: parent.border.width
+                        width: 1
+                        height: Math.max(
+                            0,
+                            parent.height - parent.border.width * 2)
+                        color: parent.border.color
+                        Accessible.ignored: true
+                    }
+                }
             }
         }
     }

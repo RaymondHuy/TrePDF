@@ -21,6 +21,7 @@ Item {
     required property bool checkboxToolActive
     required property bool radioButtonToolActive
     required property bool dropdownToolActive
+    required property bool combFieldToolActive
     required property bool draftTextureCurrent
     required property bool draftTextureReady
     required property Item viewportItem
@@ -39,6 +40,7 @@ Item {
         && !checkboxToolActive
         && !radioButtonToolActive
         && !dropdownToolActive
+        && !combFieldToolActive
 
     function prepareForSessionChange() {
         editOverlay.prepareForSessionChange()
@@ -157,6 +159,7 @@ Item {
         checkboxToolActive: root.checkboxToolActive
         radioButtonToolActive: root.radioButtonToolActive
         dropdownToolActive: root.dropdownToolActive
+        combFieldToolActive: root.combFieldToolActive
         z: 3
     }
 }

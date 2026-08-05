@@ -23,7 +23,7 @@
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Components/DocumentView.qml" line="239"/>
+        <location filename="../src/Components/DocumentView.qml" line="241"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="48"/>
@@ -148,39 +148,39 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="200"/>
+        <location filename="../src/Components/AppRibbon.qml" line="219"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="206"/>
+        <location filename="../src/Components/AppRibbon.qml" line="225"/>
         <location filename="../src/Components/EditOverlay.qml" line="1892"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="212"/>
+        <location filename="../src/Components/AppRibbon.qml" line="231"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="218"/>
+        <location filename="../src/Components/AppRibbon.qml" line="237"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="243"/>
+        <location filename="../src/Components/AppRibbon.qml" line="262"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="247"/>
+        <location filename="../src/Components/AppRibbon.qml" line="266"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="230"/>
+        <location filename="../src/Components/DocumentView.qml" line="232"/>
         <location filename="../src/PDFDocument.cpp" line="80"/>
         <location filename="../src/PDFDocument.cpp" line="232"/>
         <source>No document open</source>
@@ -200,7 +200,7 @@
     <message id="Delete">
         <location filename="../src/Main.qml" line="845"/>
         <location filename="../src/Components/EditOverlay.qml" line="1923"/>
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="859"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1007"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
@@ -434,7 +434,7 @@
         <translation>Làm lại</translation>
     </message>
     <message id="PageNumber">
-        <location filename="../src/Components/PdfPageDelegate.qml" line="159"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="161"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -469,64 +469,74 @@
         <translation>Thêm ký tắt</translation>
     </message>
     <message id="Fields">
-        <location filename="../src/Components/FormRibbon.qml" line="37"/>
+        <location filename="../src/Components/FormRibbon.qml" line="39"/>
         <location filename="../src/Components/SignRibbon.qml" line="69"/>
         <source>Fields</source>
         <translation>Trường</translation>
     </message>
     <message id="TextFieldTool">
-        <location filename="../src/Components/FormRibbon.qml" line="43"/>
+        <location filename="../src/Components/FormRibbon.qml" line="45"/>
         <source>Text Field</source>
         <translation>Ô văn bản</translation>
     </message>
     <message id="DragToAddTextField">
-        <location filename="../src/Components/FormRibbon.qml" line="45"/>
+        <location filename="../src/Components/FormRibbon.qml" line="47"/>
         <source>Drag on the page to add a text field</source>
         <translation>Kéo trên trang để thêm ô văn bản</translation>
     </message>
     <message id="CheckboxTool">
-        <location filename="../src/Components/FormRibbon.qml" line="58"/>
+        <location filename="../src/Components/FormRibbon.qml" line="60"/>
         <source>Check Box</source>
         <translation>Hộp kiểm</translation>
     </message>
     <message id="ClickOrDragToAddCheckbox">
-        <location filename="../src/Components/FormRibbon.qml" line="60"/>
+        <location filename="../src/Components/FormRibbon.qml" line="62"/>
         <source>Click or drag on the page to add a check box</source>
         <translation>Nhấp hoặc kéo trên trang để thêm hộp kiểm</translation>
     </message>
     <message id="RadioButtonTool">
-        <location filename="../src/Components/FormRibbon.qml" line="73"/>
+        <location filename="../src/Components/FormRibbon.qml" line="75"/>
         <source>Radio Button</source>
         <translation>Nút chọn</translation>
     </message>
     <message id="ClickOrDragToAddRadioButton">
-        <location filename="../src/Components/FormRibbon.qml" line="75"/>
+        <location filename="../src/Components/FormRibbon.qml" line="77"/>
         <source>Click or drag on the page to add a radio button</source>
         <translation>Nhấp hoặc kéo trên trang để thêm nút chọn</translation>
     </message>
     <message id="DropdownTool">
-        <location filename="../src/Components/FormRibbon.qml" line="88"/>
+        <location filename="../src/Components/FormRibbon.qml" line="90"/>
         <source>Dropdown</source>
         <translation>Danh sách thả xuống</translation>
     </message>
     <message id="ClickOrDragToAddDropdown">
-        <location filename="../src/Components/FormRibbon.qml" line="90"/>
+        <location filename="../src/Components/FormRibbon.qml" line="92"/>
         <source>Click or drag on the page to add a dropdown</source>
         <translation>Nhấp hoặc kéo trên trang để thêm danh sách thả xuống</translation>
     </message>
+    <message id="CombFieldTool">
+        <location filename="../src/Components/FormRibbon.qml" line="105"/>
+        <source>Comb Field</source>
+        <translation>Trường chia ô</translation>
+    </message>
+    <message id="ClickOrDragToAddCombField">
+        <location filename="../src/Components/FormRibbon.qml" line="107"/>
+        <source>Click or drag on the page to add a comb field</source>
+        <translation>Nhấp hoặc kéo trên trang để thêm trường chia ô</translation>
+    </message>
     <message id="ResizeFormField">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="503"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="651"/>
         <source>Resize form field</source>
         <translation>Đổi kích thước trường biểu mẫu</translation>
     </message>
     <message id="MoveFormField">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="958"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1106"/>
         <source>Move form field</source>
         <translation>Di chuyển trường biểu mẫu</translation>
     </message>
     <message id="EnterFormText">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1080"/>
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1146"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1243"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1410"/>
         <source>Enter text</source>
         <translation>Nhập văn bản</translation>
     </message>
@@ -1089,17 +1099,17 @@
         <translation>Một tab đang mở khác đã sử dụng tệp PDF đó.</translation>
     </message>
     <message id="DropdownOption1">
-        <location filename="../src/PDFFormDesignerController.cpp" line="39"/>
+        <location filename="../src/PDFFormDesignerController.cpp" line="89"/>
         <source>Option 1</source>
         <translation>Tùy chọn 1</translation>
     </message>
     <message id="DropdownOption2">
-        <location filename="../src/PDFFormDesignerController.cpp" line="41"/>
+        <location filename="../src/PDFFormDesignerController.cpp" line="91"/>
         <source>Option 2</source>
         <translation>Tùy chọn 2</translation>
     </message>
     <message id="DropdownOption3">
-        <location filename="../src/PDFFormDesignerController.cpp" line="43"/>
+        <location filename="../src/PDFFormDesignerController.cpp" line="93"/>
         <source>Option 3</source>
         <translation>Tùy chọn 3</translation>
     </message>
@@ -1222,59 +1232,107 @@
         <translation>Xóa nút chọn</translation>
     </message>
     <message id="UpdateTextFieldOptionsFailed">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="42"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="51"/>
         <source>Could not update the text field options.</source>
         <translation>Không thể cập nhật tùy chọn trường văn bản.</translation>
     </message>
     <message id="DeleteTextFieldFailed">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="96"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="149"/>
         <source>Could not delete the text field.</source>
         <translation>Không thể xóa trường văn bản.</translation>
     </message>
     <message id="ExpandTextFieldOptions">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="137"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="200"/>
         <source>Expand text field options</source>
         <translation>Mở rộng tùy chọn trường văn bản</translation>
     </message>
     <message id="TextFieldOptions">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="176"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="239"/>
         <source>Text field options</source>
         <translation>Tùy chọn trường văn bản</translation>
     </message>
     <message id="CollapseTextFieldOptions">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="194"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="257"/>
         <source>Collapse text field options</source>
         <translation>Thu gọn tùy chọn trường văn bản</translation>
     </message>
     <message id="TextFieldOptionsHint">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="221"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="287"/>
         <source>Control how users can enter text in this field.</source>
         <translation>Kiểm soát cách người dùng nhập văn bản vào trường này.</translation>
     </message>
     <message id="MultilineTextField">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="234"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="300"/>
         <source>Multi-line</source>
         <translation>Nhiều dòng</translation>
     </message>
     <message id="MultilineTextFieldHint">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="244"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="310"/>
         <source>Allow line breaks and wrapped text.</source>
         <translation>Cho phép xuống dòng và tự động ngắt dòng.</translation>
     </message>
+    <message id="CombTextField">
+        <source>Comb field</source>
+        <translation type="vanished">Chia ô ký tự</translation>
+    </message>
+    <message id="CombTextFieldHint">
+        <source>Divide the field into one box for each allowed character.</source>
+        <translation type="vanished">Chia trường thành một ô cho mỗi ký tự được phép.</translation>
+    </message>
     <message id="LimitTextFieldCharacters">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="257"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="323"/>
         <source>Limit characters</source>
         <translation>Giới hạn số ký tự</translation>
     </message>
     <message id="MaximumTextFieldCharacters">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="272"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="338"/>
         <source>Maximum characters</source>
         <translation>Số ký tự tối đa</translation>
     </message>
     <message id="DeleteTextField">
-        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="326"/>
+        <location filename="../src/Components/TextFieldOptionsPanel.qml" line="413"/>
         <source>Delete text field</source>
         <translation>Xóa trường văn bản</translation>
+    </message>
+    <message id="UpdateCombFieldOptionsFailed">
+        <location filename="../src/Components/CombFieldOptionsPanel.qml" line="50"/>
+        <source>Could not update the comb field options.</source>
+        <translation>Không thể cập nhật tùy chọn trường chia ô.</translation>
+    </message>
+    <message id="DeleteCombFieldFailed">
+        <location filename="../src/Components/CombFieldOptionsPanel.qml" line="109"/>
+        <source>Could not delete the comb field.</source>
+        <translation>Không thể xóa trường chia ô.</translation>
+    </message>
+    <message id="ExpandCombFieldOptions">
+        <location filename="../src/Components/CombFieldOptionsPanel.qml" line="160"/>
+        <source>Expand comb field options</source>
+        <translation>Mở rộng tùy chọn trường chia ô</translation>
+    </message>
+    <message id="CombFieldOptions">
+        <location filename="../src/Components/CombFieldOptionsPanel.qml" line="199"/>
+        <source>Comb field options</source>
+        <translation>Tùy chọn trường chia ô</translation>
+    </message>
+    <message id="CollapseCombFieldOptions">
+        <location filename="../src/Components/CombFieldOptionsPanel.qml" line="217"/>
+        <source>Collapse comb field options</source>
+        <translation>Thu gọn tùy chọn trường chia ô</translation>
+    </message>
+    <message id="CombFieldOptionsHint">
+        <location filename="../src/Components/CombFieldOptionsPanel.qml" line="247"/>
+        <source>The character limit also determines the number of cells.</source>
+        <translation>Giới hạn ký tự cũng quyết định số ô.</translation>
+    </message>
+    <message id="CombFieldCharacterLimit">
+        <location filename="../src/Components/CombFieldOptionsPanel.qml" line="261"/>
+        <source>Character limit</source>
+        <translation>Giới hạn ký tự</translation>
+    </message>
+    <message id="DeleteCombField">
+        <location filename="../src/Components/CombFieldOptionsPanel.qml" line="335"/>
+        <source>Delete comb field</source>
+        <translation>Xóa trường chia ô</translation>
     </message>
 </context>
 </TS>
