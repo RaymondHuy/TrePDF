@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="32" height="32" viewBox="0 0 32 32"
+     fill="none" color="#1F1F1F"
+     aria-labelledby="title desc" role="img">
+  <title id="title">List box</title>
+  <desc id="desc">A list box form field with three rows and a vertical scrollbar.</desc>
+
+  <!-- Outer field -->
+  <rect x="4.25" y="5.25" width="23.5" height="21.5" rx="1.25"
+        stroke="currentColor" stroke-width="1.5"/>
+
+  <!-- Scrollbar divider -->
+  <path d="M23 5.75V26.25"
+        stroke="currentColor" stroke-width="1.5"/>
+
+  <!-- List rows -->
+  <path d="M7.5 10H19.5"
+        stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M7.5 16H19.5"
+        stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M7.5 22H19.5"
+        stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Scrollbar arrows -->
+  <path d="M25.5 8.25L24.25 10H26.75L25.5 8.25Z"
+        fill="currentColor"/>
+  <path d="M25.5 23.75L26.75 22H24.25L25.5 23.75Z"
+        fill="currentColor"/>
+
+  <!-- Scrollbar thumb -->
+  <rect x="24.65" y="12.25" width="1.7" height="7.5" rx="0.85"
+        fill="currentColor"/>
+</svg>

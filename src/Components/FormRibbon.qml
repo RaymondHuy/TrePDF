@@ -107,7 +107,7 @@ Flickable {
                 text: qsTrId("ListBoxTool")
                 //% "Click or drag on the page to add a list box"
                 toolTipText: qsTrId("ClickOrDragToAddListBox")
-                iconSource: "../assets/icons/dropdown-menu.svg"
+                iconSource: "../assets/icons/list-box.svg"
                 icon.width: 32
                 icon.height: 32
                 preserveIconColors: true
