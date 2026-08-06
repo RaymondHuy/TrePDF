@@ -2900,6 +2900,7 @@ PDFSaveWriter::Result prepareAcroFormFields(
             == PDFFormDesignerController::SaveField::Remove) {
             if ((source.type != PDFFormDesignerController::Text
                  && source.type != PDFFormDesignerController::Dropdown
+                 && source.type != PDFFormDesignerController::ListBox
                  && source.type != PDFFormDesignerController::RadioButton)
                 || source.id.isEmpty()
                 || source.page < -1
@@ -2917,7 +2918,9 @@ PDFSaveWriter::Result prepareAcroFormFields(
                 ? PDFAcroFormWriter::FieldType::Text
                 : source.type == PDFFormDesignerController::RadioButton
                     ? PDFAcroFormWriter::FieldType::RadioButton
-                    : PDFAcroFormWriter::FieldType::Dropdown;
+                    : source.type == PDFFormDesignerController::ListBox
+                        ? PDFAcroFormWriter::FieldType::ListBox
+                        : PDFAcroFormWriter::FieldType::Dropdown;
             target.operation = PDFAcroFormWriter::Operation::Remove;
             target.page = source.page;
             targetFields.append(std::move(target));
@@ -2988,6 +2991,7 @@ PDFSaveWriter::Result prepareAcroFormFields(
         target.fieldName = source.name;
         target.tooltip = source.tooltip;
         target.value = source.value;
+        target.selectedValues = source.selectedValues;
         target.defaultValue = source.defaultValue;
         target.options = source.options;
         if (source.operation
@@ -3039,6 +3043,9 @@ PDFSaveWriter::Result prepareAcroFormFields(
             break;
         case PDFFormDesignerController::Signature:
             target.type = PDFAcroFormWriter::FieldType::Signature;
+            break;
+        case PDFFormDesignerController::ListBox:
+            target.type = PDFAcroFormWriter::FieldType::ListBox;
             break;
         }
         targetFields.append(std::move(target));

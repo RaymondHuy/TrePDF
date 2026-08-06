@@ -98,6 +98,7 @@ struct TrePDFTextField {
     QString value;
     QString defaultValue;
     QStringList options;
+    QStringList selectedValues;
     int type = FPDF_FORMFIELD_UNKNOWN;
     int flags = 0;
     int maxLength = 0;

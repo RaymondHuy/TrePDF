@@ -18,8 +18,8 @@
 
 namespace {
 
-constexpr int kMaximumDropdownOptions = 4096;
-constexpr qsizetype kMaximumDropdownOptionCharacters = 1024 * 1024;
+constexpr int kMaximumChoiceOptions = 4096;
+constexpr qsizetype kMaximumChoiceOptionCharacters = 1024 * 1024;
 constexpr int kMaximumTextFieldInputLength = 300000;
 constexpr int kDefaultCombFieldLength = 5;
 // PDFium's public annotation header does not expose the PDF Comb flag.
@@ -94,9 +94,19 @@ QStringList defaultDropdownOptions()
     return options;
 }
 
-bool validDropdownOptions(const QStringList &options)
+QStringList defaultListBoxOptions()
 {
-    if (options.isEmpty() || options.size() > kMaximumDropdownOptions) {
+    QStringList options = defaultDropdownOptions();
+    //% "Option 4"
+    options.append(qtTrId("ListBoxOption4"));
+    //% "Option 5"
+    options.append(qtTrId("ListBoxOption5"));
+    return options;
+}
+
+bool validChoiceOptions(const QStringList &options)
+{
+    if (options.isEmpty() || options.size() > kMaximumChoiceOptions) {
         return false;
     }
     QSet<QString> uniqueOptions;
@@ -104,13 +114,54 @@ bool validDropdownOptions(const QStringList &options)
     for (const QString &option : options) {
         totalCharacters += option.size();
         if (option.isEmpty()
-            || totalCharacters > kMaximumDropdownOptionCharacters
+            || totalCharacters > kMaximumChoiceOptionCharacters
             || uniqueOptions.contains(option)) {
             return false;
         }
         uniqueOptions.insert(option);
     }
     return true;
+}
+
+bool isChoiceFieldType(PDFFormDesignerController::FieldType type)
+{
+    return type == PDFFormDesignerController::Dropdown
+        || type == PDFFormDesignerController::ListBox;
+}
+
+QStringList canonicalSelectedValues(
+    const QStringList &options,
+    const QStringList &selectedValues,
+    bool *allValuesKnown = nullptr)
+{
+    QSet<QString> optionSet;
+    optionSet.reserve(options.size());
+    for (const QString &option : options) {
+        optionSet.insert(option);
+    }
+
+    QSet<QString> selectedSet;
+    selectedSet.reserve(selectedValues.size());
+    bool allKnown = true;
+    for (const QString &selectedValue : selectedValues) {
+        if (optionSet.contains(selectedValue)) {
+            selectedSet.insert(selectedValue);
+        } else {
+            allKnown = false;
+        }
+    }
+    if (allValuesKnown) {
+        *allValuesKnown = allKnown;
+    }
+
+    QStringList canonicalValues;
+    canonicalValues.reserve(qMin(options.size(), selectedSet.size()));
+    for (const QString &option : options) {
+        if (selectedSet.contains(option)) {
+            canonicalValues.append(option);
+        }
+    }
+    return canonicalValues;
 }
 
 QRectF boundedFieldRect(qreal x,
@@ -140,6 +191,8 @@ QString fieldIdPrefix(PDFFormDesignerController::FieldType type)
         return QStringLiteral("radio-field");
     case PDFFormDesignerController::Dropdown:
         return QStringLiteral("dropdown-field");
+    case PDFFormDesignerController::ListBox:
+        return QStringLiteral("listbox-field");
     case PDFFormDesignerController::Date:
         return QStringLiteral("date-field");
     case PDFFormDesignerController::Signature:
@@ -159,6 +212,8 @@ QString fieldNamePrefix(PDFFormDesignerController::FieldType type)
         return QStringLiteral("RadioButton");
     case PDFFormDesignerController::Dropdown:
         return QStringLiteral("Dropdown");
+    case PDFFormDesignerController::ListBox:
+        return QStringLiteral("ListBox");
     case PDFFormDesignerController::Date:
         return QStringLiteral("DateField");
     case PDFFormDesignerController::Signature:
@@ -222,6 +277,8 @@ QVariant PDFFormDesignerController::data(const QModelIndex &index, int role) con
         return field.changedProperties != NoPropertyChanges;
     case SourceBackedRole:
         return field.sourceBacked;
+    case SelectedValuesRole:
+        return field.selectedValues;
     default:
         return {};
     }
@@ -247,6 +304,7 @@ QHash<int, QByteArray> PDFFormDesignerController::roleNames() const
         {DirtyRole, "dirty"},
         {SourceBackedRole, "sourceBacked"},
         {MaxLengthRole, "maxLength"},
+        {SelectedValuesRole, "selectedValues"},
     };
 }
 
@@ -404,25 +462,45 @@ void PDFFormDesignerController::refreshSourceFieldValues()
                 field.sourceIdentityToken = source->identityToken;
                 QList<int> changedRoles;
                 if (!(field.changedProperties & ValuePropertyChanged)) {
-                    QString acceptedValue = field.type == Text
-                        ? constrainedSourceTextFieldValue(
-                              source->value,
-                              field.flags,
-                              field.maxLength)
-                        : source->value;
-                    const bool valueConstrained
-                        = acceptedValue != source->value;
-                    if (acceptedValue != field.value) {
-                        field.value = acceptedValue;
-                        changedRoles.append(ValueRole);
-                    }
-                    if (valueConstrained) {
-                        field.changedProperties |= ValuePropertyChanged;
-                        changedRoles.append(DirtyRole);
-                        constrainedTextValue = true;
+                    if (field.type == ListBox) {
+                        const QStringList acceptedSelectedValues
+                            = canonicalSelectedValues(
+                                source->options,
+                                source->selectedValues);
+                        if (acceptedSelectedValues
+                            != field.selectedValues) {
+                            field.selectedValues
+                                = acceptedSelectedValues;
+                            changedRoles.append(SelectedValuesRole);
+                        }
+                        const QString acceptedValue
+                            = acceptedSelectedValues.value(0);
+                        if (acceptedValue != field.value) {
+                            field.value = acceptedValue;
+                            changedRoles.append(ValueRole);
+                        }
+                    } else {
+                        QString acceptedValue = field.type == Text
+                            ? constrainedSourceTextFieldValue(
+                                  source->value,
+                                  field.flags,
+                                  field.maxLength)
+                            : source->value;
+                        const bool valueConstrained
+                            = acceptedValue != source->value;
+                        if (acceptedValue != field.value) {
+                            field.value = acceptedValue;
+                            changedRoles.append(ValueRole);
+                        }
+                        if (valueConstrained) {
+                            field.changedProperties
+                                |= ValuePropertyChanged;
+                            changedRoles.append(DirtyRole);
+                            constrainedTextValue = true;
+                        }
                     }
                 }
-                if (field.type == Dropdown
+                if (isChoiceFieldType(field.type)
                     && !(field.changedProperties & OptionsPropertyChanged)
                     && source->options != field.options) {
                     field.options = source->options;
@@ -451,7 +529,7 @@ QString PDFFormDesignerController::addField(int type,
                                             qreal width,
                                             qreal height)
 {
-    if (type < Text || type > Signature || page < 0) {
+    if (type < Text || type > ListBox || page < 0) {
         return {};
     }
 
@@ -487,6 +565,11 @@ QString PDFFormDesignerController::addField(int type,
         };
     } else if (field.type == Dropdown) {
         field.options = defaultDropdownOptions();
+        field.value = field.options.constFirst();
+        field.defaultValue = field.value;
+    } else if (field.type == ListBox) {
+        field.options = defaultListBoxOptions();
+        field.selectedValues = {field.options.constFirst()};
         field.value = field.options.constFirst();
         field.defaultValue = field.value;
     }
@@ -588,6 +671,28 @@ bool PDFFormDesignerController::activateSourceDropdown(
     const QString &fieldId,
     int optionIndex)
 {
+    return activateSourceChoice(fieldId, optionIndex);
+}
+
+bool PDFFormDesignerController::activateSourceChoice(
+    const QString &fieldId,
+    int optionIndex)
+{
+    return changeSourceChoiceOption(fieldId, optionIndex, false);
+}
+
+bool PDFFormDesignerController::toggleSourceChoiceOption(
+    const QString &fieldId,
+    int optionIndex)
+{
+    return changeSourceChoiceOption(fieldId, optionIndex, true);
+}
+
+bool PDFFormDesignerController::changeSourceChoiceOption(
+    const QString &fieldId,
+    int optionIndex,
+    bool toggle)
+{
     const int row = rowForFieldId(fieldId);
     if (row < 0
         || !m_document
@@ -599,7 +704,8 @@ bool PDFFormDesignerController::activateSourceDropdown(
     }
 
     const FormField &field = m_fields.at(row);
-    if (field.type != Dropdown
+    if (!isChoiceFieldType(field.type)
+        || (toggle && field.type != ListBox)
         || !field.sourceBacked
         || !field.hasSourcePage
         || field.sourcePage < 0
@@ -621,7 +727,7 @@ bool PDFFormDesignerController::activateSourceDropdown(
         optionIndex,
         true,
         field.sourcePage,
-        false,
+        toggle,
         field.sourceIdentityToken);
     // Keep native focus adornments out of the designer-owned source Widget.
     // Both requests run on the serialized form worker, so the selection is
@@ -684,7 +790,7 @@ bool PDFFormDesignerController::managesSourceChoiceField(
 
     const auto matches =
         [sourcePage, annotationIndex, &identityToken](const FormField &field) {
-            return field.type == Dropdown
+            return isChoiceFieldType(field.type)
                 && field.sourceBacked
                 && field.sourcePage == sourcePage
                 && field.sourceAnnotationIndex == annotationIndex
@@ -788,10 +894,15 @@ bool PDFFormDesignerController::setFieldValue(const QString &fieldId,
     }
 
     FormField &field = m_fields[row];
+    if (field.type == ListBox) {
+        return setFieldSelectedValues(
+            fieldId,
+            value.isEmpty() ? QStringList{} : QStringList{value});
+    }
     QString acceptedValue = field.type == Text
         ? constrainedTextFieldValue(value, field.flags, field.maxLength)
         : value;
-    if (field.type == Dropdown
+    if (isChoiceFieldType(field.type)
         && !field.options.contains(acceptedValue)) {
         return false;
     }
@@ -829,6 +940,44 @@ bool PDFFormDesignerController::setFieldValue(const QString &fieldId,
     if (changed) {
         emit draftStateChanged();
     }
+    return true;
+}
+
+bool PDFFormDesignerController::setFieldSelectedValues(
+    const QString &fieldId,
+    const QStringList &selectedValues)
+{
+    const int row = rowForFieldId(fieldId);
+    if (row < 0 || m_fields.at(row).type != ListBox) {
+        return false;
+    }
+
+    FormField &field = m_fields[row];
+    bool allValuesKnown = false;
+    const QStringList acceptedSelectedValues
+        = canonicalSelectedValues(
+            field.options,
+            selectedValues,
+            &allValuesKnown);
+    if (!allValuesKnown) {
+        return false;
+    }
+
+    const QString acceptedValue = acceptedSelectedValues.value(0);
+    if (field.selectedValues == acceptedSelectedValues
+        && field.value == acceptedValue) {
+        return true;
+    }
+
+    QList<int> changedRoles{SelectedValuesRole, DirtyRole};
+    field.selectedValues = acceptedSelectedValues;
+    if (field.value != acceptedValue) {
+        field.value = acceptedValue;
+        changedRoles.append(ValueRole);
+    }
+    field.changedProperties |= ValuePropertyChanged;
+    emit dataChanged(index(row), index(row), changedRoles);
+    emit draftStateChanged();
     return true;
 }
 
@@ -922,7 +1071,7 @@ bool PDFFormDesignerController::setFieldOptions(const QString &fieldId,
     }
 
     FormField &field = m_fields[row];
-    if (field.type == Dropdown && !validDropdownOptions(options)) {
+    if (isChoiceFieldType(field.type) && !validChoiceOptions(options)) {
         return false;
     }
     if (field.options == options) {
@@ -934,6 +1083,25 @@ bool PDFFormDesignerController::setFieldOptions(const QString &fieldId,
     if (field.type == Dropdown) {
         if (!field.options.contains(field.value)) {
             field.value = field.options.constFirst();
+            field.changedProperties |= ValuePropertyChanged;
+            changedRoles.append(ValueRole);
+        }
+        if (!field.options.contains(field.defaultValue)) {
+            field.defaultValue = field.options.constFirst();
+        }
+    } else if (field.type == ListBox) {
+        const QStringList filteredSelectedValues
+            = canonicalSelectedValues(
+                field.options,
+                field.selectedValues);
+        if (field.selectedValues != filteredSelectedValues) {
+            field.selectedValues = filteredSelectedValues;
+            field.changedProperties |= ValuePropertyChanged;
+            changedRoles.append(SelectedValuesRole);
+        }
+        const QString compatibleValue = field.selectedValues.value(0);
+        if (field.value != compatibleValue) {
+            field.value = compatibleValue;
             field.changedProperties |= ValuePropertyChanged;
             changedRoles.append(ValueRole);
         }
@@ -956,7 +1124,7 @@ bool PDFFormDesignerController::renameFieldOption(const QString &fieldId,
     }
 
     FormField &field = m_fields[row];
-    if (field.type != Dropdown || optionIndex < 0
+    if (!isChoiceFieldType(field.type) || optionIndex < 0
         || optionIndex >= field.options.size()) {
         return false;
     }
@@ -968,17 +1136,40 @@ bool PDFFormDesignerController::renameFieldOption(const QString &fieldId,
 
     QStringList options = field.options;
     options[optionIndex] = option;
-    if (!validDropdownOptions(options)) {
+    if (!validChoiceOptions(options)) {
         return false;
     }
 
     field.options = std::move(options);
     field.changedProperties |= OptionsPropertyChanged;
     QList<int> changedRoles{OptionsRole, DirtyRole};
-    if (field.value == previousOption) {
-        field.value = option;
-        field.changedProperties |= ValuePropertyChanged;
-        changedRoles.append(ValueRole);
+    if (field.type == Dropdown) {
+        if (field.value == previousOption) {
+            field.value = option;
+            field.changedProperties |= ValuePropertyChanged;
+            changedRoles.append(ValueRole);
+        }
+    } else {
+        QStringList remappedSelectedValues = field.selectedValues;
+        for (QString &selectedValue : remappedSelectedValues) {
+            if (selectedValue == previousOption) {
+                selectedValue = option;
+            }
+        }
+        remappedSelectedValues = canonicalSelectedValues(
+            field.options,
+            remappedSelectedValues);
+        if (field.selectedValues != remappedSelectedValues) {
+            field.selectedValues = remappedSelectedValues;
+            field.changedProperties |= ValuePropertyChanged;
+            changedRoles.append(SelectedValuesRole);
+        }
+        const QString compatibleValue = field.selectedValues.value(0);
+        if (field.value != compatibleValue) {
+            field.value = compatibleValue;
+            field.changedProperties |= ValuePropertyChanged;
+            changedRoles.append(ValueRole);
+        }
     }
     if (field.defaultValue == previousOption) {
         field.defaultValue = option;
@@ -1190,6 +1381,7 @@ bool PDFFormDesignerController::removeField(const QString &fieldId)
     if (field.sourceBacked
         && field.type != Text
         && field.type != Dropdown
+        && field.type != ListBox
         && field.type != RadioButton) {
         return false;
     }
@@ -1406,21 +1598,24 @@ PDFFormDesignerController::saveFields(
             ? PDFFormAppearance::kTextFieldVersion
             : field.type == Dropdown
                 ? PDFFormAppearance::kDropdownVersion
-                : field.type == RadioButton
-                    ? PDFFormAppearance::kRadioButtonVersion
-                    : 0;
+                : field.type == ListBox
+                    ? PDFFormAppearance::kListBoxVersion
+                    : field.type == RadioButton
+                        ? PDFFormAppearance::kRadioButtonVersion
+                        : 0;
         const bool normalizeLegacyAppearance
             = includeAppearanceNormalization
             && field.sourceBacked
             && (field.type == Text
                 || field.type == Dropdown
+                || field.type == ListBox
                 || field.type == RadioButton)
             && field.appearanceVersion
                 < currentAppearanceVersion
             && normalizationPages.contains(page);
         const bool normalizeNativeAppearance
             = field.sourceBacked
-            && (field.type == Text || field.type == Dropdown)
+            && (field.type == Text || isChoiceFieldType(field.type))
             && (normalizeAllNativeAppearances
                 || nativeAppearancePages.contains(page));
         const bool normalizeAppearance
@@ -1449,9 +1644,11 @@ PDFFormDesignerController::saveFields(
             : field.type == Checkbox
                     || field.type == RadioButton
                     || field.type == Dropdown
+                    || field.type == ListBox
                 ? field.defaultValue
                 : field.value;
         saved.options = field.options;
+        saved.selectedValues = field.selectedValues;
         saved.type = field.type;
         saved.page = page;
         saved.normalizedRect = field.normalizedRect;
@@ -1472,6 +1669,7 @@ PDFFormDesignerController::saveFields(
         saved.value = field.value;
         saved.defaultValue = field.defaultValue;
         saved.options = field.options;
+        saved.selectedValues = field.selectedValues;
         saved.type = field.type;
         saved.page = page;
         saved.normalizedRect = field.sourceNormalizedRect;
@@ -1521,6 +1719,7 @@ QVariantMap PDFFormDesignerController::fieldToMap(const FormField &field) const
     value.insert(QStringLiteral("value"), field.value);
     value.insert(QStringLiteral("name"), field.name);
     value.insert(QStringLiteral("options"), field.options);
+    value.insert(QStringLiteral("selectedValues"), field.selectedValues);
     value.insert(QStringLiteral("flags"), field.flags);
     value.insert(QStringLiteral("maxLength"), field.maxLength);
     value.insert(
@@ -1586,7 +1785,8 @@ void PDFFormDesignerController::reloadSourceFields()
                     || (source.type != FPDF_FORMFIELD_TEXTFIELD
                         && source.type != FPDF_FORMFIELD_CHECKBOX
                         && source.type != FPDF_FORMFIELD_RADIOBUTTON
-                        && source.type != FPDF_FORMFIELD_COMBOBOX)
+                        && source.type != FPDF_FORMFIELD_COMBOBOX
+                        && source.type != FPDF_FORMFIELD_LISTBOX)
                     || source.sourcePage < 0
                     || source.normalizedRect.isEmpty()
                     || document->displayPageIndexForSourcePage(
@@ -1602,7 +1802,9 @@ void PDFFormDesignerController::reloadSourceFields()
                         ? RadioButton
                         : source.type == FPDF_FORMFIELD_COMBOBOX
                             ? Dropdown
-                            : Text;
+                            : source.type == FPDF_FORMFIELD_LISTBOX
+                                ? ListBox
+                                : Text;
                 field.page = document->displayPageIndexForSourcePage(
                     source.sourcePage);
                 field.sourcePage = source.sourcePage;
@@ -1618,6 +1820,7 @@ void PDFFormDesignerController::reloadSourceFields()
                 field.tooltip = source.tooltip;
                 field.defaultValue = source.defaultValue;
                 field.options = source.options;
+                field.selectedValues = source.selectedValues;
                 field.sourceIdentityToken = source.identityToken;
                 field.appearanceVersion = source.appearanceVersion;
                 field.flags = (source.flags & FPDF_FORMFLAG_REQUIRED

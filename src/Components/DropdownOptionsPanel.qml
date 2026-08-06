@@ -12,10 +12,118 @@ Rectangle {
     required property PDFFormDesignerController controller
     required property string fieldId
     required property bool collapsed
+    required property bool listBoxMode
 
     property bool sourceBacked: false
     property string errorText: ""
     property string newOptionDraft: ""
+    readonly property int expectedFieldType: listBoxMode
+        ? PDFFormDesignerController.ListBox
+        : PDFFormDesignerController.Dropdown
+    readonly property string updateOptionsFailedText: {
+        if (listBoxMode) {
+            //% "Could not update the list box options."
+            return qsTrId("UpdateListBoxOptionsFailed")
+        }
+        //% "Could not update the dropdown options."
+        return qsTrId("UpdateDropdownOptionsFailed")
+    }
+    readonly property string enterOptionValueText: {
+        if (listBoxMode) {
+            //% "Enter a list box option value."
+            return qsTrId("EnterListBoxOptionValue")
+        }
+        //% "Enter an option value."
+        return qsTrId("EnterDropdownOptionValue")
+    }
+    readonly property string uniqueOptionsText: {
+        if (listBoxMode) {
+            //% "List box options must be unique."
+            return qsTrId("ListBoxOptionsMustBeUnique")
+        }
+        //% "Dropdown options must be unique."
+        return qsTrId("DropdownOptionsMustBeUnique")
+    }
+    readonly property string requiresOptionText: {
+        if (listBoxMode) {
+            //% "A list box must contain at least one option."
+            return qsTrId("ListBoxRequiresOneOption")
+        }
+        //% "A dropdown must contain at least one option."
+        return qsTrId("DropdownRequiresOneOption")
+    }
+    readonly property string deleteFailedText: {
+        if (listBoxMode) {
+            //% "Could not delete the list box."
+            return qsTrId("DeleteListBoxFailed")
+        }
+        //% "Could not delete the dropdown."
+        return qsTrId("DeleteDropdownFailed")
+    }
+    readonly property string expandOptionsText: {
+        if (listBoxMode) {
+            //% "Expand list box options"
+            return qsTrId("ExpandListBoxOptions")
+        }
+        //% "Expand dropdown options"
+        return qsTrId("ExpandDropdownOptions")
+    }
+    readonly property string optionsTitleText: {
+        if (listBoxMode) {
+            //% "List box options"
+            return qsTrId("ListBoxOptions")
+        }
+        //% "Dropdown options"
+        return qsTrId("DropdownOptions")
+    }
+    readonly property string collapseOptionsText: {
+        if (listBoxMode) {
+            //% "Collapse list box options"
+            return qsTrId("CollapseListBoxOptions")
+        }
+        //% "Collapse dropdown options"
+        return qsTrId("CollapseDropdownOptions")
+    }
+    readonly property string manageOptionsHintText: {
+        if (listBoxMode) {
+            //% "Add, edit, or remove values shown in this list box."
+            return qsTrId("ManageListBoxOptionsHint")
+        }
+        //% "Add, edit, or remove values shown in this dropdown."
+        return qsTrId("ManageDropdownOptionsHint")
+    }
+    readonly property string newOptionText: {
+        if (listBoxMode) {
+            //% "New list box option"
+            return qsTrId("NewListBoxOption")
+        }
+        //% "New option"
+        return qsTrId("NewDropdownOption")
+    }
+    readonly property string addOptionText: {
+        if (listBoxMode) {
+            //% "Add list box option"
+            return qsTrId("AddListBoxOption")
+        }
+        //% "Add option"
+        return qsTrId("AddDropdownOption")
+    }
+    readonly property string removeOptionText: {
+        if (listBoxMode) {
+            //% "Remove list box option"
+            return qsTrId("RemoveListBoxOption")
+        }
+        //% "Remove option"
+        return qsTrId("RemoveDropdownOption")
+    }
+    readonly property string deleteFieldText: {
+        if (listBoxMode) {
+            //% "Delete list box"
+            return qsTrId("DeleteListBox")
+        }
+        //% "Delete dropdown"
+        return qsTrId("DeleteDropdown")
+    }
 
     signal collapsedChangeRequested(bool collapsed)
 
@@ -49,8 +157,7 @@ Rectangle {
     function refreshField() {
         const field = controller.fieldData(fieldId)
         if (fieldId.length === 0
-                || Number(field.type)
-                    !== PDFFormDesignerController.Dropdown) {
+                || Number(field.type) !== expectedFieldType) {
             optionsModel.clear()
             sourceBacked = false
             return
@@ -73,8 +180,7 @@ Rectangle {
     function commitOptions(options) {
         const success = controller.setFieldOptions(fieldId, options)
         if (!success) {
-            //% "Could not update the dropdown options."
-            errorText = qsTrId("UpdateDropdownOptionsFailed")
+            errorText = updateOptionsFailedText
             return false
         }
 
@@ -85,13 +191,11 @@ Rectangle {
     function addOption(value) {
         const option = String(value).trim()
         if (option.length === 0) {
-            //% "Enter an option value."
-            errorText = qsTrId("EnterDropdownOptionValue")
+            errorText = enterOptionValueText
             return false
         }
         if (optionIndex(option, -1) >= 0) {
-            //% "Dropdown options must be unique."
-            errorText = qsTrId("DropdownOptionsMustBeUnique")
+            errorText = uniqueOptionsText
             return false
         }
 
@@ -110,13 +214,11 @@ Rectangle {
 
         const option = String(value).trim()
         if (option.length === 0) {
-            //% "Enter an option value."
-            errorText = qsTrId("EnterDropdownOptionValue")
+            errorText = enterOptionValueText
             return false
         }
         if (optionIndex(option, index) >= 0) {
-            //% "Dropdown options must be unique."
-            errorText = qsTrId("DropdownOptionsMustBeUnique")
+            errorText = uniqueOptionsText
             return false
         }
         if (String(optionsModel.get(index).value) === option) {
@@ -126,8 +228,7 @@ Rectangle {
 
         const success = controller.renameFieldOption(fieldId, index, option)
         if (!success) {
-            //% "Could not update the dropdown options."
-            errorText = qsTrId("UpdateDropdownOptionsFailed")
+            errorText = updateOptionsFailedText
             return false
         }
 
@@ -153,8 +254,7 @@ Rectangle {
         if (index < 0 || index >= optionsModel.count)
             return
         if (optionsModel.count <= 1) {
-            //% "A dropdown must contain at least one option."
-            errorText = qsTrId("DropdownRequiresOneOption")
+            errorText = requiresOptionText
             return
         }
 
@@ -164,14 +264,18 @@ Rectangle {
             optionsModel.remove(index)
     }
 
-    function deleteDropdown() {
+    function deleteChoiceField() {
         if (!controller.removeField(fieldId)) {
-            //% "Could not delete the dropdown."
-            errorText = qsTrId("DeleteDropdownFailed")
+            errorText = deleteFailedText
         }
     }
 
     onFieldIdChanged: {
+        errorText = ""
+        newOptionDraft = ""
+        refreshField()
+    }
+    onListBoxModeChanged: {
         errorText = ""
         newOptionDraft = ""
         refreshField()
@@ -212,8 +316,7 @@ Rectangle {
         icon.height: 18
         icon.color: root.theme.foxitDarkOrange
         display: AbstractButton.IconOnly
-        //% "Expand dropdown options"
-        ToolTip.text: qsTrId("ExpandDropdownOptions")
+        ToolTip.text: root.expandOptionsText
         ToolTip.visible: hovered
         ToolTip.delay: 500
         Accessible.name: ToolTip.text
@@ -251,8 +354,7 @@ Rectangle {
 
                     Label {
                         Layout.fillWidth: true
-                        //% "Dropdown options"
-                        text: qsTrId("DropdownOptions")
+                        text: root.optionsTitleText
                         color: root.theme.ribbonTextColor
                         font.pixelSize: 17
                         font.weight: Font.DemiBold
@@ -269,8 +371,7 @@ Rectangle {
                         icon.height: 18
                         icon.color: root.theme.foxitDarkOrange
                         display: AbstractButton.IconOnly
-                        //% "Collapse dropdown options"
-                        ToolTip.text: qsTrId("CollapseDropdownOptions")
+                        ToolTip.text: root.collapseOptionsText
                         ToolTip.visible: hovered
                         ToolTip.delay: 500
                         Accessible.name: ToolTip.text
@@ -296,8 +397,7 @@ Rectangle {
                     Layout.leftMargin: 16
                     Layout.rightMargin: 16
                     Layout.topMargin: 8
-                    //% "Add, edit, or remove values shown in this dropdown."
-                    text: qsTrId("ManageDropdownOptionsHint")
+                    text: root.manageOptionsHintText
                     color: "#747176"
                     font.pixelSize: 11
                     wrapMode: Text.Wrap
@@ -316,8 +416,7 @@ Rectangle {
                         Layout.fillWidth: true
                         text: root.newOptionDraft
                         selectByMouse: true
-                        //% "New option"
-                        placeholderText: qsTrId("NewDropdownOption")
+                        placeholderText: root.newOptionText
                         onTextEdited: root.newOptionDraft = text
                         onAccepted: {
                             if (root.addOption(text))
@@ -333,8 +432,7 @@ Rectangle {
                         enabled: root.newOptionDraft.trim().length > 0
                         text: "+"
                         font.pixelSize: 18
-                        //% "Add option"
-                        ToolTip.text: qsTrId("AddDropdownOption")
+                        ToolTip.text: root.addOptionText
                         ToolTip.visible: hovered
                         ToolTip.delay: 500
                         Accessible.name: ToolTip.text
@@ -452,8 +550,7 @@ Rectangle {
                             enabled: optionsModel.count > 1
                             text: "\u2212"
                             font.pixelSize: 16
-                            //% "Remove option"
-                            ToolTip.text: qsTrId("RemoveDropdownOption")
+                            ToolTip.text: root.removeOptionText
                             ToolTip.visible: hovered
                             ToolTip.delay: 500
                             Accessible.name: ToolTip.text
@@ -496,12 +593,11 @@ Rectangle {
                     Layout.topMargin: 12
                     Layout.bottomMargin: 16
                     Layout.preferredHeight: 34
-                    //% "Delete dropdown"
-                    text: qsTrId("DeleteDropdown")
+                    text: root.deleteFieldText
                     ToolTip.text: text
                     ToolTip.visible: hovered
                     ToolTip.delay: 500
-                    onClicked: root.deleteDropdown()
+                    onClicked: root.deleteChoiceField()
 
                     contentItem: Label {
                         text: deleteDropdownButton.text

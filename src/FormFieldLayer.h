@@ -44,6 +44,8 @@ class FormFieldLayer : public QQuickItem
                    CONSTANT FINAL)
     Q_PROPERTY(qreal textFieldHorizontalPaddingRatio
                    READ textFieldHorizontalPaddingRatio CONSTANT FINAL)
+    Q_PROPERTY(qreal listBoxRowHeightRatio READ listBoxRowHeightRatio
+                   CONSTANT FINAL)
     Q_PROPERTY(QColor accentColor READ accentColor WRITE setAccentColor
                    NOTIFY accentColorChanged FINAL)
     Q_PROPERTY(QString activeFieldId READ activeFieldId
@@ -53,6 +55,9 @@ class FormFieldLayer : public QQuickItem
     Q_PROPERTY(QString activeFieldValue READ activeFieldValue
                    NOTIFY activeFieldChanged FINAL)
     Q_PROPERTY(QStringList activeFieldOptions READ activeFieldOptions
+                   NOTIFY activeFieldChanged FINAL)
+    Q_PROPERTY(QStringList activeFieldSelectedValues
+                   READ activeFieldSelectedValues
                    NOTIFY activeFieldChanged FINAL)
     Q_PROPERTY(int activeFieldType READ activeFieldType
                    NOTIFY activeFieldChanged FINAL)
@@ -81,11 +86,13 @@ public:
     QColor textFieldBorderColor() const;
     qreal textFieldMinimumHorizontalPaddingPoints() const;
     qreal textFieldHorizontalPaddingRatio() const;
+    qreal listBoxRowHeightRatio() const;
     QColor accentColor() const;
     QString activeFieldId() const;
     QRectF activeFieldRect() const;
     QString activeFieldValue() const;
     QStringList activeFieldOptions() const;
+    QStringList activeFieldSelectedValues() const;
     int activeFieldType() const;
     int activeFieldFlags() const;
     int activeFieldMaxLength() const;
@@ -144,6 +151,7 @@ private:
         QRectF normalizedRect;
         QString value;
         QStringList options;
+        QStringList selectedValues;
         int flags = PDFFormDesignerController::NoFieldFlags;
         int maxLength = 0;
         bool sourceBacked = false;
@@ -174,6 +182,7 @@ private:
     QRectF m_activeFieldRect;
     QString m_activeFieldValue;
     QStringList m_activeFieldOptions;
+    QStringList m_activeFieldSelectedValues;
     int m_activeFieldType = -1;
     int m_activeFieldFlags = PDFFormDesignerController::NoFieldFlags;
     int m_activeFieldMaxLength = 0;

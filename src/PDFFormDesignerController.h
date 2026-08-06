@@ -36,7 +36,8 @@ public:
         RadioButton,
         Dropdown,
         Date,
-        Signature
+        Signature,
+        ListBox
     };
     Q_ENUM(FieldType)
 
@@ -82,7 +83,8 @@ public:
         FlagsRole,
         DirtyRole,
         SourceBackedRole,
-        MaxLengthRole
+        MaxLengthRole,
+        SelectedValuesRole
     };
     Q_ENUM(Role)
 
@@ -100,6 +102,7 @@ public:
         QString value;
         QString defaultValue;
         QStringList options;
+        QStringList selectedValues;
         FieldType type = Text;
         int page = -1;
         QRectF normalizedRect;
@@ -143,6 +146,10 @@ public:
                                             qreal viewHeight);
     Q_INVOKABLE bool activateSourceDropdown(const QString &fieldId,
                                             int optionIndex);
+    Q_INVOKABLE bool activateSourceChoice(const QString &fieldId,
+                                          int optionIndex);
+    Q_INVOKABLE bool toggleSourceChoiceOption(const QString &fieldId,
+                                              int optionIndex);
     Q_INVOKABLE QVariantList fieldsForPage(int page) const;
     Q_INVOKABLE QVariantList textFieldsForPage(int page) const;
     QStringList sourceFieldIdsForPage(int page) const;
@@ -161,6 +168,9 @@ public:
         const QPointF &normalizedPoint) const;
     Q_INVOKABLE bool setFieldValue(const QString &fieldId,
                                    const QString &value);
+    Q_INVOKABLE bool setFieldSelectedValues(
+        const QString &fieldId,
+        const QStringList &selectedValues);
     Q_INVOKABLE bool setFieldName(const QString &fieldId,
                                   const QString &name);
     Q_INVOKABLE bool setFieldOptions(const QString &fieldId,
@@ -227,6 +237,7 @@ private:
         QString tooltip;
         QString defaultValue;
         QStringList options;
+        QStringList selectedValues;
         QString sourceIdentityToken;
         int flags = NoFieldFlags;
         int maxLength = 0;
@@ -238,6 +249,9 @@ private:
     int rowForFieldId(const QString &fieldId) const;
     int displayPageForField(const FormField &field) const;
     QVariantMap fieldToMap(const FormField &field) const;
+    bool changeSourceChoiceOption(const QString &fieldId,
+                                  int optionIndex,
+                                  bool toggle);
     void handlePageStructureChanged();
     void reloadSourceFields();
 

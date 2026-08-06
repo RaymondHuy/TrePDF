@@ -102,14 +102,14 @@ này ra sao.
 
 | Nhóm | `z` nội bộ | Mục đích |
 |---|---:|---|
-| `placementArea` | 0 | Click/drag ở vùng trống để đặt Text Field, Check Box, Radio Button, Dropdown hoặc Comb Field. |
+| `placementArea` | 0 | Click/drag ở vùng trống để đặt Text Field, Check Box, Radio Button, Dropdown, List Box hoặc Comb Field. |
 | Background Forms | 1 | Bỏ focus/selection khi click vùng trống trong Forms rồi reject press để runtime bên dưới vẫn được hit; không enabled ở Edit nên không che cursor edit. |
 | Rectangle preview khi đặt | 1 | Hiện rect đang kéo. |
 | `FormFieldLayer` | 2 | Render field bằng scene graph; hit-test, click, checkbox/radio activation, drag move. |
-| `activeFieldFrame` | 4 | Neo editor TextField/Comb Field/Dropdown, viền active và control của field đang chọn. |
+| `activeFieldFrame` | 4 | Neo editor TextField/Comb Field/Dropdown/List Box, viền active và control của field đang chọn. |
 | Edge resize handles | 20 | Nhận kéo/phím để resize. |
-| Nút xóa Text Field/Check Box transient | 30 | Chỉ ở Forms mode; Dropdown và Radio Button được xóa từ panel tùy chọn. |
-| Move handle của Text Field/Comb Field/Dropdown | 40 | Nhận kéo/phím để move qua API C++ chung. |
+| Nút xóa Text Field/Check Box transient | 30 | Chỉ ở Forms mode; Dropdown, List Box và Radio Button được xóa từ panel tùy chọn. |
+| Move handle của Text Field/Comb Field/Dropdown/List Box | 40 | Nhận kéo/phím để move qua API C++ chung. |
 
 `placementArea` cố ý nằm **dưới** `FormFieldLayer`. Khi tool đặt field đang
 bật, click vào vùng trống tạo field mới, còn click vào field đã có vẫn đi qua
@@ -289,7 +289,7 @@ không bị thay bằng một document mới.
 child được bật/tắt độc lập:
 
 - `placementArea` chỉ enabled khi Forms tab đang active, đang chọn tool Text
-  Field/Check Box/Radio Button/Dropdown/Comb Field và delegate không pooled.
+  Field/Check Box/Radio Button/Dropdown/List Box/Comb Field và delegate không pooled.
 - `FormFieldLayer` chỉ render khi `fieldsVisible`, không pooled và có page; nó
   chỉ hiện source-backed field khi `sourceFieldsVisible`, hiện được đặt là
   `formsActive || editActive`.
@@ -297,7 +297,7 @@ child được bật/tắt độc lập:
   placement tool và không pooled.
 - `activeFieldFrame`/resize handle chỉ hiện khi một field đã chọn; nút xóa nổi
   chỉ hiện cho Text Field/Check Box transient trong Forms tab. Text Field,
-  Dropdown và Radio Button transient hoặc source-backed do TrePDF tạo được xóa
+  Dropdown, List Box và Radio Button transient hoặc source-backed do TrePDF tạo được xóa
   từ panel tùy chọn; TextField editor tôn trọng ReadOnly khi không ở Forms tab.
 
 `FormFieldLayer` C++ render vùng field bằng scene graph, hit-test từ field trên
@@ -323,15 +323,15 @@ coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-tes
 |---|---|---|---|---|
 | View | `false` | Có thể interactive nếu form session sẵn sàng. | Không bắt input; draft vẫn có thể hiện. | Source-backed field bị ẩn; không đặt/move/resize. |
 | Edit | `true` | Không interactive vì tool là Select hoặc tool edit khác Browse. | Active: select, edit, add, shape, highlight theo tool. | Source-backed field hiện; action designer hỗ trợ vẫn gate theo read-only, nhưng không có placement/delete Forms-only. |
-| Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Text Field/Dropdown source-backed được hỗ trợ có thể tạo draft xóa. |
-| Forms, tool đặt field | `true` | Bị tắt bởi cờ tool Text Field/Check Box/Radio Button/Dropdown/Comb Field. | Không active. | `placementArea` xử lý vùng trống; không move trong lúc placement tool bật. |
+| Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Text Field/Dropdown/List Box source-backed được hỗ trợ có thể tạo draft xóa. |
+| Forms, tool đặt field | `true` | Bị tắt bởi cờ tool Text Field/Check Box/Radio Button/Dropdown/List Box/Comb Field. | Không active. | `placementArea` xử lý vùng trống; không move trong lúc placement tool bật. |
 | Đang Save hoặc delegate pooled | Không dùng để tương tác | Bị tắt/clear state. | Bị tắt; khi pooled còn xóa data/gesture cục bộ. | Hủy placement/resize/move/focus; khi pooled không render field. |
 
 `AppRibbon` duy trì điều này bằng `syncEditTool()`:
 
 - Rời Edit đặt `PDFEditController.tool = BrowseTool`.
 - Vào Edit từ Browse đặt tool mặc định là Select.
-- Tool đặt Text Field/Check Box/Radio Button/Dropdown/Comb Field chỉ sống trong
+- Tool đặt Text Field/Check Box/Radio Button/Dropdown/List Box/Comb Field chỉ sống trong
   Forms tab và loại trừ nhau.
 
 `formDesignMode` khác với `PDFFormView.interactive`: ở Edit và Forms,
@@ -392,6 +392,7 @@ vừa chọn/di chuyển designer field, kể cả trong một edge case hit tes
 | Form designer handle | Arrow/Shift+Arrow move/resize | `FormFieldLayer` hoặc QML handle gọi designer controller. |
 | Text field designer | Gõ text, Tab/click focus | `TextField` đồng bộ value/focus vào designer controller. |
 | Dropdown designer | Mở popup, chọn option | `ComboBox` đồng bộ value vào designer controller. |
+| List Box designer | Click hoặc Space/Enter để bật/tắt nhiều option; Up/Down/Home/End đổi dòng hiện hành | `ListView` đồng bộ tập lựa chọn vào designer controller hoặc form worker. |
 
 Khi thêm control focus mới, cần trả lời rõ: ai được `activeFocusOnTab`, ai nhận
 Escape, và focus bị hủy thế nào khi tab/mode/delegate đổi.

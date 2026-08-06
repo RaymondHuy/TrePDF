@@ -420,7 +420,9 @@ bool isTrePDFDesignerFieldId(const QString &id, int fieldType)
                 ? QStringLiteral("radio-field-")
                 : fieldType == FPDF_FORMFIELD_COMBOBOX
                     ? QStringLiteral("dropdown-field-")
-                    : QString();
+                    : fieldType == FPDF_FORMFIELD_LISTBOX
+                        ? QStringLiteral("listbox-field-")
+                        : QString();
     constexpr qsizetype uuidLength = 36;
     if (prefix.isEmpty() || !id.startsWith(prefix)) {
         return false;
@@ -1495,7 +1497,8 @@ public:
                 && (fieldType == FPDF_FORMFIELD_TEXTFIELD
                     || fieldType == FPDF_FORMFIELD_CHECKBOX
                     || fieldType == FPDF_FORMFIELD_RADIOBUTTON
-                    || fieldType == FPDF_FORMFIELD_COMBOBOX);
+                    || fieldType == FPDF_FORMFIELD_COMBOBOX
+                    || fieldType == FPDF_FORMFIELD_LISTBOX);
             if (!designerWidget) {
                 FPDFPage_CloseAnnot(annotation);
                 continue;
@@ -1624,13 +1627,18 @@ public:
                         : QStringLiteral("Off");
                 }
             }
-            if (fieldType == FPDF_FORMFIELD_COMBOBOX) {
+            if (fieldType == FPDF_FORMFIELD_COMBOBOX
+                || fieldType == FPDF_FORMFIELD_LISTBOX) {
                 const int choiceFlags = FPDFAnnot_GetFormFieldFlags(
                     m_formHandle,
                     annotation);
-                if (!(choiceFlags & FPDF_FORMFLAG_CHOICE_COMBO)
+                const bool combo = choiceFlags
+                    & FPDF_FORMFLAG_CHOICE_COMBO;
+                if ((fieldType == FPDF_FORMFIELD_COMBOBOX) != combo
                     || (choiceFlags & FPDF_FORMFLAG_CHOICE_EDIT)
-                    || (choiceFlags & FPDF_FORMFLAG_CHOICE_MULTI_SELECT)
+                    || (fieldType == FPDF_FORMFIELD_COMBOBOX
+                        && (choiceFlags
+                            & FPDF_FORMFLAG_CHOICE_MULTI_SELECT))
                     || (choiceFlags & kChoiceCommitOnSelectionChange)
                     || FPDFAnnot_HasKey(annotation, "A")
                     || FPDFAnnot_HasKey(annotation, "AA")) {
@@ -1671,13 +1679,24 @@ public:
                         }
                         uniqueOptions.insert(option);
                         field.options.append(option);
+                        if (fieldType == FPDF_FORMFIELD_LISTBOX
+                            && FPDFAnnot_IsOptionSelected(
+                                m_formHandle,
+                                annotation,
+                                optionIndex)) {
+                            field.selectedValues.append(option);
+                        }
                     }
                 }
                 if (!validOptions
-                    || !field.options.contains(field.value)
+                    || (fieldType == FPDF_FORMFIELD_COMBOBOX
+                        && !field.options.contains(field.value))
                     || !field.options.contains(field.defaultValue)) {
                     FPDFPage_CloseAnnot(annotation);
                     continue;
+                }
+                if (fieldType == FPDF_FORMFIELD_LISTBOX) {
+                    field.value = field.selectedValues.value(0);
                 }
                 field.identityToken = choiceFieldIdentityToken(
                     m_formHandle,

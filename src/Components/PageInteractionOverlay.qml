@@ -21,6 +21,7 @@ Item {
     required property bool checkboxToolActive
     required property bool radioButtonToolActive
     required property bool dropdownToolActive
+    required property bool listBoxToolActive
     required property bool combFieldToolActive
     required property bool draftTextureCurrent
     required property bool draftTextureReady
@@ -40,6 +41,7 @@ Item {
         && !checkboxToolActive
         && !radioButtonToolActive
         && !dropdownToolActive
+        && !listBoxToolActive
         && !combFieldToolActive
 
     function prepareForSessionChange() {
@@ -159,6 +161,7 @@ Item {
         checkboxToolActive: root.checkboxToolActive
         radioButtonToolActive: root.radioButtonToolActive
         dropdownToolActive: root.dropdownToolActive
+        listBoxToolActive: root.listBoxToolActive
         combFieldToolActive: root.combFieldToolActive
         z: 3
     }
