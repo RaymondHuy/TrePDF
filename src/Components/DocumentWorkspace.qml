@@ -17,6 +17,7 @@ Item {
     property bool checkboxToolActive: false
     property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
+    property bool listBoxToolActive: false
     property bool combFieldToolActive: false
     property string transientStatus
     readonly property string selectedFormFieldId:
@@ -40,6 +41,10 @@ Item {
         && selectedFormFieldId.length > 0
         && Number(selectedFormField.type)
             === PDFFormDesignerController.Dropdown
+    readonly property bool listBoxOptionsPanelActive: formsTabActive
+        && selectedFormFieldId.length > 0
+        && Number(selectedFormField.type)
+            === PDFFormDesignerController.ListBox
     readonly property bool radioButtonOptionsPanelActive: formsTabActive
         && selectedFormFieldId.length > 0
         && Number(selectedFormField.type)
@@ -198,6 +203,7 @@ Item {
             checkboxToolActive: root.checkboxToolActive
             radioButtonToolActive: root.radioButtonToolActive
             dropdownToolActive: root.dropdownToolActive
+            listBoxToolActive: root.listBoxToolActive
             combFieldToolActive: root.combFieldToolActive
             zoom: root.session.zoom
             viewRotation: root.session.viewRotation
@@ -237,7 +243,8 @@ Item {
                 : 0
             Layout.fillHeight: true
             active: root.session.document.loaded
-                && root.dropdownOptionsPanelActive
+                && (root.dropdownOptionsPanelActive
+                    || root.listBoxOptionsPanelActive)
             visible: active
 
             sourceComponent: Component {
@@ -245,6 +252,7 @@ Item {
                     theme: root.theme
                     controller: root.session.formDesignerController
                     fieldId: root.selectedFormFieldId
+                    listBoxMode: root.listBoxOptionsPanelActive
                     collapsed: root.session.panelCollapsed
                     onCollapsedChangeRequested: collapsed => {
                         root.session.panelCollapsed = collapsed
@@ -288,6 +296,7 @@ Item {
                 && !root.textFieldOptionsPanelActive
                 && !root.combFieldOptionsPanelActive
                 && !root.dropdownOptionsPanelActive
+                && !root.listBoxOptionsPanelActive
                 && !root.radioButtonOptionsPanelActive
                 && root.session.editController.tool !== PDFEditController.BrowseTool
             visible: active

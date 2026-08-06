@@ -487,6 +487,11 @@ qreal FormFieldLayer::textFieldHorizontalPaddingRatio() const
     return PDFFormAppearance::kTextFieldHorizontalPaddingRatio;
 }
 
+qreal FormFieldLayer::listBoxRowHeightRatio() const
+{
+    return PDFFormAppearance::kListBoxRowHeightRatio;
+}
+
 QColor FormFieldLayer::accentColor() const
 {
     return m_accentColor;
@@ -510,6 +515,11 @@ QString FormFieldLayer::activeFieldValue() const
 QStringList FormFieldLayer::activeFieldOptions() const
 {
     return m_activeFieldOptions;
+}
+
+QStringList FormFieldLayer::activeFieldSelectedValues() const
+{
+    return m_activeFieldSelectedValues;
 }
 
 int FormFieldLayer::activeFieldType() const
@@ -918,12 +928,14 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
             = field.type == PDFFormDesignerController::RadioButton;
         const bool dropdown
             = field.type == PDFFormDesignerController::Dropdown;
+        const bool listBox
+            = field.type == PDFFormDesignerController::ListBox;
         // Source Widget rectangles commonly return with fractional coordinates
         // after a Save/reopen cycle. Keep both opposite edges on the same
         // physical-pixel phase so a one-point border cannot rasterize as one
         // pixel on one side and two pixels on the other.
         const QRectF fieldRect
-            = textField || checkbox || radioButton || dropdown
+            = textField || checkbox || radioButton || dropdown || listBox
             ? alignedDeviceRect(rawFieldRect, devicePixelRatio)
             : rawFieldRect;
         const bool selected = m_formsActive && field.selected;
@@ -936,12 +948,12 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                     * m_pointScale
                 : 1.0;
         const qreal borderWidth
-            = textField || checkbox || radioButton || dropdown
+            = textField || checkbox || radioButton || dropdown || listBox
             ? alignedDeviceWidth(
                   requestedBorderWidth,
                   devicePixelRatio)
             : requestedBorderWidth;
-        const qreal fieldRadius = textField
+        const qreal fieldRadius = textField || listBox
             ? 0.0
             : checkbox
                 ? 2.0
@@ -1091,6 +1103,83 @@ QSGNode *FormFieldLayer::updatePaintNode(QSGNode *oldNode,
                 contentRect,
                 defaultFontPixelSize,
                 true);
+            break;
+        }
+        case PDFFormDesignerController::ListBox: {
+            const QRectF listRect = fieldRect.adjusted(
+                borderWidth,
+                borderWidth,
+                -borderWidth,
+                -borderWidth);
+            if (listRect.isEmpty() || field.options.isEmpty()) {
+                break;
+            }
+            const int listFontPixelSize = qMax(
+                1,
+                qRound(PDFFormAppearance::kTextFieldFontPointSize
+                       * m_pointScale));
+            const qreal naturalRowHeight
+                = PDFFormAppearance::kTextFieldFontPointSize
+                * PDFFormAppearance::kListBoxRowHeightRatio
+                * m_pointScale;
+            const QColor selectedRowBackground = readOnly
+                ? QColor(QStringLiteral("#dde2e6"))
+                : QColor(QStringLiteral("#d9e8fb"));
+            const QColor rowSeparator(QStringLiteral("#e2e5e8"));
+            const int visibleRowCount = qMin(
+                field.options.size(),
+                qMax(1,
+                     qFloor(listRect.height()
+                            / qMax<qreal>(naturalRowHeight, 0.01))));
+            const int selectedOption = field.options.indexOf(
+                field.selectedValues.value(0));
+            const int maximumTopIndex = qMax(
+                0,
+                field.options.size() - visibleRowCount);
+            const int firstVisibleOption = selectedOption < 0
+                ? 0
+                : qBound(
+                      0,
+                      selectedOption - visibleRowCount / 2,
+                      maximumTopIndex);
+            const qreal rowHeight = qMin(
+                naturalRowHeight,
+                listRect.height());
+            qreal rowTop = listRect.top();
+            for (int optionIndex = firstVisibleOption;
+                 optionIndex < firstVisibleOption + visibleRowCount
+                 && optionIndex < field.options.size();
+                 ++optionIndex) {
+                const QString &option = field.options.at(optionIndex);
+                const QRectF rowRect(
+                    listRect.left(),
+                    rowTop,
+                    listRect.width(),
+                    rowHeight);
+                if (field.selectedValues.contains(option)) {
+                    appendRoundedRect(
+                        &geometryVertices,
+                        rowRect,
+                        0.0,
+                        selectedRowBackground);
+                }
+                appendText(
+                    textNode,
+                    option,
+                    m_textFieldRenderFont,
+                    rowRect.adjusted(5.0, 0.0, -5.0, 0.0),
+                    listFontPixelSize,
+                    true);
+                rowTop += rowHeight;
+                if (rowTop < listRect.bottom() - 0.01) {
+                    appendThickLine(
+                        &geometryVertices,
+                        {listRect.left(), rowTop},
+                        {listRect.right(), rowTop},
+                        1.0 / devicePixelRatio,
+                        rowSeparator);
+                }
+            }
             break;
         }
         case PDFFormDesignerController::Signature:
@@ -1372,6 +1461,9 @@ void FormFieldLayer::refreshFields()
             field.options = m_controller->data(
                 modelIndex,
                 PDFFormDesignerController::OptionsRole).toStringList();
+            field.selectedValues = m_controller->data(
+                modelIndex,
+                PDFFormDesignerController::SelectedValuesRole).toStringList();
             field.flags = m_controller->data(
                 modelIndex,
                 PDFFormDesignerController::FlagsRole).toInt();
@@ -1425,6 +1517,7 @@ void FormFieldLayer::refreshActiveField()
     QRectF fieldRect;
     QString fieldValue;
     QStringList fieldOptions;
+    QStringList fieldSelectedValues;
     int fieldType = -1;
     int fieldFlags = PDFFormDesignerController::NoFieldFlags;
     int fieldMaxLength = 0;
@@ -1443,6 +1536,7 @@ void FormFieldLayer::refreshActiveField()
             fieldRect = field->normalizedRect;
             fieldValue = field->value;
             fieldOptions = field->options;
+            fieldSelectedValues = field->selectedValues;
             fieldType = field->type;
             fieldFlags = field->flags;
             fieldMaxLength = field->maxLength;
@@ -1453,6 +1547,7 @@ void FormFieldLayer::refreshActiveField()
     if (m_activeFieldId == fieldId && m_activeFieldRect == fieldRect
         && m_activeFieldValue == fieldValue
         && m_activeFieldOptions == fieldOptions
+        && m_activeFieldSelectedValues == fieldSelectedValues
         && m_activeFieldType == fieldType
         && m_activeFieldFlags == fieldFlags
         && m_activeFieldMaxLength == fieldMaxLength
@@ -1463,6 +1558,7 @@ void FormFieldLayer::refreshActiveField()
     m_activeFieldRect = fieldRect;
     m_activeFieldValue = fieldValue;
     m_activeFieldOptions = fieldOptions;
+    m_activeFieldSelectedValues = fieldSelectedValues;
     m_activeFieldType = fieldType;
     m_activeFieldFlags = fieldFlags;
     m_activeFieldMaxLength = fieldMaxLength;

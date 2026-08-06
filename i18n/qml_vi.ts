@@ -23,7 +23,7 @@
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Components/DocumentView.qml" line="241"/>
+        <location filename="../src/Components/DocumentView.qml" line="243"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="48"/>
@@ -148,39 +148,39 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="219"/>
+        <location filename="../src/Components/AppRibbon.qml" line="240"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="225"/>
+        <location filename="../src/Components/AppRibbon.qml" line="246"/>
         <location filename="../src/Components/EditOverlay.qml" line="1892"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="231"/>
+        <location filename="../src/Components/AppRibbon.qml" line="252"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="237"/>
+        <location filename="../src/Components/AppRibbon.qml" line="258"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="262"/>
+        <location filename="../src/Components/AppRibbon.qml" line="283"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="266"/>
+        <location filename="../src/Components/AppRibbon.qml" line="287"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="232"/>
+        <location filename="../src/Components/DocumentView.qml" line="234"/>
         <location filename="../src/PDFDocument.cpp" line="80"/>
         <location filename="../src/PDFDocument.cpp" line="232"/>
         <source>No document open</source>
@@ -200,7 +200,7 @@
     <message id="Delete">
         <location filename="../src/Main.qml" line="845"/>
         <location filename="../src/Components/EditOverlay.qml" line="1923"/>
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1007"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
@@ -434,7 +434,7 @@
         <translation>Làm lại</translation>
     </message>
     <message id="PageNumber">
-        <location filename="../src/Components/PdfPageDelegate.qml" line="161"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="163"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -469,74 +469,84 @@
         <translation>Thêm ký tắt</translation>
     </message>
     <message id="Fields">
-        <location filename="../src/Components/FormRibbon.qml" line="39"/>
+        <location filename="../src/Components/FormRibbon.qml" line="41"/>
         <location filename="../src/Components/SignRibbon.qml" line="69"/>
         <source>Fields</source>
         <translation>Trường</translation>
     </message>
     <message id="TextFieldTool">
-        <location filename="../src/Components/FormRibbon.qml" line="45"/>
+        <location filename="../src/Components/FormRibbon.qml" line="47"/>
         <source>Text Field</source>
         <translation>Ô văn bản</translation>
     </message>
     <message id="DragToAddTextField">
-        <location filename="../src/Components/FormRibbon.qml" line="47"/>
+        <location filename="../src/Components/FormRibbon.qml" line="49"/>
         <source>Drag on the page to add a text field</source>
         <translation>Kéo trên trang để thêm ô văn bản</translation>
     </message>
     <message id="CheckboxTool">
-        <location filename="../src/Components/FormRibbon.qml" line="60"/>
+        <location filename="../src/Components/FormRibbon.qml" line="62"/>
         <source>Check Box</source>
         <translation>Hộp kiểm</translation>
     </message>
     <message id="ClickOrDragToAddCheckbox">
-        <location filename="../src/Components/FormRibbon.qml" line="62"/>
+        <location filename="../src/Components/FormRibbon.qml" line="64"/>
         <source>Click or drag on the page to add a check box</source>
         <translation>Nhấp hoặc kéo trên trang để thêm hộp kiểm</translation>
     </message>
     <message id="RadioButtonTool">
-        <location filename="../src/Components/FormRibbon.qml" line="75"/>
+        <location filename="../src/Components/FormRibbon.qml" line="77"/>
         <source>Radio Button</source>
         <translation>Nút chọn</translation>
     </message>
     <message id="ClickOrDragToAddRadioButton">
-        <location filename="../src/Components/FormRibbon.qml" line="77"/>
+        <location filename="../src/Components/FormRibbon.qml" line="79"/>
         <source>Click or drag on the page to add a radio button</source>
         <translation>Nhấp hoặc kéo trên trang để thêm nút chọn</translation>
     </message>
     <message id="DropdownTool">
-        <location filename="../src/Components/FormRibbon.qml" line="90"/>
+        <location filename="../src/Components/FormRibbon.qml" line="92"/>
         <source>Dropdown</source>
         <translation>Danh sách thả xuống</translation>
     </message>
     <message id="ClickOrDragToAddDropdown">
-        <location filename="../src/Components/FormRibbon.qml" line="92"/>
+        <location filename="../src/Components/FormRibbon.qml" line="94"/>
         <source>Click or drag on the page to add a dropdown</source>
         <translation>Nhấp hoặc kéo trên trang để thêm danh sách thả xuống</translation>
     </message>
+    <message id="ListBoxTool">
+        <location filename="../src/Components/FormRibbon.qml" line="107"/>
+        <source>List Box</source>
+        <translation>Hộp danh sách</translation>
+    </message>
+    <message id="ClickOrDragToAddListBox">
+        <location filename="../src/Components/FormRibbon.qml" line="109"/>
+        <source>Click or drag on the page to add a list box</source>
+        <translation>Nhấp hoặc kéo trên trang để thêm hộp danh sách</translation>
+    </message>
     <message id="CombFieldTool">
-        <location filename="../src/Components/FormRibbon.qml" line="105"/>
+        <location filename="../src/Components/FormRibbon.qml" line="122"/>
         <source>Comb Field</source>
         <translation>Trường chia ô</translation>
     </message>
     <message id="ClickOrDragToAddCombField">
-        <location filename="../src/Components/FormRibbon.qml" line="107"/>
+        <location filename="../src/Components/FormRibbon.qml" line="124"/>
         <source>Click or drag on the page to add a comb field</source>
         <translation>Nhấp hoặc kéo trên trang để thêm trường chia ô</translation>
     </message>
     <message id="ResizeFormField">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="651"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="676"/>
         <source>Resize form field</source>
         <translation>Đổi kích thước trường biểu mẫu</translation>
     </message>
     <message id="MoveFormField">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1106"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1163"/>
         <source>Move form field</source>
         <translation>Di chuyển trường biểu mẫu</translation>
     </message>
     <message id="EnterFormText">
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1243"/>
-        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1410"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1346"/>
+        <location filename="../src/Components/FormTextFieldOverlay.qml" line="1498"/>
         <source>Enter text</source>
         <translation>Nhập văn bản</translation>
     </message>
@@ -1113,71 +1123,143 @@
         <source>Option 3</source>
         <translation>Tùy chọn 3</translation>
     </message>
+    <message id="ListBoxOption4">
+        <location filename="../src/PDFFormDesignerController.cpp" line="101"/>
+        <source>Option 4</source>
+        <translation>Tùy chọn 4</translation>
+    </message>
+    <message id="ListBoxOption5">
+        <location filename="../src/PDFFormDesignerController.cpp" line="103"/>
+        <source>Option 5</source>
+        <translation>Tùy chọn 5</translation>
+    </message>
+    <message id="UpdateListBoxOptionsFailed">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="26"/>
+        <source>Could not update the list box options.</source>
+        <translation>Không thể cập nhật các tùy chọn của hộp danh sách.</translation>
+    </message>
     <message id="UpdateDropdownOptionsFailed">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="77"/>
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="130"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="29"/>
         <source>Could not update the dropdown options.</source>
         <translation>Không thể cập nhật các tùy chọn của danh sách thả xuống.</translation>
     </message>
+    <message id="EnterListBoxOptionValue">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="34"/>
+        <source>Enter a list box option value.</source>
+        <translation>Nhập một giá trị tùy chọn cho hộp danh sách.</translation>
+    </message>
     <message id="EnterDropdownOptionValue">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="89"/>
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="114"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="37"/>
         <source>Enter an option value.</source>
         <translation>Nhập một giá trị tùy chọn.</translation>
     </message>
+    <message id="ListBoxOptionsMustBeUnique">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="42"/>
+        <source>List box options must be unique.</source>
+        <translation>Các tùy chọn trong hộp danh sách không được trùng nhau.</translation>
+    </message>
     <message id="DropdownOptionsMustBeUnique">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="94"/>
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="119"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="45"/>
         <source>Dropdown options must be unique.</source>
         <translation>Các tùy chọn trong danh sách thả xuống không được trùng nhau.</translation>
     </message>
+    <message id="ListBoxRequiresOneOption">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="50"/>
+        <source>A list box must contain at least one option.</source>
+        <translation>Hộp danh sách phải có ít nhất một tùy chọn.</translation>
+    </message>
     <message id="DropdownRequiresOneOption">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="157"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="53"/>
         <source>A dropdown must contain at least one option.</source>
         <translation>Danh sách thả xuống phải có ít nhất một tùy chọn.</translation>
     </message>
+    <message id="DeleteListBoxFailed">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="58"/>
+        <source>Could not delete the list box.</source>
+        <translation>Không thể xóa hộp danh sách.</translation>
+    </message>
     <message id="DeleteDropdownFailed">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="170"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="61"/>
         <source>Could not delete the dropdown.</source>
         <translation>Không thể xóa danh sách thả xuống.</translation>
     </message>
+    <message id="ExpandListBoxOptions">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="66"/>
+        <source>Expand list box options</source>
+        <translation>Mở rộng tùy chọn hộp danh sách</translation>
+    </message>
     <message id="ExpandDropdownOptions">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="216"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="69"/>
         <source>Expand dropdown options</source>
         <translation>Mở rộng tùy chọn danh sách thả xuống</translation>
     </message>
+    <message id="ListBoxOptions">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="74"/>
+        <source>List box options</source>
+        <translation>Tùy chọn hộp danh sách</translation>
+    </message>
     <message id="DropdownOptions">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="255"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="77"/>
         <source>Dropdown options</source>
         <translation>Tùy chọn danh sách thả xuống</translation>
     </message>
+    <message id="CollapseListBoxOptions">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="82"/>
+        <source>Collapse list box options</source>
+        <translation>Thu gọn tùy chọn hộp danh sách</translation>
+    </message>
     <message id="CollapseDropdownOptions">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="273"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="85"/>
         <source>Collapse dropdown options</source>
         <translation>Thu gọn tùy chọn danh sách thả xuống</translation>
     </message>
+    <message id="ManageListBoxOptionsHint">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="90"/>
+        <source>Add, edit, or remove values shown in this list box.</source>
+        <translation>Thêm, sửa hoặc xóa các giá trị hiển thị trong hộp danh sách.</translation>
+    </message>
     <message id="ManageDropdownOptionsHint">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="300"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="93"/>
         <source>Add, edit, or remove values shown in this dropdown.</source>
         <translation>Thêm, sửa hoặc xóa các giá trị hiển thị trong danh sách thả xuống.</translation>
     </message>
+    <message id="NewListBoxOption">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="98"/>
+        <source>New list box option</source>
+        <translation>Tùy chọn hộp danh sách mới</translation>
+    </message>
     <message id="NewDropdownOption">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="320"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="101"/>
         <source>New option</source>
         <translation>Tùy chọn mới</translation>
     </message>
+    <message id="AddListBoxOption">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="106"/>
+        <source>Add list box option</source>
+        <translation>Thêm tùy chọn hộp danh sách</translation>
+    </message>
     <message id="AddDropdownOption">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="337"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="109"/>
         <source>Add option</source>
         <translation>Thêm tùy chọn</translation>
     </message>
+    <message id="RemoveListBoxOption">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="114"/>
+        <source>Remove list box option</source>
+        <translation>Xóa tùy chọn hộp danh sách</translation>
+    </message>
     <message id="RemoveDropdownOption">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="456"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="117"/>
         <source>Remove option</source>
         <translation>Xóa tùy chọn</translation>
     </message>
+    <message id="DeleteListBox">
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="122"/>
+        <source>Delete list box</source>
+        <translation>Xóa hộp danh sách</translation>
+    </message>
     <message id="DeleteDropdown">
-        <location filename="../src/Components/DropdownOptionsPanel.qml" line="500"/>
+        <location filename="../src/Components/DropdownOptionsPanel.qml" line="125"/>
         <source>Delete dropdown</source>
         <translation>Xóa danh sách thả xuống</translation>
     </message>

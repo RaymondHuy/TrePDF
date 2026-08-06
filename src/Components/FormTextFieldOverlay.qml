@@ -20,6 +20,7 @@ Item {
     property bool checkboxToolActive: false
     property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
+    property bool listBoxToolActive: false
     property bool combFieldToolActive: false
     property rect placementRect: Qt.rect(0, 0, 0, 0)
     property real placementStartX: 0
@@ -60,7 +61,9 @@ Item {
                 ? PDFFormDesignerController.RadioButton
                 : dropdownToolActive
                     ? PDFFormDesignerController.Dropdown
-                    : -1
+                    : listBoxToolActive
+                        ? PDFFormDesignerController.ListBox
+                        : -1
 
     function resetPlacement() {
         placementRect = Qt.rect(0, 0, 0, 0)
@@ -376,6 +379,15 @@ Item {
         editor.popup.open()
     }
 
+    function focusActiveListBox() {
+        if (activeListBoxEditorLoader.status !== Loader.Ready)
+            return
+
+        const editor = activeListBoxEditorLoader.item as Item
+        if (editor && editor.enabled)
+            editor.forceActiveFocus()
+    }
+
     function finishPlacement() {
         if (width <= 0 || height <= 0) {
             resetPlacement()
@@ -404,7 +416,10 @@ Item {
                     defaultSide)
             } else {
                 const defaultWidth = Math.min(160, width)
-                const defaultHeight = Math.min(28, height)
+                const defaultHeight = placementFieldType
+                        === PDFFormDesignerController.ListBox
+                    ? Math.min(124, height)
+                    : Math.min(28, height)
                 fieldRect = Qt.rect(
                     Math.min(placementStartX, width - defaultWidth),
                     Math.min(placementStartY, height - defaultHeight),
@@ -508,6 +523,12 @@ Item {
     }
     onDropdownToolActiveChanged: {
         if (dropdownToolActive)
+            formFieldLayer.cancelFieldMove()
+        else
+            resetPlacement()
+    }
+    onListBoxToolActiveChanged: {
+        if (listBoxToolActive)
             formFieldLayer.cancelFieldMove()
         else
             resetPlacement()
@@ -752,6 +773,8 @@ Item {
                         || root.placementFieldType
                             === PDFFormDesignerController.Dropdown
                         || root.placementFieldType
+                            === PDFFormDesignerController.ListBox
+                        || root.placementFieldType
                             === PDFFormDesignerController.Text)))
             && !root.pooled
         accentColor: root.theme.foxitDarkOrange
@@ -818,6 +841,13 @@ Item {
                 }
                 return
             }
+            if (fieldType === PDFFormDesignerController.ListBox) {
+                root.pendingFocusFieldId = ""
+                Qt.callLater(function() {
+                    root.focusActiveListBox()
+                })
+                return
+            }
             if (fieldType !== PDFFormDesignerController.Text) {
                 root.pendingFocusFieldId = ""
                 return
@@ -851,6 +881,11 @@ Item {
                     dropdown.popup.close()
                     dropdown.focus = false
                 }
+            }
+            if (activeListBoxEditorLoader.status === Loader.Ready) {
+                const listBox = activeListBoxEditorLoader.item as Item
+                if (listBox)
+                    listBox.focus = false
             }
             root.controller.clearTextFieldFocus()
         }
@@ -920,13 +955,15 @@ Item {
             anchors.fill: parent
             visible: formFieldLayer.activeFieldType
                 !== PDFFormDesignerController.Text
-                && ((formFieldLayer.activeFieldType
+                && (activeFieldFrame.resizing
+                    || (formFieldLayer.activeFieldType
                         !== PDFFormDesignerController.Checkbox
-                     && formFieldLayer.activeFieldType
+                        && formFieldLayer.activeFieldType
                         !== PDFFormDesignerController.RadioButton
-                     && formFieldLayer.activeFieldType
-                        !== PDFFormDesignerController.Dropdown)
-                    || activeFieldFrame.resizing)
+                        && formFieldLayer.activeFieldType
+                            !== PDFFormDesignerController.Dropdown
+                        && formFieldLayer.activeFieldType
+                            !== PDFFormDesignerController.ListBox))
             color: "transparent"
             border.color: root.theme.foxitDarkOrange
             border.width: root.formsActive ? 2 : 0
@@ -985,6 +1022,17 @@ Item {
             sourceComponent: activeDropdownEditorComponent
         }
 
+        Loader {
+            id: activeListBoxEditorLoader
+
+            anchors.fill: parent
+            active: activeFieldFrame.visible
+                && formFieldLayer.activeFieldType
+                    === PDFFormDesignerController.ListBox
+            sourceComponent: activeListBoxEditorComponent
+            onLoaded: root.focusActiveListBox()
+        }
+
         ToolButton {
             id: deleteFieldButton
 
@@ -997,6 +1045,8 @@ Item {
                 && !root.activeTextFieldComb
                 && formFieldLayer.activeFieldType
                     !== PDFFormDesignerController.Dropdown
+                && formFieldLayer.activeFieldType
+                    !== PDFFormDesignerController.ListBox
                 && formFieldLayer.activeFieldType
                     !== PDFFormDesignerController.RadioButton
                 && !activeFieldFrame.resizing
@@ -1037,6 +1087,8 @@ Item {
                         === PDFFormDesignerController.Text
                     || formFieldLayer.activeFieldType
                         === PDFFormDesignerController.Dropdown
+                    || formFieldLayer.activeFieldType
+                        === PDFFormDesignerController.ListBox
                     || formFieldLayer.activeFieldType
                         === PDFFormDesignerController.Checkbox
                     || formFieldLayer.activeFieldType
@@ -1546,6 +1598,281 @@ Item {
                     ? 2
                     : 1
                 radius: 5
+            }
+        }
+    }
+
+    Component {
+        id: activeListBoxEditorComponent
+
+        FocusScope {
+            id: activeListBoxEditor
+
+            property int navigationIndex: -1
+            readonly property string navigationFieldId:
+                formFieldLayer.activeFieldId
+            readonly property int optionCount:
+                formFieldLayer.activeFieldOptions.length
+            readonly property real rowHeight: Math.max(
+                1,
+                formFieldLayer.textFieldFontPointSize
+                    * formFieldLayer.listBoxRowHeightRatio
+                    * formFieldLayer.pointScale)
+            readonly property real contentInset: Math.max(
+                1,
+                formFieldLayer.textFieldBorderPointWidth
+                    * formFieldLayer.pointScale)
+
+            function selectedValues() {
+                const values = []
+                for (let index = 0;
+                        index < formFieldLayer.activeFieldSelectedValues.length;
+                        ++index) {
+                    values.push(String(
+                        formFieldLayer.activeFieldSelectedValues[index]))
+                }
+                return values
+            }
+
+            function firstSelectedOptionIndex() {
+                const values = selectedValues()
+                for (let index = 0; index < optionCount; ++index) {
+                    if (values.indexOf(String(
+                            formFieldLayer.activeFieldOptions[index])) >= 0) {
+                        return index
+                    }
+                }
+                return -1
+            }
+
+            function setNavigationIndex(index) {
+                if (optionCount <= 0) {
+                    navigationIndex = -1
+                    return
+                }
+
+                navigationIndex = Math.max(
+                    0,
+                    Math.min(optionCount - 1, Number(index)))
+                activeListBoxView.positionViewAtIndex(
+                    navigationIndex,
+                    ListView.Contain)
+            }
+
+            function resetNavigation() {
+                const selectedIndex = firstSelectedOptionIndex()
+                setNavigationIndex(selectedIndex >= 0 ? selectedIndex : 0)
+                Qt.callLater(function() {
+                    activeListBoxEditor.alignViewToSelection()
+                })
+            }
+
+            function alignViewToSelection() {
+                if (optionCount <= 0 || activeListBoxView.height <= 0)
+                    return
+
+                const selectedIndex = firstSelectedOptionIndex()
+                const visibleRows = Math.max(
+                    1,
+                    Math.floor(activeListBoxView.height / rowHeight))
+                const maximumTopIndex = Math.max(
+                    0,
+                    optionCount - visibleRows)
+                const firstVisibleIndex = Math.max(
+                    0,
+                    Math.min(
+                        maximumTopIndex,
+                        (selectedIndex >= 0 ? selectedIndex : 0)
+                            - Math.floor(visibleRows / 2)))
+                activeListBoxView.positionViewAtIndex(
+                    firstVisibleIndex,
+                    ListView.Beginning)
+            }
+
+            function toggleOption(index) {
+                if (index < 0
+                        || index >= optionCount
+                        || formFieldLayer.activeFieldId.length === 0) {
+                    return
+                }
+
+                const field = root.controller.fieldData(
+                    formFieldLayer.activeFieldId)
+                const sourceBacked = Boolean(field.sourceBacked)
+                const optionsDirty = Boolean(field.optionsDirty)
+                const readOnly = (Number(field.flags)
+                    & PDFFormDesignerController.ReadOnly) !== 0
+                if (readOnly)
+                    return
+
+                if (sourceBacked && !optionsDirty) {
+                    root.controller.toggleSourceChoiceOption(
+                        formFieldLayer.activeFieldId,
+                        index)
+                } else {
+                    const toggledOption = String(
+                        formFieldLayer.activeFieldOptions[index])
+                    const currentValues = selectedValues()
+                    const removeOption
+                        = currentValues.indexOf(toggledOption) >= 0
+                    const updatedValues = []
+                    for (let optionIndex = 0;
+                            optionIndex < optionCount;
+                            ++optionIndex) {
+                        const option = String(
+                            formFieldLayer.activeFieldOptions[optionIndex])
+                        const selected = currentValues.indexOf(option) >= 0
+                        if (optionIndex === index
+                                ? !removeOption
+                                : selected) {
+                            updatedValues.push(option)
+                        }
+                    }
+                    root.controller.setFieldSelectedValues(
+                        formFieldLayer.activeFieldId,
+                        updatedValues)
+                }
+            }
+
+            function moveNavigation(offset) {
+                if (optionCount <= 0)
+                    return
+
+                const currentIndex = navigationIndex >= 0
+                    ? navigationIndex
+                    : 0
+                setNavigationIndex(currentIndex + offset)
+            }
+
+            enabled: root.fieldsInteractive
+                && (root.formsActive
+                    || !(formFieldLayer.activeFieldFlags
+                         & PDFFormDesignerController.ReadOnly))
+            activeFocusOnTab: true
+
+            onNavigationFieldIdChanged: resetNavigation()
+            onRowHeightChanged: resetNavigation()
+            onOptionCountChanged: {
+                if (navigationIndex < 0 || navigationIndex >= optionCount)
+                    resetNavigation()
+            }
+            Component.onCompleted: resetNavigation()
+
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Up) {
+                    activeListBoxEditor.moveNavigation(-1)
+                } else if (event.key === Qt.Key_Down) {
+                    activeListBoxEditor.moveNavigation(1)
+                } else if (event.key === Qt.Key_Home) {
+                    activeListBoxEditor.setNavigationIndex(0)
+                } else if (event.key === Qt.Key_End) {
+                    activeListBoxEditor.setNavigationIndex(optionCount - 1)
+                } else if (event.key === Qt.Key_Space
+                           || event.key === Qt.Key_Return
+                           || event.key === Qt.Key_Enter) {
+                    activeListBoxEditor.toggleOption(navigationIndex)
+                } else {
+                    return
+                }
+                event.accepted = true
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                color: "white"
+                border.color: activeListBoxEditor.activeFocus
+                        || root.formsActive
+                    ? root.theme.foxitDarkOrange
+                    : "#7f8c99"
+                border.width: activeListBoxEditor.activeFocus
+                        || root.formsActive
+                    ? 2
+                    : 1
+                radius: 2
+            }
+
+            ListView {
+                id: activeListBoxView
+
+                anchors.fill: parent
+                anchors.margins: activeListBoxEditor.contentInset
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: formFieldLayer.activeFieldOptions
+                currentIndex: activeListBoxEditor.navigationIndex
+                highlightMoveDuration: 0
+                onHeightChanged: Qt.callLater(function() {
+                    activeListBoxEditor.alignViewToSelection()
+                })
+
+                delegate: ItemDelegate {
+                    id: listBoxOptionDelegate
+
+                    required property int index
+                    required property string modelData
+                    readonly property bool optionSelected:
+                        formFieldLayer.activeFieldSelectedValues.indexOf(
+                            modelData) >= 0
+                    readonly property bool navigationCurrent:
+                        index === activeListBoxEditor.navigationIndex
+
+                    width: ListView.view.width
+                    height: activeListBoxEditor.rowHeight
+                    leftPadding: 5
+                    rightPadding: 5
+                    topPadding: 0
+                    bottomPadding: 0
+                    text: modelData
+                    focusPolicy: Qt.NoFocus
+                    highlighted: optionSelected
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.name: text
+                    Accessible.checked: optionSelected
+                    onClicked: {
+                        activeListBoxEditor.forceActiveFocus()
+                        activeListBoxEditor.setNavigationIndex(index)
+                        activeListBoxEditor.toggleOption(index)
+                    }
+
+                    contentItem: Label {
+                        text: listBoxOptionDelegate.text
+                        color: listBoxOptionDelegate.highlighted
+                            ? "white"
+                            : "#202124"
+                        font.family: "Helvetica"
+                        font.pixelSize: Math.max(
+                            1,
+                            Math.round(
+                                formFieldLayer.textFieldFontPointSize
+                                    * formFieldLayer.pointScale))
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    background: Rectangle {
+                        color: listBoxOptionDelegate.highlighted
+                            ? root.theme.foxitDarkOrange
+                            : listBoxOptionDelegate.hovered
+                                ? root.theme.foxitPaleOrange
+                                : "transparent"
+                        border.color:
+                            listBoxOptionDelegate.navigationCurrent
+                                && activeListBoxEditor.activeFocus
+                            ? listBoxOptionDelegate.highlighted
+                                ? "white"
+                                : root.theme.foxitDarkOrange
+                            : "transparent"
+                        border.width:
+                            listBoxOptionDelegate.navigationCurrent
+                                && activeListBoxEditor.activeFocus
+                            ? 1
+                            : 0
+                    }
+                }
+
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                }
             }
         }
     }

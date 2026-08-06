@@ -64,6 +64,9 @@ constexpr char kObliqueText[] = "Oblique";
 constexpr char kStretchedText[] = "Scale";
 constexpr char kImageFixtureText[] = "Image fixture text";
 constexpr char kFontCollisionTargetText[] = "Wxyz";
+constexpr char kLegacyListBoxFieldName[] = "LegacyOfficeList";
+constexpr char kLegacyListBoxWidgetId[]
+    = "listbox-field-22222222-2222-4222-8222-222222222222";
 constexpr int kPdfButtonNoToggleToOff = 1 << 14;
 constexpr int kPdfButtonRadio = 1 << 15;
 constexpr int kPdfTextDoNotScroll = 1 << 23;
@@ -169,6 +172,59 @@ bool createLegacyTrePDFRadioButtonPdf(const QString &filePath)
                 "<< /Fields [4 0 R] /NeedAppearances false >>"),
             appearanceObject(offContent),
             appearanceObject(onContent),
+        });
+}
+
+bool createLegacyTrePDFListBoxPdf(const QString &filePath)
+{
+    const QByteArray appearanceContent(
+        "q\n"
+        "1 1 1 rg\n"
+        "0 0 220 72 re f\n"
+        "0.55 0.55 0.55 RG\n"
+        "1 w\n"
+        "0.5 0.5 219 71 re S\n"
+        "Q\n");
+    const QByteArray appearanceStream
+        = QByteArray(
+              "<< /Type /XObject /Subtype /Form /FormType 1 "
+              "/BBox [0 0 220 72] /Resources << >> /Length ")
+        + QByteArray::number(appearanceContent.size())
+        + QByteArray(" >>\nstream\n")
+        + appearanceContent
+        + QByteArray("endstream");
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray(
+                "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R "
+                "/MediaBox [0 0 595 842] "
+                "/Resources << /Font << /Helv 7 0 R >> >> "
+                "/Annots [4 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 0 "
+                "/T (")
+                + QByteArray(kLegacyListBoxFieldName)
+                + QByteArray(") /TU (Legacy office list) /NM (")
+                + QByteArray(kLegacyListBoxWidgetId)
+                + QByteArray(") /P 3 0 R /F 4 "
+                    "/Rect [80 620 300 692] "
+                    "/Opt [(Alpha) (Beta) (Gamma)] "
+                    "/V (Beta) /DV (Alpha) /I [1] /TI 0 "
+                    "/DA (/Helv 12 Tf 0 g) "
+                    "/AP << /N 6 0 R >> /TrePDFApVersion 1 >>"),
+            QByteArray(
+                "<< /Fields [4 0 R] /NeedAppearances false "
+                "/DR << /Font << /Helv 7 0 R >> >> "
+                "/DA (/Helv 12 Tf 0 g) >>"),
+            appearanceStream,
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
         });
 }
 
@@ -2584,6 +2640,8 @@ private slots:
     void scopesRadioSnapshotsToAffectedGroups();
     void migratesLegacyMergedRadioButton();
     void savesRehydratesAndInteractsWithDropdown();
+    void savesRehydratesAndInteractsWithListBox();
+    void migratesLegacyListBoxWhenAddingMultiSelectListBox();
     void deletesRehydratedDropdownWithoutChangingPeer();
     void deletesDropdownWhenItsSourcePageIsDeleted();
     void rejectsDropdownExportDisplayPairs();
@@ -5143,6 +5201,377 @@ void PDFEditControllerTest::savesRehydratesAndInteractsWithDropdown()
     QVERIFY(!formDesigner.sourceFieldContainsPoint(
         0,
         initialRect.topLeft()));
+}
+
+void PDFEditControllerTest::savesRehydratesAndInteractsWithListBox()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-list-box.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFFormDesignerController formDesigner;
+    PDFFormController formController;
+    PDFEditController editController;
+    formDesigner.setDocument(&document);
+    formController.setDocument(&document);
+    formDesigner.setFormController(&formController);
+    editController.setDocument(&document);
+    editController.setFormController(&formController);
+    editController.setFormDesignerController(&formDesigner);
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+
+    const QStringList options({
+        QStringLiteral("Hà Nội"),
+        QStringLiteral("Đà Nẵng"),
+        QStringLiteral("TP. Hồ Chí Minh"),
+        QStringLiteral("Cần Thơ"),
+        QStringLiteral("Hải Phòng"),
+    });
+    const QStringList initialSelection({
+        options.at(1),
+        options.at(3),
+    });
+    const QRectF fieldRect(0.14, 0.18, 0.46, 0.18);
+    const QString fieldId = formDesigner.addField(
+        PDFFormDesignerController::ListBox,
+        0,
+        fieldRect.x(),
+        fieldRect.y(),
+        fieldRect.width(),
+        fieldRect.height());
+    QVERIFY(fieldId.startsWith(QStringLiteral("listbox-field-")));
+    const QVariantMap initialField = formDesigner.fieldData(fieldId);
+    QCOMPARE(initialField.value(QStringLiteral("options")).toStringList().size(),
+             5);
+    QCOMPARE(initialField.value(QStringLiteral("selectedValues"))
+                 .toStringList().size(),
+             1);
+    QVERIFY(formDesigner.setFieldName(
+        fieldId,
+        QStringLiteral("OfficeLocation")));
+    QVERIFY(formDesigner.setFieldOptions(fieldId, options));
+    QVERIFY(formDesigner.setFieldSelectedValues(
+        fieldId,
+        initialSelection));
+    QVERIFY(formDesigner.setFieldFlags(
+        fieldId,
+        PDFFormDesignerController::Required));
+
+    const QVector<PDFFormDesignerController::SaveField> addedFields
+        = formDesigner.saveFields();
+    QCOMPARE(addedFields.size(), 1);
+    QCOMPARE(addedFields.constFirst().type,
+             PDFFormDesignerController::ListBox);
+    QCOMPARE(addedFields.constFirst().options, options);
+    QCOMPARE(addedFields.constFirst().value, options.at(1));
+    QCOMPARE(addedFields.constFirst().selectedValues, initialSelection);
+    QCOMPARE(addedFields.constFirst().defaultValue, options.constFirst());
+
+    QSignalSpy saveFinishedSpy(
+        &editController,
+        &PDFEditController::saveFinished);
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+    QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+
+    QVariantMap hydrated = formDesigner.fieldData(fieldId);
+    QCOMPARE(hydrated.value(QStringLiteral("type")).toInt(),
+             PDFFormDesignerController::ListBox);
+    QCOMPARE(hydrated.value(QStringLiteral("options")).toStringList(),
+             options);
+    QCOMPARE(hydrated.value(QStringLiteral("value")).toString(),
+             options.at(1));
+    QCOMPARE(hydrated.value(QStringLiteral("selectedValues")).toStringList(),
+             initialSelection);
+    QVERIFY(hydrated.value(QStringLiteral("sourceBacked")).toBool());
+    QVERIFY(!hydrated.value(QStringLiteral("dirty")).toBool());
+
+    AcroFormFieldInspection inspection = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("OfficeLocation"));
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.formType, FORMTYPE_ACRO_FORM);
+    QCOMPARE(inspection.widgetCount, 1);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_LISTBOX);
+    QVERIFY(inspection.fieldFlags & FPDF_FORMFLAG_REQUIRED);
+    QVERIFY(!(inspection.fieldFlags & FPDF_FORMFLAG_CHOICE_COMBO));
+    QVERIFY(!(inspection.fieldFlags & FPDF_FORMFLAG_CHOICE_EDIT));
+    QVERIFY(inspection.fieldFlags & FPDF_FORMFLAG_CHOICE_MULTI_SELECT);
+    QCOMPARE(inspection.defaultValue, options.constFirst());
+    QCOMPARE(inspection.options, options);
+    QCOMPARE(inspection.selectedIndices, QVector<int>({1, 3}));
+    QVERIFY(inspection.annotationFlags & FPDF_ANNOT_FLAG_PRINT);
+    QVERIFY(inspection.hasAppearance);
+    QVERIFY(inspection.appearanceStream.contains(
+        QStringLiteral("/Im0 Do")));
+    QVERIFY(inspection.hasAppearanceVersion);
+    QCOMPARE(inspection.appearanceVersion,
+             static_cast<float>(PDFFormAppearance::kListBoxVersion));
+
+    QTRY_VERIFY_WITH_TIMEOUT(formController.javascriptEnabled(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !formController.javascriptTransitionPending(),
+        5000);
+    QVector<PDFFormWorker::ChoiceField> choiceFields;
+    bool inspectionCompleted = false;
+    formController.requestChoiceFields(
+        0,
+        [&choiceFields, &inspectionCompleted](
+            QVector<PDFFormWorker::ChoiceField> fields) {
+            choiceFields = std::move(fields);
+            inspectionCompleted = true;
+        });
+    QTRY_VERIFY_WITH_TIMEOUT(inspectionCompleted, 5000);
+    QCOMPARE(choiceFields.size(), 1);
+    const PDFFormWorker::ChoiceField choice = choiceFields.constFirst();
+    QCOMPARE(choice.fieldType, FPDF_FORMFIELD_LISTBOX);
+    QCOMPARE(choice.options, options);
+    QCOMPARE(choice.selectedIndices, QVector<int>({1, 3}));
+    QVERIFY(!choice.readOnly);
+    QVERIFY(choice.multiSelect);
+    QVERIFY(!choice.identityToken.isEmpty());
+    QVERIFY(formDesigner.managesSourceChoiceField(
+        choice.sourcePage,
+        choice.annotationIndex,
+        choice.identityToken));
+
+    QVERIFY(formDesigner.toggleSourceChoiceOption(fieldId, 0));
+    QVERIFY(formDesigner.toggleSourceChoiceOption(fieldId, 1));
+    QTRY_VERIFY_WITH_TIMEOUT(formController.hasDrafts(), 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        formDesigner.fieldData(fieldId)
+            .value(QStringLiteral("selectedValues"))
+            .toStringList(),
+        QStringList({options.at(0), options.at(3)}),
+        5000);
+
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 2, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    inspection = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("OfficeLocation"));
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_LISTBOX);
+    QVERIFY(inspection.fieldFlags & FPDF_FORMFLAG_CHOICE_MULTI_SELECT);
+    QCOMPARE(inspection.selectedIndices, QVector<int>({0, 3}));
+    QCOMPARE(inspection.appearanceVersion,
+             static_cast<float>(PDFFormAppearance::kListBoxVersion));
+
+    QVERIFY(formDesigner.toggleSourceChoiceOption(fieldId, 0));
+    QVERIFY(formDesigner.toggleSourceChoiceOption(fieldId, 3));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        formDesigner.fieldData(fieldId)
+            .value(QStringLiteral("selectedValues"))
+            .toStringList(),
+        QStringList(),
+        5000);
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 3, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+    inspection = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("OfficeLocation"));
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_LISTBOX);
+    QCOMPARE(inspection.selectedIndices, QVector<int>());
+
+    QVERIFY(formDesigner.removeField(fieldId));
+    QVERIFY(editController.requestSave());
+    QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 4, 10000);
+    QVERIFY(saveFinishedSpy.constLast().constFirst().toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 0, 10000);
+    inspection = inspectAcroFormField(
+        sourcePath,
+        QStringLiteral("OfficeLocation"));
+    QCOMPARE(inspection.widgetCount, 0);
+    QCOMPARE(inspection.fieldType, FPDF_FORMFIELD_UNKNOWN);
+}
+
+void PDFEditControllerTest::migratesLegacyListBoxWhenAddingMultiSelectListBox()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("acroform-legacy-list-box-migration.pdf"));
+    QVERIFY(createLegacyTrePDFListBoxPdf(sourcePath));
+
+    const QString legacyFieldId = QString::fromLatin1(
+        kLegacyListBoxWidgetId);
+    const QString legacyFieldName = QString::fromLatin1(
+        kLegacyListBoxFieldName);
+    const QStringList legacyOptions({
+        QStringLiteral("Alpha"),
+        QStringLiteral("Beta"),
+        QStringLiteral("Gamma"),
+    });
+    const QStringList legacySelection({legacyOptions.at(1)});
+    const QStringList addedOptions({
+        QStringLiteral("North"),
+        QStringLiteral("South"),
+        QStringLiteral("East"),
+        QStringLiteral("West"),
+        QStringLiteral("Central"),
+        QStringLiteral("Remote"),
+    });
+    const QStringList addedSelection({
+        addedOptions.at(1),
+        addedOptions.at(4),
+    });
+    const QString addedFieldName = QStringLiteral("NewMultiOfficeList");
+    QString addedFieldId;
+
+    AcroFormFieldInspection legacyInspection = inspectAcroFormField(
+        sourcePath,
+        legacyFieldName);
+    QVERIFY(legacyInspection.readable);
+    QCOMPARE(legacyInspection.widgetCount, 1);
+    QCOMPARE(legacyInspection.fieldType, FPDF_FORMFIELD_LISTBOX);
+    QVERIFY(!(legacyInspection.fieldFlags
+              & FPDF_FORMFLAG_CHOICE_COMBO));
+    QVERIFY(!(legacyInspection.fieldFlags
+              & FPDF_FORMFLAG_CHOICE_EDIT));
+    QVERIFY(!(legacyInspection.fieldFlags
+              & FPDF_FORMFLAG_CHOICE_MULTI_SELECT));
+    QCOMPARE(legacyInspection.options, legacyOptions);
+    QCOMPARE(legacyInspection.selectedIndices, QVector<int>({1}));
+    QVERIFY(legacyInspection.hasAppearanceVersion);
+    QCOMPARE(legacyInspection.appearanceVersion, 1.0f);
+
+    {
+        PDFDocument document;
+        PDFFormDesignerController formDesigner;
+        PDFFormController formController;
+        PDFEditController editController;
+        formDesigner.setDocument(&document);
+        formController.setDocument(&document);
+        formDesigner.setFormController(&formController);
+        editController.setDocument(&document);
+        editController.setFormController(&formController);
+        editController.setFormDesignerController(&formDesigner);
+        QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+
+        QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 1, 10000);
+        const QVariantMap legacyField = formDesigner.fieldData(
+            legacyFieldId);
+        QCOMPARE(legacyField.value(QStringLiteral("type")).toInt(),
+                 PDFFormDesignerController::ListBox);
+        QCOMPARE(legacyField.value(QStringLiteral("options")).toStringList(),
+                 legacyOptions);
+        QCOMPARE(legacyField.value(QStringLiteral("selectedValues"))
+                     .toStringList(),
+                 legacySelection);
+        QCOMPARE(legacyField.value(QStringLiteral("value")).toString(),
+                 legacySelection.constFirst());
+        QVERIFY(legacyField.value(QStringLiteral("sourceBacked")).toBool());
+        QVERIFY(!legacyField.value(QStringLiteral("dirty")).toBool());
+
+        const QRectF addedRect(0.14, 0.42, 0.46, 0.18);
+        addedFieldId = formDesigner.addField(
+            PDFFormDesignerController::ListBox,
+            0,
+            addedRect.x(),
+            addedRect.y(),
+            addedRect.width(),
+            addedRect.height());
+        QVERIFY(!addedFieldId.isEmpty());
+        QVERIFY(formDesigner.setFieldName(
+            addedFieldId,
+            addedFieldName));
+        QVERIFY(formDesigner.setFieldOptions(
+            addedFieldId,
+            addedOptions));
+        QVERIFY(formDesigner.setFieldSelectedValues(
+            addedFieldId,
+            addedSelection));
+
+        QSignalSpy saveFinishedSpy(
+            &editController,
+            &PDFEditController::saveFinished);
+        QVERIFY(editController.requestSave());
+        QTRY_COMPARE_WITH_TIMEOUT(saveFinishedSpy.count(), 1, 10000);
+        QVERIFY(saveFinishedSpy.constFirst().constFirst().toBool());
+        QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(!formDesigner.hasDrafts(), 10000);
+    }
+
+    {
+        PDFDocument document;
+        PDFFormDesignerController formDesigner;
+        PDFFormController formController;
+        formDesigner.setDocument(&document);
+        formController.setDocument(&document);
+        formDesigner.setFormController(&formController);
+        QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+
+        QTRY_COMPARE_WITH_TIMEOUT(formDesigner.rowCount(), 2, 10000);
+        const QVariantMap legacyField = formDesigner.fieldData(
+            legacyFieldId);
+        QCOMPARE(legacyField.value(QStringLiteral("type")).toInt(),
+                 PDFFormDesignerController::ListBox);
+        QCOMPARE(legacyField.value(QStringLiteral("selectedValues"))
+                     .toStringList(),
+                 legacySelection);
+        QCOMPARE(legacyField.value(QStringLiteral("value")).toString(),
+                 legacySelection.constFirst());
+        QVERIFY(legacyField.value(QStringLiteral("sourceBacked")).toBool());
+
+        const QVariantMap addedField = formDesigner.fieldData(
+            addedFieldId);
+        QCOMPARE(addedField.value(QStringLiteral("type")).toInt(),
+                 PDFFormDesignerController::ListBox);
+        QCOMPARE(addedField.value(QStringLiteral("options")).toStringList(),
+                 addedOptions);
+        QCOMPARE(addedField.value(QStringLiteral("selectedValues"))
+                     .toStringList(),
+                 addedSelection);
+        QCOMPARE(addedField.value(QStringLiteral("value")).toString(),
+                 addedSelection.constFirst());
+        QVERIFY(addedField.value(QStringLiteral("sourceBacked")).toBool());
+    }
+
+    legacyInspection = inspectAcroFormField(
+        sourcePath,
+        legacyFieldName);
+    QVERIFY(legacyInspection.readable);
+    QCOMPARE(legacyInspection.widgetCount, 2);
+    QCOMPARE(legacyInspection.widgetId, legacyFieldId);
+    QCOMPARE(legacyInspection.fieldType, FPDF_FORMFIELD_LISTBOX);
+    QVERIFY(legacyInspection.fieldFlags
+            & FPDF_FORMFLAG_CHOICE_MULTI_SELECT);
+    QVERIFY(!(legacyInspection.fieldFlags
+              & FPDF_FORMFLAG_CHOICE_COMBO));
+    QVERIFY(!(legacyInspection.fieldFlags
+              & FPDF_FORMFLAG_CHOICE_EDIT));
+    QCOMPARE(legacyInspection.options, legacyOptions);
+    QCOMPARE(legacyInspection.value, legacySelection.constFirst());
+    QCOMPARE(legacyInspection.selectedIndices, QVector<int>({1}));
+    QVERIFY(legacyInspection.hasAppearance);
+    QVERIFY(legacyInspection.hasAppearanceVersion);
+    QCOMPARE(legacyInspection.appearanceVersion,
+             static_cast<float>(PDFFormAppearance::kListBoxVersion));
+
+    const AcroFormFieldInspection addedInspection = inspectAcroFormField(
+        sourcePath,
+        addedFieldName);
+    QVERIFY(addedInspection.readable);
+    QCOMPARE(addedInspection.widgetCount, 2);
+    QCOMPARE(addedInspection.widgetId, addedFieldId);
+    QCOMPARE(addedInspection.fieldType, FPDF_FORMFIELD_LISTBOX);
+    QVERIFY(addedInspection.fieldFlags
+            & FPDF_FORMFLAG_CHOICE_MULTI_SELECT);
+    QVERIFY(!(addedInspection.fieldFlags
+              & FPDF_FORMFLAG_CHOICE_COMBO));
+    QVERIFY(!(addedInspection.fieldFlags
+              & FPDF_FORMFLAG_CHOICE_EDIT));
+    QCOMPARE(addedInspection.options, addedOptions);
+    QCOMPARE(addedInspection.value, addedSelection.constFirst());
+    QCOMPARE(addedInspection.selectedIndices, QVector<int>({1, 4}));
+    QVERIFY(addedInspection.hasAppearance);
+    QVERIFY(addedInspection.hasAppearanceVersion);
+    QCOMPARE(addedInspection.appearanceVersion,
+             static_cast<float>(PDFFormAppearance::kListBoxVersion));
 }
 
 void PDFEditControllerTest::deletesRehydratedDropdownWithoutChangingPeer()

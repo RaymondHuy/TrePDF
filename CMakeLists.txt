@@ -133,6 +133,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/italic-font.svg
         src/assets/icons/line.svg
         src/assets/icons/link-2.svg
+        src/assets/icons/list-box.svg
         src/assets/icons/maximize-2.svg
         src/assets/icons/mouse-pointer-2.svg
         src/assets/icons/mouse-pointer-filled-orange.svg

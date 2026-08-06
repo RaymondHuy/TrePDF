@@ -21,6 +21,7 @@ Rectangle {
     property bool checkboxToolActive: false
     property bool radioButtonToolActive: false
     property bool dropdownToolActive: false
+    property bool listBoxToolActive: false
     property bool combFieldToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
@@ -203,6 +204,7 @@ Rectangle {
             checkboxToolActive: root.checkboxToolActive
             radioButtonToolActive: root.radioButtonToolActive
             dropdownToolActive: root.dropdownToolActive
+            listBoxToolActive: root.listBoxToolActive
             combFieldToolActive: root.combFieldToolActive
             zoom: root.zoom
             viewRotation: root.viewRotation

@@ -42,21 +42,23 @@ Current features:
   on the native PDFium interaction path. Form values participate in the
   per-tab draft guard and Save/Save As, while PDFium does not expose undo/redo
   history for non-editable choice fields.
-- The Forms tab can place Text Field, Check Box, Radio Button, and fixed
-  single-select Dropdown widgets. Check boxes and radio buttons use a square
-  click/drag tool; dropdowns use a rectangular tool and start with three
-  localized options. All four support selection, movement, resizing, and
+- The Forms tab can place Text Field, Check Box, Radio Button, fixed
+  single-select Dropdown, multi-select List Box, and Comb Field widgets. Check boxes and
+  radio buttons use a square click/drag tool; dropdowns and list boxes use a
+  rectangular tool. Dropdowns start with three localized options, while List
+  Boxes start taller with five localized options. All six support
+  selection, movement, resizing, and
   transient deletion; check boxes and radio buttons can be toggled, and
-  dropdown values can be selected in the designer. A selected Text Field has a
+  dropdown values and multiple list-box values can be selected in the designer. A selected Text Field has a
   right-side panel for enabling multi-line input and an optional maximum
   character count; both persist through Save/Save As and rehydrate after reopen.
   A selected Radio Button has a right-side panel for changing its Group ID and
   deleting the member. Radio Buttons with the same Group ID persist as one
   AcroForm radio field with child Widgets and mutually exclusive selection.
-  TrePDF rehydrates radio groups, state, dropdown options, and dropdown selection
-  after reopen. A TrePDF-created Text Field, Dropdown, or Radio Button can also
+  TrePDF rehydrates radio groups, state, choice options, and choice selection
+  after reopen. A TrePDF-created Text Field, Dropdown, List Box, or Radio Button can also
   be deleted after rehydrate: deletion remains a Forms-mode draft until
-  Save/Save As, while Discard restores it. Text Field and Dropdown removal is
+  Save/Save As, while Discard restores it. Text Field, Dropdown, and List Box removal is
   limited to top-level, single-widget TrePDF fields; Radio removal rebuilds the
   remaining TrePDF-created group. Source-backed Check Box and arbitrary
   AcroForm structures remain protected.

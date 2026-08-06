@@ -12,7 +12,8 @@ public:
         Text,
         Checkbox,
         RadioButton,
-        Dropdown
+        Dropdown,
+        ListBox
     };
 
     enum class Operation {
@@ -27,6 +28,7 @@ public:
         QString fieldName;
         QString tooltip;
         QString value;
+        QStringList selectedValues;
         QString defaultValue;
         QStringList options;
         QRectF pageRect;

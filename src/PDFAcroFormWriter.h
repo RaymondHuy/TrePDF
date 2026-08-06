@@ -14,7 +14,8 @@ public:
         RadioButton,
         Dropdown,
         Date,
-        Signature
+        Signature,
+        ListBox
     };
 
     enum class Operation {
@@ -29,6 +30,7 @@ public:
         QString fieldName;
         QString tooltip;
         QString value;
+        QStringList selectedValues;
         QString defaultValue;
         QStringList options;
         FieldType type = FieldType::Text;

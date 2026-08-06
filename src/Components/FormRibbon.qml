@@ -13,12 +13,14 @@ Flickable {
     required property bool checkboxToolSelected
     required property bool radioButtonToolSelected
     required property bool dropdownToolSelected
+    required property bool listBoxToolSelected
     required property bool combFieldToolSelected
 
     signal textFieldToolRequested()
     signal checkboxToolRequested()
     signal radioButtonToolRequested()
     signal dropdownToolRequested()
+    signal listBoxToolRequested()
     signal combFieldToolRequested()
 
     clip: true
@@ -96,6 +98,21 @@ Flickable {
                 preserveIconColors: true
                 primary: root.dropdownToolSelected
                 onClicked: root.dropdownToolRequested()
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "List Box"
+                text: qsTrId("ListBoxTool")
+                //% "Click or drag on the page to add a list box"
+                toolTipText: qsTrId("ClickOrDragToAddListBox")
+                iconSource: "../assets/icons/list-box.svg"
+                icon.width: 32
+                icon.height: 32
+                preserveIconColors: true
+                primary: root.listBoxToolSelected
+                onClicked: root.listBoxToolRequested()
             }
 
             RibbonButton {

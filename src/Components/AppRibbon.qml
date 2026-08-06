@@ -18,6 +18,7 @@ Column {
     property bool checkboxToolSelected: false
     property bool radioButtonToolSelected: false
     property bool dropdownToolSelected: false
+    property bool listBoxToolSelected: false
     property bool combFieldToolSelected: false
     readonly property bool viewTabActive: ribbonTabs.currentIndex === 0
     readonly property bool editTabActive: ribbonTabs.currentIndex === 1
@@ -33,6 +34,9 @@ Column {
         && document.loaded
     readonly property bool dropdownToolActive: formsTabActive
         && dropdownToolSelected
+        && document.loaded
+    readonly property bool listBoxToolActive: formsTabActive
+        && listBoxToolSelected
         && document.loaded
     readonly property bool combFieldToolActive: formsTabActive
         && combFieldToolSelected
@@ -57,6 +61,7 @@ Column {
             checkboxToolSelected = false
             radioButtonToolSelected = false
             dropdownToolSelected = false
+            listBoxToolSelected = false
             combFieldToolSelected = false
         }
 
@@ -73,6 +78,7 @@ Column {
         checkboxToolSelected = false
         radioButtonToolSelected = false
         dropdownToolSelected = false
+        listBoxToolSelected = false
         combFieldToolSelected = false
         syncEditTool()
     }
@@ -81,6 +87,7 @@ Column {
         checkboxToolSelected = false
         radioButtonToolSelected = false
         dropdownToolSelected = false
+        listBoxToolSelected = false
         combFieldToolSelected = false
         syncEditTool()
     }
@@ -136,12 +143,14 @@ Column {
             checkboxToolSelected: root.checkboxToolSelected
             radioButtonToolSelected: root.radioButtonToolSelected
             dropdownToolSelected: root.dropdownToolSelected
+            listBoxToolSelected: root.listBoxToolSelected
             combFieldToolSelected: root.combFieldToolSelected
             onTextFieldToolRequested: {
                 root.textFieldToolSelected = !root.textFieldToolSelected
                 root.checkboxToolSelected = false
                 root.radioButtonToolSelected = false
                 root.dropdownToolSelected = false
+                root.listBoxToolSelected = false
                 root.combFieldToolSelected = false
             }
             onCheckboxToolRequested: {
@@ -149,6 +158,7 @@ Column {
                 root.textFieldToolSelected = false
                 root.radioButtonToolSelected = false
                 root.dropdownToolSelected = false
+                root.listBoxToolSelected = false
                 root.combFieldToolSelected = false
             }
             onRadioButtonToolRequested: {
@@ -156,6 +166,7 @@ Column {
                 root.textFieldToolSelected = false
                 root.checkboxToolSelected = false
                 root.dropdownToolSelected = false
+                root.listBoxToolSelected = false
                 root.combFieldToolSelected = false
             }
             onDropdownToolRequested: {
@@ -163,6 +174,15 @@ Column {
                 root.textFieldToolSelected = false
                 root.checkboxToolSelected = false
                 root.radioButtonToolSelected = false
+                root.listBoxToolSelected = false
+                root.combFieldToolSelected = false
+            }
+            onListBoxToolRequested: {
+                root.listBoxToolSelected = !root.listBoxToolSelected
+                root.textFieldToolSelected = false
+                root.checkboxToolSelected = false
+                root.radioButtonToolSelected = false
+                root.dropdownToolSelected = false
                 root.combFieldToolSelected = false
             }
             onCombFieldToolRequested: {
@@ -171,6 +191,7 @@ Column {
                 root.checkboxToolSelected = false
                 root.radioButtonToolSelected = false
                 root.dropdownToolSelected = false
+                root.listBoxToolSelected = false
             }
         }
     }
