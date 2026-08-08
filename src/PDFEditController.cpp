@@ -1174,9 +1174,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::ShapeObjectCreationFailed:
         //% "The shape could not be created on page %1."
         return qtTrId("PdfSaveShapeCreationFailed").arg(result.page + 1);
-    case PDFSaveWriter::Error::HighlightAnnotationCreationFailed:
-        //% "The highlight could not be created on page %1."
-        return qtTrId("PdfSaveHighlightCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::TextMarkupAnnotationCreationFailed:
+        //% "The text markup could not be created on page %1."
+        return qtTrId("PdfSaveTextMarkupCreationFailed").arg(result.page + 1);
     case PDFSaveWriter::Error::CommentAnnotationCreationFailed:
         //% "The comment could not be created on page %1."
         return qtTrId("PdfSaveCommentCreationFailed").arg(result.page + 1);

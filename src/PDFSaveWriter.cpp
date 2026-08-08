@@ -2511,7 +2511,7 @@ PDFSaveWriter::Result createTextMarkupAnnotation(
 
     if (quadPoints.isEmpty() || !hasBounds) {
         return failure(
-            PDFSaveWriter::Error::HighlightAnnotationCreationFailed,
+            PDFSaveWriter::Error::TextMarkupAnnotationCreationFailed,
             draft.page,
             draft.objectId);
     }
@@ -2533,7 +2533,7 @@ PDFSaveWriter::Result createTextMarkupAnnotation(
             annotation.get(),
             FPDF_ANNOT_FLAG_PRINT)) {
         return failure(
-            PDFSaveWriter::Error::HighlightAnnotationCreationFailed,
+            PDFSaveWriter::Error::TextMarkupAnnotationCreationFailed,
             draft.page,
             draft.objectId);
     }
@@ -2542,7 +2542,7 @@ PDFSaveWriter::Result createTextMarkupAnnotation(
                 annotation.get(),
                 &quadPoint)) {
             return failure(
-                PDFSaveWriter::Error::HighlightAnnotationCreationFailed,
+                PDFSaveWriter::Error::TextMarkupAnnotationCreationFailed,
                 draft.page,
                 draft.objectId);
         }
@@ -2555,7 +2555,7 @@ PDFSaveWriter::Result createTextMarkupAnnotation(
     annotationRect.bottom = static_cast<float>(minimumY);
     if (!FPDFAnnot_SetRect(annotation.get(), &annotationRect)) {
         return failure(
-            PDFSaveWriter::Error::HighlightAnnotationCreationFailed,
+            PDFSaveWriter::Error::TextMarkupAnnotationCreationFailed,
             draft.page,
             draft.objectId);
     }

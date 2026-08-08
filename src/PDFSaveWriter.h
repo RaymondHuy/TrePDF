@@ -36,7 +36,7 @@ public:
         TextObjectCreationFailed,
         ImageObjectCreationFailed,
         ShapeObjectCreationFailed,
-        HighlightAnnotationCreationFailed,
+        TextMarkupAnnotationCreationFailed,
         CommentAnnotationCreationFailed,
         PageCreationFailed,
         PageDeletionFailed,
