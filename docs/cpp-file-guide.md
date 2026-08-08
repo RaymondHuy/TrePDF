@@ -200,14 +200,20 @@ zoom, đóng/mở khi render đang chạy và shutdown render thread.
 ### [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) và
 [`src/PDFEditController.h`](../src/PDFEditController.h)
 
-**Vai trò:** trung tâm nghiệp vụ của edit mode: khám phá nội dung, selection,
-draft, rich text, history, page operation và orchestration Save.
+**Vai trò:** trung tâm nghiệp vụ của Edit/Comment: khám phá nội dung và
+annotation, selection, draft, rich text, history, page operation và
+orchestration Save.
 
 **Khám phá candidate:**
 
 - Scan page bất đồng bộ từ document handle riêng dưới PDFium lock.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
+- Đọc Highlight, Underline, Strikeout và Text annotation; chuẩn hóa quad/rect,
+  màu và `/Contents` thành comment candidate. Annotation nguồn hiện chỉ đọc.
+- `requestCommentIndex()` dùng worker riêng để quét annotation-only từng trang,
+  nhả PDFium lock giữa các trang và chỉ giữ comment candidate. Vì vậy danh sách
+  toàn tài liệu không làm phình cache text/image 12 trang của viewport.
 - Gom các text object tương thích trên cùng visual line thành một candidate nhưng
   giữ mọi source object path để suppress/remove chính xác.
 - Trích source bounds, baseline/origin, font family/style/size/stretch, render
@@ -218,8 +224,8 @@ draft, rich text, history, page operation và orchestration Save.
 **Draft model và history:**
 
 - Draft chứa kind, source ids/paths, text, character spans, paragraph formats,
-  immutable source rect, layout frame, content bounds, image snapshot, shape/
-  highlight geometry và insertion order tùy loại.
+  immutable source rect, layout frame, content bounds, image snapshot, shape,
+  text-markup/sticky-note geometry và insertion order tùy loại.
 - Mỗi action logic tạo snapshot command: add, delete, move, resize, format, page
   insert/delete. Undo/redo phục hồi toàn bộ state liên quan, không chỉ text.
 - `hasDrafts` bao gồm edit history, transient page structure, form runtime draft
@@ -240,7 +246,11 @@ draft, rich text, history, page operation và orchestration Save.
 **Công cụ khác:**
 
 - Add Image decode/giới hạn ảnh trên GUI thread rồi lưu pixel snapshot.
-- Add Shape và Highlight chuẩn hóa geometry, snap line/arrow gần trục và giữ màu.
+- Add Shape chuẩn hóa geometry và snap line/arrow gần trục. Highlight,
+  Underline và Strikeout giữ quad/màu; Sticky Note giữ frame 24 pt và nội dung
+  chỉnh từ `CommentPanel`.
+- `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
+  hướng cho panel; nội dung Sticky Note mới tham gia cùng snapshot undo/redo.
 - Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 
@@ -286,12 +296,13 @@ draft, rich text, history, page operation và orchestration Save.
   system TrueType snapshot, giữ font handle sống đến sau GenerateContent.
 - Bảo toàn exact source horizontal scale khi reuse; chỉ tính width compensation
   cho font mới/standard.
-- Tạo bitmap object cho ảnh thêm mới, path object cho sáu shape, và standard
-  Highlight annotation với quad/color/opacity/Print flag.
+- Tạo bitmap object cho ảnh thêm mới, path object cho sáu shape, các standard
+  Highlight/Underline/Strikeout annotation với quad/color/Print flag và Text
+  annotation với rect/color/`Contents`/`NM`/Print flag.
 - Giữ earliest source z-order bằng insert-at-index; object thêm mới theo insertion
   order. Dùng `FPDF_DeviceToPage()` để tôn trọng CropBox/rotation.
 - Chỉ gọi `FPDFPage_GenerateContent()` cho page có content object thay đổi;
-  highlight-only page không bị rewrite content stream.
+  page chỉ có comment/markup annotation không bị rewrite content stream.
 - Với source paint mà PDFium không thể tái tạo an toàn, chuẩn bị rasterized paint
   có giới hạn; các mode/scope unsupported phải trả lỗi thay vì làm mất đồ họa.
 
@@ -638,7 +649,8 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   button action, URI sandbox, external-link routing và PDFium serialization
   giữa thread.
 - Candidate/hover: scan ngoài GUI thread, cancellation/reschedule/defer khi lock
-  bận, grouping theo dòng/cột/style/font và giới hạn editable scope.
+  bận, grouping theo dòng/cột/style/font, giới hạn editable scope và comment
+  index/điều hướng xuyên trang.
 - Font: bundled/system registration, language filters, mixed-style intersection,
   embedding rejection, glyph coverage, TTC/subset collision và stretch
   calibration.
@@ -646,7 +658,8 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   formatting, typing format, paragraph alignment, editor undo và scale qua nhiều
   lần save.
 - Content round-trip: text, Vietnamese, paint Fill/Stroke/pattern/grayscale,
-  highlight, image, shape, source move/delete, z-order, CropBox và rotated page.
+  Highlight/Underline/Strikeout/Sticky Note, image, shape, source move/delete,
+  z-order, CropBox và rotated page.
 - Page operation: insert/delete, undo/redo/discard, source page mapping và save.
 - Save lifecycle: async save, failure giữ draft, Save/Save As và reopen.
 - Multi-tab: document/session độc lập, rotation/draft riêng, save đúng tab và

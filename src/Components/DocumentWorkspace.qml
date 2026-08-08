@@ -11,6 +11,8 @@ Item {
     required property PDFDocumentSession session
     property bool formsTabActive: false
     property bool editTabActive: false
+    property bool commentTabActive: false
+    property bool commentsPanelVisible: false
     property bool formFieldsVisible: false
     property bool formFieldsInteractive: false
     property bool textFieldToolActive: false
@@ -50,6 +52,12 @@ Item {
         && Number(selectedFormField.type)
             === PDFFormDesignerController.RadioButton
     readonly property bool hasPendingPanelEdits: {
+        if (commentPanelLoader.status === Loader.Ready) {
+            const commentPanel = commentPanelLoader.item as CommentPanel
+            if (commentPanel && commentPanel.textEditPending)
+                return true
+        }
+
         if (textFieldOptionsPanelLoader.status === Loader.Ready) {
             const textPanel = textFieldOptionsPanelLoader.item
                 as TextFieldOptionsPanel
@@ -74,6 +82,14 @@ Item {
     }
 
     signal openRequested()
+
+    onCommentTabActiveChanged: {
+        if (!commentTabActive)
+            return
+
+        session.formDesignerController.clearTextFieldFocus()
+        session.formDesignerController.clearTextFieldSelection()
+    }
 
     onTextFieldOptionsPanelActiveChanged: {
         if (textFieldOptionsPanelActive)
@@ -138,6 +154,12 @@ Item {
     }
 
     function commitPendingPanelEdits() {
+        if (commentPanelLoader.status === Loader.Ready) {
+            const commentPanel = commentPanelLoader.item as CommentPanel
+            if (commentPanel && !commentPanel.commitPendingEdit())
+                return false
+        }
+
         if (textFieldOptionsPanelLoader.status === Loader.Ready) {
             const textPanel = textFieldOptionsPanelLoader.item
                 as TextFieldOptionsPanel
@@ -209,6 +231,32 @@ Item {
             viewRotation: root.session.viewRotation
             transientStatus: root.transientStatus
             onOpenRequested: root.openRequested()
+        }
+
+        Loader {
+            id: commentPanelLoader
+
+            Layout.preferredWidth: active
+                ? root.session.panelCollapsed ? 42 : 280
+                : 0
+            Layout.fillHeight: true
+            active: root.session.document.loaded
+                && root.commentTabActive
+                && root.commentsPanelVisible
+            visible: active
+
+            sourceComponent: Component {
+                CommentPanel {
+                    theme: root.theme
+                    document: root.session.document
+                    editController: root.session.editController
+                    collapsed: root.session.panelCollapsed
+                    onCollapsedChangeRequested: collapsed => {
+                        root.session.panelCollapsed = collapsed
+                    }
+                    onPageRequested: page => root.navigateToPage(page)
+                }
+            }
         }
 
         Loader {
@@ -293,6 +341,7 @@ Item {
                 : 0
             Layout.fillHeight: true
             active: root.session.document.loaded
+                && root.editTabActive
                 && !root.textFieldOptionsPanelActive
                 && !root.combFieldOptionsPanelActive
                 && !root.dropdownOptionsPanelActive

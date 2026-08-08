@@ -20,9 +20,11 @@ Column {
     property bool dropdownToolSelected: false
     property bool listBoxToolSelected: false
     property bool combFieldToolSelected: false
+    property bool commentsPanelVisible: true
     readonly property bool viewTabActive: ribbonTabs.currentIndex === 0
     readonly property bool editTabActive: ribbonTabs.currentIndex === 1
-    readonly property bool formsTabActive: ribbonTabs.currentIndex === 2
+    readonly property bool commentTabActive: ribbonTabs.currentIndex === 2
+    readonly property bool formsTabActive: ribbonTabs.currentIndex === 3
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
         && document.loaded
@@ -55,8 +57,24 @@ Column {
 
     spacing: 0
 
+    function isCommentTool(tool) {
+        return tool === PDFEditController.HighlightTool
+            || tool === PDFEditController.UnderlineTool
+            || tool === PDFEditController.StrikeoutTool
+            || tool === PDFEditController.StickyNoteTool
+    }
+
+    function navigateRelativeComment(direction) {
+        const page = editController.selectRelativeComment(direction)
+        if (page < 0)
+            return
+
+        editController.tool = PDFEditController.SelectTool
+        pageRequested(page)
+    }
+
     function syncEditTool() {
-        if (!document.loaded || ribbonTabs.currentIndex !== 2) {
+        if (!document.loaded || !formsTabActive) {
             textFieldToolSelected = false
             checkboxToolSelected = false
             radioButtonToolSelected = false
@@ -65,10 +83,17 @@ Column {
             combFieldToolSelected = false
         }
 
-        if (!document.loaded || ribbonTabs.currentIndex !== 1) {
+        if (!document.loaded) {
             editController.tool = PDFEditController.BrowseTool
-        } else if (editController.tool === PDFEditController.BrowseTool) {
+        } else if (commentTabActive) {
+            editController.tool = PDFEditController.HighlightTool
+            editController.requestCommentIndex()
+        } else if (editTabActive
+                   && (editController.tool === PDFEditController.BrowseTool
+                       || isCommentTool(editController.tool))) {
             editController.tool = PDFEditController.SelectTool
+        } else if (!editTabActive) {
+            editController.tool = PDFEditController.BrowseTool
         }
     }
 
@@ -130,6 +155,24 @@ Column {
             onPageRequested: page => root.pageRequested(page)
             onDeletePageRequested: page => root.deletePageRequested(page)
             onToolRequested: toolName => root.toolRequested(toolName)
+        }
+    }
+
+    Component {
+        id: commentRibbonComponent
+
+        CommentRibbon {
+            theme: root.theme
+            document: root.document
+            editController: root.editController
+            commentsPanelVisible: root.commentsPanelVisible
+            onPageRequested: page => root.pageRequested(page)
+            onToolRequested: toolName => root.toolRequested(toolName)
+            onCommentsPanelToggleRequested: {
+                root.commentsPanelVisible = !root.commentsPanelVisible
+            }
+            onPreviousCommentRequested: root.navigateRelativeComment(-1)
+            onNextCommentRequested: root.navigateRelativeComment(1)
         }
     }
 
@@ -228,7 +271,7 @@ Column {
             TabBar {
                 id: ribbonTabs
 
-                Layout.preferredWidth: 416
+                Layout.preferredWidth: 520
                 Layout.fillHeight: true
                 spacing: 0
                 background: Item {}
@@ -244,6 +287,12 @@ Column {
                     theme: root.theme
                     //% "Edit"
                     text: qsTrId("Edit")
+                }
+
+                RibbonTabButton {
+                    theme: root.theme
+                    //% "Comment"
+                    text: qsTrId("Comment")
                 }
 
                 RibbonTabButton {
@@ -319,8 +368,10 @@ Column {
                 : ribbonTabs.currentIndex === 1
                     ? editRibbonComponent
                     : ribbonTabs.currentIndex === 2
-                        ? formRibbonComponent
-                        : signRibbonComponent
+                        ? commentRibbonComponent
+                        : ribbonTabs.currentIndex === 3
+                            ? formRibbonComponent
+                            : signRibbonComponent
         }
     }
 }

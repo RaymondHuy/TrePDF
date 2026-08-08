@@ -322,15 +322,17 @@ coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-tes
 | Mode UI | `PDFPageItem.formDesignMode` | Runtime form (`PDFFormView`) | `EditOverlay` | Form designer (`FormTextFieldOverlay`) |
 |---|---|---|---|---|
 | View | `false` | Có thể interactive nếu form session sẵn sàng. | Không bắt input; draft vẫn có thể hiện. | Source-backed field bị ẩn; không đặt/move/resize. |
-| Edit | `true` | Không interactive vì tool là Select hoặc tool edit khác Browse. | Active: select, edit, add, shape, highlight theo tool. | Source-backed field hiện; action designer hỗ trợ vẫn gate theo read-only, nhưng không có placement/delete Forms-only. |
+| Edit | `true` | Không interactive vì tool là Select hoặc tool edit khác Browse. | Active: select, edit, add hoặc shape theo tool. | Source-backed field hiện; action designer hỗ trợ vẫn gate theo read-only, nhưng không có placement/delete Forms-only. |
+| Comment | `false` | Không interactive vì tool comment khác Browse. | Active để đặt Sticky Note hoặc kéo Highlight/Underline/Strikeout; Select dùng khi điều hướng danh sách. | Source-backed field bị ẩn và không interactive. |
 | Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Text Field/Dropdown/List Box source-backed được hỗ trợ có thể tạo draft xóa. |
 | Forms, tool đặt field | `true` | Bị tắt bởi cờ tool Text Field/Check Box/Radio Button/Dropdown/List Box/Comb Field. | Không active. | `placementArea` xử lý vùng trống; không move trong lúc placement tool bật. |
 | Đang Save hoặc delegate pooled | Không dùng để tương tác | Bị tắt/clear state. | Bị tắt; khi pooled còn xóa data/gesture cục bộ. | Hủy placement/resize/move/focus; khi pooled không render field. |
 
 `AppRibbon` duy trì điều này bằng `syncEditTool()`:
 
-- Rời Edit đặt `PDFEditController.tool = BrowseTool`.
-- Vào Edit từ Browse đặt tool mặc định là Select.
+- Vào Edit đặt tool mặc định là Select nếu đang Browse hoặc đang giữ tool Comment.
+- Vào Comment đặt tool là Highlight.
+- Rời Edit/Comment đặt `PDFEditController.tool = BrowseTool`.
 - Tool đặt Text Field/Check Box/Radio Button/Dropdown/List Box/Comb Field chỉ sống trong
   Forms tab và loại trừ nhau.
 
@@ -500,9 +502,9 @@ controller pointer cùng page vào callback. `FormChoiceOverlay` đóng popup kh
    async request; dùng `QPointer`/serial ở C++ nếu callback quay về view.
 8. **Giữ accessibility và localization.** Custom hit target cần role/name,
    `activeFocusOnTab` nếu keyboard-accessible và `qsTrId()` cho text mới.
-9. **Test theo mode.** Ít nhất thử View, Edit, Forms không tool, Forms placement,
-   xoay 90°, scroll để pool/reuse, đổi tab giữa gesture, và Save khi draft/form
-   đang hiển thị.
+9. **Test theo mode.** Ít nhất thử View, Edit, Comment, Forms không tool, Forms
+   placement, xoay 90°, scroll để pool/reuse, đổi tab giữa gesture, và Save khi
+   draft/form đang hiển thị.
 
 ## 10. Điểm vào theo loại thay đổi
 

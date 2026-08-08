@@ -17,6 +17,7 @@ Item {
     property var drafts: []
     property var contentDrafts: []
     property var highlightDrafts: []
+    property var stickyNoteDrafts: []
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
@@ -98,6 +99,7 @@ Item {
             drafts = []
             contentDrafts = []
             highlightDrafts = []
+            stickyNoteDrafts = []
             hoverCandidate = ({})
             cancelHighlight()
             cancelShape()
@@ -132,16 +134,20 @@ Item {
         }
         const displayedContentDrafts = []
         const displayedHighlightDrafts = []
+        const displayedStickyNoteDrafts = []
         for (let index = 0; index < displayedDrafts.length; ++index) {
             const draft = displayedDrafts[index]
-            if (draft.kind === "highlight")
+            if (isTextMarkupKind(draft.kind))
                 displayedHighlightDrafts.push(draft)
+            else if (draft.kind === "stickyNote")
+                displayedStickyNoteDrafts.push(draft)
             else
                 displayedContentDrafts.push(draft)
         }
         drafts = displayedDrafts
         contentDrafts = displayedContentDrafts
         highlightDrafts = displayedHighlightDrafts
+        stickyNoteDrafts = displayedStickyNoteDrafts
         if (!interactionActive) {
             hoverCandidate = ({})
             hideSelectCursor()
@@ -522,8 +528,25 @@ Item {
         return kind === "image" || kind === "addedImage"
     }
 
-    function isHighlightKind(kind) {
+    function isTextMarkupKind(kind) {
         return kind === "highlight"
+            || kind === "underline"
+            || kind === "strikeout"
+    }
+
+    function isCommentKind(kind) {
+        return isTextMarkupKind(kind) || kind === "stickyNote"
+    }
+
+    function isTextMarkupTool() {
+        return controller.tool === PDFEditController.HighlightTool
+            || controller.tool === PDFEditController.UnderlineTool
+            || controller.tool === PDFEditController.StrikeoutTool
+    }
+
+    function isCommentCreationTool() {
+        return isTextMarkupTool()
+            || controller.tool === PDFEditController.StickyNoteTool
     }
 
     function isShapeKind(kind) {
@@ -807,7 +830,7 @@ Item {
                 || controller.tool === PDFEditController.AddTextTool
                 || controller.tool === PDFEditController.AddImageTool
                 || controller.tool === PDFEditController.AddShapeTool
-                || controller.tool === PDFEditController.HighlightTool
+                || isCommentCreationTool()
                 || width <= 0
                 || height <= 0) {
             return ({})
@@ -920,7 +943,7 @@ Item {
     }
 
     function beginHighlight(x, y) {
-        if (controller.tool !== PDFEditController.HighlightTool
+        if (!isTextMarkupTool()
                 || width <= 0
                 || height <= 0) {
             return
@@ -970,6 +993,26 @@ Item {
 
     function cancelHighlight() {
         highlighting = false
+    }
+
+    function addStickyNote(x, y) {
+        if (controller.tool !== PDFEditController.StickyNoteTool
+                || width <= 0
+                || height <= 0) {
+            return
+        }
+
+        if (editing)
+            commitEditing()
+        selectionActions.close()
+        hoverCandidate = ({})
+        hideSelectCursor()
+        controller.addStickyNote(
+            page,
+            Qt.point(
+                Math.max(0, Math.min(width, x)) / width,
+                Math.max(0, Math.min(height, y)) / height))
+        reloadData()
     }
 
     function selectCandidate(candidate) {
@@ -1106,7 +1149,7 @@ Item {
     function deleteSelectedNonText() {
         if (editing
                 || (!isImageKind(controller.selectedKind)
-                    && !isHighlightKind(controller.selectedKind)
+                    && !isCommentKind(controller.selectedKind)
                     && !isShapeKind(controller.selectedKind))) {
             return false
         }
@@ -1302,16 +1345,69 @@ Item {
                 model: highlightItem.modelData.highlightRects
 
                 delegate: Rectangle {
+                    id: markupRect
+
                     required property var modelData
 
+                    readonly property string markupKind:
+                        String(highlightItem.modelData.kind)
                     x: modelData.x * root.width
                     y: modelData.y * root.height
                     width: Math.max(1, modelData.width * root.width)
                     height: Math.max(1, modelData.height * root.height)
-                    color: highlightItem.modelData.highlightColor
+                    color: markupKind === "highlight"
+                        ? highlightItem.modelData.highlightColor
+                        : "transparent"
                     visible: highlightItem.modelData.deleted !== true
                     Accessible.ignored: true
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: markupRect.markupKind === "underline"
+                            ? parent.bottom
+                            : undefined
+                        anchors.verticalCenter:
+                            markupRect.markupKind === "strikeout"
+                                ? parent.verticalCenter
+                                : undefined
+                        height: Math.max(1, Math.min(3, parent.height * 0.12))
+                        visible: markupRect.markupKind !== "highlight"
+                        color: highlightItem.modelData.highlightColor
+                        Accessible.ignored: true
+                    }
                 }
+            }
+        }
+    }
+
+    Repeater {
+        model: root.stickyNoteDrafts
+
+        delegate: Rectangle {
+            id: stickyNoteItem
+
+            required property var modelData
+
+            readonly property rect frameRect: modelData.frameRect
+            x: frameRect.x * root.width
+            y: frameRect.y * root.height
+            width: Math.max(18, frameRect.width * root.width)
+            height: Math.max(18, frameRect.height * root.height)
+            radius: 4
+            color: modelData.highlightColor
+            border.width: 1
+            border.color: "#b8a316"
+            visible: modelData.deleted !== true
+            z: 1
+            Accessible.ignored: true
+
+            Label {
+                anchors.centerIn: parent
+                text: "\u270e"
+                color: "#5f5312"
+                font.pixelSize: Math.max(11, Math.min(16, parent.height * 0.58))
+                Accessible.ignored: true
             }
         }
     }
@@ -1599,7 +1695,7 @@ Item {
                     && root.controller.tool !== PDFEditController.AddTextTool
                     && root.controller.tool !== PDFEditController.AddImageTool
                     && root.controller.tool !== PDFEditController.AddShapeTool
-                    && root.controller.tool !== PDFEditController.HighlightTool
+                    && !root.isCommentCreationTool()
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
                 preventStealing: false
@@ -1659,14 +1755,15 @@ Item {
         enabled: root.interactionActive
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton
-        preventStealing: root.controller.tool
-                === PDFEditController.HighlightTool
+        preventStealing: root.isTextMarkupTool()
             || root.controller.tool === PDFEditController.AddShapeTool
         cursorShape: root.selectCursorActive || root.addTextCursorActive
             ? Qt.BlankCursor
-            : root.controller.tool === PDFEditController.HighlightTool
+            : root.isTextMarkupTool()
                     || root.controller.tool === PDFEditController.AddShapeTool
                 ? Qt.CrossCursor
+            : root.controller.tool === PDFEditController.StickyNoteTool
+                ? Qt.PointingHandCursor
             : root.controller.tool === PDFEditController.AddTextTool
                     || root.controller.tool === PDFEditController.AddImageTool
             ? Qt.IBeamCursor
@@ -1676,7 +1773,7 @@ Item {
                 : root.isImageCandidate(root.hoverCandidate)
                         || root.isShapeCandidate(root.hoverCandidate)
                     ? Qt.ArrowCursor
-                    : root.isHighlightKind(root.hoverCandidate.kind)
+                    : root.isCommentKind(root.hoverCandidate.kind)
                         ? Qt.PointingHandCursor
                     : Qt.IBeamCursor
             : Qt.ArrowCursor
@@ -1684,7 +1781,7 @@ Item {
         Accessible.role: Accessible.Pane
         //% "PDF edit surface"
         Accessible.name: qsTrId("PdfEditSurface")
-        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text, images, or shapes to move them, drag with Shapes to draw, or drag with Highlight to mark an area"
+        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text, images, or shapes to move them, draw with Shapes or text markup tools, or click with Sticky Note to add a comment"
         Accessible.description: qsTrId("PdfEditSurfaceDescription")
 
         onEntered: root.updateHoverAtPosition(mouseX, mouseY)
@@ -1703,7 +1800,7 @@ Item {
         onPressed: mouse => {
             root.pointerInteractionStarted()
             forceActiveFocus()
-            if (root.controller.tool === PDFEditController.HighlightTool) {
+            if (root.isTextMarkupTool()) {
                 root.beginHighlight(mouse.x, mouse.y)
                 mouse.accepted = true
             } else if (root.controller.tool
@@ -1721,9 +1818,13 @@ Item {
             root.cancelShape()
         }
         onClicked: mouse => {
-            if (root.controller.tool === PDFEditController.HighlightTool
+            if (root.isTextMarkupTool()
                     || root.controller.tool
                         === PDFEditController.AddShapeTool) {
+                return
+            }
+            if (root.controller.tool === PDFEditController.StickyNoteTool) {
+                root.addStickyNote(mouse.x, mouse.y)
                 return
             }
             if (root.controller.tool === PDFEditController.AddTextTool) {
@@ -1756,7 +1857,7 @@ Item {
             if (root.controller.tool === PDFEditController.AddTextTool
                     || root.controller.tool === PDFEditController.AddImageTool
                     || root.controller.tool === PDFEditController.AddShapeTool
-                    || root.controller.tool === PDFEditController.HighlightTool)
+                    || root.isCommentCreationTool())
                 return
 
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
@@ -1796,16 +1897,39 @@ Item {
     }
 
     Rectangle {
+        id: highlightPreview
+
         x: root.activeHighlightRect.x
         y: root.activeHighlightRect.y
         width: Math.max(1, root.activeHighlightRect.width)
         height: Math.max(1, root.activeHighlightRect.height)
-        color: root.controller.highlightColor
-        border.width: 1
+        color: root.controller.tool === PDFEditController.HighlightTool
+            ? root.controller.highlightColor
+            : "transparent"
+        border.width: root.controller.tool === PDFEditController.HighlightTool
+            ? 1
+            : 0
         border.color: "#8a8785"
         visible: root.highlighting
         z: 5
         Accessible.ignored: true
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: root.controller.tool
+                    === PDFEditController.UnderlineTool
+                ? parent.bottom
+                : undefined
+            anchors.verticalCenter: root.controller.tool
+                    === PDFEditController.StrikeoutTool
+                ? parent.verticalCenter
+                : undefined
+            height: Math.max(1, Math.min(3, parent.height * 0.12))
+            visible: root.controller.tool !== PDFEditController.HighlightTool
+            color: root.controller.highlightColor
+            Accessible.ignored: true
+        }
     }
 
     ShapeDraftView {
@@ -1838,7 +1962,7 @@ Item {
         readonly property bool compactSelection:
             root.isImageKind(root.controller.selectedKind)
             || root.isShapeKind(root.controller.selectedKind)
-            || root.isHighlightKind(root.controller.selectedKind)
+            || root.isCommentKind(root.controller.selectedKind)
 
         parent: root
         width: compactSelection ? 71 : 136
@@ -2294,7 +2418,7 @@ Item {
                 || (root.controller.tool !== PDFEditController.AddTextTool
                     && root.controller.tool !== PDFEditController.AddImageTool
                     && root.controller.tool !== PDFEditController.AddShapeTool
-                    && root.controller.tool !== PDFEditController.HighlightTool))
+                    && !root.isCommentCreationTool()))
 
         Rectangle {
             anchors.fill: parent
@@ -2439,7 +2563,7 @@ Item {
 
         Repeater {
             model: root.controller.selectedKind === "image"
-                    || root.controller.selectedKind === "highlight" ? [] : [
+                    || root.isCommentKind(root.controller.selectedKind) ? [] : [
                 { horizontal: 0, vertical: -1, cursor: Qt.SizeVerCursor },
                 { horizontal: 1, vertical: 0, cursor: Qt.SizeHorCursor },
                 { horizontal: 0, vertical: 1, cursor: Qt.SizeVerCursor },

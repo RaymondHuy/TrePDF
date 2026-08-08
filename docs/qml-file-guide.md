@@ -1,6 +1,6 @@
 # Hướng dẫn toàn bộ tệp QML
 
-Tài liệu này mô tả 23 tệp QML đang được đăng ký trong QML module `TrePDF`.
+Tài liệu này mô tả 27 tệp QML đang được đăng ký trong QML module `TrePDF`.
 Mỗi mục tập trung vào trách nhiệm, dữ liệu đi vào/đi ra, quan hệ với C++ và các
 ràng buộc vòng đời cần giữ khi sửa code.
 
@@ -25,6 +25,7 @@ Main.qml
 ├── AppRibbon.qml
 │   ├── ViewRibbon.qml
 │   ├── EditRibbon.qml
+│   ├── CommentRibbon.qml
 │   ├── FormRibbon.qml
 │   └── SignRibbon.qml
 ├── DocumentTabBar.qml
@@ -39,6 +40,7 @@ Main.qml
     │           │   └── ShapeDraftView.qml
     │           └── FormTextFieldOverlay.qml
     │               └── FormFieldLayer (C++)
+    ├── CommentPanel.qml
     ├── TextFormatPanel.qml
     ├── TextFieldOptionsPanel.qml
     ├── CombFieldOptionsPanel.qml
@@ -106,8 +108,8 @@ chỉ là state của workflow UI và phải được xóa khi popup đóng ho�
 
 ### [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml)
 
-**Vai trò:** host của bốn tab View, Edit, Forms, Sign và cầu nối giữa ribbon con
-với `Main.qml`.
+**Vai trò:** host của năm tab View, Edit, Comment, Forms, Sign và cầu nối giữa
+ribbon con với `Main.qml`.
 
 **Đầu vào:** `theme`, `document`, `editController`; giữ lựa chọn tool Text Field,
 Check Box, Radio Button, Dropdown, List Box và Comb Field của Forms.
@@ -115,10 +117,13 @@ Check Box, Radio Button, Dropdown, List Box và Comb Field của Forms.
 **Việc chính:**
 
 - Vẽ hàng tab ribbon, vùng lệnh tương ứng và trạng thái tên tài liệu/draft/save.
-- Tính `viewTabActive`, `editTabActive`, `formsTabActive` và các cờ tool form để
-  workspace biết overlay nào được phép hiện/tương tác.
-- Khi rời Edit, đưa `PDFEditController.tool` về Browse; khi vào Edit, mặc định về
-  Select để không giữ một placement/drawing tool từ phiên trước.
+- Tính `viewTabActive`, `editTabActive`, `commentTabActive`, `formsTabActive` và
+  các cờ tool form để workspace biết overlay nào được phép hiện/tương tác.
+- Khi vào Edit, mặc định về Select; khi vào Comment, bật Highlight; rời cả hai
+  tab đưa `PDFEditController.tool` về Browse để không giữ một tool tương tác từ
+  phiên trước.
+- Khi Comment active, yêu cầu annotation-only comment index cho toàn tài liệu,
+  kể cả khi panel danh sách đang được ẩn.
 - Khi chọn Forms tool, bảo đảm Text Field, Check Box, Radio Button, Dropdown,
   List Box và Comb Field loại trừ nhau.
 - Chuyển tiếp signal Open/Save/Save As, page, delete page, zoom, fit, rotate và
@@ -147,9 +152,6 @@ dialog, đổi tab hoặc ghi tệp.
 **Tool và command:**
 
 - Select, Add Text, Add Image.
-- Highlight dạng split button: click phần chính dùng màu hiện tại; menu có bảng
-  màu marker curated và system color picker. Màu được ghi vào
-  `editController.highlightColor` với opacity marker cố định.
 - Shapes dạng split button: Rectangle, Oval, Line, Arrow, Triangle, Diamond.
   Menu dùng `ShapeDraftView` để preview và cập nhật `shapeType` trước khi bật
   `AddShapeTool`.
@@ -163,6 +165,39 @@ cần cấp cao hơn.
 
 **Ràng buộc:** menu tool phải đóng sạch khi document/session thay đổi. Không tự
 ghi Save; mọi thay đổi vẫn là draft.
+
+### [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml)
+
+**Vai trò:** command surface cho PDF comment/markup, nằm ngay sau tab Edit.
+
+- Khi tab mở, `AppRibbon` bật `PDFEditController.HighlightTool`; người dùng có
+  thể chuyển sang Sticky Note, Underline hoặc Strikeout mà không bật form design
+  mode.
+- Highlight là split button: phần chính dùng màu hiện tại, menu có bảng màu
+  marker curated và system color picker. Màu được ghi vào
+  `editController.highlightColor` với opacity marker cố định.
+- Underline và Strikeout dùng chung gesture kéo vùng, draft history và pipeline
+  lưu annotation với Highlight; Sticky Note đặt bằng một lần bấm và mở nội dung
+  trong panel bên phải.
+- Nhóm Manage bật/tắt danh sách, chọn bình luận trước/sau và xóa comment đang
+  chọn; nhóm History dùng chung undo/redo của `PDFEditController`.
+- Undo/Redo dùng chung history của `PDFEditController` và điều hướng tới trang
+  bị thay đổi qua `pageRequested()`.
+
+### [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml)
+
+**Vai trò:** panel bên phải cho danh sách comment toàn tài liệu và nội dung
+Sticky Note đang chọn.
+
+- Khi được load, panel yêu cầu controller chạy annotation-only index tuần tự ở
+  nền cho mọi source page; kết quả không phụ thuộc cache candidate 12 trang của
+  viewport và tự hủy khi document/revision đổi.
+- Hiển thị loại, trang, màu, nội dung rút gọn và trạng thái draft; chọn item sẽ
+  chuyển về Select, chọn candidate tương ứng và điều hướng tới trang đó.
+- Sticky Note mới có `TextArea` để sửa `/Contents`; nội dung được commit khi mất
+  focus, thu gọn panel, đổi session hoặc thực hiện Save.
+- Comment có sẵn trong PDF được liệt kê để đọc và điều hướng nhưng chưa cho sửa
+  nội dung hoặc xóa. Panel dùng chung trạng thái thu gọn theo document session.
 
 ### [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml)
 
@@ -209,12 +244,12 @@ ghi Save; mọi thay đổi vẫn là draft.
   truyền `session.viewRotation` và trạng thái tab/tool form.
 - Thực hiện Fit Width từ kích thước viewport và maximum page dimension đã xoay;
   initial-fit chỉ chạy khi session còn `initialFitPending`.
-- Load đúng một panel ở cạnh phải: `TextFormatPanel` khi Edit active,
-  `TextFieldOptionsPanel` khi chọn Text Field, `DropdownOptionsPanel` khi chọn
-  Dropdown hoặc List Box, `CombFieldOptionsPanel` khi chọn Comb Field, hoặc
-  `RadioButtonOptionsPanel` khi chọn Radio Button trong Forms. Khi Text Field
-  hoặc Comb Field vừa được chọn, panel tương ứng tự mở; trạng thái collapsed
-  sau đó vẫn được lưu riêng theo session.
+- Load đúng một panel ở cạnh phải: `CommentPanel` khi Comment active và danh
+  sách được bật, `TextFormatPanel` khi Edit active, `TextFieldOptionsPanel` khi
+  chọn Text Field, `DropdownOptionsPanel` khi chọn Dropdown hoặc List Box,
+  `CombFieldOptionsPanel` khi chọn Comb Field, hoặc `RadioButtonOptionsPanel`
+  khi chọn Radio Button trong Forms. Khi Text Field hoặc Comb Field vừa được
+  chọn, panel tương ứng tự mở; trạng thái collapsed được lưu theo session.
 - Chuyển các signal font family, bold/italic/underline, color và paragraph
   alignment vào `PDFEditController`.
 
@@ -518,7 +553,7 @@ delegate được reuse.
 
 ### [`src/Components/RibbonTabButton.qml`](../src/Components/RibbonTabButton.qml)
 
-**Vai trò:** nút chọn View/Edit/Forms/Sign.
+**Vai trò:** nút chọn View/Edit/Comment/Forms/Sign.
 
 - Tùy biến background, text color và indicator theo checked/hover/focus.
 - Nhận theme, còn label/check state do `AppRibbon` cung cấp.

@@ -18,8 +18,9 @@ Current features:
 - Open multiple local PDF files in independent tabs and close them separately.
 - Insert a blank page immediately after the current page or delete the current
   page, with undo/redo/discard and Save/Save As persistence.
-- Add rectangular highlight annotations with an Office-style split-button
-  palette containing curated marker and custom colors. Highlights retain
+- Add rectangular highlight annotations from the Comment tab with an
+  Office-style split-button palette containing curated marker and custom
+  colors. Highlights retain
   their chosen color as undoable session drafts, can be selected and deleted,
   and persist through Save/Save As without rewriting page content streams on
   annotation-only pages.

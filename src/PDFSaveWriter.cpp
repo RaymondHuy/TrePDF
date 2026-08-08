@@ -78,7 +78,8 @@ struct SaveDraft {
         Text,
         Image,
         Shape,
-        Highlight
+        TextMarkup,
+        StickyNote
     };
 
     Kind kind = Kind::Text;
@@ -93,6 +94,7 @@ struct SaveDraft {
     QRectF frameRect;
     QVector<QRectF> highlightRects;
     QColor highlightColor;
+    FPDF_ANNOTATION_SUBTYPE annotationSubtype = FPDF_ANNOT_HIGHLIGHT;
     QImage image;
     PDFEditController::ShapeType shapeType
         = PDFEditController::RectangleShape;
@@ -2412,7 +2414,7 @@ void destroyPreparedObjects(QVector<PreparedDraft> &preparedDrafts)
     }
 }
 
-PDFSaveWriter::Result createHighlightAnnotation(
+PDFSaveWriter::Result createTextMarkupAnnotation(
     FPDF_PAGE page,
     const SaveDraft &draft,
     qreal pageWidth,
@@ -2515,7 +2517,7 @@ PDFSaveWriter::Result createHighlightAnnotation(
     }
 
     PdfAnnotationHandle annotation(
-        FPDFPage_CreateAnnot(page, FPDF_ANNOT_HIGHLIGHT));
+        FPDFPage_CreateAnnot(page, draft.annotationSubtype));
     const QColor color = draft.highlightColor.isValid()
         ? draft.highlightColor.toRgb()
         : QColor(255, 235, 59, 96);
@@ -2560,6 +2562,109 @@ PDFSaveWriter::Result createHighlightAnnotation(
     return {};
 }
 
+PDFSaveWriter::Result createStickyNoteAnnotation(
+    FPDF_PAGE page,
+    const SaveDraft &draft,
+    qreal pageWidth,
+    qreal pageHeight,
+    const PageCoordinateMapper &coordinateMapper)
+{
+    if (!std::isfinite(draft.frameRect.x())
+        || !std::isfinite(draft.frameRect.y())
+        || !std::isfinite(draft.frameRect.width())
+        || !std::isfinite(draft.frameRect.height())) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+    const QRectF normalizedRect = draft.frameRect.normalized().intersected(
+        QRectF(0.0, 0.0, 1.0, 1.0));
+    if (normalizedRect.isEmpty()) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    const QRectF deviceRect(
+        normalizedRect.x() * pageWidth,
+        normalizedRect.y() * pageHeight,
+        normalizedRect.width() * pageWidth,
+        normalizedRect.height() * pageHeight);
+    const std::array<QPointF, 4> devicePoints{
+        deviceRect.topLeft(),
+        deviceRect.topRight(),
+        deviceRect.bottomLeft(),
+        deviceRect.bottomRight()};
+    std::array<QPointF, 4> pagePoints;
+    for (size_t index = 0; index < devicePoints.size(); ++index) {
+        if (!coordinateMapper.pagePoint(
+                devicePoints[index].x(),
+                devicePoints[index].y(),
+                pagePoints[index])
+            || !std::isfinite(pagePoints[index].x())
+            || !std::isfinite(pagePoints[index].y())) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                draft.page,
+                draft.objectId);
+        }
+    }
+
+    qreal minimumX = pagePoints.front().x();
+    qreal maximumX = minimumX;
+    qreal minimumY = pagePoints.front().y();
+    qreal maximumY = minimumY;
+    for (const QPointF &point : pagePoints) {
+        minimumX = qMin(minimumX, point.x());
+        maximumX = qMax(maximumX, point.x());
+        minimumY = qMin(minimumY, point.y());
+        maximumY = qMax(maximumY, point.y());
+    }
+    const FS_RECTF annotationRect{
+        static_cast<float>(minimumX),
+        static_cast<float>(maximumY),
+        static_cast<float>(maximumX),
+        static_cast<float>(minimumY)};
+
+    PdfAnnotationHandle annotation(
+        FPDFPage_CreateAnnot(page, FPDF_ANNOT_TEXT));
+    const QColor color = draft.highlightColor.isValid()
+        ? draft.highlightColor.toRgb()
+        : QColor(255, 235, 59);
+    const auto *contents = reinterpret_cast<const FPDF_WCHAR *>(
+        draft.text.utf16());
+    const auto *identity = reinterpret_cast<const FPDF_WCHAR *>(
+        draft.objectId.utf16());
+    if (!annotation.get()
+        || !FPDFAnnot_SetRect(annotation.get(), &annotationRect)
+        || !FPDFAnnot_SetColor(
+            annotation.get(),
+            FPDFANNOT_COLORTYPE_Color,
+            static_cast<unsigned int>(color.red()),
+            static_cast<unsigned int>(color.green()),
+            static_cast<unsigned int>(color.blue()),
+            static_cast<unsigned int>(color.alpha()))
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "Contents",
+            contents)
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "NM",
+            identity)
+        || !FPDFAnnot_SetFlags(
+            annotation.get(),
+            FPDF_ANNOT_FLAG_PRINT)) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+    return {};
+}
+
 PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                                       FPDF_DOCUMENT inspectionDocument,
                                       int pageIndex,
@@ -2598,13 +2703,15 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         drafts.cbegin(),
         drafts.cend(),
         [](const SaveDraft &draft) {
-            return draft.kind != SaveDraft::Kind::Highlight;
+            return draft.kind != SaveDraft::Kind::TextMarkup
+                && draft.kind != SaveDraft::Kind::StickyNote;
         });
     const bool modifiesExistingObject = std::any_of(
         drafts.cbegin(),
         drafts.cend(),
         [](const SaveDraft &draft) {
-            return draft.kind != SaveDraft::Kind::Highlight
+            return draft.kind != SaveDraft::Kind::TextMarkup
+                && draft.kind != SaveDraft::Kind::StickyNote
                 && !draft.added;
         });
     if (modifiesExistingObject) {
@@ -2631,7 +2738,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     QVector<PreparedDraft> preparedDrafts;
     preparedDrafts.reserve(drafts.size());
     for (const SaveDraft &draft : drafts) {
-        if (draft.kind == SaveDraft::Kind::Highlight) {
+        if (draft.kind == SaveDraft::Kind::TextMarkup
+            || draft.kind == SaveDraft::Kind::StickyNote) {
             continue;
         }
         PreparedDraft prepared;
@@ -2792,18 +2900,26 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     destroyPreparedObjects(preparedDrafts);
 
     for (const SaveDraft &draft : drafts) {
-        if (draft.kind != SaveDraft::Kind::Highlight) {
-            continue;
-        }
-        const PDFSaveWriter::Result highlightResult
-            = createHighlightAnnotation(
+        PDFSaveWriter::Result annotationResult;
+        if (draft.kind == SaveDraft::Kind::TextMarkup) {
+            annotationResult = createTextMarkupAnnotation(
                 page.get(),
                 draft,
                 pageWidth,
                 pageHeight,
                 coordinateMapper);
-        if (!highlightResult.succeeded()) {
-            return highlightResult;
+        } else if (draft.kind == SaveDraft::Kind::StickyNote) {
+            annotationResult = createStickyNoteAnnotation(
+                page.get(),
+                draft,
+                pageWidth,
+                pageHeight,
+                coordinateMapper);
+        } else {
+            continue;
+        }
+        if (!annotationResult.succeeded()) {
+            return annotationResult;
         }
     }
     return {};
@@ -3197,10 +3313,16 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             || draft->candidate.kind == QLatin1String("image");
         const bool shapeDraft
             = draft->candidate.kind == QLatin1String("addedShape");
-        const bool highlightDraft
-            = draft->candidate.kind == QLatin1String("highlight");
-        saveDraft.kind = highlightDraft
-            ? SaveDraft::Kind::Highlight
+        const bool textMarkupDraft
+            = draft->candidate.kind == QLatin1String("highlight")
+            || draft->candidate.kind == QLatin1String("underline")
+            || draft->candidate.kind == QLatin1String("strikeout");
+        const bool stickyNoteDraft
+            = draft->candidate.kind == QLatin1String("stickyNote");
+        saveDraft.kind = stickyNoteDraft
+            ? SaveDraft::Kind::StickyNote
+            : textMarkupDraft
+            ? SaveDraft::Kind::TextMarkup
             : shapeDraft
                 ? SaveDraft::Kind::Shape
                 : imageDraft
@@ -3218,6 +3340,11 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.frameRect = draft->frameRect;
         saveDraft.highlightRects = draft->candidate.highlightRects;
         saveDraft.highlightColor = draft->candidate.highlightColor;
+        if (draft->candidate.kind == QLatin1String("underline")) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_UNDERLINE;
+        } else if (draft->candidate.kind == QLatin1String("strikeout")) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_STRIKEOUT;
+        }
         saveDraft.shapeType = draft->candidate.shapeType;
         saveDraft.shapeStartRatio = draft->candidate.shapeStartRatio;
         saveDraft.shapeEndRatio = draft->candidate.shapeEndRatio;
@@ -3235,7 +3362,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
                 && !saveDraft.added
                 && !saveDraft.deleted);
         saveDraft.image = draft->deleted ? QImage() : draft->candidate.image;
-        if (saveDraft.kind == SaveDraft::Kind::Highlight) {
+        if (saveDraft.kind == SaveDraft::Kind::TextMarkup
+            || saveDraft.kind == SaveDraft::Kind::StickyNote) {
             data->drafts.append(std::move(saveDraft));
             continue;
         }

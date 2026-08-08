@@ -37,6 +37,7 @@ public:
         ImageObjectCreationFailed,
         ShapeObjectCreationFailed,
         HighlightAnnotationCreationFailed,
+        CommentAnnotationCreationFailed,
         PageCreationFailed,
         PageDeletionFailed,
         PageContentGenerationFailed,
