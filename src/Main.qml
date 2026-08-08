@@ -928,6 +928,8 @@ ApplicationWindow {
                 session: window.workspaceSession
                 formsTabActive: appRibbon.formsTabActive
                 editTabActive: appRibbon.editTabActive
+                commentTabActive: appRibbon.commentTabActive
+                commentsPanelVisible: appRibbon.commentsPanelVisible
                 formFieldsVisible: window.activeDocument.loaded
                 formFieldsInteractive: appRibbon.viewTabActive
                     || appRibbon.editTabActive

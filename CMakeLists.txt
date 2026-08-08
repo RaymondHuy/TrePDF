@@ -89,6 +89,8 @@ qt_add_qml_module(trepdf
         src/Components/AppRibbon.qml
         src/Components/AppTheme.qml
         src/Components/CombFieldOptionsPanel.qml
+        src/Components/CommentPanel.qml
+        src/Components/CommentRibbon.qml
         src/Components/DocumentView.qml
         src/Components/DocumentTabBar.qml
         src/Components/DocumentWorkspace.qml

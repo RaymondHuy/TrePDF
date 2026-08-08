@@ -66,13 +66,15 @@ PDF. Compatible text objects on the same visual line are grouped into one
 editable candidate while retaining every source object path for draft rendering
 and persistence.
 
-The Highlight split button offers a compact curated marker-color grid and a
-system picker for custom colors before the user drags a rectangular mark over
-any page area. Highlights are per-tab session drafts with undo, redo,
-discard, selection, and deletion support. Save and Save As persist each draft's
-selected color as a standard PDF highlight annotation with quad points, opacity,
-and print visibility; a highlight-only save does not regenerate the page
-content stream.
+The Comment ribbon provides Sticky Note, Highlight, Underline, and Strikeout
+tools plus a collapsible, whole-document comments panel. New sticky notes can
+be selected and edited in the panel, while markup uses a compact curated color
+grid and a system picker for custom colors. Comment changes are per-tab session
+drafts with undo, redo, discard, selection, and deletion support. Save and Save As
+persist them as standard PDF annotations with geometry, color, contents, and
+print visibility; annotation-only saves do not regenerate the page content
+stream. Existing supported annotations are rehydrated for navigation and
+display, but editing their contents is intentionally read-only for now.
 
 The Shapes dropdown offers rectangles, ovals, lines, arrows, triangles, and
 diamonds. After choosing a shape, drag over a page to create a vector session
@@ -192,7 +194,7 @@ caret at the end. Font size is currently UI-only.
   thread boundaries, main runtime flows, and an index of every current QML/C++
   implementation file.
 - [`docs/qml-file-guide.md`](docs/qml-file-guide.md): detailed responsibilities,
-  inputs, outputs, lifecycle, and C++ relationships for all 20 QML files.
+  inputs, outputs, lifecycle, and C++ relationships for all 27 QML files.
 - [`docs/cpp-file-guide.md`](docs/cpp-file-guide.md): detailed responsibilities,
   ownership, threading, persistence boundaries, and tests for all 16 `src/` C++
   implementations, the C++ test file, and support headers.

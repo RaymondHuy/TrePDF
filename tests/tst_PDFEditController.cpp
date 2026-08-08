@@ -1926,6 +1926,16 @@ struct HighlightSaveInspection {
     QVector<FS_QUADPOINTSF> quadPoints;
 };
 
+struct StickyNoteSaveInspection {
+    bool readable = false;
+    int count = 0;
+    QColor color;
+    int flags = 0;
+    FS_RECTF rect{};
+    QString contents;
+    QStringList names;
+};
+
 struct AcroFormFieldInspection {
     bool readable = false;
     int formType = FORMTYPE_NONE;
@@ -2323,8 +2333,10 @@ QVector<bool> clickAcroFormFieldTwice(
     return states;
 }
 
-HighlightSaveInspection inspectHighlights(const QString &filePath,
-                                          int pageIndex = 0)
+HighlightSaveInspection inspectTextMarkupAnnotations(
+    const QString &filePath,
+    FPDF_ANNOTATION_SUBTYPE subtype,
+    int pageIndex = 0)
 {
     PDFiumProcessLock pdfiumLock;
     HighlightSaveInspection inspection;
@@ -2343,7 +2355,7 @@ HighlightSaveInspection inspectHighlights(const QString &filePath,
             if (!annotation) {
                 continue;
             }
-            if (FPDFAnnot_GetSubtype(annotation) != FPDF_ANNOT_HIGHLIGHT) {
+            if (FPDFAnnot_GetSubtype(annotation) != subtype) {
                 FPDFPage_CloseAnnot(annotation);
                 continue;
             }
@@ -2384,6 +2396,105 @@ HighlightSaveInspection inspectHighlights(const QString &filePath,
                         inspection.quadPoints.append(quad);
                     }
                 }
+            }
+            FPDFPage_CloseAnnot(annotation);
+        }
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return inspection;
+}
+
+HighlightSaveInspection inspectHighlights(const QString &filePath,
+                                          int pageIndex = 0)
+{
+    return inspectTextMarkupAnnotations(
+        filePath,
+        FPDF_ANNOT_HIGHLIGHT,
+        pageIndex);
+}
+
+StickyNoteSaveInspection inspectStickyNotes(const QString &filePath,
+                                            int pageIndex = 0)
+{
+    PDFiumProcessLock pdfiumLock;
+    StickyNoteSaveInspection inspection;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document
+        ? FPDF_LoadPage(document, pageIndex)
+        : nullptr;
+    inspection.readable = document && page;
+    if (page) {
+        const int annotationCount = FPDFPage_GetAnnotCount(page);
+        for (int index = 0; index < annotationCount; ++index) {
+            FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(page, index);
+            if (!annotation) {
+                continue;
+            }
+            if (FPDFAnnot_GetSubtype(annotation) != FPDF_ANNOT_TEXT) {
+                FPDFPage_CloseAnnot(annotation);
+                continue;
+            }
+
+            const auto annotationString = [annotation](const char *key) {
+                const unsigned long byteLength = FPDFAnnot_GetStringValue(
+                    annotation,
+                    key,
+                    nullptr,
+                    0);
+                if (byteLength < sizeof(FPDF_WCHAR)) {
+                    return QString();
+                }
+                QVector<FPDF_WCHAR> buffer(
+                    static_cast<qsizetype>(
+                        (byteLength + sizeof(FPDF_WCHAR) - 1)
+                        / sizeof(FPDF_WCHAR)));
+                const unsigned long actualLength = FPDFAnnot_GetStringValue(
+                    annotation,
+                    key,
+                    buffer.data(),
+                    byteLength);
+                qsizetype characterCount = static_cast<qsizetype>(
+                    actualLength / sizeof(FPDF_WCHAR));
+                while (characterCount > 0
+                       && buffer.at(characterCount - 1) == 0) {
+                    --characterCount;
+                }
+                return QString::fromUtf16(
+                    reinterpret_cast<const char16_t *>(buffer.constData()),
+                    characterCount);
+            };
+
+            ++inspection.count;
+            inspection.names.append(annotationString("NM"));
+            if (inspection.count == 1) {
+                unsigned int red = 0;
+                unsigned int green = 0;
+                unsigned int blue = 0;
+                unsigned int alpha = 0;
+                if (FPDFAnnot_GetColor(
+                        annotation,
+                        FPDFANNOT_COLORTYPE_Color,
+                        &red,
+                        &green,
+                        &blue,
+                        &alpha)) {
+                    inspection.color = QColor::fromRgb(
+                        red,
+                        green,
+                        blue,
+                        alpha);
+                }
+                inspection.flags = FPDFAnnot_GetFlags(annotation);
+                FPDFAnnot_GetRect(annotation, &inspection.rect);
+                inspection.contents = annotationString("Contents");
             }
             FPDFPage_CloseAnnot(annotation);
         }
@@ -2659,6 +2770,7 @@ private slots:
     void discoversUncachedHoverOffGuiThread();
     void reschedulesCancelledHoverForSamePage();
     void defersUncachedHoverWhilePdfiumIsBusy();
+    void dropsAsyncResultsAfterControllerDestruction();
     void registersBundledFonts();
     void keepsArialLayoutStableAfterEmbeddedSubsetCollision();
     void filtersUnsupportedSystemFonts();
@@ -2712,7 +2824,15 @@ private slots:
     void preservesEmbeddedFontForFormatOnlyVietnameseEdit();
     void savesNormalizedVietnameseRichText();
     void addsHighlightWithUndoRedoAndDiscard();
+    void addsUnderlineAndStrikeoutWithUndoRedoAndDelete_data();
+    void addsUnderlineAndStrikeoutWithUndoRedoAndDelete();
+    void addsStickyNoteWithPanelModelAndUndo();
     void savesHighlightAnnotationRoundTrip();
+    void savesUnderlineAndStrikeoutAnnotationRoundTrip_data();
+    void savesUnderlineAndStrikeoutAnnotationRoundTrip();
+    void savesStickyNoteRoundTrip();
+    void keepsStickyNoteNamesUniqueAcrossReopen();
+    void indexesCommentsAcrossDocument();
     void savesHighlightAlongsideTextEdit();
     void preservesPatternGraphicsWhenSavingHighlight();
     void addsBlankPageWithUndoRedoAndDiscard();
@@ -7702,6 +7822,26 @@ void PDFEditControllerTest::defersUncachedHoverWhilePdfiumIsBusy()
                        .arg(cachedHoverMilliseconds)));
 }
 
+void PDFEditControllerTest::dropsAsyncResultsAfterControllerDestruction()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("destroyed-controller-async-source.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    for (int iteration = 0; iteration < 64; ++iteration) {
+        auto controller = std::make_unique<PDFEditController>();
+        controller->setDocument(&document);
+        controller->candidateAt(0, 0.5, 0.5);
+        controller->requestCommentIndex();
+        controller.reset();
+    }
+
+    QTest::qWait(1000);
+    QVERIFY(document.isLoaded());
+}
+
 void PDFEditControllerTest::registersBundledFonts()
 {
     QVERIFY(QFile::exists(QStringLiteral(
@@ -10391,6 +10531,129 @@ void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
     QVERIFY(!controller.canRedo());
 }
 
+void PDFEditControllerTest::addsUnderlineAndStrikeoutWithUndoRedoAndDelete_data()
+{
+    QTest::addColumn<int>("tool");
+    QTest::addColumn<QString>("kind");
+
+    QTest::newRow("underline")
+        << static_cast<int>(PDFEditController::UnderlineTool)
+        << QStringLiteral("underline");
+    QTest::newRow("strikeout")
+        << static_cast<int>(PDFEditController::StrikeoutTool)
+        << QStringLiteral("strikeout");
+}
+
+void PDFEditControllerTest::addsUnderlineAndStrikeoutWithUndoRedoAndDelete()
+{
+    QFETCH(int, tool);
+    QFETCH(QString, kind);
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("add-%1-source.pdf").arg(kind));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(static_cast<PDFEditController::Tool>(tool));
+
+    const QRectF selectionRect(0.12, 0.18, 0.28, 0.045);
+    const QVariantMap annotation = controller.addHighlight(
+        0,
+        selectionRect);
+    QCOMPARE(annotation.value(QStringLiteral("kind")).toString(), kind);
+    QCOMPARE(
+        annotation.value(QStringLiteral("sourceRect")).toRectF(),
+        selectionRect);
+    QVERIFY(
+        annotation.value(QStringLiteral("objectId")).toString().startsWith(
+            kind + QLatin1Char(':')));
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QVERIFY(!candidateForKind(controller.candidatesForPage(0), kind).isEmpty());
+
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(candidateForKind(controller.candidatesForPage(0), kind).isEmpty());
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+
+    controller.setTool(PDFEditController::SelectTool);
+    const QString objectId = annotation
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(controller.selectCandidate(0, objectId));
+    controller.deleteSelectedObject();
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(candidateForKind(controller.candidatesForPage(0), kind).isEmpty());
+
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("kind"))
+            .toString(),
+        kind);
+    QCOMPARE(controller.redo(), -1);
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+}
+
+void PDFEditControllerTest::addsStickyNoteWithPanelModelAndUndo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("add-sticky-note-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::StickyNoteTool);
+
+    const QVariantMap note = controller.addStickyNote(
+        0,
+        QPointF(0.2, 0.3));
+    QCOMPARE(
+        note.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("stickyNote"));
+    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.selectedObjectId(),
+             note.value(QStringLiteral("objectId")).toString());
+    QCOMPARE(controller.commentItems().size(), 1);
+    QCOMPARE(
+        controller.commentItems()
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("page"))
+            .toInt(),
+        0);
+
+    const QString commentText = QStringLiteral("Cần kiểm tra lại số liệu.");
+    controller.setSelectedCommentText(commentText);
+    QCOMPARE(controller.selectedText(), commentText);
+    QCOMPARE(
+        controller.commentItems()
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("text"))
+            .toString(),
+        commentText);
+
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedText(), QString());
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedText(), commentText);
+    QCOMPARE(controller.selectRelativeComment(1), 0);
+
+    controller.deleteSelectedObject();
+    QVERIFY(controller.commentItems().isEmpty());
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.commentItems().size(), 1);
+}
+
 void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -10448,6 +10711,244 @@ void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
     QVERIFY(closeEnough(quad.y3, expectedBottom));
     QVERIFY(closeEnough(quad.x4, expectedRight));
     QVERIFY(closeEnough(quad.y4, expectedBottom));
+}
+
+void PDFEditControllerTest::savesUnderlineAndStrikeoutAnnotationRoundTrip_data()
+{
+    QTest::addColumn<int>("tool");
+    QTest::addColumn<int>("subtype");
+    QTest::addColumn<QString>("kind");
+
+    QTest::newRow("underline")
+        << static_cast<int>(PDFEditController::UnderlineTool)
+        << static_cast<int>(FPDF_ANNOT_UNDERLINE)
+        << QStringLiteral("underline");
+    QTest::newRow("strikeout")
+        << static_cast<int>(PDFEditController::StrikeoutTool)
+        << static_cast<int>(FPDF_ANNOT_STRIKEOUT)
+        << QStringLiteral("strikeout");
+}
+
+void PDFEditControllerTest::savesUnderlineAndStrikeoutAnnotationRoundTrip()
+{
+    QFETCH(int, tool);
+    QFETCH(int, subtype);
+    QFETCH(QString, kind);
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-%1-source.pdf").arg(kind));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-%1-output.pdf").arg(kind));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(static_cast<PDFEditController::Tool>(tool));
+    const QSizeF pageSize = document.pageSize(0);
+    const QRectF selectionRect(0.14, 0.24, 0.32, 0.04);
+    const QColor annotationColor(38, 166, 154, 160);
+    controller.setHighlightColor(annotationColor);
+    QCOMPARE(
+        controller.addHighlight(0, selectionRect)
+            .value(QStringLiteral("kind"))
+            .toString(),
+        kind);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+
+    const HighlightSaveInspection sourceInspection
+        = inspectTextMarkupAnnotations(
+            sourcePath,
+            static_cast<FPDF_ANNOTATION_SUBTYPE>(subtype));
+    QVERIFY(sourceInspection.readable);
+    QCOMPARE(sourceInspection.count, 0);
+
+    const HighlightSaveInspection inspection
+        = inspectTextMarkupAnnotations(
+            outputPath,
+            static_cast<FPDF_ANNOTATION_SUBTYPE>(subtype));
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.count, 1);
+    QCOMPARE(inspection.color, annotationColor);
+    QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
+    QCOMPARE(inspection.quadPoints.size(), 1);
+
+    const qreal expectedLeft = selectionRect.left() * pageSize.width();
+    const qreal expectedRight = selectionRect.right() * pageSize.width();
+    const qreal expectedTop = (1.0 - selectionRect.top())
+        * pageSize.height();
+    const qreal expectedBottom = (1.0 - selectionRect.bottom())
+        * pageSize.height();
+    const auto closeEnough = [](qreal actual, qreal expected) {
+        return qAbs(actual - expected) < 0.05;
+    };
+    QVERIFY(closeEnough(inspection.rect.left, expectedLeft));
+    QVERIFY(closeEnough(inspection.rect.right, expectedRight));
+    QVERIFY(closeEnough(inspection.rect.top, expectedTop));
+    QVERIFY(closeEnough(inspection.rect.bottom, expectedBottom));
+    const FS_QUADPOINTSF quad = inspection.quadPoints.constFirst();
+    QVERIFY(closeEnough(quad.x1, expectedLeft));
+    QVERIFY(closeEnough(quad.y1, expectedTop));
+    QVERIFY(closeEnough(quad.x2, expectedRight));
+    QVERIFY(closeEnough(quad.y2, expectedTop));
+    QVERIFY(closeEnough(quad.x3, expectedLeft));
+    QVERIFY(closeEnough(quad.y3, expectedBottom));
+    QVERIFY(closeEnough(quad.x4, expectedRight));
+    QVERIFY(closeEnough(quad.y4, expectedBottom));
+}
+
+void PDFEditControllerTest::savesStickyNoteRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-sticky-note-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-sticky-note-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::StickyNoteTool);
+    const QSizeF pageSize = document.pageSize(0);
+    const QPointF position(0.2, 0.3);
+    const QString commentText = QStringLiteral(
+        "Cần kiểm tra lại số liệu.");
+    QVERIFY(!controller.addStickyNote(0, position).isEmpty());
+    controller.setSelectedCommentText(commentText);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+
+    const StickyNoteSaveInspection sourceInspection
+        = inspectStickyNotes(sourcePath);
+    QVERIFY(sourceInspection.readable);
+    QCOMPARE(sourceInspection.count, 0);
+
+    const StickyNoteSaveInspection inspection
+        = inspectStickyNotes(outputPath);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.count, 1);
+    QCOMPARE(inspection.color, QColor(255, 235, 59));
+    QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
+    QCOMPARE(inspection.contents, commentText);
+
+    const qreal expectedLeft = position.x() * pageSize.width();
+    const qreal expectedRight = expectedLeft + 24.0;
+    const qreal expectedTop = (1.0 - position.y()) * pageSize.height();
+    const qreal expectedBottom = expectedTop - 24.0;
+    const auto closeEnough = [](qreal actual, qreal expected) {
+        return qAbs(actual - expected) < 0.05;
+    };
+    QVERIFY(closeEnough(inspection.rect.left, expectedLeft));
+    QVERIFY(closeEnough(inspection.rect.right, expectedRight));
+    QVERIFY(closeEnough(inspection.rect.top, expectedTop));
+    QVERIFY(closeEnough(inspection.rect.bottom, expectedBottom));
+
+    const QVariantMap rehydratedNote = candidateForKind(
+        waitForCandidates(controller, 0),
+        QStringLiteral("stickyNote"));
+    QVERIFY(!rehydratedNote.isEmpty());
+    QCOMPARE(
+        rehydratedNote.value(QStringLiteral("text")).toString(),
+        commentText);
+    QVERIFY(!rehydratedNote.value(QStringLiteral("editable")).toBool());
+    QVERIFY(controller.selectComment(
+        0,
+        rehydratedNote.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(!controller.selectedEditable());
+    QCOMPARE(controller.commentItems().size(), 1);
+}
+
+void PDFEditControllerTest::keepsStickyNoteNamesUniqueAcrossReopen()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("sticky-note-name-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("sticky-note-name-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    controller.setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller.addStickyNote(0, QPointF(0.2, 0.3)).isEmpty());
+    controller.setSelectedCommentText(QStringLiteral("First comment"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    const StickyNoteSaveInspection firstInspection
+        = inspectStickyNotes(outputPath);
+    QVERIFY(firstInspection.readable);
+    QCOMPARE(firstInspection.count, 1);
+    QCOMPARE(firstInspection.names.size(), 1);
+    QVERIFY(!firstInspection.names.constFirst().isEmpty());
+    const QString firstName = firstInspection.names.constFirst();
+
+    controller.setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller.addStickyNote(0, QPointF(0.55, 0.45)).isEmpty());
+    controller.setSelectedCommentText(QStringLiteral("Second comment"));
+    QVERIFY(controller.save());
+
+    const StickyNoteSaveInspection secondInspection
+        = inspectStickyNotes(outputPath);
+    QVERIFY(secondInspection.readable);
+    QCOMPARE(secondInspection.count, 2);
+    QCOMPARE(secondInspection.names.size(), 2);
+    QSet<QString> uniqueNames;
+    for (const QString &name : secondInspection.names) {
+        QVERIFY(!name.isEmpty());
+        uniqueNames.insert(name);
+    }
+    QCOMPARE(uniqueNames.size(), secondInspection.names.size());
+    QVERIFY(uniqueNames.contains(firstName));
+}
+
+void PDFEditControllerTest::indexesCommentsAcrossDocument()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-index-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-index-output.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    controller.setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller.addStickyNote(0, QPointF(0.15, 0.2)).isEmpty());
+    controller.setSelectedCommentText(QStringLiteral("First comment"));
+    controller.setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller.addStickyNote(2, QPointF(0.25, 0.3)).isEmpty());
+    controller.setSelectedCommentText(QStringLiteral("Third-page comment"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+    const QVariantList comments = controller.commentItems();
+    QCOMPARE(
+        comments.at(0).toMap().value(QStringLiteral("page")).toInt(),
+        0);
+    QCOMPARE(
+        comments.at(0).toMap().value(QStringLiteral("text")).toString(),
+        QStringLiteral("First comment"));
+    QCOMPARE(
+        comments.at(1).toMap().value(QStringLiteral("page")).toInt(),
+        2);
+    QCOMPARE(
+        comments.at(1).toMap().value(QStringLiteral("text")).toString(),
+        QStringLiteral("Third-page comment"));
+
+    QCOMPARE(controller.selectRelativeComment(1), 0);
+    QCOMPARE(controller.selectRelativeComment(1), 2);
+    QCOMPARE(controller.selectRelativeComment(-1), 0);
 }
 
 void PDFEditControllerTest::savesHighlightAlongsideTextEdit()

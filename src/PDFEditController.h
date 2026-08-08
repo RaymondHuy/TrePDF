@@ -66,6 +66,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(int selectedParagraphAlignment READ selectedParagraphAlignment NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QVariantList commentItems READ commentItems NOTIFY commentsChanged FINAL)
 
 public:
     struct DraftObjectMove {
@@ -87,7 +88,10 @@ public:
         AddTextTool,
         AddImageTool,
         AddShapeTool,
-        HighlightTool
+        HighlightTool,
+        UnderlineTool,
+        StrikeoutTool,
+        StickyNoteTool
     };
     Q_ENUM(Tool)
 
@@ -168,6 +172,7 @@ public:
     int selectedParagraphAlignment() const;
     bool selectedEditable() const;
     QString selectedReason() const;
+    QVariantList commentItems() const;
     quint64 draftRevisionForPage(int page) const;
     QVector<QVector<int>> draftedTextObjectPathsForPage(int page) const;
     QVector<DraftObjectMove> draftedObjectMovesForPage(int page) const;
@@ -196,6 +201,8 @@ public:
         qreal strokeWidthRatio) const;
     Q_INVOKABLE QVariantMap addHighlight(int page,
                                          const QRectF &selectionRect);
+    Q_INVOKABLE QVariantMap addStickyNote(int page,
+                                         const QPointF &position);
     Q_INVOKABLE int addBlankPage();
     Q_INVOKABLE int deleteCurrentPage();
     Q_INVOKABLE QFont fontForDisplay(const QString &fontFamily,
@@ -220,6 +227,9 @@ public:
     Q_INVOKABLE bool syncEditorFontStyles(QObject *textDocument);
     Q_INVOKABLE QStringList fontFamiliesForFilter(FontFilter filter) const;
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
+    Q_INVOKABLE void requestCommentIndex();
+    Q_INVOKABLE bool selectComment(int page, const QString &objectId);
+    Q_INVOKABLE int selectRelativeComment(int direction);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
     Q_INVOKABLE void updateSelectedTextPreview(const QString &text,
@@ -239,6 +249,7 @@ public:
     Q_INVOKABLE void finishSelectedTextEdit();
     Q_INVOKABLE void cancelSelectedTextEdit();
     Q_INVOKABLE void commitSelectedText(const QString &text);
+    Q_INVOKABLE void setSelectedCommentText(const QString &text);
     Q_INVOKABLE void deleteSelectedObject();
     Q_INVOKABLE int undo();
     Q_INVOKABLE int redo();
@@ -258,6 +269,7 @@ signals:
     void textEditActiveChanged();
     void selectionChanged();
     void textFormatStateChanged();
+    void commentsChanged();
     void typingFormatApplied(int start, int length);
     void selectionFontStyleApplied(int start,
                                    int length,
@@ -475,8 +487,16 @@ private:
     void touchPageCandidateCache(int page);
     void prunePageCandidateCache(int protectedPage);
     bool isPageCandidateCachePinned(int page) const;
+    void resetCommentIndex();
+    void cacheCommentCandidates(
+        int page,
+        const QVector<Candidate> &candidates);
     CandidateScanRequest candidateScanRequest(int page) const;
     static QVector<Candidate> scanPageFromFile(
+        const CandidateScanRequest &request,
+        const std::shared_ptr<std::atomic_bool> &cancellation);
+    static QVector<Candidate> scanCommentPageLocked(
+        FPDF_DOCUMENT document,
         const CandidateScanRequest &request,
         const std::shared_ptr<std::atomic_bool> &cancellation);
     static QVector<Candidate> scanPageLocked(
@@ -601,6 +621,10 @@ private:
     int m_candidateScanInFlightPage = -1;
     bool m_candidateScanInFlight = false;
     std::shared_ptr<std::atomic_bool> m_candidateScanCancellation;
+    QHash<int, QVector<Candidate>> m_indexedCommentCandidates;
+    bool m_commentIndexInFlight = false;
+    bool m_commentIndexComplete = false;
+    std::shared_ptr<std::atomic_bool> m_commentIndexCancellation;
     QVector<Candidate> m_addedCandidates;
     QVector<PDFPageInsertion> m_pageInsertions;
     QSet<int> m_deletedSourcePages;

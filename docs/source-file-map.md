@@ -7,7 +7,7 @@ nguyên ảnh/phông chữ.
 
 Tại thời điểm cập nhật, phạm vi có:
 
-- 20 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
+- 27 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
 - 16 tệp triển khai C++ trong `src/` và 1 tệp kiểm thử C++: xem
   [Hướng dẫn tệp C++](cpp-file-guide.md).
 - 17 header C++; trong đó 15 header đi cùng tệp triển khai và 2 header dùng
@@ -124,7 +124,7 @@ flowchart TD
 
 ### Sửa nội dung trang
 
-1. `EditRibbon` đổi tool trên `PDFEditController`.
+1. `EditRibbon` hoặc `CommentRibbon` đổi tool trên `PDFEditController`.
 2. `EditOverlay` chuyển tọa độ pointer sang tỉ lệ chuẩn hóa của trang, hit-test
    candidate và gọi API của controller.
 3. Controller giữ draft session-only và snapshot đầy đủ cho undo/redo. Texture
@@ -193,11 +193,13 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/AppTheme.qml`](../src/Components/AppTheme.qml) | Bảng màu dùng chung. |
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
-| [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/highlight/shape, history và page operation. |
+| [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
+| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Highlight/Underline/Strikeout, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
-| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel format/Text Field/Comb/Dropdown/List Box/Radio cho một session. |
+| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel comment/format/Text Field/Comb/Dropdown/List Box/Radio cho một session. |
+| [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, điều hướng và sửa nội dung Sticky Note mới. |
 | [`src/Components/TextFieldOptionsPanel.qml`](../src/Components/TextFieldOptionsPanel.qml) | Panel multi-line, giới hạn ký tự tùy chọn và xóa Text Field đang chọn. |
 | [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml) | Panel số ô/giới hạn ký tự bắt buộc và xóa Comb Field đang chọn. |
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |
@@ -243,7 +245,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 |---|---|---|
 | Ribbon, bố cục, dialog | `Main.qml`, ribbon tương ứng | `i18n/qml_vi.ts`, `AppTheme.qml` |
 | Scroll/zoom/rotation/pooling | `DocumentView.qml`, `PdfPageDelegate.qml` | `PDFPageItem.cpp`, state trong `PDFDocumentSession` |
-| Chọn hoặc sửa text/image/shape/highlight | `EditOverlay.qml` | `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
+| Chọn hoặc sửa text/image/shape/comment | `EditOverlay.qml` | `EditRibbon.qml` hoặc `CommentRibbon.qml`, `CommentPanel.qml`, `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
 | Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp` | `PDFEditController.cpp`, `PDFSaveWriter.cpp` |
 | Form PDF đang chạy | `PDFFormView.cpp`, `PDFFormController.cpp` | `PDFFormWorker.cpp`, `FormChoiceOverlay.qml` |
 | Form designer | `FormTextFieldOverlay.qml`, `FormFieldLayer.cpp` | `PDFFormDesignerController.cpp`, AcroForm writer/canonicalizer |
