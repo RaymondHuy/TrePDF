@@ -29,6 +29,7 @@
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QThreadPool>
+#include <QUuid>
 #include <QVariantMap>
 #include <QtTranslation>
 
@@ -2720,7 +2721,7 @@ QVariantMap PDFEditController::addStickyNote(int page,
     candidate.page = page;
     candidate.addedOrder = ++m_nextAddedObjectId;
     candidate.objectId = QStringLiteral("stickyNote:")
-        + QString::number(candidate.addedOrder);
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
     candidate.kind = QStringLiteral("stickyNote");
     //% "Sticky Note"
     candidate.label = qtTrId("StickyNote");

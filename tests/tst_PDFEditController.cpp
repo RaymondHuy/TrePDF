@@ -1933,6 +1933,7 @@ struct StickyNoteSaveInspection {
     int flags = 0;
     FS_RECTF rect{};
     QString contents;
+    QStringList names;
 };
 
 struct AcroFormFieldInspection {
@@ -2442,7 +2443,37 @@ StickyNoteSaveInspection inspectStickyNotes(const QString &filePath,
                 continue;
             }
 
+            const auto annotationString = [annotation](const char *key) {
+                const unsigned long byteLength = FPDFAnnot_GetStringValue(
+                    annotation,
+                    key,
+                    nullptr,
+                    0);
+                if (byteLength < sizeof(FPDF_WCHAR)) {
+                    return QString();
+                }
+                QVector<FPDF_WCHAR> buffer(
+                    static_cast<qsizetype>(
+                        (byteLength + sizeof(FPDF_WCHAR) - 1)
+                        / sizeof(FPDF_WCHAR)));
+                const unsigned long actualLength = FPDFAnnot_GetStringValue(
+                    annotation,
+                    key,
+                    buffer.data(),
+                    byteLength);
+                qsizetype characterCount = static_cast<qsizetype>(
+                    actualLength / sizeof(FPDF_WCHAR));
+                while (characterCount > 0
+                       && buffer.at(characterCount - 1) == 0) {
+                    --characterCount;
+                }
+                return QString::fromUtf16(
+                    reinterpret_cast<const char16_t *>(buffer.constData()),
+                    characterCount);
+            };
+
             ++inspection.count;
+            inspection.names.append(annotationString("NM"));
             if (inspection.count == 1) {
                 unsigned int red = 0;
                 unsigned int green = 0;
@@ -2463,33 +2494,7 @@ StickyNoteSaveInspection inspectStickyNotes(const QString &filePath,
                 }
                 inspection.flags = FPDFAnnot_GetFlags(annotation);
                 FPDFAnnot_GetRect(annotation, &inspection.rect);
-                const unsigned long byteLength = FPDFAnnot_GetStringValue(
-                    annotation,
-                    "Contents",
-                    nullptr,
-                    0);
-                if (byteLength >= sizeof(FPDF_WCHAR)) {
-                    QVector<FPDF_WCHAR> buffer(
-                        static_cast<qsizetype>(
-                            (byteLength + sizeof(FPDF_WCHAR) - 1)
-                            / sizeof(FPDF_WCHAR)));
-                    const unsigned long actualLength
-                        = FPDFAnnot_GetStringValue(
-                            annotation,
-                            "Contents",
-                            buffer.data(),
-                            byteLength);
-                    qsizetype characterCount = static_cast<qsizetype>(
-                        actualLength / sizeof(FPDF_WCHAR));
-                    while (characterCount > 0
-                           && buffer.at(characterCount - 1) == 0) {
-                        --characterCount;
-                    }
-                    inspection.contents = QString::fromUtf16(
-                        reinterpret_cast<const char16_t *>(
-                            buffer.constData()),
-                        characterCount);
-                }
+                inspection.contents = annotationString("Contents");
             }
             FPDFPage_CloseAnnot(annotation);
         }
@@ -2826,6 +2831,7 @@ private slots:
     void savesUnderlineAndStrikeoutAnnotationRoundTrip_data();
     void savesUnderlineAndStrikeoutAnnotationRoundTrip();
     void savesStickyNoteRoundTrip();
+    void keepsStickyNoteNamesUniqueAcrossReopen();
     void indexesCommentsAcrossDocument();
     void savesHighlightAlongsideTextEdit();
     void preservesPatternGraphicsWhenSavingHighlight();
@@ -10856,6 +10862,51 @@ void PDFEditControllerTest::savesStickyNoteRoundTrip()
         rehydratedNote.value(QStringLiteral("objectId")).toString()));
     QVERIFY(!controller.selectedEditable());
     QCOMPARE(controller.commentItems().size(), 1);
+}
+
+void PDFEditControllerTest::keepsStickyNoteNamesUniqueAcrossReopen()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("sticky-note-name-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("sticky-note-name-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    controller.setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller.addStickyNote(0, QPointF(0.2, 0.3)).isEmpty());
+    controller.setSelectedCommentText(QStringLiteral("First comment"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    const StickyNoteSaveInspection firstInspection
+        = inspectStickyNotes(outputPath);
+    QVERIFY(firstInspection.readable);
+    QCOMPARE(firstInspection.count, 1);
+    QCOMPARE(firstInspection.names.size(), 1);
+    QVERIFY(!firstInspection.names.constFirst().isEmpty());
+    const QString firstName = firstInspection.names.constFirst();
+
+    controller.setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller.addStickyNote(0, QPointF(0.55, 0.45)).isEmpty());
+    controller.setSelectedCommentText(QStringLiteral("Second comment"));
+    QVERIFY(controller.save());
+
+    const StickyNoteSaveInspection secondInspection
+        = inspectStickyNotes(outputPath);
+    QVERIFY(secondInspection.readable);
+    QCOMPARE(secondInspection.count, 2);
+    QCOMPARE(secondInspection.names.size(), 2);
+    QSet<QString> uniqueNames;
+    for (const QString &name : secondInspection.names) {
+        QVERIFY(!name.isEmpty());
+        uniqueNames.insert(name);
+    }
+    QCOMPARE(uniqueNames.size(), secondInspection.names.size());
+    QVERIFY(uniqueNames.contains(firstName));
 }
 
 void PDFEditControllerTest::indexesCommentsAcrossDocument()
