@@ -1074,6 +1074,35 @@ bool createDifferentPageSizesPdf(const QString &filePath)
         });
 }
 
+bool createStickyNotePopupPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [4 0 R 5 0 R 6 0 R 7 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [32 144 56 168] "
+                "/Contents (Reverse-only popup comment) "
+                "/NM (reverse-only-popup-comment) /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Popup /P 3 0 R "
+                "/Rect [64 72 184 152] /Parent 4 0 R /Open true /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [132 144 156 168] "
+                "/Contents (Preserved popup comment) "
+                "/NM (preserved-popup-comment) /F 4 /Popup 7 0 R >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Popup /P 3 0 R "
+                "/Rect [72 32 192 112] /Parent 6 0 R /Open false /F 4 >>"),
+        });
+}
+
 bool createThreePageTextPdf(const QString &filePath)
 {
     FPDF_DOCUMENT document = FPDF_CreateNewDocument();
@@ -2508,6 +2537,119 @@ StickyNoteSaveInspection inspectStickyNotes(const QString &filePath,
     return inspection;
 }
 
+int annotationSubtypeCount(
+    const QString &filePath,
+    FPDF_ANNOTATION_SUBTYPE subtype,
+    int pageIndex = 0)
+{
+    PDFiumProcessLock pdfiumLock;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document
+        ? FPDF_LoadPage(document, pageIndex)
+        : nullptr;
+    if (!page) {
+        if (document) {
+            FPDF_CloseDocument(document);
+        }
+        return -1;
+    }
+
+    int count = 0;
+    const int annotationCount = FPDFPage_GetAnnotCount(page);
+    for (int annotationIndex = 0;
+         annotationIndex < annotationCount;
+         ++annotationIndex) {
+        FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+            page,
+            annotationIndex);
+        if (annotation) {
+            if (FPDFAnnot_GetSubtype(annotation) == subtype) {
+                ++count;
+            }
+            FPDFPage_CloseAnnot(annotation);
+        }
+    }
+    FPDF_ClosePage(page);
+    FPDF_CloseDocument(document);
+    return count;
+}
+
+bool hasSingleBidirectionalCommentPopup(const QString &filePath,
+                                        int pageIndex = 0)
+{
+    PDFiumProcessLock pdfiumLock;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document
+        ? FPDF_LoadPage(document, pageIndex)
+        : nullptr;
+    bool valid = false;
+    if (page) {
+        int commentIndex = -1;
+        int popupIndex = -1;
+        const int annotationCount = FPDFPage_GetAnnotCount(page);
+        for (int annotationIndex = 0;
+             annotationIndex < annotationCount;
+             ++annotationIndex) {
+            FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+                page,
+                annotationIndex);
+            if (!annotation) {
+                continue;
+            }
+            const FPDF_ANNOTATION_SUBTYPE subtype
+                = FPDFAnnot_GetSubtype(annotation);
+            if (subtype == FPDF_ANNOT_TEXT) {
+                commentIndex = commentIndex < 0 ? annotationIndex : -2;
+            } else if (subtype == FPDF_ANNOT_POPUP) {
+                popupIndex = popupIndex < 0 ? annotationIndex : -2;
+            }
+            FPDFPage_CloseAnnot(annotation);
+        }
+
+        FPDF_ANNOTATION comment = commentIndex >= 0
+            ? FPDFPage_GetAnnot(page, commentIndex)
+            : nullptr;
+        FPDF_ANNOTATION popup = popupIndex >= 0
+            ? FPDFPage_GetAnnot(page, popupIndex)
+            : nullptr;
+        FPDF_ANNOTATION forwardPopup = comment
+            ? FPDFAnnot_GetLinkedAnnot(comment, "Popup")
+            : nullptr;
+        FPDF_ANNOTATION reverseParent = popup
+            ? FPDFAnnot_GetLinkedAnnot(popup, "Parent")
+            : nullptr;
+        valid = forwardPopup
+            && reverseParent
+            && FPDFPage_GetAnnotIndex(page, forwardPopup) == popupIndex
+            && FPDFPage_GetAnnotIndex(page, reverseParent) == commentIndex;
+        if (reverseParent) {
+            FPDFPage_CloseAnnot(reverseParent);
+        }
+        if (forwardPopup) {
+            FPDFPage_CloseAnnot(forwardPopup);
+        }
+        if (popup) {
+            FPDFPage_CloseAnnot(popup);
+        }
+        if (comment) {
+            FPDFPage_CloseAnnot(comment);
+        }
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return valid;
+}
+
 struct ShapeSaveInspection {
     bool readable = false;
     int count = 0;
@@ -2827,12 +2969,15 @@ private slots:
     void addsUnderlineAndStrikeoutWithUndoRedoAndDelete_data();
     void addsUnderlineAndStrikeoutWithUndoRedoAndDelete();
     void addsStickyNoteWithPanelModelAndUndo();
+    void deletesSourceCommentsWithUndoRedoDiscardAndSave();
+    void deletesSourceCommentPopupRoundTrip();
     void savesHighlightAnnotationRoundTrip();
     void savesUnderlineAndStrikeoutAnnotationRoundTrip_data();
     void savesUnderlineAndStrikeoutAnnotationRoundTrip();
     void savesStickyNoteRoundTrip();
     void keepsStickyNoteNamesUniqueAcrossReopen();
     void indexesCommentsAcrossDocument();
+    void reindexesCommentsAfterDiscardingPageDeletion();
     void savesHighlightAlongsideTextEdit();
     void preservesPatternGraphicsWhenSavingHighlight();
     void addsBlankPageWithUndoRedoAndDiscard();
@@ -10648,10 +10793,150 @@ void PDFEditControllerTest::addsStickyNoteWithPanelModelAndUndo()
     QCOMPARE(controller.selectedText(), commentText);
     QCOMPARE(controller.selectRelativeComment(1), 0);
 
-    controller.deleteSelectedObject();
+    QVERIFY(controller.removeComment(
+        0,
+        note.value(QStringLiteral("objectId")).toString()));
     QVERIFY(controller.commentItems().isEmpty());
     QCOMPARE(controller.undo(), -1);
     QCOMPARE(controller.commentItems().size(), 1);
+}
+
+void PDFEditControllerTest::deletesSourceCommentsWithUndoRedoDiscardAndSave()
+{
+    const QString basePath = m_temporaryDirectory.filePath(
+        QStringLiteral("delete-comments-base.pdf"));
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("delete-comments-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("delete-comments-output.pdf"));
+    QVERIFY(createFontStylePdf(basePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(basePath)));
+    controller.setDocument(&document);
+
+    controller.setTool(PDFEditController::HighlightTool);
+    QVERIFY(!controller.addHighlight(
+        0,
+        QRectF(0.10, 0.18, 0.22, 0.04)).isEmpty());
+    controller.setTool(PDFEditController::UnderlineTool);
+    QVERIFY(!controller.addHighlight(
+        0,
+        QRectF(0.12, 0.28, 0.24, 0.04)).isEmpty());
+    controller.setTool(PDFEditController::StrikeoutTool);
+    QVERIFY(!controller.addHighlight(
+        0,
+        QRectF(0.14, 0.38, 0.26, 0.04)).isEmpty());
+    controller.setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller.addStickyNote(0, QPointF(0.2, 0.5)).isEmpty());
+    controller.setSelectedCommentText(QStringLiteral("Source comment"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(sourcePath)));
+    QVERIFY(!controller.hasDrafts());
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 4, 5000);
+    const QVariantMap stickyNote = candidateForKind(
+        controller.commentItems(),
+        QStringLiteral("stickyNote"));
+    QVERIFY(!stickyNote.isEmpty());
+    QVERIFY(controller.removeComment(
+        stickyNote.value(QStringLiteral("page")).toInt(),
+        stickyNote.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.commentItems().size(), 3);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.commentItems().size(), 4);
+    QVERIFY(controller.canRedo());
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.commentItems().size(), 3);
+
+    controller.discardDrafts();
+    QCOMPARE(controller.commentItems().size(), 4);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+
+    const QVariantList commentsToDelete = controller.commentItems();
+    for (const QVariant &commentValue : commentsToDelete) {
+        const QVariantMap comment = commentValue.toMap();
+        QVERIFY(controller.removeComment(
+            comment.value(QStringLiteral("page")).toInt(),
+            comment.value(QStringLiteral("objectId")).toString()));
+    }
+    QVERIFY(controller.commentItems().isEmpty());
+    QVERIFY(controller.hasDrafts());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+
+    QCOMPARE(inspectHighlights(sourcePath).count, 1);
+    QCOMPARE(
+        inspectTextMarkupAnnotations(
+            sourcePath,
+            FPDF_ANNOT_UNDERLINE).count,
+        1);
+    QCOMPARE(
+        inspectTextMarkupAnnotations(
+            sourcePath,
+            FPDF_ANNOT_STRIKEOUT).count,
+        1);
+    QCOMPARE(inspectStickyNotes(sourcePath).count, 1);
+
+    QCOMPARE(inspectHighlights(outputPath).count, 0);
+    QCOMPARE(
+        inspectTextMarkupAnnotations(
+            outputPath,
+            FPDF_ANNOT_UNDERLINE).count,
+        0);
+    QCOMPARE(
+        inspectTextMarkupAnnotations(
+            outputPath,
+            FPDF_ANNOT_STRIKEOUT).count,
+        0);
+    QCOMPARE(inspectStickyNotes(outputPath).count, 0);
+    QVERIFY(normalizedPageText(outputPath).contains(
+        QString::fromLatin1(kRegularText)));
+}
+
+void PDFEditControllerTest::deletesSourceCommentPopupRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("delete-comment-popup-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("delete-comment-popup-output.pdf"));
+    QVERIFY(createStickyNotePopupPdf(sourcePath));
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_TEXT), 2);
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_POPUP), 2);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+    const QVariantMap comment = controller.commentItems()
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        comment.value(QStringLiteral("text")).toString(),
+        QStringLiteral("Reverse-only popup comment"));
+    QVERIFY(controller.removeComment(
+        comment.value(QStringLiteral("page")).toInt(),
+        comment.value(QStringLiteral("objectId")).toString()));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_TEXT), 2);
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_POPUP), 2);
+    QCOMPARE(annotationSubtypeCount(outputPath, FPDF_ANNOT_TEXT), 1);
+    QCOMPARE(annotationSubtypeCount(outputPath, FPDF_ANNOT_POPUP), 1);
+    const StickyNoteSaveInspection remaining = inspectStickyNotes(outputPath);
+    QCOMPARE(remaining.count, 1);
+    QCOMPARE(remaining.contents, QStringLiteral("Preserved popup comment"));
+    QVERIFY(hasSingleBidirectionalCommentPopup(outputPath));
 }
 
 void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
@@ -10949,6 +11234,78 @@ void PDFEditControllerTest::indexesCommentsAcrossDocument()
     QCOMPARE(controller.selectRelativeComment(1), 0);
     QCOMPARE(controller.selectRelativeComment(1), 2);
     QCOMPARE(controller.selectRelativeComment(-1), 0);
+}
+
+void PDFEditControllerTest::reindexesCommentsAfterDiscardingPageDeletion()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-index-page-discard-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-index-page-discard-output.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    connect(
+        &controller,
+        &PDFEditController::commentsChanged,
+        &controller,
+        &PDFEditController::requestCommentIndex);
+
+    controller.setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller.addStickyNote(0, QPointF(0.15, 0.2)).isEmpty());
+    controller.setSelectedCommentText(QStringLiteral("First-page comment"));
+    controller.setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller.addStickyNote(1, QPointF(0.25, 0.3)).isEmpty());
+    controller.setSelectedCommentText(QStringLiteral("Second-page comment"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+    QCOMPARE(
+        controller.commentItems().at(0).toMap()
+            .value(QStringLiteral("objectId")).toString(),
+        QStringLiteral("annotation:0"));
+    QCOMPARE(
+        controller.commentItems().at(1).toMap()
+            .value(QStringLiteral("objectId")).toString(),
+        QStringLiteral("annotation:0"));
+
+    document.setCurrentPage(0);
+    QCOMPARE(controller.deleteCurrentPage(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        QStringLiteral("Second-page comment"));
+
+    controller.discardDrafts();
+    QCOMPARE(document.pageCount(), 3);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+    const QVariantList comments = controller.commentItems();
+    QCOMPARE(
+        comments.at(0).toMap().value(QStringLiteral("page")).toInt(),
+        0);
+    QCOMPARE(
+        comments.at(0).toMap().value(QStringLiteral("text")).toString(),
+        QStringLiteral("First-page comment"));
+    QCOMPARE(
+        comments.at(1).toMap().value(QStringLiteral("page")).toInt(),
+        1);
+    QCOMPARE(
+        comments.at(1).toMap().value(QStringLiteral("text")).toString(),
+        QStringLiteral("Second-page comment"));
+    QVERIFY(controller.removeComment(
+        1,
+        comments.at(1).toMap()
+            .value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.commentItems().size(), 1);
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        QStringLiteral("First-page comment"));
 }
 
 void PDFEditControllerTest::savesHighlightAlongsideTextEdit()

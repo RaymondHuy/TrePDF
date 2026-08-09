@@ -196,8 +196,9 @@ Sticky Note đang chọn.
   chuyển về Select, chọn candidate tương ứng và điều hướng tới trang đó.
 - Sticky Note mới có `TextArea` để sửa `/Contents`; nội dung được commit khi mất
   focus, thu gọn panel, đổi session hoặc thực hiện Save.
-- Comment có sẵn trong PDF được liệt kê để đọc và điều hướng nhưng chưa cho sửa
-  nội dung hoặc xóa. Panel dùng chung trạng thái thu gọn theo document session.
+- Comment có sẵn trong PDF được liệt kê để đọc, điều hướng và xóa dưới dạng
+  draft có undo/redo/discard; nội dung của chúng vẫn chưa cho sửa. Panel dùng
+  chung trạng thái thu gọn theo document session.
 
 ### [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml)
 

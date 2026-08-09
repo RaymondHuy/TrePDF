@@ -412,6 +412,12 @@ Overlay hiện tại phối hợp với render worker, không phải chỉ “v�
 4. Khi result đúng revision về, `PDFPageItem` đánh dấu texture current/ready; QML
    bỏ fallback đúng lúc.
 
+Khi xóa comment nguồn, render request còn mang annotation index và subtype.
+Worker tạm thêm cờ Hidden cho comment cùng `/Popup` liên kết trước
+`FPDF_RenderPageBitmap()`, không cho form layer vẽ popup, rồi phục hồi đúng cờ
+gốc trước khi tái sử dụng form document; Save mới gỡ các annotation thật khỏi
+PDF.
+
 ### Source widget của form designer
 
 1. Trong Edit/Forms, `PDFPageItem` lấy danh sách source widget id mà designer

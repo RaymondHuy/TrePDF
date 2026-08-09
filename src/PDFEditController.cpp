@@ -550,6 +550,22 @@ bool isCommentCandidateKind(const QString &kind)
         || kind == QLatin1String("stickyNote");
 }
 
+int commentAnnotationSubtype(const QString &kind)
+{
+    if (kind == QLatin1String("underline")) {
+        return FPDF_ANNOT_UNDERLINE;
+    }
+    if (kind == QLatin1String("strikeout")) {
+        return FPDF_ANNOT_STRIKEOUT;
+    }
+    if (kind == QLatin1String("stickyNote")) {
+        return FPDF_ANNOT_TEXT;
+    }
+    return kind == QLatin1String("highlight")
+        ? FPDF_ANNOT_HIGHLIGHT
+        : FPDF_ANNOT_UNKNOWN;
+}
+
 bool draftSuppressesSourceObjects(const QString &kind, bool deleted)
 {
     return kind == QLatin1String("text")
@@ -1181,6 +1197,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::CommentAnnotationCreationFailed:
         //% "The comment could not be created on page %1."
         return qtTrId("PdfSaveCommentCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::CommentAnnotationRemovalFailed:
+        //% "The comment could not be deleted on page %1."
+        return qtTrId("PdfSaveCommentRemovalFailed").arg(result.page + 1);
     case PDFSaveWriter::Error::PageCreationFailed:
         //% "Blank page %1 could not be created while saving."
         return qtTrId("PdfSavePageCreationFailed").arg(result.page + 1);
@@ -1910,6 +1929,47 @@ PDFEditController::draftedObjectMovesForPage(int page) const
     return moves;
 }
 
+QVector<PDFEditController::DraftAnnotationDeletion>
+PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
+{
+    QVector<DraftAnnotationDeletion> deletions;
+    for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
+        const Candidate &candidate = draft->candidate;
+        if (candidate.page != page
+            || candidate.added
+            || !draft->deleted
+            || !isCommentCandidateKind(candidate.kind)
+            || candidate.sourceAnnotationIndex < 0) {
+            continue;
+        }
+
+        const int subtype = commentAnnotationSubtype(candidate.kind);
+        if (subtype != FPDF_ANNOT_UNKNOWN) {
+            deletions.append(DraftAnnotationDeletion{
+                candidate.sourceAnnotationIndex,
+                subtype});
+        }
+    }
+
+    std::sort(
+        deletions.begin(),
+        deletions.end(),
+        [](const DraftAnnotationDeletion &left,
+           const DraftAnnotationDeletion &right) {
+            return left.annotationIndex < right.annotationIndex;
+        });
+    deletions.erase(
+        std::unique(
+            deletions.begin(),
+            deletions.end(),
+            [](const DraftAnnotationDeletion &left,
+               const DraftAnnotationDeletion &right) {
+                return left.annotationIndex == right.annotationIndex;
+            }),
+        deletions.end());
+    return deletions;
+}
+
 bool PDFEditController::allDraftedTextObjectsSuppressibleForPage(int page) const
 {
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
@@ -2616,7 +2676,7 @@ QVariantMap PDFEditController::addHighlight(int page,
         return {};
     }
     if (!documentAllowsAnnotations()) {
-        //% "This PDF does not permit adding annotations."
+        //% "This PDF does not permit adding or deleting annotations."
         emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
         return {};
     }
@@ -2700,7 +2760,7 @@ QVariantMap PDFEditController::addStickyNote(int page,
         return {};
     }
     if (!documentAllowsAnnotations()) {
-        //% "This PDF does not permit adding annotations."
+        //% "This PDF does not permit adding or deleting annotations."
         emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
         return {};
     }
@@ -3522,6 +3582,41 @@ bool PDFEditController::selectComment(int page, const QString &objectId)
     return false;
 }
 
+bool PDFEditController::removeComment(int page, const QString &objectId)
+{
+    if (!m_document
+        || !m_document->isLoaded()
+        || m_saving
+        || page < 0
+        || page >= m_document->pageCount()
+        || objectId.isEmpty()) {
+        return false;
+    }
+
+    Candidate candidate;
+    const Candidate *pageCandidate = findCandidate(page, objectId);
+    if (pageCandidate && isCommentCandidateKind(pageCandidate->kind)) {
+        candidate = *pageCandidate;
+    } else {
+        const auto indexedPage = m_indexedCommentCandidates.constFind(page);
+        if (indexedPage == m_indexedCommentCandidates.cend()) {
+            return false;
+        }
+        const auto indexedCandidate = std::find_if(
+            indexedPage->cbegin(),
+            indexedPage->cend(),
+            [&objectId](const Candidate &current) {
+                return current.objectId == objectId
+                    && isCommentCandidateKind(current.kind);
+            });
+        if (indexedCandidate == indexedPage->cend()) {
+            return false;
+        }
+        candidate = *indexedCandidate;
+    }
+    return removeCommentCandidate(candidate);
+}
+
 int PDFEditController::selectRelativeComment(int direction)
 {
     const QVariantList comments = commentItems();
@@ -4340,9 +4435,71 @@ void PDFEditController::setSelectedCommentText(const QString &text)
     emit historyStateChanged();
 }
 
+bool PDFEditController::removeCommentCandidate(const Candidate &candidate)
+{
+    if (!isCommentCandidateKind(candidate.kind)
+        || candidate.page < 0
+        || candidate.objectId.isEmpty()) {
+        return false;
+    }
+    if (!candidate.added) {
+        if (candidate.sourceAnnotationIndex < 0) {
+            return false;
+        }
+        if (!documentAllowsAnnotations()) {
+            //% "This PDF does not permit adding or deleting annotations."
+            emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+            return false;
+        }
+    }
+
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    const QString key = draftKey(candidate.page, candidate.objectId);
+    const auto existingDraft = m_drafts.constFind(key);
+
+    Command command;
+    command.key = key;
+    command.page = candidate.page;
+    command.objectId = candidate.objectId;
+    if (candidate.added) {
+        if (existingDraft == m_drafts.cend()) {
+            return false;
+        }
+        command.hadBefore = true;
+        command.before = *existingDraft;
+        command.hadAfter = false;
+        command.after = command.before;
+    } else {
+        command.hadBefore = existingDraft != m_drafts.cend();
+        command.before = command.hadBefore
+            ? *existingDraft
+            : initialDraftForCandidate(candidate);
+        if (command.before.deleted) {
+            return false;
+        }
+        command.hadAfter = true;
+        command.after = command.before;
+        command.after.deleted = true;
+    }
+
+    m_undoStack.append(command);
+    m_redoStack.clear();
+    applyDraftState(command, true, true);
+    emit historyStateChanged();
+    return true;
+}
+
 void PDFEditController::deleteSelectedObject()
 {
-    if (!m_hasSelection || !m_selectedCandidate.editable) {
+    if (!m_hasSelection) {
+        return;
+    }
+    if (isCommentCandidateKind(m_selectedCandidate.kind)) {
+        removeCommentCandidate(m_selectedCandidate);
+        return;
+    }
+    if (!m_selectedCandidate.editable) {
         return;
     }
     if (isTextCandidateKind(m_selectedCandidate.kind)) {
@@ -4356,8 +4513,7 @@ void PDFEditController::deleteSelectedObject()
         m_selectedCandidate.objectId);
     const auto existingDraft = m_drafts.constFind(key);
     if (m_selectedCandidate.kind == QLatin1String("addedImage")
-        || isShapeCandidateKind(m_selectedCandidate.kind)
-        || isCommentCandidateKind(m_selectedCandidate.kind)) {
+        || isShapeCandidateKind(m_selectedCandidate.kind)) {
         if (existingDraft == m_drafts.cend()) {
             return;
         }
@@ -4466,6 +4622,8 @@ void PDFEditController::discardDrafts()
          ++revision) {
         affectedPages.insert(revision.key());
     }
+    const bool discardedPageStructure
+        = !m_pageInsertions.isEmpty() || !m_deletedSourcePages.isEmpty();
 
     const bool wasEditing = m_textEditActive;
     resetFrameResizeState();
@@ -4481,6 +4639,17 @@ void PDFEditController::discardDrafts()
         m_document->setTransientPageStructure(
             m_deletedSourcePages,
             m_pageInsertions);
+    }
+    if (discardedPageStructure) {
+        if (m_candidateScanCancellation) {
+            m_candidateScanCancellation->store(
+                true,
+                std::memory_order_relaxed);
+        }
+        m_pendingCandidateScanPage = -1;
+        m_pageCandidates.clear();
+        m_pageCandidateLru.clear();
+        resetCommentIndex();
     }
     m_drafts.clear();
     m_undoStack.clear();
@@ -4499,6 +4668,9 @@ void PDFEditController::discardDrafts()
         emit textEditActiveChanged();
     }
     emit pageDataChanged(-1);
+    if (discardedPageStructure) {
+        emit commentsChanged();
+    }
     emit historyStateChanged();
     //% "All draft changes were discarded."
     emit statusMessage(qtTrId("AllDraftChangesDiscarded"));
@@ -5957,7 +6129,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 candidate.label = qtTrId("Highlight");
                 break;
             }
-            //% "Editing comments that already exist in the PDF is not available yet."
+            //% "Editing the contents of comments that already exist in the PDF is not available yet."
             candidate.reason = qtTrId("ExistingCommentEditingUnavailable");
             candidates.append(std::move(candidate));
             FPDFPage_CloseAnnot(annotation);

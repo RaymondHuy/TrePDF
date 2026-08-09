@@ -121,12 +121,14 @@ qt_add_qml_module(trepdf
         src/assets/icons/align-right.svg
         src/assets/icons/arrow.svg
         src/assets/icons/bold-text.svg
+        src/assets/icons/cancel.svg
         src/assets/icons/calendar-days.svg
         src/assets/icons/chevron-left.svg
         src/assets/icons/chevron-right.svg
         src/assets/icons/comb-field.svg
         src/assets/icons/delete-page.svg
         src/assets/icons/diamond.svg
+        src/assets/icons/down.svg
         src/assets/icons/dropdown-menu.svg
         src/assets/icons/edit-text.svg
         src/assets/icons/folder-open.svg

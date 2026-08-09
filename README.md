@@ -74,7 +74,8 @@ drafts with undo, redo, discard, selection, and deletion support. Save and Save 
 persist them as standard PDF annotations with geometry, color, contents, and
 print visibility; annotation-only saves do not regenerate the page content
 stream. Existing supported annotations are rehydrated for navigation and
-display, but editing their contents is intentionally read-only for now.
+display. Their contents remain read-only, but they can be deleted as undoable
+session drafts and removed from the saved PDF without regenerating page content.
 
 The Shapes dropdown offers rectangles, ovals, lines, arrows, triangles, and
 diamonds. After choosing a shape, drag over a page to create a vector session

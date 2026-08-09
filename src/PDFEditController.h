@@ -81,6 +81,11 @@ public:
         QRectF frameRect;
     };
 
+    struct DraftAnnotationDeletion {
+        int annotationIndex = -1;
+        int annotationSubtype = 0;
+    };
+
     enum Tool {
         BrowseTool,
         SelectTool,
@@ -176,6 +181,8 @@ public:
     quint64 draftRevisionForPage(int page) const;
     QVector<QVector<int>> draftedTextObjectPathsForPage(int page) const;
     QVector<DraftObjectMove> draftedObjectMovesForPage(int page) const;
+    QVector<DraftAnnotationDeletion> deletedSourceCommentAnnotationsForPage(
+        int page) const;
     bool allDraftedTextObjectsSuppressibleForPage(int page) const;
 
     Q_INVOKABLE QVariantList candidatesForPage(int page);
@@ -229,6 +236,7 @@ public:
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
     Q_INVOKABLE void requestCommentIndex();
     Q_INVOKABLE bool selectComment(int page, const QString &objectId);
+    Q_INVOKABLE bool removeComment(int page, const QString &objectId);
     Q_INVOKABLE int selectRelativeComment(int direction);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
@@ -537,6 +545,7 @@ private:
     QString draftKey(int page, const QString &objectId) const;
     void markDraftStateChanged(int page, bool immediate);
     void requestDraftRender(int page, bool immediate);
+    bool removeCommentCandidate(const Candidate &candidate);
     static void setInitialGeometry(Candidate &candidate, const QRectF &sourceRect);
     void expandInitialTextFrame(Candidate &candidate, const QSizeF &pageSize) const;
     static CharacterFormat characterFormatForCandidate(const Candidate &candidate);

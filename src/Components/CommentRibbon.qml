@@ -424,14 +424,14 @@ Flickable {
                 iconSource: "../assets/icons/remove-text.svg"
                 enabled: root.document.loaded
                     && !root.editController.saving
-                    && root.editController.selectedEditable
                     && root.isCommentKind(
                         root.editController.selectedKind)
                 onClicked: {
-                    if (root.editController.selectedEditable
-                            && root.isCommentKind(
-                                root.editController.selectedKind)) {
-                        root.editController.deleteSelectedObject()
+                    if (root.isCommentKind(
+                            root.editController.selectedKind)) {
+                        root.editController.removeComment(
+                            root.editController.selectedPage,
+                            root.editController.selectedObjectId)
                     }
                 }
             }
