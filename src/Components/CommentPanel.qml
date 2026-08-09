@@ -263,6 +263,25 @@ Rectangle {
                                 modelData.text === undefined
                                     ? ""
                                     : String(modelData.text)
+                            readonly property string commentAuthor:
+                                modelData.commentAuthor === undefined
+                                    ? ""
+                                    : String(modelData.commentAuthor)
+                            readonly property var commentDate:
+                                modelData.commentDate === undefined
+                                    ? null
+                                    : modelData.commentDate
+                            readonly property string commentDateText: {
+                                if (commentDate === null
+                                        || commentDate === undefined
+                                        || isNaN(commentDate.getTime())) {
+                                    return ""
+                                }
+                                return Qt.formatDateTime(
+                                    commentDate,
+                                    Qt.locale(),
+                                    Locale.ShortFormat)
+                            }
                             readonly property color markerColor:
                                 modelData.color === undefined
                                     ? root.theme.foxitOrange
@@ -462,6 +481,34 @@ Rectangle {
                                                 ? 2
                                                 : 1
                                         }
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: 13
+                                    visible:
+                                        commentCard.commentAuthor.length > 0
+                                        || commentCard.commentDateText.length > 0
+                                    spacing: 8
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible:
+                                            commentCard.commentAuthor.length > 0
+                                        text: commentCard.commentAuthor
+                                        color: "#747176"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Medium
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Label {
+                                        visible:
+                                            commentCard.commentDateText.length > 0
+                                        text: commentCard.commentDateText
+                                        color: "#747176"
+                                        font.pixelSize: 10
                                     }
                                 }
 

@@ -13,6 +13,7 @@
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFont>
 #include <QFontDatabase>
 #include <QFontInfo>
@@ -29,6 +30,7 @@
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QThreadPool>
+#include <QTimeZone>
 #include <QUuid>
 #include <QVariantMap>
 #include <QtTranslation>
@@ -847,6 +849,124 @@ QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
     return QString::fromUtf16(
         reinterpret_cast<const char16_t *>(buffer.constData()),
         characterCount);
+}
+
+bool containsOnlyAsciiDigits(const QString &value)
+{
+    for (const QChar character : value) {
+        if (character < QLatin1Char('0')
+            || character > QLatin1Char('9')) {
+            return false;
+        }
+    }
+    return !value.isEmpty();
+}
+
+QDateTime pdfAnnotationDateTime(const QString &rawValue)
+{
+    const QString trimmedValue = rawValue.trimmed();
+    const QDateTime isoDateTime = QDateTime::fromString(
+        trimmedValue,
+        Qt::ISODate);
+    if (isoDateTime.isValid()) {
+        return isoDateTime;
+    }
+
+    QString value = trimmedValue;
+    if (value.startsWith(QLatin1String("D:"))) {
+        value.remove(0, 2);
+    }
+
+    qsizetype digitCount = 0;
+    while (digitCount < value.size()
+           && digitCount < 14
+           && value.at(digitCount) >= QLatin1Char('0')
+           && value.at(digitCount) <= QLatin1Char('9')) {
+        ++digitCount;
+    }
+    if (digitCount < 4
+        || digitCount % 2 != 0
+        || (digitCount == 14
+            && digitCount < value.size()
+            && value.at(digitCount) >= QLatin1Char('0')
+            && value.at(digitCount) <= QLatin1Char('9'))) {
+        return {};
+    }
+
+    const auto component = [&value, digitCount](
+                               qsizetype offset,
+                               int fallback) {
+        if (digitCount < offset + 2) {
+            return fallback;
+        }
+        bool parsed = false;
+        const int result = value.mid(offset, 2).toInt(&parsed);
+        return parsed ? result : -1;
+    };
+    bool parsedYear = false;
+    const int year = value.left(4).toInt(&parsedYear);
+    const int month = component(4, 1);
+    const int day = component(6, 1);
+    const int hour = component(8, 0);
+    const int minute = component(10, 0);
+    const int second = component(12, 0);
+    const QDate date(year, month, day);
+    const QTime time(hour, minute, second);
+    if (!parsedYear || !date.isValid() || !time.isValid()) {
+        return {};
+    }
+
+    QString timeZoneSuffix = value.mid(digitCount).trimmed();
+    if (timeZoneSuffix.isEmpty()) {
+        return QDateTime(date, time);
+    }
+    if (timeZoneSuffix == QLatin1String("Z")) {
+        return QDateTime(date, time, QTimeZone::UTC);
+    }
+    if (!timeZoneSuffix.startsWith(QLatin1Char('+'))
+        && !timeZoneSuffix.startsWith(QLatin1Char('-'))) {
+        return {};
+    }
+
+    const int direction = timeZoneSuffix.startsWith(QLatin1Char('-'))
+        ? -1
+        : 1;
+    timeZoneSuffix.remove(0, 1);
+    timeZoneSuffix.remove(QLatin1Char('\''));
+    timeZoneSuffix.remove(QLatin1Char(':'));
+    if ((timeZoneSuffix.size() != 2 && timeZoneSuffix.size() != 4)
+        || !containsOnlyAsciiDigits(timeZoneSuffix)) {
+        return {};
+    }
+    const int offsetHours = timeZoneSuffix.left(2).toInt();
+    const int offsetMinutes = timeZoneSuffix.size() == 4
+        ? timeZoneSuffix.mid(2, 2).toInt()
+        : 0;
+    if (offsetHours > 23 || offsetMinutes > 59) {
+        return {};
+    }
+    const int offsetSeconds = direction
+        * (offsetHours * 60 * 60 + offsetMinutes * 60);
+    return QDateTime(
+        date,
+        time,
+        QTimeZone::fromSecondsAheadOfUtc(offsetSeconds));
+}
+
+QString currentCommentAuthor()
+{
+    const QStringList candidates{
+        qEnvironmentVariable("USER"),
+        qEnvironmentVariable("LOGNAME"),
+        QFileInfo(QDir::homePath()).fileName(),
+        QCoreApplication::applicationName()};
+    for (const QString &candidate : candidates) {
+        const QString author = candidate.trimmed();
+        if (!author.isEmpty()) {
+            return author;
+        }
+    }
+    return {};
 }
 
 QString pdfFontName(FPDF_FONT font, bool baseName)
@@ -2720,6 +2840,8 @@ QVariantMap PDFEditController::addHighlight(int page,
         + QString::number(candidate.addedOrder);
     candidate.editable = true;
     candidate.added = true;
+    candidate.commentAuthor = currentCommentAuthor();
+    candidate.commentCreationDate = QDateTime::currentDateTime();
     candidate.highlightRects.append(normalizedRect);
     candidate.highlightColor = m_highlightColor;
     setInitialGeometry(candidate, normalizedRect);
@@ -2787,6 +2909,8 @@ QVariantMap PDFEditController::addStickyNote(int page,
     candidate.label = qtTrId("StickyNote");
     candidate.editable = true;
     candidate.added = true;
+    candidate.commentAuthor = currentCommentAuthor();
+    candidate.commentCreationDate = QDateTime::currentDateTime();
     candidate.highlightColor = QColor(
         kHighlightRed,
         kHighlightGreen,
@@ -4429,6 +4553,8 @@ void PDFEditController::setSelectedCommentText(const QString &text)
     command.hadAfter = true;
     command.after = command.before;
     command.after.text = text;
+    command.after.candidate.commentModifiedDate
+        = QDateTime::currentDateTime();
     m_undoStack.append(command);
     m_redoStack.clear();
     applyDraftState(command, true, true);
@@ -6077,6 +6203,11 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 + QString::number(index);
             candidate.sourceAnnotationIndex = index;
             candidate.text = annotationString(annotation, "Contents");
+            candidate.commentAuthor = annotationString(annotation, "T").trimmed();
+            candidate.commentCreationDate = pdfAnnotationDateTime(
+                annotationString(annotation, "CreationDate"));
+            candidate.commentModifiedDate = pdfAnnotationDateTime(
+                annotationString(annotation, "M"));
             candidate.editable = false;
             candidate.limited = true;
             setInitialGeometry(candidate, geometry);
@@ -6333,6 +6464,20 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("originX"), layoutOrigin.x());
     map.insert(QStringLiteral("baselineY"), layoutOrigin.y());
     map.insert(QStringLiteral("text"), draft.text);
+    map.insert(
+        QStringLiteral("commentAuthor"),
+        candidate.commentAuthor);
+    map.insert(
+        QStringLiteral("commentCreationDate"),
+        candidate.commentCreationDate);
+    map.insert(
+        QStringLiteral("commentModifiedDate"),
+        candidate.commentModifiedDate);
+    map.insert(
+        QStringLiteral("commentDate"),
+        candidate.commentModifiedDate.isValid()
+            ? candidate.commentModifiedDate
+            : candidate.commentCreationDate);
     map.insert(QStringLiteral("characterSpans"), characterSpanMaps(draft.characterSpans));
     map.insert(
         QStringLiteral("paragraphFormats"),

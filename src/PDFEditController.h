@@ -5,6 +5,7 @@
 
 #include <QByteArray>
 #include <QColor>
+#include <QDateTime>
 #include <QFont>
 #include <QHash>
 #include <QImage>
@@ -327,6 +328,9 @@ private:
         QRectF initialDraftFrameRect;
         QPointF origin;
         QString text;
+        QString commentAuthor;
+        QDateTime commentCreationDate;
+        QDateTime commentModifiedDate;
         QString fontFamily;
         QString fontIdentity;
         qreal fontSizeRatio = 0.0;

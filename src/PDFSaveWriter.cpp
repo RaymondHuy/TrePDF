@@ -16,6 +16,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QDateTime>
 #include <QFont>
 #include <QFontMetricsF>
 #include <QHash>
@@ -96,6 +97,9 @@ struct SaveDraft {
     QColor highlightColor;
     FPDF_ANNOTATION_SUBTYPE annotationSubtype = FPDF_ANNOT_HIGHLIGHT;
     int sourceAnnotationIndex = -1;
+    QString commentAuthor;
+    QDateTime commentCreationDate;
+    QDateTime commentModifiedDate;
     QImage image;
     PDFEditController::ShapeType shapeType
         = PDFEditController::RectangleShape;
@@ -2415,6 +2419,59 @@ void destroyPreparedObjects(QVector<PreparedDraft> &preparedDrafts)
     }
 }
 
+QString pdfAnnotationDateString(const QDateTime &dateTime)
+{
+    if (!dateTime.isValid()) {
+        return {};
+    }
+
+    const int offsetSeconds = dateTime.offsetFromUtc();
+    QString timeZoneSuffix;
+    if (offsetSeconds == 0) {
+        timeZoneSuffix = QStringLiteral("Z");
+    } else {
+        const int absoluteMinutes = qAbs(offsetSeconds) / 60;
+        const int offsetHours = absoluteMinutes / 60;
+        const int offsetMinutes = absoluteMinutes % 60;
+        timeZoneSuffix = QStringLiteral("%1%2'%3'")
+            .arg(offsetSeconds < 0 ? QLatin1Char('-') : QLatin1Char('+'))
+            .arg(offsetHours, 2, 10, QLatin1Char('0'))
+            .arg(offsetMinutes, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("D:%1%2")
+        .arg(
+            dateTime.toString(QStringLiteral("yyyyMMddHHmmss")),
+            timeZoneSuffix);
+}
+
+bool setOptionalAnnotationString(FPDF_ANNOTATION annotation,
+                                 FPDF_BYTESTRING key,
+                                 const QString &value)
+{
+    return value.isEmpty()
+        || FPDFAnnot_SetStringValue(
+            annotation,
+            key,
+            reinterpret_cast<const FPDF_WCHAR *>(value.utf16()));
+}
+
+bool setCommentAnnotationMetadata(FPDF_ANNOTATION annotation,
+                                  const SaveDraft &draft)
+{
+    return setOptionalAnnotationString(
+               annotation,
+               "T",
+               draft.commentAuthor)
+        && setOptionalAnnotationString(
+            annotation,
+            "CreationDate",
+            pdfAnnotationDateString(draft.commentCreationDate))
+        && setOptionalAnnotationString(
+            annotation,
+            "M",
+            pdfAnnotationDateString(draft.commentModifiedDate));
+}
+
 PDFSaveWriter::Result createTextMarkupAnnotation(
     FPDF_PAGE page,
     const SaveDraft &draft,
@@ -2532,7 +2589,8 @@ PDFSaveWriter::Result createTextMarkupAnnotation(
             static_cast<unsigned int>(color.alpha()))
         || !FPDFAnnot_SetFlags(
             annotation.get(),
-            FPDF_ANNOT_FLAG_PRINT)) {
+            FPDF_ANNOT_FLAG_PRINT)
+        || !setCommentAnnotationMetadata(annotation.get(), draft)) {
         return failure(
             PDFSaveWriter::Error::TextMarkupAnnotationCreationFailed,
             draft.page,
@@ -2655,6 +2713,7 @@ PDFSaveWriter::Result createStickyNoteAnnotation(
             annotation.get(),
             "NM",
             identity)
+        || !setCommentAnnotationMetadata(annotation.get(), draft)
         || !FPDFAnnot_SetFlags(
             annotation.get(),
             FPDF_ANNOT_FLAG_PRINT)) {
@@ -3505,6 +3564,11 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.highlightColor = draft->candidate.highlightColor;
         saveDraft.sourceAnnotationIndex
             = draft->candidate.sourceAnnotationIndex;
+        saveDraft.commentAuthor = draft->candidate.commentAuthor;
+        saveDraft.commentCreationDate
+            = draft->candidate.commentCreationDate;
+        saveDraft.commentModifiedDate
+            = draft->candidate.commentModifiedDate;
         if (draft->candidate.kind == QLatin1String("underline")) {
             saveDraft.annotationSubtype = FPDF_ANNOT_UNDERLINE;
         } else if (draft->candidate.kind == QLatin1String("strikeout")) {
