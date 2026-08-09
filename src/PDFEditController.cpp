@@ -60,6 +60,8 @@ constexpr int kHighlightBlue = 59;
 constexpr int kHighlightAlpha = 96;
 constexpr qint64 kMaximumAddedImageFileBytes = 64 * 1024 * 1024;
 constexpr qint64 kMaximumAddedImagePixels = 40 * 1000 * 1000;
+constexpr unsigned long kMaximumAnnotationStringBytes
+    = 4UL * 1024UL * 1024UL;
 constexpr qreal kLineBaselineToleranceEm = 0.25;
 constexpr qreal kLineMinimumHorizontalGapEm = -0.35;
 constexpr qreal kLineMaximumHorizontalGapEm = 1.25;
@@ -80,6 +82,8 @@ constexpr qsizetype kMaximumRegisteredFontCount = 128;
 constexpr qsizetype kMaximumRejectedFontFingerprints = 128;
 constexpr FS_MATRIX kIdentityMatrix{1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
 constexpr char kPreservedPaintMark[] = "TrePDFPreservedPaint";
+constexpr char kCommentThreadIdKey[] = "TrePDFThreadId";
+constexpr char kCommentReplyToKey[] = "TrePDFReplyTo";
 
 bool pageObjectHasContentMark(FPDF_PAGEOBJECT object,
                               const QString &expectedName)
@@ -794,7 +798,8 @@ QString textObjectText(FPDF_PAGEOBJECT object, FPDF_TEXTPAGE textPage)
     }
 
     const unsigned long byteLength = FPDFTextObj_GetText(object, textPage, nullptr, 0);
-    if (byteLength < sizeof(FPDF_WCHAR)) {
+    if (byteLength < sizeof(FPDF_WCHAR)
+        || byteLength > kMaximumAnnotationStringBytes) {
         return {};
     }
 
@@ -849,6 +854,73 @@ QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
     return QString::fromUtf16(
         reinterpret_cast<const char16_t *>(buffer.constData()),
         characterCount);
+}
+
+bool isSupportedCommentAnnotationSubtype(int subtype)
+{
+    return subtype == FPDF_ANNOT_HIGHLIGHT
+        || subtype == FPDF_ANNOT_UNDERLINE
+        || subtype == FPDF_ANNOT_STRIKEOUT
+        || subtype == FPDF_ANNOT_TEXT;
+}
+
+bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
+{
+    const QString relation = annotationString(annotation, "RT").trimmed();
+    return relation.isEmpty()
+        || relation.compare(QLatin1String("R"), Qt::CaseInsensitive) == 0;
+}
+
+int rootReplyAnnotationIndex(FPDF_PAGE page,
+                             FPDF_ANNOTATION annotation,
+                             int annotationIndex,
+                             int &directParentIndex,
+                             QString &threadId)
+{
+    directParentIndex = -1;
+    threadId.clear();
+    if (!page
+        || !annotation
+        || !annotationUsesReplyRelation(annotation)) {
+        return -1;
+    }
+
+    FPDF_ANNOTATION parent = FPDFAnnot_GetLinkedAnnot(annotation, "IRT");
+    if (!parent) {
+        return -1;
+    }
+
+    QSet<int> visitedIndices{annotationIndex};
+    int rootIndex = -1;
+    while (parent) {
+        const int parentIndex = FPDFPage_GetAnnotIndex(page, parent);
+        const int parentSubtype = FPDFAnnot_GetSubtype(parent);
+        if (parentIndex < 0
+            || visitedIndices.contains(parentIndex)
+            || !isSupportedCommentAnnotationSubtype(parentSubtype)) {
+            FPDFPage_CloseAnnot(parent);
+            return -1;
+        }
+        visitedIndices.insert(parentIndex);
+        if (directParentIndex < 0) {
+            directParentIndex = parentIndex;
+        }
+        rootIndex = parentIndex;
+        threadId = annotationString(parent, kCommentThreadIdKey).trimmed();
+
+        FPDF_ANNOTATION nextParent = FPDFAnnot_GetLinkedAnnot(parent, "IRT");
+        const bool parentIsReply = nextParent
+            && annotationUsesReplyRelation(parent);
+        FPDFPage_CloseAnnot(parent);
+        if (!parentIsReply) {
+            if (nextParent) {
+                FPDFPage_CloseAnnot(nextParent);
+            }
+            break;
+        }
+        parent = nextParent;
+    }
+    return rootIndex;
 }
 
 bool containsOnlyAsciiDigits(const QString &value)
@@ -1893,10 +1965,8 @@ QVariantList PDFEditController::commentItems() const
         }
     }
 
-    std::stable_sort(
-        comments.begin(),
-        comments.end(),
-        [](const Candidate *left, const Candidate *right) {
+    const auto geometryLess = [](const Candidate *left,
+                                 const Candidate *right) {
             if (left->page != right->page) {
                 return left->page < right->page;
             }
@@ -1916,10 +1986,24 @@ QVariantList PDFEditController::commentItems() const
                 return left->addedOrder < right->addedOrder;
             }
             return left->objectId < right->objectId;
-        });
+        };
+    const auto replyLess = [&geometryLess](const Candidate *left,
+                                           const Candidate *right) {
+        if (left->commentCreationDate.isValid()
+            && right->commentCreationDate.isValid()
+            && left->commentCreationDate != right->commentCreationDate) {
+            return left->commentCreationDate < right->commentCreationDate;
+        }
+        if (left->sourceAnnotationIndex != right->sourceAnnotationIndex
+            && left->sourceAnnotationIndex >= 0
+            && right->sourceAnnotationIndex >= 0) {
+            return left->sourceAnnotationIndex < right->sourceAnnotationIndex;
+        }
+        return geometryLess(left, right);
+    };
 
-    QVariantList result;
-    result.reserve(comments.size());
+    QVector<const Candidate *> roots;
+    QHash<QString, QVector<const Candidate *>> repliesByRoot;
     for (const Candidate *candidate : std::as_const(comments)) {
         const auto draft = m_drafts.constFind(
             draftKey(candidate->page, candidate->objectId));
@@ -1930,7 +2014,30 @@ QVariantList PDFEditController::commentItems() const
                 draft->deleted)) {
             continue;
         }
+        if (candidate->replyToObjectId.isEmpty()) {
+            roots.append(candidate);
+        } else if (commentReplyIsVisible(*candidate)) {
+            repliesByRoot[draftKey(
+                candidate->page,
+                candidate->replyToObjectId)]
+                .append(candidate);
+        }
+    }
+    std::stable_sort(roots.begin(), roots.end(), geometryLess);
+    for (auto replies = repliesByRoot.begin();
+         replies != repliesByRoot.end();
+         ++replies) {
+        std::stable_sort(replies->begin(), replies->end(), replyLess);
+    }
 
+    QVariantList result;
+    result.reserve(comments.size());
+    QSet<QString> appendedReplies;
+    const auto appendComment = [this, &result](const Candidate *candidate,
+                                               bool isReply,
+                                               int replyCount) {
+        const auto draft = m_drafts.constFind(
+            draftKey(candidate->page, candidate->objectId));
         const Draft displayDraft = draft == m_drafts.cend()
             ? initialDraftForCandidate(*candidate)
             : *draft;
@@ -1945,7 +2052,40 @@ QVariantList PDFEditController::commentItems() const
                          kHighlightBlue,
                          kHighlightAlpha);
         map.insert(QStringLiteral("color"), markerColor);
+        map.insert(QStringLiteral("isReply"), isReply);
+        map.insert(
+            QStringLiteral("parentObjectId"),
+            isReply ? candidate->replyToObjectId : QString());
+        map.insert(QStringLiteral("replyCount"), replyCount);
         result.append(map);
+    };
+    for (const Candidate *root : std::as_const(roots)) {
+        const QString rootKey = draftKey(root->page, root->objectId);
+        const QVector<const Candidate *> replies = repliesByRoot.value(rootKey);
+        appendComment(root, false, replies.size());
+        for (const Candidate *reply : replies) {
+            appendComment(reply, true, 0);
+            appendedReplies.insert(draftKey(reply->page, reply->objectId));
+        }
+    }
+
+    // Malformed or cross-page source reply relationships are still readable,
+    // but are presented as top-level comments rather than creating a deeper
+    // or dangling thread in the panel.
+    QVector<const Candidate *> orphanReplies;
+    for (auto replies = repliesByRoot.cbegin();
+         replies != repliesByRoot.cend();
+         ++replies) {
+        for (const Candidate *reply : replies.value()) {
+            if (!appendedReplies.contains(
+                    draftKey(reply->page, reply->objectId))) {
+                orphanReplies.append(reply);
+            }
+        }
+    }
+    std::stable_sort(orphanReplies.begin(), orphanReplies.end(), geometryLess);
+    for (const Candidate *reply : std::as_const(orphanReplies)) {
+        appendComment(reply, false, 0);
     }
     return result;
 }
@@ -2113,6 +2253,10 @@ QVariantList PDFEditController::candidatesForPage(int page)
         if (isDesignerManagedSourceWidget(candidate)) {
             continue;
         }
+        if (!candidate.replyToObjectId.isEmpty()
+            && !commentReplyIsVisible(candidate)) {
+            continue;
+        }
         const QString key = draftKey(candidate.page, candidate.objectId);
         const auto draft = m_drafts.constFind(key);
         if (draft != m_drafts.cend()
@@ -2126,6 +2270,10 @@ QVariantList PDFEditController::candidatesForPage(int page)
     }
     for (const Candidate &candidate : std::as_const(m_addedCandidates)) {
         if (candidate.page != page) {
+            continue;
+        }
+        if (!candidate.replyToObjectId.isEmpty()
+            && !commentReplyIsVisible(candidate)) {
             continue;
         }
 
@@ -2148,6 +2296,10 @@ QVariantList PDFEditController::draftsForPage(int page) const
     const auto pageCandidates = m_pageCandidates.constFind(page);
     if (pageCandidates != m_pageCandidates.cend()) {
         for (const Candidate &candidate : pageCandidates.value()) {
+            if (!candidate.replyToObjectId.isEmpty()
+                && !commentReplyIsVisible(candidate)) {
+                continue;
+            }
             const auto draft = m_drafts.constFind(draftKey(page, candidate.objectId));
             if (draft == m_drafts.cend()) {
                 continue;
@@ -2170,6 +2322,10 @@ QVariantList PDFEditController::draftsForPage(int page) const
 
     for (const Candidate &candidate : m_addedCandidates) {
         if (candidate.page != page) {
+            continue;
+        }
+        if (!candidate.replyToObjectId.isEmpty()
+            && !commentReplyIsVisible(candidate)) {
             continue;
         }
 
@@ -2205,6 +2361,10 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
 
     const auto considerCandidate = [&](const Candidate &candidate) {
         if (isDesignerManagedSourceWidget(candidate)) {
+            return;
+        }
+        if (!candidate.replyToObjectId.isEmpty()
+            && !commentReplyIsVisible(candidate)) {
             return;
         }
         if (m_tool == EditTextTool
@@ -2837,7 +2997,8 @@ QVariantMap PDFEditController::addHighlight(int page,
         break;
     }
     candidate.objectId = candidate.kind + QLatin1Char(':')
-        + QString::number(candidate.addedOrder);
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    candidate.commentThreadId = candidate.objectId;
     candidate.editable = true;
     candidate.added = true;
     candidate.commentAuthor = currentCommentAuthor();
@@ -2904,6 +3065,7 @@ QVariantMap PDFEditController::addStickyNote(int page,
     candidate.addedOrder = ++m_nextAddedObjectId;
     candidate.objectId = QStringLiteral("stickyNote:")
         + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    candidate.commentThreadId = candidate.objectId;
     candidate.kind = QStringLiteral("stickyNote");
     //% "Sticky Note"
     candidate.label = qtTrId("StickyNote");
@@ -2939,6 +3101,163 @@ QVariantMap PDFEditController::addStickyNote(int page,
     markDraftStateChanged(page, true);
     emit historyStateChanged();
     return candidateMap(draft);
+}
+
+QVariantMap PDFEditController::addCommentReply(
+    int page,
+    const QString &parentObjectId,
+    const QString &text)
+{
+    if (!m_document
+        || !m_document->isLoaded()
+        || m_saving
+        || page < 0
+        || page >= m_document->pageCount()
+        || parentObjectId.isEmpty()
+        || text.trimmed().isEmpty()) {
+        return {};
+    }
+    if (!documentAllowsAnnotations()) {
+        //% "This PDF does not permit adding or deleting annotations."
+        emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+        return {};
+    }
+
+    Candidate parentCandidate;
+    const Candidate *pageCandidate = findCandidate(page, parentObjectId);
+    if (pageCandidate && isCommentCandidateKind(pageCandidate->kind)) {
+        parentCandidate = *pageCandidate;
+    } else {
+        const auto indexedPage = m_indexedCommentCandidates.constFind(page);
+        if (indexedPage == m_indexedCommentCandidates.cend()) {
+            return {};
+        }
+        const auto indexedCandidate = std::find_if(
+            indexedPage->cbegin(),
+            indexedPage->cend(),
+            [&parentObjectId](const Candidate &candidate) {
+                return candidate.objectId == parentObjectId
+                    && isCommentCandidateKind(candidate.kind);
+            });
+        if (indexedCandidate == indexedPage->cend()) {
+            return {};
+        }
+        parentCandidate = *indexedCandidate;
+    }
+    if (!parentCandidate.replyToObjectId.isEmpty()) {
+        return {};
+    }
+    const auto parentDraft = m_drafts.constFind(
+        draftKey(page, parentObjectId));
+    if (parentDraft != m_drafts.cend()
+        && draftRepresentsDeletion(
+            parentCandidate.kind,
+            parentDraft->text,
+            parentDraft->deleted)) {
+        return {};
+    }
+
+    const QSizeF pageSize = m_document->pageSize(page);
+    if (pageSize.isEmpty()) {
+        return {};
+    }
+    const qreal noteWidth = qMin<qreal>(
+        1.0,
+        kStickyNoteSizePoints / pageSize.width());
+    const qreal noteHeight = qMin<qreal>(
+        1.0,
+        kStickyNoteSizePoints / pageSize.height());
+    int existingReplyCount = 0;
+    QString parentThreadId = parentCandidate.commentThreadId;
+    for (const Candidate &candidate : std::as_const(m_addedCandidates)) {
+        if (candidate.page == page
+            && candidate.replyToObjectId == parentObjectId) {
+            ++existingReplyCount;
+            if (parentThreadId.isEmpty()
+                && !candidate.replyToThreadId.isEmpty()) {
+                parentThreadId = candidate.replyToThreadId;
+            }
+        }
+    }
+    const auto indexedPage = m_indexedCommentCandidates.constFind(page);
+    if (indexedPage != m_indexedCommentCandidates.cend()) {
+        for (const Candidate &candidate : indexedPage.value()) {
+            if (candidate.replyToObjectId == parentObjectId) {
+                ++existingReplyCount;
+            }
+        }
+    }
+    if (parentThreadId.isEmpty()) {
+        parentThreadId = QStringLiteral("trepdf-thread:")
+            + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+
+    const qreal offsetPoints = qMin<qreal>(
+        18.0,
+        4.0 * (existingReplyCount + 1));
+    const QRectF parentRect = parentCandidate.geometry.sourceRect.normalized();
+    const qreal left = qBound<qreal>(
+        0.0,
+        parentRect.left() + offsetPoints / pageSize.width(),
+        1.0 - noteWidth);
+    const qreal top = qBound<qreal>(
+        0.0,
+        parentRect.top() + offsetPoints / pageSize.height(),
+        1.0 - noteHeight);
+
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    Candidate candidate;
+    candidate.page = page;
+    candidate.addedOrder = ++m_nextAddedObjectId;
+    candidate.objectId = QStringLiteral("commentReply:")
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    candidate.kind = QStringLiteral("stickyNote");
+    //% "Reply"
+    candidate.label = qtTrId("Reply");
+    candidate.text = text;
+    candidate.editable = true;
+    candidate.added = true;
+    candidate.commentAuthor = currentCommentAuthor();
+    candidate.commentCreationDate = QDateTime::currentDateTime();
+    candidate.replyToObjectId = parentObjectId;
+    candidate.replyToThreadId = parentThreadId;
+    candidate.replyToSourceAnnotationIndex
+        = parentCandidate.added
+        ? -1
+        : parentCandidate.sourceAnnotationIndex;
+    candidate.replyDirectParentSourceAnnotationIndex
+        = candidate.replyToSourceAnnotationIndex;
+    candidate.replyToParentAdded = parentCandidate.added;
+    candidate.highlightColor = parentCandidate.highlightColor.isValid()
+        ? parentCandidate.highlightColor
+        : QColor(kHighlightRed, kHighlightGreen, kHighlightBlue);
+    setInitialGeometry(candidate, QRectF(left, top, noteWidth, noteHeight));
+
+    m_addedCandidates.append(std::move(candidate));
+    const Candidate &addedCandidate = m_addedCandidates.constLast();
+    const Draft draft = initialDraftForCandidate(addedCandidate);
+    const QString key = draftKey(page, addedCandidate.objectId);
+    m_drafts.insert(key, draft);
+
+    Command command;
+    command.key = key;
+    command.page = page;
+    command.objectId = addedCandidate.objectId;
+    command.hadBefore = false;
+    command.before = draft;
+    command.hadAfter = true;
+    command.after = draft;
+    m_undoStack.append(command);
+    m_redoStack.clear();
+
+    setTool(SelectTool);
+    setSelection(&addedCandidate);
+    markDraftStateChanged(page, true);
+    emit historyStateChanged();
+    QVariantMap map = candidateMap(draft);
+    map.insert(QStringLiteral("page"), page);
+    return map;
 }
 
 int PDFEditController::addBlankPage()
@@ -6105,7 +6424,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
 void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                                                    const CandidateScanRequest &request,
                                                    QVector<Candidate> &candidates,
-                                                   const std::shared_ptr<std::atomic_bool> &cancellation)
+    const std::shared_ptr<std::atomic_bool> &cancellation)
 {
     assertPDFiumProcessLockHeld();
     const QSizeF &pageSize = request.pageSize;
@@ -6208,6 +6527,28 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 annotationString(annotation, "CreationDate"));
             candidate.commentModifiedDate = pdfAnnotationDateTime(
                 annotationString(annotation, "M"));
+            candidate.commentThreadId = annotationString(
+                annotation,
+                kCommentThreadIdKey).trimmed();
+            candidate.replyToThreadId = annotationString(
+                annotation,
+                kCommentReplyToKey).trimmed();
+            QString rootThreadId;
+            int directParentIndex = -1;
+            const int rootReplyIndex = rootReplyAnnotationIndex(
+                page,
+                annotation,
+                index,
+                directParentIndex,
+                rootThreadId);
+            if (rootReplyIndex >= 0) {
+                candidate.replyToObjectId = QStringLiteral("annotation:")
+                    + QString::number(rootReplyIndex);
+                candidate.replyToThreadId = rootThreadId;
+                candidate.replyToSourceAnnotationIndex = rootReplyIndex;
+                candidate.replyDirectParentSourceAnnotationIndex
+                    = directParentIndex;
+            }
             candidate.editable = false;
             candidate.limited = true;
             setInitialGeometry(candidate, geometry);
@@ -6259,6 +6600,10 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 //% "Highlight"
                 candidate.label = qtTrId("Highlight");
                 break;
+            }
+            if (!candidate.replyToObjectId.isEmpty()) {
+                //% "Reply"
+                candidate.label = qtTrId("Reply");
             }
             //% "Editing the contents of comments that already exist in the PDF is not available yet."
             candidate.reason = qtTrId("ExistingCommentEditingUnavailable");
@@ -6324,6 +6669,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
         candidates.append(candidate);
         FPDFPage_CloseAnnot(annotation);
     }
+
 }
 
 const PDFEditController::Candidate *PDFEditController::findCandidate(int page,
@@ -6478,6 +6824,13 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
         candidate.commentModifiedDate.isValid()
             ? candidate.commentModifiedDate
             : candidate.commentCreationDate);
+    map.insert(
+        QStringLiteral("isReply"),
+        !candidate.replyToObjectId.isEmpty());
+    map.insert(
+        QStringLiteral("parentObjectId"),
+        candidate.replyToObjectId);
+    map.insert(QStringLiteral("replyCount"), 0);
     map.insert(QStringLiteral("characterSpans"), characterSpanMaps(draft.characterSpans));
     map.insert(
         QStringLiteral("paragraphFormats"),
@@ -6549,6 +6902,83 @@ bool PDFEditController::documentAllowsPageAssembly() const
 QString PDFEditController::draftKey(int page, const QString &objectId) const
 {
     return QString::number(page) + QLatin1Char('|') + objectId;
+}
+
+bool PDFEditController::commentReplyIsVisible(const Candidate &candidate) const
+{
+    if (candidate.replyToObjectId.isEmpty()) {
+        return true;
+    }
+
+    const auto parentDraft = m_drafts.constFind(
+        draftKey(candidate.page, candidate.replyToObjectId));
+    if (parentDraft != m_drafts.cend()
+        && draftRepresentsDeletion(
+            parentDraft->candidate.kind,
+            parentDraft->text,
+            parentDraft->deleted)) {
+        return false;
+    }
+    int parentAnnotationIndex
+        = candidate.replyDirectParentSourceAnnotationIndex;
+    QSet<int> visitedAnnotationIndices;
+    const auto sourceParent = [this, &candidate](int annotationIndex)
+        -> const Candidate * {
+        const auto candidateForIndex = [annotationIndex](
+                                           const QVector<Candidate> &items)
+            -> const Candidate * {
+            const auto match = std::find_if(
+                items.cbegin(),
+                items.cend(),
+                [annotationIndex](const Candidate &current) {
+                    return current.sourceAnnotationIndex == annotationIndex
+                        && isCommentCandidateKind(current.kind);
+                });
+            return match == items.cend() ? nullptr : &*match;
+        };
+        const auto indexedPage = m_indexedCommentCandidates.constFind(
+            candidate.page);
+        if (indexedPage != m_indexedCommentCandidates.cend()) {
+            if (const Candidate *parent = candidateForIndex(*indexedPage)) {
+                return parent;
+            }
+        }
+        const auto cachedPage = m_pageCandidates.constFind(candidate.page);
+        return cachedPage == m_pageCandidates.cend()
+            ? nullptr
+            : candidateForIndex(*cachedPage);
+    };
+    while (parentAnnotationIndex >= 0
+           && !visitedAnnotationIndices.contains(parentAnnotationIndex)) {
+        visitedAnnotationIndices.insert(parentAnnotationIndex);
+        const Candidate *parentCandidate = sourceParent(
+            parentAnnotationIndex);
+        if (!parentCandidate) {
+            break;
+        }
+        const auto ancestorDraft = m_drafts.constFind(
+            draftKey(candidate.page, parentCandidate->objectId));
+        if (ancestorDraft != m_drafts.cend()
+            && draftRepresentsDeletion(
+                ancestorDraft->candidate.kind,
+                ancestorDraft->text,
+                ancestorDraft->deleted)) {
+            return false;
+        }
+        parentAnnotationIndex
+            = parentCandidate->replyDirectParentSourceAnnotationIndex;
+    }
+    if (!candidate.replyToParentAdded) {
+        return true;
+    }
+    return std::any_of(
+        m_addedCandidates.cbegin(),
+        m_addedCandidates.cend(),
+        [&candidate](const Candidate &parent) {
+            return parent.page == candidate.page
+                && parent.objectId == candidate.replyToObjectId
+                && parent.replyToObjectId.isEmpty();
+        });
 }
 
 void PDFEditController::setInitialGeometry(Candidate &candidate,
@@ -7524,8 +7954,13 @@ void PDFEditController::applyDraftState(const Command &command,
     const bool selectionWasRemoved = candidate.added && !shouldExist;
     const bool selectionWasDeleted = shouldExist
         && draftRepresentsDeletion(candidate.kind, draft.text, draft.deleted);
-    if (selectedCandidateChanged
-        && (selectionWasRemoved || selectionWasDeleted)) {
+    const bool selectedReplyWasHidden = m_hasSelection
+        && isCommentCandidateKind(m_selectedCandidate.kind)
+        && !m_selectedCandidate.replyToObjectId.isEmpty()
+        && !commentReplyIsVisible(m_selectedCandidate);
+    if ((selectedCandidateChanged
+         && (selectionWasRemoved || selectionWasDeleted))
+        || selectedReplyWasHidden) {
         setSelection(nullptr);
     } else {
         updateSelectedTextFromDraft();

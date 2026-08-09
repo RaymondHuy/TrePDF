@@ -15,6 +15,10 @@ Rectangle {
     property bool collapsed: false
     property var activeEditor: null
     property string activeEditorObjectId: ""
+    property int replyTargetPage: -1
+    property string replyTargetObjectId: ""
+    property string replyDraftText: ""
+    property var expandedReplyThreads: ({})
 
     signal collapsedChangeRequested(bool collapsed)
     signal pageRequested(int page)
@@ -23,8 +27,33 @@ Rectangle {
         editController.commentItems
             ? editController.commentItems.length
             : 0
-    readonly property bool textEditPending: activeEditor !== null
-        && activeEditor.dirty === true
+    readonly property var displayedCommentItems: {
+        const comments = root.editController.commentItems
+            ? root.editController.commentItems
+            : []
+        const displayedComments = []
+        const expandedThreads = root.expandedReplyThreads
+        for (let index = 0; index < comments.length; ++index) {
+            const comment = comments[index]
+            const isReply = comment.isReply === undefined
+                ? false
+                : Boolean(comment.isReply)
+            if (!isReply) {
+                displayedComments.push(comment)
+                continue
+            }
+            const threadKey = String(Number(comment.page))
+                + "\u001f"
+                + String(comment.parentObjectId)
+            if (expandedThreads[threadKey] === true)
+                displayedComments.push(comment)
+        }
+        return displayedComments
+    }
+    readonly property bool textEditPending:
+        (activeEditor !== null && activeEditor.dirty === true)
+        || replyTargetObjectId.length > 0
+    readonly property int replyIndent: 30
 
     implicitWidth: collapsed ? 42 : 280
     color: theme.ribbonSurface
@@ -45,31 +74,158 @@ Rectangle {
     }
 
     function requestCollapsed(collapsed) {
-        if (collapsed)
-            root.commitActiveEditor()
+        if (collapsed && !root.commitPendingEdit())
+            return
         root.collapsedChangeRequested(collapsed)
     }
 
     function commitPendingEdit() {
         commitActiveEditor()
+        return submitPendingReply()
+    }
+
+    function commentThreadKey(page, objectId) {
+        return String(page) + "\u001f" + objectId
+    }
+
+    function threadRepliesExpanded(page, objectId) {
+        return root.expandedReplyThreads[
+            root.commentThreadKey(page, objectId)] === true
+    }
+
+    function setThreadRepliesExpanded(page, objectId, expanded) {
+        const threadKey = root.commentThreadKey(page, objectId)
+        if (root.threadRepliesExpanded(page, objectId) === expanded)
+            return
+
+        const nextExpandedThreads = ({})
+        const currentExpandedThreads = root.expandedReplyThreads
+        for (const existingKey in currentExpandedThreads)
+            nextExpandedThreads[existingKey]
+                = currentExpandedThreads[existingKey]
+        if (expanded)
+            nextExpandedThreads[threadKey] = true
+        else
+            delete nextExpandedThreads[threadKey]
+        root.expandedReplyThreads = nextExpandedThreads
+    }
+
+    function toggleThreadReplies(page, objectId) {
+        const expanded = root.threadRepliesExpanded(page, objectId)
+        if (expanded)
+            root.commitActiveEditor()
+        root.setThreadRepliesExpanded(page, objectId, !expanded)
+    }
+
+    function expandSelectedReply() {
+        if (!root.editController)
+            return
+
+        const selectedPage = root.editController.selectedPage
+        const selectedObjectId = root.editController.selectedObjectId
+        if (selectedPage < 0 || selectedObjectId.length === 0)
+            return
+        const comments = root.editController.commentItems
+        for (let index = 0; index < comments.length; ++index) {
+            const comment = comments[index]
+            if (Number(comment.page) !== selectedPage
+                    || String(comment.objectId) !== selectedObjectId
+                    || !Boolean(comment.isReply)) {
+                continue
+            }
+            root.setThreadRepliesExpanded(
+                selectedPage,
+                String(comment.parentObjectId),
+                true)
+            return
+        }
+    }
+
+    function beginReply(page, objectId) {
+        if (!root.document.loaded
+                || root.editController.saving
+                || page < 0
+                || objectId.length === 0) {
+            return
+        }
+        root.commitActiveEditor()
+        if (root.replyTargetObjectId.length > 0
+                && (root.replyTargetPage !== page
+                    || root.replyTargetObjectId !== objectId)
+                && !root.submitPendingReply()) {
+            return
+        }
+        root.replyTargetPage = page
+        root.replyTargetObjectId = objectId
+        root.replyDraftText = ""
+    }
+
+    function cancelPendingReply() {
+        root.replyTargetPage = -1
+        root.replyTargetObjectId = ""
+        root.replyDraftText = ""
+    }
+
+    function replyTargetExists() {
+        if (root.replyTargetObjectId.length === 0)
+            return true
+
+        const comments = root.editController.commentItems
+        for (let index = 0; index < comments.length; ++index) {
+            const comment = comments[index]
+            if (Number(comment.page) === root.replyTargetPage
+                    && String(comment.objectId)
+                        === root.replyTargetObjectId
+                    && !Boolean(comment.isReply)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    function submitPendingReply() {
+        if (root.replyTargetObjectId.length === 0)
+            return true
+
+        const replyText = root.replyDraftText
+        if (replyText.trim().length === 0) {
+            root.cancelPendingReply()
+            return true
+        }
+        if (!root.document.loaded || root.editController.saving)
+            return false
+
+        const replyPage = root.replyTargetPage
+        const result = root.editController.addCommentReply(
+            replyPage,
+            root.replyTargetObjectId,
+            replyText)
+        if (!result
+                || result.objectId === undefined
+                || String(result.objectId).length === 0) {
+            return false
+        }
+        root.setThreadRepliesExpanded(
+            replyPage,
+            root.replyTargetObjectId,
+            true)
+        root.cancelPendingReply()
+        root.pageRequested(replyPage)
         return true
     }
 
-    function removeComment(index) {
-        const comments = root.editController.commentItems
+    function removeComment(page, objectId) {
         if (!root.document.loaded
                 || root.editController.saving
-                || index < 0
-                || index >= comments.length) {
+                || page < 0
+                || objectId.length === 0) {
             return
         }
 
-        const comment = comments[index]
-        const page = Number(comment.page)
-        const objectId = String(comment.objectId)
-        if (page < 0 || objectId.length === 0)
-            return
-
+        if (root.replyTargetPage === page
+                && root.replyTargetObjectId === objectId) {
+            root.cancelPendingReply()
+        }
         root.commitActiveEditor()
         root.editController.removeComment(page, objectId)
     }
@@ -81,17 +237,29 @@ Rectangle {
 
     onCollapsedChanged: {
         if (collapsed)
-            commitActiveEditor()
+            commitPendingEdit()
     }
-    onDocumentChanged: ensureCommentIndex()
-    onEditControllerChanged: ensureCommentIndex()
+    onDocumentChanged: {
+        cancelPendingReply()
+        expandedReplyThreads = ({})
+        ensureCommentIndex()
+    }
+    onEditControllerChanged: {
+        cancelPendingReply()
+        expandedReplyThreads = ({})
+        ensureCommentIndex()
+    }
     Component.onCompleted: ensureCommentIndex()
-    Component.onDestruction: commitActiveEditor()
+    Component.onDestruction: commitPendingEdit()
 
     Connections {
         target: root.document
 
         function onLoadedChanged() {
+            if (!root.document.loaded) {
+                root.cancelPendingReply()
+                root.expandedReplyThreads = ({})
+            }
             root.ensureCommentIndex()
         }
     }
@@ -100,7 +268,13 @@ Rectangle {
         target: root.editController
 
         function onCommentsChanged() {
+            if (!root.replyTargetExists())
+                root.cancelPendingReply()
             root.ensureCommentIndex()
+        }
+
+        function onSelectionChanged() {
+            root.expandSelectedReply()
         }
     }
 
@@ -227,7 +401,7 @@ Rectangle {
 
                         anchors.fill: parent
                         anchors.margins: 12
-                        model: root.editController.commentItems
+                        model: root.displayedCommentItems
                         spacing: 8
                         clip: true
                         boundsBehavior: Flickable.StopAtBounds
@@ -294,6 +468,26 @@ Rectangle {
                                 modelData.added === undefined
                                     ? false
                                     : Boolean(modelData.added)
+                            readonly property bool isReply:
+                                modelData.isReply === undefined
+                                    ? false
+                                    : Boolean(modelData.isReply)
+                            readonly property string parentObjectId:
+                                modelData.parentObjectId === undefined
+                                    ? ""
+                                    : String(modelData.parentObjectId)
+                            readonly property int replyCount:
+                                modelData.replyCount === undefined
+                                    ? 0
+                                    : Number(modelData.replyCount)
+                            readonly property string replyThreadKey:
+                                String(page) + "\u001f" + objectId
+                            readonly property bool repliesExpanded:
+                                !isReply
+                                    && root.expandedReplyThreads[
+                                        replyThreadKey] === true
+                            readonly property int hierarchyIndent:
+                                isReply ? root.replyIndent : 0
                             readonly property bool selected:
                                 root.editController.selectedObjectId
                                     === objectId
@@ -301,9 +495,15 @@ Rectangle {
                                 kind.toLowerCase() === "stickynote"
                             readonly property bool editorVisible:
                                 selected && stickyNote && editable
+                                    && (root.replyTargetPage !== page
+                                        || root.replyTargetObjectId
+                                            !== objectId)
 
                             width: ListView.view
-                                ? ListView.view.width
+                                ? Math.max(
+                                    0,
+                                    ListView.view.width
+                                        - hierarchyIndent)
                                 : 0
                             height: cardContent.implicitHeight + 20
                             radius: 7
@@ -311,14 +511,21 @@ Rectangle {
                                 ? root.theme.foxitPaleOrange
                                 : hoverHandler.hovered
                                     ? "#fff9f5"
-                                    : "#ffffff"
-                            border.width: selected || commentCard.activeFocus
+                                    : isReply
+                                        ? "#fffaf6"
+                                        : "#ffffff"
+                            border.width: selected
+                                    || commentCard.activeFocus
+                                    || isReply
                                 ? 1
                                 : 0
                             border.color: selected
                                 ? root.theme.foxitBorderOrange
                                 : root.theme.ribbonBorder
                             activeFocusOnTab: true
+                            transform: Translate {
+                                x: commentCard.hierarchyIndent
+                            }
                             Accessible.role: Accessible.ListItem
                             //% "%1, page %2"
                             Accessible.name:
@@ -329,7 +536,8 @@ Rectangle {
                             function activateComment() {
                                 const targetObjectId = objectId
                                 const targetPage = page
-                                root.commitActiveEditor()
+                                if (!root.commitPendingEdit())
+                                    return
                                 if (!root.document.loaded
                                         || targetObjectId.length === 0
                                         || targetPage < 0) {
@@ -363,6 +571,34 @@ Rectangle {
                                 onTapped: commentCard.activateComment()
                             }
 
+                            Item {
+                                visible: commentCard.isReply
+                                x: -22
+                                y: -commentList.spacing
+                                width: 22
+                                height: commentCard.height
+                                    + commentList.spacing
+                                Accessible.ignored: true
+
+                                Rectangle {
+                                    x: 0
+                                    y: 0
+                                    width: 2
+                                    height: parent.height
+                                    radius: 1
+                                    color: root.theme.ribbonBorder
+                                }
+
+                                Rectangle {
+                                    x: 0
+                                    y: commentList.spacing + 20
+                                    width: parent.width
+                                    height: 2
+                                    radius: 1
+                                    color: root.theme.foxitBorderOrange
+                                }
+                            }
+
                             ColumnLayout {
                                 id: cardContent
 
@@ -377,6 +613,7 @@ Rectangle {
                                     Rectangle {
                                         Layout.preferredWidth: 5
                                         Layout.preferredHeight: 24
+                                        visible: !commentCard.isReply
                                         radius: 2
                                         color: commentCard.markerColor
                                         Accessible.ignored: true
@@ -384,6 +621,7 @@ Rectangle {
 
                                     Label {
                                         Layout.fillWidth: true
+                                        visible: !commentCard.isReply
                                         text: commentCard.label
                                         color: root.theme.ribbonTextColor
                                         font.pixelSize: 12
@@ -392,7 +630,18 @@ Rectangle {
                                     }
 
                                     Label {
-                                        visible: commentCard.added
+                                        Layout.fillWidth: true
+                                        visible: commentCard.isReply
+                                        text: commentCard.commentAuthor
+                                        color: "#747176"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Medium
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Label {
+                                        visible: !commentCard.isReply
+                                            && commentCard.added
                                         Layout.preferredHeight: 20
                                         leftPadding: 7
                                         rightPadding: 7
@@ -415,34 +664,65 @@ Rectangle {
                                         //% "Page %1"
                                         text: qsTrId("PageNumber")
                                             .arg(commentCard.page + 1)
+                                        visible: !commentCard.isReply
                                         color: "#747176"
                                         font.pixelSize: 10
                                     }
+
+                                    Label {
+                                        visible: commentCard.isReply
+                                            && commentCard.commentDateText
+                                                .length > 0
+                                        text: commentCard.commentDateText
+                                        color: "#747176"
+                                        font.pixelSize: 10
+                                    }
+
                                     ToolButton {
                                         id: showCommentButton
 
                                         Layout.preferredWidth: 20
                                         Layout.fillHeight: true
-                                        icon.source: "../assets/icons/down.svg"
+                                        visible: !commentCard.isReply
+                                            && commentCard.replyCount > 0
+                                        icon.source:
+                                            "../assets/icons/down.svg"
                                         icon.width: 12
                                         icon.height: 12
                                         icon.color: "transparent"
-                                        enabled: commentList.count > 1
+                                        rotation:
+                                            commentCard.repliesExpanded
+                                                ? 180
+                                                : 0
+                                        focusPolicy: Qt.TabFocus
+                                        //% "Show or hide replies"
+                                        ToolTip.text:
+                                            qsTrId("ToggleReplies")
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
                                         Accessible.name: ToolTip.text
+                                        onClicked:
+                                            root.toggleThreadReplies(
+                                                commentCard.page,
+                                                commentCard.objectId)
 
                                         background: Rectangle {
                                             radius: 4
                                             color: showCommentButton.down
                                                 ? "#f5dfcf"
                                                 : showCommentButton.hovered
-                                                    ? root.theme.foxitPaleOrange
+                                                    ? root.theme
+                                                        .foxitPaleOrange
                                                     : "white"
-                                            border.color: showCommentButton.visualFocus
-                                                ? root.theme.foxitDarkOrange
-                                                : root.theme.ribbonBorder
-                                            border.width: showCommentButton.visualFocus
-                                                ? 2
-                                                : 1
+                                            border.color:
+                                                showCommentButton.visualFocus
+                                                    ? root.theme
+                                                        .foxitDarkOrange
+                                                    : root.theme.ribbonBorder
+                                            border.width:
+                                                showCommentButton.visualFocus
+                                                    ? 2
+                                                    : 1
                                         }
                                     }
                                     ToolButton {
@@ -465,7 +745,9 @@ Rectangle {
                                         ToolTip.visible: hovered
                                         ToolTip.delay: 500
                                         Accessible.name: ToolTip.text
-                                        onClicked: root.removeComment(commentCard.index)
+                                        onClicked: root.removeComment(
+                                            commentCard.page,
+                                            commentCard.objectId)
 
                                         background: Rectangle {
                                             radius: 4
@@ -487,9 +769,10 @@ Rectangle {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Layout.leftMargin: 13
-                                    visible:
-                                        commentCard.commentAuthor.length > 0
-                                        || commentCard.commentDateText.length > 0
+                                    visible: !commentCard.isReply
+                                        && (commentCard.commentAuthor.length > 0
+                                            || commentCard.commentDateText
+                                                .length > 0)
                                     spacing: 8
 
                                     Label {
@@ -522,6 +805,150 @@ Rectangle {
                                     wrapMode: Text.Wrap
                                     elide: Text.ElideRight
                                     maximumLineCount: 3
+                                }
+
+                                ToolButton {
+                                    id: replyButton
+
+                                    Layout.alignment: Qt.AlignLeft
+                                    visible: !commentCard.isReply
+                                        && root.replyTargetObjectId
+                                            !== commentCard.objectId
+                                    enabled: root.document.loaded
+                                        && !root.editController.saving
+                                    focusPolicy: Qt.TabFocus
+                                    //% "Reply"
+                                    text: qsTrId("Reply")
+                                    icon.source:
+                                        "../assets/icons/comment.svg"
+                                    icon.width: 14
+                                    icon.height: 14
+                                    icon.color:
+                                        root.theme.ribbonTextColor
+                                    display: AbstractButton.TextBesideIcon
+                                    spacing: 6
+                                    Accessible.name: text
+                                    onClicked: root.beginReply(
+                                        commentCard.page,
+                                        commentCard.objectId)
+
+                                    background: Rectangle {
+                                        radius: 4
+                                        color: replyButton.down
+                                            ? "#f5dfcf"
+                                            : replyButton.hovered
+                                                ? root.theme.foxitPaleOrange
+                                                : "transparent"
+                                        border.color:
+                                            replyButton.visualFocus
+                                                ? root.theme.foxitDarkOrange
+                                                : "transparent"
+                                        border.width:
+                                            replyButton.visualFocus ? 1 : 0
+                                    }
+                                }
+
+                                Loader {
+                                    id: replyEditorLoader
+
+                                    Layout.fillWidth: true
+                                    active: !commentCard.isReply
+                                        && root.replyTargetPage
+                                            === commentCard.page
+                                        && root.replyTargetObjectId
+                                            === commentCard.objectId
+                                    visible: active
+
+                                    sourceComponent: Component {
+                                        ColumnLayout {
+                                            spacing: 6
+
+                                            TextArea {
+                                                id: replyEditor
+
+                                                Layout.fillWidth: true
+                                                Layout.preferredHeight: 80
+                                                text: root.replyDraftText
+                                                wrapMode: TextEdit.Wrap
+                                                selectByMouse: true
+                                                persistentSelection: true
+                                                font.pixelSize: 12
+                                                color: root.theme.ribbonTextColor
+                                                selectionColor:
+                                                    root.theme.foxitHoverOrange
+                                                selectedTextColor: "#ffffff"
+                                                //% "Write a reply"
+                                                placeholderText:
+                                                    qsTrId("WriteReplyPlaceholder")
+                                                //% "Reply text"
+                                                Accessible.name:
+                                                    qsTrId("ReplyText")
+                                                Component.onCompleted:
+                                                    forceActiveFocus()
+                                                onTextChanged:
+                                                    root.replyDraftText = text
+                                                Keys.onPressed: function(event) {
+                                                    const commitModifier
+                                                        = event.modifiers
+                                                            & (Qt.ControlModifier
+                                                                | Qt.MetaModifier)
+                                                    if (commitModifier
+                                                            && (event.key
+                                                                    === Qt.Key_Return
+                                                                || event.key
+                                                                    === Qt.Key_Enter)) {
+                                                        if (root.submitPendingReply())
+                                                            event.accepted = true
+                                                    } else if (event.key
+                                                            === Qt.Key_Escape) {
+                                                        root.cancelPendingReply()
+                                                        event.accepted = true
+                                                    }
+                                                }
+
+                                                background: Rectangle {
+                                                    radius: 5
+                                                    color: "#ffffff"
+                                                    border.width: 1
+                                                    border.color:
+                                                        replyEditor.activeFocus
+                                                            ? root.theme
+                                                                .foxitBorderOrange
+                                                            : root.theme
+                                                                .ribbonBorder
+                                                }
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                Item {
+                                                    Layout.fillWidth: true
+                                                }
+
+                                                Button {
+                                                    //% "Cancel reply"
+                                                    text: qsTrId("CancelReply")
+                                                    onClicked:
+                                                        root.cancelPendingReply()
+                                                }
+
+                                                Button {
+                                                    //% "Send reply"
+                                                    text: qsTrId("SendReply")
+                                                    enabled:
+                                                        root.replyDraftText
+                                                            .trim().length > 0
+                                                        && !root.editController
+                                                            .saving
+                                                    onClicked:
+                                                        root.submitPendingReply()
+                                                }
+                                            }
+                                        }
+                                    }
+
                                 }
 
                                 TextArea {

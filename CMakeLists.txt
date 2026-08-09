@@ -126,6 +126,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/chevron-left.svg
         src/assets/icons/chevron-right.svg
         src/assets/icons/comb-field.svg
+        src/assets/icons/comment.svg
         src/assets/icons/delete-page.svg
         src/assets/icons/diamond.svg
         src/assets/icons/down.svg

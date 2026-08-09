@@ -186,8 +186,8 @@ ghi Save; mọi thay đổi vẫn là draft.
 
 ### [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml)
 
-**Vai trò:** panel bên phải cho danh sách comment toàn tài liệu và nội dung
-Sticky Note đang chọn.
+**Vai trò:** panel bên phải cho danh sách comment toàn tài liệu, nội dung Sticky
+Note đang chọn và phản hồi một cấp.
 
 - Khi được load, panel yêu cầu controller chạy annotation-only index tuần tự ở
   nền cho mọi source page; kết quả không phụ thuộc cache candidate 12 trang của
@@ -196,9 +196,14 @@ Sticky Note đang chọn.
   chuyển về Select, chọn candidate tương ứng và điều hướng tới trang đó.
 - Sticky Note mới có `TextArea` để sửa `/Contents`; nội dung được commit khi mất
   focus, thu gọn panel, đổi session hoặc thực hiện Save.
+- Comment gốc có action Phản hồi và composer Gửi/Hủy; Ctrl/Cmd+Enter gửi, Esc
+  hủy. Nút dropdown trên từng comment gốc bung/thu nhóm reply; reply được thụt
+  vào kèm đường nhánh cấp hai trong cùng model phẳng và không có action phản
+  hồi tiếp, nên UI luôn chỉ có một cấp con.
 - Comment có sẵn trong PDF được liệt kê để đọc, điều hướng và xóa dưới dạng
-  draft có undo/redo/discard; nội dung của chúng vẫn chưa cho sửa. Panel dùng
-  chung trạng thái thu gọn theo document session.
+  draft có undo/redo/discard; nội dung của chúng vẫn chưa cho sửa. Xóa comment
+  gốc ẩn cả thread, còn xóa reply chỉ tác động item đó. Panel dùng chung trạng
+  thái thu gọn theo document session.
 
 ### [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml)
 

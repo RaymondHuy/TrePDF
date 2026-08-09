@@ -1,6 +1,7 @@
 #include "PDFSaveWriter.h"
 
 #include "ApplicationFonts.h"
+#include "PDFAcroFormCanonicalizer.h"
 #include "PDFAcroFormWriter.h"
 #include "PDFEditController.h"
 #include "PDFFormController.h"
@@ -46,6 +47,10 @@ constexpr qreal kUnsupportedPaintRasterScale = 4.0;
 constexpr qint64 kMaximumUnsupportedPaintPixels = 8 * 1024 * 1024;
 constexpr int kPaintColorTolerance = 12;
 constexpr char kPreservedPaintMark[] = "TrePDFPreservedPaint";
+constexpr char kCommentThreadIdKey[] = "TrePDFThreadId";
+constexpr char kCommentReplyToKey[] = "TrePDFReplyTo";
+constexpr unsigned long kMaximumAnnotationStringBytes
+    = 4UL * 1024UL * 1024UL;
 
 struct SaveFormat {
     QString fontFamily;
@@ -100,6 +105,9 @@ struct SaveDraft {
     QString commentAuthor;
     QDateTime commentCreationDate;
     QDateTime commentModifiedDate;
+    QString commentThreadId;
+    QString replyToThreadId;
+    int replyToSourceAnnotationIndex = -1;
     QImage image;
     PDFEditController::ShapeType shapeType
         = PDFEditController::RectangleShape;
@@ -120,6 +128,7 @@ struct SaveDraft {
     bool added = false;
     bool deleted = false;
     bool movesSourceObjects = false;
+    bool reply = false;
 };
 
 struct LayoutRun {
@@ -2455,10 +2464,48 @@ bool setOptionalAnnotationString(FPDF_ANNOTATION annotation,
             reinterpret_cast<const FPDF_WCHAR *>(value.utf16()));
 }
 
+QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
+{
+    if (!annotation) {
+        return {};
+    }
+    const unsigned long byteLength = FPDFAnnot_GetStringValue(
+        annotation,
+        key,
+        nullptr,
+        0);
+    if (byteLength < sizeof(FPDF_WCHAR)
+        || byteLength > kMaximumAnnotationStringBytes) {
+        return {};
+    }
+    QVector<FPDF_WCHAR> buffer(static_cast<qsizetype>(
+        (byteLength + sizeof(FPDF_WCHAR) - 1) / sizeof(FPDF_WCHAR)));
+    const unsigned long actualLength = FPDFAnnot_GetStringValue(
+        annotation,
+        key,
+        buffer.data(),
+        byteLength);
+    if (actualLength < sizeof(FPDF_WCHAR)) {
+        return {};
+    }
+    qsizetype characterCount = static_cast<qsizetype>(
+        actualLength / sizeof(FPDF_WCHAR));
+    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
+        --characterCount;
+    }
+    return QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(buffer.constData()),
+        characterCount);
+}
+
 bool setCommentAnnotationMetadata(FPDF_ANNOTATION annotation,
                                   const SaveDraft &draft)
 {
     return setOptionalAnnotationString(
+               annotation,
+               "NM",
+               draft.objectId)
+        && setOptionalAnnotationString(
                annotation,
                "T",
                draft.commentAuthor)
@@ -2469,7 +2516,15 @@ bool setCommentAnnotationMetadata(FPDF_ANNOTATION annotation,
         && setOptionalAnnotationString(
             annotation,
             "M",
-            pdfAnnotationDateString(draft.commentModifiedDate));
+            pdfAnnotationDateString(draft.commentModifiedDate))
+        && setOptionalAnnotationString(
+            annotation,
+            kCommentThreadIdKey,
+            draft.commentThreadId)
+        && setOptionalAnnotationString(
+            annotation,
+            kCommentReplyToKey,
+            draft.replyToThreadId);
 }
 
 PDFSaveWriter::Result createTextMarkupAnnotation(
@@ -2694,8 +2749,6 @@ PDFSaveWriter::Result createStickyNoteAnnotation(
         : QColor(255, 235, 59);
     const auto *contents = reinterpret_cast<const FPDF_WCHAR *>(
         draft.text.utf16());
-    const auto *identity = reinterpret_cast<const FPDF_WCHAR *>(
-        draft.objectId.utf16());
     if (!annotation.get()
         || !FPDFAnnot_SetRect(annotation.get(), &annotationRect)
         || !FPDFAnnot_SetColor(
@@ -2709,10 +2762,6 @@ PDFSaveWriter::Result createStickyNoteAnnotation(
             annotation.get(),
             "Contents",
             contents)
-        || !FPDFAnnot_SetStringValue(
-            annotation.get(),
-            "NM",
-            identity)
         || !setCommentAnnotationMetadata(annotation.get(), draft)
         || !FPDFAnnot_SetFlags(
             annotation.get(),
@@ -2731,6 +2780,84 @@ FPDF_ANNOTATION_SUBTYPE sourceAnnotationSubtypeForDraft(
     return draft.kind == SaveDraft::Kind::StickyNote
         ? FPDF_ANNOT_TEXT
         : draft.annotationSubtype;
+}
+
+bool isSupportedCommentAnnotationSubtype(int subtype)
+{
+    return subtype == FPDF_ANNOT_HIGHLIGHT
+        || subtype == FPDF_ANNOT_UNDERLINE
+        || subtype == FPDF_ANNOT_STRIKEOUT
+        || subtype == FPDF_ANNOT_TEXT;
+}
+
+bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
+{
+    const QString relation = annotationString(annotation, "RT").trimmed();
+    return relation.isEmpty()
+        || relation.compare(QLatin1String("R"), Qt::CaseInsensitive) == 0;
+}
+
+PDFSaveWriter::Result assignSourceReplyParentThreadIds(
+    FPDF_PAGE page,
+    const QVector<SaveDraft> &drafts,
+    int pageIndex)
+{
+    const int annotationCount = FPDFPage_GetAnnotCount(page);
+    QHash<int, QString> threadIdsByAnnotation;
+    for (const SaveDraft &draft : drafts) {
+        if (!draft.reply
+            || draft.deleted
+            || draft.replyToSourceAnnotationIndex < 0) {
+            continue;
+        }
+        const auto existing = threadIdsByAnnotation.constFind(
+            draft.replyToSourceAnnotationIndex);
+        if (draft.replyToThreadId.isEmpty()
+            || (existing != threadIdsByAnnotation.cend()
+                && *existing != draft.replyToThreadId)) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                pageIndex,
+                draft.objectId);
+        }
+        threadIdsByAnnotation.insert(
+            draft.replyToSourceAnnotationIndex,
+            draft.replyToThreadId);
+    }
+
+    for (auto thread = threadIdsByAnnotation.cbegin();
+         thread != threadIdsByAnnotation.cend();
+         ++thread) {
+        if (thread.key() < 0 || thread.key() >= annotationCount) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                pageIndex,
+                thread.value());
+        }
+        PdfAnnotationHandle parent(FPDFPage_GetAnnot(page, thread.key()));
+        PdfAnnotationHandle inReplyTo(parent.get()
+                ? FPDFAnnot_GetLinkedAnnot(parent.get(), "IRT")
+                : nullptr);
+        const QString currentThreadId = parent.get()
+            ? annotationString(parent.get(), kCommentThreadIdKey).trimmed()
+            : QString();
+        if (!parent.get()
+            || !isSupportedCommentAnnotationSubtype(
+                FPDFAnnot_GetSubtype(parent.get()))
+            || inReplyTo.get()
+            || (!currentThreadId.isEmpty()
+                && currentThreadId != thread.value())
+            || !setOptionalAnnotationString(
+                parent.get(),
+                kCommentThreadIdKey,
+                thread.value())) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                pageIndex,
+                thread.value());
+        }
+    }
+    return {};
 }
 
 int popupAnnotationIndexForSourceComment(FPDF_PAGE page,
@@ -2799,9 +2926,8 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
         QString objectId;
     };
 
-    QVector<AnnotationRemoval> removals;
+    QHash<int, QString> removalObjectIds;
     QSet<int> sourceAnnotationIndices;
-    QSet<int> removalIndices;
     const int annotationCount = FPDFPage_GetAnnotCount(page);
     for (const SaveDraft &draft : drafts) {
         const bool commentDraft
@@ -2812,8 +2938,7 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
         }
         if (draft.sourceAnnotationIndex < 0
             || draft.sourceAnnotationIndex >= annotationCount
-            || sourceAnnotationIndices.contains(
-                draft.sourceAnnotationIndex)) {
+            || sourceAnnotationIndices.contains(draft.sourceAnnotationIndex)) {
             return failure(
                 PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
                 pageIndex,
@@ -2826,35 +2951,104 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
             draft.sourceAnnotationIndex));
         if (!annotation.get()
             || FPDFAnnot_GetSubtype(annotation.get())
-                != sourceAnnotationSubtypeForDraft(draft)
-            || removalIndices.contains(draft.sourceAnnotationIndex)) {
+                != sourceAnnotationSubtypeForDraft(draft)) {
             return failure(
                 PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
                 pageIndex,
                 draft.objectId);
         }
-        removalIndices.insert(draft.sourceAnnotationIndex);
-        removals.append({draft.sourceAnnotationIndex, draft.objectId});
+        removalObjectIds.insert(
+            draft.sourceAnnotationIndex,
+            draft.objectId);
+    }
 
+    if (sourceAnnotationIndices.isEmpty()) {
+        return {};
+    }
+
+    for (int annotationIndex = 0;
+         annotationIndex < annotationCount;
+         ++annotationIndex) {
+        if (sourceAnnotationIndices.contains(annotationIndex)) {
+            continue;
+        }
+        PdfAnnotationHandle annotation(FPDFPage_GetAnnot(
+            page,
+            annotationIndex));
+        if (!annotation.get()
+            || !isSupportedCommentAnnotationSubtype(
+                FPDFAnnot_GetSubtype(annotation.get()))
+            || !annotationUsesReplyRelation(annotation.get())) {
+            continue;
+        }
+
+        QSet<int> visited{annotationIndex};
+        FPDF_ANNOTATION parent = FPDFAnnot_GetLinkedAnnot(
+            annotation.get(),
+            "IRT");
+        while (parent) {
+            const int parentIndex = FPDFPage_GetAnnotIndex(page, parent);
+            if (parentIndex < 0 || visited.contains(parentIndex)) {
+                FPDFPage_CloseAnnot(parent);
+                break;
+            }
+            visited.insert(parentIndex);
+            if (sourceAnnotationIndices.contains(parentIndex)) {
+                removalObjectIds.insert(
+                    annotationIndex,
+                    removalObjectIds.value(parentIndex));
+                FPDFPage_CloseAnnot(parent);
+                break;
+            }
+            if (!isSupportedCommentAnnotationSubtype(
+                    FPDFAnnot_GetSubtype(parent))
+                || !annotationUsesReplyRelation(parent)) {
+                FPDFPage_CloseAnnot(parent);
+                break;
+            }
+            FPDF_ANNOTATION nextParent = FPDFAnnot_GetLinkedAnnot(
+                parent,
+                "IRT");
+            FPDFPage_CloseAnnot(parent);
+            parent = nextParent;
+        }
+    }
+
+    const QList<int> commentIndices = removalObjectIds.keys();
+    for (int commentIndex : commentIndices) {
+        PdfAnnotationHandle annotation(FPDFPage_GetAnnot(page, commentIndex));
+        if (!annotation.get()) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
+                pageIndex,
+                removalObjectIds.value(commentIndex));
+        }
         bool popupValid = false;
         const int popupIndex = popupAnnotationIndexForSourceComment(
             page,
             annotation.get(),
-            draft.sourceAnnotationIndex,
+            commentIndex,
             annotationCount,
             popupValid);
-        if (!popupValid
-            || (popupIndex >= 0
-                && removalIndices.contains(popupIndex))) {
+        if (!popupValid) {
             return failure(
                 PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
                 pageIndex,
-                draft.objectId);
+                removalObjectIds.value(commentIndex));
         }
-        if (popupIndex >= 0) {
-            removalIndices.insert(popupIndex);
-            removals.append({popupIndex, draft.objectId});
+        if (popupIndex >= 0 && !removalObjectIds.contains(popupIndex)) {
+            removalObjectIds.insert(
+                popupIndex,
+                removalObjectIds.value(commentIndex));
         }
+    }
+
+    QVector<AnnotationRemoval> removals;
+    removals.reserve(removalObjectIds.size());
+    for (auto removal = removalObjectIds.cbegin();
+         removal != removalObjectIds.cend();
+         ++removal) {
+        removals.append({removal.key(), removal.value()});
     }
 
     std::sort(
@@ -3109,6 +3303,15 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     }
     destroyPreparedObjects(preparedDrafts);
 
+    const PDFSaveWriter::Result replyParentResult
+        = assignSourceReplyParentThreadIds(
+            page.get(),
+            drafts,
+            pageIndex);
+    if (!replyParentResult.succeeded()) {
+        return replyParentResult;
+    }
+
     const PDFSaveWriter::Result annotationRemovalResult
         = removeDeletedCommentAnnotations(
             page.get(),
@@ -3220,6 +3423,104 @@ PDFSaveWriter::Result commitDocumentFile(const QString &sourceFilePath,
             PDFSaveWriter::Error::OutputCommitFailed,
             -1,
             target.errorString());
+    }
+    return {};
+}
+
+PDFSaveWriter::Result validateAnnotationReplies(
+    const QString &filePath,
+    const QVector<PDFAcroFormCanonicalizer::AnnotationReply> &replies)
+{
+    assertPDFiumProcessLockHeld();
+    if (replies.isEmpty()) {
+        return {};
+    }
+
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    PdfDocumentHandle document(FPDF_LoadDocument(encodedPath.constData(), nullptr));
+    if (!document.get()) {
+        return failure(PDFSaveWriter::Error::CommentAnnotationCreationFailed);
+    }
+    const int pageCount = FPDF_GetPageCount(document.get());
+    for (const PDFAcroFormCanonicalizer::AnnotationReply &reply : replies) {
+        if (reply.page < 0 || reply.page >= pageCount) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                reply.page,
+                reply.replyId);
+        }
+        PdfPageHandle page(FPDF_LoadPage(document.get(), reply.page));
+        if (!page.get()) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                reply.page,
+                reply.replyId);
+        }
+
+        int parentIndex = -1;
+        int replyIndex = -1;
+        const int annotationCount = FPDFPage_GetAnnotCount(page.get());
+        for (int annotationIndex = 0;
+             annotationIndex < annotationCount;
+             ++annotationIndex) {
+            PdfAnnotationHandle annotation(FPDFPage_GetAnnot(
+                page.get(),
+                annotationIndex));
+            if (!annotation.get()) {
+                continue;
+            }
+            if (annotationString(annotation.get(), kCommentThreadIdKey)
+                    == reply.parentThreadId) {
+                if (parentIndex >= 0) {
+                    return failure(
+                        PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                        reply.page,
+                        reply.replyId);
+                }
+                parentIndex = annotationIndex;
+            }
+            if (annotationString(annotation.get(), "NM") == reply.replyId) {
+                if (replyIndex >= 0) {
+                    return failure(
+                        PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                        reply.page,
+                        reply.replyId);
+                }
+                replyIndex = annotationIndex;
+            }
+        }
+        if (parentIndex < 0 || replyIndex < 0) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                reply.page,
+                reply.replyId);
+        }
+
+        PdfAnnotationHandle replyAnnotation(FPDFPage_GetAnnot(
+            page.get(),
+            replyIndex));
+        PdfAnnotationHandle linkedParent(replyAnnotation.get()
+                ? FPDFAnnot_GetLinkedAnnot(replyAnnotation.get(), "IRT")
+                : nullptr);
+        const int linkedParentIndex = linkedParent.get()
+            ? FPDFPage_GetAnnotIndex(page.get(), linkedParent.get())
+            : -1;
+        const QString relation = replyAnnotation.get()
+            ? annotationString(replyAnnotation.get(), "RT").trimmed()
+            : QString();
+        if (!replyAnnotation.get()
+            || FPDFAnnot_GetSubtype(replyAnnotation.get()) != FPDF_ANNOT_TEXT
+            || linkedParentIndex != parentIndex
+            || (!relation.isEmpty()
+                && relation.compare(
+                    QLatin1String("R"),
+                    Qt::CaseInsensitive)
+                    != 0)) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                reply.page,
+                reply.replyId);
+        }
     }
     return {};
 }
@@ -3528,6 +3829,10 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
     for (auto draft = controller.m_drafts.cbegin();
          draft != controller.m_drafts.cend();
          ++draft) {
+        if (!draft->candidate.replyToObjectId.isEmpty()
+            && !controller.commentReplyIsVisible(draft->candidate)) {
+            continue;
+        }
         SaveDraft saveDraft;
         const bool sourceTextMoveOnly
             = PDFEditController::isSourceTextMoveOnly(*draft);
@@ -3569,6 +3874,11 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             = draft->candidate.commentCreationDate;
         saveDraft.commentModifiedDate
             = draft->candidate.commentModifiedDate;
+        saveDraft.commentThreadId = draft->candidate.commentThreadId;
+        saveDraft.replyToThreadId = draft->candidate.replyToThreadId;
+        saveDraft.replyToSourceAnnotationIndex
+            = draft->candidate.replyToSourceAnnotationIndex;
+        saveDraft.reply = !draft->candidate.replyToObjectId.isEmpty();
         if (draft->candidate.kind == QLatin1String("underline")) {
             saveDraft.annotationSubtype = FPDF_ANNOT_UNDERLINE;
         } else if (draft->candidate.kind == QLatin1String("strikeout")) {
@@ -3764,17 +4074,37 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         start = end;
     }
 
-    if (request.m_data->formFields.isEmpty()) {
+    QVector<PDFAcroFormCanonicalizer::AnnotationReply> annotationReplies;
+    for (const SaveDraft &draft : request.m_data->drafts) {
+        if (!draft.reply || draft.deleted || !draft.added) {
+            continue;
+        }
+        if (draft.replyToThreadId.isEmpty() || draft.objectId.isEmpty()) {
+            return failure(
+                Error::CommentAnnotationCreationFailed,
+                draft.page,
+                draft.objectId);
+        }
+        annotationReplies.append({
+            draft.page,
+            draft.replyToThreadId,
+            draft.objectId});
+    }
+
+    if (request.m_data->formFields.isEmpty()
+        && annotationReplies.isEmpty()) {
         return writeDocument(document.get(), request.m_data->targetFilePath);
     }
 
     QVector<PDFAcroFormWriter::Field> acroFormFields;
-    const Result fieldResult = prepareAcroFormFields(
-        document.get(),
-        request.m_data->formFields,
-        acroFormFields);
-    if (!fieldResult.succeeded()) {
-        return fieldResult;
+    if (!request.m_data->formFields.isEmpty()) {
+        const Result fieldResult = prepareAcroFormFields(
+            document.get(),
+            request.m_data->formFields,
+            acroFormFields);
+        if (!fieldResult.succeeded()) {
+            return fieldResult;
+        }
     }
 
     const QFileInfo targetInfo(request.m_data->targetFilePath);
@@ -3794,6 +4124,30 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         contentFilePath);
     if (!contentResult.succeeded()) {
         return contentResult;
+    }
+
+    if (!annotationReplies.isEmpty()) {
+        QString replyError;
+        if (!PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
+                contentFilePath,
+                annotationReplies,
+                replyError)) {
+            return failure(
+                Error::CommentAnnotationCreationFailed,
+                -1,
+                replyError);
+        }
+        const Result replyValidation = validateAnnotationReplies(
+            contentFilePath,
+            annotationReplies);
+        if (!replyValidation.succeeded()) {
+            return replyValidation;
+        }
+    }
+    if (request.m_data->formFields.isEmpty()) {
+        return commitDocumentFile(
+            contentFilePath,
+            request.m_data->targetFilePath);
     }
 
     QTemporaryFile formFile(
@@ -3817,6 +4171,12 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             Error::AcroFormCreationFailed,
             -1,
             acroFormResult.error);
+    }
+    const Result replyValidation = validateAnnotationReplies(
+        formFilePath,
+        annotationReplies);
+    if (!replyValidation.succeeded()) {
+        return replyValidation;
     }
     return commitDocumentFile(
         formFilePath,

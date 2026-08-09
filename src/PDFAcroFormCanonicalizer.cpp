@@ -833,9 +833,10 @@ bool matchingDictionaryEnd(const char *data,
                            qsizetype start,
                            qsizetype &end);
 
-PlaceholderLocation annotationForWidgetId(
+PlaceholderLocation annotationForStringId(
     const ParsedPdf &pdf,
-    const QString &widgetId,
+    QByteArrayView key,
+    const QString &identifier,
     QByteArrayView expectedSubtype)
 {
     PlaceholderLocation directCandidate;
@@ -857,19 +858,19 @@ PlaceholderLocation annotationForWidgetId(
             const qsizetype nameKey = keyPositionFrom(
                 view.data(),
                 dictionarySize,
-                "/NM",
+                key,
                 searchPosition);
             if (nameKey < 0) {
                 break;
             }
-            searchPosition = nameKey + QByteArrayView("/NM").size();
+            searchPosition = nameKey + key.size();
             QByteArray encodedName;
             if (!parsePdfString(
                     view.data(),
                     dictionarySize,
                     searchPosition,
                     encodedName)
-                || decodedPdfString(encodedName) != widgetId) {
+                || decodedPdfString(encodedName) != identifier) {
                 continue;
             }
 
@@ -919,7 +920,8 @@ PlaceholderLocation annotationForWidgetId(
                     ? subtypeKey + QByteArrayView("/Subtype").size()
                     : dictionaryLength);
             if (subtypeKey < 0
-                || !subtypeCursor.consume(expectedSubtype)) {
+                || (!expectedSubtype.isEmpty()
+                    && !subtypeCursor.consume(expectedSubtype))) {
                 continue;
             }
             const ObjectReference objectReference{
@@ -942,6 +944,18 @@ PlaceholderLocation annotationForWidgetId(
         }
     }
     return directCandidate;
+}
+
+PlaceholderLocation annotationForWidgetId(
+    const ParsedPdf &pdf,
+    const QString &widgetId,
+    QByteArrayView expectedSubtype)
+{
+    return annotationForStringId(
+        pdf,
+        QByteArrayView("/NM"),
+        widgetId,
+        expectedSubtype);
 }
 
 QByteArray encodedPdfString(const QString &value)
@@ -5140,6 +5154,316 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             ObjectReference{standardFontObjectNumber, 0},
             standardFormFontObject(standardFontObjectNumber)});
     }
+    file.unmap(mapped);
+    file.close();
+    return appendIncrementalUpdate(
+        filePath,
+        root,
+        previousXref,
+        nextObjectNumber,
+        sourceEndsWithNewline,
+        std::move(incrementalObjects),
+        error);
+}
+
+bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
+    const QString &filePath,
+    const QVector<AnnotationReply> &replies,
+    QString &error)
+{
+    if (replies.isEmpty()) {
+        return true;
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0) {
+        error = file.errorString();
+        return false;
+    }
+    const qint64 fileSize = file.size();
+    uchar *mapped = file.map(0, fileSize);
+    if (!mapped) {
+        error = file.errorString();
+        return false;
+    }
+
+    ParsedPdf pdf;
+    if (!parseXref(
+            reinterpret_cast<const char *>(mapped),
+            fileSize,
+            pdf,
+            error)) {
+        file.unmap(mapped);
+        return false;
+    }
+
+    struct DictionaryReplacement {
+        qsizetype start = -1;
+        qsizetype end = -1;
+        QByteArray value;
+    };
+    QHash<int, QVector<DictionaryReplacement>> replacementsByContainer;
+    QHash<int, ObjectReference> containerReferences;
+    QHash<int, QByteArray> rewrittenObjects;
+    QHash<int, ObjectReference> rewrittenReferences;
+    QList<IncrementalObject> newObjects;
+    QHash<QString, ObjectReference> parentReferences;
+    QSet<QString> replyIds;
+    int nextObjectNumber = pdf.declaredSize;
+
+    const auto fail = [&file, mapped, &error](const QString &message) {
+        error = message;
+        file.unmap(mapped);
+        return false;
+    };
+    const auto referenceBytes = [](const ObjectReference &reference) {
+        return QByteArray::number(reference.number)
+            + ' '
+            + QByteArray::number(reference.generation)
+            + QByteArrayLiteral(" R");
+    };
+    const auto linkedDictionary = [
+        &error,
+        &referenceBytes](QByteArray dictionary,
+                         const ObjectReference &parent) {
+        if (dictionary.size() < 4
+            || !dictionary.startsWith("<<")
+            || !dictionary.endsWith(">>")) {
+            error = QStringLiteral(
+                "A comment reply annotation dictionary is malformed.");
+            return QByteArray();
+        }
+        if (keyPosition(
+                dictionary.constData(),
+                dictionary.size(),
+                QByteArrayView("/IRT"))
+            >= 0) {
+            error = QStringLiteral(
+                "A comment reply already contains an IRT relationship.");
+            return QByteArray();
+        }
+        dictionary.insert(
+            dictionary.size() - 2,
+            QByteArrayLiteral(" /IRT ")
+                + referenceBytes(parent)
+                + QByteArrayLiteral(" /RT /R"));
+        return dictionary;
+    };
+
+    for (const AnnotationReply &reply : replies) {
+        if (reply.page < 0
+            || reply.parentThreadId.isEmpty()
+            || reply.replyId.isEmpty()
+            || replyIds.contains(reply.replyId)) {
+            return fail(QStringLiteral(
+                "A comment reply relationship is invalid or duplicated."));
+        }
+        replyIds.insert(reply.replyId);
+
+        if (parentReferences.contains(reply.parentThreadId)) {
+            continue;
+        }
+        const PlaceholderLocation parent = annotationForStringId(
+            pdf,
+            QByteArrayView("/TrePDFThreadId"),
+            reply.parentThreadId,
+            QByteArrayView());
+        const bool parentLocated = parent.widget.number >= 0
+            || (parent.container.number >= 0
+                && parent.dictionaryStart >= 0
+                && parent.dictionaryEnd > parent.dictionaryStart);
+        if (!parentLocated) {
+            return fail(QStringLiteral(
+                "The parent annotation for a comment reply could not be located."));
+        }
+        if (!parent.isDirect()) {
+            parentReferences.insert(
+                reply.parentThreadId,
+                parent.widget);
+            continue;
+        }
+
+        const QByteArray containerObject = completeObject(
+            pdf,
+            parent.container.number,
+            error);
+        if (containerObject.isEmpty()
+            || parent.dictionaryStart < 0
+            || parent.dictionaryEnd <= parent.dictionaryStart
+            || parent.dictionaryEnd > containerObject.size()) {
+            return fail(error.isEmpty()
+                    ? QStringLiteral(
+                        "A direct parent comment annotation is malformed.")
+                    : error);
+        }
+        if (nextObjectNumber >= std::numeric_limits<int>::max()) {
+            return fail(QStringLiteral(
+                "The PDF has no available object number for a comment reply."));
+        }
+        const ObjectReference promotedReference{nextObjectNumber++, 0};
+        QByteArray promotedObject = QByteArray::number(
+                promotedReference.number)
+            + QByteArrayLiteral(" 0 obj\n")
+            + containerObject.mid(
+                parent.dictionaryStart,
+                parent.dictionaryEnd - parent.dictionaryStart)
+            + QByteArrayLiteral("\nendobj");
+        newObjects.append({promotedReference, std::move(promotedObject)});
+        replacementsByContainer[parent.container.number].append({
+            parent.dictionaryStart,
+            parent.dictionaryEnd,
+            referenceBytes(promotedReference)});
+        containerReferences.insert(
+            parent.container.number,
+            parent.container);
+        parentReferences.insert(
+            reply.parentThreadId,
+            promotedReference);
+    }
+
+    for (const AnnotationReply &reply : replies) {
+        const ObjectReference parentReference = parentReferences.value(
+            reply.parentThreadId,
+            ObjectReference{});
+        if (parentReference.number < 0) {
+            return fail(QStringLiteral(
+                "The parent annotation reference for a comment reply is missing."));
+        }
+        const PlaceholderLocation child = annotationForStringId(
+            pdf,
+            QByteArrayView("/NM"),
+            reply.replyId,
+            QByteArrayView("/Text"));
+        const bool childLocated = child.widget.number >= 0
+            || (child.container.number >= 0
+                && child.dictionaryStart >= 0
+                && child.dictionaryEnd > child.dictionaryStart);
+        if (!childLocated) {
+            return fail(QStringLiteral(
+                "A comment reply annotation could not be located."));
+        }
+
+        if (child.isDirect()) {
+            const QByteArray containerObject = completeObject(
+                pdf,
+                child.container.number,
+                error);
+            if (containerObject.isEmpty()
+                || child.dictionaryStart < 0
+                || child.dictionaryEnd <= child.dictionaryStart
+                || child.dictionaryEnd > containerObject.size()) {
+                return fail(error.isEmpty()
+                        ? QStringLiteral(
+                            "A direct comment reply annotation is malformed.")
+                        : error);
+            }
+            const QByteArray dictionary = linkedDictionary(
+                containerObject.mid(
+                    child.dictionaryStart,
+                    child.dictionaryEnd - child.dictionaryStart),
+                parentReference);
+            if (dictionary.isEmpty()) {
+                return fail(error);
+            }
+            replacementsByContainer[child.container.number].append({
+                child.dictionaryStart,
+                child.dictionaryEnd,
+                dictionary});
+            containerReferences.insert(
+                child.container.number,
+                child.container);
+            continue;
+        }
+
+        QByteArray childObject = completeObject(
+            pdf,
+            child.widget.number,
+            error);
+        const qsizetype dictionaryStart = findBytes(
+            childObject.constData(),
+            childObject.size(),
+            "<<");
+        qsizetype dictionaryEnd = -1;
+        if (childObject.isEmpty()
+            || dictionaryStart < 0
+            || !matchingDictionaryEnd(
+                childObject.constData(),
+                childObject.size(),
+                dictionaryStart,
+                dictionaryEnd)) {
+            return fail(error.isEmpty()
+                    ? QStringLiteral(
+                        "An indirect comment reply annotation is malformed.")
+                    : error);
+        }
+        const QByteArray dictionary = linkedDictionary(
+            childObject.mid(
+                dictionaryStart,
+                dictionaryEnd - dictionaryStart),
+            parentReference);
+        if (dictionary.isEmpty()) {
+            return fail(error);
+        }
+        childObject.replace(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart,
+            dictionary);
+        rewrittenObjects.insert(child.widget.number, std::move(childObject));
+        rewrittenReferences.insert(child.widget.number, child.widget);
+    }
+
+    for (auto container = replacementsByContainer.begin();
+         container != replacementsByContainer.end();
+         ++container) {
+        if (rewrittenObjects.contains(container.key())) {
+            return fail(QStringLiteral(
+                "A comment annotation container cannot be rewritten safely."));
+        }
+        QByteArray object = completeObject(pdf, container.key(), error);
+        if (object.isEmpty()) {
+            return fail(error);
+        }
+        std::sort(
+            container->begin(),
+            container->end(),
+            [](const DictionaryReplacement &left,
+               const DictionaryReplacement &right) {
+                return left.start > right.start;
+            });
+        qsizetype previousStart = object.size();
+        for (const DictionaryReplacement &replacement
+             : std::as_const(*container)) {
+            if (replacement.start < 0
+                || replacement.end <= replacement.start
+                || replacement.end > previousStart
+                || replacement.end > object.size()) {
+                return fail(QStringLiteral(
+                    "Overlapping comment annotation rewrites are not supported."));
+            }
+            object.replace(
+                replacement.start,
+                replacement.end - replacement.start,
+                replacement.value);
+            previousStart = replacement.start;
+        }
+        rewrittenObjects.insert(container.key(), std::move(object));
+        rewrittenReferences.insert(
+            container.key(),
+            containerReferences.value(container.key()));
+    }
+
+    QList<IncrementalObject> incrementalObjects = std::move(newObjects);
+    for (auto object = rewrittenObjects.begin();
+         object != rewrittenObjects.end();
+         ++object) {
+        incrementalObjects.append({
+            rewrittenReferences.value(object.key()),
+            std::move(object.value())});
+    }
+    const bool sourceEndsWithNewline = fileSize > 0
+        && reinterpret_cast<const char *>(mapped)[fileSize - 1] == '\n';
+    const ObjectReference root = pdf.root;
+    const qint64 previousXref = pdf.startXref;
     file.unmap(mapped);
     file.close();
     return appendIncrementalUpdate(

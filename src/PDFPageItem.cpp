@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 #include <QMetaObject>
 #include <QPointer>
+#include <QSet>
 #include <QSGSimpleTextureNode>
 #include <QSGTexture>
 #include <QQuickWindow>
@@ -20,6 +21,8 @@
 namespace {
 
 using CancellationFlag = std::shared_ptr<std::atomic_bool>;
+constexpr unsigned long kMaximumAnnotationStringBytes
+    = 4UL * 1024UL * 1024UL;
 
 bool isCancelled(const CancellationFlag &cancellation)
 {
@@ -205,6 +208,50 @@ int popupAnnotationIndexForComment(FPDF_PAGE page,
         : reversePopupIndex;
 }
 
+QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
+{
+    const unsigned long byteLength = annotation
+        ? FPDFAnnot_GetStringValue(annotation, key, nullptr, 0)
+        : 0;
+    if (byteLength < sizeof(FPDF_WCHAR)
+        || byteLength > kMaximumAnnotationStringBytes) {
+        return {};
+    }
+    QVector<FPDF_WCHAR> buffer(static_cast<qsizetype>(
+        (byteLength + sizeof(FPDF_WCHAR) - 1) / sizeof(FPDF_WCHAR)));
+    const unsigned long actualLength = FPDFAnnot_GetStringValue(
+        annotation,
+        key,
+        buffer.data(),
+        byteLength);
+    if (actualLength < sizeof(FPDF_WCHAR)) {
+        return {};
+    }
+    qsizetype characterCount = static_cast<qsizetype>(
+        actualLength / sizeof(FPDF_WCHAR));
+    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
+        --characterCount;
+    }
+    return QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(buffer.constData()),
+        characterCount);
+}
+
+bool isSupportedCommentAnnotationSubtype(int subtype)
+{
+    return subtype == FPDF_ANNOT_HIGHLIGHT
+        || subtype == FPDF_ANNOT_UNDERLINE
+        || subtype == FPDF_ANNOT_STRIKEOUT
+        || subtype == FPDF_ANNOT_TEXT;
+}
+
+bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
+{
+    const QString relation = annotationString(annotation, "RT").trimmed();
+    return relation.isEmpty()
+        || relation.compare(QLatin1String("R"), Qt::CaseInsensitive) == 0;
+}
+
 bool commentAnnotationIndices(
     FPDF_PAGE page,
     const QVector<PDFEditController::DraftAnnotationDeletion> &deletions,
@@ -217,12 +264,12 @@ bool commentAnnotationIndices(
     }
 
     const int annotationCount = FPDFPage_GetAnnotCount(page);
-    annotationIndices.reserve(deletions.size() * 2);
+    QSet<int> commentIndices;
     for (const PDFEditController::DraftAnnotationDeletion &deletion
          : deletions) {
         if (deletion.annotationIndex < 0
             || deletion.annotationIndex >= annotationCount
-            || annotationIndices.contains(deletion.annotationIndex)) {
+            || commentIndices.contains(deletion.annotationIndex)) {
             annotationIndices.clear();
             return false;
         }
@@ -239,27 +286,84 @@ bool commentAnnotationIndices(
             annotationIndices.clear();
             return false;
         }
-        annotationIndices.append(deletion.annotationIndex);
+        commentIndices.insert(deletion.annotationIndex);
+        FPDFPage_CloseAnnot(annotation);
+    }
 
+    const QSet<int> deletedRoots = commentIndices;
+    for (int annotationIndex = 0;
+         annotationIndex < annotationCount;
+         ++annotationIndex) {
+        if (commentIndices.contains(annotationIndex)) {
+            continue;
+        }
+        FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(page, annotationIndex);
+        if (!annotation) {
+            continue;
+        }
+        const bool eligible = isSupportedCommentAnnotationSubtype(
+                FPDFAnnot_GetSubtype(annotation))
+            && annotationUsesReplyRelation(annotation);
+        FPDF_ANNOTATION parent = eligible
+            ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
+            : nullptr;
+        FPDFPage_CloseAnnot(annotation);
+        if (!eligible) {
+            continue;
+        }
+
+        QSet<int> visited{annotationIndex};
+        while (parent) {
+            const int parentIndex = FPDFPage_GetAnnotIndex(page, parent);
+            if (parentIndex < 0 || visited.contains(parentIndex)) {
+                FPDFPage_CloseAnnot(parent);
+                break;
+            }
+            visited.insert(parentIndex);
+            if (deletedRoots.contains(parentIndex)) {
+                commentIndices.insert(annotationIndex);
+                FPDFPage_CloseAnnot(parent);
+                break;
+            }
+            if (!isSupportedCommentAnnotationSubtype(
+                    FPDFAnnot_GetSubtype(parent))
+                || !annotationUsesReplyRelation(parent)) {
+                FPDFPage_CloseAnnot(parent);
+                break;
+            }
+            FPDF_ANNOTATION nextParent = FPDFAnnot_GetLinkedAnnot(
+                parent,
+                "IRT");
+            FPDFPage_CloseAnnot(parent);
+            parent = nextParent;
+        }
+    }
+
+    QSet<int> hiddenIndices = commentIndices;
+    for (int commentIndex : std::as_const(commentIndices)) {
+        FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(page, commentIndex);
+        if (!annotation) {
+            annotationIndices.clear();
+            return false;
+        }
         bool popupValid = false;
         const int popupIndex = popupAnnotationIndexForComment(
             page,
             annotation,
-            deletion.annotationIndex,
+            commentIndex,
             annotationCount,
             popupValid);
-        if (!popupValid
-            || (popupIndex >= 0
-                && annotationIndices.contains(popupIndex))) {
-            FPDFPage_CloseAnnot(annotation);
+        FPDFPage_CloseAnnot(annotation);
+        if (!popupValid) {
             annotationIndices.clear();
             return false;
         }
         if (popupIndex >= 0) {
-            annotationIndices.append(popupIndex);
+            hiddenIndices.insert(popupIndex);
         }
-        FPDFPage_CloseAnnot(annotation);
     }
+    annotationIndices = hiddenIndices.values();
+    std::sort(annotationIndices.begin(), annotationIndices.end());
     return true;
 }
 

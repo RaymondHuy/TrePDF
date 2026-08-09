@@ -23,8 +23,10 @@ Current features:
   comments can be indexed, selected, and deleted with undo/redo/discard.
   Save/Save As persists additions and removals without rewriting page content
   streams on annotation-only pages. The comments panel shows each annotation's
-  author and modification date, falling back to its creation date. Existing
-  comment contents remain read-only.
+  author and modification date, falling back to its creation date. Root
+  comments accept replies; the panel flattens imported reply chains to one
+  display level, saves new replies with standard `/IRT`, and cascades root
+  deletion across the thread. Existing comment contents remain read-only.
 - Draw rectangles, ovals, lines, arrows, triangles, and diamonds from the
   Shapes dropdown. Added shapes are vector session drafts that can be selected,
   moved, resized, deleted, undone/redone, and persisted as PDF path objects.

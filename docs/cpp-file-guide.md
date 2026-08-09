@@ -212,6 +212,9 @@ orchestration Save.
 - Đọc Highlight, Underline, Strikeout và Text annotation; chuẩn hóa quad/rect,
   màu và `/Contents` thành comment candidate. Nội dung annotation nguồn chỉ đọc,
   nhưng xóa tạo tombstone draft theo annotation index và subtype.
+- Đọc quan hệ reply chuẩn qua `/IRT` và `/RT`; chuỗi reply nhiều tầng từ PDF
+  ngoài được lần về root rồi trình bày thành đúng một cấp. Metadata private chỉ
+  dùng để định danh ổn định parent trong pipeline ghi trước khi tạo `/IRT` chuẩn.
 - `requestCommentIndex()` dùng worker riêng để quét annotation-only từng trang,
   nhả PDFium lock giữa các trang và chỉ giữ comment candidate. Vì vậy danh sách
   toàn tài liệu không làm phình cache text/image 12 trang của viewport.
@@ -251,7 +254,8 @@ orchestration Save.
   Underline và Strikeout giữ quad/màu; Sticky Note giữ frame 24 pt và nội dung
   chỉnh từ `CommentPanel`.
 - `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
-  hướng cho panel; nội dung Sticky Note mới tham gia cùng snapshot undo/redo.
+  hướng phẳng cho panel theo thứ tự root rồi replies. `addCommentReply()` chỉ
+  nhận root, còn nội dung Sticky Note/reply mới tham gia cùng snapshot undo/redo.
 - Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 
@@ -300,9 +304,11 @@ orchestration Save.
 - Tạo bitmap object cho ảnh thêm mới, path object cho sáu shape, các standard
   Highlight/Underline/Strikeout annotation với quad/color/Print flag và Text
   annotation với rect/color/`Contents`/`NM`/Print flag.
-- Xóa comment nguồn và `/Popup` liên kết theo annotation index từ lớn xuống nhỏ,
-  xác thực lại subtype trước khi gỡ; page chỉ đổi annotation không gọi
-  `FPDFPage_GenerateContent()`.
+- Ghi parent/reply vào file tạm, định danh bằng metadata ổn định rồi canonicalize
+  reply thành `/IRT <parent-ref>` và `/RT /R` trước khi commit giao dịch.
+- Xóa comment nguồn, toàn bộ reply hậu duệ và `/Popup` liên kết theo annotation
+  index từ lớn xuống nhỏ, xác thực lại subtype trước khi gỡ; page chỉ đổi
+  annotation không gọi `FPDFPage_GenerateContent()`.
 - Giữ earliest source z-order bằng insert-at-index; object thêm mới theo insertion
   order. Dùng `FPDF_DeviceToPage()` để tôn trọng CropBox/rotation.
 - Chỉ gọi `FPDFPage_GenerateContent()` cho page có content object thay đổi;
@@ -545,8 +551,8 @@ TrePDF phải fail rõ ràng.
 ### [`src/PDFAcroFormCanonicalizer.cpp`](../src/PDFAcroFormCanonicalizer.cpp)
 và [`src/PDFAcroFormCanonicalizer.h`](../src/PDFAcroFormCanonicalizer.h)
 
-**Vai trò:** bộ đọc/ghi PDF mục đích hẹp để hoàn thiện AcroForm mà PDFium public
-API không thể dựng trực tiếp.
+**Vai trò:** bộ đọc/ghi PDF mục đích hẹp để hoàn thiện AcroForm và liên kết reply
+annotation mà PDFium public API không thể dựng trực tiếp.
 
 **Đọc cấu trúc:**
 
@@ -554,6 +560,9 @@ API không thể dựng trực tiếp.
   trường hợp AcroForm cần xử lý.
 - Tìm Catalog, `/AcroForm`, `/Fields`, page annotation arrays, placeholder có
   `NM` khớp widget id và field/widget hiện có cần update/remove.
+- Với reply, tìm child qua `/NM`, tìm parent qua thread id ổn định, promote
+  direct annotation khi cần rồi thêm reference `/IRT` và name `/RT /R` bằng
+  incremental update.
 - Thu field names để phát hiện trùng tên và bảo toàn reference hiện hữu.
 - Đây không phải PDF editor tổng quát; parser chỉ nên mở rộng khi writer có test
   fixture tương ứng.

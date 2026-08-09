@@ -413,10 +413,10 @@ Overlay hiện tại phối hợp với render worker, không phải chỉ “v�
    bỏ fallback đúng lúc.
 
 Khi xóa comment nguồn, render request còn mang annotation index và subtype.
-Worker tạm thêm cờ Hidden cho comment cùng `/Popup` liên kết trước
-`FPDF_RenderPageBitmap()`, không cho form layer vẽ popup, rồi phục hồi đúng cờ
-gốc trước khi tái sử dụng form document; Save mới gỡ các annotation thật khỏi
-PDF.
+Worker lần quan hệ `/IRT` để đưa mọi reply hậu duệ cùng `/Popup` liên kết vào
+tập suppress, tạm thêm cờ Hidden trước `FPDF_RenderPageBitmap()`, không cho form
+layer vẽ popup, rồi phục hồi đúng cờ gốc trước khi tái sử dụng form document;
+Save mới gỡ các annotation thật khỏi PDF.
 
 ### Source widget của form designer
 

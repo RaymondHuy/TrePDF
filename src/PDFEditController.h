@@ -211,6 +211,9 @@ public:
                                          const QRectF &selectionRect);
     Q_INVOKABLE QVariantMap addStickyNote(int page,
                                          const QPointF &position);
+    Q_INVOKABLE QVariantMap addCommentReply(int page,
+                                            const QString &parentObjectId,
+                                            const QString &text);
     Q_INVOKABLE int addBlankPage();
     Q_INVOKABLE int deleteCurrentPage();
     Q_INVOKABLE QFont fontForDisplay(const QString &fontFamily,
@@ -331,6 +334,12 @@ private:
         QString commentAuthor;
         QDateTime commentCreationDate;
         QDateTime commentModifiedDate;
+        QString commentThreadId;
+        QString replyToObjectId;
+        QString replyToThreadId;
+        int replyToSourceAnnotationIndex = -1;
+        int replyDirectParentSourceAnnotationIndex = -1;
+        bool replyToParentAdded = false;
         QString fontFamily;
         QString fontIdentity;
         qreal fontSizeRatio = 0.0;
@@ -547,6 +556,7 @@ private:
     bool documentAllowsAnnotations() const;
     bool documentAllowsPageAssembly() const;
     QString draftKey(int page, const QString &objectId) const;
+    bool commentReplyIsVisible(const Candidate &candidate) const;
     void markDraftStateChanged(int page, bool immediate);
     void requestDraftRender(int page, bool immediate);
     bool removeCommentCandidate(const Candidate &candidate);
