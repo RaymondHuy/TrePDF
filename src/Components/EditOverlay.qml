@@ -1402,11 +1402,16 @@ Item {
             z: 1
             Accessible.ignored: true
 
-            Label {
-                anchors.centerIn: parent
-                text: "\u270e"
-                color: "#5f5312"
-                font.pixelSize: Math.max(11, Math.min(16, parent.height * 0.58))
+            Image {
+                anchors.fill: parent
+                anchors.margins: Math.max(
+                    3,
+                    Math.min(parent.width, parent.height) * 0.2)
+                source: "../assets/icons/comment.svg"
+                sourceSize.width: width
+                sourceSize.height: height
+                fillMode: Image.PreserveAspectFit
+                smooth: true
                 Accessible.ignored: true
             }
         }
