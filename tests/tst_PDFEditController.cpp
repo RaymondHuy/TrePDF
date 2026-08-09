@@ -8,6 +8,7 @@
 #include "PDFFormAppearance.h"
 #include "PDFFormView.h"
 #include "PDFFormWorker.h"
+#include "PDFPageItem.h"
 #include "PDFSaveWriter.h"
 #include "PDFTabModel.h"
 #include "PDFWidgetAnnotationSuppression.h"
@@ -764,6 +765,77 @@ QImage renderFirstPageWithForms(
     return image;
 }
 
+class TestablePDFPageItem final : public PDFPageItem
+{
+public:
+    explicit TestablePDFPageItem(QQuickItem *parent = nullptr)
+        : PDFPageItem(parent)
+    {
+    }
+
+    void completeForTest()
+    {
+        if (!isComponentComplete()) {
+            componentComplete();
+        }
+    }
+};
+
+QImage renderFirstPageInViewer(const QString &filePath,
+                               const QSize &logicalSize)
+{
+    if (logicalSize.isEmpty()) {
+        return {};
+    }
+
+    PDFDocument document;
+    PDFEditController editController;
+    PDFFormController formController;
+    if (!document.open(QUrl::fromLocalFile(filePath))) {
+        return {};
+    }
+    editController.setDocument(&document);
+    formController.setDocument(&document);
+
+    QQuickWindow window;
+    window.setColor(Qt::white);
+    window.resize(logicalSize);
+
+    TestablePDFPageItem pageItem(window.contentItem());
+    pageItem.setWidth(logicalSize.width());
+    pageItem.setHeight(logicalSize.height());
+    pageItem.setEditController(&editController);
+    pageItem.setFormController(&formController);
+    pageItem.setDocument(&document);
+    pageItem.setPage(0);
+    pageItem.completeForTest();
+
+    window.show();
+    QElapsedTimer timer;
+    timer.start();
+    while ((!window.isExposed() || !pageItem.draftTextureCurrent())
+           && timer.elapsed() < 5000) {
+        QTest::qWait(10);
+    }
+    if (!window.isExposed() || !pageItem.draftTextureCurrent()) {
+        return {};
+    }
+
+    const QSharedPointer<QQuickItemGrabResult> grabResult
+        = pageItem.grabToImage(logicalSize);
+    if (!grabResult) {
+        return {};
+    }
+    QSignalSpy readySpy(grabResult.data(), &QQuickItemGrabResult::ready);
+    timer.restart();
+    while (grabResult->image().isNull()
+           && readySpy.isEmpty()
+           && timer.elapsed() < 5000) {
+        QTest::qWait(10);
+    }
+    return grabResult->image();
+}
+
 qsizetype changedPixelCount(const QImage &left,
                             const QImage &right,
                             const QRect &area)
@@ -1133,6 +1205,43 @@ bool createNestedCommentRepliesPdf(const QString &filePath)
                 "/Rect [80 144 104 168] /Contents (Nested reply) "
                 "/CreationDate (D:20240101110000Z) /NM (nested-reply) "
                 "/IRT 5 0 R /RT /R /F 4 >>"),
+        });
+}
+
+bool createRootCommentOnlyPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [4 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [24 144 48 168] /Contents (Root comment) "
+                "/CreationDate (D:20240101090000Z) /NM (root-comment) /F 4 >>"),
+        });
+}
+
+bool createUnsupportedRootCommentReplyPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [4 0 R 5 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Link /P 3 0 R "
+                "/Rect [24 144 48 168] /Border [0 0 0] /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [52 144 76 168] /Contents (Unresolved reply) "
+                "/NM (unresolved-reply) /IRT 4 0 R /RT /R /F 4 >>"),
         });
 }
 
@@ -3173,6 +3282,8 @@ private slots:
     void addsStickyNoteWithPanelModelAndUndo();
     void addsCommentReplyWithOneLevelModelAndUndo();
     void flattensNestedSourceCommentReplies();
+    void hidesCommentRepliesFromViewer();
+    void hidesUnresolvedSourceReplyFromViewerModel();
     void deletesMixedSubtypeSourceReplyThread();
     void rejectsNonMarkupReplyDescendantDeletion();
     void deletesSourceCommentsWithUndoRedoDiscardAndSave();
@@ -11081,6 +11192,21 @@ void PDFEditControllerTest::addsCommentReplyWithOneLevelModelAndUndo()
         reply.value(QStringLiteral("parentObjectId")).toString(),
         rootObjectId);
     QVERIFY(reply.value(QStringLiteral("isReply")).toBool());
+    QVERIFY(controller.selectedCommentReply());
+
+    const QVariantList pageDrafts = controller.draftsForPage(0);
+    QCOMPARE(pageDrafts.size(), 1);
+    QCOMPARE(
+        pageDrafts.constFirst().toMap()
+            .value(QStringLiteral("objectId")).toString(),
+        rootObjectId);
+    const QVariantList pageCandidates = controller.candidatesForPage(0);
+    for (const QVariant &pageCandidate : pageCandidates) {
+        QVERIFY(
+            pageCandidate.toMap()
+                .value(QStringLiteral("objectId")).toString()
+            != replyObjectId);
+    }
 
     QVariantList comments = controller.commentItems();
     QCOMPARE(comments.size(), 2);
@@ -11211,6 +11337,98 @@ void PDFEditControllerTest::flattensNestedSourceCommentReplies()
     QVERIFY(rootInspection.readable);
     QCOMPARE(rootInspection.count, 1);
     QCOMPARE(rootInspection.contents, QStringLiteral("Root comment"));
+}
+
+void PDFEditControllerTest::hidesCommentRepliesFromViewer()
+{
+    if (QGuiApplication::screens().isEmpty()) {
+        QSKIP("The PDF viewer regression test needs a Qt Quick render screen.");
+    }
+
+    const QString rootOnlyPath = m_temporaryDirectory.filePath(
+        QStringLiteral("viewer-root-comment-only.pdf"));
+    const QString repliesPath = m_temporaryDirectory.filePath(
+        QStringLiteral("viewer-comment-replies.pdf"));
+    QVERIFY(createRootCommentOnlyPdf(rootOnlyPath));
+    QVERIFY(createNestedCommentRepliesPdf(repliesPath));
+
+    const QSize renderSize(240, 240);
+    const QImage rootOnlyImage = renderFirstPageInViewer(
+        rootOnlyPath,
+        renderSize);
+    const QImage repliesImage = renderFirstPageInViewer(
+        repliesPath,
+        renderSize);
+    QVERIFY(!rootOnlyImage.isNull());
+    QVERIFY(!repliesImage.isNull());
+    QCOMPARE(rootOnlyImage.size(), repliesImage.size());
+
+    QImage blankImage(rootOnlyImage.size(), QImage::Format_ARGB32);
+    blankImage.fill(Qt::white);
+    QVERIFY(changedPixelCount(
+        rootOnlyImage,
+        blankImage,
+        rootOnlyImage.rect()) > 0);
+    QCOMPARE(
+        changedPixelCount(
+            rootOnlyImage,
+            repliesImage,
+            rootOnlyImage.rect()),
+        0);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(repliesPath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 3, 5000);
+    QCOMPARE(controller.commentItems().size(), 3);
+    const QVariantMap sourceReply = controller.commentItems().at(1).toMap();
+    QVERIFY(sourceReply.value(QStringLiteral("isReply")).toBool());
+    QVERIFY(controller.selectComment(
+        0,
+        sourceReply.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.selectedCommentReply());
+    const QVariantList pageCandidates = waitForCandidates(controller, 0);
+    bool rootCandidateFound = false;
+    for (const QVariant &candidate : pageCandidates) {
+        const QVariantMap candidateMap = candidate.toMap();
+        QVERIFY(!candidateMap.value(QStringLiteral("isReply")).toBool());
+        rootCandidateFound = rootCandidateFound
+            || (candidateMap.value(QStringLiteral("kind")).toString()
+                    == QStringLiteral("stickyNote")
+                && candidateMap.value(QStringLiteral("text")).toString()
+                    == QStringLiteral("Root comment"));
+    }
+    QVERIFY(rootCandidateFound);
+}
+
+void PDFEditControllerTest::hidesUnresolvedSourceReplyFromViewerModel()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("viewer-unresolved-comment-reply.pdf"));
+    QVERIFY(createUnsupportedRootCommentReplyPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+
+    const QVariantMap reply = controller.commentItems().constFirst().toMap();
+    QCOMPARE(
+        reply.value(QStringLiteral("text")).toString(),
+        QStringLiteral("Unresolved reply"));
+    QVERIFY(!reply.value(QStringLiteral("isReply")).toBool());
+    QVERIFY(controller.selectComment(
+        0,
+        reply.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.selectedCommentReply());
+
+    QVERIFY(waitForCandidates(controller, 0).isEmpty());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(controller.candidateAt(0, 0.32, 0.22).isEmpty());
 }
 
 void PDFEditControllerTest::deletesMixedSubtypeSourceReplyThread()

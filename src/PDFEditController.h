@@ -46,6 +46,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(int selectedPage READ selectedPage NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedObjectId READ selectedObjectId NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedKind READ selectedKind NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedCommentReply READ selectedCommentReply NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QRectF selectedSourceRect READ selectedSourceRect NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QRectF selectedFrameRect READ selectedFrameRect NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QRectF selectedContentBounds READ selectedContentBounds NOTIFY selectionChanged FINAL)
@@ -157,6 +158,7 @@ public:
     int selectedPage() const;
     QString selectedObjectId() const;
     QString selectedKind() const;
+    bool selectedCommentReply() const;
     QRectF selectedSourceRect() const;
     QRectF selectedFrameRect() const;
     QRectF selectedContentBounds() const;
@@ -339,6 +341,7 @@ private:
         QString replyToThreadId;
         int replyToSourceAnnotationIndex = -1;
         int replyDirectParentSourceAnnotationIndex = -1;
+        bool isReplyAnnotation = false;
         bool replyToParentAdded = false;
         QString fontFamily;
         QString fontIdentity;

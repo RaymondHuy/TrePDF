@@ -2178,6 +2178,7 @@ Item {
             && !root.editing
             && root.controller.selectedPage === root.page
             && root.controller.selectedObjectId.length > 0
+            && !root.controller.selectedCommentReply
             && root.controller.selectedKind !== "addedText"
             && !root.controller.selectedEditable
             && !root.hasActiveDraft(root.controller.selectedObjectId)
@@ -2413,6 +2414,7 @@ Item {
         visible: root.interactionActive
             && root.controller.selectedPage === root.page
             && root.controller.selectedObjectId.length > 0
+            && !root.controller.selectedCommentReply
             && root.controller.selectedEditable
             && (root.editing
                 || (root.controller.tool !== PDFEditController.AddTextTool
@@ -2763,6 +2765,7 @@ Item {
         visible: root.interactionActive
             && root.controller.selectedPage === root.page
             && root.controller.selectedObjectId.length > 0
+            && !root.controller.selectedCommentReply
             && !root.controller.selectedEditable
 
         Label {

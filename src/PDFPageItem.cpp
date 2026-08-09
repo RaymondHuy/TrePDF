@@ -270,7 +270,7 @@ bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
         || relation.compare(QLatin1String("R"), Qt::CaseInsensitive) == 0;
 }
 
-bool commentAnnotationIndices(
+bool hiddenCommentAnnotationIndices(
     FPDF_PAGE page,
     const QVector<PDFEditController::DraftAnnotationDeletion> &deletions,
     QVector<int> &annotationIndices)
@@ -325,6 +325,12 @@ bool commentAnnotationIndices(
         FPDF_ANNOTATION parent = replyRelation
             ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
             : nullptr;
+        if (parent && markupReplyChain) {
+            // Replies stay available to the comments panel and save pipeline,
+            // but their standalone annotation appearances are not part of the
+            // page viewer.
+            commentIndices.insert(annotationIndex);
+        }
         FPDFPage_CloseAnnot(annotation);
         if (!replyRelation) {
             continue;
@@ -406,9 +412,13 @@ public:
         assertPDFiumProcessLockHeld();
         m_page = page;
         QVector<int> annotationIndices;
-        if (!commentAnnotationIndices(page, deletions, annotationIndices)) {
+        if (!hiddenCommentAnnotationIndices(
+                page,
+                deletions,
+                annotationIndices)) {
             return false;
         }
+        m_hasTargetAnnotations = !annotationIndices.isEmpty();
         m_states.reserve(annotationIndices.size());
         for (int annotationIndex : std::as_const(annotationIndices)) {
             FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
@@ -464,6 +474,11 @@ public:
         return m_restoreSucceeded;
     }
 
+    bool hasTargetAnnotations() const
+    {
+        return m_hasTargetAnnotations;
+    }
+
 private:
     struct State {
         int annotationIndex = -1;
@@ -474,6 +489,7 @@ private:
     QVector<State> m_states;
     bool m_restored = false;
     bool m_restoreSucceeded = true;
+    bool m_hasTargetAnnotations = false;
 };
 
 struct PreviewAnnotationRemovalResult {
@@ -491,7 +507,7 @@ PreviewAnnotationRemovalResult removePreviewAnnotations(
     }
 
     QVector<int> annotationIndices;
-    if (!commentAnnotationIndices(page, deletions, annotationIndices)) {
+    if (!hiddenCommentAnnotationIndices(page, deletions, annotationIndices)) {
         return {};
     }
 
@@ -682,7 +698,7 @@ PageRenderResult renderPageFromFile(
 
     bool suppressionApplied = draftObjectPaths.isEmpty();
     bool objectMovesApplied = draftObjectMoves.isEmpty();
-    bool annotationSuppressionApplied = deletedCommentAnnotations.isEmpty();
+    bool annotationSuppressionApplied = false;
     bool widgetSuppressionApplied = suppressedFormWidgetIds.isEmpty();
     bool renderPerformed = false;
     {
@@ -730,6 +746,7 @@ PageRenderResult renderPageFromFile(
                     PDFWidgetAnnotationSuppression widgetSuppression;
                     QVector<PDFWidgetRenderPatch> widgetPatches;
                     bool omitSourceAnnotations = false;
+                    bool omitFormAnnotations = false;
                     if (!draftObjectPaths.isEmpty()) {
                         suppressionApplied = suppression.suppress(
                             previewPage,
@@ -741,29 +758,29 @@ PageRenderResult renderPageFromFile(
                             pixelSize,
                             draftObjectMoves);
                     }
-                    if (!deletedCommentAnnotations.isEmpty()) {
-                        annotationSuppressionApplied
-                            = annotationSuppression.suppress(
+                    annotationSuppressionApplied
+                        = annotationSuppression.suppress(
+                            previewPage,
+                            deletedCommentAnnotations);
+                    omitFormAnnotations
+                        = annotationSuppression.hasTargetAnnotations();
+                    if (!annotationSuppressionApplied
+                        && annotationSuppression.restorationSucceeded()) {
+                        const PreviewAnnotationRemovalResult removal
+                            = removePreviewAnnotations(
                                 previewPage,
                                 deletedCommentAnnotations);
-                        if (!annotationSuppressionApplied
-                            && annotationSuppression.restorationSucceeded()) {
-                            const PreviewAnnotationRemovalResult removal
-                                = removePreviewAnnotations(
-                                    previewPage,
-                                    deletedCommentAnnotations);
-                            annotationSuppressionApplied = removal.removedAll;
-                            renderDocumentReusable
-                                = removal.documentReusable;
-                        }
-                        if (!annotationSuppressionApplied) {
-                            // The deleted annotation must never leak back into
-                            // the draft preview. If both targeted strategies
-                            // fail, omit the page annotation pass and let
-                            // FPDF_FFLDraw render form widgets separately.
-                            omitSourceAnnotations = true;
-                            annotationSuppressionApplied = true;
-                        }
+                        annotationSuppressionApplied = removal.removedAll;
+                        renderDocumentReusable = removal.documentReusable;
+                    }
+                    if (!annotationSuppressionApplied) {
+                        // A deleted annotation or reply must never leak back
+                        // into the viewer. If both targeted strategies fail,
+                        // omit the page annotation pass and let FPDF_FFLDraw
+                        // render form widgets separately.
+                        omitSourceAnnotations = true;
+                        omitFormAnnotations = true;
+                        annotationSuppressionApplied = true;
                     }
                     if (!suppressedFormWidgetIds.isEmpty()) {
                         widgetSuppressionApplied
@@ -813,9 +830,7 @@ PageRenderResult renderPageFromFile(
                                 pixelSize.width(),
                                 pixelSize.height(),
                                 0,
-                                deletedCommentAnnotations.isEmpty()
-                                    ? FPDF_ANNOT
-                                    : 0);
+                                omitFormAnnotations ? 0 : FPDF_ANNOT);
                         }
                         if (widgetSuppressionApplied) {
                             widgetSuppressionApplied
