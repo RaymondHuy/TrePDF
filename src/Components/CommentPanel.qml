@@ -812,8 +812,10 @@ Rectangle {
 
                                     Layout.alignment: Qt.AlignLeft
                                     visible: !commentCard.isReply
-                                        && root.replyTargetObjectId
-                                            !== commentCard.objectId
+                                        && (root.replyTargetPage
+                                                !== commentCard.page
+                                            || root.replyTargetObjectId
+                                                !== commentCard.objectId)
                                     enabled: root.document.loaded
                                         && !root.editController.saving
                                     focusPolicy: Qt.TabFocus
