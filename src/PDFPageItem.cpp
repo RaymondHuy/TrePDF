@@ -237,12 +237,30 @@ QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
         characterCount);
 }
 
-bool isSupportedCommentAnnotationSubtype(int subtype)
+bool isMarkupAnnotationSubtype(int subtype)
 {
-    return subtype == FPDF_ANNOT_HIGHLIGHT
-        || subtype == FPDF_ANNOT_UNDERLINE
-        || subtype == FPDF_ANNOT_STRIKEOUT
-        || subtype == FPDF_ANNOT_TEXT;
+    switch (subtype) {
+    case FPDF_ANNOT_TEXT:
+    case FPDF_ANNOT_FREETEXT:
+    case FPDF_ANNOT_LINE:
+    case FPDF_ANNOT_SQUARE:
+    case FPDF_ANNOT_CIRCLE:
+    case FPDF_ANNOT_POLYGON:
+    case FPDF_ANNOT_POLYLINE:
+    case FPDF_ANNOT_HIGHLIGHT:
+    case FPDF_ANNOT_UNDERLINE:
+    case FPDF_ANNOT_SQUIGGLY:
+    case FPDF_ANNOT_STRIKEOUT:
+    case FPDF_ANNOT_STAMP:
+    case FPDF_ANNOT_CARET:
+    case FPDF_ANNOT_INK:
+    case FPDF_ANNOT_FILEATTACHMENT:
+    case FPDF_ANNOT_SOUND:
+    case FPDF_ANNOT_REDACT:
+        return true;
+    default:
+        return false;
+    }
 }
 
 bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
@@ -301,14 +319,14 @@ bool commentAnnotationIndices(
         if (!annotation) {
             continue;
         }
-        const bool eligible = isSupportedCommentAnnotationSubtype(
-                FPDFAnnot_GetSubtype(annotation))
-            && annotationUsesReplyRelation(annotation);
-        FPDF_ANNOTATION parent = eligible
+        const bool replyRelation = annotationUsesReplyRelation(annotation);
+        bool markupReplyChain = isMarkupAnnotationSubtype(
+            FPDFAnnot_GetSubtype(annotation));
+        FPDF_ANNOTATION parent = replyRelation
             ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
             : nullptr;
         FPDFPage_CloseAnnot(annotation);
-        if (!eligible) {
+        if (!replyRelation) {
             continue;
         }
 
@@ -321,16 +339,22 @@ bool commentAnnotationIndices(
             }
             visited.insert(parentIndex);
             if (deletedRoots.contains(parentIndex)) {
+                if (!markupReplyChain) {
+                    FPDFPage_CloseAnnot(parent);
+                    annotationIndices.clear();
+                    return false;
+                }
                 commentIndices.insert(annotationIndex);
                 FPDFPage_CloseAnnot(parent);
                 break;
             }
-            if (!isSupportedCommentAnnotationSubtype(
-                    FPDFAnnot_GetSubtype(parent))
-                || !annotationUsesReplyRelation(parent)) {
+            if (!annotationUsesReplyRelation(parent)) {
                 FPDFPage_CloseAnnot(parent);
                 break;
             }
+            markupReplyChain = markupReplyChain
+                && isMarkupAnnotationSubtype(
+                    FPDFAnnot_GetSubtype(parent));
             FPDF_ANNOTATION nextParent = FPDFAnnot_GetLinkedAnnot(
                 parent,
                 "IRT");

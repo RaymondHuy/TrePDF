@@ -2790,6 +2790,32 @@ bool isSupportedCommentAnnotationSubtype(int subtype)
         || subtype == FPDF_ANNOT_TEXT;
 }
 
+bool isMarkupAnnotationSubtype(int subtype)
+{
+    switch (subtype) {
+    case FPDF_ANNOT_TEXT:
+    case FPDF_ANNOT_FREETEXT:
+    case FPDF_ANNOT_LINE:
+    case FPDF_ANNOT_SQUARE:
+    case FPDF_ANNOT_CIRCLE:
+    case FPDF_ANNOT_POLYGON:
+    case FPDF_ANNOT_POLYLINE:
+    case FPDF_ANNOT_HIGHLIGHT:
+    case FPDF_ANNOT_UNDERLINE:
+    case FPDF_ANNOT_SQUIGGLY:
+    case FPDF_ANNOT_STRIKEOUT:
+    case FPDF_ANNOT_STAMP:
+    case FPDF_ANNOT_CARET:
+    case FPDF_ANNOT_INK:
+    case FPDF_ANNOT_FILEATTACHMENT:
+    case FPDF_ANNOT_SOUND:
+    case FPDF_ANNOT_REDACT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
 {
     const QString relation = annotationString(annotation, "RT").trimmed();
@@ -2976,12 +3002,12 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
             page,
             annotationIndex));
         if (!annotation.get()
-            || !isSupportedCommentAnnotationSubtype(
-                FPDFAnnot_GetSubtype(annotation.get()))
             || !annotationUsesReplyRelation(annotation.get())) {
             continue;
         }
 
+        bool markupReplyChain = isMarkupAnnotationSubtype(
+            FPDFAnnot_GetSubtype(annotation.get()));
         QSet<int> visited{annotationIndex};
         FPDF_ANNOTATION parent = FPDFAnnot_GetLinkedAnnot(
             annotation.get(),
@@ -2994,18 +3020,28 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
             }
             visited.insert(parentIndex);
             if (sourceAnnotationIndices.contains(parentIndex)) {
+                const QString rootObjectId = removalObjectIds.value(
+                    parentIndex);
+                if (!markupReplyChain) {
+                    FPDFPage_CloseAnnot(parent);
+                    return failure(
+                        PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
+                        pageIndex,
+                        rootObjectId);
+                }
                 removalObjectIds.insert(
                     annotationIndex,
-                    removalObjectIds.value(parentIndex));
+                    rootObjectId);
                 FPDFPage_CloseAnnot(parent);
                 break;
             }
-            if (!isSupportedCommentAnnotationSubtype(
-                    FPDFAnnot_GetSubtype(parent))
-                || !annotationUsesReplyRelation(parent)) {
+            if (!annotationUsesReplyRelation(parent)) {
                 FPDFPage_CloseAnnot(parent);
                 break;
             }
+            markupReplyChain = markupReplyChain
+                && isMarkupAnnotationSubtype(
+                    FPDFAnnot_GetSubtype(parent));
             FPDF_ANNOTATION nextParent = FPDFAnnot_GetLinkedAnnot(
                 parent,
                 "IRT");

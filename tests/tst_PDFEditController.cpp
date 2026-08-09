@@ -1136,6 +1136,67 @@ bool createNestedCommentRepliesPdf(const QString &filePath)
         });
 }
 
+bool createMixedSubtypeCommentRepliesPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /Helv 9 0 R >> >> "
+                "/Annots [4 0 R 5 0 R 6 0 R 7 0 R 8 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [24 144 48 168] /Contents (Mixed root) "
+                "/NM (mixed-root) /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /FreeText /P 3 0 R "
+                "/Rect [52 144 100 168] /Contents (FreeText reply) "
+                "/DA (/Helv 10 Tf 0 g) /NM (mixed-free-text) "
+                "/IRT 4 0 R /RT /R /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [104 144 128 168] "
+                "/Contents (Text after FreeText) /NM (mixed-text) "
+                "/IRT 5 0 R /RT /R /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Stamp /P 3 0 R "
+                "/Rect [24 100 64 128] /Contents (Stamp reply) "
+                "/Name /Draft /NM (mixed-stamp) /IRT 4 0 R /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Ink /P 3 0 R "
+                "/Rect [72 96 112 128] /Contents (Ink reply) "
+                "/InkList [[76 104 84 112 92 104]] /NM (mixed-ink) "
+                "/IRT 4 0 R /RT /R /F 4 >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+                "/Encoding /WinAnsiEncoding >>"),
+        });
+}
+
+bool createNonMarkupCommentReplyPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [4 0 R 5 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [24 144 48 168] /Contents (Protected root) "
+                "/NM (protected-root) /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Link /P 3 0 R "
+                "/Rect [52 144 100 168] /Border [0 0 0] "
+                "/IRT 4 0 R /RT /R /F 4 >>"),
+        });
+}
+
 bool createThreePageTextPdf(const QString &filePath)
 {
     FPDF_DOCUMENT document = FPDF_CreateNewDocument();
@@ -3112,6 +3173,8 @@ private slots:
     void addsStickyNoteWithPanelModelAndUndo();
     void addsCommentReplyWithOneLevelModelAndUndo();
     void flattensNestedSourceCommentReplies();
+    void deletesMixedSubtypeSourceReplyThread();
+    void rejectsNonMarkupReplyDescendantDeletion();
     void deletesSourceCommentsWithUndoRedoDiscardAndSave();
     void deletesSourceCommentPopupRoundTrip();
     void savesHighlightAnnotationRoundTrip();
@@ -11148,6 +11211,90 @@ void PDFEditControllerTest::flattensNestedSourceCommentReplies()
     QVERIFY(rootInspection.readable);
     QCOMPARE(rootInspection.count, 1);
     QCOMPARE(rootInspection.contents, QStringLiteral("Root comment"));
+}
+
+void PDFEditControllerTest::deletesMixedSubtypeSourceReplyThread()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-subtype-replies-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-subtype-replies-output.pdf"));
+    QVERIFY(createMixedSubtypeCommentRepliesPdf(sourcePath));
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_TEXT), 2);
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_FREETEXT), 1);
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_STAMP), 1);
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_INK), 1);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_VERIFY_WITH_TIMEOUT(controller.commentItems().size() >= 2, 5000);
+
+    QVariantMap root;
+    QVariantMap supportedNestedReply;
+    for (const QVariant &commentValue : controller.commentItems()) {
+        const QVariantMap comment = commentValue.toMap();
+        const QString text = comment.value(QStringLiteral("text")).toString();
+        if (text == QLatin1String("Mixed root")) {
+            root = comment;
+        } else if (text == QLatin1String("Text after FreeText")) {
+            supportedNestedReply = comment;
+        }
+    }
+    QVERIFY(!root.isEmpty());
+    QVERIFY(!supportedNestedReply.isEmpty());
+    QVERIFY(supportedNestedReply.value(QStringLiteral("isReply")).toBool());
+    QCOMPARE(
+        supportedNestedReply.value(QStringLiteral("parentObjectId")).toString(),
+        root.value(QStringLiteral("objectId")).toString());
+
+    QVERIFY(controller.removeComment(
+        0,
+        root.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.commentItems().isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    QCOMPARE(annotationSubtypeCount(outputPath, FPDF_ANNOT_TEXT), 0);
+    QCOMPARE(annotationSubtypeCount(outputPath, FPDF_ANNOT_FREETEXT), 0);
+    QCOMPARE(annotationSubtypeCount(outputPath, FPDF_ANNOT_STAMP), 0);
+    QCOMPARE(annotationSubtypeCount(outputPath, FPDF_ANNOT_INK), 0);
+}
+
+void PDFEditControllerTest::rejectsNonMarkupReplyDescendantDeletion()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("non-markup-reply-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("non-markup-reply-output.pdf"));
+    QVERIFY(createNonMarkupCommentReplyPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+
+    const QVariantMap root = controller.commentItems().constFirst().toMap();
+    QCOMPARE(
+        root.value(QStringLiteral("text")).toString(),
+        QStringLiteral("Protected root"));
+    QVERIFY(controller.removeComment(
+        0,
+        root.value(QStringLiteral("objectId")).toString()));
+
+    const PDFSaveWriter::Result result = PDFSaveWriter::save(
+        controller,
+        outputPath);
+    QCOMPARE(
+        result.error,
+        PDFSaveWriter::Error::CommentAnnotationRemovalFailed);
+    QVERIFY(!QFile::exists(outputPath));
+    QVERIFY(controller.hasDrafts());
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_TEXT), 1);
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_LINK), 1);
 }
 
 void PDFEditControllerTest::deletesSourceCommentsWithUndoRedoDiscardAndSave()

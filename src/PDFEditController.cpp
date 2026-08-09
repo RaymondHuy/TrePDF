@@ -864,6 +864,32 @@ bool isSupportedCommentAnnotationSubtype(int subtype)
         || subtype == FPDF_ANNOT_TEXT;
 }
 
+bool isMarkupAnnotationSubtype(int subtype)
+{
+    switch (subtype) {
+    case FPDF_ANNOT_TEXT:
+    case FPDF_ANNOT_FREETEXT:
+    case FPDF_ANNOT_LINE:
+    case FPDF_ANNOT_SQUARE:
+    case FPDF_ANNOT_CIRCLE:
+    case FPDF_ANNOT_POLYGON:
+    case FPDF_ANNOT_POLYLINE:
+    case FPDF_ANNOT_HIGHLIGHT:
+    case FPDF_ANNOT_UNDERLINE:
+    case FPDF_ANNOT_SQUIGGLY:
+    case FPDF_ANNOT_STRIKEOUT:
+    case FPDF_ANNOT_STAMP:
+    case FPDF_ANNOT_CARET:
+    case FPDF_ANNOT_INK:
+    case FPDF_ANNOT_FILEATTACHMENT:
+    case FPDF_ANNOT_SOUND:
+    case FPDF_ANNOT_REDACT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
 {
     const QString relation = annotationString(annotation, "RT").trimmed();
@@ -897,7 +923,7 @@ int rootReplyAnnotationIndex(FPDF_PAGE page,
         const int parentSubtype = FPDFAnnot_GetSubtype(parent);
         if (parentIndex < 0
             || visitedIndices.contains(parentIndex)
-            || !isSupportedCommentAnnotationSubtype(parentSubtype)) {
+            || !isMarkupAnnotationSubtype(parentSubtype)) {
             FPDFPage_CloseAnnot(parent);
             return -1;
         }
@@ -915,6 +941,9 @@ int rootReplyAnnotationIndex(FPDF_PAGE page,
         if (!parentIsReply) {
             if (nextParent) {
                 FPDFPage_CloseAnnot(nextParent);
+            }
+            if (!isSupportedCommentAnnotationSubtype(parentSubtype)) {
+                return -1;
             }
             break;
         }
