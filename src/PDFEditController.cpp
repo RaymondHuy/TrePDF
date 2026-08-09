@@ -13,6 +13,7 @@
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFont>
 #include <QFontDatabase>
 #include <QFontInfo>
@@ -29,6 +30,7 @@
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QThreadPool>
+#include <QTimeZone>
 #include <QUuid>
 #include <QVariantMap>
 #include <QtTranslation>
@@ -550,6 +552,22 @@ bool isCommentCandidateKind(const QString &kind)
         || kind == QLatin1String("stickyNote");
 }
 
+int commentAnnotationSubtype(const QString &kind)
+{
+    if (kind == QLatin1String("underline")) {
+        return FPDF_ANNOT_UNDERLINE;
+    }
+    if (kind == QLatin1String("strikeout")) {
+        return FPDF_ANNOT_STRIKEOUT;
+    }
+    if (kind == QLatin1String("stickyNote")) {
+        return FPDF_ANNOT_TEXT;
+    }
+    return kind == QLatin1String("highlight")
+        ? FPDF_ANNOT_HIGHLIGHT
+        : FPDF_ANNOT_UNKNOWN;
+}
+
 bool draftSuppressesSourceObjects(const QString &kind, bool deleted)
 {
     return kind == QLatin1String("text")
@@ -831,6 +849,124 @@ QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
     return QString::fromUtf16(
         reinterpret_cast<const char16_t *>(buffer.constData()),
         characterCount);
+}
+
+bool containsOnlyAsciiDigits(const QString &value)
+{
+    for (const QChar character : value) {
+        if (character < QLatin1Char('0')
+            || character > QLatin1Char('9')) {
+            return false;
+        }
+    }
+    return !value.isEmpty();
+}
+
+QDateTime pdfAnnotationDateTime(const QString &rawValue)
+{
+    const QString trimmedValue = rawValue.trimmed();
+    const QDateTime isoDateTime = QDateTime::fromString(
+        trimmedValue,
+        Qt::ISODate);
+    if (isoDateTime.isValid()) {
+        return isoDateTime;
+    }
+
+    QString value = trimmedValue;
+    if (value.startsWith(QLatin1String("D:"))) {
+        value.remove(0, 2);
+    }
+
+    qsizetype digitCount = 0;
+    while (digitCount < value.size()
+           && digitCount < 14
+           && value.at(digitCount) >= QLatin1Char('0')
+           && value.at(digitCount) <= QLatin1Char('9')) {
+        ++digitCount;
+    }
+    if (digitCount < 4
+        || digitCount % 2 != 0
+        || (digitCount == 14
+            && digitCount < value.size()
+            && value.at(digitCount) >= QLatin1Char('0')
+            && value.at(digitCount) <= QLatin1Char('9'))) {
+        return {};
+    }
+
+    const auto component = [&value, digitCount](
+                               qsizetype offset,
+                               int fallback) {
+        if (digitCount < offset + 2) {
+            return fallback;
+        }
+        bool parsed = false;
+        const int result = value.mid(offset, 2).toInt(&parsed);
+        return parsed ? result : -1;
+    };
+    bool parsedYear = false;
+    const int year = value.left(4).toInt(&parsedYear);
+    const int month = component(4, 1);
+    const int day = component(6, 1);
+    const int hour = component(8, 0);
+    const int minute = component(10, 0);
+    const int second = component(12, 0);
+    const QDate date(year, month, day);
+    const QTime time(hour, minute, second);
+    if (!parsedYear || !date.isValid() || !time.isValid()) {
+        return {};
+    }
+
+    QString timeZoneSuffix = value.mid(digitCount).trimmed();
+    if (timeZoneSuffix.isEmpty()) {
+        return QDateTime(date, time);
+    }
+    if (timeZoneSuffix == QLatin1String("Z")) {
+        return QDateTime(date, time, QTimeZone::UTC);
+    }
+    if (!timeZoneSuffix.startsWith(QLatin1Char('+'))
+        && !timeZoneSuffix.startsWith(QLatin1Char('-'))) {
+        return {};
+    }
+
+    const int direction = timeZoneSuffix.startsWith(QLatin1Char('-'))
+        ? -1
+        : 1;
+    timeZoneSuffix.remove(0, 1);
+    timeZoneSuffix.remove(QLatin1Char('\''));
+    timeZoneSuffix.remove(QLatin1Char(':'));
+    if ((timeZoneSuffix.size() != 2 && timeZoneSuffix.size() != 4)
+        || !containsOnlyAsciiDigits(timeZoneSuffix)) {
+        return {};
+    }
+    const int offsetHours = timeZoneSuffix.left(2).toInt();
+    const int offsetMinutes = timeZoneSuffix.size() == 4
+        ? timeZoneSuffix.mid(2, 2).toInt()
+        : 0;
+    if (offsetHours > 23 || offsetMinutes > 59) {
+        return {};
+    }
+    const int offsetSeconds = direction
+        * (offsetHours * 60 * 60 + offsetMinutes * 60);
+    return QDateTime(
+        date,
+        time,
+        QTimeZone::fromSecondsAheadOfUtc(offsetSeconds));
+}
+
+QString currentCommentAuthor()
+{
+    const QStringList candidates{
+        qEnvironmentVariable("USER"),
+        qEnvironmentVariable("LOGNAME"),
+        QFileInfo(QDir::homePath()).fileName(),
+        QCoreApplication::applicationName()};
+    for (const QString &candidate : candidates) {
+        const QString author = candidate.trimmed();
+        if (!author.isEmpty()) {
+            return author;
+        }
+    }
+    return {};
 }
 
 QString pdfFontName(FPDF_FONT font, bool baseName)
@@ -1181,6 +1317,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::CommentAnnotationCreationFailed:
         //% "The comment could not be created on page %1."
         return qtTrId("PdfSaveCommentCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::CommentAnnotationRemovalFailed:
+        //% "The comment could not be deleted on page %1."
+        return qtTrId("PdfSaveCommentRemovalFailed").arg(result.page + 1);
     case PDFSaveWriter::Error::PageCreationFailed:
         //% "Blank page %1 could not be created while saving."
         return qtTrId("PdfSavePageCreationFailed").arg(result.page + 1);
@@ -1910,6 +2049,47 @@ PDFEditController::draftedObjectMovesForPage(int page) const
     return moves;
 }
 
+QVector<PDFEditController::DraftAnnotationDeletion>
+PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
+{
+    QVector<DraftAnnotationDeletion> deletions;
+    for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
+        const Candidate &candidate = draft->candidate;
+        if (candidate.page != page
+            || candidate.added
+            || !draft->deleted
+            || !isCommentCandidateKind(candidate.kind)
+            || candidate.sourceAnnotationIndex < 0) {
+            continue;
+        }
+
+        const int subtype = commentAnnotationSubtype(candidate.kind);
+        if (subtype != FPDF_ANNOT_UNKNOWN) {
+            deletions.append(DraftAnnotationDeletion{
+                candidate.sourceAnnotationIndex,
+                subtype});
+        }
+    }
+
+    std::sort(
+        deletions.begin(),
+        deletions.end(),
+        [](const DraftAnnotationDeletion &left,
+           const DraftAnnotationDeletion &right) {
+            return left.annotationIndex < right.annotationIndex;
+        });
+    deletions.erase(
+        std::unique(
+            deletions.begin(),
+            deletions.end(),
+            [](const DraftAnnotationDeletion &left,
+               const DraftAnnotationDeletion &right) {
+                return left.annotationIndex == right.annotationIndex;
+            }),
+        deletions.end());
+    return deletions;
+}
+
 bool PDFEditController::allDraftedTextObjectsSuppressibleForPage(int page) const
 {
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
@@ -2616,7 +2796,7 @@ QVariantMap PDFEditController::addHighlight(int page,
         return {};
     }
     if (!documentAllowsAnnotations()) {
-        //% "This PDF does not permit adding annotations."
+        //% "This PDF does not permit adding or deleting annotations."
         emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
         return {};
     }
@@ -2660,6 +2840,8 @@ QVariantMap PDFEditController::addHighlight(int page,
         + QString::number(candidate.addedOrder);
     candidate.editable = true;
     candidate.added = true;
+    candidate.commentAuthor = currentCommentAuthor();
+    candidate.commentCreationDate = QDateTime::currentDateTime();
     candidate.highlightRects.append(normalizedRect);
     candidate.highlightColor = m_highlightColor;
     setInitialGeometry(candidate, normalizedRect);
@@ -2700,7 +2882,7 @@ QVariantMap PDFEditController::addStickyNote(int page,
         return {};
     }
     if (!documentAllowsAnnotations()) {
-        //% "This PDF does not permit adding annotations."
+        //% "This PDF does not permit adding or deleting annotations."
         emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
         return {};
     }
@@ -2727,6 +2909,8 @@ QVariantMap PDFEditController::addStickyNote(int page,
     candidate.label = qtTrId("StickyNote");
     candidate.editable = true;
     candidate.added = true;
+    candidate.commentAuthor = currentCommentAuthor();
+    candidate.commentCreationDate = QDateTime::currentDateTime();
     candidate.highlightColor = QColor(
         kHighlightRed,
         kHighlightGreen,
@@ -3520,6 +3704,41 @@ bool PDFEditController::selectComment(int page, const QString &objectId)
         return true;
     }
     return false;
+}
+
+bool PDFEditController::removeComment(int page, const QString &objectId)
+{
+    if (!m_document
+        || !m_document->isLoaded()
+        || m_saving
+        || page < 0
+        || page >= m_document->pageCount()
+        || objectId.isEmpty()) {
+        return false;
+    }
+
+    Candidate candidate;
+    const Candidate *pageCandidate = findCandidate(page, objectId);
+    if (pageCandidate && isCommentCandidateKind(pageCandidate->kind)) {
+        candidate = *pageCandidate;
+    } else {
+        const auto indexedPage = m_indexedCommentCandidates.constFind(page);
+        if (indexedPage == m_indexedCommentCandidates.cend()) {
+            return false;
+        }
+        const auto indexedCandidate = std::find_if(
+            indexedPage->cbegin(),
+            indexedPage->cend(),
+            [&objectId](const Candidate &current) {
+                return current.objectId == objectId
+                    && isCommentCandidateKind(current.kind);
+            });
+        if (indexedCandidate == indexedPage->cend()) {
+            return false;
+        }
+        candidate = *indexedCandidate;
+    }
+    return removeCommentCandidate(candidate);
 }
 
 int PDFEditController::selectRelativeComment(int direction)
@@ -4334,15 +4553,79 @@ void PDFEditController::setSelectedCommentText(const QString &text)
     command.hadAfter = true;
     command.after = command.before;
     command.after.text = text;
+    command.after.candidate.commentModifiedDate
+        = QDateTime::currentDateTime();
     m_undoStack.append(command);
     m_redoStack.clear();
     applyDraftState(command, true, true);
     emit historyStateChanged();
 }
 
+bool PDFEditController::removeCommentCandidate(const Candidate &candidate)
+{
+    if (!isCommentCandidateKind(candidate.kind)
+        || candidate.page < 0
+        || candidate.objectId.isEmpty()) {
+        return false;
+    }
+    if (!candidate.added) {
+        if (candidate.sourceAnnotationIndex < 0) {
+            return false;
+        }
+        if (!documentAllowsAnnotations()) {
+            //% "This PDF does not permit adding or deleting annotations."
+            emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+            return false;
+        }
+    }
+
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    const QString key = draftKey(candidate.page, candidate.objectId);
+    const auto existingDraft = m_drafts.constFind(key);
+
+    Command command;
+    command.key = key;
+    command.page = candidate.page;
+    command.objectId = candidate.objectId;
+    if (candidate.added) {
+        if (existingDraft == m_drafts.cend()) {
+            return false;
+        }
+        command.hadBefore = true;
+        command.before = *existingDraft;
+        command.hadAfter = false;
+        command.after = command.before;
+    } else {
+        command.hadBefore = existingDraft != m_drafts.cend();
+        command.before = command.hadBefore
+            ? *existingDraft
+            : initialDraftForCandidate(candidate);
+        if (command.before.deleted) {
+            return false;
+        }
+        command.hadAfter = true;
+        command.after = command.before;
+        command.after.deleted = true;
+    }
+
+    m_undoStack.append(command);
+    m_redoStack.clear();
+    applyDraftState(command, true, true);
+    emit historyStateChanged();
+    return true;
+}
+
 void PDFEditController::deleteSelectedObject()
 {
-    if (!m_hasSelection || !m_selectedCandidate.editable) {
+    if (!m_hasSelection) {
+        return;
+    }
+    if (isCommentCandidateKind(m_selectedCandidate.kind)) {
+        removeCommentCandidate(m_selectedCandidate);
+        return;
+    }
+    if (!m_selectedCandidate.editable) {
         return;
     }
     if (isTextCandidateKind(m_selectedCandidate.kind)) {
@@ -4356,8 +4639,7 @@ void PDFEditController::deleteSelectedObject()
         m_selectedCandidate.objectId);
     const auto existingDraft = m_drafts.constFind(key);
     if (m_selectedCandidate.kind == QLatin1String("addedImage")
-        || isShapeCandidateKind(m_selectedCandidate.kind)
-        || isCommentCandidateKind(m_selectedCandidate.kind)) {
+        || isShapeCandidateKind(m_selectedCandidate.kind)) {
         if (existingDraft == m_drafts.cend()) {
             return;
         }
@@ -4466,6 +4748,8 @@ void PDFEditController::discardDrafts()
          ++revision) {
         affectedPages.insert(revision.key());
     }
+    const bool discardedPageStructure
+        = !m_pageInsertions.isEmpty() || !m_deletedSourcePages.isEmpty();
 
     const bool wasEditing = m_textEditActive;
     resetFrameResizeState();
@@ -4481,6 +4765,17 @@ void PDFEditController::discardDrafts()
         m_document->setTransientPageStructure(
             m_deletedSourcePages,
             m_pageInsertions);
+    }
+    if (discardedPageStructure) {
+        if (m_candidateScanCancellation) {
+            m_candidateScanCancellation->store(
+                true,
+                std::memory_order_relaxed);
+        }
+        m_pendingCandidateScanPage = -1;
+        m_pageCandidates.clear();
+        m_pageCandidateLru.clear();
+        resetCommentIndex();
     }
     m_drafts.clear();
     m_undoStack.clear();
@@ -4499,6 +4794,9 @@ void PDFEditController::discardDrafts()
         emit textEditActiveChanged();
     }
     emit pageDataChanged(-1);
+    if (discardedPageStructure) {
+        emit commentsChanged();
+    }
     emit historyStateChanged();
     //% "All draft changes were discarded."
     emit statusMessage(qtTrId("AllDraftChangesDiscarded"));
@@ -5905,6 +6203,11 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 + QString::number(index);
             candidate.sourceAnnotationIndex = index;
             candidate.text = annotationString(annotation, "Contents");
+            candidate.commentAuthor = annotationString(annotation, "T").trimmed();
+            candidate.commentCreationDate = pdfAnnotationDateTime(
+                annotationString(annotation, "CreationDate"));
+            candidate.commentModifiedDate = pdfAnnotationDateTime(
+                annotationString(annotation, "M"));
             candidate.editable = false;
             candidate.limited = true;
             setInitialGeometry(candidate, geometry);
@@ -5957,7 +6260,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 candidate.label = qtTrId("Highlight");
                 break;
             }
-            //% "Editing comments that already exist in the PDF is not available yet."
+            //% "Editing the contents of comments that already exist in the PDF is not available yet."
             candidate.reason = qtTrId("ExistingCommentEditingUnavailable");
             candidates.append(std::move(candidate));
             FPDFPage_CloseAnnot(annotation);
@@ -6161,6 +6464,20 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("originX"), layoutOrigin.x());
     map.insert(QStringLiteral("baselineY"), layoutOrigin.y());
     map.insert(QStringLiteral("text"), draft.text);
+    map.insert(
+        QStringLiteral("commentAuthor"),
+        candidate.commentAuthor);
+    map.insert(
+        QStringLiteral("commentCreationDate"),
+        candidate.commentCreationDate);
+    map.insert(
+        QStringLiteral("commentModifiedDate"),
+        candidate.commentModifiedDate);
+    map.insert(
+        QStringLiteral("commentDate"),
+        candidate.commentModifiedDate.isValid()
+            ? candidate.commentModifiedDate
+            : candidate.commentCreationDate);
     map.insert(QStringLiteral("characterSpans"), characterSpanMaps(draft.characterSpans));
     map.insert(
         QStringLiteral("paragraphFormats"),

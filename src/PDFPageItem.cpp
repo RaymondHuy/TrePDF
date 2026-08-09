@@ -13,6 +13,7 @@
 #include <QSGTexture>
 #include <QQuickWindow>
 
+#include <fpdf_annot.h>
 #include <fpdf_edit.h>
 #include <fpdf_formfill.h>
 
@@ -138,6 +139,248 @@ private:
     bool m_restored = false;
     bool m_restoreSucceeded = true;
 };
+
+int popupAnnotationIndexForComment(FPDF_PAGE page,
+                                   FPDF_ANNOTATION comment,
+                                   int commentIndex,
+                                   int annotationCount,
+                                   bool &valid)
+{
+    assertPDFiumProcessLockHeld();
+    valid = false;
+
+    int forwardPopupIndex = -1;
+    FPDF_ANNOTATION forwardPopup = FPDFAnnot_GetLinkedAnnot(
+        comment,
+        "Popup");
+    if (forwardPopup) {
+        forwardPopupIndex = FPDFPage_GetAnnotIndex(page, forwardPopup);
+        const bool forwardPopupValid
+            = FPDFAnnot_GetSubtype(forwardPopup) == FPDF_ANNOT_POPUP
+            && forwardPopupIndex >= 0
+            && forwardPopupIndex < annotationCount;
+        FPDFPage_CloseAnnot(forwardPopup);
+        if (!forwardPopupValid) {
+            return -1;
+        }
+    }
+
+    int reversePopupIndex = -1;
+    for (int annotationIndex = 0;
+         annotationIndex < annotationCount;
+         ++annotationIndex) {
+        FPDF_ANNOTATION popup = FPDFPage_GetAnnot(page, annotationIndex);
+        if (!popup) {
+            continue;
+        }
+        if (FPDFAnnot_GetSubtype(popup) != FPDF_ANNOT_POPUP) {
+            FPDFPage_CloseAnnot(popup);
+            continue;
+        }
+
+        FPDF_ANNOTATION parent = FPDFAnnot_GetLinkedAnnot(popup, "Parent");
+        const int parentIndex = parent
+            ? FPDFPage_GetAnnotIndex(page, parent)
+            : -1;
+        if (parent) {
+            FPDFPage_CloseAnnot(parent);
+        }
+        FPDFPage_CloseAnnot(popup);
+        if (parentIndex != commentIndex) {
+            continue;
+        }
+        if (reversePopupIndex >= 0) {
+            return -1;
+        }
+        reversePopupIndex = annotationIndex;
+    }
+
+    if (forwardPopupIndex >= 0
+        && reversePopupIndex != forwardPopupIndex) {
+        return -1;
+    }
+    valid = true;
+    return forwardPopupIndex >= 0
+        ? forwardPopupIndex
+        : reversePopupIndex;
+}
+
+bool commentAnnotationIndices(
+    FPDF_PAGE page,
+    const QVector<PDFEditController::DraftAnnotationDeletion> &deletions,
+    QVector<int> &annotationIndices)
+{
+    assertPDFiumProcessLockHeld();
+    annotationIndices.clear();
+    if (!page) {
+        return deletions.isEmpty();
+    }
+
+    const int annotationCount = FPDFPage_GetAnnotCount(page);
+    annotationIndices.reserve(deletions.size() * 2);
+    for (const PDFEditController::DraftAnnotationDeletion &deletion
+         : deletions) {
+        if (deletion.annotationIndex < 0
+            || deletion.annotationIndex >= annotationCount
+            || annotationIndices.contains(deletion.annotationIndex)) {
+            annotationIndices.clear();
+            return false;
+        }
+
+        FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+            page,
+            deletion.annotationIndex);
+        if (!annotation
+            || FPDFAnnot_GetSubtype(annotation)
+                != deletion.annotationSubtype) {
+            if (annotation) {
+                FPDFPage_CloseAnnot(annotation);
+            }
+            annotationIndices.clear();
+            return false;
+        }
+        annotationIndices.append(deletion.annotationIndex);
+
+        bool popupValid = false;
+        const int popupIndex = popupAnnotationIndexForComment(
+            page,
+            annotation,
+            deletion.annotationIndex,
+            annotationCount,
+            popupValid);
+        if (!popupValid
+            || (popupIndex >= 0
+                && annotationIndices.contains(popupIndex))) {
+            FPDFPage_CloseAnnot(annotation);
+            annotationIndices.clear();
+            return false;
+        }
+        if (popupIndex >= 0) {
+            annotationIndices.append(popupIndex);
+        }
+        FPDFPage_CloseAnnot(annotation);
+    }
+    return true;
+}
+
+class ScopedAnnotationSuppression
+{
+public:
+    ~ScopedAnnotationSuppression()
+    {
+        restore();
+    }
+
+    bool suppress(
+        FPDF_PAGE page,
+        const QVector<PDFEditController::DraftAnnotationDeletion> &deletions)
+    {
+        assertPDFiumProcessLockHeld();
+        m_page = page;
+        QVector<int> annotationIndices;
+        if (!commentAnnotationIndices(page, deletions, annotationIndices)) {
+            return false;
+        }
+        m_states.reserve(annotationIndices.size());
+        for (int annotationIndex : std::as_const(annotationIndices)) {
+            FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+                page,
+                annotationIndex);
+            if (!annotation) {
+                restore();
+                return false;
+            }
+            const int flags = FPDFAnnot_GetFlags(annotation);
+            m_states.append(State{annotationIndex, flags});
+            const bool hidden = flags & FPDF_ANNOT_FLAG_HIDDEN;
+            const bool updated = hidden
+                || FPDFAnnot_SetFlags(
+                    annotation,
+                    flags | FPDF_ANNOT_FLAG_HIDDEN);
+            FPDFPage_CloseAnnot(annotation);
+            if (!updated) {
+                restore();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool restore()
+    {
+        assertPDFiumProcessLockHeld();
+        if (m_restored) {
+            return m_restoreSucceeded;
+        }
+
+        m_restored = true;
+        for (auto state = m_states.crbegin(); state != m_states.crend(); ++state) {
+            FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
+                m_page,
+                state->annotationIndex);
+            if (!annotation) {
+                m_restoreSucceeded = false;
+                continue;
+            }
+            if (!FPDFAnnot_SetFlags(annotation, state->flags)) {
+                m_restoreSucceeded = false;
+            }
+            FPDFPage_CloseAnnot(annotation);
+        }
+        m_states.clear();
+        return m_restoreSucceeded;
+    }
+
+    bool restorationSucceeded() const
+    {
+        return m_restoreSucceeded;
+    }
+
+private:
+    struct State {
+        int annotationIndex = -1;
+        int flags = 0;
+    };
+
+    FPDF_PAGE m_page = nullptr;
+    QVector<State> m_states;
+    bool m_restored = false;
+    bool m_restoreSucceeded = true;
+};
+
+struct PreviewAnnotationRemovalResult {
+    bool removedAll = false;
+    bool documentReusable = true;
+};
+
+PreviewAnnotationRemovalResult removePreviewAnnotations(
+    FPDF_PAGE page,
+    const QVector<PDFEditController::DraftAnnotationDeletion> &deletions)
+{
+    assertPDFiumProcessLockHeld();
+    if (!page) {
+        return {deletions.isEmpty(), true};
+    }
+
+    QVector<int> annotationIndices;
+    if (!commentAnnotationIndices(page, deletions, annotationIndices)) {
+        return {};
+    }
+
+    std::sort(
+        annotationIndices.begin(),
+        annotationIndices.end(),
+        std::greater<int>());
+    PreviewAnnotationRemovalResult result;
+    for (int annotationIndex : std::as_const(annotationIndices)) {
+        if (!FPDFPage_RemoveAnnot(page, annotationIndex)) {
+            return result;
+        }
+        result.documentReusable = false;
+    }
+    result.removedAll = true;
+    return result;
+}
 
 class ScopedPageObjectMoves
 {
@@ -286,6 +529,8 @@ PageRenderResult renderPageFromFile(
     bool blankPage,
     const QVector<QVector<int>> &draftObjectPaths,
     const QVector<PDFEditController::DraftObjectMove> &draftObjectMoves,
+    const QVector<PDFEditController::DraftAnnotationDeletion>
+        &deletedCommentAnnotations,
     const QStringList &suppressedFormWidgetIds,
     const CancellationFlag &cancellation)
 {
@@ -309,6 +554,7 @@ PageRenderResult renderPageFromFile(
 
     bool suppressionApplied = draftObjectPaths.isEmpty();
     bool objectMovesApplied = draftObjectMoves.isEmpty();
+    bool annotationSuppressionApplied = deletedCommentAnnotations.isEmpty();
     bool widgetSuppressionApplied = suppressedFormWidgetIds.isEmpty();
     bool renderPerformed = false;
     {
@@ -352,8 +598,10 @@ PageRenderResult renderPageFromFile(
                 {
                     ScopedPageObjectSuppression suppression;
                     ScopedPageObjectMoves objectMoves;
+                    ScopedAnnotationSuppression annotationSuppression;
                     PDFWidgetAnnotationSuppression widgetSuppression;
                     QVector<PDFWidgetRenderPatch> widgetPatches;
+                    bool omitSourceAnnotations = false;
                     if (!draftObjectPaths.isEmpty()) {
                         suppressionApplied = suppression.suppress(
                             previewPage,
@@ -364,6 +612,30 @@ PageRenderResult renderPageFromFile(
                             previewPage,
                             pixelSize,
                             draftObjectMoves);
+                    }
+                    if (!deletedCommentAnnotations.isEmpty()) {
+                        annotationSuppressionApplied
+                            = annotationSuppression.suppress(
+                                previewPage,
+                                deletedCommentAnnotations);
+                        if (!annotationSuppressionApplied
+                            && annotationSuppression.restorationSucceeded()) {
+                            const PreviewAnnotationRemovalResult removal
+                                = removePreviewAnnotations(
+                                    previewPage,
+                                    deletedCommentAnnotations);
+                            annotationSuppressionApplied = removal.removedAll;
+                            renderDocumentReusable
+                                = removal.documentReusable;
+                        }
+                        if (!annotationSuppressionApplied) {
+                            // The deleted annotation must never leak back into
+                            // the draft preview. If both targeted strategies
+                            // fail, omit the page annotation pass and let
+                            // FPDF_FFLDraw render form widgets separately.
+                            omitSourceAnnotations = true;
+                            annotationSuppressionApplied = true;
+                        }
                     }
                     if (!suppressedFormWidgetIds.isEmpty()) {
                         widgetSuppressionApplied
@@ -377,6 +649,9 @@ PageRenderResult renderPageFromFile(
                             || suppression.restorationSucceeded())
                         && (objectMovesApplied
                             || objectMoves.restorationSucceeded())
+                        && (annotationSuppressionApplied
+                            || annotationSuppression
+                                .restorationSucceeded())
                         && (widgetSuppressionApplied
                             || widgetSuppression
                                 .restorationSucceeded())) {
@@ -388,7 +663,7 @@ PageRenderResult renderPageFromFile(
                             pixelSize.width(),
                             pixelSize.height(),
                             0,
-                            FPDF_ANNOT);
+                            omitSourceAnnotations ? 0 : FPDF_ANNOT);
                         if (widgetSuppressionApplied) {
                             widgetSuppressionApplied
                                 = capturePDFWidgetRenderPatches(
@@ -410,7 +685,9 @@ PageRenderResult renderPageFromFile(
                                 pixelSize.width(),
                                 pixelSize.height(),
                                 0,
-                                FPDF_ANNOT);
+                                deletedCommentAnnotations.isEmpty()
+                                    ? FPDF_ANNOT
+                                    : 0);
                         }
                         if (widgetSuppressionApplied) {
                             widgetSuppressionApplied
@@ -419,16 +696,20 @@ PageRenderResult renderPageFromFile(
                                     widgetPatches);
                         }
                         renderDocumentReusable
-                            = widgetRestoreSucceeded;
+                            = widgetRestoreSucceeded
+                            && renderDocumentReusable;
                         renderPerformed = true;
                     }
                     const bool objectRestoreSucceeded = objectMoves.restore();
                     const bool suppressionRestoreSucceeded
                         = suppression.restore();
+                    const bool annotationRestoreSucceeded
+                        = annotationSuppression.restore();
                     const bool widgetRestoreSucceeded
                         = widgetSuppression.restore();
                     renderDocumentReusable = objectRestoreSucceeded
                         && suppressionRestoreSucceeded
+                        && annotationRestoreSucceeded
                         && widgetRestoreSucceeded
                         && renderDocumentReusable;
                 }
@@ -447,6 +728,7 @@ PageRenderResult renderPageFromFile(
         image,
         suppressionApplied
             && objectMovesApplied
+            && annotationSuppressionApplied
             && widgetSuppressionApplied};
 }
 
@@ -1141,6 +1423,11 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             && editController->document() == document
         ? editController->draftedObjectMovesForPage(page)
         : QVector<PDFEditController::DraftObjectMove>();
+    const QVector<PDFEditController::DraftAnnotationDeletion>
+        deletedCommentAnnotations = editController
+            && editController->document() == document
+        ? editController->deletedSourceCommentAnnotationsForPage(page)
+        : QVector<PDFEditController::DraftAnnotationDeletion>();
     const bool allDraftObjectsSuppressible = !editController
         || editController->document() != document
         || editController->allDraftedTextObjectsSuppressibleForPage(page);
@@ -1179,6 +1466,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                                        formRevision,
                                        draftObjectPaths,
                                        draftObjectMoves,
+                                       deletedCommentAnnotations,
                                        suppressedFormWidgetIds,
                                        allDraftObjectsSuppressible,
                                        requestId,
@@ -1192,6 +1480,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             blankPage,
             draftObjectPaths,
             draftObjectMoves,
+            deletedCommentAnnotations,
             suppressedFormWidgetIds,
             cancellation);
         result.suppressionApplied = result.suppressionApplied

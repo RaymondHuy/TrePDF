@@ -55,6 +55,25 @@ Rectangle {
         return true
     }
 
+    function removeComment(index) {
+        const comments = root.editController.commentItems
+        if (!root.document.loaded
+                || root.editController.saving
+                || index < 0
+                || index >= comments.length) {
+            return
+        }
+
+        const comment = comments[index]
+        const page = Number(comment.page)
+        const objectId = String(comment.objectId)
+        if (page < 0 || objectId.length === 0)
+            return
+
+        root.commitActiveEditor()
+        root.editController.removeComment(page, objectId)
+    }
+
     function ensureCommentIndex() {
         if (document && editController && document.loaded)
             editController.requestCommentIndex()
@@ -163,7 +182,7 @@ Rectangle {
 
                         Layout.preferredWidth: 32
                         Layout.preferredHeight: 32
-                        icon.source: "../assets/icons/cancel.svg"
+                        icon.source: "../assets/icons/chevron-right.svg"
                         icon.width: 16
                         icon.height: 16
                         icon.color: root.theme.foxitDarkOrange
@@ -221,6 +240,7 @@ Rectangle {
                         delegate: Rectangle {
                             id: commentCard
 
+                            required property int index
                             required property var modelData
 
                             readonly property string objectId:
@@ -243,6 +263,25 @@ Rectangle {
                                 modelData.text === undefined
                                     ? ""
                                     : String(modelData.text)
+                            readonly property string commentAuthor:
+                                modelData.commentAuthor === undefined
+                                    ? ""
+                                    : String(modelData.commentAuthor)
+                            readonly property var commentDate:
+                                modelData.commentDate === undefined
+                                    ? null
+                                    : modelData.commentDate
+                            readonly property string commentDateText: {
+                                if (commentDate === null
+                                        || commentDate === undefined
+                                        || isNaN(commentDate.getTime())) {
+                                    return ""
+                                }
+                                return Qt.formatDateTime(
+                                    commentDate,
+                                    Qt.locale(),
+                                    Locale.ShortFormat)
+                            }
                             readonly property color markerColor:
                                 modelData.color === undefined
                                     ? root.theme.foxitOrange
@@ -376,6 +415,98 @@ Rectangle {
                                         //% "Page %1"
                                         text: qsTrId("PageNumber")
                                             .arg(commentCard.page + 1)
+                                        color: "#747176"
+                                        font.pixelSize: 10
+                                    }
+                                    ToolButton {
+                                        id: showCommentButton
+
+                                        Layout.preferredWidth: 20
+                                        Layout.fillHeight: true
+                                        icon.source: "../assets/icons/down.svg"
+                                        icon.width: 12
+                                        icon.height: 12
+                                        icon.color: "transparent"
+                                        enabled: commentList.count > 1
+                                        Accessible.name: ToolTip.text
+
+                                        background: Rectangle {
+                                            radius: 4
+                                            color: showCommentButton.down
+                                                ? "#f5dfcf"
+                                                : showCommentButton.hovered
+                                                    ? root.theme.foxitPaleOrange
+                                                    : "white"
+                                            border.color: showCommentButton.visualFocus
+                                                ? root.theme.foxitDarkOrange
+                                                : root.theme.ribbonBorder
+                                            border.width: showCommentButton.visualFocus
+                                                ? 2
+                                                : 1
+                                        }
+                                    }
+                                    ToolButton {
+                                        id: removeCommentButton
+
+                                        Layout.preferredWidth: 20
+                                        Layout.fillHeight: true
+                                        icon.source: "../assets/icons/cancel.svg"
+                                        icon.width: 12
+                                        icon.height: 12
+                                        icon.color: "transparent"
+                                        enabled: root.document.loaded
+                                            && !root.editController.saving
+                                            && commentCard.page >= 0
+                                            && commentCard.objectId.length > 0
+                                        focusPolicy: Qt.TabFocus
+                                        //% "Delete selected comment"
+                                        ToolTip.text:
+                                            qsTrId("DeleteSelectedComment")
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
+                                        Accessible.name: ToolTip.text
+                                        onClicked: root.removeComment(commentCard.index)
+
+                                        background: Rectangle {
+                                            radius: 4
+                                            color: removeCommentButton.down
+                                                ? "#f5dfcf"
+                                                : removeCommentButton.hovered
+                                                    ? root.theme.foxitPaleOrange
+                                                    : "white"
+                                            border.color: removeCommentButton.visualFocus
+                                                ? root.theme.foxitDarkOrange
+                                                : root.theme.ribbonBorder
+                                            border.width: removeCommentButton.visualFocus
+                                                ? 2
+                                                : 1
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: 13
+                                    visible:
+                                        commentCard.commentAuthor.length > 0
+                                        || commentCard.commentDateText.length > 0
+                                    spacing: 8
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible:
+                                            commentCard.commentAuthor.length > 0
+                                        text: commentCard.commentAuthor
+                                        color: "#747176"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Medium
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Label {
+                                        visible:
+                                            commentCard.commentDateText.length > 0
+                                        text: commentCard.commentDateText
                                         color: "#747176"
                                         font.pixelSize: 10
                                     }

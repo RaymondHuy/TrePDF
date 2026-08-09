@@ -210,7 +210,8 @@ orchestration Save.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
 - Đọc Highlight, Underline, Strikeout và Text annotation; chuẩn hóa quad/rect,
-  màu và `/Contents` thành comment candidate. Annotation nguồn hiện chỉ đọc.
+  màu và `/Contents` thành comment candidate. Nội dung annotation nguồn chỉ đọc,
+  nhưng xóa tạo tombstone draft theo annotation index và subtype.
 - `requestCommentIndex()` dùng worker riêng để quét annotation-only từng trang,
   nhả PDFium lock giữa các trang và chỉ giữ comment candidate. Vì vậy danh sách
   toàn tài liệu không làm phình cache text/image 12 trang của viewport.
@@ -299,6 +300,9 @@ orchestration Save.
 - Tạo bitmap object cho ảnh thêm mới, path object cho sáu shape, các standard
   Highlight/Underline/Strikeout annotation với quad/color/Print flag và Text
   annotation với rect/color/`Contents`/`NM`/Print flag.
+- Xóa comment nguồn và `/Popup` liên kết theo annotation index từ lớn xuống nhỏ,
+  xác thực lại subtype trước khi gỡ; page chỉ đổi annotation không gọi
+  `FPDFPage_GenerateContent()`.
 - Giữ earliest source z-order bằng insert-at-index; object thêm mới theo insertion
   order. Dùng `FPDF_DeviceToPage()` để tôn trọng CropBox/rotation.
 - Chỉ gọi `FPDFPage_GenerateContent()` cho page có content object thay đổi;

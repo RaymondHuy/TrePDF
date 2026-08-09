@@ -16,6 +16,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QDateTime>
 #include <QFont>
 #include <QFontMetricsF>
 #include <QHash>
@@ -95,6 +96,10 @@ struct SaveDraft {
     QVector<QRectF> highlightRects;
     QColor highlightColor;
     FPDF_ANNOTATION_SUBTYPE annotationSubtype = FPDF_ANNOT_HIGHLIGHT;
+    int sourceAnnotationIndex = -1;
+    QString commentAuthor;
+    QDateTime commentCreationDate;
+    QDateTime commentModifiedDate;
     QImage image;
     PDFEditController::ShapeType shapeType
         = PDFEditController::RectangleShape;
@@ -2414,6 +2419,59 @@ void destroyPreparedObjects(QVector<PreparedDraft> &preparedDrafts)
     }
 }
 
+QString pdfAnnotationDateString(const QDateTime &dateTime)
+{
+    if (!dateTime.isValid()) {
+        return {};
+    }
+
+    const int offsetSeconds = dateTime.offsetFromUtc();
+    QString timeZoneSuffix;
+    if (offsetSeconds == 0) {
+        timeZoneSuffix = QStringLiteral("Z");
+    } else {
+        const int absoluteMinutes = qAbs(offsetSeconds) / 60;
+        const int offsetHours = absoluteMinutes / 60;
+        const int offsetMinutes = absoluteMinutes % 60;
+        timeZoneSuffix = QStringLiteral("%1%2'%3'")
+            .arg(offsetSeconds < 0 ? QLatin1Char('-') : QLatin1Char('+'))
+            .arg(offsetHours, 2, 10, QLatin1Char('0'))
+            .arg(offsetMinutes, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("D:%1%2")
+        .arg(
+            dateTime.toString(QStringLiteral("yyyyMMddHHmmss")),
+            timeZoneSuffix);
+}
+
+bool setOptionalAnnotationString(FPDF_ANNOTATION annotation,
+                                 FPDF_BYTESTRING key,
+                                 const QString &value)
+{
+    return value.isEmpty()
+        || FPDFAnnot_SetStringValue(
+            annotation,
+            key,
+            reinterpret_cast<const FPDF_WCHAR *>(value.utf16()));
+}
+
+bool setCommentAnnotationMetadata(FPDF_ANNOTATION annotation,
+                                  const SaveDraft &draft)
+{
+    return setOptionalAnnotationString(
+               annotation,
+               "T",
+               draft.commentAuthor)
+        && setOptionalAnnotationString(
+            annotation,
+            "CreationDate",
+            pdfAnnotationDateString(draft.commentCreationDate))
+        && setOptionalAnnotationString(
+            annotation,
+            "M",
+            pdfAnnotationDateString(draft.commentModifiedDate));
+}
+
 PDFSaveWriter::Result createTextMarkupAnnotation(
     FPDF_PAGE page,
     const SaveDraft &draft,
@@ -2531,7 +2589,8 @@ PDFSaveWriter::Result createTextMarkupAnnotation(
             static_cast<unsigned int>(color.alpha()))
         || !FPDFAnnot_SetFlags(
             annotation.get(),
-            FPDF_ANNOT_FLAG_PRINT)) {
+            FPDF_ANNOT_FLAG_PRINT)
+        || !setCommentAnnotationMetadata(annotation.get(), draft)) {
         return failure(
             PDFSaveWriter::Error::TextMarkupAnnotationCreationFailed,
             draft.page,
@@ -2654,6 +2713,7 @@ PDFSaveWriter::Result createStickyNoteAnnotation(
             annotation.get(),
             "NM",
             identity)
+        || !setCommentAnnotationMetadata(annotation.get(), draft)
         || !FPDFAnnot_SetFlags(
             annotation.get(),
             FPDF_ANNOT_FLAG_PRINT)) {
@@ -2661,6 +2721,156 @@ PDFSaveWriter::Result createStickyNoteAnnotation(
             PDFSaveWriter::Error::CommentAnnotationCreationFailed,
             draft.page,
             draft.objectId);
+    }
+    return {};
+}
+
+FPDF_ANNOTATION_SUBTYPE sourceAnnotationSubtypeForDraft(
+    const SaveDraft &draft)
+{
+    return draft.kind == SaveDraft::Kind::StickyNote
+        ? FPDF_ANNOT_TEXT
+        : draft.annotationSubtype;
+}
+
+int popupAnnotationIndexForSourceComment(FPDF_PAGE page,
+                                         FPDF_ANNOTATION comment,
+                                         int commentIndex,
+                                         int annotationCount,
+                                         bool &valid)
+{
+    assertPDFiumProcessLockHeld();
+    valid = false;
+
+    int forwardPopupIndex = -1;
+    PdfAnnotationHandle forwardPopup(FPDFAnnot_GetLinkedAnnot(
+        comment,
+        "Popup"));
+    if (forwardPopup.get()) {
+        forwardPopupIndex = FPDFPage_GetAnnotIndex(
+            page,
+            forwardPopup.get());
+        if (FPDFAnnot_GetSubtype(forwardPopup.get()) != FPDF_ANNOT_POPUP
+            || forwardPopupIndex < 0
+            || forwardPopupIndex >= annotationCount) {
+            return -1;
+        }
+    }
+
+    int reversePopupIndex = -1;
+    for (int annotationIndex = 0;
+         annotationIndex < annotationCount;
+         ++annotationIndex) {
+        PdfAnnotationHandle popup(FPDFPage_GetAnnot(page, annotationIndex));
+        if (!popup.get()
+            || FPDFAnnot_GetSubtype(popup.get()) != FPDF_ANNOT_POPUP) {
+            continue;
+        }
+        PdfAnnotationHandle parent(FPDFAnnot_GetLinkedAnnot(
+            popup.get(),
+            "Parent"));
+        if (!parent.get()
+            || FPDFPage_GetAnnotIndex(page, parent.get()) != commentIndex) {
+            continue;
+        }
+        if (reversePopupIndex >= 0) {
+            return -1;
+        }
+        reversePopupIndex = annotationIndex;
+    }
+
+    if (forwardPopupIndex >= 0
+        && reversePopupIndex != forwardPopupIndex) {
+        return -1;
+    }
+    valid = true;
+    return forwardPopupIndex >= 0
+        ? forwardPopupIndex
+        : reversePopupIndex;
+}
+
+PDFSaveWriter::Result removeDeletedCommentAnnotations(
+    FPDF_PAGE page,
+    const QVector<SaveDraft> &drafts,
+    int pageIndex)
+{
+    struct AnnotationRemoval {
+        int annotationIndex = -1;
+        QString objectId;
+    };
+
+    QVector<AnnotationRemoval> removals;
+    QSet<int> sourceAnnotationIndices;
+    QSet<int> removalIndices;
+    const int annotationCount = FPDFPage_GetAnnotCount(page);
+    for (const SaveDraft &draft : drafts) {
+        const bool commentDraft
+            = draft.kind == SaveDraft::Kind::TextMarkup
+            || draft.kind == SaveDraft::Kind::StickyNote;
+        if (!commentDraft || !draft.deleted || draft.added) {
+            continue;
+        }
+        if (draft.sourceAnnotationIndex < 0
+            || draft.sourceAnnotationIndex >= annotationCount
+            || sourceAnnotationIndices.contains(
+                draft.sourceAnnotationIndex)) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
+                pageIndex,
+                draft.objectId);
+        }
+        sourceAnnotationIndices.insert(draft.sourceAnnotationIndex);
+
+        PdfAnnotationHandle annotation(FPDFPage_GetAnnot(
+            page,
+            draft.sourceAnnotationIndex));
+        if (!annotation.get()
+            || FPDFAnnot_GetSubtype(annotation.get())
+                != sourceAnnotationSubtypeForDraft(draft)
+            || removalIndices.contains(draft.sourceAnnotationIndex)) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
+                pageIndex,
+                draft.objectId);
+        }
+        removalIndices.insert(draft.sourceAnnotationIndex);
+        removals.append({draft.sourceAnnotationIndex, draft.objectId});
+
+        bool popupValid = false;
+        const int popupIndex = popupAnnotationIndexForSourceComment(
+            page,
+            annotation.get(),
+            draft.sourceAnnotationIndex,
+            annotationCount,
+            popupValid);
+        if (!popupValid
+            || (popupIndex >= 0
+                && removalIndices.contains(popupIndex))) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
+                pageIndex,
+                draft.objectId);
+        }
+        if (popupIndex >= 0) {
+            removalIndices.insert(popupIndex);
+            removals.append({popupIndex, draft.objectId});
+        }
+    }
+
+    std::sort(
+        removals.begin(),
+        removals.end(),
+        [](const AnnotationRemoval &left,
+           const AnnotationRemoval &right) {
+            return left.annotationIndex > right.annotationIndex;
+        });
+    for (const AnnotationRemoval &removal : std::as_const(removals)) {
+        if (!FPDFPage_RemoveAnnot(page, removal.annotationIndex)) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
+                pageIndex,
+                removal.objectId);
+        }
     }
     return {};
 }
@@ -2899,7 +3109,19 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     }
     destroyPreparedObjects(preparedDrafts);
 
+    const PDFSaveWriter::Result annotationRemovalResult
+        = removeDeletedCommentAnnotations(
+            page.get(),
+            drafts,
+            pageIndex);
+    if (!annotationRemovalResult.succeeded()) {
+        return annotationRemovalResult;
+    }
+
     for (const SaveDraft &draft : drafts) {
+        if (draft.deleted) {
+            continue;
+        }
         PDFSaveWriter::Result annotationResult;
         if (draft.kind == SaveDraft::Kind::TextMarkup) {
             annotationResult = createTextMarkupAnnotation(
@@ -3340,6 +3562,13 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.frameRect = draft->frameRect;
         saveDraft.highlightRects = draft->candidate.highlightRects;
         saveDraft.highlightColor = draft->candidate.highlightColor;
+        saveDraft.sourceAnnotationIndex
+            = draft->candidate.sourceAnnotationIndex;
+        saveDraft.commentAuthor = draft->candidate.commentAuthor;
+        saveDraft.commentCreationDate
+            = draft->candidate.commentCreationDate;
+        saveDraft.commentModifiedDate
+            = draft->candidate.commentModifiedDate;
         if (draft->candidate.kind == QLatin1String("underline")) {
             saveDraft.annotationSubtype = FPDF_ANNOT_UNDERLINE;
         } else if (draft->candidate.kind == QLatin1String("strikeout")) {

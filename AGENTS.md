@@ -18,12 +18,13 @@ Current features:
 - Open multiple local PDF files in independent tabs and close them separately.
 - Insert a blank page immediately after the current page or delete the current
   page, with undo/redo/discard and Save/Save As persistence.
-- Add rectangular highlight annotations from the Comment tab with an
-  Office-style split-button palette containing curated marker and custom
-  colors. Highlights retain
-  their chosen color as undoable session drafts, can be selected and deleted,
-  and persist through Save/Save As without rewriting page content streams on
-  annotation-only pages.
+- Add Sticky Note, Highlight, Underline, and Strikeout annotations from the
+  Comment tab. New comments are undoable session drafts; supported source
+  comments can be indexed, selected, and deleted with undo/redo/discard.
+  Save/Save As persists additions and removals without rewriting page content
+  streams on annotation-only pages. The comments panel shows each annotation's
+  author and modification date, falling back to its creation date. Existing
+  comment contents remain read-only.
 - Draw rectangles, ovals, lines, arrows, triangles, and diamonds from the
   Shapes dropdown. Added shapes are vector session drafts that can be selected,
   moved, resized, deleted, undone/redone, and persisted as PDF path objects.
