@@ -263,6 +263,9 @@ public:
     Q_INVOKABLE void finishSelectedTextEdit();
     Q_INVOKABLE void cancelSelectedTextEdit();
     Q_INVOKABLE void commitSelectedText(const QString &text);
+    Q_INVOKABLE bool setCommentText(int page,
+                                    const QString &objectId,
+                                    const QString &text);
     Q_INVOKABLE void setSelectedCommentText(const QString &text);
     Q_INVOKABLE void deleteSelectedObject();
     Q_INVOKABLE int undo();
@@ -333,6 +336,7 @@ private:
         QRectF initialDraftFrameRect;
         QPointF origin;
         QString text;
+        QString sourceAnnotationName;
         QString commentAuthor;
         QDateTime commentCreationDate;
         QDateTime commentModifiedDate;
@@ -342,6 +346,7 @@ private:
         int replyToSourceAnnotationIndex = -1;
         int replyDirectParentSourceAnnotationIndex = -1;
         bool isReplyAnnotation = false;
+        bool commentTextReadOnly = false;
         bool replyToParentAdded = false;
         QString fontFamily;
         QString fontIdentity;
@@ -551,6 +556,8 @@ private:
         QVector<Candidate> &candidates,
         const std::shared_ptr<std::atomic_bool> &cancellation);
     const Candidate *findCandidate(int page, const QString &objectId);
+    const Candidate *findCommentCandidate(int page,
+                                          const QString &objectId);
     QVariantList candidateSourceRects(const Candidate &candidate) const;
     QVariantList characterSpanMaps(const QVector<CharacterSpan> &spans) const;
     QVariantList paragraphFormatMaps(const QVector<ParagraphFormat> &formats) const;

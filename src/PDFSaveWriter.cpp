@@ -49,6 +49,7 @@ constexpr int kPaintColorTolerance = 12;
 constexpr char kPreservedPaintMark[] = "TrePDFPreservedPaint";
 constexpr char kCommentThreadIdKey[] = "TrePDFThreadId";
 constexpr char kCommentReplyToKey[] = "TrePDFReplyTo";
+constexpr int kAnnotationFlagLockedContents = 1 << 9;
 constexpr unsigned long kMaximumAnnotationStringBytes
     = 4UL * 1024UL * 1024UL;
 
@@ -94,6 +95,7 @@ struct SaveDraft {
     QVector<QVector<int>> sourceObjectPaths;
     QString originalText;
     QString text;
+    QString sourceAnnotationName;
     QVector<SaveSpan> characterSpans;
     QVector<SaveParagraph> paragraphFormats;
     QRectF sourceRect;
@@ -2782,6 +2784,82 @@ FPDF_ANNOTATION_SUBTYPE sourceAnnotationSubtypeForDraft(
         : draft.annotationSubtype;
 }
 
+QString plainTextCommentRichText(const QString &text)
+{
+    QString escapedText = text.toHtmlEscaped();
+    escapedText.replace(QLatin1Char('\n'), QStringLiteral("<br/>"));
+    return QStringLiteral(
+               "<?xml version=\"1.0\"?>"
+               "<body xmlns=\"http://www.w3.org/1999/xhtml\"><p>")
+        + escapedText
+        + QStringLiteral("</p></body>");
+}
+
+PDFSaveWriter::Result updateSourceCommentAnnotation(
+    FPDF_PAGE page,
+    const SaveDraft &draft,
+    int pageIndex)
+{
+    if (draft.added || draft.deleted) {
+        return {};
+    }
+
+    const int annotationCount = FPDFPage_GetAnnotCount(page);
+    if (draft.sourceAnnotationIndex < 0
+        || draft.sourceAnnotationIndex >= annotationCount) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationUpdateFailed,
+            pageIndex,
+            draft.objectId);
+    }
+
+    PdfAnnotationHandle annotation(FPDFPage_GetAnnot(
+        page,
+        draft.sourceAnnotationIndex));
+    const int annotationFlags = annotation.get()
+        ? FPDFAnnot_GetFlags(annotation.get())
+        : 0;
+    const bool commentTextReadOnly
+        = (annotationFlags & FPDF_ANNOT_FLAG_READONLY) != 0
+        || (annotationFlags & kAnnotationFlagLockedContents) != 0;
+    const bool sourceIdentityMatches = annotation.get()
+        && annotationString(annotation.get(), "Contents")
+            == draft.originalText
+        && (draft.sourceAnnotationName.isEmpty()
+            || annotationString(annotation.get(), "NM")
+                == draft.sourceAnnotationName);
+    const auto *contents = reinterpret_cast<const FPDF_WCHAR *>(
+        draft.text.utf16());
+    const QString modificationDate = pdfAnnotationDateString(
+        draft.commentModifiedDate);
+    bool updated = annotation.get()
+        && !commentTextReadOnly
+        && sourceIdentityMatches
+        && FPDFAnnot_GetSubtype(annotation.get())
+            == sourceAnnotationSubtypeForDraft(draft)
+        && FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "Contents",
+            contents)
+        && setOptionalAnnotationString(
+            annotation.get(),
+            "M",
+            modificationDate);
+    if (updated && FPDFAnnot_HasKey(annotation.get(), "RC")) {
+        const QString richText = plainTextCommentRichText(draft.text);
+        updated = FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "RC",
+            reinterpret_cast<const FPDF_WCHAR *>(richText.utf16()));
+    }
+    return updated
+        ? PDFSaveWriter::Result{}
+        : failure(
+            PDFSaveWriter::Error::CommentAnnotationUpdateFailed,
+            pageIndex,
+            draft.objectId);
+}
+
 bool isSupportedCommentAnnotationSubtype(int subtype)
 {
     return subtype == FPDF_ANNOT_HIGHLIGHT
@@ -2831,7 +2909,8 @@ PDFSaveWriter::Result assignSourceReplyParentThreadIds(
     const int annotationCount = FPDFPage_GetAnnotCount(page);
     QHash<int, QString> threadIdsByAnnotation;
     for (const SaveDraft &draft : drafts) {
-        if (!draft.reply
+        if (!draft.added
+            || !draft.reply
             || draft.deleted
             || draft.replyToSourceAnnotationIndex < 0) {
             continue;
@@ -3348,6 +3427,23 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         return replyParentResult;
     }
 
+    for (const SaveDraft &draft : drafts) {
+        if ((draft.kind != SaveDraft::Kind::TextMarkup
+             && draft.kind != SaveDraft::Kind::StickyNote)
+            || draft.added
+            || draft.deleted) {
+            continue;
+        }
+        const PDFSaveWriter::Result annotationUpdateResult
+            = updateSourceCommentAnnotation(
+                page.get(),
+                draft,
+                pageIndex);
+        if (!annotationUpdateResult.succeeded()) {
+            return annotationUpdateResult;
+        }
+    }
+
     const PDFSaveWriter::Result annotationRemovalResult
         = removeDeletedCommentAnnotations(
             page.get(),
@@ -3358,7 +3454,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     }
 
     for (const SaveDraft &draft : drafts) {
-        if (draft.deleted) {
+        if (draft.deleted || !draft.added) {
             continue;
         }
         PDFSaveWriter::Result annotationResult;
@@ -3895,6 +3991,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.objectId = draft->candidate.objectId;
         saveDraft.originalText = draft->candidate.text;
         saveDraft.text = draft->text;
+        saveDraft.sourceAnnotationName
+            = draft->candidate.sourceAnnotationName;
         saveDraft.sourceRect = sourceTextMoveOnly
             ? (draft->candidate.initialDraftFrameRect.isEmpty()
                    ? draft->candidate.geometry.sourceRect

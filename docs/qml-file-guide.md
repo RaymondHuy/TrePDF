@@ -194,18 +194,19 @@ Note đang chọn và phản hồi một cấp.
   viewport và tự hủy khi document/revision đổi.
 - Hiển thị loại, trang, màu, nội dung rút gọn và trạng thái draft; chọn item sẽ
   chuyển về Select, chọn candidate tương ứng và điều hướng tới trang đó.
-- Sticky Note mới có `TextArea` để sửa `/Contents`; nội dung được commit khi mất
-  focus, thu gọn panel, đổi session hoặc thực hiện Save.
+- Comment được hỗ trợ, gồm Sticky Note, text markup và reply có sẵn trong PDF,
+  dùng `TextArea` để sửa `/Contents`; nội dung được buffer theo `page + objectId`
+  và commit khi mất focus, thu gọn panel, đổi session hoặc thực hiện Save.
 - Comment gốc có action Phản hồi và composer Gửi/Hủy; Ctrl/Cmd+Enter gửi, Esc
   hủy. Nút dropdown trên từng comment gốc bung/thu nhóm reply; reply được thụt
   vào kèm đường nhánh cấp hai trong cùng model phẳng và không có action phản
   hồi tiếp, nên UI luôn chỉ có một cấp con. Reply chỉ hiện trong panel; API dữ
   liệu theo trang và selection decoration của `EditOverlay` không vẽ reply lên
   viewer.
-- Comment có sẵn trong PDF được liệt kê để đọc, điều hướng và xóa dưới dạng
-  draft có undo/redo/discard; nội dung của chúng vẫn chưa cho sửa. Xóa comment
-  gốc ẩn cả thread, còn xóa reply chỉ tác động item đó. Panel dùng chung trạng
-  thái thu gọn theo document session.
+- Comment có sẵn trong PDF được liệt kê để đọc, điều hướng, sửa nội dung và xóa
+  dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
+  được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.
+  Panel dùng chung trạng thái thu gọn theo document session.
 
 ### [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml)
 

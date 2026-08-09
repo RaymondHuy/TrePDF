@@ -67,11 +67,12 @@ editable candidate while retaining every source object path for draft rendering
 and persistence.
 
 The Comment ribbon provides Sticky Note, Highlight, Underline, and Strikeout
-tools plus a collapsible, whole-document comments panel. New sticky notes can
-be selected and edited in the panel, while markup uses a compact curated color
-grid and a system picker for custom colors. Root comments can receive replies;
-each root has a dropdown control that expands its replies at one visual level,
-and reply-to-reply is not offered. Reply annotations remain available in this
+tools plus a collapsible, whole-document comments panel. Supported comments
+and replies, including annotations already in the PDF, can be selected and
+have their text edited in the panel. Markup uses a compact curated color grid
+and a system picker for custom colors. Root comments can receive replies; each
+root has a dropdown control that expands its replies at one visual level, and
+reply-to-reply is not offered. Reply annotations remain available in this
 panel but their standalone appearances are hidden from the PDF page viewer.
 Comment changes are per-tab session drafts with
 undo, redo, discard, selection, and deletion support. Save and Save As persist
@@ -79,10 +80,12 @@ them as standard PDF annotations with geometry, color, contents, print
 visibility, and `/IRT` reply links; annotation-only saves do not regenerate the
 page content stream. Existing supported annotations are rehydrated for
 navigation and display, including their author and modification date (or
-creation date when no modification date is present). Their contents remain
-read-only, but they can be deleted as undoable session drafts and removed from
-the saved PDF without regenerating page content. Deleting a root comment also
-removes its replies so the saved document cannot contain an orphaned thread.
+creation date when no modification date is present). Editing updates the source
+annotation's `/Contents`, modification date, and rich-text value when present,
+while preserving its appearance, popup, thread links, geometry, and other
+metadata. Read-only and LockedContents annotations remain protected. Deleting
+a root comment also removes its replies so the saved document cannot contain
+an orphaned thread.
 
 The Shapes dropdown offers rectangles, ovals, lines, arrows, triangles, and
 diamonds. After choosing a shape, drag over a page to create a vector session

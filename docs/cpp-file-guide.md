@@ -213,8 +213,10 @@ orchestration Save.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
 - Đọc Highlight, Underline, Strikeout và Text annotation; chuẩn hóa quad/rect,
-  màu và `/Contents` thành comment candidate. Nội dung annotation nguồn chỉ đọc,
-  nhưng xóa tạo tombstone draft theo annotation index và subtype.
+  màu và `/Contents` thành comment candidate. Nội dung annotation nguồn được sửa
+  trong panel bằng draft riêng; canvas vẫn không cho move/resize annotation
+  nguồn, còn ReadOnly/LockedContents không nhận mutation. Xóa tạo tombstone draft
+  theo annotation index và subtype.
 - Đọc quan hệ reply chuẩn qua `/IRT` và `/RT`; chuỗi reply nhiều tầng từ PDF
   ngoài được lần về root rồi trình bày thành đúng một cấp. Metadata private chỉ
   dùng để định danh ổn định parent trong pipeline ghi trước khi tạo `/IRT` chuẩn.
@@ -257,8 +259,9 @@ orchestration Save.
   Underline và Strikeout giữ quad/màu; Sticky Note giữ frame 24 pt và nội dung
   chỉnh từ `CommentPanel`.
 - `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
-  hướng phẳng cho panel theo thứ tự root rồi replies. `addCommentReply()` chỉ
-  nhận root, còn nội dung Sticky Note/reply mới tham gia cùng snapshot undo/redo.
+  hướng phẳng cho panel theo thứ tự root rồi replies. `setCommentText()` định
+  danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
+  gia cùng snapshot undo/redo. `addCommentReply()` chỉ nhận root.
 - Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 
@@ -312,6 +315,9 @@ orchestration Save.
 - Xóa comment nguồn, toàn bộ reply hậu duệ và `/Popup` liên kết theo annotation
   index từ lớn xuống nhỏ, xác thực lại subtype trước khi gỡ; page chỉ đổi
   annotation không gọi `FPDFPage_GenerateContent()`.
+- Sửa comment nguồn tại chỗ trước bước xóa index: xác thực subtype, nội dung gốc,
+  `/NM` nếu có và cờ bảo vệ; chỉ đổi `/Contents`, `/M` và `/RC` nếu tồn tại để
+  giữ nguyên `/AP`, `/Popup`, `/IRT`, `/RT`, rect/quad, màu và metadata khác.
 - Giữ earliest source z-order bằng insert-at-index; object thêm mới theo insertion
   order. Dùng `FPDF_DeviceToPage()` để tôn trọng CropBox/rotation.
 - Chỉ gọi `FPDFPage_GenerateContent()` cho page có content object thay đổi;
