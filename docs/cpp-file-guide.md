@@ -178,6 +178,9 @@ Tệp định nghĩa hai lớp có ownership khác nhau.
   hoặc Dropdown đang giữ tombstone xóa draft; capture nền vùng widget, cho
   `FPDF_FFLDraw` chạy để form khác vẫn đúng, rồi dán nền lại trên widget bị
   suppress.
+- Reply comment có `/IRT` được tạm đặt Hidden cùng Popup liên kết trong mỗi
+  transaction render và phục hồi nguyên flags sau đó; panel và Save vẫn giữ
+  đầy đủ reply, còn viewer chỉ vẽ comment gốc.
 - Chỉ tái sử dụng form document nếu mọi object transform, annotation flag và patch
   đều phục hồi thành công.
 

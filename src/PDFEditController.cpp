@@ -1831,6 +1831,12 @@ QString PDFEditController::selectedKind() const
     return m_hasSelection ? m_selectedCandidate.kind : QString();
 }
 
+bool PDFEditController::selectedCommentReply() const
+{
+    return m_hasSelection
+        && m_selectedCandidate.isReplyAnnotation;
+}
+
 QRectF PDFEditController::selectedSourceRect() const
 {
     return m_hasSelection ? m_selectedCandidate.geometry.sourceRect : QRectF();
@@ -2282,8 +2288,7 @@ QVariantList PDFEditController::candidatesForPage(int page)
         if (isDesignerManagedSourceWidget(candidate)) {
             continue;
         }
-        if (!candidate.replyToObjectId.isEmpty()
-            && !commentReplyIsVisible(candidate)) {
+        if (candidate.isReplyAnnotation) {
             continue;
         }
         const QString key = draftKey(candidate.page, candidate.objectId);
@@ -2301,8 +2306,7 @@ QVariantList PDFEditController::candidatesForPage(int page)
         if (candidate.page != page) {
             continue;
         }
-        if (!candidate.replyToObjectId.isEmpty()
-            && !commentReplyIsVisible(candidate)) {
+        if (candidate.isReplyAnnotation) {
             continue;
         }
 
@@ -2325,8 +2329,7 @@ QVariantList PDFEditController::draftsForPage(int page) const
     const auto pageCandidates = m_pageCandidates.constFind(page);
     if (pageCandidates != m_pageCandidates.cend()) {
         for (const Candidate &candidate : pageCandidates.value()) {
-            if (!candidate.replyToObjectId.isEmpty()
-                && !commentReplyIsVisible(candidate)) {
+            if (candidate.isReplyAnnotation) {
                 continue;
             }
             const auto draft = m_drafts.constFind(draftKey(page, candidate.objectId));
@@ -2353,8 +2356,7 @@ QVariantList PDFEditController::draftsForPage(int page) const
         if (candidate.page != page) {
             continue;
         }
-        if (!candidate.replyToObjectId.isEmpty()
-            && !commentReplyIsVisible(candidate)) {
+        if (candidate.isReplyAnnotation) {
             continue;
         }
 
@@ -2392,8 +2394,7 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
         if (isDesignerManagedSourceWidget(candidate)) {
             return;
         }
-        if (!candidate.replyToObjectId.isEmpty()
-            && !commentReplyIsVisible(candidate)) {
+        if (candidate.isReplyAnnotation) {
             return;
         }
         if (m_tool == EditTextTool
@@ -3251,6 +3252,7 @@ QVariantMap PDFEditController::addCommentReply(
     candidate.commentCreationDate = QDateTime::currentDateTime();
     candidate.replyToObjectId = parentObjectId;
     candidate.replyToThreadId = parentThreadId;
+    candidate.isReplyAnnotation = true;
     candidate.replyToSourceAnnotationIndex
         = parentCandidate.added
         ? -1
@@ -6562,6 +6564,14 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             candidate.replyToThreadId = annotationString(
                 annotation,
                 kCommentReplyToKey).trimmed();
+            FPDF_ANNOTATION directReplyParent
+                = annotationUsesReplyRelation(annotation)
+                ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
+                : nullptr;
+            candidate.isReplyAnnotation = directReplyParent != nullptr;
+            if (directReplyParent) {
+                FPDFPage_CloseAnnot(directReplyParent);
+            }
             QString rootThreadId;
             int directParentIndex = -1;
             const int rootReplyIndex = rootReplyAnnotationIndex(

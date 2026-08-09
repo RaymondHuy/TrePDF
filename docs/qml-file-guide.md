@@ -199,7 +199,9 @@ Note đang chọn và phản hồi một cấp.
 - Comment gốc có action Phản hồi và composer Gửi/Hủy; Ctrl/Cmd+Enter gửi, Esc
   hủy. Nút dropdown trên từng comment gốc bung/thu nhóm reply; reply được thụt
   vào kèm đường nhánh cấp hai trong cùng model phẳng và không có action phản
-  hồi tiếp, nên UI luôn chỉ có một cấp con.
+  hồi tiếp, nên UI luôn chỉ có một cấp con. Reply chỉ hiện trong panel; API dữ
+  liệu theo trang và selection decoration của `EditOverlay` không vẽ reply lên
+  viewer.
 - Comment có sẵn trong PDF được liệt kê để đọc, điều hướng và xóa dưới dạng
   draft có undo/redo/discard; nội dung của chúng vẫn chưa cho sửa. Xóa comment
   gốc ẩn cả thread, còn xóa reply chỉ tác động item đó. Panel dùng chung trạng

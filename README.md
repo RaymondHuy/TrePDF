@@ -71,7 +71,9 @@ tools plus a collapsible, whole-document comments panel. New sticky notes can
 be selected and edited in the panel, while markup uses a compact curated color
 grid and a system picker for custom colors. Root comments can receive replies;
 each root has a dropdown control that expands its replies at one visual level,
-and reply-to-reply is not offered. Comment changes are per-tab session drafts with
+and reply-to-reply is not offered. Reply annotations remain available in this
+panel but their standalone appearances are hidden from the PDF page viewer.
+Comment changes are per-tab session drafts with
 undo, redo, discard, selection, and deletion support. Save and Save As persist
 them as standard PDF annotations with geometry, color, contents, print
 visibility, and `/IRT` reply links; annotation-only saves do not regenerate the

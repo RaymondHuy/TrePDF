@@ -26,7 +26,9 @@ Current features:
   author and modification date, falling back to its creation date. Root
   comments accept replies; the panel flattens imported reply chains to one
   display level, saves new replies with standard `/IRT`, and cascades root
-  deletion across the thread. Existing comment contents remain read-only.
+  deletion across the thread. Reply annotation appearances stay hidden from the
+  page viewer while the replies remain available in the panel. Existing comment
+  contents remain read-only.
 - Draw rectangles, ovals, lines, arrows, triangles, and diamonds from the
   Shapes dropdown. Added shapes are vector session drafts that can be selected,
   moved, resized, deleted, undone/redone, and persisted as PDF path objects.

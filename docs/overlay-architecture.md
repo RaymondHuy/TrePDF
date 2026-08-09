@@ -418,6 +418,12 @@ tập suppress, tạm thêm cờ Hidden trước `FPDF_RenderPageBitmap()`, khô
 layer vẽ popup, rồi phục hồi đúng cờ gốc trước khi tái sử dụng form document;
 Save mới gỡ các annotation thật khỏi PDF.
 
+Ngay cả khi không có draft xóa, mọi markup annotation có quan hệ reply `/IRT`
+và `/RT /R` (hoặc thiếu `/RT` theo mặc định PDF) cùng Popup của nó cũng được
+tạm đặt Hidden trong transaction render. Reply vẫn nằm trong comment index và
+được Save bình thường, nhưng chỉ xuất hiện trong `CommentPanel`; reply draft và
+selection decoration tương ứng cũng bị loại khỏi lớp hiển thị theo trang.
+
 ### Source widget của form designer
 
 1. Trong Edit/Forms, `PDFPageItem` lấy danh sách source widget id mà designer
