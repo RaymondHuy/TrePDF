@@ -14,7 +14,11 @@ Rectangle {
 
     property bool collapsed: false
     property var activeEditor: null
+    property int activeEditorPage: -1
     property string activeEditorObjectId: ""
+    property string activeEditorSourceText: ""
+    property string activeEditorText: ""
+    property bool activeEditorDirty: false
     property int replyTargetPage: -1
     property string replyTargetObjectId: ""
     property string replyDraftText: ""
@@ -51,26 +55,59 @@ Rectangle {
         return displayedComments
     }
     readonly property bool textEditPending:
-        (activeEditor !== null && activeEditor.dirty === true)
-        || replyTargetObjectId.length > 0
+        activeEditorDirty || replyTargetObjectId.length > 0
     readonly property int replyIndent: 30
+    readonly property int maximumCommentCharacters:
+        root.editController.maximumCommentCharacters
 
     implicitWidth: collapsed ? 42 : 280
     color: theme.ribbonSurface
 
     function commitActiveEditor() {
-        const editor = root.activeEditor
-        if (editor === null)
-            return
+        if (root.activeEditorObjectId.length === 0)
+            return true
 
-        if (root.editController
-                && root.editController.selectedObjectId
-                    === root.activeEditorObjectId
-                && typeof editor.commitText === "function") {
-            editor.commitText()
+        if (root.activeEditorDirty
+                && root.activeEditorText.length
+                    > root.maximumCommentCharacters) {
+            return false
+        }
+        if (root.activeEditorDirty
+                && (!root.editController
+                    || !root.editController.setCommentText(
+                        root.activeEditorPage,
+                        root.activeEditorObjectId,
+                        root.activeEditorText))) {
+            return false
         }
         root.activeEditor = null
+        root.activeEditorPage = -1
         root.activeEditorObjectId = ""
+        root.activeEditorSourceText = ""
+        root.activeEditorText = ""
+        root.activeEditorDirty = false
+        return true
+    }
+
+    function beginCommentEdit(page, objectId, sourceText, editor) {
+        const sameComment = root.activeEditorPage === page
+            && root.activeEditorObjectId === objectId
+        if (!sameComment && !root.commitActiveEditor())
+            return false
+
+        if (!sameComment) {
+            root.activeEditorPage = page
+            root.activeEditorObjectId = objectId
+            root.activeEditorSourceText = sourceText
+            root.activeEditorText = sourceText
+            root.activeEditorDirty = false
+        } else if (!root.activeEditorDirty
+                   && root.activeEditorSourceText !== sourceText) {
+            root.activeEditorSourceText = sourceText
+            root.activeEditorText = sourceText
+        }
+        root.activeEditor = editor
+        return true
     }
 
     function requestCollapsed(collapsed) {
@@ -80,7 +117,8 @@ Rectangle {
     }
 
     function commitPendingEdit() {
-        commitActiveEditor()
+        if (!commitActiveEditor())
+            return false
         return submitPendingReply()
     }
 
@@ -112,8 +150,8 @@ Rectangle {
 
     function toggleThreadReplies(page, objectId) {
         const expanded = root.threadRepliesExpanded(page, objectId)
-        if (expanded)
-            root.commitActiveEditor()
+        if (expanded && !root.commitActiveEditor())
+            return
         root.setThreadRepliesExpanded(page, objectId, !expanded)
     }
 
@@ -148,7 +186,8 @@ Rectangle {
                 || objectId.length === 0) {
             return
         }
-        root.commitActiveEditor()
+        if (!root.commitActiveEditor())
+            return
         if (root.replyTargetObjectId.length > 0
                 && (root.replyTargetPage !== page
                     || root.replyTargetObjectId !== objectId)
@@ -192,6 +231,8 @@ Rectangle {
             root.cancelPendingReply()
             return true
         }
+        if (replyText.length > root.maximumCommentCharacters)
+            return false
         if (!root.document.loaded || root.editController.saving)
             return false
 
@@ -226,7 +267,8 @@ Rectangle {
                 && root.replyTargetObjectId === objectId) {
             root.cancelPendingReply()
         }
-        root.commitActiveEditor()
+        if (!root.commitActiveEditor())
+            return
         root.editController.removeComment(page, objectId)
     }
 
@@ -460,10 +502,16 @@ Rectangle {
                                 modelData.color === undefined
                                     ? root.theme.foxitOrange
                                     : modelData.color
-                            readonly property bool editable:
-                                modelData.editable === undefined
+                            readonly property bool commentTextEditable:
+                                modelData.commentTextEditable === undefined
                                     ? false
-                                    : Boolean(modelData.editable)
+                                    : Boolean(
+                                        modelData.commentTextEditable)
+                            readonly property string commentTextEditReason:
+                                modelData.commentTextEditReason === undefined
+                                    ? ""
+                                    : String(
+                                        modelData.commentTextEditReason)
                             readonly property bool added:
                                 modelData.added === undefined
                                     ? false
@@ -489,12 +537,11 @@ Rectangle {
                             readonly property int hierarchyIndent:
                                 isReply ? root.replyIndent : 0
                             readonly property bool selected:
-                                root.editController.selectedObjectId
-                                    === objectId
-                            readonly property bool stickyNote:
-                                kind.toLowerCase() === "stickynote"
+                                root.editController.selectedPage === page
+                                    && root.editController.selectedObjectId
+                                        === objectId
                             readonly property bool editorVisible:
-                                selected && stickyNote && editable
+                                selected && commentTextEditable
                                     && (root.replyTargetPage !== page
                                         || root.replyTargetObjectId
                                             !== objectId)
@@ -532,6 +579,10 @@ Rectangle {
                                 qsTrId("CommentItemAccessibleName")
                                     .arg(label)
                                     .arg(page + 1)
+                            Accessible.description: commentTextEditReason
+                            ToolTip.visible: hoverHandler.hovered
+                                && commentTextEditReason.length > 0
+                            ToolTip.text: commentTextEditReason
 
                             function activateComment() {
                                 const targetObjectId = objectId
@@ -567,6 +618,11 @@ Rectangle {
                             }
 
                             TapHandler {
+                                enabled: !commentCard.editorVisible
+                                    && (root.replyTargetPage
+                                            !== commentCard.page
+                                        || root.replyTargetObjectId
+                                            !== commentCard.objectId)
                                 acceptedButtons: Qt.LeftButton
                                 onTapped: commentCard.activateComment()
                             }
@@ -868,6 +924,14 @@ Rectangle {
                                             TextArea {
                                                 id: replyEditor
 
+                                                //% "%1 / %2 characters"
+                                                readonly property string characterCountText:
+                                                    qsTrId(
+                                                        "CommentCharacterCount")
+                                                        .arg(length)
+                                                        .arg(root
+                                                            .maximumCommentCharacters)
+
                                                 Layout.fillWidth: true
                                                 Layout.preferredHeight: 80
                                                 text: root.replyDraftText
@@ -885,6 +949,8 @@ Rectangle {
                                                 //% "Reply text"
                                                 Accessible.name:
                                                     qsTrId("ReplyText")
+                                                Accessible.description:
+                                                    characterCountText
                                                 Component.onCompleted:
                                                     forceActiveFocus()
                                                 onTextChanged:
@@ -898,9 +964,16 @@ Rectangle {
                                                             && (event.key
                                                                     === Qt.Key_Return
                                                                 || event.key
-                                                                    === Qt.Key_Enter)) {
-                                                        if (root.submitPendingReply())
-                                                            event.accepted = true
+                                                                    === Qt.Key_Enter)
+                                                            && !replyEditor
+                                                                .inputMethodComposing) {
+                                                        event.accepted = true
+                                                        if (replyEditor.length
+                                                                <= root
+                                                                    .maximumCommentCharacters) {
+                                                            root
+                                                                .submitPendingReply()
+                                                        }
                                                     } else if (event.key
                                                             === Qt.Key_Escape) {
                                                         root.cancelPendingReply()
@@ -919,6 +992,21 @@ Rectangle {
                                                             : root.theme
                                                                 .ribbonBorder
                                                 }
+                                            }
+
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: replyEditor
+                                                    .characterCountText
+                                                color: replyEditor.length
+                                                        > root
+                                                            .maximumCommentCharacters
+                                                    ? "#b3261e"
+                                                    : "#747176"
+                                                font.pixelSize: 10
+                                                horizontalAlignment:
+                                                    Text.AlignRight
+                                                Accessible.ignored: true
                                             }
 
                                             RowLayout {
@@ -942,6 +1030,10 @@ Rectangle {
                                                     enabled:
                                                         root.replyDraftText
                                                             .trim().length > 0
+                                                        && root.replyDraftText
+                                                            .length
+                                                            <= root
+                                                                .maximumCommentCharacters
                                                         && !root.editController
                                                             .saving
                                                     onClicked:
@@ -956,14 +1048,29 @@ Rectangle {
                                 TextArea {
                                     id: commentEditor
 
+                                    //% "%1 / %2 characters"
+                                    readonly property string characterCountText:
+                                        qsTrId("CommentCharacterCount")
+                                            .arg(length)
+                                            .arg(root.maximumCommentCharacters)
                                     property string sourceText:
                                         commentCard.commentText
-                                    property bool dirty: false
+                                    readonly property bool ownsActiveEdit:
+                                        root.activeEditorPage
+                                            === commentCard.page
+                                        && root.activeEditorObjectId
+                                            === commentCard.objectId
+                                    readonly property bool dirty:
+                                        ownsActiveEdit
+                                            && root.activeEditorDirty
 
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 92
                                     visible: commentCard.editorVisible
-                                    text: sourceText
+                                    enabled: !root.editController.saving
+                                    text: ownsActiveEdit
+                                        ? root.activeEditorText
+                                        : sourceText
                                     wrapMode: TextEdit.Wrap
                                     selectByMouse: true
                                     persistentSelection: true
@@ -977,36 +1084,45 @@ Rectangle {
                                         qsTrId("WriteCommentPlaceholder")
                                     //% "Comment text"
                                     Accessible.name: qsTrId("CommentText")
+                                    Accessible.description:
+                                        characterCountText
 
                                     function commitText() {
-                                        if (!dirty
-                                                || !root.editController
-                                                || root.editController
-                                                    .selectedObjectId
-                                                    !== commentCard.objectId) {
-                                            return
+                                        if (!ownsActiveEdit || !dirty)
+                                            return true
+                                        if (length
+                                                > root
+                                                    .maximumCommentCharacters) {
+                                            return false
                                         }
-
-                                        dirty = false
-                                        root.editController
-                                            .setSelectedCommentText(text)
+                                        return root.commitActiveEditor()
                                     }
 
                                     onSourceTextChanged: {
-                                        if (!activeFocus) {
+                                        if (!activeFocus
+                                                && !ownsActiveEdit) {
                                             text = sourceText
-                                            dirty = false
                                         }
                                     }
                                     onTextChanged: {
-                                        if (activeFocus)
-                                            dirty = text !== sourceText
+                                        if (activeFocus
+                                                && ownsActiveEdit) {
+                                            root.activeEditorText = text
+                                            root.activeEditorDirty
+                                                = text
+                                                    !== root
+                                                        .activeEditorSourceText
+                                        }
                                     }
                                     onActiveFocusChanged: {
                                         if (activeFocus) {
-                                            root.activeEditor = commentEditor
-                                            root.activeEditorObjectId
-                                                = commentCard.objectId
+                                            if (!root.beginCommentEdit(
+                                                    commentCard.page,
+                                                    commentCard.objectId,
+                                                    sourceText,
+                                                    commentEditor)) {
+                                                commentEditor.focus = false
+                                            }
                                         } else if (root.activeEditor
                                                 === commentEditor) {
                                             root.commitActiveEditor()
@@ -1021,9 +1137,21 @@ Rectangle {
                                                 && (event.key
                                                         === Qt.Key_Return
                                                     || event.key
-                                                        === Qt.Key_Enter)) {
-                                            commentEditor.commitText()
+                                                        === Qt.Key_Enter)
+                                                && !commentEditor
+                                                    .inputMethodComposing) {
                                             event.accepted = true
+                                            if (commentEditor.length
+                                                    <= root
+                                                        .maximumCommentCharacters
+                                                    && commentEditor
+                                                        .commitText()) {
+                                                root.beginCommentEdit(
+                                                    commentCard.page,
+                                                    commentCard.objectId,
+                                                    commentEditor.text,
+                                                    commentEditor)
+                                            }
                                         }
                                     }
 
@@ -1037,6 +1165,19 @@ Rectangle {
                                                     .foxitBorderOrange
                                                 : root.theme.ribbonBorder
                                     }
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: commentCard.editorVisible
+                                    text: commentEditor.characterCountText
+                                    color: commentEditor.length
+                                            > root.maximumCommentCharacters
+                                        ? "#b3261e"
+                                        : "#747176"
+                                    font.pixelSize: 10
+                                    horizontalAlignment: Text.AlignRight
+                                    Accessible.ignored: true
                                 }
                             }
                         }

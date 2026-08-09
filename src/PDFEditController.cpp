@@ -62,6 +62,7 @@ constexpr qint64 kMaximumAddedImageFileBytes = 64 * 1024 * 1024;
 constexpr qint64 kMaximumAddedImagePixels = 40 * 1000 * 1000;
 constexpr unsigned long kMaximumAnnotationStringBytes
     = 4UL * 1024UL * 1024UL;
+constexpr qsizetype kMaximumCommentCharacters = 700;
 constexpr qreal kLineBaselineToleranceEm = 0.25;
 constexpr qreal kLineMinimumHorizontalGapEm = -0.35;
 constexpr qreal kLineMaximumHorizontalGapEm = 1.25;
@@ -84,6 +85,7 @@ constexpr FS_MATRIX kIdentityMatrix{1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
 constexpr char kPreservedPaintMark[] = "TrePDFPreservedPaint";
 constexpr char kCommentThreadIdKey[] = "TrePDFThreadId";
 constexpr char kCommentReplyToKey[] = "TrePDFReplyTo";
+constexpr int kAnnotationFlagLockedContents = 1 << 9;
 
 bool pageObjectHasContentMark(FPDF_PAGEOBJECT object,
                               const QString &expectedName)
@@ -1418,6 +1420,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::CommentAnnotationCreationFailed:
         //% "The comment could not be created on page %1."
         return qtTrId("PdfSaveCommentCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::CommentAnnotationUpdateFailed:
+        //% "The comment could not be updated on page %1."
+        return qtTrId("PdfSaveCommentUpdateFailed").arg(result.page + 1);
     case PDFSaveWriter::Error::CommentAnnotationRemovalFailed:
         //% "The comment could not be deleted on page %1."
         return qtTrId("PdfSaveCommentRemovalFailed").arg(result.page + 1);
@@ -2078,6 +2083,23 @@ QVariantList PDFEditController::commentItems() const
             : *draft;
         QVariantMap map = candidateMap(displayDraft);
         map.insert(QStringLiteral("page"), candidate->page);
+        map.insert(
+            QStringLiteral("commentTextEditable"),
+            documentAllowsAnnotations()
+                && !candidate->commentTextReadOnly);
+        QString commentTextEditReason;
+        if (candidate->commentTextReadOnly) {
+            //% "This comment is read-only."
+            commentTextEditReason = qtTrId(
+                "ReadOnlyCommentCannotBeEdited");
+        } else if (!documentAllowsAnnotations()) {
+            //% "This PDF does not permit changing annotations."
+            commentTextEditReason = qtTrId(
+                "PdfAnnotationsNotPermitted");
+        }
+        map.insert(
+            QStringLiteral("commentTextEditReason"),
+            commentTextEditReason);
         const QColor markerColor = candidate->highlightColor.isValid()
             ? candidate->highlightColor
             : candidate->kind == QLatin1String("stickyNote")
@@ -2123,6 +2145,11 @@ QVariantList PDFEditController::commentItems() const
         appendComment(reply, false, 0);
     }
     return result;
+}
+
+int PDFEditController::maximumCommentCharacters() const
+{
+    return static_cast<int>(kMaximumCommentCharacters);
 }
 
 quint64 PDFEditController::draftRevisionForPage(int page) const
@@ -2986,7 +3013,7 @@ QVariantMap PDFEditController::addHighlight(int page,
         return {};
     }
     if (!documentAllowsAnnotations()) {
-        //% "This PDF does not permit adding or deleting annotations."
+        //% "This PDF does not permit changing annotations."
         emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
         return {};
     }
@@ -3073,7 +3100,7 @@ QVariantMap PDFEditController::addStickyNote(int page,
         return {};
     }
     if (!documentAllowsAnnotations()) {
-        //% "This PDF does not permit adding or deleting annotations."
+        //% "This PDF does not permit changing annotations."
         emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
         return {};
     }
@@ -3147,8 +3174,15 @@ QVariantMap PDFEditController::addCommentReply(
         || text.trimmed().isEmpty()) {
         return {};
     }
+    if (text.size() > kMaximumCommentCharacters) {
+        //% "Comments and replies can contain at most %1 characters."
+        emit statusMessage(
+            qtTrId("CommentTextTooLong")
+                .arg(kMaximumCommentCharacters));
+        return {};
+    }
     if (!documentAllowsAnnotations()) {
-        //% "This PDF does not permit adding or deleting annotations."
+        //% "This PDF does not permit changing annotations."
         emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
         return {};
     }
@@ -3883,7 +3917,13 @@ bool PDFEditController::selectCandidate(int page, const QString &objectId)
 
     setSelection(candidate);
     if (!candidate->editable && !candidate->reason.isEmpty()) {
-        emit statusMessage(candidate->reason);
+        if (isCommentCandidateKind(candidate->kind)
+            && !documentAllowsAnnotations()) {
+            //% "This PDF does not permit changing annotations."
+            emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+        } else {
+            emit statusMessage(candidate->reason);
+        }
     }
     return true;
 }
@@ -4048,7 +4088,10 @@ bool PDFEditController::selectComment(int page, const QString &objectId)
             continue;
         }
         setSelection(&indexedCandidate);
-        if (!indexedCandidate.reason.isEmpty()) {
+        if (!documentAllowsAnnotations()) {
+            //% "This PDF does not permit changing annotations."
+            emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+        } else if (!indexedCandidate.reason.isEmpty()) {
             emit statusMessage(indexedCandidate.reason);
         }
         return true;
@@ -4878,37 +4921,84 @@ void PDFEditController::commitSelectedText(const QString &text)
     emit historyStateChanged();
 }
 
-void PDFEditController::setSelectedCommentText(const QString &text)
+bool PDFEditController::setCommentText(int page,
+                                       const QString &objectId,
+                                       const QString &text)
 {
-    if (!m_hasSelection
-        || !m_selectedCandidate.editable
-        || m_selectedCandidate.kind != QLatin1String("stickyNote")) {
-        return;
+    if (m_saving || page < 0 || objectId.isEmpty()) {
+        return false;
     }
 
-    const QString key = draftKey(
-        m_selectedCandidate.page,
-        m_selectedCandidate.objectId);
+    const Candidate *candidatePointer = findCommentCandidate(page, objectId);
+    if (!candidatePointer) {
+        return false;
+    }
+    const Candidate candidate = *candidatePointer;
+    if (!isCommentCandidateKind(candidate.kind)
+        || candidate.commentTextReadOnly
+        || (!candidate.added && candidate.sourceAnnotationIndex < 0)) {
+        return false;
+    }
+    if (!documentAllowsAnnotations()) {
+        //% "This PDF does not permit changing annotations."
+        emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+        return false;
+    }
+
+    const QString key = draftKey(page, objectId);
     const auto existingDraft = m_drafts.constFind(key);
-    if (existingDraft == m_drafts.cend() || existingDraft->text == text) {
-        return;
+    if (existingDraft != m_drafts.cend()
+        && draftRepresentsDeletion(
+            candidate.kind,
+            existingDraft->text,
+            existingDraft->deleted)) {
+        return false;
+    }
+    const bool hadBefore = existingDraft != m_drafts.cend();
+    const Draft before = hadBefore
+        ? *existingDraft
+        : initialDraftForCandidate(candidate);
+    if (before.text == text) {
+        return true;
+    }
+    if (text.size() > kMaximumCommentCharacters) {
+        //% "Comments and replies can contain at most %1 characters."
+        emit statusMessage(
+            qtTrId("CommentTextTooLong")
+                .arg(kMaximumCommentCharacters));
+        return false;
     }
 
     Command command;
     command.key = key;
-    command.page = m_selectedCandidate.page;
-    command.objectId = m_selectedCandidate.objectId;
-    command.hadBefore = true;
-    command.before = *existingDraft;
-    command.hadAfter = true;
+    command.page = page;
+    command.objectId = objectId;
+    command.hadBefore = hadBefore;
+    command.before = before;
     command.after = command.before;
-    command.after.text = text;
+    setDraftText(command.after, text);
     command.after.candidate.commentModifiedDate
         = QDateTime::currentDateTime();
+    command.hadAfter = candidate.added
+        || !sameDraftContent(
+            command.after,
+            initialDraftForCandidate(candidate));
     m_undoStack.append(command);
     m_redoStack.clear();
     applyDraftState(command, true, true);
     emit historyStateChanged();
+    return true;
+}
+
+void PDFEditController::setSelectedCommentText(const QString &text)
+{
+    if (!m_hasSelection) {
+        return;
+    }
+    setCommentText(
+        m_selectedCandidate.page,
+        m_selectedCandidate.objectId,
+        text);
 }
 
 bool PDFEditController::removeCommentCandidate(const Candidate &candidate)
@@ -4923,7 +5013,7 @@ bool PDFEditController::removeCommentCandidate(const Candidate &candidate)
             return false;
         }
         if (!documentAllowsAnnotations()) {
-            //% "This PDF does not permit adding or deleting annotations."
+            //% "This PDF does not permit changing annotations."
             emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
             return false;
         }
@@ -6553,6 +6643,9 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 + QString::number(index);
             candidate.sourceAnnotationIndex = index;
             candidate.text = annotationString(annotation, "Contents");
+            candidate.sourceAnnotationName = annotationString(
+                annotation,
+                "NM");
             candidate.commentAuthor = annotationString(annotation, "T").trimmed();
             candidate.commentCreationDate = pdfAnnotationDateTime(
                 annotationString(annotation, "CreationDate"));
@@ -6569,6 +6662,10 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
                 : nullptr;
             candidate.isReplyAnnotation = directReplyParent != nullptr;
+            const int annotationFlags = FPDFAnnot_GetFlags(annotation);
+            candidate.commentTextReadOnly
+                = (annotationFlags & FPDF_ANNOT_FLAG_READONLY) != 0
+                || (annotationFlags & kAnnotationFlagLockedContents) != 0;
             if (directReplyParent) {
                 FPDFPage_CloseAnnot(directReplyParent);
             }
@@ -6644,8 +6741,14 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 //% "Reply"
                 candidate.label = qtTrId("Reply");
             }
-            //% "Editing the contents of comments that already exist in the PDF is not available yet."
-            candidate.reason = qtTrId("ExistingCommentEditingUnavailable");
+            if (candidate.commentTextReadOnly) {
+                //% "This comment is read-only."
+                candidate.reason = qtTrId("ReadOnlyCommentCannotBeEdited");
+            } else {
+                //% "Edit the comment text in the Comments panel. Moving or resizing existing comments is not available."
+                candidate.reason = qtTrId(
+                    "ExistingCommentPageAppearanceReadOnly");
+            }
             candidates.append(std::move(candidate));
             FPDFPage_CloseAnnot(annotation);
             continue;
@@ -6729,6 +6832,31 @@ const PDFEditController::Candidate *PDFEditController::findCandidate(int page,
         }
     }
     return nullptr;
+}
+
+const PDFEditController::Candidate *PDFEditController::findCommentCandidate(
+    int page,
+    const QString &objectId)
+{
+    const Candidate *candidate = findCandidate(page, objectId);
+    if (candidate && isCommentCandidateKind(candidate->kind)) {
+        return candidate;
+    }
+
+    const auto indexedPage = m_indexedCommentCandidates.constFind(page);
+    if (indexedPage == m_indexedCommentCandidates.cend()) {
+        return nullptr;
+    }
+    const auto indexedCandidate = std::find_if(
+        indexedPage->cbegin(),
+        indexedPage->cend(),
+        [&objectId](const Candidate &current) {
+            return current.objectId == objectId
+                && isCommentCandidateKind(current.kind);
+        });
+    return indexedCandidate == indexedPage->cend()
+        ? nullptr
+        : &*indexedCandidate;
 }
 
 QVariantList PDFEditController::candidateSourceRects(const Candidate &candidate) const

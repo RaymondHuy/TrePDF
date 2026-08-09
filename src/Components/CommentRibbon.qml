@@ -154,7 +154,7 @@ Flickable {
                 text: qsTrId("StickyNote")
                 //% "Add sticky note"
                 toolTipText: qsTrId("AddStickyNote")
-                iconSource: "../assets/icons/pen-line.svg"
+                iconSource: "../assets/icons/comment.svg"
                 enabled: root.document.loaded
                     && !root.editController.saving
                 primary: root.editController.tool

@@ -38,6 +38,7 @@ public:
         ShapeObjectCreationFailed,
         TextMarkupAnnotationCreationFailed,
         CommentAnnotationCreationFailed,
+        CommentAnnotationUpdateFailed,
         CommentAnnotationRemovalFailed,
         PageCreationFailed,
         PageDeletionFailed,
