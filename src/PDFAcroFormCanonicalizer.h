@@ -38,7 +38,17 @@ public:
         Operation operation = Operation::Add;
     };
 
+    struct AnnotationReply {
+        int page = -1;
+        QString parentThreadId;
+        QString replyId;
+    };
+
     static bool finalizeFields(const QString &filePath,
                                const QVector<Field> &fields,
                                QString &error);
+    static bool finalizeAnnotationReplies(
+        const QString &filePath,
+        const QVector<AnnotationReply> &replies,
+        QString &error);
 };

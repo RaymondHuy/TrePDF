@@ -69,15 +69,18 @@ and persistence.
 The Comment ribbon provides Sticky Note, Highlight, Underline, and Strikeout
 tools plus a collapsible, whole-document comments panel. New sticky notes can
 be selected and edited in the panel, while markup uses a compact curated color
-grid and a system picker for custom colors. Comment changes are per-tab session
-drafts with undo, redo, discard, selection, and deletion support. Save and Save As
-persist them as standard PDF annotations with geometry, color, contents, and
-print visibility; annotation-only saves do not regenerate the page content
-stream. Existing supported annotations are rehydrated for navigation and
-display, including their author and modification date (or creation date when no
-modification date is present). Their contents remain read-only, but they can be
-deleted as undoable session drafts and removed from the saved PDF without
-regenerating page content.
+grid and a system picker for custom colors. Root comments can receive replies;
+each root has a dropdown control that expands its replies at one visual level,
+and reply-to-reply is not offered. Comment changes are per-tab session drafts with
+undo, redo, discard, selection, and deletion support. Save and Save As persist
+them as standard PDF annotations with geometry, color, contents, print
+visibility, and `/IRT` reply links; annotation-only saves do not regenerate the
+page content stream. Existing supported annotations are rehydrated for
+navigation and display, including their author and modification date (or
+creation date when no modification date is present). Their contents remain
+read-only, but they can be deleted as undoable session drafts and removed from
+the saved PDF without regenerating page content. Deleting a root comment also
+removes its replies so the saved document cannot contain an orphaned thread.
 
 The Shapes dropdown offers rectangles, ovals, lines, arrows, triangles, and
 diamonds. After choosing a shape, drag over a page to create a vector session
