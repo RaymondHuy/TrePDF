@@ -57,6 +57,8 @@ Rectangle {
     readonly property bool textEditPending:
         activeEditorDirty || replyTargetObjectId.length > 0
     readonly property int replyIndent: 30
+    readonly property int maximumCommentCharacters:
+        root.editController.maximumCommentCharacters
 
     implicitWidth: collapsed ? 42 : 280
     color: theme.ribbonSurface
@@ -65,6 +67,11 @@ Rectangle {
         if (root.activeEditorObjectId.length === 0)
             return true
 
+        if (root.activeEditorDirty
+                && root.activeEditorText.length
+                    > root.maximumCommentCharacters) {
+            return false
+        }
         if (root.activeEditorDirty
                 && (!root.editController
                     || !root.editController.setCommentText(
@@ -224,6 +231,8 @@ Rectangle {
             root.cancelPendingReply()
             return true
         }
+        if (replyText.length > root.maximumCommentCharacters)
+            return false
         if (!root.document.loaded || root.editController.saving)
             return false
 
@@ -915,6 +924,14 @@ Rectangle {
                                             TextArea {
                                                 id: replyEditor
 
+                                                //% "%1 / %2 characters"
+                                                readonly property string characterCountText:
+                                                    qsTrId(
+                                                        "CommentCharacterCount")
+                                                        .arg(length)
+                                                        .arg(root
+                                                            .maximumCommentCharacters)
+
                                                 Layout.fillWidth: true
                                                 Layout.preferredHeight: 80
                                                 text: root.replyDraftText
@@ -932,6 +949,8 @@ Rectangle {
                                                 //% "Reply text"
                                                 Accessible.name:
                                                     qsTrId("ReplyText")
+                                                Accessible.description:
+                                                    characterCountText
                                                 Component.onCompleted:
                                                     forceActiveFocus()
                                                 onTextChanged:
@@ -945,9 +964,16 @@ Rectangle {
                                                             && (event.key
                                                                     === Qt.Key_Return
                                                                 || event.key
-                                                                    === Qt.Key_Enter)) {
-                                                        if (root.submitPendingReply())
-                                                            event.accepted = true
+                                                                    === Qt.Key_Enter)
+                                                            && !replyEditor
+                                                                .inputMethodComposing) {
+                                                        event.accepted = true
+                                                        if (replyEditor.length
+                                                                <= root
+                                                                    .maximumCommentCharacters) {
+                                                            root
+                                                                .submitPendingReply()
+                                                        }
                                                     } else if (event.key
                                                             === Qt.Key_Escape) {
                                                         root.cancelPendingReply()
@@ -966,6 +992,21 @@ Rectangle {
                                                             : root.theme
                                                                 .ribbonBorder
                                                 }
+                                            }
+
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: replyEditor
+                                                    .characterCountText
+                                                color: replyEditor.length
+                                                        > root
+                                                            .maximumCommentCharacters
+                                                    ? "#b3261e"
+                                                    : "#747176"
+                                                font.pixelSize: 10
+                                                horizontalAlignment:
+                                                    Text.AlignRight
+                                                Accessible.ignored: true
                                             }
 
                                             RowLayout {
@@ -989,6 +1030,10 @@ Rectangle {
                                                     enabled:
                                                         root.replyDraftText
                                                             .trim().length > 0
+                                                        && root.replyDraftText
+                                                            .length
+                                                            <= root
+                                                                .maximumCommentCharacters
                                                         && !root.editController
                                                             .saving
                                                     onClicked:
@@ -1003,6 +1048,11 @@ Rectangle {
                                 TextArea {
                                     id: commentEditor
 
+                                    //% "%1 / %2 characters"
+                                    readonly property string characterCountText:
+                                        qsTrId("CommentCharacterCount")
+                                            .arg(length)
+                                            .arg(root.maximumCommentCharacters)
                                     property string sourceText:
                                         commentCard.commentText
                                     readonly property bool ownsActiveEdit:
@@ -1034,10 +1084,17 @@ Rectangle {
                                         qsTrId("WriteCommentPlaceholder")
                                     //% "Comment text"
                                     Accessible.name: qsTrId("CommentText")
+                                    Accessible.description:
+                                        characterCountText
 
                                     function commitText() {
                                         if (!ownsActiveEdit || !dirty)
                                             return true
+                                        if (length
+                                                > root
+                                                    .maximumCommentCharacters) {
+                                            return false
+                                        }
                                         return root.commitActiveEditor()
                                     }
 
@@ -1080,14 +1137,20 @@ Rectangle {
                                                 && (event.key
                                                         === Qt.Key_Return
                                                     || event.key
-                                                        === Qt.Key_Enter)) {
-                                            if (commentEditor.commitText()) {
+                                                        === Qt.Key_Enter)
+                                                && !commentEditor
+                                                    .inputMethodComposing) {
+                                            event.accepted = true
+                                            if (commentEditor.length
+                                                    <= root
+                                                        .maximumCommentCharacters
+                                                    && commentEditor
+                                                        .commitText()) {
                                                 root.beginCommentEdit(
                                                     commentCard.page,
                                                     commentCard.objectId,
                                                     commentEditor.text,
                                                     commentEditor)
-                                                event.accepted = true
                                             }
                                         }
                                     }
@@ -1102,6 +1165,19 @@ Rectangle {
                                                     .foxitBorderOrange
                                                 : root.theme.ribbonBorder
                                     }
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: commentCard.editorVisible
+                                    text: commentEditor.characterCountText
+                                    color: commentEditor.length
+                                            > root.maximumCommentCharacters
+                                        ? "#b3261e"
+                                        : "#747176"
+                                    font.pixelSize: 10
+                                    horizontalAlignment: Text.AlignRight
+                                    Accessible.ignored: true
                                 }
                             }
                         }

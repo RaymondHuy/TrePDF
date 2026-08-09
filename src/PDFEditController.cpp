@@ -62,10 +62,7 @@ constexpr qint64 kMaximumAddedImageFileBytes = 64 * 1024 * 1024;
 constexpr qint64 kMaximumAddedImagePixels = 40 * 1000 * 1000;
 constexpr unsigned long kMaximumAnnotationStringBytes
     = 4UL * 1024UL * 1024UL;
-constexpr qsizetype kMaximumAnnotationStringCharacters
-    = static_cast<qsizetype>(
-          kMaximumAnnotationStringBytes / sizeof(FPDF_WCHAR))
-        - 1;
+constexpr qsizetype kMaximumCommentCharacters = 700;
 constexpr qreal kLineBaselineToleranceEm = 0.25;
 constexpr qreal kLineMinimumHorizontalGapEm = -0.35;
 constexpr qreal kLineMaximumHorizontalGapEm = 1.25;
@@ -2150,6 +2147,11 @@ QVariantList PDFEditController::commentItems() const
     return result;
 }
 
+int PDFEditController::maximumCommentCharacters() const
+{
+    return static_cast<int>(kMaximumCommentCharacters);
+}
+
 quint64 PDFEditController::draftRevisionForPage(int page) const
 {
     return m_pageDraftRevisions.value(page, 0);
@@ -3170,6 +3172,13 @@ QVariantMap PDFEditController::addCommentReply(
         || page >= m_document->pageCount()
         || parentObjectId.isEmpty()
         || text.trimmed().isEmpty()) {
+        return {};
+    }
+    if (text.size() > kMaximumCommentCharacters) {
+        //% "Comments and replies can contain at most %1 characters."
+        emit statusMessage(
+            qtTrId("CommentTextTooLong")
+                .arg(kMaximumCommentCharacters));
         return {};
     }
     if (!documentAllowsAnnotations()) {
@@ -4920,12 +4929,6 @@ bool PDFEditController::setCommentText(int page,
         return false;
     }
 
-    if (text.size() > kMaximumAnnotationStringCharacters) {
-        //% "The comment is too long to edit."
-        emit statusMessage(qtTrId("CommentTextTooLong"));
-        return false;
-    }
-
     const Candidate *candidatePointer = findCommentCandidate(page, objectId);
     if (!candidatePointer) {
         return false;
@@ -4957,6 +4960,13 @@ bool PDFEditController::setCommentText(int page,
         : initialDraftForCandidate(candidate);
     if (before.text == text) {
         return true;
+    }
+    if (text.size() > kMaximumCommentCharacters) {
+        //% "Comments and replies can contain at most %1 characters."
+        emit statusMessage(
+            qtTrId("CommentTextTooLong")
+                .arg(kMaximumCommentCharacters));
+        return false;
     }
 
     Command command;

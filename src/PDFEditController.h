@@ -69,6 +69,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QVariantList commentItems READ commentItems NOTIFY commentsChanged FINAL)
+    Q_PROPERTY(int maximumCommentCharacters READ maximumCommentCharacters CONSTANT FINAL)
 
 public:
     struct DraftObjectMove {
@@ -181,6 +182,7 @@ public:
     bool selectedEditable() const;
     QString selectedReason() const;
     QVariantList commentItems() const;
+    int maximumCommentCharacters() const;
     quint64 draftRevisionForPage(int page) const;
     QVector<QVector<int>> draftedTextObjectPathsForPage(int page) const;
     QVector<DraftObjectMove> draftedObjectMovesForPage(int page) const;

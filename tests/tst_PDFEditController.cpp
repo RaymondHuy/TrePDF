@@ -3511,6 +3511,7 @@ private slots:
     void editsSourceTextMarkupComment();
     void editsSourceReplyComment();
     void rejectsEditingProtectedSourceComments();
+    void enforcesCommentTextLengthLimit();
     void flattensNestedSourceCommentReplies();
     void hidesCommentRepliesFromViewer();
     void hidesUnresolvedSourceReplyFromViewerModel();
@@ -11853,6 +11854,105 @@ void PDFEditControllerTest::rejectsEditingProtectedSourceComments()
     }
 
     QCOMPARE(controller.commentItems(), comments);
+}
+
+void PDFEditControllerTest::enforcesCommentTextLengthLimit()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-text-length-limit.pdf"));
+    QVERIFY(createRootCommentOnlyPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+
+    const QVariantMap root = controller.commentItems().constFirst().toMap();
+    const QString rootObjectId = root
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QString sourceText = root
+        .value(QStringLiteral("text"))
+        .toString();
+    const QString acceptedText
+        = QStringLiteral("\U0001F642").repeated(350);
+    const QString rejectedText = acceptedText + QLatin1Char('x');
+    QCOMPARE(acceptedText.size(), 700);
+    QCOMPARE(rejectedText.size(), 701);
+
+    QVERIFY(controller.setCommentText(0, rootObjectId, acceptedText));
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        acceptedText);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    controller.discardDrafts();
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        sourceText);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+
+    QVERIFY(!controller.setCommentText(0, rootObjectId, rejectedText));
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        sourceText);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+
+    QVERIFY(controller.setCommentText(0, rootObjectId, QString()));
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        QString());
+    QVERIFY(controller.hasDrafts());
+    controller.discardDrafts();
+
+    const QVariantMap acceptedReply = controller.addCommentReply(
+        0,
+        rootObjectId,
+        acceptedText);
+    QVERIFY(!acceptedReply.isEmpty());
+    QCOMPARE(
+        acceptedReply.value(QStringLiteral("text")).toString(),
+        acceptedText);
+    QCOMPARE(controller.commentItems().size(), 2);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    controller.discardDrafts();
+    QCOMPARE(controller.commentItems().size(), 1);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+
+    QVERIFY(controller.addCommentReply(
+        0,
+        rootObjectId,
+        rejectedText).isEmpty());
+    QCOMPARE(controller.commentItems().size(), 1);
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        sourceText);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+
+    QVERIFY(controller.addCommentReply(
+        0,
+        rootObjectId,
+        QString()).isEmpty());
+    QCOMPARE(controller.commentItems().size(), 1);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
 }
 
 void PDFEditControllerTest::flattensNestedSourceCommentReplies()

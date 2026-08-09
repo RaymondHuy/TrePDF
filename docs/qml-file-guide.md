@@ -197,6 +197,9 @@ Note đang chọn và phản hồi một cấp.
 - Comment được hỗ trợ, gồm Sticky Note, text markup và reply có sẵn trong PDF,
   dùng `TextArea` để sửa `/Contents`; nội dung được buffer theo `page + objectId`
   và commit khi mất focus, thu gọn panel, đổi session hoặc thực hiện Save.
+- Hai editor có bộ đếm trực tiếp và soft-limit 700 UTF-16 code unit. Nội dung có
+  thể tạm vượt giới hạn để không phá IME/undo, nhưng Gửi, commit và Save bị chặn
+  cho tới khi người dùng rút gọn về 700 hoặc ít hơn.
 - Comment gốc có action Phản hồi và composer Gửi/Hủy; Ctrl/Cmd+Enter gửi, Esc
   hủy. Nút dropdown trên từng comment gốc bung/thu nhóm reply; reply được thụt
   vào kèm đường nhánh cấp hai trong cùng model phẳng và không có action phản

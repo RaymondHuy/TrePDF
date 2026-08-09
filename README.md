@@ -78,8 +78,10 @@ Comment changes are per-tab session drafts with
 undo, redo, discard, selection, and deletion support. Save and Save As persist
 them as standard PDF annotations with geometry, color, contents, print
 visibility, and `/IRT` reply links; annotation-only saves do not regenerate the
-page content stream. Existing supported annotations are rehydrated for
-navigation and display, including their author and modification date (or
+page content stream. Each comment or reply is limited to 700 characters, with
+the panel showing a live counter before commit. Existing supported annotations
+are rehydrated for navigation and display, including their author and
+modification date (or
 creation date when no modification date is present). Editing updates the source
 annotation's `/Contents`, modification date, and rich-text value when present,
 while preserving its appearance, popup, thread links, geometry, and other

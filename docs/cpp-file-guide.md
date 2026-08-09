@@ -261,7 +261,8 @@ orchestration Save.
 - `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
   hướng phẳng cho panel theo thứ tự root rồi replies. `setCommentText()` định
   danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
-  gia cùng snapshot undo/redo. `addCommentReply()` chỉ nhận root.
+  gia cùng snapshot undo/redo. `setCommentText()` và `addCommentReply()` cùng
+  enforce tối đa 700 UTF-16 code unit; `addCommentReply()` chỉ nhận root.
 - Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 

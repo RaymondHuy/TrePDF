@@ -28,8 +28,9 @@ Current features:
   flattens imported reply chains to one display level, saves new replies with
   standard `/IRT`, and cascades root deletion across the thread. Reply
   annotation appearances stay hidden from the page viewer while the replies
-  remain available and editable in the panel. Read-only and LockedContents
-  source annotations remain protected.
+  remain available and editable in the panel. Comments and replies are limited
+  to 700 UTF-16 code units. Read-only and LockedContents source annotations
+  remain protected.
 - Draw rectangles, ovals, lines, arrows, triangles, and diamonds from the
   Shapes dropdown. Added shapes are vector session drafts that can be selected,
   moved, resized, deleted, undone/redone, and persisted as PDF path objects.
