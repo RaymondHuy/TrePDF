@@ -25,7 +25,11 @@ Current features:
   removals without rewriting page content streams on annotation-only pages.
   Squiggly accepts only non-whitespace source-text glyphs intersected by the
   drag gesture, snaps the result into per-line rectangles/QuadPoints, and
-  rejects whitespace-only or no-text selections. Invisible OCR text is eligible
+  rejects whitespace-only or no-text selections. Nearly horizontal gestures use
+  a three-pixel hit-test band. If glyph geometry is still loading at release,
+  preserve the pending revision/page/selection/color, prioritize that page's
+  candidate scan, and materialize the draft automatically; Discard must cancel
+  pending Squiggly creation. Invisible OCR text is eligible
   for hit testing but never exposed as a selectable/editable text candidate.
   Scans without a usable text layer do not support Squiggly. Current
   axis-aligned geometry accepts upright horizontal glyphs only; rotated/vertical

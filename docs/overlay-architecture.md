@@ -286,7 +286,10 @@ không bị thay bằng một document mới.
 Squiggly có bước resolve geometry riêng cho preview và commit. `EditOverlay` gửi
 vùng kéo normalized cho controller; controller chỉ hit-test các glyph source-text
 không phải whitespace đã có trong kết quả page scan/cache bất đồng bộ, nhóm hit
-theo visual line và trả các rectangle/QuadPoints đã snap. Không có glyph thì
+theo visual line và trả các rectangle/QuadPoints đã snap. Nét kéo gần-ngang dùng
+dải hit-test tối thiểu 3 px. Nếu cache chưa sẵn sàng lúc release, controller giữ
+pending gesture theo document revision/page/selection/màu, ưu tiên scan page đó
+và tự materialize draft khi geometry về; Discard hủy pending gesture. Không có glyph thì
 không tạo draft. Invisible OCR text được giữ như geometry hit-test-only và không
 được đưa vào candidate selection/editing. Geometry hiện chỉ nhận glyph
 ngang/upright; glyph xoay/dọc bị bỏ qua cho tới khi có oriented QuadPoints. Page

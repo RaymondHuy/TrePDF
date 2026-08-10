@@ -180,7 +180,10 @@ ghi Save; mọi thay đổi vẫn là draft.
 - Cả bốn text-markup tool dùng chung gesture kéo vùng, draft history và pipeline
   lưu annotation. Riêng Squiggly chỉ dùng rectangle kéo làm đầu vào: controller
   hit-test glyph source-text đã cache, bỏ whitespace và snap kết quả theo từng
-  dòng trước khi tạo draft. OCR ẩn tham gia hit-test nhưng không xuất hiện như
+  dòng trước khi tạo draft. Gesture gần như nằm ngang được mở thành dải hit-test
+  tối thiểu 3 px, nên không bị bỏ chỉ vì độ lệch dọc của pointer quá nhỏ. Khi
+  cache glyph còn tải, controller giữ gesture và tự hoàn tất sau scan thay vì
+  yêu cầu người dùng kéo lại. OCR ẩn tham gia hit-test nhưng không xuất hiện như
   text candidate để chọn/sửa. Kéo vùng không có glyph khả dụng không tạo
   annotation; hiện glyph phải ngang/upright, còn page không có text layer khả
   dụng hoặc vượt safety cap 50.000 ký tự không hỗ trợ Squiggly. Highlight,

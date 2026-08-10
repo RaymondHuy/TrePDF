@@ -73,6 +73,11 @@ and have their text edited in the panel. Markup uses a compact curated color
 grid and a system picker for custom colors. Squiggly is source-text-aware: its
 drag rectangle is intersected with non-whitespace glyphs from the PDF text
 layer, then snapped into per-line rectangles and QuadPoints.
+Nearly horizontal drags use a three-pixel hit-test band, so small differences
+in pointer height do not silently discard the gesture. If the asynchronous text
+scan is still running at release, TrePDF keeps the page, selection, and color,
+prioritizes that page, and creates the draft automatically when geometry is
+ready.
 Dragging only across whitespace or an area without source text creates no
 annotation. Invisible OCR text layers are accepted for this hit testing but do
 not become selectable or editable text candidates. Image-only scans without a

@@ -269,7 +269,10 @@ orchestration Save.
 - Add Shape chuẩn hóa geometry và snap line/arrow gần trục. Khi kết thúc gesture
   Squiggly, controller lấy các glyph không-whitespace giao vùng kéo, nhóm theo
   visual line rồi tạo rectangle/QuadPoints đã snap cho từng dòng. Không có glyph
-  khả dụng thì không tạo draft. OCR ẩn vẫn dùng được, nhưng page không có text
+  khả dụng thì không tạo draft. Nếu cache glyph chưa sẵn sàng khi thả chuột,
+  controller giữ pending request cùng revision/page/selection/màu, ưu tiên scan
+  page đó và tự tạo draft sau khi geometry về; Discard xóa cả pending request.
+  OCR ẩn vẫn dùng được, nhưng page không có text
   layer khả dụng, chỉ có glyph xoay/dọc hoặc vượt safety cap 50.000 ký tự thì
   không dùng được Squiggly. Highlight, Underline và Strikeout vẫn giữ free
   rectangle/quad của gesture. Sticky Note giữ frame 24 pt và nội dung chỉnh từ

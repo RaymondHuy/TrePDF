@@ -3751,6 +3751,8 @@ private slots:
     void addsHighlightWithUndoRedoAndDiscard();
     void keepsHighlightAndSquigglyColorsIndependent();
     void requiresSourceTextOnlyForSquiggly();
+    void prioritizesPendingSquigglyCandidateScan();
+    void discardsPendingSquigglyBeforeCandidateScanCompletes();
     void snapsSquigglyToSourceTextAndSavesQuadPoints();
     void clipsSquigglyGapAtPageBottom();
     void usesInvisibleOcrTextForSquiggly();
@@ -11554,19 +11556,43 @@ void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     controller.setTool(PDFEditController::SquigglyTool);
+    const QColor queuedSquigglyColor(73, 91, 211, 187);
+    controller.setSquigglyColor(queuedSquigglyColor);
     QSignalSpy statusSpy(
         &controller,
         &PDFEditController::statusMessage);
-    QVERIFY(controller
-        .addHighlight(0, QRectF(0.05, 0.05, 0.90, 0.90))
-        .isEmpty());
-    QVERIFY(controller.draftsForPage(0).isEmpty());
-    QCOMPARE(statusSpy.count(), 1);
+    const QVariantMap pendingSquiggly = controller.addHighlight(
+        0,
+        QRectF(0.05, 0.05, 0.90, 0.90));
     QCOMPARE(
-        statusSpy.constFirst().constFirst().toString(),
-        qtTrId("TextGeometryStillLoading"));
+        pendingSquiggly.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("squiggly"));
+    QVERIFY(pendingSquiggly.value(QStringLiteral("pending")).toBool());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(controller.hasDrafts());
+    QCOMPARE(statusSpy.count(), 0);
+
+    controller.setTool(PDFEditController::HighlightTool);
+    controller.setSquigglyColor(QColor(198, 40, 40, 192));
 
     const QVariantList candidates = waitForCandidates(controller, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.draftsForPage(0).size(), 1, 2000);
+    const QVariantMap completedSquiggly = controller
+        .draftsForPage(0)
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        completedSquiggly.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("squiggly"));
+    QCOMPARE(
+        completedSquiggly
+            .value(QStringLiteral("highlightColor"))
+            .value<QColor>(),
+        queuedSquigglyColor);
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+
     const QVariantMap groupedCandidate = candidateForText(
         candidates,
         QString::fromLatin1(kGroupedText));
@@ -11598,6 +11624,7 @@ void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
         .textMarkupRectsForSelection(0, whitespaceRect)
         .isEmpty());
 
+    controller.setTool(PDFEditController::SquigglyTool);
     statusSpy.clear();
     QVERIFY(controller.addHighlight(0, whitespaceRect).isEmpty());
     QVERIFY(controller.draftsForPage(0).isEmpty());
@@ -11606,6 +11633,22 @@ void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
     QCOMPARE(
         statusSpy.constFirst().constFirst().toString(),
         qtTrId("NoTextInSelectedArea"));
+
+    constexpr qreal thinSelectionHeight = 0.00025;
+    const QRectF thinTextSelection(
+        leftWordRect.left(),
+        leftWordRect.center().y() - thinSelectionHeight / 2.0,
+        leftWordRect.width(),
+        thinSelectionHeight);
+    const QVariantMap thinSquiggly = controller.addHighlight(
+        0,
+        thinTextSelection);
+    QCOMPARE(
+        thinSquiggly.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("squiggly"));
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(controller.draftsForPage(0).isEmpty());
 
     struct MarkupCase {
         PDFEditController::Tool tool;
@@ -11631,6 +11674,82 @@ void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
         QCOMPARE(controller.undo(), -1);
         QVERIFY(controller.draftsForPage(0).isEmpty());
     }
+}
+
+void PDFEditControllerTest::prioritizesPendingSquigglyCandidateScan()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("pending-squiggly-scan-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("pending-squiggly-scan-output.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
+    QSignalSpy statusSpy(
+        &controller,
+        &PDFEditController::statusMessage);
+
+    QVERIFY(controller.candidatesForPage(1).isEmpty());
+    const QVariantMap pendingSquiggly = controller.addHighlight(
+        0,
+        QRectF(0.01, 0.01, 0.98, 0.40));
+    QVERIFY(pendingSquiggly.value(QStringLiteral("pending")).toBool());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(controller.hasDrafts());
+
+    QVERIFY(!controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QCOMPARE(statusSpy.count(), 1);
+    QCOMPARE(
+        statusSpy.constFirst().constFirst().toString(),
+        qtTrId("TextGeometryStillLoading"));
+    statusSpy.clear();
+
+    controller.candidatesForPage(2);
+    controller.candidatesForPage(1);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.draftsForPage(0).size(), 1, 5000);
+    const QVariantMap completedSquiggly = controller
+        .draftsForPage(0)
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        completedSquiggly.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("squiggly"));
+    QVERIFY(!completedSquiggly
+        .value(QStringLiteral("highlightRects"))
+        .toList()
+        .isEmpty());
+    QCOMPARE(statusSpy.count(), 0);
+}
+
+void PDFEditControllerTest::discardsPendingSquigglyBeforeCandidateScanCompletes()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("discard-pending-squiggly-source.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
+
+    QVERIFY(controller.candidatesForPage(1).isEmpty());
+    const QVariantMap pendingSquiggly = controller.addHighlight(
+        0,
+        QRectF(0.01, 0.01, 0.98, 0.40));
+    QVERIFY(pendingSquiggly.value(QStringLiteral("pending")).toBool());
+    QVERIFY(controller.hasDrafts());
+
+    controller.discardDrafts();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(!waitForCandidates(controller, 0).isEmpty());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
 }
 
 void PDFEditControllerTest::snapsSquigglyToSourceTextAndSavesQuadPoints()

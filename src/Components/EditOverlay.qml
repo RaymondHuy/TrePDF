@@ -61,6 +61,29 @@ Item {
         Math.min(highlightStart.y, highlightCurrent.y),
         Math.abs(highlightCurrent.x - highlightStart.x),
         Math.abs(highlightCurrent.y - highlightStart.y))
+    readonly property rect activeSquigglySelectionRect: {
+        const selectionRect = activeHighlightRect
+        if (controller.tool !== PDFEditController.SquigglyTool
+                || selectionRect.height >= minimumHighlightDragSize
+                || height <= 0) {
+            return selectionRect
+        }
+
+        const selectionHeight = Math.min(
+            height,
+            minimumHighlightDragSize)
+        const selectionCenterY = selectionRect.y + selectionRect.height / 2
+        const selectionY = Math.max(
+            0,
+            Math.min(
+                height - selectionHeight,
+                selectionCenterY - selectionHeight / 2))
+        return Qt.rect(
+            selectionRect.x,
+            selectionY,
+            selectionRect.width,
+            selectionHeight)
+    }
     readonly property rect activeShapeRect: Qt.rect(
         Math.min(shapeStart.x, shapeCurrent.x),
         Math.min(shapeStart.y, shapeCurrent.y),
@@ -1007,7 +1030,7 @@ Item {
             return
         }
 
-        const selectionRect = activeHighlightRect
+        const selectionRect = activeSquigglySelectionRect
         squigglyPreviewRects = controller.textMarkupRectsForSelection(
             page,
             Qt.rect(
@@ -1053,11 +1076,16 @@ Item {
             return
 
         updateHighlight(x, y)
-        const selectionRect = activeHighlightRect
+        const squigglyTool = controller.tool
+            === PDFEditController.SquigglyTool
+        const selectionRect = squigglyTool
+            ? activeSquigglySelectionRect
+            : activeHighlightRect
         highlighting = false
         squigglyPreviewRects = []
         if (selectionRect.width < minimumHighlightDragSize
-                || selectionRect.height < minimumHighlightDragSize) {
+                || (!squigglyTool
+                    && selectionRect.height < minimumHighlightDragSize)) {
             return
         }
 

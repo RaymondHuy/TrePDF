@@ -224,7 +224,11 @@ markup thiếu và để giới hạn RAM.
 
 Khi người dùng thả gesture Squiggly, controller giao rectangle kéo với các box
 glyph đã cache, nhóm phần giao theo visual line rồi tạo các rectangle/QuadPoints
-đã snap theo dòng. Vùng chỉ có whitespace hoặc không có glyph khả dụng trả về
+đã snap theo dòng. QML mở nét kéo gần-ngang thành dải hit-test tối thiểu 3 px.
+Nếu cache glyph chưa sẵn sàng lúc release, controller giữ pending gesture theo
+document revision/page/selection/màu, ưu tiên page đó trong hàng scan và tự tạo
+draft khi geometry về; pending gesture tham gia draft guard và bị xóa bởi
+Discard. Vùng chỉ có whitespace hoặc không có glyph khả dụng trả về
 rỗng và không tạo draft. OCR Invisible vẫn có geometry hit-test nhưng không
 thành candidate selectable/editable. Glyph xoay/dọc bị loại vì rectangle
 axis-aligned chưa thể biểu diễn oriented QuadPoints; page không có text layer

@@ -129,7 +129,9 @@ flowchart TD
 2. `EditOverlay` chuyển tọa độ pointer sang tỉ lệ chuẩn hóa của trang, hit-test
    candidate và gọi API của controller. Với Squiggly, controller giao vùng kéo
    với glyph source-text không-whitespace trong cache scan bất đồng bộ, snap
-   rectangle/QuadPoints theo từng dòng và từ chối vùng chỉ có khoảng trắng hoặc
+   rectangle/QuadPoints theo từng dòng; nét gần-ngang dùng dải hit-test 3 px và
+   gesture release khi cache chưa sẵn sàng được giữ pending, ưu tiên scan đúng
+   page rồi tự materialize thành draft. Controller từ chối vùng chỉ có khoảng trắng hoặc
    không có glyph khả dụng. OCR Invisible được hit-test nhưng không select/edit;
    glyph xoay/dọc, page không có text layer khả dụng và page vượt safety cap
    50.000 ký tự không tạo Squiggly. Highlight/Underline/Strikeout vẫn giữ free rect.
