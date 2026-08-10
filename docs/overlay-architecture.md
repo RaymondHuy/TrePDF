@@ -298,6 +298,11 @@ per-glyph geometry và không nhận Squiggly. QML không đụng tới PDFium h
 Highlight, Underline và Strikeout không đi qua bước snap này và tiếp tục dùng
 free rectangle của gesture.
 
+`SquigglyLine` nhận `pagePointScale` từ `PdfPageDelegate` qua coordinator và
+vẽ đoạn zigzag rộng 1 PDF point với bước 2 PDF point, đúng công thức appearance
+mặc định của PDFium. Vì preview gesture, draft overlay và texture PDF sau Save
+dùng cùng point scale/hình học nên đổi zoom không làm hai trạng thái lệch nét.
+
 ### `FormTextFieldOverlay` + `FormFieldLayer`: form designer
 
 `FormTextFieldOverlay` là lớp 3, nhưng root `Item` không tự nuốt event. Các

@@ -109,6 +109,7 @@ qt_add_qml_module(trepdf
         src/Components/RibbonTabButton.qml
         src/Components/ShapeDraftView.qml
         src/Components/SignRibbon.qml
+        src/Components/SquigglyLine.qml
         src/Components/TextFieldOptionsPanel.qml
         src/Components/TextFormatPanel.qml
         src/Components/ViewRibbon.qml

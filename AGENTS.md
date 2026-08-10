@@ -182,6 +182,8 @@ Current features:
   presentation for the safe subset of AcroForm choice fields.
 - `src/Components/ShapeDraftView.qml`: shared Qt Quick Shapes preview used by
   the ribbon palette, drag preview, and added-shape draft delegates.
+- `src/Components/SquigglyLine.qml`: point-scaled Squiggly renderer shared by
+  the drag preview and draft delegates, matching PDFium's saved appearance.
 - `src/Components`: ribbon controls, document view, page delegates, and the
   draft editing overlay.
 - `third_party/pdfium`: prebuilt arm64 PDFium headers and library. Treat this as

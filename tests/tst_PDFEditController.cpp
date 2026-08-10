@@ -602,7 +602,9 @@ bool createGrayscaleWhiteFillPdf(const QString &filePath)
         });
 }
 
-QImage renderFirstPage(const QString &filePath, const QSize &pixelSize)
+QImage renderFirstPage(const QString &filePath,
+                       const QSize &pixelSize,
+                       int renderFlags = 0)
 {
     PDFiumProcessLock pdfiumLock;
     const QByteArray encodedPath = QFile::encodeName(filePath);
@@ -627,7 +629,7 @@ QImage renderFirstPage(const QString &filePath, const QSize &pixelSize)
             image.width(),
             image.height(),
             0,
-            0);
+            renderFlags);
         FPDFBitmap_Destroy(bitmap);
     } else {
         image = {};
@@ -883,6 +885,27 @@ QRect changedPixelBounds(const QImage &left,
                 || qAbs(leftColor.green() - rightColor.green()) > 8
                 || qAbs(leftColor.blue() - rightColor.blue()) > 8;
             if (changed) {
+                bounds = bounds.united(QRect(x, y, 1, 1));
+            }
+        }
+    }
+    return bounds;
+}
+
+QRect redPixelBounds(const QImage &image, const QRect &area = {})
+{
+    if (image.isNull()) {
+        return {};
+    }
+    const QRect boundedArea = (area.isValid() ? area : image.rect())
+        .intersected(image.rect());
+    QRect bounds;
+    for (int y = boundedArea.top(); y <= boundedArea.bottom(); ++y) {
+        for (int x = boundedArea.left(); x <= boundedArea.right(); ++x) {
+            const QColor pixel = image.pixelColor(x, y);
+            if (pixel.red() > 170
+                && pixel.red() > pixel.green() * 2
+                && pixel.red() > pixel.blue() * 2) {
                 bounds = bounds.united(QRect(x, y, 1, 1));
             }
         }
@@ -3757,6 +3780,8 @@ private slots:
     void clipsSquigglyGapAtPageBottom();
     void usesInvisibleOcrTextForSquiggly();
     void rejectsVerticalTextForSquiggly();
+    void matchesSquigglyPreviewGeometryToPdfium();
+    void matchesSquigglyPreviewRenderingToSavedPdfium();
     void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete_data();
     void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete();
     void addsStickyNoteWithPanelModelAndUndo();
@@ -12100,6 +12125,192 @@ void PDFEditControllerTest::rejectsVerticalTextForSquiggly()
         uprightSquiggly.value(QStringLiteral("highlightRects")).toList(),
         uprightMarkupRects);
     QCOMPARE(controller.draftsForPage(0).size(), 1);
+}
+
+void PDFEditControllerTest::matchesSquigglyPreviewGeometryToPdfium()
+{
+    const QString componentPath = QFINDTESTDATA(
+        "../src/Components/SquigglyLine.qml");
+    QVERIFY(!componentPath.isEmpty());
+
+    QQmlEngine engine;
+    QQmlComponent component(
+        &engine,
+        QUrl::fromLocalFile(componentPath));
+    const QVariantMap initialProperties{
+        {QStringLiteral("waveColor"), QColor(Qt::red)},
+        {QStringLiteral("pagePointScale"), 2.0},
+        {QStringLiteral("width"), 10.0},
+        {QStringLiteral("height"), 12.0}};
+    std::unique_ptr<QObject> squiggly(
+        component.createWithInitialProperties(initialProperties));
+    QVERIFY2(squiggly, qPrintable(component.errorString()));
+
+    QCOMPARE(
+        squiggly->property("waveStrokeWidth").toReal(),
+        2.0);
+    QCOMPARE(squiggly->property("waveDelta").toReal(), 4.0);
+    QCOMPARE(
+        squiggly->property("wavePath").toString(),
+        QStringLiteral("M 0 8 L 4 12 L 8 8 L 10 10"));
+
+    QVERIFY(squiggly->setProperty("width", 3.0));
+    QCOMPARE(
+        squiggly->property("wavePath").toString(),
+        QStringLiteral("M 0 8 L 3 11"));
+
+    QVERIFY(squiggly->setProperty("width", 12.0));
+    QCOMPARE(
+        squiggly->property("wavePath").toString(),
+        QStringLiteral("M 0 8 L 4 12 L 8 8 L 12 12"));
+
+    QVERIFY(squiggly->setProperty("pagePointScale", 1.5));
+    QVERIFY(squiggly->setProperty("width", 7.5));
+    QVERIFY(squiggly->setProperty("height", 20.0));
+    QCOMPARE(
+        squiggly->property("waveStrokeWidth").toReal(),
+        1.5);
+    QCOMPARE(squiggly->property("waveDelta").toReal(), 3.0);
+    QCOMPARE(
+        squiggly->property("wavePath").toString(),
+        QStringLiteral("M 0 17 L 3 20 L 6 17 L 7.5 18.5"));
+}
+
+void PDFEditControllerTest::matchesSquigglyPreviewRenderingToSavedPdfium()
+{
+    if (QGuiApplication::screens().isEmpty()) {
+        QSKIP("The Squiggly preview needs a Qt Quick render screen.");
+    }
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("squiggly-preview-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("squiggly-preview-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
+    const QRectF selectionRect = textCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const QVariantList snappedRects
+        = controller.textMarkupRectsForSelection(0, selectionRect);
+    QCOMPARE(snappedRects.size(), 1);
+    const QRectF squigglyRect = rectFromCoordinateMap(
+        snappedRects.constFirst());
+
+    controller.setTool(PDFEditController::SquigglyTool);
+    controller.setSquigglyColor(QColor(230, 30, 30));
+    const QVariantMap draft = controller.addHighlight(0, selectionRect);
+    QCOMPARE(
+        draft.value(QStringLiteral("highlightRects")).toList(),
+        snappedRects);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    const QString componentPath = QFINDTESTDATA(
+        "../src/Components/SquigglyLine.qml");
+    QVERIFY(!componentPath.isEmpty());
+    QQmlEngine engine;
+    QQmlComponent component(
+        &engine,
+        QUrl::fromLocalFile(componentPath));
+    const QSizeF pageSize = document.pageSize(0);
+    for (const qreal pagePointScale : {1.0, 2.0}) {
+        const QSize renderedPageSize(
+            qRound(pageSize.width() * pagePointScale),
+            qRound(pageSize.height() * pagePointScale));
+        const QImage savedPage = renderFirstPage(
+            outputPath,
+            renderedPageSize,
+            FPDF_ANNOT);
+        QVERIFY(!savedPage.isNull());
+        const QRect savedSearchArea = QRectF(
+            squigglyRect.x() * savedPage.width(),
+            squigglyRect.y() * savedPage.height(),
+            squigglyRect.width() * savedPage.width(),
+            squigglyRect.height() * savedPage.height())
+            .toAlignedRect()
+            .adjusted(-2, -2, 2, 2);
+        const QRect savedBounds = redPixelBounds(
+            savedPage,
+            savedSearchArea);
+        QVERIFY(savedBounds.isValid());
+
+        const qreal previewWidth = squigglyRect.width()
+            * pageSize.width()
+            * pagePointScale;
+        const qreal previewHeight = squigglyRect.height()
+            * pageSize.height()
+            * pagePointScale;
+        const QSize previewImageSize(
+            qMax(1, qCeil(previewWidth)),
+            qMax(1, qCeil(previewHeight)));
+        const QVariantMap initialProperties{
+            {QStringLiteral("waveColor"), QColor(230, 30, 30)},
+            {QStringLiteral("pagePointScale"), pagePointScale},
+            {QStringLiteral("width"), previewWidth},
+            {QStringLiteral("height"), previewHeight}};
+        std::unique_ptr<QObject> previewObject(
+            component.createWithInitialProperties(initialProperties));
+        QVERIFY2(previewObject, qPrintable(component.errorString()));
+        auto *previewItem = qobject_cast<QQuickItem *>(previewObject.get());
+        QVERIFY(previewItem);
+
+        QQuickWindow window;
+        window.setColor(Qt::white);
+        window.resize(previewImageSize);
+        previewItem->setParentItem(window.contentItem());
+        window.show();
+        QTRY_VERIFY_WITH_TIMEOUT(window.isExposed(), 5000);
+        const QSharedPointer<QQuickItemGrabResult> grabResult
+            = previewItem->grabToImage(previewImageSize);
+        QVERIFY(grabResult);
+        QSignalSpy readySpy(
+            grabResult.data(),
+            &QQuickItemGrabResult::ready);
+        if (grabResult->image().isNull()) {
+            QTRY_VERIFY_WITH_TIMEOUT(readySpy.count() > 0, 5000);
+        }
+        const QImage previewImage = grabResult->image();
+        QVERIFY(!previewImage.isNull());
+        const QRect previewBounds = redPixelBounds(previewImage);
+        QVERIFY(previewBounds.isValid());
+
+        const qreal savedBottom = squigglyRect.bottom()
+            * savedPage.height();
+        const qreal savedTop = squigglyRect.top()
+            * savedPage.height();
+        const qreal savedWaveTopOffset = savedBounds.top() - savedTop;
+        const qreal savedWaveBottomOffset = savedBottom
+            - (savedBounds.bottom() + 1);
+        const qreal previewWaveTopOffset = previewBounds.top();
+        const qreal previewWaveBottomOffset = previewImage.height()
+            - (previewBounds.bottom() + 1);
+        // Qt Quick and PDFium rasterize the same point geometry independently;
+        // allow one antialiased edge pixel on each side of the wave band.
+        QVERIFY2(
+            qAbs(savedBounds.height() - previewBounds.height()) <= 2,
+            qPrintable(QStringLiteral(
+                "scale=%1 savedBounds=%2,%3 %4x%5 "
+                "previewBounds=%6,%7 %8x%9")
+                .arg(pagePointScale)
+                .arg(savedBounds.x())
+                .arg(savedBounds.y())
+                .arg(savedBounds.width())
+                .arg(savedBounds.height())
+                .arg(previewBounds.x())
+                .arg(previewBounds.y())
+                .arg(previewBounds.width())
+                .arg(previewBounds.height())));
+        QVERIFY(qAbs(savedWaveTopOffset - previewWaveTopOffset) <= 2.0);
+        QVERIFY(qAbs(savedWaveBottomOffset - previewWaveBottomOffset) <= 2.0);
+    }
 }
 
 void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete_data()

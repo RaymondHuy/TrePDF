@@ -37,7 +37,8 @@ Main.qml
     │           ├── PDFFormView (C++)
     │           │   └── FormChoiceOverlay.qml
     │           ├── EditOverlay.qml
-    │           │   └── ShapeDraftView.qml
+    │           │   ├── ShapeDraftView.qml
+    │           │   └── SquigglyLine.qml
     │           └── FormTextFieldOverlay.qml
     │               └── FormFieldLayer (C++)
     ├── CommentPanel.qml
@@ -350,9 +351,10 @@ background selection được xử lý bởi các `MouseArea` riêng trong form 
 **Vai trò:** lớp QML chính cho chọn, tạo, sửa, di chuyển, resize và xóa nội dung
 draft trên một trang. Đây là tệp QML phức tạp nhất dự án.
 
-**Dữ liệu vào:** page, trạng thái pooled, hai cờ texture draft, theme và
-`PDFEditController`. Component tải `candidatesForPage()`/`draftsForPage()` và
-làm mới khi controller báo page data/candidate/history/selection đổi.
+**Dữ liệu vào:** page, page-point scale, trạng thái pooled, hai cờ texture draft,
+theme và `PDFEditController`. Component tải
+`candidatesForPage()`/`draftsForPage()` và làm mới khi controller báo page
+data/candidate/history/selection đổi.
 
 **Hit testing và con trỏ:**
 
@@ -392,6 +394,18 @@ làm mới khi controller báo page data/candidate/history/selection đổi.
 **Dọn state:** `prepareForSessionChange()` kết thúc hoặc hủy editor/resize/draw,
 ẩn cursor và xóa dữ liệu trang. Bất kỳ bổ sung gesture nào cũng phải đi qua
 đường cleanup này và trạng thái `pooled`.
+
+### [`src/Components/SquigglyLine.qml`](../src/Components/SquigglyLine.qml)
+
+**Vai trò:** renderer dùng chung cho preview gesture và draft Squiggly.
+
+- Nhận màu và `pagePointScale`; nét 1 PDF point, bước zigzag 2 PDF point được
+  đổi sang logical pixel theo zoom của page delegate.
+- Dùng cùng hình học đoạn thẳng mà PDFium sinh cho annotation Squiggly không có
+  appearance stream, nên preview trước Save và texture sau Save giữ cùng độ dày,
+  biên độ và tần số.
+- Chỉ vẽ presentation; hit-test, snap glyph, QuadPoints và persistence vẫn thuộc
+  `EditOverlay`, `PDFEditController` và `PDFSaveWriter`.
 
 ### [`src/Components/ShapeDraftView.qml`](../src/Components/ShapeDraftView.qml)
 

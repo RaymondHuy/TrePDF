@@ -134,6 +134,7 @@ Item {
         pooled: root.pooled
         theme: root.theme
         controller: root.editController
+        pagePointScale: root.pagePointScale
         draftTextureCurrent: root.draftTextureCurrent
         draftTextureReady: root.draftTextureReady
         z: 2

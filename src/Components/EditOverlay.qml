@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Shapes
 import TrePDF
 
 Item {
@@ -14,6 +13,7 @@ Item {
     required property bool draftTextureReady
     required property AppTheme theme
     required property PDFEditController controller
+    required property real pagePointScale
 
     property var drafts: []
     property var contentDrafts: []
@@ -110,58 +110,6 @@ Item {
 
     signal selectedDraftContentBoundsSyncRequested()
     signal pointerInteractionStarted()
-
-    component SquigglyLine: Shape {
-        id: squigglyLine
-
-        required property color waveColor
-
-        readonly property real waveStrokeWidth: Math.max(
-            1,
-            Math.min(3, height * 0.12))
-        readonly property real waveAmplitude: Math.max(
-            0,
-            Math.min(
-                2.5,
-                height * 0.12,
-                (height - waveStrokeWidth) / 2))
-        readonly property real waveCenterY: Math.max(
-            waveStrokeWidth / 2,
-            height - waveStrokeWidth / 2 - waveAmplitude)
-        readonly property real halfWaveLength: Math.max(
-            2,
-            waveAmplitude * 2.4)
-        readonly property string wavePath: {
-            let path = "M 0 " + waveCenterY
-            let startX = 0
-            let direction = -1
-            while (startX < width) {
-                const endX = Math.min(width, startX + halfWaveLength)
-                const controlX = (startX + endX) / 2
-                const controlY = waveCenterY
-                    + direction * waveAmplitude * 2
-                path += " Q " + controlX + " " + controlY
-                    + " " + endX + " " + waveCenterY
-                startX = endX
-                direction = -direction
-            }
-            return path
-        }
-
-        preferredRendererType: Shape.CurveRenderer
-
-        ShapePath {
-            fillColor: "transparent"
-            strokeColor: squigglyLine.waveColor
-            strokeWidth: squigglyLine.waveStrokeWidth
-            capStyle: ShapePath.RoundCap
-            joinStyle: ShapePath.RoundJoin
-
-            PathSvg {
-                path: squigglyLine.wavePath
-            }
-        }
-    }
 
     visible: !pooled && (interactionActive || drafts.length > 0)
     enabled: interactionActive
@@ -1494,6 +1442,7 @@ Item {
                     SquigglyLine {
                         anchors.fill: parent
                         waveColor: highlightItem.modelData.highlightColor
+                        pagePointScale: root.pagePointScale
                         visible: markupRect.markupKind === "squiggly"
                         Accessible.ignored: true
                     }
@@ -2071,6 +2020,7 @@ Item {
             width: Math.max(1, modelData.width * root.width)
             height: Math.max(1, modelData.height * root.height)
             waveColor: root.controller.squigglyColor
+            pagePointScale: root.pagePointScale
             visible: root.highlighting
                 && root.controller.tool === PDFEditController.SquigglyTool
             z: 5
