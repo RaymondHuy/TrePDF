@@ -36,6 +36,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(Tool tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
     Q_PROPERTY(ShapeType shapeType READ shapeType WRITE setShapeType NOTIFY shapeTypeChanged FINAL)
     Q_PROPERTY(QColor highlightColor READ highlightColor WRITE setHighlightColor NOTIFY highlightColorChanged FINAL)
+    Q_PROPERTY(QColor squigglyColor READ squigglyColor WRITE setSquigglyColor NOTIFY squigglyColorChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
@@ -98,6 +99,7 @@ public:
         AddShapeTool,
         HighlightTool,
         UnderlineTool,
+        SquigglyTool,
         StrikeoutTool,
         StickyNoteTool
     };
@@ -147,6 +149,8 @@ public:
     void setShapeType(ShapeType shapeType);
     QColor highlightColor() const;
     void setHighlightColor(const QColor &color);
+    QColor squigglyColor() const;
+    void setSquigglyColor(const QColor &color);
 
     bool hasDrafts() const;
     bool canUndo() const;
@@ -283,6 +287,7 @@ signals:
     void toolChanged();
     void shapeTypeChanged();
     void highlightColorChanged();
+    void squigglyColorChanged();
     void historyStateChanged();
     void savingChanged();
     void textEditActiveChanged();
@@ -649,6 +654,7 @@ private:
     Tool m_tool = BrowseTool;
     ShapeType m_shapeType = RectangleShape;
     QColor m_highlightColor;
+    QColor m_squigglyColor;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
     QVector<int> m_pageCandidateLru;

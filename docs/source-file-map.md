@@ -33,7 +33,7 @@ flowchart TD
     Delegate["PdfPageDelegate\nMột trang đang hiện"]
     PageItem["PDFPageItem\nRender texture PDF"]
     Interaction["PageInteractionOverlay\nĐiều phối input theo trang"]
-    EditOverlay["EditOverlay\nEdit text/image/shape/highlight"]
+    EditOverlay["EditOverlay\nEdit text/image/shape/text markup"]
     FormView["PDFFormView + FormChoiceOverlay\nForm PDFium đang chạy"]
     Designer["FormTextFieldOverlay + FormFieldLayer\nThiết kế form"]
     Document["PDFDocument\nHandle PDF GUI thread + cấu trúc trang"]
@@ -129,7 +129,7 @@ flowchart TD
    candidate và gọi API của controller.
 3. Controller giữ draft session-only và snapshot đầy đủ cho undo/redo. Texture
    gốc bị mask hoặc render lại tùy loại thay đổi.
-4. Text dùng editor rich text; image, shape và highlight dùng delegate/preview
+4. Text dùng editor rich text; image, shape và text markup dùng delegate/preview
    riêng. Move/resize chỉ commit một command khi gesture kết thúc.
 5. `PDFSaveWriter` phân biệt thay đổi chỉ dịch chuyển với thay đổi cần thay object
    để giữ font, ma trận, resource và z-order khi có thể.
@@ -194,7 +194,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
-| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Highlight/Underline/Strikeout, quản lý comment và history. |
+| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Highlight/Squiggly/Underline/Strikeout, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |

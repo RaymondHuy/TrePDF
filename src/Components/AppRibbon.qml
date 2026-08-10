@@ -60,6 +60,7 @@ Column {
     function isCommentTool(tool) {
         return tool === PDFEditController.HighlightTool
             || tool === PDFEditController.UnderlineTool
+            || tool === PDFEditController.SquigglyTool
             || tool === PDFEditController.StrikeoutTool
             || tool === PDFEditController.StickyNoteTool
     }

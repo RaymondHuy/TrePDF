@@ -2864,6 +2864,7 @@ bool isSupportedCommentAnnotationSubtype(int subtype)
 {
     return subtype == FPDF_ANNOT_HIGHLIGHT
         || subtype == FPDF_ANNOT_UNDERLINE
+        || subtype == FPDF_ANNOT_SQUIGGLY
         || subtype == FPDF_ANNOT_STRIKEOUT
         || subtype == FPDF_ANNOT_TEXT;
 }
@@ -3975,6 +3976,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         const bool textMarkupDraft
             = draft->candidate.kind == QLatin1String("highlight")
             || draft->candidate.kind == QLatin1String("underline")
+            || draft->candidate.kind == QLatin1String("squiggly")
             || draft->candidate.kind == QLatin1String("strikeout");
         const bool stickyNoteDraft
             = draft->candidate.kind == QLatin1String("stickyNote");
@@ -4015,6 +4017,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.reply = !draft->candidate.replyToObjectId.isEmpty();
         if (draft->candidate.kind == QLatin1String("underline")) {
             saveDraft.annotationSubtype = FPDF_ANNOT_UNDERLINE;
+        } else if (draft->candidate.kind == QLatin1String("squiggly")) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_SQUIGGLY;
         } else if (draft->candidate.kind == QLatin1String("strikeout")) {
             saveDraft.annotationSubtype = FPDF_ANNOT_STRIKEOUT;
         }

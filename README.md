@@ -66,13 +66,13 @@ PDF. Compatible text objects on the same visual line are grouped into one
 editable candidate while retaining every source object path for draft rendering
 and persistence.
 
-The Comment ribbon provides Sticky Note, Highlight, Underline, and Strikeout
-tools plus a collapsible, whole-document comments panel. Supported comments
-and replies, including annotations already in the PDF, can be selected and
-have their text edited in the panel. Markup uses a compact curated color grid
-and a system picker for custom colors. Root comments can receive replies; each
-root has a dropdown control that expands its replies at one visual level, and
-reply-to-reply is not offered. Reply annotations remain available in this
+The Comment ribbon provides Sticky Note, Highlight, Squiggly, Underline, and
+Strikeout tools plus a collapsible, whole-document comments panel. Supported
+comments and replies, including annotations already in the PDF, can be selected
+and have their text edited in the panel. Markup uses a compact curated color
+grid and a system picker for custom colors. Root comments can receive replies;
+each root has a dropdown control that expands its replies at one visual level,
+and reply-to-reply is not offered. Reply annotations remain available in this
 panel but their standalone appearances are hidden from the PDF page viewer.
 Comment changes are per-tab session drafts with
 undo, redo, discard, selection, and deletion support. Save and Save As persist

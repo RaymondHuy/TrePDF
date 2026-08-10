@@ -171,14 +171,15 @@ ghi Save; mọi thay đổi vẫn là draft.
 **Vai trò:** command surface cho PDF comment/markup, nằm ngay sau tab Edit.
 
 - Khi tab mở, `AppRibbon` bật `PDFEditController.HighlightTool`; người dùng có
-  thể chuyển sang Sticky Note, Underline hoặc Strikeout mà không bật form design
-  mode.
-- Highlight là split button: phần chính dùng màu hiện tại, menu có bảng màu
-  marker curated và system color picker. Màu được ghi vào
-  `editController.highlightColor` với opacity marker cố định.
-- Underline và Strikeout dùng chung gesture kéo vùng, draft history và pipeline
-  lưu annotation với Highlight; Sticky Note đặt bằng một lần bấm và mở nội dung
-  trong panel bên phải.
+  thể chuyển sang Sticky Note, Squiggly, Underline hoặc Strikeout mà không bật
+  form design mode.
+- Highlight và Squiggly là split button: phần chính dùng màu hiện tại, menu có
+  bảng màu marker curated và system color picker cùng kiểu. Squiggly dùng palette
+  RGB đậm và opacity cao hơn để nét lượn sóng mảnh vẫn rõ. Mỗi tool giữ màu riêng
+  qua `editController.highlightColor` hoặc `editController.squigglyColor`.
+- Cả bốn text-markup tool dùng chung gesture kéo vùng, draft history và pipeline
+  lưu annotation; Sticky Note đặt bằng một lần bấm và mở nội dung trong panel
+  bên phải.
 - Nhóm Manage bật/tắt danh sách, chọn bình luận trước/sau và xóa comment đang
   chọn; nhóm History dùng chung undo/redo của `PDFEditController`.
 - Undo/Redo dùng chung history của `PDFEditController` và điều hướng tới trang
@@ -351,7 +352,7 @@ làm mới khi controller báo page data/candidate/history/selection đổi.
   kích thước trang.
 - Quản lý con trỏ Select/Add Text bằng SVG và fallback cursor; ẩn cursor khi
   pooled, ngoài trang hoặc tool không phù hợp.
-- Các công cụ draw shape/highlight giữ start/current point tạm thời, validate
+- Các công cụ draw shape/text-markup giữ start/current point tạm thời, validate
   gesture rồi mới tạo một draft command.
 
 **Text rich-edit:**
@@ -368,7 +369,7 @@ làm mới khi controller báo page data/candidate/history/selection đổi.
 
 **Draft presentation:**
 
-- Mask source rect khỏi texture sạch khi cần, rồi vẽ text/image/shape/highlight
+- Mask source rect khỏi texture sạch khi cần, rồi vẽ text/image/shape/text-markup
   draft lên trên. Nếu render worker đã trả texture draft đúng revision, component
   tránh chồng preview không cần thiết.
 - `DraftImageView` vẽ pixel snapshot của ảnh thêm mới; `ShapeDraftView` vẽ vector.

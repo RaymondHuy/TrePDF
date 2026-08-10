@@ -18,9 +18,9 @@ Current features:
 - Open multiple local PDF files in independent tabs and close them separately.
 - Insert a blank page immediately after the current page or delete the current
   page, with undo/redo/discard and Save/Save As persistence.
-- Add Sticky Note, Highlight, Underline, and Strikeout annotations from the
-  Comment tab. New comments are undoable session drafts; supported source
-  comments can be indexed, selected, edited, and deleted with
+- Add Sticky Note, Highlight, Squiggly, Underline, and Strikeout annotations
+  from the Comment tab. New comments are undoable session drafts; supported
+  source comments can be indexed, selected, edited, and deleted with
   undo/redo/discard. Save/Save As persists additions, content edits, and
   removals without rewriting page content streams on annotation-only pages.
   The comments panel shows each annotation's author and modification date,
@@ -380,10 +380,11 @@ clipped or elided unintentionally.
   embedded font programs to glyphs used by new text objects while leaving
   original PDF font resources unchanged. Commit only after PDFium succeeds;
   any earlier error must leave the destination and in-memory drafts untouched.
-- Persist highlight drafts as `FPDF_ANNOT_HIGHLIGHT` annotations with explicit
-  quad points, bounding rectangles, color/opacity, and the Print flag. Adding
-  annotations alone must not call `FPDFPage_GenerateContent()`; mixed
-  text/image edits still regenerate the affected page content normally.
+- Persist Highlight, Squiggly, Underline, and Strikeout drafts as their matching
+  `FPDF_ANNOT_*` annotations with explicit quad points, bounding rectangles,
+  color/opacity, and the Print flag. Adding annotations alone must not call
+  `FPDFPage_GenerateContent()`; mixed text/image edits still regenerate the
+  affected page content normally.
 - Persist added shapes as top-level PDF path objects. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain

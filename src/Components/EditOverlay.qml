@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Shapes
 import TrePDF
 
 Item {
@@ -85,6 +86,58 @@ Item {
 
     signal selectedDraftContentBoundsSyncRequested()
     signal pointerInteractionStarted()
+
+    component SquigglyLine: Shape {
+        id: squigglyLine
+
+        required property color waveColor
+
+        readonly property real waveStrokeWidth: Math.max(
+            1,
+            Math.min(3, height * 0.12))
+        readonly property real waveAmplitude: Math.max(
+            0,
+            Math.min(
+                2.5,
+                height * 0.12,
+                (height - waveStrokeWidth) / 2))
+        readonly property real waveCenterY: Math.max(
+            waveStrokeWidth / 2,
+            height - waveStrokeWidth / 2 - waveAmplitude)
+        readonly property real halfWaveLength: Math.max(
+            2,
+            waveAmplitude * 2.4)
+        readonly property string wavePath: {
+            let path = "M 0 " + waveCenterY
+            let startX = 0
+            let direction = -1
+            while (startX < width) {
+                const endX = Math.min(width, startX + halfWaveLength)
+                const controlX = (startX + endX) / 2
+                const controlY = waveCenterY
+                    + direction * waveAmplitude * 2
+                path += " Q " + controlX + " " + controlY
+                    + " " + endX + " " + waveCenterY
+                startX = endX
+                direction = -direction
+            }
+            return path
+        }
+
+        preferredRendererType: Shape.CurveRenderer
+
+        ShapePath {
+            fillColor: "transparent"
+            strokeColor: squigglyLine.waveColor
+            strokeWidth: squigglyLine.waveStrokeWidth
+            capStyle: ShapePath.RoundCap
+            joinStyle: ShapePath.RoundJoin
+
+            PathSvg {
+                path: squigglyLine.wavePath
+            }
+        }
+    }
 
     visible: !pooled && (interactionActive || drafts.length > 0)
     enabled: interactionActive
@@ -531,6 +584,7 @@ Item {
     function isTextMarkupKind(kind) {
         return kind === "highlight"
             || kind === "underline"
+            || kind === "squiggly"
             || kind === "strikeout"
     }
 
@@ -541,6 +595,7 @@ Item {
     function isTextMarkupTool() {
         return controller.tool === PDFEditController.HighlightTool
             || controller.tool === PDFEditController.UnderlineTool
+            || controller.tool === PDFEditController.SquigglyTool
             || controller.tool === PDFEditController.StrikeoutTool
     }
 
@@ -1373,7 +1428,15 @@ Item {
                                 : undefined
                         height: Math.max(1, Math.min(3, parent.height * 0.12))
                         visible: markupRect.markupKind !== "highlight"
+                            && markupRect.markupKind !== "squiggly"
                         color: highlightItem.modelData.highlightColor
+                        Accessible.ignored: true
+                    }
+
+                    SquigglyLine {
+                        anchors.fill: parent
+                        waveColor: highlightItem.modelData.highlightColor
+                        visible: markupRect.markupKind === "squiggly"
                         Accessible.ignored: true
                     }
                 }
@@ -1932,7 +1995,15 @@ Item {
                 : undefined
             height: Math.max(1, Math.min(3, parent.height * 0.12))
             visible: root.controller.tool !== PDFEditController.HighlightTool
+                && root.controller.tool !== PDFEditController.SquigglyTool
             color: root.controller.highlightColor
+            Accessible.ignored: true
+        }
+
+        SquigglyLine {
+            anchors.fill: parent
+            waveColor: root.controller.squigglyColor
+            visible: root.controller.tool === PDFEditController.SquigglyTool
             Accessible.ignored: true
         }
     }

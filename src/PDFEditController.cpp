@@ -58,6 +58,10 @@ constexpr int kHighlightRed = 255;
 constexpr int kHighlightGreen = 235;
 constexpr int kHighlightBlue = 59;
 constexpr int kHighlightAlpha = 96;
+constexpr int kSquigglyRed = 198;
+constexpr int kSquigglyGreen = 40;
+constexpr int kSquigglyBlue = 40;
+constexpr int kSquigglyAlpha = 192;
 constexpr qint64 kMaximumAddedImageFileBytes = 64 * 1024 * 1024;
 constexpr qint64 kMaximumAddedImagePixels = 40 * 1000 * 1000;
 constexpr unsigned long kMaximumAnnotationStringBytes
@@ -542,6 +546,7 @@ bool isTextMarkupTool(PDFEditController::Tool tool)
 {
     return tool == PDFEditController::HighlightTool
         || tool == PDFEditController::UnderlineTool
+        || tool == PDFEditController::SquigglyTool
         || tool == PDFEditController::StrikeoutTool;
 }
 
@@ -549,6 +554,7 @@ bool isTextMarkupCandidateKind(const QString &kind)
 {
     return kind == QLatin1String("highlight")
         || kind == QLatin1String("underline")
+        || kind == QLatin1String("squiggly")
         || kind == QLatin1String("strikeout");
 }
 
@@ -562,6 +568,9 @@ int commentAnnotationSubtype(const QString &kind)
 {
     if (kind == QLatin1String("underline")) {
         return FPDF_ANNOT_UNDERLINE;
+    }
+    if (kind == QLatin1String("squiggly")) {
+        return FPDF_ANNOT_SQUIGGLY;
     }
     if (kind == QLatin1String("strikeout")) {
         return FPDF_ANNOT_STRIKEOUT;
@@ -862,6 +871,7 @@ bool isSupportedCommentAnnotationSubtype(int subtype)
 {
     return subtype == FPDF_ANNOT_HIGHLIGHT
         || subtype == FPDF_ANNOT_UNDERLINE
+        || subtype == FPDF_ANNOT_SQUIGGLY
         || subtype == FPDF_ANNOT_STRIKEOUT
         || subtype == FPDF_ANNOT_TEXT;
 }
@@ -1461,6 +1471,11 @@ PDFEditController::PDFEditController(QObject *parent)
           kHighlightGreen,
           kHighlightBlue,
           kHighlightAlpha)
+    , m_squigglyColor(
+          kSquigglyRed,
+          kSquigglyGreen,
+          kSquigglyBlue,
+          kSquigglyAlpha)
 {
     connect(
         this,
@@ -1664,6 +1679,26 @@ void PDFEditController::setHighlightColor(const QColor &color)
 
     m_highlightColor = normalizedColor;
     emit highlightColorChanged();
+}
+
+QColor PDFEditController::squigglyColor() const
+{
+    return m_squigglyColor;
+}
+
+void PDFEditController::setSquigglyColor(const QColor &color)
+{
+    if (!color.isValid()) {
+        return;
+    }
+
+    const QColor normalizedColor = color.toRgb();
+    if (m_squigglyColor == normalizedColor) {
+        return;
+    }
+
+    m_squigglyColor = normalizedColor;
+    emit squigglyColorChanged();
 }
 
 bool PDFEditController::hasDrafts() const
@@ -3042,6 +3077,11 @@ QVariantMap PDFEditController::addHighlight(int page,
         //% "Underline"
         candidate.label = qtTrId("Underline");
         break;
+    case SquigglyTool:
+        candidate.kind = QStringLiteral("squiggly");
+        //% "Squiggly"
+        candidate.label = qtTrId("Squiggly");
+        break;
     case StrikeoutTool:
         candidate.kind = QStringLiteral("strikeout");
         //% "Strikeout"
@@ -3061,7 +3101,9 @@ QVariantMap PDFEditController::addHighlight(int page,
     candidate.commentAuthor = currentCommentAuthor();
     candidate.commentCreationDate = QDateTime::currentDateTime();
     candidate.highlightRects.append(normalizedRect);
-    candidate.highlightColor = m_highlightColor;
+    candidate.highlightColor = m_tool == SquigglyTool
+        ? m_squigglyColor
+        : m_highlightColor;
     setInitialGeometry(candidate, normalizedRect);
 
     m_addedCandidates.append(std::move(candidate));
@@ -6562,6 +6604,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
         const bool textMarkupSubtype
             = subtype == FPDF_ANNOT_HIGHLIGHT
             || subtype == FPDF_ANNOT_UNDERLINE
+            || subtype == FPDF_ANNOT_SQUIGGLY
             || subtype == FPDF_ANNOT_STRIKEOUT;
         const bool stickyNoteSubtype = subtype == FPDF_ANNOT_TEXT;
         if (textMarkupSubtype || stickyNoteSubtype) {
@@ -6720,6 +6763,11 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 candidate.kind = QStringLiteral("underline");
                 //% "Underline"
                 candidate.label = qtTrId("Underline");
+                break;
+            case FPDF_ANNOT_SQUIGGLY:
+                candidate.kind = QStringLiteral("squiggly");
+                //% "Squiggly"
+                candidate.label = qtTrId("Squiggly");
                 break;
             case FPDF_ANNOT_STRIKEOUT:
                 candidate.kind = QStringLiteral("strikeout");

@@ -212,11 +212,11 @@ orchestration Save.
 - Scan page bất đồng bộ từ document handle riêng dưới PDFium lock.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
-- Đọc Highlight, Underline, Strikeout và Text annotation; chuẩn hóa quad/rect,
-  màu và `/Contents` thành comment candidate. Nội dung annotation nguồn được sửa
-  trong panel bằng draft riêng; canvas vẫn không cho move/resize annotation
-  nguồn, còn ReadOnly/LockedContents không nhận mutation. Xóa tạo tombstone draft
-  theo annotation index và subtype.
+- Đọc Highlight, Squiggly, Underline, Strikeout và Text annotation; chuẩn hóa
+  quad/rect, màu và `/Contents` thành comment candidate. Nội dung annotation
+  nguồn được sửa trong panel bằng draft riêng; canvas vẫn không cho move/resize
+  annotation nguồn, còn ReadOnly/LockedContents không nhận mutation. Xóa tạo
+  tombstone draft theo annotation index và subtype.
 - Đọc quan hệ reply chuẩn qua `/IRT` và `/RT`; chuỗi reply nhiều tầng từ PDF
   ngoài được lần về root rồi trình bày thành đúng một cấp. Metadata private chỉ
   dùng để định danh ổn định parent trong pipeline ghi trước khi tạo `/IRT` chuẩn.
@@ -256,8 +256,8 @@ orchestration Save.
 
 - Add Image decode/giới hạn ảnh trên GUI thread rồi lưu pixel snapshot.
 - Add Shape chuẩn hóa geometry và snap line/arrow gần trục. Highlight,
-  Underline và Strikeout giữ quad/màu; Sticky Note giữ frame 24 pt và nội dung
-  chỉnh từ `CommentPanel`.
+  Squiggly, Underline và Strikeout giữ quad/màu; Sticky Note giữ frame 24 pt và
+  nội dung chỉnh từ `CommentPanel`.
 - `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
   hướng phẳng cho panel theo thứ tự root rồi replies. `setCommentText()` định
   danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
@@ -309,8 +309,8 @@ orchestration Save.
 - Bảo toàn exact source horizontal scale khi reuse; chỉ tính width compensation
   cho font mới/standard.
 - Tạo bitmap object cho ảnh thêm mới, path object cho sáu shape, các standard
-  Highlight/Underline/Strikeout annotation với quad/color/Print flag và Text
-  annotation với rect/color/`Contents`/`NM`/Print flag.
+  Highlight/Squiggly/Underline/Strikeout annotation với quad/color/Print flag
+  và Text annotation với rect/color/`Contents`/`NM`/Print flag.
 - Ghi parent/reply vào file tạm, định danh bằng metadata ổn định rồi canonicalize
   reply thành `/IRT <parent-ref>` và `/RT /R` trước khi commit giao dịch.
 - Xóa comment nguồn, toàn bộ reply hậu duệ và `/Popup` liên kết theo annotation
@@ -681,8 +681,8 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   formatting, typing format, paragraph alignment, editor undo và scale qua nhiều
   lần save.
 - Content round-trip: text, Vietnamese, paint Fill/Stroke/pattern/grayscale,
-  Highlight/Underline/Strikeout/Sticky Note, image, shape, source move/delete,
-  z-order, CropBox và rotated page.
+  Highlight/Squiggly/Underline/Strikeout/Sticky Note, image, shape, source
+  move/delete, z-order, CropBox và rotated page.
 - Page operation: insert/delete, undo/redo/discard, source page mapping và save.
 - Save lifecycle: async save, failure giữ draft, Save/Save As và reopen.
 - Multi-tab: document/session độc lập, rotation/draft riêng, save đúng tab và

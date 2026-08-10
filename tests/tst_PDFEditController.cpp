@@ -1196,7 +1196,10 @@ bool createStickyNotePopupPdf(const QString &filePath)
         });
 }
 
-bool createTextMarkupCommentPdf(const QString &filePath)
+bool createTextMarkupCommentPdf(const QString &filePath,
+                                const QByteArray &subtypeName,
+                                const QByteArray &annotationName,
+                                const QByteArray &contents)
 {
     return writePdfObjects(
         filePath,
@@ -1206,16 +1209,19 @@ bool createTextMarkupCommentPdf(const QString &filePath)
             QByteArray(
                 "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
                 "/Resources << >> /Annots [4 0 R] >>"),
-            QByteArray(
-                "<< /Type /Annot /Subtype /Highlight /P 3 0 R "
-                "/Rect [20 120 160 142] "
-                "/QuadPoints [20 142 160 142 20 120 160 120] "
-                "/Contents (Source highlight comment) "
-                "/T (Markup Author) "
-                "/CreationDate (D:20240405060708+07'00') "
-                "/M (D:20240506070809+07'00') "
-                "/NM (editable-source-highlight) "
-                "/C [1 0.9 0] /CA 0.55 /F 4 >>"),
+            QByteArray("<< /Type /Annot /Subtype /")
+                + subtypeName
+                + QByteArray(
+                    " /P 3 0 R /Rect [20 120 160 142] "
+                    "/QuadPoints [20 142 160 142 20 120 160 120] "
+                    "/Contents (")
+                + contents
+                + QByteArray(
+                    ") /T (Markup Author) "
+                    "/CreationDate (D:20240405060708+07'00') "
+                    "/M (D:20240506070809+07'00') /NM (")
+                + annotationName
+                + QByteArray(") /C [1 0.9 0] /CA 0.55 /F 4 >>"),
         });
 }
 
@@ -3503,11 +3509,13 @@ private slots:
     void preservesEmbeddedFontForFormatOnlyVietnameseEdit();
     void savesNormalizedVietnameseRichText();
     void addsHighlightWithUndoRedoAndDiscard();
-    void addsUnderlineAndStrikeoutWithUndoRedoAndDelete_data();
-    void addsUnderlineAndStrikeoutWithUndoRedoAndDelete();
+    void keepsHighlightAndSquigglyColorsIndependent();
+    void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete_data();
+    void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete();
     void addsStickyNoteWithPanelModelAndUndo();
     void addsCommentReplyWithOneLevelModelAndUndo();
     void editsSourceStickyNoteComment();
+    void editsSourceTextMarkupComment_data();
     void editsSourceTextMarkupComment();
     void editsSourceReplyComment();
     void rejectsEditingProtectedSourceComments();
@@ -3520,8 +3528,8 @@ private slots:
     void deletesSourceCommentsWithUndoRedoDiscardAndSave();
     void deletesSourceCommentPopupRoundTrip();
     void savesHighlightAnnotationRoundTrip();
-    void savesUnderlineAndStrikeoutAnnotationRoundTrip_data();
-    void savesUnderlineAndStrikeoutAnnotationRoundTrip();
+    void savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip_data();
+    void savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip();
     void savesStickyNoteRoundTrip();
     void savesCommentReplyRoundTrip();
     void keepsStickyNoteNamesUniqueAcrossReopen();
@@ -11226,7 +11234,67 @@ void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
     QVERIFY(!controller.canRedo());
 }
 
-void PDFEditControllerTest::addsUnderlineAndStrikeoutWithUndoRedoAndDelete_data()
+void PDFEditControllerTest::keepsHighlightAndSquigglyColorsIndependent()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("independent-markup-colors-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    const QColor defaultHighlightColor(255, 235, 59, 96);
+    const QColor defaultSquigglyColor(198, 40, 40, 192);
+    const QColor highlightColor(255, 128, 171, 96);
+    const QColor squigglyColor(38, 166, 154, 160);
+    QCOMPARE(controller.highlightColor(), defaultHighlightColor);
+    QCOMPARE(controller.squigglyColor(), defaultSquigglyColor);
+
+    QSignalSpy highlightColorSpy(
+        &controller,
+        &PDFEditController::highlightColorChanged);
+    QSignalSpy squigglyColorSpy(
+        &controller,
+        &PDFEditController::squigglyColorChanged);
+
+    controller.setHighlightColor(highlightColor);
+    QCOMPARE(controller.highlightColor(), highlightColor);
+    QCOMPARE(controller.squigglyColor(), defaultSquigglyColor);
+    QCOMPARE(highlightColorSpy.count(), 1);
+    QCOMPARE(squigglyColorSpy.count(), 0);
+
+    controller.setSquigglyColor(squigglyColor);
+    QCOMPARE(controller.highlightColor(), highlightColor);
+    QCOMPARE(controller.squigglyColor(), squigglyColor);
+    QCOMPARE(highlightColorSpy.count(), 1);
+    QCOMPARE(squigglyColorSpy.count(), 1);
+    controller.setSquigglyColor(squigglyColor);
+    QCOMPARE(squigglyColorSpy.count(), 1);
+
+    controller.setTool(PDFEditController::HighlightTool);
+    const QVariantMap highlight = controller.addHighlight(
+        0,
+        QRectF(0.10, 0.20, 0.30, 0.05));
+    QCOMPARE(
+        highlight.value(QStringLiteral("highlightColor")).value<QColor>(),
+        highlightColor);
+
+    controller.setTool(PDFEditController::SquigglyTool);
+    const QVariantMap squiggly = controller.addHighlight(
+        0,
+        QRectF(0.10, 0.30, 0.30, 0.05));
+    QCOMPARE(
+        squiggly.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("squiggly"));
+    QCOMPARE(
+        squiggly.value(QStringLiteral("highlightColor")).value<QColor>(),
+        squigglyColor);
+    QCOMPARE(controller.draftsForPage(0).size(), 2);
+}
+
+void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete_data()
 {
     QTest::addColumn<int>("tool");
     QTest::addColumn<QString>("kind");
@@ -11237,9 +11305,12 @@ void PDFEditControllerTest::addsUnderlineAndStrikeoutWithUndoRedoAndDelete_data(
     QTest::newRow("strikeout")
         << static_cast<int>(PDFEditController::StrikeoutTool)
         << QStringLiteral("strikeout");
+    QTest::newRow("squiggly")
+        << static_cast<int>(PDFEditController::SquigglyTool)
+        << QStringLiteral("squiggly");
 }
 
-void PDFEditControllerTest::addsUnderlineAndStrikeoutWithUndoRedoAndDelete()
+void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete()
 {
     QFETCH(int, tool);
     QFETCH(QString, kind);
@@ -11625,21 +11696,57 @@ void PDFEditControllerTest::editsSourceStickyNoteComment()
         .value(QStringLiteral("commentTextEditable")).toBool());
 }
 
+void PDFEditControllerTest::editsSourceTextMarkupComment_data()
+{
+    QTest::addColumn<QByteArray>("pdfSubtypeName");
+    QTest::addColumn<int>("subtype");
+    QTest::addColumn<QString>("annotationName");
+    QTest::addColumn<QString>("kind");
+    QTest::addColumn<QByteArray>("sourceText");
+    QTest::addColumn<QString>("savedText");
+
+    QTest::newRow("highlight")
+        << QByteArray("Highlight")
+        << static_cast<int>(FPDF_ANNOT_HIGHLIGHT)
+        << QStringLiteral("editable-source-highlight")
+        << QStringLiteral("highlight")
+        << QByteArray("Source highlight comment")
+        << QStringLiteral("Edited highlight comment");
+    QTest::newRow("squiggly")
+        << QByteArray("Squiggly")
+        << static_cast<int>(FPDF_ANNOT_SQUIGGLY)
+        << QStringLiteral("editable-source-squiggly")
+        << QStringLiteral("squiggly")
+        << QByteArray("Source squiggly comment")
+        << QStringLiteral("Edited squiggly comment");
+}
+
 void PDFEditControllerTest::editsSourceTextMarkupComment()
 {
+    QFETCH(QByteArray, pdfSubtypeName);
+    QFETCH(int, subtype);
+    QFETCH(QString, annotationName);
+    QFETCH(QString, kind);
+    QFETCH(QByteArray, sourceText);
+    QFETCH(QString, savedText);
+
     const QString sourcePath = m_temporaryDirectory.filePath(
-        QStringLiteral("edit-source-text-markup.pdf"));
+        QStringLiteral("edit-source-%1.pdf").arg(kind));
     const QString outputPath = m_temporaryDirectory.filePath(
-        QStringLiteral("edit-source-text-markup-output.pdf"));
-    QVERIFY(createTextMarkupCommentPdf(sourcePath));
+        QStringLiteral("edit-source-%1-output.pdf").arg(kind));
+    QVERIFY(createTextMarkupCommentPdf(
+        sourcePath,
+        pdfSubtypeName,
+        annotationName.toLatin1(),
+        sourceText));
 
     const CommentAnnotationInspection sourceInspection
         = inspectCommentAnnotation(
             sourcePath,
-            QStringLiteral("editable-source-highlight"));
+            annotationName);
     QVERIFY(sourceInspection.readable);
     QCOMPARE(sourceInspection.annotationCount, 1);
-    QCOMPARE(sourceInspection.subtype, FPDF_ANNOT_HIGHLIGHT);
+    QCOMPARE(sourceInspection.subtype, subtype);
     QCOMPARE(sourceInspection.quadPoints.size(), 1);
 
     PDFDocument document;
@@ -11652,7 +11759,7 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
         = controller.commentItems().constFirst().toMap();
     QCOMPARE(
         sourceComment.value(QStringLiteral("kind")).toString(),
-        QStringLiteral("highlight"));
+        kind);
     QVERIFY(!sourceComment.value(QStringLiteral("editable")).toBool());
     QVERIFY(sourceComment
         .value(QStringLiteral("commentTextEditable")).toBool());
@@ -11660,7 +11767,6 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
         .value(QStringLiteral("objectId"))
         .toString();
 
-    const QString savedText = QStringLiteral("Edited highlight comment");
     QVERIFY(controller.setCommentText(0, objectId, savedText));
     QCOMPARE(
         controller.commentItems().constFirst().toMap()
@@ -11672,7 +11778,7 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
     const CommentAnnotationInspection outputInspection
         = inspectCommentAnnotation(
             outputPath,
-            QStringLiteral("editable-source-highlight"));
+            annotationName);
     QVERIFY(outputInspection.readable);
     QCOMPARE(
         outputInspection.annotationCount,
@@ -12238,14 +12344,18 @@ void PDFEditControllerTest::deletesSourceCommentsWithUndoRedoDiscardAndSave()
     QVERIFY(!controller.addHighlight(
         0,
         QRectF(0.14, 0.38, 0.26, 0.04)).isEmpty());
+    controller.setTool(PDFEditController::SquigglyTool);
+    QVERIFY(!controller.addHighlight(
+        0,
+        QRectF(0.16, 0.48, 0.28, 0.04)).isEmpty());
     controller.setTool(PDFEditController::StickyNoteTool);
-    QVERIFY(!controller.addStickyNote(0, QPointF(0.2, 0.5)).isEmpty());
+    QVERIFY(!controller.addStickyNote(0, QPointF(0.2, 0.6)).isEmpty());
     controller.setSelectedCommentText(QStringLiteral("Source comment"));
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(sourcePath)));
     QVERIFY(!controller.hasDrafts());
 
     controller.requestCommentIndex();
-    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 4, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 5, 5000);
     const QVariantMap stickyNote = candidateForKind(
         controller.commentItems(),
         QStringLiteral("stickyNote"));
@@ -12253,18 +12363,18 @@ void PDFEditControllerTest::deletesSourceCommentsWithUndoRedoDiscardAndSave()
     QVERIFY(controller.removeComment(
         stickyNote.value(QStringLiteral("page")).toInt(),
         stickyNote.value(QStringLiteral("objectId")).toString()));
-    QCOMPARE(controller.commentItems().size(), 3);
+    QCOMPARE(controller.commentItems().size(), 4);
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
 
     QCOMPARE(controller.undo(), -1);
-    QCOMPARE(controller.commentItems().size(), 4);
+    QCOMPARE(controller.commentItems().size(), 5);
     QVERIFY(controller.canRedo());
     QCOMPARE(controller.redo(), -1);
-    QCOMPARE(controller.commentItems().size(), 3);
+    QCOMPARE(controller.commentItems().size(), 4);
 
     controller.discardDrafts();
-    QCOMPARE(controller.commentItems().size(), 4);
+    QCOMPARE(controller.commentItems().size(), 5);
     QVERIFY(!controller.hasDrafts());
     QVERIFY(!controller.canUndo());
     QVERIFY(!controller.canRedo());
@@ -12294,6 +12404,11 @@ void PDFEditControllerTest::deletesSourceCommentsWithUndoRedoDiscardAndSave()
             sourcePath,
             FPDF_ANNOT_STRIKEOUT).count,
         1);
+    QCOMPARE(
+        inspectTextMarkupAnnotations(
+            sourcePath,
+            FPDF_ANNOT_SQUIGGLY).count,
+        1);
     QCOMPARE(inspectStickyNotes(sourcePath).count, 1);
 
     QCOMPARE(inspectHighlights(outputPath).count, 0);
@@ -12306,6 +12421,11 @@ void PDFEditControllerTest::deletesSourceCommentsWithUndoRedoDiscardAndSave()
         inspectTextMarkupAnnotations(
             outputPath,
             FPDF_ANNOT_STRIKEOUT).count,
+        0);
+    QCOMPARE(
+        inspectTextMarkupAnnotations(
+            outputPath,
+            FPDF_ANNOT_SQUIGGLY).count,
         0);
     QCOMPARE(inspectStickyNotes(outputPath).count, 0);
     QVERIFY(normalizedPageText(outputPath).contains(
@@ -12467,7 +12587,7 @@ void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
     QVERIFY(closeEnough(quad.y4, expectedBottom));
 }
 
-void PDFEditControllerTest::savesUnderlineAndStrikeoutAnnotationRoundTrip_data()
+void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip_data()
 {
     QTest::addColumn<int>("tool");
     QTest::addColumn<int>("subtype");
@@ -12481,9 +12601,13 @@ void PDFEditControllerTest::savesUnderlineAndStrikeoutAnnotationRoundTrip_data()
         << static_cast<int>(PDFEditController::StrikeoutTool)
         << static_cast<int>(FPDF_ANNOT_STRIKEOUT)
         << QStringLiteral("strikeout");
+    QTest::newRow("squiggly")
+        << static_cast<int>(PDFEditController::SquigglyTool)
+        << static_cast<int>(FPDF_ANNOT_SQUIGGLY)
+        << QStringLiteral("squiggly");
 }
 
-void PDFEditControllerTest::savesUnderlineAndStrikeoutAnnotationRoundTrip()
+void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip()
 {
     QFETCH(int, tool);
     QFETCH(int, subtype);
@@ -12503,12 +12627,25 @@ void PDFEditControllerTest::savesUnderlineAndStrikeoutAnnotationRoundTrip()
     const QSizeF pageSize = document.pageSize(0);
     const QRectF selectionRect(0.14, 0.24, 0.32, 0.04);
     const QColor annotationColor(38, 166, 154, 160);
-    controller.setHighlightColor(annotationColor);
+    const QColor unrelatedHighlightColor(255, 128, 171, 96);
+    if (tool == static_cast<int>(PDFEditController::SquigglyTool)) {
+        controller.setHighlightColor(unrelatedHighlightColor);
+        controller.setSquigglyColor(annotationColor);
+        QCOMPARE(controller.highlightColor(), unrelatedHighlightColor);
+    } else {
+        controller.setHighlightColor(annotationColor);
+    }
+    const QVariantMap addedAnnotation = controller.addHighlight(
+        0,
+        selectionRect);
     QCOMPARE(
-        controller.addHighlight(0, selectionRect)
-            .value(QStringLiteral("kind"))
-            .toString(),
+        addedAnnotation.value(QStringLiteral("kind")).toString(),
         kind);
+    QCOMPARE(
+        addedAnnotation
+            .value(QStringLiteral("highlightColor"))
+            .value<QColor>(),
+        annotationColor);
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     QVERIFY(!controller.hasDrafts());
