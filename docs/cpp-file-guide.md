@@ -227,6 +227,17 @@ orchestration Save.
   giữ mọi source object path để suppress/remove chính xác.
 - Trích source bounds, baseline/origin, font family/style/size/stretch, render
   mode/color, character span và paragraph format.
+- Giữ geometry chuẩn hóa của từng glyph source-text không phải whitespace trong
+  kết quả scan/cache theo page và revision. Squiggly hit-test trên dữ liệu này;
+  GUI/QML không mở `FPDF_PAGE`/`FPDF_TEXTPAGE` hay gọi PDFium để dò chữ.
+- Text có render mode Invisible, thường là OCR ẩn trên trang scan, được giữ dưới
+  dạng record nội bộ chỉ phục vụ hit-test Squiggly và bị loại khỏi
+  `candidatesForPage()`/`candidateAt()`, nên không thể select/edit như source
+  text thường. Geometry axis-aligned hiện chỉ nhận glyph ngang/upright (góc gần
+  0°); glyph xoay/dọc bị bỏ qua cho tới khi pipeline hỗ trợ oriented QuadPoints.
+- Mỗi page chỉ cache per-glyph Squiggly geometry khi text layer có tối đa 50.000
+  ký tự. Nếu vượt safety cap này, scan không giữ partial glyph geometry nào cho
+  page đó để giới hạn RAM; candidate/source text editing vẫn được quét như cũ.
 - Cache candidate theo page/revision; hover có đường try-lock/defer để không khóa
   GUI khi PDFium đang bận.
 
@@ -255,9 +266,14 @@ orchestration Save.
 **Công cụ khác:**
 
 - Add Image decode/giới hạn ảnh trên GUI thread rồi lưu pixel snapshot.
-- Add Shape chuẩn hóa geometry và snap line/arrow gần trục. Highlight,
-  Squiggly, Underline và Strikeout giữ quad/màu; Sticky Note giữ frame 24 pt và
-  nội dung chỉnh từ `CommentPanel`.
+- Add Shape chuẩn hóa geometry và snap line/arrow gần trục. Khi kết thúc gesture
+  Squiggly, controller lấy các glyph không-whitespace giao vùng kéo, nhóm theo
+  visual line rồi tạo rectangle/QuadPoints đã snap cho từng dòng. Không có glyph
+  khả dụng thì không tạo draft. OCR ẩn vẫn dùng được, nhưng page không có text
+  layer khả dụng, chỉ có glyph xoay/dọc hoặc vượt safety cap 50.000 ký tự thì
+  không dùng được Squiggly. Highlight, Underline và Strikeout vẫn giữ free
+  rectangle/quad của gesture. Sticky Note giữ frame 24 pt và nội dung chỉnh từ
+  `CommentPanel`.
 - `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
   hướng phẳng cho panel theo thứ tự root rồi replies. `setCommentText()` định
   danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
@@ -310,7 +326,9 @@ orchestration Save.
   cho font mới/standard.
 - Tạo bitmap object cho ảnh thêm mới, path object cho sáu shape, các standard
   Highlight/Squiggly/Underline/Strikeout annotation với quad/color/Print flag
-  và Text annotation với rect/color/`Contents`/`NM`/Print flag.
+  và Text annotation với rect/color/`Contents`/`NM`/Print flag. Squiggly ghi
+  quad từ các rectangle dòng đã snap; ba text-markup còn lại ghi geometry tự do
+  hiện có.
 - Ghi parent/reply vào file tạm, định danh bằng metadata ổn định rồi canonicalize
   reply thành `/IRT <parent-ref>` và `/RT /R` trước khi commit giao dịch.
 - Xóa comment nguồn, toàn bộ reply hậu duệ và `/Popup` liên kết theo annotation

@@ -100,7 +100,8 @@ flowchart TD
 
 | Thành phần | Thread/queue | Quy tắc quan trọng |
 |---|---|---|
-| QML, `PDFDocument`, các controller | GUI thread | Không đưa handle `FPDF_DOCUMENT` của `PDFDocument` sang worker. |
+| QML, `PDFDocument`, các controller | GUI thread | Không đưa handle `FPDF_DOCUMENT` của `PDFDocument` sang worker; Squiggly chỉ hit-test geometry glyph normalized trong candidate cache. |
+| Candidate scan của `PDFEditController` | Worker bất đồng bộ | Mở page/text handle riêng dưới PDFium lock và trả geometry glyph normalized, gồm OCR Invisible dạng hit-test-only; chỉ cache glyph ngang/upright và bỏ toàn bộ per-glyph geometry nếu page vượt 50.000 text characters. GUI/QML không truy cập các handle này. |
 | Render của `PDFPageItem` | Hàng đợi worker có giới hạn | Worker mở handle riêng từ đường dẫn, có cancellation và khóa chống kết quả cũ. |
 | `PDFFormWorker` | Hàng đợi tuần tự dùng chung cho form session | Sở hữu document/form handle riêng; callback quay lại GUI bằng queued invocation. |
 | `PDFSaveWriter` | Chuẩn bị snapshot ở GUI, ghi trên worker | Request không giữ con trỏ controller/document; writer mở document riêng. |
@@ -126,7 +127,12 @@ flowchart TD
 
 1. `EditRibbon` hoặc `CommentRibbon` đổi tool trên `PDFEditController`.
 2. `EditOverlay` chuyển tọa độ pointer sang tỉ lệ chuẩn hóa của trang, hit-test
-   candidate và gọi API của controller.
+   candidate và gọi API của controller. Với Squiggly, controller giao vùng kéo
+   với glyph source-text không-whitespace trong cache scan bất đồng bộ, snap
+   rectangle/QuadPoints theo từng dòng và từ chối vùng chỉ có khoảng trắng hoặc
+   không có glyph khả dụng. OCR Invisible được hit-test nhưng không select/edit;
+   glyph xoay/dọc, page không có text layer khả dụng và page vượt safety cap
+   50.000 ký tự không tạo Squiggly. Highlight/Underline/Strikeout vẫn giữ free rect.
 3. Controller giữ draft session-only và snapshot đầy đủ cho undo/redo. Texture
    gốc bị mask hoặc render lại tùy loại thay đổi.
 4. Text dùng editor rich text; image, shape và text markup dùng delegate/preview

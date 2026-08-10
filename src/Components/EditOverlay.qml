@@ -40,6 +40,7 @@ Item {
     property bool highlighting: false
     property point highlightStart: Qt.point(0, 0)
     property point highlightCurrent: Qt.point(0, 0)
+    property var squigglyPreviewRects: []
     property bool drawingShape: false
     property point shapeStart: Qt.point(0, 0)
     property point shapeCurrent: Qt.point(0, 0)
@@ -997,6 +998,25 @@ Item {
         drawingShape = false
     }
 
+    function updateSquigglyPreview() {
+        if (!highlighting
+                || controller.tool !== PDFEditController.SquigglyTool
+                || width <= 0
+                || height <= 0) {
+            squigglyPreviewRects = []
+            return
+        }
+
+        const selectionRect = activeHighlightRect
+        squigglyPreviewRects = controller.textMarkupRectsForSelection(
+            page,
+            Qt.rect(
+                selectionRect.x / width,
+                selectionRect.y / height,
+                selectionRect.width / width,
+                selectionRect.height / height))
+    }
+
     function beginHighlight(x, y) {
         if (!isTextMarkupTool()
                 || width <= 0
@@ -1015,6 +1035,7 @@ Item {
             Math.max(0, Math.min(height, y)))
         highlightCurrent = highlightStart
         highlighting = true
+        updateSquigglyPreview()
     }
 
     function updateHighlight(x, y) {
@@ -1024,6 +1045,7 @@ Item {
         highlightCurrent = Qt.point(
             Math.max(0, Math.min(width, x)),
             Math.max(0, Math.min(height, y)))
+        updateSquigglyPreview()
     }
 
     function finishHighlight(x, y) {
@@ -1033,6 +1055,7 @@ Item {
         updateHighlight(x, y)
         const selectionRect = activeHighlightRect
         highlighting = false
+        squigglyPreviewRects = []
         if (selectionRect.width < minimumHighlightDragSize
                 || selectionRect.height < minimumHighlightDragSize) {
             return
@@ -1048,6 +1071,7 @@ Item {
 
     function cancelHighlight() {
         highlighting = false
+        squigglyPreviewRects = []
     }
 
     function addStickyNote(x, y) {
@@ -1292,6 +1316,12 @@ Item {
         }
 
         function onPageCandidatesReady(readyPage) {
+            if (readyPage === root.page
+                    && root.highlighting
+                    && root.controller.tool
+                        === PDFEditController.SquigglyTool) {
+                root.updateSquigglyPreview()
+            }
             if (readyPage === root.page
                     && root.interactionActive
                     && hitArea.containsMouse) {
@@ -1979,6 +2009,7 @@ Item {
             : 0
         border.color: "#8a8785"
         visible: root.highlighting
+            && root.controller.tool !== PDFEditController.SquigglyTool
         z: 5
         Accessible.ignored: true
 
@@ -1999,11 +2030,22 @@ Item {
             color: root.controller.highlightColor
             Accessible.ignored: true
         }
+    }
 
-        SquigglyLine {
-            anchors.fill: parent
+    Repeater {
+        model: root.squigglyPreviewRects
+
+        delegate: SquigglyLine {
+            required property var modelData
+
+            x: modelData.x * root.width
+            y: modelData.y * root.height
+            width: Math.max(1, modelData.width * root.width)
+            height: Math.max(1, modelData.height * root.height)
             waveColor: root.controller.squigglyColor
-            visible: root.controller.tool === PDFEditController.SquigglyTool
+            visible: root.highlighting
+                && root.controller.tool === PDFEditController.SquigglyTool
+            z: 5
             Accessible.ignored: true
         }
     }

@@ -23,6 +23,16 @@ Current features:
   source comments can be indexed, selected, edited, and deleted with
   undo/redo/discard. Save/Save As persists additions, content edits, and
   removals without rewriting page content streams on annotation-only pages.
+  Squiggly accepts only non-whitespace source-text glyphs intersected by the
+  drag gesture, snaps the result into per-line rectangles/QuadPoints, and
+  rejects whitespace-only or no-text selections. Invisible OCR text is eligible
+  for hit testing but never exposed as a selectable/editable text candidate.
+  Scans without a usable text layer do not support Squiggly. Current
+  axis-aligned geometry accepts upright horizontal glyphs only; rotated/vertical
+  glyphs require oriented QuadPoints and are ignored. Pages above the 50,000
+  text-character safety cap do not cache partial glyph geometry and therefore
+  do not support Squiggly. Highlight, Underline, and Strikeout remain
+  free-rectangle markup tools.
   The comments panel shows each annotation's author and modification date,
   falling back to its creation date. Root comments accept replies; the panel
   flattens imported reply chains to one display level, saves new replies with
@@ -280,6 +290,16 @@ clipped or elided unintentionally.
   `QPointer<PDFPageItem>`.
 - Reject a result when its request id, document pointer, revision, page, zoom,
   device pixel ratio, or pixel size no longer matches.
+- Keep source-text glyph discovery for Squiggly inside the asynchronous page
+  candidate scan. Return and cache only normalized glyph geometry on the GUI
+  side; QML and GUI-thread controller paths must never open or inspect PDFium
+  page/text handles for hit testing.
+- Preserve invisible OCR text as internal Squiggly hit-test geometry without
+  surfacing it through normal candidate selection/editing. Cache only
+  non-whitespace, upright horizontal glyphs. If a page reports more than 50,000
+  text characters, cache no per-glyph Squiggly geometry for that page rather
+  than keeping a partial result; normal source-candidate scanning remains
+  unchanged.
 
 ### Scene Graph Texture Ownership
 
@@ -384,7 +404,9 @@ clipped or elided unintentionally.
   `FPDF_ANNOT_*` annotations with explicit quad points, bounding rectangles,
   color/opacity, and the Print flag. Adding annotations alone must not call
   `FPDFPage_GenerateContent()`; mixed text/image edits still regenerate the
-  affected page content normally.
+  affected page content normally. A Squiggly selection carries snapped
+  rectangle/QuadPoints entries grouped by matched text line; the other tools keep
+  the free rectangle drawn by the user.
 - Persist added shapes as top-level PDF path objects. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain

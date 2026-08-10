@@ -283,6 +283,18 @@ một history command khi mouse release. `TextEdit` đồng bộ rich text, rang
 content bounds với controller, nhưng giữ document local để undo/redo của editor
 không bị thay bằng một document mới.
 
+Squiggly có bước resolve geometry riêng cho preview và commit. `EditOverlay` gửi
+vùng kéo normalized cho controller; controller chỉ hit-test các glyph source-text
+không phải whitespace đã có trong kết quả page scan/cache bất đồng bộ, nhóm hit
+theo visual line và trả các rectangle/QuadPoints đã snap. Không có glyph thì
+không tạo draft. Invisible OCR text được giữ như geometry hit-test-only và không
+được đưa vào candidate selection/editing. Geometry hiện chỉ nhận glyph
+ngang/upright; glyph xoay/dọc bị bỏ qua cho tới khi có oriented QuadPoints. Page
+không có text layer khả dụng hoặc có hơn 50.000 text characters không cache
+per-glyph geometry và không nhận Squiggly. QML không đụng tới PDFium handle.
+Highlight, Underline và Strikeout không đi qua bước snap này và tiếp tục dùng
+free rectangle của gesture.
+
 ### `FormTextFieldOverlay` + `FormFieldLayer`: form designer
 
 `FormTextFieldOverlay` là lớp 3, nhưng root `Item` không tự nuốt event. Các

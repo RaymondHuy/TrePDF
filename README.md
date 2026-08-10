@@ -70,7 +70,18 @@ The Comment ribbon provides Sticky Note, Highlight, Squiggly, Underline, and
 Strikeout tools plus a collapsible, whole-document comments panel. Supported
 comments and replies, including annotations already in the PDF, can be selected
 and have their text edited in the panel. Markup uses a compact curated color
-grid and a system picker for custom colors. Root comments can receive replies;
+grid and a system picker for custom colors. Squiggly is source-text-aware: its
+drag rectangle is intersected with non-whitespace glyphs from the PDF text
+layer, then snapped into per-line rectangles and QuadPoints.
+Dragging only across whitespace or an area without source text creates no
+annotation. Invisible OCR text layers are accepted for this hit testing but do
+not become selectable or editable text candidates. Image-only scans without a
+usable text layer therefore do not support Squiggly. The current axis-aligned
+geometry accepts upright horizontal glyphs only; rotated or vertical glyphs
+remain unsupported until oriented QuadPoints are implemented. Pages with more
+than 50,000 text-layer characters skip the per-glyph cache for memory safety and
+do not support Squiggly. Highlight, Underline, and Strikeout keep their existing
+free-rectangle behavior. Root comments can receive replies;
 each root has a dropdown control that expands its replies at one visual level,
 and reply-to-reply is not offered. Reply annotations remain available in this
 panel but their standalone appearances are hidden from the PDF page viewer.

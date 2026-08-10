@@ -178,8 +178,14 @@ ghi Save; mọi thay đổi vẫn là draft.
   RGB đậm và opacity cao hơn để nét lượn sóng mảnh vẫn rõ. Mỗi tool giữ màu riêng
   qua `editController.highlightColor` hoặc `editController.squigglyColor`.
 - Cả bốn text-markup tool dùng chung gesture kéo vùng, draft history và pipeline
-  lưu annotation; Sticky Note đặt bằng một lần bấm và mở nội dung trong panel
-  bên phải.
+  lưu annotation. Riêng Squiggly chỉ dùng rectangle kéo làm đầu vào: controller
+  hit-test glyph source-text đã cache, bỏ whitespace và snap kết quả theo từng
+  dòng trước khi tạo draft. OCR ẩn tham gia hit-test nhưng không xuất hiện như
+  text candidate để chọn/sửa. Kéo vùng không có glyph khả dụng không tạo
+  annotation; hiện glyph phải ngang/upright, còn page không có text layer khả
+  dụng hoặc vượt safety cap 50.000 ký tự không hỗ trợ Squiggly. Highlight,
+  Underline và Strikeout vẫn dùng free rectangle hiện tại. Sticky Note đặt bằng
+  một lần bấm và mở nội dung trong panel bên phải.
 - Nhóm Manage bật/tắt danh sách, chọn bình luận trước/sau và xóa comment đang
   chọn; nhóm History dùng chung undo/redo của `PDFEditController`.
 - Undo/Redo dùng chung history của `PDFEditController` và điều hướng tới trang
@@ -348,6 +354,9 @@ làm mới khi controller báo page data/candidate/history/selection đổi.
 **Hit testing và con trỏ:**
 
 - Chuyển pointer pixel sang tỉ lệ trang và gọi candidate cache của controller.
+- Với Squiggly, QML chỉ gửi rectangle chuẩn hóa cho preview/commit và render
+  geometry đã được controller snap theo glyph/dòng. Geometry glyph đến từ page
+  scan bất đồng bộ/cache; QML không truy cập handle PDFium và không tự dò text.
 - Có hit-test riêng cho rectangle/oval/line/arrow/polygon với tolerance theo
   kích thước trang.
 - Quản lý con trỏ Select/Add Text bằng SVG và fallback cursor; ẩn cursor khi

@@ -56,6 +56,7 @@ namespace {
 
 constexpr char kRegularText[] = "Regular PDF text";
 constexpr char kBoldText[] = "Bold PDF text";
+constexpr char kBottomEdgeText[] = "BOTTOM ABC";
 constexpr char kGroupedText[] = "Hello world";
 constexpr char kMixedRegularText[] = "Plain";
 constexpr char kMixedBoldText[] = "Strong";
@@ -976,6 +977,34 @@ bool addTextObject(FPDF_DOCUMENT document,
     return FPDFPage_InsertObject(page, textObject);
 }
 
+bool addTransformedTextObject(FPDF_DOCUMENT document,
+                              FPDF_PAGE page,
+                              const QString &text,
+                              const FS_MATRIX &matrix)
+{
+    FPDF_PAGEOBJECT textObject = FPDFPageObj_NewTextObj(
+        document,
+        "Helvetica",
+        24.0F);
+    if (!textObject) {
+        return false;
+    }
+    const auto *wideText = reinterpret_cast<const FPDF_WCHAR *>(text.utf16());
+    if (!FPDFText_SetText(textObject, wideText)) {
+        FPDFPageObj_Destroy(textObject);
+        return false;
+    }
+    FPDFPageObj_Transform(
+        textObject,
+        matrix.a,
+        matrix.b,
+        matrix.c,
+        matrix.d,
+        matrix.e,
+        matrix.f);
+    return FPDFPage_InsertObject(page, textObject);
+}
+
 bool addTextObjectWithFont(FPDF_DOCUMENT document,
                            FPDF_PAGE page,
                            FPDF_FONT font,
@@ -1127,6 +1156,35 @@ bool createFontStylePdf(const QString &filePath)
             && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
     }
 
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createBottomEdgeTextPdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 200.0, 200.0);
+    bool succeeded = page
+        && addTextObject(
+            document,
+            page,
+            "Helvetica",
+            QString::fromLatin1(kBottomEdgeText),
+            20.0,
+            1.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
     FPDF_CloseDocument(document);
     return succeeded;
 }
@@ -1614,6 +1672,85 @@ bool createRenderModePdf(const QString &filePath)
     return succeeded;
 }
 
+bool createInvisibleOcrTextPdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 400.0, 400.0);
+    bool succeeded = page
+        && addStyledTextObject(
+            document,
+            page,
+            QStringLiteral("Hidden OCR text"),
+            FPDF_TEXTRENDERMODE_INVISIBLE,
+            Qt::black,
+            1.0F,
+            40.0,
+            300.0)
+        && addTextObject(
+            document,
+            page,
+            "Helvetica",
+            QStringLiteral("Visible text"),
+            40.0,
+            100.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createVerticalTextPdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 400.0, 400.0);
+    const FS_MATRIX verticalMatrix{
+        0.0F,
+        1.0F,
+        -1.0F,
+        0.0F,
+        300.0F,
+        80.0F};
+    bool succeeded = page
+        && addTextObject(
+            document,
+            page,
+            "Helvetica",
+            QStringLiteral("Upright text"),
+            40.0,
+            320.0)
+        && addTransformedTextObject(
+            document,
+            page,
+            QStringLiteral("Vertical text"),
+            verticalMatrix)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
 bool createTopLevelImagePdf(const QString &filePath)
 {
     FPDF_DOCUMENT document = FPDF_CreateNewDocument();
@@ -1738,6 +1875,109 @@ QVariantList waitForCandidates(PDFEditController &controller, int page)
     return candidates.isEmpty()
         ? controller.candidatesForPage(page)
         : candidates;
+}
+
+QRectF rectFromCoordinateMap(const QVariant &value)
+{
+    const QVariantMap map = value.toMap();
+    return QRectF(
+        map.value(QStringLiteral("x")).toDouble(),
+        map.value(QStringLiteral("y")).toDouble(),
+        map.value(QStringLiteral("width")).toDouble(),
+        map.value(QStringLiteral("height")).toDouble());
+}
+
+QRectF boundingRectForCoordinateMaps(const QVariantList &values)
+{
+    QRectF bounds;
+    for (const QVariant &value : values) {
+        const QRectF rect = rectFromCoordinateMap(value);
+        bounds = bounds.isEmpty() ? rect : bounds.united(rect);
+    }
+    return bounds;
+}
+
+QRectF normalizedGlyphBoundsForText(const QString &filePath,
+                                    const QString &text,
+                                    int pageIndex = 0)
+{
+    PDFiumProcessLock pdfiumLock;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document
+        ? FPDF_LoadPage(document, pageIndex)
+        : nullptr;
+    FPDF_TEXTPAGE textPage = page
+        ? FPDFText_LoadPage(page)
+        : nullptr;
+
+    QRectF bounds;
+    if (textPage && !text.isEmpty()) {
+        const int characterCount = FPDFText_CountChars(textPage);
+        int textStart = -1;
+        for (int index = 0;
+             index + text.size() <= characterCount;
+             ++index) {
+            bool matches = true;
+            for (qsizetype offset = 0; offset < text.size(); ++offset) {
+                if (FPDFText_GetUnicode(
+                        textPage,
+                        index + static_cast<int>(offset))
+                    != text.at(offset).unicode()) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                textStart = index;
+                break;
+            }
+        }
+
+        const qreal pageWidth = FPDF_GetPageWidthF(page);
+        const qreal pageHeight = FPDF_GetPageHeightF(page);
+        if (textStart >= 0 && pageWidth > 0.0 && pageHeight > 0.0) {
+            for (qsizetype offset = 0; offset < text.size(); ++offset) {
+                if (text.at(offset).isSpace()) {
+                    continue;
+                }
+                double left = 0.0;
+                double right = 0.0;
+                double bottom = 0.0;
+                double top = 0.0;
+                if (!FPDFText_GetCharBox(
+                        textPage,
+                        textStart + static_cast<int>(offset),
+                        &left,
+                        &right,
+                        &bottom,
+                        &top)) {
+                    continue;
+                }
+                const QRectF glyphRect(
+                    left / pageWidth,
+                    (pageHeight - top) / pageHeight,
+                    (right - left) / pageWidth,
+                    (top - bottom) / pageHeight);
+                bounds = bounds.isEmpty()
+                    ? glyphRect
+                    : bounds.united(glyphRect);
+            }
+        }
+    }
+
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return bounds;
 }
 
 QString pageText(const QString &filePath, int pageIndex = 0)
@@ -3510,6 +3750,11 @@ private slots:
     void savesNormalizedVietnameseRichText();
     void addsHighlightWithUndoRedoAndDiscard();
     void keepsHighlightAndSquigglyColorsIndependent();
+    void requiresSourceTextOnlyForSquiggly();
+    void snapsSquigglyToSourceTextAndSavesQuadPoints();
+    void clipsSquigglyGapAtPageBottom();
+    void usesInvisibleOcrTextForSquiggly();
+    void rejectsVerticalTextForSquiggly();
     void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete_data();
     void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete();
     void addsStickyNoteWithPanelModelAndUndo();
@@ -11244,6 +11489,10 @@ void PDFEditControllerTest::keepsHighlightAndSquigglyColorsIndependent()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
 
     const QColor defaultHighlightColor(255, 235, 59, 96);
     const QColor defaultSquigglyColor(198, 40, 40, 192);
@@ -11284,7 +11533,7 @@ void PDFEditControllerTest::keepsHighlightAndSquigglyColorsIndependent()
     controller.setTool(PDFEditController::SquigglyTool);
     const QVariantMap squiggly = controller.addHighlight(
         0,
-        QRectF(0.10, 0.30, 0.30, 0.05));
+        textCandidate.value(QStringLiteral("sourceRect")).toRectF());
     QCOMPARE(
         squiggly.value(QStringLiteral("kind")).toString(),
         QStringLiteral("squiggly"));
@@ -11292,6 +11541,446 @@ void PDFEditControllerTest::keepsHighlightAndSquigglyColorsIndependent()
         squiggly.value(QStringLiteral("highlightColor")).value<QColor>(),
         squigglyColor);
     QCOMPARE(controller.draftsForPage(0).size(), 2);
+}
+
+void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("squiggly-text-hit-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
+    QSignalSpy statusSpy(
+        &controller,
+        &PDFEditController::statusMessage);
+    QVERIFY(controller
+        .addHighlight(0, QRectF(0.05, 0.05, 0.90, 0.90))
+        .isEmpty());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QCOMPARE(statusSpy.count(), 1);
+    QCOMPARE(
+        statusSpy.constFirst().constFirst().toString(),
+        qtTrId("TextGeometryStillLoading"));
+
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    const QVariantMap groupedCandidate = candidateForText(
+        candidates,
+        QString::fromLatin1(kGroupedText));
+    QVERIFY(!groupedCandidate.isEmpty());
+    const QVariantList sourceRects = groupedCandidate
+        .value(QStringLiteral("sourceRects"))
+        .toList();
+    QCOMPARE(sourceRects.size(), 2);
+    QRectF leftWordRect = rectFromCoordinateMap(sourceRects.at(0));
+    QRectF rightWordRect = rectFromCoordinateMap(sourceRects.at(1));
+    if (leftWordRect.left() > rightWordRect.left()) {
+        std::swap(leftWordRect, rightWordRect);
+    }
+    const qreal gapWidth = rightWordRect.left() - leftWordRect.right();
+    const qreal gapTop = qMax(leftWordRect.top(), rightWordRect.top());
+    const qreal gapBottom = qMin(
+        leftWordRect.bottom(),
+        rightWordRect.bottom());
+    QVERIFY(gapWidth > 0.0);
+    QVERIFY(gapBottom > gapTop);
+    const qreal horizontalInset = gapWidth * 0.20;
+    const QRectF whitespaceRect(
+        leftWordRect.right() + horizontalInset,
+        gapTop,
+        gapWidth - 2.0 * horizontalInset,
+        gapBottom - gapTop);
+    QVERIFY(whitespaceRect.isValid());
+    QVERIFY(controller
+        .textMarkupRectsForSelection(0, whitespaceRect)
+        .isEmpty());
+
+    statusSpy.clear();
+    QVERIFY(controller.addHighlight(0, whitespaceRect).isEmpty());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(statusSpy.count(), 1);
+    QCOMPARE(
+        statusSpy.constFirst().constFirst().toString(),
+        qtTrId("NoTextInSelectedArea"));
+
+    struct MarkupCase {
+        PDFEditController::Tool tool;
+        QString kind;
+    };
+    const MarkupCase freeformCases[] = {
+        {PDFEditController::HighlightTool, QStringLiteral("highlight")},
+        {PDFEditController::UnderlineTool, QStringLiteral("underline")},
+        {PDFEditController::StrikeoutTool, QStringLiteral("strikeout")},
+    };
+    for (const MarkupCase &markupCase : freeformCases) {
+        controller.setTool(markupCase.tool);
+        const QVariantMap annotation = controller.addHighlight(
+            0,
+            whitespaceRect);
+        QCOMPARE(
+            annotation.value(QStringLiteral("kind")).toString(),
+            markupCase.kind);
+        QCOMPARE(
+            annotation.value(QStringLiteral("sourceRect")).toRectF(),
+            whitespaceRect);
+        QCOMPARE(controller.draftsForPage(0).size(), 1);
+        QCOMPARE(controller.undo(), -1);
+        QVERIFY(controller.draftsForPage(0).isEmpty());
+    }
+}
+
+void PDFEditControllerTest::snapsSquigglyToSourceTextAndSavesQuadPoints()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("snap-squiggly-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("snap-squiggly-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    const QVariantMap firstLine = candidateForText(
+        candidates,
+        QString::fromLatin1(kRegularText));
+    const QVariantMap secondLine = candidateForText(
+        candidates,
+        QString::fromLatin1(kBoldText));
+    QVERIFY(!firstLine.isEmpty());
+    QVERIFY(!secondLine.isEmpty());
+
+    const QRectF firstLineRect = firstLine
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const QRectF secondLineRect = secondLine
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const QRectF selectionRect = firstLineRect.united(secondLineRect);
+    const QVariantList snappedRects
+        = controller.textMarkupRectsForSelection(0, selectionRect);
+    QCOMPARE(snappedRects.size(), 2);
+    const QRectF firstSnappedRect = rectFromCoordinateMap(
+        snappedRects.at(0));
+    const QRectF secondSnappedRect = rectFromCoordinateMap(
+        snappedRects.at(1));
+    QVERIFY(firstSnappedRect.isValid());
+    QVERIFY(secondSnappedRect.isValid());
+    QVERIFY(firstSnappedRect.intersects(firstLineRect));
+    QVERIFY(secondSnappedRect.intersects(secondLineRect));
+    QVERIFY(firstSnappedRect.bottom() < secondSnappedRect.top());
+
+    const QSizeF pageSize = document.pageSize(0);
+    QVERIFY(pageSize.width() > 0.0);
+    QVERIFY(pageSize.height() > 0.0);
+    const QRectF firstGlyphBounds = normalizedGlyphBoundsForText(
+        sourcePath,
+        QString::fromLatin1(kRegularText));
+    const QRectF secondGlyphBounds = normalizedGlyphBoundsForText(
+        sourcePath,
+        QString::fromLatin1(kBoldText));
+    QVERIFY(firstGlyphBounds.isValid());
+    QVERIFY(secondGlyphBounds.isValid());
+    constexpr qreal expectedBottomPaddingPoints = 3.5;
+    const qreal expectedGapRatio
+        = expectedBottomPaddingPoints / pageSize.height();
+    constexpr qreal normalizedTolerance = 0.00001;
+    QVERIFY(qAbs(firstSnappedRect.left() - firstGlyphBounds.left())
+        < normalizedTolerance);
+    QVERIFY(qAbs(firstSnappedRect.top() - firstGlyphBounds.top())
+        < normalizedTolerance);
+    QVERIFY(qAbs(firstSnappedRect.right() - firstGlyphBounds.right())
+        < normalizedTolerance);
+    QVERIFY(qAbs(firstSnappedRect.bottom()
+                 - qMin<qreal>(1.0,
+                               firstGlyphBounds.bottom()
+                                   + expectedGapRatio))
+        < normalizedTolerance);
+    QVERIFY(qAbs(secondSnappedRect.left() - secondGlyphBounds.left())
+        < normalizedTolerance);
+    QVERIFY(qAbs(secondSnappedRect.top() - secondGlyphBounds.top())
+        < normalizedTolerance);
+    QVERIFY(qAbs(secondSnappedRect.right() - secondGlyphBounds.right())
+        < normalizedTolerance);
+    QVERIFY(qAbs(secondSnappedRect.bottom()
+                 - qMin<qreal>(1.0,
+                               secondGlyphBounds.bottom()
+                                   + expectedGapRatio))
+        < normalizedTolerance);
+
+    controller.setTool(PDFEditController::SquigglyTool);
+    const QVariantMap squiggly = controller.addHighlight(
+        0,
+        selectionRect);
+    QVERIFY(!squiggly.isEmpty());
+    QCOMPARE(
+        squiggly.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("squiggly"));
+    QCOMPARE(
+        squiggly.value(QStringLiteral("highlightRects")).toList(),
+        snappedRects);
+    QCOMPARE(
+        squiggly.value(QStringLiteral("sourceRect")).toRectF(),
+        boundingRectForCoordinateMaps(snappedRects));
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const HighlightSaveInspection inspection
+        = inspectTextMarkupAnnotations(outputPath, FPDF_ANNOT_SQUIGGLY);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.count, 1);
+    QCOMPARE(inspection.quadPoints.size(), snappedRects.size());
+
+    const auto closeEnough = [](qreal actual, qreal expected) {
+        return qAbs(actual - expected) < 0.05;
+    };
+    const QVector<QRectF> sourceGlyphBounds{
+        firstGlyphBounds,
+        secondGlyphBounds};
+    QVector<bool> matchedQuads(inspection.quadPoints.size(), false);
+    for (qsizetype rectIndex = 0;
+         rectIndex < snappedRects.size();
+         ++rectIndex) {
+        const QRectF rect = rectFromCoordinateMap(
+            snappedRects.at(rectIndex));
+        const qreal expectedLeft = rect.left() * pageSize.width();
+        const qreal expectedRight = rect.right() * pageSize.width();
+        const qreal expectedTop = (1.0 - rect.top()) * pageSize.height();
+        const qreal expectedBottom = (1.0 - rect.bottom())
+            * pageSize.height();
+        bool matched = false;
+        FS_QUADPOINTSF matchedQuad{};
+        for (qsizetype index = 0;
+             index < inspection.quadPoints.size();
+             ++index) {
+            if (matchedQuads.at(index)) {
+                continue;
+            }
+            const FS_QUADPOINTSF quad = inspection.quadPoints.at(index);
+            if (!closeEnough(quad.x1, expectedLeft)
+                || !closeEnough(quad.y1, expectedTop)
+                || !closeEnough(quad.x2, expectedRight)
+                || !closeEnough(quad.y2, expectedTop)
+                || !closeEnough(quad.x3, expectedLeft)
+                || !closeEnough(quad.y3, expectedBottom)
+                || !closeEnough(quad.x4, expectedRight)
+                || !closeEnough(quad.y4, expectedBottom)) {
+                continue;
+            }
+            matchedQuads[index] = true;
+            matched = true;
+            matchedQuad = quad;
+            break;
+        }
+        QVERIFY(matched);
+        const qreal unpaddedBottom = (1.0
+            - sourceGlyphBounds.at(rectIndex).bottom())
+            * pageSize.height();
+        QVERIFY(closeEnough(
+            matchedQuad.y3,
+            unpaddedBottom - expectedBottomPaddingPoints));
+        QVERIFY(closeEnough(
+            matchedQuad.y4,
+            unpaddedBottom - expectedBottomPaddingPoints));
+    }
+}
+
+void PDFEditControllerTest::clipsSquigglyGapAtPageBottom()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("bottom-edge-squiggly-source.pdf"));
+    QVERIFY(createBottomEdgeTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kBottomEdgeText));
+    QVERIFY(!textCandidate.isEmpty());
+
+    const QSizeF pageSize = document.pageSize(0);
+    QVERIFY(pageSize.height() > 0.0);
+    const QRectF glyphBounds = normalizedGlyphBoundsForText(
+        sourcePath,
+        QString::fromLatin1(kBottomEdgeText));
+    QVERIFY(glyphBounds.isValid());
+    constexpr qreal expectedBottomPaddingPoints = 3.5;
+    const qreal expectedGapRatio
+        = expectedBottomPaddingPoints / pageSize.height();
+    QVERIFY(glyphBounds.bottom() < 1.0);
+    QVERIFY(glyphBounds.bottom() + expectedGapRatio > 1.0);
+
+    const QRectF selectionRect = textCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const QVariantList snappedRects
+        = controller.textMarkupRectsForSelection(0, selectionRect);
+    QCOMPARE(snappedRects.size(), 1);
+    const QRectF snappedRect = rectFromCoordinateMap(
+        snappedRects.constFirst());
+    constexpr qreal normalizedTolerance = 0.00001;
+    QVERIFY(qAbs(snappedRect.left() - glyphBounds.left())
+        < normalizedTolerance);
+    QVERIFY(qAbs(snappedRect.top() - glyphBounds.top())
+        < normalizedTolerance);
+    QVERIFY(qAbs(snappedRect.right() - glyphBounds.right())
+        < normalizedTolerance);
+    QVERIFY(qAbs(snappedRect.bottom() - 1.0) < normalizedTolerance);
+
+    controller.setTool(PDFEditController::SquigglyTool);
+    const QVariantMap squiggly = controller.addHighlight(
+        0,
+        selectionRect);
+    QVERIFY(!squiggly.isEmpty());
+    QCOMPARE(
+        squiggly.value(QStringLiteral("highlightRects")).toList(),
+        snappedRects);
+}
+
+void PDFEditControllerTest::usesInvisibleOcrTextForSquiggly()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("invisible-ocr-squiggly-source.pdf"));
+    QVERIFY(createInvisibleOcrTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    QSignalSpy candidatesReadySpy(
+        &controller,
+        &PDFEditController::pageCandidatesReady);
+    QVariantList candidates = controller.candidatesForPage(0);
+    if (candidatesReadySpy.isEmpty()) {
+        QVERIFY(candidatesReadySpy.wait(2000));
+    }
+    QVERIFY(!candidatesReadySpy.isEmpty());
+    QCOMPARE(
+        candidatesReadySpy.constLast().constFirst().toInt(),
+        0);
+    candidates = controller.candidatesForPage(0);
+
+    QVERIFY(candidateForText(
+        candidates,
+        QStringLiteral("Hidden OCR text")).isEmpty());
+    const QVariantMap visibleCandidate = candidateForText(
+        candidates,
+        QStringLiteral("Visible text"));
+    QVERIFY(!visibleCandidate.isEmpty());
+
+    const QRectF hiddenSearchRect(0.08, 0.16, 0.62, 0.16);
+    const QVariantList hiddenMarkupRects
+        = controller.textMarkupRectsForSelection(0, hiddenSearchRect);
+    QVERIFY(!hiddenMarkupRects.isEmpty());
+    const QRectF firstHiddenGlyph = rectFromCoordinateMap(
+        hiddenMarkupRects.constFirst());
+    QVERIFY(firstHiddenGlyph.isValid());
+    QVERIFY(hiddenSearchRect.intersects(firstHiddenGlyph));
+    QVERIFY(controller.candidateAt(
+        0,
+        firstHiddenGlyph.center().x(),
+        firstHiddenGlyph.center().y()).isEmpty());
+
+    controller.setTool(PDFEditController::SquigglyTool);
+    const QVariantMap hiddenSquiggly = controller.addHighlight(
+        0,
+        hiddenSearchRect);
+    QVERIFY(!hiddenSquiggly.isEmpty());
+    QCOMPARE(
+        hiddenSquiggly.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("squiggly"));
+    QCOMPARE(
+        hiddenSquiggly.value(QStringLiteral("highlightRects")).toList(),
+        hiddenMarkupRects);
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+
+    const QRectF visibleRect = visibleCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const QVariantList visibleMarkupRects
+        = controller.textMarkupRectsForSelection(0, visibleRect);
+    QVERIFY(!visibleMarkupRects.isEmpty());
+    controller.setTool(PDFEditController::SquigglyTool);
+    const QVariantMap visibleSquiggly = controller.addHighlight(
+        0,
+        visibleRect);
+    QVERIFY(!visibleSquiggly.isEmpty());
+    QCOMPARE(
+        visibleSquiggly.value(QStringLiteral("highlightRects")).toList(),
+        visibleMarkupRects);
+    QCOMPARE(controller.draftsForPage(0).size(), 2);
+}
+
+void PDFEditControllerTest::rejectsVerticalTextForSquiggly()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("vertical-text-squiggly-source.pdf"));
+    QVERIFY(createVerticalTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    const QVariantMap uprightCandidate = candidateForText(
+        candidates,
+        QStringLiteral("Upright text"));
+    const QVariantMap verticalCandidate = candidateForText(
+        candidates,
+        QStringLiteral("Vertical text"));
+    QVERIFY(!uprightCandidate.isEmpty());
+    QVERIFY(!verticalCandidate.isEmpty());
+
+    const QRectF verticalRect = verticalCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    QCOMPARE(
+        controller.candidateAt(
+            0,
+            verticalRect.center().x(),
+            verticalRect.center().y())
+            .value(QStringLiteral("text"))
+            .toString()
+            .trimmed(),
+        QStringLiteral("Vertical text"));
+    QVERIFY(controller
+        .textMarkupRectsForSelection(0, verticalRect)
+        .isEmpty());
+
+    controller.setTool(PDFEditController::SquigglyTool);
+    QSignalSpy statusSpy(
+        &controller,
+        &PDFEditController::statusMessage);
+    QVERIFY(controller.addHighlight(0, verticalRect).isEmpty());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QCOMPARE(statusSpy.count(), 1);
+    QCOMPARE(
+        statusSpy.constFirst().constFirst().toString(),
+        qtTrId("NoTextInSelectedArea"));
+
+    const QRectF uprightRect = uprightCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const QVariantList uprightMarkupRects
+        = controller.textMarkupRectsForSelection(0, uprightRect);
+    QVERIFY(!uprightMarkupRects.isEmpty());
+    controller.setTool(PDFEditController::SquigglyTool);
+    const QVariantMap uprightSquiggly = controller.addHighlight(
+        0,
+        uprightRect);
+    QVERIFY(!uprightSquiggly.isEmpty());
+    QCOMPARE(
+        uprightSquiggly.value(QStringLiteral("highlightRects")).toList(),
+        uprightMarkupRects);
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
 }
 
 void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete_data()
@@ -11323,16 +12012,30 @@ void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDele
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
-    controller.setTool(static_cast<PDFEditController::Tool>(tool));
 
-    const QRectF selectionRect(0.12, 0.18, 0.28, 0.045);
+    QRectF selectionRect(0.12, 0.18, 0.28, 0.045);
+    QRectF expectedSourceRect = selectionRect;
+    if (tool == static_cast<int>(PDFEditController::SquigglyTool)) {
+        const QVariantMap textCandidate = candidateForText(
+            waitForCandidates(controller, 0),
+            QString::fromLatin1(kRegularText));
+        QVERIFY(!textCandidate.isEmpty());
+        selectionRect = textCandidate
+            .value(QStringLiteral("sourceRect"))
+            .toRectF();
+        const QVariantList snappedRects
+            = controller.textMarkupRectsForSelection(0, selectionRect);
+        QVERIFY(!snappedRects.isEmpty());
+        expectedSourceRect = boundingRectForCoordinateMaps(snappedRects);
+    }
+    controller.setTool(static_cast<PDFEditController::Tool>(tool));
     const QVariantMap annotation = controller.addHighlight(
         0,
         selectionRect);
     QCOMPARE(annotation.value(QStringLiteral("kind")).toString(), kind);
     QCOMPARE(
         annotation.value(QStringLiteral("sourceRect")).toRectF(),
-        selectionRect);
+        expectedSourceRect);
     QVERIFY(
         annotation.value(QStringLiteral("objectId")).toString().startsWith(
             kind + QLatin1Char(':')));
@@ -12331,6 +13034,10 @@ void PDFEditControllerTest::deletesSourceCommentsWithUndoRedoDiscardAndSave()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(basePath)));
     controller.setDocument(&document);
+    const QVariantMap squigglyTextCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kUprightText));
+    QVERIFY(!squigglyTextCandidate.isEmpty());
 
     controller.setTool(PDFEditController::HighlightTool);
     QVERIFY(!controller.addHighlight(
@@ -12347,7 +13054,9 @@ void PDFEditControllerTest::deletesSourceCommentsWithUndoRedoDiscardAndSave()
     controller.setTool(PDFEditController::SquigglyTool);
     QVERIFY(!controller.addHighlight(
         0,
-        QRectF(0.16, 0.48, 0.28, 0.04)).isEmpty());
+        squigglyTextCandidate
+            .value(QStringLiteral("sourceRect"))
+            .toRectF()).isEmpty());
     controller.setTool(PDFEditController::StickyNoteTool);
     QVERIFY(!controller.addStickyNote(0, QPointF(0.2, 0.6)).isEmpty());
     controller.setSelectedCommentText(QStringLiteral("Source comment"));
@@ -12623,9 +13332,28 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
-    controller.setTool(static_cast<PDFEditController::Tool>(tool));
     const QSizeF pageSize = document.pageSize(0);
-    const QRectF selectionRect(0.14, 0.24, 0.32, 0.04);
+    QRectF selectionRect(0.14, 0.24, 0.32, 0.04);
+    QVector<QRectF> expectedRects;
+    if (tool == static_cast<int>(PDFEditController::SquigglyTool)) {
+        const QVariantMap textCandidate = candidateForText(
+            waitForCandidates(controller, 0),
+            QString::fromLatin1(kGroupedText));
+        QVERIFY(!textCandidate.isEmpty());
+        selectionRect = textCandidate
+            .value(QStringLiteral("sourceRect"))
+            .toRectF();
+        const QVariantList snappedRects
+            = controller.textMarkupRectsForSelection(0, selectionRect);
+        QVERIFY(!snappedRects.isEmpty());
+        expectedRects.reserve(snappedRects.size());
+        for (const QVariant &rectValue : snappedRects) {
+            expectedRects.append(rectFromCoordinateMap(rectValue));
+        }
+    } else {
+        expectedRects.append(selectionRect);
+    }
+    controller.setTool(static_cast<PDFEditController::Tool>(tool));
     const QColor annotationColor(38, 166, 154, 160);
     const QColor unrelatedHighlightColor(255, 128, 171, 96);
     if (tool == static_cast<int>(PDFEditController::SquigglyTool)) {
@@ -12665,13 +13393,21 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
     QCOMPARE(inspection.count, 1);
     QCOMPARE(inspection.color, annotationColor);
     QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
-    QCOMPARE(inspection.quadPoints.size(), 1);
+    QCOMPARE(inspection.quadPoints.size(), expectedRects.size());
 
-    const qreal expectedLeft = selectionRect.left() * pageSize.width();
-    const qreal expectedRight = selectionRect.right() * pageSize.width();
-    const qreal expectedTop = (1.0 - selectionRect.top())
+    QRectF expectedAnnotationRect;
+    for (const QRectF &rect : std::as_const(expectedRects)) {
+        expectedAnnotationRect = expectedAnnotationRect.isEmpty()
+            ? rect
+            : expectedAnnotationRect.united(rect);
+    }
+    const qreal expectedLeft = expectedAnnotationRect.left()
+        * pageSize.width();
+    const qreal expectedRight = expectedAnnotationRect.right()
+        * pageSize.width();
+    const qreal expectedTop = (1.0 - expectedAnnotationRect.top())
         * pageSize.height();
-    const qreal expectedBottom = (1.0 - selectionRect.bottom())
+    const qreal expectedBottom = (1.0 - expectedAnnotationRect.bottom())
         * pageSize.height();
     const auto closeEnough = [](qreal actual, qreal expected) {
         return qAbs(actual - expected) < 0.05;
@@ -12680,15 +13416,22 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
     QVERIFY(closeEnough(inspection.rect.right, expectedRight));
     QVERIFY(closeEnough(inspection.rect.top, expectedTop));
     QVERIFY(closeEnough(inspection.rect.bottom, expectedBottom));
-    const FS_QUADPOINTSF quad = inspection.quadPoints.constFirst();
-    QVERIFY(closeEnough(quad.x1, expectedLeft));
-    QVERIFY(closeEnough(quad.y1, expectedTop));
-    QVERIFY(closeEnough(quad.x2, expectedRight));
-    QVERIFY(closeEnough(quad.y2, expectedTop));
-    QVERIFY(closeEnough(quad.x3, expectedLeft));
-    QVERIFY(closeEnough(quad.y3, expectedBottom));
-    QVERIFY(closeEnough(quad.x4, expectedRight));
-    QVERIFY(closeEnough(quad.y4, expectedBottom));
+    for (qsizetype index = 0; index < expectedRects.size(); ++index) {
+        const QRectF rect = expectedRects.at(index);
+        const qreal quadLeft = rect.left() * pageSize.width();
+        const qreal quadRight = rect.right() * pageSize.width();
+        const qreal quadTop = (1.0 - rect.top()) * pageSize.height();
+        const qreal quadBottom = (1.0 - rect.bottom()) * pageSize.height();
+        const FS_QUADPOINTSF quad = inspection.quadPoints.at(index);
+        QVERIFY(closeEnough(quad.x1, quadLeft));
+        QVERIFY(closeEnough(quad.y1, quadTop));
+        QVERIFY(closeEnough(quad.x2, quadRight));
+        QVERIFY(closeEnough(quad.y2, quadTop));
+        QVERIFY(closeEnough(quad.x3, quadLeft));
+        QVERIFY(closeEnough(quad.y3, quadBottom));
+        QVERIFY(closeEnough(quad.x4, quadRight));
+        QVERIFY(closeEnough(quad.y4, quadBottom));
+    }
 }
 
 void PDFEditControllerTest::savesStickyNoteRoundTrip()

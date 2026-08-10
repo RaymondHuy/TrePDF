@@ -215,6 +215,9 @@ public:
     Q_INVOKABLE qreal shapeHitToleranceRatio(
         int page,
         qreal strokeWidthRatio) const;
+    Q_INVOKABLE QVariantList textMarkupRectsForSelection(
+        int page,
+        const QRectF &selectionRect);
     Q_INVOKABLE QVariantMap addHighlight(int page,
                                          const QRectF &selectionRect);
     Q_INVOKABLE QVariantMap addStickyNote(int page,
@@ -311,6 +314,7 @@ private:
 
     struct TextObjectLayout {
         QRectF bounds;
+        QVector<QRectF> glyphBounds;
         QPointF origin;
         QString text;
         bool hasOrigin = false;
@@ -343,6 +347,8 @@ private:
         QRectF initialDraftFrameRect;
         QPointF origin;
         QString text;
+        QVector<QRectF> textGlyphRects;
+        bool textMarkupHitTestOnly = false;
         QString sourceAnnotationName;
         QString commentAuthor;
         QDateTime commentCreationDate;
@@ -510,6 +516,10 @@ private:
         const QString &sourceFilePathOverride = {},
         const QString &temporarySourceFilePath = {});
     void ensureCacheRevision();
+    QVector<QRectF> resolvedTextMarkupRectsForSelection(
+        int page,
+        const QRectF &selectionRect,
+        bool *geometryReady);
     const QVector<Candidate> &ensurePageCandidates(int page);
     const QVector<Candidate> *cachedPageCandidates(int page);
     void requestPageCandidateScan(int page);
