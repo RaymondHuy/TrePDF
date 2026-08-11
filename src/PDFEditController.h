@@ -36,6 +36,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(Tool tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
     Q_PROPERTY(ShapeType shapeType READ shapeType WRITE setShapeType NOTIFY shapeTypeChanged FINAL)
     Q_PROPERTY(QColor highlightColor READ highlightColor WRITE setHighlightColor NOTIFY highlightColorChanged FINAL)
+    Q_PROPERTY(QColor squigglyColor READ squigglyColor WRITE setSquigglyColor NOTIFY squigglyColorChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
@@ -98,6 +99,7 @@ public:
         AddShapeTool,
         HighlightTool,
         UnderlineTool,
+        SquigglyTool,
         StrikeoutTool,
         StickyNoteTool
     };
@@ -147,6 +149,8 @@ public:
     void setShapeType(ShapeType shapeType);
     QColor highlightColor() const;
     void setHighlightColor(const QColor &color);
+    QColor squigglyColor() const;
+    void setSquigglyColor(const QColor &color);
 
     bool hasDrafts() const;
     bool canUndo() const;
@@ -211,6 +215,9 @@ public:
     Q_INVOKABLE qreal shapeHitToleranceRatio(
         int page,
         qreal strokeWidthRatio) const;
+    Q_INVOKABLE QVariantList textMarkupRectsForSelection(
+        int page,
+        const QRectF &selectionRect);
     Q_INVOKABLE QVariantMap addHighlight(int page,
                                          const QRectF &selectionRect);
     Q_INVOKABLE QVariantMap addStickyNote(int page,
@@ -283,6 +290,7 @@ signals:
     void toolChanged();
     void shapeTypeChanged();
     void highlightColorChanged();
+    void squigglyColorChanged();
     void historyStateChanged();
     void savingChanged();
     void textEditActiveChanged();
@@ -306,6 +314,7 @@ private:
 
     struct TextObjectLayout {
         QRectF bounds;
+        QVector<QRectF> glyphBounds;
         QPointF origin;
         QString text;
         bool hasOrigin = false;
@@ -338,6 +347,8 @@ private:
         QRectF initialDraftFrameRect;
         QPointF origin;
         QString text;
+        QVector<QRectF> textGlyphRects;
+        bool textMarkupHitTestOnly = false;
         QString sourceAnnotationName;
         QString commentAuthor;
         QDateTime commentCreationDate;
@@ -395,6 +406,16 @@ private:
         QStringList bundledFontFamilies;
         QStringList systemFontFamilies;
         qsizetype maximumEmbeddedFontSnapshotBytes = 0;
+    };
+
+    struct PendingSquigglyCreation {
+        QString filePath;
+        QRectF selectionRect;
+        QSizeF pageSize;
+        QColor color;
+        int revision = -1;
+        int page = -1;
+        int sourcePage = -1;
     };
 
     struct FontResolutionSnapshot {
@@ -505,6 +526,19 @@ private:
         const QString &sourceFilePathOverride = {},
         const QString &temporarySourceFilePath = {});
     void ensureCacheRevision();
+    QVector<QRectF> resolvedTextMarkupRectsForSelection(
+        int page,
+        const QRectF &selectionRect,
+        bool *geometryReady);
+    QVariantMap addTextMarkupDraft(
+        int page,
+        const QVector<QRectF> &annotationRects,
+        Tool tool,
+        const QColor &color);
+    bool pendingSquigglyCreationIsCurrent(
+        const PendingSquigglyCreation &creation) const;
+    int pendingSquigglyScanPage() const;
+    void completePendingSquigglyCreations(int page);
     const QVector<Candidate> &ensurePageCandidates(int page);
     const QVector<Candidate> *cachedPageCandidates(int page);
     void requestPageCandidateScan(int page);
@@ -649,6 +683,7 @@ private:
     Tool m_tool = BrowseTool;
     ShapeType m_shapeType = RectangleShape;
     QColor m_highlightColor;
+    QColor m_squigglyColor;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
     QVector<int> m_pageCandidateLru;
@@ -656,6 +691,7 @@ private:
     int m_candidateScanInFlightPage = -1;
     bool m_candidateScanInFlight = false;
     std::shared_ptr<std::atomic_bool> m_candidateScanCancellation;
+    QVector<PendingSquigglyCreation> m_pendingSquigglyCreations;
     QHash<int, QVector<Candidate>> m_indexedCommentCandidates;
     bool m_commentIndexInFlight = false;
     bool m_commentIndexComplete = false;

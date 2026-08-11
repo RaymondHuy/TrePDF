@@ -20,6 +20,7 @@ Flickable {
     signal nextCommentRequested()
 
     readonly property real highlightOpacity: 96 / 255
+    readonly property real squigglyOpacity: 192 / 255
     readonly property bool hasComments:
         editController.commentItems.length > 0
     readonly property var highlightColors: [
@@ -27,6 +28,13 @@ Flickable {
         "#ec407a", "#ab47bc", "#42a5f5", "#26c6da", "#66bb6a",
         "#fff176", "#b39ddb", "#f48fb1", "#90caf9", "#a5d6a7"
     ]
+    readonly property var squigglyColors: [
+        "#c62828", "#ad1457", "#6a1b9a", "#283593", "#1565c0",
+        "#0277bd", "#00838f", "#00695c", "#2e7d32", "#558b2f",
+        "#9e9d24", "#f9a825", "#ef6c00", "#d84315", "#455a64"
+    ]
+    property int pendingColorTool: PDFEditController.HighlightTool
+    property string pendingColorDialogTitle: ""
 
     clip: true
     contentWidth: ribbonRow.implicitWidth + 16
@@ -44,12 +52,15 @@ Flickable {
         return Qt.rgba(color.r, color.g, color.b, 1)
     }
 
-    function highlightColorWithOpacity(color) {
+    function markupColorWithOpacity(color, tool) {
+        const opacity = tool === PDFEditController.SquigglyTool
+            ? squigglyOpacity
+            : highlightOpacity
         return Qt.rgba(
             color.r,
             color.g,
             color.b,
-            highlightOpacity)
+            opacity)
     }
 
     function highlightCheckColor(color) {
@@ -59,17 +70,41 @@ Flickable {
         return luminance > 0.62 ? "#35363a" : "#ffffff"
     }
 
-    function selectHighlightColor(color) {
+    function markupColor(tool) {
+        return tool === PDFEditController.SquigglyTool
+            ? editController.squigglyColor
+            : editController.highlightColor
+    }
+
+    function selectMarkupColor(color, tool) {
         highlightColorPopup.close()
-        editController.highlightColor = highlightColorWithOpacity(color)
-        editController.tool = PDFEditController.HighlightTool
+        squigglyColorPopup.close()
+        const selectedColor = markupColorWithOpacity(color, tool)
+        if (tool === PDFEditController.SquigglyTool) {
+            editController.squigglyColor = selectedColor
+        } else {
+            editController.highlightColor = selectedColor
+        }
+        editController.tool = tool
+    }
+
+    function openMarkupColorDialog(tool, title) {
+        highlightColorPopup.close()
+        squigglyColorPopup.close()
+        pendingColorTool = tool
+        pendingColorDialogTitle = title
+        markupColorDialog.selectedColor = opaqueHighlightColor(
+            markupColor(tool))
+        markupColorDialog.open()
     }
 
     function closeColorPickers() {
         if (highlightColorPopup)
             highlightColorPopup.close()
-        if (highlightColorDialog)
-            highlightColorDialog.close()
+        if (squigglyColorPopup)
+            squigglyColorPopup.close()
+        if (markupColorDialog)
+            markupColorDialog.close()
     }
 
     function isCommentKind(kind) {
@@ -78,6 +113,7 @@ Flickable {
             || kind === "note"
             || kind === "highlight"
             || kind === "underline"
+            || kind === "squiggly"
             || kind === "strikeout"
     }
 
@@ -85,22 +121,23 @@ Flickable {
     onEditControllerChanged: closeColorPickers()
     Component.onDestruction: closeColorPickers()
 
-    component HighlightColorSwatch: ToolButton {
+    component MarkupColorSwatch: ToolButton {
         id: swatch
 
         required property color swatchColor
+        required property int targetTool
+        required property string accessibleName
 
         width: 38
         height: 26
         padding: 3
         checkable: true
         checked: root.sameHighlightColor(
-            root.editController.highlightColor,
+            root.markupColor(swatch.targetTool),
             swatchColor)
         focusPolicy: Qt.TabFocus
-        //% "Choose highlight color"
-        Accessible.name: qsTrId("ChooseHighlightColor")
-        onClicked: root.selectHighlightColor(swatchColor)
+        Accessible.name: swatch.accessibleName
+        onClicked: root.selectMarkupColor(swatchColor, swatch.targetTool)
 
         contentItem: Rectangle {
             radius: 3
@@ -133,6 +170,122 @@ Flickable {
             border.color: swatch.checked
                 ? root.theme.foxitDarkOrange
                 : root.theme.foxitBorderOrange
+        }
+    }
+
+    component MarkupColorPopup: Popup {
+        id: colorPopup
+
+        required property Item anchorButton
+        required property var paletteColors
+        required property int targetTool
+        required property string pickerTitle
+
+        x: 0
+        y: anchorButton.height
+        width: 234
+        padding: 12
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+            | Popup.CloseOnPressOutsideParent
+
+        contentItem: Column {
+            spacing: 10
+
+            Grid {
+                columns: 5
+                columnSpacing: 5
+                rowSpacing: 5
+
+                Repeater {
+                    model: colorPopup.paletteColors
+
+                    delegate: MarkupColorSwatch {
+                        required property var modelData
+
+                        swatchColor: modelData
+                        targetTool: colorPopup.targetTool
+                        accessibleName: colorPopup.pickerTitle
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width
+                height: 1
+                color: "#eee8e4"
+                Accessible.ignored: true
+            }
+
+            ToolButton {
+                id: moreColorsButton
+
+                width: parent.width
+                height: 32
+                leftPadding: 7
+                rightPadding: 7
+                //% "More colors…"
+                text: qsTrId("HighlightMoreColors")
+                onClicked: root.openMarkupColorDialog(
+                    colorPopup.targetTool,
+                    colorPopup.pickerTitle)
+
+                contentItem: Row {
+                    spacing: 8
+
+                    Grid {
+                        y: Math.round((parent.height - height) / 2)
+                        columns: 2
+                        columnSpacing: 1
+                        rowSpacing: 1
+                        Accessible.ignored: true
+
+                        Repeater {
+                            model: [
+                                "#ffeb3b", "#ec407a",
+                                "#42a5f5", "#66bb6a"
+                            ]
+
+                            delegate: Rectangle {
+                                required property var modelData
+
+                                width: 6
+                                height: 6
+                                radius: 1
+                                color: modelData
+                                Accessible.ignored: true
+                            }
+                        }
+                    }
+
+                    Label {
+                        height: parent.height
+                        text: moreColorsButton.text
+                        color: root.theme.ribbonTextColor
+                        font.pixelSize: 11
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                background: Rectangle {
+                    radius: 5
+                    color: moreColorsButton.down
+                        ? "#f5dfcf"
+                        : moreColorsButton.hovered
+                            || moreColorsButton.visualFocus
+                            ? root.theme.foxitPaleOrange
+                            : "transparent"
+                    border.width: moreColorsButton.visualFocus ? 1 : 0
+                    border.color: root.theme.foxitBorderOrange
+                }
+            }
+        }
+
+        background: Rectangle {
+            radius: 8
+            color: root.theme.ribbonSurface
+            border.width: 1
+            border.color: root.theme.ribbonBorder
         }
     }
 
@@ -216,121 +369,14 @@ Flickable {
                     Accessible.ignored: true
                 }
 
-                Popup {
+                MarkupColorPopup {
                     id: highlightColorPopup
 
-                    x: 0
-                    y: highlightButton.height
-                    width: 234
-                    padding: 12
-                    focus: true
-                    closePolicy: Popup.CloseOnEscape
-                        | Popup.CloseOnPressOutsideParent
-
-                    contentItem: Column {
-                        spacing: 10
-
-                        Grid {
-                            columns: 5
-                            columnSpacing: 5
-                            rowSpacing: 5
-
-                            Repeater {
-                                model: root.highlightColors
-
-                                delegate: HighlightColorSwatch {
-                                    required property var modelData
-
-                                    swatchColor: modelData
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            width: parent.width
-                            height: 1
-                            color: "#eee8e4"
-                            Accessible.ignored: true
-                        }
-
-                        ToolButton {
-                            id: moreHighlightColorsButton
-
-                            width: parent.width
-                            height: 32
-                            leftPadding: 7
-                            rightPadding: 7
-                            //% "More colors…"
-                            text: qsTrId("HighlightMoreColors")
-                            onClicked: {
-                                highlightColorPopup.close()
-                                highlightColorDialog.selectedColor
-                                    = root.opaqueHighlightColor(
-                                        root.editController.highlightColor)
-                                highlightColorDialog.open()
-                            }
-
-                            contentItem: Row {
-                                spacing: 8
-
-                                Grid {
-                                    y: Math.round(
-                                        (parent.height - height) / 2)
-                                    columns: 2
-                                    columnSpacing: 1
-                                    rowSpacing: 1
-                                    Accessible.ignored: true
-
-                                    Repeater {
-                                        model: [
-                                            "#ffeb3b", "#ec407a",
-                                            "#42a5f5", "#66bb6a"
-                                        ]
-
-                                        delegate: Rectangle {
-                                            required property var modelData
-
-                                            width: 6
-                                            height: 6
-                                            radius: 1
-                                            color: modelData
-                                            Accessible.ignored: true
-                                        }
-                                    }
-                                }
-
-                                Label {
-                                    height: parent.height
-                                    text: moreHighlightColorsButton.text
-                                    color: root.theme.ribbonTextColor
-                                    font.pixelSize: 11
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                            }
-
-                            background: Rectangle {
-                                radius: 5
-                                color: moreHighlightColorsButton.down
-                                    ? "#f5dfcf"
-                                    : moreHighlightColorsButton.hovered
-                                        || moreHighlightColorsButton.visualFocus
-                                        ? root.theme.foxitPaleOrange
-                                        : "transparent"
-                                border.width:
-                                    moreHighlightColorsButton.visualFocus
-                                        ? 1
-                                        : 0
-                                border.color: root.theme.foxitBorderOrange
-                            }
-                        }
-                    }
-
-                    background: Rectangle {
-                        radius: 8
-                        color: root.theme.ribbonSurface
-                        border.width: 1
-                        border.color: root.theme.ribbonBorder
-                    }
+                    anchorButton: highlightButton
+                    paletteColors: root.highlightColors
+                    targetTool: PDFEditController.HighlightTool
+                    //% "Choose highlight color"
+                    pickerTitle: qsTrId("ChooseHighlightColor")
                 }
             }
 
@@ -347,6 +393,61 @@ Flickable {
                 onClicked: {
                     root.editController.tool
                         = PDFEditController.UnderlineTool
+                }
+            }
+
+            RibbonButton {
+                id: squigglyButton
+
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Squiggly"
+                text: qsTrId("Squiggly")
+                iconSource: "../assets/icons/squiggly.svg"
+                menuIndicatorVisible: true
+                spacing: 6
+                //% "Choose squiggly color"
+                menuToolTipText: qsTrId("ChooseSquigglyColor")
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.SquigglyTool
+                onClicked: {
+                    squigglyColorPopup.close()
+                    root.editController.tool
+                        = PDFEditController.SquigglyTool
+                }
+                onMenuRequested: squigglyColorPopup.open()
+                onEnabledChanged: {
+                    if (!enabled)
+                        squigglyColorPopup.close()
+                }
+
+                Rectangle {
+                    anchors.top: squigglyButton.contentItem.top
+                    anchors.horizontalCenter:
+                        squigglyButton.contentItem.horizontalCenter
+                    anchors.topMargin:
+                        (squigglyButton.contentItem.height
+                            - squigglyButton.implicitContentHeight) / 2
+                        + squigglyButton.icon.height
+                        + (squigglyButton.spacing - height) / 2
+                    width: squigglyButton.icon.width
+                    height: 5
+                    radius: 1
+                    color: root.opaqueHighlightColor(
+                        root.editController.squigglyColor)
+                    Accessible.ignored: true
+                }
+
+                MarkupColorPopup {
+                    id: squigglyColorPopup
+
+                    anchorButton: squigglyButton
+                    paletteColors: root.squigglyColors
+                    targetTool: PDFEditController.SquigglyTool
+                    //% "Choose squiggly color"
+                    pickerTitle: qsTrId("ChooseSquigglyColor")
                 }
             }
 
@@ -483,10 +584,11 @@ Flickable {
     }
 
     ColorDialog {
-        id: highlightColorDialog
+        id: markupColorDialog
 
-        //% "Choose highlight color"
-        title: qsTrId("ChooseHighlightColor")
-        onAccepted: root.selectHighlightColor(selectedColor)
+        title: root.pendingColorDialogTitle
+        onAccepted: root.selectMarkupColor(
+            selectedColor,
+            root.pendingColorTool)
     }
 }

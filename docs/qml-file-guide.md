@@ -37,7 +37,8 @@ Main.qml
     │           ├── PDFFormView (C++)
     │           │   └── FormChoiceOverlay.qml
     │           ├── EditOverlay.qml
-    │           │   └── ShapeDraftView.qml
+    │           │   ├── ShapeDraftView.qml
+    │           │   └── SquigglyLine.qml
     │           └── FormTextFieldOverlay.qml
     │               └── FormFieldLayer (C++)
     ├── CommentPanel.qml
@@ -171,14 +172,24 @@ ghi Save; mọi thay đổi vẫn là draft.
 **Vai trò:** command surface cho PDF comment/markup, nằm ngay sau tab Edit.
 
 - Khi tab mở, `AppRibbon` bật `PDFEditController.HighlightTool`; người dùng có
-  thể chuyển sang Sticky Note, Underline hoặc Strikeout mà không bật form design
-  mode.
-- Highlight là split button: phần chính dùng màu hiện tại, menu có bảng màu
-  marker curated và system color picker. Màu được ghi vào
-  `editController.highlightColor` với opacity marker cố định.
-- Underline và Strikeout dùng chung gesture kéo vùng, draft history và pipeline
-  lưu annotation với Highlight; Sticky Note đặt bằng một lần bấm và mở nội dung
-  trong panel bên phải.
+  thể chuyển sang Sticky Note, Squiggly, Underline hoặc Strikeout mà không bật
+  form design mode.
+- Highlight và Squiggly là split button: phần chính dùng màu hiện tại, menu có
+  bảng màu marker curated và system color picker cùng kiểu. Squiggly dùng palette
+  RGB đậm và opacity cao hơn để nét lượn sóng mảnh vẫn rõ. Mỗi tool giữ màu riêng
+  qua `editController.highlightColor` hoặc `editController.squigglyColor`.
+- Cả bốn text-markup tool dùng chung gesture kéo vùng, draft history và pipeline
+  lưu annotation. Riêng Squiggly chỉ dùng rectangle kéo làm đầu vào: controller
+  hit-test glyph source-text đã cache, bỏ whitespace và snap kết quả theo từng
+  dòng trước khi tạo draft. Gesture gần như nằm ngang được mở thành dải hit-test
+  tối thiểu 3 px, nên không bị bỏ chỉ vì độ lệch dọc của pointer quá nhỏ. Khi
+  cache glyph còn tải, controller giữ gesture và tự hoàn tất sau scan thay vì
+  yêu cầu người dùng kéo lại. OCR ẩn tham gia hit-test nhưng không xuất hiện như
+  text candidate để chọn/sửa. Kéo vùng không có glyph khả dụng không tạo
+  annotation; hiện glyph phải ngang/upright, còn page không có text layer khả
+  dụng hoặc vượt safety cap 50.000 ký tự không hỗ trợ Squiggly. Highlight,
+  Underline và Strikeout vẫn dùng free rectangle hiện tại. Sticky Note đặt bằng
+  một lần bấm và mở nội dung trong panel bên phải.
 - Nhóm Manage bật/tắt danh sách, chọn bình luận trước/sau và xóa comment đang
   chọn; nhóm History dùng chung undo/redo của `PDFEditController`.
 - Undo/Redo dùng chung history của `PDFEditController` và điều hướng tới trang
@@ -340,18 +351,22 @@ background selection được xử lý bởi các `MouseArea` riêng trong form 
 **Vai trò:** lớp QML chính cho chọn, tạo, sửa, di chuyển, resize và xóa nội dung
 draft trên một trang. Đây là tệp QML phức tạp nhất dự án.
 
-**Dữ liệu vào:** page, trạng thái pooled, hai cờ texture draft, theme và
-`PDFEditController`. Component tải `candidatesForPage()`/`draftsForPage()` và
-làm mới khi controller báo page data/candidate/history/selection đổi.
+**Dữ liệu vào:** page, page-point scale, trạng thái pooled, hai cờ texture draft,
+theme và `PDFEditController`. Component tải
+`candidatesForPage()`/`draftsForPage()` và làm mới khi controller báo page
+data/candidate/history/selection đổi.
 
 **Hit testing và con trỏ:**
 
 - Chuyển pointer pixel sang tỉ lệ trang và gọi candidate cache của controller.
+- Với Squiggly, QML chỉ gửi rectangle chuẩn hóa cho preview/commit và render
+  geometry đã được controller snap theo glyph/dòng. Geometry glyph đến từ page
+  scan bất đồng bộ/cache; QML không truy cập handle PDFium và không tự dò text.
 - Có hit-test riêng cho rectangle/oval/line/arrow/polygon với tolerance theo
   kích thước trang.
 - Quản lý con trỏ Select/Add Text bằng SVG và fallback cursor; ẩn cursor khi
   pooled, ngoài trang hoặc tool không phù hợp.
-- Các công cụ draw shape/highlight giữ start/current point tạm thời, validate
+- Các công cụ draw shape/text-markup giữ start/current point tạm thời, validate
   gesture rồi mới tạo một draft command.
 
 **Text rich-edit:**
@@ -368,7 +383,7 @@ làm mới khi controller báo page data/candidate/history/selection đổi.
 
 **Draft presentation:**
 
-- Mask source rect khỏi texture sạch khi cần, rồi vẽ text/image/shape/highlight
+- Mask source rect khỏi texture sạch khi cần, rồi vẽ text/image/shape/text-markup
   draft lên trên. Nếu render worker đã trả texture draft đúng revision, component
   tránh chồng preview không cần thiết.
 - `DraftImageView` vẽ pixel snapshot của ảnh thêm mới; `ShapeDraftView` vẽ vector.
@@ -379,6 +394,18 @@ làm mới khi controller báo page data/candidate/history/selection đổi.
 **Dọn state:** `prepareForSessionChange()` kết thúc hoặc hủy editor/resize/draw,
 ẩn cursor và xóa dữ liệu trang. Bất kỳ bổ sung gesture nào cũng phải đi qua
 đường cleanup này và trạng thái `pooled`.
+
+### [`src/Components/SquigglyLine.qml`](../src/Components/SquigglyLine.qml)
+
+**Vai trò:** renderer dùng chung cho preview gesture và draft Squiggly.
+
+- Nhận màu và `pagePointScale`; nét 1 PDF point, bước zigzag 2 PDF point được
+  đổi sang logical pixel theo zoom của page delegate.
+- Dùng cùng hình học đoạn thẳng mà PDFium sinh cho annotation Squiggly không có
+  appearance stream, nên preview trước Save và texture sau Save giữ cùng độ dày,
+  biên độ và tần số.
+- Chỉ vẽ presentation; hit-test, snap glyph, QuadPoints và persistence vẫn thuộc
+  `EditOverlay`, `PDFEditController` và `PDFSaveWriter`.
 
 ### [`src/Components/ShapeDraftView.qml`](../src/Components/ShapeDraftView.qml)
 

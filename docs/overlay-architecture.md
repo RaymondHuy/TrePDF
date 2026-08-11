@@ -70,7 +70,7 @@ trạng thái.
 | Thứ tự | Thành phần | `z` | Trách nhiệm | Có thể nhận input khi |
 |---:|---|---:|---|---|
 | 1 | `PDFFormView` | 1 | Pointer, keyboard, IME và cursor cho AcroForm native; host cho choice overlay. | Browse/runtime form hợp lệ. |
-| 2 | `EditOverlay` | 2 | Chọn/thêm/sửa/move/resize draft text, image, shape, highlight. | Tool edit khác Browse, không save/pool. |
+| 2 | `EditOverlay` | 2 | Chọn/thêm/sửa/move/resize draft text, image, shape, text markup. | Tool edit khác Browse, không save/pool. |
 | 3 | `FormTextFieldOverlay` | 3 | Đặt, chọn, sửa, resize, move field form designer. | Tùy từng child/control; xem bên dưới. |
 
 Các số `z` trong bảng này là thứ tự quyết định giữa các overlay lớn. Một `z`
@@ -84,12 +84,12 @@ của `PageInteractionOverlay`, rồi mới xét `z` nội bộ của từng nh�
 
 | Nhóm | `z` nội bộ | Mục đích |
 |---|---:|---|
-| Highlight draft | 0 | Vẽ marker màu đã tạo. |
+| Text-markup draft | 0 | Vẽ Highlight/Squiggly/Underline/Strikeout đã tạo. |
 | Content draft/restoration | 0–1 | Vẽ text, ảnh, shape draft; restoration chỉ dùng khi texture mới chưa sẵn sàng. |
 | `hitArea` nền | mặc định | Bắt click/drag trên vùng chưa do draft-specific area chiếm. |
 | Hover/selection box, editor mask, `TextEdit` | 2 | Hiển thị selection và editor rich text. |
 | Con trỏ custom | 4 | Thay thế cursor OS khi cần preview tool. |
-| Preview shape/highlight đang kéo | 5 | Hiện feedback cho gesture đang chạy. |
+| Preview shape/text markup đang kéo | 5 | Hiện feedback cho gesture đang chạy. |
 | `resizeOverlay` | 6 | Khung chọn, move area và bốn resize handle của object editable. |
 | Hint commit/cancel editor | 7 | Luôn nổi hơn frame editor. |
 
@@ -272,9 +272,9 @@ trong khi runtime form bên dưới lại có thể nhận input.
 Nó có ba nhóm việc:
 
 1. Tải candidate/draft theo trang và hit-test geometry chuẩn hóa.
-2. Vẽ highlight/text/image/shape, mask source khi texture cũ, rồi hiển thị
+2. Vẽ text markup/text/image/shape, mask source khi texture cũ, rồi hiển thị
    hover/selected frame, cursor, popup action, `TextEdit`, move/resize handle.
-3. Chuyển gesture thành API controller: add text/image, add shape/highlight,
+3. Chuyển gesture thành API controller: add text/image, add shape/text markup,
    select, begin/finish/cancel text edit, update frame/content bounds, move,
    resize và delete.
 
@@ -282,6 +282,26 @@ Gesture kéo chỉ giữ preview trong QML trong lúc di chuyển; controller co
 một history command khi mouse release. `TextEdit` đồng bộ rich text, range và
 content bounds với controller, nhưng giữ document local để undo/redo của editor
 không bị thay bằng một document mới.
+
+Squiggly có bước resolve geometry riêng cho preview và commit. `EditOverlay` gửi
+vùng kéo normalized cho controller; controller chỉ hit-test các glyph source-text
+không phải whitespace đã có trong kết quả page scan/cache bất đồng bộ, nhóm hit
+theo visual line và trả các rectangle/QuadPoints đã snap. Nét kéo gần-ngang dùng
+dải hit-test tối thiểu 3 px. Nếu cache chưa sẵn sàng lúc release, controller giữ
+pending gesture theo document revision/page/selection/màu, ưu tiên scan page đó
+và tự materialize draft khi geometry về; Discard hủy pending gesture. Không có glyph thì
+không tạo draft. Invisible OCR text được giữ như geometry hit-test-only và không
+được đưa vào candidate selection/editing. Geometry hiện chỉ nhận glyph
+ngang/upright; glyph xoay/dọc bị bỏ qua cho tới khi có oriented QuadPoints. Page
+không có text layer khả dụng hoặc có hơn 50.000 text characters không cache
+per-glyph geometry và không nhận Squiggly. QML không đụng tới PDFium handle.
+Highlight, Underline và Strikeout không đi qua bước snap này và tiếp tục dùng
+free rectangle của gesture.
+
+`SquigglyLine` nhận `pagePointScale` từ `PdfPageDelegate` qua coordinator và
+vẽ đoạn zigzag rộng 1 PDF point với bước 2 PDF point, đúng công thức appearance
+mặc định của PDFium. Vì preview gesture, draft overlay và texture PDF sau Save
+dùng cùng point scale/hình học nên đổi zoom không làm hai trạng thái lệch nét.
 
 ### `FormTextFieldOverlay` + `FormFieldLayer`: form designer
 
@@ -323,7 +343,7 @@ coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-tes
 |---|---|---|---|---|
 | View | `false` | Có thể interactive nếu form session sẵn sàng. | Không bắt input; draft vẫn có thể hiện. | Source-backed field bị ẩn; không đặt/move/resize. |
 | Edit | `true` | Không interactive vì tool là Select hoặc tool edit khác Browse. | Active: select, edit, add hoặc shape theo tool. | Source-backed field hiện; action designer hỗ trợ vẫn gate theo read-only, nhưng không có placement/delete Forms-only. |
-| Comment | `false` | Không interactive vì tool comment khác Browse. | Active để đặt Sticky Note hoặc kéo Highlight/Underline/Strikeout; Select dùng khi điều hướng danh sách. | Source-backed field bị ẩn và không interactive. |
+| Comment | `false` | Không interactive vì tool comment khác Browse. | Active để đặt Sticky Note hoặc kéo Highlight/Squiggly/Underline/Strikeout; Select dùng khi điều hướng danh sách. | Source-backed field bị ẩn và không interactive. |
 | Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Text Field/Dropdown/List Box source-backed được hỗ trợ có thể tạo draft xóa. |
 | Forms, tool đặt field | `true` | Bị tắt bởi cờ tool Text Field/Check Box/Radio Button/Dropdown/List Box/Comb Field. | Không active. | `placementArea` xử lý vùng trống; không move trong lúc placement tool bật. |
 | Đang Save hoặc delegate pooled | Không dùng để tương tác | Bị tắt/clear state. | Bị tắt; khi pooled còn xóa data/gesture cục bộ. | Hủy placement/resize/move/focus; khi pooled không render field. |
@@ -405,7 +425,7 @@ Overlay hiện tại phối hợp với render worker, không phải chỉ “v�
 
 ### Draft content
 
-1. `PDFEditController` đổi draft revision khi text/image/shape/highlight thay đổi.
+1. `PDFEditController` đổi draft revision khi text/image/shape/text markup thay đổi.
 2. `PDFPageItem` request render mới hoặc debounce trong lúc kéo.
 3. Khi texture hiện tại chưa có đúng draft, `EditOverlay` mask source và vẽ preview
    dựa trên draft data.
@@ -464,7 +484,7 @@ Khi pooled:
 - `PageInteractionOverlay` chuyển `pooled` xuống ba nhánh và gom cleanup đồng bộ.
 - `PDFFormView` mất controller/interactivity; choice snapshot/pending refresh bị
   clear hoặc loại bằng request serial.
-- `EditOverlay.reloadData()` xóa drafts/candidates/hover và cancel shape/highlight.
+- `EditOverlay.reloadData()` xóa drafts/candidates/hover và cancel shape/text markup.
 - `FormTextFieldOverlay.prepareForSessionChange()` cancel placement/resize/move,
   xóa pending focus và không để loader editor giữ field của trang cũ.
 

@@ -33,7 +33,7 @@ flowchart TD
     Delegate["PdfPageDelegate\nMột trang đang hiện"]
     PageItem["PDFPageItem\nRender texture PDF"]
     Interaction["PageInteractionOverlay\nĐiều phối input theo trang"]
-    EditOverlay["EditOverlay\nEdit text/image/shape/highlight"]
+    EditOverlay["EditOverlay\nEdit text/image/shape/text markup"]
     FormView["PDFFormView + FormChoiceOverlay\nForm PDFium đang chạy"]
     Designer["FormTextFieldOverlay + FormFieldLayer\nThiết kế form"]
     Document["PDFDocument\nHandle PDF GUI thread + cấu trúc trang"]
@@ -100,7 +100,8 @@ flowchart TD
 
 | Thành phần | Thread/queue | Quy tắc quan trọng |
 |---|---|---|
-| QML, `PDFDocument`, các controller | GUI thread | Không đưa handle `FPDF_DOCUMENT` của `PDFDocument` sang worker. |
+| QML, `PDFDocument`, các controller | GUI thread | Không đưa handle `FPDF_DOCUMENT` của `PDFDocument` sang worker; Squiggly chỉ hit-test geometry glyph normalized trong candidate cache. |
+| Candidate scan của `PDFEditController` | Worker bất đồng bộ | Mở page/text handle riêng dưới PDFium lock và trả geometry glyph normalized, gồm OCR Invisible dạng hit-test-only; chỉ cache glyph ngang/upright và bỏ toàn bộ per-glyph geometry nếu page vượt 50.000 text characters. GUI/QML không truy cập các handle này. |
 | Render của `PDFPageItem` | Hàng đợi worker có giới hạn | Worker mở handle riêng từ đường dẫn, có cancellation và khóa chống kết quả cũ. |
 | `PDFFormWorker` | Hàng đợi tuần tự dùng chung cho form session | Sở hữu document/form handle riêng; callback quay lại GUI bằng queued invocation. |
 | `PDFSaveWriter` | Chuẩn bị snapshot ở GUI, ghi trên worker | Request không giữ con trỏ controller/document; writer mở document riêng. |
@@ -126,10 +127,17 @@ flowchart TD
 
 1. `EditRibbon` hoặc `CommentRibbon` đổi tool trên `PDFEditController`.
 2. `EditOverlay` chuyển tọa độ pointer sang tỉ lệ chuẩn hóa của trang, hit-test
-   candidate và gọi API của controller.
+   candidate và gọi API của controller. Với Squiggly, controller giao vùng kéo
+   với glyph source-text không-whitespace trong cache scan bất đồng bộ, snap
+   rectangle/QuadPoints theo từng dòng; nét gần-ngang dùng dải hit-test 3 px và
+   gesture release khi cache chưa sẵn sàng được giữ pending, ưu tiên scan đúng
+   page rồi tự materialize thành draft. Controller từ chối vùng chỉ có khoảng trắng hoặc
+   không có glyph khả dụng. OCR Invisible được hit-test nhưng không select/edit;
+   glyph xoay/dọc, page không có text layer khả dụng và page vượt safety cap
+   50.000 ký tự không tạo Squiggly. Highlight/Underline/Strikeout vẫn giữ free rect.
 3. Controller giữ draft session-only và snapshot đầy đủ cho undo/redo. Texture
    gốc bị mask hoặc render lại tùy loại thay đổi.
-4. Text dùng editor rich text; image, shape và highlight dùng delegate/preview
+4. Text dùng editor rich text; image, shape và text markup dùng delegate/preview
    riêng. Move/resize chỉ commit một command khi gesture kết thúc.
 5. `PDFSaveWriter` phân biệt thay đổi chỉ dịch chuyển với thay đổi cần thay object
    để giữ font, ma trận, resource và z-order khi có thể.
@@ -194,7 +202,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
-| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Highlight/Underline/Strikeout, quản lý comment và history. |
+| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Highlight/Squiggly/Underline/Strikeout, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
@@ -208,6 +216,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, coordinator interaction, rotation và layout của một trang. |
 | [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml) | Gom mode, z-order, choice handshake và cleanup của runtime/edit/form designer. |
 | [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml) | Tương tác sửa nội dung trang. |
+| [`src/Components/SquigglyLine.qml`](../src/Components/SquigglyLine.qml) | Preview Squiggly theo đúng hình học 1pt/2pt của PDFium và scale trang. |
 | [`src/Components/FormChoiceOverlay.qml`](../src/Components/FormChoiceOverlay.qml) | Combo/list overlay cho choice field an toàn. |
 | [`src/Components/FormTextFieldOverlay.qml`](../src/Components/FormTextFieldOverlay.qml) | Đặt và chỉnh field thiết kế. |
 | [`src/Components/TextFormatPanel.qml`](../src/Components/TextFormatPanel.qml) | Panel font/style/color/alignment. |

@@ -78,7 +78,7 @@ một dòng, nhưng renderer vẫn tìm và ẩn được từng PDF page object
 
 `glyph bbox` là hình chữ nhật bao quanh phần glyph mà PDFium trả về cho từng ký
 tự. TrePDF lấy `FPDFText_GetCharBox()` cho tất cả ký tự thuộc cùng text object,
-sau đó hợp các hình chữ nhật:
+sau đó hợp các hình chữ nhật để tạo source rect của candidate:
 
 ```text
 glyphBBox = union(charBox[0], charBox[1], ..., charBox[n - 1])
@@ -86,7 +86,12 @@ glyphBBox = union(charBox[0], charBox[1], ..., charBox[n - 1])
 
 Nếu có glyph bbox hợp lệ, nó được ưu tiên làm
 `Candidate.geometry.sourceRect`. Nếu không có, TrePDF dùng bounds của cả page
-object từ `FPDFPageObj_GetBounds()`.
+object từ `FPDFPageObj_GetBounds()`. Kết quả scan đồng thời giữ geometry chuẩn
+hóa của từng glyph source-text không phải whitespace trong cache page. Dữ liệu
+chi tiết này phục vụ hit-test/snap Squiggly; nó không làm thay đổi source rect
+union dùng cho text editing. Text render mode Invisible, thường là OCR ẩn, được
+giữ dưới dạng hit-test-only: glyph của nó tham gia Squiggly nhưng record không
+được trả về cho selection/editing.
 
 Glyph bbox không phải line box của font. Nó không tự bao gồm toàn bộ ascent,
 descent hoặc khoảng trống mà Qt cần để vẽ caret.
@@ -200,7 +205,9 @@ Với mỗi ký tự:
 - `FPDFText_GetTextObject()` xác định text object sở hữu ký tự;
 - ký tự không phải generated character được nối vào chuỗi Unicode;
 - origin của ký tự không-generated đầu tiên được lưu làm baseline origin;
-- `FPDFText_GetCharBox()` được hợp vào glyph bbox của object.
+- `FPDFText_GetCharBox()` được hợp vào glyph bbox của object và box normalized
+  của glyph không-whitespace được giữ trong kết quả scan cho Squiggly nếu góc
+  ký tự gần 0° (ngang/upright).
 
 Nếu chuỗi gom từ ký tự rỗng, code fallback sang `FPDFTextObj_GetText()`.
 
@@ -209,6 +216,26 @@ Text rỗng hoặc chỉ chứa whitespace bị bỏ qua hoàn toàn:
 ```text
 if trim(text) is empty -> không tạo Candidate
 ```
+
+Trước vòng lặp, `FPDFText_CountChars()` áp safety cap 50.000 ký tự/page cho cache
+per-glyph. Page vượt cap vẫn scan candidate/source text như trước nhưng không
+giữ bất kỳ glyph rectangle Squiggly nào; không lấy partial prefix để tránh tạo
+markup thiếu và để giới hạn RAM.
+
+Khi người dùng thả gesture Squiggly, controller giao rectangle kéo với các box
+glyph đã cache, nhóm phần giao theo visual line rồi tạo các rectangle/QuadPoints
+đã snap theo dòng. QML mở nét kéo gần-ngang thành dải hit-test tối thiểu 3 px.
+Nếu cache glyph chưa sẵn sàng lúc release, controller giữ pending gesture theo
+document revision/page/selection/màu, ưu tiên page đó trong hàng scan và tự tạo
+draft khi geometry về; pending gesture tham gia draft guard và bị xóa bởi
+Discard. Vùng chỉ có whitespace hoặc không có glyph khả dụng trả về
+rỗng và không tạo draft. OCR Invisible vẫn có geometry hit-test nhưng không
+thành candidate selectable/editable. Glyph xoay/dọc bị loại vì rectangle
+axis-aligned chưa thể biểu diễn oriented QuadPoints; page không có text layer
+khả dụng hoặc vượt safety cap cũng không dùng được Squiggly. Highlight,
+Underline và Strikeout không dùng bước glyph hit-test này, nên vẫn giữ free
+rectangle hiện tại. Toàn bộ `FPDF_PAGE` và `FPDF_TEXTPAGE` chỉ sống trong worker
+scan dưới PDFium lock; QML/GUI chỉ đọc geometry normalized từ cache.
 
 ### 4.3 Duyệt page object và Form XObject
 
