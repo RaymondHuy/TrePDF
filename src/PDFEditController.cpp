@@ -810,7 +810,8 @@ QRectF normalizedRect(FPDF_PAGE page,
     return normalized.intersected(QRectF(0.0, 0.0, 1.0, 1.0));
 }
 
-QVector<QRectF> mergedTextMarkupRects(QVector<QRectF> glyphRects)
+QVector<QRectF> mergedTextMarkupRects(QVector<QRectF> glyphRects,
+                                      const QSizeF &pageSize)
 {
     glyphRects.erase(
         std::remove_if(
@@ -906,10 +907,15 @@ QVector<QRectF> mergedTextMarkupRects(QVector<QRectF> glyphRects)
                 run = glyphRect;
                 continue;
             }
-            const qreal horizontalGap = glyphRect.left() - run.right();
-            const qreal maximumGap = qMax(run.height(), glyphRect.height())
+            // QRectF axes are normalized independently; compare the gap and
+            // glyph height only after restoring both to PDF page points.
+            const qreal horizontalGapPoints
+                = (glyphRect.left() - run.right()) * pageSize.width();
+            const qreal maximumGapPoints
+                = (std::max)(run.height(), glyphRect.height())
+                * pageSize.height()
                 * kTextMarkupMaximumGapHeightRatio;
-            if (horizontalGap <= maximumGap) {
+            if (horizontalGapPoints <= maximumGapPoints) {
                 run = run.united(glyphRect);
                 continue;
             }
@@ -3257,12 +3263,16 @@ QVector<QRectF> PDFEditController::resolvedTextMarkupRectsForSelection(
             }
         }
     }
-    QVector<QRectF> markupRects = mergedTextMarkupRects(
-        std::move(selectedGlyphRects));
     const QSizeF pageSize = m_document->pageSize(page);
-    if (pageSize.height() <= 0.0) {
-        return markupRects;
+    if (!std::isfinite(pageSize.width())
+        || !std::isfinite(pageSize.height())
+        || pageSize.width() <= 0.0
+        || pageSize.height() <= 0.0) {
+        return {};
     }
+    QVector<QRectF> markupRects = mergedTextMarkupRects(
+        std::move(selectedGlyphRects),
+        pageSize);
 
     // This resolver currently feeds only Squiggly preview and creation. Keep
     // the top and width aligned to the glyphs while extending the bottom by

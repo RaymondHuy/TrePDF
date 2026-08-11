@@ -1212,6 +1212,62 @@ bool createBottomEdgeTextPdf(const QString &filePath)
     return succeeded;
 }
 
+bool createSquigglyAspectRatioPdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    const QSizeF pageSizes[] = {
+        QSizeF(300.0, 800.0),
+        QSizeF(800.0, 300.0),
+    };
+    // Both pages use the same point-space glyph positions. The inter-glyph
+    // gap is below the configured 1.25-glyph-height limit, while the old
+    // mixed-axis normalized comparison split it only on the tall page.
+    bool succeeded = true;
+    for (qsizetype pageIndex = 0;
+         pageIndex < std::size(pageSizes);
+         ++pageIndex) {
+        const QSizeF pageSize = pageSizes[pageIndex];
+        FPDF_PAGE page = FPDFPage_New(
+            document,
+            static_cast<int>(pageIndex),
+            pageSize.width(),
+            pageSize.height());
+        const bool pageSucceeded = page
+            && addTextObject(document,
+                             page,
+                             "Helvetica",
+                             QStringLiteral("A"),
+                             40.0,
+                             150.0)
+            && addTextObject(document,
+                             page,
+                             "Helvetica",
+                             QStringLiteral("B"),
+                             72.0,
+                             150.0)
+            && FPDFPage_GenerateContent(page);
+        if (page) {
+            FPDF_ClosePage(page);
+        }
+        if (!pageSucceeded) {
+            succeeded = false;
+            break;
+        }
+    }
+
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
 bool createDifferentPageSizesPdf(const QString &filePath)
 {
     return writePdfObjects(
@@ -3776,6 +3832,7 @@ private slots:
     void requiresSourceTextOnlyForSquiggly();
     void prioritizesPendingSquigglyCandidateScan();
     void discardsPendingSquigglyBeforeCandidateScanCompletes();
+    void keepsSquigglyGapGroupingStableAcrossPageAspectRatios();
     void snapsSquigglyToSourceTextAndSavesQuadPoints();
     void clipsSquigglyGapAtPageBottom();
     void usesInvisibleOcrTextForSquiggly();
@@ -11775,6 +11832,58 @@ void PDFEditControllerTest::discardsPendingSquigglyBeforeCandidateScanCompletes(
     QVERIFY(!waitForCandidates(controller, 0).isEmpty());
     QVERIFY(controller.draftsForPage(0).isEmpty());
     QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::keepsSquigglyGapGroupingStableAcrossPageAspectRatios()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("squiggly-aspect-ratio-source.pdf"));
+    QVERIFY(createSquigglyAspectRatioPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    QCOMPARE(document.pageCount(), 2);
+    controller.setDocument(&document);
+
+    QVector<QVariantList> markupRectsByPage;
+    QVector<QRectF> physicalBoundsByPage;
+    for (int page = 0; page < document.pageCount(); ++page) {
+        QVERIFY(!waitForCandidates(controller, page).isEmpty());
+        const QVariantList markupRects
+            = controller.textMarkupRectsForSelection(
+                page,
+                QRectF(0.0, 0.0, 1.0, 1.0));
+        markupRectsByPage.append(markupRects);
+        if (markupRects.size() != 1) {
+            continue;
+        }
+
+        const QRectF normalizedBounds = rectFromCoordinateMap(
+            markupRects.constFirst());
+        const QSizeF pageSize = document.pageSize(page);
+        physicalBoundsByPage.append(QRectF(
+            normalizedBounds.x() * pageSize.width(),
+            (1.0 - normalizedBounds.bottom()) * pageSize.height(),
+            normalizedBounds.width() * pageSize.width(),
+            normalizedBounds.height() * pageSize.height()));
+    }
+
+    QCOMPARE(markupRectsByPage.size(), 2);
+    QCOMPARE(markupRectsByPage.at(0).size(), markupRectsByPage.at(1).size());
+    QCOMPARE(markupRectsByPage.at(0).size(), 1);
+    QCOMPARE(physicalBoundsByPage.size(), 2);
+    constexpr qreal physicalTolerancePoints = 0.01;
+    const QRectF portraitBounds = physicalBoundsByPage.at(0);
+    const QRectF landscapeBounds = physicalBoundsByPage.at(1);
+    QVERIFY(qAbs(portraitBounds.left() - landscapeBounds.left())
+        < physicalTolerancePoints);
+    QVERIFY(qAbs(portraitBounds.top() - landscapeBounds.top())
+        < physicalTolerancePoints);
+    QVERIFY(qAbs(portraitBounds.width() - landscapeBounds.width())
+        < physicalTolerancePoints);
+    QVERIFY(qAbs(portraitBounds.height() - landscapeBounds.height())
+        < physicalTolerancePoints);
 }
 
 void PDFEditControllerTest::snapsSquigglyToSourceTextAndSavesQuadPoints()
