@@ -3832,6 +3832,8 @@ private slots:
     void requiresSourceTextOnlyForSquiggly();
     void prioritizesPendingSquigglyCandidateScan();
     void discardsPendingSquigglyBeforeCandidateScanCompletes();
+    void remapsPendingSquigglyAcrossPageInsertionUndoRedo();
+    void cancelsPendingSquigglyWhenSourcePageIsDeleted();
     void keepsSquigglyGapGroupingStableAcrossPageAspectRatios();
     void snapsSquigglyToSourceTextAndSavesQuadPoints();
     void clipsSquigglyGapAtPageBottom();
@@ -11832,6 +11834,109 @@ void PDFEditControllerTest::discardsPendingSquigglyBeforeCandidateScanCompletes(
     QVERIFY(!waitForCandidates(controller, 0).isEmpty());
     QVERIFY(controller.draftsForPage(0).isEmpty());
     QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::remapsPendingSquigglyAcrossPageInsertionUndoRedo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("remap-pending-squiggly-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("remap-pending-squiggly-output.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
+
+    // Keep the single candidate-scan worker occupied so page 1 stays pending
+    // while the page-structure commands below remap its display index.
+    QVERIFY(controller.candidatesForPage(0).isEmpty());
+    const QVariantMap pendingSquiggly = controller.addHighlight(
+        1,
+        QRectF(0.01, 0.01, 0.98, 0.40));
+    QVERIFY(pendingSquiggly.value(QStringLiteral("pending")).toBool());
+    QVERIFY(controller.draftsForPage(1).isEmpty());
+    QVERIFY(controller.hasDrafts());
+
+    document.setCurrentPage(0);
+    QCOMPARE(controller.addBlankPage(), 1);
+    QCOMPARE(document.displayPageIndexForSourcePage(1), 2);
+    QVERIFY(controller.draftsForPage(2).isEmpty());
+
+    QCOMPARE(controller.undo(), 0);
+    QCOMPARE(document.displayPageIndexForSourcePage(1), 1);
+    QCOMPARE(controller.redo(), 1);
+    QCOMPARE(document.displayPageIndexForSourcePage(1), 2);
+
+    QTRY_COMPARE_WITH_TIMEOUT(controller.draftsForPage(2).size(), 1, 5000);
+    QVERIFY(controller.draftsForPage(1).isEmpty());
+    const QVariantMap completedSquiggly = controller
+        .draftsForPage(2)
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        completedSquiggly.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("squiggly"));
+    QVERIFY(!completedSquiggly
+        .value(QStringLiteral("highlightRects"))
+        .toList()
+        .isEmpty());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(document.pageCount(), 4);
+    QVERIFY(normalizedPageText(outputPath, 2).contains(
+        QStringLiteral("Second fixture page")));
+}
+
+void PDFEditControllerTest::cancelsPendingSquigglyWhenSourcePageIsDeleted()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("cancel-deleted-page-pending-squiggly-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("cancel-deleted-page-pending-squiggly-output.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
+
+    QVERIFY(controller.candidatesForPage(0).isEmpty());
+    const QVariantMap pendingSquiggly = controller.addHighlight(
+        1,
+        QRectF(0.01, 0.01, 0.98, 0.40));
+    QVERIFY(pendingSquiggly.value(QStringLiteral("pending")).toBool());
+    QVERIFY(controller.hasDrafts());
+
+    document.setCurrentPage(1);
+    QCOMPARE(controller.deleteCurrentPage(), 1);
+    QCOMPARE(document.displayPageIndexForSourcePage(1), -1);
+    QVERIFY(controller.hasDrafts());
+
+    // Undo restores the source page, but the annotation request was explicitly
+    // cancelled when that page was deleted and must not be resurrected by a
+    // late candidate-scan result.
+    QCOMPARE(controller.undo(), 1);
+    QCOMPARE(document.displayPageIndexForSourcePage(1), 1);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!waitForCandidates(controller, 1).isEmpty());
+    QVERIFY(controller.draftsForPage(1).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+
+    QCOMPARE(controller.redo(), 1);
+    QCOMPARE(document.displayPageIndexForSourcePage(1), -1);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(document.pageCount(), 2);
+    QVERIFY(!normalizedPageText(outputPath, 0).contains(
+        QStringLiteral("Second fixture page")));
+    QVERIFY(!normalizedPageText(outputPath, 1).contains(
+        QStringLiteral("Second fixture page")));
 }
 
 void PDFEditControllerTest::keepsSquigglyGapGroupingStableAcrossPageAspectRatios()

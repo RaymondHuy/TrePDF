@@ -8750,6 +8750,30 @@ void PDFEditController::applyPageState(const PageState &state)
         m_pageInsertions,
         state.currentPage);
 
+    QVector<PendingSquigglyCreation> remappedPendingCreations;
+    remappedPendingCreations.reserve(m_pendingSquigglyCreations.size());
+    for (PendingSquigglyCreation creation
+         : std::as_const(m_pendingSquigglyCreations)) {
+        const int remappedPage
+            = m_document->displayPageIndexForSourcePage(creation.sourcePage);
+        if (remappedPage < 0) {
+            // Deleting the source page cancels its unfinished annotation.
+            continue;
+        }
+
+        const QSizeF remappedPageSize = m_document->pageSize(remappedPage);
+        if (remappedPageSize.isEmpty()) {
+            continue;
+        }
+        creation.page = remappedPage;
+        creation.pageSize = remappedPageSize;
+        if (!pendingSquigglyCreationIsCurrent(creation)) {
+            continue;
+        }
+        remappedPendingCreations.append(std::move(creation));
+    }
+    m_pendingSquigglyCreations = std::move(remappedPendingCreations);
+
     if (state.hasSelection) {
         const Candidate selectedCandidate = state.selectedCandidate;
         setSelection(&selectedCandidate);
@@ -8758,6 +8782,10 @@ void PDFEditController::applyPageState(const PageState &state)
     }
     emit pageDataChanged(-1);
     emit commentsChanged();
+    const int pendingSquigglyPage = pendingSquigglyScanPage();
+    if (pendingSquigglyPage >= 0) {
+        requestPageCandidateScan(pendingSquigglyPage);
+    }
 }
 
 bool PDFEditController::removeAddedCandidate(int page, const QString &objectId)
