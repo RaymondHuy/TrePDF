@@ -19,6 +19,7 @@ Item {
     property var contentDrafts: []
     property var highlightDrafts: []
     property var stickyNoteDrafts: []
+    property var freeTextDrafts: []
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
@@ -45,6 +46,10 @@ Item {
     property bool drawingShape: false
     property point shapeStart: Qt.point(0, 0)
     property point shapeCurrent: Qt.point(0, 0)
+    property bool placingFreeText: false
+    property point freeTextStart: Qt.point(0, 0)
+    property point freeTextCurrent: Qt.point(0, 0)
+    property bool suppressNextPlacementClick: false
     readonly property real fallbackBleed: 2
     readonly property real editBoxRadius: 4
     readonly property color editBoxColor: "#f5a55a"
@@ -57,6 +62,9 @@ Item {
     readonly property real resizeHandleHitSize: 24
     readonly property real minimumResizePixelSize: 24
     readonly property real minimumHighlightDragSize: 3
+    readonly property real minimumFreeTextDragSize: 3
+    readonly property real defaultFreeTextWidthPoints: 160
+    readonly property real defaultFreeTextHeightPoints: 64
     readonly property rect activeHighlightRect: Qt.rect(
         Math.min(highlightStart.x, highlightCurrent.x),
         Math.min(highlightStart.y, highlightCurrent.y),
@@ -90,6 +98,32 @@ Item {
         Math.min(shapeStart.y, shapeCurrent.y),
         Math.max(1, Math.abs(shapeCurrent.x - shapeStart.x)),
         Math.max(1, Math.abs(shapeCurrent.y - shapeStart.y)))
+    readonly property bool freeTextDragIsSized:
+        Math.abs(freeTextCurrent.x - freeTextStart.x)
+            >= minimumFreeTextDragSize
+        && Math.abs(freeTextCurrent.y - freeTextStart.y)
+            >= minimumFreeTextDragSize
+    readonly property rect activeFreeTextRect: {
+        if (freeTextDragIsSized) {
+            return Qt.rect(
+                Math.min(freeTextStart.x, freeTextCurrent.x),
+                Math.min(freeTextStart.y, freeTextCurrent.y),
+                Math.abs(freeTextCurrent.x - freeTextStart.x),
+                Math.abs(freeTextCurrent.y - freeTextStart.y))
+        }
+
+        const defaultWidth = Math.min(
+            width,
+            defaultFreeTextWidthPoints * pagePointScale)
+        const defaultHeight = Math.min(
+            height,
+            defaultFreeTextHeightPoints * pagePointScale)
+        return Qt.rect(
+            Math.max(0, Math.min(width - defaultWidth, freeTextStart.x)),
+            Math.max(0, Math.min(height - defaultHeight, freeTextStart.y)),
+            defaultWidth,
+            defaultHeight)
+    }
     readonly property bool interactionActive: !pooled
         && !controller.saving
         && controller.tool !== PDFEditController.BrowseTool
@@ -126,9 +160,11 @@ Item {
             contentDrafts = []
             highlightDrafts = []
             stickyNoteDrafts = []
+            freeTextDrafts = []
             hoverCandidate = ({})
             cancelHighlight()
             cancelShape()
+            cancelFreeTextPlacement()
             hideSelectCursor()
             return
         }
@@ -161,12 +197,15 @@ Item {
         const displayedContentDrafts = []
         const displayedHighlightDrafts = []
         const displayedStickyNoteDrafts = []
+        const displayedFreeTextDrafts = []
         for (let index = 0; index < displayedDrafts.length; ++index) {
             const draft = displayedDrafts[index]
             if (isTextMarkupKind(draft.kind))
                 displayedHighlightDrafts.push(draft)
             else if (draft.kind === "stickyNote")
                 displayedStickyNoteDrafts.push(draft)
+            else if (draft.kind === "freeText")
+                displayedFreeTextDrafts.push(draft)
             else
                 displayedContentDrafts.push(draft)
         }
@@ -174,6 +213,7 @@ Item {
         contentDrafts = displayedContentDrafts
         highlightDrafts = displayedHighlightDrafts
         stickyNoteDrafts = displayedStickyNoteDrafts
+        freeTextDrafts = displayedFreeTextDrafts
         if (!interactionActive) {
             hoverCandidate = ({})
             hideSelectCursor()
@@ -546,8 +586,7 @@ Item {
     function isTextBoxCandidate(candidate) {
         return hasCandidate(candidate)
             && (candidate.kind === "text"
-                || candidate.kind === "addedText"
-                || candidate.kind === "freeText")
+                || candidate.kind === "addedText")
     }
 
     function isImageKind(kind) {
@@ -562,7 +601,9 @@ Item {
     }
 
     function isCommentKind(kind) {
-        return isTextMarkupKind(kind) || kind === "stickyNote"
+        return isTextMarkupKind(kind)
+            || kind === "stickyNote"
+            || kind === "freeText"
     }
 
     function isTextMarkupTool() {
@@ -575,6 +616,7 @@ Item {
     function isCommentCreationTool() {
         return isTextMarkupTool()
             || controller.tool === PDFEditController.StickyNoteTool
+            || controller.tool === PDFEditController.FreeTextTool
     }
 
     function isShapeKind(kind) {
@@ -970,6 +1012,61 @@ Item {
         drawingShape = false
     }
 
+    function beginFreeTextPlacement(x, y) {
+        if (controller.tool !== PDFEditController.FreeTextTool
+                || width <= 0
+                || height <= 0) {
+            return
+        }
+
+        if (editing)
+            commitEditing()
+        selectionActions.close()
+        controller.clearSelection()
+        hoverCandidate = ({})
+        hideSelectCursor()
+        freeTextStart = Qt.point(
+            Math.max(0, Math.min(width, x)),
+            Math.max(0, Math.min(height, y)))
+        freeTextCurrent = freeTextStart
+        placingFreeText = true
+    }
+
+    function updateFreeTextPlacement(x, y) {
+        if (!placingFreeText)
+            return
+
+        freeTextCurrent = Qt.point(
+            Math.max(0, Math.min(width, x)),
+            Math.max(0, Math.min(height, y)))
+    }
+
+    function finishFreeTextPlacement(x, y) {
+        if (!placingFreeText)
+            return
+
+        updateFreeTextPlacement(x, y)
+        const placementRect = activeFreeTextRect
+        placingFreeText = false
+        suppressNextPlacementClick = true
+        Qt.callLater(function() {
+            root.suppressNextPlacementClick = false
+        })
+        if (placementRect.width <= 0 || placementRect.height <= 0)
+            return
+
+        controller.addFreeText(page, Qt.rect(
+            placementRect.x / width,
+            placementRect.y / height,
+            placementRect.width / width,
+            placementRect.height / height))
+        reloadData()
+    }
+
+    function cancelFreeTextPlacement() {
+        placingFreeText = false
+    }
+
     function resolveSquigglyPreview() {
         squigglyPreviewUpdatePending = false
         if (!highlighting
@@ -1183,6 +1280,7 @@ Item {
     function prepareForSessionChange() {
         selectionActions.close()
         cancelHighlight()
+        cancelFreeTextPlacement()
         hideSelectCursor()
         hoverCandidate = ({})
         if (editing) {
@@ -1270,6 +1368,7 @@ Item {
         selectionActions.close()
         cancelHighlight()
         cancelShape()
+        cancelFreeTextPlacement()
         cancelFrameResize()
         if (editing)
             commitEditing()
@@ -1280,6 +1379,7 @@ Item {
         selectionActions.close()
         cancelHighlight()
         cancelShape()
+        cancelFreeTextPlacement()
         if (pooled)
             cancelFrameResize()
         if (pooled && editing)
@@ -1291,6 +1391,7 @@ Item {
         if (!interactionActive) {
             cancelHighlight()
             cancelShape()
+            cancelFreeTextPlacement()
         }
         reloadData()
     }
@@ -1333,6 +1434,7 @@ Item {
             selectionActions.close()
             root.cancelHighlight()
             root.cancelShape()
+            root.cancelFreeTextPlacement()
             root.cancelFrameResize()
             if (root.editing)
                 root.commitEditing()
@@ -1506,6 +1608,61 @@ Item {
                 sourceSize.height: height
                 fillMode: Image.PreserveAspectFit
                 smooth: true
+                Accessible.ignored: true
+            }
+        }
+    }
+
+    Repeater {
+        model: root.freeTextDrafts
+
+        delegate: Rectangle {
+            id: freeTextItem
+
+            required property var modelData
+
+            readonly property rect frameRect: modelData.frameRect
+            readonly property real fontPixelSize: Math.max(
+                1,
+                (Number(modelData.displayFontSizeRatio) > 0
+                    ? Number(modelData.displayFontSizeRatio)
+                    : 0.018) * root.height)
+            readonly property font displayFont:
+                root.controller.fontForDisplay(
+                    String(modelData.fontFamily || "Helvetica"),
+                    Number(modelData.fontStretch || 100),
+                    modelData.fontBold === true,
+                    modelData.fontItalic === true,
+                    modelData.fontUnderline === true,
+                    fontPixelSize)
+            readonly property real contentMargin: Math.min(
+                Math.max(2, 4 * root.pagePointScale),
+                Math.max(0, Math.min(width, height) / 4))
+
+            x: frameRect.x * root.width
+            y: frameRect.y * root.height
+            width: Math.max(1, frameRect.width * root.width)
+            height: Math.max(1, frameRect.height * root.height)
+            color: "#ffffff"
+            border.width: Math.max(1, root.pagePointScale)
+            border.color: "#000000"
+            clip: true
+            visible: modelData.deleted !== true
+            z: 1
+            Accessible.ignored: true
+
+            Text {
+                anchors.fill: parent
+                anchors.margins: freeTextItem.contentMargin
+                text: String(freeTextItem.modelData.text || "")
+                textFormat: Text.PlainText
+                color: freeTextItem.modelData.color !== undefined
+                    ? freeTextItem.modelData.color
+                    : "#202124"
+                font: freeTextItem.displayFont
+                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                elide: Text.ElideNone
+                verticalAlignment: Text.AlignTop
                 Accessible.ignored: true
             }
         }
@@ -1856,10 +2013,12 @@ Item {
         acceptedButtons: Qt.LeftButton
         preventStealing: root.isTextMarkupTool()
             || root.controller.tool === PDFEditController.AddShapeTool
+            || root.controller.tool === PDFEditController.FreeTextTool
         cursorShape: root.selectCursorActive || root.addTextCursorActive
             ? Qt.BlankCursor
             : root.isTextMarkupTool()
                     || root.controller.tool === PDFEditController.AddShapeTool
+                    || root.controller.tool === PDFEditController.FreeTextTool
                 ? Qt.CrossCursor
             : root.controller.tool === PDFEditController.StickyNoteTool
                 ? Qt.PointingHandCursor
@@ -1880,8 +2039,8 @@ Item {
         Accessible.role: Accessible.Pane
         //% "PDF edit surface"
         Accessible.name: qsTrId("PdfEditSurface")
-        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text, images, or shapes to move them, draw with Shapes or text markup tools, or click with Sticky Note to add a comment"
-        Accessible.description: qsTrId("PdfEditSurfaceDescription")
+        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text, images, or shapes to move them, draw with Shapes or text markup tools, drag or click with Free Text, or click with Sticky Note to add a comment"
+        Accessible.description: qsTrId("PdfEditSurfaceDescriptionWithFreeText")
 
         onEntered: root.updateHoverAtPosition(mouseX, mouseY)
         onPositionChanged: mouse => {
@@ -1889,6 +2048,8 @@ Item {
                 root.updateHighlight(mouse.x, mouse.y)
             else if (root.drawingShape)
                 root.updateShape(mouse.x, mouse.y)
+            else if (root.placingFreeText)
+                root.updateFreeTextPlacement(mouse.x, mouse.y)
             else
                 root.updateHoverAtPosition(mouse.x, mouse.y)
         }
@@ -1906,20 +2067,32 @@ Item {
                     === PDFEditController.AddShapeTool) {
                 root.beginShape(mouse.x, mouse.y)
                 mouse.accepted = true
+            } else if (root.controller.tool
+                    === PDFEditController.FreeTextTool) {
+                root.beginFreeTextPlacement(mouse.x, mouse.y)
+                mouse.accepted = true
             }
         }
         onReleased: mouse => {
             root.finishHighlight(mouse.x, mouse.y)
             root.finishShape(mouse.x, mouse.y)
+            root.finishFreeTextPlacement(mouse.x, mouse.y)
         }
         onCanceled: {
             root.cancelHighlight()
             root.cancelShape()
+            root.cancelFreeTextPlacement()
         }
         onClicked: mouse => {
+            if (root.suppressNextPlacementClick) {
+                root.suppressNextPlacementClick = false
+                return
+            }
             if (root.isTextMarkupTool()
                     || root.controller.tool
-                        === PDFEditController.AddShapeTool) {
+                        === PDFEditController.AddShapeTool
+                    || root.controller.tool
+                        === PDFEditController.FreeTextTool) {
                 return
             }
             if (root.controller.tool === PDFEditController.StickyNoteTool) {
@@ -1978,6 +2151,9 @@ Item {
                 event.accepted = true
             } else if (root.drawingShape) {
                 root.cancelShape()
+                event.accepted = true
+            } else if (root.placingFreeText) {
+                root.cancelFreeTextPlacement()
                 event.accepted = true
             }
         }
@@ -2050,6 +2226,20 @@ Item {
             z: 5
             Accessible.ignored: true
         }
+    }
+
+    Rectangle {
+        x: root.activeFreeTextRect.x
+        y: root.activeFreeTextRect.y
+        width: Math.max(1, root.activeFreeTextRect.width)
+        height: Math.max(1, root.activeFreeTextRect.height)
+        color: "#ffffff"
+        border.width: Math.max(1, root.pagePointScale)
+        border.color: "#000000"
+        visible: root.placingFreeText
+            && root.controller.tool === PDFEditController.FreeTextTool
+        z: 5
+        Accessible.ignored: true
     }
 
     ShapeDraftView {

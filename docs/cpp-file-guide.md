@@ -212,11 +212,11 @@ orchestration Save.
 - Scan page bất đồng bộ từ document handle riêng dưới PDFium lock.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
-- Đọc Highlight, Squiggly, Underline, Strikeout và Text annotation; chuẩn hóa
-  quad/rect, màu và `/Contents` thành comment candidate. Nội dung annotation
-  nguồn được sửa trong panel bằng draft riêng; canvas vẫn không cho move/resize
-  annotation nguồn, còn ReadOnly/LockedContents không nhận mutation. Xóa tạo
-  tombstone draft theo annotation index và subtype.
+- Đọc Highlight, Squiggly, Underline, Strikeout, Text và FreeText annotation;
+  chuẩn hóa quad/rect, màu và `/Contents` thành comment candidate. Nội dung
+  annotation nguồn được sửa trong panel bằng draft riêng; canvas vẫn không cho
+  move/resize annotation nguồn, còn ReadOnly/LockedContents không nhận mutation.
+  Xóa tạo tombstone draft theo annotation index và subtype.
 - Đọc quan hệ reply chuẩn qua `/IRT` và `/RT`; chuỗi reply nhiều tầng từ PDF
   ngoài được lần về root rồi trình bày thành đúng một cấp. Metadata private chỉ
   dùng để định danh ổn định parent trong pipeline ghi trước khi tạo `/IRT` chuẩn.
@@ -275,8 +275,9 @@ orchestration Save.
   OCR ẩn vẫn dùng được, nhưng page không có text
   layer khả dụng, chỉ có glyph xoay/dọc hoặc vượt safety cap 50.000 ký tự thì
   không dùng được Squiggly. Highlight, Underline và Strikeout vẫn giữ free
-  rectangle/quad của gesture. Sticky Note giữ frame 24 pt và nội dung chỉnh từ
-  `CommentPanel`.
+  rectangle/quad của gesture. Sticky Note giữ frame 24 pt. Free Text nhận click
+  hoặc drag để tạo frame text box, dùng kích thước mặc định cho click; nội dung
+  của cả hai được chỉnh từ `CommentPanel`.
 - `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
   hướng phẳng cho panel theo thứ tự root rồi replies. `setCommentText()` định
   danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
@@ -328,18 +329,21 @@ orchestration Save.
 - Bảo toàn exact source horizontal scale khi reuse; chỉ tính width compensation
   cho font mới/standard.
 - Tạo bitmap object cho ảnh thêm mới, path object cho sáu shape, các standard
-  Highlight/Squiggly/Underline/Strikeout annotation với quad/color/Print flag
-  và Text annotation với rect/color/`Contents`/`NM`/Print flag. Squiggly ghi
-  quad từ các rectangle dòng đã snap; ba text-markup còn lại ghi geometry tự do
-  hiện có.
+  Highlight/Squiggly/Underline/Strikeout annotation với quad/color/Print flag,
+  Text annotation và FreeText annotation với rect/`Contents`/`NM`/Print flag.
+  Squiggly ghi quad từ các rectangle dòng đã snap; ba text-markup còn lại ghi
+  geometry tự do hiện có.
 - Ghi parent/reply vào file tạm, định danh bằng metadata ổn định rồi canonicalize
   reply thành `/IRT <parent-ref>` và `/RT /R` trước khi commit giao dịch.
 - Xóa comment nguồn, toàn bộ reply hậu duệ và `/Popup` liên kết theo annotation
   index từ lớn xuống nhỏ, xác thực lại subtype trước khi gỡ; page chỉ đổi
   annotation không gọi `FPDFPage_GenerateContent()`.
 - Sửa comment nguồn tại chỗ trước bước xóa index: xác thực subtype, nội dung gốc,
-  `/NM` nếu có và cờ bảo vệ; chỉ đổi `/Contents`, `/M` và `/RC` nếu tồn tại để
-  giữ nguyên `/AP`, `/Popup`, `/IRT`, `/RT`, rect/quad, màu và metadata khác.
+  `/NM` nếu có và cờ bảo vệ; đổi `/Contents`, `/M` và `/RC` nếu tồn tại. Các
+  subtype khác giữ `/AP`; FreeText thay appearance cũ bằng bản Unicode có wrap
+  theo style hộp mặc định của TrePDF để không tiếp tục vẽ nội dung trước khi
+  sửa. FreeText không có draft giữ nguyên appearance nguồn. `/Popup`, `/IRT`,
+  `/RT`, geometry, màu và metadata khác được giữ nguyên.
 - Giữ earliest source z-order bằng insert-at-index; object thêm mới theo insertion
   order. Dùng `FPDF_DeviceToPage()` để tôn trọng CropBox/rotation.
 - Chỉ gọi `FPDFPage_GenerateContent()` cho page có content object thay đổi;
@@ -582,8 +586,8 @@ TrePDF phải fail rõ ràng.
 ### [`src/PDFAcroFormCanonicalizer.cpp`](../src/PDFAcroFormCanonicalizer.cpp)
 và [`src/PDFAcroFormCanonicalizer.h`](../src/PDFAcroFormCanonicalizer.h)
 
-**Vai trò:** bộ đọc/ghi PDF mục đích hẹp để hoàn thiện AcroForm và liên kết reply
-annotation mà PDFium public API không thể dựng trực tiếp.
+**Vai trò:** bộ đọc/ghi PDF mục đích hẹp để hoàn thiện AcroForm, liên kết reply
+annotation và appearance FreeText mà PDFium public API không dựng đủ an toàn.
 
 **Đọc cấu trúc:**
 
@@ -607,6 +611,9 @@ annotation mà PDFium public API không thể dựng trực tiếp.
   tạo appearance stream để PDF reader hiển thị ổn định kể cả trước khi focus;
   field multi-line được wrap và căn trên trong appearance; field comb vẽ divider
   và căn từng ký tự giữa cell.
+- Render FreeText thành appearance image nền trắng, viền đen và text Unicode
+  wrap trong rectangle annotation; `/Contents` vẫn giữ nội dung semantic để
+  reader khác có thể tìm/đọc comment.
 - Tạo Checkbox Widget với `/AP` Off/Yes riêng, `/AS`, value/default value và
   vector check appearance.
 - Gom Radio theo Group ID thành một field cha `/FT /Btn` có `/Kids`; mỗi Widget
@@ -702,8 +709,8 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   formatting, typing format, paragraph alignment, editor undo và scale qua nhiều
   lần save.
 - Content round-trip: text, Vietnamese, paint Fill/Stroke/pattern/grayscale,
-  Highlight/Squiggly/Underline/Strikeout/Sticky Note, image, shape, source
-  move/delete, z-order, CropBox và rotated page.
+  Highlight/Squiggly/Underline/Strikeout/Sticky Note/Free Text, image, shape,
+  source move/delete, z-order, CropBox và rotated page.
 - Page operation: insert/delete, undo/redo/discard, source page mapping và save.
 - Save lifecycle: async save, failure giữ draft, Save/Save As và reopen.
 - Multi-tab: document/session độc lập, rotation/draft riêng, save đúng tab và

@@ -54,6 +54,11 @@ constexpr qreal kAddedShapeStrokeWidthRatio = 0.0022;
 constexpr qreal kShapeAxisSnapRatio = 0.12;
 constexpr qreal kMinimumHighlightDimensionRatio = 0.0005;
 constexpr qreal kStickyNoteSizePoints = 24.0;
+constexpr qreal kFreeTextDefaultWidthPoints = 160.0;
+constexpr qreal kFreeTextDefaultHeightPoints = 64.0;
+constexpr qreal kFreeTextMinimumWidthPoints = 36.0;
+constexpr qreal kFreeTextMinimumHeightPoints = 24.0;
+constexpr qreal kFreeTextFontSizePoints = 12.0;
 constexpr int kHighlightRed = 255;
 constexpr int kHighlightGreen = 235;
 constexpr int kHighlightBlue = 59;
@@ -569,7 +574,8 @@ bool isTextMarkupCandidateKind(const QString &kind)
 bool isCommentCandidateKind(const QString &kind)
 {
     return isTextMarkupCandidateKind(kind)
-        || kind == QLatin1String("stickyNote");
+        || kind == QLatin1String("stickyNote")
+        || kind == QLatin1String("freeText");
 }
 
 int commentAnnotationSubtype(const QString &kind)
@@ -585,6 +591,9 @@ int commentAnnotationSubtype(const QString &kind)
     }
     if (kind == QLatin1String("stickyNote")) {
         return FPDF_ANNOT_TEXT;
+    }
+    if (kind == QLatin1String("freeText")) {
+        return FPDF_ANNOT_FREETEXT;
     }
     return kind == QLatin1String("highlight")
         ? FPDF_ANNOT_HIGHLIGHT
@@ -1014,7 +1023,8 @@ bool isSupportedCommentAnnotationSubtype(int subtype)
         || subtype == FPDF_ANNOT_UNDERLINE
         || subtype == FPDF_ANNOT_SQUIGGLY
         || subtype == FPDF_ANNOT_STRIKEOUT
-        || subtype == FPDF_ANNOT_TEXT;
+        || subtype == FPDF_ANNOT_TEXT
+        || subtype == FPDF_ANNOT_FREETEXT;
 }
 
 bool isMarkupAnnotationSubtype(int subtype)
@@ -1781,6 +1791,7 @@ void PDFEditController::setTool(Tool tool)
     m_tool = tool;
     if (m_tool == BrowseTool
         || m_tool == StickyNoteTool
+        || m_tool == FreeTextTool
         || isTextMarkupTool(m_tool)) {
         clearSelection();
     }
@@ -2434,9 +2445,12 @@ PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
     QVector<DraftAnnotationDeletion> deletions;
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
         const Candidate &candidate = draft->candidate;
+        const bool suppressesSourceAppearance
+            = draft->deleted
+            || candidate.kind == QLatin1String("freeText");
         if (candidate.page != page
             || candidate.added
-            || !draft->deleted
+            || !suppressesSourceAppearance
             || !isCommentCandidateKind(candidate.kind)
             || candidate.sourceAnnotationIndex < 0) {
             continue;
@@ -2621,6 +2635,7 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
         const bool draftGeometryCandidate
             = candidate.kind == QLatin1String("image")
             || candidate.kind == QLatin1String("addedImage")
+            || candidate.kind == QLatin1String("freeText")
             || isShapeCandidateKind(candidate.kind);
         const QRectF candidateRect
             = draftGeometryCandidate && draft != m_drafts.cend()
@@ -3656,6 +3671,124 @@ QVariantMap PDFEditController::addStickyNote(int page,
     return candidateMap(draft);
 }
 
+QVariantMap PDFEditController::addFreeText(int page,
+                                           const QRectF &selectionRect)
+{
+    if (!m_document
+        || !m_document->isLoaded()
+        || m_saving
+        || page < 0
+        || page >= m_document->pageCount()
+        || !std::isfinite(selectionRect.x())
+        || !std::isfinite(selectionRect.y())
+        || !std::isfinite(selectionRect.width())
+        || !std::isfinite(selectionRect.height())) {
+        return {};
+    }
+    if (!documentAllowsAnnotations()) {
+        //% "This PDF does not permit changing annotations."
+        emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+        return {};
+    }
+
+    const QSizeF pageSize = m_document->pageSize(page);
+    if (pageSize.isEmpty()) {
+        return {};
+    }
+
+    const QRectF normalizedSelection = selectionRect.normalized();
+    const qreal selectionWidthPoints
+        = normalizedSelection.width() * pageSize.width();
+    const qreal selectionHeightPoints
+        = normalizedSelection.height() * pageSize.height();
+    QRectF freeTextRect;
+    if (selectionWidthPoints < kMinimumShapeDragPoints
+        || selectionHeightPoints < kMinimumShapeDragPoints) {
+        const qreal width = qMin<qreal>(
+            1.0,
+            kFreeTextDefaultWidthPoints / pageSize.width());
+        const qreal height = qMin<qreal>(
+            1.0,
+            kFreeTextDefaultHeightPoints / pageSize.height());
+        const qreal left = qBound<qreal>(
+            0.0,
+            normalizedSelection.left(),
+            1.0 - width);
+        const qreal top = qBound<qreal>(
+            0.0,
+            normalizedSelection.top(),
+            1.0 - height);
+        freeTextRect = QRectF(left, top, width, height);
+    } else {
+        const qreal width = qMin<qreal>(
+            1.0,
+            qMax(
+                normalizedSelection.width(),
+                kFreeTextMinimumWidthPoints / pageSize.width()));
+        const qreal height = qMin<qreal>(
+            1.0,
+            qMax(
+                normalizedSelection.height(),
+                kFreeTextMinimumHeightPoints / pageSize.height()));
+        const qreal left = qBound<qreal>(
+            0.0,
+            normalizedSelection.left(),
+            1.0 - width);
+        const qreal top = qBound<qreal>(
+            0.0,
+            normalizedSelection.top(),
+            1.0 - height);
+        freeTextRect = QRectF(left, top, width, height);
+    }
+
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    Candidate candidate;
+    candidate.page = page;
+    candidate.addedOrder = ++m_nextAddedObjectId;
+    candidate.objectId = QStringLiteral("freeText:")
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    candidate.commentThreadId = candidate.objectId;
+    candidate.kind = QStringLiteral("freeText");
+    //% "Free text annotation"
+    candidate.label = qtTrId("FreeTextAnnotation");
+    candidate.fontFamily = QStringLiteral("Helvetica");
+    candidate.fontSizeRatio = qMin<qreal>(
+        1.0,
+        kFreeTextFontSizePoints / pageSize.height());
+    candidate.displayFontSizeRatio = candidate.fontSizeRatio;
+    candidate.color = QColor(32, 33, 36);
+    candidate.highlightColor = Qt::black;
+    candidate.editable = true;
+    candidate.added = true;
+    candidate.commentAuthor = currentCommentAuthor();
+    candidate.commentCreationDate = QDateTime::currentDateTime();
+    setInitialGeometry(candidate, freeTextRect);
+
+    m_addedCandidates.append(std::move(candidate));
+    const Candidate &addedCandidate = m_addedCandidates.constLast();
+    const Draft draft = initialDraftForCandidate(addedCandidate);
+    const QString key = draftKey(page, addedCandidate.objectId);
+    m_drafts.insert(key, draft);
+
+    Command command;
+    command.key = key;
+    command.page = page;
+    command.objectId = addedCandidate.objectId;
+    command.hadBefore = false;
+    command.before = draft;
+    command.hadAfter = true;
+    command.after = draft;
+    m_undoStack.append(command);
+    m_redoStack.clear();
+
+    setTool(SelectTool);
+    setSelection(&addedCandidate);
+    markDraftStateChanged(page, true);
+    emit historyStateChanged();
+    return candidateMap(draft);
+}
+
 QVariantMap PDFEditController::addCommentReply(
     int page,
     const QString &parentObjectId,
@@ -4450,6 +4583,7 @@ void PDFEditController::requestCommentIndex()
         request.sourcePage = m_document->sourcePageIndex(page);
         request.pageSize = m_document->pageSize(page);
         request.editingAllowed = documentAllowsEditing();
+        request.annotationsAllowed = documentAllowsAnnotations();
         if (request.sourcePage >= 0 && !request.pageSize.isEmpty()) {
             requests.append(std::move(request));
         }
@@ -4739,7 +4873,6 @@ void PDFEditController::updateSelectedTextPreview(const QString &text,
     if (!m_textEditActive || !m_hasSelection) {
         return;
     }
-
     Draft draft = selectedDraftForDisplay();
     if (draft.text == text) {
         return;
@@ -4847,6 +4980,7 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
     const bool sourceImageDraft = draft.candidate.kind == QLatin1String("image");
     const bool fixedBoundsDraft = sourceImageDraft
         || draft.candidate.kind == QLatin1String("addedImage")
+        || draft.candidate.kind == QLatin1String("freeText")
         || isShapeCandidateKind(draft.candidate.kind);
     if (!movesFrame && sourceImageDraft) {
         const qreal width = qBound<qreal>(0.0, draft.frameRect.width(), 1.0);
@@ -5311,8 +5445,14 @@ void PDFEditController::finishSelectedTextEdit()
         finalizedDraft.frameRect = baseline.before.frameRect;
         finalizedDraft.contentBounds = baseline.before.contentBounds;
     }
-    if (!sameDraftContent(finalizedDraft, baseline.before)) {
+    const bool draftChanged
+        = !sameDraftContent(finalizedDraft, baseline.before);
+    if (draftChanged) {
         applyUnicodeFontFallback(finalizedDraft);
+        if (finalizedDraft.candidate.kind == QLatin1String("freeText")) {
+            finalizedDraft.candidate.commentModifiedDate
+                = QDateTime::currentDateTime();
+        }
     }
     updateSelectedDraft(finalizedDraft);
     resetFrameResizeState();
@@ -5340,6 +5480,9 @@ void PDFEditController::finishSelectedTextEdit()
             setSelection(nullptr);
         }
         emit pageDataChanged(command.page);
+        if (isCommentCandidateKind(command.before.candidate.kind)) {
+            emit commentsChanged();
+        }
     }
     requestDraftRender(command.page, true);
     const bool changed = command.hadBefore != command.hadAfter
@@ -5381,7 +5524,6 @@ void PDFEditController::commitSelectedText(const QString &text)
         }
         return;
     }
-
     if (m_textEditActive) {
         updateSelectedTextPreview(text);
         finishSelectedTextEdit();
@@ -5502,6 +5644,11 @@ bool PDFEditController::removeCommentCandidate(const Candidate &candidate)
     if (!isCommentCandidateKind(candidate.kind)
         || candidate.page < 0
         || candidate.objectId.isEmpty()) {
+        return false;
+    }
+    if (candidate.commentTextReadOnly) {
+        //% "This comment is read-only."
+        emit statusMessage(qtTrId("ReadOnlyCommentCannotBeEdited"));
         return false;
     }
     if (!candidate.added) {
@@ -6470,6 +6617,7 @@ PDFEditController::CandidateScanRequest PDFEditController::candidateScanRequest(
     request.sourcePage = m_document->sourcePageIndex(page);
     request.pageSize = m_document->pageSize(page);
     request.editingAllowed = documentAllowsEditing();
+    request.annotationsAllowed = documentAllowsAnnotations();
     request.bundledFontFamilies = ApplicationFonts::bundledFontFamilies();
     request.systemFontFamilies = ApplicationFonts::systemFontFamilies();
     // A fixed per-scan budget keeps peak memory bounded while still allowing a
@@ -7190,7 +7338,8 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             || subtype == FPDF_ANNOT_SQUIGGLY
             || subtype == FPDF_ANNOT_STRIKEOUT;
         const bool stickyNoteSubtype = subtype == FPDF_ANNOT_TEXT;
-        if (textMarkupSubtype || stickyNoteSubtype) {
+        const bool freeTextSubtype = subtype == FPDF_ANNOT_FREETEXT;
+        if (textMarkupSubtype || stickyNoteSubtype || freeTextSubtype) {
             QVector<QRectF> annotationRects;
             if (textMarkupSubtype) {
                 const size_t quadCount
@@ -7340,6 +7489,14 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 defaultColor = QColor::fromRgb(red, green, blue, alpha);
             }
             candidate.highlightColor = defaultColor;
+            if (freeTextSubtype) {
+                candidate.fontFamily = QStringLiteral("Helvetica");
+                candidate.fontSizeRatio = qMin<qreal>(
+                    1.0,
+                    kFreeTextFontSizePoints / pageSize.height());
+                candidate.displayFontSizeRatio = candidate.fontSizeRatio;
+                candidate.color = QColor(32, 33, 36);
+            }
 
             switch (subtype) {
             case FPDF_ANNOT_UNDERLINE:
@@ -7362,6 +7519,11 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 //% "Sticky Note"
                 candidate.label = qtTrId("StickyNote");
                 break;
+            case FPDF_ANNOT_FREETEXT:
+                candidate.kind = QStringLiteral("freeText");
+                //% "Free text annotation"
+                candidate.label = qtTrId("FreeTextAnnotation");
+                break;
             default:
                 candidate.kind = QStringLiteral("highlight");
                 //% "Highlight"
@@ -7375,6 +7537,9 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             if (candidate.commentTextReadOnly) {
                 //% "This comment is read-only."
                 candidate.reason = qtTrId("ReadOnlyCommentCannotBeEdited");
+            } else if (freeTextSubtype && !request.annotationsAllowed) {
+                //% "This PDF does not permit changing annotations."
+                candidate.reason = qtTrId("PdfAnnotationsNotPermitted");
             } else {
                 //% "Edit the comment text in the Comments panel. Moving or resizing existing comments is not available."
                 candidate.reason = qtTrId(
@@ -7385,7 +7550,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             continue;
         }
 
-        if (subtype != FPDF_ANNOT_FREETEXT && subtype != FPDF_ANNOT_WIDGET) {
+        if (subtype != FPDF_ANNOT_WIDGET) {
             FPDFPage_CloseAnnot(annotation);
             continue;
         }
@@ -7419,18 +7584,11 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
         candidate.editable = false;
         candidate.limited = true;
 
-        if (subtype == FPDF_ANNOT_FREETEXT) {
-            candidate.kind = QStringLiteral("freeText");
-            //% "Free text annotation"
-            candidate.label = qtTrId("FreeTextAnnotation");
-            candidate.text = annotationString(annotation, "Contents");
-        } else {
-            candidate.kind = QStringLiteral("widget");
-            candidate.sourceWidgetId = annotationString(annotation, "NM");
-            //% "Form field"
-            candidate.label = qtTrId("FormField");
-            candidate.text = annotationString(annotation, "V");
-        }
+        candidate.kind = QStringLiteral("widget");
+        candidate.sourceWidgetId = annotationString(annotation, "NM");
+        //% "Form field"
+        candidate.label = qtTrId("FormField");
+        candidate.text = annotationString(annotation, "V");
 
         if (!request.editingAllowed) {
             //% "This PDF does not permit content editing."
@@ -8650,7 +8808,13 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
     }
 
     Draft normalizedDraft = draft;
+    const QDateTime commentModifiedDate
+        = normalizedDraft.candidate.commentModifiedDate;
     normalizedDraft.candidate = m_selectedCandidate;
+    if (commentModifiedDate.isValid()) {
+        normalizedDraft.candidate.commentModifiedDate
+            = commentModifiedDate;
+    }
     if (m_textEditActive && m_textEditDisplayDraftActive) {
         m_textEditDisplayDraft = normalizedDraft;
     }
@@ -8660,6 +8824,8 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
     const bool matchesOriginal
         = m_selectedCandidate.kind != QLatin1String("addedImage")
         && !isShapeCandidateKind(m_selectedCandidate.kind)
+        && !(m_selectedCandidate.added
+             && m_selectedCandidate.kind == QLatin1String("freeText"))
         && sameDraftContent(normalizedDraft, originalDraft);
     bool changed = false;
     if (matchesOriginal) {

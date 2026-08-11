@@ -91,6 +91,27 @@ Item {
         session.formDesignerController.clearTextFieldSelection()
     }
 
+    onCommentsPanelVisibleChanged: {
+        if (commentsPanelVisible
+                && commentTabActive
+                && session.editController.tool
+                    === PDFEditController.FreeTextTool) {
+            session.panelCollapsed = false
+        }
+    }
+
+    Connections {
+        target: root.session.editController
+
+        function onToolChanged() {
+            if (root.commentTabActive
+                    && root.session.editController.tool
+                        === PDFEditController.FreeTextTool) {
+                root.session.panelCollapsed = false
+            }
+        }
+    }
+
     onTextFieldOptionsPanelActiveChanged: {
         if (textFieldOptionsPanelActive)
             session.panelCollapsed = false
