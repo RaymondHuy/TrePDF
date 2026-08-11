@@ -18,8 +18,8 @@ Current features:
 - Open multiple local PDF files in independent tabs and close them separately.
 - Insert a blank page immediately after the current page or delete the current
   page, with undo/redo/discard and Save/Save As persistence.
-- Add Sticky Note, Highlight, Squiggly, Underline, and Strikeout annotations
-  from the Comment tab. New comments are undoable session drafts; supported
+- Add Sticky Note, Free Text, Highlight, Squiggly, Underline, and Strikeout
+  annotations from the Comment tab. New comments are undoable session drafts; supported
   source comments can be indexed, selected, edited, and deleted with
   undo/redo/discard. Save/Save As persists additions, content edits, and
   removals without rewriting page content streams on annotation-only pages.
@@ -37,6 +37,10 @@ Current features:
   text-character safety cap do not cache partial glyph geometry and therefore
   do not support Squiggly. Highlight, Underline, and Strikeout remain
   free-rectangle markup tools.
+  Free Text accepts a click or drag to place a bounded text box. Its contents
+  are edited through the comments panel and remain semantic `/Contents` text;
+  Save writes a standard `/FreeText` annotation with a wrapped Unicode-safe
+  appearance instead of converting it into page-content text.
   The comments panel shows each annotation's author and modification date,
   falling back to its creation date. Root comments accept replies; the panel
   flattens imported reply chains to one display level, saves new replies with
@@ -406,13 +410,15 @@ clipped or elided unintentionally.
   embedded font programs to glyphs used by new text objects while leaving
   original PDF font resources unchanged. Commit only after PDFium succeeds;
   any earlier error must leave the destination and in-memory drafts untouched.
-- Persist Highlight, Squiggly, Underline, and Strikeout drafts as their matching
-  `FPDF_ANNOT_*` annotations with explicit quad points, bounding rectangles,
+- Persist Highlight, Squiggly, Underline, Strikeout, and Free Text drafts as
+  their matching `FPDF_ANNOT_*` annotations with explicit quad points, bounding rectangles,
   color/opacity, and the Print flag. Adding annotations alone must not call
   `FPDFPage_GenerateContent()`; mixed text/image edits still regenerate the
   affected page content normally. A Squiggly selection carries snapped
   rectangle/QuadPoints entries grouped by matched text line; the other tools keep
-  the free rectangle drawn by the user.
+  the free rectangle drawn by the user. Free Text must keep `/Contents`, `/DA`,
+  comment metadata, and a wrapped Unicode-capable `/AP`; editing a source Free
+  Text annotation must replace its stale appearance.
 - Persist added shapes as top-level PDF path objects. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain

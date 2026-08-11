@@ -172,8 +172,8 @@ ghi Save; mọi thay đổi vẫn là draft.
 **Vai trò:** command surface cho PDF comment/markup, nằm ngay sau tab Edit.
 
 - Khi tab mở, `AppRibbon` bật `PDFEditController.HighlightTool`; người dùng có
-  thể chuyển sang Sticky Note, Squiggly, Underline hoặc Strikeout mà không bật
-  form design mode.
+  thể chuyển sang Sticky Note, Free Text, Squiggly, Underline hoặc Strikeout mà
+  không bật form design mode.
 - Highlight và Squiggly là split button: phần chính dùng màu hiện tại, menu có
   bảng màu marker curated và system color picker cùng kiểu. Squiggly dùng palette
   RGB đậm và opacity cao hơn để nét lượn sóng mảnh vẫn rõ. Mỗi tool giữ màu riêng
@@ -189,7 +189,8 @@ ghi Save; mọi thay đổi vẫn là draft.
   annotation; hiện glyph phải ngang/upright, còn page không có text layer khả
   dụng hoặc vượt safety cap 50.000 ký tự không hỗ trợ Squiggly. Highlight,
   Underline và Strikeout vẫn dùng free rectangle hiện tại. Sticky Note đặt bằng
-  một lần bấm và mở nội dung trong panel bên phải.
+  một lần bấm. Free Text nhận click hoặc drag để tạo hộp chữ; cả hai chỉnh nội
+  dung trong panel bên phải. Chọn Free Text cũng mở panel nếu panel đang đóng.
 - Nhóm Manage bật/tắt danh sách, chọn bình luận trước/sau và xóa comment đang
   chọn; nhóm History dùng chung undo/redo của `PDFEditController`.
 - Undo/Redo dùng chung history của `PDFEditController` và điều hướng tới trang
@@ -198,16 +199,17 @@ ghi Save; mọi thay đổi vẫn là draft.
 ### [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml)
 
 **Vai trò:** panel bên phải cho danh sách comment toàn tài liệu, nội dung Sticky
-Note đang chọn và phản hồi một cấp.
+Note/Free Text đang chọn và phản hồi một cấp.
 
 - Khi được load, panel yêu cầu controller chạy annotation-only index tuần tự ở
   nền cho mọi source page; kết quả không phụ thuộc cache candidate 12 trang của
   viewport và tự hủy khi document/revision đổi.
 - Hiển thị loại, trang, màu, nội dung rút gọn và trạng thái draft; chọn item sẽ
   chuyển về Select, chọn candidate tương ứng và điều hướng tới trang đó.
-- Comment được hỗ trợ, gồm Sticky Note, text markup và reply có sẵn trong PDF,
-  dùng `TextArea` để sửa `/Contents`; nội dung được buffer theo `page + objectId`
-  và commit khi mất focus, thu gọn panel, đổi session hoặc thực hiện Save.
+- Comment được hỗ trợ, gồm Sticky Note, Free Text, text markup và reply có sẵn
+  trong PDF, dùng `TextArea` để sửa `/Contents`; nội dung được buffer theo
+  `page + objectId` và commit khi mất focus, thu gọn panel, đổi session hoặc
+  thực hiện Save.
 - Hai editor có bộ đếm trực tiếp và soft-limit 700 UTF-16 code unit. Nội dung có
   thể tạm vượt giới hạn để không phá IME/undo, nhưng Gửi, commit và Save bị chặn
   cho tới khi người dùng rút gọn về 700 hoặc ít hơn.
@@ -366,8 +368,9 @@ data/candidate/history/selection đổi.
   kích thước trang.
 - Quản lý con trỏ Select/Add Text bằng SVG và fallback cursor; ẩn cursor khi
   pooled, ngoài trang hoặc tool không phù hợp.
-- Các công cụ draw shape/text-markup giữ start/current point tạm thời, validate
-  gesture rồi mới tạo một draft command.
+- Các công cụ draw shape/text-markup/Free Text giữ start/current point tạm thời,
+  validate gesture rồi mới tạo một draft command. Click Free Text dùng kích
+  thước mặc định; drag dùng rectangle đã clamp trong trang.
 
 **Text rich-edit:**
 
@@ -383,9 +386,12 @@ data/candidate/history/selection đổi.
 
 **Draft presentation:**
 
-- Mask source rect khỏi texture sạch khi cần, rồi vẽ text/image/shape/text-markup
-  draft lên trên. Nếu render worker đã trả texture draft đúng revision, component
-  tránh chồng preview không cần thiết.
+- Mask source rect khỏi texture sạch khi cần, rồi vẽ
+  text/image/shape/text-markup/Free Text draft lên trên. Free Text dùng hộp nền
+  trắng, viền đen và text wrap khớp appearance lưu. FreeText nguồn không đổi giữ
+  appearance gốc; khi sửa nội dung, draft được preview bằng style hộp mặc định
+  này. Nếu render worker đã trả texture draft đúng revision, component tránh
+  chồng preview không cần thiết.
 - `DraftImageView` vẽ pixel snapshot của ảnh thêm mới; `ShapeDraftView` vẽ vector.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
 - Drag text/image/shape giữ preview trong QML nhưng chỉ commit geometry một lần

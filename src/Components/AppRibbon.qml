@@ -62,6 +62,7 @@ Column {
             || tool === PDFEditController.UnderlineTool
             || tool === PDFEditController.SquigglyTool
             || tool === PDFEditController.StrikeoutTool
+            || tool === PDFEditController.FreeTextTool
             || tool === PDFEditController.StickyNoteTool
     }
 

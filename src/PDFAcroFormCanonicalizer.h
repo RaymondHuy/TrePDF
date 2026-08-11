@@ -44,11 +44,22 @@ public:
         QString replyId;
     };
 
+    struct FreeTextAnnotation {
+        int page = -1;
+        QString annotationId;
+        QString text;
+        bool preserveDefaultAppearance = false;
+    };
+
     static bool finalizeFields(const QString &filePath,
                                const QVector<Field> &fields,
                                QString &error);
     static bool finalizeAnnotationReplies(
         const QString &filePath,
         const QVector<AnnotationReply> &replies,
+        QString &error);
+    static bool finalizeFreeTextAnnotations(
+        const QString &filePath,
+        const QVector<FreeTextAnnotation> &annotations,
         QString &error);
 };

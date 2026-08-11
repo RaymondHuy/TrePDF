@@ -1383,6 +1383,61 @@ bool createProtectedCommentTextPdf(const QString &filePath)
         });
 }
 
+bool createProtectedFreeTextPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /Helv 6 0 R >> >> "
+                "/Annots [4 0 R 5 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /FreeText /P 3 0 R "
+                "/Rect [20 120 90 160] /Contents (Read-only free text) "
+                "/DA (/Helv 12 Tf 0 g) /NM (read-only-free-text) /F 64 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /FreeText /P 3 0 R "
+                "/Rect [105 120 180 160] /Contents (Locked free text) "
+                "/DA (/Helv 12 Tf 0 g) /NM (locked-free-text) /F 512 >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+                "/Encoding /WinAnsiEncoding >>"),
+        });
+}
+
+bool createPageLocalDuplicateFreeTextNamesPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray(
+                "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /Helv 7 0 R >> >> "
+                "/Annots [5 0 R] >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /Helv 7 0 R >> >> "
+                "/Annots [6 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /FreeText /P 3 0 R "
+                "/Rect [20 120 180 170] /Contents (Page zero text) "
+                "/DA (/Helv 12 Tf 0 g) /NM (page-local-name) /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /FreeText /P 4 0 R "
+                "/Rect [20 120 180 170] /Contents (Page one text) "
+                "/DA (/Helv 12 Tf 0 g) /NM (page-local-name) /F 4 >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+                "/Encoding /WinAnsiEncoding >>"),
+        });
+}
+
 bool createNestedCommentRepliesPdf(const QString &filePath)
 {
     return writePdfObjects(
@@ -2631,6 +2686,8 @@ struct CommentAnnotationInspection {
     QString author;
     QString creationDate;
     QString modificationDate;
+    QString defaultAppearance;
+    int flags = 0;
     bool hasAppearance = false;
     QString appearance;
     int popupIndex = -1;
@@ -2692,6 +2749,10 @@ CommentAnnotationInspection inspectCommentAnnotation(
             inspection.modificationDate = annotationDictionaryString(
                 annotation,
                 "M");
+            inspection.defaultAppearance = annotationDictionaryString(
+                annotation,
+                "DA");
+            inspection.flags = FPDFAnnot_GetFlags(annotation);
             inspection.hasAppearance = FPDFAnnot_HasKey(
                 annotation,
                 "AP");
@@ -3846,12 +3907,14 @@ private slots:
     void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete_data();
     void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete();
     void addsStickyNoteWithPanelModelAndUndo();
+    void addsFreeTextWithPanelModelAndUndo();
     void addsCommentReplyWithOneLevelModelAndUndo();
     void editsSourceStickyNoteComment();
     void editsSourceTextMarkupComment_data();
     void editsSourceTextMarkupComment();
     void editsSourceReplyComment();
     void rejectsEditingProtectedSourceComments();
+    void protectsSourceFreeTextComments();
     void enforcesCommentTextLengthLimit();
     void flattensNestedSourceCommentReplies();
     void hidesCommentRepliesFromViewer();
@@ -3864,6 +3927,8 @@ private slots:
     void savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip_data();
     void savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip();
     void savesStickyNoteRoundTrip();
+    void savesAndEditsFreeTextRoundTrip();
+    void savesFreeTextWithPageLocalDuplicateNames();
     void savesCommentReplyRoundTrip();
     void keepsStickyNoteNamesUniqueAcrossReopen();
     void keepsMarkupReplyIdsUniqueAcrossReopen();
@@ -12832,6 +12897,80 @@ void PDFEditControllerTest::addsStickyNoteWithPanelModelAndUndo()
     QCOMPARE(controller.commentItems().size(), 1);
 }
 
+void PDFEditControllerTest::addsFreeTextWithPanelModelAndUndo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("add-free-text-source.pdf"));
+    QVERIFY(createDifferentPageSizesPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::FreeTextTool);
+
+    const QRectF placement(0.12, 0.16, 0.32, 0.12);
+    const QVariantMap freeText = controller.addFreeText(0, placement);
+    QVERIFY(!freeText.isEmpty());
+    QCOMPARE(
+        freeText.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("freeText"));
+    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    const QString objectId = freeText
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(!objectId.isEmpty());
+    QCOMPARE(controller.selectedPage(), 0);
+    QCOMPARE(controller.selectedObjectId(), objectId);
+    QCOMPARE(controller.commentItems().size(), 1);
+
+    const QVariantMap initialItem = controller.commentItems()
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        initialItem.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("freeText"));
+    QVERIFY(initialItem
+        .value(QStringLiteral("commentTextEditable"))
+        .toBool());
+    QVERIFY(initialItem
+        .value(QStringLiteral("commentCreationDate"))
+        .toDateTime()
+        .isValid());
+
+    const QString commentText
+        = QStringLiteral("Nội dung Free Text có dấu tiếng Việt.");
+    QVERIFY(controller.setCommentText(0, objectId, commentText));
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        commentText);
+    QVERIFY(controller.hasDrafts());
+
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        QString());
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(controller.commentItems().isEmpty());
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.commentItems().size(), 1);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        commentText);
+
+    QVERIFY(controller.removeComment(0, objectId));
+    QVERIFY(controller.commentItems().isEmpty());
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.commentItems().size(), 1);
+    controller.discardDrafts();
+    QVERIFY(controller.commentItems().isEmpty());
+    QVERIFY(!controller.hasDrafts());
+}
+
 void PDFEditControllerTest::addsCommentReplyWithOneLevelModelAndUndo()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -13334,6 +13473,46 @@ void PDFEditControllerTest::rejectsEditingProtectedSourceComments()
     }
 
     QCOMPARE(controller.commentItems(), comments);
+}
+
+void PDFEditControllerTest::protectsSourceFreeTextComments()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("protected-source-free-text.pdf"));
+    QVERIFY(createProtectedFreeTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+
+    const QVariantList comments = controller.commentItems();
+    for (const QVariant &commentValue : comments) {
+        const QVariantMap comment = commentValue.toMap();
+        QCOMPARE(
+            comment.value(QStringLiteral("kind")).toString(),
+            QStringLiteral("freeText"));
+        QVERIFY(!comment.value(QStringLiteral("editable")).toBool());
+        QVERIFY(!comment
+            .value(QStringLiteral("commentTextEditable"))
+            .toBool());
+        const int page = comment.value(QStringLiteral("page")).toInt();
+        const QString objectId = comment
+            .value(QStringLiteral("objectId"))
+            .toString();
+        QVERIFY(!controller.setCommentText(
+            page,
+            objectId,
+            QStringLiteral("Rejected Free Text edit")));
+        QVERIFY(!controller.removeComment(page, objectId));
+    }
+
+    QCOMPARE(controller.commentItems(), comments);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
 }
 
 void PDFEditControllerTest::enforcesCommentTextLengthLimit()
@@ -14216,6 +14395,243 @@ void PDFEditControllerTest::savesStickyNoteRoundTrip()
     QVERIFY(controller.commentItems().constFirst().toMap()
         .value(QStringLiteral("commentTextEditable")).toBool());
     QCOMPARE(controller.commentItems().size(), 1);
+}
+
+void PDFEditControllerTest::savesAndEditsFreeTextRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-free-text-source.pdf"));
+    const QString firstOutputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-free-text-first-output.pdf"));
+    const QString secondOutputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-free-text-second-output.pdf"));
+    QVERIFY(createDifferentPageSizesPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QSizeF pageSize = document.pageSize(0);
+    const QRectF placement(0.12, 0.14, 0.28, 0.15);
+    const QString firstText = QStringLiteral(
+        "Tiếng Việt có dấu phải hiển thị đầy đủ và tự động xuống dòng "
+        "bên trong hộp Free Text hẹp.");
+
+    controller.setTool(PDFEditController::FreeTextTool);
+    const QVariantMap added = controller.addFreeText(0, placement);
+    QVERIFY(!added.isEmpty());
+    const QString objectId = added
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QString author = added
+        .value(QStringLiteral("commentAuthor"))
+        .toString();
+    QVERIFY(!objectId.isEmpty());
+    QVERIFY(!author.isEmpty());
+    QVERIFY(controller.setCommentText(0, objectId, firstText));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(firstOutputPath)));
+    QVERIFY(!controller.hasDrafts());
+
+    const CommentAnnotationInspection firstInspection
+        = inspectCommentAnnotation(firstOutputPath, objectId);
+    QVERIFY(firstInspection.readable);
+    QCOMPARE(firstInspection.annotationCount, 1);
+    QCOMPARE(firstInspection.subtype, FPDF_ANNOT_FREETEXT);
+    QCOMPARE(firstInspection.contents, firstText);
+    QCOMPARE(firstInspection.author, author);
+    QVERIFY(!firstInspection.creationDate.isEmpty());
+    QVERIFY(!firstInspection.modificationDate.isEmpty());
+    QVERIFY(firstInspection.flags & FPDF_ANNOT_FLAG_PRINT);
+    QVERIFY(!firstInspection.defaultAppearance.isEmpty());
+    QVERIFY(firstInspection.hasAppearance);
+
+    const auto closeEnough = [](qreal actual, qreal expected) {
+        return qAbs(actual - expected) < 0.05;
+    };
+    QVERIFY(closeEnough(
+        firstInspection.rect.left,
+        placement.left() * pageSize.width()));
+    QVERIFY(closeEnough(
+        firstInspection.rect.right,
+        placement.right() * pageSize.width()));
+    QVERIFY(closeEnough(
+        firstInspection.rect.top,
+        (1.0 - placement.top()) * pageSize.height()));
+    QVERIFY(closeEnough(
+        firstInspection.rect.bottom,
+        (1.0 - placement.bottom()) * pageSize.height()));
+
+    const QSize renderSize(
+        qRound(pageSize.width()),
+        qRound(pageSize.height()));
+    const QImage sourceWithoutAnnotations = renderFirstPage(
+        sourcePath,
+        renderSize);
+    const QImage firstWithoutAnnotations = renderFirstPage(
+        firstOutputPath,
+        renderSize);
+    const QImage firstWithAnnotations = renderFirstPage(
+        firstOutputPath,
+        renderSize,
+        FPDF_ANNOT);
+    QCOMPARE(
+        changedPixelCount(
+            sourceWithoutAnnotations,
+            firstWithoutAnnotations,
+            sourceWithoutAnnotations.rect()),
+        0);
+    const QRect placementPixels(
+        qRound(placement.x() * renderSize.width()),
+        qRound(placement.y() * renderSize.height()),
+        qRound(placement.width() * renderSize.width()),
+        qRound(placement.height() * renderSize.height()));
+    const QRect textInterior = placementPixels.adjusted(6, 6, -6, -6);
+    const QRect firstTextBounds = darkChangedPixelBounds(
+        firstWithoutAnnotations,
+        firstWithAnnotations,
+        textInterior);
+    QVERIFY2(
+        !firstTextBounds.isEmpty(),
+        "The Free Text appearance did not render Vietnamese glyphs.");
+    QVERIFY2(
+        firstTextBounds.height() > 20,
+        "The narrow Free Text appearance did not wrap onto multiple lines.");
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+    const QVariantMap rehydrated = controller.commentItems()
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        rehydrated.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("freeText"));
+    QCOMPARE(
+        rehydrated.value(QStringLiteral("text")).toString(),
+        firstText);
+    QVERIFY(rehydrated
+        .value(QStringLiteral("commentTextEditable"))
+        .toBool());
+    const QString rehydratedObjectId = rehydrated
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(!rehydratedObjectId.isEmpty());
+
+    const QString secondText = QStringLiteral(
+        "Nội dung Free Text đã được chỉnh sửa sau khi mở lại.");
+    QVERIFY(controller.setCommentText(
+        0,
+        rehydratedObjectId,
+        secondText));
+    const QString replyText = QStringLiteral(
+        "Phản hồi cho bình luận Free Text.");
+    const QVariantMap reply = controller.addCommentReply(
+        0,
+        rehydratedObjectId,
+        replyText);
+    QVERIFY(!reply.isEmpty());
+    const QString replyId = reply
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(!replyId.isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(secondOutputPath)));
+    QVERIFY(!controller.hasDrafts());
+
+    const CommentAnnotationInspection preservedFirst
+        = inspectCommentAnnotation(firstOutputPath, objectId);
+    QCOMPARE(preservedFirst.contents, firstText);
+    const CommentAnnotationInspection secondInspection
+        = inspectCommentAnnotation(secondOutputPath, objectId);
+    QVERIFY(secondInspection.readable);
+    QCOMPARE(secondInspection.subtype, FPDF_ANNOT_FREETEXT);
+    QCOMPARE(secondInspection.contents, secondText);
+    QVERIFY(secondInspection.hasAppearance);
+    QVERIFY(!secondInspection.modificationDate.isEmpty());
+    const CommentAnnotationInspection replyInspection
+        = inspectCommentAnnotation(secondOutputPath, replyId);
+    QVERIFY(replyInspection.readable);
+    QCOMPARE(replyInspection.subtype, FPDF_ANNOT_TEXT);
+    QCOMPARE(replyInspection.contents, replyText);
+    QCOMPARE(replyInspection.parentName, objectId);
+    QCOMPARE(replyInspection.relation, QStringLiteral("R"));
+
+    const QImage secondWithAnnotations = renderFirstPage(
+        secondOutputPath,
+        renderSize,
+        FPDF_ANNOT);
+    QVERIFY(
+        changedPixelCount(
+            firstWithAnnotations,
+            secondWithAnnotations,
+            placementPixels) > 0);
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+    QVariantMap rehydratedRoot;
+    for (const QVariant &commentValue : controller.commentItems()) {
+        const QVariantMap comment = commentValue.toMap();
+        if (comment.value(QStringLiteral("kind")).toString()
+                == QLatin1String("freeText")
+            && !comment.value(QStringLiteral("isReply")).toBool()) {
+            rehydratedRoot = comment;
+            break;
+        }
+    }
+    QVERIFY(!rehydratedRoot.isEmpty());
+    QCOMPARE(
+        rehydratedRoot.value(QStringLiteral("text")).toString(),
+        secondText);
+}
+
+void PDFEditControllerTest::savesFreeTextWithPageLocalDuplicateNames()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("duplicate-free-text-names-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("duplicate-free-text-names-output.pdf"));
+    QVERIFY(createPageLocalDuplicateFreeTextNamesPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+
+    QVariantMap secondPageComment;
+    for (const QVariant &commentValue : controller.commentItems()) {
+        const QVariantMap comment = commentValue.toMap();
+        QCOMPARE(
+            comment.value(QStringLiteral("kind")).toString(),
+            QStringLiteral("freeText"));
+        if (comment.value(QStringLiteral("page")).toInt() == 1) {
+            secondPageComment = comment;
+        }
+    }
+    QVERIFY(!secondPageComment.isEmpty());
+    const QString replacement = QStringLiteral(
+        "Nội dung chỉ được thay trên trang thứ hai.");
+    QVERIFY(controller.setCommentText(
+        1,
+        secondPageComment.value(QStringLiteral("objectId")).toString(),
+        replacement));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    const CommentAnnotationInspection firstPage
+        = inspectCommentAnnotation(
+            outputPath,
+            QStringLiteral("page-local-name"),
+            0);
+    const CommentAnnotationInspection secondPage
+        = inspectCommentAnnotation(
+            outputPath,
+            QStringLiteral("page-local-name"),
+            1);
+    QVERIFY(firstPage.readable);
+    QVERIFY(secondPage.readable);
+    QCOMPARE(firstPage.contents, QStringLiteral("Page zero text"));
+    QCOMPARE(secondPage.contents, replacement);
+    QVERIFY(!firstPage.hasAppearance);
+    QVERIFY(secondPage.hasAppearance);
 }
 
 void PDFEditControllerTest::savesCommentReplyRoundTrip()

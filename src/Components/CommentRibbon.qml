@@ -115,6 +115,7 @@ Flickable {
             || kind === "underline"
             || kind === "squiggly"
             || kind === "strikeout"
+            || kind === "freeText"
     }
 
     onDocumentChanged: closeColorPickers()
@@ -315,6 +316,26 @@ Flickable {
                 onClicked: {
                     root.editController.tool
                         = PDFEditController.StickyNoteTool
+                }
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Free Text"
+                text: qsTrId("FreeText")
+                //% "Add a free-text comment"
+                toolTipText: qsTrId("AddFreeTextComment")
+                iconSource: "../assets/icons/type.svg"
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.FreeTextTool
+                onClicked: {
+                    if (!root.commentsPanelVisible)
+                        root.commentsPanelToggleRequested()
+                    root.editController.tool
+                        = PDFEditController.FreeTextTool
                 }
             }
         }

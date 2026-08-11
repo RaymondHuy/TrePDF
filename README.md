@@ -66,9 +66,9 @@ PDF. Compatible text objects on the same visual line are grouped into one
 editable candidate while retaining every source object path for draft rendering
 and persistence.
 
-The Comment ribbon provides Sticky Note, Highlight, Squiggly, Underline, and
-Strikeout tools plus a collapsible, whole-document comments panel. Supported
-comments and replies, including annotations already in the PDF, can be selected
+The Comment ribbon provides Sticky Note, Free Text, Highlight, Squiggly,
+Underline, and Strikeout tools plus a collapsible, whole-document comments
+panel. Supported comments and replies, including annotations already in the PDF, can be selected
 and have their text edited in the panel. Markup uses a compact curated color
 grid and a system picker for custom colors. Squiggly is source-text-aware: its
 drag rectangle is intersected with non-whitespace glyphs from the PDF text
@@ -86,7 +86,10 @@ geometry accepts upright horizontal glyphs only; rotated or vertical glyphs
 remain unsupported until oriented QuadPoints are implemented. Pages with more
 than 50,000 text-layer characters skip the per-glyph cache for memory safety and
 do not support Squiggly. Highlight, Underline, and Strikeout keep their existing
-free-rectangle behavior. Root comments can receive replies;
+free-rectangle behavior. Free Text places a bounded text box by click or drag;
+its text is edited in the comments panel and is saved as a standard
+`/FreeText` annotation with semantic `/Contents` plus a wrapped,
+Unicode-capable appearance. Root comments can receive replies;
 each root has a dropdown control that expands its replies at one visual level,
 and reply-to-reply is not offered. Reply annotations remain available in this
 panel but their standalone appearances are hidden from the PDF page viewer.
@@ -99,9 +102,11 @@ the panel showing a live counter before commit. Existing supported annotations
 are rehydrated for navigation and display, including their author and
 modification date (or
 creation date when no modification date is present). Editing updates the source
-annotation's `/Contents`, modification date, and rich-text value when present,
-while preserving its appearance, popup, thread links, geometry, and other
-metadata. Read-only and LockedContents annotations remain protected. Deleting
+annotation's `/Contents`, modification date, and rich-text value when present.
+Markup and Sticky Note appearances are preserved; an edited Free Text comment
+receives TrePDF's normalized wrapped Unicode appearance so stale text is not
+shown. Popup, thread links, geometry, and other metadata remain intact.
+Read-only and LockedContents annotations remain protected. Deleting
 a root comment also removes its replies so the saved document cannot contain
 an orphaned thread.
 

@@ -195,7 +195,7 @@ document thay đổi.
 3. Duyệt từng ký tự trong text page.
 4. Gom ký tự theo `FPDF_PAGEOBJECT`.
 5. Duyệt page object để tạo candidate nguồn.
-6. Duyệt thêm annotation FreeText và Widget.
+6. Duyệt thêm comment annotation (gồm FreeText) và Widget.
 7. Gom các candidate text tương thích thành candidate dòng.
 
 ### 4.2 Gom text layout theo ký tự
@@ -419,13 +419,19 @@ Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hi�
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
 | Image top-level | Có | Có, chỉ để xóa, nếu PDF cho phép sửa | Không mở text editor |
 | Image trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip/resource khi save |
-| FreeText annotation | Có | Không | Draft editor chưa hỗ trợ annotation |
+| FreeText annotation | Có | Không trong page `TextEdit`; `/Contents` sửa được trong CommentPanel | Là comment annotation, không phải page-content text |
 | Widget/form field | Có | Không | Draft editor chưa hỗ trợ form field |
 | Add Text do TrePDF tạo | Có | Có nếu PDF cho phép sửa | Không phải object gốc trong PDF |
 
 `renderSuppressible` vừa bảo đảm renderer có thể tạo background sạch, vừa chặn
 các render mode clipping khỏi luồng edit/save. Các mode được hỗ trợ là `FILL`,
 `STROKE` và `FILL_STROKE`.
+
+FreeText là ngoại lệ có chủ ý trong bảng: controller vẫn tạo candidate/draft để
+selection, undo/redo, comment index và Save dùng chung, nhưng QML không đưa nó
+vào rich-text editor của page content. Hộp được đặt bằng click/drag trong
+`EditOverlay`; nội dung giới hạn 700 UTF-16 code unit được sửa trong
+`CommentPanel` rồi lưu lại `/Contents`.
 
 ## 7. Các thuộc tính font và text được lấy như thế nào
 
@@ -1095,6 +1101,11 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
    đích khi toàn bộ quá trình thành công.
 7. Mở lại file đã lưu bằng `PDFDocument::open()`. Các signal đổi document/revision
    reset draft và undo/redo chỉ sau khi reopen thành công.
+
+FreeText không đi qua các bước thay page object ở trên. Writer tạo/cập nhật
+`FPDF_ANNOT_FREETEXT`, giữ geometry và metadata comment, rồi canonicalizer dựng
+appearance Unicode có wrap trong file staging. Page chỉ đổi FreeText annotation
+không gọi `FPDFPage_GenerateContent()`.
 
 Nếu bất kỳ bước nào trước commit lỗi, document đang mở, file nguồn, draft và
 lịch sử undo/redo vẫn được giữ nguyên. Save As không sửa file nguồn. Text nằm

@@ -17,6 +17,8 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -449,6 +451,11 @@ qsizetype keyPosition(const char *data,
     return -1;
 }
 
+bool matchingDictionaryEnd(const char *data,
+                           qsizetype size,
+                           qsizetype start,
+                           qsizetype &end);
+
 bool parseXref(const char *data,
                qsizetype size,
                ParsedPdf &pdf,
@@ -475,104 +482,183 @@ bool parseXref(const char *data,
         return false;
     }
 
-    Cursor cursor(data, size, static_cast<qsizetype>(startXref));
-    if (!cursor.consume("xref")) {
-        error = QStringLiteral("The intermediate PDF did not use a canonical xref table.");
-        return false;
-    }
-
     QHash<int, XrefEntry> entries;
-    while (true) {
-        cursor.skipWhitespaceAndComments();
-        const qsizetype sectionPosition = cursor.position();
-        if (cursor.consume("trailer")) {
-            break;
-        }
-
-        qint64 firstObject = -1;
-        qint64 objectCount = -1;
-        Cursor sectionCursor(data, size, sectionPosition);
-        if (!sectionCursor.integer(firstObject)
-            || !sectionCursor.integer(objectCount)
-            || firstObject < 0
-            || objectCount < 0
-            || firstObject + objectCount
-                > std::numeric_limits<int>::max()) {
-            error = QStringLiteral("The intermediate PDF has an invalid xref subsection.");
+    QSet<int> resolvedObjectNumbers;
+    QSet<qint64> visitedXrefs;
+    ObjectReference root;
+    qint64 declaredSize = -1;
+    qint64 currentXref = startXref;
+    while (currentXref >= 0) {
+        if (currentXref >= size
+            || visitedXrefs.contains(currentXref)) {
+            error = QStringLiteral(
+                "The intermediate PDF has an invalid xref chain.");
             return false;
         }
-        cursor = sectionCursor;
-        for (qint64 index = 0; index < objectCount; ++index) {
-            qint64 objectOffset = -1;
-            qint64 generation = -1;
-            if (!cursor.integer(objectOffset)
-                || !cursor.integer(generation)) {
-                error = QStringLiteral("The intermediate PDF has a truncated xref entry.");
+        visitedXrefs.insert(currentXref);
+        Cursor cursor(data, size, static_cast<qsizetype>(currentXref));
+        if (!cursor.consume("xref")) {
+            error = QStringLiteral(
+                "The intermediate PDF did not use a canonical xref table.");
+            return false;
+        }
+
+        while (true) {
+            cursor.skipWhitespaceAndComments();
+            const qsizetype sectionPosition = cursor.position();
+            if (cursor.consume("trailer")) {
+                break;
+            }
+
+            qint64 firstObject = -1;
+            qint64 objectCount = -1;
+            Cursor sectionCursor(data, size, sectionPosition);
+            if (!sectionCursor.integer(firstObject)
+                || !sectionCursor.integer(objectCount)
+                || firstObject < 0
+                || objectCount < 0
+                || firstObject + objectCount
+                    > std::numeric_limits<int>::max()) {
+                error = QStringLiteral(
+                    "The intermediate PDF has an invalid xref subsection.");
                 return false;
             }
-            const char state = cursor.nextNonWhitespace();
-            if (state != 'n' && state != 'f') {
-                error = QStringLiteral("The intermediate PDF has an invalid xref state.");
-                return false;
-            }
-            if (state == 'n') {
-                if (objectOffset < 0
-                    || objectOffset >= size
-                    || generation < 0
-                    || generation > std::numeric_limits<int>::max()) {
-                    error = QStringLiteral("The intermediate PDF has an invalid object offset.");
+            cursor = sectionCursor;
+            for (qint64 index = 0; index < objectCount; ++index) {
+                qint64 objectOffset = -1;
+                qint64 generation = -1;
+                if (!cursor.integer(objectOffset)
+                    || !cursor.integer(generation)) {
+                    error = QStringLiteral(
+                        "The intermediate PDF has a truncated xref entry.");
                     return false;
                 }
-                entries.insert(
-                    static_cast<int>(firstObject + index),
-                    XrefEntry{
-                        objectOffset,
-                        static_cast<int>(generation)});
+                const char state = cursor.nextNonWhitespace();
+                if (state != 'n' && state != 'f') {
+                    error = QStringLiteral(
+                        "The intermediate PDF has an invalid xref state.");
+                    return false;
+                }
+                const int objectNumber = static_cast<int>(
+                    firstObject + index);
+                if (resolvedObjectNumbers.contains(objectNumber)) {
+                    continue;
+                }
+                resolvedObjectNumbers.insert(objectNumber);
+                if (state == 'n') {
+                    if (objectOffset < 0
+                        || objectOffset >= size
+                        || generation < 0
+                        || generation
+                            > std::numeric_limits<int>::max()) {
+                        error = QStringLiteral(
+                            "The intermediate PDF has an invalid object offset.");
+                        return false;
+                    }
+                    entries.insert(
+                        objectNumber,
+                        XrefEntry{
+                            objectOffset,
+                            static_cast<int>(generation)});
+                }
+            }
+        }
+
+        cursor.skipWhitespaceAndComments();
+        const qsizetype trailerStart = cursor.position();
+        qsizetype trailerEnd = -1;
+        if (!matchingDictionaryEnd(
+                data,
+                size,
+                trailerStart,
+                trailerEnd)) {
+            error = QStringLiteral(
+                "The intermediate PDF has no trailer dictionary.");
+            return false;
+        }
+        const char *trailerData = data + trailerStart;
+        const qsizetype trailerSize = trailerEnd - trailerStart;
+        if (keyPosition(trailerData, trailerSize, "/Encrypt") >= 0) {
+            error = QStringLiteral(
+                "Creating fields in encrypted PDFs is not supported.");
+            return false;
+        }
+        if (keyPosition(trailerData, trailerSize, "/XRefStm") >= 0) {
+            error = QStringLiteral(
+                "Hybrid-reference PDFs are not supported by the canonicalizer.");
+            return false;
+        }
+
+        if (root.number < 0) {
+            const qsizetype rootKey = keyPosition(
+                trailerData,
+                trailerSize,
+                "/Root");
+            if (rootKey >= 0
+                && !parseReference(
+                    trailerData,
+                    trailerSize,
+                    rootKey + QByteArrayView("/Root").size(),
+                    root)) {
+                error = QStringLiteral(
+                    "The intermediate PDF has an invalid Catalog reference.");
+                return false;
+            }
+        }
+        if (declaredSize < 0) {
+            const qsizetype sizeKey = keyPosition(
+                trailerData,
+                trailerSize,
+                "/Size");
+            if (sizeKey >= 0) {
+                Cursor sizeCursor(
+                    trailerData,
+                    trailerSize,
+                    sizeKey + QByteArrayView("/Size").size());
+                if (!sizeCursor.integer(declaredSize)
+                    || declaredSize <= 0
+                    || declaredSize
+                        > std::numeric_limits<int>::max()) {
+                    error = QStringLiteral(
+                        "The intermediate PDF trailer has an invalid Size entry.");
+                    return false;
+                }
+            }
+        }
+
+        const qsizetype previousKey = keyPosition(
+            trailerData,
+            trailerSize,
+            "/Prev");
+        if (previousKey < 0) {
+            currentXref = -1;
+        } else {
+            Cursor previousCursor(
+                trailerData,
+                trailerSize,
+                previousKey + QByteArrayView("/Prev").size());
+            if (!previousCursor.integer(currentXref)
+                || currentXref < 0) {
+                error = QStringLiteral(
+                    "The intermediate PDF has an invalid Prev xref offset.");
+                return false;
             }
         }
     }
 
-    const qsizetype trailerStart = cursor.position();
-    const qsizetype trailerEnd = startXrefPosition;
-    if (trailerStart >= trailerEnd) {
-        error = QStringLiteral("The intermediate PDF has no trailer dictionary.");
+    if (root.number < 0) {
+        error = QStringLiteral(
+            "The intermediate PDF has no indirect Catalog reference.");
         return false;
     }
-    const char *trailerData = data + trailerStart;
-    const qsizetype trailerSize = trailerEnd - trailerStart;
-    if (keyPosition(trailerData, trailerSize, "/Encrypt") >= 0) {
-        error = QStringLiteral("Creating fields in encrypted PDFs is not supported.");
+    if (declaredSize <= 0) {
+        error = QStringLiteral(
+            "The intermediate PDF trailer has no Size entry.");
         return false;
     }
-
-    const qsizetype rootKey = keyPosition(trailerData, trailerSize, "/Root");
-    ObjectReference root;
-    if (rootKey < 0
-        || !parseReference(
-            trailerData,
-            trailerSize,
-            rootKey + QByteArrayView("/Root").size(),
-            root)) {
-        error = QStringLiteral("The intermediate PDF has no indirect Catalog reference.");
-        return false;
-    }
-    const qsizetype sizeKey = keyPosition(trailerData, trailerSize, "/Size");
-    qint64 declaredSize = 0;
-    if (sizeKey < 0) {
-        error = QStringLiteral("The intermediate PDF trailer has no Size entry.");
-        return false;
-    }
-    Cursor sizeCursor(
-        trailerData,
-        trailerSize,
-        sizeKey + QByteArrayView("/Size").size());
-    if (!sizeCursor.integer(declaredSize)
-        || declaredSize <= 0
-        || declaredSize > std::numeric_limits<int>::max()) {
-        error = QStringLiteral("The intermediate PDF trailer has an invalid Size entry.");
-        return false;
-    }
-    if (!entries.contains(root.number)) {
+    const auto rootEntry = entries.constFind(root.number);
+    if (rootEntry == entries.cend()
+        || rootEntry->generation != root.generation) {
         error = QStringLiteral("The intermediate PDF Catalog is missing from the xref table.");
         return false;
     }
@@ -1423,6 +1509,76 @@ QImage textFieldAppearanceImage(
             QPointF(center.x(), center.y() + arrowHalfHeight),
         }));
     }
+    painter.end();
+    return image;
+}
+
+QImage freeTextAppearanceImage(const QRectF &pageRect,
+                               const QString &text)
+{
+    constexpr qreal rasterScale = 2.0;
+    constexpr int maximumDimension = 2048;
+    constexpr qreal borderPointWidth = 1.0;
+    constexpr qreal paddingPoints = 4.0;
+    const int pixelWidth = qBound(
+        2,
+        qRound(pageRect.width() * rasterScale),
+        maximumDimension);
+    const int pixelHeight = qBound(
+        2,
+        qRound(pageRect.height() * rasterScale),
+        maximumDimension);
+    QImage image(pixelWidth, pixelHeight, QImage::Format_RGB888);
+    if (image.isNull()) {
+        return {};
+    }
+    image.fill(Qt::white);
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    const qreal pixelsPerPointX = pageRect.width() > 0.0
+        ? pixelWidth / pageRect.width()
+        : rasterScale;
+    const qreal pixelsPerPointY = pageRect.height() > 0.0
+        ? pixelHeight / pageRect.height()
+        : rasterScale;
+    const qreal borderPixelWidth = qMax(
+        1.0,
+        borderPointWidth * qMin(pixelsPerPointX, pixelsPerPointY));
+    const qreal borderInset = qMax(0.5, borderPixelWidth / 2.0);
+    painter.setPen(QPen(Qt::black, borderPixelWidth));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(QRectF(
+        borderInset,
+        borderInset,
+        pixelWidth - 2.0 * borderInset,
+        pixelHeight - 2.0 * borderInset));
+
+    QFont font(QStringLiteral("Arial"));
+    font.setPixelSize(qMax(
+        1,
+        qRound(
+            PDFFormAppearance::kTextFieldFontPointSize
+            * pixelsPerPointY)));
+    painter.setFont(font);
+    painter.setPen(QColor(32, 33, 36));
+    const qreal horizontalPadding = qMax(
+        borderPixelWidth + 1.0,
+        paddingPoints * pixelsPerPointX);
+    const qreal verticalPadding = qMax(
+        borderPixelWidth + 1.0,
+        paddingPoints * pixelsPerPointY);
+    const QRectF textRect(
+        horizontalPadding,
+        verticalPadding,
+        qMax(0.0, pixelWidth - 2.0 * horizontalPadding),
+        qMax(0.0, pixelHeight - 2.0 * verticalPadding));
+    painter.setClipRect(textRect);
+    QTextOption textOption;
+    textOption.setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    painter.drawText(textRect, text, textOption);
     painter.end();
     return image;
 }
@@ -3284,6 +3440,215 @@ bool replaceTopLevelDictionaryValue(
             + ' '
             + replacement);
     return true;
+}
+
+bool parsePdfReal(const char *data,
+                  qsizetype size,
+                  qsizetype position,
+                  qreal &value,
+                  qsizetype &end)
+{
+    Cursor cursor(data, size, position);
+    cursor.skipWhitespaceAndComments();
+    const qsizetype start = cursor.position();
+    position = start;
+    if (position < size
+        && (data[position] == '+' || data[position] == '-')) {
+        ++position;
+    }
+    bool hasDigit = false;
+    bool hasDecimalPoint = false;
+    while (position < size) {
+        const char character = data[position];
+        if (character >= '0' && character <= '9') {
+            hasDigit = true;
+            ++position;
+            continue;
+        }
+        if (character == '.' && !hasDecimalPoint) {
+            hasDecimalPoint = true;
+            ++position;
+            continue;
+        }
+        break;
+    }
+    if (!hasDigit
+        || (position < size && !isDelimiter(data[position]))) {
+        return false;
+    }
+    bool converted = false;
+    value = QByteArray(data + start, position - start).toDouble(&converted);
+    end = position;
+    return converted && std::isfinite(value);
+}
+
+bool freeTextAppearanceRect(const QByteArray &dictionary,
+                            QRectF &pageRect,
+                            QString &error)
+{
+    const qsizetype rectKey = keyPosition(
+        dictionary.constData(),
+        dictionary.size(),
+        QByteArrayView("/Rect"));
+    Cursor cursor(
+        dictionary.constData(),
+        dictionary.size(),
+        rectKey >= 0
+            ? rectKey + QByteArrayView("/Rect").size()
+            : dictionary.size());
+    if (rectKey < 0 || !cursor.consume("[")) {
+        error = QStringLiteral(
+            "A Free Text annotation Rect entry is missing or malformed.");
+        return false;
+    }
+
+    std::array<qreal, 4> coordinates{};
+    qsizetype position = cursor.position();
+    for (qreal &coordinate : coordinates) {
+        qsizetype end = -1;
+        if (!parsePdfReal(
+                dictionary.constData(),
+                dictionary.size(),
+                position,
+                coordinate,
+                end)) {
+            error = QStringLiteral(
+                "A Free Text annotation Rect entry is malformed.");
+            return false;
+        }
+        position = end;
+    }
+    Cursor closingCursor(
+        dictionary.constData(),
+        dictionary.size(),
+        position);
+    if (!closingCursor.consume("]")) {
+        error = QStringLiteral(
+            "A Free Text annotation Rect entry is malformed.");
+        return false;
+    }
+
+    const qreal width = qAbs(coordinates[2] - coordinates[0]);
+    const qreal height = qAbs(coordinates[3] - coordinates[1]);
+    if (width <= 0.0 || height <= 0.0) {
+        error = QStringLiteral(
+            "A Free Text annotation Rect entry is empty.");
+        return false;
+    }
+    pageRect = QRectF(0.0, 0.0, width, height);
+    return true;
+}
+
+bool removeTopLevelDictionaryValue(QByteArray &object,
+                                   QByteArrayView key,
+                                   QString &error)
+{
+    const qsizetype dictionaryStart = object.indexOf("<<");
+    qsizetype dictionaryEnd = -1;
+    if (dictionaryStart < 0
+        || !matchingDictionaryEnd(
+            object.constData(),
+            object.size(),
+            dictionaryStart,
+            dictionaryEnd)) {
+        error = QStringLiteral("A PDF dictionary is malformed.");
+        return false;
+    }
+
+    qsizetype position = dictionaryStart + 2;
+    while (position < dictionaryEnd - 2) {
+        Cursor cursor(object.constData(), object.size(), position);
+        cursor.skipWhitespaceAndComments();
+        const qsizetype keyStart = cursor.position();
+        if (keyStart >= dictionaryEnd - 2) {
+            break;
+        }
+        if (object.at(keyStart) != '/') {
+            error = QStringLiteral("A PDF dictionary entry is malformed.");
+            return false;
+        }
+        qsizetype keyEnd = keyStart + 1;
+        while (keyEnd < dictionaryEnd - 2
+               && !isDelimiter(object.at(keyEnd))) {
+            ++keyEnd;
+        }
+        Cursor valueCursor(object.constData(), object.size(), keyEnd);
+        valueCursor.skipWhitespaceAndComments();
+        const qsizetype valueStart = valueCursor.position();
+        qsizetype valueEnd = -1;
+        if (valueStart >= dictionaryEnd - 2
+            || !pdfValueEnd(
+                object.constData(),
+                dictionaryEnd - 2,
+                valueStart,
+                valueEnd)) {
+            error = QStringLiteral("A PDF dictionary value is malformed.");
+            return false;
+        }
+        const QByteArrayView currentKey(
+            object.constData() + keyStart,
+            keyEnd - keyStart);
+        if (currentKey == key) {
+            object.remove(keyStart, valueEnd - keyStart);
+            return true;
+        }
+        position = valueEnd;
+    }
+    return true;
+}
+
+bool updateFreeTextAppearanceDictionary(
+    QByteArray &dictionary,
+    int appearanceObjectNumber,
+    QByteArrayView fontResourceName,
+    bool preserveDefaultAppearance,
+    QString &error)
+{
+    const QByteArray appearance
+        = QByteArrayLiteral("<< /N ")
+        + QByteArray::number(appearanceObjectNumber)
+        + QByteArrayLiteral(" 0 R >>");
+    const QByteArray defaultAppearance
+        = QByteArrayLiteral("(")
+        + textFieldDefaultAppearance(fontResourceName)
+        + ')';
+    if (!replaceTopLevelDictionaryValue(
+               dictionary,
+               QByteArrayView("/AP"),
+               appearance,
+               true,
+               error)) {
+        return false;
+    }
+    if ((!preserveDefaultAppearance
+         || keyPosition(
+                dictionary.constData(),
+                dictionary.size(),
+                QByteArrayView("/DA")) < 0)
+        && !replaceTopLevelDictionaryValue(
+               dictionary,
+               QByteArrayView("/DA"),
+               defaultAppearance,
+               true,
+               error)) {
+        return false;
+    }
+    return replaceTopLevelDictionaryValue(
+            dictionary,
+            QByteArrayView("/BS"),
+            QByteArrayLiteral("<< /W 1 /S /S >>"),
+            true,
+            error)
+        && replaceTopLevelDictionaryValue(
+            dictionary,
+            QByteArrayView("/TrePDFFreeTextApVersion"),
+            QByteArrayLiteral("1"),
+            true,
+            error)
+        && removeTopLevelDictionaryValue(
+            dictionary,
+            QByteArrayView("/TrePDFFreeTextAppearanceId"),
+            error);
 }
 
 QByteArray normalizedFieldAppearanceObject(
@@ -5154,6 +5519,405 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             ObjectReference{standardFontObjectNumber, 0},
             standardFormFontObject(standardFontObjectNumber)});
     }
+    file.unmap(mapped);
+    file.close();
+    return appendIncrementalUpdate(
+        filePath,
+        root,
+        previousXref,
+        nextObjectNumber,
+        sourceEndsWithNewline,
+        std::move(incrementalObjects),
+        error);
+}
+
+bool PDFAcroFormCanonicalizer::finalizeFreeTextAnnotations(
+    const QString &filePath,
+    const QVector<FreeTextAnnotation> &annotations,
+    QString &error)
+{
+    if (annotations.isEmpty()) {
+        return true;
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0) {
+        error = file.errorString();
+        return false;
+    }
+    const qint64 fileSize = file.size();
+    uchar *mapped = file.map(0, fileSize);
+    if (!mapped) {
+        error = file.errorString();
+        return false;
+    }
+
+    ParsedPdf pdf;
+    if (!parseXref(
+            reinterpret_cast<const char *>(mapped),
+            fileSize,
+            pdf,
+            error)) {
+        file.unmap(mapped);
+        return false;
+    }
+
+    const auto fail = [&file, mapped, &error](const QString &message) {
+        error = message;
+        file.unmap(mapped);
+        return false;
+    };
+
+    QByteArray catalogObject = completeObject(
+        pdf,
+        pdf.root.number,
+        error);
+    if (catalogObject.isEmpty()) {
+        return fail(error);
+    }
+    ObjectReference sourceAcroFormReference;
+    const qsizetype acroFormKey = keyPosition(
+        catalogObject.constData(),
+        catalogObject.size(),
+        QByteArrayView("/AcroForm"));
+    bool directAcroForm = false;
+    if (acroFormKey >= 0
+        && !parseReference(
+            catalogObject.constData(),
+            catalogObject.size(),
+            acroFormKey + QByteArrayView("/AcroForm").size(),
+            sourceAcroFormReference)) {
+        directAcroForm = true;
+    }
+
+    int highestObject = 0;
+    for (auto entry = pdf.entries.cbegin(); entry != pdf.entries.cend(); ++entry) {
+        highestObject = qMax(highestObject, entry.key());
+    }
+    int nextObjectNumber = qMax(
+        pdf.declaredSize,
+        highestObject + 1);
+    const bool requiresUnicodeDefaultAppearance = std::any_of(
+        annotations.cbegin(),
+        annotations.cend(),
+        [](const FreeTextAnnotation &annotation) {
+            return !annotation.preserveDefaultAppearance;
+        });
+    const bool installUnicodeDefaultAppearance
+        = requiresUnicodeDefaultAppearance && !directAcroForm;
+    const bool hasExistingAcroForm
+        = sourceAcroFormReference.number >= 0;
+    ObjectReference acroFormReference;
+    QList<ObjectReference> fields;
+    if (installUnicodeDefaultAppearance) {
+        if (!existingFields(pdf, fields, error)) {
+            return fail(error);
+        }
+        acroFormReference = hasExistingAcroForm
+            ? sourceAcroFormReference
+            : ObjectReference{nextObjectNumber++, 0};
+    }
+
+    FormFontResource defaultFontResource;
+    defaultFontResource.name = QByteArrayLiteral("Helv");
+    if (installUnicodeDefaultAppearance) {
+        if (!findUnicodeFormFontResource(
+                pdf,
+                sourceAcroFormReference,
+                defaultFontResource,
+                error)) {
+            return fail(error);
+        }
+    }
+    struct UnicodeFontObjects {
+        int type0 = -1;
+        int descendant = -1;
+        int widths = -1;
+        int descriptor = -1;
+        int fontFile = -1;
+        int cidToGidMap = -1;
+        int toUnicode = -1;
+    } unicodeFontObjects;
+    const UnicodeFormFontTemplate *unicodeFont = nullptr;
+    if (installUnicodeDefaultAppearance
+        && defaultFontResource.reference.number < 0) {
+        unicodeFont = &unicodeFormFontTemplate();
+        if (!unicodeFont->isValid()) {
+            return fail(unicodeFont->error);
+        }
+        unicodeFontObjects.type0 = nextObjectNumber++;
+        unicodeFontObjects.descendant = nextObjectNumber++;
+        unicodeFontObjects.widths = nextObjectNumber++;
+        unicodeFontObjects.descriptor = nextObjectNumber++;
+        unicodeFontObjects.fontFile = nextObjectNumber++;
+        unicodeFontObjects.cidToGidMap = nextObjectNumber++;
+        unicodeFontObjects.toUnicode = nextObjectNumber++;
+        defaultFontResource.reference
+            = ObjectReference{unicodeFontObjects.type0, 0};
+        defaultFontResource.name
+            = QByteArrayLiteral(kUnicodeFormFontResourcePrefix)
+            + QByteArray::number(unicodeFontObjects.type0);
+    }
+
+    struct DictionaryReplacement {
+        qsizetype start = -1;
+        qsizetype end = -1;
+        QByteArray value;
+    };
+    QHash<int, QVector<DictionaryReplacement>> replacementsByContainer;
+    QHash<int, ObjectReference> containerReferences;
+    QHash<int, QByteArray> rewrittenObjects;
+    QHash<int, ObjectReference> rewrittenReferences;
+    QList<IncrementalObject> incrementalObjects;
+    incrementalObjects.reserve(annotations.size() * 3 + 10);
+    QSet<QString> annotationIds;
+
+    for (const FreeTextAnnotation &annotation : annotations) {
+        if (annotation.page < 0
+            || annotation.annotationId.isEmpty()
+            || annotation.text.size() > kMaximumTextFieldLength
+            || annotationIds.contains(annotation.annotationId)) {
+            return fail(QStringLiteral(
+                "A Free Text appearance request is invalid or duplicated."));
+        }
+        annotationIds.insert(annotation.annotationId);
+
+        const PlaceholderLocation placeholder = annotationForStringId(
+            pdf,
+            QByteArrayView("/TrePDFFreeTextAppearanceId"),
+            annotation.annotationId,
+            QByteArrayView("/FreeText"));
+        const bool located = placeholder.widget.number >= 0
+            || (placeholder.container.number >= 0
+                && placeholder.dictionaryStart >= 0
+                && placeholder.dictionaryEnd
+                    > placeholder.dictionaryStart);
+        if (!located) {
+            return fail(QStringLiteral(
+                "A Free Text annotation could not be located."));
+        }
+
+        QByteArray object;
+        QByteArray dictionary;
+        qsizetype dictionaryStart = -1;
+        qsizetype dictionaryEnd = -1;
+        if (placeholder.isDirect()) {
+            object = completeObject(
+                pdf,
+                placeholder.container.number,
+                error);
+            dictionaryStart = placeholder.dictionaryStart;
+            dictionaryEnd = placeholder.dictionaryEnd;
+        } else {
+            object = completeObject(
+                pdf,
+                placeholder.widget.number,
+                error);
+            dictionaryStart = object.indexOf("<<");
+            if (dictionaryStart >= 0
+                && !matchingDictionaryEnd(
+                    object.constData(),
+                    object.size(),
+                    dictionaryStart,
+                    dictionaryEnd)) {
+                dictionaryEnd = -1;
+            }
+        }
+        if (object.isEmpty()
+            || dictionaryStart < 0
+            || dictionaryEnd <= dictionaryStart
+            || dictionaryEnd > object.size()) {
+            return fail(error.isEmpty()
+                    ? QStringLiteral(
+                        "A Free Text annotation dictionary is malformed.")
+                    : error);
+        }
+        dictionary = object.mid(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart);
+
+        QRectF pageRect;
+        if (!freeTextAppearanceRect(dictionary, pageRect, error)) {
+            return fail(error);
+        }
+        const QImage appearanceImage = freeTextAppearanceImage(
+            pageRect,
+            annotation.text);
+        const QByteArray compressedPixels = compressedRgbPixels(
+            appearanceImage);
+        if (appearanceImage.isNull() || compressedPixels.isEmpty()) {
+            return fail(QStringLiteral(
+                "A Free Text appearance image could not be generated."));
+        }
+        if (nextObjectNumber
+            > std::numeric_limits<int>::max() - 2) {
+            return fail(QStringLiteral(
+                "The PDF has no available object number for a Free Text appearance."));
+        }
+        const int appearanceObjectNumber = nextObjectNumber++;
+        const int imageObjectNumber = nextObjectNumber++;
+        if (!updateFreeTextAppearanceDictionary(
+                dictionary,
+                appearanceObjectNumber,
+                defaultFontResource.name,
+                annotation.preserveDefaultAppearance,
+                error)) {
+            return fail(error);
+        }
+        incrementalObjects.append({
+            ObjectReference{appearanceObjectNumber, 0},
+            appearanceObject(
+                appearanceObjectNumber,
+                imageObjectNumber,
+                pageRect)});
+        incrementalObjects.append({
+            ObjectReference{imageObjectNumber, 0},
+            imageObject(
+                imageObjectNumber,
+                appearanceImage,
+                compressedPixels)});
+
+        if (placeholder.isDirect()) {
+            replacementsByContainer[placeholder.container.number].append({
+                dictionaryStart,
+                dictionaryEnd,
+                dictionary});
+            containerReferences.insert(
+                placeholder.container.number,
+                placeholder.container);
+            continue;
+        }
+        if (rewrittenObjects.contains(placeholder.widget.number)) {
+            return fail(QStringLiteral(
+                "Two Free Text requests resolved to the same annotation."));
+        }
+        object.replace(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart,
+            dictionary);
+        rewrittenObjects.insert(
+            placeholder.widget.number,
+            std::move(object));
+        rewrittenReferences.insert(
+            placeholder.widget.number,
+            placeholder.widget);
+    }
+
+    for (auto container = replacementsByContainer.begin();
+         container != replacementsByContainer.end();
+         ++container) {
+        QByteArray object = completeObject(pdf, container.key(), error);
+        if (object.isEmpty()) {
+            return fail(error);
+        }
+        std::sort(
+            container->begin(),
+            container->end(),
+            [](const DictionaryReplacement &left,
+               const DictionaryReplacement &right) {
+                return left.start > right.start;
+            });
+        qsizetype previousStart = object.size();
+        for (const DictionaryReplacement &replacement
+             : std::as_const(*container)) {
+            if (replacement.start < 0
+                || replacement.end <= replacement.start
+                || replacement.end > previousStart
+                || replacement.end > object.size()) {
+                return fail(QStringLiteral(
+                    "Overlapping Free Text annotation rewrites are not supported."));
+            }
+            object.replace(
+                replacement.start,
+                replacement.end - replacement.start,
+                replacement.value);
+            previousStart = replacement.start;
+        }
+        rewrittenObjects.insert(container.key(), std::move(object));
+        rewrittenReferences.insert(
+            container.key(),
+            containerReferences.value(container.key()));
+    }
+    for (auto rewritten = rewrittenObjects.begin();
+         rewritten != rewrittenObjects.end();
+         ++rewritten) {
+        incrementalObjects.append({
+            rewrittenReferences.value(rewritten.key()),
+            std::move(rewritten.value())});
+    }
+
+    if (installUnicodeDefaultAppearance) {
+        if (!hasExistingAcroForm) {
+            if (!replaceCatalogAcroForm(
+                    catalogObject,
+                    acroFormReference,
+                    error)) {
+                return fail(error);
+            }
+            incrementalObjects.append({
+                pdf.root,
+                std::move(catalogObject)});
+        }
+        const QByteArray acroFormObject = updatedAcroFormObject(
+            pdf,
+            fields,
+            acroFormReference,
+            defaultFontResource.reference,
+            defaultFontResource.name,
+            error);
+        if (acroFormObject.isEmpty()) {
+            return fail(error);
+        }
+        incrementalObjects.append({
+            acroFormReference,
+            acroFormObject});
+    }
+    if (unicodeFont) {
+        incrementalObjects.append({
+            ObjectReference{unicodeFontObjects.type0, 0},
+            unicodeFormFontObject(
+                unicodeFontObjects.type0,
+                unicodeFontObjects.descendant,
+                unicodeFontObjects.toUnicode)});
+        incrementalObjects.append({
+            ObjectReference{unicodeFontObjects.descendant, 0},
+            unicodeFormDescendantFontObject(
+                unicodeFontObjects.descendant,
+                unicodeFontObjects.widths,
+                unicodeFontObjects.descriptor,
+                unicodeFontObjects.cidToGidMap)});
+        incrementalObjects.append({
+            ObjectReference{unicodeFontObjects.widths, 0},
+            unicodeFormWidthsObject(
+                unicodeFontObjects.widths,
+                *unicodeFont)});
+        incrementalObjects.append({
+            ObjectReference{unicodeFontObjects.descriptor, 0},
+            unicodeFormFontDescriptorObject(
+                unicodeFontObjects.descriptor,
+                unicodeFontObjects.fontFile,
+                *unicodeFont)});
+        incrementalObjects.append({
+            ObjectReference{unicodeFontObjects.cidToGidMap, 0},
+            unicodeFormCidToGidMapObject(
+                unicodeFontObjects.cidToGidMap,
+                *unicodeFont)});
+        incrementalObjects.append({
+            ObjectReference{unicodeFontObjects.fontFile, 0},
+            unicodeFormFontFileObject(
+                unicodeFontObjects.fontFile,
+                *unicodeFont)});
+        incrementalObjects.append({
+            ObjectReference{unicodeFontObjects.toUnicode, 0},
+            unicodeFormToUnicodeObject(
+                unicodeFontObjects.toUnicode,
+                *unicodeFont)});
+    }
+
+    const bool sourceEndsWithNewline = fileSize > 0
+        && reinterpret_cast<const char *>(mapped)[fileSize - 1] == '\n';
+    const ObjectReference root = pdf.root;
+    const qint64 previousXref = pdf.startXref;
     file.unmap(mapped);
     file.close();
     return appendIncrementalUpdate(

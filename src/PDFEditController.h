@@ -101,7 +101,8 @@ public:
         UnderlineTool,
         SquigglyTool,
         StrikeoutTool,
-        StickyNoteTool
+        StickyNoteTool,
+        FreeTextTool
     };
     Q_ENUM(Tool)
 
@@ -222,6 +223,8 @@ public:
                                          const QRectF &selectionRect);
     Q_INVOKABLE QVariantMap addStickyNote(int page,
                                          const QPointF &position);
+    Q_INVOKABLE QVariantMap addFreeText(int page,
+                                       const QRectF &selectionRect);
     Q_INVOKABLE QVariantMap addCommentReply(int page,
                                             const QString &parentObjectId,
                                             const QString &text);
@@ -403,6 +406,7 @@ private:
         int sourcePage = -1;
         QSizeF pageSize;
         bool editingAllowed = false;
+        bool annotationsAllowed = false;
         QStringList bundledFontFamilies;
         QStringList systemFontFamilies;
         qsizetype maximumEmbeddedFontSnapshotBytes = 0;
