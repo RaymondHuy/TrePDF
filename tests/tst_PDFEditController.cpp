@@ -3831,7 +3831,9 @@ private slots:
     void keepsHighlightAndSquigglyColorsIndependent();
     void requiresSourceTextOnlyForSquiggly();
     void prioritizesPendingSquigglyCandidateScan();
+    void resumesNormalCandidateScanAfterPendingSquigglyPriority();
     void discardsPendingSquigglyBeforeCandidateScanCompletes();
+    void preservesTextEditorWhenPendingSquigglyCompletes();
     void remapsPendingSquigglyAcrossPageInsertionUndoRedo();
     void cancelsPendingSquigglyWhenSourcePageIsDeleted();
     void keepsSquigglyGapGroupingStableAcrossPageAspectRatios();
@@ -11809,6 +11811,90 @@ void PDFEditControllerTest::prioritizesPendingSquigglyCandidateScan()
     QCOMPARE(statusSpy.count(), 0);
 }
 
+void PDFEditControllerTest::resumesNormalCandidateScanAfterPendingSquigglyPriority()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("pending-squiggly-resumes-normal-scan-source.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
+    QSignalSpy candidatesReadySpy(
+        &controller,
+        &PDFEditController::pageCandidatesReady);
+
+    const auto holderLocked = std::make_shared<QSemaphore>();
+    const auto releaseHolder = std::make_shared<QSemaphore>();
+    QThread *holder = QThread::create([holderLocked, releaseHolder]() {
+        QElapsedTimer deadline;
+        deadline.start();
+        while (!QThread::currentThread()->isInterruptionRequested()
+               && deadline.elapsed() < 2000) {
+            PDFiumProcessLock holderLock(PDFiumProcessLock::Mode::TryLock);
+            if (holderLock.isLocked()) {
+                holderLocked->release();
+                releaseHolder->tryAcquire(1, 1000);
+                return;
+            }
+            QThread::msleep(1);
+        }
+    });
+    holder->start();
+    const bool holderStarted = holderLocked->tryAcquire(1, 1000);
+
+    QVariantList runningNormalCandidates;
+    QVariantMap pendingSquiggly;
+    QVariantList deferredNormalCandidates;
+    if (holderStarted) {
+        // Page 1 is guaranteed to remain in flight until the priority and
+        // deferred requests below have both been registered.
+        runningNormalCandidates = controller.candidatesForPage(1);
+        pendingSquiggly = controller.addHighlight(
+            0,
+            QRectF(0.01, 0.01, 0.98, 0.40));
+
+        // Request page 2 exactly once. The scheduler must defer it while page
+        // 0 preempts page 1, then resume it without another caller request.
+        deferredNormalCandidates = controller.candidatesForPage(2);
+    }
+    releaseHolder->release();
+    const bool holderFinished = holder->wait(2500);
+    if (!holderFinished) {
+        holder->requestInterruption();
+        holder->wait();
+    }
+    delete holder;
+
+    QVERIFY(holderStarted);
+    QVERIFY(holderFinished);
+    QVERIFY(runningNormalCandidates.isEmpty());
+    QVERIFY(pendingSquiggly.value(QStringLiteral("pending")).toBool());
+    QVERIFY(deferredNormalCandidates.isEmpty());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+
+    const auto readyPages = [&candidatesReadySpy]() {
+        QVector<int> pages;
+        pages.reserve(candidatesReadySpy.size());
+        for (const QList<QVariant> &arguments : candidatesReadySpy) {
+            pages.append(arguments.constFirst().toInt());
+        }
+        return pages;
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(
+        readyPages().contains(0) && readyPages().contains(2),
+        5000);
+
+    const QVector<int> completedPages = readyPages();
+    QVERIFY(completedPages.indexOf(0) < completedPages.indexOf(2));
+    QVERIFY(!completedPages.contains(1));
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QVERIFY(!controller.candidatesForPage(0).isEmpty());
+    QVERIFY(!controller.candidatesForPage(2).isEmpty());
+}
+
 void PDFEditControllerTest::discardsPendingSquigglyBeforeCandidateScanCompletes()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -11834,6 +11920,47 @@ void PDFEditControllerTest::discardsPendingSquigglyBeforeCandidateScanCompletes(
     QVERIFY(!waitForCandidates(controller, 0).isEmpty());
     QVERIFY(controller.draftsForPage(0).isEmpty());
     QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::preservesTextEditorWhenPendingSquigglyCompletes()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("pending-squiggly-preserves-editor-source.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    const QVariantMap editCandidate = candidateForText(
+        waitForCandidates(controller, 2),
+        QStringLiteral("Third fixture page"));
+    QVERIFY(!editCandidate.isEmpty());
+
+    controller.setTool(PDFEditController::SquigglyTool);
+    QVERIFY(controller.candidatesForPage(1).isEmpty());
+    const QVariantMap pendingSquiggly = controller.addHighlight(
+        0,
+        QRectF(0.01, 0.01, 0.98, 0.40));
+    QVERIFY(pendingSquiggly.value(QStringLiteral("pending")).toBool());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+
+    const QString selectedObjectId = editCandidate
+        .value(QStringLiteral("objectId"))
+        .toString();
+    controller.setTool(PDFEditController::EditTextTool);
+    QVERIFY(controller.selectCandidate(2, selectedObjectId));
+    controller.beginSelectedTextEdit();
+    QVERIFY(controller.textEditActive());
+    QCOMPARE(controller.selectedPage(), 2);
+    QCOMPARE(controller.selectedObjectId(), selectedObjectId);
+
+    QTRY_COMPARE_WITH_TIMEOUT(controller.draftsForPage(0).size(), 1, 5000);
+    QVERIFY(controller.textEditActive());
+    QCOMPARE(controller.selectedPage(), 2);
+    QCOMPARE(controller.selectedObjectId(), selectedObjectId);
+    QCOMPARE(controller.selectedText(), QStringLiteral("Third fixture page"));
 }
 
 void PDFEditControllerTest::remapsPendingSquigglyAcrossPageInsertionUndoRedo()

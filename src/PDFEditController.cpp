@@ -3400,6 +3400,31 @@ QVariantMap PDFEditController::addTextMarkupDraft(
 
     finishSelectedFrameResize();
     finishSelectedTextEdit();
+    const QVariantMap draft = materializeTextMarkupDraft(
+        page,
+        annotationRects,
+        tool,
+        color);
+    if (draft.isEmpty()) {
+        return {};
+    }
+
+    setSelection(nullptr);
+    markDraftStateChanged(page, true);
+    emit historyStateChanged();
+    return draft;
+}
+
+QVariantMap PDFEditController::materializeTextMarkupDraft(
+    int page,
+    const QVector<QRectF> &annotationRects,
+    Tool tool,
+    const QColor &color)
+{
+    if (annotationRects.isEmpty()) {
+        return {};
+    }
+
     Candidate candidate;
     candidate.page = page;
     candidate.addedOrder = ++m_nextAddedObjectId;
@@ -3459,9 +3484,6 @@ QVariantMap PDFEditController::addTextMarkupDraft(
     m_undoStack.append(command);
     m_redoStack.clear();
 
-    setSelection(nullptr);
-    markDraftStateChanged(page, true);
-    emit historyStateChanged();
     return candidateMap(draft);
 }
 
@@ -3544,11 +3566,16 @@ void PDFEditController::completePendingSquigglyCreations(int page)
             continue;
         }
 
-        createdDraft = !addTextMarkupDraft(
+        const QVariantMap draft = materializeTextMarkupDraft(
             creation.page,
             annotationRects,
             SquigglyTool,
-            creation.color).isEmpty() || createdDraft;
+            creation.color);
+        if (!draft.isEmpty()) {
+            markDraftStateChanged(creation.page, true);
+            emit historyStateChanged();
+            createdDraft = true;
+        }
     }
 
     if (pendingStateChanged && !createdDraft) {
@@ -5664,6 +5691,11 @@ void PDFEditController::discardDrafts()
     }
     const bool discardedPageStructure
         = !m_pageInsertions.isEmpty() || !m_deletedSourcePages.isEmpty();
+    int deferredSourcePage = -1;
+    if (discardedPageStructure && m_document) {
+        deferredSourcePage = m_document->sourcePageIndex(
+            m_deferredCandidateScanPage);
+    }
 
     const bool wasEditing = m_textEditActive;
     resetFrameResizeState();
@@ -5672,6 +5704,17 @@ void PDFEditController::discardDrafts()
     m_selectedTextRangeLength = 0;
     m_textEditCommand = Command();
     resetTextEditDisplayState();
+    if (discardedPageStructure) {
+        if (m_candidateScanCancellation) {
+            m_candidateScanCancellation->store(
+                true,
+                std::memory_order_relaxed);
+        }
+        m_deferredCandidateScanPage = -1;
+        m_pageCandidates.clear();
+        m_pageCandidateLru.clear();
+        resetCommentIndex();
+    }
     m_addedCandidates.clear();
     m_pendingSquigglyCreations.clear();
     m_pageInsertions.clear();
@@ -5682,15 +5725,13 @@ void PDFEditController::discardDrafts()
             m_pageInsertions);
     }
     if (discardedPageStructure) {
-        if (m_candidateScanCancellation) {
-            m_candidateScanCancellation->store(
-                true,
-                std::memory_order_relaxed);
+        if (deferredSourcePage >= 0
+            && m_document
+            && m_deferredCandidateScanPage < 0) {
+            m_deferredCandidateScanPage
+                = m_document->displayPageIndexForSourcePage(
+                    deferredSourcePage);
         }
-        m_pendingCandidateScanPage = -1;
-        m_pageCandidates.clear();
-        m_pageCandidateLru.clear();
-        resetCommentIndex();
     }
     m_drafts.clear();
     m_undoStack.clear();
@@ -5711,6 +5752,7 @@ void PDFEditController::discardDrafts()
     emit pageDataChanged(-1);
     if (discardedPageStructure) {
         emit commentsChanged();
+        startPendingCandidateScan();
     }
     emit historyStateChanged();
     //% "All draft changes were discarded."
@@ -6012,7 +6054,7 @@ void PDFEditController::resetSession()
     if (m_candidateScanCancellation) {
         m_candidateScanCancellation->store(true, std::memory_order_relaxed);
     }
-    m_pendingCandidateScanPage = -1;
+    m_deferredCandidateScanPage = -1;
     m_pendingSquigglyCreations.clear();
     m_pageCandidates.clear();
     m_pageCandidateLru.clear();
@@ -6071,7 +6113,7 @@ void PDFEditController::ensureCacheRevision()
     if (m_candidateScanCancellation) {
         m_candidateScanCancellation->store(true, std::memory_order_relaxed);
     }
-    m_pendingCandidateScanPage = -1;
+    m_deferredCandidateScanPage = -1;
     m_pendingSquigglyCreations.clear();
     m_pageCandidates.clear();
     m_pageCandidateLru.clear();
@@ -6136,15 +6178,16 @@ void PDFEditController::requestPageCandidateScan(int page)
         return;
     }
 
-    const int priorityPage = pendingSquigglyScanPage();
-    if (priorityPage >= 0) {
-        page = priorityPage;
-    }
     if (m_pageCandidates.contains(page)) {
+        if (page == m_deferredCandidateScanPage) {
+            m_deferredCandidateScanPage = -1;
+        }
         return;
     }
-
     if (m_document->isTransientBlankPage(page)) {
+        if (page == m_deferredCandidateScanPage) {
+            m_deferredCandidateScanPage = -1;
+        }
         m_pageCandidates.insert(page, {});
         touchPageCandidateCache(page);
         prunePageCandidateCache(page);
@@ -6155,11 +6198,21 @@ void PDFEditController::requestPageCandidateScan(int page)
         return;
     }
 
+    const int priorityPage = pendingSquigglyScanPage();
+    if (priorityPage < 0) {
+        m_deferredCandidateScanPage = page;
+    } else if (page != priorityPage) {
+        // Preserve the latest ordinary request while unfinished Squiggly
+        // geometry takes priority.
+        m_deferredCandidateScanPage = page;
+    }
+    const int scanPage = priorityPage >= 0 ? priorityPage : page;
+
     if (m_candidateScanInFlight) {
-        if (m_candidateScanInFlightPage != page
-            || candidateScanCancelled(m_candidateScanCancellation)) {
-            // Keep exactly one running request plus the latest requested page.
-            m_pendingCandidateScanPage = page;
+        const bool cancellationPending
+            = candidateScanCancelled(m_candidateScanCancellation);
+        if (m_candidateScanInFlightPage != scanPage
+            || cancellationPending) {
             if (m_candidateScanCancellation) {
                 m_candidateScanCancellation->store(
                     true,
@@ -6169,7 +6222,6 @@ void PDFEditController::requestPageCandidateScan(int page)
         return;
     }
 
-    m_pendingCandidateScanPage = page;
     startPendingCandidateScan();
 }
 
@@ -6180,21 +6232,25 @@ void PDFEditController::startPendingCandidateScan()
     }
 
     const int priorityPage = pendingSquigglyScanPage();
-    if (priorityPage >= 0) {
-        m_pendingCandidateScanPage = priorityPage;
-    }
-    if (m_pendingCandidateScanPage < 0) {
+    const bool pendingSquigglyPriority = priorityPage >= 0;
+    const int page = pendingSquigglyPriority
+        ? priorityPage
+        : m_deferredCandidateScanPage;
+    if (page < 0) {
         return;
     }
-
-    const int page = m_pendingCandidateScanPage;
-    m_pendingCandidateScanPage = -1;
     if (m_pageCandidates.contains(page)) {
+        if (page == m_deferredCandidateScanPage) {
+            m_deferredCandidateScanPage = -1;
+        }
         return;
     }
 
     const CandidateScanRequest request = candidateScanRequest(page);
     if (request.page < 0) {
+        if (page == m_deferredCandidateScanPage) {
+            m_deferredCandidateScanPage = -1;
+        }
         return;
     }
 
@@ -6292,6 +6348,11 @@ void PDFEditController::completePageCandidateScan(
         emit pageCandidatesReady(request.page);
         emit commentsChanged();
     }
+    if (requestStillCurrent
+        && request.page == m_deferredCandidateScanPage
+        && m_pageCandidates.contains(request.page)) {
+        m_deferredCandidateScanPage = -1;
+    }
 
     startPendingCandidateScan();
 }
@@ -6318,7 +6379,7 @@ void PDFEditController::touchPageCandidateCache(int page)
 
 bool PDFEditController::isPageCandidateCachePinned(int page) const
 {
-    if (page == m_pendingCandidateScanPage
+    if (page == m_deferredCandidateScanPage
         || (m_hasSelection
             && !m_selectedCandidate.added
             && m_selectedCandidate.page == page)) {
@@ -8732,10 +8793,12 @@ void PDFEditController::applyPageState(const PageState &state)
         return;
     }
 
+    const int deferredSourcePage
+        = m_document->sourcePageIndex(m_deferredCandidateScanPage);
     if (m_candidateScanCancellation) {
         m_candidateScanCancellation->store(true, std::memory_order_relaxed);
     }
-    m_pendingCandidateScanPage = -1;
+    m_deferredCandidateScanPage = -1;
     m_pageCandidates.clear();
     m_pageCandidateLru.clear();
     resetCommentIndex();
@@ -8749,6 +8812,11 @@ void PDFEditController::applyPageState(const PageState &state)
         m_deletedSourcePages,
         m_pageInsertions,
         state.currentPage);
+    if (deferredSourcePage >= 0
+        && m_deferredCandidateScanPage < 0) {
+        m_deferredCandidateScanPage
+            = m_document->displayPageIndexForSourcePage(deferredSourcePage);
+    }
 
     QVector<PendingSquigglyCreation> remappedPendingCreations;
     remappedPendingCreations.reserve(m_pendingSquigglyCreations.size());
@@ -8782,10 +8850,7 @@ void PDFEditController::applyPageState(const PageState &state)
     }
     emit pageDataChanged(-1);
     emit commentsChanged();
-    const int pendingSquigglyPage = pendingSquigglyScanPage();
-    if (pendingSquigglyPage >= 0) {
-        requestPageCandidateScan(pendingSquigglyPage);
-    }
+    startPendingCandidateScan();
 }
 
 bool PDFEditController::removeAddedCandidate(int page, const QString &objectId)

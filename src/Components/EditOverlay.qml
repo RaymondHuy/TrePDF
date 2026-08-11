@@ -41,6 +41,7 @@ Item {
     property point highlightStart: Qt.point(0, 0)
     property point highlightCurrent: Qt.point(0, 0)
     property var squigglyPreviewRects: []
+    property bool squigglyPreviewUpdatePending: false
     property bool drawingShape: false
     property point shapeStart: Qt.point(0, 0)
     property point shapeCurrent: Qt.point(0, 0)
@@ -969,7 +970,8 @@ Item {
         drawingShape = false
     }
 
-    function updateSquigglyPreview() {
+    function resolveSquigglyPreview() {
+        squigglyPreviewUpdatePending = false
         if (!highlighting
                 || controller.tool !== PDFEditController.SquigglyTool
                 || width <= 0
@@ -986,6 +988,18 @@ Item {
                 selectionRect.y / height,
                 selectionRect.width / width,
                 selectionRect.height / height))
+    }
+
+    function scheduleSquigglyPreviewUpdate() {
+        if (!highlighting
+                || controller.tool !== PDFEditController.SquigglyTool) {
+            squigglyPreviewUpdatePending = false
+            if (squigglyPreviewRects.length > 0)
+                squigglyPreviewRects = []
+            return
+        }
+
+        squigglyPreviewUpdatePending = true
     }
 
     function beginHighlight(x, y) {
@@ -1006,7 +1020,7 @@ Item {
             Math.max(0, Math.min(height, y)))
         highlightCurrent = highlightStart
         highlighting = true
-        updateSquigglyPreview()
+        scheduleSquigglyPreviewUpdate()
     }
 
     function updateHighlight(x, y) {
@@ -1016,7 +1030,7 @@ Item {
         highlightCurrent = Qt.point(
             Math.max(0, Math.min(width, x)),
             Math.max(0, Math.min(height, y)))
-        updateSquigglyPreview()
+        scheduleSquigglyPreviewUpdate()
     }
 
     function finishHighlight(x, y) {
@@ -1030,6 +1044,7 @@ Item {
             ? activeSquigglySelectionRect
             : activeHighlightRect
         highlighting = false
+        squigglyPreviewUpdatePending = false
         squigglyPreviewRects = []
         if (selectionRect.width < minimumHighlightDragSize
                 || (!squigglyTool
@@ -1047,6 +1062,7 @@ Item {
 
     function cancelHighlight() {
         highlighting = false
+        squigglyPreviewUpdatePending = false
         squigglyPreviewRects = []
     }
 
@@ -1166,6 +1182,7 @@ Item {
 
     function prepareForSessionChange() {
         selectionActions.close()
+        cancelHighlight()
         hideSelectCursor()
         hoverCandidate = ({})
         if (editing) {
@@ -1283,6 +1300,13 @@ Item {
     }
     Component.onCompleted: reloadData()
 
+    FrameAnimation {
+        running: root.squigglyPreviewUpdatePending
+
+        // Pointer events can outpace frames; resolve from the latest position.
+        onTriggered: root.resolveSquigglyPreview()
+    }
+
     Connections {
         target: root.controller
 
@@ -1296,7 +1320,7 @@ Item {
                     && root.highlighting
                     && root.controller.tool
                         === PDFEditController.SquigglyTool) {
-                root.updateSquigglyPreview()
+                root.scheduleSquigglyPreviewUpdate()
             }
             if (readyPage === root.page
                     && root.interactionActive

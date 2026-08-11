@@ -535,6 +535,11 @@ private:
         const QVector<QRectF> &annotationRects,
         Tool tool,
         const QColor &color);
+    QVariantMap materializeTextMarkupDraft(
+        int page,
+        const QVector<QRectF> &annotationRects,
+        Tool tool,
+        const QColor &color);
     bool pendingSquigglyCreationIsCurrent(
         const PendingSquigglyCreation &creation) const;
     int pendingSquigglyScanPage() const;
@@ -687,7 +692,7 @@ private:
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
     QVector<int> m_pageCandidateLru;
-    int m_pendingCandidateScanPage = -1;
+    int m_deferredCandidateScanPage = -1;
     int m_candidateScanInFlightPage = -1;
     bool m_candidateScanInFlight = false;
     std::shared_ptr<std::atomic_bool> m_candidateScanCancellation;
