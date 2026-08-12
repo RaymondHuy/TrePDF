@@ -456,6 +456,10 @@ bool matchingDictionaryEnd(const char *data,
                            qsizetype size,
                            qsizetype start,
                            qsizetype &end);
+bool pdfValueEnd(const char *data,
+                 qsizetype size,
+                 qsizetype start,
+                 qsizetype &end);
 
 bool parseXref(const char *data,
                qsizetype size,
@@ -953,19 +957,34 @@ PlaceholderLocation annotationForStringId(
         if (view.isEmpty()) {
             continue;
         }
-        qsizetype dictionarySize = view.size();
-        const qsizetype streamPosition = findBytes(
-            view.data(),
-            view.size(),
-            "stream");
-        if (streamPosition >= 0) {
-            dictionarySize = streamPosition;
+        // An incremental xref contains only the newest revision of an object.
+        // The next live xref entry can therefore be physically separated by
+        // obsolete objects and trailers. Bound the lookup to this indirect
+        // object's value so stale dictionaries cannot be mistaken for a
+        // direct annotation.
+        Cursor objectCursor(view.data(), view.size());
+        qint64 objectNumber = -1;
+        qint64 generation = -1;
+        if (!objectCursor.integer(objectNumber)
+            || !objectCursor.integer(generation)
+            || !objectCursor.consume("obj")) {
+            continue;
+        }
+        objectCursor.skipWhitespaceAndComments();
+        const qsizetype objectValueStart = objectCursor.position();
+        qsizetype objectValueEnd = -1;
+        if (!pdfValueEnd(
+                view.data(),
+                view.size(),
+                objectValueStart,
+                objectValueEnd)) {
+            continue;
         }
         qsizetype searchPosition = 0;
         while (true) {
             const qsizetype nameKey = keyPositionFrom(
                 view.data(),
-                dictionarySize,
+                objectValueEnd,
                 key,
                 searchPosition);
             if (nameKey < 0) {
@@ -975,7 +994,7 @@ PlaceholderLocation annotationForStringId(
             QByteArray encodedName;
             if (!parsePdfString(
                     view.data(),
-                    dictionarySize,
+                    objectValueEnd,
                     searchPosition,
                     encodedName)
                 || decodedPdfString(encodedName) != identifier) {
@@ -984,7 +1003,7 @@ PlaceholderLocation annotationForStringId(
 
             const qsizetype topLevelDictionary = findBytes(
                 view.data(),
-                dictionarySize,
+                objectValueEnd,
                 "<<");
             qsizetype dictionaryStart = -1;
             qsizetype dictionaryEnd = -1;
@@ -993,7 +1012,7 @@ PlaceholderLocation annotationForStringId(
                 qsizetype candidateEnd = -1;
                 if (!matchingDictionaryEnd(
                         view.data(),
-                        dictionarySize,
+                        objectValueEnd,
                         candidateStart,
                         candidateEnd)) {
                     return {};
@@ -1005,7 +1024,7 @@ PlaceholderLocation annotationForStringId(
                 }
                 candidateStart = findBytes(
                     view.data(),
-                    dictionarySize,
+                    objectValueEnd,
                     "<<",
                     candidateStart + 2);
             }
@@ -1035,7 +1054,7 @@ PlaceholderLocation annotationForStringId(
             const ObjectReference objectReference{
                 entry.key(),
                 entry->generation};
-            if (dictionaryStart == topLevelDictionary) {
+            if (dictionaryStart == objectValueStart) {
                 return PlaceholderLocation{
                     {},
                     objectReference,
@@ -3544,7 +3563,7 @@ bool directDictionaryValueRange(const QByteArray &dictionary,
             dictionaryEnd)
         || dictionaryEnd != dictionary.size()) {
         error = QStringLiteral(
-            "A text markup annotation dictionary is malformed.");
+            "A text markup annotation dictionary value container is malformed.");
         return false;
     }
 
@@ -6446,7 +6465,13 @@ bool PDFAcroFormCanonicalizer::finalizeTextMarkupAnnotations(
             || dictionaryEnd > object.size()) {
             return fail(error.isEmpty()
                     ? QStringLiteral(
-                        "A text markup annotation dictionary is malformed.")
+                        "A text markup annotation object dictionary is malformed "
+                        "(widget %1, container %2, range %3..%4, size %5).")
+                        .arg(placeholder.widget.number)
+                        .arg(placeholder.container.number)
+                        .arg(dictionaryStart)
+                        .arg(dictionaryEnd)
+                        .arg(object.size())
                     : error);
         }
 
