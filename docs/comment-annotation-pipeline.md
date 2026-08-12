@@ -182,6 +182,12 @@ hỗ trợ. Với mỗi annotation, controller lấy:
 - `/IRT` và `/RT` để nhận diện reply;
 - private thread id của TrePDF nếu annotation đang ở giữa save pipeline.
 
+Một số PDF reader, gồm Foxit, lưu reply `/Text` hợp lệ với `/IRT` và `/RT /R`
+nhưng để `/Rect [0 0 0 0]`. Reply kiểu này vẫn được lập chỉ mục và hiển thị
+trong CommentPanel vì nó không cần standalone page geometry; appearance của nó
+tiếp tục bị ẩn trong viewer. Annotation không phải reply vẫn phải có `/Rect`
+hoặc QuadPoints hữu dụng, nên comment gốc có geometry rỗng vẫn bị loại.
+
 Kết quả được cache theo display page và document revision. Khi revision đổi,
 mọi kết quả cũ và callback đến muộn phải bị loại.
 
@@ -216,8 +222,9 @@ Khi mở tab Comment, ribbon chọn Highlight làm tool mặc định. Người 
 chuyển sang Sticky Note, Free Text, Squiggly, Underline hoặc Strikeout mà không
 bật form designer.
 
-Highlight và Squiggly dùng split button cùng color grid và system color picker.
-Mỗi tool giữ màu riêng; Squiggly dùng màu đậm/opacity cao hơn vì nét mảnh.
+Highlight, Underline và Squiggly dùng split button cùng color grid và system
+color picker. Mỗi tool giữ màu riêng; Underline và Squiggly dùng màu đậm/opacity
+cao hơn vì nét mảnh.
 History dùng chung `PDFEditController::undo()` và `redo()`.
 
 ### 5.2 `EditOverlay`

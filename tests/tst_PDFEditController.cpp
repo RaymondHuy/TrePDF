@@ -1484,6 +1484,37 @@ bool createNestedCommentRepliesPdf(const QString &filePath)
         });
 }
 
+bool createZeroRectUnderlineReplyPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [4 0 R 5 0 R 6 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Underline /P 3 0 R "
+                "/Rect [20 120 180 132] "
+                "/QuadPoints [20 132 180 132 20 120 180 120] "
+                "/Contents (Root underline) "
+                "/CreationDate (D:20240101090000Z) "
+                "/NM (foxit-underline-root) /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Foxit underline reply) "
+                "/CreationDate (D:20240101100000Z) "
+                "/NM (foxit-underline-reply) "
+                "/IRT 4 0 R /RT /R /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Zero rect root) "
+                "/CreationDate (D:20240101110000Z) "
+                "/NM (zero-rect-root) /F 4 >>"),
+        });
+}
+
 bool createRootCommentOnlyPdf(const QString &filePath)
 {
     return writePdfObjects(
@@ -3970,7 +4001,7 @@ private slots:
     void preservesEmbeddedFontForFormatOnlyVietnameseEdit();
     void savesNormalizedVietnameseRichText();
     void addsHighlightWithUndoRedoAndDiscard();
-    void keepsHighlightAndSquigglyColorsIndependent();
+    void keepsTextMarkupColorsIndependent();
     void requiresSourceTextOnlyForSquiggly();
     void prioritizesPendingSquigglyCandidateScan();
     void resumesNormalCandidateScanAfterPendingSquigglyPriority();
@@ -3994,6 +4025,7 @@ private slots:
     void editsSourceTextMarkupComment_data();
     void editsSourceTextMarkupComment();
     void editsSourceReplyComment();
+    void importsZeroRectUnderlineReply();
     void rejectsEditingProtectedSourceComments();
     void protectsSourceFreeTextComments();
     void enforcesCommentTextLengthLimit();
@@ -11713,7 +11745,7 @@ void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
     QVERIFY(!controller.canRedo());
 }
 
-void PDFEditControllerTest::keepsHighlightAndSquigglyColorsIndependent()
+void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
         QStringLiteral("independent-markup-colors-source.pdf"));
@@ -11729,29 +11761,49 @@ void PDFEditControllerTest::keepsHighlightAndSquigglyColorsIndependent()
     QVERIFY(!textCandidate.isEmpty());
 
     const QColor defaultHighlightColor(255, 235, 59, 96);
+    const QColor defaultUnderlineColor(198, 40, 40, 192);
     const QColor defaultSquigglyColor(198, 40, 40, 192);
     const QColor highlightColor(255, 128, 171, 96);
+    const QColor underlineColor(73, 91, 211, 176);
     const QColor squigglyColor(38, 166, 154, 160);
     QCOMPARE(controller.highlightColor(), defaultHighlightColor);
+    QCOMPARE(controller.underlineColor(), defaultUnderlineColor);
     QCOMPARE(controller.squigglyColor(), defaultSquigglyColor);
 
     QSignalSpy highlightColorSpy(
         &controller,
         &PDFEditController::highlightColorChanged);
+    QSignalSpy underlineColorSpy(
+        &controller,
+        &PDFEditController::underlineColorChanged);
     QSignalSpy squigglyColorSpy(
         &controller,
         &PDFEditController::squigglyColorChanged);
 
     controller.setHighlightColor(highlightColor);
     QCOMPARE(controller.highlightColor(), highlightColor);
+    QCOMPARE(controller.underlineColor(), defaultUnderlineColor);
     QCOMPARE(controller.squigglyColor(), defaultSquigglyColor);
     QCOMPARE(highlightColorSpy.count(), 1);
+    QCOMPARE(underlineColorSpy.count(), 0);
     QCOMPARE(squigglyColorSpy.count(), 0);
+
+    controller.setUnderlineColor(underlineColor);
+    QCOMPARE(controller.highlightColor(), highlightColor);
+    QCOMPARE(controller.underlineColor(), underlineColor);
+    QCOMPARE(controller.squigglyColor(), defaultSquigglyColor);
+    QCOMPARE(highlightColorSpy.count(), 1);
+    QCOMPARE(underlineColorSpy.count(), 1);
+    QCOMPARE(squigglyColorSpy.count(), 0);
+    controller.setUnderlineColor(underlineColor);
+    QCOMPARE(underlineColorSpy.count(), 1);
 
     controller.setSquigglyColor(squigglyColor);
     QCOMPARE(controller.highlightColor(), highlightColor);
+    QCOMPARE(controller.underlineColor(), underlineColor);
     QCOMPARE(controller.squigglyColor(), squigglyColor);
     QCOMPARE(highlightColorSpy.count(), 1);
+    QCOMPARE(underlineColorSpy.count(), 1);
     QCOMPARE(squigglyColorSpy.count(), 1);
     controller.setSquigglyColor(squigglyColor);
     QCOMPARE(squigglyColorSpy.count(), 1);
@@ -11764,6 +11816,17 @@ void PDFEditControllerTest::keepsHighlightAndSquigglyColorsIndependent()
         highlight.value(QStringLiteral("highlightColor")).value<QColor>(),
         highlightColor);
 
+    controller.setTool(PDFEditController::UnderlineTool);
+    const QVariantMap underline = controller.addHighlight(
+        0,
+        QRectF(0.12, 0.30, 0.30, 0.05));
+    QCOMPARE(
+        underline.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("underline"));
+    QCOMPARE(
+        underline.value(QStringLiteral("highlightColor")).value<QColor>(),
+        underlineColor);
+
     controller.setTool(PDFEditController::SquigglyTool);
     const QVariantMap squiggly = controller.addHighlight(
         0,
@@ -11774,7 +11837,7 @@ void PDFEditControllerTest::keepsHighlightAndSquigglyColorsIndependent()
     QCOMPARE(
         squiggly.value(QStringLiteral("highlightColor")).value<QColor>(),
         squigglyColor);
-    QCOMPARE(controller.draftsForPage(0).size(), 2);
+    QCOMPARE(controller.draftsForPage(0).size(), 3);
 }
 
 void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
@@ -13546,6 +13609,130 @@ void PDFEditControllerTest::editsSourceReplyComment()
         .value(QStringLiteral("commentTextEditable")).toBool());
 }
 
+void PDFEditControllerTest::importsZeroRectUnderlineReply()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("zero-rect-underline-reply.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("zero-rect-underline-reply-output.pdf"));
+    const QString deletedOutputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("zero-rect-underline-reply-deleted.pdf"));
+    QVERIFY(createZeroRectUnderlineReplyPdf(sourcePath));
+
+    const CommentAnnotationInspection sourceReply
+        = inspectCommentAnnotation(
+            sourcePath,
+            QStringLiteral("foxit-underline-reply"));
+    QVERIFY(sourceReply.readable);
+    QCOMPARE(sourceReply.annotationCount, 3);
+    QCOMPARE(sourceReply.subtype, FPDF_ANNOT_TEXT);
+    QCOMPARE(
+        sourceReply.parentName,
+        QStringLiteral("foxit-underline-root"));
+    QCOMPARE(sourceReply.relation, QStringLiteral("R"));
+    QCOMPARE(sourceReply.rect.left, 0.0f);
+    QCOMPARE(sourceReply.rect.right, 0.0f);
+    QCOMPARE(sourceReply.rect.top, 0.0f);
+    QCOMPARE(sourceReply.rect.bottom, 0.0f);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+
+    const QVariantMap root = controller.commentItems().at(0).toMap();
+    const QVariantMap reply = controller.commentItems().at(1).toMap();
+    QCOMPARE(
+        root.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("underline"));
+    QCOMPARE(
+        root.value(QStringLiteral("text")).toString(),
+        QStringLiteral("Root underline"));
+    QCOMPARE(root.value(QStringLiteral("replyCount")).toInt(), 1);
+    QVERIFY(reply.value(QStringLiteral("isReply")).toBool());
+    QCOMPARE(
+        reply.value(QStringLiteral("text")).toString(),
+        QStringLiteral("Foxit underline reply"));
+    QCOMPARE(
+        reply.value(QStringLiteral("parentObjectId")).toString(),
+        root.value(QStringLiteral("objectId")).toString());
+    QVERIFY(reply
+        .value(QStringLiteral("sourceRect"))
+        .toRectF()
+        .isEmpty());
+
+    const QString replyObjectId = reply
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(controller.selectComment(0, replyObjectId));
+    QVERIFY(controller.selectedCommentReply());
+    QVERIFY(controller.removeComment(0, replyObjectId));
+    QCOMPARE(controller.commentItems().size(), 1);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.commentItems().size(), 2);
+
+    const QString savedText
+        = QStringLiteral("Edited Foxit underline reply");
+    QVERIFY(controller.setCommentText(0, replyObjectId, savedText));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    const CommentAnnotationInspection outputReply
+        = inspectCommentAnnotation(
+            outputPath,
+            QStringLiteral("foxit-underline-reply"));
+    QVERIFY(outputReply.readable);
+    QCOMPARE(outputReply.annotationCount, sourceReply.annotationCount);
+    QCOMPARE(outputReply.subtype, sourceReply.subtype);
+    QCOMPARE(outputReply.contents, savedText);
+    QCOMPARE(outputReply.parentName, sourceReply.parentName);
+    QCOMPARE(outputReply.relation, QStringLiteral("R"));
+    QCOMPARE(outputReply.rect.left, sourceReply.rect.left);
+    QCOMPARE(outputReply.rect.right, sourceReply.rect.right);
+    QCOMPARE(outputReply.rect.top, sourceReply.rect.top);
+    QCOMPARE(outputReply.rect.bottom, sourceReply.rect.bottom);
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+    QVariantMap rehydratedReply;
+    for (const QVariant &commentValue : controller.commentItems()) {
+        const QVariantMap comment = commentValue.toMap();
+        if (comment.value(QStringLiteral("text")).toString()
+            == savedText) {
+            rehydratedReply = comment;
+            break;
+        }
+    }
+    QVERIFY(!rehydratedReply.isEmpty());
+    QVERIFY(rehydratedReply.value(QStringLiteral("isReply")).toBool());
+    QVERIFY(rehydratedReply
+        .value(QStringLiteral("sourceRect"))
+        .toRectF()
+        .isEmpty());
+
+    const QString rehydratedReplyObjectId = rehydratedReply
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(controller.removeComment(0, rehydratedReplyObjectId));
+    QCOMPARE(controller.commentItems().size(), 1);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(deletedOutputPath)));
+
+    const CommentAnnotationInspection deletedReply
+        = inspectCommentAnnotation(
+            deletedOutputPath,
+            QStringLiteral("foxit-underline-reply"));
+    QVERIFY(deletedReply.readable);
+    QCOMPARE(deletedReply.annotationCount, 2);
+    QCOMPARE(deletedReply.annotationIndex, -1);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        QStringLiteral("Root underline"));
+}
+
 void PDFEditControllerTest::rejectsEditingProtectedSourceComments()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -14314,7 +14501,11 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
     controller.setTool(static_cast<PDFEditController::Tool>(tool));
     const QColor annotationColor(38, 166, 154, 160);
     const QColor unrelatedHighlightColor(255, 128, 171, 96);
-    if (tool == static_cast<int>(PDFEditController::SquigglyTool)) {
+    if (tool == static_cast<int>(PDFEditController::UnderlineTool)) {
+        controller.setHighlightColor(unrelatedHighlightColor);
+        controller.setUnderlineColor(annotationColor);
+        QCOMPARE(controller.highlightColor(), unrelatedHighlightColor);
+    } else if (tool == static_cast<int>(PDFEditController::SquigglyTool)) {
         controller.setHighlightColor(unrelatedHighlightColor);
         controller.setSquigglyColor(annotationColor);
         QCOMPARE(controller.highlightColor(), unrelatedHighlightColor);

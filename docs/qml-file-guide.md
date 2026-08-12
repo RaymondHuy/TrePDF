@@ -174,10 +174,11 @@ ghi Save; mọi thay đổi vẫn là draft.
 - Khi tab mở, `AppRibbon` bật `PDFEditController.HighlightTool`; người dùng có
   thể chuyển sang Sticky Note, Free Text, Squiggly, Underline hoặc Strikeout mà
   không bật form design mode.
-- Highlight và Squiggly là split button: phần chính dùng màu hiện tại, menu có
-  bảng màu marker curated và system color picker cùng kiểu. Squiggly dùng palette
-  RGB đậm và opacity cao hơn để nét lượn sóng mảnh vẫn rõ. Mỗi tool giữ màu riêng
-  qua `editController.highlightColor` hoặc `editController.squigglyColor`.
+- Highlight, Underline và Squiggly là split button: phần chính dùng màu hiện
+  tại, menu có bảng màu curated và system color picker cùng kiểu. Underline và
+  Squiggly dùng palette RGB đậm và opacity cao hơn để các nét mảnh vẫn rõ. Mỗi
+  tool giữ màu riêng qua `editController.highlightColor`,
+  `editController.underlineColor` hoặc `editController.squigglyColor`.
 - Cả bốn text-markup tool dùng chung gesture kéo vùng, draft history và pipeline
   lưu annotation. Riêng Squiggly chỉ dùng rectangle kéo làm đầu vào: controller
   hit-test glyph source-text đã cache, bỏ whitespace và snap kết quả theo từng

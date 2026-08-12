@@ -63,6 +63,10 @@ constexpr int kHighlightRed = 255;
 constexpr int kHighlightGreen = 235;
 constexpr int kHighlightBlue = 59;
 constexpr int kHighlightAlpha = 96;
+constexpr int kUnderlineRed = 198;
+constexpr int kUnderlineGreen = 40;
+constexpr int kUnderlineBlue = 40;
+constexpr int kUnderlineAlpha = 192;
 constexpr int kSquigglyRed = 198;
 constexpr int kSquigglyGreen = 40;
 constexpr int kSquigglyBlue = 40;
@@ -1688,6 +1692,11 @@ PDFEditController::PDFEditController(QObject *parent)
           kHighlightGreen,
           kHighlightBlue,
           kHighlightAlpha)
+    , m_underlineColor(
+          kUnderlineRed,
+          kUnderlineGreen,
+          kUnderlineBlue,
+          kUnderlineAlpha)
     , m_squigglyColor(
           kSquigglyRed,
           kSquigglyGreen,
@@ -1897,6 +1906,26 @@ void PDFEditController::setHighlightColor(const QColor &color)
 
     m_highlightColor = normalizedColor;
     emit highlightColorChanged();
+}
+
+QColor PDFEditController::underlineColor() const
+{
+    return m_underlineColor;
+}
+
+void PDFEditController::setUnderlineColor(const QColor &color)
+{
+    if (!color.isValid()) {
+        return;
+    }
+
+    const QColor normalizedColor = color.toRgb();
+    if (m_underlineColor == normalizedColor) {
+        return;
+    }
+
+    m_underlineColor = normalizedColor;
+    emit underlineColorChanged();
 }
 
 QColor PDFEditController::squigglyColor() const
@@ -3462,11 +3491,17 @@ QVariantMap PDFEditController::addHighlight(int page,
         }
     }
 
+    QColor markupColor = m_highlightColor;
+    if (markupTool == UnderlineTool) {
+        markupColor = m_underlineColor;
+    } else if (markupTool == SquigglyTool) {
+        markupColor = m_squigglyColor;
+    }
     return addTextMarkupDraft(
         page,
         annotationRects,
         markupTool,
-        markupTool == SquigglyTool ? m_squigglyColor : m_highlightColor);
+        markupColor);
 }
 
 QVariantMap PDFEditController::addTextMarkupDraft(
@@ -7406,6 +7441,23 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
         const bool stickyNoteSubtype = subtype == FPDF_ANNOT_TEXT;
         const bool freeTextSubtype = subtype == FPDF_ANNOT_FREETEXT;
         if (textMarkupSubtype || stickyNoteSubtype || freeTextSubtype) {
+            FPDF_ANNOTATION directReplyParent
+                = annotationUsesReplyRelation(annotation)
+                ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
+                : nullptr;
+            const bool isReplyAnnotation = directReplyParent != nullptr;
+            if (directReplyParent) {
+                FPDFPage_CloseAnnot(directReplyParent);
+            }
+            QString rootThreadId;
+            int directParentIndex = -1;
+            const int rootReplyIndex = rootReplyAnnotationIndex(
+                page,
+                annotation,
+                index,
+                directParentIndex,
+                rootThreadId);
+
             QVector<QRectF> annotationRects;
             if (textMarkupSubtype) {
                 const size_t quadCount
@@ -7466,16 +7518,19 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                     }
                 }
             }
-            if (annotationRects.isEmpty()) {
+            if (annotationRects.isEmpty() && rootReplyIndex < 0) {
                 FPDFPage_CloseAnnot(annotation);
                 continue;
             }
 
-            QRectF geometry = annotationRects.constFirst();
-            for (qsizetype rectIndex = 1;
-                 rectIndex < annotationRects.size();
-                 ++rectIndex) {
-                geometry = geometry.united(annotationRects.at(rectIndex));
+            QRectF geometry;
+            if (!annotationRects.isEmpty()) {
+                geometry = annotationRects.constFirst();
+                for (qsizetype rectIndex = 1;
+                     rectIndex < annotationRects.size();
+                     ++rectIndex) {
+                    geometry = geometry.united(annotationRects.at(rectIndex));
+                }
             }
 
             Candidate candidate;
@@ -7498,26 +7553,11 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             candidate.replyToThreadId = annotationString(
                 annotation,
                 kCommentReplyToKey).trimmed();
-            FPDF_ANNOTATION directReplyParent
-                = annotationUsesReplyRelation(annotation)
-                ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
-                : nullptr;
-            candidate.isReplyAnnotation = directReplyParent != nullptr;
+            candidate.isReplyAnnotation = isReplyAnnotation;
             const int annotationFlags = FPDFAnnot_GetFlags(annotation);
             candidate.commentTextReadOnly
                 = (annotationFlags & FPDF_ANNOT_FLAG_READONLY) != 0
                 || (annotationFlags & kAnnotationFlagLockedContents) != 0;
-            if (directReplyParent) {
-                FPDFPage_CloseAnnot(directReplyParent);
-            }
-            QString rootThreadId;
-            int directParentIndex = -1;
-            const int rootReplyIndex = rootReplyAnnotationIndex(
-                page,
-                annotation,
-                index,
-                directParentIndex,
-                rootThreadId);
             if (rootReplyIndex >= 0) {
                 candidate.replyToObjectId = QStringLiteral("annotation:")
                     + QString::number(rootReplyIndex);

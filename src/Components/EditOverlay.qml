@@ -2204,7 +2204,9 @@ Item {
             height: Math.max(1, Math.min(3, parent.height * 0.12))
             visible: root.controller.tool !== PDFEditController.HighlightTool
                 && root.controller.tool !== PDFEditController.SquigglyTool
-            color: root.controller.highlightColor
+            color: root.controller.tool === PDFEditController.UnderlineTool
+                ? root.controller.underlineColor
+                : root.controller.highlightColor
             Accessible.ignored: true
         }
     }
