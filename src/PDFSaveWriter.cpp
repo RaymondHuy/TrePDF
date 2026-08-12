@@ -4415,7 +4415,44 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     QVector<PDFAcroFormCanonicalizer::AnnotationReply> annotationReplies;
     QVector<PDFAcroFormCanonicalizer::FreeTextAnnotation>
         freeTextAnnotations;
+    QVector<PDFAcroFormCanonicalizer::TextMarkupAnnotation>
+        textMarkupAnnotations;
     for (const SaveDraft &draft : request.m_data->drafts) {
+        if (draft.kind == SaveDraft::Kind::TextMarkup
+            && draft.added
+            && !draft.deleted
+            && !draft.reply) {
+            PDFAcroFormCanonicalizer::TextMarkupType type;
+            switch (draft.annotationSubtype) {
+            case FPDF_ANNOT_HIGHLIGHT:
+                type = PDFAcroFormCanonicalizer::TextMarkupType::Highlight;
+                break;
+            case FPDF_ANNOT_UNDERLINE:
+                type = PDFAcroFormCanonicalizer::TextMarkupType::Underline;
+                break;
+            case FPDF_ANNOT_SQUIGGLY:
+                type = PDFAcroFormCanonicalizer::TextMarkupType::Squiggly;
+                break;
+            case FPDF_ANNOT_STRIKEOUT:
+                type = PDFAcroFormCanonicalizer::TextMarkupType::StrikeOut;
+                break;
+            default:
+                return failure(
+                    Error::TextMarkupAnnotationCreationFailed,
+                    draft.page,
+                    draft.objectId);
+            }
+            if (draft.objectId.isEmpty()) {
+                return failure(
+                    Error::TextMarkupAnnotationCreationFailed,
+                    draft.page,
+                    draft.objectId);
+            }
+            textMarkupAnnotations.append({
+                draft.page,
+                draft.objectId,
+                type});
+        }
         if (draft.kind == SaveDraft::Kind::FreeText
             && !draft.deleted) {
             const QString annotationId = freeTextAppearanceId(draft);
@@ -4448,7 +4485,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
 
     if (request.m_data->formFields.isEmpty()
         && annotationReplies.isEmpty()
-        && freeTextAnnotations.isEmpty()) {
+        && freeTextAnnotations.isEmpty()
+        && textMarkupAnnotations.isEmpty()) {
         return writeDocument(document.get(), request.m_data->targetFilePath);
     }
 
@@ -4495,6 +4533,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         }
     }
     if (request.m_data->formFields.isEmpty()) {
+        if (!textMarkupAnnotations.isEmpty()) {
+            QString appearanceError;
+            if (!PDFAcroFormCanonicalizer::finalizeTextMarkupAnnotations(
+                    contentFilePath,
+                    textMarkupAnnotations,
+                    appearanceError)) {
+                return failure(
+                    Error::TextMarkupAnnotationCreationFailed,
+                    -1,
+                    appearanceError);
+            }
+        }
         if (!freeTextAnnotations.isEmpty()) {
             QString appearanceError;
             if (!PDFAcroFormCanonicalizer::finalizeFreeTextAnnotations(
@@ -4539,6 +4589,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             Error::AcroFormCreationFailed,
             -1,
             acroFormResult.error);
+    }
+    if (!textMarkupAnnotations.isEmpty()) {
+        QString appearanceError;
+        if (!PDFAcroFormCanonicalizer::finalizeTextMarkupAnnotations(
+                formFilePath,
+                textMarkupAnnotations,
+                appearanceError)) {
+            return failure(
+                Error::TextMarkupAnnotationCreationFailed,
+                -1,
+                appearanceError);
+        }
     }
     if (!freeTextAnnotations.isEmpty()) {
         QString appearanceError;
