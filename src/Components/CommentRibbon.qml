@@ -20,7 +20,7 @@ Flickable {
     signal nextCommentRequested()
 
     readonly property real highlightOpacity: 96 / 255
-    readonly property real squigglyOpacity: 192 / 255
+    readonly property real lineMarkupOpacity: 192 / 255
     readonly property bool hasComments:
         editController.commentItems.length > 0
     readonly property var highlightColors: [
@@ -28,7 +28,7 @@ Flickable {
         "#ec407a", "#ab47bc", "#42a5f5", "#26c6da", "#66bb6a",
         "#fff176", "#b39ddb", "#f48fb1", "#90caf9", "#a5d6a7"
     ]
-    readonly property var squigglyColors: [
+    readonly property var lineMarkupColors: [
         "#c62828", "#ad1457", "#6a1b9a", "#283593", "#1565c0",
         "#0277bd", "#00838f", "#00695c", "#2e7d32", "#558b2f",
         "#9e9d24", "#f9a825", "#ef6c00", "#d84315", "#455a64"
@@ -53,8 +53,9 @@ Flickable {
     }
 
     function markupColorWithOpacity(color, tool) {
-        const opacity = tool === PDFEditController.SquigglyTool
-            ? squigglyOpacity
+        const opacity = tool === PDFEditController.UnderlineTool
+                || tool === PDFEditController.SquigglyTool
+            ? lineMarkupOpacity
             : highlightOpacity
         return Qt.rgba(
             color.r,
@@ -71,16 +72,21 @@ Flickable {
     }
 
     function markupColor(tool) {
-        return tool === PDFEditController.SquigglyTool
-            ? editController.squigglyColor
-            : editController.highlightColor
+        if (tool === PDFEditController.UnderlineTool)
+            return editController.underlineColor
+        if (tool === PDFEditController.SquigglyTool)
+            return editController.squigglyColor
+        return editController.highlightColor
     }
 
     function selectMarkupColor(color, tool) {
         highlightColorPopup.close()
+        underlineColorPopup.close()
         squigglyColorPopup.close()
         const selectedColor = markupColorWithOpacity(color, tool)
-        if (tool === PDFEditController.SquigglyTool) {
+        if (tool === PDFEditController.UnderlineTool) {
+            editController.underlineColor = selectedColor
+        } else if (tool === PDFEditController.SquigglyTool) {
             editController.squigglyColor = selectedColor
         } else {
             editController.highlightColor = selectedColor
@@ -90,6 +96,7 @@ Flickable {
 
     function openMarkupColorDialog(tool, title) {
         highlightColorPopup.close()
+        underlineColorPopup.close()
         squigglyColorPopup.close()
         pendingColorTool = tool
         pendingColorDialogTitle = title
@@ -101,6 +108,8 @@ Flickable {
     function closeColorPickers() {
         if (highlightColorPopup)
             highlightColorPopup.close()
+        if (underlineColorPopup)
+            underlineColorPopup.close()
         if (squigglyColorPopup)
             squigglyColorPopup.close()
         if (markupColorDialog)
@@ -402,18 +411,57 @@ Flickable {
             }
 
             RibbonButton {
+                id: underlineButton
+
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Underline"
                 text: qsTrId("Underline")
                 iconSource: "../assets/icons/underline.svg"
+                menuIndicatorVisible: true
+                spacing: 6
+                //% "Choose underline color"
+                menuToolTipText: qsTrId("ChooseUnderlineColor")
                 enabled: root.document.loaded
                     && !root.editController.saving
                 primary: root.editController.tool
                     === PDFEditController.UnderlineTool
                 onClicked: {
+                    underlineColorPopup.close()
                     root.editController.tool
                         = PDFEditController.UnderlineTool
+                }
+                onMenuRequested: underlineColorPopup.open()
+                onEnabledChanged: {
+                    if (!enabled)
+                        underlineColorPopup.close()
+                }
+
+                Rectangle {
+                    anchors.top: underlineButton.contentItem.top
+                    anchors.horizontalCenter:
+                        underlineButton.contentItem.horizontalCenter
+                    anchors.topMargin:
+                        (underlineButton.contentItem.height
+                            - underlineButton.implicitContentHeight) / 2
+                        + underlineButton.icon.height
+                        + (underlineButton.spacing - height) / 2
+                    width: underlineButton.icon.width
+                    height: 5
+                    radius: 1
+                    color: root.opaqueHighlightColor(
+                        root.editController.underlineColor)
+                    Accessible.ignored: true
+                }
+
+                MarkupColorPopup {
+                    id: underlineColorPopup
+
+                    anchorButton: underlineButton
+                    paletteColors: root.lineMarkupColors
+                    targetTool: PDFEditController.UnderlineTool
+                    //% "Choose underline color"
+                    pickerTitle: qsTrId("ChooseUnderlineColor")
                 }
             }
 
@@ -465,7 +513,7 @@ Flickable {
                     id: squigglyColorPopup
 
                     anchorButton: squigglyButton
-                    paletteColors: root.squigglyColors
+                    paletteColors: root.lineMarkupColors
                     targetTool: PDFEditController.SquigglyTool
                     //% "Choose squiggly color"
                     pickerTitle: qsTrId("ChooseSquigglyColor")
