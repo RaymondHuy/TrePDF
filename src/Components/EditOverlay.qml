@@ -2206,7 +2206,7 @@ Item {
                 && root.controller.tool !== PDFEditController.SquigglyTool
             color: root.controller.tool === PDFEditController.UnderlineTool
                 ? root.controller.underlineColor
-                : root.controller.highlightColor
+                : root.controller.strikeoutColor
             Accessible.ignored: true
         }
     }

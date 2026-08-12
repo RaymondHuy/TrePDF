@@ -11763,12 +11763,15 @@ void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
     const QColor defaultHighlightColor(255, 235, 59, 96);
     const QColor defaultUnderlineColor(198, 40, 40, 192);
     const QColor defaultSquigglyColor(198, 40, 40, 192);
+    const QColor defaultStrikeoutColor(198, 40, 40, 192);
     const QColor highlightColor(255, 128, 171, 96);
     const QColor underlineColor(73, 91, 211, 176);
     const QColor squigglyColor(38, 166, 154, 160);
+    const QColor strikeoutColor(123, 31, 162, 184);
     QCOMPARE(controller.highlightColor(), defaultHighlightColor);
     QCOMPARE(controller.underlineColor(), defaultUnderlineColor);
     QCOMPARE(controller.squigglyColor(), defaultSquigglyColor);
+    QCOMPARE(controller.strikeoutColor(), defaultStrikeoutColor);
 
     QSignalSpy highlightColorSpy(
         &controller,
@@ -11779,22 +11782,29 @@ void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
     QSignalSpy squigglyColorSpy(
         &controller,
         &PDFEditController::squigglyColorChanged);
+    QSignalSpy strikeoutColorSpy(
+        &controller,
+        &PDFEditController::strikeoutColorChanged);
 
     controller.setHighlightColor(highlightColor);
     QCOMPARE(controller.highlightColor(), highlightColor);
     QCOMPARE(controller.underlineColor(), defaultUnderlineColor);
     QCOMPARE(controller.squigglyColor(), defaultSquigglyColor);
+    QCOMPARE(controller.strikeoutColor(), defaultStrikeoutColor);
     QCOMPARE(highlightColorSpy.count(), 1);
     QCOMPARE(underlineColorSpy.count(), 0);
     QCOMPARE(squigglyColorSpy.count(), 0);
+    QCOMPARE(strikeoutColorSpy.count(), 0);
 
     controller.setUnderlineColor(underlineColor);
     QCOMPARE(controller.highlightColor(), highlightColor);
     QCOMPARE(controller.underlineColor(), underlineColor);
     QCOMPARE(controller.squigglyColor(), defaultSquigglyColor);
+    QCOMPARE(controller.strikeoutColor(), defaultStrikeoutColor);
     QCOMPARE(highlightColorSpy.count(), 1);
     QCOMPARE(underlineColorSpy.count(), 1);
     QCOMPARE(squigglyColorSpy.count(), 0);
+    QCOMPARE(strikeoutColorSpy.count(), 0);
     controller.setUnderlineColor(underlineColor);
     QCOMPARE(underlineColorSpy.count(), 1);
 
@@ -11802,11 +11812,25 @@ void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
     QCOMPARE(controller.highlightColor(), highlightColor);
     QCOMPARE(controller.underlineColor(), underlineColor);
     QCOMPARE(controller.squigglyColor(), squigglyColor);
+    QCOMPARE(controller.strikeoutColor(), defaultStrikeoutColor);
     QCOMPARE(highlightColorSpy.count(), 1);
     QCOMPARE(underlineColorSpy.count(), 1);
     QCOMPARE(squigglyColorSpy.count(), 1);
+    QCOMPARE(strikeoutColorSpy.count(), 0);
     controller.setSquigglyColor(squigglyColor);
     QCOMPARE(squigglyColorSpy.count(), 1);
+
+    controller.setStrikeoutColor(strikeoutColor);
+    QCOMPARE(controller.highlightColor(), highlightColor);
+    QCOMPARE(controller.underlineColor(), underlineColor);
+    QCOMPARE(controller.squigglyColor(), squigglyColor);
+    QCOMPARE(controller.strikeoutColor(), strikeoutColor);
+    QCOMPARE(highlightColorSpy.count(), 1);
+    QCOMPARE(underlineColorSpy.count(), 1);
+    QCOMPARE(squigglyColorSpy.count(), 1);
+    QCOMPARE(strikeoutColorSpy.count(), 1);
+    controller.setStrikeoutColor(strikeoutColor);
+    QCOMPARE(strikeoutColorSpy.count(), 1);
 
     controller.setTool(PDFEditController::HighlightTool);
     const QVariantMap highlight = controller.addHighlight(
@@ -11837,7 +11861,18 @@ void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
     QCOMPARE(
         squiggly.value(QStringLiteral("highlightColor")).value<QColor>(),
         squigglyColor);
-    QCOMPARE(controller.draftsForPage(0).size(), 3);
+
+    controller.setTool(PDFEditController::StrikeoutTool);
+    const QVariantMap strikeout = controller.addHighlight(
+        0,
+        QRectF(0.14, 0.40, 0.30, 0.05));
+    QCOMPARE(
+        strikeout.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("strikeout"));
+    QCOMPARE(
+        strikeout.value(QStringLiteral("highlightColor")).value<QColor>(),
+        strikeoutColor);
+    QCOMPARE(controller.draftsForPage(0).size(), 4);
 }
 
 void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
@@ -14508,6 +14543,10 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
     } else if (tool == static_cast<int>(PDFEditController::SquigglyTool)) {
         controller.setHighlightColor(unrelatedHighlightColor);
         controller.setSquigglyColor(annotationColor);
+        QCOMPARE(controller.highlightColor(), unrelatedHighlightColor);
+    } else if (tool == static_cast<int>(PDFEditController::StrikeoutTool)) {
+        controller.setHighlightColor(unrelatedHighlightColor);
+        controller.setStrikeoutColor(annotationColor);
         QCOMPARE(controller.highlightColor(), unrelatedHighlightColor);
     } else {
         controller.setHighlightColor(annotationColor);

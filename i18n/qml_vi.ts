@@ -203,7 +203,7 @@
     </message>
     <message id="Delete">
         <location filename="../src/Main.qml" line="845"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="591"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="639"/>
         <location filename="../src/Components/EditOverlay.qml" line="2359"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
         <source>Delete</source>
@@ -276,7 +276,7 @@
     </message>
     <message id="RectangleShape">
         <location filename="../src/Components/EditRibbon.qml" line="55"/>
-        <location filename="../src/PDFEditController.cpp" line="326"/>
+        <location filename="../src/PDFEditController.cpp" line="330"/>
         <source>Rectangle</source>
         <translation>Hình chữ nhật</translation>
     </message>
@@ -286,31 +286,31 @@
     </message>
     <message id="OvalShape">
         <location filename="../src/Components/EditRibbon.qml" line="58"/>
-        <location filename="../src/PDFEditController.cpp" line="329"/>
+        <location filename="../src/PDFEditController.cpp" line="333"/>
         <source>Oval</source>
         <translation>Hình oval</translation>
     </message>
     <message id="LineShape">
         <location filename="../src/Components/EditRibbon.qml" line="61"/>
-        <location filename="../src/PDFEditController.cpp" line="332"/>
+        <location filename="../src/PDFEditController.cpp" line="336"/>
         <source>Line</source>
         <translation>Đường thẳng</translation>
     </message>
     <message id="ArrowShape">
         <location filename="../src/Components/EditRibbon.qml" line="64"/>
-        <location filename="../src/PDFEditController.cpp" line="335"/>
+        <location filename="../src/PDFEditController.cpp" line="339"/>
         <source>Arrow</source>
         <translation>Mũi tên</translation>
     </message>
     <message id="TriangleShape">
         <location filename="../src/Components/EditRibbon.qml" line="67"/>
-        <location filename="../src/PDFEditController.cpp" line="338"/>
+        <location filename="../src/PDFEditController.cpp" line="342"/>
         <source>Triangle</source>
         <translation>Hình tam giác</translation>
     </message>
     <message id="DiamondShape">
         <location filename="../src/Components/EditRibbon.qml" line="70"/>
-        <location filename="../src/PDFEditController.cpp" line="341"/>
+        <location filename="../src/PDFEditController.cpp" line="345"/>
         <source>Diamond</source>
         <translation>Hình thoi</translation>
     </message>
@@ -331,7 +331,7 @@
     </message>
     <message id="AddText">
         <location filename="../src/Components/EditRibbon.qml" line="175"/>
-        <location filename="../src/PDFEditController.cpp" line="2834"/>
+        <location filename="../src/PDFEditController.cpp" line="2863"/>
         <source>Add Text</source>
         <translation>Thêm văn bản</translation>
     </message>
@@ -342,8 +342,8 @@
     </message>
     <message id="Image">
         <location filename="../src/Components/EditRibbon.qml" line="191"/>
-        <location filename="../src/PDFEditController.cpp" line="2994"/>
-        <location filename="../src/PDFEditController.cpp" line="7098"/>
+        <location filename="../src/PDFEditController.cpp" line="3023"/>
+        <location filename="../src/PDFEditController.cpp" line="7129"/>
         <source>Image</source>
         <translation>Hình ảnh</translation>
     </message>
@@ -383,20 +383,20 @@
         <translation>Xóa trang hiện tại</translation>
     </message>
     <message id="Markup">
-        <location filename="../src/Components/CommentRibbon.qml" line="355"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="364"/>
         <source>Markup</source>
         <translation>Đánh dấu</translation>
     </message>
     <message id="Highlight">
-        <location filename="../src/Components/CommentRibbon.qml" line="363"/>
-        <location filename="../src/PDFEditController.cpp" line="3566"/>
-        <location filename="../src/PDFEditController.cpp" line="7626"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="372"/>
+        <location filename="../src/PDFEditController.cpp" line="3597"/>
+        <location filename="../src/PDFEditController.cpp" line="7657"/>
         <source>Highlight</source>
         <translation>Highlight</translation>
     </message>
     <message id="ChooseHighlightColor">
-        <location filename="../src/Components/CommentRibbon.qml" line="369"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="409"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="378"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="418"/>
         <source>Choose highlight color</source>
         <translation>Chọn màu tô sáng</translation>
     </message>
@@ -413,116 +413,122 @@
         <translation type="vanished">Màu tiêu chuẩn</translation>
     </message>
     <message id="Notes">
-        <location filename="../src/Components/CommentRibbon.qml" line="311"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="320"/>
         <source>Notes</source>
         <translation>Ghi chú</translation>
     </message>
     <message id="StickyNote">
-        <location filename="../src/Components/CommentRibbon.qml" line="317"/>
-        <location filename="../src/PDFEditController.cpp" line="3740"/>
-        <location filename="../src/PDFEditController.cpp" line="7616"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="326"/>
+        <location filename="../src/PDFEditController.cpp" line="3771"/>
+        <location filename="../src/PDFEditController.cpp" line="7647"/>
         <source>Sticky Note</source>
         <translation>Ghi chú</translation>
     </message>
     <message id="AddStickyNote">
-        <location filename="../src/Components/CommentRibbon.qml" line="319"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="328"/>
         <source>Add sticky note</source>
         <translation>Thêm ghi chú</translation>
     </message>
     <message id="HighlightMoreColors">
-        <location filename="../src/Components/CommentRibbon.qml" line="238"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="247"/>
         <source>More colors…</source>
         <translation>Màu khác…</translation>
     </message>
     <message id="FreeText">
-        <location filename="../src/Components/CommentRibbon.qml" line="335"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="344"/>
         <source>Free Text</source>
         <translation>Văn bản tự do</translation>
     </message>
     <message id="AddFreeTextComment">
-        <location filename="../src/Components/CommentRibbon.qml" line="337"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="346"/>
         <source>Add a free-text comment</source>
         <translation>Thêm bình luận văn bản tự do</translation>
     </message>
     <message id="Underline">
-        <location filename="../src/Components/CommentRibbon.qml" line="419"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="428"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="590"/>
-        <location filename="../src/PDFEditController.cpp" line="3551"/>
-        <location filename="../src/PDFEditController.cpp" line="7601"/>
+        <location filename="../src/PDFEditController.cpp" line="3582"/>
+        <location filename="../src/PDFEditController.cpp" line="7632"/>
         <source>Underline</source>
         <translation>Gạch chân</translation>
     </message>
     <message id="ChooseUnderlineColor">
-        <location filename="../src/Components/CommentRibbon.qml" line="424"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="464"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="433"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="473"/>
         <source>Choose underline color</source>
         <translation>Chọn màu gạch chân</translation>
     </message>
     <message id="Squiggly">
-        <location filename="../src/Components/CommentRibbon.qml" line="474"/>
-        <location filename="../src/PDFEditController.cpp" line="3556"/>
-        <location filename="../src/PDFEditController.cpp" line="7606"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="483"/>
+        <location filename="../src/PDFEditController.cpp" line="3587"/>
+        <location filename="../src/PDFEditController.cpp" line="7637"/>
         <source>Squiggly</source>
         <translation>Gạch lượn sóng</translation>
     </message>
     <message id="ChooseSquigglyColor">
-        <location filename="../src/Components/CommentRibbon.qml" line="479"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="519"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="488"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="528"/>
         <source>Choose squiggly color</source>
         <translation>Chọn màu gạch lượn sóng</translation>
     </message>
     <message id="Strikeout">
-        <location filename="../src/Components/CommentRibbon.qml" line="527"/>
-        <location filename="../src/PDFEditController.cpp" line="3561"/>
-        <location filename="../src/PDFEditController.cpp" line="7611"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="538"/>
+        <location filename="../src/PDFEditController.cpp" line="3592"/>
+        <location filename="../src/PDFEditController.cpp" line="7642"/>
         <source>Strikeout</source>
         <translation>Gạch bỏ</translation>
     </message>
-    <message id="ManageComments">
+    <message id="ChooseStrikeoutColor">
         <location filename="../src/Components/CommentRibbon.qml" line="543"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="583"/>
+        <source>Choose strikeout color</source>
+        <translation>Chọn màu gạch bỏ</translation>
+    </message>
+    <message id="ManageComments">
+        <location filename="../src/Components/CommentRibbon.qml" line="591"/>
         <source>Manage</source>
         <translation>Quản lý</translation>
     </message>
     <message id="CommentList">
-        <location filename="../src/Components/CommentRibbon.qml" line="549"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="597"/>
         <source>List</source>
         <translation>Danh sách</translation>
     </message>
     <message id="ToggleCommentsList">
-        <location filename="../src/Components/CommentRibbon.qml" line="551"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="599"/>
         <source>Show or hide the comments list</source>
         <translation>Hiện hoặc ẩn danh sách bình luận</translation>
     </message>
     <message id="PreviousComment">
-        <location filename="../src/Components/CommentRibbon.qml" line="565"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="613"/>
         <source>Previous comment</source>
         <translation>Bình luận trước</translation>
     </message>
     <message id="NextComment">
-        <location filename="../src/Components/CommentRibbon.qml" line="579"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="627"/>
         <source>Next comment</source>
         <translation>Bình luận sau</translation>
     </message>
     <message id="DeleteSelectedComment">
         <location filename="../src/Components/CommentPanel.qml" line="800"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="593"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="641"/>
         <source>Delete selected comment</source>
         <translation>Xóa bình luận đã chọn</translation>
     </message>
     <message id="History">
-        <location filename="../src/Components/CommentRibbon.qml" line="613"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="661"/>
         <location filename="../src/Components/EditRibbon.qml" line="312"/>
         <source>History</source>
         <translation>Lịch sử</translation>
     </message>
     <message id="Undo">
-        <location filename="../src/Components/CommentRibbon.qml" line="619"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="667"/>
         <location filename="../src/Components/EditRibbon.qml" line="318"/>
         <source>Undo</source>
         <translation>Hoàn tác</translation>
     </message>
     <message id="Redo">
-        <location filename="../src/Components/CommentRibbon.qml" line="636"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="684"/>
         <location filename="../src/Components/EditRibbon.qml" line="335"/>
         <source>Redo</source>
         <translation>Làm lại</translation>
@@ -570,8 +576,8 @@
     </message>
     <message id="Reply">
         <location filename="../src/Components/CommentPanel.qml" line="879"/>
-        <location filename="../src/PDFEditController.cpp" line="4011"/>
-        <location filename="../src/PDFEditController.cpp" line="7631"/>
+        <location filename="../src/PDFEditController.cpp" line="4042"/>
+        <location filename="../src/PDFEditController.cpp" line="7662"/>
         <source>Reply</source>
         <translation>Phản hồi</translation>
     </message>
@@ -799,7 +805,7 @@
         <translation>Điều hướng</translation>
     </message>
     <message id="Previous">
-        <location filename="../src/Components/CommentRibbon.qml" line="563"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="611"/>
         <location filename="../src/Components/ViewRibbon.qml" line="92"/>
         <source>Previous</source>
         <translation>Trước</translation>
@@ -810,7 +816,7 @@
         <translation>Trang trước</translation>
     </message>
     <message id="Next">
-        <location filename="../src/Components/CommentRibbon.qml" line="577"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="625"/>
         <location filename="../src/Components/ViewRibbon.qml" line="104"/>
         <source>Next</source>
         <translation>Tiếp</translation>
@@ -939,8 +945,8 @@
     </message>
     <message id="LocalPdfFilesOnly">
         <location filename="../src/PDFDocument.cpp" line="138"/>
-        <location filename="../src/PDFEditController.cpp" line="6042"/>
-        <location filename="../src/PDFEditController.cpp" line="6119"/>
+        <location filename="../src/PDFEditController.cpp" line="6073"/>
+        <location filename="../src/PDFEditController.cpp" line="6150"/>
         <source>Only local PDF files are supported</source>
         <translation>Chỉ hỗ trợ tệp PDF trên máy</translation>
     </message>
@@ -952,7 +958,7 @@
         </translation>
     </message>
     <message id="AllDraftChangesDiscarded">
-        <location filename="../src/PDFEditController.cpp" line="6007"/>
+        <location filename="../src/PDFEditController.cpp" line="6038"/>
         <source>All draft changes were discarded.</source>
         <translation>Đã bỏ tất cả thay đổi nháp.</translation>
     </message>
@@ -961,252 +967,252 @@
         <translation type="vanished">Nội dung này là hình ảnh. Cần OCR để chỉnh sửa văn bản.</translation>
     </message>
     <message id="Text">
-        <location filename="../src/PDFEditController.cpp" line="7136"/>
+        <location filename="../src/PDFEditController.cpp" line="7167"/>
         <source>Text</source>
         <translation>Văn bản</translation>
     </message>
     <message id="PdfEditingNotPermitted">
-        <location filename="../src/PDFEditController.cpp" line="2821"/>
-        <location filename="../src/PDFEditController.cpp" line="2886"/>
-        <location filename="../src/PDFEditController.cpp" line="2909"/>
-        <location filename="../src/PDFEditController.cpp" line="3039"/>
-        <location filename="../src/PDFEditController.cpp" line="7106"/>
-        <location filename="../src/PDFEditController.cpp" line="7174"/>
-        <location filename="../src/PDFEditController.cpp" line="7691"/>
+        <location filename="../src/PDFEditController.cpp" line="2850"/>
+        <location filename="../src/PDFEditController.cpp" line="2915"/>
+        <location filename="../src/PDFEditController.cpp" line="2938"/>
+        <location filename="../src/PDFEditController.cpp" line="3068"/>
+        <location filename="../src/PDFEditController.cpp" line="7137"/>
+        <location filename="../src/PDFEditController.cpp" line="7205"/>
+        <location filename="../src/PDFEditController.cpp" line="7722"/>
         <source>This PDF does not permit content editing.</source>
         <translation>Tệp PDF này không cho phép chỉnh sửa nội dung.</translation>
     </message>
     <message id="NoPdfOpenForSaving">
-        <location filename="../src/PDFEditController.cpp" line="1601"/>
-        <location filename="../src/PDFEditController.cpp" line="6014"/>
-        <location filename="../src/PDFEditController.cpp" line="6032"/>
-        <location filename="../src/PDFEditController.cpp" line="6090"/>
-        <location filename="../src/PDFEditController.cpp" line="6109"/>
+        <location filename="../src/PDFEditController.cpp" line="1605"/>
+        <location filename="../src/PDFEditController.cpp" line="6045"/>
+        <location filename="../src/PDFEditController.cpp" line="6063"/>
+        <location filename="../src/PDFEditController.cpp" line="6121"/>
+        <location filename="../src/PDFEditController.cpp" line="6140"/>
         <source>No PDF is open.</source>
         <translation>Chưa mở tệp PDF.</translation>
     </message>
     <message id="PdfSaveSourceOpenFailed">
-        <location filename="../src/PDFEditController.cpp" line="1604"/>
+        <location filename="../src/PDFEditController.cpp" line="1608"/>
         <source>The source PDF could not be opened for saving.</source>
         <translation>Không thể mở tệp PDF nguồn để lưu.</translation>
     </message>
     <message id="PdfSavePageLoadFailed">
-        <location filename="../src/PDFEditController.cpp" line="1610"/>
+        <location filename="../src/PDFEditController.cpp" line="1614"/>
         <source>Page %1 could not be loaded while saving.</source>
         <translation>Không thể tải trang %1 trong khi lưu.</translation>
     </message>
     <message id="PdfSaveUnsupportedSourceObject">
-        <location filename="../src/PDFEditController.cpp" line="1613"/>
+        <location filename="../src/PDFEditController.cpp" line="1617"/>
         <source>Page %1 contains edited text that cannot be saved safely yet.</source>
         <translation>Trang %1 chứa văn bản đã sửa chưa thể lưu an toàn.</translation>
     </message>
     <message id="PdfSaveSourceObjectMissing">
-        <location filename="../src/PDFEditController.cpp" line="1616"/>
+        <location filename="../src/PDFEditController.cpp" line="1620"/>
         <source>An edited object could not be found on page %1.</source>
         <translation>Không tìm thấy đối tượng đã chỉnh sửa trên trang %1.</translation>
     </message>
     <message id="PdfSaveObjectRemovalFailed">
-        <location filename="../src/PDFEditController.cpp" line="1619"/>
+        <location filename="../src/PDFEditController.cpp" line="1623"/>
         <source>An original object could not be removed or replaced on page %1.</source>
         <translation>Không thể xóa hoặc thay thế đối tượng gốc trên trang %1.</translation>
     </message>
     <message id="PdfSaveFontMissingCharacter">
-        <location filename="../src/PDFEditController.cpp" line="1633"/>
+        <location filename="../src/PDFEditController.cpp" line="1637"/>
         <source>The font “%1” does not support the character “%2” (%3). Choose a different font.</source>
         <translation>Phông chữ “%1” không hỗ trợ ký tự “%2” (%3). Hãy chọn phông chữ khác.</translation>
     </message>
     <message id="PdfSaveFontUnavailable">
-        <location filename="../src/PDFEditController.cpp" line="1637"/>
+        <location filename="../src/PDFEditController.cpp" line="1641"/>
         <source>The font %1 cannot be embedded in the saved PDF.</source>
         <translation>Không thể nhúng phông chữ %1 vào tệp PDF đã lưu.</translation>
     </message>
     <message id="PdfSaveTextCreationFailed">
-        <location filename="../src/PDFEditController.cpp" line="1641"/>
+        <location filename="../src/PDFEditController.cpp" line="1645"/>
         <source>Saved text could not be created on page %1.</source>
         <translation>Không thể tạo văn bản đã lưu trên trang %1.</translation>
     </message>
     <message id="PdfSaveImageCreationFailed">
-        <location filename="../src/PDFEditController.cpp" line="1644"/>
+        <location filename="../src/PDFEditController.cpp" line="1648"/>
         <source>The image could not be created on page %1.</source>
         <translation>Không thể tạo hình ảnh trên trang %1.</translation>
     </message>
     <message id="PdfSaveShapeCreationFailed">
-        <location filename="../src/PDFEditController.cpp" line="1647"/>
+        <location filename="../src/PDFEditController.cpp" line="1651"/>
         <source>The shape could not be created on page %1.</source>
         <translation>Không thể tạo hình dạng trên trang %1.</translation>
     </message>
     <message id="PdfSaveCommentCreationFailed">
-        <location filename="../src/PDFEditController.cpp" line="1653"/>
+        <location filename="../src/PDFEditController.cpp" line="1657"/>
         <source>The comment could not be created on page %1.</source>
         <translation>Không thể tạo bình luận trên trang %1.</translation>
     </message>
     <message id="PdfSaveCommentUpdateFailed">
-        <location filename="../src/PDFEditController.cpp" line="1656"/>
+        <location filename="../src/PDFEditController.cpp" line="1660"/>
         <source>The comment could not be updated on page %1.</source>
         <translation>Không thể cập nhật bình luận trên trang %1.</translation>
     </message>
     <message id="PdfSaveCommentRemovalFailed">
-        <location filename="../src/PDFEditController.cpp" line="1659"/>
+        <location filename="../src/PDFEditController.cpp" line="1663"/>
         <source>The comment could not be deleted on page %1.</source>
         <translation>Không thể xóa bình luận trên trang %1.</translation>
     </message>
     <message id="PdfSavePageCreationFailed">
-        <location filename="../src/PDFEditController.cpp" line="1662"/>
+        <location filename="../src/PDFEditController.cpp" line="1666"/>
         <source>Blank page %1 could not be created while saving.</source>
         <translation>Không thể tạo trang trắng %1 khi lưu.</translation>
     </message>
     <message id="PdfSavePageDeletionFailed">
-        <location filename="../src/PDFEditController.cpp" line="1665"/>
+        <location filename="../src/PDFEditController.cpp" line="1669"/>
         <source>Page %1 could not be deleted while saving.</source>
         <translation>Không thể xóa trang %1 khi lưu.</translation>
     </message>
     <message id="PdfSavePageGenerationFailed">
-        <location filename="../src/PDFEditController.cpp" line="1668"/>
+        <location filename="../src/PDFEditController.cpp" line="1672"/>
         <source>Page %1 could not be finalized for saving.</source>
         <translation>Không thể hoàn tất trang %1 để lưu.</translation>
     </message>
     <message id="PdfSaveAcroFormCreationFailed">
-        <location filename="../src/PDFEditController.cpp" line="1671"/>
+        <location filename="../src/PDFEditController.cpp" line="1675"/>
         <source>The AcroForm fields could not be created: %1</source>
         <translation>Không thể tạo các trường AcroForm: %1</translation>
     </message>
     <message id="PdfSaveOutputOpenFailed">
-        <location filename="../src/PDFEditController.cpp" line="1674"/>
+        <location filename="../src/PDFEditController.cpp" line="1678"/>
         <source>The destination file could not be opened: %1</source>
         <translation>Không thể mở tệp đích: %1</translation>
     </message>
     <message id="PdfSaveOutputWriteFailed">
-        <location filename="../src/PDFEditController.cpp" line="1677"/>
+        <location filename="../src/PDFEditController.cpp" line="1681"/>
         <source>The PDF could not be written: %1</source>
         <translation>Không thể ghi tệp PDF: %1</translation>
     </message>
     <message id="PdfSaveOutputCommitFailed">
-        <location filename="../src/PDFEditController.cpp" line="1680"/>
+        <location filename="../src/PDFEditController.cpp" line="1684"/>
         <source>The saved PDF could not replace the destination file: %1</source>
         <translation>Không thể thay thế tệp đích bằng tệp PDF đã lưu: %1</translation>
     </message>
     <message id="ReadOnlyCommentCannotBeEdited">
-        <location filename="../src/PDFEditController.cpp" line="2376"/>
-        <location filename="../src/PDFEditController.cpp" line="5752"/>
-        <location filename="../src/PDFEditController.cpp" line="7635"/>
+        <location filename="../src/PDFEditController.cpp" line="2405"/>
+        <location filename="../src/PDFEditController.cpp" line="5783"/>
+        <location filename="../src/PDFEditController.cpp" line="7666"/>
         <source>This comment is read-only.</source>
         <translation>Bình luận này chỉ có thể đọc.</translation>
     </message>
     <message id="TextGeometryStillLoading">
-        <location filename="../src/PDFEditController.cpp" line="3465"/>
-        <location filename="../src/PDFEditController.cpp" line="6037"/>
-        <location filename="../src/PDFEditController.cpp" line="6114"/>
+        <location filename="../src/PDFEditController.cpp" line="3494"/>
+        <location filename="../src/PDFEditController.cpp" line="6068"/>
+        <location filename="../src/PDFEditController.cpp" line="6145"/>
         <source>Text information is still loading. Please try again.</source>
         <translation>Thông tin văn bản vẫn đang tải. Vui lòng thử lại.</translation>
     </message>
     <message id="NoTextInSelectedArea">
-        <location filename="../src/PDFEditController.cpp" line="3489"/>
-        <location filename="../src/PDFEditController.cpp" line="3681"/>
+        <location filename="../src/PDFEditController.cpp" line="3518"/>
+        <location filename="../src/PDFEditController.cpp" line="3712"/>
         <source>No text was found in the selected area.</source>
         <translation>Không tìm thấy văn bản trong vùng đã chọn.</translation>
     </message>
     <message id="ExistingCommentPageAppearanceReadOnly">
-        <location filename="../src/PDFEditController.cpp" line="7641"/>
+        <location filename="../src/PDFEditController.cpp" line="7672"/>
         <source>Edit the comment text in the Comments panel. Moving or resizing existing comments is not available.</source>
         <translation>Sửa nội dung bình luận trong bảng Bình luận. Hiện chưa thể di chuyển hoặc thay đổi kích thước bình luận có sẵn.</translation>
     </message>
     <message id="PdfSaveFailed">
-        <location filename="../src/PDFEditController.cpp" line="1607"/>
-        <location filename="../src/PDFEditController.cpp" line="1683"/>
+        <location filename="../src/PDFEditController.cpp" line="1611"/>
+        <location filename="../src/PDFEditController.cpp" line="1687"/>
         <source>The PDF could not be saved.</source>
         <translation>Không thể lưu tệp PDF.</translation>
     </message>
     <message id="PdfSaveTextMarkupCreationFailed">
-        <location filename="../src/PDFEditController.cpp" line="1650"/>
+        <location filename="../src/PDFEditController.cpp" line="1654"/>
         <source>The text markup could not be created on page %1.</source>
         <translation>Không thể tạo đánh dấu văn bản trên trang %1.</translation>
     </message>
     <message id="LocalImageFilesOnly">
-        <location filename="../src/PDFEditController.cpp" line="2914"/>
+        <location filename="../src/PDFEditController.cpp" line="2943"/>
         <source>Only local image files are supported.</source>
         <translation>Chỉ hỗ trợ tệp hình ảnh trên máy.</translation>
     </message>
     <message id="SelectedImageOpenFailed">
-        <location filename="../src/PDFEditController.cpp" line="2923"/>
-        <location filename="../src/PDFEditController.cpp" line="2949"/>
+        <location filename="../src/PDFEditController.cpp" line="2952"/>
+        <location filename="../src/PDFEditController.cpp" line="2978"/>
         <source>The selected image could not be opened.</source>
         <translation>Không thể mở hình ảnh đã chọn.</translation>
     </message>
     <message id="SelectedImageTooLarge">
-        <location filename="../src/PDFEditController.cpp" line="2928"/>
-        <location filename="../src/PDFEditController.cpp" line="2942"/>
-        <location filename="../src/PDFEditController.cpp" line="2954"/>
+        <location filename="../src/PDFEditController.cpp" line="2957"/>
+        <location filename="../src/PDFEditController.cpp" line="2971"/>
+        <location filename="../src/PDFEditController.cpp" line="2983"/>
         <source>The selected image is too large. Choose an image up to 40 megapixels and 64 MiB.</source>
         <translation>Hình ảnh đã chọn quá lớn. Hãy chọn ảnh tối đa 40 megapixel và 64 MiB.</translation>
     </message>
     <message id="PdfAnnotationsNotPermitted">
-        <location filename="../src/PDFEditController.cpp" line="2380"/>
-        <location filename="../src/PDFEditController.cpp" line="3434"/>
-        <location filename="../src/PDFEditController.cpp" line="3662"/>
-        <location filename="../src/PDFEditController.cpp" line="3716"/>
-        <location filename="../src/PDFEditController.cpp" line="3791"/>
-        <location filename="../src/PDFEditController.cpp" line="3916"/>
-        <location filename="../src/PDFEditController.cpp" line="4653"/>
-        <location filename="../src/PDFEditController.cpp" line="4824"/>
-        <location filename="../src/PDFEditController.cpp" line="5683"/>
-        <location filename="../src/PDFEditController.cpp" line="5761"/>
-        <location filename="../src/PDFEditController.cpp" line="7638"/>
+        <location filename="../src/PDFEditController.cpp" line="2409"/>
+        <location filename="../src/PDFEditController.cpp" line="3463"/>
+        <location filename="../src/PDFEditController.cpp" line="3693"/>
+        <location filename="../src/PDFEditController.cpp" line="3747"/>
+        <location filename="../src/PDFEditController.cpp" line="3822"/>
+        <location filename="../src/PDFEditController.cpp" line="3947"/>
+        <location filename="../src/PDFEditController.cpp" line="4684"/>
+        <location filename="../src/PDFEditController.cpp" line="4855"/>
+        <location filename="../src/PDFEditController.cpp" line="5714"/>
+        <location filename="../src/PDFEditController.cpp" line="5792"/>
+        <location filename="../src/PDFEditController.cpp" line="7669"/>
         <source>This PDF does not permit changing annotations.</source>
         <oldsource>This PDF does not permit adding or deleting annotations.</oldsource>
         <translation>Tệp PDF này không cho phép thay đổi chú thích.</translation>
     </message>
     <message id="PdfPageAssemblyNotPermitted">
-        <location filename="../src/PDFEditController.cpp" line="4065"/>
-        <location filename="../src/PDFEditController.cpp" line="4140"/>
+        <location filename="../src/PDFEditController.cpp" line="4096"/>
+        <location filename="../src/PDFEditController.cpp" line="4171"/>
         <source>This PDF does not permit adding or deleting pages.</source>
         <translation>Tệp PDF này không cho phép thêm hoặc xóa trang.</translation>
     </message>
     <message id="CannotDeleteOnlyPage">
-        <location filename="../src/PDFEditController.cpp" line="4145"/>
+        <location filename="../src/PDFEditController.cpp" line="4176"/>
         <source>A PDF must contain at least one page.</source>
         <translation>Tệp PDF phải có ít nhất một trang.</translation>
     </message>
     <message id="CommentTextTooLong">
-        <location filename="../src/PDFEditController.cpp" line="3910"/>
-        <location filename="../src/PDFEditController.cpp" line="5706"/>
+        <location filename="../src/PDFEditController.cpp" line="3941"/>
+        <location filename="../src/PDFEditController.cpp" line="5737"/>
         <source>Comments and replies can contain at most %1 characters.</source>
         <oldsource>The comment is too long to edit.</oldsource>
         <translation>Bình luận và phản hồi chỉ được chứa tối đa %1 ký tự.</translation>
     </message>
     <message id="NoDraftChangesToSave">
-        <location filename="../src/PDFEditController.cpp" line="6019"/>
-        <location filename="../src/PDFEditController.cpp" line="6095"/>
+        <location filename="../src/PDFEditController.cpp" line="6050"/>
+        <location filename="../src/PDFEditController.cpp" line="6126"/>
         <source>There are no draft changes to save.</source>
         <translation>Không có thay đổi nháp nào để lưu.</translation>
     </message>
     <message id="PdfSavedButReopenFailed">
-        <location filename="../src/PDFEditController.cpp" line="6289"/>
+        <location filename="../src/PDFEditController.cpp" line="6320"/>
         <source>The PDF was saved, but TrePDF could not reopen it.</source>
         <translation>Đã lưu tệp PDF nhưng TrePDF không thể mở lại tệp.</translation>
     </message>
     <message id="PdfSavedFile">
-        <location filename="../src/PDFEditController.cpp" line="6277"/>
-        <location filename="../src/PDFEditController.cpp" line="6295"/>
+        <location filename="../src/PDFEditController.cpp" line="6308"/>
+        <location filename="../src/PDFEditController.cpp" line="6326"/>
         <source>Saved %1</source>
         <translation>Đã lưu %1</translation>
     </message>
     <message id="PdfFormImageDeleteUnsupported">
-        <location filename="../src/PDFEditController.cpp" line="7109"/>
+        <location filename="../src/PDFEditController.cpp" line="7140"/>
         <source>Images inside a PDF form object cannot be deleted safely yet.</source>
         <translation>Chưa thể xóa an toàn hình ảnh nằm trong đối tượng biểu mẫu PDF.</translation>
     </message>
     <message id="PdfTextClippingEditUnsupported">
-        <location filename="../src/PDFEditController.cpp" line="7177"/>
+        <location filename="../src/PDFEditController.cpp" line="7208"/>
         <source>Text clipping render modes cannot be edited safely yet.</source>
         <translation>Chưa thể chỉnh sửa an toàn văn bản dùng chế độ cắt xén.</translation>
     </message>
     <message id="PdfFormTextSaveUnsupported">
-        <location filename="../src/PDFEditController.cpp" line="7180"/>
+        <location filename="../src/PDFEditController.cpp" line="7211"/>
         <source>Text inside a PDF form object cannot be saved safely yet.</source>
         <translation>Chưa thể lưu an toàn văn bản nằm trong đối tượng biểu mẫu PDF.</translation>
     </message>
     <message id="InlineEditorUnsupportedTextLayout">
-        <location filename="../src/PDFEditController.cpp" line="7183"/>
+        <location filename="../src/PDFEditController.cpp" line="7214"/>
         <source>Rotated, transformed, or multiline text is not supported by the inline draft editor yet.</source>
         <translation>Trình chỉnh sửa bản nháp tại chỗ chưa hỗ trợ văn bản xoay, biến đổi hoặc nhiều dòng.</translation>
     </message>
@@ -1216,18 +1222,18 @@
         <translation type="vanished">Hiện chưa thể chỉnh sửa nội dung của bình luận có sẵn trong tệp PDF.</translation>
     </message>
     <message id="FreeTextAnnotation">
-        <location filename="../src/PDFEditController.cpp" line="3855"/>
-        <location filename="../src/PDFEditController.cpp" line="7621"/>
+        <location filename="../src/PDFEditController.cpp" line="3886"/>
+        <location filename="../src/PDFEditController.cpp" line="7652"/>
         <source>Free text annotation</source>
         <translation>Chú thích văn bản tự do</translation>
     </message>
     <message id="FormField">
-        <location filename="../src/PDFEditController.cpp" line="7686"/>
+        <location filename="../src/PDFEditController.cpp" line="7717"/>
         <source>Form field</source>
         <translation>Trường biểu mẫu</translation>
     </message>
     <message id="DraftEditorUnsupportedAnnotations">
-        <location filename="../src/PDFEditController.cpp" line="7694"/>
+        <location filename="../src/PDFEditController.cpp" line="7725"/>
         <source>Editing form fields and free-text annotations is not available in this draft editor yet.</source>
         <translation>Trình chỉnh sửa bản nháp này chưa hỗ trợ chỉnh sửa trường biểu mẫu và chú thích văn bản tự do.</translation>
     </message>

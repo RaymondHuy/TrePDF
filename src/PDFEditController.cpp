@@ -71,6 +71,10 @@ constexpr int kSquigglyRed = 198;
 constexpr int kSquigglyGreen = 40;
 constexpr int kSquigglyBlue = 40;
 constexpr int kSquigglyAlpha = 192;
+constexpr int kStrikeoutRed = 198;
+constexpr int kStrikeoutGreen = 40;
+constexpr int kStrikeoutBlue = 40;
+constexpr int kStrikeoutAlpha = 192;
 constexpr qint64 kMaximumAddedImageFileBytes = 64 * 1024 * 1024;
 constexpr qint64 kMaximumAddedImagePixels = 40 * 1000 * 1000;
 constexpr unsigned long kMaximumAnnotationStringBytes
@@ -1702,6 +1706,11 @@ PDFEditController::PDFEditController(QObject *parent)
           kSquigglyGreen,
           kSquigglyBlue,
           kSquigglyAlpha)
+    , m_strikeoutColor(
+          kStrikeoutRed,
+          kStrikeoutGreen,
+          kStrikeoutBlue,
+          kStrikeoutAlpha)
 {
     connect(
         this,
@@ -1946,6 +1955,26 @@ void PDFEditController::setSquigglyColor(const QColor &color)
 
     m_squigglyColor = normalizedColor;
     emit squigglyColorChanged();
+}
+
+QColor PDFEditController::strikeoutColor() const
+{
+    return m_strikeoutColor;
+}
+
+void PDFEditController::setStrikeoutColor(const QColor &color)
+{
+    if (!color.isValid()) {
+        return;
+    }
+
+    const QColor normalizedColor = color.toRgb();
+    if (m_strikeoutColor == normalizedColor) {
+        return;
+    }
+
+    m_strikeoutColor = normalizedColor;
+    emit strikeoutColorChanged();
 }
 
 bool PDFEditController::hasDrafts() const
@@ -3496,6 +3525,8 @@ QVariantMap PDFEditController::addHighlight(int page,
         markupColor = m_underlineColor;
     } else if (markupTool == SquigglyTool) {
         markupColor = m_squigglyColor;
+    } else if (markupTool == StrikeoutTool) {
+        markupColor = m_strikeoutColor;
     }
     return addTextMarkupDraft(
         page,

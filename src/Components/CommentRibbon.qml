@@ -55,6 +55,7 @@ Flickable {
     function markupColorWithOpacity(color, tool) {
         const opacity = tool === PDFEditController.UnderlineTool
                 || tool === PDFEditController.SquigglyTool
+                || tool === PDFEditController.StrikeoutTool
             ? lineMarkupOpacity
             : highlightOpacity
         return Qt.rgba(
@@ -76,6 +77,8 @@ Flickable {
             return editController.underlineColor
         if (tool === PDFEditController.SquigglyTool)
             return editController.squigglyColor
+        if (tool === PDFEditController.StrikeoutTool)
+            return editController.strikeoutColor
         return editController.highlightColor
     }
 
@@ -83,11 +86,14 @@ Flickable {
         highlightColorPopup.close()
         underlineColorPopup.close()
         squigglyColorPopup.close()
+        strikeoutColorPopup.close()
         const selectedColor = markupColorWithOpacity(color, tool)
         if (tool === PDFEditController.UnderlineTool) {
             editController.underlineColor = selectedColor
         } else if (tool === PDFEditController.SquigglyTool) {
             editController.squigglyColor = selectedColor
+        } else if (tool === PDFEditController.StrikeoutTool) {
+            editController.strikeoutColor = selectedColor
         } else {
             editController.highlightColor = selectedColor
         }
@@ -98,6 +104,7 @@ Flickable {
         highlightColorPopup.close()
         underlineColorPopup.close()
         squigglyColorPopup.close()
+        strikeoutColorPopup.close()
         pendingColorTool = tool
         pendingColorDialogTitle = title
         markupColorDialog.selectedColor = opaqueHighlightColor(
@@ -112,6 +119,8 @@ Flickable {
             underlineColorPopup.close()
         if (squigglyColorPopup)
             squigglyColorPopup.close()
+        if (strikeoutColorPopup)
+            strikeoutColorPopup.close()
         if (markupColorDialog)
             markupColorDialog.close()
     }
@@ -521,18 +530,57 @@ Flickable {
             }
 
             RibbonButton {
+                id: strikeoutButton
+
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Strikeout"
                 text: qsTrId("Strikeout")
                 iconSource: "../assets/icons/strikethrough.svg"
+                menuIndicatorVisible: true
+                spacing: 6
+                //% "Choose strikeout color"
+                menuToolTipText: qsTrId("ChooseStrikeoutColor")
                 enabled: root.document.loaded
                     && !root.editController.saving
                 primary: root.editController.tool
                     === PDFEditController.StrikeoutTool
                 onClicked: {
+                    strikeoutColorPopup.close()
                     root.editController.tool
                         = PDFEditController.StrikeoutTool
+                }
+                onMenuRequested: strikeoutColorPopup.open()
+                onEnabledChanged: {
+                    if (!enabled)
+                        strikeoutColorPopup.close()
+                }
+
+                Rectangle {
+                    anchors.top: strikeoutButton.contentItem.top
+                    anchors.horizontalCenter:
+                        strikeoutButton.contentItem.horizontalCenter
+                    anchors.topMargin:
+                        (strikeoutButton.contentItem.height
+                            - strikeoutButton.implicitContentHeight) / 2
+                        + strikeoutButton.icon.height
+                        + (strikeoutButton.spacing - height) / 2
+                    width: strikeoutButton.icon.width
+                    height: 5
+                    radius: 1
+                    color: root.opaqueHighlightColor(
+                        root.editController.strikeoutColor)
+                    Accessible.ignored: true
+                }
+
+                MarkupColorPopup {
+                    id: strikeoutColorPopup
+
+                    anchorButton: strikeoutButton
+                    paletteColors: root.lineMarkupColors
+                    targetTool: PDFEditController.StrikeoutTool
+                    //% "Choose strikeout color"
+                    pickerTitle: qsTrId("ChooseStrikeoutColor")
                 }
             }
         }
