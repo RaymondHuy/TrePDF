@@ -51,6 +51,19 @@ public:
         bool preserveDefaultAppearance = false;
     };
 
+    enum class TextMarkupType {
+        Highlight,
+        Underline,
+        Squiggly,
+        StrikeOut
+    };
+
+    struct TextMarkupAnnotation {
+        int page = -1;
+        QString annotationId;
+        TextMarkupType type = TextMarkupType::Highlight;
+    };
+
     static bool finalizeFields(const QString &filePath,
                                const QVector<Field> &fields,
                                QString &error);
@@ -61,5 +74,9 @@ public:
     static bool finalizeFreeTextAnnotations(
         const QString &filePath,
         const QVector<FreeTextAnnotation> &annotations,
+        QString &error);
+    static bool finalizeTextMarkupAnnotations(
+        const QString &filePath,
+        const QVector<TextMarkupAnnotation> &annotations,
         QString &error);
 };

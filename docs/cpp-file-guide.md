@@ -217,6 +217,9 @@ orchestration Save.
   annotation nguồn được sửa trong panel bằng draft riêng; canvas vẫn không cho
   move/resize annotation nguồn, còn ReadOnly/LockedContents không nhận mutation.
   Xóa tạo tombstone draft theo annotation index và subtype.
+- Khi text markup có explicit `/AP`, lấy fill/stroke RGBA từ path trong normal
+  appearance nếu PDFium không trả annotation color; AP là nguồn hiển thị có
+  thẩm quyền, không để `/C` hoặc `/CA` stale đổi màu model sau reopen.
 - Đọc quan hệ reply chuẩn qua `/IRT` và `/RT`; chuỗi reply nhiều tầng từ PDF
   ngoài được lần về root rồi trình bày thành đúng một cấp. Metadata private chỉ
   dùng để định danh ổn định parent trong pipeline ghi trước khi tạo `/IRT` chuẩn.
@@ -332,7 +335,8 @@ orchestration Save.
   Highlight/Squiggly/Underline/Strikeout annotation với quad/color/Print flag,
   Text annotation và FreeText annotation với rect/`Contents`/`NM`/Print flag.
   Squiggly ghi quad từ các rectangle dòng đã snap; ba text-markup còn lại ghi
-  geometry tự do hiện có.
+  geometry tự do hiện có. Sau khi serialize staging file, canonicalizer thêm
+  normal `/AP` vector cho text markup mới mà không regenerate page content.
 - Ghi parent/reply vào file tạm, định danh bằng metadata ổn định rồi canonicalize
   reply thành `/IRT <parent-ref>` và `/RT /R` trước khi commit giao dịch.
 - Xóa comment nguồn, toàn bộ reply hậu duệ và `/Popup` liên kết theo annotation
@@ -586,8 +590,9 @@ TrePDF phải fail rõ ràng.
 ### [`src/PDFAcroFormCanonicalizer.cpp`](../src/PDFAcroFormCanonicalizer.cpp)
 và [`src/PDFAcroFormCanonicalizer.h`](../src/PDFAcroFormCanonicalizer.h)
 
-**Vai trò:** bộ đọc/ghi PDF mục đích hẹp để hoàn thiện AcroForm, liên kết reply
-annotation và appearance FreeText mà PDFium public API không dựng đủ an toàn.
+**Vai trò:** bộ đọc/ghi PDF mục đích hẹp để hoàn thiện AcroForm, liên kết reply,
+appearance FreeText và normal appearance vector của text markup mà PDFium
+public API không dựng đủ an toàn.
 
 **Đọc cấu trúc:**
 
@@ -614,6 +619,10 @@ annotation và appearance FreeText mà PDFium public API không dựng đủ an 
 - Render FreeText thành appearance image nền trắng, viền đen và text Unicode
   wrap trong rectangle annotation; `/Contents` vẫn giữ nội dung semantic để
   reader khác có thể tìm/đọc comment.
+- Với Highlight/Underline/Squiggly/Strikeout mới, tìm annotation qua `/NM`, đọc
+  `/QuadPoints`, `/C`, `/CA` rồi tạo `/AP /N` Form XObject vector. Highlight
+  fill với `/BM /Multiply`; ba subtype nét dùng stroke với `/BM /Normal`.
+  Annotation nguồn không nằm trong request nên giữ nguyên appearance cũ.
 - Tạo Checkbox Widget với `/AP` Off/Yes riêng, `/AS`, value/default value và
   vector check appearance.
 - Gom Radio theo Group ID thành một field cha `/FT /Btn` có `/Kids`; mỗi Widget

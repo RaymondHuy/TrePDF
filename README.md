@@ -235,6 +235,9 @@ caret at the end. Font size is currently UI-only.
 - [`docs/overlay-architecture.md`](docs/overlay-architecture.md): the current
   per-page overlay tree, stacking order, coordinate systems, mode gates, input
   routing, texture synchronization, and pooling cleanup.
+- [`docs/comment-annotation-pipeline.md`](docs/comment-annotation-pipeline.md):
+  the current PDF comment/annotation scope, indexing, draft/history, geometry,
+  replies, rendering, persistence, interoperability invariants, and roadmap.
 - [`docs/text-editing-pipeline.md`](docs/text-editing-pipeline.md): the complete
   editable-text discovery, geometry, font, baseline, overlay, and
   draft-rendering flow.

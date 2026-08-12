@@ -70,6 +70,13 @@ constexpr char kFontCollisionTargetText[] = "Wxyz";
 constexpr char kLegacyListBoxFieldName[] = "LegacyOfficeList";
 constexpr char kLegacyListBoxWidgetId[]
     = "listbox-field-22222222-2222-4222-8222-222222222222";
+constexpr char kSourceTextMarkupAppearance[]
+    = "q\n"
+      "0.13 0.27 0.61 RG\n"
+      "2 w\n"
+      "7 11 m 133 11 l S\n"
+      "% TrePDF source text markup appearance sentinel\n"
+      "Q\n";
 constexpr int kPdfButtonNoToggleToOff = 1 << 14;
 constexpr int kPdfButtonRadio = 1 << 15;
 constexpr int kPdfTextDoNotScroll = 1 << 23;
@@ -1338,6 +1345,15 @@ bool createTextMarkupCommentPdf(const QString &filePath,
                                 const QByteArray &annotationName,
                                 const QByteArray &contents)
 {
+    const QByteArray appearanceContent(kSourceTextMarkupAppearance);
+    const QByteArray appearanceObject
+        = QByteArray(
+              "<< /Type /XObject /Subtype /Form /FormType 1 "
+              "/BBox [0 0 140 22] /Resources << >> /Length ")
+        + QByteArray::number(appearanceContent.size())
+        + QByteArray(" >>\nstream\n")
+        + appearanceContent
+        + QByteArray("endstream");
     return writePdfObjects(
         filePath,
         {
@@ -1358,7 +1374,10 @@ bool createTextMarkupCommentPdf(const QString &filePath,
                     "/CreationDate (D:20240405060708+07'00') "
                     "/M (D:20240506070809+07'00') /NM (")
                 + annotationName
-                + QByteArray(") /C [1 0.9 0] /CA 0.55 /F 4 >>"),
+                + QByteArray(
+                    ") /C [1 0.9 0] /CA 0.55 /F 4 "
+                    "/AP << /N 5 0 R >> >>"),
+            appearanceObject,
         });
 }
 
@@ -2598,6 +2617,10 @@ struct HighlightSaveInspection {
     QString author;
     QString creationDate;
     QString modificationDate;
+    bool hasAppearance = false;
+    QString appearance;
+    int appearanceObjectCount = 0;
+    int appearancePathCount = 0;
 };
 
 struct StickyNoteSaveInspection {
@@ -3259,6 +3282,64 @@ HighlightSaveInspection inspectTextMarkupAnnotations(
                         green,
                         blue,
                         alpha);
+                }
+                inspection.hasAppearance = FPDFAnnot_HasKey(
+                    annotation,
+                    "AP");
+                inspection.appearance = annotationAppearanceString(
+                    annotation);
+                inspection.appearanceObjectCount
+                    = FPDFAnnot_GetObjectCount(annotation);
+                for (int objectIndex = 0;
+                     objectIndex < inspection.appearanceObjectCount;
+                     ++objectIndex) {
+                    FPDF_PAGEOBJECT object = FPDFAnnot_GetObject(
+                        annotation,
+                        objectIndex);
+                    if (!object
+                        || FPDFPageObj_GetType(object)
+                            != FPDF_PAGEOBJ_PATH) {
+                        continue;
+                    }
+                    ++inspection.appearancePathCount;
+                    if (inspection.color.isValid()) {
+                        continue;
+                    }
+
+                    int fillMode = FPDF_FILLMODE_NONE;
+                    FPDF_BOOL stroke = false;
+                    unsigned int pathRed = 0;
+                    unsigned int pathGreen = 0;
+                    unsigned int pathBlue = 0;
+                    unsigned int pathAlpha = 255;
+                    const bool hasDrawMode = FPDFPath_GetDrawMode(
+                        object,
+                        &fillMode,
+                        &stroke);
+                    const bool hasPathColor = hasDrawMode
+                        && ((fillMode != FPDF_FILLMODE_NONE
+                             && FPDFPageObj_GetFillColor(
+                                 object,
+                                 &pathRed,
+                                 &pathGreen,
+                                 &pathBlue,
+                                 &pathAlpha))
+                            || (stroke
+                                && FPDFPageObj_GetStrokeColor(
+                                    object,
+                                    &pathRed,
+                                    &pathGreen,
+                                    &pathBlue,
+                                    &pathAlpha)));
+                    if (!hasPathColor) {
+                        continue;
+                    }
+
+                    inspection.color = QColor::fromRgb(
+                        pathRed,
+                        pathGreen,
+                        pathBlue,
+                        pathAlpha);
                 }
                 inspection.flags = FPDFAnnot_GetFlags(annotation);
                 FPDFAnnot_GetRect(annotation, &inspection.rect);
@@ -13225,6 +13306,13 @@ void PDFEditControllerTest::editsSourceTextMarkupComment_data()
         << QStringLiteral("highlight")
         << QByteArray("Source highlight comment")
         << QStringLiteral("Edited highlight comment");
+    QTest::newRow("underline")
+        << QByteArray("Underline")
+        << static_cast<int>(FPDF_ANNOT_UNDERLINE)
+        << QStringLiteral("editable-source-underline")
+        << QStringLiteral("underline")
+        << QByteArray("Source underline comment")
+        << QStringLiteral("Edited underline comment");
     QTest::newRow("squiggly")
         << QByteArray("Squiggly")
         << static_cast<int>(FPDF_ANNOT_SQUIGGLY)
@@ -13232,6 +13320,13 @@ void PDFEditControllerTest::editsSourceTextMarkupComment_data()
         << QStringLiteral("squiggly")
         << QByteArray("Source squiggly comment")
         << QStringLiteral("Edited squiggly comment");
+    QTest::newRow("strikeout")
+        << QByteArray("StrikeOut")
+        << static_cast<int>(FPDF_ANNOT_STRIKEOUT)
+        << QStringLiteral("editable-source-strikeout")
+        << QStringLiteral("strikeout")
+        << QByteArray("Source strikeout comment")
+        << QStringLiteral("Edited strikeout comment");
 }
 
 void PDFEditControllerTest::editsSourceTextMarkupComment()
@@ -13261,6 +13356,9 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
     QCOMPARE(sourceInspection.annotationCount, 1);
     QCOMPARE(sourceInspection.subtype, subtype);
     QCOMPARE(sourceInspection.quadPoints.size(), 1);
+    QVERIFY(sourceInspection.hasAppearance);
+    QVERIFY(sourceInspection.appearance.contains(
+        QStringLiteral("TrePDF source text markup appearance sentinel")));
 
     PDFDocument document;
     PDFEditController controller;
@@ -13273,6 +13371,11 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
     QCOMPARE(
         sourceComment.value(QStringLiteral("kind")).toString(),
         kind);
+    QCOMPARE(
+        sourceComment
+            .value(QStringLiteral("highlightColor"))
+            .value<QColor>(),
+        QColor(33, 69, 156, 255));
     QVERIFY(!sourceComment.value(QStringLiteral("editable")).toBool());
     QVERIFY(sourceComment
         .value(QStringLiteral("commentTextEditable")).toBool());
@@ -13307,9 +13410,8 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
     QVERIFY(
         outputInspection.modificationDate
         != sourceInspection.modificationDate);
-    QCOMPARE(
-        outputInspection.hasAppearance,
-        sourceInspection.hasAppearance);
+    QVERIFY(outputInspection.hasAppearance);
+    QCOMPARE(outputInspection.appearance, sourceInspection.appearance);
     QVERIFY(qAbs(outputInspection.rect.left
                  - sourceInspection.rect.left) < 0.001);
     QVERIFY(qAbs(outputInspection.rect.right
@@ -14116,6 +14218,12 @@ void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
     QCOMPARE(inspection.color, highlightColor);
     QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
     QCOMPARE(inspection.quadPoints.size(), 1);
+    QVERIFY(inspection.hasAppearance);
+    QVERIFY(!inspection.appearance.isEmpty());
+    QVERIFY(inspection.appearanceObjectCount > 0);
+    QCOMPARE(
+        inspection.appearancePathCount,
+        inspection.appearanceObjectCount);
     QCOMPARE(
         inspection.author,
         addedHighlight.value(QStringLiteral("commentAuthor")).toString());
@@ -14244,6 +14352,12 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
     QCOMPARE(inspection.color, annotationColor);
     QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
     QCOMPARE(inspection.quadPoints.size(), expectedRects.size());
+    QVERIFY(inspection.hasAppearance);
+    QVERIFY(!inspection.appearance.isEmpty());
+    QVERIFY(inspection.appearanceObjectCount > 0);
+    QCOMPARE(
+        inspection.appearancePathCount,
+        inspection.appearanceObjectCount);
 
     QRectF expectedAnnotationRect;
     for (const QRectF &rect : std::as_const(expectedRects)) {
@@ -15007,6 +15121,12 @@ void PDFEditControllerTest::savesHighlightAlongsideTextEdit()
     QVERIFY(inspection.readable);
     QCOMPARE(inspection.count, 1);
     QCOMPARE(inspection.quadPoints.size(), 1);
+    QVERIFY(inspection.hasAppearance);
+    QVERIFY(!inspection.appearance.isEmpty());
+    QVERIFY(inspection.appearanceObjectCount > 0);
+    QCOMPARE(
+        inspection.appearancePathCount,
+        inspection.appearanceObjectCount);
 }
 
 void PDFEditControllerTest::preservesPatternGraphicsWhenSavingHighlight()

@@ -1497,6 +1497,72 @@ QColor pageObjectColor(FPDF_PAGEOBJECT object, bool stroke)
     return QColor::fromRgb(red, green, blue, alpha);
 }
 
+QColor annotationColor(FPDF_ANNOTATION annotation,
+                       FPDF_ANNOTATION_SUBTYPE subtype,
+                       const QColor &fallback)
+{
+    unsigned int red = 0;
+    unsigned int green = 0;
+    unsigned int blue = 0;
+    unsigned int alpha = 255;
+    if (FPDFAnnot_GetColor(
+            annotation,
+            FPDFANNOT_COLORTYPE_Color,
+            &red,
+            &green,
+            &blue,
+            &alpha)) {
+        return QColor::fromRgb(red, green, blue, alpha);
+    }
+
+    const bool highlight = subtype == FPDF_ANNOT_HIGHLIGHT;
+    const bool strokedTextMarkup = subtype == FPDF_ANNOT_UNDERLINE
+        || subtype == FPDF_ANNOT_SQUIGGLY
+        || subtype == FPDF_ANNOT_STRIKEOUT;
+    if (!highlight && !strokedTextMarkup) {
+        return fallback;
+    }
+
+    const int objectCount = FPDFAnnot_GetObjectCount(annotation);
+    for (int index = 0; index < objectCount; ++index) {
+        FPDF_PAGEOBJECT object = FPDFAnnot_GetObject(annotation, index);
+        if (!object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_PATH) {
+            continue;
+        }
+        int fillMode = FPDF_FILLMODE_NONE;
+        FPDF_BOOL stroke = false;
+        if (!FPDFPath_GetDrawMode(object, &fillMode, &stroke)) {
+            continue;
+        }
+        const auto fillColor = [&]() {
+            return fillMode != FPDF_FILLMODE_NONE
+                && FPDFPageObj_GetFillColor(
+                    object,
+                    &red,
+                    &green,
+                    &blue,
+                    &alpha);
+        };
+        const auto strokeColor = [&]() {
+            return stroke
+                && FPDFPageObj_GetStrokeColor(
+                    object,
+                    &red,
+                    &green,
+                    &blue,
+                    &alpha);
+        };
+        const bool foundColor = highlight
+            ? fillColor() || strokeColor()
+            : strokeColor() || fillColor();
+        if (!foundColor) {
+            continue;
+        }
+        return QColor::fromRgb(red, green, blue, alpha);
+    }
+    return fallback;
+}
+
 QColor textColor(FPDF_PAGEOBJECT object, FPDF_TEXT_RENDERMODE renderMode)
 {
     const bool strokeOnly = renderMode == FPDF_TEXTRENDERMODE_STROKE
@@ -7475,20 +7541,10 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                              kHighlightBlue,
                              kHighlightAlpha)
                     : QColor(Qt::black);
-            unsigned int red = 0;
-            unsigned int green = 0;
-            unsigned int blue = 0;
-            unsigned int alpha = 0;
-            if (FPDFAnnot_GetColor(
-                    annotation,
-                    FPDFANNOT_COLORTYPE_Color,
-                    &red,
-                    &green,
-                    &blue,
-                    &alpha)) {
-                defaultColor = QColor::fromRgb(red, green, blue, alpha);
-            }
-            candidate.highlightColor = defaultColor;
+            candidate.highlightColor = annotationColor(
+                annotation,
+                subtype,
+                defaultColor);
             if (freeTextSubtype) {
                 candidate.fontFamily = QStringLiteral("Helvetica");
                 candidate.fontSizeRatio = qMin<qreal>(
