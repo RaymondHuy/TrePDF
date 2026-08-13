@@ -7101,7 +7101,18 @@ bool PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
     }
 
     qsizetype totalVertices = 0;
+    QSet<QString> annotationIds;
     for (const auto &annotation : annotations) {
+        const QByteArrayView subtype = drawingSubtypeName(annotation.type);
+        if (annotation.page < 0
+            || annotation.annotationId.isEmpty()
+            || subtype.isEmpty()
+            || annotationIds.contains(annotation.annotationId)) {
+            error = QStringLiteral(
+                "A drawing annotation request is invalid or duplicated.");
+            return false;
+        }
+        annotationIds.insert(annotation.annotationId);
         totalVertices += annotation.pageVertices.size();
         if (totalVertices > maximumTotalVertices) {
             error = QStringLiteral(
@@ -7154,21 +7165,10 @@ bool PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
     QHash<int, ObjectReference> rewrittenReferences;
     QList<IncrementalObject> incrementalObjects;
     incrementalObjects.reserve(annotations.size() * 2);
-    QSet<QString> annotationIds;
     qsizetype totalAppearanceBytes = 0;
 
     for (const PDFCommentAnnotation::DrawingAnnotation &annotation
          : annotations) {
-        const QByteArrayView subtype = drawingSubtypeName(annotation.type);
-        if (annotation.page < 0
-            || annotation.annotationId.isEmpty()
-            || subtype.isEmpty()
-            || annotationIds.contains(annotation.annotationId)) {
-            return fail(QStringLiteral(
-                "A drawing annotation request is invalid or duplicated."));
-        }
-        annotationIds.insert(annotation.annotationId);
-
         QByteArray appearanceContent;
         if (!drawingAppearanceData(annotation, appearanceContent, error)) {
             return fail(error);

@@ -1632,7 +1632,8 @@ AnnotationAppearanceStyle annotationAppearanceStyle(
 
 QColor annotationColor(FPDF_ANNOTATION annotation,
                        FPDF_ANNOTATION_SUBTYPE subtype,
-                       const QColor &fallback)
+                       const QColor &fallback,
+                       const AnnotationAppearanceStyle *appearanceStyle)
 {
     unsigned int red = 0;
     unsigned int green = 0;
@@ -1660,16 +1661,20 @@ QColor annotationColor(FPDF_ANNOTATION annotation,
     if (!highlight && !strokedTextMarkup && !drawing) {
         return fallback;
     }
-    const AnnotationAppearanceStyle appearance
-        = annotationAppearanceStyle(annotation);
-    if (highlight && appearance.hasFill) {
-        return appearance.fillColor;
+
+    AnnotationAppearanceStyle discoveredAppearanceStyle;
+    if (!appearanceStyle) {
+        discoveredAppearanceStyle = annotationAppearanceStyle(annotation);
+        appearanceStyle = &discoveredAppearanceStyle;
     }
-    if (appearance.hasStroke) {
-        return appearance.strokeColor;
+    if (highlight && appearanceStyle->hasFill) {
+        return appearanceStyle->fillColor;
     }
-    if (appearance.hasFill) {
-        return appearance.fillColor;
+    if (appearanceStyle->hasStroke) {
+        return appearanceStyle->strokeColor;
+    }
+    if (appearanceStyle->hasFill) {
+        return appearanceStyle->fillColor;
     }
     return fallback;
 }
@@ -7990,13 +7995,16 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                              kHighlightBlue,
                              kHighlightAlpha)
                     : QColor(Qt::black);
+            const AnnotationAppearanceStyle appearanceStyle
+                = drawingCommentSubtype
+                ? annotationAppearanceStyle(annotation)
+                : AnnotationAppearanceStyle{};
             candidate.highlightColor = annotationColor(
                 annotation,
                 subtype,
-                defaultColor);
+                defaultColor,
+                drawingCommentSubtype ? &appearanceStyle : nullptr);
             if (drawingCommentSubtype) {
-                const AnnotationAppearanceStyle appearanceStyle
-                    = annotationAppearanceStyle(annotation);
                 candidate.drawingType = drawingTypeForSubtype(subtype);
                 candidate.commentProperties.strokeColor = QColor(
                     candidate.highlightColor.red(),
