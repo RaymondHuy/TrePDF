@@ -173,6 +173,9 @@ Current features:
   duplicate-path protection, and cross-tab save guards.
 - `src/PDFDocument.h/.cpp`: main-thread PDFium document, metadata, page sizes,
   navigation state, and source file path.
+- `src/PDFAnnotationUtils.h/.cpp`: shared bounded annotation-string access,
+  comment newline normalization, markup classification, and reply-relation
+  predicates used by indexing, rendering, and saving.
 - `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
   rich-text draft state, snapshot-based undo/redo history, and save commands.
 - `src/PDFFormController.h/.cpp`: per-tab AcroForm state, asynchronous form

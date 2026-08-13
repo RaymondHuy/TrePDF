@@ -200,6 +200,15 @@ zoom, đóng/mở khi render đang chạy và shutdown render thread.
 
 ## Edit controller và writer nội dung
 
+### [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) và
+[`src/PDFAnnotationUtils.h`](../src/PDFAnnotationUtils.h)
+
+**Vai trò:** contract dùng chung cho comment annotation giữa candidate index,
+render suppression và save cascade. Utility đọc chuỗi annotation với giới hạn
+4 MiB, chuẩn hóa CR/LF, phân loại editable/full markup (kể cả `/Projection`) và
+nhận diện quan hệ reply. Các hàm chỉ mượn annotation handle, yêu cầu caller đã
+giữ `PDFiumProcessLock` và không tự đóng handle hoặc acquire lock.
+
 ### [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) và
 [`src/PDFEditController.h`](../src/PDFEditController.h)
 
@@ -744,6 +753,7 @@ thay thế kiểm thử native Metal thủ công.
 | `FormFieldLayer.cpp` | `FormFieldLayer.h` |
 | `PDFAcroFormCanonicalizer.cpp` | `PDFAcroFormCanonicalizer.h` |
 | `PDFAcroFormWriter.cpp` | `PDFAcroFormWriter.h` |
+| `PDFAnnotationUtils.cpp` | `PDFAnnotationUtils.h` |
 | `PDFDocument.cpp` | `PDFDocument.h` |
 | `PDFEditController.cpp` | `PDFEditController.h` |
 | `PDFFormController.cpp` | `PDFFormController.h` |

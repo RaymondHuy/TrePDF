@@ -239,6 +239,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFPageItem.cpp`](../src/PDFPageItem.cpp) | Render trang bất đồng bộ và upload texture. |
 | [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) | Candidate, selection, draft, edit, history và save orchestration. |
 | [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) | Ghi PDF giao dịch từ snapshot bất biến. |
+| [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) | Đọc chuỗi, chuẩn hóa nội dung và phân loại comment annotation dùng chung cho index, render và save. |
 | [`src/DraftImageItem.cpp`](../src/DraftImageItem.cpp) | Vẽ snapshot ảnh draft trong QML. |
 | [`src/PDFFormController.cpp`](../src/PDFFormController.cpp) | Facade GUI-thread của form runtime. |
 | [`src/PDFFormWorker.cpp`](../src/PDFFormWorker.cpp) | Session PDFium form trên hàng đợi tuần tự. |

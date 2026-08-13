@@ -1,6 +1,7 @@
 #include "ApplicationFonts.h"
 #include "DraftImageItem.h"
 #include "FormFieldLayer.h"
+#include "PDFAnnotationUtils.h"
 #include "PDFDocument.h"
 #include "PDFEditController.h"
 #include "PDFFormController.h"
@@ -27,10 +28,12 @@
 #include <QQuickTextDocument>
 #include <QQuickWindow>
 #include <QRawFont>
+#include <QRegularExpression>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QSemaphore>
 #include <QSignalSpy>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextCursor>
@@ -2824,6 +2827,545 @@ struct CommentAnnotationInspection {
     QVector<FS_QUADPOINTSF> quadPoints;
 };
 
+struct PdfDictionaryRange {
+    qsizetype start = -1;
+    qsizetype end = -1;
+
+    bool isValid() const
+    {
+        return start >= 0 && end > start;
+    }
+};
+
+qsizetype skipPdfLiteralString(const QByteArray &data, qsizetype offset)
+{
+    int depth = 1;
+    for (qsizetype index = offset + 1; index < data.size(); ++index) {
+        const char value = data.at(index);
+        if (value == '\\') {
+            if (index + 1 < data.size()) {
+                ++index;
+                if (data.at(index) == '\r'
+                    && index + 1 < data.size()
+                    && data.at(index + 1) == '\n') {
+                    ++index;
+                }
+            }
+            continue;
+        }
+        if (value == '(') {
+            ++depth;
+        } else if (value == ')' && --depth == 0) {
+            return index + 1;
+        }
+    }
+    return data.size();
+}
+
+qsizetype skipPdfHexString(const QByteArray &data, qsizetype offset)
+{
+    const qsizetype end = data.indexOf('>', offset + 1);
+    return end >= 0 ? end + 1 : data.size();
+}
+
+qsizetype skipPdfComment(const QByteArray &data, qsizetype offset)
+{
+    qsizetype index = offset + 1;
+    while (index < data.size()
+           && data.at(index) != '\r'
+           && data.at(index) != '\n') {
+        ++index;
+    }
+    return index;
+}
+
+PdfDictionaryRange pdfDictionaryRangeAt(const QByteArray &data,
+                                        qsizetype dictionaryStart)
+{
+    if (dictionaryStart < 0
+        || dictionaryStart + 1 >= data.size()
+        || data.at(dictionaryStart) != '<'
+        || data.at(dictionaryStart + 1) != '<') {
+        return {};
+    }
+
+    int depth = 0;
+    for (qsizetype index = dictionaryStart; index < data.size();) {
+        const char value = data.at(index);
+        if (value == '%') {
+            index = skipPdfComment(data, index);
+            continue;
+        }
+        if (value == '(') {
+            index = skipPdfLiteralString(data, index);
+            continue;
+        }
+        if (value == '<') {
+            if (index + 1 < data.size() && data.at(index + 1) == '<') {
+                ++depth;
+                index += 2;
+            } else {
+                index = skipPdfHexString(data, index);
+            }
+            continue;
+        }
+        if (value == '>'
+            && index + 1 < data.size()
+            && data.at(index + 1) == '>') {
+            --depth;
+            index += 2;
+            if (depth == 0) {
+                return PdfDictionaryRange{dictionaryStart, index};
+            }
+            if (depth < 0) {
+                return {};
+            }
+            continue;
+        }
+        ++index;
+    }
+    return {};
+}
+
+bool isPdfWhitespace(char value)
+{
+    return value == '\0'
+        || value == '\t'
+        || value == '\n'
+        || value == '\f'
+        || value == '\r'
+        || value == ' ';
+}
+
+bool isPdfDelimiter(char value)
+{
+    return value == '('
+        || value == ')'
+        || value == '<'
+        || value == '>'
+        || value == '['
+        || value == ']'
+        || value == '{'
+        || value == '}'
+        || value == '/'
+        || value == '%';
+}
+
+qsizetype skipPdfWhitespaceAndComments(const QByteArray &data,
+                                       qsizetype offset,
+                                       qsizetype end)
+{
+    qsizetype index = offset;
+    while (index < end) {
+        if (isPdfWhitespace(data.at(index))) {
+            ++index;
+            continue;
+        }
+        if (data.at(index) == '%') {
+            index = skipPdfComment(data, index);
+            continue;
+        }
+        break;
+    }
+    return index;
+}
+
+qsizetype pdfDirectValueOffset(
+    const QByteArray &data,
+    const PdfDictionaryRange &parent,
+    const QByteArray &key)
+{
+    if (!parent.isValid()) {
+        return -1;
+    }
+
+    int dictionaryDepth = 0;
+    int arrayDepth = 0;
+    for (qsizetype index = parent.start; index < parent.end;) {
+        const char value = data.at(index);
+        if (value == '%') {
+            index = skipPdfComment(data, index);
+            continue;
+        }
+        if (value == '(') {
+            index = skipPdfLiteralString(data, index);
+            continue;
+        }
+        if (value == '<') {
+            if (index + 1 < parent.end && data.at(index + 1) == '<') {
+                ++dictionaryDepth;
+                index += 2;
+            } else {
+                index = skipPdfHexString(data, index);
+            }
+            continue;
+        }
+        if (value == '>'
+            && index + 1 < parent.end
+            && data.at(index + 1) == '>') {
+            --dictionaryDepth;
+            index += 2;
+            continue;
+        }
+        if (value == '[') {
+            ++arrayDepth;
+            ++index;
+            continue;
+        }
+        if (value == ']') {
+            --arrayDepth;
+            ++index;
+            continue;
+        }
+        if (value != '/'
+            || dictionaryDepth != 1
+            || arrayDepth != 0) {
+            ++index;
+            continue;
+        }
+
+        const qsizetype nameStart = index + 1;
+        qsizetype nameEnd = nameStart;
+        while (nameEnd < parent.end
+               && !isPdfWhitespace(data.at(nameEnd))
+               && !isPdfDelimiter(data.at(nameEnd))) {
+            ++nameEnd;
+        }
+        if (data.mid(nameStart, nameEnd - nameStart) != key) {
+            index = nameEnd;
+            continue;
+        }
+        return skipPdfWhitespaceAndComments(
+            data,
+            nameEnd,
+            parent.end);
+    }
+    return -1;
+}
+
+PdfDictionaryRange pdfDirectDictionaryValue(
+    const QByteArray &data,
+    const PdfDictionaryRange &parent,
+    const QByteArray &key)
+{
+    const qsizetype valueStart = pdfDirectValueOffset(data, parent, key);
+    const PdfDictionaryRange valueRange = pdfDictionaryRangeAt(
+        data,
+        valueStart);
+    return valueRange.isValid() && valueRange.end <= parent.end
+        ? valueRange
+        : PdfDictionaryRange();
+}
+
+struct PdfIndirectReference {
+    int objectNumber = 0;
+    int generation = 0;
+
+    bool isValid() const
+    {
+        return objectNumber > 0 && generation >= 0;
+    }
+};
+
+PdfIndirectReference pdfDirectIndirectReference(
+    const QByteArray &data,
+    const PdfDictionaryRange &parent,
+    const QByteArray &key)
+{
+    const qsizetype valueStart = pdfDirectValueOffset(data, parent, key);
+    if (valueStart < 0 || valueStart >= parent.end) {
+        return {};
+    }
+    const QString valueText = QString::fromLatin1(
+        data.mid(valueStart, parent.end - valueStart));
+    const QRegularExpression referenceExpression(
+        QStringLiteral(R"(^(\d+)\s+(\d+)\s+R\b)"));
+    const QRegularExpressionMatch match = referenceExpression.match(valueText);
+    if (!match.hasMatch()) {
+        return {};
+    }
+    bool objectNumberValid = false;
+    bool generationValid = false;
+    const int objectNumber = match.captured(1).toInt(&objectNumberValid);
+    const int generation = match.captured(2).toInt(&generationValid);
+    return objectNumberValid && generationValid
+        ? PdfIndirectReference{objectNumber, generation}
+        : PdfIndirectReference();
+}
+
+PdfDictionaryRange pdfDictionaryContainingOffset(const QByteArray &data,
+                                                 qsizetype offset)
+{
+    if (offset < 0 || offset >= data.size()) {
+        return {};
+    }
+
+    const qsizetype objectKeyword = data.lastIndexOf(" obj", offset);
+    const qsizetype scanStart = objectKeyword >= 0
+        ? objectKeyword + 4
+        : 0;
+    QVector<qsizetype> dictionaryStarts;
+    for (qsizetype index = scanStart; index < offset;) {
+        const char value = data.at(index);
+        if (value == '%') {
+            index = skipPdfComment(data, index);
+            continue;
+        }
+        if (value == '(') {
+            index = skipPdfLiteralString(data, index);
+            continue;
+        }
+        if (value == '<') {
+            if (index + 1 < data.size() && data.at(index + 1) == '<') {
+                dictionaryStarts.append(index);
+                index += 2;
+            } else {
+                index = skipPdfHexString(data, index);
+            }
+            continue;
+        }
+        if (value == '>'
+            && index + 1 < data.size()
+            && data.at(index + 1) == '>') {
+            if (dictionaryStarts.isEmpty()) {
+                return {};
+            }
+            dictionaryStarts.removeLast();
+            index += 2;
+            continue;
+        }
+        ++index;
+    }
+    return dictionaryStarts.isEmpty()
+        ? PdfDictionaryRange()
+        : pdfDictionaryRangeAt(data, dictionaryStarts.constLast());
+}
+
+QRegularExpressionMatch lastRegularExpressionMatch(
+    const QRegularExpression &expression,
+    const QString &text)
+{
+    QRegularExpressionMatch lastMatch;
+    auto iterator = expression.globalMatch(text);
+    while (iterator.hasNext()) {
+        lastMatch = iterator.next();
+    }
+    return lastMatch;
+}
+
+PdfDictionaryRange pdfIndirectObjectDictionary(
+    const QByteArray &data,
+    int objectNumber,
+    int generation,
+    bool *isStream)
+{
+    if (isStream) {
+        *isStream = false;
+    }
+    const QString pdfText = QString::fromLatin1(data);
+    const QRegularExpression objectExpression(
+        QStringLiteral(
+            R"((?:^|[\r\n])\s*%1\s+%2\s+obj\b)")
+            .arg(objectNumber)
+            .arg(generation));
+    const QRegularExpressionMatch objectMatch
+        = lastRegularExpressionMatch(objectExpression, pdfText);
+    if (!objectMatch.hasMatch()) {
+        return {};
+    }
+
+    const qsizetype endObject = data.indexOf(
+        "endobj",
+        objectMatch.capturedEnd());
+    const qsizetype dictionaryStart = data.indexOf(
+        "<<",
+        objectMatch.capturedEnd());
+    if (endObject < 0
+        || dictionaryStart < 0
+        || dictionaryStart >= endObject) {
+        return {};
+    }
+    const PdfDictionaryRange range = pdfDictionaryRangeAt(
+        data,
+        dictionaryStart);
+    if (!range.isValid() || range.end > endObject) {
+        return {};
+    }
+    if (isStream) {
+        const qsizetype streamKeyword = skipPdfWhitespaceAndComments(
+            data,
+            range.end,
+            endObject);
+        const qsizetype endStream = data.indexOf(
+            "endstream",
+            streamKeyword + 6);
+        *isStream = streamKeyword + 6 <= endObject
+            && data.mid(streamKeyword, 6) == QByteArrayLiteral("stream")
+            && (streamKeyword + 6 == endObject
+                || isPdfWhitespace(data.at(streamKeyword + 6)))
+            && endStream >= streamKeyword + 6
+            && endStream < endObject;
+    }
+    return range;
+}
+
+struct AnnotationAppearanceStructureInspection {
+    bool readable = false;
+    bool annotationFound = false;
+    bool normalAppearanceIsIndirect = false;
+    bool appearanceObjectFound = false;
+    bool appearanceIsStream = false;
+    bool typeIsXObject = false;
+    bool subtypeIsForm = false;
+    QVector<qreal> boundingBox;
+    bool hasResources = false;
+    bool hasExtGState = false;
+    bool hasGraphicsState = false;
+    bool graphicsStateTypeIsExtGState = false;
+    bool blendModeIsNormal = false;
+    bool alphaSourceIsFalse = false;
+    qreal strokingOpacity = std::numeric_limits<qreal>::quiet_NaN();
+    qreal nonStrokingOpacity = std::numeric_limits<qreal>::quiet_NaN();
+};
+
+// FPDFAnnot_GetAP() exposes only decoded drawing commands. Inspect the final
+// serialized object graph as well so a named graphics state cannot go unresolved.
+AnnotationAppearanceStructureInspection inspectAnnotationAppearanceStructure(
+    const QString &filePath,
+    const QString &targetName)
+{
+    AnnotationAppearanceStructureInspection inspection;
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return inspection;
+    }
+    const QByteArray data = file.readAll();
+    inspection.readable = true;
+    const QString pdfText = QString::fromLatin1(data);
+    const QRegularExpression nameExpression(
+        QStringLiteral(R"(/NM\s*\(%1\))")
+            .arg(QRegularExpression::escape(targetName)));
+    const QRegularExpressionMatch nameMatch
+        = lastRegularExpressionMatch(nameExpression, pdfText);
+    if (!nameMatch.hasMatch()) {
+        return inspection;
+    }
+
+    const PdfDictionaryRange annotationRange
+        = pdfDictionaryContainingOffset(data, nameMatch.capturedStart());
+    if (!annotationRange.isValid()) {
+        return inspection;
+    }
+    inspection.annotationFound = true;
+    const PdfDictionaryRange appearanceDictionaryRange
+        = pdfDirectDictionaryValue(data, annotationRange, "AP");
+    const PdfIndirectReference normalAppearanceReference
+        = pdfDirectIndirectReference(data, appearanceDictionaryRange, "N");
+    inspection.normalAppearanceIsIndirect
+        = normalAppearanceReference.isValid();
+    if (!inspection.normalAppearanceIsIndirect) {
+        return inspection;
+    }
+
+    const PdfDictionaryRange appearanceRange = pdfIndirectObjectDictionary(
+        data,
+        normalAppearanceReference.objectNumber,
+        normalAppearanceReference.generation,
+        &inspection.appearanceIsStream);
+    if (!appearanceRange.isValid()) {
+        return inspection;
+    }
+    inspection.appearanceObjectFound = true;
+    const QString appearanceDictionary = QString::fromLatin1(
+        data.mid(
+            appearanceRange.start,
+            appearanceRange.end - appearanceRange.start));
+    inspection.typeIsXObject = QRegularExpression(
+        QStringLiteral(R"(/Type\s*/XObject\b)"))
+        .match(appearanceDictionary)
+        .hasMatch();
+    inspection.subtypeIsForm = QRegularExpression(
+        QStringLiteral(R"(/Subtype\s*/Form\b)"))
+        .match(appearanceDictionary)
+        .hasMatch();
+
+    const PdfDictionaryRange resourcesRange
+        = pdfDirectDictionaryValue(data, appearanceRange, "Resources");
+    inspection.hasResources = resourcesRange.isValid();
+    const PdfDictionaryRange extGStateRange
+        = pdfDirectDictionaryValue(data, resourcesRange, "ExtGState");
+    inspection.hasExtGState = extGStateRange.isValid();
+    const PdfDictionaryRange graphicsStateRange
+        = pdfDirectDictionaryValue(data, extGStateRange, "GS");
+    inspection.hasGraphicsState = graphicsStateRange.isValid();
+    const QString graphicsStateDictionary = graphicsStateRange.isValid()
+        ? QString::fromLatin1(
+              data.mid(
+                  graphicsStateRange.start,
+                  graphicsStateRange.end - graphicsStateRange.start))
+        : QString();
+    inspection.graphicsStateTypeIsExtGState = QRegularExpression(
+        QStringLiteral(R"(/Type\s*/ExtGState\b)"))
+        .match(graphicsStateDictionary)
+        .hasMatch();
+    inspection.blendModeIsNormal = QRegularExpression(
+        QStringLiteral(R"(/BM\s*/Normal\b)"))
+        .match(graphicsStateDictionary)
+        .hasMatch();
+    inspection.alphaSourceIsFalse = QRegularExpression(
+        QStringLiteral(R"(/AIS\s+false\b)"))
+        .match(graphicsStateDictionary)
+        .hasMatch();
+
+    static const QString numberPattern
+        = QStringLiteral(R"(([+-]?(?:\d+(?:\.\d*)?|\.\d+)))");
+    const QRegularExpression boundingBoxExpression(
+        QStringLiteral(
+            R"(/BBox\s*\[\s*%1\s+%1\s+%1\s+%1\s*\])")
+            .arg(numberPattern));
+    const QRegularExpressionMatch boundingBoxMatch
+        = boundingBoxExpression.match(appearanceDictionary);
+    if (boundingBoxMatch.hasMatch()) {
+        for (int capture = 1; capture <= 4; ++capture) {
+            bool valid = false;
+            const qreal value = boundingBoxMatch
+                .captured(capture)
+                .toDouble(&valid);
+            if (!valid) {
+                inspection.boundingBox.clear();
+                break;
+            }
+            inspection.boundingBox.append(value);
+        }
+    }
+
+    const QRegularExpression strokingOpacityExpression(
+        QStringLiteral(R"(/CA\s+%1(?=[\s/\]>]))")
+            .arg(numberPattern));
+    const QRegularExpression nonStrokingOpacityExpression(
+        QStringLiteral(R"(/ca\s+%1(?=[\s/\]>]))")
+            .arg(numberPattern));
+    bool strokingOpacityValid = false;
+    inspection.strokingOpacity = strokingOpacityExpression
+        .match(graphicsStateDictionary)
+        .captured(1)
+        .toDouble(&strokingOpacityValid);
+    if (!strokingOpacityValid) {
+        inspection.strokingOpacity
+            = std::numeric_limits<qreal>::quiet_NaN();
+    }
+    bool nonStrokingOpacityValid = false;
+    inspection.nonStrokingOpacity = nonStrokingOpacityExpression
+        .match(graphicsStateDictionary)
+        .captured(1)
+        .toDouble(&nonStrokingOpacityValid);
+    if (!nonStrokingOpacityValid) {
+        inspection.nonStrokingOpacity
+            = std::numeric_limits<qreal>::quiet_NaN();
+    }
+    return inspection;
+}
+
 CommentAnnotationInspection inspectCommentAnnotation(
     const QString &filePath,
     const QString &targetName,
@@ -4104,6 +4646,7 @@ private slots:
     void rejectsEditingProtectedSourceComments();
     void protectsSourceFreeTextComments();
     void enforcesCommentTextLengthLimit();
+    void boundsSharedAnnotationStringReads();
     void flattensNestedSourceCommentReplies();
     void hidesCommentRepliesFromViewer();
     void hidesUnresolvedSourceReplyFromViewerModel();
@@ -14018,6 +14561,60 @@ void PDFEditControllerTest::enforcesCommentTextLengthLimit()
     QVERIFY(!controller.canRedo());
 }
 
+void PDFEditControllerTest::boundsSharedAnnotationStringReads()
+{
+    PDFiumProcessLock pdfiumLock;
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    QVERIFY(document);
+    const auto closeDocument = qScopeGuard([document]() {
+        FPDF_CloseDocument(document);
+    });
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 200.0, 200.0);
+    QVERIFY(page);
+    const auto closePage = qScopeGuard([page]() {
+        FPDF_ClosePage(page);
+    });
+
+    FPDF_ANNOTATION annotation = FPDFPage_CreateAnnot(
+        page,
+        FPDF_ANNOT_TEXT);
+    QVERIFY(annotation);
+    const auto closeAnnotation = qScopeGuard([annotation]() {
+        FPDFPage_CloseAnnot(annotation);
+    });
+
+    constexpr unsigned long maximumBytes = 4UL * 1024UL * 1024UL;
+    constexpr qsizetype maximumCharacters
+        = maximumBytes / sizeof(FPDF_WCHAR) - 1;
+    QString contents(maximumCharacters, QLatin1Char('a'));
+    QVERIFY(FPDFAnnot_SetStringValue(
+        annotation,
+        "Contents",
+        reinterpret_cast<const FPDF_WCHAR *>(contents.utf16())));
+    QCOMPARE(
+        FPDFAnnot_GetStringValue(annotation, "Contents", nullptr, 0),
+        maximumBytes);
+    QString boundedContents = PDFAnnotationUtils::annotationString(
+        annotation,
+        "Contents");
+    QCOMPARE(boundedContents.size(), maximumCharacters);
+    QVERIFY(boundedContents == contents);
+
+    boundedContents.clear();
+    contents.append(QLatin1Char('b'));
+    QVERIFY(FPDFAnnot_SetStringValue(
+        annotation,
+        "Contents",
+        reinterpret_cast<const FPDF_WCHAR *>(contents.utf16())));
+    QCOMPARE(
+        FPDFAnnot_GetStringValue(annotation, "Contents", nullptr, 0),
+        maximumBytes + sizeof(FPDF_WCHAR));
+    QVERIFY(PDFAnnotationUtils::annotationString(
+        annotation,
+        "Contents").isEmpty());
+}
+
 void PDFEditControllerTest::flattensNestedSourceCommentReplies()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -15456,8 +16053,42 @@ void PDFEditControllerTest::keepsMarkupReplyIdsUniqueAcrossReopen()
         = inspectCommentAnnotation(
             outputPath,
             reply.value(QStringLiteral("objectId")).toString());
+    QVERIFY(replyInspection.readable);
     QVERIFY(replyInspection.hasAppearance);
     QVERIFY(replyInspection.appearance.contains(QStringLiteral("/GS gs")));
+
+    const AnnotationAppearanceStructureInspection appearanceStructure
+        = inspectAnnotationAppearanceStructure(
+            outputPath,
+            reply.value(QStringLiteral("objectId")).toString());
+    QVERIFY(appearanceStructure.readable);
+    QVERIFY(appearanceStructure.annotationFound);
+    QVERIFY(appearanceStructure.normalAppearanceIsIndirect);
+    QVERIFY(appearanceStructure.appearanceObjectFound);
+    QVERIFY(appearanceStructure.appearanceIsStream);
+    QVERIFY(appearanceStructure.typeIsXObject);
+    QVERIFY(appearanceStructure.subtypeIsForm);
+    QCOMPARE(appearanceStructure.boundingBox.size(), 4);
+    QVERIFY(appearanceStructure.hasResources);
+    QVERIFY(appearanceStructure.hasExtGState);
+    QVERIFY(appearanceStructure.hasGraphicsState);
+    QVERIFY(appearanceStructure.graphicsStateTypeIsExtGState);
+    QVERIFY(appearanceStructure.blendModeIsNormal);
+    QVERIFY(appearanceStructure.alphaSourceIsFalse);
+
+    constexpr qreal expectedReplyOpacity = 96.0 / 255.0;
+    QVERIFY(qAbs(appearanceStructure.strokingOpacity
+                 - expectedReplyOpacity) < 0.00001);
+    QVERIFY(qAbs(appearanceStructure.nonStrokingOpacity
+                 - expectedReplyOpacity) < 0.00001);
+    QVERIFY(qAbs(appearanceStructure.boundingBox.at(0)
+                 - replyInspection.rect.left) < 0.01);
+    QVERIFY(qAbs(appearanceStructure.boundingBox.at(1)
+                 - replyInspection.rect.bottom) < 0.01);
+    QVERIFY(qAbs(appearanceStructure.boundingBox.at(2)
+                 - replyInspection.rect.right) < 0.01);
+    QVERIFY(qAbs(appearanceStructure.boundingBox.at(3)
+                 - replyInspection.rect.top) < 0.01);
 
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 3, 5000);

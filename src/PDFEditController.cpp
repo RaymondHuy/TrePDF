@@ -1,5 +1,6 @@
 #include "PDFEditController.h"
 #include "ApplicationFonts.h"
+#include "PDFAnnotationUtils.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
 #include "PDFSaveWriter.h"
@@ -40,6 +41,12 @@
 #include <fpdf_text.h>
 
 namespace {
+
+using PDFAnnotationUtils::annotationString;
+using PDFAnnotationUtils::annotationUsesReplyRelation;
+using PDFAnnotationUtils::isMarkupAnnotation;
+using PDFAnnotationUtils::isSupportedCommentAnnotationSubtype;
+using PDFAnnotationUtils::normalizedCommentText;
 
 constexpr int kCoordinateMapExtent = 100000;
 constexpr qsizetype kMaximumCachedCandidatePages = 12;
@@ -579,13 +586,6 @@ bool isTextMarkupCandidateKind(const QString &kind)
         || kind == QLatin1String("strikeout");
 }
 
-QString normalizedCommentText(QString text)
-{
-    text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
-    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
-    return text;
-}
-
 bool isCommentCandidateKind(const QString &kind)
 {
     return isTextMarkupCandidateKind(kind)
@@ -999,96 +999,6 @@ QString textObjectText(FPDF_PAGEOBJECT object, FPDF_TEXTPAGE textPage)
     return QString::fromUtf16(
         reinterpret_cast<const char16_t *>(buffer.constData()),
         characterCount);
-}
-
-QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
-{
-    if (!annotation) {
-        return {};
-    }
-
-    const unsigned long byteLength = FPDFAnnot_GetStringValue(annotation, key, nullptr, 0);
-    if (byteLength < sizeof(FPDF_WCHAR)) {
-        return {};
-    }
-
-    const qsizetype unitCount = static_cast<qsizetype>(
-        (byteLength + sizeof(FPDF_WCHAR) - 1) / sizeof(FPDF_WCHAR));
-    QVector<FPDF_WCHAR> buffer(unitCount);
-    const unsigned long actualLength = FPDFAnnot_GetStringValue(
-        annotation,
-        key,
-        buffer.data(),
-        byteLength);
-    if (actualLength < sizeof(FPDF_WCHAR)) {
-        return {};
-    }
-
-    qsizetype characterCount = static_cast<qsizetype>(actualLength / sizeof(FPDF_WCHAR));
-    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
-        --characterCount;
-    }
-    return QString::fromUtf16(
-        reinterpret_cast<const char16_t *>(buffer.constData()),
-        characterCount);
-}
-
-bool isSupportedCommentAnnotationSubtype(int subtype)
-{
-    return subtype == FPDF_ANNOT_HIGHLIGHT
-        || subtype == FPDF_ANNOT_UNDERLINE
-        || subtype == FPDF_ANNOT_SQUIGGLY
-        || subtype == FPDF_ANNOT_STRIKEOUT
-        || subtype == FPDF_ANNOT_TEXT
-        || subtype == FPDF_ANNOT_FREETEXT;
-}
-
-bool isMarkupAnnotationSubtype(int subtype)
-{
-    switch (subtype) {
-    case FPDF_ANNOT_TEXT:
-    case FPDF_ANNOT_FREETEXT:
-    case FPDF_ANNOT_LINE:
-    case FPDF_ANNOT_SQUARE:
-    case FPDF_ANNOT_CIRCLE:
-    case FPDF_ANNOT_POLYGON:
-    case FPDF_ANNOT_POLYLINE:
-    case FPDF_ANNOT_HIGHLIGHT:
-    case FPDF_ANNOT_UNDERLINE:
-    case FPDF_ANNOT_SQUIGGLY:
-    case FPDF_ANNOT_STRIKEOUT:
-    case FPDF_ANNOT_STAMP:
-    case FPDF_ANNOT_CARET:
-    case FPDF_ANNOT_INK:
-    case FPDF_ANNOT_FILEATTACHMENT:
-    case FPDF_ANNOT_SOUND:
-    case FPDF_ANNOT_REDACT:
-        return true;
-    default:
-        return false;
-    }
-}
-
-bool isProjectionAnnotation(FPDF_ANNOTATION annotation)
-{
-    return annotation
-        && FPDFAnnot_GetSubtype(annotation) == FPDF_ANNOT_UNKNOWN
-        && annotationString(annotation, "Subtype")
-            == QLatin1String("Projection");
-}
-
-bool isMarkupAnnotation(FPDF_ANNOTATION annotation)
-{
-    return annotation
-        && (isMarkupAnnotationSubtype(FPDFAnnot_GetSubtype(annotation))
-            || isProjectionAnnotation(annotation));
-}
-
-bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
-{
-    const QString relation = annotationString(annotation, "RT").trimmed();
-    return relation.isEmpty()
-        || relation.compare(QLatin1String("R"), Qt::CaseInsensitive) == 0;
 }
 
 int rootReplyAnnotationIndex(FPDF_PAGE page,

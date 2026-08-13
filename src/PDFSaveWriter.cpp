@@ -3,6 +3,7 @@
 #include "ApplicationFonts.h"
 #include "PDFAcroFormCanonicalizer.h"
 #include "PDFAcroFormWriter.h"
+#include "PDFAnnotationUtils.h"
 #include "PDFEditController.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
@@ -38,6 +39,12 @@
 
 namespace {
 
+using PDFAnnotationUtils::annotationString;
+using PDFAnnotationUtils::annotationUsesReplyRelation;
+using PDFAnnotationUtils::isMarkupAnnotation;
+using PDFAnnotationUtils::isSupportedCommentAnnotationSubtype;
+using PDFAnnotationUtils::normalizedCommentText;
+
 constexpr qreal kMinimumLayoutWidth = 1.0;
 constexpr qreal kMinimumObjectWidth = 0.01;
 constexpr qreal kMinimumScale = 0.1;
@@ -52,9 +59,6 @@ constexpr char kCommentReplyToKey[] = "TrePDFReplyTo";
 constexpr char kFreeTextAppearanceIdKey[]
     = "TrePDFFreeTextAppearanceId";
 constexpr int kAnnotationFlagLockedContents = 1 << 9;
-constexpr unsigned long kMaximumAnnotationStringBytes
-    = 4UL * 1024UL * 1024UL;
-
 struct SaveFormat {
     QString fontFamily;
     QString embeddableFontFamily;
@@ -2469,47 +2473,6 @@ bool setOptionalAnnotationString(FPDF_ANNOTATION annotation,
             reinterpret_cast<const FPDF_WCHAR *>(value.utf16()));
 }
 
-QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
-{
-    if (!annotation) {
-        return {};
-    }
-    const unsigned long byteLength = FPDFAnnot_GetStringValue(
-        annotation,
-        key,
-        nullptr,
-        0);
-    if (byteLength < sizeof(FPDF_WCHAR)
-        || byteLength > kMaximumAnnotationStringBytes) {
-        return {};
-    }
-    QVector<FPDF_WCHAR> buffer(static_cast<qsizetype>(
-        (byteLength + sizeof(FPDF_WCHAR) - 1) / sizeof(FPDF_WCHAR)));
-    const unsigned long actualLength = FPDFAnnot_GetStringValue(
-        annotation,
-        key,
-        buffer.data(),
-        byteLength);
-    if (actualLength < sizeof(FPDF_WCHAR)) {
-        return {};
-    }
-    qsizetype characterCount = static_cast<qsizetype>(
-        actualLength / sizeof(FPDF_WCHAR));
-    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
-        --characterCount;
-    }
-    return QString::fromUtf16(
-        reinterpret_cast<const char16_t *>(buffer.constData()),
-        characterCount);
-}
-
-QString normalizedCommentText(QString text)
-{
-    text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
-    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
-    return text;
-}
-
 QString pdfCommentContents(const QString &text)
 {
     QString contents = normalizedCommentText(text);
@@ -3180,64 +3143,6 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
             PDFSaveWriter::Error::CommentAnnotationUpdateFailed,
             pageIndex,
             draft.objectId);
-}
-
-bool isSupportedCommentAnnotationSubtype(int subtype)
-{
-    return subtype == FPDF_ANNOT_HIGHLIGHT
-        || subtype == FPDF_ANNOT_UNDERLINE
-        || subtype == FPDF_ANNOT_SQUIGGLY
-        || subtype == FPDF_ANNOT_STRIKEOUT
-        || subtype == FPDF_ANNOT_TEXT
-        || subtype == FPDF_ANNOT_FREETEXT;
-}
-
-bool isMarkupAnnotationSubtype(int subtype)
-{
-    switch (subtype) {
-    case FPDF_ANNOT_TEXT:
-    case FPDF_ANNOT_FREETEXT:
-    case FPDF_ANNOT_LINE:
-    case FPDF_ANNOT_SQUARE:
-    case FPDF_ANNOT_CIRCLE:
-    case FPDF_ANNOT_POLYGON:
-    case FPDF_ANNOT_POLYLINE:
-    case FPDF_ANNOT_HIGHLIGHT:
-    case FPDF_ANNOT_UNDERLINE:
-    case FPDF_ANNOT_SQUIGGLY:
-    case FPDF_ANNOT_STRIKEOUT:
-    case FPDF_ANNOT_STAMP:
-    case FPDF_ANNOT_CARET:
-    case FPDF_ANNOT_INK:
-    case FPDF_ANNOT_FILEATTACHMENT:
-    case FPDF_ANNOT_SOUND:
-    case FPDF_ANNOT_REDACT:
-        return true;
-    default:
-        return false;
-    }
-}
-
-bool isProjectionAnnotation(FPDF_ANNOTATION annotation)
-{
-    return annotation
-        && FPDFAnnot_GetSubtype(annotation) == FPDF_ANNOT_UNKNOWN
-        && annotationString(annotation, "Subtype")
-            == QLatin1String("Projection");
-}
-
-bool isMarkupAnnotation(FPDF_ANNOTATION annotation)
-{
-    return annotation
-        && (isMarkupAnnotationSubtype(FPDFAnnot_GetSubtype(annotation))
-            || isProjectionAnnotation(annotation));
-}
-
-bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
-{
-    const QString relation = annotationString(annotation, "RT").trimmed();
-    return relation.isEmpty()
-        || relation.compare(QLatin1String("R"), Qt::CaseInsensitive) == 0;
 }
 
 PDFSaveWriter::Result assignSourceReplyParentThreadIds(
