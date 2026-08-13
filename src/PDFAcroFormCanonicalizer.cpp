@@ -3973,7 +3973,9 @@ QByteArray pdfPointArray(const QVector<QPointF> &points)
 
 bool isSafePdfName(const QString &name)
 {
-    if (name.isEmpty() || name.size() > 64) {
+    constexpr qsizetype maximumAcceptedPdfNameCharacters = 64;
+    if (name.isEmpty()
+        || name.size() > maximumAcceptedPdfNameCharacters) {
         return false;
     }
     return std::all_of(
@@ -3996,12 +3998,16 @@ bool drawingAppearanceData(
     constexpr qsizetype maximumVertices = 4096;
     constexpr qsizetype maximumDashEntries = 16;
     constexpr qsizetype maximumAppearanceBytes = 8 * 1024 * 1024;
+    constexpr qreal maximumCoordinateMagnitudePoints = 10'000'000.0;
+    constexpr qreal maximumBorderWidthPoints = 1024.0;
+    constexpr qreal maximumDashElementLengthPoints = 10'000.0;
     const QRectF bounds = annotation.pageRect.normalized();
-    const auto finitePoint = [](const QPointF &point) {
+    const auto finitePoint = [
+        maximumCoordinateMagnitudePoints](const QPointF &point) {
         return std::isfinite(point.x())
             && std::isfinite(point.y())
-            && qAbs(point.x()) <= 10000000.0
-            && qAbs(point.y()) <= 10000000.0;
+            && qAbs(point.x()) <= maximumCoordinateMagnitudePoints
+            && qAbs(point.y()) <= maximumCoordinateMagnitudePoints;
     };
     const auto &properties = annotation.properties;
     if (!bounds.isValid()
@@ -4014,7 +4020,7 @@ bool drawingAppearanceData(
         || properties.opacity > 1.0
         || !std::isfinite(properties.borderWidth)
         || properties.borderWidth <= 0.0
-        || properties.borderWidth > 1024.0
+        || properties.borderWidth > maximumBorderWidthPoints
         || !properties.strokeColor.isValid()
         || properties.flags < 0
         || (properties.borderStyle
@@ -4087,10 +4093,10 @@ bool drawingAppearanceData(
             || !std::all_of(
                 dashes.cbegin(),
                 dashes.cend(),
-                [](qreal dash) {
+                [maximumDashElementLengthPoints](qreal dash) {
                     return std::isfinite(dash)
                         && dash > 0.0
-                        && dash <= 10000.0;
+                        && dash <= maximumDashElementLengthPoints;
                 })) {
             error = QStringLiteral(
                 "A drawing annotation dash pattern is invalid.");

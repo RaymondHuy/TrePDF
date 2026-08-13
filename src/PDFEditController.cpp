@@ -87,6 +87,7 @@ constexpr int kDrawingCommentGreen = 40;
 constexpr int kDrawingCommentBlue = 40;
 constexpr int kDrawingCommentAlpha = 255;
 constexpr qreal kDrawingCommentBorderWidthPoints = 1.5;
+constexpr qreal kDrawingCommentVertexMergeDistancePoints = 0.5;
 constexpr qsizetype kMaximumDrawingCommentVertices = 256;
 constexpr qint64 kMaximumAddedImageFileBytes = 64 * 1024 * 1024;
 constexpr qint64 kMaximumAddedImagePixels = 40 * 1000 * 1000;
@@ -4133,7 +4134,7 @@ QVariantMap PDFEditController::addDrawingComment(
             const qreal distance = std::hypot(
                 (point.x() - previous.x()) * pageSize.width(),
                 (point.y() - previous.y()) * pageSize.height());
-            if (distance < 0.5) {
+            if (distance < kDrawingCommentVertexMergeDistancePoints) {
                 continue;
             }
         }
@@ -4148,7 +4149,7 @@ QVariantMap PDFEditController::addDrawingComment(
         const qreal closingDistance = std::hypot(
             (first.x() - last.x()) * pageSize.width(),
             (first.y() - last.y()) * pageSize.height());
-        if (closingDistance < 0.5) {
+        if (closingDistance < kDrawingCommentVertexMergeDistancePoints) {
             normalizedVertices.removeLast();
         }
     }
