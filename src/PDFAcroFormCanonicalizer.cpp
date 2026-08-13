@@ -3902,6 +3902,487 @@ QByteArray textMarkupAppearanceObject(
         + QByteArrayLiteral("endstream\nendobj");
 }
 
+QByteArrayView drawingSubtypeName(PDFCommentAnnotation::DrawingType type)
+{
+    switch (type) {
+    case PDFCommentAnnotation::DrawingType::Square:
+        return QByteArrayView("/Square");
+    case PDFCommentAnnotation::DrawingType::Circle:
+        return QByteArrayView("/Circle");
+    case PDFCommentAnnotation::DrawingType::Line:
+        return QByteArrayView("/Line");
+    case PDFCommentAnnotation::DrawingType::Polygon:
+        return QByteArrayView("/Polygon");
+    case PDFCommentAnnotation::DrawingType::PolyLine:
+        return QByteArrayView("/PolyLine");
+    }
+    return {};
+}
+
+QByteArrayView lineEndingName(PDFCommentAnnotation::LineEnding ending)
+{
+    switch (ending) {
+    case PDFCommentAnnotation::LineEnding::None:
+        return QByteArrayView("/None");
+    case PDFCommentAnnotation::LineEnding::Square:
+        return QByteArrayView("/Square");
+    case PDFCommentAnnotation::LineEnding::Circle:
+        return QByteArrayView("/Circle");
+    case PDFCommentAnnotation::LineEnding::Diamond:
+        return QByteArrayView("/Diamond");
+    case PDFCommentAnnotation::LineEnding::OpenArrow:
+        return QByteArrayView("/OpenArrow");
+    case PDFCommentAnnotation::LineEnding::ClosedArrow:
+        return QByteArrayView("/ClosedArrow");
+    case PDFCommentAnnotation::LineEnding::Butt:
+        return QByteArrayView("/Butt");
+    case PDFCommentAnnotation::LineEnding::ReverseOpenArrow:
+        return QByteArrayView("/ROpenArrow");
+    case PDFCommentAnnotation::LineEnding::ReverseClosedArrow:
+        return QByteArrayView("/RClosedArrow");
+    case PDFCommentAnnotation::LineEnding::Slash:
+        return QByteArrayView("/Slash");
+    }
+    return {};
+}
+
+QByteArray pdfColorArray(const QColor &color)
+{
+    if (!color.isValid()) {
+        return QByteArrayLiteral("[]");
+    }
+    const QColor rgb = color.toRgb();
+    return QByteArrayLiteral("[")
+        + pdfNumber(rgb.redF()) + ' '
+        + pdfNumber(rgb.greenF()) + ' '
+        + pdfNumber(rgb.blueF()) + ']';
+}
+
+QByteArray pdfPointArray(const QVector<QPointF> &points)
+{
+    QByteArray value = QByteArrayLiteral("[");
+    for (const QPointF &point : points) {
+        if (value.size() > 1) {
+            value += ' ';
+        }
+        value += pdfNumber(point.x()) + ' ' + pdfNumber(point.y());
+    }
+    value += ']';
+    return value;
+}
+
+bool isSafePdfName(const QString &name)
+{
+    if (name.isEmpty() || name.size() > 64) {
+        return false;
+    }
+    return std::all_of(
+        name.cbegin(),
+        name.cend(),
+        [](QChar character) {
+            const ushort value = character.unicode();
+            return (value >= 'A' && value <= 'Z')
+                || (value >= 'a' && value <= 'z')
+                || (value >= '0' && value <= '9')
+                || value == '-' || value == '_';
+        });
+}
+
+bool drawingAppearanceData(
+    const PDFCommentAnnotation::DrawingAnnotation &annotation,
+    QByteArray &content,
+    QString &error)
+{
+    constexpr qsizetype maximumVertices = 4096;
+    constexpr qsizetype maximumDashEntries = 16;
+    constexpr qsizetype maximumAppearanceBytes = 8 * 1024 * 1024;
+    const QRectF bounds = annotation.pageRect.normalized();
+    const auto finitePoint = [](const QPointF &point) {
+        return std::isfinite(point.x())
+            && std::isfinite(point.y())
+            && qAbs(point.x()) <= 10000000.0
+            && qAbs(point.y()) <= 10000000.0;
+    };
+    const auto &properties = annotation.properties;
+    if (!bounds.isValid()
+        || bounds.width() <= 0.0
+        || bounds.height() <= 0.0
+        || !finitePoint(bounds.topLeft())
+        || !finitePoint(bounds.bottomRight())
+        || !std::isfinite(properties.opacity)
+        || properties.opacity < 0.0
+        || properties.opacity > 1.0
+        || !std::isfinite(properties.borderWidth)
+        || properties.borderWidth <= 0.0
+        || properties.borderWidth > 1024.0
+        || !properties.strokeColor.isValid()
+        || properties.flags < 0
+        || (properties.borderStyle
+                != PDFCommentAnnotation::BorderStyle::Solid
+            && properties.borderStyle
+                != PDFCommentAnnotation::BorderStyle::Dashed)
+        || !std::isfinite(properties.borderEffectIntensity)
+        || properties.borderEffectIntensity < 0.0
+        || properties.borderEffectIntensity > 2.0
+        || properties.borderEffect != PDFCommentAnnotation::BorderEffect::None
+        || properties.startLineEnding != PDFCommentAnnotation::LineEnding::None
+        || properties.endLineEnding != PDFCommentAnnotation::LineEnding::None) {
+        error = QStringLiteral(
+            "A drawing annotation appearance request has unsupported properties.");
+        return false;
+    }
+
+    const bool rectangular
+        = annotation.type == PDFCommentAnnotation::DrawingType::Square
+        || annotation.type == PDFCommentAnnotation::DrawingType::Circle;
+    const qsizetype expectedMinimum
+        = annotation.type == PDFCommentAnnotation::DrawingType::Polygon
+        ? 3
+        : 2;
+    if ((rectangular && annotation.pageVertices.size() != 2)
+        || (!rectangular
+         && (annotation.pageVertices.size() < expectedMinimum
+             || annotation.pageVertices.size() > maximumVertices))
+        || (annotation.type == PDFCommentAnnotation::DrawingType::Line
+            && annotation.pageVertices.size() != 2)
+        || !std::all_of(
+            annotation.pageVertices.cbegin(),
+            annotation.pageVertices.cend(),
+            finitePoint)) {
+        error = QStringLiteral(
+            "A drawing annotation geometry request is invalid.");
+        return false;
+    }
+
+    for (qsizetype index = 1;
+         index < annotation.pageVertices.size();
+         ++index) {
+        const QPointF previous = annotation.pageVertices.at(index - 1);
+        const QPointF current = annotation.pageVertices.at(index);
+        if (std::hypot(
+                current.x() - previous.x(),
+                current.y() - previous.y()) <= 0.0) {
+            error = QStringLiteral(
+                "A drawing annotation contains a zero-length segment.");
+            return false;
+        }
+    }
+    if (annotation.type == PDFCommentAnnotation::DrawingType::Polygon) {
+        const QPointF first = annotation.pageVertices.constFirst();
+        const QPointF last = annotation.pageVertices.constLast();
+        if (std::hypot(first.x() - last.x(), first.y() - last.y()) <= 0.0) {
+            error = QStringLiteral(
+                "A Polygon annotation must not repeat its first vertex.");
+            return false;
+        }
+    }
+
+    QByteArray dashCommand = QByteArrayLiteral("[] 0 d\n");
+    if (properties.borderStyle == PDFCommentAnnotation::BorderStyle::Dashed) {
+        QVector<qreal> dashes = properties.dashPattern;
+        if (dashes.isEmpty()) {
+            dashes = {3.0, 2.0};
+        }
+        if (dashes.size() > maximumDashEntries
+            || !std::all_of(
+                dashes.cbegin(),
+                dashes.cend(),
+                [](qreal dash) {
+                    return std::isfinite(dash)
+                        && dash > 0.0
+                        && dash <= 10000.0;
+                })) {
+            error = QStringLiteral(
+                "A drawing annotation dash pattern is invalid.");
+            return false;
+        }
+        dashCommand = QByteArrayLiteral("[");
+        for (qreal dash : std::as_const(dashes)) {
+            if (dashCommand.size() > 1) {
+                dashCommand += ' ';
+            }
+            dashCommand += pdfNumber(dash);
+        }
+        dashCommand += QByteArrayLiteral("] 0 d\n");
+    }
+
+    const QColor stroke = properties.strokeColor.toRgb();
+    content = QByteArrayLiteral("q\n/GS gs\n")
+        + pdfNumber(stroke.redF()) + ' '
+        + pdfNumber(stroke.greenF()) + ' '
+        + pdfNumber(stroke.blueF()) + QByteArrayLiteral(" RG\n")
+        + pdfNumber(properties.borderWidth)
+            + QByteArrayLiteral(" w\n1 J 1 j\n")
+        + dashCommand;
+    const bool hasInterior = properties.interiorColor.isValid();
+    if (hasInterior) {
+        const QColor interior = properties.interiorColor.toRgb();
+        content += pdfNumber(interior.redF()) + ' '
+            + pdfNumber(interior.greenF()) + ' '
+            + pdfNumber(interior.blueF()) + QByteArrayLiteral(" rg\n");
+    }
+
+    if (annotation.type == PDFCommentAnnotation::DrawingType::Square) {
+        const qreal inset = properties.borderWidth / 2.0;
+        const qreal left = bounds.left() + inset;
+        const qreal right = bounds.right() - inset;
+        const qreal bottom = bounds.top() + inset;
+        const qreal top = bounds.bottom() - inset;
+        if (right <= left || top <= bottom) {
+            error = QStringLiteral("A Square annotation rectangle is too small.");
+            return false;
+        }
+        content += pdfNumber(left) + ' ' + pdfNumber(bottom)
+            + QByteArrayLiteral(" m ") + pdfNumber(right) + ' '
+            + pdfNumber(bottom) + QByteArrayLiteral(" l ")
+            + pdfNumber(right) + ' ' + pdfNumber(top)
+            + QByteArrayLiteral(" l ") + pdfNumber(left) + ' '
+            + pdfNumber(top) + QByteArrayLiteral(" l h ")
+            + (hasInterior ? QByteArrayLiteral("B\n")
+                           : QByteArrayLiteral("S\n"));
+    } else if (annotation.type == PDFCommentAnnotation::DrawingType::Circle) {
+        constexpr qreal kappa = 0.5522847498307936;
+        const qreal inset = properties.borderWidth / 2.0;
+        const qreal left = bounds.left() + inset;
+        const qreal right = bounds.right() - inset;
+        const qreal bottom = bounds.top() + inset;
+        const qreal top = bounds.bottom() - inset;
+        const qreal radiusX = (right - left) / 2.0;
+        const qreal radiusY = (top - bottom) / 2.0;
+        if (radiusX <= 0.0 || radiusY <= 0.0) {
+            error = QStringLiteral("A Circle annotation rectangle is too small.");
+            return false;
+        }
+        const qreal centerX = (left + right) / 2.0;
+        const qreal centerY = (bottom + top) / 2.0;
+        content += pdfNumber(centerX + radiusX) + ' '
+            + pdfNumber(centerY) + QByteArrayLiteral(" m\n")
+            + pdfNumber(centerX + radiusX) + ' '
+            + pdfNumber(centerY + kappa * radiusY) + ' '
+            + pdfNumber(centerX + kappa * radiusX) + ' '
+            + pdfNumber(centerY + radiusY) + ' '
+            + pdfNumber(centerX) + ' '
+            + pdfNumber(centerY + radiusY) + QByteArrayLiteral(" c\n")
+            + pdfNumber(centerX - kappa * radiusX) + ' '
+            + pdfNumber(centerY + radiusY) + ' '
+            + pdfNumber(centerX - radiusX) + ' '
+            + pdfNumber(centerY + kappa * radiusY) + ' '
+            + pdfNumber(centerX - radiusX) + ' '
+            + pdfNumber(centerY) + QByteArrayLiteral(" c\n")
+            + pdfNumber(centerX - radiusX) + ' '
+            + pdfNumber(centerY - kappa * radiusY) + ' '
+            + pdfNumber(centerX - kappa * radiusX) + ' '
+            + pdfNumber(centerY - radiusY) + ' '
+            + pdfNumber(centerX) + ' '
+            + pdfNumber(centerY - radiusY) + QByteArrayLiteral(" c\n")
+            + pdfNumber(centerX + kappa * radiusX) + ' '
+            + pdfNumber(centerY - radiusY) + ' '
+            + pdfNumber(centerX + radiusX) + ' '
+            + pdfNumber(centerY - kappa * radiusY) + ' '
+            + pdfNumber(centerX + radiusX) + ' '
+            + pdfNumber(centerY) + QByteArrayLiteral(" c h ")
+            + (hasInterior ? QByteArrayLiteral("B\n")
+                           : QByteArrayLiteral("S\n"));
+    } else {
+        const QVector<QPointF> &points = annotation.pageVertices;
+        content += pdfNumber(points.constFirst().x()) + ' '
+            + pdfNumber(points.constFirst().y()) + QByteArrayLiteral(" m\n");
+        for (qsizetype index = 1; index < points.size(); ++index) {
+            content += pdfNumber(points.at(index).x()) + ' '
+                + pdfNumber(points.at(index).y()) + QByteArrayLiteral(" l\n");
+            if (content.size() > maximumAppearanceBytes) {
+                error = QStringLiteral(
+                    "A drawing annotation appearance is too large.");
+                return false;
+            }
+        }
+        if (annotation.type == PDFCommentAnnotation::DrawingType::Polygon) {
+            content += hasInterior
+                ? QByteArrayLiteral("h B\n")
+                : QByteArrayLiteral("h S\n");
+        } else {
+            content += QByteArrayLiteral("S\n");
+        }
+    }
+    content += QByteArrayLiteral("Q\n");
+    if (content.size() > maximumAppearanceBytes) {
+        error = QStringLiteral("A drawing annotation appearance is too large.");
+        return false;
+    }
+    return true;
+}
+
+QByteArray drawingAppearanceObject(
+    int objectNumber,
+    const PDFCommentAnnotation::DrawingAnnotation &annotation,
+    const QByteArray &content)
+{
+    const QRectF bounds = annotation.pageRect.normalized();
+    return QByteArray::number(objectNumber)
+        + QByteArrayLiteral(
+            " 0 obj\n"
+            "<< /Type /XObject /Subtype /Form /FormType 1 /BBox [")
+        + pdfNumber(bounds.left()) + ' '
+        + pdfNumber(bounds.top()) + ' '
+        + pdfNumber(bounds.right()) + ' '
+        + pdfNumber(bounds.bottom())
+        + QByteArrayLiteral(
+            "] /Matrix [1 0 0 1 0 0] "
+            "/Resources << /ExtGState << /GS << /Type /ExtGState /CA ")
+        + pdfNumber(annotation.properties.opacity)
+        + QByteArrayLiteral(" /ca ")
+        + pdfNumber(annotation.properties.opacity)
+        + QByteArrayLiteral(
+            " /AIS false /BM /Normal >> >> >> /Length ")
+        + QByteArray::number(content.size())
+        + QByteArrayLiteral(" >>\nstream\n")
+        + content
+        + QByteArrayLiteral("endstream\nendobj");
+}
+
+bool configureDrawingAnnotationDictionary(
+    QByteArray &dictionary,
+    const PDFCommentAnnotation::DrawingAnnotation &annotation,
+    int appearanceObjectNumber,
+    QString &error)
+{
+    const QRectF bounds = annotation.pageRect.normalized();
+    const auto replace = [
+        &dictionary,
+        &error](QByteArrayView key,
+                const QByteArray &value,
+                bool insertIfMissing = true) {
+        const bool replaced = replaceTopLevelDictionaryValue(
+            dictionary,
+            key,
+            value,
+            insertIfMissing,
+            error);
+        if (!replaced) {
+            error = QStringLiteral("Drawing annotation key %1: %2")
+                .arg(
+                    QString::fromLatin1(key.data(), key.size()),
+                    error);
+        }
+        return replaced;
+    };
+    const QByteArray rect = QByteArrayLiteral("[")
+        + pdfNumber(bounds.left()) + ' '
+        + pdfNumber(bounds.top()) + ' '
+        + pdfNumber(bounds.right()) + ' '
+        + pdfNumber(bounds.bottom()) + ']';
+    if (!replace(QByteArrayView("/Rect"), rect)
+        || !replace(
+            QByteArrayView("/Subtype"),
+            QByteArray(
+                drawingSubtypeName(annotation.type).data(),
+                drawingSubtypeName(annotation.type).size()))
+        || !replace(
+            QByteArrayView("/C"),
+            pdfColorArray(annotation.properties.strokeColor))
+        || !replace(
+            QByteArrayView("/CA"),
+            pdfNumber(annotation.properties.opacity))
+        || !replace(
+            QByteArrayView("/F"),
+            QByteArray::number(annotation.properties.flags))
+        || !replace(
+            QByteArrayView("/Border"),
+            QByteArrayLiteral("null"),
+            false)) {
+        return false;
+    }
+    if (annotation.properties.interiorColor.isValid()
+        && !replace(
+            QByteArrayView("/IC"),
+            pdfColorArray(annotation.properties.interiorColor))) {
+        return false;
+    }
+
+    QVector<qreal> dashes = annotation.properties.dashPattern;
+    if (annotation.properties.borderStyle
+            == PDFCommentAnnotation::BorderStyle::Dashed
+        && dashes.isEmpty()) {
+        dashes = {3.0, 2.0};
+    }
+    QByteArray borderStyle = QByteArrayLiteral("<< /Type /Border /W ")
+        + pdfNumber(annotation.properties.borderWidth);
+    if (annotation.properties.borderStyle
+        == PDFCommentAnnotation::BorderStyle::Dashed) {
+        borderStyle += QByteArrayLiteral(" /S /D /D [");
+        for (qreal dash : std::as_const(dashes)) {
+            if (!borderStyle.endsWith('[')) {
+                borderStyle += ' ';
+            }
+            borderStyle += pdfNumber(dash);
+        }
+        borderStyle += QByteArrayLiteral("] >>");
+    } else {
+        borderStyle += QByteArrayLiteral(" /S /S >>");
+    }
+    if (!replace(QByteArrayView("/BS"), borderStyle)) {
+        return false;
+    }
+
+    if (annotation.type == PDFCommentAnnotation::DrawingType::Line) {
+        if (!replace(
+                QByteArrayView("/L"),
+                pdfPointArray(annotation.pageVertices))) {
+            return false;
+        }
+    } else if (annotation.type == PDFCommentAnnotation::DrawingType::Polygon
+               || annotation.type
+                    == PDFCommentAnnotation::DrawingType::PolyLine) {
+        if (!replace(
+                QByteArrayView("/Vertices"),
+                pdfPointArray(annotation.pageVertices))) {
+            return false;
+        }
+    }
+
+    if (annotation.type == PDFCommentAnnotation::DrawingType::Line
+        || annotation.type == PDFCommentAnnotation::DrawingType::PolyLine) {
+        const QByteArrayView startEnding = lineEndingName(
+            annotation.properties.startLineEnding);
+        const QByteArrayView endEnding = lineEndingName(
+            annotation.properties.endLineEnding);
+        if (startEnding.isEmpty()
+            || endEnding.isEmpty()
+            || !replace(
+                QByteArrayView("/LE"),
+                QByteArrayLiteral("[")
+                    + QByteArray(startEnding.data(), startEnding.size())
+                    + ' '
+                    + QByteArray(endEnding.data(), endEnding.size())
+                    + ']')) {
+            return false;
+        }
+    }
+    if (!annotation.properties.intent.isEmpty()) {
+        if (!isSafePdfName(annotation.properties.intent)
+            || !replace(
+                QByteArrayView("/IT"),
+                '/' + annotation.properties.intent.toLatin1())) {
+            error = QStringLiteral("A drawing annotation intent is invalid.");
+            return false;
+        }
+    }
+    if (!annotation.properties.name.isEmpty()) {
+        if (!isSafePdfName(annotation.properties.name)
+            || !replace(
+                QByteArrayView("/Name"),
+                '/' + annotation.properties.name.toLatin1())) {
+            error = QStringLiteral("A drawing annotation name is invalid.");
+            return false;
+        }
+    }
+    return replace(
+        QByteArrayView("/AP"),
+        QByteArrayLiteral("<< /N ")
+            + QByteArray::number(appearanceObjectNumber)
+            + QByteArrayLiteral(" 0 R >>"));
+}
+
 bool freeTextAppearanceRect(const QByteArray &dictionary,
                             QRectF &pageRect,
                             QString &error)
@@ -6567,6 +7048,254 @@ bool PDFAcroFormCanonicalizer::finalizeTextMarkupAnnotations(
                 || replacement.end > object.size()) {
                 return fail(QStringLiteral(
                     "Overlapping text markup annotation rewrites are not supported."));
+            }
+            object.replace(
+                replacement.start,
+                replacement.end - replacement.start,
+                replacement.value);
+            previousStart = replacement.start;
+        }
+        rewrittenObjects.insert(container.key(), std::move(object));
+        rewrittenReferences.insert(
+            container.key(),
+            containerReferences.value(container.key()));
+    }
+    for (auto rewritten = rewrittenObjects.begin();
+         rewritten != rewrittenObjects.end();
+         ++rewritten) {
+        incrementalObjects.append({
+            rewrittenReferences.value(rewritten.key()),
+            std::move(rewritten.value())});
+    }
+
+    const bool sourceEndsWithNewline = fileSize > 0
+        && reinterpret_cast<const char *>(mapped)[fileSize - 1] == '\n';
+    const ObjectReference root = pdf.root;
+    const qint64 previousXref = pdf.startXref;
+    file.unmap(mapped);
+    file.close();
+    return appendIncrementalUpdate(
+        filePath,
+        root,
+        previousXref,
+        nextObjectNumber,
+        sourceEndsWithNewline,
+        std::move(incrementalObjects),
+        error);
+}
+
+bool PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
+    const QString &filePath,
+    const QVector<PDFCommentAnnotation::DrawingAnnotation> &annotations,
+    QString &error)
+{
+    constexpr qsizetype maximumAnnotations = 4096;
+    constexpr qsizetype maximumTotalVertices = 65536;
+    constexpr qsizetype maximumTotalAppearanceBytes = 64 * 1024 * 1024;
+    if (annotations.isEmpty()) {
+        return true;
+    }
+    if (annotations.size() > maximumAnnotations) {
+        error = QStringLiteral("Too many drawing annotations were requested.");
+        return false;
+    }
+
+    qsizetype totalVertices = 0;
+    for (const auto &annotation : annotations) {
+        totalVertices += annotation.pageVertices.size();
+        if (totalVertices > maximumTotalVertices) {
+            error = QStringLiteral(
+                "Drawing annotation geometry exceeds the safety limit.");
+            return false;
+        }
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0) {
+        error = file.errorString();
+        return false;
+    }
+    const qint64 fileSize = file.size();
+    uchar *mapped = file.map(0, fileSize);
+    if (!mapped) {
+        error = file.errorString();
+        return false;
+    }
+
+    ParsedPdf pdf;
+    if (!parseXref(
+            reinterpret_cast<const char *>(mapped),
+            fileSize,
+            pdf,
+            error)) {
+        file.unmap(mapped);
+        return false;
+    }
+    const auto fail = [&file, mapped, &error](const QString &message) {
+        error = message;
+        file.unmap(mapped);
+        return false;
+    };
+
+    int highestObject = 0;
+    for (auto entry = pdf.entries.cbegin(); entry != pdf.entries.cend(); ++entry) {
+        highestObject = qMax(highestObject, entry.key());
+    }
+    int nextObjectNumber = qMax(pdf.declaredSize, highestObject + 1);
+
+    struct DictionaryReplacement {
+        qsizetype start = -1;
+        qsizetype end = -1;
+        QByteArray value;
+    };
+    QHash<int, QVector<DictionaryReplacement>> replacementsByContainer;
+    QHash<int, ObjectReference> containerReferences;
+    QHash<int, QByteArray> rewrittenObjects;
+    QHash<int, ObjectReference> rewrittenReferences;
+    QList<IncrementalObject> incrementalObjects;
+    incrementalObjects.reserve(annotations.size() * 2);
+    QSet<QString> annotationIds;
+    qsizetype totalAppearanceBytes = 0;
+
+    for (const PDFCommentAnnotation::DrawingAnnotation &annotation
+         : annotations) {
+        const QByteArrayView subtype = drawingSubtypeName(annotation.type);
+        if (annotation.page < 0
+            || annotation.annotationId.isEmpty()
+            || subtype.isEmpty()
+            || annotationIds.contains(annotation.annotationId)) {
+            return fail(QStringLiteral(
+                "A drawing annotation request is invalid or duplicated."));
+        }
+        annotationIds.insert(annotation.annotationId);
+
+        QByteArray appearanceContent;
+        if (!drawingAppearanceData(annotation, appearanceContent, error)) {
+            return fail(error);
+        }
+        if (appearanceContent.size()
+                > maximumTotalAppearanceBytes - totalAppearanceBytes) {
+            return fail(QStringLiteral(
+                "Drawing annotation appearances exceed the safety limit."));
+        }
+        totalAppearanceBytes += appearanceContent.size();
+
+        const PlaceholderLocation placeholder = annotationForStringId(
+            pdf,
+            QByteArrayView("/NM"),
+            annotation.annotationId,
+            QByteArrayView("/Square"));
+        const bool located = placeholder.widget.number >= 0
+            || (placeholder.container.number >= 0
+                && placeholder.dictionaryStart >= 0
+                && placeholder.dictionaryEnd > placeholder.dictionaryStart);
+        if (!located) {
+            return fail(QStringLiteral(
+                "A drawing annotation could not be located."));
+        }
+
+        QByteArray object;
+        qsizetype dictionaryStart = -1;
+        qsizetype dictionaryEnd = -1;
+        if (placeholder.isDirect()) {
+            object = completeObject(pdf, placeholder.container.number, error);
+            dictionaryStart = placeholder.dictionaryStart;
+            dictionaryEnd = placeholder.dictionaryEnd;
+        } else {
+            object = completeObject(pdf, placeholder.widget.number, error);
+            dictionaryStart = object.indexOf("<<");
+            if (dictionaryStart >= 0
+                && !matchingDictionaryEnd(
+                    object.constData(),
+                    object.size(),
+                    dictionaryStart,
+                    dictionaryEnd)) {
+                dictionaryEnd = -1;
+            }
+        }
+        if (object.isEmpty()
+            || dictionaryStart < 0
+            || dictionaryEnd <= dictionaryStart
+            || dictionaryEnd > object.size()) {
+            return fail(error.isEmpty()
+                    ? QStringLiteral(
+                        "A drawing annotation object dictionary is malformed.")
+                    : error);
+        }
+
+        if (nextObjectNumber >= std::numeric_limits<int>::max()) {
+            return fail(QStringLiteral(
+                "The PDF has no available object number for a drawing appearance."));
+        }
+        const int appearanceObjectNumber = nextObjectNumber++;
+        QByteArray dictionary = object.mid(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart);
+        if (!configureDrawingAnnotationDictionary(
+                dictionary,
+                annotation,
+                appearanceObjectNumber,
+                error)) {
+            return fail(error);
+        }
+        incrementalObjects.append({
+            ObjectReference{appearanceObjectNumber, 0},
+            drawingAppearanceObject(
+                appearanceObjectNumber,
+                annotation,
+                appearanceContent)});
+
+        if (placeholder.isDirect()) {
+            replacementsByContainer[placeholder.container.number].append({
+                dictionaryStart,
+                dictionaryEnd,
+                dictionary});
+            containerReferences.insert(
+                placeholder.container.number,
+                placeholder.container);
+            continue;
+        }
+        if (rewrittenObjects.contains(placeholder.widget.number)) {
+            return fail(QStringLiteral(
+                "Two drawing requests resolved to the same annotation."));
+        }
+        object.replace(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart,
+            dictionary);
+        rewrittenObjects.insert(placeholder.widget.number, std::move(object));
+        rewrittenReferences.insert(
+            placeholder.widget.number,
+            placeholder.widget);
+    }
+
+    for (auto container = replacementsByContainer.begin();
+         container != replacementsByContainer.end();
+         ++container) {
+        if (rewrittenObjects.contains(container.key())) {
+            return fail(QStringLiteral(
+                "A drawing annotation container cannot be rewritten safely."));
+        }
+        QByteArray object = completeObject(pdf, container.key(), error);
+        if (object.isEmpty()) {
+            return fail(error);
+        }
+        std::sort(
+            container->begin(),
+            container->end(),
+            [](const DictionaryReplacement &left,
+               const DictionaryReplacement &right) {
+                return left.start > right.start;
+            });
+        qsizetype previousStart = object.size();
+        for (const DictionaryReplacement &replacement
+             : std::as_const(*container)) {
+            if (replacement.start < 0
+                || replacement.end <= replacement.start
+                || replacement.end > previousStart
+                || replacement.end > object.size()) {
+                return fail(QStringLiteral(
+                    "Overlapping drawing annotation rewrites are not supported."));
             }
             object.replace(
                 replacement.start,

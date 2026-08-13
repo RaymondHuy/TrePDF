@@ -18,15 +18,16 @@ Current features:
 - Open multiple local PDF files in independent tabs and close them separately.
 - Insert a blank page immediately after the current page or delete the current
   page, with undo/redo/discard and Save/Save As persistence.
-- Add Sticky Note, Free Text, Highlight, Squiggly, Underline, and Strikeout
+- Add Sticky Note, Free Text, Highlight, Squiggly, Underline, Strikeout,
+  Square, Circle, Line, Polygon, and PolyLine
   annotations from the Comment tab. New comments are undoable session drafts; supported
   source comments can be indexed, selected, edited, and deleted with
   undo/redo/discard. Save/Save As persists additions, content edits, and
   removals without rewriting page content streams on annotation-only pages.
-  Line, Square, Circle, Polygon, PolyLine, Stamp, Caret, Ink, FileAttachment,
-  Sound, Redact, and PDF 2.0 Projection annotations are indexed read-only for
-  panel navigation; editing, deletion, and replies remain disabled for those
-  subtypes.
+  Square, Circle, Line, Polygon, and PolyLine are drawing-comment drafts with
+  shared stroke/interior/opacity/border/effect/line-ending properties and a
+  subtype-safe vector `/AP` pipeline. Stamp, Caret, Ink, FileAttachment, Sound,
+  Redact, and PDF 2.0 Projection remain indexed read-only for panel navigation.
   Squiggly accepts only non-whitespace source-text glyphs intersected by the
   drag gesture, snaps the result into per-line rectangles/QuadPoints, and
   rejects whitespace-only or no-text selections. Nearly horizontal gestures use
@@ -189,12 +190,16 @@ Current features:
 - `src/PDFSaveWriter.h/.cpp`: resolves source object paths, reflows rich-text
   runs, embeds/reuses fonts, creates added image objects, regenerates changed
   page content, and writes the PDF transactionally.
+- `src/PDFCommentAnnotation.h`: shared drawing-comment geometry/property
+  contract used by controller snapshots, writer, and the `/AP` canonicalizer.
 - `src/PDFPageItem.h/.cpp`: asynchronous rendering and scene graph texture
   upload for one page delegate.
 - `src/Components/FormChoiceOverlay.qml`: custom combo-box and list-box
   presentation for the safe subset of AcroForm choice fields.
 - `src/Components/ShapeDraftView.qml`: shared Qt Quick Shapes preview used by
   the ribbon palette, drag preview, and added-shape draft delegates.
+- `src/Components/CommentDrawingView.qml`: vector preview shared by Square,
+  Circle, Line, Polygon, and PolyLine comment drafts and gestures.
 - `src/Components/SquigglyLine.qml`: point-scaled Squiggly renderer shared by
   the drag preview and draft delegates, matching PDFium's saved appearance.
 - `src/Components`: ribbon controls, document view, page delegates, and the
@@ -419,7 +424,8 @@ clipped or elided unintentionally.
   embedded font programs to glyphs used by new text objects while leaving
   original PDF font resources unchanged. Commit only after PDFium succeeds;
   any earlier error must leave the destination and in-memory drafts untouched.
-- Persist Highlight, Squiggly, Underline, Strikeout, and Free Text drafts as
+- Persist Highlight, Squiggly, Underline, Strikeout, Free Text, Square, Circle,
+  Line, Polygon, and PolyLine drafts as
   their matching `FPDF_ANNOT_*` annotations with explicit quad points, bounding rectangles,
   color/opacity, and the Print flag. Adding annotations alone must not call
   `FPDFPage_GenerateContent()`; mixed text/image edits still regenerate the
@@ -428,6 +434,10 @@ clipped or elided unintentionally.
   the free rectangle drawn by the user. Free Text must keep `/Contents`, `/DA`,
   comment metadata, and a wrapped Unicode-capable `/AP`; editing a source Free
   Text annotation must replace its stale appearance.
+  Drawing comments use `/L` or `/Vertices` where applicable plus a common
+  `/C`, `/IC`, `/CA`, `/BS`, `/BE`, `/IT`, `/Name`, `/LE`, `/F`, and vector
+  `/AP` framework. PDFium creates only a staging placeholder; the canonicalizer
+  writes the final subtype, dictionary, and appearance atomically.
 - Persist added shapes as top-level PDF path objects. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain

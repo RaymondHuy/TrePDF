@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PDFDocument.h"
+#include "PDFCommentAnnotation.h"
 #include "PDFSaveWriter.h"
 
 #include <QByteArray>
@@ -39,6 +40,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(QColor underlineColor READ underlineColor WRITE setUnderlineColor NOTIFY underlineColorChanged FINAL)
     Q_PROPERTY(QColor squigglyColor READ squigglyColor WRITE setSquigglyColor NOTIFY squigglyColorChanged FINAL)
     Q_PROPERTY(QColor strikeoutColor READ strikeoutColor WRITE setStrikeoutColor NOTIFY strikeoutColorChanged FINAL)
+    Q_PROPERTY(QColor drawingCommentColor READ drawingCommentColor WRITE setDrawingCommentColor NOTIFY drawingCommentColorChanged FINAL)
+    Q_PROPERTY(int pendingDrawingCommentPage READ pendingDrawingCommentPage NOTIFY pendingDrawingCommentPageChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
@@ -104,7 +107,19 @@ public:
         SquigglyTool,
         StrikeoutTool,
         StickyNoteTool,
-        FreeTextTool
+        FreeTextTool,
+        SquareTool,
+        CircleTool,
+        LineTool,
+        PolygonTool,
+        PolyLineTool,
+        // Compatibility aliases for QML/tests written during the initial
+        // drawing-comment implementation.
+        SquareCommentTool = SquareTool,
+        CircleCommentTool = CircleTool,
+        LineCommentTool = LineTool,
+        PolygonCommentTool = PolygonTool,
+        PolyLineCommentTool = PolyLineTool
     };
     Q_ENUM(Tool)
 
@@ -158,6 +173,8 @@ public:
     void setSquigglyColor(const QColor &color);
     QColor strikeoutColor() const;
     void setStrikeoutColor(const QColor &color);
+    QColor drawingCommentColor() const;
+    void setDrawingCommentColor(const QColor &color);
 
     bool hasDrafts() const;
     bool canUndo() const;
@@ -194,6 +211,7 @@ public:
     QString selectedReason() const;
     QVariantList commentItems() const;
     int maximumCommentCharacters() const;
+    int pendingDrawingCommentPage() const;
     quint64 draftRevisionForPage(int page) const;
     QVector<QVector<int>> draftedTextObjectPathsForPage(int page) const;
     QVector<DraftObjectMove> draftedObjectMovesForPage(int page) const;
@@ -231,6 +249,11 @@ public:
                                          const QPointF &position);
     Q_INVOKABLE QVariantMap addFreeText(int page,
                                        const QRectF &selectionRect);
+    Q_INVOKABLE QVariantMap addDrawingComment(
+        int page,
+        const QVariantList &vertices);
+    Q_INVOKABLE bool claimDrawingCommentInteraction(int page);
+    Q_INVOKABLE void releaseDrawingCommentInteraction(int page);
     Q_INVOKABLE QVariantMap addCommentReply(int page,
                                             const QString &parentObjectId,
                                             const QString &text);
@@ -302,6 +325,8 @@ signals:
     void underlineColorChanged();
     void squigglyColorChanged();
     void strikeoutColorChanged();
+    void drawingCommentColorChanged();
+    void pendingDrawingCommentPageChanged();
     void historyStateChanged();
     void savingChanged();
     void textEditActiveChanged();
@@ -399,6 +424,10 @@ private:
         qreal shapeStrokeWidthRatio = 0.0;
         QVector<QRectF> highlightRects;
         QColor highlightColor;
+        PDFCommentAnnotation::DrawingType drawingType
+            = PDFCommentAnnotation::DrawingType::Square;
+        QVector<QPointF> drawingVertices;
+        PDFCommentAnnotation::CommonProperties commentProperties;
         QString reason;
         int pendingFontSnapshotIndex = -1;
         QString pendingFontExpectedFamily;
@@ -524,6 +553,7 @@ private:
     };
 
     void resetSession();
+    void setPendingDrawingCommentPage(int page);
     bool completeSave(const PDFSaveWriter::Result &result,
                       const QString &targetFilePath,
                       PDFDocument *expectedDocument,
@@ -703,6 +733,8 @@ private:
     QColor m_underlineColor;
     QColor m_squigglyColor;
     QColor m_strikeoutColor;
+    QColor m_drawingCommentColor;
+    int m_pendingDrawingCommentPage = -1;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
     QVector<int> m_pageCandidateLru;

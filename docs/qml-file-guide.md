@@ -38,7 +38,8 @@ Main.qml
     │           │   └── FormChoiceOverlay.qml
     │           ├── EditOverlay.qml
     │           │   ├── ShapeDraftView.qml
-    │           │   └── SquigglyLine.qml
+    │           │   ├── SquigglyLine.qml
+    │           │   └── CommentDrawingView.qml
     │           └── FormTextFieldOverlay.qml
     │               └── FormFieldLayer (C++)
     ├── CommentPanel.qml
@@ -172,8 +173,8 @@ ghi Save; mọi thay đổi vẫn là draft.
 **Vai trò:** command surface cho PDF comment/markup, nằm ngay sau tab Edit.
 
 - Khi tab mở, `AppRibbon` bật `PDFEditController.HighlightTool`; người dùng có
-  thể chuyển sang Sticky Note, Free Text, Squiggly, Underline hoặc Strikeout mà
-  không bật form design mode.
+  thể chuyển sang Sticky Note, Free Text, text markup hoặc năm drawing-comment
+  tool mà không bật form design mode.
 - Highlight, Underline, Squiggly và Strikeout là split button: phần chính dùng
   màu hiện tại, menu có bảng màu curated và system color picker cùng kiểu.
   Underline, Squiggly và Strikeout dùng palette RGB đậm và opacity cao hơn để
@@ -193,6 +194,11 @@ ghi Save; mọi thay đổi vẫn là draft.
   Underline và Strikeout vẫn dùng free rectangle hiện tại. Sticky Note đặt bằng
   một lần bấm. Free Text nhận click hoặc drag để tạo hộp chữ; cả hai chỉnh nội
   dung trong panel bên phải. Chọn Free Text cũng mở panel nếu panel đang đóng.
+- Rectangle/Oval/Line dùng drag; Polygon/Polyline dùng multi-click, Enter hoặc
+  nhấp đúp để hoàn tất. Cả năm dùng màu drawing riêng và renderer vector chung.
+- Gesture drawing có owner page duy nhất ở `PDFEditController`; bắt đầu trên
+  trang khác sẽ hủy polygon/polyline tạm của delegate trước để pooling không giữ
+  hai path dang dở song song.
 - Nhóm Manage bật/tắt danh sách, chọn bình luận trước/sau và xóa comment đang
   chọn; nhóm History dùng chung undo/redo của `PDFEditController`.
 - Undo/Redo dùng chung history của `PDFEditController` và điều hướng tới trang
@@ -225,9 +231,9 @@ Note/Free Text đang chọn và phản hồi một cấp.
   dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
   được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.
   Panel dùng chung trạng thái thu gọn theo document session.
-- Line, Square, Circle, Polygon, PolyLine, Stamp, Caret, Ink, FileAttachment,
-  Sound, Redact và Projection dùng card `comment` chỉ đọc: vẫn chọn/điều hướng
-  được nhưng không mở editor và vô hiệu action xóa/Phản hồi.
+- Square, Circle, Line, Polygon và PolyLine có kind riêng, sửa nội dung/xóa/reply
+  như comment được hỗ trợ. Stamp, Caret, Ink, FileAttachment, Sound, Redact và
+  Projection dùng card `comment` chỉ đọc.
 
 ### [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml)
 
@@ -373,7 +379,7 @@ data/candidate/history/selection đổi.
   kích thước trang.
 - Quản lý con trỏ Select/Add Text bằng SVG và fallback cursor; ẩn cursor khi
   pooled, ngoài trang hoặc tool không phù hợp.
-- Các công cụ draw shape/text-markup/Free Text giữ start/current point tạm thời,
+- Các công cụ draw shape/text-markup/Free Text/drawing comment giữ point tạm thời,
   validate gesture rồi mới tạo một draft command. Click Free Text dùng kích
   thước mặc định; drag dùng rectangle đã clamp trong trang.
 
@@ -398,6 +404,8 @@ data/candidate/history/selection đổi.
   này. Nếu render worker đã trả texture draft đúng revision, component tránh
   chồng preview không cần thiết.
 - `DraftImageView` vẽ pixel snapshot của ảnh thêm mới; `ShapeDraftView` vẽ vector.
+- `CommentDrawingView` vẽ Square/Circle/Line/Polygon/PolyLine từ cùng geometry
+  và common properties mà writer dùng để dựng `/AP`.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
 - Drag text/image/shape giữ preview trong QML nhưng chỉ commit geometry một lần
   khi thả; phím mũi tên tạo move command, Shift dùng bước lớn hơn.
@@ -417,6 +425,12 @@ data/candidate/history/selection đổi.
   biên độ và tần số.
 - Chỉ vẽ presentation; hit-test, snap glyph, QuadPoints và persistence vẫn thuộc
   `EditOverlay`, `PDFEditController` và `PDFSaveWriter`.
+
+### [`src/Components/CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml)
+
+**Vai trò:** renderer vector riêng cho drawing comment, dùng chung giữa preview
+gesture và added draft. Component nhận kind, vertices normalized, stroke/fill,
+opacity, border width/style và dash pattern; không hit-test hoặc ghi PDF.
 
 ### [`src/Components/ShapeDraftView.qml`](../src/Components/ShapeDraftView.qml)
 

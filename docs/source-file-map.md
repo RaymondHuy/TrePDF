@@ -204,7 +204,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
-| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Free Text, Highlight/Squiggly/Underline/Strikeout, quản lý comment và history. |
+| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Free Text, text markup, Square/Circle/Line/Polygon/PolyLine, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
@@ -217,7 +217,8 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/DocumentView.qml`](../src/Components/DocumentView.qml) | ListView trang liên tục và ảo hóa. |
 | [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, coordinator interaction, rotation và layout của một trang. |
 | [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml) | Gom mode, z-order, choice handshake và cleanup của runtime/edit/form designer. |
-| [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml) | Tương tác sửa nội dung trang và preview/draft comment Free Text. |
+| [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml) | Tương tác sửa nội dung trang, gesture và preview/draft comment. |
+| [`src/Components/CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml) | Renderer vector chung cho năm drawing-comment subtype. |
 | [`src/Components/SquigglyLine.qml`](../src/Components/SquigglyLine.qml) | Preview Squiggly theo đúng hình học 1pt/2pt của PDFium và scale trang. |
 | [`src/Components/FormChoiceOverlay.qml`](../src/Components/FormChoiceOverlay.qml) | Combo/list overlay cho choice field an toàn. |
 | [`src/Components/FormTextFieldOverlay.qml`](../src/Components/FormTextFieldOverlay.qml) | Đặt và chỉnh field thiết kế. |
@@ -240,6 +241,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) | Candidate, selection, draft, edit, history và save orchestration. |
 | [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) | Ghi PDF giao dịch từ snapshot bất biến. |
 | [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) | Đọc chuỗi, chuẩn hóa nội dung và phân loại comment annotation dùng chung cho index, render và save. |
+| [`src/PDFCommentAnnotation.h`](../src/PDFCommentAnnotation.h) | Contract geometry/common properties cho drawing comment và `/AP`. |
 | [`src/DraftImageItem.cpp`](../src/DraftImageItem.cpp) | Vẽ snapshot ảnh draft trong QML. |
 | [`src/PDFFormController.cpp`](../src/PDFFormController.cpp) | Facade GUI-thread của form runtime. |
 | [`src/PDFFormWorker.cpp`](../src/PDFFormWorker.cpp) | Session PDFium form trên hàng đợi tuần tự. |
@@ -247,7 +249,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFFormDesignerController.cpp`](../src/PDFFormDesignerController.cpp) | Model field thiết kế, rehydrate và snapshot save. |
 | [`src/FormFieldLayer.cpp`](../src/FormFieldLayer.cpp) | Scene graph và pointer interaction cho field thiết kế. |
 | [`src/PDFAcroFormWriter.cpp`](../src/PDFAcroFormWriter.cpp) | Pipeline cấp cao để ghi field TrePDF. |
-| [`src/PDFAcroFormCanonicalizer.cpp`](../src/PDFAcroFormCanonicalizer.cpp) | Hoàn thiện object/dictionary/appearance AcroForm, appearance Free Text và `/IRT` của comment reply bằng incremental update. |
+| [`src/PDFAcroFormCanonicalizer.cpp`](../src/PDFAcroFormCanonicalizer.cpp) | Hoàn thiện AcroForm, Free Text, text/drawing markup `/AP` và `/IRT` reply bằng incremental update. |
 | [`src/PDFWidgetAnnotationSuppression.cpp`](../src/PDFWidgetAnnotationSuppression.cpp) | Ẩn Widget tạm thời và phục hồi patch khi render designer. |
 | [`tests/tst_PDFEditController.cpp`](../tests/tst_PDFEditController.cpp) | Bộ test tích hợp/hồi quy của edit, save, form, font và tab. |
 

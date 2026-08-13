@@ -89,7 +89,7 @@ của `PageInteractionOverlay`, rồi mới xét `z` nội bộ của từng nh�
 | `hitArea` nền | mặc định | Bắt click/drag trên vùng chưa do draft-specific area chiếm. |
 | Hover/selection box, editor mask, `TextEdit` | 2 | Hiển thị selection và editor rich text. |
 | Con trỏ custom | 4 | Thay thế cursor OS khi cần preview tool. |
-| Preview shape/text markup/Free Text đang kéo | 5 | Hiện feedback cho gesture đang chạy. |
+| Preview shape/text markup/Free Text/drawing comment | 5 | Hiện feedback cho gesture đang chạy. |
 | `resizeOverlay` | 6 | Khung chọn, move area và bốn resize handle của object editable. |
 | Hint commit/cancel editor | 7 | Luôn nổi hơn frame editor. |
 
@@ -350,7 +350,7 @@ coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-tes
 |---|---|---|---|---|
 | View | `false` | Có thể interactive nếu form session sẵn sàng. | Không bắt input; draft vẫn có thể hiện. | Source-backed field bị ẩn; không đặt/move/resize. |
 | Edit | `true` | Không interactive vì tool là Select hoặc tool edit khác Browse. | Active: select, edit, add hoặc shape theo tool. | Source-backed field hiện; action designer hỗ trợ vẫn gate theo read-only, nhưng không có placement/delete Forms-only. |
-| Comment | `false` | Không interactive vì tool comment khác Browse. | Active để đặt Sticky Note, click/drag Free Text hoặc kéo Highlight/Squiggly/Underline/Strikeout; Select dùng khi điều hướng danh sách. | Source-backed field bị ẩn và không interactive. |
+| Comment | `false` | Không interactive vì tool comment khác Browse. | Active để đặt Sticky Note, Free Text, text markup hoặc Square/Circle/Line/Polygon/PolyLine; Select dùng khi điều hướng danh sách. | Source-backed field bị ẩn và không interactive. |
 | Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Text Field/Dropdown/List Box source-backed được hỗ trợ có thể tạo draft xóa. |
 | Forms, tool đặt field | `true` | Bị tắt bởi cờ tool Text Field/Check Box/Radio Button/Dropdown/List Box/Comb Field. | Không active. | `placementArea` xử lý vùng trống; không move trong lúc placement tool bật. |
 | Đang Save hoặc delegate pooled | Không dùng để tương tác | Bị tắt/clear state. | Bị tắt; khi pooled còn xóa data/gesture cục bộ. | Hủy placement/resize/move/focus; khi pooled không render field. |

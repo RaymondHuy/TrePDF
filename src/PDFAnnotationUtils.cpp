@@ -68,7 +68,12 @@ bool isSupportedCommentAnnotationSubtype(int subtype)
         || subtype == FPDF_ANNOT_SQUIGGLY
         || subtype == FPDF_ANNOT_STRIKEOUT
         || subtype == FPDF_ANNOT_TEXT
-        || subtype == FPDF_ANNOT_FREETEXT;
+        || subtype == FPDF_ANNOT_FREETEXT
+        || subtype == FPDF_ANNOT_SQUARE
+        || subtype == FPDF_ANNOT_CIRCLE
+        || subtype == FPDF_ANNOT_LINE
+        || subtype == FPDF_ANNOT_POLYGON
+        || subtype == FPDF_ANNOT_POLYLINE;
 }
 
 bool isMarkupAnnotationSubtype(int subtype)

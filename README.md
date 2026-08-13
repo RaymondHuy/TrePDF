@@ -67,8 +67,9 @@ editable candidate while retaining every source object path for draft rendering
 and persistence.
 
 The Comment ribbon provides Sticky Note, Free Text, Highlight, Squiggly,
-Underline, and Strikeout tools plus a collapsible, whole-document comments
-panel. Supported comments and replies, including annotations already in the PDF, can be selected
+Underline, Strikeout, Rectangle, Oval, Line, Polygon, and Polyline tools plus a
+collapsible, whole-document comments panel. Supported comments and replies,
+including annotations already in the PDF, can be selected
 and have their text edited in the panel. Markup uses a compact curated color
 grid and a system picker for custom colors. Squiggly is source-text-aware: its
 drag rectangle is intersected with non-whitespace glyphs from the PDF text
@@ -93,10 +94,11 @@ Unicode-capable appearance. Root comments can receive replies;
 each root has a dropdown control that expands its replies at one visual level,
 and reply-to-reply is not offered. Reply annotations remain available in this
 panel but their standalone appearances are hidden from the PDF page viewer.
-Line, Square, Circle, Polygon, PolyLine, Stamp, Caret, Ink, FileAttachment,
-Sound, Redact, and PDF 2.0 Projection annotations are also indexed for reading
-and navigation, with editing, deletion, and replies disabled until subtype-safe
-persistence exists.
+Square, Circle, Line, Polygon, and PolyLine comments use shared semantic stroke,
+interior, opacity, border, effect, and line-ending properties. Save writes
+standard `/Rect`, `/L` or `/Vertices` geometry and a matching vector `/AP`.
+Stamp, Caret, Ink, FileAttachment, Sound, Redact, and PDF 2.0 Projection are
+still indexed read-only for reading and navigation.
 Comment changes are per-tab session drafts with
 undo, redo, discard, selection, and deletion support. Save and Save As persist
 them as standard PDF annotations with geometry, color, contents, print

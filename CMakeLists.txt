@@ -64,6 +64,7 @@ qt_add_qml_module(trepdf
         src/PDFAcroFormWriter.h
         src/PDFAnnotationUtils.cpp
         src/PDFAnnotationUtils.h
+        src/PDFCommentAnnotation.h
         src/PDFDocument.cpp
         src/PDFDocument.h
         src/PDFEditController.cpp
@@ -92,6 +93,7 @@ qt_add_qml_module(trepdf
         src/Components/AppTheme.qml
         src/Components/CombFieldOptionsPanel.qml
         src/Components/CommentPanel.qml
+        src/Components/CommentDrawingView.qml
         src/Components/CommentRibbon.qml
         src/Components/DocumentView.qml
         src/Components/DocumentTabBar.qml
