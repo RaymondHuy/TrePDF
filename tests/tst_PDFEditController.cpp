@@ -1557,12 +1557,12 @@ bool createMixedSubtypeCommentRepliesPdf(const QString &filePath)
     return writePdfObjects(
         filePath,
         {
-            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Catalog /Version /2.0 /Pages 2 0 R >>"),
             QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
             QByteArray(
                 "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
-                "/Resources << /Font << /Helv 9 0 R >> >> "
-                "/Annots [4 0 R 5 0 R 6 0 R 7 0 R 8 0 R] >>"),
+                "/Resources << /Font << /Helv 10 0 R >> >> "
+                "/Annots [4 0 R 5 0 R 6 0 R 7 0 R 8 0 R 9 0 R] >>"),
             QByteArray(
                 "<< /Type /Annot /Subtype /Text /P 3 0 R "
                 "/Rect [24 144 48 168] /Contents (Mixed root) "
@@ -1587,9 +1587,80 @@ bool createMixedSubtypeCommentRepliesPdf(const QString &filePath)
                 "/InkList [[76 104 84 112 92 104]] /NM (mixed-ink) "
                 "/IRT 4 0 R /RT /R /F 4 >>"),
             QByteArray(
+                "<< /Type /Annot /Subtype /Projection /P 3 0 R "
+                "/Rect [120 96 160 128] /Contents (Projection reply) "
+                "/NM (mixed-projection) /IRT 4 0 R /RT /R /F 4 >>"),
+            QByteArray(
                 "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
                 "/Encoding /WinAnsiEncoding >>"),
         });
+}
+
+bool createUnsupportedMarkupCommentsPdf(const QString &filePath)
+{
+    struct AnnotationDefinition {
+        QByteArray subtype;
+        QByteArray contents;
+        QByteArray subtypeData;
+    };
+    const QVector<AnnotationDefinition> definitions{
+        {"Line", "unsupported-line", "/L [20 520 120 540]"},
+        {"Square", "unsupported-square", {}},
+        {"Circle", "unsupported-circle", {}},
+        {"Polygon", "unsupported-polygon",
+         "/Vertices [20 400 120 400 70 430]"},
+        {"PolyLine", "unsupported-polyline",
+         "/Vertices [20 360 70 390 120 360]"},
+        {"Stamp", "unsupported-stamp", "/Name /Draft"},
+        {"Caret", "unsupported-caret", "/Sy /P"},
+        {"Ink", "unsupported-ink",
+         "/InkList [[20 240 60 270 120 240]]"},
+        {"FileAttachment", "unsupported-file-attachment",
+         "/FS << /Type /Filespec /F (sample.txt) >>"},
+        {"Sound", "unsupported-sound", "/Sound 16 0 R"},
+        {"Redact", "unsupported-redact",
+         "/QuadPoints [20 140 120 140 20 120 120 120]"},
+        {"Projection", "unsupported-projection", {}},
+    };
+
+    QByteArray annotationReferences;
+    for (qsizetype index = 0; index < definitions.size(); ++index) {
+        annotationReferences += QByteArray::number(index + 4) + " 0 R ";
+    }
+    QVector<QByteArray> objects{
+        QByteArray("<< /Type /Catalog /Version /2.0 /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] "
+            "/Resources << >> /Annots [")
+            + annotationReferences + QByteArray("] >>"),
+    };
+    for (qsizetype index = 0; index < definitions.size(); ++index) {
+        const AnnotationDefinition &definition = definitions.at(index);
+        const int top = 560 - static_cast<int>(index) * 38;
+        const int bottom = top - 24;
+        QByteArray annotation(
+            "<< /Type /Annot /P 3 0 R /Subtype /");
+        annotation += definition.subtype;
+        annotation += " /Rect [20 ";
+        annotation += QByteArray::number(bottom);
+        annotation += " 120 ";
+        annotation += QByteArray::number(top);
+        annotation += "] /Contents (";
+        annotation += definition.contents;
+        annotation += ") /T (Markup author) ";
+        annotation += "/CreationDate (D:20240101090000Z) ";
+        annotation += "/M (D:20240101100000Z) /NM (unsupported-";
+        annotation += QByteArray::number(index);
+        annotation += ") /F 4 ";
+        annotation += definition.subtypeData;
+        annotation += " >>";
+        objects.append(std::move(annotation));
+    }
+    objects.append(QByteArray(
+        "<< /Type /Sound /R 8000 /C 1 /B 8 /E /Unsigned /Length 0 >>\n"
+        "stream\n\nendstream"));
+    return writePdfObjects(filePath, objects);
 }
 
 bool createNonMarkupCommentReplyPdf(const QString &filePath)
@@ -2648,6 +2719,7 @@ struct HighlightSaveInspection {
     QString author;
     QString creationDate;
     QString modificationDate;
+    QString contents;
     bool hasAppearance = false;
     QString appearance;
     int appearanceObjectCount = 0;
@@ -3383,6 +3455,9 @@ HighlightSaveInspection inspectTextMarkupAnnotations(
                 inspection.modificationDate = annotationDictionaryString(
                     annotation,
                     "M");
+                inspection.contents = annotationDictionaryString(
+                    annotation,
+                    "Contents");
                 const size_t quadCount
                     = FPDFAnnot_CountAttachmentPoints(annotation);
                 inspection.quadPoints.reserve(
@@ -4032,6 +4107,7 @@ private slots:
     void flattensNestedSourceCommentReplies();
     void hidesCommentRepliesFromViewer();
     void hidesUnresolvedSourceReplyFromViewerModel();
+    void indexesUnsupportedMarkupCommentsReadOnly();
     void deletesMixedSubtypeSourceReplyThread();
     void rejectsNonMarkupReplyDescendantDeletion();
     void deletesSourceCommentsWithUndoRedoDiscardAndSave();
@@ -4043,6 +4119,7 @@ private slots:
     void savesAndEditsFreeTextRoundTrip();
     void savesFreeTextWithPageLocalDuplicateNames();
     void savesCommentReplyRoundTrip();
+    void normalizesCommentContentsLineEndingsOnSave();
     void keepsStickyNoteNamesUniqueAcrossReopen();
     void keepsMarkupReplyIdsUniqueAcrossReopen();
     void indexesCommentsAcrossDocument();
@@ -13572,6 +13649,7 @@ void PDFEditControllerTest::editsSourceReplyComment()
     QCOMPARE(sourceReply.subtype, FPDF_ANNOT_TEXT);
     QCOMPARE(sourceReply.parentName, QStringLiteral("root-comment"));
     QCOMPARE(sourceReply.relation, QStringLiteral("R"));
+    QVERIFY(!sourceReply.hasAppearance);
     QCOMPARE(sourceNestedReply.parentName, QStringLiteral("first-reply"));
     QCOMPARE(sourceNestedReply.relation, QStringLiteral("R"));
 
@@ -13613,6 +13691,8 @@ void PDFEditControllerTest::editsSourceReplyComment()
     QCOMPARE(outputReply.parentName, sourceReply.parentName);
     QCOMPARE(outputReply.relation, QStringLiteral("R"));
     QVERIFY(outputReply.parentIndex >= 0);
+    QVERIFY(outputReply.hasAppearance);
+    QVERIFY(!outputReply.appearance.isEmpty());
     QVERIFY(!outputReply.modificationDate.isEmpty());
     QVERIFY(qAbs(outputReply.rect.left - sourceReply.rect.left) < 0.001);
     QVERIFY(qAbs(outputReply.rect.right - sourceReply.rect.right) < 0.001);
@@ -14110,6 +14190,76 @@ void PDFEditControllerTest::hidesUnresolvedSourceReplyFromViewerModel()
     QVERIFY(controller.candidateAt(0, 0.32, 0.22).isEmpty());
 }
 
+void PDFEditControllerTest::indexesUnsupportedMarkupCommentsReadOnly()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("unsupported-markup-comments.pdf"));
+    QVERIFY(createUnsupportedMarkupCommentsPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 12, 5000);
+
+    const QSet<QString> expectedContents{
+        QStringLiteral("unsupported-line"),
+        QStringLiteral("unsupported-square"),
+        QStringLiteral("unsupported-circle"),
+        QStringLiteral("unsupported-polygon"),
+        QStringLiteral("unsupported-polyline"),
+        QStringLiteral("unsupported-stamp"),
+        QStringLiteral("unsupported-caret"),
+        QStringLiteral("unsupported-ink"),
+        QStringLiteral("unsupported-file-attachment"),
+        QStringLiteral("unsupported-sound"),
+        QStringLiteral("unsupported-redact"),
+        QStringLiteral("unsupported-projection"),
+    };
+    QSet<QString> indexedContents;
+    const QVariantList comments = controller.commentItems();
+    for (const QVariant &commentValue : comments) {
+        const QVariantMap comment = commentValue.toMap();
+        const QString text = comment.value(QStringLiteral("text")).toString();
+        const QString objectId = comment
+            .value(QStringLiteral("objectId"))
+            .toString();
+        indexedContents.insert(text);
+        QCOMPARE(
+            comment.value(QStringLiteral("kind")).toString(),
+            QStringLiteral("comment"));
+        QVERIFY(!comment.value(QStringLiteral("label")).toString().isEmpty());
+        QCOMPARE(
+            comment.value(QStringLiteral("commentAuthor")).toString(),
+            QStringLiteral("Markup author"));
+        QVERIFY(!comment.value(QStringLiteral("editable")).toBool());
+        QVERIFY(!comment
+            .value(QStringLiteral("commentTextEditable"))
+            .toBool());
+        QVERIFY(!comment
+            .value(QStringLiteral("commentTextEditReason"))
+            .toString()
+            .isEmpty());
+        QVERIFY(controller.selectComment(0, objectId));
+        QVERIFY(!controller.selectedEditable());
+        QVERIFY(!controller.setCommentText(
+            0,
+            objectId,
+            QStringLiteral("Mutation must be rejected")));
+        QVERIFY(!controller.removeComment(0, objectId));
+        QVERIFY(controller.addCommentReply(
+            0,
+            objectId,
+            QStringLiteral("Reply must be rejected")).isEmpty());
+    }
+    QCOMPARE(indexedContents, expectedContents);
+    QCOMPARE(controller.commentItems().size(), 12);
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
 void PDFEditControllerTest::deletesMixedSubtypeSourceReplyThread()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -14127,7 +14277,7 @@ void PDFEditControllerTest::deletesMixedSubtypeSourceReplyThread()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     controller.requestCommentIndex();
-    QTRY_VERIFY_WITH_TIMEOUT(controller.commentItems().size() >= 2, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 6, 5000);
 
     QVariantMap root;
     QVariantMap supportedNestedReply;
@@ -14157,6 +14307,13 @@ void PDFEditControllerTest::deletesMixedSubtypeSourceReplyThread()
     QCOMPARE(annotationSubtypeCount(outputPath, FPDF_ANNOT_FREETEXT), 0);
     QCOMPARE(annotationSubtypeCount(outputPath, FPDF_ANNOT_STAMP), 0);
     QCOMPARE(annotationSubtypeCount(outputPath, FPDF_ANNOT_INK), 0);
+    const CommentAnnotationInspection projectionInspection
+        = inspectCommentAnnotation(
+            outputPath,
+            QStringLiteral("mixed-projection"));
+    QVERIFY(projectionInspection.readable);
+    QCOMPARE(projectionInspection.annotationIndex, -1);
+    QCOMPARE(projectionInspection.annotationCount, 0);
 }
 
 void PDFEditControllerTest::rejectsNonMarkupReplyDescendantDeletion()
@@ -14439,6 +14596,7 @@ void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
     QCOMPARE(inspection.count, 1);
     QCOMPARE(inspection.color, highlightColor);
     QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
+    QCOMPARE(inspection.contents, QString());
     QCOMPARE(inspection.quadPoints.size(), 1);
     QVERIFY(inspection.hasAppearance);
     QVERIFY(!inspection.appearance.isEmpty());
@@ -14581,6 +14739,7 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
     QCOMPARE(inspection.count, 1);
     QCOMPARE(inspection.color, annotationColor);
     QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
+    QCOMPARE(inspection.contents, QString());
     QCOMPARE(inspection.quadPoints.size(), expectedRects.size());
     QVERIFY(inspection.hasAppearance);
     QVERIFY(!inspection.appearance.isEmpty());
@@ -14688,12 +14847,18 @@ void PDFEditControllerTest::savesStickyNoteRoundTrip()
         = inspectStickyNotes(outputPath);
     QVERIFY(inspection.readable);
     QCOMPARE(inspection.count, 1);
-    QCOMPARE(inspection.color, QColor(255, 235, 59));
     QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
     QCOMPARE(inspection.contents, commentText);
     QCOMPARE(inspection.author, commentAuthor);
     QVERIFY(!inspection.creationDate.isEmpty());
     QVERIFY(!inspection.modificationDate.isEmpty());
+    const CommentAnnotationInspection appearanceInspection
+        = inspectCommentAnnotation(
+            outputPath,
+            addedNote.value(QStringLiteral("objectId")).toString());
+    QVERIFY(appearanceInspection.readable);
+    QVERIFY(appearanceInspection.hasAppearance);
+    QVERIFY(!appearanceInspection.appearance.isEmpty());
 
     const qreal expectedLeft = position.x() * pageSize.width();
     const qreal expectedRight = expectedLeft + 24.0;
@@ -14707,10 +14872,33 @@ void PDFEditControllerTest::savesStickyNoteRoundTrip()
     QVERIFY(closeEnough(inspection.rect.top, expectedTop));
     QVERIFY(closeEnough(inspection.rect.bottom, expectedBottom));
 
+    const QSize renderSize(
+        qRound(pageSize.width()),
+        qRound(pageSize.height()));
+    const QImage withoutAnnotations = renderFirstPage(
+        outputPath,
+        renderSize);
+    const QImage withAnnotations = renderFirstPage(
+        outputPath,
+        renderSize,
+        FPDF_ANNOT);
+    const QRect notePixels(
+        qRound(position.x() * renderSize.width()),
+        qRound(position.y() * renderSize.height()),
+        26,
+        26);
+    QVERIFY(changedPixelCount(
+        withoutAnnotations,
+        withAnnotations,
+        notePixels) > 0);
+
     const QVariantMap rehydratedNote = candidateForKind(
         waitForCandidates(controller, 0),
         QStringLiteral("stickyNote"));
     QVERIFY(!rehydratedNote.isEmpty());
+    QCOMPARE(
+        rehydratedNote.value(QStringLiteral("highlightColor")).value<QColor>(),
+        QColor(255, 235, 59));
     QCOMPARE(
         rehydratedNote.value(QStringLiteral("text")).toString(),
         commentText);
@@ -15041,6 +15229,18 @@ void PDFEditControllerTest::savesCommentReplyRoundTrip()
     QCOMPARE(inspection.relation, QStringLiteral("R"));
     QVERIFY(!inspection.parentThreadId.isEmpty());
     QCOMPARE(inspection.replyToThreadId, inspection.parentThreadId);
+    const CommentAnnotationInspection rootAppearance
+        = inspectCommentAnnotation(
+            outputPath,
+            root.value(QStringLiteral("objectId")).toString());
+    const CommentAnnotationInspection replyAppearance
+        = inspectCommentAnnotation(
+            outputPath,
+            reply.value(QStringLiteral("objectId")).toString());
+    QVERIFY(rootAppearance.hasAppearance);
+    QVERIFY(!rootAppearance.appearance.isEmpty());
+    QVERIFY(replyAppearance.hasAppearance);
+    QVERIFY(!replyAppearance.appearance.isEmpty());
     const AcroFormFieldInspection fieldInspection
         = inspectAcroFormField(
             outputPath,
@@ -15084,6 +15284,89 @@ void PDFEditControllerTest::savesCommentReplyRoundTrip()
         .value(QStringLiteral("commentTextEditable")).toBool());
     QVERIFY(rehydratedReply
         .value(QStringLiteral("commentTextEditable")).toBool());
+}
+
+void PDFEditControllerTest::normalizesCommentContentsLineEndingsOnSave()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-line-endings-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-line-endings-output.pdf"));
+    QVERIFY(createRootCommentOnlyPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+
+    const QVariantMap root = controller.commentItems().constFirst().toMap();
+    const QString rootObjectId = root
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QString mixedLineEndings
+        = QStringLiteral("Dòng 1\nDòng 2\r\nDòng 3\rDòng 4");
+    const QString editingText
+        = QStringLiteral("Dòng 1\nDòng 2\nDòng 3\nDòng 4");
+    const QString pdfText
+        = QStringLiteral("Dòng 1\rDòng 2\rDòng 3\rDòng 4");
+    QVERIFY(controller.setCommentText(
+        0,
+        rootObjectId,
+        mixedLineEndings));
+    QCOMPARE(
+        controller.commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        editingText);
+
+    const QVariantMap reply = controller.addCommentReply(
+        0,
+        rootObjectId,
+        mixedLineEndings);
+    QVERIFY(!reply.isEmpty());
+    controller.setTool(PDFEditController::FreeTextTool);
+    const QVariantMap freeText = controller.addFreeText(
+        0,
+        QRectF(0.15, 0.55, 0.35, 0.15));
+    QVERIFY(!freeText.isEmpty());
+    QVERIFY(controller.setCommentText(
+        0,
+        freeText.value(QStringLiteral("objectId")).toString(),
+        mixedLineEndings));
+    const QVariantMap highlight = controller.addHighlight(
+        0,
+        QRectF(0.15, 0.35, 0.35, 0.05));
+    QVERIFY(!highlight.isEmpty());
+    QVERIFY(controller.setCommentText(
+        0,
+        highlight.value(QStringLiteral("objectId")).toString(),
+        mixedLineEndings));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QVector<QString> annotationNames{
+        QStringLiteral("root-comment"),
+        reply.value(QStringLiteral("objectId")).toString(),
+        freeText.value(QStringLiteral("objectId")).toString(),
+        highlight.value(QStringLiteral("objectId")).toString(),
+    };
+    for (const QString &annotationName : annotationNames) {
+        const CommentAnnotationInspection inspection
+            = inspectCommentAnnotation(outputPath, annotationName);
+        QVERIFY(inspection.readable);
+        QCOMPARE(inspection.contents, pdfText);
+        QVERIFY(!inspection.contents.contains(QLatin1Char('\n')));
+        QVERIFY(inspection.hasAppearance);
+        QVERIFY(!inspection.appearance.isEmpty());
+    }
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 4, 5000);
+    for (const QVariant &commentValue : controller.commentItems()) {
+        QCOMPARE(
+            commentValue.toMap().value(QStringLiteral("text")).toString(),
+            editingText);
+    }
 }
 
 void PDFEditControllerTest::keepsStickyNoteNamesUniqueAcrossReopen()
@@ -15162,11 +15445,19 @@ void PDFEditControllerTest::keepsMarkupReplyIdsUniqueAcrossReopen()
         0,
         QRectF(0.12, 0.28, 0.22, 0.04));
     QVERIFY(!secondHighlight.isEmpty());
-    QVERIFY(!controller.addCommentReply(
+    const QVariantMap reply = controller.addCommentReply(
         0,
         sourceHighlightObjectId,
-        QStringLiteral("Reply to source highlight")).isEmpty());
+        QStringLiteral("Reply to source highlight"));
+    QVERIFY(!reply.isEmpty());
     QVERIFY(controller.save());
+
+    const CommentAnnotationInspection replyInspection
+        = inspectCommentAnnotation(
+            outputPath,
+            reply.value(QStringLiteral("objectId")).toString());
+    QVERIFY(replyInspection.hasAppearance);
+    QVERIFY(replyInspection.appearance.contains(QStringLiteral("/GS gs")));
 
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 3, 5000);

@@ -263,6 +263,21 @@ bool isMarkupAnnotationSubtype(int subtype)
     }
 }
 
+bool isProjectionAnnotation(FPDF_ANNOTATION annotation)
+{
+    return annotation
+        && FPDFAnnot_GetSubtype(annotation) == FPDF_ANNOT_UNKNOWN
+        && annotationString(annotation, "Subtype")
+            == QLatin1String("Projection");
+}
+
+bool isMarkupAnnotation(FPDF_ANNOTATION annotation)
+{
+    return annotation
+        && (isMarkupAnnotationSubtype(FPDFAnnot_GetSubtype(annotation))
+            || isProjectionAnnotation(annotation));
+}
+
 bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
 {
     const QString relation = annotationString(annotation, "RT").trimmed();
@@ -320,8 +335,7 @@ bool hiddenCommentAnnotationIndices(
             continue;
         }
         const bool replyRelation = annotationUsesReplyRelation(annotation);
-        bool markupReplyChain = isMarkupAnnotationSubtype(
-            FPDFAnnot_GetSubtype(annotation));
+        bool markupReplyChain = isMarkupAnnotation(annotation);
         FPDF_ANNOTATION parent = replyRelation
             ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
             : nullptr;
@@ -359,8 +373,7 @@ bool hiddenCommentAnnotationIndices(
                 break;
             }
             markupReplyChain = markupReplyChain
-                && isMarkupAnnotationSubtype(
-                    FPDFAnnot_GetSubtype(parent));
+                && isMarkupAnnotation(parent);
             FPDF_ANNOTATION nextParent = FPDFAnnot_GetLinkedAnnot(
                 parent,
                 "IRT");

@@ -602,6 +602,7 @@ Item {
 
     function isCommentKind(kind) {
         return isTextMarkupKind(kind)
+            || kind === "comment"
             || kind === "stickyNote"
             || kind === "freeText"
     }

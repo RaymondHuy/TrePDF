@@ -2503,6 +2503,20 @@ QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
         characterCount);
 }
 
+QString normalizedCommentText(QString text)
+{
+    text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    return text;
+}
+
+QString pdfCommentContents(const QString &text)
+{
+    QString contents = normalizedCommentText(text);
+    contents.replace(QLatin1Char('\n'), QLatin1Char('\r'));
+    return contents;
+}
+
 bool setCommentAnnotationMetadata(FPDF_ANNOTATION annotation,
                                   const SaveDraft &draft)
 {
@@ -2540,6 +2554,80 @@ QString freeTextAppearanceId(const SaveDraft &draft)
     return QStringLiteral("%1:%2")
         .arg(draft.page)
         .arg(draft.objectId);
+}
+
+QString stickyNoteAppearance(const FS_RECTF &rect, const QColor &color)
+{
+    const qreal width = rect.right - rect.left;
+    const qreal height = rect.top - rect.bottom;
+    const qreal minimumDimension = qMin(width, height);
+    if (!(width > 0.0)
+        || !(height > 0.0)
+        || !std::isfinite(minimumDimension)) {
+        return {};
+    }
+
+    const qreal lineWidth = qBound<qreal>(0.5, minimumDimension * 0.045, 1.25);
+    const qreal inset = lineWidth * 0.75;
+    const qreal fold = qBound<qreal>(3.0, minimumDimension * 0.28, 8.0);
+    const qreal left = rect.left + inset;
+    const qreal right = rect.right - inset;
+    const qreal bottom = rect.bottom + inset;
+    const qreal top = rect.top - inset;
+    const qreal foldLeft = qMax(left, right - fold);
+    const qreal foldBottom = qMax(bottom, top - fold);
+    const qreal textLeft = left + minimumDimension * 0.16;
+    const qreal textRight = qMax(textLeft, foldLeft - minimumDimension * 0.08);
+    const qreal firstLine = top - minimumDimension * 0.42;
+    const qreal secondLine = top - minimumDimension * 0.62;
+    const QColor fill = color.toRgb();
+    const QColor foldColor = fill.lighter(112);
+    const auto number = [](qreal value) {
+        return QString::number(value, 'f', 4);
+    };
+    const auto colorComponent = [&number](int value) {
+        return number(static_cast<qreal>(value) / 255.0);
+    };
+
+    QString appearance = QStringLiteral("q\n");
+    if (fill.alpha() < 255) {
+        appearance += QStringLiteral("/GS gs\n");
+    }
+    appearance += colorComponent(fill.red()) + QLatin1Char(' ')
+        + colorComponent(fill.green()) + QLatin1Char(' ')
+        + colorComponent(fill.blue()) + QStringLiteral(" rg\n");
+    appearance += QStringLiteral("0.18 0.16 0.08 RG\n")
+        + number(lineWidth) + QStringLiteral(" w\n")
+        + number(left) + QLatin1Char(' ') + number(bottom)
+        + QStringLiteral(" m\n")
+        + number(right) + QLatin1Char(' ') + number(bottom)
+        + QStringLiteral(" l\n")
+        + number(right) + QLatin1Char(' ') + number(foldBottom)
+        + QStringLiteral(" l\n")
+        + number(foldLeft) + QLatin1Char(' ') + number(top)
+        + QStringLiteral(" l\n")
+        + number(left) + QLatin1Char(' ') + number(top)
+        + QStringLiteral(" l\nh\nB\n");
+    appearance += colorComponent(foldColor.red()) + QLatin1Char(' ')
+        + colorComponent(foldColor.green()) + QLatin1Char(' ')
+        + colorComponent(foldColor.blue()) + QStringLiteral(" rg\n")
+        + number(right) + QLatin1Char(' ') + number(foldBottom)
+        + QStringLiteral(" m\n")
+        + number(foldLeft) + QLatin1Char(' ') + number(top)
+        + QStringLiteral(" l\n")
+        + number(foldLeft) + QLatin1Char(' ') + number(foldBottom)
+        + QStringLiteral(" l\nh\nB\n")
+        + QStringLiteral("0.28 0.25 0.10 RG\n")
+        + number(lineWidth * 0.8) + QStringLiteral(" w\n")
+        + number(textLeft) + QLatin1Char(' ') + number(firstLine)
+        + QStringLiteral(" m\n")
+        + number(textRight) + QLatin1Char(' ') + number(firstLine)
+        + QStringLiteral(" l\nS\n")
+        + number(textLeft) + QLatin1Char(' ') + number(secondLine)
+        + QStringLiteral(" m\n")
+        + number(textRight) + QLatin1Char(' ') + number(secondLine)
+        + QStringLiteral(" l\nS\nQ\n");
+    return appearance;
 }
 
 PDFSaveWriter::Result createTextMarkupAnnotation(
@@ -2660,6 +2748,11 @@ PDFSaveWriter::Result createTextMarkupAnnotation(
         || !FPDFAnnot_SetFlags(
             annotation.get(),
             FPDF_ANNOT_FLAG_PRINT)
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "Contents",
+            reinterpret_cast<const FPDF_WCHAR *>(
+                pdfCommentContents(draft.text).utf16()))
         || !setCommentAnnotationMetadata(annotation.get(), draft)) {
         return failure(
             PDFSaveWriter::Error::TextMarkupAnnotationCreationFailed,
@@ -2821,9 +2914,12 @@ PDFSaveWriter::Result createStickyNoteAnnotation(
     const QColor color = draft.highlightColor.isValid()
         ? draft.highlightColor.toRgb()
         : QColor(255, 235, 59);
+    const QString commentContents = pdfCommentContents(draft.text);
+    const QString appearance = stickyNoteAppearance(annotationRect, color);
     const auto *contents = reinterpret_cast<const FPDF_WCHAR *>(
-        draft.text.utf16());
+        commentContents.utf16());
     if (!annotation.get()
+        || appearance.isEmpty()
         || !FPDFAnnot_SetRect(annotation.get(), &annotationRect)
         || !FPDFAnnot_SetColor(
             annotation.get(),
@@ -2839,7 +2935,11 @@ PDFSaveWriter::Result createStickyNoteAnnotation(
         || !setCommentAnnotationMetadata(annotation.get(), draft)
         || !FPDFAnnot_SetFlags(
             annotation.get(),
-            FPDF_ANNOT_FLAG_PRINT)) {
+            FPDF_ANNOT_FLAG_PRINT)
+        || !FPDFAnnot_SetAP(
+            annotation.get(),
+            FPDF_ANNOT_APPEARANCEMODE_NORMAL,
+            reinterpret_cast<const FPDF_WCHAR *>(appearance.utf16()))) {
         return failure(
             PDFSaveWriter::Error::CommentAnnotationCreationFailed,
             draft.page,
@@ -2873,8 +2973,9 @@ PDFSaveWriter::Result createFreeTextAnnotation(
     const QColor color = draft.highlightColor.isValid()
         ? draft.highlightColor.toRgb()
         : QColor(32, 33, 36);
+    const QString commentContents = pdfCommentContents(draft.text);
     const auto *contents = reinterpret_cast<const FPDF_WCHAR *>(
-        draft.text.utf16());
+        commentContents.utf16());
     static constexpr char16_t defaultAppearance[]
         = u"/Helv 12 Tf 0 g";
     if (!annotation.get()
@@ -2926,7 +3027,7 @@ FPDF_ANNOTATION_SUBTYPE sourceAnnotationSubtypeForDraft(
 
 QString plainTextCommentRichText(const QString &text)
 {
-    QString escapedText = text.toHtmlEscaped();
+    QString escapedText = normalizedCommentText(text).toHtmlEscaped();
     escapedText.replace(QLatin1Char('\n'), QStringLiteral("<br/>"));
     return QStringLiteral(
                "<?xml version=\"1.0\"?>"
@@ -2966,13 +3067,15 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
         = (annotationFlags & FPDF_ANNOT_FLAG_READONLY) != 0
         || (annotationFlags & kAnnotationFlagLockedContents) != 0;
     const bool sourceIdentityMatches = annotation.get()
-        && annotationString(annotation.get(), "Contents")
-            == draft.originalText
+        && normalizedCommentText(
+               annotationString(annotation.get(), "Contents"))
+            == normalizedCommentText(draft.originalText)
         && (draft.sourceAnnotationName.isEmpty()
             || annotationString(annotation.get(), "NM")
                 == draft.sourceAnnotationName);
+    const QString commentContents = pdfCommentContents(draft.text);
     const auto *contents = reinterpret_cast<const FPDF_WCHAR *>(
-        draft.text.utf16());
+        commentContents.utf16());
     const QString modificationDate = pdfAnnotationDateString(
         draft.commentModifiedDate);
     bool updated = annotation.get()
@@ -2994,6 +3097,48 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
             annotation.get(),
             "RC",
             reinterpret_cast<const FPDF_WCHAR *>(richText.utf16()));
+    }
+    if (updated && draft.kind == SaveDraft::Kind::StickyNote) {
+        const unsigned long appearanceBytes = FPDFAnnot_GetAP(
+            annotation.get(),
+            FPDF_ANNOT_APPEARANCEMODE_NORMAL,
+            nullptr,
+            0);
+        if (appearanceBytes <= sizeof(FPDF_WCHAR)) {
+            FS_RECTF annotationRect{};
+            updated = FPDFAnnot_GetRect(annotation.get(), &annotationRect);
+            const bool hasUsableRect = updated
+                && annotationRect.right > annotationRect.left
+                && annotationRect.top > annotationRect.bottom;
+            if (hasUsableRect) {
+                unsigned int red = 255;
+                unsigned int green = 235;
+                unsigned int blue = 59;
+                unsigned int alpha = 255;
+                FPDFAnnot_GetColor(
+                    annotation.get(),
+                    FPDFANNOT_COLORTYPE_Color,
+                    &red,
+                    &green,
+                    &blue,
+                    &alpha);
+                const QString appearance = stickyNoteAppearance(
+                    annotationRect,
+                    QColor(
+                        static_cast<int>(red),
+                        static_cast<int>(green),
+                        static_cast<int>(blue),
+                        static_cast<int>(alpha)));
+                updated = !appearance.isEmpty()
+                    && FPDFAnnot_SetAP(
+                        annotation.get(),
+                        FPDF_ANNOT_APPEARANCEMODE_NORMAL,
+                        reinterpret_cast<const FPDF_WCHAR *>(
+                            appearance.utf16()));
+            } else {
+                updated = updated && draft.reply;
+            }
+        }
     }
     if (updated && draft.kind == SaveDraft::Kind::FreeText) {
         FS_RECTF annotationRect{};
@@ -3071,6 +3216,21 @@ bool isMarkupAnnotationSubtype(int subtype)
     default:
         return false;
     }
+}
+
+bool isProjectionAnnotation(FPDF_ANNOTATION annotation)
+{
+    return annotation
+        && FPDFAnnot_GetSubtype(annotation) == FPDF_ANNOT_UNKNOWN
+        && annotationString(annotation, "Subtype")
+            == QLatin1String("Projection");
+}
+
+bool isMarkupAnnotation(FPDF_ANNOTATION annotation)
+{
+    return annotation
+        && (isMarkupAnnotationSubtype(FPDFAnnot_GetSubtype(annotation))
+            || isProjectionAnnotation(annotation));
 }
 
 bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
@@ -3265,8 +3425,7 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
             continue;
         }
 
-        bool markupReplyChain = isMarkupAnnotationSubtype(
-            FPDFAnnot_GetSubtype(annotation.get()));
+        bool markupReplyChain = isMarkupAnnotation(annotation.get());
         QSet<int> visited{annotationIndex};
         FPDF_ANNOTATION parent = FPDFAnnot_GetLinkedAnnot(
             annotation.get(),
@@ -3299,8 +3458,7 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
                 break;
             }
             markupReplyChain = markupReplyChain
-                && isMarkupAnnotationSubtype(
-                    FPDFAnnot_GetSubtype(parent));
+                && isMarkupAnnotation(parent);
             FPDF_ANNOTATION nextParent = FPDFAnnot_GetLinkedAnnot(
                 parent,
                 "IRT");

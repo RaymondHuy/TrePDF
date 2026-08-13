@@ -209,7 +209,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
 | [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel comment/format/Text Field/Comb/Dropdown/List Box/Radio cho một session. |
-| [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ. |
+| [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ; các markup subtype khác hiển thị chỉ đọc. |
 | [`src/Components/TextFieldOptionsPanel.qml`](../src/Components/TextFieldOptionsPanel.qml) | Panel multi-line, giới hạn ký tự tùy chọn và xóa Text Field đang chọn. |
 | [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml) | Panel số ô/giới hạn ký tự bắt buộc và xóa Comb Field đang chọn. |
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |

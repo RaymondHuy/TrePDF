@@ -286,6 +286,9 @@ orchestration Save.
   danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
   gia cùng snapshot undo/redo. `setCommentText()` và `addCommentReply()` cùng
   enforce tối đa 700 UTF-16 code unit; `addCommentReply()` chỉ nhận root.
+- Annotation-only scan index thêm Line/Square/Circle/Polygon/PolyLine/Stamp/
+  Caret/Ink/FileAttachment/Sound/Redact/Projection dưới kind `comment` chỉ đọc;
+  mọi đường sửa, xóa và reply đều kiểm `commentTextReadOnly` trước khi tạo draft.
 - Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 
@@ -337,6 +340,9 @@ orchestration Save.
   Squiggly ghi quad từ các rectangle dòng đã snap; ba text-markup còn lại ghi
   geometry tự do hiện có. Sau khi serialize staging file, canonicalizer thêm
   normal `/AP` vector cho text markup mới mà không regenerate page content.
+- Sticky Note và reply mới được gắn normal `/AP` vector ngay trên writer
+  annotation; source Sticky Note đang sửa mà thiếu AP cũng được bổ sung. Nội
+  dung comment dùng LF trong model, chuẩn hóa thành CR khi ghi `/Contents`.
 - Ghi parent/reply vào file tạm, định danh bằng metadata ổn định rồi canonicalize
   reply thành `/IRT <parent-ref>` và `/RT /R` trước khi commit giao dịch.
 - Xóa comment nguồn, toàn bộ reply hậu duệ và `/Popup` liên kết theo annotation

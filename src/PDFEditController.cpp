@@ -579,9 +579,17 @@ bool isTextMarkupCandidateKind(const QString &kind)
         || kind == QLatin1String("strikeout");
 }
 
+QString normalizedCommentText(QString text)
+{
+    text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    return text;
+}
+
 bool isCommentCandidateKind(const QString &kind)
 {
     return isTextMarkupCandidateKind(kind)
+        || kind == QLatin1String("comment")
         || kind == QLatin1String("stickyNote")
         || kind == QLatin1String("freeText");
 }
@@ -1061,6 +1069,21 @@ bool isMarkupAnnotationSubtype(int subtype)
     }
 }
 
+bool isProjectionAnnotation(FPDF_ANNOTATION annotation)
+{
+    return annotation
+        && FPDFAnnot_GetSubtype(annotation) == FPDF_ANNOT_UNKNOWN
+        && annotationString(annotation, "Subtype")
+            == QLatin1String("Projection");
+}
+
+bool isMarkupAnnotation(FPDF_ANNOTATION annotation)
+{
+    return annotation
+        && (isMarkupAnnotationSubtype(FPDFAnnot_GetSubtype(annotation))
+            || isProjectionAnnotation(annotation));
+}
+
 bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
 {
     const QString relation = annotationString(annotation, "RT").trimmed();
@@ -1091,10 +1114,10 @@ int rootReplyAnnotationIndex(FPDF_PAGE page,
     int rootIndex = -1;
     while (parent) {
         const int parentIndex = FPDFPage_GetAnnotIndex(page, parent);
-        const int parentSubtype = FPDFAnnot_GetSubtype(parent);
+        const bool parentIsMarkup = isMarkupAnnotation(parent);
         if (parentIndex < 0
             || visitedIndices.contains(parentIndex)
-            || !isMarkupAnnotationSubtype(parentSubtype)) {
+            || !parentIsMarkup) {
             FPDFPage_CloseAnnot(parent);
             return -1;
         }
@@ -1113,7 +1136,7 @@ int rootReplyAnnotationIndex(FPDF_PAGE page,
             if (nextParent) {
                 FPDFPage_CloseAnnot(nextParent);
             }
-            if (!isSupportedCommentAnnotationSubtype(parentSubtype)) {
+            if (!parentIsMarkup) {
                 return -1;
             }
             break;
@@ -3926,16 +3949,17 @@ QVariantMap PDFEditController::addCommentReply(
     const QString &parentObjectId,
     const QString &text)
 {
+    const QString normalizedText = normalizedCommentText(text);
     if (!m_document
         || !m_document->isLoaded()
         || m_saving
         || page < 0
         || page >= m_document->pageCount()
         || parentObjectId.isEmpty()
-        || text.trimmed().isEmpty()) {
+        || normalizedText.trimmed().isEmpty()) {
         return {};
     }
-    if (text.size() > kMaximumCommentCharacters) {
+    if (normalizedText.size() > kMaximumCommentCharacters) {
         //% "Comments and replies can contain at most %1 characters."
         emit statusMessage(
             qtTrId("CommentTextTooLong")
@@ -3970,6 +3994,11 @@ QVariantMap PDFEditController::addCommentReply(
         parentCandidate = *indexedCandidate;
     }
     if (!parentCandidate.replyToObjectId.isEmpty()) {
+        return {};
+    }
+    if (parentCandidate.commentTextReadOnly) {
+        //% "This comment is read-only."
+        emit statusMessage(qtTrId("ReadOnlyCommentCannotBeEdited"));
         return {};
     }
     const auto parentDraft = m_drafts.constFind(
@@ -4040,7 +4069,7 @@ QVariantMap PDFEditController::addCommentReply(
     candidate.kind = QStringLiteral("stickyNote");
     //% "Reply"
     candidate.label = qtTrId("Reply");
-    candidate.text = text;
+    candidate.text = normalizedText;
     candidate.editable = true;
     candidate.added = true;
     candidate.commentAuthor = currentCommentAuthor();
@@ -5728,10 +5757,11 @@ bool PDFEditController::setCommentText(int page,
     const Draft before = hadBefore
         ? *existingDraft
         : initialDraftForCandidate(candidate);
-    if (before.text == text) {
+    const QString normalizedText = normalizedCommentText(text);
+    if (before.text == normalizedText) {
         return true;
     }
-    if (text.size() > kMaximumCommentCharacters) {
+    if (normalizedText.size() > kMaximumCommentCharacters) {
         //% "Comments and replies can contain at most %1 characters."
         emit statusMessage(
             qtTrId("CommentTextTooLong")
@@ -5746,7 +5776,7 @@ bool PDFEditController::setCommentText(int page,
     command.hadBefore = hadBefore;
     command.before = before;
     command.after = command.before;
-    setDraftText(command.after, text);
+    setDraftText(command.after, normalizedText);
     command.after.candidate.commentModifiedDate
         = QDateTime::currentDateTime();
     command.hadAfter = candidate.added
@@ -7471,7 +7501,9 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             || subtype == FPDF_ANNOT_STRIKEOUT;
         const bool stickyNoteSubtype = subtype == FPDF_ANNOT_TEXT;
         const bool freeTextSubtype = subtype == FPDF_ANNOT_FREETEXT;
-        if (textMarkupSubtype || stickyNoteSubtype || freeTextSubtype) {
+        const bool supportedCommentSubtype
+            = isSupportedCommentAnnotationSubtype(subtype);
+        if (isMarkupAnnotation(annotation)) {
             FPDF_ANNOTATION directReplyParent
                 = annotationUsesReplyRelation(annotation)
                 ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
@@ -7569,7 +7601,8 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             candidate.objectId = QStringLiteral("annotation:")
                 + QString::number(index);
             candidate.sourceAnnotationIndex = index;
-            candidate.text = annotationString(annotation, "Contents");
+            candidate.text = normalizedCommentText(
+                annotationString(annotation, "Contents"));
             candidate.sourceAnnotationName = annotationString(
                 annotation,
                 "NM");
@@ -7587,7 +7620,8 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             candidate.isReplyAnnotation = isReplyAnnotation;
             const int annotationFlags = FPDFAnnot_GetFlags(annotation);
             candidate.commentTextReadOnly
-                = (annotationFlags & FPDF_ANNOT_FLAG_READONLY) != 0
+                = !supportedCommentSubtype
+                || (annotationFlags & FPDF_ANNOT_FLAG_READONLY) != 0
                 || (annotationFlags & kAnnotationFlagLockedContents) != 0;
             if (rootReplyIndex >= 0) {
                 candidate.replyToObjectId = QStringLiteral("annotation:")
@@ -7626,6 +7660,11 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             }
 
             switch (subtype) {
+            case FPDF_ANNOT_HIGHLIGHT:
+                candidate.kind = QStringLiteral("highlight");
+                //% "Highlight"
+                candidate.label = qtTrId("Highlight");
+                break;
             case FPDF_ANNOT_UNDERLINE:
                 candidate.kind = QStringLiteral("underline");
                 //% "Underline"
@@ -7651,10 +7690,65 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 //% "Free text annotation"
                 candidate.label = qtTrId("FreeTextAnnotation");
                 break;
+            case FPDF_ANNOT_LINE:
+                candidate.kind = QStringLiteral("comment");
+                //% "Line annotation"
+                candidate.label = qtTrId("LineAnnotation");
+                break;
+            case FPDF_ANNOT_SQUARE:
+                candidate.kind = QStringLiteral("comment");
+                //% "Rectangle annotation"
+                candidate.label = qtTrId("RectangleAnnotation");
+                break;
+            case FPDF_ANNOT_CIRCLE:
+                candidate.kind = QStringLiteral("comment");
+                //% "Oval annotation"
+                candidate.label = qtTrId("OvalAnnotation");
+                break;
+            case FPDF_ANNOT_POLYGON:
+                candidate.kind = QStringLiteral("comment");
+                //% "Polygon annotation"
+                candidate.label = qtTrId("PolygonAnnotation");
+                break;
+            case FPDF_ANNOT_POLYLINE:
+                candidate.kind = QStringLiteral("comment");
+                //% "Polyline annotation"
+                candidate.label = qtTrId("PolylineAnnotation");
+                break;
+            case FPDF_ANNOT_STAMP:
+                candidate.kind = QStringLiteral("comment");
+                //% "Stamp annotation"
+                candidate.label = qtTrId("StampAnnotation");
+                break;
+            case FPDF_ANNOT_CARET:
+                candidate.kind = QStringLiteral("comment");
+                //% "Caret annotation"
+                candidate.label = qtTrId("CaretAnnotation");
+                break;
+            case FPDF_ANNOT_INK:
+                candidate.kind = QStringLiteral("comment");
+                //% "Ink annotation"
+                candidate.label = qtTrId("InkAnnotation");
+                break;
+            case FPDF_ANNOT_FILEATTACHMENT:
+                candidate.kind = QStringLiteral("comment");
+                //% "File attachment annotation"
+                candidate.label = qtTrId("FileAttachmentAnnotation");
+                break;
+            case FPDF_ANNOT_SOUND:
+                candidate.kind = QStringLiteral("comment");
+                //% "Sound annotation"
+                candidate.label = qtTrId("SoundAnnotation");
+                break;
+            case FPDF_ANNOT_REDACT:
+                candidate.kind = QStringLiteral("comment");
+                //% "Redaction annotation"
+                candidate.label = qtTrId("RedactionAnnotation");
+                break;
             default:
-                candidate.kind = QStringLiteral("highlight");
-                //% "Highlight"
-                candidate.label = qtTrId("Highlight");
+                candidate.kind = QStringLiteral("comment");
+                //% "Projection annotation"
+                candidate.label = qtTrId("ProjectionAnnotation");
                 break;
             }
             if (!candidate.replyToObjectId.isEmpty()) {
