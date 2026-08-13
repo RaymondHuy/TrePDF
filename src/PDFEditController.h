@@ -38,6 +38,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(QColor highlightColor READ highlightColor WRITE setHighlightColor NOTIFY highlightColorChanged FINAL)
     Q_PROPERTY(QColor underlineColor READ underlineColor WRITE setUnderlineColor NOTIFY underlineColorChanged FINAL)
     Q_PROPERTY(QColor squigglyColor READ squigglyColor WRITE setSquigglyColor NOTIFY squigglyColorChanged FINAL)
+    Q_PROPERTY(QColor strikeoutColor READ strikeoutColor WRITE setStrikeoutColor NOTIFY strikeoutColorChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
@@ -155,6 +156,8 @@ public:
     void setUnderlineColor(const QColor &color);
     QColor squigglyColor() const;
     void setSquigglyColor(const QColor &color);
+    QColor strikeoutColor() const;
+    void setStrikeoutColor(const QColor &color);
 
     bool hasDrafts() const;
     bool canUndo() const;
@@ -298,6 +301,7 @@ signals:
     void highlightColorChanged();
     void underlineColorChanged();
     void squigglyColorChanged();
+    void strikeoutColorChanged();
     void historyStateChanged();
     void savingChanged();
     void textEditActiveChanged();
@@ -698,6 +702,7 @@ private:
     QColor m_highlightColor;
     QColor m_underlineColor;
     QColor m_squigglyColor;
+    QColor m_strikeoutColor;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;
     QVector<int> m_pageCandidateLru;

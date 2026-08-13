@@ -222,9 +222,9 @@ Khi mở tab Comment, ribbon chọn Highlight làm tool mặc định. Người 
 chuyển sang Sticky Note, Free Text, Squiggly, Underline hoặc Strikeout mà không
 bật form designer.
 
-Highlight, Underline và Squiggly dùng split button cùng color grid và system
-color picker. Mỗi tool giữ màu riêng; Underline và Squiggly dùng màu đậm/opacity
-cao hơn vì nét mảnh.
+Highlight, Underline, Squiggly và Strikeout dùng split button cùng color grid
+và system color picker. Mỗi tool giữ màu riêng; Underline, Squiggly và Strikeout
+dùng màu đậm/opacity cao hơn vì nét mảnh.
 History dùng chung `PDFEditController::undo()` và `redo()`.
 
 ### 5.2 `EditOverlay`
