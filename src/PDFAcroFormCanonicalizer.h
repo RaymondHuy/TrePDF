@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PDFCommentAnnotation.h"
+
 #include <QRectF>
 #include <QString>
 #include <QStringList>
@@ -78,5 +80,9 @@ public:
     static bool finalizeTextMarkupAnnotations(
         const QString &filePath,
         const QVector<TextMarkupAnnotation> &annotations,
+        QString &error);
+    static bool finalizeDrawingAnnotations(
+        const QString &filePath,
+        const QVector<PDFCommentAnnotation::DrawingAnnotation> &annotations,
         QString &error);
 };

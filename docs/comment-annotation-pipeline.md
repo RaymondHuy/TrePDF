@@ -20,6 +20,8 @@ Các tệp chính:
   preview, selection và draft presentation trên trang.
 - [`SquigglyLine.qml`](../src/Components/SquigglyLine.qml): renderer zigzag dùng
   chung cho gesture và draft Squiggly.
+- [`CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml): renderer
+  vector dùng chung cho preview và draft Square/Circle/Line/Polygon/PolyLine.
 - [`PDFEditController.h`](../src/PDFEditController.h) và
   [`PDFEditController.cpp`](../src/PDFEditController.cpp): candidate scan,
   comment index, selection, draft, reply, history và điều phối Save.
@@ -30,8 +32,8 @@ Các tệp chính:
   trên writer document riêng.
 - [`PDFAcroFormCanonicalizer.h`](../src/PDFAcroFormCanonicalizer.h) và
   [`PDFAcroFormCanonicalizer.cpp`](../src/PDFAcroFormCanonicalizer.cpp): hoàn
-  thiện `/IRT`, `/RT /R`, appearance Free Text và appearance vector cho bốn
-  text-markup subtype trên file staging.
+  thiện `/IRT`, `/RT /R`, appearance Free Text, text markup và drawing comment
+  trên file staging.
 - [`tst_PDFEditController.cpp`](../tests/tst_PDFEditController.cpp): fixture và
   regression round-trip bằng PDFium.
 
@@ -49,15 +51,19 @@ pipeline này.
 | Strikeout | `strikeout` | `/StrikeOut` | Rectangle tự do, ghi thành `/QuadPoints`. |
 | Sticky Note | `stickyNote` | `/Text` | Frame cố định 24 PDF point tại vị trí click. |
 | Free Text | `freeText` | `/FreeText` | Click dùng frame mặc định; drag dùng text box đã clamp trong page. |
+| Rectangle | `square` | `/Square` | Drag tạo Rect. |
+| Oval | `circle` | `/Circle` | Drag tạo Rect, `/AP` dùng bốn cubic Bézier. |
+| Line | `line` | `/Line` | Drag tạo hai điểm `/L`. |
+| Polygon | `polygon` | `/Polygon` | Click nhiều đỉnh, Enter/nhấp đúp để đóng path `/Vertices`. |
+| Polyline | `polyLine` | `/PolyLine` | Click nhiều đỉnh, Enter/nhấp đúp để lưu path mở `/Vertices`. |
 
-Các markup subtype `/Line`, `/Square`, `/Circle`, `/Polygon`, `/PolyLine`,
-`/Stamp`, `/Caret`, `/Ink`, `/FileAttachment`, `/Sound`, `/Redact` và
-`/Projection` (PDF 2.0) cũng được
+Các markup subtype `/Stamp`, `/Caret`, `/Ink`, `/FileAttachment`, `/Sound`,
+`/Redact` và `/Projection` (PDF 2.0) cũng được
 đọc vào CommentPanel với `Candidate.kind == "comment"`. Chúng chỉ hỗ trợ index,
 metadata, chọn và điều hướng; sửa nội dung, xóa và thêm reply đều bị khóa cho
 đến khi writer hỗ trợ mutation an toàn theo subtype.
 
-Với cả sáu loại trên, implementation hiện tại hỗ trợ:
+Với cả mười một loại có kind riêng ở bảng trên, implementation hiện tại hỗ trợ:
 
 - tạo annotation mới dưới dạng session draft;
 - đọc và index annotation đã có trong PDF;
@@ -78,7 +84,7 @@ Giới hạn hiện tại:
 - Rectangle, Ellipse, Line, Arrow, Triangle và Diamond trong tab Edit là page
   content path object, không phải drawing comment annotation;
 - review state và XFDF chưa được model hóa;
-- 12 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
+- 7 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
 
 ## 2. Luồng kiến trúc tổng thể
 
@@ -92,7 +98,7 @@ flowchart LR
     Controller --> PageItem["PDFPageItem\nrender + suppression"]
     Controller --> Prepare["PDFSaveWriter::prepare\nGUI-thread snapshot"]
     Prepare --> Writer["PDFSaveWriter::save\nworker writer document"]
-    Writer --> Canon["PDFAcroFormCanonicalizer\nText-markup/FreeText AP + IRT/RT"]
+    Writer --> Canon["PDFAcroFormCanonicalizer\nMarkup/FreeText/Drawing AP + IRT/RT"]
     Canon --> Reopen["QSaveFile commit\nPDFDocument::open"]
 ```
 
@@ -117,11 +123,13 @@ page
 objectId
 sourceAnnotationIndex
 sourceAnnotationName       // /NM
-kind                       // highlight, stickyNote, freeText...
+kind                       // highlight, stickyNote, freeText, square, line...
 text                       // /Contents
 geometry.sourceRect
 highlightRects             // QuadPoints đã chuẩn hóa theo page
 highlightColor
+drawingVertices            // storage nội bộ cho /L hoặc /Vertices
+commentProperties          // stroke/interior/opacity/border/effect/endings
 commentAuthor              // /T
 commentCreationDate        // /CreationDate
 commentModifiedDate        // /M
@@ -141,6 +149,12 @@ lại subtype, `/Contents`, `/NM` nếu có và các cờ bảo vệ.
 `objectId` của annotation nguồn có dạng `annotation:<index>`. Vì cùng index có
 thể xuất hiện trên nhiều page, mọi API và draft key phải dùng cặp
 `page + objectId`, không dùng `objectId` độc lập.
+
+Map đưa sang QML công bố contract ổn định `frameRect`, `annotationPoints`,
+`strokeColor`, `fillColor`, `strokeWidthRatio`, `opacity`, `borderStyle`,
+`dashPattern`, `borderEffect`, `lineStartStyle` và `lineEndStyle`. Các khóa
+`drawing*` cũ vẫn được giữ như compatibility alias, nhưng renderer mới dùng bộ
+khóa chung này.
 
 ### 3.2 `Draft` và history
 
@@ -180,8 +194,8 @@ candidate, draft hoặc save-time geometry.
 ### 4.1 Candidate scan theo page
 
 Scan page phục vụ hover/edit nội dung đồng thời đọc đủ 18 markup annotation
-subtype mà TrePDF nhận diện. Sáu subtype do TrePDF hỗ trợ mutation giữ kind
-riêng; 12 subtype còn lại dùng kind `comment` chỉ đọc. Với mỗi annotation,
+subtype mà TrePDF nhận diện. Mười một subtype do TrePDF hỗ trợ mutation giữ kind
+riêng; 7 subtype còn lại dùng kind `comment` chỉ đọc. Với mỗi annotation,
 controller lấy:
 
 - `/Contents`, `/NM`, `/T`, `/CreationDate`, `/M`;
@@ -228,8 +242,8 @@ sâu trong UI; item vẫn có thể được trình bày như comment top-level 
 ### 5.1 `CommentRibbon`
 
 Khi mở tab Comment, ribbon chọn Highlight làm tool mặc định. Người dùng có thể
-chuyển sang Sticky Note, Free Text, Squiggly, Underline hoặc Strikeout mà không
-bật form designer.
+chuyển sang Sticky Note, Free Text, text markup hoặc năm drawing-comment tool mà
+không bật form designer.
 
 Highlight, Underline, Squiggly và Strikeout dùng split button cùng color grid
 và system color picker. Mỗi tool giữ màu riêng; Underline, Squiggly và Strikeout
@@ -243,7 +257,15 @@ Overlay giữ gesture tạm trong QML và chỉ commit một draft command khi r
 - text markup nhận rectangle kéo;
 - Sticky Note nhận một click;
 - Free Text nhận click hoặc drag;
+- Square, Circle và Line nhận drag;
+- Polygon và PolyLine nhận chuỗi click; Enter hoặc nhấp đúp commit, Escape hủy
+  và Backspace bỏ đỉnh cuối;
 - preview được vẽ trên page surface trước khi texture mới sẵn sàng.
+
+Controller giữ `pendingDrawingCommentPage` làm owner duy nhất của gesture
+nhiều đỉnh. Khi người dùng bắt đầu ở một page delegate khác, owner đổi và
+delegate cũ hủy point tạm; pooling, đổi tool, đổi document và Save/session reset
+đều release owner này.
 
 Free Text không dùng rich `TextEdit` của page-content text. Hộp được vẽ trên
 trang, nhưng `/Contents` được sửa trong CommentPanel.
@@ -411,6 +433,9 @@ Writer mở document riêng và tạo annotation bằng `FPDFPage_CreateAnnot()`
   `/AP` vector hình tờ ghi chú;
 - Free Text: `/FreeText`, Rect, `/Contents`, `/DA`, border, metadata, Print flag
   và appearance id cho canonicalizer;
+- drawing comment: PDFium tạo `/Square` placeholder có `/NM`; canonicalizer đổi
+  thành subtype cuối, ghi `/Rect`, `/L` hoặc `/Vertices`, common properties và
+  vector `/AP` trong cùng staging transaction;
 - reply: tạo `/Text` placeholder rồi hoàn thiện `/IRT` và `/RT /R` ở bước
   canonicalize.
 
@@ -425,6 +450,13 @@ dùng fill với blend mode `/Multiply`; Underline, Squiggly và Strikeout dùng
 stroke với blend mode `/Normal`. Màu, alpha và geometry được đóng gói trong
 appearance stream để reader không phải tự suy diễn từ `/C`, `/CA` và
 `/QuadPoints`.
+
+Drawing comment dùng `PDFCommentAnnotation::CommonProperties` làm snapshot
+chung cho preview/writer: stroke `/C`, interior `/IC`, opacity `/CA`, border
+`/BS`, flags `/F`, effect `/BE`, intent `/IT`, name `/Name` và line endings
+`/LE`. MVP tạo nét solid, fill trong suốt và line ending `/None`; backend từ
+chối effect/ending chưa có primitive `/AP` tương ứng thay vì ghi dictionary và
+appearance lệch nhau.
 
 Metadata comment mới gồm `/NM`, `/T`, `/CreationDate` và `/M` khi đã sửa.
 Author hiện lấy lần lượt từ `USER`, `LOGNAME`, tên home directory rồi application
@@ -445,9 +477,9 @@ Trước khi sửa, writer xác thực annotation index, subtype, original `/Con
 Sticky Note và text markup giữ nguyên appearance nguồn vì sửa nội dung không
 thay đổi page geometry. Nếu Sticky Note/reply nguồn đang được sửa nhưng thiếu
 normal appearance, writer bổ sung `/AP` vector từ Rect và color hiện có.
-Canonicalizer chỉ nhận danh sách text markup mới, nên không thay `/AP` của
-annotation nguồn đã có. Free Text là ngoại lệ vì text hiển thị trực tiếp trên
-trang.
+Canonicalizer chỉ nhận danh sách text markup/drawing mới, nên không thay `/AP`
+của annotation nguồn đã có. Free Text là ngoại lệ vì text hiển thị trực tiếp
+trên trang.
 
 ### 10.4 Xóa annotation nguồn
 
@@ -468,9 +500,14 @@ Sticky Note mới và mọi reply mới có normal `/AP` vector riêng. TrePDF v
 ẩn appearance của reply khi render page, nhưng giữ nó trong file để reader khác
 có thể hiển thị annotation hợp chuẩn.
 
-Pipeline vẫn chưa phải generic appearance generator cho mọi annotation subtype.
-Khi thêm drawing markup, Ink, Stamp hoặc khi nhắm PDF 2.0, mỗi subtype cần
-chiến lược `/AP` riêng và regression mở bằng reader ngoài PDFium.
+Square và Circle dùng path inset theo nửa border width; Circle dùng bốn cubic
+Bézier. Line và PolyLine giữ path mở, Polygon đóng path. `/BBox` bằng `/Rect`,
+matrix identity, và `/ExtGState` dùng cùng opacity cho stroke/fill. Annotation
+chỉ có comment vẫn không gọi `FPDFPage_GenerateContent()`.
+
+Pipeline vẫn chưa phải generic appearance generator cho Ink, Stamp hoặc các
+subtype PDF 2.0; mỗi subtype mới vẫn cần chiến lược `/AP` riêng và regression
+mở bằng reader ngoài PDFium.
 
 ### 10.6 Transaction và reopen
 
@@ -514,7 +551,9 @@ Coverage comment hiện cần được duy trì cho:
   rotated glyph và safety cap;
 - Sticky Note và Free Text Unicode appearance;
 - normal `/AP` của Sticky Note/reply và chuẩn hóa CR trong `/Contents`;
-- read-only index cho 12 markup subtype chưa hỗ trợ mutation;
+- round-trip Square, Circle, Line, Polygon và PolyLine, gồm geometry, common
+  properties, vector `/AP`, undo/redo và rehydrate;
+- read-only index cho 7 markup subtype chưa hỗ trợ mutation;
 - author, creation/modification date và 700 UTF-16 code-unit limit;
 - comment index xuyên trang, duplicate page-local `/NM` và navigation;
 - sửa `/Contents`, `/M` và `/RC` của annotation nguồn;
@@ -552,8 +591,6 @@ Bảng này không mô tả tính năng đã có.
 
 | Ưu tiên | Gap | Hướng triển khai |
 |---|---|---|
-| P0 | Common markup properties và AP cho subtype mới | Có model/preservation cho `/Subj`, `/F`, `/BS`, `/BE`, `/IC`, `/IT`, `/Name`; mở rộng AP theo từng drawing/Ink/Stamp subtype. |
-| P0 | Drawing comments chuẩn | Thêm `/Square`, `/Circle`, `/Line`, `/Polygon`, `/PolyLine`; giữ Shapes của tab Edit là page content riêng. |
 | P0 | Pencil/freehand | Thêm `/Ink` với `/InkList`, point simplification, giới hạn điểm/stroke và AP. |
 | P0 | Text-aware markup đồng nhất | Dùng glyph cache của Squiggly cho Highlight, Underline và Strikeout. |
 | P1 | Sửa source geometry/style | Move/resize và property editor, giữ dictionary/AP/Popup/thread metadata. |

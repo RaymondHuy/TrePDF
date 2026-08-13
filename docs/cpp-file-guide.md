@@ -221,7 +221,8 @@ orchestration Save.
 - Scan page bất đồng bộ từ document handle riêng dưới PDFium lock.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
-- Đọc Highlight, Squiggly, Underline, Strikeout, Text và FreeText annotation;
+- Đọc Highlight, Squiggly, Underline, Strikeout, Text, FreeText, Square, Circle,
+  Line, Polygon và PolyLine annotation;
   chuẩn hóa quad/rect, màu và `/Contents` thành comment candidate. Nội dung
   annotation nguồn được sửa trong panel bằng draft riêng; canvas vẫn không cho
   move/resize annotation nguồn, còn ReadOnly/LockedContents không nhận mutation.
@@ -295,9 +296,10 @@ orchestration Save.
   danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
   gia cùng snapshot undo/redo. `setCommentText()` và `addCommentReply()` cùng
   enforce tối đa 700 UTF-16 code unit; `addCommentReply()` chỉ nhận root.
-- Annotation-only scan index thêm Line/Square/Circle/Polygon/PolyLine/Stamp/
-  Caret/Ink/FileAttachment/Sound/Redact/Projection dưới kind `comment` chỉ đọc;
-  mọi đường sửa, xóa và reply đều kiểm `commentTextReadOnly` trước khi tạo draft.
+- Annotation-only scan giữ kind riêng cho Line/Square/Circle/Polygon/PolyLine;
+  Stamp/Caret/Ink/FileAttachment/Sound/Redact/Projection dùng kind `comment`
+  chỉ đọc. Mọi đường sửa, xóa và reply đều kiểm `commentTextReadOnly` trước khi
+  tạo draft.
 - Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 
@@ -349,6 +351,9 @@ orchestration Save.
   Squiggly ghi quad từ các rectangle dòng đã snap; ba text-markup còn lại ghi
   geometry tự do hiện có. Sau khi serialize staging file, canonicalizer thêm
   normal `/AP` vector cho text markup mới mà không regenerate page content.
+- Tạo drawing comment qua Square placeholder, snapshot common properties và
+  map normalized geometry bằng `FPDF_DeviceToPage()`; canonicalizer đổi subtype,
+  ghi `/L`/`/Vertices`, dictionary style và vector `/AP` cuối cùng.
 - Sticky Note và reply mới được gắn normal `/AP` vector ngay trên writer
   annotation; source Sticky Note đang sửa mà thiếu AP cũng được bổ sung. Nội
   dung comment dùng LF trong model, chuẩn hóa thành CR khi ghi `/Contents`.
@@ -606,8 +611,8 @@ TrePDF phải fail rõ ràng.
 và [`src/PDFAcroFormCanonicalizer.h`](../src/PDFAcroFormCanonicalizer.h)
 
 **Vai trò:** bộ đọc/ghi PDF mục đích hẹp để hoàn thiện AcroForm, liên kết reply,
-appearance FreeText và normal appearance vector của text markup mà PDFium
-public API không dựng đủ an toàn.
+appearance FreeText và normal appearance vector của text/drawing markup mà
+PDFium public API không dựng đủ an toàn.
 
 **Đọc cấu trúc:**
 
@@ -638,6 +643,10 @@ public API không dựng đủ an toàn.
   `/QuadPoints`, `/C`, `/CA` rồi tạo `/AP /N` Form XObject vector. Highlight
   fill với `/BM /Multiply`; ba subtype nét dùng stroke với `/BM /Normal`.
   Annotation nguồn không nằm trong request nên giữ nguyên appearance cũ.
+- Với Square/Circle/Line/Polygon/PolyLine mới, tìm placeholder duy nhất qua
+  `/NM`, ghi subtype/Rect/`/L`/`/Vertices` cùng `/C`, `/IC`, `/CA`, `/BS`, `/F`,
+  `/IT`, `/Name`, `/LE` và `/AP` Form XObject vector. Effect/ending chưa có
+  primitive appearance tương ứng bị từ chối thay vì lưu dictionary lệch hình.
 - Tạo Checkbox Widget với `/AP` Off/Yes riêng, `/AS`, value/default value và
   vector check appearance.
 - Gom Radio theo Group ID thành một field cha `/FT /Btn` có `/Kids`; mỗi Widget

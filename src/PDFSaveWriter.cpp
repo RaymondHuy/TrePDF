@@ -93,7 +93,8 @@ struct SaveDraft {
         Shape,
         TextMarkup,
         StickyNote,
-        FreeText
+        FreeText,
+        DrawingComment
     };
 
     Kind kind = Kind::Text;
@@ -110,6 +111,10 @@ struct SaveDraft {
     QVector<QRectF> highlightRects;
     QColor highlightColor;
     FPDF_ANNOTATION_SUBTYPE annotationSubtype = FPDF_ANNOT_HIGHLIGHT;
+    PDFCommentAnnotation::DrawingType drawingType
+        = PDFCommentAnnotation::DrawingType::Square;
+    QVector<QPointF> drawingVertices;
+    PDFCommentAnnotation::CommonProperties commentProperties;
     int sourceAnnotationIndex = -1;
     QString commentAuthor;
     QDateTime commentCreationDate;
@@ -2806,6 +2811,187 @@ bool annotationRectForFrame(const QRectF &frameRect,
         && annotationRect.top > annotationRect.bottom;
 }
 
+PDFSaveWriter::Result createDrawingCommentAnnotation(
+    FPDF_PAGE page,
+    const SaveDraft &draft,
+    qreal pageWidth,
+    qreal pageHeight,
+    const PageCoordinateMapper &coordinateMapper,
+    PDFCommentAnnotation::DrawingAnnotation &appearanceRequest)
+{
+    constexpr qsizetype maximumVertices = 4096;
+    if (draft.objectId.isEmpty()
+        || draft.drawingVertices.size() < 2
+        || draft.drawingVertices.size() > maximumVertices) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    QVector<QPointF> pageVertices;
+    pageVertices.reserve(draft.drawingVertices.size());
+    for (const QPointF &vertex : draft.drawingVertices) {
+        if (!std::isfinite(vertex.x())
+            || !std::isfinite(vertex.y())
+            || vertex.x() < 0.0
+            || vertex.x() > 1.0
+            || vertex.y() < 0.0
+            || vertex.y() > 1.0) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                draft.page,
+                draft.objectId);
+        }
+        QPointF pageVertex;
+        if (!coordinateMapper.pagePoint(
+                vertex.x() * pageWidth,
+                vertex.y() * pageHeight,
+                pageVertex)
+            || !std::isfinite(pageVertex.x())
+            || !std::isfinite(pageVertex.y())) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                draft.page,
+                draft.objectId);
+        }
+        pageVertices.append(pageVertex);
+    }
+
+    const bool rectangular
+        = draft.drawingType == PDFCommentAnnotation::DrawingType::Square
+        || draft.drawingType == PDFCommentAnnotation::DrawingType::Circle;
+    const qsizetype minimumVertexCount
+        = draft.drawingType == PDFCommentAnnotation::DrawingType::Polygon
+        ? 3
+        : 2;
+    if (pageVertices.size() < minimumVertexCount
+        || (rectangular && pageVertices.size() != 2)
+        || (draft.drawingType == PDFCommentAnnotation::DrawingType::Line
+            && pageVertices.size() != 2)) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    PDFCommentAnnotation::CommonProperties properties
+        = draft.commentProperties;
+    properties.opacity = std::clamp(properties.opacity, 0.0, 1.0);
+    properties.borderWidth = coordinateMapper.strokeWidth(
+        (std::max)(0.1, properties.borderWidth));
+    properties.flags = properties.flags > 0
+        ? properties.flags
+        : FPDF_ANNOT_FLAG_PRINT;
+
+    QRectF pageRect;
+    if (rectangular) {
+        FS_RECTF mappedRect{};
+        if (!annotationRectForFrame(
+                draft.frameRect,
+                pageWidth,
+                pageHeight,
+                coordinateMapper,
+                mappedRect)) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                draft.page,
+                draft.objectId);
+        }
+        pageRect = QRectF(
+            QPointF(mappedRect.left, mappedRect.bottom),
+            QPointF(mappedRect.right, mappedRect.top)).normalized();
+    } else {
+        qreal minimumX = pageVertices.constFirst().x();
+        qreal maximumX = minimumX;
+        qreal minimumY = pageVertices.constFirst().y();
+        qreal maximumY = minimumY;
+        for (const QPointF &vertex : std::as_const(pageVertices)) {
+            minimumX = (std::min)(minimumX, vertex.x());
+            maximumX = (std::max)(maximumX, vertex.x());
+            minimumY = (std::min)(minimumY, vertex.y());
+            maximumY = (std::max)(maximumY, vertex.y());
+        }
+        const qreal padding = (std::max)(0.5, properties.borderWidth / 2.0);
+        pageRect = QRectF(
+            QPointF(minimumX - padding, minimumY - padding),
+            QPointF(maximumX + padding, maximumY + padding)).normalized();
+    }
+    if (!pageRect.isValid()
+        || pageRect.width() <= 0.0
+        || pageRect.height() <= 0.0) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    const FS_RECTF annotationRect{
+        static_cast<float>(pageRect.left()),
+        static_cast<float>(pageRect.bottom()),
+        static_cast<float>(pageRect.right()),
+        static_cast<float>(pageRect.top())};
+    PdfAnnotationHandle annotation(
+        // PDFium cannot create Line, Polygon, or PolyLine annotations. Use a
+        // supported Square placeholder; the canonicalizer atomically writes
+        // the final subtype, geometry, properties, and /AP after serialization.
+        FPDFPage_CreateAnnot(page, FPDF_ANNOT_SQUARE));
+    if (!annotation.get()) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+    const QColor stroke = properties.strokeColor.isValid()
+        ? properties.strokeColor.toRgb()
+        : QColor(Qt::black);
+    const QString contents = pdfCommentContents(draft.text);
+    const bool colorSet = FPDFAnnot_SetColor(
+        annotation.get(),
+        FPDFANNOT_COLORTYPE_Color,
+        static_cast<unsigned int>(stroke.red()),
+        static_cast<unsigned int>(stroke.green()),
+        static_cast<unsigned int>(stroke.blue()),
+        static_cast<unsigned int>(qRound(properties.opacity * 255.0)));
+    bool interiorSet = true;
+    if (properties.interiorColor.isValid()) {
+        const QColor interior = properties.interiorColor.toRgb();
+        interiorSet = FPDFAnnot_SetColor(
+            annotation.get(),
+            FPDFANNOT_COLORTYPE_InteriorColor,
+            static_cast<unsigned int>(interior.red()),
+            static_cast<unsigned int>(interior.green()),
+            static_cast<unsigned int>(interior.blue()),
+            static_cast<unsigned int>(qRound(properties.opacity * 255.0)));
+    }
+    if (!colorSet
+        || !interiorSet
+        || !FPDFAnnot_SetRect(annotation.get(), &annotationRect)
+        || !FPDFAnnot_SetFlags(annotation.get(), properties.flags)
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "Contents",
+            reinterpret_cast<const FPDF_WCHAR *>(contents.utf16()))
+        || !setOptionalAnnotationString(
+            annotation.get(),
+            "Subj",
+            properties.subject)
+        || !setCommentAnnotationMetadata(annotation.get(), draft)) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    appearanceRequest.page = draft.page;
+    appearanceRequest.annotationId = draft.objectId;
+    appearanceRequest.type = draft.drawingType;
+    appearanceRequest.pageRect = pageRect;
+    appearanceRequest.pageVertices = std::move(pageVertices);
+    appearanceRequest.properties = std::move(properties);
+    return {};
+}
+
 PDFSaveWriter::Result createStickyNoteAnnotation(
     FPDF_PAGE page,
     const SaveDraft &draft,
@@ -3282,7 +3468,8 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
         const bool commentDraft
             = draft.kind == SaveDraft::Kind::TextMarkup
             || draft.kind == SaveDraft::Kind::StickyNote
-            || draft.kind == SaveDraft::Kind::FreeText;
+            || draft.kind == SaveDraft::Kind::FreeText
+            || draft.kind == SaveDraft::Kind::DrawingComment;
         if (!commentDraft || !draft.deleted || draft.added) {
             continue;
         }
@@ -3431,7 +3618,9 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                                       FPDF_DOCUMENT inspectionDocument,
                                       int pageIndex,
                                       const QVector<SaveDraft> &drafts,
-                                      FontResolver &fontResolver)
+                                      FontResolver &fontResolver,
+                                      QVector<PDFCommentAnnotation::DrawingAnnotation>
+                                          &drawingAnnotations)
 {
     assertPDFiumProcessLockHeld();
     FPDF_PAGE loadedPage = FPDF_LoadPage(document, pageIndex);
@@ -3467,7 +3656,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         [](const SaveDraft &draft) {
             return draft.kind != SaveDraft::Kind::TextMarkup
                 && draft.kind != SaveDraft::Kind::StickyNote
-                && draft.kind != SaveDraft::Kind::FreeText;
+                && draft.kind != SaveDraft::Kind::FreeText
+                && draft.kind != SaveDraft::Kind::DrawingComment;
         });
     const bool modifiesExistingObject = std::any_of(
         drafts.cbegin(),
@@ -3476,6 +3666,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
             return draft.kind != SaveDraft::Kind::TextMarkup
                 && draft.kind != SaveDraft::Kind::StickyNote
                 && draft.kind != SaveDraft::Kind::FreeText
+                && draft.kind != SaveDraft::Kind::DrawingComment
                 && !draft.added;
         });
     if (modifiesExistingObject) {
@@ -3504,7 +3695,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     for (const SaveDraft &draft : drafts) {
         if (draft.kind == SaveDraft::Kind::TextMarkup
             || draft.kind == SaveDraft::Kind::StickyNote
-            || draft.kind == SaveDraft::Kind::FreeText) {
+            || draft.kind == SaveDraft::Kind::FreeText
+            || draft.kind == SaveDraft::Kind::DrawingComment) {
             continue;
         }
         PreparedDraft prepared;
@@ -3676,7 +3868,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     for (const SaveDraft &draft : drafts) {
         if ((draft.kind != SaveDraft::Kind::TextMarkup
              && draft.kind != SaveDraft::Kind::StickyNote
-             && draft.kind != SaveDraft::Kind::FreeText)
+             && draft.kind != SaveDraft::Kind::FreeText
+             && draft.kind != SaveDraft::Kind::DrawingComment)
             || draft.added
             || draft.deleted) {
             continue;
@@ -3729,6 +3922,18 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 pageWidth,
                 pageHeight,
                 coordinateMapper);
+        } else if (draft.kind == SaveDraft::Kind::DrawingComment) {
+            PDFCommentAnnotation::DrawingAnnotation appearanceRequest;
+            annotationResult = createDrawingCommentAnnotation(
+                page.get(),
+                draft,
+                pageWidth,
+                pageHeight,
+                coordinateMapper,
+                appearanceRequest);
+            if (annotationResult.succeeded()) {
+                drawingAnnotations.append(std::move(appearanceRequest));
+            }
         } else {
             continue;
         }
@@ -4238,7 +4443,15 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             = draft->candidate.kind == QLatin1String("stickyNote");
         const bool freeTextDraft
             = draft->candidate.kind == QLatin1String("freeText");
-        saveDraft.kind = freeTextDraft
+        const bool drawingCommentDraft
+            = draft->candidate.kind == QLatin1String("square")
+            || draft->candidate.kind == QLatin1String("circle")
+            || draft->candidate.kind == QLatin1String("line")
+            || draft->candidate.kind == QLatin1String("polygon")
+            || draft->candidate.kind == QLatin1String("polyLine");
+        saveDraft.kind = drawingCommentDraft
+            ? SaveDraft::Kind::DrawingComment
+            : freeTextDraft
             ? SaveDraft::Kind::FreeText
             : stickyNoteDraft
             ? SaveDraft::Kind::StickyNote
@@ -4263,6 +4476,9 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.frameRect = draft->frameRect;
         saveDraft.highlightRects = draft->candidate.highlightRects;
         saveDraft.highlightColor = draft->candidate.highlightColor;
+        saveDraft.drawingType = draft->candidate.drawingType;
+        saveDraft.drawingVertices = draft->candidate.drawingVertices;
+        saveDraft.commentProperties = draft->candidate.commentProperties;
         saveDraft.sourceAnnotationIndex
             = draft->candidate.sourceAnnotationIndex;
         saveDraft.commentAuthor = draft->candidate.commentAuthor;
@@ -4283,6 +4499,16 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             saveDraft.annotationSubtype = FPDF_ANNOT_STRIKEOUT;
         } else if (freeTextDraft) {
             saveDraft.annotationSubtype = FPDF_ANNOT_FREETEXT;
+        } else if (draft->candidate.kind == QLatin1String("square")) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_SQUARE;
+        } else if (draft->candidate.kind == QLatin1String("circle")) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_CIRCLE;
+        } else if (draft->candidate.kind == QLatin1String("line")) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_LINE;
+        } else if (draft->candidate.kind == QLatin1String("polygon")) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_POLYGON;
+        } else if (draft->candidate.kind == QLatin1String("polyLine")) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_POLYLINE;
         }
         saveDraft.shapeType = draft->candidate.shapeType;
         saveDraft.shapeStartRatio = draft->candidate.shapeStartRatio;
@@ -4303,7 +4529,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.image = draft->deleted ? QImage() : draft->candidate.image;
         if (saveDraft.kind == SaveDraft::Kind::TextMarkup
             || saveDraft.kind == SaveDraft::Kind::StickyNote
-            || saveDraft.kind == SaveDraft::Kind::FreeText) {
+            || saveDraft.kind == SaveDraft::Kind::FreeText
+            || saveDraft.kind == SaveDraft::Kind::DrawingComment) {
             data->drafts.append(std::move(saveDraft));
             continue;
         }
@@ -4452,6 +4679,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     }
 
     FontResolver fontResolver(document.get());
+    QVector<PDFCommentAnnotation::DrawingAnnotation> drawingAnnotations;
     qsizetype start = 0;
     while (start < request.m_data->drafts.size()) {
         qsizetype end = start + 1;
@@ -4468,7 +4696,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             inspectionDocument.get(),
             request.m_data->drafts.at(start).page,
             pageDrafts,
-            fontResolver);
+            fontResolver,
+            drawingAnnotations);
         if (!result.succeeded()) {
             return result;
         }
@@ -4549,7 +4778,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     if (request.m_data->formFields.isEmpty()
         && annotationReplies.isEmpty()
         && freeTextAnnotations.isEmpty()
-        && textMarkupAnnotations.isEmpty()) {
+        && textMarkupAnnotations.isEmpty()
+        && drawingAnnotations.isEmpty()) {
         return writeDocument(document.get(), request.m_data->targetFilePath);
     }
 
@@ -4596,6 +4826,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         }
     }
     if (request.m_data->formFields.isEmpty()) {
+        if (!drawingAnnotations.isEmpty()) {
+            QString appearanceError;
+            if (!PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
+                    contentFilePath,
+                    drawingAnnotations,
+                    appearanceError)) {
+                return failure(
+                    Error::CommentAnnotationCreationFailed,
+                    -1,
+                    appearanceError);
+            }
+        }
         if (!textMarkupAnnotations.isEmpty()) {
             QString appearanceError;
             if (!PDFAcroFormCanonicalizer::finalizeTextMarkupAnnotations(
@@ -4661,6 +4903,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
                 appearanceError)) {
             return failure(
                 Error::TextMarkupAnnotationCreationFailed,
+                -1,
+                appearanceError);
+        }
+    }
+    if (!drawingAnnotations.isEmpty()) {
+        QString appearanceError;
+        if (!PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
+                formFilePath,
+                drawingAnnotations,
+                appearanceError)) {
+            return failure(
+                Error::CommentAnnotationCreationFailed,
                 -1,
                 appearanceError);
         }

@@ -64,6 +64,11 @@ Column {
             || tool === PDFEditController.StrikeoutTool
             || tool === PDFEditController.FreeTextTool
             || tool === PDFEditController.StickyNoteTool
+            || tool === PDFEditController.SquareTool
+            || tool === PDFEditController.CircleTool
+            || tool === PDFEditController.LineTool
+            || tool === PDFEditController.PolygonTool
+            || tool === PDFEditController.PolyLineTool
     }
 
     function navigateRelativeComment(direction) {

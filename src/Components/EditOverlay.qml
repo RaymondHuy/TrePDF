@@ -20,6 +20,7 @@ Item {
     property var highlightDrafts: []
     property var stickyNoteDrafts: []
     property var freeTextDrafts: []
+    property var drawingCommentDrafts: []
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
@@ -49,6 +50,31 @@ Item {
     property bool placingFreeText: false
     property point freeTextStart: Qt.point(0, 0)
     property point freeTextCurrent: Qt.point(0, 0)
+    property bool drawingCommentDragging: false
+    property int drawingInteractionPage: -1
+    property point drawingCommentStart: Qt.point(0, 0)
+    property point drawingCommentCurrent: Qt.point(0, 0)
+    property bool drawingPathActive: false
+    property var drawingPathPoints: []
+    property point drawingPathHover: Qt.point(0, 0)
+    readonly property var drawingPreviewVertices: {
+        if (drawingCommentDragging && width > 0 && height > 0) {
+            return [
+                Qt.point(
+                    drawingCommentStart.x / width,
+                    drawingCommentStart.y / height),
+                Qt.point(
+                    drawingCommentCurrent.x / width,
+                    drawingCommentCurrent.y / height)
+            ]
+        }
+        if (!drawingPathActive)
+            return []
+
+        const points = drawingPathPoints.slice(0)
+        points.push(drawingPathHover)
+        return points
+    }
     property bool suppressNextPlacementClick: false
     readonly property real fallbackBleed: 2
     readonly property real editBoxRadius: 4
@@ -150,8 +176,14 @@ Item {
     enabled: interactionActive
 
     Keys.onPressed: event => {
-        if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete)
+        if (event.key === Qt.Key_Backspace
+                && root.drawingPathActive) {
+            root.removeLastDrawingPathPoint()
+            event.accepted = true
+        } else if (event.key === Qt.Key_Backspace
+                   || event.key === Qt.Key_Delete) {
             event.accepted = root.deleteSelectedNonText()
+        }
     }
 
     function reloadData() {
@@ -161,10 +193,12 @@ Item {
             highlightDrafts = []
             stickyNoteDrafts = []
             freeTextDrafts = []
+            drawingCommentDrafts = []
             hoverCandidate = ({})
             cancelHighlight()
             cancelShape()
             cancelFreeTextPlacement()
+            cancelDrawingComment()
             hideSelectCursor()
             return
         }
@@ -198,6 +232,7 @@ Item {
         const displayedHighlightDrafts = []
         const displayedStickyNoteDrafts = []
         const displayedFreeTextDrafts = []
+        const displayedDrawingCommentDrafts = []
         for (let index = 0; index < displayedDrafts.length; ++index) {
             const draft = displayedDrafts[index]
             if (isTextMarkupKind(draft.kind))
@@ -206,6 +241,8 @@ Item {
                 displayedStickyNoteDrafts.push(draft)
             else if (draft.kind === "freeText")
                 displayedFreeTextDrafts.push(draft)
+            else if (isDrawingCommentKind(draft.kind))
+                displayedDrawingCommentDrafts.push(draft)
             else
                 displayedContentDrafts.push(draft)
         }
@@ -214,6 +251,7 @@ Item {
         highlightDrafts = displayedHighlightDrafts
         stickyNoteDrafts = displayedStickyNoteDrafts
         freeTextDrafts = displayedFreeTextDrafts
+        drawingCommentDrafts = displayedDrawingCommentDrafts
         if (!interactionActive) {
             hoverCandidate = ({})
             hideSelectCursor()
@@ -600,8 +638,17 @@ Item {
             || kind === "strikeout"
     }
 
+    function isDrawingCommentKind(kind) {
+        return kind === "square"
+            || kind === "circle"
+            || kind === "line"
+            || kind === "polygon"
+            || kind === "polyLine"
+    }
+
     function isCommentKind(kind) {
         return isTextMarkupKind(kind)
+            || isDrawingCommentKind(kind)
             || kind === "comment"
             || kind === "stickyNote"
             || kind === "freeText"
@@ -614,8 +661,34 @@ Item {
             || controller.tool === PDFEditController.StrikeoutTool
     }
 
+    function isDrawingCommentTool() {
+        return controller.tool === PDFEditController.SquareTool
+            || controller.tool === PDFEditController.CircleTool
+            || controller.tool === PDFEditController.LineTool
+            || controller.tool === PDFEditController.PolygonTool
+            || controller.tool === PDFEditController.PolyLineTool
+    }
+
+    function isDrawingPathTool() {
+        return controller.tool === PDFEditController.PolygonTool
+            || controller.tool === PDFEditController.PolyLineTool
+    }
+
+    function drawingKindForTool() {
+        if (controller.tool === PDFEditController.CircleTool)
+            return "circle"
+        if (controller.tool === PDFEditController.LineTool)
+            return "line"
+        if (controller.tool === PDFEditController.PolygonTool)
+            return "polygon"
+        if (controller.tool === PDFEditController.PolyLineTool)
+            return "polyLine"
+        return "square"
+    }
+
     function isCommentCreationTool() {
         return isTextMarkupTool()
+            || isDrawingCommentTool()
             || controller.tool === PDFEditController.StickyNoteTool
             || controller.tool === PDFEditController.FreeTextTool
     }
@@ -1164,6 +1237,149 @@ Item {
         squigglyPreviewRects = []
     }
 
+    function boundedDrawingPoint(x, y) {
+        return Qt.point(
+            Math.max(0, Math.min(width, x)),
+            Math.max(0, Math.min(height, y)))
+    }
+
+    function normalizedDrawingPoint(x, y) {
+        const point = boundedDrawingPoint(x, y)
+        return Qt.point(point.x / width, point.y / height)
+    }
+
+    function beginDrawingComment(x, y) {
+        if (!isDrawingCommentTool()
+                || isDrawingPathTool()
+                || width <= 0
+                || height <= 0) {
+            return
+        }
+        if (!controller.claimDrawingCommentInteraction(page))
+            return
+
+        if (editing)
+            commitEditing()
+        selectionActions.close()
+        controller.clearSelection()
+        hoverCandidate = ({})
+        hideSelectCursor()
+        drawingInteractionPage = page
+        drawingCommentStart = boundedDrawingPoint(x, y)
+        drawingCommentCurrent = drawingCommentStart
+        drawingCommentDragging = true
+    }
+
+    function updateDrawingComment(x, y) {
+        if (drawingCommentDragging)
+            drawingCommentCurrent = boundedDrawingPoint(x, y)
+        if (drawingPathActive)
+            drawingPathHover = normalizedDrawingPoint(x, y)
+    }
+
+    function finishDrawingComment(x, y) {
+        if (!drawingCommentDragging)
+            return
+
+        updateDrawingComment(x, y)
+        const points = drawingPreviewVertices.slice(0)
+        const targetPage = drawingInteractionPage
+        drawingCommentDragging = false
+        drawingInteractionPage = -1
+        controller.releaseDrawingCommentInteraction(targetPage)
+        controller.addDrawingComment(targetPage, points)
+        reloadData()
+    }
+
+    function addDrawingPathPoint(x, y) {
+        if (!isDrawingPathTool() || width <= 0 || height <= 0)
+            return false
+        if (!drawingPathActive) {
+            if (!controller.claimDrawingCommentInteraction(page))
+                return false
+            drawingInteractionPage = page
+        }
+
+        if (editing)
+            commitEditing()
+        selectionActions.close()
+        controller.clearSelection()
+        hoverCandidate = ({})
+        hideSelectCursor()
+
+        const point = normalizedDrawingPoint(x, y)
+        const points = drawingPathPoints.slice(0)
+        if (points.length > 0) {
+            const previous = points[points.length - 1]
+            const distance = Math.hypot(
+                (point.x - previous.x) * width,
+                (point.y - previous.y) * height)
+            if (distance < 2) {
+                drawingPathHover = point
+                return false
+            }
+            if (controller.tool === PDFEditController.PolygonTool
+                    && points.length >= 3) {
+                const first = points[0]
+                const closingDistance = Math.hypot(
+                    (point.x - first.x) * width,
+                    (point.y - first.y) * height)
+                if (closingDistance <= 8) {
+                    finishDrawingPath()
+                    return true
+                }
+            }
+        }
+        points.push(point)
+        drawingPathPoints = points
+        drawingPathHover = point
+        drawingPathActive = true
+        return true
+    }
+
+    function finishDrawingPath() {
+        if (!drawingPathActive)
+            return
+
+        const points = drawingPathPoints.slice(0)
+        const minimumPoints = controller.tool
+                === PDFEditController.PolygonTool ? 3 : 2
+        if (points.length < minimumPoints)
+            return
+
+        const targetPage = drawingInteractionPage
+        drawingPathActive = false
+        drawingPathPoints = []
+        drawingInteractionPage = -1
+        controller.releaseDrawingCommentInteraction(targetPage)
+        controller.addDrawingComment(targetPage, points)
+        reloadData()
+    }
+
+    function removeLastDrawingPathPoint() {
+        if (!drawingPathActive)
+            return
+        const points = drawingPathPoints.slice(0)
+        points.pop()
+        drawingPathPoints = points
+        if (points.length === 0) {
+            cancelDrawingComment()
+        } else {
+            drawingPathHover = points[points.length - 1]
+        }
+    }
+
+    function cancelDrawingComment(releaseOwner) {
+        const targetPage = drawingInteractionPage
+        drawingCommentDragging = false
+        drawingPathActive = false
+        drawingPathPoints = []
+        drawingPathHover = Qt.point(0, 0)
+        drawingInteractionPage = -1
+        if (releaseOwner !== false && targetPage >= 0)
+            controller.releaseDrawingCommentInteraction(targetPage)
+    }
+
     function addStickyNote(x, y) {
         if (controller.tool !== PDFEditController.StickyNoteTool
                 || width <= 0
@@ -1281,7 +1497,9 @@ Item {
     function prepareForSessionChange() {
         selectionActions.close()
         cancelHighlight()
+        cancelShape()
         cancelFreeTextPlacement()
+        cancelDrawingComment()
         hideSelectCursor()
         hoverCandidate = ({})
         if (editing) {
@@ -1370,6 +1588,7 @@ Item {
         cancelHighlight()
         cancelShape()
         cancelFreeTextPlacement()
+        cancelDrawingComment()
         cancelFrameResize()
         if (editing)
             commitEditing()
@@ -1381,6 +1600,7 @@ Item {
         cancelHighlight()
         cancelShape()
         cancelFreeTextPlacement()
+        cancelDrawingComment()
         if (pooled)
             cancelFrameResize()
         if (pooled && editing)
@@ -1393,6 +1613,7 @@ Item {
             cancelHighlight()
             cancelShape()
             cancelFreeTextPlacement()
+            cancelDrawingComment()
         }
         reloadData()
     }
@@ -1436,12 +1657,21 @@ Item {
             root.cancelHighlight()
             root.cancelShape()
             root.cancelFreeTextPlacement()
+            root.cancelDrawingComment()
             root.cancelFrameResize()
             if (root.editing)
                 root.commitEditing()
             root.hoverCandidate = ({})
             root.hideSelectCursor()
             root.reloadData()
+        }
+
+        function onPendingDrawingCommentPageChanged() {
+            if (root.drawingInteractionPage >= 0
+                    && root.controller.pendingDrawingCommentPage
+                        !== root.drawingInteractionPage) {
+                root.cancelDrawingComment(false)
+            }
         }
 
         function onSelectionChanged() {
@@ -1575,6 +1805,34 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    Repeater {
+        model: root.drawingCommentDrafts
+
+        delegate: CommentDrawingView {
+            required property var modelData
+
+            width: root.width
+            height: root.height
+            drawingKind: String(modelData.kind)
+            vertices: modelData.annotationPoints
+            strokeColor: modelData.strokeColor
+            interiorColor: modelData.fillColor
+            hasInterior: modelData.drawingHasInterior === true
+            borderWidth: Number(modelData.strokeWidthRatio) * root.height
+            borderStyle: Number(modelData.borderStyle)
+            dashPattern: modelData.dashPattern
+            dashScale: root.pagePointScale
+            borderEffect: Number(modelData.borderEffect)
+            lineStartStyle: Number(modelData.lineStartStyle)
+            lineEndStyle: Number(modelData.lineEndStyle)
+            drawingOpacity: Number(modelData.opacity)
+            visible: modelData.added === true
+                && modelData.deleted !== true
+            z: 1
+            Accessible.ignored: true
         }
     }
 
@@ -2013,11 +2271,13 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton
         preventStealing: root.isTextMarkupTool()
+            || root.isDrawingCommentTool()
             || root.controller.tool === PDFEditController.AddShapeTool
             || root.controller.tool === PDFEditController.FreeTextTool
         cursorShape: root.selectCursorActive || root.addTextCursorActive
             ? Qt.BlankCursor
             : root.isTextMarkupTool()
+                    || root.isDrawingCommentTool()
                     || root.controller.tool === PDFEditController.AddShapeTool
                     || root.controller.tool === PDFEditController.FreeTextTool
                 ? Qt.CrossCursor
@@ -2040,8 +2300,8 @@ Item {
         Accessible.role: Accessible.Pane
         //% "PDF edit surface"
         Accessible.name: qsTrId("PdfEditSurface")
-        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected text, images, or shapes to move them, draw with Shapes or text markup tools, drag or click with Free Text, or click with Sticky Note to add a comment"
-        Accessible.description: qsTrId("PdfEditSurfaceDescriptionWithFreeText")
+        //% "Use Tab or arrow keys to select content, Enter to edit text, drag selected content to move it, draw with Shapes, markup, or drawing comment tools, and use Enter or double-click to finish polygon comments"
+        Accessible.description: qsTrId("PdfEditSurfaceDescriptionWithDrawingComments")
 
         onEntered: root.updateHoverAtPosition(mouseX, mouseY)
         onPositionChanged: mouse => {
@@ -2051,6 +2311,9 @@ Item {
                 root.updateShape(mouse.x, mouse.y)
             else if (root.placingFreeText)
                 root.updateFreeTextPlacement(mouse.x, mouse.y)
+            else if (root.drawingCommentDragging
+                     || root.drawingPathActive)
+                root.updateDrawingComment(mouse.x, mouse.y)
             else
                 root.updateHoverAtPosition(mouse.x, mouse.y)
         }
@@ -2072,17 +2335,23 @@ Item {
                     === PDFEditController.FreeTextTool) {
                 root.beginFreeTextPlacement(mouse.x, mouse.y)
                 mouse.accepted = true
+            } else if (root.isDrawingCommentTool()
+                       && !root.isDrawingPathTool()) {
+                root.beginDrawingComment(mouse.x, mouse.y)
+                mouse.accepted = true
             }
         }
         onReleased: mouse => {
             root.finishHighlight(mouse.x, mouse.y)
             root.finishShape(mouse.x, mouse.y)
             root.finishFreeTextPlacement(mouse.x, mouse.y)
+            root.finishDrawingComment(mouse.x, mouse.y)
         }
         onCanceled: {
             root.cancelHighlight()
             root.cancelShape()
             root.cancelFreeTextPlacement()
+            root.cancelDrawingComment()
         }
         onClicked: mouse => {
             if (root.suppressNextPlacementClick) {
@@ -2094,6 +2363,10 @@ Item {
                         === PDFEditController.AddShapeTool
                     || root.controller.tool
                         === PDFEditController.FreeTextTool) {
+                return
+            }
+            if (root.isDrawingPathTool()) {
+                root.addDrawingPathPoint(mouse.x, mouse.y)
                 return
             }
             if (root.controller.tool === PDFEditController.StickyNoteTool) {
@@ -2127,6 +2400,11 @@ Item {
             }
         }
         onDoubleClicked: mouse => {
+            if (root.isDrawingPathTool()) {
+                root.addDrawingPathPoint(mouse.x, mouse.y)
+                root.finishDrawingPath()
+                return
+            }
             if (root.controller.tool === PDFEditController.AddTextTool
                     || root.controller.tool === PDFEditController.AddImageTool
                     || root.controller.tool === PDFEditController.AddShapeTool
@@ -2139,11 +2417,17 @@ Item {
         }
 
         Keys.onReturnPressed: event => {
-            root.beginSelectedEditing()
+            if (root.drawingPathActive)
+                root.finishDrawingPath()
+            else
+                root.beginSelectedEditing()
             event.accepted = true
         }
         Keys.onEnterPressed: event => {
-            root.beginSelectedEditing()
+            if (root.drawingPathActive)
+                root.finishDrawingPath()
+            else
+                root.beginSelectedEditing()
             event.accepted = true
         }
         Keys.onEscapePressed: event => {
@@ -2155,6 +2439,10 @@ Item {
                 event.accepted = true
             } else if (root.placingFreeText) {
                 root.cancelFreeTextPlacement()
+                event.accepted = true
+            } else if (root.drawingCommentDragging
+                       || root.drawingPathActive) {
+                root.cancelDrawingComment()
                 event.accepted = true
             }
         }
@@ -2229,6 +2517,20 @@ Item {
             z: 5
             Accessible.ignored: true
         }
+    }
+
+    CommentDrawingView {
+        width: root.width
+        height: root.height
+        drawingKind: root.drawingKindForTool()
+        vertices: root.drawingPreviewVertices
+        strokeColor: root.controller.drawingCommentColor
+        hasInterior: false
+        borderWidth: 1.5 * root.pagePointScale
+        drawingOpacity: root.controller.drawingCommentColor.a
+        visible: root.drawingCommentDragging || root.drawingPathActive
+        z: 5
+        Accessible.ignored: true
     }
 
     Rectangle {

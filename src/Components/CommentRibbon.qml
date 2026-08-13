@@ -123,6 +123,8 @@ Flickable {
             strikeoutColorPopup.close()
         if (markupColorDialog)
             markupColorDialog.close()
+        if (drawingColorDialog)
+            drawingColorDialog.close()
     }
 
     function isCommentKind(kind) {
@@ -134,6 +136,11 @@ Flickable {
             || kind === "squiggly"
             || kind === "strikeout"
             || kind === "freeText"
+            || kind === "square"
+            || kind === "circle"
+            || kind === "line"
+            || kind === "polygon"
+            || kind === "polyLine"
     }
 
     onDocumentChanged: closeColorPickers()
@@ -587,6 +594,111 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
+            //% "Drawing"
+            title: qsTrId("DrawingComments")
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Rectangle"
+                text: qsTrId("RectangleShape")
+                //% "Add a rectangle comment"
+                toolTipText: qsTrId("AddRectangleComment")
+                iconSource: "../assets/icons/rectangle.svg"
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.SquareTool
+                onClicked: root.editController.tool
+                    = PDFEditController.SquareTool
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Oval"
+                text: qsTrId("OvalShape")
+                //% "Add an oval comment"
+                toolTipText: qsTrId("AddOvalComment")
+                iconSource: "../assets/icons/oval.svg"
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.CircleTool
+                onClicked: root.editController.tool
+                    = PDFEditController.CircleTool
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Line"
+                text: qsTrId("LineShape")
+                //% "Add a line comment"
+                toolTipText: qsTrId("AddLineComment")
+                iconSource: "../assets/icons/line.svg"
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.LineTool
+                onClicked: root.editController.tool
+                    = PDFEditController.LineTool
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Polygon annotation"
+                text: qsTrId("PolygonAnnotation")
+                //% "Click points; double-click or press Enter to finish"
+                toolTipText: qsTrId("AddPolygonComment")
+                iconSource: "../assets/icons/triangle.svg"
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.PolygonTool
+                onClicked: root.editController.tool
+                    = PDFEditController.PolygonTool
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Polyline annotation"
+                text: qsTrId("PolylineAnnotation")
+                //% "Click points; double-click or press Enter to finish"
+                toolTipText: qsTrId("AddPolylineComment")
+                iconSource: "../assets/icons/pen-line.svg"
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.PolyLineTool
+                onClicked: root.editController.tool
+                    = PDFEditController.PolyLineTool
+            }
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Color"
+                text: qsTrId("DrawingCommentColor")
+                //% "Choose drawing comment color"
+                toolTipText: qsTrId("ChooseDrawingCommentColor")
+                iconSource: "../assets/icons/highlight.svg"
+                preserveIconColors: true
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                onClicked: {
+                    drawingColorDialog.selectedColor
+                        = root.opaqueHighlightColor(
+                            root.editController.drawingCommentColor)
+                    drawingColorDialog.open()
+                }
+            }
+        }
+
+        RibbonGroup {
+            theme: root.theme
             //% "Manage"
             title: qsTrId("ManageComments")
 
@@ -710,5 +822,18 @@ Flickable {
         onAccepted: root.selectMarkupColor(
             selectedColor,
             root.pendingColorTool)
+    }
+
+    ColorDialog {
+        id: drawingColorDialog
+
+        //% "Choose drawing comment color"
+        title: qsTrId("ChooseDrawingCommentColor")
+        onAccepted: root.editController.drawingCommentColor
+            = Qt.rgba(
+                selectedColor.r,
+                selectedColor.g,
+                selectedColor.b,
+                1)
     }
 }
