@@ -2877,9 +2877,9 @@ PDFSaveWriter::Result createDrawingCommentAnnotation(
 
     PDFCommentAnnotation::CommonProperties properties
         = draft.commentProperties;
-    properties.opacity = qBound<qreal>(0.0, properties.opacity, 1.0);
+    properties.opacity = std::clamp(properties.opacity, 0.0, 1.0);
     properties.borderWidth = coordinateMapper.strokeWidth(
-        qMax<qreal>(0.1, properties.borderWidth));
+        (std::max)(0.1, properties.borderWidth));
     properties.flags = properties.flags > 0
         ? properties.flags
         : FPDF_ANNOT_FLAG_PRINT;
@@ -2907,12 +2907,12 @@ PDFSaveWriter::Result createDrawingCommentAnnotation(
         qreal minimumY = pageVertices.constFirst().y();
         qreal maximumY = minimumY;
         for (const QPointF &vertex : std::as_const(pageVertices)) {
-            minimumX = qMin(minimumX, vertex.x());
-            maximumX = qMax(maximumX, vertex.x());
-            minimumY = qMin(minimumY, vertex.y());
-            maximumY = qMax(maximumY, vertex.y());
+            minimumX = (std::min)(minimumX, vertex.x());
+            maximumX = (std::max)(maximumX, vertex.x());
+            minimumY = (std::min)(minimumY, vertex.y());
+            maximumY = (std::max)(maximumY, vertex.y());
         }
-        const qreal padding = qMax<qreal>(0.5, properties.borderWidth / 2.0);
+        const qreal padding = (std::max)(0.5, properties.borderWidth / 2.0);
         pageRect = QRectF(
             QPointF(minimumX - padding, minimumY - padding),
             QPointF(maximumX + padding, maximumY + padding)).normalized();

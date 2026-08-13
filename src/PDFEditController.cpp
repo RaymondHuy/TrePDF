@@ -4121,8 +4121,8 @@ QVariantMap PDFEditController::addDrawingComment(
         if (!std::isfinite(point.x()) || !std::isfinite(point.y())) {
             return {};
         }
-        point.setX(qBound<qreal>(0.0, point.x(), 1.0));
-        point.setY(qBound<qreal>(0.0, point.y(), 1.0));
+        point.setX(std::clamp(point.x(), 0.0, 1.0));
+        point.setY(std::clamp(point.y(), 0.0, 1.0));
         if (!normalizedVertices.isEmpty()) {
             const QPointF previous = normalizedVertices.constLast();
             const qreal distance = std::hypot(
@@ -4180,10 +4180,10 @@ QVariantMap PDFEditController::addDrawingComment(
         qreal doubledArea = 0.0;
         for (qsizetype index = 0; index < normalizedVertices.size(); ++index) {
             const QPointF point = normalizedVertices.at(index);
-            minimumX = qMin(minimumX, point.x());
-            maximumX = qMax(maximumX, point.x());
-            minimumY = qMin(minimumY, point.y());
-            maximumY = qMax(maximumY, point.y());
+            minimumX = (std::min)(minimumX, point.x());
+            maximumX = (std::max)(maximumX, point.x());
+            minimumY = (std::min)(minimumY, point.y());
+            maximumY = (std::max)(maximumY, point.y());
             if (index > 0) {
                 const QPointF previous = normalizedVertices.at(index - 1);
                 pathLength += std::hypot(
@@ -8016,9 +8016,9 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                         &blue,
                         &alpha)) {
                     candidate.commentProperties.interiorColor = QColor(
-                        static_cast<int>(qMin(red, 255U)),
-                        static_cast<int>(qMin(green, 255U)),
-                        static_cast<int>(qMin(blue, 255U)));
+                        static_cast<int>((std::min)(red, 255U)),
+                        static_cast<int>((std::min)(green, 255U)),
+                        static_cast<int>((std::min)(blue, 255U)));
                 }
                 if (appearanceStyle.hasFill) {
                     candidate.commentProperties.interiorColor

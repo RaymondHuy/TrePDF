@@ -7139,9 +7139,9 @@ bool PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
 
     int highestObject = 0;
     for (auto entry = pdf.entries.cbegin(); entry != pdf.entries.cend(); ++entry) {
-        highestObject = qMax(highestObject, entry.key());
+        highestObject = (std::max)(highestObject, entry.key());
     }
-    int nextObjectNumber = qMax(pdf.declaredSize, highestObject + 1);
+    int nextObjectNumber = (std::max)(pdf.declaredSize, highestObject + 1);
 
     struct DictionaryReplacement {
         qsizetype start = -1;
