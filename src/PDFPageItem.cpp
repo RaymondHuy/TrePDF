@@ -1,4 +1,5 @@
 #include "PDFPageItem.h"
+#include "PDFAnnotationUtils.h"
 #include "PDFFormWorker.h"
 #include "PDFWidgetAnnotationSuppression.h"
 #include "PDFiumSynchronization.h"
@@ -21,8 +22,8 @@
 namespace {
 
 using CancellationFlag = std::shared_ptr<std::atomic_bool>;
-constexpr unsigned long kMaximumAnnotationStringBytes
-    = 4UL * 1024UL * 1024UL;
+using PDFAnnotationUtils::annotationUsesReplyRelation;
+using PDFAnnotationUtils::isMarkupAnnotation;
 
 bool isCancelled(const CancellationFlag &cancellation)
 {
@@ -208,68 +209,6 @@ int popupAnnotationIndexForComment(FPDF_PAGE page,
         : reversePopupIndex;
 }
 
-QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
-{
-    const unsigned long byteLength = annotation
-        ? FPDFAnnot_GetStringValue(annotation, key, nullptr, 0)
-        : 0;
-    if (byteLength < sizeof(FPDF_WCHAR)
-        || byteLength > kMaximumAnnotationStringBytes) {
-        return {};
-    }
-    QVector<FPDF_WCHAR> buffer(static_cast<qsizetype>(
-        (byteLength + sizeof(FPDF_WCHAR) - 1) / sizeof(FPDF_WCHAR)));
-    const unsigned long actualLength = FPDFAnnot_GetStringValue(
-        annotation,
-        key,
-        buffer.data(),
-        byteLength);
-    if (actualLength < sizeof(FPDF_WCHAR)) {
-        return {};
-    }
-    qsizetype characterCount = static_cast<qsizetype>(
-        actualLength / sizeof(FPDF_WCHAR));
-    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
-        --characterCount;
-    }
-    return QString::fromUtf16(
-        reinterpret_cast<const char16_t *>(buffer.constData()),
-        characterCount);
-}
-
-bool isMarkupAnnotationSubtype(int subtype)
-{
-    switch (subtype) {
-    case FPDF_ANNOT_TEXT:
-    case FPDF_ANNOT_FREETEXT:
-    case FPDF_ANNOT_LINE:
-    case FPDF_ANNOT_SQUARE:
-    case FPDF_ANNOT_CIRCLE:
-    case FPDF_ANNOT_POLYGON:
-    case FPDF_ANNOT_POLYLINE:
-    case FPDF_ANNOT_HIGHLIGHT:
-    case FPDF_ANNOT_UNDERLINE:
-    case FPDF_ANNOT_SQUIGGLY:
-    case FPDF_ANNOT_STRIKEOUT:
-    case FPDF_ANNOT_STAMP:
-    case FPDF_ANNOT_CARET:
-    case FPDF_ANNOT_INK:
-    case FPDF_ANNOT_FILEATTACHMENT:
-    case FPDF_ANNOT_SOUND:
-    case FPDF_ANNOT_REDACT:
-        return true;
-    default:
-        return false;
-    }
-}
-
-bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
-{
-    const QString relation = annotationString(annotation, "RT").trimmed();
-    return relation.isEmpty()
-        || relation.compare(QLatin1String("R"), Qt::CaseInsensitive) == 0;
-}
-
 bool hiddenCommentAnnotationIndices(
     FPDF_PAGE page,
     const QVector<PDFEditController::DraftAnnotationDeletion> &deletions,
@@ -320,8 +259,7 @@ bool hiddenCommentAnnotationIndices(
             continue;
         }
         const bool replyRelation = annotationUsesReplyRelation(annotation);
-        bool markupReplyChain = isMarkupAnnotationSubtype(
-            FPDFAnnot_GetSubtype(annotation));
+        bool markupReplyChain = isMarkupAnnotation(annotation);
         FPDF_ANNOTATION parent = replyRelation
             ? FPDFAnnot_GetLinkedAnnot(annotation, "IRT")
             : nullptr;
@@ -359,8 +297,7 @@ bool hiddenCommentAnnotationIndices(
                 break;
             }
             markupReplyChain = markupReplyChain
-                && isMarkupAnnotationSubtype(
-                    FPDFAnnot_GetSubtype(parent));
+                && isMarkupAnnotation(parent);
             FPDF_ANNOTATION nextParent = FPDFAnnot_GetLinkedAnnot(
                 parent,
                 "IRT");

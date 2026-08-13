@@ -93,6 +93,10 @@ Unicode-capable appearance. Root comments can receive replies;
 each root has a dropdown control that expands its replies at one visual level,
 and reply-to-reply is not offered. Reply annotations remain available in this
 panel but their standalone appearances are hidden from the PDF page viewer.
+Line, Square, Circle, Polygon, PolyLine, Stamp, Caret, Ink, FileAttachment,
+Sound, Redact, and PDF 2.0 Projection annotations are also indexed for reading
+and navigation, with editing, deletion, and replies disabled until subtype-safe
+persistence exists.
 Comment changes are per-tab session drafts with
 undo, redo, discard, selection, and deletion support. Save and Save As persist
 them as standard PDF annotations with geometry, color, contents, print
@@ -103,7 +107,10 @@ are rehydrated for navigation and display, including their author and
 modification date (or
 creation date when no modification date is present). Editing updates the source
 annotation's `/Contents`, modification date, and rich-text value when present.
-Markup and Sticky Note appearances are preserved; an edited Free Text comment
+Comment line endings are normalized to PDF CR on save and LF in the editor.
+New Sticky Notes and replies receive a vector normal appearance; existing
+appearances are preserved, while a missing Sticky Note appearance is repaired
+when that annotation is edited. An edited Free Text comment
 receives TrePDF's normalized wrapped Unicode appearance so stale text is not
 shown. Popup, thread links, geometry, and other metadata remain intact.
 Read-only and LockedContents annotations remain protected. Deleting

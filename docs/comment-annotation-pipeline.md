@@ -50,6 +50,13 @@ pipeline này.
 | Sticky Note | `stickyNote` | `/Text` | Frame cố định 24 PDF point tại vị trí click. |
 | Free Text | `freeText` | `/FreeText` | Click dùng frame mặc định; drag dùng text box đã clamp trong page. |
 
+Các markup subtype `/Line`, `/Square`, `/Circle`, `/Polygon`, `/PolyLine`,
+`/Stamp`, `/Caret`, `/Ink`, `/FileAttachment`, `/Sound`, `/Redact` và
+`/Projection` (PDF 2.0) cũng được
+đọc vào CommentPanel với `Candidate.kind == "comment"`. Chúng chỉ hỗ trợ index,
+metadata, chọn và điều hướng; sửa nội dung, xóa và thêm reply đều bị khóa cho
+đến khi writer hỗ trợ mutation an toàn theo subtype.
+
 Với cả sáu loại trên, implementation hiện tại hỗ trợ:
 
 - tạo annotation mới dưới dạng session draft;
@@ -70,8 +77,8 @@ Giới hạn hiện tại:
 - mỗi comment hoặc reply tối đa 700 UTF-16 code unit;
 - Rectangle, Ellipse, Line, Arrow, Triangle và Diamond trong tab Edit là page
   content path object, không phải drawing comment annotation;
-- `/Ink`, `/Stamp`, `/Caret`, `/Line`, `/Square`, `/Circle`, `/Polygon`,
-  `/PolyLine`, `/FileAttachment`, review state và XFDF chưa thuộc comment model.
+- review state và XFDF chưa được model hóa;
+- 12 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
 
 ## 2. Luồng kiến trúc tổng thể
 
@@ -172,8 +179,10 @@ candidate, draft hoặc save-time geometry.
 
 ### 4.1 Candidate scan theo page
 
-Scan page phục vụ hover/edit nội dung đồng thời đọc sáu annotation subtype được
-hỗ trợ. Với mỗi annotation, controller lấy:
+Scan page phục vụ hover/edit nội dung đồng thời đọc đủ 18 markup annotation
+subtype mà TrePDF nhận diện. Sáu subtype do TrePDF hỗ trợ mutation giữ kind
+riêng; 12 subtype còn lại dùng kind `comment` chỉ đọc. Với mỗi annotation,
+controller lấy:
 
 - `/Contents`, `/NM`, `/T`, `/CreationDate`, `/M`;
 - `/Rect` và attachment points/QuadPoints của text markup;
@@ -251,6 +260,7 @@ page, màu, author, ngày, nội dung và draft state. Chọn card sẽ:
 
 Editor giữ buffer local để không tạo history command cho mỗi phím. Text được
 commit khi mất focus, đổi item, thu gọn panel, đổi session hoặc trước Save.
+Card chỉ đọc vẫn chọn và điều hướng được, nhưng nút sửa, xóa và Reply bị vô hiệu.
 
 QML cho phép text tạm vượt 700 UTF-16 code unit để không phá IME/local undo,
 nhưng commit, gửi reply và Save bị chặn cho đến khi độ dài hợp lệ. C++ kiểm lại
@@ -397,11 +407,16 @@ PDFium handle.
 Writer mở document riêng và tạo annotation bằng `FPDFPage_CreateAnnot()`:
 
 - text markup: subtype tương ứng, color, Print flag, attachment points và Rect;
-- Sticky Note: `/Text`, Rect, color, `/Contents`, metadata và Print flag;
+- Sticky Note: `/Text`, Rect, color, `/Contents`, metadata, Print flag và normal
+  `/AP` vector hình tờ ghi chú;
 - Free Text: `/FreeText`, Rect, `/Contents`, `/DA`, border, metadata, Print flag
   và appearance id cho canonicalizer;
 - reply: tạo `/Text` placeholder rồi hoàn thiện `/IRT` và `/RT /R` ở bước
   canonicalize.
+
+Text comment dùng LF trong controller/QML. Khi ghi PDF, writer gom CRLF, CR và
+LF đầu vào rồi lưu mọi line break trong `/Contents` thành CR; khi index lại,
+controller đổi CR về LF cho editor.
 
 Sau khi PDFium serialize staging file, canonicalizer tìm text markup mới bằng
 `/NM` và thêm `/AP << /N <form-ref> >>`. Normal appearance là Form XObject
@@ -428,9 +443,11 @@ Trước khi sửa, writer xác thực annotation index, subtype, original `/Con
   wrapped Unicode appearance.
 
 Sticky Note và text markup giữ nguyên appearance nguồn vì sửa nội dung không
-thay đổi page geometry. Canonicalizer chỉ nhận danh sách text markup mới, nên
-không thay `/AP` của annotation nguồn. Free Text là ngoại lệ vì text hiển thị
-trực tiếp trên trang.
+thay đổi page geometry. Nếu Sticky Note/reply nguồn đang được sửa nhưng thiếu
+normal appearance, writer bổ sung `/AP` vector từ Rect và color hiện có.
+Canonicalizer chỉ nhận danh sách text markup mới, nên không thay `/AP` của
+annotation nguồn đã có. Free Text là ngoại lệ vì text hiển thị trực tiếp trên
+trang.
 
 ### 10.4 Xóa annotation nguồn
 
@@ -447,7 +464,9 @@ Bốn text-markup subtype mới được dựng `/AP /N` vector từ chính `/Qu
 `/C` và `/CA` đã ghi trên annotation. `Rect`, `QuadPoints` và AP được tạo trong
 cùng giao dịch staging; bất kỳ lỗi parse/canonicalize nào đều làm Save thất
 bại trước khi target được commit. Source text markup giữ nguyên `/AP` hiện hữu.
-Reply không có appearance độc lập.
+Sticky Note mới và mọi reply mới có normal `/AP` vector riêng. TrePDF vẫn tạm
+ẩn appearance của reply khi render page, nhưng giữ nó trong file để reader khác
+có thể hiển thị annotation hợp chuẩn.
 
 Pipeline vẫn chưa phải generic appearance generator cho mọi annotation subtype.
 Khi thêm drawing markup, Ink, Stamp hoặc khi nhắm PDF 2.0, mỗi subtype cần
@@ -494,6 +513,8 @@ Coverage comment hiện cần được duy trì cho:
 - Squiggly glyph snap, OCR Invisible, pending scan, whitespace rejection,
   rotated glyph và safety cap;
 - Sticky Note và Free Text Unicode appearance;
+- normal `/AP` của Sticky Note/reply và chuẩn hóa CR trong `/Contents`;
+- read-only index cho 12 markup subtype chưa hỗ trợ mutation;
 - author, creation/modification date và 700 UTF-16 code-unit limit;
 - comment index xuyên trang, duplicate page-local `/NM` và navigation;
 - sửa `/Contents`, `/M` và `/RC` của annotation nguồn;
@@ -532,7 +553,6 @@ Bảng này không mô tả tính năng đã có.
 | Ưu tiên | Gap | Hướng triển khai |
 |---|---|---|
 | P0 | Common markup properties và AP cho subtype mới | Có model/preservation cho `/Subj`, `/F`, `/BS`, `/BE`, `/IC`, `/IT`, `/Name`; mở rộng AP theo từng drawing/Ink/Stamp subtype. |
-| P0 | Read-only index cho mọi markup subtype | Hiển thị subtype chưa hỗ trợ trong panel mà không cho mutation cho đến khi writer an toàn. |
 | P0 | Drawing comments chuẩn | Thêm `/Square`, `/Circle`, `/Line`, `/Polygon`, `/PolyLine`; giữ Shapes của tab Edit là page content riêng. |
 | P0 | Pencil/freehand | Thêm `/Ink` với `/InkList`, point simplification, giới hạn điểm/stroke và AP. |
 | P0 | Text-aware markup đồng nhất | Dùng glyph cache của Squiggly cho Highlight, Underline và Strikeout. |
@@ -545,10 +565,11 @@ Bảng này không mô tả tính năng đã có.
 | P2 | Flattened copy/summary | Save a Flattened Copy riêng; cảnh báo mất semantic thread/metadata. |
 | Riêng | Redaction | Mark `/Redact` và Apply Redaction phải là pipeline bảo mật riêng, không chỉ vẽ rectangle đen. |
 
-Không ưu tiên cho Comment tab: Link/Widget, Movie, Sound, PrinterMark, TrapNet,
-Watermark, 3D, Projection và RichMedia. Một số là annotation trong object model
-PDF nhưng không phải comment workflow phổ thông; Movie, Sound và TrapNet còn là
-legacy/deprecated trong PDF 2.0.
+Không ưu tiên mutation cho Comment tab: Link/Widget, Movie, Sound, PrinterMark,
+TrapNet, Watermark, 3D, Projection và RichMedia. `/Sound` và `/Projection` vẫn
+được index chỉ đọc vì PDF xếp chúng vào markup annotation; Movie, Sound và
+TrapNet là legacy/deprecated trong PDF 2.0. PDFium chưa có public enum cho
+Projection, nên scanner nhận diện chính xác tên `/Subtype /Projection`.
 
 Reply nhiều cấp không phải ưu tiên: UI một cấp hiện tại vẫn giữ quan hệ root và
 giúp thread dễ đọc. Nếu mở rộng, phải có fixture cho chain, cycle, cross-page và

@@ -792,6 +792,7 @@ Rectangle {
                                         icon.color: "transparent"
                                         enabled: root.document.loaded
                                             && !root.editController.saving
+                                            && commentCard.commentTextEditable
                                             && commentCard.page >= 0
                                             && commentCard.objectId.length > 0
                                         focusPolicy: Qt.TabFocus
@@ -874,6 +875,7 @@ Rectangle {
                                                 !== commentCard.objectId)
                                     enabled: root.document.loaded
                                         && !root.editController.saving
+                                        && commentCard.commentTextEditable
                                     focusPolicy: Qt.TabFocus
                                     //% "Reply"
                                     text: qsTrId("Reply")

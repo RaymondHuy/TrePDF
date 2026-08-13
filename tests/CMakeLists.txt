@@ -10,6 +10,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFAcroFormCanonicalizer.h
     ../src/PDFAcroFormWriter.cpp
     ../src/PDFAcroFormWriter.h
+    ../src/PDFAnnotationUtils.cpp
+    ../src/PDFAnnotationUtils.h
     ../src/PDFDocument.cpp
     ../src/PDFDocument.h
     ../src/PDFEditController.cpp

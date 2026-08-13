@@ -225,6 +225,9 @@ Note/Free Text đang chọn và phản hồi một cấp.
   dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
   được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.
   Panel dùng chung trạng thái thu gọn theo document session.
+- Line, Square, Circle, Polygon, PolyLine, Stamp, Caret, Ink, FileAttachment,
+  Sound, Redact và Projection dùng card `comment` chỉ đọc: vẫn chọn/điều hướng
+  được nhưng không mở editor và vô hiệu action xóa/Phản hồi.
 
 ### [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml)
 

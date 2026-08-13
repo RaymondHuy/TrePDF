@@ -62,6 +62,8 @@ qt_add_qml_module(trepdf
         src/PDFAcroFormCanonicalizer.h
         src/PDFAcroFormWriter.cpp
         src/PDFAcroFormWriter.h
+        src/PDFAnnotationUtils.cpp
+        src/PDFAnnotationUtils.h
         src/PDFDocument.cpp
         src/PDFDocument.h
         src/PDFEditController.cpp

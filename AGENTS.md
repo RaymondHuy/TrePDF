@@ -23,6 +23,10 @@ Current features:
   source comments can be indexed, selected, edited, and deleted with
   undo/redo/discard. Save/Save As persists additions, content edits, and
   removals without rewriting page content streams on annotation-only pages.
+  Line, Square, Circle, Polygon, PolyLine, Stamp, Caret, Ink, FileAttachment,
+  Sound, Redact, and PDF 2.0 Projection annotations are indexed read-only for
+  panel navigation; editing, deletion, and replies remain disabled for those
+  subtypes.
   Squiggly accepts only non-whitespace source-text glyphs intersected by the
   drag gesture, snaps the result into per-line rectangles/QuadPoints, and
   rejects whitespace-only or no-text selections. Nearly horizontal gestures use
@@ -46,7 +50,9 @@ Current features:
   flattens imported reply chains to one display level, saves new replies with
   standard `/IRT`, and cascades root deletion across the thread. Reply
   annotation appearances stay hidden from the page viewer while the replies
-  remain available and editable in the panel. Comments and replies are limited
+  remain available and editable in the panel. New Sticky Notes and replies have
+  vector normal appearances, and comment line endings are saved as PDF CR while
+  the editor uses LF. Comments and replies are limited
   to 700 UTF-16 code units. Read-only and LockedContents source annotations
   remain protected.
 - Draw rectangles, ovals, lines, arrows, triangles, and diamonds from the
@@ -167,6 +173,9 @@ Current features:
   duplicate-path protection, and cross-tab save guards.
 - `src/PDFDocument.h/.cpp`: main-thread PDFium document, metadata, page sizes,
   navigation state, and source file path.
+- `src/PDFAnnotationUtils.h/.cpp`: shared bounded annotation-string access,
+  comment newline normalization, markup classification, and reply-relation
+  predicates used by indexing, rendering, and saving.
 - `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
   rich-text draft state, snapshot-based undo/redo history, and save commands.
 - `src/PDFFormController.h/.cpp`: per-tab AcroForm state, asynchronous form
