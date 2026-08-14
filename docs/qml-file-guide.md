@@ -175,6 +175,8 @@ ghi Save; mọi thay đổi vẫn là draft.
 - Khi tab mở, `AppRibbon` bật `PDFEditController.HighlightTool`; người dùng có
   thể chuyển sang Sticky Note, Free Text, text markup hoặc năm drawing-comment
   tool mà không bật form design mode.
+- Năm drawing-comment tool được gom trong một dropdown Shapes ba cột, cùng kiểu
+  trình bày và tương tác với dropdown Shapes của tab Edit.
 - Highlight, Underline, Squiggly và Strikeout là split button: phần chính dùng
   màu hiện tại, menu có bảng màu curated và system color picker cùng kiểu.
   Underline, Squiggly và Strikeout dùng palette RGB đậm và opacity cao hơn để

@@ -303,6 +303,11 @@
         <source>Line</source>
         <translation>Đường thẳng</translation>
     </message>
+    <message id="PolygonShape">
+        <location filename="../src/Components/CommentRibbon.qml" line="156"/>
+        <source>Polygon</source>
+        <translation>Đa giác</translation>
+    </message>
     <message id="ArrowShape">
         <location filename="../src/Components/EditRibbon.qml" line="64"/>
         <location filename="../src/PDFEditController.cpp" line="352"/>
@@ -522,15 +527,12 @@
         <translation>Nhấp để đặt điểm; nhấp đúp hoặc nhấn Enter để hoàn tất</translation>
     </message>
     <message id="DrawingCommentColor">
-        <location filename="../src/Components/CommentRibbon.qml" line="684"/>
         <source>Color</source>
-        <translation>Màu</translation>
+        <translation type="vanished">Màu</translation>
     </message>
     <message id="ChooseDrawingCommentColor">
-        <location filename="../src/Components/CommentRibbon.qml" line="686"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="831"/>
         <source>Choose drawing comment color</source>
-        <translation>Chọn màu nhận xét hình vẽ</translation>
+        <translation type="vanished">Chọn màu nhận xét hình vẽ</translation>
     </message>
     <message id="ManageComments">
         <location filename="../src/Components/CommentRibbon.qml" line="703"/>
