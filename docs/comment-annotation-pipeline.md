@@ -245,6 +245,9 @@ Khi mở tab Comment, ribbon chọn Highlight làm tool mặc định. Người 
 chuyển sang Sticky Note, Free Text, text markup hoặc năm drawing-comment tool mà
 không bật form designer.
 
+Năm drawing-comment tool nằm trong một dropdown Shapes dạng lưới, dùng cùng mẫu
+popup với dropdown Shapes của tab Edit và đánh dấu tool hiện hành.
+
 Highlight, Underline, Squiggly và Strikeout dùng split button cùng color grid
 và system color picker. Mỗi tool giữ màu riêng; Underline, Squiggly và Strikeout
 dùng màu đậm/opacity cao hơn vì nét mảnh.

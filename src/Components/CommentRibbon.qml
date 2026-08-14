@@ -33,6 +33,34 @@ Flickable {
         "#0277bd", "#00838f", "#00695c", "#2e7d32", "#558b2f",
         "#9e9d24", "#f9a825", "#ef6c00", "#d84315", "#455a64"
     ]
+    readonly property var drawingCommentOptions: [
+        {
+            tool: PDFEditController.SquareTool,
+            icon: "../assets/icons/rectangle.svg"
+        },
+        {
+            tool: PDFEditController.CircleTool,
+            icon: "../assets/icons/oval.svg"
+        },
+        {
+            tool: PDFEditController.LineTool,
+            icon: "../assets/icons/line.svg"
+        },
+        {
+            tool: PDFEditController.PolygonTool,
+            icon: "../assets/icons/polygon.svg"
+        },
+        {
+            tool: PDFEditController.PolyLineTool,
+            icon: "../assets/icons/polyline.svg"
+        }
+    ]
+    readonly property bool drawingCommentToolActive:
+        editController.tool === PDFEditController.SquareTool
+            || editController.tool === PDFEditController.CircleTool
+            || editController.tool === PDFEditController.LineTool
+            || editController.tool === PDFEditController.PolygonTool
+            || editController.tool === PDFEditController.PolyLineTool
     property int pendingColorTool: PDFEditController.HighlightTool
     property string pendingColorDialogTitle: ""
 
@@ -112,7 +140,54 @@ Flickable {
         markupColorDialog.open()
     }
 
-    function closeColorPickers() {
+    function drawingCommentName(tool) {
+        switch (tool) {
+        case PDFEditController.SquareTool:
+            //% "Rectangle"
+            return qsTrId("RectangleShape")
+        case PDFEditController.CircleTool:
+            //% "Oval"
+            return qsTrId("OvalShape")
+        case PDFEditController.LineTool:
+            //% "Line"
+            return qsTrId("LineShape")
+        case PDFEditController.PolygonTool:
+            //% "Polygon"
+            return qsTrId("PolygonShape")
+        case PDFEditController.PolyLineTool:
+            //% "Polyline annotation"
+            return qsTrId("PolylineAnnotation")
+        }
+        return ""
+    }
+
+    function drawingCommentToolTip(tool) {
+        switch (tool) {
+        case PDFEditController.SquareTool:
+            //% "Add a rectangle comment"
+            return qsTrId("AddRectangleComment")
+        case PDFEditController.CircleTool:
+            //% "Add an oval comment"
+            return qsTrId("AddOvalComment")
+        case PDFEditController.LineTool:
+            //% "Add a line comment"
+            return qsTrId("AddLineComment")
+        case PDFEditController.PolygonTool:
+            //% "Click points; double-click or press Enter to finish"
+            return qsTrId("AddPolygonComment")
+        case PDFEditController.PolyLineTool:
+            //% "Click points; double-click or press Enter to finish"
+            return qsTrId("AddPolylineComment")
+        }
+        return ""
+    }
+
+    function selectDrawingComment(tool) {
+        drawingCommentPopup.close()
+        editController.tool = tool
+    }
+
+    function closePopups() {
         if (highlightColorPopup)
             highlightColorPopup.close()
         if (underlineColorPopup)
@@ -123,8 +198,8 @@ Flickable {
             strikeoutColorPopup.close()
         if (markupColorDialog)
             markupColorDialog.close()
-        if (drawingColorDialog)
-            drawingColorDialog.close()
+        if (drawingCommentPopup)
+            drawingCommentPopup.close()
     }
 
     function isCommentKind(kind) {
@@ -143,9 +218,9 @@ Flickable {
             || kind === "polyLine"
     }
 
-    onDocumentChanged: closeColorPickers()
-    onEditControllerChanged: closeColorPickers()
-    Component.onDestruction: closeColorPickers()
+    onDocumentChanged: closePopups()
+    onEditControllerChanged: closePopups()
+    Component.onDestruction: closePopups()
 
     component MarkupColorSwatch: ToolButton {
         id: swatch
@@ -313,6 +388,73 @@ Flickable {
             border.width: 1
             border.color: root.theme.ribbonBorder
         }
+    }
+
+    component DrawingCommentOptionButton: ToolButton {
+        id: drawingCommentOption
+
+        required property int optionTool
+        required property url optionIconSource
+
+        width: 92
+        height: 66
+        padding: 5
+        checkable: true
+        checked: root.editController.tool === drawingCommentOption.optionTool
+        focusPolicy: Qt.TabFocus
+        Accessible.name: root.drawingCommentName(
+            drawingCommentOption.optionTool)
+        onClicked: root.selectDrawingComment(
+            drawingCommentOption.optionTool)
+
+        contentItem: Column {
+            spacing: 3
+
+            Image {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 46
+                height: 30
+                source: drawingCommentOption.optionIconSource
+                sourceSize: Qt.size(width * 3, height * 3)
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
+                Accessible.ignored: true
+            }
+
+            Label {
+                width: parent.width
+                text: root.drawingCommentName(
+                    drawingCommentOption.optionTool)
+                color: root.theme.ribbonTextColor
+                font.pixelSize: 10
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+            }
+        }
+
+        background: Rectangle {
+            radius: 5
+            color: drawingCommentOption.down
+                ? "#f5dfcf"
+                : drawingCommentOption.hovered
+                        || drawingCommentOption.visualFocus
+                        || drawingCommentOption.checked
+                    ? root.theme.foxitPaleOrange
+                    : "transparent"
+            border.width: drawingCommentOption.checked
+                ? 2
+                : drawingCommentOption.hovered
+                        || drawingCommentOption.visualFocus ? 1 : 0
+            border.color: drawingCommentOption.checked
+                ? root.theme.foxitDarkOrange
+                : root.theme.foxitBorderOrange
+        }
+
+        ToolTip.visible: drawingCommentOption.hovered
+        ToolTip.delay: 500
+        ToolTip.text: root.drawingCommentToolTip(
+            drawingCommentOption.optionTool)
     }
 
     Row {
@@ -598,101 +740,60 @@ Flickable {
             title: qsTrId("DrawingComments")
 
             RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Rectangle"
-                text: qsTrId("RectangleShape")
-                //% "Add a rectangle comment"
-                toolTipText: qsTrId("AddRectangleComment")
-                iconSource: "../assets/icons/rectangle.svg"
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                primary: root.editController.tool
-                    === PDFEditController.SquareTool
-                onClicked: root.editController.tool
-                    = PDFEditController.SquareTool
-            }
+                id: drawingCommentButton
 
-            RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                //% "Oval"
-                text: qsTrId("OvalShape")
-                //% "Add an oval comment"
-                toolTipText: qsTrId("AddOvalComment")
-                iconSource: "../assets/icons/oval.svg"
+                //% "Shapes"
+                text: qsTrId("Shapes")
+                iconSource: "../assets/icons/shapes.svg"
+                menuIndicatorVisible: true
+                //% "Choose shape"
+                menuToolTipText: qsTrId("ChooseShape")
                 enabled: root.document.loaded
                     && !root.editController.saving
-                primary: root.editController.tool
-                    === PDFEditController.CircleTool
-                onClicked: root.editController.tool
-                    = PDFEditController.CircleTool
-            }
+                primary: root.drawingCommentToolActive
+                onClicked: drawingCommentPopup.open()
+                onMenuRequested: drawingCommentPopup.open()
+                onEnabledChanged: {
+                    if (!enabled)
+                        drawingCommentPopup.close()
+                }
 
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Line"
-                text: qsTrId("LineShape")
-                //% "Add a line comment"
-                toolTipText: qsTrId("AddLineComment")
-                iconSource: "../assets/icons/line.svg"
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                primary: root.editController.tool
-                    === PDFEditController.LineTool
-                onClicked: root.editController.tool
-                    = PDFEditController.LineTool
-            }
+                Popup {
+                    id: drawingCommentPopup
 
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Polygon annotation"
-                text: qsTrId("PolygonAnnotation")
-                //% "Click points; double-click or press Enter to finish"
-                toolTipText: qsTrId("AddPolygonComment")
-                iconSource: "../assets/icons/triangle.svg"
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                primary: root.editController.tool
-                    === PDFEditController.PolygonTool
-                onClicked: root.editController.tool
-                    = PDFEditController.PolygonTool
-            }
+                    x: drawingCommentButton.width - width
+                    y: drawingCommentButton.height
+                    width: 300
+                    padding: 8
+                    focus: true
+                    closePolicy: Popup.CloseOnEscape
+                        | Popup.CloseOnPressOutsideParent
 
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Polyline annotation"
-                text: qsTrId("PolylineAnnotation")
-                //% "Click points; double-click or press Enter to finish"
-                toolTipText: qsTrId("AddPolylineComment")
-                iconSource: "../assets/icons/pen-line.svg"
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                primary: root.editController.tool
-                    === PDFEditController.PolyLineTool
-                onClicked: root.editController.tool
-                    = PDFEditController.PolyLineTool
-            }
+                    contentItem: Grid {
+                        columns: 3
+                        columnSpacing: 4
+                        rowSpacing: 4
 
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Color"
-                text: qsTrId("DrawingCommentColor")
-                //% "Choose drawing comment color"
-                toolTipText: qsTrId("ChooseDrawingCommentColor")
-                iconSource: "../assets/icons/highlight.svg"
-                preserveIconColors: true
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                onClicked: {
-                    drawingColorDialog.selectedColor
-                        = root.opaqueHighlightColor(
-                            root.editController.drawingCommentColor)
-                    drawingColorDialog.open()
+                        Repeater {
+                            model: root.drawingCommentOptions
+
+                            delegate: DrawingCommentOptionButton {
+                                required property var modelData
+
+                                optionTool: modelData.tool
+                                optionIconSource: modelData.icon
+                            }
+                        }
+                    }
+
+                    background: Rectangle {
+                        radius: 7
+                        color: root.theme.ribbonSurface
+                        border.width: 1
+                        border.color: root.theme.ribbonBorder
+                    }
                 }
             }
         }
@@ -822,18 +923,5 @@ Flickable {
         onAccepted: root.selectMarkupColor(
             selectedColor,
             root.pendingColorTool)
-    }
-
-    ColorDialog {
-        id: drawingColorDialog
-
-        //% "Choose drawing comment color"
-        title: qsTrId("ChooseDrawingCommentColor")
-        onAccepted: root.editController.drawingCommentColor
-            = Qt.rgba(
-                selectedColor.r,
-                selectedColor.g,
-                selectedColor.b,
-                1)
     }
 }
