@@ -31,6 +31,7 @@
 #include <QRegularExpression>
 #include <QQmlComponent>
 #include <QQmlEngine>
+#include <qqml.h>
 #include <QSemaphore>
 #include <QSignalSpy>
 #include <QScopeGuard>
@@ -4818,6 +4819,7 @@ private slots:
     void rejectsInvalidDrawingCommentGeometry();
     void savesDrawingCommentsRoundTrip_data();
     void savesDrawingCommentsRoundTrip();
+    void coalescesInkPreviewUpdates();
     void savesInkCommentRoundTrip();
     void editsRepliesAndDeletesSourceDrawingCommentsRoundTrip_data();
     void editsRepliesAndDeletesSourceDrawingCommentsRoundTrip();
@@ -15363,6 +15365,177 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
         }
     }
     QVERIFY(rehydrated);
+}
+
+void PDFEditControllerTest::coalescesInkPreviewUpdates()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("ink-preview-coalescing.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::InkTool);
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString overlayPath = QFINDTESTDATA(
+        "../src/Components/EditOverlay.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!overlayPath.isEmpty());
+    QVERIFY(qmlRegisterType<PDFEditController>(
+        "TrePDF",
+        1,
+        0,
+        "PDFEditController") >= 0);
+    QVERIFY(qmlRegisterType<DraftImageItem>(
+        "TrePDF",
+        1,
+        0,
+        "DraftImageView") >= 0);
+    QVERIFY(qmlRegisterType(
+        QUrl::fromLocalFile(themePath),
+        "TrePDF",
+        1,
+        0,
+        "AppTheme") >= 0);
+
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(
+        QByteArrayLiteral("import TrePDF\nAppTheme {}"),
+        QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+
+    QQmlComponent overlayComponent(
+        &engine,
+        QUrl::fromLocalFile(overlayPath));
+    const QVariantMap initialProperties{
+        {QStringLiteral("page"), 0},
+        {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), true},
+        {QStringLiteral("draftTextureReady"), true},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), 1.0},
+        {QStringLiteral("width"), 200.0},
+        {QStringLiteral("height"), 200.0}};
+    std::unique_ptr<QObject> overlay(
+        overlayComponent.createWithInitialProperties(initialProperties));
+    QVERIFY2(overlay, qPrintable(overlayComponent.errorString()));
+
+    const auto invokePointFunction = [&overlay](
+                                         const char *method,
+                                         qreal x,
+                                         qreal y) {
+        const QVariant xValue = x;
+        const QVariant yValue = y;
+        return QMetaObject::invokeMethod(
+            overlay.get(),
+            method,
+            Qt::DirectConnection,
+            Q_ARG(QVariant, xValue),
+            Q_ARG(QVariant, yValue));
+    };
+    const auto strokePoints = [&overlay](const char *property) {
+        return overlay->property(property).toList();
+    };
+
+    QVERIFY(invokePointFunction("beginInkDrawing", 10.0, 10.0));
+    QVERIFY(overlay->property("inkDrawing").toBool());
+    QCOMPARE(controller.pendingDrawingCommentPage(), 0);
+    QCOMPARE(strokePoints("inkStrokePoints").size(), 1);
+    QCOMPARE(strokePoints("inkPreviewStrokePoints").size(), 1);
+
+    QSignalSpy captureChangedSpy(
+        overlay.get(),
+        SIGNAL(inkStrokePointsChanged()));
+    QSignalSpy previewChangedSpy(
+        overlay.get(),
+        SIGNAL(inkPreviewStrokePointsChanged()));
+    QVERIFY(captureChangedSpy.isValid());
+    QVERIFY(previewChangedSpy.isValid());
+
+    QVERIFY(invokePointFunction("updateInkDrawing", 20.0, 20.0));
+    QVERIFY(invokePointFunction("updateInkDrawing", 30.0, 30.0));
+    QCOMPARE(captureChangedSpy.count(), 0);
+    QCOMPARE(previewChangedSpy.count(), 0);
+    QCOMPARE(strokePoints("inkStrokePoints").size(), 3);
+    QCOMPARE(strokePoints("inkPreviewStrokePoints").size(), 1);
+    QVERIFY(overlay->property("inkPreviewUpdatePending").toBool());
+
+    QVERIFY(QMetaObject::invokeMethod(
+        overlay.get(),
+        "publishInkPreview",
+        Qt::DirectConnection));
+    QCOMPARE(previewChangedSpy.count(), 1);
+    QCOMPARE(
+        strokePoints("inkPreviewStrokePoints"),
+        strokePoints("inkStrokePoints"));
+    QVERIFY(!overlay->property("inkPreviewUpdatePending").toBool());
+
+    QVERIFY(invokePointFunction("updateInkDrawing", 40.0, 40.0));
+    QCOMPARE(captureChangedSpy.count(), 0);
+    QCOMPARE(strokePoints("inkStrokePoints").size(), 4);
+    QCOMPARE(strokePoints("inkPreviewStrokePoints").size(), 3);
+    QVERIFY(overlay->property("inkPreviewUpdatePending").toBool());
+
+    QVERIFY(invokePointFunction("finishInkDrawing", 50.0, 50.0));
+    QVERIFY(!overlay->property("inkDrawing").toBool());
+    QVERIFY(strokePoints("inkStrokePoints").isEmpty());
+    QVERIFY(strokePoints("inkPreviewStrokePoints").isEmpty());
+    QVERIFY(!overlay->property("inkPreviewUpdatePending").toBool());
+    QCOMPARE(controller.pendingDrawingCommentPage(), -1);
+    const QVariantList drafts = controller.draftsForPage(0);
+    QCOMPARE(drafts.size(), 1);
+    const QVariantList savedStrokes = drafts.constFirst()
+                                          .toMap()
+                                          .value(QStringLiteral("inkStrokes"))
+                                          .toList();
+    QCOMPARE(savedStrokes.size(), 1);
+    const QVariantList savedStroke = savedStrokes.constFirst().toList();
+    QVERIFY(savedStroke.size() >= 2);
+    const QPointF savedEndpoint = savedStroke.constLast().toPointF();
+    QVERIFY(qAbs(savedEndpoint.x() - 0.25) < 0.000001);
+    QVERIFY(qAbs(savedEndpoint.y() - 0.25) < 0.000001);
+
+    controller.discardDrafts();
+    controller.setTool(PDFEditController::InkTool);
+    captureChangedSpy.clear();
+    previewChangedSpy.clear();
+    QVERIFY(invokePointFunction("beginInkDrawing", 0.0, 0.0));
+    captureChangedSpy.clear();
+    previewChangedSpy.clear();
+    for (int index = 1; index < 4096; ++index) {
+        const int row = index / 100;
+        const int column = index % 100;
+        const qreal x = (row % 2 == 0 ? column : 99 - column) * 2.0;
+        const qreal y = row * 2.0;
+        QVERIFY(invokePointFunction("updateInkDrawing", x, y));
+    }
+    QCOMPARE(strokePoints("inkStrokePoints").size(), 4096);
+    QCOMPARE(strokePoints("inkPreviewStrokePoints").size(), 1);
+    QCOMPARE(captureChangedSpy.count(), 0);
+    QCOMPARE(previewChangedSpy.count(), 0);
+    QVERIFY(overlay->property("inkPreviewUpdatePending").toBool());
+
+    QVERIFY(invokePointFunction("updateInkDrawing", 192.0, 80.0));
+    const QVariantList cappedPoints = strokePoints("inkStrokePoints");
+    QCOMPARE(cappedPoints.size(), 4096);
+    const QPointF cappedEndpoint = cappedPoints.constLast().toPointF();
+    QVERIFY(qAbs(cappedEndpoint.x() - 0.96) < 0.000001);
+    QVERIFY(qAbs(cappedEndpoint.y() - 0.40) < 0.000001);
+    QCOMPARE(captureChangedSpy.count(), 0);
+
+    QVERIFY(overlay->setProperty("pooled", true));
+    QVERIFY(!overlay->property("inkDrawing").toBool());
+    QVERIFY(strokePoints("inkStrokePoints").isEmpty());
+    QVERIFY(strokePoints("inkPreviewStrokePoints").isEmpty());
+    QVERIFY(!overlay->property("inkPreviewUpdatePending").toBool());
+    QCOMPARE(controller.pendingDrawingCommentPage(), -1);
 }
 
 void PDFEditControllerTest::savesInkCommentRoundTrip()

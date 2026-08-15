@@ -61,6 +61,8 @@ Item {
     property bool inkDrawing: false
     property int inkInteractionPage: -1
     property var inkStrokePoints: []
+    property var inkPreviewStrokePoints: []
+    property bool inkPreviewUpdatePending: false
     readonly property var drawingPreviewVertices: {
         if (drawingCommentDragging && width > 0 && height > 0) {
             return [
@@ -1400,7 +1402,10 @@ Item {
         hoverCandidate = ({})
         hideSelectCursor()
         inkInteractionPage = page
-        inkStrokePoints = [normalizedDrawingPoint(x, y)]
+        const point = normalizedDrawingPoint(x, y)
+        inkStrokePoints = [point]
+        inkPreviewStrokePoints = [point]
+        inkPreviewUpdatePending = false
         inkDrawing = true
     }
 
@@ -1417,12 +1422,21 @@ Item {
         if (distance < minimumInkSampleDistance)
             return
 
-        const points = inkStrokePoints.slice(0)
-        if (points.length >= maximumInkPoints)
-            points[points.length - 1] = point
+        if (inkStrokePoints.length >= maximumInkPoints)
+            inkStrokePoints[inkStrokePoints.length - 1] = point
         else
-            points.push(point)
-        inkStrokePoints = points
+            inkStrokePoints.push(point)
+        inkPreviewUpdatePending = true
+    }
+
+    function publishInkPreview() {
+        inkPreviewUpdatePending = false
+        if (!inkDrawing) {
+            inkPreviewStrokePoints = []
+            return
+        }
+
+        inkPreviewStrokePoints = inkStrokePoints.slice(0)
     }
 
     function finishInkDrawing(x, y) {
@@ -1430,11 +1444,13 @@ Item {
             return
 
         updateInkDrawing(x, y)
-        const points = inkStrokePoints.slice(0, maximumInkPoints)
+        const points = inkStrokePoints
         const targetPage = inkInteractionPage
         inkDrawing = false
         inkInteractionPage = -1
         inkStrokePoints = []
+        inkPreviewStrokePoints = []
+        inkPreviewUpdatePending = false
         controller.releaseDrawingCommentInteraction(targetPage)
         if (points.length >= 2)
             controller.addDrawingComment(targetPage, points)
@@ -1446,6 +1462,8 @@ Item {
         inkDrawing = false
         inkInteractionPage = -1
         inkStrokePoints = []
+        inkPreviewStrokePoints = []
+        inkPreviewUpdatePending = false
         if (releaseOwner !== false && targetPage >= 0)
             controller.releaseDrawingCommentInteraction(targetPage)
     }
@@ -1702,6 +1720,13 @@ Item {
 
         // Pointer events can outpace frames; resolve from the latest position.
         onTriggered: root.resolveSquigglyPreview()
+    }
+
+    FrameAnimation {
+        running: root.inkPreviewUpdatePending
+
+        // Pointer events can outpace frames; publish the latest captured stroke.
+        onTriggered: root.publishInkPreview()
     }
 
     Connections {
@@ -2651,7 +2676,7 @@ Item {
     InkDrawingView {
         width: root.width
         height: root.height
-        strokes: root.inkDrawing ? [root.inkStrokePoints] : []
+        strokes: root.inkDrawing ? [root.inkPreviewStrokePoints] : []
         strokeColor: root.controller.drawingCommentColor
         strokeWidth: 1.5 * root.pagePointScale
         drawingOpacity: root.controller.drawingCommentColor.a
