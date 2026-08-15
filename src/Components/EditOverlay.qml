@@ -1318,17 +1318,6 @@ Item {
                 drawingPathHover = point
                 return false
             }
-            if (controller.tool === PDFEditController.PolygonTool
-                    && points.length >= 3) {
-                const first = points[0]
-                const closingDistance = Math.hypot(
-                    (point.x - first.x) * width,
-                    (point.y - first.y) * height)
-                if (closingDistance <= 8) {
-                    finishDrawingPath()
-                    return true
-                }
-            }
         }
         points.push(point)
         drawingPathPoints = points
@@ -2522,7 +2511,10 @@ Item {
     CommentDrawingView {
         width: root.width
         height: root.height
-        drawingKind: root.drawingKindForTool()
+        drawingKind: root.drawingPathActive
+                && root.controller.tool === PDFEditController.PolygonTool
+            ? "polyLine"
+            : root.drawingKindForTool()
         vertices: root.drawingPreviewVertices
         strokeColor: root.controller.drawingCommentColor
         hasInterior: false
