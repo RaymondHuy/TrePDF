@@ -1688,6 +1688,41 @@ bool createUnsupportedMarkupCommentsPdf(const QString &filePath)
     return writePdfObjects(filePath, objects);
 }
 
+bool createSourceInkWithFillAppearancePdf(const QString &filePath)
+{
+    const QByteArray fillAppearance(
+        "q .1 .2 .3 RG 2 w 0 0 m 100 24 l S "
+        ".4 .5 .6 rg 10 5 30 15 re f Q");
+    const QByteArray appearanceObject
+        = QByteArray(
+              "<< /Type /XObject /Subtype /Form /FormType 1 "
+              "/BBox [0 0 100 24] /Resources << >> /Length ")
+        + QByteArray::number(fillAppearance.size())
+        + QByteArray(" >>\nstream\n")
+        + fillAppearance
+        + QByteArray("\nendstream");
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] "
+                "/Resources << >> /Annots [4 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Ink /P 3 0 R "
+                "/Rect [20 300 120 324] /Contents (Filled ink) "
+                "/T (Ink author) "
+                "/CreationDate (D:20240101090000Z) "
+                "/M (D:20240101100000Z) /NM (source-ink-fill) /F 4 "
+                "/C [.1 .2 .3] /CA .75 /IC [.4 .5 .6] "
+                "/BS << /Type /Border /W 2 /S /S >> "
+                "/AP << /N 5 0 R >> "
+                "/InkList [[24 310 60 316 112 306]] >>"),
+            appearanceObject,
+        });
+}
+
 bool createNonMarkupCommentReplyPdf(const QString &filePath)
 {
     return writePdfObjects(
@@ -4821,6 +4856,7 @@ private slots:
     void savesDrawingCommentsRoundTrip();
     void coalescesInkPreviewUpdates();
     void savesInkCommentRoundTrip();
+    void editsSourceInkWithFillAppearanceRoundTrip();
     void editsRepliesAndDeletesSourceDrawingCommentsRoundTrip_data();
     void editsRepliesAndDeletesSourceDrawingCommentsRoundTrip();
     void deletesMixedSubtypeSourceReplyThread();
@@ -15750,6 +15786,52 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
         break;
     }
     QVERIFY(rehydrated);
+}
+
+void PDFEditControllerTest::editsSourceInkWithFillAppearanceRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-ink-fill.pdf"));
+    const QString editedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-ink-fill-edited.pdf"));
+    QVERIFY(createSourceInkWithFillAppearancePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+
+    const QVariantMap sourceComment = controller.commentItems()
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        sourceComment.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("ink"));
+    QVERIFY(sourceComment
+        .value(QStringLiteral("commentTextEditable"))
+        .toBool());
+    QVERIFY(sourceComment
+        .value(QStringLiteral("drawingHasInterior"))
+        .toBool());
+
+    const QString objectId = sourceComment
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QString editedContents = QStringLiteral(
+        "Ink with fill appearance edited.");
+    QVERIFY(controller.setCommentText(0, objectId, editedContents));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(editedPath)));
+    QVERIFY(!controller.hasDrafts());
+
+    const CommentAnnotationInspection editedInspection
+        = inspectCommentAnnotation(editedPath, QStringLiteral("source-ink-fill"));
+    QVERIFY(editedInspection.readable);
+    QCOMPARE(editedInspection.subtype, static_cast<int>(FPDF_ANNOT_INK));
+    QCOMPARE(editedInspection.contents, editedContents);
+    QVERIFY(editedInspection.hasAppearance);
+    QVERIFY(!editedInspection.appearance.isEmpty());
 }
 
 void PDFEditControllerTest::
