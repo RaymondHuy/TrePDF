@@ -22,6 +22,8 @@ Các tệp chính:
   chung cho gesture và draft Squiggly.
 - [`CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml): renderer
   vector dùng chung cho preview và draft Square/Circle/Line/Polygon/PolyLine.
+- [`InkDrawingView.qml`](../src/Components/InkDrawingView.qml): renderer
+  Qt Quick Shapes dùng chung cho gesture Pencil và draft Ink.
 - [`PDFEditController.h`](../src/PDFEditController.h) và
   [`PDFEditController.cpp`](../src/PDFEditController.cpp): candidate scan,
   comment index, selection, draft, reply, history và điều phối Save.
@@ -56,14 +58,15 @@ pipeline này.
 | Line | `line` | `/Line` | Drag tạo hai điểm `/L`. |
 | Polygon | `polygon` | `/Polygon` | Click nhiều đỉnh, Enter/nhấp đúp để đóng path `/Vertices`. |
 | Polyline | `polyLine` | `/PolyLine` | Click nhiều đỉnh, Enter/nhấp đúp để lưu path mở `/Vertices`. |
+| Pencil | `ink` | `/Ink` | Một drag tạo một annotation; model/rehydrate giữ nhiều stroke trong `/InkList`. |
 
-Các markup subtype `/Stamp`, `/Caret`, `/Ink`, `/FileAttachment`, `/Sound`,
-`/Redact` và `/Projection` (PDF 2.0) cũng được
+Các markup subtype `/Stamp`, `/Caret`, `/FileAttachment`, `/Sound`, `/Redact`
+và `/Projection` (PDF 2.0) cũng được
 đọc vào CommentPanel với `Candidate.kind == "comment"`. Chúng chỉ hỗ trợ index,
 metadata, chọn và điều hướng; sửa nội dung, xóa và thêm reply đều bị khóa cho
 đến khi writer hỗ trợ mutation an toàn theo subtype.
 
-Với cả mười một loại có kind riêng ở bảng trên, implementation hiện tại hỗ trợ:
+Với cả mười hai loại có kind riêng ở bảng trên, implementation hiện tại hỗ trợ:
 
 - tạo annotation mới dưới dạng session draft;
 - đọc và index annotation đã có trong PDF;
@@ -84,7 +87,7 @@ Giới hạn hiện tại:
 - Rectangle, Ellipse, Line, Arrow, Triangle và Diamond trong tab Edit là page
   content path object, không phải drawing comment annotation;
 - review state và XFDF chưa được model hóa;
-- 7 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
+- 6 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
 
 ## 2. Luồng kiến trúc tổng thể
 
@@ -98,7 +101,7 @@ flowchart LR
     Controller --> PageItem["PDFPageItem\nrender + suppression"]
     Controller --> Prepare["PDFSaveWriter::prepare\nGUI-thread snapshot"]
     Prepare --> Writer["PDFSaveWriter::save\nworker writer document"]
-    Writer --> Canon["PDFAcroFormCanonicalizer\nMarkup/FreeText/Drawing AP + IRT/RT"]
+    Writer --> Canon["PDFAcroFormCanonicalizer\nMarkup/FreeText/Drawing/Ink AP + IRT/RT"]
     Canon --> Reopen["QSaveFile commit\nPDFDocument::open"]
 ```
 
@@ -129,6 +132,7 @@ geometry.sourceRect
 highlightRects             // QuadPoints đã chuẩn hóa theo page
 highlightColor
 drawingVertices            // storage nội bộ cho /L hoặc /Vertices
+inkStrokes                 // mỗi path /InkList là một stroke riêng
 commentProperties          // stroke/interior/opacity/border/effect/endings
 commentAuthor              // /T
 commentCreationDate        // /CreationDate
@@ -194,8 +198,8 @@ candidate, draft hoặc save-time geometry.
 ### 4.1 Candidate scan theo page
 
 Scan page phục vụ hover/edit nội dung đồng thời đọc đủ 18 markup annotation
-subtype mà TrePDF nhận diện. Mười một subtype do TrePDF hỗ trợ mutation giữ kind
-riêng; 7 subtype còn lại dùng kind `comment` chỉ đọc. Với mỗi annotation,
+subtype mà TrePDF nhận diện. Mười hai subtype do TrePDF hỗ trợ mutation giữ kind
+riêng; 6 subtype còn lại dùng kind `comment` chỉ đọc. Với mỗi annotation,
 controller lấy:
 
 - `/Contents`, `/NM`, `/T`, `/CreationDate`, `/M`;
@@ -204,6 +208,12 @@ controller lấy:
 - flags ReadOnly và LockedContents;
 - `/IRT` và `/RT` để nhận diện reply;
 - private thread id của TrePDF nếu annotation đang ở giữa save pipeline.
+
+Với `/Ink`, scanner đọc `/InkList` có giới hạn trước khi cấp phát: tối đa 64
+stroke, 4.096 điểm mỗi stroke và 32.768 điểm tổng. Mỗi stroke phải có ít nhất
+hai điểm hữu hạn và đổi được về normalized page coordinates. Ink thiếu/malformed
+geometry hoặc vượt giới hạn vẫn được đưa vào panel dưới kind `comment` generic
+chỉ đọc; writer không được mutation annotation đó.
 
 Một số PDF reader, gồm Foxit, lưu reply `/Text` hợp lệ với `/IRT` và `/RT /R`
 nhưng để `/Rect [0 0 0 0]`. Reply kiểu này vẫn được lập chỉ mục và hiển thị
@@ -242,8 +252,8 @@ sâu trong UI; item vẫn có thể được trình bày như comment top-level 
 ### 5.1 `CommentRibbon`
 
 Khi mở tab Comment, ribbon chọn Highlight làm tool mặc định. Người dùng có thể
-chuyển sang Sticky Note, Free Text, text markup hoặc năm drawing-comment tool mà
-không bật form designer.
+chuyển sang Sticky Note, Free Text, text markup, Pencil hoặc năm
+drawing-comment tool mà không bật form designer.
 
 Năm drawing-comment tool nằm trong một dropdown Shapes dạng lưới, dùng cùng mẫu
 popup với dropdown Shapes của tab Edit và đánh dấu tool hiện hành.
@@ -263,7 +273,16 @@ Overlay giữ gesture tạm trong QML và chỉ commit một draft command khi r
 - Square, Circle và Line nhận drag;
 - Polygon và PolyLine nhận chuỗi click; Enter hoặc nhấp đúp commit, Escape hủy
   và Backspace bỏ đỉnh cuối;
+- Pencil nhận một drag liên tục và commit đúng một Ink annotation khi release;
 - preview được vẽ trên page surface trước khi texture mới sẵn sàng.
+
+QML chỉ nhận mẫu Ink mới khi pointer cách mẫu trước ít nhất một logical pixel,
+giữ tối đa 4.096 raw points và tiếp tục cập nhật endpoint cuối khi đã đầy. Khi
+commit, controller kiểm kiểu/finite/bounds,
+clamp, bỏ điểm gần trùng, từ chối path quá ngắn, rồi dùng Ramer-Douglas-Peucker
+với tolerance khoảng 0,75 PDF point; kết quả bị hard-cap ở 1.024 điểm. Một
+gesture hiện tạo một stroke, nhưng candidate/draft và rehydrate vẫn giữ mảng
+stroke để round-trip đầy đủ `/InkList` nguồn.
 
 Controller giữ `pendingDrawingCommentPage` làm owner duy nhất của gesture
 nhiều đỉnh. Khi người dùng bắt đầu ở một page delegate khác, owner đổi và
@@ -286,12 +305,16 @@ page, màu, author, ngày, nội dung và draft state. Chọn card sẽ:
 Editor giữ buffer local để không tạo history command cho mỗi phím. Text được
 commit khi mất focus, đổi item, thu gọn panel, đổi session hoặc trước Save.
 Card chỉ đọc vẫn chọn và điều hướng được, nhưng nút sửa, xóa và Reply bị vô hiệu.
+Ink có geometry hợp lệ dùng kind `ink` nên sửa `/Contents`, Reply và xóa giống
+comment được hỗ trợ; chỉ Ink bị downgrade generic mới khóa các action này.
 
 QML cho phép text tạm vượt 700 UTF-16 code unit để không phá IME/local undo,
 nhưng commit, gửi reply và Save bị chặn cho đến khi độ dài hợp lệ. C++ kiểm lại
 cùng giới hạn; không dựa riêng vào validation QML.
 
-## 6. Geometry text markup và Squiggly
+## 6. Geometry text markup, Squiggly và Ink
+
+### 6.1 Text markup và Squiggly
 
 Highlight, Underline và Strikeout hiện giữ free rectangle của gesture. Writer
 đổi rectangle này thành QuadPoints và bounding `/Rect`.
@@ -319,6 +342,19 @@ Giới hạn an toàn:
 
 `SquigglyLine` chỉ vẽ presentation. Hit-test, grouping và QuadPoints luôn thuộc
 controller/writer, không được sao chép logic sang QML.
+
+### 6.2 Ink
+
+`InkDrawingView` vẽ cả path đang kéo và mọi stroke của draft bằng Qt Quick
+Shapes với round cap/join. Nó chỉ nhận normalized stroke, màu, opacity và độ
+rộng nét; validation, simplification và PDF geometry thuộc controller/writer.
+
+Một Pencil drag tạo một `Command` add và một candidate `ink` chứa đúng một
+stroke. Cấu trúc dữ liệu vẫn là `QVector<QVector<QPointF>>`: file nguồn có nhiều
+path `/InkList` được rehydrate không làm phẳng, nên sửa `/Contents`, reply,
+xóa, undo/redo/discard và Save/reopen đều giữ nguyên semantic nhiều stroke.
+Geometry candidate là union của stroke, có padding theo border width; tọa độ
+vẫn normalized theo page chưa xoay.
 
 ## 7. Reply và comment thread
 
@@ -439,6 +475,8 @@ Writer mở document riêng và tạo annotation bằng `FPDFPage_CreateAnnot()`
 - drawing comment: PDFium tạo `/Square` placeholder có `/NM`; canonicalizer đổi
   thành subtype cuối, ghi `/Rect`, `/L` hoặc `/Vertices`, common properties và
   vector `/AP` trong cùng staging transaction;
+- Ink: dùng cùng placeholder transaction, nhưng writer map từng điểm normalized
+  qua `FPDF_DeviceToPage()` và chuyển toàn bộ stroke đã map cho canonicalizer;
 - reply: tạo `/Text` placeholder rồi hoàn thiện `/IRT` và `/RT /R` ở bước
   canonicalize.
 
@@ -461,6 +499,12 @@ chung cho preview/writer: stroke `/C`, interior `/IC`, opacity `/CA`, border
 chối effect/ending chưa có primitive `/AP` tương ứng thay vì ghi dictionary và
 appearance lệch nhau.
 
+Ink dùng cùng common stroke/opacity/border snapshot nhưng không có interior,
+effect hay line ending. Canonicalizer atomically đổi placeholder thành
+`/Subtype /Ink`, ghi `/InkList`, `/BS`, `/C`, `/CA`, Print flag và `/AP /N`
+vector. Appearance dùng PDF line cap/join tròn (`1 J 1 j`) để khớp
+`InkDrawingView` và giữ mỗi stroke thành một subpath độc lập.
+
 Metadata comment mới gồm `/NM`, `/T`, `/CreationDate` và `/M` khi đã sửa.
 Author hiện lấy lần lượt từ `USER`, `LOGNAME`, tên home directory rồi application
 name; chưa có user profile riêng trong UI.
@@ -477,8 +521,8 @@ Trước khi sửa, writer xác thực annotation index, subtype, original `/Con
 - với Free Text, xóa stale `/AP`, ghi appearance id và để canonicalizer tạo lại
   wrapped Unicode appearance.
 
-Sticky Note và text markup giữ nguyên appearance nguồn vì sửa nội dung không
-thay đổi page geometry. Nếu Sticky Note/reply nguồn đang được sửa nhưng thiếu
+Sticky Note, text markup và Ink giữ nguyên appearance nguồn vì sửa nội dung
+không thay đổi page geometry. Nếu Sticky Note/reply nguồn đang được sửa nhưng thiếu
 normal appearance, writer bổ sung `/AP` vector từ Rect và color hiện có.
 Canonicalizer chỉ nhận danh sách text markup/drawing mới, nên không thay `/AP`
 của annotation nguồn đã có. Free Text là ngoại lệ vì text hiển thị trực tiếp
@@ -508,9 +552,10 @@ Bézier. Line và PolyLine giữ path mở, Polygon đóng path. `/BBox` bằng 
 matrix identity, và `/ExtGState` dùng cùng opacity cho stroke/fill. Annotation
 chỉ có comment vẫn không gọi `FPDFPage_GenerateContent()`.
 
-Pipeline vẫn chưa phải generic appearance generator cho Ink, Stamp hoặc các
-subtype PDF 2.0; mỗi subtype mới vẫn cần chiến lược `/AP` riêng và regression
-mở bằng reader ngoài PDFium.
+Ink dùng một path mở cho mỗi entry `/InkList`, round cap/join, cùng border width,
+màu và opacity giữa dictionary với appearance. Pipeline vẫn chưa phải generic
+appearance generator cho Stamp hoặc các subtype PDF 2.0; mỗi subtype mới vẫn
+cần chiến lược `/AP` riêng và regression mở bằng reader ngoài PDFium.
 
 ### 10.6 Transaction và reopen
 
@@ -556,7 +601,12 @@ Coverage comment hiện cần được duy trì cho:
 - normal `/AP` của Sticky Note/reply và chuẩn hóa CR trong `/Contents`;
 - round-trip Square, Circle, Line, Polygon và PolyLine, gồm geometry, common
   properties, vector `/AP`, undo/redo và rehydrate;
-- read-only index cho 7 markup subtype chưa hỗ trợ mutation;
+- Ink: một drag/một annotation, raw cap 4.096, validate/dedup/RDP và output cap
+  1.024; rehydrate nhiều stroke, dictionary `/InkList`/`/BS`/`/C`/`/CA`/Print,
+  vector `/AP` round cap/join và round-trip contents/reply/delete/history;
+- source Ink malformed/oversized downgrade thành generic read-only theo giới hạn
+  64 stroke, 4.096 điểm/stroke và 32.768 điểm tổng;
+- read-only index cho 6 markup subtype chưa hỗ trợ mutation;
 - author, creation/modification date và 700 UTF-16 code-unit limit;
 - comment index xuyên trang, duplicate page-local `/NM` và navigation;
 - sửa `/Contents`, `/M` và `/RC` của annotation nguồn;
@@ -565,7 +615,7 @@ Coverage comment hiện cần được duy trì cho:
 - xóa reply, cascade root deletion, Popup và mixed-subtype descendants;
 - undo/redo/discard trước Save;
 - annotation-only Save không làm thay đổi page-content object count;
-- CropBox, page rotation và Save/reopen lifecycle.
+- CropBox, page rotation và Save/reopen lifecycle, gồm mapping từng điểm Ink.
 
 Lệnh kiểm tra chuẩn sau thay đổi:
 
@@ -594,7 +644,6 @@ Bảng này không mô tả tính năng đã có.
 
 | Ưu tiên | Gap | Hướng triển khai |
 |---|---|---|
-| P0 | Pencil/freehand | Thêm `/Ink` với `/InkList`, point simplification, giới hạn điểm/stroke và AP. |
 | P0 | Text-aware markup đồng nhất | Dùng glyph cache của Squiggly cho Highlight, Underline và Strikeout. |
 | P1 | Sửa source geometry/style | Move/resize và property editor, giữ dictionary/AP/Popup/thread metadata. |
 | P1 | Free Text nâng cao | `/IT /FreeTextCallout`, `/CL`, `/LE`, Typewriter, `/Q`, `/RC`/`DS`, border/fill/opacity. |

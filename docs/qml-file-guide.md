@@ -1,6 +1,6 @@
 # Hướng dẫn toàn bộ tệp QML
 
-Tài liệu này mô tả 27 tệp QML đang được đăng ký trong QML module `TrePDF`.
+Tài liệu này mô tả 30 tệp QML đang được đăng ký trong QML module `TrePDF`.
 Mỗi mục tập trung vào trách nhiệm, dữ liệu đi vào/đi ra, quan hệ với C++ và các
 ràng buộc vòng đời cần giữ khi sửa code.
 
@@ -39,7 +39,8 @@ Main.qml
     │           ├── EditOverlay.qml
     │           │   ├── ShapeDraftView.qml
     │           │   ├── SquigglyLine.qml
-    │           │   └── CommentDrawingView.qml
+    │           │   ├── CommentDrawingView.qml
+    │           │   └── InkDrawingView.qml
     │           └── FormTextFieldOverlay.qml
     │               └── FormFieldLayer (C++)
     ├── CommentPanel.qml
@@ -173,8 +174,8 @@ ghi Save; mọi thay đổi vẫn là draft.
 **Vai trò:** command surface cho PDF comment/markup, nằm ngay sau tab Edit.
 
 - Khi tab mở, `AppRibbon` bật `PDFEditController.HighlightTool`; người dùng có
-  thể chuyển sang Sticky Note, Free Text, text markup hoặc năm drawing-comment
-  tool mà không bật form design mode.
+  thể chuyển sang Sticky Note, Free Text, text markup, Pencil hoặc năm
+  drawing-comment tool mà không bật form design mode.
 - Năm drawing-comment tool được gom trong một dropdown Shapes ba cột, cùng kiểu
   trình bày và tương tác với dropdown Shapes của tab Edit.
 - Highlight, Underline, Squiggly và Strikeout là split button: phần chính dùng
@@ -198,9 +199,12 @@ ghi Save; mọi thay đổi vẫn là draft.
   dung trong panel bên phải. Chọn Free Text cũng mở panel nếu panel đang đóng.
 - Rectangle/Oval/Line dùng drag; Polygon/Polyline dùng multi-click, Enter hoặc
   nhấp đúp để hoàn tất. Cả năm dùng màu drawing riêng và renderer vector chung.
+- Pencil dùng màu drawing chung và một drag liên tục để tạo đúng một Ink
+  annotation. Gesture/draft đều dùng `InkDrawingView`; model vẫn nhận nhiều
+  stroke khi rehydrate `/InkList` nguồn.
 - Gesture drawing có owner page duy nhất ở `PDFEditController`; bắt đầu trên
-  trang khác sẽ hủy polygon/polyline tạm của delegate trước để pooling không giữ
-  hai path dang dở song song.
+  trang khác sẽ hủy polygon/polyline hoặc Ink tạm của delegate trước để pooling
+  không giữ hai path dang dở song song.
 - Nhóm Manage bật/tắt danh sách, chọn bình luận trước/sau và xóa comment đang
   chọn; nhóm History dùng chung undo/redo của `PDFEditController`.
 - Undo/Redo dùng chung history của `PDFEditController` và điều hướng tới trang
@@ -216,8 +220,8 @@ Note/Free Text đang chọn và phản hồi một cấp.
   viewport và tự hủy khi document/revision đổi.
 - Hiển thị loại, trang, màu, nội dung rút gọn và trạng thái draft; chọn item sẽ
   chuyển về Select, chọn candidate tương ứng và điều hướng tới trang đó.
-- Comment được hỗ trợ, gồm Sticky Note, Free Text, text markup và reply có sẵn
-  trong PDF, dùng `TextArea` để sửa `/Contents`; nội dung được buffer theo
+- Comment được hỗ trợ, gồm Sticky Note, Free Text, text markup, Ink và reply có
+  sẵn trong PDF, dùng `TextArea` để sửa `/Contents`; nội dung được buffer theo
   `page + objectId` và commit khi mất focus, thu gọn panel, đổi session hoặc
   thực hiện Save.
 - Hai editor có bộ đếm trực tiếp và soft-limit 700 UTF-16 code unit. Nội dung có
@@ -233,9 +237,11 @@ Note/Free Text đang chọn và phản hồi một cấp.
   dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
   được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.
   Panel dùng chung trạng thái thu gọn theo document session.
-- Square, Circle, Line, Polygon và PolyLine có kind riêng, sửa nội dung/xóa/reply
-  như comment được hỗ trợ. Stamp, Caret, Ink, FileAttachment, Sound, Redact và
-  Projection dùng card `comment` chỉ đọc.
+- Square, Circle, Line, Polygon, PolyLine và Ink có kind riêng, sửa nội
+  dung/xóa/reply như comment được hỗ trợ. Stamp, Caret, FileAttachment, Sound,
+  Redact và Projection dùng card `comment` chỉ đọc. Ink có `/InkList` malformed
+  hoặc vượt giới hạn scan 64 stroke, 4.096 điểm/stroke hay 32.768 điểm tổng cũng
+  hạ xuống card generic chỉ đọc thay vì cấp phát dữ liệu không giới hạn.
 
 ### [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml)
 
@@ -384,6 +390,10 @@ data/candidate/history/selection đổi.
 - Các công cụ draw shape/text-markup/Free Text/drawing comment giữ point tạm thời,
   validate gesture rồi mới tạo một draft command. Click Free Text dùng kích
   thước mặc định; drag dùng rectangle đã clamp trong trang.
+- Pencil chỉ append mẫu khi cách mẫu trước ít nhất 1 logical pixel, giữ tối đa
+  4.096 raw points và tiếp tục cập nhật endpoint cuối khi đã đầy. Release gửi
+  đúng một stroke normalized sang controller;
+  pooling, đổi tool/session và Escape đều hủy gesture tạm.
 
 **Text rich-edit:**
 
@@ -408,6 +418,8 @@ data/candidate/history/selection đổi.
 - `DraftImageView` vẽ pixel snapshot của ảnh thêm mới; `ShapeDraftView` vẽ vector.
 - `CommentDrawingView` vẽ Square/Circle/Line/Polygon/PolyLine từ cùng geometry
   và common properties mà writer dùng để dựng `/AP`.
+- `InkDrawingView` vẽ preview Pencil và từng stroke draft bằng Qt Quick Shapes
+  với round cap/join, cùng màu, opacity và border width của save snapshot.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
 - Drag text/image/shape giữ preview trong QML nhưng chỉ commit geometry một lần
   khi thả; phím mũi tên tạo move command, Shift dùng bước lớn hơn.
@@ -433,6 +445,17 @@ data/candidate/history/selection đổi.
 **Vai trò:** renderer vector riêng cho drawing comment, dùng chung giữa preview
 gesture và added draft. Component nhận kind, vertices normalized, stroke/fill,
 opacity, border width/style và dash pattern; không hit-test hoặc ghi PDF.
+
+### [`src/Components/InkDrawingView.qml`](../src/Components/InkDrawingView.qml)
+
+**Vai trò:** renderer freehand riêng cho Ink, dùng chung giữa path Pencil đang
+kéo và draft đã tạo/rehydrate.
+
+- Nhận mảng stroke normalized, màu, opacity và stroke width; mỗi stroke được vẽ
+  thành `PathPolyline` độc lập bằng `Shape.CurveRenderer`.
+- Dùng round cap/join và độ rộng tối thiểu 0,75 logical pixel để preview rõ ở
+  mọi zoom. Component không validate/simplify hay ghi `/InkList`; controller và
+  writer sở hữu các bước đó.
 
 ### [`src/Components/ShapeDraftView.qml`](../src/Components/ShapeDraftView.qml)
 

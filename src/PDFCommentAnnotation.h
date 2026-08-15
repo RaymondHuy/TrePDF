@@ -13,7 +13,8 @@ enum class DrawingType {
     Circle,
     Line,
     Polygon,
-    PolyLine
+    PolyLine,
+    Ink
 };
 
 enum class BorderStyle {
@@ -59,13 +60,15 @@ struct CommonProperties {
 };
 
 // Geometry is expressed in PDF page coordinates. UI/controller geometry stays
-// normalized until the save writer maps it through FPDF_DeviceToPage().
+// normalized until the save writer maps it through FPDF_DeviceToPage(). Ink
+// keeps each /InkList path as a separate stroke instead of flattening paths.
 struct DrawingAnnotation {
     int page = -1;
     QString annotationId;
     DrawingType type = DrawingType::Square;
     QRectF pageRect;
     QVector<QPointF> pageVertices;
+    QVector<QVector<QPointF>> pageStrokes;
     CommonProperties properties;
 };
 

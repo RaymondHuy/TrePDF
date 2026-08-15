@@ -222,7 +222,7 @@ orchestration Save.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
 - Đọc Highlight, Squiggly, Underline, Strikeout, Text, FreeText, Square, Circle,
-  Line, Polygon và PolyLine annotation;
+  Line, Polygon, PolyLine và Ink annotation;
   chuẩn hóa quad/rect, màu và `/Contents` thành comment candidate. Nội dung
   annotation nguồn được sửa trong panel bằng draft riêng; canvas vẫn không cho
   move/resize annotation nguồn, còn ReadOnly/LockedContents không nhận mutation.
@@ -236,6 +236,11 @@ orchestration Save.
 - `requestCommentIndex()` dùng worker riêng để quét annotation-only từng trang,
   nhả PDFium lock giữa các trang và chỉ giữ comment candidate. Vì vậy danh sách
   toàn tài liệu không làm phình cache text/image 12 trang của viewport.
+- Ink hợp lệ được đọc thành các normalized stroke riêng, không flatten
+  `/InkList`. Scanner giới hạn 64 stroke, 4.096 điểm mỗi stroke và 32.768 điểm
+  tổng; stroke phải có ít nhất hai điểm hữu hạn. Ink malformed hoặc oversized
+  hạ xuống kind `comment` generic chỉ đọc để panel vẫn điều hướng mà không cho
+  mutation hay cấp phát dữ liệu không giới hạn.
 - Gom các text object tương thích trên cùng visual line thành một candidate nhưng
   giữ mọi source object path để suppress/remove chính xác.
 - Trích source bounds, baseline/origin, font family/style/size/stretch, render
@@ -258,7 +263,7 @@ orchestration Save.
 
 - Draft chứa kind, source ids/paths, text, character spans, paragraph formats,
   immutable source rect, layout frame, content bounds, image snapshot, shape,
-  text-markup/sticky-note geometry và insertion order tùy loại.
+  text-markup/sticky-note geometry, các stroke Ink và insertion order tùy loại.
 - Mỗi action logic tạo snapshot command: add, delete, move, resize, format, page
   insert/delete. Undo/redo phục hồi toàn bộ state liên quan, không chỉ text.
 - `hasDrafts` bao gồm edit history, transient page structure, form runtime draft
@@ -291,13 +296,20 @@ orchestration Save.
   rectangle/quad của gesture. Sticky Note giữ frame 24 pt. Free Text nhận click
   hoặc drag để tạo frame text box, dùng kích thước mặc định cho click; nội dung
   của cả hai được chỉnh từ `CommentPanel`.
+- Ink đi qua `addDrawingComment()` nhưng giữ geometry dạng mảng stroke. Một
+  Pencil drag gửi tối đa 4.096 raw points; controller kiểm kiểu/finite, clamp,
+  bỏ điểm gần trùng, từ chối nét quá ngắn, rồi simplify RDP với tolerance khoảng
+  0,75 PDF point. Nếu vẫn quá lớn, tolerance tăng có giới hạn và output bị
+  hard-cap ở 1.024 điểm. Một drag tạo một annotation/stroke; model vẫn hỗ trợ
+  nhiều stroke khi rehydrate `/InkList` nguồn.
 - `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
   hướng phẳng cho panel theo thứ tự root rồi replies. `setCommentText()` định
   danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
   gia cùng snapshot undo/redo. `setCommentText()` và `addCommentReply()` cùng
   enforce tối đa 700 UTF-16 code unit; `addCommentReply()` chỉ nhận root.
-- Annotation-only scan giữ kind riêng cho Line/Square/Circle/Polygon/PolyLine;
-  Stamp/Caret/Ink/FileAttachment/Sound/Redact/Projection dùng kind `comment`
+- Annotation-only scan giữ kind riêng cho
+  Line/Square/Circle/Polygon/PolyLine/Ink;
+  Stamp/Caret/FileAttachment/Sound/Redact/Projection dùng kind `comment`
   chỉ đọc. Mọi đường sửa, xóa và reply đều kiểm `commentTextReadOnly` trước khi
   tạo draft.
 - Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
@@ -354,6 +366,11 @@ orchestration Save.
 - Tạo drawing comment qua Square placeholder, snapshot common properties và
   map normalized geometry bằng `FPDF_DeviceToPage()`; canonicalizer đổi subtype,
   ghi `/L`/`/Vertices`, dictionary style và vector `/AP` cuối cùng.
+- Ink dùng cùng placeholder transaction nhưng map từng điểm trong từng stroke
+  bằng `FPDF_DeviceToPage()`. Request giữ các stroke riêng; canonicalizer ghi
+  `/Subtype /Ink`, `/InkList`, `/BS`, `/C`, `/CA`, Print flag và `/AP` vector
+  có round cap/join. Writer giới hạn 64 stroke, 4.096 điểm mỗi stroke và 32.768
+  điểm tổng trước khi serialize.
 - Sticky Note và reply mới được gắn normal `/AP` vector ngay trên writer
   annotation; source Sticky Note đang sửa mà thiếu AP cũng được bổ sung. Nội
   dung comment dùng LF trong model, chuẩn hóa thành CR khi ghi `/Contents`.
@@ -611,7 +628,7 @@ TrePDF phải fail rõ ràng.
 và [`src/PDFAcroFormCanonicalizer.h`](../src/PDFAcroFormCanonicalizer.h)
 
 **Vai trò:** bộ đọc/ghi PDF mục đích hẹp để hoàn thiện AcroForm, liên kết reply,
-appearance FreeText và normal appearance vector của text/drawing markup mà
+appearance FreeText và normal appearance vector của text/drawing/Ink markup mà
 PDFium public API không dựng đủ an toàn.
 
 **Đọc cấu trúc:**
@@ -647,6 +664,10 @@ PDFium public API không dựng đủ an toàn.
   `/NM`, ghi subtype/Rect/`/L`/`/Vertices` cùng `/C`, `/IC`, `/CA`, `/BS`, `/F`,
   `/IT`, `/Name`, `/LE` và `/AP` Form XObject vector. Effect/ending chưa có
   primitive appearance tương ứng bị từ chối thay vì lưu dictionary lệch hình.
+- Với Ink mới, tìm cùng placeholder qua `/NM`, giữ từng stroke trong
+  `/InkList`, ghi `/Subtype /Ink`, `/Rect`, `/C`, `/CA`, `/BS`, `/F` và `/AP`
+  Form XObject. Stream dùng một path mở cho mỗi stroke với PDF round cap/join;
+  dictionary và appearance được append atomically trong file staging.
 - Tạo Checkbox Widget với `/AP` Off/Yes riêng, `/AS`, value/default value và
   vector check appearance.
 - Gom Radio theo Group ID thành một field cha `/FT /Btn` có `/Kids`; mỗi Widget
@@ -742,8 +763,11 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   formatting, typing format, paragraph alignment, editor undo và scale qua nhiều
   lần save.
 - Content round-trip: text, Vietnamese, paint Fill/Stroke/pattern/grayscale,
-  Highlight/Squiggly/Underline/Strikeout/Sticky Note/Free Text, image, shape,
-  source move/delete, z-order, CropBox và rotated page.
+  Highlight/Squiggly/Underline/Strikeout/Sticky Note/Free Text/Ink, image,
+  shape, source move/delete, z-order, CropBox và rotated page. Ink coverage gồm
+  validate/dedup/simplify/cap, nhiều stroke rehydrate, bounded malformed-source
+  fallback, contents/reply/delete/history, `/InkList` và vector `/AP` round
+  cap/join.
 - Page operation: insert/delete, undo/redo/discard, source page mapping và save.
 - Save lifecycle: async save, failure giữ draft, Save/Save As và reopen.
 - Multi-tab: document/session độc lập, rotation/draft riêng, save đúng tab và

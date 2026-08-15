@@ -61,6 +61,8 @@ Flickable {
             || editController.tool === PDFEditController.LineTool
             || editController.tool === PDFEditController.PolygonTool
             || editController.tool === PDFEditController.PolyLineTool
+    readonly property bool inkToolActive:
+        editController.tool === PDFEditController.InkTool
     property int pendingColorTool: PDFEditController.HighlightTool
     property string pendingColorDialogTitle: ""
 
@@ -216,6 +218,7 @@ Flickable {
             || kind === "line"
             || kind === "polygon"
             || kind === "polyLine"
+            || kind === "ink"
     }
 
     onDocumentChanged: closePopups()
@@ -738,6 +741,21 @@ Flickable {
             theme: root.theme
             //% "Drawing"
             title: qsTrId("DrawingComments")
+
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Pencil"
+                text: qsTrId("Pencil")
+                //% "Draw a freehand ink comment"
+                toolTipText: qsTrId("AddInkComment")
+                iconSource: "../assets/icons/pen-line.svg"
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.inkToolActive
+                onClicked: root.selectDrawingComment(
+                    PDFEditController.InkTool)
+            }
 
             RibbonButton {
                 id: drawingCommentButton

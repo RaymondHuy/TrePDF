@@ -67,8 +67,8 @@ editable candidate while retaining every source object path for draft rendering
 and persistence.
 
 The Comment ribbon provides Sticky Note, Free Text, Highlight, Squiggly,
-Underline, Strikeout, Rectangle, Oval, Line, Polygon, and Polyline tools plus a
-collapsible, whole-document comments panel. Supported comments and replies,
+Underline, Strikeout, Rectangle, Oval, Line, Polygon, Polyline, and Pencil tools
+plus a collapsible, whole-document comments panel. Supported comments and replies,
 including annotations already in the PDF, can be selected
 and have their text edited in the panel. Markup uses a compact curated color
 grid and a system picker for custom colors. Squiggly is source-text-aware: its
@@ -97,8 +97,20 @@ panel but their standalone appearances are hidden from the PDF page viewer.
 Square, Circle, Line, Polygon, and PolyLine comments use shared semantic stroke,
 interior, opacity, border, effect, and line-ending properties. Save writes
 standard `/Rect`, `/L` or `/Vertices` geometry and a matching vector `/AP`.
-Stamp, Caret, Ink, FileAttachment, Sound, Redact, and PDF 2.0 Projection are
-still indexed read-only for reading and navigation.
+Each Pencil drag creates one `/Ink` annotation. QML samples the freehand path at
+least one logical pixel apart, keeps at most 4,096 raw points, and continues
+tracking the final endpoint at that cap; the controller validates and
+deduplicates it, simplifies it at roughly 0.75 PDF
+point, and caps the stored result at 1,024 points. Rehydrated Ink supports
+multiple strokes from `/InkList`; source scanning is bounded to 64 strokes,
+4,096 points per stroke, and 32,768 points total. Malformed or oversized source
+Ink is kept as a generic read-only comment. Ink drafts and their gesture preview
+share the Qt Quick Shapes `InkDrawingView`; Save maps every normalized point
+through `FPDF_DeviceToPage()` and writes `/Subtype /Ink`, `/InkList`, `/BS`, `/C`,
+`/CA`, the Print flag, and a vector `/AP` with round caps and joins. Source Ink
+supports contents editing, deletion, replies, undo/redo/discard, Save/Save As,
+and reopen. Stamp, Caret, FileAttachment, Sound, Redact, and PDF 2.0 Projection
+are still indexed read-only for reading and navigation.
 Comment changes are per-tab session drafts with
 undo, redo, discard, selection, and deletion support. Save and Save As persist
 them as standard PDF annotations with geometry, color, contents, print
