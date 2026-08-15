@@ -20,17 +20,6 @@ Item {
 
     Accessible.ignored: true
 
-    function scaledStroke(stroke) {
-        const points = []
-        for (let index = 0; index < stroke.length; ++index) {
-            const point = stroke[index]
-            points.push(Qt.point(
-                Number(point.x) * width,
-                Number(point.y) * height))
-        }
-        return points
-    }
-
     Repeater {
         model: root.strokes
 
@@ -38,21 +27,20 @@ Item {
             id: strokeShape
 
             required property var modelData
-            readonly property var scaledPoints:
-                root.scaledStroke(modelData)
 
             anchors.fill: parent
             visible: modelData.length >= 2
             preferredRendererType: Shape.CurveRenderer
 
             ShapePath {
+                scale: Qt.size(root.width, root.height)
                 fillColor: "transparent"
                 strokeColor: root.effectiveStrokeColor
                 strokeWidth: root.effectiveStrokeWidth
                 capStyle: ShapePath.RoundCap
                 joinStyle: ShapePath.RoundJoin
 
-                PathPolyline { path: strokeShape.scaledPoints }
+                PathPolyline { path: strokeShape.modelData }
             }
         }
     }
