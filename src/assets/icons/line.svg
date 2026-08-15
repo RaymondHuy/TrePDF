@@ -1,1 +1,11 @@
-<svg id="Layer_1" enable-background="new 0 0 64 64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><path d="m5.8476562 59.1523438c.2558594 0 .5117188-.0976562.7070312-.2929688l52.3046876-52.3046875c.390625-.390625.390625-1.0234375 0-1.4140625s-1.0234375-.390625-1.4140625 0l-52.3046875 52.3046875c-.390625.390625-.390625 1.0234375 0 1.4140625.1953125.1953125.4511719.2929688.7070312.2929688z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="48"
+     height="32"
+     viewBox="0 0 48 32"
+     fill="none"
+     stroke="#3f4147"
+     stroke-width="2"
+     stroke-linecap="round"
+     stroke-linejoin="round">
+    <path d="M5 27 43 5"/>
+</svg>
