@@ -43,7 +43,10 @@ Current features:
   box or using arrow keys, and resized with eight side/corner handles. Resize
   applies the frame's horizontal and vertical scale to every stroke; each
   gesture is committed as one undoable command. Saving source Ink geometry
-  updates `/Rect` and `/InkList` while preserving its `/AP`.
+  updates `/Rect` and `/InkList` without allowing PDFium to mutate the source
+  appearance `/BBox`. Pure movement and external/custom appearances preserve
+  `/AP`; a resized TrePDF-managed Ink receives a matching canonical `/AP` when
+  its captured properties are fully supported.
   Squiggly accepts only non-whitespace source-text glyphs intersected by the
   drag gesture, snaps the result into per-line rectangles/QuadPoints, and
   rejects whitespace-only or no-text selections. Nearly horizontal gestures use
@@ -462,8 +465,11 @@ clipped or elided unintentionally.
   Print flag, and a vector `/AP` with round line caps and joins. Ink supports
   source content edits and translation, delete, reply, undo/redo/discard,
   Save/Save As, and reopen without regenerating page content on annotation-only
-  pages. Source translation updates `/Rect` and every `/InkList` stroke while
-  keeping the original `/AP` and unrelated annotation dictionary entries.
+  pages. Source geometry updates patch `/Rect` and every `/InkList` stroke
+  after PDFium serialization, preserving unrelated annotation dictionary
+  entries. Translation keeps the original `/AP`; resize regenerates a matching
+  normal appearance only for a provenance-validated TrePDF Ink whose captured
+  properties are supported, while external/custom appearances remain intact.
 - Persist added shapes as top-level PDF path objects. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain

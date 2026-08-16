@@ -356,12 +356,12 @@ xóa, undo/redo/discard và Save/reopen đều giữ nguyên semantic nhiều st
 Geometry candidate là union của stroke, có padding theo border width; tọa độ
 vẫn normalized theo page chưa xoay.
 
-Ink mới và Ink nguồn hợp lệ có thể kéo bằng toàn bộ bounding box hoặc di chuyển
-bằng phím mũi tên. Controller chỉ cho phép translate, không resize: cùng một
-delta normalized được áp vào frame, content bounds và mọi điểm của mọi stroke.
-Một gesture chỉ commit một command nên undo/redo/discard không tạo history theo
-từng mouse move. Ink nguồn có ReadOnly, LockedContents, Locked hoặc `/InkList`
-không hợp lệ vẫn không thể di chuyển.
+Ink mới và Ink nguồn hợp lệ có thể kéo bằng toàn bộ bounding box, di chuyển bằng
+phím mũi tên hoặc resize bằng tám handle cạnh/góc. Move áp cùng một delta
+normalized; resize áp affine scale ngang/dọc từ frame ban đầu vào mọi điểm của
+mọi stroke. Mỗi gesture chỉ commit một command nên undo/redo/discard không tạo
+history theo từng mouse move. Ink nguồn có ReadOnly, LockedContents, Locked
+hoặc `/InkList` không hợp lệ vẫn không thể đổi geometry.
 
 ## 7. Reply và comment thread
 
@@ -533,14 +533,18 @@ Trước khi sửa, writer xác thực annotation index, subtype, original `/Con
 
 Với Ink đổi geometry, controller translate hoặc scale từng stroke từ frame ban
 đầu sang frame mới. Writer map frame và các stroke này qua
-`FPDF_DeviceToPage()`, thay `/Rect` và dựng lại `/InkList` trên chính annotation
-nguồn. Normal `/AP` không bị viết lại: PDF mapping appearance vào Rect mới nên
-appearance tùy biến, màu, opacity, z-order dictionary, `/Popup`, `/IRT` và các
-key mở rộng của reader khác vẫn được bảo toàn. Save annotation-only không gọi
-`FPDFPage_GenerateContent()`.
+`FPDF_DeviceToPage()`, gắn marker UUID tạm rồi để canonicalizer thay trực tiếp
+`/Rect` và `/InkList` sau bước serialize. Luồng này tránh side effect của
+`FPDFAnnot_SetRect()` có thể nới `/AP /BBox` mà không scale drawing commands.
+Move thuần và Ink ngoài/custom giữ nguyên `/AP`. Với Ink có provenance TrePDF
+hợp lệ (`/NM` và `/TrePDFThreadId` cùng ID `ink:<uuid>`), resize tạo normal
+`/AP` mới từ strokes đã scale nếu toàn bộ properties được hỗ trợ; nếu không thì
+fallback giữ appearance nguồn. Marker luôn bị xóa trong cùng incremental
+transaction; `/Popup`, `/IRT`, metadata và key mở rộng không bị viết lại. Save
+annotation-only không gọi `FPDFPage_GenerateContent()`.
 
-Sticky Note, text markup và Ink giữ nguyên appearance nguồn vì sửa nội dung
-không thay đổi page geometry. Nếu Sticky Note/reply nguồn đang được sửa nhưng thiếu
+Sticky Note, text markup và Ink giữ nguyên appearance nguồn khi chỉ sửa nội dung
+vì page geometry không đổi. Nếu Sticky Note/reply nguồn đang được sửa nhưng thiếu
 normal appearance, writer bổ sung `/AP` vector từ Rect và color hiện có.
 Canonicalizer chỉ nhận danh sách text markup/drawing mới, nên không thay `/AP`
 của annotation nguồn đã có. Free Text là ngoại lệ vì text hiển thị trực tiếp
@@ -621,9 +625,10 @@ Coverage comment hiện cần được duy trì cho:
   properties, vector `/AP`, undo/redo và rehydrate;
 - Ink: một drag/một annotation, raw cap 4.096, validate/dedup/RDP và output cap
   1.024; rehydrate nhiều stroke, dictionary `/InkList`/`/BS`/`/C`/`/CA`/Print,
-  vector `/AP` round cap/join, move added/source với undo/redo/discard,
-  translate mọi stroke, giữ source Rect/AP/metadata và round-trip
-  contents/reply/delete/history;
+  vector `/AP` round cap/join, move/resize added/source với undo/redo/discard,
+  affine-transform mọi stroke, pure move giữ source AP, resize TrePDF-managed
+  đồng bộ `/AP` với `/InkList`, external/custom AP và metadata vẫn được giữ,
+  cùng round-trip contents/reply/delete/history;
 - source Ink malformed/oversized downgrade thành generic read-only theo giới hạn
   64 stroke, 4.096 điểm/stroke và 32.768 điểm tổng;
 - read-only index cho 6 markup subtype chưa hỗ trợ mutation;

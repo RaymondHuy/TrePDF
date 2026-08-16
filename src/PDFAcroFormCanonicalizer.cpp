@@ -7442,6 +7442,402 @@ bool PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
         error);
 }
 
+bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
+    const QString &filePath,
+    const QVector<PDFCommentAnnotation::SourceInkGeometryUpdate> &updates,
+    QString &error)
+{
+    constexpr qsizetype maximumAnnotations = 4096;
+    constexpr qsizetype maximumInkStrokes = 64;
+    constexpr qsizetype maximumStrokePoints = 4096;
+    constexpr qsizetype maximumTotalPoints = 65536;
+    constexpr qsizetype maximumTotalAppearanceBytes = 64 * 1024 * 1024;
+    constexpr qreal maximumCoordinateMagnitudePoints = 10'000'000.0;
+    if (updates.isEmpty()) {
+        return true;
+    }
+    if (updates.size() > maximumAnnotations) {
+        error = QStringLiteral(
+            "Too many source Ink geometry updates were requested.");
+        return false;
+    }
+
+    qsizetype totalPoints = 0;
+    QSet<QString> markerIds;
+    const auto finitePoint = [
+        maximumCoordinateMagnitudePoints](const QPointF &point) {
+        return std::isfinite(point.x())
+            && std::isfinite(point.y())
+            && qAbs(point.x()) <= maximumCoordinateMagnitudePoints
+            && qAbs(point.y()) <= maximumCoordinateMagnitudePoints;
+    };
+    for (const PDFCommentAnnotation::SourceInkGeometryUpdate &update
+         : updates) {
+        const PDFCommentAnnotation::DrawingAnnotation &annotation
+            = update.annotation;
+        const QRectF bounds = annotation.pageRect.normalized();
+        if (update.markerId.isEmpty()
+            || markerIds.contains(update.markerId)
+            || annotation.page < 0
+            || annotation.type != PDFCommentAnnotation::DrawingType::Ink
+            || !annotation.pageVertices.isEmpty()
+            || annotation.pageStrokes.isEmpty()
+            || annotation.pageStrokes.size() > maximumInkStrokes
+            || !bounds.isValid()
+            || bounds.width() <= 0.0
+            || bounds.height() <= 0.0
+            || !finitePoint(bounds.topLeft())
+            || !finitePoint(bounds.bottomRight())) {
+            error = QStringLiteral(
+                "A source Ink geometry update is invalid or duplicated.");
+            return false;
+        }
+        markerIds.insert(update.markerId);
+        for (const QVector<QPointF> &stroke : annotation.pageStrokes) {
+            if (stroke.size() < 2
+                || stroke.size() > maximumStrokePoints
+                || stroke.size() > maximumTotalPoints - totalPoints
+                || !std::all_of(
+                    stroke.cbegin(),
+                    stroke.cend(),
+                    finitePoint)) {
+                error = QStringLiteral(
+                    "Source Ink geometry exceeds the safety limit.");
+                return false;
+            }
+            for (qsizetype index = 1; index < stroke.size(); ++index) {
+                const QPointF previous = stroke.at(index - 1);
+                const QPointF current = stroke.at(index);
+                if (std::hypot(
+                        current.x() - previous.x(),
+                        current.y() - previous.y()) <= 0.0) {
+                    error = QStringLiteral(
+                        "A source Ink stroke contains a zero-length segment.");
+                    return false;
+                }
+            }
+            totalPoints += stroke.size();
+        }
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0) {
+        error = file.errorString();
+        return false;
+    }
+    const qint64 fileSize = file.size();
+    uchar *mapped = file.map(0, fileSize);
+    if (!mapped) {
+        error = file.errorString();
+        return false;
+    }
+
+    ParsedPdf pdf;
+    if (!parseXref(
+            reinterpret_cast<const char *>(mapped),
+            fileSize,
+            pdf,
+            error)) {
+        file.unmap(mapped);
+        return false;
+    }
+    const auto fail = [&file, mapped, &error](const QString &message) {
+        error = message;
+        file.unmap(mapped);
+        return false;
+    };
+
+    int highestObject = 0;
+    for (auto entry = pdf.entries.cbegin(); entry != pdf.entries.cend(); ++entry) {
+        highestObject = (std::max)(highestObject, entry.key());
+    }
+    int nextObjectNumber = (std::max)(pdf.declaredSize, highestObject + 1);
+
+    struct DictionaryReplacement {
+        qsizetype start = -1;
+        qsizetype end = -1;
+        QByteArray value;
+    };
+    QHash<int, QVector<DictionaryReplacement>> replacementsByContainer;
+    QHash<int, ObjectReference> containerReferences;
+    QHash<int, QByteArray> rewrittenObjects;
+    QHash<int, ObjectReference> rewrittenReferences;
+    QList<IncrementalObject> incrementalObjects;
+    incrementalObjects.reserve(updates.size() * 2);
+    qsizetype totalAppearanceBytes = 0;
+    const QByteArray markerDictionaryKey
+        = QByteArrayLiteral("/")
+        + PDFCommentAnnotation::kSourceInkGeometryMarkerKey;
+
+    const auto canReplaceNormalAppearance = [](
+        QByteArray &dictionary,
+        int appearanceObjectNumber) {
+        QString replacementError;
+        qsizetype appearanceStart = -1;
+        qsizetype appearanceEnd = -1;
+        if (!directDictionaryValueRange(
+                dictionary,
+                QByteArrayView("/AP"),
+                appearanceStart,
+                appearanceEnd,
+                replacementError)) {
+            return false;
+        }
+        const QByteArray normalReference
+            = QByteArray::number(appearanceObjectNumber)
+            + QByteArrayLiteral(" 0 R");
+        if (appearanceStart < 0) {
+            return replaceTopLevelDictionaryValue(
+                dictionary,
+                QByteArrayView("/AP"),
+                QByteArrayLiteral("<< /N ") + normalReference
+                    + QByteArrayLiteral(" >>"),
+                true,
+                replacementError);
+        }
+
+        QByteArray appearanceDictionary = dictionary.mid(
+            appearanceStart,
+            appearanceEnd - appearanceStart);
+        if (!appearanceDictionary.startsWith("<<")) {
+            return false;
+        }
+        qsizetype normalStart = -1;
+        qsizetype normalEnd = -1;
+        if (!directDictionaryValueRange(
+                appearanceDictionary,
+                QByteArrayView("/N"),
+                normalStart,
+                normalEnd,
+                replacementError)) {
+            return false;
+        }
+        if (normalStart >= 0) {
+            ObjectReference existingNormal;
+            qsizetype referenceEnd = -1;
+            if (!parseReference(
+                    appearanceDictionary.constData(),
+                    appearanceDictionary.size(),
+                    normalStart,
+                    existingNormal,
+                    &referenceEnd)
+                || referenceEnd != normalEnd) {
+                // A state dictionary or another custom normal appearance shape
+                // cannot be replaced without losing information.
+                return false;
+            }
+        }
+        if (!replaceTopLevelDictionaryValue(
+                appearanceDictionary,
+                QByteArrayView("/N"),
+                normalReference,
+                true,
+                replacementError)) {
+            return false;
+        }
+        return replaceTopLevelDictionaryValue(
+            dictionary,
+            QByteArrayView("/AP"),
+            appearanceDictionary,
+            true,
+            replacementError);
+    };
+
+    for (const PDFCommentAnnotation::SourceInkGeometryUpdate &update
+         : updates) {
+        const PDFCommentAnnotation::DrawingAnnotation &annotation
+            = update.annotation;
+        const PlaceholderLocation placeholder = annotationForStringId(
+            pdf,
+            QByteArrayView(markerDictionaryKey),
+            update.markerId,
+            QByteArrayView("/Ink"));
+        const bool located = placeholder.widget.number >= 0
+            || (placeholder.container.number >= 0
+                && placeholder.dictionaryStart >= 0
+                && placeholder.dictionaryEnd > placeholder.dictionaryStart);
+        if (!located) {
+            return fail(QStringLiteral(
+                "A marked source Ink annotation could not be located."));
+        }
+
+        QByteArray object;
+        qsizetype dictionaryStart = -1;
+        qsizetype dictionaryEnd = -1;
+        if (placeholder.isDirect()) {
+            object = completeObject(pdf, placeholder.container.number, error);
+            dictionaryStart = placeholder.dictionaryStart;
+            dictionaryEnd = placeholder.dictionaryEnd;
+        } else {
+            object = completeObject(pdf, placeholder.widget.number, error);
+            dictionaryStart = object.indexOf("<<");
+            if (dictionaryStart >= 0
+                && !matchingDictionaryEnd(
+                    object.constData(),
+                    object.size(),
+                    dictionaryStart,
+                    dictionaryEnd)) {
+                dictionaryEnd = -1;
+            }
+        }
+        if (object.isEmpty()
+            || dictionaryStart < 0
+            || dictionaryEnd <= dictionaryStart
+            || dictionaryEnd > object.size()) {
+            return fail(error.isEmpty()
+                    ? QStringLiteral(
+                        "A source Ink annotation dictionary is malformed.")
+                    : error);
+        }
+
+        QByteArray dictionary = object.mid(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart);
+        const QRectF bounds = annotation.pageRect.normalized();
+        const QByteArray rect = QByteArrayLiteral("[")
+            + pdfNumber(bounds.left()) + ' '
+            + pdfNumber(bounds.top()) + ' '
+            + pdfNumber(bounds.right()) + ' '
+            + pdfNumber(bounds.bottom()) + ']';
+        if (!replaceTopLevelDictionaryValue(
+                dictionary,
+                QByteArrayView("/Rect"),
+                rect,
+                true,
+                error)
+            || !replaceTopLevelDictionaryValue(
+                dictionary,
+                QByteArrayView("/InkList"),
+                pdfInkList(annotation.pageStrokes),
+                true,
+                error)
+            || !removeTopLevelDictionaryValue(
+                dictionary,
+                QByteArrayView(markerDictionaryKey),
+                error)) {
+            return fail(error);
+        }
+
+        QByteArray appearanceContent;
+        bool generatedAppearance = false;
+        if (update.regenerateAppearance
+            && nextObjectNumber < std::numeric_limits<int>::max()) {
+            QString appearanceError;
+            QByteArray candidateContent;
+            if (drawingAppearanceData(
+                    annotation,
+                    candidateContent,
+                    appearanceError)
+                && candidateContent.size()
+                    <= maximumTotalAppearanceBytes - totalAppearanceBytes) {
+                QByteArray candidateDictionary = dictionary;
+                if (canReplaceNormalAppearance(
+                        candidateDictionary,
+                        nextObjectNumber)) {
+                    dictionary = std::move(candidateDictionary);
+                    appearanceContent = std::move(candidateContent);
+                    generatedAppearance = true;
+                }
+            }
+        }
+        if (generatedAppearance) {
+            const int appearanceObjectNumber = nextObjectNumber++;
+            totalAppearanceBytes += appearanceContent.size();
+            incrementalObjects.append({
+                ObjectReference{appearanceObjectNumber, 0},
+                drawingAppearanceObject(
+                    appearanceObjectNumber,
+                    annotation,
+                    appearanceContent)});
+        }
+
+        if (placeholder.isDirect()) {
+            replacementsByContainer[placeholder.container.number].append({
+                dictionaryStart,
+                dictionaryEnd,
+                dictionary});
+            containerReferences.insert(
+                placeholder.container.number,
+                placeholder.container);
+            continue;
+        }
+        if (rewrittenObjects.contains(placeholder.widget.number)) {
+            return fail(QStringLiteral(
+                "Two source Ink updates resolved to the same annotation."));
+        }
+        object.replace(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart,
+            dictionary);
+        rewrittenObjects.insert(placeholder.widget.number, std::move(object));
+        rewrittenReferences.insert(
+            placeholder.widget.number,
+            placeholder.widget);
+    }
+
+    for (auto container = replacementsByContainer.begin();
+         container != replacementsByContainer.end();
+         ++container) {
+        if (rewrittenObjects.contains(container.key())) {
+            return fail(QStringLiteral(
+                "A source Ink annotation container cannot be rewritten safely."));
+        }
+        QByteArray object = completeObject(pdf, container.key(), error);
+        if (object.isEmpty()) {
+            return fail(error);
+        }
+        std::sort(
+            container->begin(),
+            container->end(),
+            [](const DictionaryReplacement &left,
+               const DictionaryReplacement &right) {
+                return left.start > right.start;
+            });
+        qsizetype previousStart = object.size();
+        for (const DictionaryReplacement &replacement
+             : std::as_const(*container)) {
+            if (replacement.start < 0
+                || replacement.end <= replacement.start
+                || replacement.end > previousStart
+                || replacement.end > object.size()) {
+                return fail(QStringLiteral(
+                    "Overlapping source Ink annotation rewrites are not supported."));
+            }
+            object.replace(
+                replacement.start,
+                replacement.end - replacement.start,
+                replacement.value);
+            previousStart = replacement.start;
+        }
+        rewrittenObjects.insert(container.key(), std::move(object));
+        rewrittenReferences.insert(
+            container.key(),
+            containerReferences.value(container.key()));
+    }
+    for (auto rewritten = rewrittenObjects.begin();
+         rewritten != rewrittenObjects.end();
+         ++rewritten) {
+        incrementalObjects.append({
+            rewrittenReferences.value(rewritten.key()),
+            std::move(rewritten.value())});
+    }
+
+    const bool sourceEndsWithNewline = fileSize > 0
+        && reinterpret_cast<const char *>(mapped)[fileSize - 1] == '\n';
+    const ObjectReference root = pdf.root;
+    const qint64 previousXref = pdf.startXref;
+    file.unmap(mapped);
+    file.close();
+    return appendIncrementalUpdate(
+        filePath,
+        root,
+        previousXref,
+        nextObjectNumber,
+        sourceEndsWithNewline,
+        std::move(incrementalObjects),
+        error);
+}
+
 bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
     const QString &filePath,
     const QVector<AnnotationReply> &replies,

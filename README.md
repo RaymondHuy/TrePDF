@@ -108,8 +108,12 @@ Ink is kept as a generic read-only comment. Ink drafts and their gesture preview
 share the Qt Quick Shapes `InkDrawingView`; Save maps every normalized point
 through `FPDF_DeviceToPage()` and writes `/Subtype /Ink`, `/InkList`, `/BS`, `/C`,
 `/CA`, the Print flag, and a vector `/AP` with round caps and joins. Source Ink
-supports contents editing, deletion, replies, undo/redo/discard, Save/Save As,
-and reopen. Stamp, Caret, FileAttachment, Sound, Redact, and PDF 2.0 Projection
+supports moving and eight-handle affine resizing of every stroke, contents
+editing, deletion, replies, undo/redo/discard, Save/Save As, and reopen. Save
+patches source `/Rect` and `/InkList` without PDFium mutating its appearance;
+pure moves and external/custom Ink preserve `/AP`, while supported resized
+TrePDF Ink receives an appearance matching the scaled strokes. Stamp, Caret,
+FileAttachment, Sound, Redact, and PDF 2.0 Projection
 are still indexed read-only for reading and navigation.
 Comment changes are per-tab session drafts with
 undo, redo, discard, selection, and deletion support. Save and Save As persist

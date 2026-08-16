@@ -31,6 +31,7 @@
 #include <QTextLayout>
 #include <QTextOption>
 #include <QTemporaryFile>
+#include <QUuid>
 #include <QVector>
 
 #include <fpdf_annot.h>
@@ -3273,7 +3274,9 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
     int pageIndex,
     qreal pageWidth,
     qreal pageHeight,
-    const PageCoordinateMapper &coordinateMapper)
+    const PageCoordinateMapper &coordinateMapper,
+    QVector<PDFCommentAnnotation::SourceInkGeometryUpdate>
+        &sourceInkGeometryUpdates)
 {
     if (draft.added || draft.deleted) {
         return {};
@@ -3309,14 +3312,32 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
         || (annotationFlags & FPDF_ANNOT_FLAG_LOCKED) != 0;
     const bool sourceHasName = annotation.get()
         && FPDFAnnot_HasKey(annotation.get(), "NM");
+    const QString sourceName = sourceHasName
+        ? annotationString(annotation.get(), "NM")
+        : QString();
+    const QString sourceThreadId = annotation.get()
+        ? annotationString(
+              annotation.get(),
+              kCommentThreadIdKey)
+        : QString();
+    const QString sourceInkUuidText = sourceName.startsWith(
+        QLatin1String("ink:"))
+        ? sourceName.mid(4)
+        : QString();
+    const QUuid sourceInkUuid = QUuid::fromString(sourceInkUuidText);
+    const bool hasTrePDFManagedInkAppearance
+        = !sourceInkUuid.isNull()
+        && sourceInkUuid.toString(QUuid::WithoutBraces).compare(
+               sourceInkUuidText,
+               Qt::CaseInsensitive) == 0
+        && sourceThreadId == sourceName;
     const bool sourceIdentityMatches = annotation.get()
         && normalizedCommentText(
                annotationString(annotation.get(), "Contents"))
             == normalizedCommentText(draft.originalText)
         && sourceHasName == draft.sourceAnnotationHasName
         && (!sourceHasName
-            || annotationString(annotation.get(), "NM")
-                == draft.sourceAnnotationName);
+            || sourceName == draft.sourceAnnotationName);
     const bool textChanged
         = normalizedCommentText(draft.text)
         != normalizedCommentText(draft.originalText);
@@ -3444,32 +3465,32 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
                 pageIndex,
                 draft.objectId);
         }
-        const QRectF pageRect = appearanceRequest.pageRect.normalized();
-        const FS_RECTF annotationRect{
-            static_cast<float>(pageRect.left()),
-            static_cast<float>(pageRect.bottom()),
-            static_cast<float>(pageRect.right()),
-            static_cast<float>(pageRect.top())};
-        updated = FPDFAnnot_SetRect(annotation.get(), &annotationRect)
-            && FPDFAnnot_RemoveInkList(annotation.get());
+        // FPDFAnnot_SetRect() may enlarge the normal appearance's /BBox when
+        // the new rectangle contains it. That leaves the old drawing commands
+        // small inside the resized BBox. Mark this exact source annotation and
+        // patch /Rect plus /InkList after PDFium serialization instead.
+        const QString markerId = QUuid::createUuid().toString(
+            QUuid::WithoutBraces);
+        updated = !FPDFAnnot_HasKey(
+                       annotation.get(),
+                       PDFCommentAnnotation::kSourceInkGeometryMarkerKey)
+            && FPDFAnnot_SetStringValue(
+                annotation.get(),
+                PDFCommentAnnotation::kSourceInkGeometryMarkerKey,
+                reinterpret_cast<const FPDF_WCHAR *>(markerId.utf16()));
         if (updated) {
-            for (const QVector<QPointF> &stroke
-                 : std::as_const(appearanceRequest.pageStrokes)) {
-                QVector<FS_POINTF> pageStroke;
-                pageStroke.reserve(stroke.size());
-                for (const QPointF &point : stroke) {
-                    pageStroke.append(FS_POINTF{
-                        static_cast<float>(point.x()),
-                        static_cast<float>(point.y())});
-                }
-                if (FPDFAnnot_AddInkStroke(
-                        annotation.get(),
-                        pageStroke.constData(),
-                        static_cast<size_t>(pageStroke.size())) < 0) {
-                    updated = false;
-                    break;
-                }
-            }
+            constexpr qreal geometryEpsilon = 1e-9;
+            const QRectF sourceRect = draft.sourceRect.normalized();
+            const QRectF targetRect = draft.frameRect.normalized();
+            const bool resized
+                = qAbs(sourceRect.width() - targetRect.width())
+                        > geometryEpsilon
+                || qAbs(sourceRect.height() - targetRect.height())
+                        > geometryEpsilon;
+            sourceInkGeometryUpdates.append({
+                markerId,
+                std::move(appearanceRequest),
+                resized && hasTrePDFManagedInkAppearance});
         }
     }
     return updated
@@ -3769,7 +3790,9 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                                       const QVector<SaveDraft> &drafts,
                                       FontResolver &fontResolver,
                                       QVector<PDFCommentAnnotation::DrawingAnnotation>
-                                          &drawingAnnotations)
+                                          &drawingAnnotations,
+                                      QVector<PDFCommentAnnotation::SourceInkGeometryUpdate>
+                                          &sourceInkGeometryUpdates)
 {
     assertPDFiumProcessLockHeld();
     FPDF_PAGE loadedPage = FPDF_LoadPage(document, pageIndex);
@@ -4030,7 +4053,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 pageIndex,
                 pageWidth,
                 pageHeight,
-                coordinateMapper);
+                coordinateMapper,
+                sourceInkGeometryUpdates);
         if (!annotationUpdateResult.succeeded()) {
             return annotationUpdateResult;
         }
@@ -4837,6 +4861,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
 
     FontResolver fontResolver(document.get());
     QVector<PDFCommentAnnotation::DrawingAnnotation> drawingAnnotations;
+    QVector<PDFCommentAnnotation::SourceInkGeometryUpdate>
+        sourceInkGeometryUpdates;
     qsizetype start = 0;
     while (start < request.m_data->drafts.size()) {
         qsizetype end = start + 1;
@@ -4854,7 +4880,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             request.m_data->drafts.at(start).page,
             pageDrafts,
             fontResolver,
-            drawingAnnotations);
+            drawingAnnotations,
+            sourceInkGeometryUpdates);
         if (!result.succeeded()) {
             return result;
         }
@@ -4936,7 +4963,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         && annotationReplies.isEmpty()
         && freeTextAnnotations.isEmpty()
         && textMarkupAnnotations.isEmpty()
-        && drawingAnnotations.isEmpty()) {
+        && drawingAnnotations.isEmpty()
+        && sourceInkGeometryUpdates.isEmpty()) {
         return writeDocument(document.get(), request.m_data->targetFilePath);
     }
 
@@ -5019,6 +5047,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
                     appearanceError);
             }
         }
+        if (!sourceInkGeometryUpdates.isEmpty()) {
+            QString geometryError;
+            if (!PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
+                    contentFilePath,
+                    sourceInkGeometryUpdates,
+                    geometryError)) {
+                return failure(
+                    Error::CommentAnnotationUpdateFailed,
+                    -1,
+                    geometryError);
+            }
+        }
         const Result replyValidation = validateAnnotationReplies(
             contentFilePath,
             annotationReplies);
@@ -5086,6 +5126,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
                 Error::CommentAnnotationCreationFailed,
                 -1,
                 appearanceError);
+        }
+    }
+    if (!sourceInkGeometryUpdates.isEmpty()) {
+        QString geometryError;
+        if (!PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
+                formFilePath,
+                sourceInkGeometryUpdates,
+                geometryError)) {
+            return failure(
+                Error::CommentAnnotationUpdateFailed,
+                -1,
+                geometryError);
         }
     }
     const Result replyValidation = validateAnnotationReplies(

@@ -72,4 +72,19 @@ struct DrawingAnnotation {
     CommonProperties properties;
 };
 
+// PDFium's FPDFAnnot_SetRect() may enlarge an existing normal appearance's
+// /BBox. Source Ink geometry therefore crosses the save boundary through a
+// temporary marker and is patched directly after PDFium serializes the file.
+// A resize of a TrePDF-managed Ink may replace only the normal appearance when
+// the canonical vector writer supports every captured property. External Ink
+// and pure movement always preserve /AP.
+inline constexpr char kSourceInkGeometryMarkerKey[]
+    = "TrePDFSourceInkGeometryId";
+
+struct SourceInkGeometryUpdate {
+    QString markerId;
+    DrawingAnnotation annotation;
+    bool regenerateAppearance = false;
+};
+
 } // namespace PDFCommentAnnotation
