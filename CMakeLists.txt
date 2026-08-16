@@ -151,6 +151,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/oval.svg
         src/assets/icons/panel-left.svg
         src/assets/icons/pen-line.svg
+        src/assets/icons/pencil.svg
         src/assets/icons/polygon.svg
         src/assets/icons/polyline.svg
         src/assets/icons/radio.svg
