@@ -224,8 +224,10 @@ orchestration Save.
 - Đọc Highlight, Squiggly, Underline, Strikeout, Text, FreeText, Square, Circle,
   Line, Polygon, PolyLine và Ink annotation;
   chuẩn hóa quad/rect, màu và `/Contents` thành comment candidate. Nội dung
-  annotation nguồn được sửa trong panel bằng draft riêng; canvas vẫn không cho
-  move/resize annotation nguồn, còn ReadOnly/LockedContents không nhận mutation.
+  annotation nguồn được sửa trong panel bằng draft riêng; canvas cho move và
+  resize Ink nguồn hợp lệ bằng cách transform toàn bộ stroke. Annotation nguồn
+  khác chưa cho move/resize; ReadOnly/LockedContents không nhận mutation và
+  Locked chặn geometry Ink.
   Xóa tạo tombstone draft theo annotation index và subtype.
 - Khi text markup có explicit `/AP`, lấy fill/stroke RGBA từ path trong normal
   appearance nếu PDFium không trả annotation color; AP là nguồn hiển thị có
@@ -302,6 +304,10 @@ orchestration Save.
   0,75 PDF point. Nếu vẫn quá lớn, tolerance tăng có giới hạn và output bị
   hard-cap ở 1.024 điểm. Một drag tạo một annotation/stroke; model vẫn hỗ trợ
   nhiều stroke khi rehydrate `/InkList` nguồn.
+- Move Ink dùng frame draft chung với text/image/shape nhưng chỉ chấp nhận kích
+  thước không đổi. `inkStrokesForDraft()` áp cùng delta frame vào mọi stroke;
+  source appearance bị suppress trong preview, còn gesture hoàn tất thành đúng
+  một command undo/redo.
 - `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
   hướng phẳng cho panel theo thứ tự root rồi replies. `setCommentText()` định
   danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
@@ -371,6 +377,11 @@ orchestration Save.
   `/Subtype /Ink`, `/InkList`, `/BS`, `/C`, `/CA`, Print flag và `/AP` vector
   có round cap/join. Writer giới hạn 64 stroke, 4.096 điểm mỗi stroke và 32.768
   điểm tổng trước khi serialize.
+- Với Ink nguồn đổi geometry, writer xác thực lại subtype, `/NM`, `/Contents`,
+  annotation permission và các cờ ReadOnly/LockedContents/Locked; sau đó cập
+  nhật `/Rect` cùng toàn bộ `/InkList` đã translate/scale trên annotation hiện
+  có. `/AP` và các key style/thread/popup không bị tái tạo; geometry-only cũng
+  không ghi đè `/Contents` hoặc `/RC`.
 - Sticky Note và reply mới được gắn normal `/AP` vector ngay trên writer
   annotation; source Sticky Note đang sửa mà thiếu AP cũng được bổ sung. Nội
   dung comment dùng LF trong model, chuẩn hóa thành CR khi ghi `/Contents`.

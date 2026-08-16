@@ -85,4 +85,8 @@ public:
         const QString &filePath,
         const QVector<PDFCommentAnnotation::DrawingAnnotation> &annotations,
         QString &error);
+    static bool finalizeSourceInkGeometryUpdates(
+        const QString &filePath,
+        const QVector<PDFCommentAnnotation::SourceInkGeometryUpdate> &updates,
+        QString &error);
 };

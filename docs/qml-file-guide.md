@@ -202,6 +202,9 @@ ghi Save; mọi thay đổi vẫn là draft.
 - Pencil dùng màu drawing chung và một drag liên tục để tạo đúng một Ink
   annotation. Gesture/draft đều dùng `InkDrawingView`; model vẫn nhận nhiều
   stroke khi rehydrate `/InkList` nguồn.
+- Ink đã tạo và Ink nguồn hợp lệ dùng cùng selection frame như Foxit: kéo toàn
+  bounding box hoặc dùng phím mũi tên để di chuyển, kéo tám handle cạnh/góc để
+  đổi kích thước; Escape/cancel session trả frame và stroke về geometry ban đầu.
 - Gesture drawing có owner page duy nhất ở `PDFEditController`; bắt đầu trên
   trang khác sẽ hủy polygon/polyline hoặc Ink tạm của delegate trước để pooling
   không giữ hai path dang dở song song.
@@ -419,10 +422,13 @@ data/candidate/history/selection đổi.
 - `CommentDrawingView` vẽ Square/Circle/Line/Polygon/PolyLine từ cùng geometry
   và common properties mà writer dùng để dựng `/AP`.
 - `InkDrawingView` vẽ preview Pencil và từng stroke draft bằng Qt Quick Shapes
-  với round cap/join, cùng màu, opacity và border width của save snapshot.
+  với round cap/join, cùng màu, opacity và border width của save snapshot. Khi
+  geometry Ink nguồn đổi, delegate vẽ stroke đã translate/scale trên texture đã
+  suppress appearance nguồn.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
-- Drag text/image/shape giữ preview trong QML nhưng chỉ commit geometry một lần
-  khi thả; phím mũi tên tạo move command, Shift dùng bước lớn hơn.
+- Drag text/image/shape/Ink giữ preview trong QML nhưng chỉ commit geometry một
+  lần khi thả; phím mũi tên tạo move command, Shift dùng bước lớn hơn. Ink nhận
+  tám resize handle ở cạnh/góc và scale mọi stroke theo frame mới.
 
 **Dọn state:** `prepareForSessionChange()` kết thúc hoặc hủy editor/resize/draw,
 ẩn cursor và xóa dữ liệu trang. Bất kỳ bổ sung gesture nào cũng phải đi qua

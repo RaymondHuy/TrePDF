@@ -147,7 +147,9 @@ flowchart TD
    generic chỉ đọc.
 4. Page text dùng editor rich text; image, shape, text markup, Free Text và Ink
    dùng delegate/preview riêng. Nội dung Free Text được sửa trong CommentPanel.
-   Move/resize chỉ commit một command khi gesture kết thúc.
+   Move/resize chỉ commit một command khi gesture kết thúc. Ink mới và Ink
+   nguồn hợp lệ hỗ trợ translate toàn bộ stroke bằng bounding box/phím mũi tên,
+   đồng thời scale các stroke bằng tám resize handle ở cạnh/góc.
 5. `PDFSaveWriter` phân biệt thay đổi chỉ dịch chuyển với thay đổi cần thay object
    để giữ font, ma trận, resource và z-order khi có thể.
 

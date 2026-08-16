@@ -722,6 +722,7 @@ Item {
             || isShapeKind(kind)
             || kind === "text"
             || kind === "addedText"
+            || kind === "ink"
     }
 
     function isImageCandidate(candidate) {
@@ -1706,6 +1707,7 @@ Item {
             cancelFreeTextPlacement()
             cancelDrawingComment()
             cancelInkDrawing()
+            cancelFrameResize()
         }
         reloadData()
     }
@@ -1953,7 +1955,8 @@ Item {
             strokeColor: modelData.strokeColor
             strokeWidth: Number(modelData.strokeWidthRatio) * root.height
             drawingOpacity: Number(modelData.opacity)
-            visible: modelData.added === true
+            visible: (modelData.added === true
+                    || modelData.geometryChanged === true)
                 && modelData.deleted !== true
             z: 1
             Accessible.ignored: true
@@ -3242,6 +3245,10 @@ Item {
                     //% "Move shape"
                     return qsTrId("MoveShape")
                 }
+                if (root.controller.selectedKind === "ink") {
+                    //% "Move ink comment"
+                    return qsTrId("MoveInkComment")
+                }
                 //% "Move text"
                 return qsTrId("MoveText")
             }
@@ -3302,6 +3309,11 @@ Item {
             }
 
             Keys.onPressed: event => {
+                if (event.key === Qt.Key_Escape) {
+                    root.cancelFrameResize()
+                    event.accepted = true
+                    return
+                }
                 if ((event.key === Qt.Key_Return
                         || event.key === Qt.Key_Enter)
                         && (root.controller.selectedKind === "text"
@@ -3331,13 +3343,44 @@ Item {
         }
 
         Repeater {
-            model: root.controller.selectedKind === "image"
-                    || root.isCommentKind(root.controller.selectedKind) ? [] : [
-                { horizontal: 0, vertical: -1, cursor: Qt.SizeVerCursor },
-                { horizontal: 1, vertical: 0, cursor: Qt.SizeHorCursor },
-                { horizontal: 0, vertical: 1, cursor: Qt.SizeVerCursor },
-                { horizontal: -1, vertical: 0, cursor: Qt.SizeHorCursor }
-            ]
+            model: {
+                const selectedKind = root.controller.selectedKind
+                if (selectedKind === "image"
+                        || (root.isCommentKind(selectedKind)
+                            && selectedKind !== "ink")) {
+                    return []
+                }
+                if (selectedKind === "ink") {
+                    return [
+                        { horizontal: -1, vertical: -1,
+                            cursor: Qt.SizeFDiagCursor },
+                        { horizontal: 0, vertical: -1,
+                            cursor: Qt.SizeVerCursor },
+                        { horizontal: 1, vertical: -1,
+                            cursor: Qt.SizeBDiagCursor },
+                        { horizontal: 1, vertical: 0,
+                            cursor: Qt.SizeHorCursor },
+                        { horizontal: 1, vertical: 1,
+                            cursor: Qt.SizeFDiagCursor },
+                        { horizontal: 0, vertical: 1,
+                            cursor: Qt.SizeVerCursor },
+                        { horizontal: -1, vertical: 1,
+                            cursor: Qt.SizeBDiagCursor },
+                        { horizontal: -1, vertical: 0,
+                            cursor: Qt.SizeHorCursor }
+                    ]
+                }
+                return [
+                    { horizontal: 0, vertical: -1,
+                        cursor: Qt.SizeVerCursor },
+                    { horizontal: 1, vertical: 0,
+                        cursor: Qt.SizeHorCursor },
+                    { horizontal: 0, vertical: 1,
+                        cursor: Qt.SizeVerCursor },
+                    { horizontal: -1, vertical: 0,
+                        cursor: Qt.SizeHorCursor }
+                ]
+            }
 
             delegate: Item {
                 id: resizeHandle
@@ -3353,6 +3396,10 @@ Item {
                     if (root.isShapeKind(root.controller.selectedKind)) {
                         //% "Resize shape"
                         return qsTrId("ResizeShape")
+                    }
+                    if (root.controller.selectedKind === "ink") {
+                        //% "Resize ink comment"
+                        return qsTrId("ResizeInkComment")
                     }
                     //% "Resize text box"
                     return qsTrId("ResizeTextBox")
@@ -3446,6 +3493,12 @@ Item {
                     onCanceled: root.cancelFrameResize()
 
                     Keys.onPressed: event => {
+                        if (event.key === Qt.Key_Escape) {
+                            root.cancelFrameResize()
+                            event.accepted = true
+                            return
+                        }
+
                         const step = (event.modifiers & Qt.ShiftModifier) ? 10 : 1
                         let deltaX = 0
                         let deltaY = 0

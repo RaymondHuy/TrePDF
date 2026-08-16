@@ -749,7 +749,8 @@ Flickable {
                 text: qsTrId("Pencil")
                 //% "Draw a freehand ink comment"
                 toolTipText: qsTrId("AddInkComment")
-                iconSource: "../assets/icons/pen-line.svg"
+                iconSource: "../assets/icons/pencil.svg"
+                preserveIconColors: true
                 enabled: root.document.loaded
                     && !root.editController.saving
                 primary: root.inkToolActive
