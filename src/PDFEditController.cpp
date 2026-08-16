@@ -2872,9 +2872,14 @@ PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
     QVector<DraftAnnotationDeletion> deletions;
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
         const Candidate &candidate = draft->candidate;
+        const bool movesInk
+            = candidate.kind == QLatin1String("ink")
+            && draft->frameRect
+                != initialDraftForCandidate(candidate).frameRect;
         const bool suppressesSourceAppearance
             = draft->deleted
-            || candidate.kind == QLatin1String("freeText");
+            || candidate.kind == QLatin1String("freeText")
+            || movesInk;
         if (candidate.page != page
             || candidate.added
             || !suppressesSourceAppearance
@@ -2889,6 +2894,16 @@ PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
                 candidate.sourceAnnotationIndex,
                 subtype});
         }
+    }
+    if (m_frameResizeActive
+        && m_hasSelection
+        && m_selectedCandidate.page == page
+        && m_selectedCandidate.kind == QLatin1String("ink")
+        && !m_selectedCandidate.added
+        && m_selectedCandidate.sourceAnnotationIndex >= 0) {
+        deletions.append(DraftAnnotationDeletion{
+            m_selectedCandidate.sourceAnnotationIndex,
+            FPDF_ANNOT_INK});
     }
 
     std::sort(
@@ -3063,6 +3078,7 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
             = candidate.kind == QLatin1String("image")
             || candidate.kind == QLatin1String("addedImage")
             || candidate.kind == QLatin1String("freeText")
+            || candidate.kind == QLatin1String("ink")
             || isShapeCandidateKind(candidate.kind);
         const QRectF candidateRect
             = draftGeometryCandidate && draft != m_drafts.cend()
@@ -5594,6 +5610,10 @@ void PDFEditController::beginSelectedFrameResize()
         = m_textEditGeometryExplicitlyChanged;
     m_frameResizeStartFrameRect = draft.frameRect;
     m_frameResizeStartContentBounds = draft.contentBounds;
+    if (draft.candidate.kind == QLatin1String("ink")
+        && !draft.candidate.added) {
+        markDraftStateChanged(draft.candidate.page, true);
+    }
 }
 
 void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
@@ -5611,6 +5631,9 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
               <= geometryEpsilon
         && qAbs(normalizedRect.height() - currentFrameRect.height())
                <= geometryEpsilon;
+    if (draft.candidate.kind == QLatin1String("ink") && !movesFrame) {
+        return;
+    }
 
     QRectF boundedRect;
     QRectF resizedContentBounds;
@@ -6115,7 +6138,11 @@ void PDFEditController::finishSelectedTextEdit()
         = !sameDraftContent(finalizedDraft, baseline.before);
     if (draftChanged) {
         applyUnicodeFontFallback(finalizedDraft);
-        if (finalizedDraft.candidate.kind == QLatin1String("freeText")) {
+        const bool movesInk
+            = finalizedDraft.candidate.kind == QLatin1String("ink")
+            && finalizedDraft.frameRect != baseline.before.frameRect;
+        if (finalizedDraft.candidate.kind == QLatin1String("freeText")
+            || movesInk) {
             finalizedDraft.candidate.commentModifiedDate
                 = QDateTime::currentDateTime();
         }
@@ -8213,6 +8240,8 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             candidate.sourceAnnotationName = annotationString(
                 annotation,
                 "NM");
+            candidate.sourceAnnotationHasName
+                = FPDFAnnot_HasKey(annotation, "NM");
             candidate.commentAuthor = annotationString(annotation, "T").trimmed();
             candidate.commentCreationDate = pdfAnnotationDateTime(
                 annotationString(annotation, "CreationDate"));
@@ -8249,7 +8278,11 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 candidate.replyDirectParentSourceAnnotationIndex
                     = directParentIndex;
             }
-            candidate.editable = false;
+            candidate.editable = request.annotationsAllowed
+                && inkSubtype
+                && inkGeometryValid
+                && !candidate.commentTextReadOnly
+                && (annotationFlags & FPDF_ANNOT_FLAG_LOCKED) == 0;
             candidate.limited = true;
             setInitialGeometry(candidate, geometry);
             if (textMarkupSubtype) {
@@ -8497,9 +8530,12 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             if (candidate.commentTextReadOnly) {
                 //% "This comment is read-only."
                 candidate.reason = qtTrId("ReadOnlyCommentCannotBeEdited");
-            } else if (freeTextSubtype && !request.annotationsAllowed) {
+            } else if ((freeTextSubtype || inkSubtype)
+                       && !request.annotationsAllowed) {
                 //% "This PDF does not permit changing annotations."
                 candidate.reason = qtTrId("PdfAnnotationsNotPermitted");
+            } else if (inkSubtype && candidate.editable) {
+                candidate.reason.clear();
             } else {
                 //% "Edit the comment text in the Comments panel. Moving or resizing existing comments is not available."
                 candidate.reason = qtTrId(
@@ -8713,6 +8749,9 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     const Candidate &candidate = draft.candidate;
     const CharacterFormat format = primaryCharacterFormat(draft);
     const QPointF layoutOrigin = layoutOriginForDraft(draft);
+    const QRectF initialFrameRect = candidate.initialDraftFrameRect.isEmpty()
+        ? candidate.geometry.sourceRect
+        : candidate.initialDraftFrameRect;
     QVariantMap map;
     map.insert(QStringLiteral("objectId"), candidate.objectId);
     map.insert(QStringLiteral("kind"), candidate.kind);
@@ -8720,6 +8759,9 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("sourceRect"), candidate.geometry.sourceRect);
     map.insert(QStringLiteral("frameRect"), draft.frameRect);
     map.insert(QStringLiteral("contentBounds"), draft.contentBounds);
+    map.insert(
+        QStringLiteral("geometryChanged"),
+        draft.frameRect != initialFrameRect);
     map.insert(QStringLiteral("deleted"), draft.deleted);
     map.insert(QStringLiteral("sourceRects"), candidateSourceRects(candidate));
     map.insert(QStringLiteral("grouped"), candidate.parts.size() > 1);
@@ -8796,9 +8838,11 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     }
     map.insert(QStringLiteral("drawingVertices"), drawingVertices);
     map.insert(QStringLiteral("annotationPoints"), drawingVertices);
+    const QVector<QVector<QPointF>> displayedInkStrokes
+        = inkStrokesForDraft(draft);
     QVariantList inkStrokes;
-    inkStrokes.reserve(candidate.inkStrokes.size());
-    for (const QVector<QPointF> &stroke : candidate.inkStrokes) {
+    inkStrokes.reserve(displayedInkStrokes.size());
+    for (const QVector<QPointF> &stroke : displayedInkStrokes) {
         QVariantList strokePoints;
         strokePoints.reserve(stroke.size());
         for (const QPointF &point : stroke) {
@@ -9160,6 +9204,33 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
         : candidate.initialDraftFrameRect;
     draft.contentBounds = draft.frameRect;
     return draft;
+}
+
+QVector<QVector<QPointF>> PDFEditController::inkStrokesForDraft(
+    const Draft &draft)
+{
+    QVector<QVector<QPointF>> strokes = draft.candidate.inkStrokes;
+    if (draft.candidate.kind != QLatin1String("ink")
+        || strokes.isEmpty()) {
+        return strokes;
+    }
+
+    const QRectF initialFrameRect
+        = draft.candidate.initialDraftFrameRect.isEmpty()
+        ? draft.candidate.geometry.sourceRect
+        : draft.candidate.initialDraftFrameRect;
+    const QPointF translation
+        = draft.frameRect.topLeft() - initialFrameRect.topLeft();
+    if (translation.isNull()) {
+        return strokes;
+    }
+
+    for (QVector<QPointF> &stroke : strokes) {
+        for (QPointF &point : stroke) {
+            point += translation;
+        }
+    }
+    return strokes;
 }
 
 QPointF PDFEditController::layoutOriginForDraft(const Draft &draft)
@@ -9876,14 +9947,25 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
     if (matchesOriginal) {
         changed = m_drafts.remove(key) > 0;
     } else if (existingDraft == m_drafts.cend()
-               || !sameDraftContent(*existingDraft, normalizedDraft)) {
+               || !sameDraftContent(*existingDraft, normalizedDraft)
+               || existingDraft->candidate.commentModifiedDate
+                   != normalizedDraft.candidate.commentModifiedDate) {
         m_drafts.insert(key, normalizedDraft);
         changed = true;
     }
 
     m_selectedText = normalizedDraft.text;
     if (changed) {
-        markDraftStateChanged(m_selectedCandidate.page, false);
+        const bool reusesSourceInkSuppressionTexture
+            = m_frameResizeActive
+            && normalizedDraft.candidate.kind == QLatin1String("ink")
+            && !normalizedDraft.candidate.added;
+        if (reusesSourceInkSuppressionTexture) {
+            emit pageDataChanged(m_selectedCandidate.page);
+            emit commentsChanged();
+        } else {
+            markDraftStateChanged(m_selectedCandidate.page, false);
+        }
         emit historyStateChanged();
     }
     emit selectionChanged();

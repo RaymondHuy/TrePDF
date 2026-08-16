@@ -722,6 +722,7 @@ Item {
             || isShapeKind(kind)
             || kind === "text"
             || kind === "addedText"
+            || kind === "ink"
     }
 
     function isImageCandidate(candidate) {
@@ -1706,6 +1707,7 @@ Item {
             cancelFreeTextPlacement()
             cancelDrawingComment()
             cancelInkDrawing()
+            cancelFrameResize()
         }
         reloadData()
     }
@@ -1953,7 +1955,8 @@ Item {
             strokeColor: modelData.strokeColor
             strokeWidth: Number(modelData.strokeWidthRatio) * root.height
             drawingOpacity: Number(modelData.opacity)
-            visible: modelData.added === true
+            visible: (modelData.added === true
+                    || modelData.geometryChanged === true)
                 && modelData.deleted !== true
             z: 1
             Accessible.ignored: true
@@ -3242,6 +3245,10 @@ Item {
                     //% "Move shape"
                     return qsTrId("MoveShape")
                 }
+                if (root.controller.selectedKind === "ink") {
+                    //% "Move ink comment"
+                    return qsTrId("MoveInkComment")
+                }
                 //% "Move text"
                 return qsTrId("MoveText")
             }
@@ -3302,6 +3309,11 @@ Item {
             }
 
             Keys.onPressed: event => {
+                if (event.key === Qt.Key_Escape) {
+                    root.cancelFrameResize()
+                    event.accepted = true
+                    return
+                }
                 if ((event.key === Qt.Key_Return
                         || event.key === Qt.Key_Enter)
                         && (root.controller.selectedKind === "text"

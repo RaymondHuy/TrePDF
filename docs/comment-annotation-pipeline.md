@@ -356,6 +356,13 @@ xóa, undo/redo/discard và Save/reopen đều giữ nguyên semantic nhiều st
 Geometry candidate là union của stroke, có padding theo border width; tọa độ
 vẫn normalized theo page chưa xoay.
 
+Ink mới và Ink nguồn hợp lệ có thể kéo bằng toàn bộ bounding box hoặc di chuyển
+bằng phím mũi tên. Controller chỉ cho phép translate, không resize: cùng một
+delta normalized được áp vào frame, content bounds và mọi điểm của mọi stroke.
+Một gesture chỉ commit một command nên undo/redo/discard không tạo history theo
+từng mouse move. Ink nguồn có ReadOnly, LockedContents, Locked hoặc `/InkList`
+không hợp lệ vẫn không thể di chuyển.
+
 ## 7. Reply và comment thread
 
 ### 7.1 Quan hệ chuẩn PDF
@@ -421,9 +428,10 @@ Annotation bị bảo vệ vẫn được index, hiển thị và điều hướ
 text hoặc xóa. Cả QML và controller đều có trạng thái disable/reason; writer vẫn
 kiểm lại flags để chống source thay đổi giữa scan và Save.
 
-Annotation nguồn hiện chỉ sửa `/Contents`; move/resize page appearance chưa được
-hỗ trợ. Không được dùng draft geometry để âm thầm thay đổi source annotation
-nếu UI chưa cung cấp mutation đó.
+Ngoại lệ geometry hiện tại là Ink nguồn hợp lệ: translate cần annotation
+permission, không có ReadOnly/LockedContents/Locked và writer kiểm lại các điều
+kiện này trước Save. Các annotation nguồn khác vẫn không được move/resize page
+appearance nếu UI chưa cung cấp mutation đó.
 
 ## 9. Render và draft presentation
 
@@ -438,6 +446,8 @@ fill/stroke thực tế từ path object trong normal appearance. Không dùng `
 Các quy tắc tránh vẽ hai lần:
 
 - source annotation bị draft xóa được tạm ẩn trong render worker;
+- Ink nguồn đang kéo/đã dịch được tạm ẩn, còn `InkDrawingView` vẽ mọi stroke ở
+  vị trí draft để không phụ thuộc appearance nguồn cũ;
 - reply appearance được tạm ẩn nhưng reply vẫn ở CommentPanel;
 - Free Text nguồn chưa đổi giữ appearance gốc;
 - Free Text đã sửa được preview bằng hộp trắng, viền đen và text wrap của TrePDF;
@@ -514,12 +524,19 @@ name; chưa có user profile riêng trong UI.
 Trước khi sửa, writer xác thực annotation index, subtype, original `/Contents`,
 `/NM` nếu có và flags bảo vệ. Khi hợp lệ:
 
-- cập nhật `/Contents` và `/M`;
-- nếu annotation có `/RC`, thay bằng XHTML plain-text tương ứng để rich value
-  không giữ nội dung cũ;
+- chỉ cập nhật `/Contents` và `/RC` khi nội dung thật sự đổi; geometry-only
+  không làm phẳng rich text;
+- cập nhật `/M` khi nội dung hoặc geometry đổi;
 - giữ `/Popup`, `/IRT`, `/RT`, geometry, color và metadata không liên quan;
 - với Free Text, xóa stale `/AP`, ghi appearance id và để canonicalizer tạo lại
   wrapped Unicode appearance.
+
+Với Ink translate-only, writer map frame và toàn bộ stroke đã dịch qua
+`FPDF_DeviceToPage()`, thay `/Rect` và dựng lại `/InkList` trên chính annotation
+nguồn. Normal `/AP` không bị viết lại: PDF mapping appearance vào Rect mới nên
+appearance tùy biến, màu, opacity, z-order dictionary, `/Popup`, `/IRT` và các
+key mở rộng của reader khác vẫn được bảo toàn. Save annotation-only không gọi
+`FPDFPage_GenerateContent()`.
 
 Sticky Note, text markup và Ink giữ nguyên appearance nguồn vì sửa nội dung
 không thay đổi page geometry. Nếu Sticky Note/reply nguồn đang được sửa nhưng thiếu
@@ -603,7 +620,9 @@ Coverage comment hiện cần được duy trì cho:
   properties, vector `/AP`, undo/redo và rehydrate;
 - Ink: một drag/một annotation, raw cap 4.096, validate/dedup/RDP và output cap
   1.024; rehydrate nhiều stroke, dictionary `/InkList`/`/BS`/`/C`/`/CA`/Print,
-  vector `/AP` round cap/join và round-trip contents/reply/delete/history;
+  vector `/AP` round cap/join, move added/source với undo/redo/discard,
+  translate mọi stroke, giữ source Rect/AP/metadata và round-trip
+  contents/reply/delete/history;
 - source Ink malformed/oversized downgrade thành generic read-only theo giới hạn
   64 stroke, 4.096 điểm/stroke và 32.768 điểm tổng;
 - read-only index cho 6 markup subtype chưa hỗ trợ mutation;

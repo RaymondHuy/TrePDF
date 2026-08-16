@@ -39,6 +39,10 @@ Current features:
   available as a generic read-only comment. Stamp, Caret, FileAttachment,
   Sound, Redact, and PDF 2.0 Projection remain indexed read-only for panel
   navigation.
+  Added Ink and valid source Ink can be translated by dragging the selected
+  bounding box or using arrow keys. One delta is applied to every stroke and
+  committed as one undoable command; Ink resize is not supported. Saving a
+  source Ink move updates `/Rect` and `/InkList` while preserving its `/AP`.
   Squiggly accepts only non-whitespace source-text glyphs intersected by the
   drag gesture, snaps the result into per-line rectangles/QuadPoints, and
   rejects whitespace-only or no-text selections. Nearly horizontal gestures use
@@ -455,8 +459,10 @@ clipped or elided unintentionally.
   writer maps every normalized stroke through `FPDF_DeviceToPage()` and the
   canonicalizer writes `/Subtype /Ink`, `/InkList`, `/BS`, `/C`, `/CA`, the
   Print flag, and a vector `/AP` with round line caps and joins. Ink supports
-  source content edits, delete, reply, undo/redo/discard, Save/Save As, and
-  reopen without regenerating page content on annotation-only pages.
+  source content edits and translation, delete, reply, undo/redo/discard,
+  Save/Save As, and reopen without regenerating page content on annotation-only
+  pages. Source translation updates `/Rect` and every `/InkList` stroke while
+  keeping the original `/AP` and unrelated annotation dictionary entries.
 - Persist added shapes as top-level PDF path objects. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain

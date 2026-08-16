@@ -388,6 +388,7 @@ private:
         QVector<QRectF> textGlyphRects;
         bool textMarkupHitTestOnly = false;
         QString sourceAnnotationName;
+        bool sourceAnnotationHasName = false;
         QString commentAuthor;
         QDateTime commentCreationDate;
         QDateTime commentModifiedDate;
@@ -668,6 +669,7 @@ private:
         const QString &text,
         const ParagraphFormat &prototype);
     static Draft initialDraftForCandidate(const Candidate &candidate);
+    static QVector<QVector<QPointF>> inkStrokesForDraft(const Draft &draft);
     static QPointF layoutOriginForDraft(const Draft &draft);
     static bool sameCharacterFormat(const CharacterFormat &left,
                                     const CharacterFormat &right);
