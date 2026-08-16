@@ -115,6 +115,7 @@ qt_add_qml_module(trepdf
         src/Components/ShapeDraftView.qml
         src/Components/SignRibbon.qml
         src/Components/SquigglyLine.qml
+        src/Components/StampView.qml
         src/Components/TextFieldOptionsPanel.qml
         src/Components/TextFormatPanel.qml
         src/Components/ViewRibbon.qml
@@ -168,6 +169,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/signature.svg
         src/assets/icons/square-check-big.svg
         src/assets/icons/squiggly.svg
+        src/assets/icons/stamp.svg
         src/assets/icons/strikethrough.svg
         src/assets/icons/triangle.svg
         src/assets/icons/text-input.svg

@@ -2,6 +2,7 @@
 
 #include "PDFCommentAnnotation.h"
 
+#include <QColor>
 #include <QRectF>
 #include <QString>
 #include <QStringList>
@@ -66,6 +67,15 @@ public:
         TextMarkupType type = TextMarkupType::Highlight;
     };
 
+    struct StampAnnotation {
+        int page = -1;
+        QString annotationId;
+        QString stampName;
+        QString displayText;
+        QColor color;
+        QRectF pageRect;
+    };
+
     static bool finalizeFields(const QString &filePath,
                                const QVector<Field> &fields,
                                QString &error);
@@ -84,6 +94,10 @@ public:
     static bool finalizeDrawingAnnotations(
         const QString &filePath,
         const QVector<PDFCommentAnnotation::DrawingAnnotation> &annotations,
+        QString &error);
+    static bool finalizeStampAnnotations(
+        const QString &filePath,
+        const QVector<StampAnnotation> &annotations,
         QString &error);
     static bool finalizeSourceInkGeometryUpdates(
         const QString &filePath,

@@ -95,6 +95,7 @@ struct SaveDraft {
         TextMarkup,
         StickyNote,
         FreeText,
+        Stamp,
         DrawingComment
     };
 
@@ -118,6 +119,9 @@ struct SaveDraft {
     QVector<QPointF> drawingVertices;
     QVector<QVector<QPointF>> inkStrokes;
     PDFCommentAnnotation::CommonProperties commentProperties;
+    QString stampName;
+    QString stampText;
+    QColor stampColor;
     int sourceAnnotationIndex = -1;
     QString commentAuthor;
     QDateTime commentCreationDate;
@@ -3245,6 +3249,68 @@ PDFSaveWriter::Result createFreeTextAnnotation(
     return {};
 }
 
+PDFSaveWriter::Result createStampAnnotation(
+    FPDF_PAGE page,
+    const SaveDraft &draft,
+    qreal pageWidth,
+    qreal pageHeight,
+    const PageCoordinateMapper &coordinateMapper,
+    PDFAcroFormCanonicalizer::StampAnnotation &appearanceRequest)
+{
+    FS_RECTF annotationRect{};
+    if (draft.objectId.isEmpty()
+        || draft.stampName.isEmpty()
+        || draft.stampText.isEmpty()
+        || !annotationRectForFrame(
+            draft.frameRect,
+            pageWidth,
+            pageHeight,
+            coordinateMapper,
+            annotationRect)) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    PdfAnnotationHandle annotation(
+        FPDFPage_CreateAnnot(page, FPDF_ANNOT_STAMP));
+    const QColor color = draft.stampColor.isValid()
+        ? draft.stampColor.toRgb()
+        : QColor(97, 97, 97);
+    const QString contents = pdfCommentContents(draft.text);
+    if (!annotation.get()
+        || !FPDFAnnot_SetRect(annotation.get(), &annotationRect)
+        || !FPDFAnnot_SetColor(
+            annotation.get(),
+            FPDFANNOT_COLORTYPE_Color,
+            static_cast<unsigned int>(color.red()),
+            static_cast<unsigned int>(color.green()),
+            static_cast<unsigned int>(color.blue()),
+            static_cast<unsigned int>(color.alpha()))
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "Contents",
+            reinterpret_cast<const FPDF_WCHAR *>(contents.utf16()))
+        || !setCommentAnnotationMetadata(annotation.get(), draft)
+        || !FPDFAnnot_SetFlags(annotation.get(), FPDF_ANNOT_FLAG_PRINT)) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    appearanceRequest.page = draft.page;
+    appearanceRequest.annotationId = draft.objectId;
+    appearanceRequest.stampName = draft.stampName;
+    appearanceRequest.displayText = draft.stampText;
+    appearanceRequest.color = color;
+    appearanceRequest.pageRect = QRectF(
+        QPointF(annotationRect.left, annotationRect.bottom),
+        QPointF(annotationRect.right, annotationRect.top)).normalized();
+    return {};
+}
+
 FPDF_ANNOTATION_SUBTYPE sourceAnnotationSubtypeForDraft(
     const SaveDraft &draft)
 {
@@ -3253,6 +3319,9 @@ FPDF_ANNOTATION_SUBTYPE sourceAnnotationSubtypeForDraft(
     }
     if (draft.kind == SaveDraft::Kind::FreeText) {
         return FPDF_ANNOT_FREETEXT;
+    }
+    if (draft.kind == SaveDraft::Kind::Stamp) {
+        return FPDF_ANNOT_STAMP;
     }
     return draft.annotationSubtype;
 }
@@ -3639,6 +3708,7 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
             = draft.kind == SaveDraft::Kind::TextMarkup
             || draft.kind == SaveDraft::Kind::StickyNote
             || draft.kind == SaveDraft::Kind::FreeText
+            || draft.kind == SaveDraft::Kind::Stamp
             || draft.kind == SaveDraft::Kind::DrawingComment;
         if (!commentDraft || !draft.deleted || draft.added) {
             continue;
@@ -3789,6 +3859,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                                       int pageIndex,
                                       const QVector<SaveDraft> &drafts,
                                       FontResolver &fontResolver,
+                                      QVector<PDFAcroFormCanonicalizer::StampAnnotation>
+                                          &stampAnnotations,
                                       QVector<PDFCommentAnnotation::DrawingAnnotation>
                                           &drawingAnnotations,
                                       QVector<PDFCommentAnnotation::SourceInkGeometryUpdate>
@@ -3829,6 +3901,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
             return draft.kind != SaveDraft::Kind::TextMarkup
                 && draft.kind != SaveDraft::Kind::StickyNote
                 && draft.kind != SaveDraft::Kind::FreeText
+                && draft.kind != SaveDraft::Kind::Stamp
                 && draft.kind != SaveDraft::Kind::DrawingComment;
         });
     const bool modifiesExistingObject = std::any_of(
@@ -3838,6 +3911,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
             return draft.kind != SaveDraft::Kind::TextMarkup
                 && draft.kind != SaveDraft::Kind::StickyNote
                 && draft.kind != SaveDraft::Kind::FreeText
+                && draft.kind != SaveDraft::Kind::Stamp
                 && draft.kind != SaveDraft::Kind::DrawingComment
                 && !draft.added;
         });
@@ -3868,6 +3942,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         if (draft.kind == SaveDraft::Kind::TextMarkup
             || draft.kind == SaveDraft::Kind::StickyNote
             || draft.kind == SaveDraft::Kind::FreeText
+            || draft.kind == SaveDraft::Kind::Stamp
             || draft.kind == SaveDraft::Kind::DrawingComment) {
             continue;
         }
@@ -4041,6 +4116,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         if ((draft.kind != SaveDraft::Kind::TextMarkup
              && draft.kind != SaveDraft::Kind::StickyNote
              && draft.kind != SaveDraft::Kind::FreeText
+             && draft.kind != SaveDraft::Kind::Stamp
              && draft.kind != SaveDraft::Kind::DrawingComment)
             || draft.added
             || draft.deleted) {
@@ -4095,6 +4171,18 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 pageWidth,
                 pageHeight,
                 coordinateMapper);
+        } else if (draft.kind == SaveDraft::Kind::Stamp) {
+            PDFAcroFormCanonicalizer::StampAnnotation appearanceRequest;
+            annotationResult = createStampAnnotation(
+                page.get(),
+                draft,
+                pageWidth,
+                pageHeight,
+                coordinateMapper,
+                appearanceRequest);
+            if (annotationResult.succeeded()) {
+                stampAnnotations.append(std::move(appearanceRequest));
+            }
         } else if (draft.kind == SaveDraft::Kind::DrawingComment) {
             PDFCommentAnnotation::DrawingAnnotation appearanceRequest;
             annotationResult = prepareDrawingCommentAnnotation(
@@ -4617,6 +4705,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             = draft->candidate.kind == QLatin1String("stickyNote");
         const bool freeTextDraft
             = draft->candidate.kind == QLatin1String("freeText");
+        const bool stampDraft
+            = draft->candidate.kind == QLatin1String("stamp");
         const bool drawingCommentDraft
             = draft->candidate.kind == QLatin1String("square")
             || draft->candidate.kind == QLatin1String("circle")
@@ -4626,6 +4716,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             || draft->candidate.kind == QLatin1String("ink");
         saveDraft.kind = drawingCommentDraft
             ? SaveDraft::Kind::DrawingComment
+            : stampDraft
+            ? SaveDraft::Kind::Stamp
             : freeTextDraft
             ? SaveDraft::Kind::FreeText
             : stickyNoteDraft
@@ -4658,6 +4750,9 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.inkStrokes
             = PDFEditController::inkStrokesForDraft(*draft);
         saveDraft.commentProperties = draft->candidate.commentProperties;
+        saveDraft.stampName = draft->candidate.commentProperties.name;
+        saveDraft.stampText = draft->candidate.stampText;
+        saveDraft.stampColor = draft->candidate.highlightColor;
         saveDraft.sourceAnnotationIndex
             = draft->candidate.sourceAnnotationIndex;
         saveDraft.commentAuthor = draft->candidate.commentAuthor;
@@ -4678,6 +4773,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             saveDraft.annotationSubtype = FPDF_ANNOT_STRIKEOUT;
         } else if (freeTextDraft) {
             saveDraft.annotationSubtype = FPDF_ANNOT_FREETEXT;
+        } else if (stampDraft) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_STAMP;
         } else if (draft->candidate.kind == QLatin1String("square")) {
             saveDraft.annotationSubtype = FPDF_ANNOT_SQUARE;
         } else if (draft->candidate.kind == QLatin1String("circle")) {
@@ -4711,6 +4808,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         if (saveDraft.kind == SaveDraft::Kind::TextMarkup
             || saveDraft.kind == SaveDraft::Kind::StickyNote
             || saveDraft.kind == SaveDraft::Kind::FreeText
+            || saveDraft.kind == SaveDraft::Kind::Stamp
             || saveDraft.kind == SaveDraft::Kind::DrawingComment) {
             data->drafts.append(std::move(saveDraft));
             continue;
@@ -4860,6 +4958,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     }
 
     FontResolver fontResolver(document.get());
+    QVector<PDFAcroFormCanonicalizer::StampAnnotation> stampAnnotations;
     QVector<PDFCommentAnnotation::DrawingAnnotation> drawingAnnotations;
     QVector<PDFCommentAnnotation::SourceInkGeometryUpdate>
         sourceInkGeometryUpdates;
@@ -4880,6 +4979,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             request.m_data->drafts.at(start).page,
             pageDrafts,
             fontResolver,
+            stampAnnotations,
             drawingAnnotations,
             sourceInkGeometryUpdates);
         if (!result.succeeded()) {
@@ -4963,6 +5063,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         && annotationReplies.isEmpty()
         && freeTextAnnotations.isEmpty()
         && textMarkupAnnotations.isEmpty()
+        && stampAnnotations.isEmpty()
         && drawingAnnotations.isEmpty()
         && sourceInkGeometryUpdates.isEmpty()) {
         return writeDocument(document.get(), request.m_data->targetFilePath);
@@ -5011,6 +5112,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         }
     }
     if (request.m_data->formFields.isEmpty()) {
+        if (!stampAnnotations.isEmpty()) {
+            QString appearanceError;
+            if (!PDFAcroFormCanonicalizer::finalizeStampAnnotations(
+                    contentFilePath,
+                    stampAnnotations,
+                    appearanceError)) {
+                return failure(
+                    Error::CommentAnnotationCreationFailed,
+                    -1,
+                    appearanceError);
+            }
+        }
         if (!drawingAnnotations.isEmpty()) {
             QString appearanceError;
             if (!PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
@@ -5100,6 +5213,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
                 appearanceError)) {
             return failure(
                 Error::TextMarkupAnnotationCreationFailed,
+                -1,
+                appearanceError);
+        }
+    }
+    if (!stampAnnotations.isEmpty()) {
+        QString appearanceError;
+        if (!PDFAcroFormCanonicalizer::finalizeStampAnnotations(
+                formFilePath,
+                stampAnnotations,
+                appearanceError)) {
+            return failure(
+                Error::CommentAnnotationCreationFailed,
                 -1,
                 appearanceError);
         }

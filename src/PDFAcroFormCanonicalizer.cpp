@@ -4479,6 +4479,208 @@ bool configureDrawingAnnotationDictionary(
             + QByteArrayLiteral(" 0 R >>"));
 }
 
+bool stampAppearanceData(
+    const PDFAcroFormCanonicalizer::StampAnnotation &annotation,
+    QByteArray &content,
+    QString &error)
+{
+    constexpr qreal maximumCoordinateMagnitudePoints = 10'000'000.0;
+    constexpr qsizetype maximumDisplayCharacters = 32;
+    const QRectF bounds = annotation.pageRect.normalized();
+    const auto finiteCoordinate = [](qreal value) {
+        return std::isfinite(value)
+            && qAbs(value) <= maximumCoordinateMagnitudePoints;
+    };
+    const bool displayTextIsSafe = !annotation.displayText.isEmpty()
+        && annotation.displayText.size() <= maximumDisplayCharacters
+        && std::all_of(
+            annotation.displayText.cbegin(),
+            annotation.displayText.cend(),
+            [](QChar character) {
+                const ushort value = character.unicode();
+                return value == ' '
+                    || (value >= 'A' && value <= 'Z');
+            });
+    if (!bounds.isValid()
+        || bounds.width() <= 0.0
+        || bounds.height() <= 0.0
+        || !finiteCoordinate(bounds.left())
+        || !finiteCoordinate(bounds.top())
+        || !finiteCoordinate(bounds.right())
+        || !finiteCoordinate(bounds.bottom())
+        || !isSafePdfName(annotation.stampName)
+        || !displayTextIsSafe
+        || !annotation.color.isValid()) {
+        error = QStringLiteral(
+            "A Stamp annotation appearance request is invalid.");
+        return false;
+    }
+
+    const QColor color = annotation.color.toRgb();
+    const qreal lineWidth = std::clamp(
+        qMin(bounds.width(), bounds.height()) * 0.04,
+        1.0,
+        3.0);
+    const qreal fontSize = std::clamp(
+        bounds.height() * 0.44,
+        6.0,
+        36.0);
+    static constexpr std::array<int, 26> helveticaBoldWidths{{
+        722, 722, 722, 722, 667, 611, 778, 722, 278,
+        556, 722, 611, 833, 722, 778, 667, 778, 722,
+        667, 611, 722, 722, 944, 722, 722, 611,
+    }};
+    qreal naturalTextWidth = 0.0;
+    for (QChar character : annotation.displayText) {
+        const ushort value = character.unicode();
+        const qreal widthRatio = value == ' '
+            ? 0.278
+            : static_cast<qreal>(
+                  helveticaBoldWidths.at(value - 'A'))
+                / 1000.0;
+        naturalTextWidth += fontSize * widthRatio;
+    }
+    if (!std::isfinite(naturalTextWidth) || naturalTextWidth <= 0.0) {
+        error = QStringLiteral(
+            "A Stamp annotation display text cannot be measured.");
+        return false;
+    }
+
+    const qreal availableTextWidth = qMax(
+        1.0,
+        bounds.width() - lineWidth * 6.0);
+    const qreal horizontalScale = qMin(
+        1.0,
+        availableTextWidth / naturalTextWidth);
+    const qreal renderedTextWidth = naturalTextWidth * horizontalScale;
+    const qreal textX = bounds.left()
+        + (bounds.width() - renderedTextWidth) / 2.0;
+    const qreal capHeight = fontSize * 0.718;
+    const qreal baselineY = bounds.top()
+        + (bounds.height() - capHeight) / 2.0;
+    const QByteArray encodedText
+        = annotation.displayText.toLatin1().toHex().toUpper();
+
+    const qreal outerInset = lineWidth / 2.0;
+    content = QByteArrayLiteral("q\n/GS gs\n")
+        + pdfNumber(color.redF()) + ' '
+        + pdfNumber(color.greenF()) + ' '
+        + pdfNumber(color.blueF()) + QByteArrayLiteral(" RG\n")
+        + pdfNumber(lineWidth) + QByteArrayLiteral(" w\n")
+        + pdfNumber(bounds.left() + outerInset) + ' '
+        + pdfNumber(bounds.top() + outerInset) + ' '
+        + pdfNumber(bounds.width() - lineWidth) + ' '
+        + pdfNumber(bounds.height() - lineWidth)
+        + QByteArrayLiteral(" re S\n");
+    const qreal innerInset = lineWidth * 2.25;
+    if (bounds.width() > innerInset * 2.0
+        && bounds.height() > innerInset * 2.0) {
+        content += pdfNumber(lineWidth * 0.65)
+            + QByteArrayLiteral(" w\n")
+            + pdfNumber(bounds.left() + innerInset) + ' '
+            + pdfNumber(bounds.top() + innerInset) + ' '
+            + pdfNumber(bounds.width() - innerInset * 2.0) + ' '
+            + pdfNumber(bounds.height() - innerInset * 2.0)
+            + QByteArrayLiteral(" re S\n");
+    }
+    content += QByteArrayLiteral("BT\n/F0 ")
+        + pdfNumber(fontSize) + QByteArrayLiteral(" Tf\n")
+        + pdfNumber(horizontalScale * 100.0)
+        + QByteArrayLiteral(" Tz\n")
+        + pdfNumber(color.redF()) + ' '
+        + pdfNumber(color.greenF()) + ' '
+        + pdfNumber(color.blueF()) + QByteArrayLiteral(" rg\n1 0 0 1 ")
+        + pdfNumber(textX) + ' ' + pdfNumber(baselineY)
+        + QByteArrayLiteral(" Tm\n<") + encodedText
+        + QByteArrayLiteral("> Tj\nET\nQ\n");
+    return true;
+}
+
+QByteArray stampAppearanceObject(
+    int objectNumber,
+    const PDFAcroFormCanonicalizer::StampAnnotation &annotation,
+    const QByteArray &content)
+{
+    const QRectF bounds = annotation.pageRect.normalized();
+    const QColor color = annotation.color.toRgb();
+    return QByteArray::number(objectNumber)
+        + QByteArrayLiteral(
+            " 0 obj\n"
+            "<< /Type /XObject /Subtype /Form /FormType 1 /BBox [")
+        + pdfNumber(bounds.left()) + ' '
+        + pdfNumber(bounds.top()) + ' '
+        + pdfNumber(bounds.right()) + ' '
+        + pdfNumber(bounds.bottom())
+        + QByteArrayLiteral(
+            "] /Matrix [1 0 0 1 0 0] "
+            "/Resources << /ExtGState << /GS << /Type /ExtGState /CA ")
+        + pdfNumber(color.alphaF())
+        + QByteArrayLiteral(" /ca ") + pdfNumber(color.alphaF())
+        + QByteArrayLiteral(
+            " /AIS false /BM /Normal >> >> "
+            "/Font << /F0 << /Type /Font /Subtype /Type1 "
+            "/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >> >> >> "
+            "/Length ")
+        + QByteArray::number(content.size())
+        + QByteArrayLiteral(" >>\nstream\n")
+        + content
+        + QByteArrayLiteral("endstream\nendobj");
+}
+
+bool configureStampAnnotationDictionary(
+    QByteArray &dictionary,
+    const PDFAcroFormCanonicalizer::StampAnnotation &annotation,
+    int appearanceObjectNumber,
+    QString &error)
+{
+    if (!isSafePdfName(annotation.stampName)) {
+        error = QStringLiteral("A Stamp annotation Name entry is invalid.");
+        return false;
+    }
+    const QRectF bounds = annotation.pageRect.normalized();
+    const auto replace = [
+        &dictionary,
+        &error](QByteArrayView key,
+                const QByteArray &value,
+                bool insertIfMissing = true) {
+        const bool replaced = replaceTopLevelDictionaryValue(
+            dictionary,
+            key,
+            value,
+            insertIfMissing,
+            error);
+        if (!replaced) {
+            error = QStringLiteral("Stamp annotation key %1: %2")
+                .arg(
+                    QString::fromLatin1(key.data(), key.size()),
+                    error);
+        }
+        return replaced;
+    };
+    const QByteArray rect = QByteArrayLiteral("[")
+        + pdfNumber(bounds.left()) + ' '
+        + pdfNumber(bounds.top()) + ' '
+        + pdfNumber(bounds.right()) + ' '
+        + pdfNumber(bounds.bottom()) + ']';
+    return replace(QByteArrayView("/Subtype"), QByteArrayLiteral("/Stamp"))
+        && replace(QByteArrayView("/Rect"), rect)
+        && replace(
+            QByteArrayView("/Name"),
+            '/' + annotation.stampName.toLatin1())
+        && replace(QByteArrayView("/C"), pdfColorArray(annotation.color))
+        && replace(
+            QByteArrayView("/CA"),
+            pdfNumber(annotation.color.alphaF()))
+        && replace(
+            QByteArrayView("/Border"),
+            QByteArrayLiteral("[0 0 0]"))
+        && replace(
+            QByteArrayView("/AP"),
+            QByteArrayLiteral("<< /N ")
+                + QByteArray::number(appearanceObjectNumber)
+                + QByteArrayLiteral(" 0 R >>"));
+}
+
 bool freeTextAppearanceRect(const QByteArray &dictionary,
                             QRectF &pageRect,
                             QString &error)
@@ -7406,6 +7608,243 @@ bool PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
                 || replacement.end > object.size()) {
                 return fail(QStringLiteral(
                     "Overlapping drawing annotation rewrites are not supported."));
+            }
+            object.replace(
+                replacement.start,
+                replacement.end - replacement.start,
+                replacement.value);
+            previousStart = replacement.start;
+        }
+        rewrittenObjects.insert(container.key(), std::move(object));
+        rewrittenReferences.insert(
+            container.key(),
+            containerReferences.value(container.key()));
+    }
+    for (auto rewritten = rewrittenObjects.begin();
+         rewritten != rewrittenObjects.end();
+         ++rewritten) {
+        incrementalObjects.append({
+            rewrittenReferences.value(rewritten.key()),
+            std::move(rewritten.value())});
+    }
+
+    const bool sourceEndsWithNewline = fileSize > 0
+        && reinterpret_cast<const char *>(mapped)[fileSize - 1] == '\n';
+    const ObjectReference root = pdf.root;
+    const qint64 previousXref = pdf.startXref;
+    file.unmap(mapped);
+    file.close();
+    return appendIncrementalUpdate(
+        filePath,
+        root,
+        previousXref,
+        nextObjectNumber,
+        sourceEndsWithNewline,
+        std::move(incrementalObjects),
+        error);
+}
+
+bool PDFAcroFormCanonicalizer::finalizeStampAnnotations(
+    const QString &filePath,
+    const QVector<StampAnnotation> &annotations,
+    QString &error)
+{
+    constexpr qsizetype maximumAnnotations = 4096;
+    constexpr qsizetype maximumTotalAppearanceBytes = 64 * 1024 * 1024;
+    if (annotations.isEmpty()) {
+        return true;
+    }
+    if (annotations.size() > maximumAnnotations) {
+        error = QStringLiteral("Too many Stamp annotations were requested.");
+        return false;
+    }
+
+    QSet<QString> annotationIds;
+    for (const StampAnnotation &annotation : annotations) {
+        if (annotation.page < 0
+            || annotation.annotationId.isEmpty()
+            || annotationIds.contains(annotation.annotationId)) {
+            error = QStringLiteral(
+                "A Stamp annotation request is invalid or duplicated.");
+            return false;
+        }
+        annotationIds.insert(annotation.annotationId);
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0) {
+        error = file.errorString();
+        return false;
+    }
+    const qint64 fileSize = file.size();
+    uchar *mapped = file.map(0, fileSize);
+    if (!mapped) {
+        error = file.errorString();
+        return false;
+    }
+
+    ParsedPdf pdf;
+    if (!parseXref(
+            reinterpret_cast<const char *>(mapped),
+            fileSize,
+            pdf,
+            error)) {
+        file.unmap(mapped);
+        return false;
+    }
+    const auto fail = [&file, mapped, &error](const QString &message) {
+        error = message;
+        file.unmap(mapped);
+        return false;
+    };
+
+    int highestObject = 0;
+    for (auto entry = pdf.entries.cbegin(); entry != pdf.entries.cend(); ++entry) {
+        highestObject = (std::max)(highestObject, entry.key());
+    }
+    int nextObjectNumber = (std::max)(pdf.declaredSize, highestObject + 1);
+
+    struct DictionaryReplacement {
+        qsizetype start = -1;
+        qsizetype end = -1;
+        QByteArray value;
+    };
+    QHash<int, QVector<DictionaryReplacement>> replacementsByContainer;
+    QHash<int, ObjectReference> containerReferences;
+    QHash<int, QByteArray> rewrittenObjects;
+    QHash<int, ObjectReference> rewrittenReferences;
+    QList<IncrementalObject> incrementalObjects;
+    incrementalObjects.reserve(annotations.size() * 2);
+    qsizetype totalAppearanceBytes = 0;
+
+    for (const StampAnnotation &annotation : annotations) {
+        QByteArray appearanceContent;
+        if (!stampAppearanceData(annotation, appearanceContent, error)) {
+            return fail(error);
+        }
+        if (appearanceContent.size()
+                > maximumTotalAppearanceBytes - totalAppearanceBytes) {
+            return fail(QStringLiteral(
+                "Stamp annotation appearances exceed the safety limit."));
+        }
+        totalAppearanceBytes += appearanceContent.size();
+
+        const PlaceholderLocation placeholder = annotationForStringId(
+            pdf,
+            QByteArrayView("/NM"),
+            annotation.annotationId,
+            QByteArrayView("/Stamp"));
+        const bool located = placeholder.widget.number >= 0
+            || (placeholder.container.number >= 0
+                && placeholder.dictionaryStart >= 0
+                && placeholder.dictionaryEnd > placeholder.dictionaryStart);
+        if (!located) {
+            return fail(QStringLiteral(
+                "A Stamp annotation could not be located."));
+        }
+
+        QByteArray object;
+        qsizetype dictionaryStart = -1;
+        qsizetype dictionaryEnd = -1;
+        if (placeholder.isDirect()) {
+            object = completeObject(pdf, placeholder.container.number, error);
+            dictionaryStart = placeholder.dictionaryStart;
+            dictionaryEnd = placeholder.dictionaryEnd;
+        } else {
+            object = completeObject(pdf, placeholder.widget.number, error);
+            dictionaryStart = object.indexOf("<<");
+            if (dictionaryStart >= 0
+                && !matchingDictionaryEnd(
+                    object.constData(),
+                    object.size(),
+                    dictionaryStart,
+                    dictionaryEnd)) {
+                dictionaryEnd = -1;
+            }
+        }
+        if (object.isEmpty()
+            || dictionaryStart < 0
+            || dictionaryEnd <= dictionaryStart
+            || dictionaryEnd > object.size()) {
+            return fail(error.isEmpty()
+                    ? QStringLiteral(
+                        "A Stamp annotation object dictionary is malformed.")
+                    : error);
+        }
+        if (nextObjectNumber >= std::numeric_limits<int>::max()) {
+            return fail(QStringLiteral(
+                "The PDF has no available object number for a Stamp appearance."));
+        }
+
+        const int appearanceObjectNumber = nextObjectNumber++;
+        QByteArray dictionary = object.mid(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart);
+        if (!configureStampAnnotationDictionary(
+                dictionary,
+                annotation,
+                appearanceObjectNumber,
+                error)) {
+            return fail(error);
+        }
+        incrementalObjects.append({
+            ObjectReference{appearanceObjectNumber, 0},
+            stampAppearanceObject(
+                appearanceObjectNumber,
+                annotation,
+                appearanceContent)});
+
+        if (placeholder.isDirect()) {
+            replacementsByContainer[placeholder.container.number].append({
+                dictionaryStart,
+                dictionaryEnd,
+                dictionary});
+            containerReferences.insert(
+                placeholder.container.number,
+                placeholder.container);
+            continue;
+        }
+        if (rewrittenObjects.contains(placeholder.widget.number)) {
+            return fail(QStringLiteral(
+                "Two Stamp requests resolved to the same annotation."));
+        }
+        object.replace(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart,
+            dictionary);
+        rewrittenObjects.insert(placeholder.widget.number, std::move(object));
+        rewrittenReferences.insert(
+            placeholder.widget.number,
+            placeholder.widget);
+    }
+
+    for (auto container = replacementsByContainer.begin();
+         container != replacementsByContainer.end();
+         ++container) {
+        if (rewrittenObjects.contains(container.key())) {
+            return fail(QStringLiteral(
+                "A Stamp annotation container cannot be rewritten safely."));
+        }
+        QByteArray object = completeObject(pdf, container.key(), error);
+        if (object.isEmpty()) {
+            return fail(error);
+        }
+        std::sort(
+            container->begin(),
+            container->end(),
+            [](const DictionaryReplacement &left,
+               const DictionaryReplacement &right) {
+                return left.start > right.start;
+            });
+        qsizetype previousStart = object.size();
+        for (const DictionaryReplacement &replacement
+             : std::as_const(*container)) {
+            if (replacement.start < 0
+                || replacement.end <= replacement.start
+                || replacement.end > previousStart
+                || replacement.end > object.size()) {
+                return fail(QStringLiteral(
+                    "Overlapping Stamp annotation rewrites are not supported."));
             }
             object.replace(
                 replacement.start,

@@ -53,6 +53,7 @@ pipeline này.
 | Strikeout | `strikeout` | `/StrikeOut` | Rectangle tự do, ghi thành `/QuadPoints`. |
 | Sticky Note | `stickyNote` | `/Text` | Frame cố định 24 PDF point tại vị trí click. |
 | Free Text | `freeText` | `/FreeText` | Click dùng frame mặc định; drag dùng text box đã clamp trong page. |
+| Stamp | `stamp` | `/Stamp` | Sáu preset chuẩn; click dùng frame 160 × 50 point, drag dùng Rect đã clamp. |
 | Rectangle | `square` | `/Square` | Drag tạo Rect. |
 | Oval | `circle` | `/Circle` | Drag tạo Rect, `/AP` dùng bốn cubic Bézier. |
 | Line | `line` | `/Line` | Drag tạo hai điểm `/L`. |
@@ -60,13 +61,13 @@ pipeline này.
 | Polyline | `polyLine` | `/PolyLine` | Click nhiều đỉnh, Enter/nhấp đúp để lưu path mở `/Vertices`. |
 | Pencil | `ink` | `/Ink` | Một drag tạo một annotation; model/rehydrate giữ nhiều stroke trong `/InkList`. |
 
-Các markup subtype `/Stamp`, `/Caret`, `/FileAttachment`, `/Sound`, `/Redact`
-và `/Projection` (PDF 2.0) cũng được
-đọc vào CommentPanel với `Candidate.kind == "comment"`. Chúng chỉ hỗ trợ index,
-metadata, chọn và điều hướng; sửa nội dung, xóa và thêm reply đều bị khóa cho
-đến khi writer hỗ trợ mutation an toàn theo subtype.
+Các markup subtype `/Caret`, `/FileAttachment`, `/Sound`, `/Redact` và
+`/Projection` (PDF 2.0) cũng được đọc vào CommentPanel với
+`Candidate.kind == "comment"`. Chúng chỉ hỗ trợ index, metadata, chọn và điều
+hướng; sửa nội dung, xóa và thêm reply đều bị khóa cho đến khi writer hỗ trợ
+mutation an toàn theo subtype.
 
-Với cả mười hai loại có kind riêng ở bảng trên, implementation hiện tại hỗ trợ:
+Với cả mười ba loại có kind riêng ở bảng trên, implementation hiện tại hỗ trợ:
 
 - tạo annotation mới dưới dạng session draft;
 - đọc và index annotation đã có trong PDF;
@@ -80,14 +81,14 @@ Với cả mười hai loại có kind riêng ở bảng trên, implementation h
 
 Giới hạn hiện tại:
 
-- geometry của annotation nguồn không move/resize được;
+- ngoài Ink nguồn hợp lệ, geometry annotation nguồn không move/resize được;
 - reply-to-reply không được tạo từ UI;
 - reply chain nhập từ phần mềm khác được flatten thành một cấp hiển thị;
 - mỗi comment hoặc reply tối đa 700 UTF-16 code unit;
 - Rectangle, Ellipse, Line, Arrow, Triangle và Diamond trong tab Edit là page
   content path object, không phải drawing comment annotation;
 - review state và XFDF chưa được model hóa;
-- 6 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
+- 5 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
 
 ## 2. Luồng kiến trúc tổng thể
 
@@ -198,8 +199,8 @@ candidate, draft hoặc save-time geometry.
 ### 4.1 Candidate scan theo page
 
 Scan page phục vụ hover/edit nội dung đồng thời đọc đủ 18 markup annotation
-subtype mà TrePDF nhận diện. Mười hai subtype do TrePDF hỗ trợ mutation giữ kind
-riêng; 6 subtype còn lại dùng kind `comment` chỉ đọc. Với mỗi annotation,
+subtype mà TrePDF nhận diện. Mười ba subtype do TrePDF hỗ trợ mutation giữ kind
+riêng; 5 subtype còn lại dùng kind `comment` chỉ đọc. Với mỗi annotation,
 controller lấy:
 
 - `/Contents`, `/NM`, `/T`, `/CreationDate`, `/M`;
@@ -574,9 +575,15 @@ Bézier. Line và PolyLine giữ path mở, Polygon đóng path. `/BBox` bằng 
 matrix identity, và `/ExtGState` dùng cùng opacity cho stroke/fill. Annotation
 chỉ có comment vẫn không gọi `FPDFPage_GenerateContent()`.
 
+Stamp mới được canonicalizer ghi `/Subtype /Stamp`, preset `/Name`, `/C`, Print
+flag và normal `/AP` vector dùng Helvetica Bold, viền kép và màu preset.
+`/Contents` vẫn là semantic comment text; sửa Stamp nguồn giữ nguyên geometry
+và `/AP` hiện có. Stamp nguồn không move/resize, còn Stamp mới dùng cùng frame
+draft và tám handle cạnh/góc trước lần Save đầu tiên.
+
 Ink dùng một path mở cho mỗi entry `/InkList`, round cap/join, cùng border width,
 màu và opacity giữa dictionary với appearance. Pipeline vẫn chưa phải generic
-appearance generator cho Stamp hoặc các subtype PDF 2.0; mỗi subtype mới vẫn
+appearance generator cho Caret hoặc các subtype PDF 2.0; mỗi subtype mới vẫn
 cần chiến lược `/AP` riêng và regression mở bằng reader ngoài PDFium.
 
 ### 10.6 Transaction và reopen
@@ -631,7 +638,9 @@ Coverage comment hiện cần được duy trì cho:
   cùng round-trip contents/reply/delete/history;
 - source Ink malformed/oversized downgrade thành generic read-only theo giới hạn
   64 stroke, 4.096 điểm/stroke và 32.768 điểm tổng;
-- read-only index cho 6 markup subtype chưa hỗ trợ mutation;
+- Stamp preset: add/move/resize/history, `/Name`/`Contents`/Print/vector `/AP`,
+  annotation-only Save, reopen, source contents/reply/delete và giữ source `/AP`;
+- read-only index cho 5 markup subtype chưa hỗ trợ mutation;
 - author, creation/modification date và 700 UTF-16 code-unit limit;
 - comment index xuyên trang, duplicate page-local `/NM` và navigation;
 - sửa `/Contents`, `/M` và `/RC` của annotation nguồn;
@@ -673,7 +682,7 @@ Bảng này không mô tả tính năng đã có.
 | P1 | Sửa source geometry/style | Move/resize và property editor, giữ dictionary/AP/Popup/thread metadata. |
 | P1 | Free Text nâng cao | `/IT /FreeTextCallout`, `/CL`, `/LE`, Typewriter, `/Q`, `/RC`/`DS`, border/fill/opacity. |
 | P1 | Review state và grouping | Phân biệt `/State` + `/StateModel`, `/RT /R` và `/RT /Group`; hỗ trợ Accepted/Rejected/Completed/Marked. |
-| P1 | Stamp và text-edit marks | `/Stamp`, `/Caret`, Insert/Replace review workflow. |
+| P1 | Text-edit marks | `/Caret`, Insert/Replace review workflow. |
 | P1 | Comment workflow | Search/filter/sort, author profile, export selected và import/export XFDF. |
 | P2 | File attachment comment | `/FileAttachment` + `/FS`, byte snapshot, size limit và sandbox mở/extract. |
 | P2 | Flattened copy/summary | Save a Flattened Copy riêng; cảnh báo mất semantic thread/metadata. |

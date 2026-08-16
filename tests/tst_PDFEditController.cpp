@@ -1661,7 +1661,7 @@ bool createUnsupportedMarkupCommentsPdf(const QString &filePath)
         annotation += "/M (D:20240101100000Z) /NM (unsupported-";
         annotation += QByteArray::number(index);
         annotation += ") /F 4 ";
-        if (index < 5 || definition.subtype == QByteArrayLiteral("Ink")) {
+        if (index < 6 || definition.subtype == QByteArrayLiteral("Ink")) {
             annotation += "/C [.1 .2 .3] /CA .75 "
                 "/BS << /Type /Border /W 2 /S /S >> "
                 "/AP << /N 17 0 R >> ";
@@ -2968,6 +2968,7 @@ struct CommentAnnotationInspection {
     QString contents;
     QString richContents;
     QString name;
+    QString appearanceName;
     QString author;
     QString subject;
     QString creationDate;
@@ -3595,6 +3596,9 @@ CommentAnnotationInspection inspectCommentAnnotation(
             inspection.annotationIndex = index;
             inspection.subtype = FPDFAnnot_GetSubtype(annotation);
             inspection.name = name;
+            inspection.appearanceName = annotationDictionaryString(
+                annotation,
+                "Name");
             FPDFAnnot_GetRect(annotation, &inspection.rect);
             inspection.contents = annotationDictionaryString(
                 annotation,
@@ -4920,6 +4924,8 @@ private slots:
     void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete();
     void addsStickyNoteWithPanelModelAndUndo();
     void addsFreeTextWithPanelModelAndUndo();
+    void savesStampPresetWithUndoRedo();
+    void editsAndDeletesSourceStampThreadRoundTrip();
     void addsCommentReplyWithOneLevelModelAndUndo();
     void editsSourceStickyNoteComment();
     void editsSourceTextMarkupComment_data();
@@ -14067,6 +14073,331 @@ void PDFEditControllerTest::addsFreeTextWithPanelModelAndUndo()
     QVERIFY(!controller.hasDrafts());
 }
 
+void PDFEditControllerTest::savesStampPresetWithUndoRedo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-stamp-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-stamp-output.pdf"));
+    QVERIFY(createDifferentPageSizesPdf(sourcePath));
+    const int sourceObjectCount = topLevelPageObjectCount(sourcePath);
+    QVERIFY(sourceObjectCount >= 0);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    struct ExpectedStampPreset {
+        const char *name;
+        const char *text;
+        QColor color;
+    };
+    const std::array<ExpectedStampPreset, 6> expectedPresets{{
+        {"Approved", "APPROVED", QColor(46, 125, 50)},
+        {"Draft", "DRAFT", QColor(21, 101, 192)},
+        {"Final", "FINAL", QColor(40, 53, 147)},
+        {"Confidential", "CONFIDENTIAL", QColor(198, 40, 40)},
+        {"ForComment", "FOR COMMENT", QColor(239, 108, 0)},
+        {"NotApproved", "NOT APPROVED", QColor(198, 40, 40)},
+    }};
+    for (const ExpectedStampPreset &preset : expectedPresets) {
+        controller.setStampName(QString::fromLatin1(preset.name));
+        QCOMPARE(controller.stampName(), QString::fromLatin1(preset.name));
+        QCOMPARE(controller.stampText(), QString::fromLatin1(preset.text));
+        QCOMPARE(controller.stampColor(), preset.color);
+    }
+    controller.setStampName(QStringLiteral("Approved"));
+    controller.setTool(PDFEditController::StampTool);
+
+    const QRectF placement(0.16, 0.18, 0.34, 0.12);
+    const QVariantMap addedStamp = controller.addStamp(0, placement);
+    QVERIFY(!addedStamp.isEmpty());
+    QCOMPARE(
+        addedStamp.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("stamp"));
+    QCOMPARE(
+        addedStamp.value(QStringLiteral("stampName")).toString(),
+        QStringLiteral("Approved"));
+    QCOMPARE(
+        addedStamp.value(QStringLiteral("stampText")).toString(),
+        QStringLiteral("APPROVED"));
+    QCOMPARE(
+        addedStamp.value(QStringLiteral("text")).toString(),
+        QStringLiteral("APPROVED"));
+    const QColor stampColor = addedStamp
+        .value(QStringLiteral("stampColor"))
+        .value<QColor>();
+    QVERIFY(stampColor.isValid());
+    QVERIFY(addedStamp.value(QStringLiteral("editable")).toBool());
+    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.selectedPage(), 0);
+    const QString objectId = addedStamp
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(!objectId.isEmpty());
+    QCOMPARE(controller.selectedObjectId(), objectId);
+    QVERIFY(controller.selectedEditable());
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(controller.commentItems().size(), 1);
+
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(controller.commentItems().isEmpty());
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(controller.commentItems().size(), 1);
+    const QVariantMap redoneStamp = controller.commentItems()
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        redoneStamp.value(QStringLiteral("objectId")).toString(),
+        objectId);
+    QCOMPARE(
+        redoneStamp.value(QStringLiteral("stampName")).toString(),
+        QStringLiteral("Approved"));
+
+    const QRectF resizedPlacement(0.20, 0.22, 0.38, 0.15);
+    QVERIFY(controller.selectCandidate(0, objectId));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resizedPlacement);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), resizedPlacement);
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("frameRect"))
+            .toRectF(),
+        resizedPlacement);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), placement);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), resizedPlacement);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(document.source().toLocalFile(), outputPath);
+    QCOMPARE(topLevelPageObjectCount(outputPath), sourceObjectCount);
+
+    const CommentAnnotationInspection inspection
+        = inspectCommentAnnotation(outputPath, objectId);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.annotationCount, 1);
+    QCOMPARE(inspection.subtype, FPDF_ANNOT_STAMP);
+    QCOMPARE(inspection.appearanceName, QStringLiteral("Approved"));
+    QCOMPARE(inspection.contents, QStringLiteral("APPROVED"));
+    QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
+    QVERIFY(inspection.hasAppearance);
+    QVERIFY(!inspection.appearance.isEmpty());
+    const QByteArray dictionary = annotationDictionaryBytes(
+        outputPath,
+        objectId);
+    QVERIFY(!dictionary.isEmpty());
+    QVERIFY(QRegularExpression(QStringLiteral(R"(/Name\s*/Approved\b)"))
+        .match(QString::fromLatin1(dictionary))
+        .hasMatch());
+
+    const QVariantMap rehydratedStamp = candidateForKind(
+        waitForCandidates(controller, 0),
+        QStringLiteral("stamp"));
+    QVERIFY(!rehydratedStamp.isEmpty());
+    QCOMPARE(
+        rehydratedStamp.value(QStringLiteral("stampName")).toString(),
+        QStringLiteral("Approved"));
+    QCOMPARE(
+        rehydratedStamp.value(QStringLiteral("stampText")).toString(),
+        QStringLiteral("APPROVED"));
+    QCOMPARE(
+        rehydratedStamp.value(QStringLiteral("stampColor")).value<QColor>(),
+        stampColor);
+    QCOMPARE(
+        rehydratedStamp.value(QStringLiteral("text")).toString(),
+        QStringLiteral("APPROVED"));
+    const QRectF rehydratedFrame = rehydratedStamp
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    QVERIFY(qAbs(rehydratedFrame.x() - resizedPlacement.x()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.y() - resizedPlacement.y()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.width() - resizedPlacement.width()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.height() - resizedPlacement.height()) < 0.001);
+    QVERIFY(!rehydratedStamp.value(QStringLiteral("editable")).toBool());
+    QVERIFY(controller.selectComment(
+        0,
+        rehydratedStamp.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(!controller.selectedEditable());
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+    const QVariantMap indexedStamp = controller.commentItems()
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        indexedStamp.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("stamp"));
+    QCOMPARE(
+        indexedStamp.value(QStringLiteral("stampName")).toString(),
+        QStringLiteral("Approved"));
+    QCOMPARE(
+        indexedStamp.value(QStringLiteral("stampText")).toString(),
+        QStringLiteral("APPROVED"));
+    QCOMPARE(
+        indexedStamp.value(QStringLiteral("stampColor")).value<QColor>(),
+        stampColor);
+    QVERIFY(indexedStamp
+        .value(QStringLiteral("commentTextEditable"))
+        .toBool());
+}
+
+void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-stamp-thread.pdf"));
+    const QString editedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-stamp-thread-edited.pdf"));
+    const QString deletedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-stamp-thread-deleted.pdf"));
+    QVERIFY(createUnsupportedMarkupCommentsPdf(sourcePath));
+    const int sourceObjectCount = topLevelPageObjectCount(sourcePath);
+    QVERIFY(sourceObjectCount >= 0);
+
+    const QString sourceName = QStringLiteral("unsupported-5");
+    const CommentAnnotationInspection originalInspection
+        = inspectCommentAnnotation(sourcePath, sourceName);
+    QVERIFY(originalInspection.readable);
+    QCOMPARE(originalInspection.subtype, FPDF_ANNOT_STAMP);
+    QCOMPARE(originalInspection.appearanceName, QStringLiteral("Draft"));
+    QCOMPARE(
+        originalInspection.contents,
+        QStringLiteral("unsupported-stamp"));
+    QVERIFY(originalInspection.hasAppearance);
+    QVERIFY(!originalInspection.appearance.isEmpty());
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 12, 5000);
+
+    QVariantMap sourceStamp;
+    for (const QVariant &commentValue : controller.commentItems()) {
+        const QVariantMap comment = commentValue.toMap();
+        if (comment.value(QStringLiteral("kind")).toString()
+                == QLatin1String("stamp")) {
+            sourceStamp = comment;
+            break;
+        }
+    }
+    QVERIFY(!sourceStamp.isEmpty());
+    QCOMPARE(
+        sourceStamp.value(QStringLiteral("text")).toString(),
+        QStringLiteral("unsupported-stamp"));
+    QCOMPARE(
+        sourceStamp.value(QStringLiteral("stampName")).toString(),
+        QStringLiteral("Draft"));
+    QCOMPARE(
+        sourceStamp.value(QStringLiteral("stampText")).toString(),
+        QStringLiteral("DRAFT"));
+    QVERIFY(sourceStamp
+        .value(QStringLiteral("stampColor"))
+        .value<QColor>()
+        .isValid());
+    QVERIFY(!sourceStamp.value(QStringLiteral("editable")).toBool());
+    QVERIFY(sourceStamp
+        .value(QStringLiteral("commentTextEditable"))
+        .toBool());
+    const QString objectId = sourceStamp
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(!objectId.isEmpty());
+    QVERIFY(controller.selectComment(0, objectId));
+    QVERIFY(!controller.selectedEditable());
+
+    const QString editedContents = QStringLiteral(
+        "Nội dung Stamp đã được chỉnh sửa.");
+    const QString replyContents = QStringLiteral(
+        "Phản hồi cho Stamp nguồn.");
+    QVERIFY(controller.setCommentText(0, objectId, editedContents));
+    const QVariantMap reply = controller.addCommentReply(
+        0,
+        objectId,
+        replyContents);
+    QVERIFY(!reply.isEmpty());
+    const QString replyId = reply
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(!replyId.isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(editedPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(topLevelPageObjectCount(editedPath), sourceObjectCount);
+
+    const CommentAnnotationInspection sourceStillOriginal
+        = inspectCommentAnnotation(sourcePath, sourceName);
+    QCOMPARE(
+        sourceStillOriginal.contents,
+        QStringLiteral("unsupported-stamp"));
+    QCOMPARE(
+        sourceStillOriginal.appearance,
+        originalInspection.appearance);
+    const CommentAnnotationInspection editedInspection
+        = inspectCommentAnnotation(editedPath, sourceName);
+    QVERIFY(editedInspection.readable);
+    QCOMPARE(editedInspection.subtype, FPDF_ANNOT_STAMP);
+    QCOMPARE(editedInspection.appearanceName, QStringLiteral("Draft"));
+    QCOMPARE(editedInspection.contents, editedContents);
+    QCOMPARE(editedInspection.appearance, originalInspection.appearance);
+    const CommentAnnotationInspection replyInspection
+        = inspectCommentAnnotation(editedPath, replyId);
+    QVERIFY(replyInspection.readable);
+    QCOMPARE(replyInspection.subtype, FPDF_ANNOT_TEXT);
+    QCOMPARE(replyInspection.contents, replyContents);
+    QCOMPARE(replyInspection.parentName, sourceName);
+    QCOMPARE(replyInspection.relation, QStringLiteral("R"));
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 13, 5000);
+    QVariantMap rehydratedStamp;
+    for (const QVariant &commentValue : controller.commentItems()) {
+        const QVariantMap comment = commentValue.toMap();
+        if (!comment.value(QStringLiteral("isReply")).toBool()
+            && comment.value(QStringLiteral("kind")).toString()
+                == QLatin1String("stamp")) {
+            rehydratedStamp = comment;
+            break;
+        }
+    }
+    QVERIFY(!rehydratedStamp.isEmpty());
+    QCOMPARE(
+        rehydratedStamp.value(QStringLiteral("stampName")).toString(),
+        QStringLiteral("Draft"));
+    QCOMPARE(
+        rehydratedStamp.value(QStringLiteral("stampText")).toString(),
+        QStringLiteral("DRAFT"));
+    QCOMPARE(
+        rehydratedStamp.value(QStringLiteral("text")).toString(),
+        editedContents);
+    QCOMPARE(
+        rehydratedStamp.value(QStringLiteral("replyCount")).toInt(),
+        1);
+
+    QVERIFY(controller.removeComment(
+        0,
+        rehydratedStamp.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.commentItems().size(), 11);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(deletedPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(topLevelPageObjectCount(deletedPath), sourceObjectCount);
+    QCOMPARE(annotationSubtypeCount(sourcePath, FPDF_ANNOT_STAMP), 1);
+    QCOMPARE(annotationSubtypeCount(editedPath, FPDF_ANNOT_STAMP), 1);
+    QCOMPARE(annotationSubtypeCount(deletedPath, FPDF_ANNOT_STAMP), 0);
+    QCOMPARE(
+        inspectCommentAnnotation(deletedPath, sourceName).annotationIndex,
+        -1);
+    QCOMPARE(
+        inspectCommentAnnotation(deletedPath, replyId).annotationIndex,
+        -1);
+}
+
 void PDFEditControllerTest::addsCommentReplyWithOneLevelModelAndUndo()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -16940,13 +17271,18 @@ void PDFEditControllerTest::indexesDrawingAndUnsupportedMarkupComments()
             .toString();
         indexedContents.insert(text);
         const bool drawingComment = drawingKinds.contains(text);
+        const bool stampComment
+            = text == QLatin1String("unsupported-stamp");
+        const bool supportedComment = drawingComment || stampComment;
         const bool movableInk
             = text == QLatin1String("unsupported-ink");
         QCOMPARE(
             comment.value(QStringLiteral("kind")).toString(),
             drawingComment
                 ? drawingKinds.value(text)
-                : QStringLiteral("comment"));
+                : stampComment
+                    ? QStringLiteral("stamp")
+                    : QStringLiteral("comment"));
         QVERIFY(!comment.value(QStringLiteral("label")).toString().isEmpty());
         QCOMPARE(
             comment.value(QStringLiteral("commentAuthor")).toString(),
@@ -16956,15 +17292,27 @@ void PDFEditControllerTest::indexesDrawingAndUnsupportedMarkupComments()
             movableInk);
         QCOMPARE(
             comment.value(QStringLiteral("commentTextEditable")).toBool(),
-            drawingComment);
+            supportedComment);
         QCOMPARE(
             comment.value(QStringLiteral("commentTextEditReason"))
                 .toString()
                 .isEmpty(),
-            drawingComment);
+            supportedComment);
         QVERIFY(controller.selectComment(0, objectId));
         QCOMPARE(controller.selectedEditable(), movableInk);
-        if (drawingComment) {
+        if (stampComment) {
+            QCOMPARE(
+                comment.value(QStringLiteral("stampName")).toString(),
+                QStringLiteral("Draft"));
+            QCOMPARE(
+                comment.value(QStringLiteral("stampText")).toString(),
+                QStringLiteral("DRAFT"));
+            QVERIFY(comment
+                .value(QStringLiteral("stampColor"))
+                .value<QColor>()
+                .isValid());
+        }
+        if (supportedComment) {
             if (text == QLatin1String("unsupported-ink")) {
                 const QVariantList strokes = comment
                     .value(QStringLiteral("inkStrokes"))
@@ -16981,7 +17329,7 @@ void PDFEditControllerTest::indexesDrawingAndUnsupportedMarkupComments()
             QVERIFY(controller.setCommentText(
                 0,
                 objectId,
-                QStringLiteral("Editable drawing comment")));
+                QStringLiteral("Editable markup comment")));
             QVERIFY(controller.hasDrafts());
             controller.undo();
             QVERIFY(!controller.hasDrafts());
@@ -16989,7 +17337,7 @@ void PDFEditControllerTest::indexesDrawingAndUnsupportedMarkupComments()
             QVERIFY(!controller.addCommentReply(
                 0,
                 objectId,
-                QStringLiteral("Drawing reply")).isEmpty());
+                QStringLiteral("Markup reply")).isEmpty());
             QVERIFY(controller.hasDrafts());
             controller.undo();
             QVERIFY(!controller.hasDrafts());
