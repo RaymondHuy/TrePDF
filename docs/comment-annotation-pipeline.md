@@ -428,7 +428,7 @@ Annotation bị bảo vệ vẫn được index, hiển thị và điều hướ
 text hoặc xóa. Cả QML và controller đều có trạng thái disable/reason; writer vẫn
 kiểm lại flags để chống source thay đổi giữa scan và Save.
 
-Ngoại lệ geometry hiện tại là Ink nguồn hợp lệ: translate cần annotation
+Ngoại lệ geometry hiện tại là Ink nguồn hợp lệ: move/resize cần annotation
 permission, không có ReadOnly/LockedContents/Locked và writer kiểm lại các điều
 kiện này trước Save. Các annotation nguồn khác vẫn không được move/resize page
 appearance nếu UI chưa cung cấp mutation đó.
@@ -531,7 +531,8 @@ Trước khi sửa, writer xác thực annotation index, subtype, original `/Con
 - với Free Text, xóa stale `/AP`, ghi appearance id và để canonicalizer tạo lại
   wrapped Unicode appearance.
 
-Với Ink translate-only, writer map frame và toàn bộ stroke đã dịch qua
+Với Ink đổi geometry, controller translate hoặc scale từng stroke từ frame ban
+đầu sang frame mới. Writer map frame và các stroke này qua
 `FPDF_DeviceToPage()`, thay `/Rect` và dựng lại `/InkList` trên chính annotation
 nguồn. Normal `/AP` không bị viết lại: PDF mapping appearance vào Rect mới nên
 appearance tùy biến, màu, opacity, z-order dictionary, `/Popup`, `/IRT` và các

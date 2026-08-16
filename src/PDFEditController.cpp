@@ -5631,9 +5631,6 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
               <= geometryEpsilon
         && qAbs(normalizedRect.height() - currentFrameRect.height())
                <= geometryEpsilon;
-    if (draft.candidate.kind == QLatin1String("ink") && !movesFrame) {
-        return;
-    }
 
     QRectF boundedRect;
     QRectF resizedContentBounds;
@@ -5670,6 +5667,7 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
     const bool fixedBoundsDraft = sourceImageDraft
         || draft.candidate.kind == QLatin1String("addedImage")
         || draft.candidate.kind == QLatin1String("freeText")
+        || draft.candidate.kind == QLatin1String("ink")
         || isShapeCandidateKind(draft.candidate.kind);
     if (!movesFrame && sourceImageDraft) {
         const qreal width = qBound<qreal>(0.0, draft.frameRect.width(), 1.0);
@@ -9215,19 +9213,37 @@ QVector<QVector<QPointF>> PDFEditController::inkStrokesForDraft(
         return strokes;
     }
 
-    const QRectF initialFrameRect
-        = draft.candidate.initialDraftFrameRect.isEmpty()
+    const QRectF initialFrameRect = (
+        draft.candidate.initialDraftFrameRect.isEmpty()
         ? draft.candidate.geometry.sourceRect
-        : draft.candidate.initialDraftFrameRect;
-    const QPointF translation
-        = draft.frameRect.topLeft() - initialFrameRect.topLeft();
-    if (translation.isNull()) {
+        : draft.candidate.initialDraftFrameRect).normalized();
+    const QRectF currentFrameRect = draft.frameRect.normalized();
+    if (currentFrameRect == initialFrameRect) {
         return strokes;
     }
+    if (!initialFrameRect.isValid()
+        || initialFrameRect.width() <= 0.0
+        || initialFrameRect.height() <= 0.0
+        || !currentFrameRect.isValid()
+        || currentFrameRect.width() <= 0.0
+        || currentFrameRect.height() <= 0.0) {
+        return {};
+    }
+
+    const qreal horizontalScale
+        = currentFrameRect.width() / initialFrameRect.width();
+    const qreal verticalScale
+        = currentFrameRect.height() / initialFrameRect.height();
 
     for (QVector<QPointF> &stroke : strokes) {
         for (QPointF &point : stroke) {
-            point += translation;
+            point = QPointF(
+                currentFrameRect.left()
+                    + (point.x() - initialFrameRect.left())
+                        * horizontalScale,
+                currentFrameRect.top()
+                    + (point.y() - initialFrameRect.top())
+                        * verticalScale);
         }
     }
     return strokes;

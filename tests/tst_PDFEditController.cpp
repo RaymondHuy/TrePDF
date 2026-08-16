@@ -2182,6 +2182,37 @@ QVariantMap candidateForKind(const QVariantList &candidates, const QString &kind
     return {};
 }
 
+QVariantList transformedInkStrokes(const QVariantList &strokes,
+                                   const QRectF &sourceFrame,
+                                   const QRectF &targetFrame)
+{
+    QVariantList transformed;
+    if (sourceFrame.width() <= 0.0 || sourceFrame.height() <= 0.0) {
+        return transformed;
+    }
+
+    const qreal horizontalScale
+        = targetFrame.width() / sourceFrame.width();
+    const qreal verticalScale
+        = targetFrame.height() / sourceFrame.height();
+    transformed.reserve(strokes.size());
+    for (const QVariant &strokeValue : strokes) {
+        const QVariantList stroke = strokeValue.toList();
+        QVariantList transformedStroke;
+        transformedStroke.reserve(stroke.size());
+        for (const QVariant &pointValue : stroke) {
+            const QPointF point = pointValue.toPointF();
+            transformedStroke.append(QVariant::fromValue(QPointF(
+                targetFrame.left()
+                    + (point.x() - sourceFrame.left()) * horizontalScale,
+                targetFrame.top()
+                    + (point.y() - sourceFrame.top()) * verticalScale)));
+        }
+        transformed.append(QVariant::fromValue(transformedStroke));
+    }
+    return transformed;
+}
+
 QVariantList waitForCandidates(PDFEditController &controller, int page)
 {
     QSignalSpy candidatesReadySpy(
@@ -4859,9 +4890,9 @@ private slots:
     void savesDrawingCommentsRoundTrip_data();
     void savesDrawingCommentsRoundTrip();
     void coalescesInkPreviewUpdates();
-    void movesAddedInkWithUndoRedoAndDiscard();
+    void movesAndResizesAddedInkWithUndoRedoAndDiscard();
     void savesInkCommentRoundTrip();
-    void movesSourceInkRoundTrip();
+    void movesAndResizesSourceInkRoundTrip();
     void editsSourceInkWithFillAppearanceRoundTrip();
     void editsRepliesAndDeletesSourceDrawingCommentsRoundTrip_data();
     void editsRepliesAndDeletesSourceDrawingCommentsRoundTrip();
@@ -15580,7 +15611,7 @@ void PDFEditControllerTest::coalescesInkPreviewUpdates()
     QCOMPARE(controller.pendingDrawingCommentPage(), -1);
 }
 
-void PDFEditControllerTest::movesAddedInkWithUndoRedoAndDiscard()
+void PDFEditControllerTest::movesAndResizesAddedInkWithUndoRedoAndDiscard()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
         QStringLiteral("move-added-ink-source.pdf"));
@@ -15625,31 +15656,14 @@ void PDFEditControllerTest::movesAddedInkWithUndoRedoAndDiscard()
         added.value(QStringLiteral("annotationStrokes")).toList(),
         originalStrokes);
 
-    const auto translatedStrokes = [](const QVariantList &strokes,
-                                      const QPointF &translation) {
-        QVariantList translated;
-        translated.reserve(strokes.size());
-        for (const QVariant &strokeValue : strokes) {
-            const QVariantList stroke = strokeValue.toList();
-            QVariantList translatedStroke;
-            translatedStroke.reserve(stroke.size());
-            for (const QVariant &pointValue : stroke) {
-                translatedStroke.append(
-                    QVariant::fromValue(
-                        pointValue.toPointF() + translation));
-            }
-            translated.append(QVariant::fromValue(translatedStroke));
-        }
-        return translated;
-    };
-
     const QPointF translation(0.30, 0.25);
     const QRectF movedFrame = originalFrame.translated(translation);
     QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(movedFrame));
     QVERIFY(!originalFrame.intersects(movedFrame));
-    const QVariantList movedStrokes = translatedStrokes(
+    const QVariantList movedStrokes = transformedInkStrokes(
         originalStrokes,
-        translation);
+        originalFrame,
+        movedFrame);
 
     QVERIFY(controller.selectCandidate(0, objectId));
     controller.beginSelectedFrameResize();
@@ -15722,6 +15736,50 @@ void PDFEditControllerTest::movesAddedInkWithUndoRedoAndDiscard()
     QCOMPARE(
         redoneDraft.value(QStringLiteral("inkStrokes")).toList(),
         movedStrokes);
+
+    const QRectF resizedFrame(
+        movedFrame.x() - 0.04,
+        movedFrame.y() + 0.02,
+        movedFrame.width() * 0.65,
+        movedFrame.height() * 1.40);
+    QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(resizedFrame));
+    const QVariantList resizedStrokes = transformedInkStrokes(
+        originalStrokes,
+        originalFrame,
+        resizedFrame);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resizedFrame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), resizedFrame);
+    QCOMPARE(controller.selectedContentBounds(), resizedFrame);
+    const QVariantMap resizedDraft = controller.draftsForPage(0)
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        resizedDraft.value(QStringLiteral("inkStrokes")).toList(),
+        resizedStrokes);
+    QCOMPARE(
+        resizedDraft.value(QStringLiteral("annotationStrokes")).toList(),
+        resizedStrokes);
+
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), movedFrame);
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("inkStrokes"))
+            .toList(),
+        movedStrokes);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), resizedFrame);
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("inkStrokes"))
+            .toList(),
+        resizedStrokes);
 
     controller.discardDrafts();
     QVERIFY(!controller.hasDrafts());
@@ -15815,6 +15873,38 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
         .value(QStringLiteral("objectId"))
         .toString();
     QVERIFY(!annotationId.isEmpty());
+    const QRectF originalFrame = added
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QRectF resizedFrame(
+        originalFrame.x() + 0.04,
+        originalFrame.y() - 0.03,
+        originalFrame.width() * 0.72,
+        originalFrame.height() * 1.35);
+    QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(resizedFrame));
+    QVERIFY(controller.selectCandidate(0, annotationId));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resizedFrame);
+    controller.finishSelectedFrameResize();
+    const QVariantMap resizedDraft = controller.draftsForPage(0)
+        .constFirst()
+        .toMap();
+    QCOMPARE(
+        resizedDraft.value(QStringLiteral("frameRect")).toRectF(),
+        resizedFrame);
+    QCOMPARE(
+        resizedDraft.value(QStringLiteral("contentBounds")).toRectF(),
+        resizedFrame);
+    const QVariantList resizedStrokes = resizedDraft
+        .value(QStringLiteral("inkStrokes"))
+        .toList();
+    const QVariantList resizedPath = resizedStrokes.constFirst().toList();
+    QCOMPARE(
+        resizedStrokes,
+        transformedInkStrokes(
+            addedStrokes,
+            originalFrame,
+            resizedFrame));
     const int sourcePageObjectCount = topLevelPageObjectCount(sourcePath);
     QVERIFY(sourcePageObjectCount > 0);
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
@@ -15833,6 +15923,18 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
         added.value(QStringLiteral("label")).toString());
     QVERIFY(commentInspection.hasAppearance);
     QVERIFY(!commentInspection.appearance.isEmpty());
+    QVERIFY(qAbs(
+        commentInspection.rect.left
+            - resizedFrame.left() * pageSize.width()) < 0.01);
+    QVERIFY(qAbs(
+        commentInspection.rect.right
+            - resizedFrame.right() * pageSize.width()) < 0.01);
+    QVERIFY(qAbs(
+        commentInspection.rect.top
+            - (1.0 - resizedFrame.top()) * pageSize.height()) < 0.01);
+    QVERIFY(qAbs(
+        commentInspection.rect.bottom
+            - (1.0 - resizedFrame.bottom()) * pageSize.height()) < 0.01);
     QVERIFY(commentInspection.appearance.contains(QStringLiteral("/GS gs")));
     QVERIFY(commentInspection.appearance.contains(QStringLiteral("1.5 w")));
     QVERIFY(commentInspection.appearance.contains(QStringLiteral("1 J 1 j")));
@@ -15851,13 +15953,13 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
     QCOMPARE(inkInspection.count, 1);
     QVERIFY(inkInspection.annotationFound);
     QCOMPARE(inkInspection.paths.size(), 1);
-    QCOMPARE(inkInspection.paths.constFirst().size(), addedPath.size());
+    QCOMPARE(inkInspection.paths.constFirst().size(), resizedPath.size());
     for (qsizetype pointIndex = 0;
-         pointIndex < addedPath.size();
+         pointIndex < resizedPath.size();
          ++pointIndex) {
         const QPointF actual = inkInspection.paths.constFirst().at(
             pointIndex);
-        const QPointF expected = addedPath.at(pointIndex).toPointF();
+        const QPointF expected = resizedPath.at(pointIndex).toPointF();
         QVERIFY(qAbs(actual.x() / pageSize.width() - expected.x()) < 0.002);
         QVERIFY(qAbs(
             (1.0 - actual.y() / pageSize.height()) - expected.y()) < 0.002);
@@ -15906,6 +16008,14 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
         appearance.strokingOpacity - drawingColor.alphaF()) < 0.002);
     QVERIFY(qAbs(
         appearance.nonStrokingOpacity - drawingColor.alphaF()) < 0.002);
+    QVERIFY(qAbs(
+        appearance.boundingBox.at(0) - commentInspection.rect.left) < 0.01);
+    QVERIFY(qAbs(
+        appearance.boundingBox.at(1) - commentInspection.rect.bottom) < 0.01);
+    QVERIFY(qAbs(
+        appearance.boundingBox.at(2) - commentInspection.rect.right) < 0.01);
+    QVERIFY(qAbs(
+        appearance.boundingBox.at(3) - commentInspection.rect.top) < 0.01);
 
     controller.requestCommentIndex();
     QTRY_VERIFY_WITH_TIMEOUT(!controller.commentItems().isEmpty(), 5000);
@@ -15930,6 +16040,15 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
         QVERIFY(qAbs(
             comment.value(QStringLiteral("drawingBorderWidth")).toReal()
                 - 1.5) < 0.002);
+        const QRectF rehydratedFrame = comment
+            .value(QStringLiteral("frameRect"))
+            .toRectF();
+        QVERIFY(qAbs(rehydratedFrame.x() - resizedFrame.x()) < 0.002);
+        QVERIFY(qAbs(rehydratedFrame.y() - resizedFrame.y()) < 0.002);
+        QVERIFY(qAbs(
+            rehydratedFrame.width() - resizedFrame.width()) < 0.002);
+        QVERIFY(qAbs(
+            rehydratedFrame.height() - resizedFrame.height()) < 0.002);
         const QVariantList rehydratedStrokes = comment
             .value(QStringLiteral("inkStrokes"))
             .toList();
@@ -15940,12 +16059,12 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
         const QVariantList rehydratedPath = rehydratedStrokes
             .constFirst()
             .toList();
-        QCOMPARE(rehydratedPath.size(), addedPath.size());
+        QCOMPARE(rehydratedPath.size(), resizedPath.size());
         for (qsizetype pointIndex = 0;
-             pointIndex < addedPath.size();
+             pointIndex < resizedPath.size();
              ++pointIndex) {
             const QPointF actual = rehydratedPath.at(pointIndex).toPointF();
-            const QPointF expected = addedPath.at(pointIndex).toPointF();
+            const QPointF expected = resizedPath.at(pointIndex).toPointF();
             QVERIFY(qAbs(actual.x() - expected.x()) < 0.002);
             QVERIFY(qAbs(actual.y() - expected.y()) < 0.002);
         }
@@ -15955,7 +16074,7 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
     QVERIFY(rehydrated);
 }
 
-void PDFEditControllerTest::movesSourceInkRoundTrip()
+void PDFEditControllerTest::movesAndResizesSourceInkRoundTrip()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
         QStringLiteral("move-source-ink.pdf"));
@@ -16073,6 +16192,33 @@ void PDFEditControllerTest::movesSourceInkRoundTrip()
     QCOMPARE(controller.selectedFrameRect(), movedFrame);
     QVERIFY(controller.hasDrafts());
 
+    const QRectF resizedFrame(
+        movedFrame.x() + 0.03,
+        movedFrame.y() - 0.04,
+        movedFrame.width() * 0.70,
+        movedFrame.height() * 2.50);
+    QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(resizedFrame));
+    const QVariantList resizedNormalizedStrokes = transformedInkStrokes(
+        originalNormalizedStrokes,
+        originalFrame,
+        resizedFrame);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resizedFrame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), resizedFrame);
+    QCOMPARE(controller.selectedContentBounds(), resizedFrame);
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("inkStrokes"))
+            .toList(),
+        resizedNormalizedStrokes);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), movedFrame);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), resizedFrame);
+
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     QVERIFY(!controller.hasDrafts());
     QCOMPARE(topLevelPageObjectCount(outputPath), originalPageObjectCount);
@@ -16092,28 +16238,24 @@ void PDFEditControllerTest::movesSourceInkRoundTrip()
     QVERIFY(!movedComment.modificationDate.isEmpty());
     QVERIFY(movedComment.modificationDate
         != originalComment.modificationDate);
-    const qreal pageDeltaX = translation.x() * 300.0;
-    const qreal pageDeltaY = translation.y() * 600.0;
     QVERIFY(qAbs(
-        movedComment.rect.left
-            - (originalComment.rect.left + pageDeltaX)) < 0.001);
+        movedComment.rect.left - resizedFrame.left() * 300.0) < 0.02);
     QVERIFY(qAbs(
-        movedComment.rect.right
-            - (originalComment.rect.right + pageDeltaX)) < 0.001);
+        movedComment.rect.right - resizedFrame.right() * 300.0) < 0.02);
     QVERIFY(qAbs(
         movedComment.rect.top
-            - (originalComment.rect.top - pageDeltaY)) < 0.001);
+            - (1.0 - resizedFrame.top()) * 600.0) < 0.02);
     QVERIFY(qAbs(
         movedComment.rect.bottom
-            - (originalComment.rect.bottom - pageDeltaY)) < 0.001);
+            - (1.0 - resizedFrame.bottom()) * 600.0) < 0.02);
     QVERIFY(movedInk.readable);
     QVERIFY(movedInk.annotationFound);
-    QCOMPARE(movedInk.paths.size(), movedNormalizedStrokes.size());
+    QCOMPARE(movedInk.paths.size(), resizedNormalizedStrokes.size());
     for (qsizetype strokeIndex = 0;
-         strokeIndex < movedNormalizedStrokes.size();
+         strokeIndex < resizedNormalizedStrokes.size();
          ++strokeIndex) {
         const QVariantList normalizedStroke
-            = movedNormalizedStrokes.at(strokeIndex).toList();
+            = resizedNormalizedStrokes.at(strokeIndex).toList();
         const QVector<QPointF> pageStroke = movedInk.paths.at(strokeIndex);
         QCOMPARE(pageStroke.size(), normalizedStroke.size());
         for (qsizetype pointIndex = 0;
@@ -16155,10 +16297,10 @@ void PDFEditControllerTest::movesSourceInkRoundTrip()
     const QRectF rehydratedFrame = rehydratedInk
         .value(QStringLiteral("frameRect"))
         .toRectF();
-    QVERIFY(qAbs(rehydratedFrame.x() - movedFrame.x()) < 0.001);
-    QVERIFY(qAbs(rehydratedFrame.y() - movedFrame.y()) < 0.001);
-    QVERIFY(qAbs(rehydratedFrame.width() - movedFrame.width()) < 0.001);
-    QVERIFY(qAbs(rehydratedFrame.height() - movedFrame.height()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.x() - resizedFrame.x()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.y() - resizedFrame.y()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.width() - resizedFrame.width()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.height() - resizedFrame.height()) < 0.001);
 }
 
 void PDFEditControllerTest::editsSourceInkWithFillAppearanceRoundTrip()
@@ -16208,11 +16350,15 @@ void PDFEditControllerTest::editsSourceInkWithFillAppearanceRoundTrip()
     const QRectF originalFrame = pageInk
         .value(QStringLiteral("frameRect"))
         .toRectF();
-    const QPointF translation(0.10, 0.10);
+    const QRectF resizedFrame(
+        originalFrame.x() + 0.10,
+        originalFrame.y() + 0.05,
+        originalFrame.width() * 0.75,
+        originalFrame.height() * 1.50);
+    QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(resizedFrame));
     QVERIFY(controller.selectCandidate(0, objectId));
     controller.beginSelectedFrameResize();
-    controller.updateSelectedFrameRect(
-        originalFrame.translated(translation));
+    controller.updateSelectedFrameRect(resizedFrame);
     controller.finishSelectedFrameResize();
     const QString editedContents = QStringLiteral(
         "Ink with fill appearance edited.");
@@ -16228,17 +16374,15 @@ void PDFEditControllerTest::editsSourceInkWithFillAppearanceRoundTrip()
     QVERIFY(editedInspection.hasAppearance);
     QCOMPARE(editedInspection.appearance, originalInspection.appearance);
     QVERIFY(qAbs(
-        editedInspection.rect.left
-            - (originalInspection.rect.left + 30.0)) < 0.001);
+        editedInspection.rect.left - resizedFrame.left() * 300.0) < 0.02);
     QVERIFY(qAbs(
-        editedInspection.rect.right
-            - (originalInspection.rect.right + 30.0)) < 0.001);
+        editedInspection.rect.right - resizedFrame.right() * 300.0) < 0.02);
     QVERIFY(qAbs(
         editedInspection.rect.top
-            - (originalInspection.rect.top - 60.0)) < 0.001);
+            - (1.0 - resizedFrame.top()) * 600.0) < 0.02);
     QVERIFY(qAbs(
         editedInspection.rect.bottom
-            - (originalInspection.rect.bottom - 60.0)) < 0.001);
+            - (1.0 - resizedFrame.bottom()) * 600.0) < 0.02);
 
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);

@@ -2944,7 +2944,7 @@ PDFSaveWriter::Result prepareDrawingCommentAnnotation(
         : FPDF_ANNOT_FLAG_PRINT;
 
     QRectF pageRect;
-    if (rectangular || (!createPlaceholder && ink)) {
+    if (rectangular || ink) {
         FS_RECTF mappedRect{};
         if (!annotationRectForFrame(
                 draft.frameRect,

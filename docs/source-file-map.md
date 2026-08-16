@@ -149,7 +149,7 @@ flowchart TD
    dùng delegate/preview riêng. Nội dung Free Text được sửa trong CommentPanel.
    Move/resize chỉ commit một command khi gesture kết thúc. Ink mới và Ink
    nguồn hợp lệ hỗ trợ translate toàn bộ stroke bằng bounding box/phím mũi tên,
-   nhưng không hỗ trợ resize.
+   đồng thời scale các stroke bằng tám resize handle ở cạnh/góc.
 5. `PDFSaveWriter` phân biệt thay đổi chỉ dịch chuyển với thay đổi cần thay object
    để giữ font, ma trận, resource và z-order khi có thể.
 

@@ -39,10 +39,11 @@ Current features:
   available as a generic read-only comment. Stamp, Caret, FileAttachment,
   Sound, Redact, and PDF 2.0 Projection remain indexed read-only for panel
   navigation.
-  Added Ink and valid source Ink can be translated by dragging the selected
-  bounding box or using arrow keys. One delta is applied to every stroke and
-  committed as one undoable command; Ink resize is not supported. Saving a
-  source Ink move updates `/Rect` and `/InkList` while preserving its `/AP`.
+  Added Ink and valid source Ink can be moved by dragging the selected bounding
+  box or using arrow keys, and resized with eight side/corner handles. Resize
+  applies the frame's horizontal and vertical scale to every stroke; each
+  gesture is committed as one undoable command. Saving source Ink geometry
+  updates `/Rect` and `/InkList` while preserving its `/AP`.
   Squiggly accepts only non-whitespace source-text glyphs intersected by the
   drag gesture, snaps the result into per-line rectangles/QuadPoints, and
   rejects whitespace-only or no-text selections. Nearly horizontal gestures use
