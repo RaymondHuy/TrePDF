@@ -21,6 +21,7 @@ Item {
     property var stickyNoteDrafts: []
     property var freeTextDrafts: []
     property var drawingCommentDrafts: []
+    property var inkDrafts: []
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
@@ -57,6 +58,11 @@ Item {
     property bool drawingPathActive: false
     property var drawingPathPoints: []
     property point drawingPathHover: Qt.point(0, 0)
+    property bool inkDrawing: false
+    property int inkInteractionPage: -1
+    property var inkStrokePoints: []
+    property var inkPreviewStrokePoints: []
+    property bool inkPreviewUpdatePending: false
     readonly property var drawingPreviewVertices: {
         if (drawingCommentDragging && width > 0 && height > 0) {
             return [
@@ -89,6 +95,8 @@ Item {
     readonly property real minimumResizePixelSize: 24
     readonly property real minimumHighlightDragSize: 3
     readonly property real minimumFreeTextDragSize: 3
+    readonly property real minimumInkSampleDistance: 1
+    readonly property int maximumInkPoints: 4096
     readonly property real defaultFreeTextWidthPoints: 160
     readonly property real defaultFreeTextHeightPoints: 64
     readonly property rect activeHighlightRect: Qt.rect(
@@ -194,11 +202,13 @@ Item {
             stickyNoteDrafts = []
             freeTextDrafts = []
             drawingCommentDrafts = []
+            inkDrafts = []
             hoverCandidate = ({})
             cancelHighlight()
             cancelShape()
             cancelFreeTextPlacement()
             cancelDrawingComment()
+            cancelInkDrawing()
             hideSelectCursor()
             return
         }
@@ -233,6 +243,7 @@ Item {
         const displayedStickyNoteDrafts = []
         const displayedFreeTextDrafts = []
         const displayedDrawingCommentDrafts = []
+        const displayedInkDrafts = []
         for (let index = 0; index < displayedDrafts.length; ++index) {
             const draft = displayedDrafts[index]
             if (isTextMarkupKind(draft.kind))
@@ -241,6 +252,8 @@ Item {
                 displayedStickyNoteDrafts.push(draft)
             else if (draft.kind === "freeText")
                 displayedFreeTextDrafts.push(draft)
+            else if (draft.kind === "ink")
+                displayedInkDrafts.push(draft)
             else if (isDrawingCommentKind(draft.kind))
                 displayedDrawingCommentDrafts.push(draft)
             else
@@ -252,6 +265,7 @@ Item {
         stickyNoteDrafts = displayedStickyNoteDrafts
         freeTextDrafts = displayedFreeTextDrafts
         drawingCommentDrafts = displayedDrawingCommentDrafts
+        inkDrafts = displayedInkDrafts
         if (!interactionActive) {
             hoverCandidate = ({})
             hideSelectCursor()
@@ -652,6 +666,7 @@ Item {
             || kind === "comment"
             || kind === "stickyNote"
             || kind === "freeText"
+            || kind === "ink"
     }
 
     function isTextMarkupTool() {
@@ -667,6 +682,10 @@ Item {
             || controller.tool === PDFEditController.LineTool
             || controller.tool === PDFEditController.PolygonTool
             || controller.tool === PDFEditController.PolyLineTool
+    }
+
+    function isInkTool() {
+        return controller.tool === PDFEditController.InkTool
     }
 
     function isDrawingPathTool() {
@@ -689,6 +708,7 @@ Item {
     function isCommentCreationTool() {
         return isTextMarkupTool()
             || isDrawingCommentTool()
+            || isInkTool()
             || controller.tool === PDFEditController.StickyNoteTool
             || controller.tool === PDFEditController.FreeTextTool
     }
@@ -1318,17 +1338,6 @@ Item {
                 drawingPathHover = point
                 return false
             }
-            if (controller.tool === PDFEditController.PolygonTool
-                    && points.length >= 3) {
-                const first = points[0]
-                const closingDistance = Math.hypot(
-                    (point.x - first.x) * width,
-                    (point.y - first.y) * height)
-                if (closingDistance <= 8) {
-                    finishDrawingPath()
-                    return true
-                }
-            }
         }
         points.push(point)
         drawingPathPoints = points
@@ -1376,6 +1385,85 @@ Item {
         drawingPathPoints = []
         drawingPathHover = Qt.point(0, 0)
         drawingInteractionPage = -1
+        if (releaseOwner !== false && targetPage >= 0)
+            controller.releaseDrawingCommentInteraction(targetPage)
+    }
+
+    function beginInkDrawing(x, y) {
+        if (!isInkTool() || width <= 0 || height <= 0 || inkDrawing)
+            return
+        if (!controller.claimDrawingCommentInteraction(page))
+            return
+
+        if (editing)
+            commitEditing()
+        selectionActions.close()
+        controller.clearSelection()
+        hoverCandidate = ({})
+        hideSelectCursor()
+        inkInteractionPage = page
+        const point = normalizedDrawingPoint(x, y)
+        inkStrokePoints = [point]
+        inkPreviewStrokePoints = [point]
+        inkPreviewUpdatePending = false
+        inkDrawing = true
+    }
+
+    function updateInkDrawing(x, y) {
+        if (!inkDrawing || width <= 0 || height <= 0) {
+            return
+        }
+
+        const point = normalizedDrawingPoint(x, y)
+        const previous = inkStrokePoints[inkStrokePoints.length - 1]
+        const distance = Math.hypot(
+            (point.x - previous.x) * width,
+            (point.y - previous.y) * height)
+        if (distance < minimumInkSampleDistance)
+            return
+
+        if (inkStrokePoints.length >= maximumInkPoints)
+            inkStrokePoints[inkStrokePoints.length - 1] = point
+        else
+            inkStrokePoints.push(point)
+        inkPreviewUpdatePending = true
+    }
+
+    function publishInkPreview() {
+        inkPreviewUpdatePending = false
+        if (!inkDrawing) {
+            inkPreviewStrokePoints = []
+            return
+        }
+
+        inkPreviewStrokePoints = inkStrokePoints.slice(0)
+    }
+
+    function finishInkDrawing(x, y) {
+        if (!inkDrawing)
+            return
+
+        updateInkDrawing(x, y)
+        const points = inkStrokePoints
+        const targetPage = inkInteractionPage
+        inkDrawing = false
+        inkInteractionPage = -1
+        inkStrokePoints = []
+        inkPreviewStrokePoints = []
+        inkPreviewUpdatePending = false
+        controller.releaseDrawingCommentInteraction(targetPage)
+        if (points.length >= 2)
+            controller.addDrawingComment(targetPage, points)
+        reloadData()
+    }
+
+    function cancelInkDrawing(releaseOwner) {
+        const targetPage = inkInteractionPage
+        inkDrawing = false
+        inkInteractionPage = -1
+        inkStrokePoints = []
+        inkPreviewStrokePoints = []
+        inkPreviewUpdatePending = false
         if (releaseOwner !== false && targetPage >= 0)
             controller.releaseDrawingCommentInteraction(targetPage)
     }
@@ -1500,6 +1588,7 @@ Item {
         cancelShape()
         cancelFreeTextPlacement()
         cancelDrawingComment()
+        cancelInkDrawing()
         hideSelectCursor()
         hoverCandidate = ({})
         if (editing) {
@@ -1589,6 +1678,7 @@ Item {
         cancelShape()
         cancelFreeTextPlacement()
         cancelDrawingComment()
+        cancelInkDrawing()
         cancelFrameResize()
         if (editing)
             commitEditing()
@@ -1601,6 +1691,7 @@ Item {
         cancelShape()
         cancelFreeTextPlacement()
         cancelDrawingComment()
+        cancelInkDrawing()
         if (pooled)
             cancelFrameResize()
         if (pooled && editing)
@@ -1614,6 +1705,7 @@ Item {
             cancelShape()
             cancelFreeTextPlacement()
             cancelDrawingComment()
+            cancelInkDrawing()
         }
         reloadData()
     }
@@ -1628,6 +1720,13 @@ Item {
 
         // Pointer events can outpace frames; resolve from the latest position.
         onTriggered: root.resolveSquigglyPreview()
+    }
+
+    FrameAnimation {
+        running: root.inkPreviewUpdatePending
+
+        // Pointer events can outpace frames; publish the latest captured stroke.
+        onTriggered: root.publishInkPreview()
     }
 
     Connections {
@@ -1658,6 +1757,7 @@ Item {
             root.cancelShape()
             root.cancelFreeTextPlacement()
             root.cancelDrawingComment()
+            root.cancelInkDrawing()
             root.cancelFrameResize()
             if (root.editing)
                 root.commitEditing()
@@ -1671,6 +1771,11 @@ Item {
                     && root.controller.pendingDrawingCommentPage
                         !== root.drawingInteractionPage) {
                 root.cancelDrawingComment(false)
+            }
+            if (root.inkInteractionPage >= 0
+                    && root.controller.pendingDrawingCommentPage
+                        !== root.inkInteractionPage) {
+                root.cancelInkDrawing(false)
             }
         }
 
@@ -1828,6 +1933,25 @@ Item {
             borderEffect: Number(modelData.borderEffect)
             lineStartStyle: Number(modelData.lineStartStyle)
             lineEndStyle: Number(modelData.lineEndStyle)
+            drawingOpacity: Number(modelData.opacity)
+            visible: modelData.added === true
+                && modelData.deleted !== true
+            z: 1
+            Accessible.ignored: true
+        }
+    }
+
+    Repeater {
+        model: root.inkDrafts
+
+        delegate: InkDrawingView {
+            required property var modelData
+
+            width: root.width
+            height: root.height
+            strokes: modelData.inkStrokes
+            strokeColor: modelData.strokeColor
+            strokeWidth: Number(modelData.strokeWidthRatio) * root.height
             drawingOpacity: Number(modelData.opacity)
             visible: modelData.added === true
                 && modelData.deleted !== true
@@ -2272,12 +2396,14 @@ Item {
         acceptedButtons: Qt.LeftButton
         preventStealing: root.isTextMarkupTool()
             || root.isDrawingCommentTool()
+            || root.isInkTool()
             || root.controller.tool === PDFEditController.AddShapeTool
             || root.controller.tool === PDFEditController.FreeTextTool
         cursorShape: root.selectCursorActive || root.addTextCursorActive
             ? Qt.BlankCursor
             : root.isTextMarkupTool()
                     || root.isDrawingCommentTool()
+                    || root.isInkTool()
                     || root.controller.tool === PDFEditController.AddShapeTool
                     || root.controller.tool === PDFEditController.FreeTextTool
                 ? Qt.CrossCursor
@@ -2311,6 +2437,8 @@ Item {
                 root.updateShape(mouse.x, mouse.y)
             else if (root.placingFreeText)
                 root.updateFreeTextPlacement(mouse.x, mouse.y)
+            else if (root.inkDrawing)
+                root.updateInkDrawing(mouse.x, mouse.y)
             else if (root.drawingCommentDragging
                      || root.drawingPathActive)
                 root.updateDrawingComment(mouse.x, mouse.y)
@@ -2335,6 +2463,9 @@ Item {
                     === PDFEditController.FreeTextTool) {
                 root.beginFreeTextPlacement(mouse.x, mouse.y)
                 mouse.accepted = true
+            } else if (root.isInkTool()) {
+                root.beginInkDrawing(mouse.x, mouse.y)
+                mouse.accepted = true
             } else if (root.isDrawingCommentTool()
                        && !root.isDrawingPathTool()) {
                 root.beginDrawingComment(mouse.x, mouse.y)
@@ -2346,12 +2477,14 @@ Item {
             root.finishShape(mouse.x, mouse.y)
             root.finishFreeTextPlacement(mouse.x, mouse.y)
             root.finishDrawingComment(mouse.x, mouse.y)
+            root.finishInkDrawing(mouse.x, mouse.y)
         }
         onCanceled: {
             root.cancelHighlight()
             root.cancelShape()
             root.cancelFreeTextPlacement()
             root.cancelDrawingComment()
+            root.cancelInkDrawing()
         }
         onClicked: mouse => {
             if (root.suppressNextPlacementClick) {
@@ -2362,7 +2495,8 @@ Item {
                     || root.controller.tool
                         === PDFEditController.AddShapeTool
                     || root.controller.tool
-                        === PDFEditController.FreeTextTool) {
+                        === PDFEditController.FreeTextTool
+                    || root.isInkTool()) {
                 return
             }
             if (root.isDrawingPathTool()) {
@@ -2439,6 +2573,9 @@ Item {
                 event.accepted = true
             } else if (root.placingFreeText) {
                 root.cancelFreeTextPlacement()
+                event.accepted = true
+            } else if (root.inkDrawing) {
+                root.cancelInkDrawing()
                 event.accepted = true
             } else if (root.drawingCommentDragging
                        || root.drawingPathActive) {
@@ -2522,13 +2659,28 @@ Item {
     CommentDrawingView {
         width: root.width
         height: root.height
-        drawingKind: root.drawingKindForTool()
+        drawingKind: root.drawingPathActive
+                && root.controller.tool === PDFEditController.PolygonTool
+            ? "polyLine"
+            : root.drawingKindForTool()
         vertices: root.drawingPreviewVertices
         strokeColor: root.controller.drawingCommentColor
         hasInterior: false
         borderWidth: 1.5 * root.pagePointScale
         drawingOpacity: root.controller.drawingCommentColor.a
         visible: root.drawingCommentDragging || root.drawingPathActive
+        z: 5
+        Accessible.ignored: true
+    }
+
+    InkDrawingView {
+        width: root.width
+        height: root.height
+        strokes: root.inkDrawing ? [root.inkPreviewStrokePoints] : []
+        strokeColor: root.controller.drawingCommentColor
+        strokeWidth: 1.5 * root.pagePointScale
+        drawingOpacity: root.controller.drawingCommentColor.a
+        visible: root.inkDrawing
         z: 5
         Accessible.ignored: true
     }

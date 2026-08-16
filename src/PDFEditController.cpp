@@ -89,6 +89,12 @@ constexpr int kDrawingCommentAlpha = 255;
 constexpr qreal kDrawingCommentBorderWidthPoints = 1.5;
 constexpr qreal kDrawingCommentVertexMergeDistancePoints = 0.5;
 constexpr qsizetype kMaximumDrawingCommentVertices = 256;
+constexpr qsizetype kMaximumRawInkPoints = 4096;
+constexpr qsizetype kMaximumSimplifiedInkPoints = 1024;
+constexpr qreal kInkSimplificationTolerancePoints = 0.75;
+constexpr unsigned long kMaximumSourceInkStrokes = 64;
+constexpr unsigned long kMaximumSourceInkPointsPerStroke = 4096;
+constexpr unsigned long kMaximumSourceInkPoints = 32768;
 constexpr qint64 kMaximumAddedImageFileBytes = 64 * 1024 * 1024;
 constexpr qint64 kMaximumAddedImagePixels = 40 * 1000 * 1000;
 constexpr unsigned long kMaximumAnnotationStringBytes
@@ -379,6 +385,116 @@ qreal distanceToSegment(const QPointF &point,
     return std::hypot(point.x() - nearest.x(), point.y() - nearest.y());
 }
 
+QVector<QPointF> simplifyInkStrokeRdp(const QVector<QPointF> &points,
+                                      const QSizeF &pageSize,
+                                      qreal tolerancePoints)
+{
+    if (points.size() <= 2) {
+        return points;
+    }
+
+    QVector<QPointF> pagePoints;
+    pagePoints.reserve(points.size());
+    for (const QPointF &point : points) {
+        pagePoints.append(QPointF(
+            point.x() * pageSize.width(),
+            point.y() * pageSize.height()));
+    }
+
+    QVector<quint8> retained(points.size(), 0);
+    retained[0] = 1;
+    retained[points.size() - 1] = 1;
+    QVector<std::pair<qsizetype, qsizetype>> pendingRanges;
+    pendingRanges.append({0, points.size() - 1});
+    while (!pendingRanges.isEmpty()) {
+        const auto [startIndex, endIndex] = pendingRanges.takeLast();
+        if (endIndex - startIndex <= 1) {
+            continue;
+        }
+
+        qsizetype furthestIndex = -1;
+        qreal furthestDistance = tolerancePoints;
+        for (qsizetype index = startIndex + 1;
+             index < endIndex;
+             ++index) {
+            const qreal distance = distanceToSegment(
+                pagePoints.at(index),
+                pagePoints.at(startIndex),
+                pagePoints.at(endIndex));
+            if (distance > furthestDistance) {
+                furthestDistance = distance;
+                furthestIndex = index;
+            }
+        }
+        if (furthestIndex < 0) {
+            continue;
+        }
+
+        retained[furthestIndex] = 1;
+        pendingRanges.append({startIndex, furthestIndex});
+        pendingRanges.append({furthestIndex, endIndex});
+    }
+
+    QVector<QPointF> simplified;
+    simplified.reserve(points.size());
+    for (qsizetype index = 0; index < points.size(); ++index) {
+        if (retained.at(index) != 0) {
+            simplified.append(points.at(index));
+        }
+    }
+    return simplified;
+}
+
+QVector<QPointF> simplifyInkStroke(const QVector<QPointF> &points,
+                                   const QSizeF &pageSize)
+{
+    QVector<QPointF> simplified = simplifyInkStrokeRdp(
+        points,
+        pageSize,
+        kInkSimplificationTolerancePoints);
+    if (simplified.size() <= kMaximumSimplifiedInkPoints) {
+        return simplified;
+    }
+
+    qreal lowerTolerance = kInkSimplificationTolerancePoints;
+    qreal upperTolerance = std::hypot(
+        pageSize.width(),
+        pageSize.height());
+    QVector<QPointF> capped = simplifyInkStrokeRdp(
+        points,
+        pageSize,
+        upperTolerance);
+    for (int iteration = 0; iteration < 20; ++iteration) {
+        const qreal tolerance = (lowerTolerance + upperTolerance) / 2.0;
+        QVector<QPointF> candidate = simplifyInkStrokeRdp(
+            points,
+            pageSize,
+            tolerance);
+        if (candidate.size() > kMaximumSimplifiedInkPoints) {
+            lowerTolerance = tolerance;
+        } else {
+            upperTolerance = tolerance;
+            capped = std::move(candidate);
+        }
+    }
+    if (capped.size() <= kMaximumSimplifiedInkPoints) {
+        return capped;
+    }
+
+    // This fallback should only be reachable for pathological floating-point
+    // page geometry. Preserve both endpoints while enforcing the hard cap.
+    QVector<QPointF> sampled;
+    sampled.reserve(kMaximumSimplifiedInkPoints);
+    for (qsizetype index = 0;
+         index < kMaximumSimplifiedInkPoints;
+         ++index) {
+        const qsizetype sourceIndex = index * (points.size() - 1)
+            / (kMaximumSimplifiedInkPoints - 1);
+        sampled.append(points.at(sourceIndex));
+    }
+    return sampled;
+}
+
 bool polygonContainsPoint(const QPolygonF &polygon,
                           const QPointF &point,
                           qreal tolerance,
@@ -591,7 +707,8 @@ bool isDrawingCommentTool(PDFEditController::Tool tool)
         || tool == PDFEditController::CircleTool
         || tool == PDFEditController::LineTool
         || tool == PDFEditController::PolygonTool
-        || tool == PDFEditController::PolyLineTool;
+        || tool == PDFEditController::PolyLineTool
+        || tool == PDFEditController::InkTool;
 }
 
 bool isTextMarkupCandidateKind(const QString &kind)
@@ -608,7 +725,8 @@ bool isDrawingCommentCandidateKind(const QString &kind)
         || kind == QLatin1String("circle")
         || kind == QLatin1String("line")
         || kind == QLatin1String("polygon")
-        || kind == QLatin1String("polyLine");
+        || kind == QLatin1String("polyLine")
+        || kind == QLatin1String("ink");
 }
 
 bool isCommentCandidateKind(const QString &kind)
@@ -652,6 +770,9 @@ int commentAnnotationSubtype(const QString &kind)
     if (kind == QLatin1String("polyLine")) {
         return FPDF_ANNOT_POLYLINE;
     }
+    if (kind == QLatin1String("ink")) {
+        return FPDF_ANNOT_INK;
+    }
     return kind == QLatin1String("highlight")
         ? FPDF_ANNOT_HIGHLIGHT
         : FPDF_ANNOT_UNKNOWN;
@@ -669,6 +790,8 @@ PDFCommentAnnotation::DrawingType drawingTypeForTool(
         return PDFCommentAnnotation::DrawingType::Polygon;
     case PDFEditController::PolyLineTool:
         return PDFCommentAnnotation::DrawingType::PolyLine;
+    case PDFEditController::InkTool:
+        return PDFCommentAnnotation::DrawingType::Ink;
     default:
         return PDFCommentAnnotation::DrawingType::Square;
     }
@@ -685,6 +808,8 @@ PDFCommentAnnotation::DrawingType drawingTypeForSubtype(int subtype)
         return PDFCommentAnnotation::DrawingType::Polygon;
     case FPDF_ANNOT_POLYLINE:
         return PDFCommentAnnotation::DrawingType::PolyLine;
+    case FPDF_ANNOT_INK:
+        return PDFCommentAnnotation::DrawingType::Ink;
     default:
         return PDFCommentAnnotation::DrawingType::Square;
     }
@@ -701,6 +826,8 @@ QString drawingKind(PDFCommentAnnotation::DrawingType type)
         return QStringLiteral("polygon");
     case PDFCommentAnnotation::DrawingType::PolyLine:
         return QStringLiteral("polyLine");
+    case PDFCommentAnnotation::DrawingType::Ink:
+        return QStringLiteral("ink");
     default:
         return QStringLiteral("square");
     }
@@ -721,6 +848,9 @@ QString drawingLabel(PDFCommentAnnotation::DrawingType type)
     case PDFCommentAnnotation::DrawingType::PolyLine:
         //% "Polyline annotation"
         return qtTrId("PolylineAnnotation");
+    case PDFCommentAnnotation::DrawingType::Ink:
+        //% "Ink annotation"
+        return qtTrId("InkAnnotation");
     default:
         //% "Rectangle annotation"
         return qtTrId("RectangleAnnotation");
@@ -1658,7 +1788,8 @@ QColor annotationColor(FPDF_ANNOTATION annotation,
         || subtype == FPDF_ANNOT_CIRCLE
         || subtype == FPDF_ANNOT_LINE
         || subtype == FPDF_ANNOT_POLYGON
-        || subtype == FPDF_ANNOT_POLYLINE;
+        || subtype == FPDF_ANNOT_POLYLINE
+        || subtype == FPDF_ANNOT_INK;
     if (!highlight && !strokedTextMarkup && !drawing) {
         return fallback;
     }
@@ -4103,7 +4234,10 @@ QVariantMap PDFEditController::addDrawingComment(
         || page < 0
         || page >= m_document->pageCount()
         || !isDrawingCommentTool(m_tool)
-        || vertices.size() > kMaximumDrawingCommentVertices) {
+        || vertices.size()
+            > (m_tool == InkTool
+                   ? kMaximumRawInkPoints
+                   : kMaximumDrawingCommentVertices)) {
         return {};
     }
     if (!documentAllowsAnnotations()) {
@@ -4142,6 +4276,36 @@ QVariantMap PDFEditController::addDrawingComment(
     }
 
     const PDFCommentAnnotation::DrawingType type = drawingTypeForTool(m_tool);
+    qreal inkPathLengthPoints = 0.0;
+    if (type == PDFCommentAnnotation::DrawingType::Ink) {
+        normalizedVertices = simplifyInkStroke(
+            normalizedVertices,
+            pageSize);
+        QVector<QPointF> distinctVertices;
+        distinctVertices.reserve(normalizedVertices.size());
+        for (const QPointF &point : std::as_const(normalizedVertices)) {
+            if (!distinctVertices.isEmpty()) {
+                const QPointF previous = distinctVertices.constLast();
+                const qreal distance = std::hypot(
+                    (point.x() - previous.x()) * pageSize.width(),
+                    (point.y() - previous.y()) * pageSize.height());
+                if (distance <= 0.0) {
+                    continue;
+                }
+            }
+            distinctVertices.append(point);
+        }
+        normalizedVertices = std::move(distinctVertices);
+        for (qsizetype index = 1;
+             index < normalizedVertices.size();
+             ++index) {
+            const QPointF previous = normalizedVertices.at(index - 1);
+            const QPointF point = normalizedVertices.at(index);
+            inkPathLengthPoints += std::hypot(
+                (point.x() - previous.x()) * pageSize.width(),
+                (point.y() - previous.y()) * pageSize.height());
+        }
+    }
     if (type == PDFCommentAnnotation::DrawingType::Polygon
         && normalizedVertices.size() > 2) {
         const QPointF first = normalizedVertices.constFirst();
@@ -4157,6 +4321,8 @@ QVariantMap PDFEditController::addDrawingComment(
     if ((type == PDFCommentAnnotation::DrawingType::Polygon
          && normalizedVertices.size() < 3)
         || (type == PDFCommentAnnotation::DrawingType::PolyLine
+            && normalizedVertices.size() < 2)
+        || (type == PDFCommentAnnotation::DrawingType::Ink
             && normalizedVertices.size() < 2)
         || ((type == PDFCommentAnnotation::DrawingType::Square
              || type == PDFCommentAnnotation::DrawingType::Circle
@@ -4205,7 +4371,9 @@ QVariantMap PDFEditController::addDrawingComment(
                         * point.y() * pageSize.height();
             }
         }
-        if (pathLength < kMinimumShapeDragPoints
+        if ((type == PDFCommentAnnotation::DrawingType::Ink
+                 ? inkPathLengthPoints < kMinimumShapeDragPoints
+                 : pathLength < kMinimumShapeDragPoints)
             || (type == PDFCommentAnnotation::DrawingType::Polygon
                 && qAbs(doubledArea) < kMinimumShapeDragPoints * 2.0)) {
             return {};
@@ -4239,7 +4407,11 @@ QVariantMap PDFEditController::addDrawingComment(
     candidate.added = true;
     candidate.commentAuthor = currentCommentAuthor();
     candidate.commentCreationDate = QDateTime::currentDateTime();
-    candidate.drawingVertices = normalizedVertices;
+    if (type == PDFCommentAnnotation::DrawingType::Ink) {
+        candidate.inkStrokes.append(normalizedVertices);
+    } else {
+        candidate.drawingVertices = normalizedVertices;
+    }
     candidate.commentProperties.flags = FPDF_ANNOT_FLAG_PRINT;
     candidate.commentProperties.subject = candidate.label;
     candidate.commentProperties.strokeColor = QColor(
@@ -7835,12 +8007,14 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             || subtype == FPDF_ANNOT_STRIKEOUT;
         const bool stickyNoteSubtype = subtype == FPDF_ANNOT_TEXT;
         const bool freeTextSubtype = subtype == FPDF_ANNOT_FREETEXT;
+        const bool inkSubtype = subtype == FPDF_ANNOT_INK;
         const bool drawingCommentSubtype
             = subtype == FPDF_ANNOT_SQUARE
             || subtype == FPDF_ANNOT_CIRCLE
             || subtype == FPDF_ANNOT_LINE
             || subtype == FPDF_ANNOT_POLYGON
-            || subtype == FPDF_ANNOT_POLYLINE;
+            || subtype == FPDF_ANNOT_POLYLINE
+            || inkSubtype;
         const bool supportedCommentSubtype
             = isSupportedCommentAnnotationSubtype(subtype);
         if (isMarkupAnnotation(annotation)) {
@@ -7936,6 +8110,99 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 }
             }
 
+            QVector<QVector<QPointF>> inkStrokes;
+            bool inkGeometryValid = !inkSubtype;
+            if (inkSubtype) {
+                const unsigned long strokeCount
+                    = FPDFAnnot_GetInkListCount(annotation);
+                if (strokeCount > 0
+                    && strokeCount <= kMaximumSourceInkStrokes) {
+                    inkGeometryValid = true;
+                    unsigned long totalPointCount = 0;
+                    inkStrokes.reserve(static_cast<qsizetype>(strokeCount));
+                    for (unsigned long strokeIndex = 0;
+                         strokeIndex < strokeCount;
+                         ++strokeIndex) {
+                        if (candidateScanCancelled(cancellation)) {
+                            inkGeometryValid = false;
+                            break;
+                        }
+                        const unsigned long pointCount
+                            = FPDFAnnot_GetInkListPath(
+                                annotation,
+                                strokeIndex,
+                                nullptr,
+                                0);
+                        if (pointCount < 2
+                            || pointCount
+                                > kMaximumSourceInkPointsPerStroke
+                            || pointCount
+                                > kMaximumSourceInkPoints
+                                    - totalPointCount) {
+                            inkGeometryValid = false;
+                            break;
+                        }
+
+                        QVector<FS_POINTF> pageStroke(
+                            static_cast<qsizetype>(pointCount));
+                        if (FPDFAnnot_GetInkListPath(
+                                annotation,
+                                strokeIndex,
+                                pageStroke.data(),
+                                pointCount)
+                            != pointCount) {
+                            inkGeometryValid = false;
+                            break;
+                        }
+
+                        QVector<QPointF> normalizedStroke;
+                        normalizedStroke.reserve(pageStroke.size());
+                        for (const FS_POINTF &pagePoint
+                             : std::as_const(pageStroke)) {
+                            QPointF normalizedPoint;
+                            if (!std::isfinite(pagePoint.x)
+                                || !std::isfinite(pagePoint.y)
+                                || !normalizedPagePoint(
+                                    page,
+                                    pageSize,
+                                    QPointF(pagePoint.x, pagePoint.y),
+                                    normalizedPoint)
+                                || !std::isfinite(normalizedPoint.x())
+                                || !std::isfinite(normalizedPoint.y())) {
+                                inkGeometryValid = false;
+                                break;
+                            }
+                            if (!normalizedStroke.isEmpty()) {
+                                const QPointF previous
+                                    = normalizedStroke.constLast();
+                                if (std::hypot(
+                                        (normalizedPoint.x() - previous.x())
+                                            * pageSize.width(),
+                                        (normalizedPoint.y() - previous.y())
+                                            * pageSize.height())
+                                    <= 0.0) {
+                                    // Foxit may repeat samples in /InkList.
+                                    // They do not change the path and must not
+                                    // make an otherwise valid Ink read-only.
+                                    continue;
+                                }
+                            }
+                            normalizedStroke.append(normalizedPoint);
+                        }
+                        if (!inkGeometryValid
+                            || normalizedStroke.size() < 2) {
+                            inkGeometryValid = false;
+                            break;
+                        }
+                        totalPointCount += pointCount;
+                        inkStrokes.append(std::move(normalizedStroke));
+                    }
+                }
+                if (!inkGeometryValid) {
+                    inkStrokes.clear();
+                }
+            }
+
             Candidate candidate;
             candidate.page = request.page;
             candidate.objectId = QStringLiteral("annotation:")
@@ -7961,6 +8228,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             const int annotationFlags = FPDFAnnot_GetFlags(annotation);
             candidate.commentTextReadOnly
                 = !supportedCommentSubtype
+                || (inkSubtype && !inkGeometryValid)
                 || (annotationFlags & FPDF_ANNOT_FLAG_READONLY) != 0
                 || (annotationFlags & kAnnotationFlagLockedContents) != 0;
             candidate.commentProperties.flags = annotationFlags;
@@ -8056,7 +8324,9 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                         = appearanceStyle.dashPattern;
                 }
 
-                if (subtype == FPDF_ANNOT_LINE) {
+                if (inkSubtype && inkGeometryValid) {
+                    candidate.inkStrokes = std::move(inkStrokes);
+                } else if (subtype == FPDF_ANNOT_LINE) {
                     FS_POINTF start{};
                     FS_POINTF end{};
                     QPointF normalizedStart;
@@ -8193,7 +8463,9 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 candidate.label = qtTrId("CaretAnnotation");
                 break;
             case FPDF_ANNOT_INK:
-                candidate.kind = QStringLiteral("comment");
+                candidate.kind = inkGeometryValid
+                    ? QStringLiteral("ink")
+                    : QStringLiteral("comment");
                 //% "Ink annotation"
                 candidate.label = qtTrId("InkAnnotation");
                 break;
@@ -8524,6 +8796,18 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     }
     map.insert(QStringLiteral("drawingVertices"), drawingVertices);
     map.insert(QStringLiteral("annotationPoints"), drawingVertices);
+    QVariantList inkStrokes;
+    inkStrokes.reserve(candidate.inkStrokes.size());
+    for (const QVector<QPointF> &stroke : candidate.inkStrokes) {
+        QVariantList strokePoints;
+        strokePoints.reserve(stroke.size());
+        for (const QPointF &point : stroke) {
+            strokePoints.append(point);
+        }
+        inkStrokes.append(QVariant::fromValue(strokePoints));
+    }
+    map.insert(QStringLiteral("inkStrokes"), inkStrokes);
+    map.insert(QStringLiteral("annotationStrokes"), inkStrokes);
     map.insert(
         QStringLiteral("drawingStrokeColor"),
         candidate.commentProperties.strokeColor);

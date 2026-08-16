@@ -7,7 +7,7 @@ nguyên ảnh/phông chữ.
 
 Tại thời điểm cập nhật, phạm vi có:
 
-- 27 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
+- 30 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
 - 16 tệp triển khai C++ trong `src/` và 1 tệp kiểm thử C++: xem
   [Hướng dẫn tệp C++](cpp-file-guide.md).
 - 17 header C++; trong đó 15 header đi cùng tệp triển khai và 2 header dùng
@@ -33,7 +33,7 @@ flowchart TD
     Delegate["PdfPageDelegate\nMột trang đang hiện"]
     PageItem["PDFPageItem\nRender texture PDF"]
     Interaction["PageInteractionOverlay\nĐiều phối input theo trang"]
-    EditOverlay["EditOverlay\nEdit text/image/shape/text markup"]
+    EditOverlay["EditOverlay\nEdit text/image/shape/text markup/Ink"]
     FormView["PDFFormView + FormChoiceOverlay\nForm PDFium đang chạy"]
     Designer["FormTextFieldOverlay + FormFieldLayer\nThiết kế form"]
     Document["PDFDocument\nHandle PDF GUI thread + cấu trúc trang"]
@@ -136,10 +136,17 @@ flowchart TD
    glyph xoay/dọc, page không có text layer khả dụng và page vượt safety cap
    50.000 ký tự không tạo Squiggly. Highlight/Underline/Strikeout vẫn giữ free
    rect. Free Text nhận click/drag, tạo text-box comment và mở panel nội dung.
+   Pencil sample point cách nhau tối thiểu 1 logical pixel, giữ tối đa 4.096 raw
+   points và tiếp tục cập nhật endpoint cuối khi đã đầy, rồi controller
+   validate/dedup/RDP-simplify khoảng 0,75 PDF point và
+   cap output 1.024 điểm để tạo đúng một Ink annotation cho mỗi drag.
 3. Controller giữ draft session-only và snapshot đầy đủ cho undo/redo. Texture
    gốc bị mask hoặc render lại tùy loại thay đổi.
-4. Page text dùng editor rich text; image, shape, text markup và Free Text dùng
-   delegate/preview riêng. Nội dung Free Text được sửa trong CommentPanel.
+   Ink nguồn chỉ rehydrate khi `/InkList` nằm trong giới hạn 64 stroke, 4.096
+   điểm/stroke và 32.768 điểm tổng; dữ liệu malformed/oversized thành comment
+   generic chỉ đọc.
+4. Page text dùng editor rich text; image, shape, text markup, Free Text và Ink
+   dùng delegate/preview riêng. Nội dung Free Text được sửa trong CommentPanel.
    Move/resize chỉ commit một command khi gesture kết thúc.
 5. `PDFSaveWriter` phân biệt thay đổi chỉ dịch chuyển với thay đổi cần thay object
    để giữ font, ma trận, resource và z-order khi có thể.
@@ -204,12 +211,12 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
-| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Free Text, text markup, Square/Circle/Line/Polygon/PolyLine, quản lý comment và history. |
+| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Free Text, text markup, Pencil, Square/Circle/Line/Polygon/PolyLine, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
 | [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel comment/format/Text Field/Comb/Dropdown/List Box/Radio cho một session. |
-| [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ; các markup subtype khác hiển thị chỉ đọc. |
+| [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ, gồm Ink hợp lệ; sáu markup subtype còn lại và Ink malformed/oversized hiển thị chỉ đọc. |
 | [`src/Components/TextFieldOptionsPanel.qml`](../src/Components/TextFieldOptionsPanel.qml) | Panel multi-line, giới hạn ký tự tùy chọn và xóa Text Field đang chọn. |
 | [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml) | Panel số ô/giới hạn ký tự bắt buộc và xóa Comb Field đang chọn. |
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |
@@ -219,6 +226,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml) | Gom mode, z-order, choice handshake và cleanup của runtime/edit/form designer. |
 | [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml) | Tương tác sửa nội dung trang, gesture và preview/draft comment. |
 | [`src/Components/CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml) | Renderer vector chung cho năm drawing-comment subtype. |
+| [`src/Components/InkDrawingView.qml`](../src/Components/InkDrawingView.qml) | Renderer Qt Quick Shapes dùng chung cho gesture Pencil và các stroke Ink draft. |
 | [`src/Components/SquigglyLine.qml`](../src/Components/SquigglyLine.qml) | Preview Squiggly theo đúng hình học 1pt/2pt của PDFium và scale trang. |
 | [`src/Components/FormChoiceOverlay.qml`](../src/Components/FormChoiceOverlay.qml) | Combo/list overlay cho choice field an toàn. |
 | [`src/Components/FormTextFieldOverlay.qml`](../src/Components/FormTextFieldOverlay.qml) | Đặt và chỉnh field thiết kế. |
@@ -241,7 +249,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) | Candidate, selection, draft, edit, history và save orchestration. |
 | [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) | Ghi PDF giao dịch từ snapshot bất biến. |
 | [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) | Đọc chuỗi, chuẩn hóa nội dung và phân loại comment annotation dùng chung cho index, render và save. |
-| [`src/PDFCommentAnnotation.h`](../src/PDFCommentAnnotation.h) | Contract geometry/common properties cho drawing comment và `/AP`. |
+| [`src/PDFCommentAnnotation.h`](../src/PDFCommentAnnotation.h) | Contract geometry/common properties cho drawing/Ink comment và `/AP`; Ink giữ từng stroke `/InkList` riêng. |
 | [`src/DraftImageItem.cpp`](../src/DraftImageItem.cpp) | Vẽ snapshot ảnh draft trong QML. |
 | [`src/PDFFormController.cpp`](../src/PDFFormController.cpp) | Facade GUI-thread của form runtime. |
 | [`src/PDFFormWorker.cpp`](../src/PDFFormWorker.cpp) | Session PDFium form trên hàng đợi tuần tự. |
@@ -249,7 +257,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFFormDesignerController.cpp`](../src/PDFFormDesignerController.cpp) | Model field thiết kế, rehydrate và snapshot save. |
 | [`src/FormFieldLayer.cpp`](../src/FormFieldLayer.cpp) | Scene graph và pointer interaction cho field thiết kế. |
 | [`src/PDFAcroFormWriter.cpp`](../src/PDFAcroFormWriter.cpp) | Pipeline cấp cao để ghi field TrePDF. |
-| [`src/PDFAcroFormCanonicalizer.cpp`](../src/PDFAcroFormCanonicalizer.cpp) | Hoàn thiện AcroForm, Free Text, text/drawing markup `/AP` và `/IRT` reply bằng incremental update. |
+| [`src/PDFAcroFormCanonicalizer.cpp`](../src/PDFAcroFormCanonicalizer.cpp) | Hoàn thiện AcroForm, Free Text, text/drawing/Ink markup `/AP` và `/IRT` reply bằng incremental update. |
 | [`src/PDFWidgetAnnotationSuppression.cpp`](../src/PDFWidgetAnnotationSuppression.cpp) | Ẩn Widget tạm thời và phục hồi patch khi render designer. |
 | [`tests/tst_PDFEditController.cpp`](../tests/tst_PDFEditController.cpp) | Bộ test tích hợp/hồi quy của edit, save, form, font và tab. |
 

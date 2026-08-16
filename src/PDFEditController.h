@@ -113,13 +113,15 @@ public:
         LineTool,
         PolygonTool,
         PolyLineTool,
+        InkTool,
         // Compatibility aliases for QML/tests written during the initial
         // drawing-comment implementation.
         SquareCommentTool = SquareTool,
         CircleCommentTool = CircleTool,
         LineCommentTool = LineTool,
         PolygonCommentTool = PolygonTool,
-        PolyLineCommentTool = PolyLineTool
+        PolyLineCommentTool = PolyLineTool,
+        InkCommentTool = InkTool
     };
     Q_ENUM(Tool)
 
@@ -427,6 +429,7 @@ private:
         PDFCommentAnnotation::DrawingType drawingType
             = PDFCommentAnnotation::DrawingType::Square;
         QVector<QPointF> drawingVertices;
+        QVector<QVector<QPointF>> inkStrokes;
         PDFCommentAnnotation::CommonProperties commentProperties;
         QString reason;
         int pendingFontSnapshotIndex = -1;

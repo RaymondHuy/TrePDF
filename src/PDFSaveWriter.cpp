@@ -114,6 +114,7 @@ struct SaveDraft {
     PDFCommentAnnotation::DrawingType drawingType
         = PDFCommentAnnotation::DrawingType::Square;
     QVector<QPointF> drawingVertices;
+    QVector<QVector<QPointF>> inkStrokes;
     PDFCommentAnnotation::CommonProperties commentProperties;
     int sourceAnnotationIndex = -1;
     QString commentAuthor;
@@ -2820,42 +2821,97 @@ PDFSaveWriter::Result createDrawingCommentAnnotation(
     PDFCommentAnnotation::DrawingAnnotation &appearanceRequest)
 {
     constexpr qsizetype maximumVertices = 4096;
-    if (draft.objectId.isEmpty()
-        || draft.drawingVertices.size() < 2
-        || draft.drawingVertices.size() > maximumVertices) {
+    constexpr qsizetype maximumInkStrokes = 64;
+    constexpr qsizetype maximumInkPoints = 32768;
+    const bool ink
+        = draft.drawingType == PDFCommentAnnotation::DrawingType::Ink;
+    if (draft.objectId.isEmpty()) {
         return failure(
             PDFSaveWriter::Error::CommentAnnotationCreationFailed,
             draft.page,
             draft.objectId);
     }
 
+    const auto mapNormalizedPoint = [
+        pageWidth,
+        pageHeight,
+        &coordinateMapper](const QPointF &point,
+                           QPointF &pagePoint) {
+        return std::isfinite(point.x())
+            && std::isfinite(point.y())
+            && point.x() >= 0.0
+            && point.x() <= 1.0
+            && point.y() >= 0.0
+            && point.y() <= 1.0
+            && coordinateMapper.pagePoint(
+                point.x() * pageWidth,
+                point.y() * pageHeight,
+                pagePoint)
+            && std::isfinite(pagePoint.x())
+            && std::isfinite(pagePoint.y());
+    };
+
     QVector<QPointF> pageVertices;
-    pageVertices.reserve(draft.drawingVertices.size());
-    for (const QPointF &vertex : draft.drawingVertices) {
-        if (!std::isfinite(vertex.x())
-            || !std::isfinite(vertex.y())
-            || vertex.x() < 0.0
-            || vertex.x() > 1.0
-            || vertex.y() < 0.0
-            || vertex.y() > 1.0) {
+    QVector<QVector<QPointF>> pageStrokes;
+    if (ink) {
+        if (!draft.drawingVertices.isEmpty()
+            || draft.inkStrokes.isEmpty()
+            || draft.inkStrokes.size() > maximumInkStrokes) {
             return failure(
                 PDFSaveWriter::Error::CommentAnnotationCreationFailed,
                 draft.page,
                 draft.objectId);
         }
-        QPointF pageVertex;
-        if (!coordinateMapper.pagePoint(
-                vertex.x() * pageWidth,
-                vertex.y() * pageHeight,
-                pageVertex)
-            || !std::isfinite(pageVertex.x())
-            || !std::isfinite(pageVertex.y())) {
+        qsizetype totalInkPoints = 0;
+        pageStrokes.reserve(draft.inkStrokes.size());
+        for (const QVector<QPointF> &stroke : draft.inkStrokes) {
+            if (stroke.size() < 2 || stroke.size() > maximumVertices
+                || stroke.size() > maximumInkPoints - totalInkPoints) {
+                return failure(
+                    PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                    draft.page,
+                    draft.objectId);
+            }
+            QVector<QPointF> mappedStroke;
+            mappedStroke.reserve(stroke.size());
+            for (const QPointF &point : stroke) {
+                QPointF pagePoint;
+                if (!mapNormalizedPoint(point, pagePoint)
+                    || (!mappedStroke.isEmpty()
+                        && std::hypot(
+                            pagePoint.x() - mappedStroke.constLast().x(),
+                            pagePoint.y() - mappedStroke.constLast().y())
+                            <= 0.0)) {
+                    return failure(
+                        PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                        draft.page,
+                        draft.objectId);
+                }
+                mappedStroke.append(pagePoint);
+            }
+            totalInkPoints += mappedStroke.size();
+            pageStrokes.append(std::move(mappedStroke));
+        }
+    } else {
+        if (draft.drawingVertices.size() < 2
+            || draft.drawingVertices.size() > maximumVertices
+            || !draft.inkStrokes.isEmpty()) {
             return failure(
                 PDFSaveWriter::Error::CommentAnnotationCreationFailed,
                 draft.page,
                 draft.objectId);
         }
-        pageVertices.append(pageVertex);
+        pageVertices.reserve(draft.drawingVertices.size());
+        for (const QPointF &vertex : draft.drawingVertices) {
+            QPointF pageVertex;
+            if (!mapNormalizedPoint(vertex, pageVertex)) {
+                return failure(
+                    PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+                    draft.page,
+                    draft.objectId);
+            }
+            pageVertices.append(pageVertex);
+        }
     }
 
     const bool rectangular
@@ -2865,10 +2921,11 @@ PDFSaveWriter::Result createDrawingCommentAnnotation(
         = draft.drawingType == PDFCommentAnnotation::DrawingType::Polygon
         ? 3
         : 2;
-    if (pageVertices.size() < minimumVertexCount
-        || (rectangular && pageVertices.size() != 2)
-        || (draft.drawingType == PDFCommentAnnotation::DrawingType::Line
-            && pageVertices.size() != 2)) {
+    if (!ink
+        && (pageVertices.size() < minimumVertexCount
+            || (rectangular && pageVertices.size() != 2)
+            || (draft.drawingType == PDFCommentAnnotation::DrawingType::Line
+                && pageVertices.size() != 2))) {
         return failure(
             PDFSaveWriter::Error::CommentAnnotationCreationFailed,
             draft.page,
@@ -2902,15 +2959,33 @@ PDFSaveWriter::Result createDrawingCommentAnnotation(
             QPointF(mappedRect.left, mappedRect.bottom),
             QPointF(mappedRect.right, mappedRect.top)).normalized();
     } else {
-        qreal minimumX = pageVertices.constFirst().x();
+        const QPointF firstPoint = ink
+            ? pageStrokes.constFirst().constFirst()
+            : pageVertices.constFirst();
+        qreal minimumX = firstPoint.x();
         qreal maximumX = minimumX;
-        qreal minimumY = pageVertices.constFirst().y();
+        qreal minimumY = firstPoint.y();
         qreal maximumY = minimumY;
-        for (const QPointF &vertex : std::as_const(pageVertices)) {
-            minimumX = (std::min)(minimumX, vertex.x());
-            maximumX = (std::max)(maximumX, vertex.x());
-            minimumY = (std::min)(minimumY, vertex.y());
-            maximumY = (std::max)(maximumY, vertex.y());
+        const auto includePoint = [
+            &minimumX,
+            &maximumX,
+            &minimumY,
+            &maximumY](const QPointF &point) {
+            minimumX = (std::min)(minimumX, point.x());
+            maximumX = (std::max)(maximumX, point.x());
+            minimumY = (std::min)(minimumY, point.y());
+            maximumY = (std::max)(maximumY, point.y());
+        };
+        if (ink) {
+            for (const QVector<QPointF> &stroke : std::as_const(pageStrokes)) {
+                for (const QPointF &point : stroke) {
+                    includePoint(point);
+                }
+            }
+        } else {
+            for (const QPointF &vertex : std::as_const(pageVertices)) {
+                includePoint(vertex);
+            }
         }
         const qreal padding = (std::max)(0.5, properties.borderWidth / 2.0);
         pageRect = QRectF(
@@ -2932,9 +3007,9 @@ PDFSaveWriter::Result createDrawingCommentAnnotation(
         static_cast<float>(pageRect.right()),
         static_cast<float>(pageRect.top())};
     PdfAnnotationHandle annotation(
-        // PDFium cannot create Line, Polygon, or PolyLine annotations. Use a
-        // supported Square placeholder; the canonicalizer atomically writes
-        // the final subtype, geometry, properties, and /AP after serialization.
+        // Use one supported Square placeholder for every drawing subtype. The
+        // canonicalizer atomically writes the final subtype, geometry (including
+        // /InkList), properties, and /AP after serialization.
         FPDFPage_CreateAnnot(page, FPDF_ANNOT_SQUARE));
     if (!annotation.get()) {
         return failure(
@@ -2988,6 +3063,7 @@ PDFSaveWriter::Result createDrawingCommentAnnotation(
     appearanceRequest.type = draft.drawingType;
     appearanceRequest.pageRect = pageRect;
     appearanceRequest.pageVertices = std::move(pageVertices);
+    appearanceRequest.pageStrokes = std::move(pageStrokes);
     appearanceRequest.properties = std::move(properties);
     return {};
 }
@@ -4448,7 +4524,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             || draft->candidate.kind == QLatin1String("circle")
             || draft->candidate.kind == QLatin1String("line")
             || draft->candidate.kind == QLatin1String("polygon")
-            || draft->candidate.kind == QLatin1String("polyLine");
+            || draft->candidate.kind == QLatin1String("polyLine")
+            || draft->candidate.kind == QLatin1String("ink");
         saveDraft.kind = drawingCommentDraft
             ? SaveDraft::Kind::DrawingComment
             : freeTextDraft
@@ -4478,6 +4555,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.highlightColor = draft->candidate.highlightColor;
         saveDraft.drawingType = draft->candidate.drawingType;
         saveDraft.drawingVertices = draft->candidate.drawingVertices;
+        saveDraft.inkStrokes = draft->candidate.inkStrokes;
         saveDraft.commentProperties = draft->candidate.commentProperties;
         saveDraft.sourceAnnotationIndex
             = draft->candidate.sourceAnnotationIndex;
@@ -4509,6 +4587,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             saveDraft.annotationSubtype = FPDF_ANNOT_POLYGON;
         } else if (draft->candidate.kind == QLatin1String("polyLine")) {
             saveDraft.annotationSubtype = FPDF_ANNOT_POLYLINE;
+        } else if (draft->candidate.kind == QLatin1String("ink")) {
+            saveDraft.annotationSubtype = FPDF_ANNOT_INK;
         }
         saveDraft.shapeType = draft->candidate.shapeType;
         saveDraft.shapeStartRatio = draft->candidate.shapeStartRatio;

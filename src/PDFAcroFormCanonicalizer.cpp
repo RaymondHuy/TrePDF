@@ -3915,6 +3915,8 @@ QByteArrayView drawingSubtypeName(PDFCommentAnnotation::DrawingType type)
         return QByteArrayView("/Polygon");
     case PDFCommentAnnotation::DrawingType::PolyLine:
         return QByteArrayView("/PolyLine");
+    case PDFCommentAnnotation::DrawingType::Ink:
+        return QByteArrayView("/Ink");
     }
     return {};
 }
@@ -3971,6 +3973,19 @@ QByteArray pdfPointArray(const QVector<QPointF> &points)
     return value;
 }
 
+QByteArray pdfInkList(const QVector<QVector<QPointF>> &strokes)
+{
+    QByteArray value = QByteArrayLiteral("[");
+    for (const QVector<QPointF> &stroke : strokes) {
+        if (value.size() > 1) {
+            value += ' ';
+        }
+        value += pdfPointArray(stroke);
+    }
+    value += ']';
+    return value;
+}
+
 bool isSafePdfName(const QString &name)
 {
     constexpr qsizetype maximumAcceptedPdfNameCharacters = 64;
@@ -3996,6 +4011,8 @@ bool drawingAppearanceData(
     QString &error)
 {
     constexpr qsizetype maximumVertices = 4096;
+    constexpr qsizetype maximumInkStrokes = 64;
+    constexpr qsizetype maximumInkPoints = 32768;
     constexpr qsizetype maximumDashEntries = 16;
     constexpr qsizetype maximumAppearanceBytes = 8 * 1024 * 1024;
     constexpr qreal maximumCoordinateMagnitudePoints = 10'000'000.0;
@@ -4041,36 +4058,85 @@ bool drawingAppearanceData(
     const bool rectangular
         = annotation.type == PDFCommentAnnotation::DrawingType::Square
         || annotation.type == PDFCommentAnnotation::DrawingType::Circle;
+    const bool ink
+        = annotation.type == PDFCommentAnnotation::DrawingType::Ink;
     const qsizetype expectedMinimum
         = annotation.type == PDFCommentAnnotation::DrawingType::Polygon
         ? 3
         : 2;
-    if ((rectangular && annotation.pageVertices.size() != 2)
-        || (!rectangular
-         && (annotation.pageVertices.size() < expectedMinimum
-             || annotation.pageVertices.size() > maximumVertices))
-        || (annotation.type == PDFCommentAnnotation::DrawingType::Line
-            && annotation.pageVertices.size() != 2)
-        || !std::all_of(
-            annotation.pageVertices.cbegin(),
-            annotation.pageVertices.cend(),
-            finitePoint)) {
+    bool geometryValid = true;
+    if (ink) {
+        geometryValid = annotation.pageVertices.isEmpty()
+            && !annotation.pageStrokes.isEmpty()
+            && annotation.pageStrokes.size() <= maximumInkStrokes
+            && !annotation.properties.interiorColor.isValid();
+        qsizetype totalInkPoints = 0;
+        for (const QVector<QPointF> &stroke : annotation.pageStrokes) {
+            geometryValid = geometryValid
+                && stroke.size() >= 2
+                && stroke.size() <= maximumVertices
+                && stroke.size() <= maximumInkPoints - totalInkPoints
+                && std::all_of(
+                    stroke.cbegin(),
+                    stroke.cend(),
+                    finitePoint);
+            if (!geometryValid) {
+                break;
+            }
+            totalInkPoints += stroke.size();
+        }
+    } else {
+        geometryValid = annotation.pageStrokes.isEmpty()
+            && std::all_of(
+                annotation.pageVertices.cbegin(),
+                annotation.pageVertices.cend(),
+                finitePoint);
+        if (rectangular) {
+            geometryValid = geometryValid
+                && annotation.pageVertices.size() == 2;
+        } else {
+            geometryValid = geometryValid
+                && annotation.pageVertices.size() >= expectedMinimum
+                && annotation.pageVertices.size() <= maximumVertices;
+        }
+        if (annotation.type == PDFCommentAnnotation::DrawingType::Line) {
+            geometryValid = geometryValid
+                && annotation.pageVertices.size() == 2;
+        }
+    }
+    if (!geometryValid) {
         error = QStringLiteral(
             "A drawing annotation geometry request is invalid.");
         return false;
     }
 
-    for (qsizetype index = 1;
-         index < annotation.pageVertices.size();
-         ++index) {
-        const QPointF previous = annotation.pageVertices.at(index - 1);
-        const QPointF current = annotation.pageVertices.at(index);
-        if (std::hypot(
-                current.x() - previous.x(),
-                current.y() - previous.y()) <= 0.0) {
-            error = QStringLiteral(
-                "A drawing annotation contains a zero-length segment.");
-            return false;
+    if (ink) {
+        for (const QVector<QPointF> &stroke : annotation.pageStrokes) {
+            for (qsizetype index = 1; index < stroke.size(); ++index) {
+                const QPointF previous = stroke.at(index - 1);
+                const QPointF current = stroke.at(index);
+                if (std::hypot(
+                        current.x() - previous.x(),
+                        current.y() - previous.y()) <= 0.0) {
+                    error = QStringLiteral(
+                        "An Ink annotation contains a zero-length segment.");
+                    return false;
+                }
+            }
+        }
+    } else {
+        for (qsizetype index = 1;
+             index < annotation.pageVertices.size();
+             ++index) {
+            const QPointF previous = annotation.pageVertices.at(index - 1);
+            const QPointF current = annotation.pageVertices.at(index);
+            if (std::hypot(
+                    current.x() - previous.x(),
+                    current.y() - previous.y()) <= 0.0) {
+                error = QStringLiteral(
+                    "A drawing annotation contains a zero-length segment.");
+                return false;
+            }
         }
     }
     if (annotation.type == PDFCommentAnnotation::DrawingType::Polygon) {
@@ -4128,7 +4194,24 @@ bool drawingAppearanceData(
             + pdfNumber(interior.blueF()) + QByteArrayLiteral(" rg\n");
     }
 
-    if (annotation.type == PDFCommentAnnotation::DrawingType::Square) {
+    if (ink) {
+        for (const QVector<QPointF> &stroke : annotation.pageStrokes) {
+            content += pdfNumber(stroke.constFirst().x()) + ' '
+                + pdfNumber(stroke.constFirst().y())
+                + QByteArrayLiteral(" m\n");
+            for (qsizetype index = 1; index < stroke.size(); ++index) {
+                content += pdfNumber(stroke.at(index).x()) + ' '
+                    + pdfNumber(stroke.at(index).y())
+                    + QByteArrayLiteral(" l\n");
+                if (content.size() > maximumAppearanceBytes) {
+                    error = QStringLiteral(
+                        "An Ink annotation appearance is too large.");
+                    return false;
+                }
+            }
+            content += QByteArrayLiteral("S\n");
+        }
+    } else if (annotation.type == PDFCommentAnnotation::DrawingType::Square) {
         const qreal inset = properties.borderWidth / 2.0;
         const qreal left = bounds.left() + inset;
         const qreal right = bounds.right() - inset;
@@ -4298,7 +4381,8 @@ bool configureDrawingAnnotationDictionary(
             false)) {
         return false;
     }
-    if (annotation.properties.interiorColor.isValid()
+    if (annotation.type != PDFCommentAnnotation::DrawingType::Ink
+        && annotation.properties.interiorColor.isValid()
         && !replace(
             QByteArrayView("/IC"),
             pdfColorArray(annotation.properties.interiorColor))) {
@@ -4330,7 +4414,13 @@ bool configureDrawingAnnotationDictionary(
         return false;
     }
 
-    if (annotation.type == PDFCommentAnnotation::DrawingType::Line) {
+    if (annotation.type == PDFCommentAnnotation::DrawingType::Ink) {
+        if (!replace(
+                QByteArrayView("/InkList"),
+                pdfInkList(annotation.pageStrokes))) {
+            return false;
+        }
+    } else if (annotation.type == PDFCommentAnnotation::DrawingType::Line) {
         if (!replace(
                 QByteArrayView("/L"),
                 pdfPointArray(annotation.pageVertices))) {
@@ -7119,7 +7209,21 @@ bool PDFAcroFormCanonicalizer::finalizeDrawingAnnotations(
             return false;
         }
         annotationIds.insert(annotation.annotationId);
+        if (annotation.pageVertices.size()
+            > maximumTotalVertices - totalVertices) {
+            error = QStringLiteral(
+                "Drawing annotation geometry exceeds the safety limit.");
+            return false;
+        }
         totalVertices += annotation.pageVertices.size();
+        for (const QVector<QPointF> &stroke : annotation.pageStrokes) {
+            if (stroke.size() > maximumTotalVertices - totalVertices) {
+                error = QStringLiteral(
+                    "Drawing annotation geometry exceeds the safety limit.");
+                return false;
+            }
+            totalVertices += stroke.size();
+        }
         if (totalVertices > maximumTotalVertices) {
             error = QStringLiteral(
                 "Drawing annotation geometry exceeds the safety limit.");

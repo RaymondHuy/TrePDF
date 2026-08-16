@@ -19,15 +19,26 @@ Current features:
 - Insert a blank page immediately after the current page or delete the current
   page, with undo/redo/discard and Save/Save As persistence.
 - Add Sticky Note, Free Text, Highlight, Squiggly, Underline, Strikeout,
-  Square, Circle, Line, Polygon, and PolyLine
-  annotations from the Comment tab. New comments are undoable session drafts; supported
-  source comments can be indexed, selected, edited, and deleted with
+  Square, Circle, Line, Polygon, PolyLine, and Ink annotations from the Comment
+  tab; Ink is drawn with the Pencil tool. New comments are undoable session
+  drafts; supported source comments can be indexed, selected, edited, and deleted with
   undo/redo/discard. Save/Save As persists additions, content edits, and
   removals without rewriting page content streams on annotation-only pages.
   Square, Circle, Line, Polygon, and PolyLine are drawing-comment drafts with
-  shared stroke/interior/opacity/border/effect/line-ending properties and a
-  subtype-safe vector `/AP` pipeline. Stamp, Caret, Ink, FileAttachment, Sound,
-  Redact, and PDF 2.0 Projection remain indexed read-only for panel navigation.
+  shared stroke/interior/opacity/border/effect/line-ending properties. Ink
+  shares the stroke/opacity/border pipeline without interior, effect, or line
+  endings; all six use subtype-safe vector `/AP`. A Pencil drag creates one Ink
+  annotation; the model and source rehydration preserve multiple strokes as
+  `/InkList`.
+  QML samples points at least one logical pixel apart, keeps at most 4,096 raw
+  points, and continues updating the final endpoint after reaching that cap.
+  The controller validates and deduplicates the input, applies
+  Ramer-Douglas-Peucker simplification at about 0.75 PDF point, and caps the
+  result at 1,024 points. Source Ink scanning is bounded to 64 strokes, 4,096
+  points per stroke, and 32,768 points total; malformed or oversized Ink stays
+  available as a generic read-only comment. Stamp, Caret, FileAttachment,
+  Sound, Redact, and PDF 2.0 Projection remain indexed read-only for panel
+  navigation.
   Squiggly accepts only non-whitespace source-text glyphs intersected by the
   drag gesture, snaps the result into per-line rectangles/QuadPoints, and
   rejects whitespace-only or no-text selections. Nearly horizontal gestures use
@@ -200,6 +211,8 @@ Current features:
   the ribbon palette, drag preview, and added-shape draft delegates.
 - `src/Components/CommentDrawingView.qml`: vector preview shared by Square,
   Circle, Line, Polygon, and PolyLine comment drafts and gestures.
+- `src/Components/InkDrawingView.qml`: Qt Quick Shapes freehand preview shared
+  by the active Pencil gesture and Ink draft delegates.
 - `src/Components/SquigglyLine.qml`: point-scaled Squiggly renderer shared by
   the drag preview and draft delegates, matching PDFium's saved appearance.
 - `src/Components`: ribbon controls, document view, page delegates, and the
@@ -424,20 +437,26 @@ clipped or elided unintentionally.
   embedded font programs to glyphs used by new text objects while leaving
   original PDF font resources unchanged. Commit only after PDFium succeeds;
   any earlier error must leave the destination and in-memory drafts untouched.
-- Persist Highlight, Squiggly, Underline, Strikeout, Free Text, Square, Circle,
-  Line, Polygon, and PolyLine drafts as
-  their matching `FPDF_ANNOT_*` annotations with explicit quad points, bounding rectangles,
-  color/opacity, and the Print flag. Adding annotations alone must not call
+- Persist Highlight, Squiggly, Underline, Strikeout, and Free Text drafts as
+  their matching `FPDF_ANNOT_*` annotations; persist Square, Circle, Line,
+  Polygon, PolyLine, and Ink through the subtype-safe drawing placeholder
+  pipeline. Adding annotations alone must not call
   `FPDFPage_GenerateContent()`; mixed text/image edits still regenerate the
   affected page content normally. A Squiggly selection carries snapped
-  rectangle/QuadPoints entries grouped by matched text line; the other tools keep
-  the free rectangle drawn by the user. Free Text must keep `/Contents`, `/DA`,
-  comment metadata, and a wrapped Unicode-capable `/AP`; editing a source Free
-  Text annotation must replace its stale appearance.
-  Drawing comments use `/L` or `/Vertices` where applicable plus a common
+  rectangle/QuadPoints entries grouped by matched text line; Highlight,
+  Underline, and Strikeout keep the free rectangle drawn by the user. Free Text
+  must keep `/Contents`, `/DA`, comment metadata, and a wrapped Unicode-capable
+  `/AP`; editing a source Free Text annotation must replace its stale
+  appearance. Square, Circle, Line, Polygon, and PolyLine use `/L` or
+  `/Vertices` where applicable plus a common
   `/C`, `/IC`, `/CA`, `/BS`, `/BE`, `/IT`, `/Name`, `/LE`, `/F`, and vector
   `/AP` framework. PDFium creates only a staging placeholder; the canonicalizer
-  writes the final subtype, dictionary, and appearance atomically.
+  writes the final subtype, dictionary, and appearance atomically. For Ink, the
+  writer maps every normalized stroke through `FPDF_DeviceToPage()` and the
+  canonicalizer writes `/Subtype /Ink`, `/InkList`, `/BS`, `/C`, `/CA`, the
+  Print flag, and a vector `/AP` with round line caps and joins. Ink supports
+  source content edits, delete, reply, undo/redo/discard, Save/Save As, and
+  reopen without regenerating page content on annotation-only pages.
 - Persist added shapes as top-level PDF path objects. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain
