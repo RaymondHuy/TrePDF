@@ -22,6 +22,7 @@ Item {
     property var freeTextDrafts: []
     property var drawingCommentDrafts: []
     property var inkDrafts: []
+    property var stampDrafts: []
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
@@ -51,6 +52,9 @@ Item {
     property bool placingFreeText: false
     property point freeTextStart: Qt.point(0, 0)
     property point freeTextCurrent: Qt.point(0, 0)
+    property bool placingStamp: false
+    property point stampStart: Qt.point(0, 0)
+    property point stampCurrent: Qt.point(0, 0)
     property bool drawingCommentDragging: false
     property int drawingInteractionPage: -1
     property point drawingCommentStart: Qt.point(0, 0)
@@ -95,10 +99,13 @@ Item {
     readonly property real minimumResizePixelSize: 24
     readonly property real minimumHighlightDragSize: 3
     readonly property real minimumFreeTextDragSize: 3
+    readonly property real minimumStampDragSize: 3
     readonly property real minimumInkSampleDistance: 1
     readonly property int maximumInkPoints: 4096
     readonly property real defaultFreeTextWidthPoints: 160
     readonly property real defaultFreeTextHeightPoints: 64
+    readonly property real defaultStampWidthPoints: 160
+    readonly property real defaultStampHeightPoints: 50
     readonly property rect activeHighlightRect: Qt.rect(
         Math.min(highlightStart.x, highlightCurrent.x),
         Math.min(highlightStart.y, highlightCurrent.y),
@@ -158,6 +165,32 @@ Item {
             defaultWidth,
             defaultHeight)
     }
+    readonly property bool stampDragIsSized:
+        Math.abs(stampCurrent.x - stampStart.x)
+            >= minimumStampDragSize
+        && Math.abs(stampCurrent.y - stampStart.y)
+            >= minimumStampDragSize
+    readonly property rect activeStampRect: {
+        if (stampDragIsSized) {
+            return Qt.rect(
+                Math.min(stampStart.x, stampCurrent.x),
+                Math.min(stampStart.y, stampCurrent.y),
+                Math.abs(stampCurrent.x - stampStart.x),
+                Math.abs(stampCurrent.y - stampStart.y))
+        }
+
+        const defaultWidth = Math.min(
+            width,
+            defaultStampWidthPoints * pagePointScale)
+        const defaultHeight = Math.min(
+            height,
+            defaultStampHeightPoints * pagePointScale)
+        return Qt.rect(
+            Math.max(0, Math.min(width - defaultWidth, stampStart.x)),
+            Math.max(0, Math.min(height - defaultHeight, stampStart.y)),
+            defaultWidth,
+            defaultHeight)
+    }
     readonly property bool interactionActive: !pooled
         && !controller.saving
         && controller.tool !== PDFEditController.BrowseTool
@@ -203,10 +236,12 @@ Item {
             freeTextDrafts = []
             drawingCommentDrafts = []
             inkDrafts = []
+            stampDrafts = []
             hoverCandidate = ({})
             cancelHighlight()
             cancelShape()
             cancelFreeTextPlacement()
+            cancelStampPlacement()
             cancelDrawingComment()
             cancelInkDrawing()
             hideSelectCursor()
@@ -244,6 +279,7 @@ Item {
         const displayedFreeTextDrafts = []
         const displayedDrawingCommentDrafts = []
         const displayedInkDrafts = []
+        const displayedStampDrafts = []
         for (let index = 0; index < displayedDrafts.length; ++index) {
             const draft = displayedDrafts[index]
             if (isTextMarkupKind(draft.kind))
@@ -254,6 +290,8 @@ Item {
                 displayedFreeTextDrafts.push(draft)
             else if (draft.kind === "ink")
                 displayedInkDrafts.push(draft)
+            else if (draft.kind === "stamp")
+                displayedStampDrafts.push(draft)
             else if (isDrawingCommentKind(draft.kind))
                 displayedDrawingCommentDrafts.push(draft)
             else
@@ -266,6 +304,7 @@ Item {
         freeTextDrafts = displayedFreeTextDrafts
         drawingCommentDrafts = displayedDrawingCommentDrafts
         inkDrafts = displayedInkDrafts
+        stampDrafts = displayedStampDrafts
         if (!interactionActive) {
             hoverCandidate = ({})
             hideSelectCursor()
@@ -667,6 +706,7 @@ Item {
             || kind === "stickyNote"
             || kind === "freeText"
             || kind === "ink"
+            || kind === "stamp"
     }
 
     function isTextMarkupTool() {
@@ -686,6 +726,10 @@ Item {
 
     function isInkTool() {
         return controller.tool === PDFEditController.InkTool
+    }
+
+    function isStampTool() {
+        return controller.tool === PDFEditController.StampTool
     }
 
     function isDrawingPathTool() {
@@ -709,6 +753,7 @@ Item {
         return isTextMarkupTool()
             || isDrawingCommentTool()
             || isInkTool()
+            || isStampTool()
             || controller.tool === PDFEditController.StickyNoteTool
             || controller.tool === PDFEditController.FreeTextTool
     }
@@ -723,6 +768,7 @@ Item {
             || kind === "text"
             || kind === "addedText"
             || kind === "ink"
+            || kind === "stamp"
     }
 
     function isImageCandidate(candidate) {
@@ -1162,6 +1208,58 @@ Item {
         placingFreeText = false
     }
 
+    function beginStampPlacement(x, y) {
+        if (!isStampTool() || width <= 0 || height <= 0)
+            return
+
+        if (editing)
+            commitEditing()
+        selectionActions.close()
+        controller.clearSelection()
+        hoverCandidate = ({})
+        hideSelectCursor()
+        stampStart = Qt.point(
+            Math.max(0, Math.min(width, x)),
+            Math.max(0, Math.min(height, y)))
+        stampCurrent = stampStart
+        placingStamp = true
+    }
+
+    function updateStampPlacement(x, y) {
+        if (!placingStamp)
+            return
+
+        stampCurrent = Qt.point(
+            Math.max(0, Math.min(width, x)),
+            Math.max(0, Math.min(height, y)))
+    }
+
+    function finishStampPlacement(x, y) {
+        if (!placingStamp)
+            return
+
+        updateStampPlacement(x, y)
+        const placementRect = activeStampRect
+        placingStamp = false
+        suppressNextPlacementClick = true
+        Qt.callLater(function() {
+            root.suppressNextPlacementClick = false
+        })
+        if (placementRect.width <= 0 || placementRect.height <= 0)
+            return
+
+        controller.addStamp(page, Qt.rect(
+            placementRect.x / width,
+            placementRect.y / height,
+            placementRect.width / width,
+            placementRect.height / height))
+        reloadData()
+    }
+
+    function cancelStampPlacement() {
+        placingStamp = false
+    }
+
     function resolveSquigglyPreview() {
         squigglyPreviewUpdatePending = false
         if (!highlighting
@@ -1588,6 +1686,7 @@ Item {
         cancelHighlight()
         cancelShape()
         cancelFreeTextPlacement()
+        cancelStampPlacement()
         cancelDrawingComment()
         cancelInkDrawing()
         hideSelectCursor()
@@ -1678,6 +1777,7 @@ Item {
         cancelHighlight()
         cancelShape()
         cancelFreeTextPlacement()
+        cancelStampPlacement()
         cancelDrawingComment()
         cancelInkDrawing()
         cancelFrameResize()
@@ -1691,6 +1791,7 @@ Item {
         cancelHighlight()
         cancelShape()
         cancelFreeTextPlacement()
+        cancelStampPlacement()
         cancelDrawingComment()
         cancelInkDrawing()
         if (pooled)
@@ -1705,6 +1806,7 @@ Item {
             cancelHighlight()
             cancelShape()
             cancelFreeTextPlacement()
+            cancelStampPlacement()
             cancelDrawingComment()
             cancelInkDrawing()
             cancelFrameResize()
@@ -1758,6 +1860,7 @@ Item {
             root.cancelHighlight()
             root.cancelShape()
             root.cancelFreeTextPlacement()
+            root.cancelStampPlacement()
             root.cancelDrawingComment()
             root.cancelInkDrawing()
             root.cancelFrameResize()
@@ -1955,6 +2058,31 @@ Item {
             strokeColor: modelData.strokeColor
             strokeWidth: Number(modelData.strokeWidthRatio) * root.height
             drawingOpacity: Number(modelData.opacity)
+            visible: (modelData.added === true
+                    || modelData.geometryChanged === true)
+                && modelData.deleted !== true
+            z: 1
+            Accessible.ignored: true
+        }
+    }
+
+    Repeater {
+        model: root.stampDrafts
+
+        delegate: StampView {
+            required property var modelData
+
+            readonly property rect frameRect: modelData.frameRect
+
+            x: frameRect.x * root.width
+            y: frameRect.y * root.height
+            width: Math.max(1, frameRect.width * root.width)
+            height: Math.max(1, frameRect.height * root.height)
+            stampName: String(modelData.stampName || "")
+            stampText: String(modelData.stampText || "")
+            stampColor: modelData.stampColor !== undefined
+                ? modelData.stampColor
+                : "#c62828"
             visible: (modelData.added === true
                     || modelData.geometryChanged === true)
                 && modelData.deleted !== true
@@ -2400,6 +2528,7 @@ Item {
         preventStealing: root.isTextMarkupTool()
             || root.isDrawingCommentTool()
             || root.isInkTool()
+            || root.isStampTool()
             || root.controller.tool === PDFEditController.AddShapeTool
             || root.controller.tool === PDFEditController.FreeTextTool
         cursorShape: root.selectCursorActive || root.addTextCursorActive
@@ -2407,6 +2536,7 @@ Item {
             : root.isTextMarkupTool()
                     || root.isDrawingCommentTool()
                     || root.isInkTool()
+                    || root.isStampTool()
                     || root.controller.tool === PDFEditController.AddShapeTool
                     || root.controller.tool === PDFEditController.FreeTextTool
                 ? Qt.CrossCursor
@@ -2440,6 +2570,8 @@ Item {
                 root.updateShape(mouse.x, mouse.y)
             else if (root.placingFreeText)
                 root.updateFreeTextPlacement(mouse.x, mouse.y)
+            else if (root.placingStamp)
+                root.updateStampPlacement(mouse.x, mouse.y)
             else if (root.inkDrawing)
                 root.updateInkDrawing(mouse.x, mouse.y)
             else if (root.drawingCommentDragging
@@ -2466,6 +2598,9 @@ Item {
                     === PDFEditController.FreeTextTool) {
                 root.beginFreeTextPlacement(mouse.x, mouse.y)
                 mouse.accepted = true
+            } else if (root.isStampTool()) {
+                root.beginStampPlacement(mouse.x, mouse.y)
+                mouse.accepted = true
             } else if (root.isInkTool()) {
                 root.beginInkDrawing(mouse.x, mouse.y)
                 mouse.accepted = true
@@ -2479,6 +2614,7 @@ Item {
             root.finishHighlight(mouse.x, mouse.y)
             root.finishShape(mouse.x, mouse.y)
             root.finishFreeTextPlacement(mouse.x, mouse.y)
+            root.finishStampPlacement(mouse.x, mouse.y)
             root.finishDrawingComment(mouse.x, mouse.y)
             root.finishInkDrawing(mouse.x, mouse.y)
         }
@@ -2486,6 +2622,7 @@ Item {
             root.cancelHighlight()
             root.cancelShape()
             root.cancelFreeTextPlacement()
+            root.cancelStampPlacement()
             root.cancelDrawingComment()
             root.cancelInkDrawing()
         }
@@ -2499,6 +2636,7 @@ Item {
                         === PDFEditController.AddShapeTool
                     || root.controller.tool
                         === PDFEditController.FreeTextTool
+                    || root.isStampTool()
                     || root.isInkTool()) {
                 return
             }
@@ -2576,6 +2714,9 @@ Item {
                 event.accepted = true
             } else if (root.placingFreeText) {
                 root.cancelFreeTextPlacement()
+                event.accepted = true
+            } else if (root.placingStamp) {
+                root.cancelStampPlacement()
                 event.accepted = true
             } else if (root.inkDrawing) {
                 root.cancelInkDrawing()
@@ -2698,6 +2839,20 @@ Item {
         border.color: "#000000"
         visible: root.placingFreeText
             && root.controller.tool === PDFEditController.FreeTextTool
+        z: 5
+        Accessible.ignored: true
+    }
+
+    StampView {
+        x: root.activeStampRect.x
+        y: root.activeStampRect.y
+        width: Math.max(1, root.activeStampRect.width)
+        height: Math.max(1, root.activeStampRect.height)
+        stampName: root.controller.stampName
+        stampText: root.controller.stampText
+        stampColor: root.controller.stampColor
+        visible: root.placingStamp
+            && root.controller.tool === PDFEditController.StampTool
         z: 5
         Accessible.ignored: true
     }
@@ -3249,6 +3404,10 @@ Item {
                     //% "Move ink comment"
                     return qsTrId("MoveInkComment")
                 }
+                if (root.controller.selectedKind === "stamp") {
+                    //% "Move stamp comment"
+                    return qsTrId("MoveStampComment")
+                }
                 //% "Move text"
                 return qsTrId("MoveText")
             }
@@ -3347,10 +3506,11 @@ Item {
                 const selectedKind = root.controller.selectedKind
                 if (selectedKind === "image"
                         || (root.isCommentKind(selectedKind)
-                            && selectedKind !== "ink")) {
+                            && selectedKind !== "ink"
+                            && selectedKind !== "stamp")) {
                     return []
                 }
-                if (selectedKind === "ink") {
+                if (selectedKind === "ink" || selectedKind === "stamp") {
                     return [
                         { horizontal: -1, vertical: -1,
                             cursor: Qt.SizeFDiagCursor },
@@ -3400,6 +3560,10 @@ Item {
                     if (root.controller.selectedKind === "ink") {
                         //% "Resize ink comment"
                         return qsTrId("ResizeInkComment")
+                    }
+                    if (root.controller.selectedKind === "stamp") {
+                        //% "Resize stamp comment"
+                        return qsTrId("ResizeStampComment")
                     }
                     //% "Resize text box"
                     return qsTrId("ResizeTextBox")

@@ -112,9 +112,15 @@ supports moving and eight-handle affine resizing of every stroke, contents
 editing, deletion, replies, undo/redo/discard, Save/Save As, and reopen. Save
 patches source `/Rect` and `/InkList` without PDFium mutating its appearance;
 pure moves and external/custom Ink preserve `/AP`, while supported resized
-TrePDF Ink receives an appearance matching the scaled strokes. Stamp, Caret,
-FileAttachment, Sound, Redact, and PDF 2.0 Projection
-are still indexed read-only for reading and navigation.
+TrePDF Ink receives an appearance matching the scaled strokes. Stamp offers
+Approved, Draft, Final, Confidential, For Comment, and Not Approved presets.
+A click uses a 160-by-50-point frame and a drag sets a custom frame; new Stamp
+drafts can be moved, resized with eight handles, deleted, undone/redone, and
+saved as standard `/Stamp` annotations with `/Name`, semantic `/Contents`, the
+Print flag, and a vector `/AP`. Existing Stamp contents, replies, and deletion
+are supported while source geometry and custom appearances remain unchanged.
+Caret, FileAttachment, Sound, Redact, and PDF 2.0 Projection are still indexed
+read-only for reading and navigation.
 Comment changes are per-tab session drafts with
 undo, redo, discard, selection, and deletion support. Save and Save As persist
 them as standard PDF annotations with geometry, color, contents, print

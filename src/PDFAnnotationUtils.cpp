@@ -74,7 +74,8 @@ bool isSupportedCommentAnnotationSubtype(int subtype)
         || subtype == FPDF_ANNOT_LINE
         || subtype == FPDF_ANNOT_POLYGON
         || subtype == FPDF_ANNOT_POLYLINE
-        || subtype == FPDF_ANNOT_INK;
+        || subtype == FPDF_ANNOT_INK
+        || subtype == FPDF_ANNOT_STAMP;
 }
 
 bool isMarkupAnnotationSubtype(int subtype)

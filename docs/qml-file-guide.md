@@ -40,7 +40,8 @@ Main.qml
     │           │   ├── ShapeDraftView.qml
     │           │   ├── SquigglyLine.qml
     │           │   ├── CommentDrawingView.qml
-    │           │   └── InkDrawingView.qml
+    │           │   ├── InkDrawingView.qml
+    │           │   └── StampView.qml
     │           └── FormTextFieldOverlay.qml
     │               └── FormFieldLayer (C++)
     ├── CommentPanel.qml
@@ -202,6 +203,9 @@ ghi Save; mọi thay đổi vẫn là draft.
 - Pencil dùng màu drawing chung và một drag liên tục để tạo đúng một Ink
   annotation. Gesture/draft đều dùng `InkDrawingView`; model vẫn nhận nhiều
   stroke khi rehydrate `/InkList` nguồn.
+- Stamp là split button với sáu preset Approved, Draft, Final, Confidential,
+  For Comment và Not Approved. Menu dùng `StampView` để preview đúng artwork và
+  màu; phần chính giữ preset hiện tại rồi chuyển sang `StampTool`.
 - Ink đã tạo và Ink nguồn hợp lệ dùng cùng selection frame như Foxit: kéo toàn
   bounding box hoặc dùng phím mũi tên để di chuyển, kéo tám handle cạnh/góc để
   đổi kích thước; Escape/cancel session trả frame và stroke về geometry ban đầu.
@@ -240,9 +244,9 @@ Note/Free Text đang chọn và phản hồi một cấp.
   dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
   được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.
   Panel dùng chung trạng thái thu gọn theo document session.
-- Square, Circle, Line, Polygon, PolyLine và Ink có kind riêng, sửa nội
-  dung/xóa/reply như comment được hỗ trợ. Stamp, Caret, FileAttachment, Sound,
-  Redact và Projection dùng card `comment` chỉ đọc. Ink có `/InkList` malformed
+- Square, Circle, Line, Polygon, PolyLine, Ink và Stamp có kind riêng, sửa nội
+  dung/xóa/reply như comment được hỗ trợ. Stamp nguồn giữ geometry/AP; Caret,
+  FileAttachment, Sound, Redact và Projection dùng card `comment` chỉ đọc. Ink có `/InkList` malformed
   hoặc vượt giới hạn scan 64 stroke, 4.096 điểm/stroke hay 32.768 điểm tổng cũng
   hạ xuống card generic chỉ đọc thay vì cấp phát dữ liệu không giới hạn.
 
@@ -390,9 +394,10 @@ data/candidate/history/selection đổi.
   kích thước trang.
 - Quản lý con trỏ Select/Add Text bằng SVG và fallback cursor; ẩn cursor khi
   pooled, ngoài trang hoặc tool không phù hợp.
-- Các công cụ draw shape/text-markup/Free Text/drawing comment giữ point tạm thời,
+- Các công cụ draw shape/text-markup/Free Text/Stamp/drawing comment giữ point tạm thời,
   validate gesture rồi mới tạo một draft command. Click Free Text dùng kích
-  thước mặc định; drag dùng rectangle đã clamp trong trang.
+  thước mặc định; Stamp click dùng 160 × 50 PDF point; drag của cả hai dùng
+  rectangle đã clamp trong trang.
 - Pencil chỉ append mẫu khi cách mẫu trước ít nhất 1 logical pixel, giữ tối đa
   4.096 raw points và tiếp tục cập nhật endpoint cuối khi đã đầy. Release gửi
   đúng một stroke normalized sang controller;
@@ -425,10 +430,13 @@ data/candidate/history/selection đổi.
   với round cap/join, cùng màu, opacity và border width của save snapshot. Khi
   geometry Ink nguồn đổi, delegate vẽ stroke đã translate/scale trên texture đã
   suppress appearance nguồn.
+- `StampView` vẽ viền kép, màu và artwork text dùng chung cho menu preset,
+  preview placement và draft Stamp mới.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
-- Drag text/image/shape/Ink giữ preview trong QML nhưng chỉ commit geometry một
-  lần khi thả; phím mũi tên tạo move command, Shift dùng bước lớn hơn. Ink nhận
-  tám resize handle ở cạnh/góc và scale mọi stroke theo frame mới.
+- Drag text/image/shape/Ink/Stamp giữ preview trong QML nhưng chỉ commit geometry
+  một lần khi thả; phím mũi tên tạo move command, Shift dùng bước lớn hơn. Ink
+  và Stamp mới nhận tám resize handle ở cạnh/góc; Ink scale mọi stroke theo
+  frame mới.
 
 **Dọn state:** `prepareForSessionChange()` kết thúc hoặc hủy editor/resize/draw,
 ẩn cursor và xóa dữ liệu trang. Bất kỳ bổ sung gesture nào cũng phải đi qua
@@ -462,6 +470,16 @@ kéo và draft đã tạo/rehydrate.
 - Dùng round cap/join và độ rộng tối thiểu 0,75 logical pixel để preview rõ ở
   mọi zoom. Component không validate/simplify hay ghi `/InkList`; controller và
   writer sở hữu các bước đó.
+
+### [`src/Components/StampView.qml`](../src/Components/StampView.qml)
+
+**Vai trò:** renderer nhẹ dùng chung cho preset Stamp trong ribbon, preview khi
+click/drag và draft chưa Save.
+
+- Nhận `stampName`, artwork `stampText` và `stampColor`; tự fit một dòng chữ in
+  hoa vào viền kép mà không tạo layer/FBO riêng.
+- Chỉ vẽ presentation. Controller sở hữu preset/geometry/history và writer dựng
+  lại normal `/AP` vector tương ứng trong PDF.
 
 ### [`src/Components/ShapeDraftView.qml`](../src/Components/ShapeDraftView.qml)
 

@@ -41,6 +41,9 @@ class PDFEditController : public QObject
     Q_PROPERTY(QColor squigglyColor READ squigglyColor WRITE setSquigglyColor NOTIFY squigglyColorChanged FINAL)
     Q_PROPERTY(QColor strikeoutColor READ strikeoutColor WRITE setStrikeoutColor NOTIFY strikeoutColorChanged FINAL)
     Q_PROPERTY(QColor drawingCommentColor READ drawingCommentColor WRITE setDrawingCommentColor NOTIFY drawingCommentColorChanged FINAL)
+    Q_PROPERTY(QString stampName READ stampName WRITE setStampName NOTIFY stampNameChanged FINAL)
+    Q_PROPERTY(QString stampText READ stampText NOTIFY stampNameChanged FINAL)
+    Q_PROPERTY(QColor stampColor READ stampColor NOTIFY stampNameChanged FINAL)
     Q_PROPERTY(int pendingDrawingCommentPage READ pendingDrawingCommentPage NOTIFY pendingDrawingCommentPageChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
@@ -114,6 +117,7 @@ public:
         PolygonTool,
         PolyLineTool,
         InkTool,
+        StampTool,
         // Compatibility aliases for QML/tests written during the initial
         // drawing-comment implementation.
         SquareCommentTool = SquareTool,
@@ -177,6 +181,10 @@ public:
     void setStrikeoutColor(const QColor &color);
     QColor drawingCommentColor() const;
     void setDrawingCommentColor(const QColor &color);
+    QString stampName() const;
+    void setStampName(const QString &name);
+    QString stampText() const;
+    QColor stampColor() const;
 
     bool hasDrafts() const;
     bool canUndo() const;
@@ -251,6 +259,8 @@ public:
                                          const QPointF &position);
     Q_INVOKABLE QVariantMap addFreeText(int page,
                                        const QRectF &selectionRect);
+    Q_INVOKABLE QVariantMap addStamp(int page,
+                                    const QRectF &selectionRect);
     Q_INVOKABLE QVariantMap addDrawingComment(
         int page,
         const QVariantList &vertices);
@@ -328,6 +338,7 @@ signals:
     void squigglyColorChanged();
     void strikeoutColorChanged();
     void drawingCommentColorChanged();
+    void stampNameChanged();
     void pendingDrawingCommentPageChanged();
     void historyStateChanged();
     void savingChanged();
@@ -432,6 +443,7 @@ private:
         QVector<QPointF> drawingVertices;
         QVector<QVector<QPointF>> inkStrokes;
         PDFCommentAnnotation::CommonProperties commentProperties;
+        QString stampText;
         QString reason;
         int pendingFontSnapshotIndex = -1;
         QString pendingFontExpectedFamily;
@@ -739,6 +751,7 @@ private:
     QColor m_squigglyColor;
     QColor m_strikeoutColor;
     QColor m_drawingCommentColor;
+    QString m_stampName = QStringLiteral("Approved");
     int m_pendingDrawingCommentPage = -1;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;

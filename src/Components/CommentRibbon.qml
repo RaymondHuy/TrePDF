@@ -33,6 +33,14 @@ Flickable {
         "#0277bd", "#00838f", "#00695c", "#2e7d32", "#558b2f",
         "#9e9d24", "#f9a825", "#ef6c00", "#d84315", "#455a64"
     ]
+    readonly property var stampPresets: [
+        "Approved",
+        "Draft",
+        "Final",
+        "Confidential",
+        "ForComment",
+        "NotApproved"
+    ]
     readonly property var drawingCommentOptions: [
         {
             tool: PDFEditController.SquareTool,
@@ -189,6 +197,72 @@ Flickable {
         editController.tool = tool
     }
 
+    function stampPresetLabel(stampName) {
+        switch (stampName) {
+        case "Approved":
+            //% "Approved"
+            return qsTrId("StampApproved")
+        case "Draft":
+            //% "Draft"
+            return qsTrId("StampDraft")
+        case "Final":
+            //% "Final"
+            return qsTrId("StampFinal")
+        case "Confidential":
+            //% "Confidential"
+            return qsTrId("StampConfidential")
+        case "ForComment":
+            //% "For Comment"
+            return qsTrId("StampForComment")
+        case "NotApproved":
+            //% "Not Approved"
+            return qsTrId("StampNotApproved")
+        }
+        return ""
+    }
+
+    function stampPresetColor(stampName) {
+        switch (stampName) {
+        case "Approved":
+            return "#2e7d32"
+        case "Draft":
+            return "#1565c0"
+        case "Final":
+            return "#283593"
+        case "Confidential":
+            return "#c62828"
+        case "ForComment":
+            return "#ef6c00"
+        case "NotApproved":
+            return "#c62828"
+        }
+        return "#c62828"
+    }
+
+    function stampPresetArtworkText(stampName) {
+        switch (stampName) {
+        case "Approved":
+            return "APPROVED"
+        case "Draft":
+            return "DRAFT"
+        case "Final":
+            return "FINAL"
+        case "Confidential":
+            return "CONFIDENTIAL"
+        case "ForComment":
+            return "FOR COMMENT"
+        case "NotApproved":
+            return "NOT APPROVED"
+        }
+        return ""
+    }
+
+    function selectStampPreset(stampName) {
+        stampPresetPopup.close()
+        editController.stampName = stampName
+        editController.tool = PDFEditController.StampTool
+    }
+
     function closePopups() {
         if (highlightColorPopup)
             highlightColorPopup.close()
@@ -202,6 +276,8 @@ Flickable {
             markupColorDialog.close()
         if (drawingCommentPopup)
             drawingCommentPopup.close()
+        if (stampPresetPopup)
+            stampPresetPopup.close()
     }
 
     function isCommentKind(kind) {
@@ -219,6 +295,7 @@ Flickable {
             || kind === "polygon"
             || kind === "polyLine"
             || kind === "ink"
+            || kind === "stamp"
     }
 
     onDocumentChanged: closePopups()
@@ -458,6 +535,66 @@ Flickable {
         ToolTip.delay: 500
         ToolTip.text: root.drawingCommentToolTip(
             drawingCommentOption.optionTool)
+    }
+
+    component StampOptionButton: ToolButton {
+        id: stampOption
+
+        required property string optionStampName
+        required property color optionStampColor
+
+        width: 146
+        height: 62
+        padding: 5
+        checkable: true
+        checked: root.editController.stampName
+            === stampOption.optionStampName
+        focusPolicy: Qt.TabFocus
+        Accessible.name: root.stampPresetLabel(
+            stampOption.optionStampName)
+        onClicked: root.selectStampPreset(
+            stampOption.optionStampName)
+
+        contentItem: Column {
+            spacing: 2
+
+            StampView {
+                width: parent.width
+                height: 34
+                stampName: stampOption.optionStampName
+                stampText: root.stampPresetArtworkText(
+                    stampOption.optionStampName)
+                stampColor: stampOption.optionStampColor
+            }
+
+            Label {
+                width: parent.width
+                text: root.stampPresetLabel(
+                    stampOption.optionStampName)
+                color: root.theme.ribbonTextColor
+                font.pixelSize: 10
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+            }
+        }
+
+        background: Rectangle {
+            radius: 5
+            color: stampOption.down
+                ? "#f5dfcf"
+                : stampOption.hovered
+                        || stampOption.visualFocus
+                        || stampOption.checked
+                    ? root.theme.foxitPaleOrange
+                    : "transparent"
+            border.width: stampOption.checked
+                ? 2
+                : stampOption.hovered
+                        || stampOption.visualFocus ? 1 : 0
+            border.color: stampOption.checked
+                ? root.theme.foxitDarkOrange
+                : root.theme.foxitBorderOrange
+        }
     }
 
     Row {
@@ -733,6 +870,72 @@ Flickable {
                     targetTool: PDFEditController.StrikeoutTool
                     //% "Choose strikeout color"
                     pickerTitle: qsTrId("ChooseStrikeoutColor")
+                }
+            }
+
+            RibbonButton {
+                id: stampButton
+
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Stamp"
+                text: qsTrId("Stamp")
+                //% "Add a stamp comment"
+                toolTipText: qsTrId("AddStamp")
+                iconSource: "../assets/icons/stamp.svg"
+                preserveIconColors: true
+                menuIndicatorVisible: true
+                //% "Choose stamp"
+                menuToolTipText: qsTrId("ChooseStamp")
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.StampTool
+                onClicked: {
+                    root.editController.tool
+                        = PDFEditController.StampTool
+                }
+                onMenuRequested: stampPresetPopup.open()
+                onEnabledChanged: {
+                    if (!enabled)
+                        stampPresetPopup.close()
+                }
+
+                Popup {
+                    id: stampPresetPopup
+
+                    x: 0
+                    y: stampButton.height
+                    width: 308
+                    padding: 6
+                    focus: true
+                    closePolicy: Popup.CloseOnEscape
+                        | Popup.CloseOnPressOutsideParent
+
+                    contentItem: Grid {
+                        columns: 2
+                        columnSpacing: 4
+                        rowSpacing: 4
+
+                        Repeater {
+                            model: root.stampPresets
+
+                            delegate: StampOptionButton {
+                                required property var modelData
+
+                                optionStampName: String(modelData)
+                                optionStampColor: root.stampPresetColor(
+                                    String(modelData))
+                            }
+                        }
+                    }
+
+                    background: Rectangle {
+                        radius: 7
+                        color: root.theme.ribbonSurface
+                        border.width: 1
+                        border.color: root.theme.ribbonBorder
+                    }
                 }
             }
         }

@@ -36,7 +36,12 @@ Current features:
   Ramer-Douglas-Peucker simplification at about 0.75 PDF point, and caps the
   result at 1,024 points. Source Ink scanning is bounded to 64 strokes, 4,096
   points per stroke, and 32,768 points total; malformed or oversized Ink stays
-  available as a generic read-only comment. Stamp, Caret, FileAttachment,
+  available as a generic read-only comment. Stamp provides Approved, Draft,
+  Final, Confidential, For Comment, and Not Approved presets. Added Stamp
+  drafts support click/drag placement, move, eight-handle resize, delete,
+  undo/redo/discard, and Save/Save As as `/Stamp` with `/Name`, `/Contents`,
+  Print, and vector `/AP`. Source Stamp supports contents edits, replies, and
+  deletion while preserving source geometry and `/AP`. Caret, FileAttachment,
   Sound, Redact, and PDF 2.0 Projection remain indexed read-only for panel
   navigation.
   Added Ink and valid source Ink can be moved by dragging the selected bounding
@@ -445,7 +450,7 @@ clipped or elided unintentionally.
   embedded font programs to glyphs used by new text objects while leaving
   original PDF font resources unchanged. Commit only after PDFium succeeds;
   any earlier error must leave the destination and in-memory drafts untouched.
-- Persist Highlight, Squiggly, Underline, Strikeout, and Free Text drafts as
+- Persist Highlight, Squiggly, Underline, Strikeout, Free Text, and Stamp drafts as
   their matching `FPDF_ANNOT_*` annotations; persist Square, Circle, Line,
   Polygon, PolyLine, and Ink through the subtype-safe drawing placeholder
   pipeline. Adding annotations alone must not call
@@ -455,7 +460,10 @@ clipped or elided unintentionally.
   Underline, and Strikeout keep the free rectangle drawn by the user. Free Text
   must keep `/Contents`, `/DA`, comment metadata, and a wrapped Unicode-capable
   `/AP`; editing a source Free Text annotation must replace its stale
-  appearance. Square, Circle, Line, Polygon, and PolyLine use `/L` or
+  appearance. New Stamp annotations keep their standard preset `/Name`,
+  semantic `/Contents`, `/C`, Print flag, and vector `/AP`; editing source
+  Stamp contents must preserve its geometry and existing `/AP`. Square,
+  Circle, Line, Polygon, and PolyLine use `/L` or
   `/Vertices` where applicable plus a common
   `/C`, `/IC`, `/CA`, `/BS`, `/BE`, `/IT`, `/Name`, `/LE`, `/F`, and vector
   `/AP` framework. PDFium creates only a staging placeholder; the canonicalizer

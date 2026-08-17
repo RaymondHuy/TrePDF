@@ -221,8 +221,8 @@ orchestration Save.
 - Scan page bất đồng bộ từ document handle riêng dưới PDFium lock.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
-- Đọc Highlight, Squiggly, Underline, Strikeout, Text, FreeText, Square, Circle,
-  Line, Polygon, PolyLine và Ink annotation;
+- Đọc Highlight, Squiggly, Underline, Strikeout, Text, FreeText, Stamp, Square,
+  Circle, Line, Polygon, PolyLine và Ink annotation;
   chuẩn hóa quad/rect, màu và `/Contents` thành comment candidate. Nội dung
   annotation nguồn được sửa trong panel bằng draft riêng; canvas cho move và
   resize Ink nguồn hợp lệ bằng cách transform toàn bộ stroke. Annotation nguồn
@@ -314,10 +314,10 @@ orchestration Save.
   gia cùng snapshot undo/redo. `setCommentText()` và `addCommentReply()` cùng
   enforce tối đa 700 UTF-16 code unit; `addCommentReply()` chỉ nhận root.
 - Annotation-only scan giữ kind riêng cho
-  Line/Square/Circle/Polygon/PolyLine/Ink;
-  Stamp/Caret/FileAttachment/Sound/Redact/Projection dùng kind `comment`
-  chỉ đọc. Mọi đường sửa, xóa và reply đều kiểm `commentTextReadOnly` trước khi
-  tạo draft.
+  Line/Square/Circle/Polygon/PolyLine/Ink/Stamp. Stamp nguồn cho sửa nội dung,
+  reply và xóa nhưng không cho đổi geometry; Caret/FileAttachment/Sound/Redact/
+  Projection dùng kind `comment` chỉ đọc. Mọi đường sửa, xóa và reply đều kiểm
+  `commentTextReadOnly` trước khi tạo draft.
 - Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 
@@ -365,7 +365,9 @@ orchestration Save.
   cho font mới/standard.
 - Tạo bitmap object cho ảnh thêm mới, path object cho sáu shape, các standard
   Highlight/Squiggly/Underline/Strikeout annotation với quad/color/Print flag,
-  Text annotation và FreeText annotation với rect/`Contents`/`NM`/Print flag.
+  Text annotation, FreeText annotation và Stamp với rect/`Contents`/`NM`/Print
+  flag. Stamp snapshot giữ preset `/Name`, artwork text và màu; canonicalizer
+  gắn normal `/AP` vector mà không regenerate page content.
   Squiggly ghi quad từ các rectangle dòng đã snap; ba text-markup còn lại ghi
   geometry tự do hiện có. Sau khi serialize staging file, canonicalizer thêm
   normal `/AP` vector cho text markup mới mà không regenerate page content.

@@ -66,6 +66,10 @@ constexpr qreal kFreeTextDefaultHeightPoints = 64.0;
 constexpr qreal kFreeTextMinimumWidthPoints = 36.0;
 constexpr qreal kFreeTextMinimumHeightPoints = 24.0;
 constexpr qreal kFreeTextFontSizePoints = 12.0;
+constexpr qreal kStampDefaultWidthPoints = 160.0;
+constexpr qreal kStampDefaultHeightPoints = 50.0;
+constexpr qreal kStampMinimumWidthPoints = 48.0;
+constexpr qreal kStampMinimumHeightPoints = 24.0;
 constexpr int kHighlightRed = 255;
 constexpr int kHighlightGreen = 235;
 constexpr int kHighlightBlue = 59;
@@ -131,6 +135,50 @@ constexpr char kPreservedPaintMark[] = "TrePDFPreservedPaint";
 constexpr char kCommentThreadIdKey[] = "TrePDFThreadId";
 constexpr char kCommentReplyToKey[] = "TrePDFReplyTo";
 constexpr int kAnnotationFlagLockedContents = 1 << 9;
+
+struct StampPreset {
+    const char *name;
+    const char *text;
+    int red;
+    int green;
+    int blue;
+};
+
+constexpr std::array<StampPreset, 6> kStampPresets{{
+    {"Approved", "APPROVED", 46, 125, 50},
+    {"Draft", "DRAFT", 21, 101, 192},
+    {"Final", "FINAL", 40, 53, 147},
+    {"Confidential", "CONFIDENTIAL", 198, 40, 40},
+    {"ForComment", "FOR COMMENT", 239, 108, 0},
+    {"NotApproved", "NOT APPROVED", 198, 40, 40},
+}};
+
+const StampPreset *stampPreset(const QString &name)
+{
+    const auto preset = std::find_if(
+        kStampPresets.cbegin(),
+        kStampPresets.cend(),
+        [&name](const StampPreset &candidate) {
+            return name == QLatin1String(candidate.name);
+        });
+    return preset == kStampPresets.cend() ? nullptr : &*preset;
+}
+
+QString stampTextForName(const QString &name)
+{
+    const StampPreset *preset = stampPreset(name);
+    return preset
+        ? QString::fromLatin1(preset->text)
+        : name.trimmed().left(64);
+}
+
+QColor stampColorForName(const QString &name)
+{
+    const StampPreset *preset = stampPreset(name);
+    return preset
+        ? QColor(preset->red, preset->green, preset->blue)
+        : QColor(97, 97, 97);
+}
 
 bool pageObjectHasContentMark(FPDF_PAGEOBJECT object,
                               const QString &expectedName)
@@ -735,7 +783,8 @@ bool isCommentCandidateKind(const QString &kind)
         || isDrawingCommentCandidateKind(kind)
         || kind == QLatin1String("comment")
         || kind == QLatin1String("stickyNote")
-        || kind == QLatin1String("freeText");
+        || kind == QLatin1String("freeText")
+        || kind == QLatin1String("stamp");
 }
 
 int commentAnnotationSubtype(const QString &kind)
@@ -754,6 +803,9 @@ int commentAnnotationSubtype(const QString &kind)
     }
     if (kind == QLatin1String("freeText")) {
         return FPDF_ANNOT_FREETEXT;
+    }
+    if (kind == QLatin1String("stamp")) {
+        return FPDF_ANNOT_STAMP;
     }
     if (kind == QLatin1String("square")) {
         return FPDF_ANNOT_SQUARE;
@@ -2158,6 +2210,7 @@ void PDFEditController::setTool(Tool tool)
     if (m_tool == BrowseTool
         || m_tool == StickyNoteTool
         || m_tool == FreeTextTool
+        || m_tool == StampTool
         || isDrawingCommentTool(m_tool)
         || isTextMarkupTool(m_tool)) {
         clearSelection();
@@ -2278,6 +2331,31 @@ void PDFEditController::setDrawingCommentColor(const QColor &color)
 
     m_drawingCommentColor = normalizedColor;
     emit drawingCommentColorChanged();
+}
+
+QString PDFEditController::stampName() const
+{
+    return m_stampName;
+}
+
+void PDFEditController::setStampName(const QString &name)
+{
+    if (!stampPreset(name) || m_stampName == name) {
+        return;
+    }
+
+    m_stampName = name;
+    emit stampNameChanged();
+}
+
+QString PDFEditController::stampText() const
+{
+    return stampTextForName(m_stampName);
+}
+
+QColor PDFEditController::stampColor() const
+{
+    return stampColorForName(m_stampName);
 }
 
 bool PDFEditController::hasDrafts() const
@@ -4240,6 +4318,126 @@ QVariantMap PDFEditController::addFreeText(int page,
     return candidateMap(draft);
 }
 
+QVariantMap PDFEditController::addStamp(int page,
+                                        const QRectF &selectionRect)
+{
+    if (!m_document
+        || !m_document->isLoaded()
+        || m_saving
+        || page < 0
+        || page >= m_document->pageCount()
+        || !std::isfinite(selectionRect.x())
+        || !std::isfinite(selectionRect.y())
+        || !std::isfinite(selectionRect.width())
+        || !std::isfinite(selectionRect.height())
+        || !stampPreset(m_stampName)) {
+        return {};
+    }
+    if (!documentAllowsAnnotations()) {
+        //% "This PDF does not permit changing annotations."
+        emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+        return {};
+    }
+
+    const QSizeF pageSize = m_document->pageSize(page);
+    if (pageSize.isEmpty()) {
+        return {};
+    }
+
+    const QRectF normalizedSelection = selectionRect.normalized();
+    const qreal selectionWidthPoints
+        = normalizedSelection.width() * pageSize.width();
+    const qreal selectionHeightPoints
+        = normalizedSelection.height() * pageSize.height();
+    QRectF stampRect;
+    if (selectionWidthPoints < kMinimumShapeDragPoints
+        || selectionHeightPoints < kMinimumShapeDragPoints) {
+        const qreal width = qMin<qreal>(
+            1.0,
+            kStampDefaultWidthPoints / pageSize.width());
+        const qreal height = qMin<qreal>(
+            1.0,
+            kStampDefaultHeightPoints / pageSize.height());
+        stampRect = QRectF(
+            qBound<qreal>(
+                0.0,
+                normalizedSelection.left(),
+                1.0 - width),
+            qBound<qreal>(
+                0.0,
+                normalizedSelection.top(),
+                1.0 - height),
+            width,
+            height);
+    } else {
+        const qreal width = qMin<qreal>(
+            1.0,
+            qMax(
+                normalizedSelection.width(),
+                kStampMinimumWidthPoints / pageSize.width()));
+        const qreal height = qMin<qreal>(
+            1.0,
+            qMax(
+                normalizedSelection.height(),
+                kStampMinimumHeightPoints / pageSize.height()));
+        stampRect = QRectF(
+            qBound<qreal>(
+                0.0,
+                normalizedSelection.left(),
+                1.0 - width),
+            qBound<qreal>(
+                0.0,
+                normalizedSelection.top(),
+                1.0 - height),
+            width,
+            height);
+    }
+
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    Candidate candidate;
+    candidate.page = page;
+    candidate.addedOrder = ++m_nextAddedObjectId;
+    candidate.objectId = QStringLiteral("stamp:")
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    candidate.commentThreadId = candidate.objectId;
+    candidate.kind = QStringLiteral("stamp");
+    //% "Stamp annotation"
+    candidate.label = qtTrId("StampAnnotation");
+    candidate.commentProperties.name = m_stampName;
+    candidate.stampText = stampText();
+    candidate.text = candidate.stampText;
+    candidate.highlightColor = stampColor();
+    candidate.editable = true;
+    candidate.added = true;
+    candidate.commentAuthor = currentCommentAuthor();
+    candidate.commentCreationDate = QDateTime::currentDateTime();
+    setInitialGeometry(candidate, stampRect);
+
+    m_addedCandidates.append(std::move(candidate));
+    const Candidate &addedCandidate = m_addedCandidates.constLast();
+    const Draft draft = initialDraftForCandidate(addedCandidate);
+    const QString key = draftKey(page, addedCandidate.objectId);
+    m_drafts.insert(key, draft);
+
+    Command command;
+    command.key = key;
+    command.page = page;
+    command.objectId = addedCandidate.objectId;
+    command.hadBefore = false;
+    command.before = draft;
+    command.hadAfter = true;
+    command.after = draft;
+    m_undoStack.append(command);
+    m_redoStack.clear();
+
+    setTool(SelectTool);
+    setSelection(&addedCandidate);
+    markDraftStateChanged(page, true);
+    emit historyStateChanged();
+    return candidateMap(draft);
+}
+
 QVariantMap PDFEditController::addDrawingComment(
     int page,
     const QVariantList &vertices)
@@ -5667,6 +5865,7 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
     const bool fixedBoundsDraft = sourceImageDraft
         || draft.candidate.kind == QLatin1String("addedImage")
         || draft.candidate.kind == QLatin1String("freeText")
+        || draft.candidate.kind == QLatin1String("stamp")
         || draft.candidate.kind == QLatin1String("ink")
         || isShapeCandidateKind(draft.candidate.kind);
     if (!movesFrame && sourceImageDraft) {
@@ -6139,8 +6338,12 @@ void PDFEditController::finishSelectedTextEdit()
         const bool movesInk
             = finalizedDraft.candidate.kind == QLatin1String("ink")
             && finalizedDraft.frameRect != baseline.before.frameRect;
+        const bool movesStamp
+            = finalizedDraft.candidate.kind == QLatin1String("stamp")
+            && finalizedDraft.frameRect != baseline.before.frameRect;
         if (finalizedDraft.candidate.kind == QLatin1String("freeText")
-            || movesInk) {
+            || movesInk
+            || movesStamp) {
             finalizedDraft.candidate.commentModifiedDate
                 = QDateTime::currentDateTime();
         }
@@ -8032,6 +8235,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             || subtype == FPDF_ANNOT_STRIKEOUT;
         const bool stickyNoteSubtype = subtype == FPDF_ANNOT_TEXT;
         const bool freeTextSubtype = subtype == FPDF_ANNOT_FREETEXT;
+        const bool stampSubtype = subtype == FPDF_ANNOT_STAMP;
         const bool inkSubtype = subtype == FPDF_ANNOT_INK;
         const bool drawingCommentSubtype
             = subtype == FPDF_ANNOT_SQUARE
@@ -8268,6 +8472,10 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             candidate.commentProperties.name = annotationString(
                 annotation,
                 "Name");
+            if (stampSubtype) {
+                candidate.stampText = stampTextForName(
+                    candidate.commentProperties.name);
+            }
             if (rootReplyIndex >= 0) {
                 candidate.replyToObjectId = QStringLiteral("annotation:")
                     + QString::number(rootReplyIndex);
@@ -8289,6 +8497,8 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
 
             QColor defaultColor = stickyNoteSubtype
                 ? QColor(kHighlightRed, kHighlightGreen, kHighlightBlue)
+                : stampSubtype
+                    ? stampColorForName(candidate.commentProperties.name)
                 : subtype == FPDF_ANNOT_HIGHLIGHT
                     ? QColor(kHighlightRed,
                              kHighlightGreen,
@@ -8484,7 +8694,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 candidate.label = qtTrId("PolylineAnnotation");
                 break;
             case FPDF_ANNOT_STAMP:
-                candidate.kind = QStringLiteral("comment");
+                candidate.kind = QStringLiteral("stamp");
                 //% "Stamp annotation"
                 candidate.label = qtTrId("StampAnnotation");
                 break;
@@ -8528,7 +8738,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             if (candidate.commentTextReadOnly) {
                 //% "This comment is read-only."
                 candidate.reason = qtTrId("ReadOnlyCommentCannotBeEdited");
-            } else if ((freeTextSubtype || inkSubtype)
+            } else if ((freeTextSubtype || inkSubtype || stampSubtype)
                        && !request.annotationsAllowed) {
                 //% "This PDF does not permit changing annotations."
                 candidate.reason = qtTrId("PdfAnnotationsNotPermitted");
@@ -8829,6 +9039,11 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
             ? QVariantList()
             : candidateSourceRects(candidate));
     map.insert(QStringLiteral("highlightColor"), candidate.highlightColor);
+    map.insert(
+        QStringLiteral("stampName"),
+        candidate.commentProperties.name);
+    map.insert(QStringLiteral("stampText"), candidate.stampText);
+    map.insert(QStringLiteral("stampColor"), candidate.highlightColor);
     QVariantList drawingVertices;
     drawingVertices.reserve(candidate.drawingVertices.size());
     for (const QPointF &vertex : candidate.drawingVertices) {
