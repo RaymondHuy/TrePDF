@@ -99,8 +99,8 @@ public:
         const QString &filePath,
         const QVector<StampAnnotation> &annotations,
         QString &error);
-    static bool finalizeSourceInkGeometryUpdates(
+    static bool finalizeSourceDrawingGeometryUpdates(
         const QString &filePath,
-        const QVector<PDFCommentAnnotation::SourceInkGeometryUpdate> &updates,
+        const QVector<PDFCommentAnnotation::SourceDrawingGeometryUpdate> &updates,
         QString &error);
 };

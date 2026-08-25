@@ -379,11 +379,12 @@ orchestration Save.
   `/Subtype /Ink`, `/InkList`, `/BS`, `/C`, `/CA`, Print flag và `/AP` vector
   có round cap/join. Writer giới hạn 64 stroke, 4.096 điểm mỗi stroke và 32.768
   điểm tổng trước khi serialize.
-- Với Ink nguồn đổi geometry, writer xác thực lại subtype, `/NM`, `/Contents`,
-  annotation permission và các cờ ReadOnly/LockedContents/Locked; sau đó cập
-  nhật `/Rect` cùng toàn bộ `/InkList` đã translate/scale trên annotation hiện
-  có. `/AP` và các key style/thread/popup không bị tái tạo; geometry-only cũng
-  không ghi đè `/Contents` hoặc `/RC`.
+- Với drawing comment nguồn đổi geometry, writer xác thực lại subtype, `/NM`,
+  `/Contents`, annotation permission và các cờ ReadOnly/LockedContents/Locked;
+  sau đó canonicalizer cập nhật `/Rect` cùng `/L`, `/Vertices` hoặc `/InkList`
+  đã translate/scale trên annotation hiện có. Move và AP ngoài/custom giữ
+  nguyên `/AP`; resize TrePDF-managed chỉ tái tạo AP khi properties được hỗ
+  trợ. Geometry-only không ghi đè `/Contents` hoặc `/RC`.
 - Sticky Note và reply mới được gắn normal `/AP` vector ngay trên writer
   annotation; source Sticky Note đang sửa mà thiếu AP cũng được bổ sung. Nội
   dung comment dùng LF trong model, chuẩn hóa thành CR khi ghi `/Contents`.

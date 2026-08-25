@@ -2950,14 +2950,14 @@ PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
     QVector<DraftAnnotationDeletion> deletions;
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
         const Candidate &candidate = draft->candidate;
-        const bool movesInk
-            = candidate.kind == QLatin1String("ink")
+        const bool movesDrawingComment
+            = isDrawingCommentCandidateKind(candidate.kind)
             && draft->frameRect
                 != initialDraftForCandidate(candidate).frameRect;
         const bool suppressesSourceAppearance
             = draft->deleted
             || candidate.kind == QLatin1String("freeText")
-            || movesInk;
+            || movesDrawingComment;
         if (candidate.page != page
             || candidate.added
             || !suppressesSourceAppearance
@@ -2976,12 +2976,12 @@ PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
     if (m_frameResizeActive
         && m_hasSelection
         && m_selectedCandidate.page == page
-        && m_selectedCandidate.kind == QLatin1String("ink")
+        && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
         && !m_selectedCandidate.added
         && m_selectedCandidate.sourceAnnotationIndex >= 0) {
         deletions.append(DraftAnnotationDeletion{
             m_selectedCandidate.sourceAnnotationIndex,
-            FPDF_ANNOT_INK});
+            commentAnnotationSubtype(m_selectedCandidate.kind)});
     }
 
     std::sort(
@@ -3156,7 +3156,7 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
             = candidate.kind == QLatin1String("image")
             || candidate.kind == QLatin1String("addedImage")
             || candidate.kind == QLatin1String("freeText")
-            || candidate.kind == QLatin1String("ink")
+            || isDrawingCommentCandidateKind(candidate.kind)
             || isShapeCandidateKind(candidate.kind);
         const QRectF candidateRect
             = draftGeometryCandidate && draft != m_drafts.cend()
@@ -5808,7 +5808,7 @@ void PDFEditController::beginSelectedFrameResize()
         = m_textEditGeometryExplicitlyChanged;
     m_frameResizeStartFrameRect = draft.frameRect;
     m_frameResizeStartContentBounds = draft.contentBounds;
-    if (draft.candidate.kind == QLatin1String("ink")
+    if (isDrawingCommentCandidateKind(draft.candidate.kind)
         && !draft.candidate.added) {
         markDraftStateChanged(draft.candidate.page, true);
     }
@@ -5866,7 +5866,7 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         || draft.candidate.kind == QLatin1String("addedImage")
         || draft.candidate.kind == QLatin1String("freeText")
         || draft.candidate.kind == QLatin1String("stamp")
-        || draft.candidate.kind == QLatin1String("ink")
+        || isDrawingCommentCandidateKind(draft.candidate.kind)
         || isShapeCandidateKind(draft.candidate.kind);
     if (!movesFrame && sourceImageDraft) {
         const qreal width = qBound<qreal>(0.0, draft.frameRect.width(), 1.0);
@@ -6335,14 +6335,14 @@ void PDFEditController::finishSelectedTextEdit()
         = !sameDraftContent(finalizedDraft, baseline.before);
     if (draftChanged) {
         applyUnicodeFontFallback(finalizedDraft);
-        const bool movesInk
-            = finalizedDraft.candidate.kind == QLatin1String("ink")
+        const bool movesDrawingComment
+            = isDrawingCommentCandidateKind(finalizedDraft.candidate.kind)
             && finalizedDraft.frameRect != baseline.before.frameRect;
         const bool movesStamp
             = finalizedDraft.candidate.kind == QLatin1String("stamp")
             && finalizedDraft.frameRect != baseline.before.frameRect;
         if (finalizedDraft.candidate.kind == QLatin1String("freeText")
-            || movesInk
+            || movesDrawingComment
             || movesStamp) {
             finalizedDraft.candidate.commentModifiedDate
                 = QDateTime::currentDateTime();
@@ -8459,7 +8459,6 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             const int annotationFlags = FPDFAnnot_GetFlags(annotation);
             candidate.commentTextReadOnly
                 = !supportedCommentSubtype
-                || (inkSubtype && !inkGeometryValid)
                 || (annotationFlags & FPDF_ANNOT_FLAG_READONLY) != 0
                 || (annotationFlags & kAnnotationFlagLockedContents) != 0;
             candidate.commentProperties.flags = annotationFlags;
@@ -8484,11 +8483,6 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 candidate.replyDirectParentSourceAnnotationIndex
                     = directParentIndex;
             }
-            candidate.editable = request.annotationsAllowed
-                && inkSubtype
-                && inkGeometryValid
-                && !candidate.commentTextReadOnly
-                && (annotationFlags & FPDF_ANNOT_FLAG_LOCKED) == 0;
             candidate.limited = true;
             setInitialGeometry(candidate, geometry);
             if (textMarkupSubtype) {
@@ -8628,6 +8622,68 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                         geometry.bottomRight()};
                 }
             }
+            const auto finiteNormalizedPoint = [](const QPointF &point) {
+                return std::isfinite(point.x())
+                    && std::isfinite(point.y())
+                    && point.x() >= 0.0
+                    && point.x() <= 1.0
+                    && point.y() >= 0.0
+                    && point.y() <= 1.0;
+            };
+            bool drawingGeometryValid = !drawingCommentSubtype;
+            if (drawingCommentSubtype) {
+                const qsizetype minimumVertexCount
+                    = subtype == FPDF_ANNOT_POLYGON ? 3 : 2;
+                drawingGeometryValid = inkSubtype
+                    ? inkGeometryValid
+                    : candidate.drawingVertices.size()
+                            >= minimumVertexCount
+                        && candidate.drawingVertices.size()
+                            <= kMaximumDrawingCommentVertices
+                        && std::all_of(
+                            candidate.drawingVertices.cbegin(),
+                            candidate.drawingVertices.cend(),
+                            finiteNormalizedPoint);
+                if (subtype == FPDF_ANNOT_SQUARE
+                    || subtype == FPDF_ANNOT_CIRCLE
+                    || subtype == FPDF_ANNOT_LINE) {
+                    drawingGeometryValid = drawingGeometryValid
+                        && candidate.drawingVertices.size() == 2;
+                }
+                if (drawingGeometryValid && !inkSubtype) {
+                    for (qsizetype vertexIndex = 1;
+                         vertexIndex < candidate.drawingVertices.size();
+                         ++vertexIndex) {
+                        const QPointF previous
+                            = candidate.drawingVertices.at(vertexIndex - 1);
+                        const QPointF current
+                            = candidate.drawingVertices.at(vertexIndex);
+                        if (std::hypot(
+                                current.x() - previous.x(),
+                                current.y() - previous.y()) <= 0.0) {
+                            drawingGeometryValid = false;
+                            break;
+                        }
+                    }
+                }
+                if (drawingGeometryValid
+                    && subtype == FPDF_ANNOT_POLYGON) {
+                    const QPointF first
+                        = candidate.drawingVertices.constFirst();
+                    const QPointF last
+                        = candidate.drawingVertices.constLast();
+                    drawingGeometryValid = std::hypot(
+                        first.x() - last.x(),
+                        first.y() - last.y()) > 0.0;
+                }
+            }
+            candidate.commentTextReadOnly
+                = candidate.commentTextReadOnly || !drawingGeometryValid;
+            candidate.editable = request.annotationsAllowed
+                && drawingCommentSubtype
+                && drawingGeometryValid
+                && !candidate.commentTextReadOnly
+                && (annotationFlags & FPDF_ANNOT_FLAG_LOCKED) == 0;
             if (freeTextSubtype) {
                 candidate.fontFamily = QStringLiteral("Helvetica");
                 candidate.fontSizeRatio = qMin<qreal>(
@@ -8738,11 +8794,13 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             if (candidate.commentTextReadOnly) {
                 //% "This comment is read-only."
                 candidate.reason = qtTrId("ReadOnlyCommentCannotBeEdited");
-            } else if ((freeTextSubtype || inkSubtype || stampSubtype)
+            } else if ((freeTextSubtype
+                        || drawingCommentSubtype
+                        || stampSubtype)
                        && !request.annotationsAllowed) {
                 //% "This PDF does not permit changing annotations."
                 candidate.reason = qtTrId("PdfAnnotationsNotPermitted");
-            } else if (inkSubtype && candidate.editable) {
+            } else if (drawingCommentSubtype && candidate.editable) {
                 candidate.reason.clear();
             } else {
                 //% "Edit the comment text in the Comments panel. Moving or resizing existing comments is not available."
@@ -9044,9 +9102,11 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
         candidate.commentProperties.name);
     map.insert(QStringLiteral("stampText"), candidate.stampText);
     map.insert(QStringLiteral("stampColor"), candidate.highlightColor);
+    const QVector<QPointF> displayedDrawingVertices
+        = drawingVerticesForDraft(draft);
     QVariantList drawingVertices;
-    drawingVertices.reserve(candidate.drawingVertices.size());
-    for (const QPointF &vertex : candidate.drawingVertices) {
+    drawingVertices.reserve(displayedDrawingVertices.size());
+    for (const QPointF &vertex : displayedDrawingVertices) {
         drawingVertices.append(vertex);
     }
     map.insert(QStringLiteral("drawingVertices"), drawingVertices);
@@ -9417,6 +9477,47 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
         : candidate.initialDraftFrameRect;
     draft.contentBounds = draft.frameRect;
     return draft;
+}
+
+QVector<QPointF> PDFEditController::drawingVerticesForDraft(
+    const Draft &draft)
+{
+    QVector<QPointF> vertices = draft.candidate.drawingVertices;
+    if (!isDrawingCommentCandidateKind(draft.candidate.kind)
+        || draft.candidate.kind == QLatin1String("ink")
+        || vertices.isEmpty()) {
+        return vertices;
+    }
+
+    const QRectF initialFrameRect = (
+        draft.candidate.initialDraftFrameRect.isEmpty()
+        ? draft.candidate.geometry.sourceRect
+        : draft.candidate.initialDraftFrameRect).normalized();
+    const QRectF currentFrameRect = draft.frameRect.normalized();
+    if (currentFrameRect == initialFrameRect) {
+        return vertices;
+    }
+    if (!initialFrameRect.isValid()
+        || initialFrameRect.width() <= 0.0
+        || initialFrameRect.height() <= 0.0
+        || !currentFrameRect.isValid()
+        || currentFrameRect.width() <= 0.0
+        || currentFrameRect.height() <= 0.0) {
+        return {};
+    }
+
+    const qreal horizontalScale
+        = currentFrameRect.width() / initialFrameRect.width();
+    const qreal verticalScale
+        = currentFrameRect.height() / initialFrameRect.height();
+    for (QPointF &point : vertices) {
+        point = QPointF(
+            currentFrameRect.left()
+                + (point.x() - initialFrameRect.left()) * horizontalScale,
+            currentFrameRect.top()
+                + (point.y() - initialFrameRect.top()) * verticalScale);
+    }
+    return vertices;
 }
 
 QVector<QVector<QPointF>> PDFEditController::inkStrokesForDraft(
@@ -10187,11 +10288,12 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
 
     m_selectedText = normalizedDraft.text;
     if (changed) {
-        const bool reusesSourceInkSuppressionTexture
+        const bool reusesSourceDrawingSuppressionTexture
             = m_frameResizeActive
-            && normalizedDraft.candidate.kind == QLatin1String("ink")
+            && isDrawingCommentCandidateKind(
+                normalizedDraft.candidate.kind)
             && !normalizedDraft.candidate.added;
-        if (reusesSourceInkSuppressionTexture) {
+        if (reusesSourceDrawingSuppressionTexture) {
             emit pageDataChanged(m_selectedCandidate.page);
             emit commentsChanged();
         } else {

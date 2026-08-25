@@ -532,17 +532,18 @@ Trước khi sửa, writer xác thực annotation index, subtype, original `/Con
 - với Free Text, xóa stale `/AP`, ghi appearance id và để canonicalizer tạo lại
   wrapped Unicode appearance.
 
-Với Ink đổi geometry, controller translate hoặc scale từng stroke từ frame ban
-đầu sang frame mới. Writer map frame và các stroke này qua
-`FPDF_DeviceToPage()`, gắn marker UUID tạm rồi để canonicalizer thay trực tiếp
-`/Rect` và `/InkList` sau bước serialize. Luồng này tránh side effect của
-`FPDFAnnot_SetRect()` có thể nới `/AP /BBox` mà không scale drawing commands.
-Move thuần và Ink ngoài/custom giữ nguyên `/AP`. Với Ink có provenance TrePDF
-hợp lệ (`/NM` và `/TrePDFThreadId` cùng ID `ink:<uuid>`), resize tạo normal
-`/AP` mới từ strokes đã scale nếu toàn bộ properties được hỗ trợ; nếu không thì
-fallback giữ appearance nguồn. Marker luôn bị xóa trong cùng incremental
-transaction; `/Popup`, `/IRT`, metadata và key mở rộng không bị viết lại. Save
-annotation-only không gọi `FPDFPage_GenerateContent()`.
+Với drawing comment đổi geometry, controller translate hoặc scale từng vertex
+hay Ink stroke từ frame ban đầu sang frame mới. Writer map frame và geometry
+qua `FPDF_DeviceToPage()`, gắn marker UUID tạm rồi để canonicalizer thay trực
+tiếp `/Rect` cùng `/L`, `/Vertices` hoặc `/InkList` sau bước serialize. Luồng
+này tránh side effect của `FPDFAnnot_SetRect()` có thể nới `/AP /BBox` mà không
+scale drawing commands. Move thuần và appearance ngoài/custom giữ nguyên `/AP`.
+Với annotation có provenance TrePDF hợp lệ (`/NM` và `/TrePDFThreadId` cùng ID
+`<kind>:<uuid>`), resize tạo normal `/AP` mới từ geometry đã scale nếu toàn bộ
+properties được hỗ trợ; nếu không thì giữ appearance nguồn. Marker luôn bị xóa
+trong cùng incremental transaction; `/Popup`, `/IRT`, metadata và key mở rộng
+không bị viết lại. Save annotation-only không gọi
+`FPDFPage_GenerateContent()`.
 
 Sticky Note, text markup và Ink giữ nguyên appearance nguồn khi chỉ sửa nội dung
 vì page geometry không đổi. Nếu Sticky Note/reply nguồn đang được sửa nhưng thiếu
@@ -628,8 +629,9 @@ Coverage comment hiện cần được duy trì cho:
   rotated glyph và safety cap;
 - Sticky Note và Free Text Unicode appearance;
 - normal `/AP` của Sticky Note/reply và chuẩn hóa CR trong `/Contents`;
-- round-trip Square, Circle, Line, Polygon và PolyLine, gồm geometry, common
-  properties, vector `/AP`, undo/redo và rehydrate;
+- round-trip Square, Circle, Line, Polygon và PolyLine, gồm source/add geometry,
+  move/resize tám handle, undo/redo/discard, `/Rect` + `/L`/`/Vertices`, giữ AP
+  custom, tái tạo AP TrePDF-managed, common properties, delete và rehydrate;
 - Ink: một drag/một annotation, raw cap 4.096, validate/dedup/RDP và output cap
   1.024; rehydrate nhiều stroke, dictionary `/InkList`/`/BS`/`/C`/`/CA`/Print,
   vector `/AP` round cap/join, move/resize added/source với undo/redo/discard,

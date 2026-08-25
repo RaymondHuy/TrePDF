@@ -2257,6 +2257,31 @@ QVariantList transformedInkStrokes(const QVariantList &strokes,
     return transformed;
 }
 
+QVariantList transformedDrawingVertices(const QVariantList &vertices,
+                                        const QRectF &sourceFrame,
+                                        const QRectF &targetFrame)
+{
+    QVariantList transformed;
+    if (sourceFrame.width() <= 0.0 || sourceFrame.height() <= 0.0) {
+        return transformed;
+    }
+
+    const qreal horizontalScale
+        = targetFrame.width() / sourceFrame.width();
+    const qreal verticalScale
+        = targetFrame.height() / sourceFrame.height();
+    transformed.reserve(vertices.size());
+    for (const QVariant &pointValue : vertices) {
+        const QPointF point = pointValue.toPointF();
+        transformed.append(QVariant::fromValue(QPointF(
+            targetFrame.left()
+                + (point.x() - sourceFrame.left()) * horizontalScale,
+            targetFrame.top()
+                + (point.y() - sourceFrame.top()) * verticalScale)));
+    }
+    return transformed;
+}
+
 QVariantList waitForCandidates(PDFEditController &controller, int page)
 {
     QSignalSpy candidatesReadySpy(
@@ -15609,6 +15634,8 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
         QStringLiteral("drawing-comment-%1-source.pdf").arg(kind));
     const QString outputPath = m_temporaryDirectory.filePath(
         QStringLiteral("drawing-comment-%1-output.pdf").arg(kind));
+    const QString resizedOutputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("drawing-comment-%1-resized.pdf").arg(kind));
     QVERIFY(createFontStylePdf(sourcePath));
 
     PDFDocument document;
@@ -15662,6 +15689,36 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
         .value(QStringLiteral("objectId"))
         .toString();
     QVERIFY(!annotationId.isEmpty());
+    const QRectF addedFrame = added
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QRectF savedFrame(
+        addedFrame.x() + 0.05,
+        addedFrame.y() + 0.04,
+        addedFrame.width() * 0.80,
+        addedFrame.height() * 1.10);
+    QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(savedFrame));
+    const QVariantList savedVertices = transformedDrawingVertices(
+        added.value(QStringLiteral("annotationPoints")).toList(),
+        addedFrame,
+        savedFrame);
+    QVERIFY(controller.selectCandidate(0, annotationId));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(savedFrame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), savedFrame);
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("annotationPoints"))
+            .toList(),
+        savedVertices);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), addedFrame);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), savedFrame);
+
     const int sourcePageObjectCount = topLevelPageObjectCount(sourcePath);
     QVERIFY(sourcePageObjectCount > 0);
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
@@ -15773,7 +15830,7 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
 
     controller.requestCommentIndex();
     QTRY_VERIFY_WITH_TIMEOUT(!controller.commentItems().isEmpty(), 5000);
-    bool rehydrated = false;
+    QVariantMap rehydratedComment;
     for (const QVariant &commentValue : controller.commentItems()) {
         const QVariantMap comment = commentValue.toMap();
         if (comment.value(QStringLiteral("kind")).toString() == kind) {
@@ -15783,6 +15840,7 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
             QVERIFY(comment
                 .value(QStringLiteral("commentTextEditable"))
                 .toBool());
+            QVERIFY(comment.value(QStringLiteral("editable")).toBool());
             QCOMPARE(
                 comment
                     .value(QStringLiteral("drawingStrokeColor"))
@@ -15807,20 +15865,88 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
             const QVariantList rehydratedVertices = comment
                 .value(QStringLiteral("annotationPoints"))
                 .toList();
-            QCOMPARE(rehydratedVertices.size(), vertices.size());
+            QCOMPARE(rehydratedVertices.size(), savedVertices.size());
             for (qsizetype index = 0;
                  index < rehydratedVertices.size();
                  ++index) {
                 const QPointF actual = rehydratedVertices.at(index).toPointF();
-                const QPointF expected = vertices.at(index).toPointF();
+                const QPointF expected = savedVertices.at(index).toPointF();
                 QVERIFY(qAbs(actual.x() - expected.x()) < 0.002);
                 QVERIFY(qAbs(actual.y() - expected.y()) < 0.002);
             }
-            rehydrated = true;
+            rehydratedComment = comment;
             break;
         }
     }
-    QVERIFY(rehydrated);
+    QVERIFY(!rehydratedComment.isEmpty());
+
+    QVERIFY(!waitForCandidates(controller, 0).isEmpty());
+    const QRectF sourceFrame = rehydratedComment
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QVariantList sourceVertices = rehydratedComment
+        .value(QStringLiteral("annotationPoints"))
+        .toList();
+    const QRectF resizedFrame(
+        sourceFrame.x() + 0.08,
+        sourceFrame.y() + 0.08,
+        sourceFrame.width() * 0.75,
+        sourceFrame.height() * 1.25);
+    QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(resizedFrame));
+    const QVariantList resizedVertices = transformedDrawingVertices(
+        sourceVertices,
+        sourceFrame,
+        resizedFrame);
+    QVERIFY(controller.selectComment(
+        0,
+        rehydratedComment.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resizedFrame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("annotationPoints"))
+            .toList(),
+        resizedVertices);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(resizedOutputPath)));
+
+    const CommentAnnotationInspection resizedInspection
+        = inspectCommentAnnotation(resizedOutputPath, annotationId);
+    QVERIFY(resizedInspection.readable);
+    QCOMPARE(resizedInspection.subtype, subtype);
+    QVERIFY(resizedInspection.hasAppearance);
+    QVERIFY(!resizedInspection.appearance.isEmpty());
+    QVERIFY(resizedInspection.appearance != inspection.appearance);
+    const AnnotationAppearanceStructureInspection resizedAppearance
+        = inspectAnnotationAppearanceStructure(
+            resizedOutputPath,
+            annotationId);
+    QVERIFY(resizedAppearance.readable);
+    QVERIFY(resizedAppearance.annotationFound);
+    QVERIFY(resizedAppearance.appearanceObjectFound);
+    QCOMPARE(resizedAppearance.boundingBox.size(), 4);
+    QVERIFY(qAbs(
+        resizedAppearance.boundingBox.at(0)
+            - resizedInspection.rect.left) < 0.02);
+    QVERIFY(qAbs(
+        resizedAppearance.boundingBox.at(1)
+            - resizedInspection.rect.bottom) < 0.02);
+    QVERIFY(qAbs(
+        resizedAppearance.boundingBox.at(2)
+            - resizedInspection.rect.right) < 0.02);
+    QVERIFY(qAbs(
+        resizedAppearance.boundingBox.at(3)
+            - resizedInspection.rect.top) < 0.02);
+    const QByteArray resizedDictionary = annotationDictionaryBytes(
+        resizedOutputPath,
+        annotationId);
+    QVERIFY(!resizedDictionary.contains(
+        "/TrePDFSourceDrawingGeometryId"));
+    QCOMPARE(
+        inspectCommentAnnotation(outputPath, annotationId).appearance,
+        inspection.appearance);
 }
 
 void PDFEditControllerTest::coalescesInkPreviewUpdates()
@@ -16663,7 +16789,8 @@ void PDFEditControllerTest::movesAndResizesSourceInkRoundTrip()
     QVERIFY(movedDictionary.contains("keep-me"));
     QVERIFY(movedDictionary.contains("/RC"));
     QVERIFY(movedDictionary.contains("ink-rich-original"));
-    QVERIFY(!movedDictionary.contains("/TrePDFSourceInkGeometryId"));
+    QVERIFY(!movedDictionary.contains(
+        "/TrePDFSourceDrawingGeometryId"));
 
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 12, 5000);
@@ -16810,7 +16937,8 @@ void PDFEditControllerTest::movesSourceInkWithoutChangingAppearance()
     QVERIFY(movedDictionary.contains("keep-me"));
     QVERIFY(movedDictionary.contains("/RC"));
     QVERIFY(movedDictionary.contains("ink-rich-original"));
-    QVERIFY(!movedDictionary.contains("/TrePDFSourceInkGeometryId"));
+    QVERIFY(!movedDictionary.contains(
+        "/TrePDFSourceDrawingGeometryId"));
 }
 
 void PDFEditControllerTest::
@@ -16922,7 +17050,8 @@ void PDFEditControllerTest::
         outputPath,
         QStringLiteral("ink:11111111-2222-4333-8444-555555555555"));
     QVERIFY(!savedDictionary.isEmpty());
-    QVERIFY(!savedDictionary.contains("/TrePDFSourceInkGeometryId"));
+    QVERIFY(!savedDictionary.contains(
+        "/TrePDFSourceDrawingGeometryId"));
 }
 
 void PDFEditControllerTest::editsSourceInkWithFillAppearanceRoundTrip()
@@ -17108,6 +17237,7 @@ void PDFEditControllerTest::
     controller.setDocument(&document);
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 12, 5000);
+    QVERIFY(!waitForCandidates(controller, 0).isEmpty());
 
     QVariantMap sourceComment;
     for (const QVariant &value : controller.commentItems()) {
@@ -17134,6 +17264,7 @@ void PDFEditControllerTest::
     QVERIFY(qAbs(
         sourceComment.value(QStringLiteral("drawingBorderWidth")).toReal()
             - 2.0) < 0.01);
+    QVERIFY(sourceComment.value(QStringLiteral("editable")).toBool());
 
     const CommentAnnotationInspection originalInspection
         = inspectCommentAnnotation(sourcePath, sourceName);
@@ -17145,6 +17276,62 @@ void PDFEditControllerTest::
     const QString objectId = sourceComment
         .value(QStringLiteral("objectId"))
         .toString();
+    QRectF editedFrame;
+    QVariantList editedVertices;
+    if (kind != QLatin1String("ink")) {
+        const QRectF originalFrame = sourceComment
+            .value(QStringLiteral("frameRect"))
+            .toRectF();
+        const QVariantList originalVertices = sourceComment
+            .value(QStringLiteral("annotationPoints"))
+            .toList();
+        QVERIFY(originalFrame.isValid());
+        QVERIFY(!originalVertices.isEmpty());
+        editedFrame = QRectF(
+            originalFrame.x() + 0.15,
+            originalFrame.y() + 0.12,
+            originalFrame.width() * 0.65,
+            originalFrame.height() * 1.5);
+        QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(editedFrame));
+        editedVertices = transformedDrawingVertices(
+            originalVertices,
+            originalFrame,
+            editedFrame);
+
+        QVERIFY(controller.selectComment(0, objectId));
+        QVERIFY(controller.selectedEditable());
+        controller.beginSelectedFrameResize();
+        QCOMPARE(
+            controller.deletedSourceCommentAnnotationsForPage(0).size(),
+            1);
+        controller.updateSelectedFrameRect(editedFrame);
+        controller.finishSelectedFrameResize();
+        QCOMPARE(controller.selectedFrameRect(), editedFrame);
+        QCOMPARE(controller.selectedContentBounds(), editedFrame);
+        QCOMPARE(
+            controller.draftsForPage(0)
+                .constFirst()
+                .toMap()
+                .value(QStringLiteral("annotationPoints"))
+                .toList(),
+            editedVertices);
+
+        QCOMPARE(controller.undo(), -1);
+        QVERIFY(!controller.hasDrafts());
+        QCOMPARE(controller.selectedFrameRect(), originalFrame);
+        QCOMPARE(controller.redo(), -1);
+        QVERIFY(controller.hasDrafts());
+        QCOMPARE(controller.selectedFrameRect(), editedFrame);
+
+        controller.discardDrafts();
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(controller.selectComment(0, objectId));
+        QCOMPARE(controller.selectedFrameRect(), originalFrame);
+        controller.beginSelectedFrameResize();
+        controller.updateSelectedFrameRect(editedFrame);
+        controller.finishSelectedFrameResize();
+        QCOMPARE(controller.selectedFrameRect(), editedFrame);
+    }
     const QString editedContents = QStringLiteral(
         "Drawing comment đã được chỉnh sửa.");
     const QString replyContents = QStringLiteral(
@@ -17172,6 +17359,27 @@ void PDFEditControllerTest::
     QCOMPARE(editedInspection.subtype, subtype);
     QCOMPARE(editedInspection.contents, editedContents);
     QCOMPARE(editedInspection.appearance, originalInspection.appearance);
+    if (kind != QLatin1String("ink")) {
+        QVERIFY(qAbs(
+            editedInspection.rect.left - editedFrame.left() * 300.0)
+            < 0.02);
+        QVERIFY(qAbs(
+            editedInspection.rect.right - editedFrame.right() * 300.0)
+            < 0.02);
+        QVERIFY(qAbs(
+            editedInspection.rect.top
+                - (1.0 - editedFrame.top()) * 600.0)
+            < 0.02);
+        QVERIFY(qAbs(
+            editedInspection.rect.bottom
+                - (1.0 - editedFrame.bottom()) * 600.0)
+            < 0.02);
+        const QByteArray editedDictionary = annotationDictionaryBytes(
+            editedPath,
+            sourceName);
+        QVERIFY(!editedDictionary.contains(
+            "/TrePDFSourceDrawingGeometryId"));
+    }
     const CommentAnnotationInspection replyInspection
         = inspectCommentAnnotation(editedPath, replyId);
     QVERIFY(replyInspection.readable);
@@ -17182,21 +17390,45 @@ void PDFEditControllerTest::
 
     controller.requestCommentIndex();
     QTRY_VERIFY_WITH_TIMEOUT(controller.commentItems().size() >= 13, 5000);
-    QString rehydratedObjectId;
+    QVariantMap rehydratedComment;
     for (const QVariant &value : controller.commentItems()) {
         const QVariantMap comment = value.toMap();
         if (!comment.value(QStringLiteral("isReply")).toBool()
             && comment.value(QStringLiteral("kind")).toString() == kind
             && comment.value(QStringLiteral("text")).toString()
                 == editedContents) {
-            rehydratedObjectId = comment
-                .value(QStringLiteral("objectId"))
-                .toString();
+            rehydratedComment = comment;
             break;
         }
     }
-    QVERIFY(!rehydratedObjectId.isEmpty());
-    QVERIFY(controller.removeComment(0, rehydratedObjectId));
+    QVERIFY(!rehydratedComment.isEmpty());
+    QVERIFY(rehydratedComment.value(QStringLiteral("editable")).toBool());
+    if (kind != QLatin1String("ink")) {
+        const QRectF rehydratedFrame = rehydratedComment
+            .value(QStringLiteral("frameRect"))
+            .toRectF();
+        QVERIFY(qAbs(rehydratedFrame.x() - editedFrame.x()) < 0.001);
+        QVERIFY(qAbs(rehydratedFrame.y() - editedFrame.y()) < 0.001);
+        QVERIFY(qAbs(
+            rehydratedFrame.width() - editedFrame.width()) < 0.001);
+        QVERIFY(qAbs(
+            rehydratedFrame.height() - editedFrame.height()) < 0.001);
+        const QVariantList rehydratedVertices = rehydratedComment
+            .value(QStringLiteral("annotationPoints"))
+            .toList();
+        QCOMPARE(rehydratedVertices.size(), editedVertices.size());
+        for (qsizetype index = 0;
+             index < editedVertices.size();
+             ++index) {
+            const QPointF actual = rehydratedVertices.at(index).toPointF();
+            const QPointF expected = editedVertices.at(index).toPointF();
+            QVERIFY(qAbs(actual.x() - expected.x()) < 0.002);
+            QVERIFY(qAbs(actual.y() - expected.y()) < 0.002);
+        }
+    }
+    QVERIFY(controller.removeComment(
+        0,
+        rehydratedComment.value(QStringLiteral("objectId")).toString()));
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(deletedPath)));
     QVERIFY(!controller.hasDrafts());
 
@@ -17274,8 +17506,7 @@ void PDFEditControllerTest::indexesDrawingAndUnsupportedMarkupComments()
         const bool stampComment
             = text == QLatin1String("unsupported-stamp");
         const bool supportedComment = drawingComment || stampComment;
-        const bool movableInk
-            = text == QLatin1String("unsupported-ink");
+        const bool pageEditable = drawingComment;
         QCOMPARE(
             comment.value(QStringLiteral("kind")).toString(),
             drawingComment
@@ -17289,7 +17520,7 @@ void PDFEditControllerTest::indexesDrawingAndUnsupportedMarkupComments()
             QStringLiteral("Markup author"));
         QCOMPARE(
             comment.value(QStringLiteral("editable")).toBool(),
-            movableInk);
+            pageEditable);
         QCOMPARE(
             comment.value(QStringLiteral("commentTextEditable")).toBool(),
             supportedComment);
@@ -17299,7 +17530,7 @@ void PDFEditControllerTest::indexesDrawingAndUnsupportedMarkupComments()
                 .isEmpty(),
             supportedComment);
         QVERIFY(controller.selectComment(0, objectId));
-        QCOMPARE(controller.selectedEditable(), movableInk);
+        QCOMPARE(controller.selectedEditable(), pageEditable);
         if (stampComment) {
             QCOMPARE(
                 comment.value(QStringLiteral("stampName")).toString(),
