@@ -7881,9 +7881,9 @@ bool PDFAcroFormCanonicalizer::finalizeStampAnnotations(
         error);
 }
 
-bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
+bool PDFAcroFormCanonicalizer::finalizeSourceDrawingGeometryUpdates(
     const QString &filePath,
-    const QVector<PDFCommentAnnotation::SourceInkGeometryUpdate> &updates,
+    const QVector<PDFCommentAnnotation::SourceDrawingGeometryUpdate> &updates,
     QString &error)
 {
     constexpr qsizetype maximumAnnotations = 4096;
@@ -7897,10 +7897,11 @@ bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
     }
     if (updates.size() > maximumAnnotations) {
         error = QStringLiteral(
-            "Too many source Ink geometry updates were requested.");
+            "Too many source drawing geometry updates were requested.");
         return false;
     }
 
+    constexpr qsizetype maximumVertices = 4096;
     qsizetype totalPoints = 0;
     QSet<QString> markerIds;
     const auto finitePoint = [
@@ -7910,53 +7911,109 @@ bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
             && qAbs(point.x()) <= maximumCoordinateMagnitudePoints
             && qAbs(point.y()) <= maximumCoordinateMagnitudePoints;
     };
-    for (const PDFCommentAnnotation::SourceInkGeometryUpdate &update
+    for (const PDFCommentAnnotation::SourceDrawingGeometryUpdate &update
          : updates) {
         const PDFCommentAnnotation::DrawingAnnotation &annotation
             = update.annotation;
         const QRectF bounds = annotation.pageRect.normalized();
+        const bool ink
+            = annotation.type == PDFCommentAnnotation::DrawingType::Ink;
+        const bool rectangular
+            = annotation.type == PDFCommentAnnotation::DrawingType::Square
+            || annotation.type == PDFCommentAnnotation::DrawingType::Circle;
+        const qsizetype minimumVertices
+            = annotation.type == PDFCommentAnnotation::DrawingType::Polygon
+            ? 3
+            : 2;
         if (update.markerId.isEmpty()
             || markerIds.contains(update.markerId)
             || annotation.page < 0
-            || annotation.type != PDFCommentAnnotation::DrawingType::Ink
-            || !annotation.pageVertices.isEmpty()
-            || annotation.pageStrokes.isEmpty()
-            || annotation.pageStrokes.size() > maximumInkStrokes
             || !bounds.isValid()
             || bounds.width() <= 0.0
             || bounds.height() <= 0.0
             || !finitePoint(bounds.topLeft())
             || !finitePoint(bounds.bottomRight())) {
             error = QStringLiteral(
-                "A source Ink geometry update is invalid or duplicated.");
+                "A source drawing geometry update is invalid or duplicated.");
             return false;
         }
         markerIds.insert(update.markerId);
-        for (const QVector<QPointF> &stroke : annotation.pageStrokes) {
-            if (stroke.size() < 2
-                || stroke.size() > maximumStrokePoints
-                || stroke.size() > maximumTotalPoints - totalPoints
-                || !std::all_of(
-                    stroke.cbegin(),
-                    stroke.cend(),
-                    finitePoint)) {
+
+        if (ink) {
+            if (!annotation.pageVertices.isEmpty()
+                || annotation.pageStrokes.isEmpty()
+                || annotation.pageStrokes.size() > maximumInkStrokes) {
                 error = QStringLiteral(
-                    "Source Ink geometry exceeds the safety limit.");
+                    "A source Ink geometry update is invalid.");
                 return false;
             }
-            for (qsizetype index = 1; index < stroke.size(); ++index) {
-                const QPointF previous = stroke.at(index - 1);
-                const QPointF current = stroke.at(index);
-                if (std::hypot(
-                        current.x() - previous.x(),
-                        current.y() - previous.y()) <= 0.0) {
+            for (const QVector<QPointF> &stroke : annotation.pageStrokes) {
+                if (stroke.size() < 2
+                    || stroke.size() > maximumStrokePoints
+                    || stroke.size() > maximumTotalPoints - totalPoints
+                    || !std::all_of(
+                        stroke.cbegin(),
+                        stroke.cend(),
+                        finitePoint)) {
                     error = QStringLiteral(
-                        "A source Ink stroke contains a zero-length segment.");
+                        "Source Ink geometry exceeds the safety limit.");
                     return false;
                 }
+                for (qsizetype index = 1; index < stroke.size(); ++index) {
+                    const QPointF previous = stroke.at(index - 1);
+                    const QPointF current = stroke.at(index);
+                    if (std::hypot(
+                            current.x() - previous.x(),
+                            current.y() - previous.y()) <= 0.0) {
+                        error = QStringLiteral(
+                            "A source Ink stroke contains a zero-length segment.");
+                        return false;
+                    }
+                }
+                totalPoints += stroke.size();
             }
-            totalPoints += stroke.size();
+            continue;
         }
+
+        const QVector<QPointF> &vertices = annotation.pageVertices;
+        if (!annotation.pageStrokes.isEmpty()
+            || vertices.size() < minimumVertices
+            || vertices.size() > maximumVertices
+            || vertices.size() > maximumTotalPoints - totalPoints
+            || (rectangular && vertices.size() != 2)
+            || (annotation.type == PDFCommentAnnotation::DrawingType::Line
+                && vertices.size() != 2)
+            || !std::all_of(
+                vertices.cbegin(),
+                vertices.cend(),
+                finitePoint)) {
+            error = QStringLiteral(
+                "Source drawing geometry exceeds the safety limit.");
+            return false;
+        }
+        for (qsizetype index = 1; index < vertices.size(); ++index) {
+            const QPointF previous = vertices.at(index - 1);
+            const QPointF current = vertices.at(index);
+            if (std::hypot(
+                    current.x() - previous.x(),
+                    current.y() - previous.y()) <= 0.0) {
+                error = QStringLiteral(
+                    "A source drawing geometry contains a zero-length segment.");
+                return false;
+            }
+        }
+        if (annotation.type == PDFCommentAnnotation::DrawingType::Polygon) {
+            const QPointF first = vertices.constFirst();
+            const QPointF last = vertices.constLast();
+            if (std::hypot(
+                    first.x() - last.x(),
+                    first.y() - last.y()) <= 0.0) {
+                error = QStringLiteral(
+                    "A source Polygon must not repeat its first vertex.");
+                return false;
+            }
+        }
+        totalPoints += vertices.size();
     }
 
     QFile file(filePath);
@@ -8006,7 +8063,7 @@ bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
     qsizetype totalAppearanceBytes = 0;
     const QByteArray markerDictionaryKey
         = QByteArrayLiteral("/")
-        + PDFCommentAnnotation::kSourceInkGeometryMarkerKey;
+        + PDFCommentAnnotation::kSourceDrawingGeometryMarkerKey;
 
     const auto canReplaceNormalAppearance = [](
         QByteArray &dictionary,
@@ -8082,22 +8139,24 @@ bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
             replacementError);
     };
 
-    for (const PDFCommentAnnotation::SourceInkGeometryUpdate &update
+    for (const PDFCommentAnnotation::SourceDrawingGeometryUpdate &update
          : updates) {
         const PDFCommentAnnotation::DrawingAnnotation &annotation
             = update.annotation;
+        const QByteArrayView expectedSubtype = drawingSubtypeName(
+            annotation.type);
         const PlaceholderLocation placeholder = annotationForStringId(
             pdf,
             QByteArrayView(markerDictionaryKey),
             update.markerId,
-            QByteArrayView("/Ink"));
+            expectedSubtype);
         const bool located = placeholder.widget.number >= 0
             || (placeholder.container.number >= 0
                 && placeholder.dictionaryStart >= 0
                 && placeholder.dictionaryEnd > placeholder.dictionaryStart);
         if (!located) {
             return fail(QStringLiteral(
-                "A marked source Ink annotation could not be located."));
+                "A marked source drawing annotation could not be located."));
         }
 
         QByteArray object;
@@ -8125,7 +8184,7 @@ bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
             || dictionaryEnd > object.size()) {
             return fail(error.isEmpty()
                     ? QStringLiteral(
-                        "A source Ink annotation dictionary is malformed.")
+                        "A source drawing annotation dictionary is malformed.")
                     : error);
         }
 
@@ -8138,18 +8197,42 @@ bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
             + pdfNumber(bounds.top()) + ' '
             + pdfNumber(bounds.right()) + ' '
             + pdfNumber(bounds.bottom()) + ']';
-        if (!replaceTopLevelDictionaryValue(
-                dictionary,
-                QByteArrayView("/Rect"),
-                rect,
-                true,
-                error)
-            || !replaceTopLevelDictionaryValue(
+        bool geometryUpdated = replaceTopLevelDictionaryValue(
+            dictionary,
+            QByteArrayView("/Rect"),
+            rect,
+            true,
+            error);
+        if (geometryUpdated
+            && annotation.type == PDFCommentAnnotation::DrawingType::Ink) {
+            geometryUpdated = replaceTopLevelDictionaryValue(
                 dictionary,
                 QByteArrayView("/InkList"),
                 pdfInkList(annotation.pageStrokes),
                 true,
-                error)
+                error);
+        } else if (geometryUpdated
+                   && annotation.type
+                       == PDFCommentAnnotation::DrawingType::Line) {
+            geometryUpdated = replaceTopLevelDictionaryValue(
+                dictionary,
+                QByteArrayView("/L"),
+                pdfPointArray(annotation.pageVertices),
+                true,
+                error);
+        } else if (geometryUpdated
+                   && (annotation.type
+                           == PDFCommentAnnotation::DrawingType::Polygon
+                       || annotation.type
+                           == PDFCommentAnnotation::DrawingType::PolyLine)) {
+            geometryUpdated = replaceTopLevelDictionaryValue(
+                dictionary,
+                QByteArrayView("/Vertices"),
+                pdfPointArray(annotation.pageVertices),
+                true,
+                error);
+        }
+        if (!geometryUpdated
             || !removeTopLevelDictionaryValue(
                 dictionary,
                 QByteArrayView(markerDictionaryKey),
@@ -8202,7 +8285,7 @@ bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
         }
         if (rewrittenObjects.contains(placeholder.widget.number)) {
             return fail(QStringLiteral(
-                "Two source Ink updates resolved to the same annotation."));
+                "Two source drawing updates resolved to the same annotation."));
         }
         object.replace(
             dictionaryStart,
@@ -8219,7 +8302,7 @@ bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
          ++container) {
         if (rewrittenObjects.contains(container.key())) {
             return fail(QStringLiteral(
-                "A source Ink annotation container cannot be rewritten safely."));
+                "A source drawing annotation container cannot be rewritten safely."));
         }
         QByteArray object = completeObject(pdf, container.key(), error);
         if (object.isEmpty()) {
@@ -8240,7 +8323,7 @@ bool PDFAcroFormCanonicalizer::finalizeSourceInkGeometryUpdates(
                 || replacement.end > previousStart
                 || replacement.end > object.size()) {
                 return fail(QStringLiteral(
-                    "Overlapping source Ink annotation rewrites are not supported."));
+                    "Overlapping source drawing annotation rewrites are not supported."));
             }
             object.replace(
                 replacement.start,

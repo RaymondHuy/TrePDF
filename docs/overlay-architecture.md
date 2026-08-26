@@ -70,7 +70,7 @@ trạng thái.
 | Thứ tự | Thành phần | `z` | Trách nhiệm | Có thể nhận input khi |
 |---:|---|---:|---|---|
 | 1 | `PDFFormView` | 1 | Pointer, keyboard, IME và cursor cho AcroForm native; host cho choice overlay. | Browse/runtime form hợp lệ. |
-| 2 | `EditOverlay` | 2 | Chọn/thêm/sửa/move/resize draft text, image, shape, text markup và Ink. | Tool edit khác Browse, không save/pool. |
+| 2 | `EditOverlay` | 2 | Chọn/thêm/sửa/move/resize draft text, image, shape, text markup và drawing comment. | Tool edit khác Browse, không save/pool. |
 | 3 | `FormTextFieldOverlay` | 3 | Đặt, chọn, sửa, resize, move field form designer. | Tùy từng child/control; xem bên dưới. |
 
 Các số `z` trong bảng này là thứ tự quyết định giữa các overlay lớn. Một `z`

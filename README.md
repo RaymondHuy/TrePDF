@@ -97,6 +97,12 @@ panel but their standalone appearances are hidden from the PDF page viewer.
 Square, Circle, Line, Polygon, and PolyLine comments use shared semantic stroke,
 interior, opacity, border, effect, and line-ending properties. Save writes
 standard `/Rect`, `/L` or `/Vertices` geometry and a matching vector `/AP`.
+Valid source drawing comments can be dragged or moved with arrow keys, resized
+with eight handles, deleted, undone/redone, discarded, saved, and reopened.
+Source geometry updates patch `/Rect` plus `/L` or `/Vertices` after PDFium
+serialization. Pure moves and external/custom appearances preserve `/AP`;
+resized TrePDF-managed comments receive a matching canonical `/AP` when all
+captured properties are supported.
 Each Pencil drag creates one `/Ink` annotation. QML samples the freehand path at
 least one logical pixel apart, keeps at most 4,096 raw points, and continues
 tracking the final endpoint at that cap; the controller validates and
@@ -108,11 +114,8 @@ Ink is kept as a generic read-only comment. Ink drafts and their gesture preview
 share the Qt Quick Shapes `InkDrawingView`; Save maps every normalized point
 through `FPDF_DeviceToPage()` and writes `/Subtype /Ink`, `/InkList`, `/BS`, `/C`,
 `/CA`, the Print flag, and a vector `/AP` with round caps and joins. Source Ink
-supports moving and eight-handle affine resizing of every stroke, contents
-editing, deletion, replies, undo/redo/discard, Save/Save As, and reopen. Save
-patches source `/Rect` and `/InkList` without PDFium mutating its appearance;
-pure moves and external/custom Ink preserve `/AP`, while supported resized
-TrePDF Ink receives an appearance matching the scaled strokes. Stamp offers
+follows the same editable geometry lifecycle, affinely transforms every stroke,
+and patches `/Rect` plus `/InkList`. Stamp offers
 Approved, Draft, Final, Confidential, For Comment, and Not Approved presets.
 A click uses a 160-by-50-point frame and a drag sets a custom frame; new Stamp
 drafts can be moved, resized with eight handles, deleted, undone/redone, and

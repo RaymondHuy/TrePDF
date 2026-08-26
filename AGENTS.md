@@ -44,14 +44,15 @@ Current features:
   deletion while preserving source geometry and `/AP`. Caret, FileAttachment,
   Sound, Redact, and PDF 2.0 Projection remain indexed read-only for panel
   navigation.
-  Added Ink and valid source Ink can be moved by dragging the selected bounding
-  box or using arrow keys, and resized with eight side/corner handles. Resize
-  applies the frame's horizontal and vertical scale to every stroke; each
-  gesture is committed as one undoable command. Saving source Ink geometry
-  updates `/Rect` and `/InkList` without allowing PDFium to mutate the source
-  appearance `/BBox`. Pure movement and external/custom appearances preserve
-  `/AP`; a resized TrePDF-managed Ink receives a matching canonical `/AP` when
-  its captured properties are fully supported.
+  Added and valid source Square, Circle, Line, Polygon, PolyLine, and Ink can be
+  moved by dragging the selected bounding box or using arrow keys, and resized
+  with eight side/corner handles. Resize applies the frame's horizontal and
+  vertical scale to every vertex or Ink stroke; each gesture is one undoable
+  command. Saving source drawing geometry patches `/Rect` plus `/L`,
+  `/Vertices`, or `/InkList` after serialization without allowing PDFium to
+  mutate the source appearance `/BBox`. Pure movement and external/custom
+  appearances preserve `/AP`; a resized TrePDF-managed drawing comment receives
+  a matching canonical `/AP` when its captured properties are fully supported.
   Squiggly accepts only non-whitespace source-text glyphs intersected by the
   drag gesture, snaps the result into per-line rectangles/QuadPoints, and
   rejects whitespace-only or no-text selections. Nearly horizontal gestures use
@@ -470,14 +471,15 @@ clipped or elided unintentionally.
   writes the final subtype, dictionary, and appearance atomically. For Ink, the
   writer maps every normalized stroke through `FPDF_DeviceToPage()` and the
   canonicalizer writes `/Subtype /Ink`, `/InkList`, `/BS`, `/C`, `/CA`, the
-  Print flag, and a vector `/AP` with round line caps and joins. Ink supports
-  source content edits and translation, delete, reply, undo/redo/discard,
-  Save/Save As, and reopen without regenerating page content on annotation-only
-  pages. Source geometry updates patch `/Rect` and every `/InkList` stroke
-  after PDFium serialization, preserving unrelated annotation dictionary
-  entries. Translation keeps the original `/AP`; resize regenerates a matching
-  normal appearance only for a provenance-validated TrePDF Ink whose captured
-  properties are supported, while external/custom appearances remain intact.
+  Print flag, and a vector `/AP` with round line caps and joins. All six drawing
+  subtypes support source content edits and geometry changes, delete, reply,
+  undo/redo/discard, Save/Save As, and reopen without regenerating page content
+  on annotation-only pages. Source geometry updates patch `/Rect` plus `/L`,
+  `/Vertices`, or `/InkList` after PDFium serialization while preserving
+  unrelated dictionary entries. Translation keeps the original `/AP`; resize
+  regenerates a matching normal appearance only for a provenance-validated
+  TrePDF drawing comment with fully supported captured properties, while
+  external/custom appearances remain intact.
 - Persist added shapes as top-level PDF path objects. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain

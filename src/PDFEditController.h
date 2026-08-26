@@ -681,6 +681,7 @@ private:
         const QString &text,
         const ParagraphFormat &prototype);
     static Draft initialDraftForCandidate(const Candidate &candidate);
+    static QVector<QPointF> drawingVerticesForDraft(const Draft &draft);
     static QVector<QVector<QPointF>> inkStrokesForDraft(const Draft &draft);
     static QPointF layoutOriginForDraft(const Draft &draft);
     static bool sameCharacterFormat(const CharacterFormat &left,

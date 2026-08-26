@@ -765,6 +765,7 @@ Item {
     function isMovableKind(kind) {
         return isImageKind(kind)
             || isShapeKind(kind)
+            || isDrawingCommentKind(kind)
             || kind === "text"
             || kind === "addedText"
             || kind === "ink"
@@ -2039,7 +2040,8 @@ Item {
             lineStartStyle: Number(modelData.lineStartStyle)
             lineEndStyle: Number(modelData.lineEndStyle)
             drawingOpacity: Number(modelData.opacity)
-            visible: modelData.added === true
+            visible: (modelData.added === true
+                    || modelData.geometryChanged === true)
                 && modelData.deleted !== true
             z: 1
             Accessible.ignored: true
@@ -3400,6 +3402,11 @@ Item {
                     //% "Move shape"
                     return qsTrId("MoveShape")
                 }
+                if (root.isDrawingCommentKind(
+                        root.controller.selectedKind)) {
+                    //% "Move drawing comment"
+                    return qsTrId("MoveDrawingComment")
+                }
                 if (root.controller.selectedKind === "ink") {
                     //% "Move ink comment"
                     return qsTrId("MoveInkComment")
@@ -3506,11 +3513,14 @@ Item {
                 const selectedKind = root.controller.selectedKind
                 if (selectedKind === "image"
                         || (root.isCommentKind(selectedKind)
+                            && !root.isDrawingCommentKind(selectedKind)
                             && selectedKind !== "ink"
                             && selectedKind !== "stamp")) {
                     return []
                 }
-                if (selectedKind === "ink" || selectedKind === "stamp") {
+                if (root.isDrawingCommentKind(selectedKind)
+                        || selectedKind === "ink"
+                        || selectedKind === "stamp") {
                     return [
                         { horizontal: -1, vertical: -1,
                             cursor: Qt.SizeFDiagCursor },
@@ -3556,6 +3566,11 @@ Item {
                     if (root.isShapeKind(root.controller.selectedKind)) {
                         //% "Resize shape"
                         return qsTrId("ResizeShape")
+                    }
+                    if (root.isDrawingCommentKind(
+                            root.controller.selectedKind)) {
+                        //% "Resize drawing comment"
+                        return qsTrId("ResizeDrawingComment")
                     }
                     if (root.controller.selectedKind === "ink") {
                         //% "Resize ink comment"

@@ -154,7 +154,7 @@
     </message>
     <message id="Edit">
         <location filename="../src/Components/AppRibbon.qml" line="296"/>
-        <location filename="../src/Components/EditOverlay.qml" line="2941"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2943"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
@@ -192,7 +192,7 @@
         <translation>Chưa mở tài liệu</translation>
     </message>
     <message id="PdfEditSurface">
-        <location filename="../src/Components/EditOverlay.qml" line="2561"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2563"/>
         <source>PDF edit surface</source>
         <translation>Vùng chỉnh sửa PDF</translation>
     </message>
@@ -203,8 +203,8 @@
     </message>
     <message id="Delete">
         <location filename="../src/Main.qml" line="845"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="1073"/>
-        <location filename="../src/Components/EditOverlay.qml" line="2972"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1074"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2974"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
         <source>Delete</source>
         <translation>Xóa</translation>
@@ -214,62 +214,72 @@
         <translation type="vanished">Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo văn bản, hình ảnh hoặc hình dạng đã chọn để di chuyển, vẽ bằng công cụ Hình dạng hoặc đánh dấu văn bản, kéo hoặc bấm bằng công cụ Văn bản tự do, hoặc bấm bằng công cụ Ghi chú để thêm bình luận</translation>
     </message>
     <message id="PdfEditSurfaceDescriptionWithDrawingComments">
-        <location filename="../src/Components/EditOverlay.qml" line="2563"/>
+        <location filename="../src/Components/EditOverlay.qml" line="2565"/>
         <source>Use Tab or arrow keys to select content, Enter to edit text, drag selected content to move it, draw with Shapes, markup, or drawing comment tools, and use Enter or double-click to finish polygon comments</source>
         <translation>Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo nội dung đã chọn để di chuyển, vẽ bằng công cụ Hình dạng, đánh dấu hoặc nhận xét hình vẽ, và dùng Enter hoặc nhấp đúp để hoàn tất nhận xét đa giác</translation>
     </message>
     <message id="MoveImage">
-        <location filename="../src/Components/EditOverlay.qml" line="3397"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3399"/>
         <source>Move image</source>
         <translation>Di chuyển hình ảnh</translation>
     </message>
     <message id="MoveShape">
-        <location filename="../src/Components/EditOverlay.qml" line="3401"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3403"/>
         <source>Move shape</source>
         <translation>Di chuyển hình dạng</translation>
     </message>
+    <message id="MoveDrawingComment">
+        <location filename="../src/Components/EditOverlay.qml" line="3408"/>
+        <source>Move drawing comment</source>
+        <translation>Di chuyển chú thích hình vẽ</translation>
+    </message>
     <message id="MoveInkComment">
-        <location filename="../src/Components/EditOverlay.qml" line="3405"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3412"/>
         <source>Move ink comment</source>
         <translation>Di chuyển chú thích nét mực</translation>
     </message>
     <message id="MoveStampComment">
-        <location filename="../src/Components/EditOverlay.qml" line="3409"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3416"/>
         <source>Move stamp comment</source>
         <translation>Di chuyển chú thích con dấu</translation>
     </message>
     <message id="MoveText">
-        <location filename="../src/Components/EditOverlay.qml" line="3412"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3419"/>
         <source>Move text</source>
         <translation>Di chuyển văn bản</translation>
     </message>
     <message id="ResizeImage">
-        <location filename="../src/Components/EditOverlay.qml" line="3554"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3564"/>
         <source>Resize image</source>
         <translation>Đổi kích thước hình ảnh</translation>
     </message>
     <message id="ResizeShape">
-        <location filename="../src/Components/EditOverlay.qml" line="3558"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3568"/>
         <source>Resize shape</source>
         <translation>Đổi kích thước hình dạng</translation>
     </message>
+    <message id="ResizeDrawingComment">
+        <location filename="../src/Components/EditOverlay.qml" line="3573"/>
+        <source>Resize drawing comment</source>
+        <translation>Đổi kích thước chú thích hình vẽ</translation>
+    </message>
     <message id="ResizeInkComment">
-        <location filename="../src/Components/EditOverlay.qml" line="3562"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3577"/>
         <source>Resize ink comment</source>
         <translation>Đổi kích thước chú thích nét mực</translation>
     </message>
     <message id="ResizeStampComment">
-        <location filename="../src/Components/EditOverlay.qml" line="3566"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3581"/>
         <source>Resize stamp comment</source>
         <translation>Đổi kích thước chú thích con dấu</translation>
     </message>
     <message id="ResizeTextBox">
-        <location filename="../src/Components/EditOverlay.qml" line="3569"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3584"/>
         <source>Resize text box</source>
         <translation>Đổi kích thước hộp văn bản</translation>
     </message>
     <message id="ApplyOrCancelEditHint">
-        <location filename="../src/Components/EditOverlay.qml" line="3732"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3747"/>
         <source>Ctrl/Cmd+Enter to apply · Esc to cancel</source>
         <oldsource>Enter to apply · Esc to cancel</oldsource>
         <translation>Ctrl/Cmd+Enter để áp dụng · Esc để hủy</translation>
@@ -395,13 +405,13 @@
         <translation>Thêm liên kết</translation>
     </message>
     <message id="Shapes">
-        <location filename="../src/Components/CommentRibbon.qml" line="969"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="970"/>
         <location filename="../src/Components/EditRibbon.qml" line="216"/>
         <source>Shapes</source>
         <translation>Hình dạng</translation>
     </message>
     <message id="ChooseShape">
-        <location filename="../src/Components/CommentRibbon.qml" line="973"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="974"/>
         <location filename="../src/Components/EditRibbon.qml" line="220"/>
         <source>Choose shape</source>
         <translation>Chọn hình dạng</translation>
@@ -417,20 +427,20 @@
         <translation>Xóa trang hiện tại</translation>
     </message>
     <message id="Markup">
-        <location filename="../src/Components/CommentRibbon.qml" line="718"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="653"/>
         <source>Markup</source>
         <translation>Đánh dấu</translation>
     </message>
     <message id="Highlight">
-        <location filename="../src/Components/CommentRibbon.qml" line="726"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="661"/>
         <location filename="../src/PDFEditController.cpp" line="3994"/>
-        <location filename="../src/PDFEditController.cpp" line="8644"/>
+        <location filename="../src/PDFEditController.cpp" line="8700"/>
         <source>Highlight</source>
         <translation>Highlight</translation>
     </message>
     <message id="ChooseHighlightColor">
-        <location filename="../src/Components/CommentRibbon.qml" line="732"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="772"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="667"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="707"/>
         <source>Choose highlight color</source>
         <translation>Chọn màu tô sáng</translation>
     </message>
@@ -454,7 +464,7 @@
     <message id="StickyNote">
         <location filename="../src/Components/CommentRibbon.qml" line="615"/>
         <location filename="../src/PDFEditController.cpp" line="4168"/>
-        <location filename="../src/PDFEditController.cpp" line="8664"/>
+        <location filename="../src/PDFEditController.cpp" line="8720"/>
         <source>Sticky Note</source>
         <translation>Ghi chú</translation>
     </message>
@@ -509,72 +519,72 @@
         <translation>Thêm bình luận văn bản tự do</translation>
     </message>
     <message id="Stamp">
-        <location filename="../src/Components/CommentRibbon.qml" line="655"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="882"/>
         <source>Stamp</source>
         <translation>Con dấu</translation>
     </message>
     <message id="AddStamp">
-        <location filename="../src/Components/CommentRibbon.qml" line="657"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="884"/>
         <source>Add a stamp comment</source>
         <translation>Thêm chú thích con dấu</translation>
     </message>
     <message id="ChooseStamp">
-        <location filename="../src/Components/CommentRibbon.qml" line="661"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="889"/>
         <source>Choose stamp</source>
         <translation>Chọn con dấu</translation>
     </message>
     <message id="Underline">
-        <location filename="../src/Components/CommentRibbon.qml" line="782"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="717"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="590"/>
         <location filename="../src/PDFEditController.cpp" line="3979"/>
-        <location filename="../src/PDFEditController.cpp" line="8649"/>
+        <location filename="../src/PDFEditController.cpp" line="8705"/>
         <source>Underline</source>
         <translation>Gạch chân</translation>
     </message>
     <message id="ChooseUnderlineColor">
-        <location filename="../src/Components/CommentRibbon.qml" line="787"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="827"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="722"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="762"/>
         <source>Choose underline color</source>
         <translation>Chọn màu gạch chân</translation>
     </message>
     <message id="Squiggly">
-        <location filename="../src/Components/CommentRibbon.qml" line="837"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="772"/>
         <location filename="../src/PDFEditController.cpp" line="3984"/>
-        <location filename="../src/PDFEditController.cpp" line="8654"/>
+        <location filename="../src/PDFEditController.cpp" line="8710"/>
         <source>Squiggly</source>
         <translation>Gạch lượn sóng</translation>
     </message>
     <message id="ChooseSquigglyColor">
-        <location filename="../src/Components/CommentRibbon.qml" line="842"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="882"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="777"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="817"/>
         <source>Choose squiggly color</source>
         <translation>Chọn màu gạch lượn sóng</translation>
     </message>
     <message id="Strikeout">
-        <location filename="../src/Components/CommentRibbon.qml" line="892"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="827"/>
         <location filename="../src/PDFEditController.cpp" line="3989"/>
-        <location filename="../src/PDFEditController.cpp" line="8659"/>
+        <location filename="../src/PDFEditController.cpp" line="8715"/>
         <source>Strikeout</source>
         <translation>Gạch bỏ</translation>
     </message>
     <message id="ChooseStrikeoutColor">
-        <location filename="../src/Components/CommentRibbon.qml" line="897"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="937"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="832"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="872"/>
         <source>Choose strikeout color</source>
         <translation>Chọn màu gạch bỏ</translation>
     </message>
     <message id="DrawingComments">
-        <location filename="../src/Components/CommentRibbon.qml" line="945"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="946"/>
         <source>Drawing</source>
         <translation>Hình vẽ</translation>
     </message>
     <message id="Pencil">
-        <location filename="../src/Components/CommentRibbon.qml" line="951"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="952"/>
         <source>Pencil</source>
         <translation>Bút chì</translation>
     </message>
     <message id="AddInkComment">
-        <location filename="../src/Components/CommentRibbon.qml" line="953"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="954"/>
         <source>Draw a freehand ink comment</source>
         <translation>Vẽ chú thích bằng nét mực tự do</translation>
     </message>
@@ -612,50 +622,50 @@
         <translation type="vanished">Chọn màu nhận xét hình vẽ</translation>
     </message>
     <message id="ManageComments">
-        <location filename="../src/Components/CommentRibbon.qml" line="1025"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1026"/>
         <source>Manage</source>
         <translation>Quản lý</translation>
     </message>
     <message id="CommentList">
-        <location filename="../src/Components/CommentRibbon.qml" line="1031"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1032"/>
         <source>List</source>
         <translation>Danh sách</translation>
     </message>
     <message id="ToggleCommentsList">
-        <location filename="../src/Components/CommentRibbon.qml" line="1033"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1034"/>
         <source>Show or hide the comments list</source>
         <translation>Hiện hoặc ẩn danh sách bình luận</translation>
     </message>
     <message id="PreviousComment">
-        <location filename="../src/Components/CommentRibbon.qml" line="1047"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1048"/>
         <source>Previous comment</source>
         <translation>Bình luận trước</translation>
     </message>
     <message id="NextComment">
-        <location filename="../src/Components/CommentRibbon.qml" line="1061"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1062"/>
         <source>Next comment</source>
         <translation>Bình luận sau</translation>
     </message>
     <message id="DeleteSelectedComment">
         <location filename="../src/Components/CommentPanel.qml" line="801"/>
-        <location filename="../src/Components/CommentRibbon.qml" line="1075"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1076"/>
         <source>Delete selected comment</source>
         <translation>Xóa bình luận đã chọn</translation>
     </message>
     <message id="History">
-        <location filename="../src/Components/CommentRibbon.qml" line="1098"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1099"/>
         <location filename="../src/Components/EditRibbon.qml" line="312"/>
         <source>History</source>
         <translation>Lịch sử</translation>
     </message>
     <message id="Undo">
-        <location filename="../src/Components/CommentRibbon.qml" line="1104"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1105"/>
         <location filename="../src/Components/EditRibbon.qml" line="318"/>
         <source>Undo</source>
         <translation>Hoàn tác</translation>
     </message>
     <message id="Redo">
-        <location filename="../src/Components/CommentRibbon.qml" line="1121"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1122"/>
         <location filename="../src/Components/EditRibbon.qml" line="335"/>
         <source>Redo</source>
         <translation>Làm lại</translation>
@@ -704,7 +714,7 @@
     <message id="Reply">
         <location filename="../src/Components/CommentPanel.qml" line="881"/>
         <location filename="../src/PDFEditController.cpp" line="4790"/>
-        <location filename="../src/PDFEditController.cpp" line="8736"/>
+        <location filename="../src/PDFEditController.cpp" line="8792"/>
         <source>Reply</source>
         <translation>Phản hồi</translation>
     </message>
@@ -932,7 +942,7 @@
         <translation>Điều hướng</translation>
     </message>
     <message id="Previous">
-        <location filename="../src/Components/CommentRibbon.qml" line="1045"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1046"/>
         <location filename="../src/Components/ViewRibbon.qml" line="92"/>
         <source>Previous</source>
         <translation>Trước</translation>
@@ -943,7 +953,7 @@
         <translation>Trang trước</translation>
     </message>
     <message id="Next">
-        <location filename="../src/Components/CommentRibbon.qml" line="1059"/>
+        <location filename="../src/Components/CommentRibbon.qml" line="1060"/>
         <location filename="../src/Components/ViewRibbon.qml" line="104"/>
         <source>Next</source>
         <translation>Tiếp</translation>
@@ -1105,7 +1115,7 @@
         <location filename="../src/PDFEditController.cpp" line="3465"/>
         <location filename="../src/PDFEditController.cpp" line="7901"/>
         <location filename="../src/PDFEditController.cpp" line="7969"/>
-        <location filename="../src/PDFEditController.cpp" line="8799"/>
+        <location filename="../src/PDFEditController.cpp" line="8857"/>
         <source>This PDF does not permit content editing.</source>
         <translation>Tệp PDF này không cho phép chỉnh sửa nội dung.</translation>
     </message>
@@ -1222,7 +1232,7 @@
         <location filename="../src/PDFEditController.cpp" line="2786"/>
         <location filename="../src/PDFEditController.cpp" line="4720"/>
         <location filename="../src/PDFEditController.cpp" line="6546"/>
-        <location filename="../src/PDFEditController.cpp" line="8740"/>
+        <location filename="../src/PDFEditController.cpp" line="8796"/>
         <source>This comment is read-only.</source>
         <translation>Bình luận này chỉ có thể đọc.</translation>
     </message>
@@ -1241,74 +1251,74 @@
     </message>
     <message id="LineAnnotation">
         <location filename="../src/PDFEditController.cpp" line="896"/>
-        <location filename="../src/PDFEditController.cpp" line="8674"/>
+        <location filename="../src/PDFEditController.cpp" line="8730"/>
         <source>Line annotation</source>
         <translation>Chú thích đường thẳng</translation>
     </message>
     <message id="RectangleAnnotation">
         <location filename="../src/PDFEditController.cpp" line="908"/>
-        <location filename="../src/PDFEditController.cpp" line="8679"/>
+        <location filename="../src/PDFEditController.cpp" line="8735"/>
         <source>Rectangle annotation</source>
         <translation>Chú thích hình chữ nhật</translation>
     </message>
     <message id="OvalAnnotation">
         <location filename="../src/PDFEditController.cpp" line="893"/>
-        <location filename="../src/PDFEditController.cpp" line="8684"/>
+        <location filename="../src/PDFEditController.cpp" line="8740"/>
         <source>Oval annotation</source>
         <translation>Chú thích hình ô-van</translation>
     </message>
     <message id="PolygonAnnotation">
         <location filename="../src/PDFEditController.cpp" line="899"/>
-        <location filename="../src/PDFEditController.cpp" line="8689"/>
+        <location filename="../src/PDFEditController.cpp" line="8745"/>
         <source>Polygon annotation</source>
         <translation>Chú thích đa giác</translation>
     </message>
     <message id="PolylineAnnotation">
         <location filename="../src/Components/CommentRibbon.qml" line="169"/>
         <location filename="../src/PDFEditController.cpp" line="902"/>
-        <location filename="../src/PDFEditController.cpp" line="8694"/>
+        <location filename="../src/PDFEditController.cpp" line="8750"/>
         <source>Polyline annotation</source>
         <translation>Chú thích đường đa đoạn</translation>
     </message>
     <message id="StampAnnotation">
         <location filename="../src/PDFEditController.cpp" line="4406"/>
-        <location filename="../src/PDFEditController.cpp" line="8699"/>
+        <location filename="../src/PDFEditController.cpp" line="8755"/>
         <source>Stamp annotation</source>
         <translation>Chú thích con dấu</translation>
     </message>
     <message id="CaretAnnotation">
-        <location filename="../src/PDFEditController.cpp" line="8704"/>
+        <location filename="../src/PDFEditController.cpp" line="8760"/>
         <source>Caret annotation</source>
         <translation>Chú thích dấu chèn</translation>
     </message>
     <message id="InkAnnotation">
         <location filename="../src/PDFEditController.cpp" line="905"/>
-        <location filename="../src/PDFEditController.cpp" line="8711"/>
+        <location filename="../src/PDFEditController.cpp" line="8767"/>
         <source>Ink annotation</source>
         <translation>Chú thích nét mực</translation>
     </message>
     <message id="FileAttachmentAnnotation">
-        <location filename="../src/PDFEditController.cpp" line="8716"/>
+        <location filename="../src/PDFEditController.cpp" line="8772"/>
         <source>File attachment annotation</source>
         <translation>Chú thích tệp đính kèm</translation>
     </message>
     <message id="SoundAnnotation">
-        <location filename="../src/PDFEditController.cpp" line="8721"/>
+        <location filename="../src/PDFEditController.cpp" line="8777"/>
         <source>Sound annotation</source>
         <translation>Chú thích âm thanh</translation>
     </message>
     <message id="RedactionAnnotation">
-        <location filename="../src/PDFEditController.cpp" line="8726"/>
+        <location filename="../src/PDFEditController.cpp" line="8782"/>
         <source>Redaction annotation</source>
         <translation>Chú thích che nội dung</translation>
     </message>
     <message id="ProjectionAnnotation">
-        <location filename="../src/PDFEditController.cpp" line="8731"/>
+        <location filename="../src/PDFEditController.cpp" line="8787"/>
         <source>Projection annotation</source>
         <translation>Chú thích phép chiếu</translation>
     </message>
     <message id="ExistingCommentPageAppearanceReadOnly">
-        <location filename="../src/PDFEditController.cpp" line="8749"/>
+        <location filename="../src/PDFEditController.cpp" line="8807"/>
         <source>Edit the comment text in the Comments panel. Moving or resizing existing comments is not available.</source>
         <translation>Sửa nội dung bình luận trong bảng Bình luận. Hiện chưa thể di chuyển hoặc thay đổi kích thước bình luận có sẵn.</translation>
     </message>
@@ -1354,7 +1364,7 @@
         <location filename="../src/PDFEditController.cpp" line="5603"/>
         <location filename="../src/PDFEditController.cpp" line="6476"/>
         <location filename="../src/PDFEditController.cpp" line="6555"/>
-        <location filename="../src/PDFEditController.cpp" line="8744"/>
+        <location filename="../src/PDFEditController.cpp" line="8802"/>
         <source>This PDF does not permit changing annotations.</source>
         <oldsource>This PDF does not permit adding or deleting annotations.</oldsource>
         <translation>Tệp PDF này không cho phép thay đổi chú thích.</translation>
@@ -1421,17 +1431,17 @@
     </message>
     <message id="FreeTextAnnotation">
         <location filename="../src/PDFEditController.cpp" line="4283"/>
-        <location filename="../src/PDFEditController.cpp" line="8669"/>
+        <location filename="../src/PDFEditController.cpp" line="8725"/>
         <source>Free text annotation</source>
         <translation>Chú thích văn bản tự do</translation>
     </message>
     <message id="FormField">
-        <location filename="../src/PDFEditController.cpp" line="8794"/>
+        <location filename="../src/PDFEditController.cpp" line="8852"/>
         <source>Form field</source>
         <translation>Trường biểu mẫu</translation>
     </message>
     <message id="DraftEditorUnsupportedAnnotations">
-        <location filename="../src/PDFEditController.cpp" line="8802"/>
+        <location filename="../src/PDFEditController.cpp" line="8860"/>
         <source>Editing form fields and free-text annotations is not available in this draft editor yet.</source>
         <translation>Trình chỉnh sửa bản nháp này chưa hỗ trợ chỉnh sửa trường biểu mẫu và chú thích văn bản tự do.</translation>
     </message>

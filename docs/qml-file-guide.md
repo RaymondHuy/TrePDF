@@ -244,8 +244,9 @@ Note/Free Text đang chọn và phản hồi một cấp.
   dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
   được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.
   Panel dùng chung trạng thái thu gọn theo document session.
-- Square, Circle, Line, Polygon, PolyLine, Ink và Stamp có kind riêng, sửa nội
-  dung/xóa/reply như comment được hỗ trợ. Stamp nguồn giữ geometry/AP; Caret,
+- Square, Circle, Line, Polygon, PolyLine và Ink có kind riêng, hỗ trợ chọn,
+  drag/phím mũi tên, resize tám handle, sửa nội dung, xóa, reply và history.
+  Stamp nguồn giữ geometry/AP; Caret,
   FileAttachment, Sound, Redact và Projection dùng card `comment` chỉ đọc. Ink có `/InkList` malformed
   hoặc vượt giới hạn scan 64 stroke, 4.096 điểm/stroke hay 32.768 điểm tổng cũng
   hạ xuống card generic chỉ đọc thay vì cấp phát dữ liệu không giới hạn.
