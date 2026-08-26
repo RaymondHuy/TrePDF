@@ -44,6 +44,8 @@ Item {
         && !listBoxToolActive
         && !combFieldToolActive
 
+    signal deleteCommentRequested(int page, string objectId)
+
     function prepareForSessionChange() {
         editOverlay.prepareForSessionChange()
         formTextFieldOverlay.prepareForSessionChange()
@@ -138,6 +140,9 @@ Item {
         draftTextureCurrent: root.draftTextureCurrent
         draftTextureReady: root.draftTextureReady
         z: 2
+
+        onDeleteCommentRequested: (page, objectId) =>
+            root.deleteCommentRequested(page, objectId)
 
         onPointerInteractionStarted: {
             root.formDesignerController.clearTextFieldFocus()

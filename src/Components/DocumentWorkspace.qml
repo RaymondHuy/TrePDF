@@ -83,6 +83,7 @@ Item {
     }
 
     signal openRequested()
+    signal deleteCommentRequested(int page, string objectId)
 
     onCommentTabActiveChanged: {
         if (!commentTabActive)
@@ -271,6 +272,8 @@ Item {
             viewRotation: root.session.viewRotation
             transientStatus: root.transientStatus
             onOpenRequested: root.openRequested()
+            onDeleteCommentRequested: (page, objectId) =>
+                root.deleteCommentRequested(page, objectId)
         }
 
         Loader {
@@ -304,6 +307,8 @@ Item {
                     onTextEditPendingChanged:
                         root.updateCommentPanelEditPending(textEditPending)
                     onPageRequested: page => root.navigateToPage(page)
+                    onDeleteCommentRequested: (page, objectId) =>
+                        root.deleteCommentRequested(page, objectId)
                 }
             }
         }

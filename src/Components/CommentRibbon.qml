@@ -1081,14 +1081,13 @@ Flickable {
                 iconSource: "../assets/icons/remove-text.svg"
                 enabled: root.document.loaded
                     && !root.editController.saving
-                    && root.editController.selectedKind !== "comment"
+                    && root.editController.selectedDeletable
                     && root.isCommentKind(
                         root.editController.selectedKind)
                 onClicked: {
                     if (root.isCommentKind(
                             root.editController.selectedKind)
-                            && root.editController.selectedKind
-                                !== "comment") {
+                            && root.editController.selectedDeletable) {
                         root.deleteCommentRequested(
                             root.editController.selectedPage,
                             root.editController.selectedObjectId)

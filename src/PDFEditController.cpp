@@ -2675,6 +2675,23 @@ bool PDFEditController::selectedEditable() const
     return m_hasSelection && m_selectedCandidate.editable;
 }
 
+bool PDFEditController::candidateDeletable(const Candidate &candidate) const
+{
+    if (!isCommentCandidateKind(candidate.kind)) {
+        return candidate.editable;
+    }
+    return documentAllowsAnnotations()
+        && !candidate.commentTextReadOnly
+        && (candidate.commentProperties.flags & FPDF_ANNOT_FLAG_LOCKED) == 0
+        && !candidate.commentThreadDeletionProtected
+        && (candidate.added || candidate.sourceAnnotationIndex >= 0);
+}
+
+bool PDFEditController::selectedDeletable() const
+{
+    return m_hasSelection && candidateDeletable(m_selectedCandidate);
+}
+
 QString PDFEditController::selectedReason() const
 {
     return m_hasSelection ? m_selectedCandidate.reason : QString();
@@ -6546,15 +6563,13 @@ bool PDFEditController::removeCommentCandidate(const Candidate &candidate)
         emit statusMessage(qtTrId("ReadOnlyCommentCannotBeEdited"));
         return false;
     }
-    if (!candidate.added) {
-        if (candidate.sourceAnnotationIndex < 0) {
-            return false;
-        }
-        if (!documentAllowsAnnotations()) {
-            //% "This PDF does not permit changing annotations."
-            emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
-            return false;
-        }
+    if (!documentAllowsAnnotations()) {
+        //% "This PDF does not permit changing annotations."
+        emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+        return false;
+    }
+    if (!candidateDeletable(candidate)) {
+        return false;
     }
 
     finishSelectedFrameResize();
@@ -6596,14 +6611,11 @@ bool PDFEditController::removeCommentCandidate(const Candidate &candidate)
 
 void PDFEditController::deleteSelectedObject()
 {
-    if (!m_hasSelection) {
+    if (!selectedDeletable()) {
         return;
     }
     if (isCommentCandidateKind(m_selectedCandidate.kind)) {
         removeCommentCandidate(m_selectedCandidate);
-        return;
-    }
-    if (!m_selectedCandidate.editable) {
         return;
     }
     if (isTextCandidateKind(m_selectedCandidate.kind)) {
@@ -7582,6 +7594,7 @@ PDFEditController::scanCommentPageLocked(
                 return !isCommentCandidateKind(candidate.kind);
             }),
         candidates.end());
+    applyCommentThreadDeletionProtection(candidates);
     return candidates;
 }
 
@@ -7717,6 +7730,54 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
     return candidates;
 }
 
+void PDFEditController::applyCommentThreadDeletionProtection(
+    QVector<Candidate> &candidates)
+{
+    QHash<int, qsizetype> candidateBySourceAnnotationIndex;
+    for (qsizetype index = 0; index < candidates.size(); ++index) {
+        const int sourceAnnotationIndex
+            = candidates.at(index).sourceAnnotationIndex;
+        if (sourceAnnotationIndex >= 0) {
+            candidateBySourceAnnotationIndex.insert(
+                sourceAnnotationIndex,
+                index);
+        }
+    }
+    QSet<int> protectedAncestorIndices;
+    for (const Candidate &candidate : std::as_const(candidates)) {
+        const int flags = candidate.commentProperties.flags;
+        if ((flags & (FPDF_ANNOT_FLAG_READONLY
+                      | FPDF_ANNOT_FLAG_LOCKED
+                      | kAnnotationFlagLockedContents)) == 0) {
+            continue;
+        }
+
+        int ancestorIndex
+            = candidate.replyDirectParentSourceAnnotationIndex;
+        QSet<int> visitedIndices;
+        while (ancestorIndex >= 0
+               && !visitedIndices.contains(ancestorIndex)) {
+            visitedIndices.insert(ancestorIndex);
+            if (protectedAncestorIndices.contains(ancestorIndex)) {
+                break;
+            }
+            protectedAncestorIndices.insert(ancestorIndex);
+            const auto ancestor
+                = candidateBySourceAnnotationIndex.constFind(ancestorIndex);
+            if (ancestor == candidateBySourceAnnotationIndex.cend()) {
+                break;
+            }
+            ancestorIndex = candidates.at(*ancestor)
+                .replyDirectParentSourceAnnotationIndex;
+        }
+    }
+    for (Candidate &candidate : candidates) {
+        candidate.commentThreadDeletionProtected
+            = protectedAncestorIndices.contains(
+                candidate.sourceAnnotationIndex);
+    }
+}
+
 QVector<PDFEditController::Candidate> PDFEditController::finalizePageCandidates(
     QVector<Candidate> candidates,
     int page,
@@ -7733,6 +7794,7 @@ QVector<PDFEditController::Candidate> PDFEditController::finalizePageCandidates(
         candidate.page = page;
     }
     candidates = groupTextLineCandidates(std::move(candidates), pageSize);
+    applyCommentThreadDeletionProtection(candidates);
     std::stable_sort(
         candidates.begin(),
         candidates.end(),
@@ -9073,6 +9135,7 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("fontUnderline"), format.fontUnderline);
     map.insert(QStringLiteral("color"), format.color);
     map.insert(QStringLiteral("editable"), candidate.editable);
+    map.insert(QStringLiteral("deletable"), candidateDeletable(candidate));
     map.insert(QStringLiteral("limited"), candidate.limited);
     map.insert(QStringLiteral("added"), candidate.added);
     map.insert(

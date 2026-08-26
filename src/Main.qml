@@ -997,6 +997,9 @@ ApplicationWindow {
                 transientStatus: window.transientStatus
                 enabled: !tabModel.anySaving
                 onOpenRequested: window.requestOpen()
+                onDeleteCommentRequested: (page, objectId) => {
+                    window.requestDeleteComment(page, objectId)
+                }
             }
         }
     }

@@ -38,6 +38,7 @@ Rectangle {
 
     signal openRequested()
     signal beginSelectedEditingRequested()
+    signal deleteCommentRequested(int page, string objectId)
 
     color: "#f2efec"
 
@@ -209,6 +210,8 @@ Rectangle {
             zoom: root.zoom
             viewRotation: root.viewRotation
             sessionChangeGeneration: root.sessionChangeGeneration
+            onDeleteCommentRequested: (page, objectId) =>
+                root.deleteCommentRequested(page, objectId)
 
             Connections {
                 target: root

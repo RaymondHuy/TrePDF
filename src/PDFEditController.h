@@ -76,6 +76,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(QColor selectedColor READ selectedColor NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(int selectedParagraphAlignment READ selectedParagraphAlignment NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedDeletable READ selectedDeletable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QVariantList commentItems READ commentItems NOTIFY commentsChanged FINAL)
     Q_PROPERTY(int maximumCommentCharacters READ maximumCommentCharacters CONSTANT FINAL)
@@ -218,6 +219,7 @@ public:
     QColor selectedColor() const;
     int selectedParagraphAlignment() const;
     bool selectedEditable() const;
+    bool selectedDeletable() const;
     QString selectedReason() const;
     QVariantList commentItems() const;
     int maximumCommentCharacters() const;
@@ -410,6 +412,7 @@ private:
         int replyDirectParentSourceAnnotationIndex = -1;
         bool isReplyAnnotation = false;
         bool commentTextReadOnly = false;
+        bool commentThreadDeletionProtected = false;
         bool replyToParentAdded = false;
         QString fontFamily;
         QString fontIdentity;
@@ -631,6 +634,8 @@ private:
         FPDF_DOCUMENT document,
         const CandidateScanRequest &request,
         const std::shared_ptr<std::atomic_bool> &cancellation = {});
+    static void applyCommentThreadDeletionProtection(
+        QVector<Candidate> &candidates);
     QVector<Candidate> finalizePageCandidates(
         QVector<Candidate> candidates,
         int page,
@@ -657,6 +662,7 @@ private:
     const Candidate *findCandidate(int page, const QString &objectId);
     const Candidate *findCommentCandidate(int page,
                                           const QString &objectId);
+    bool candidateDeletable(const Candidate &candidate) const;
     QVariantList candidateSourceRects(const Candidate &candidate) const;
     QVariantList characterSpanMaps(const QVector<CharacterSpan> &spans) const;
     QVariantList paragraphFormatMaps(const QVector<ParagraphFormat> &formats) const;

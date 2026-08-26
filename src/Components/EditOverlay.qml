@@ -211,6 +211,7 @@ Item {
         && hitArea.containsMouse
 
     signal selectedDraftContentBoundsSyncRequested()
+    signal deleteCommentRequested(int page, string objectId)
     signal pointerInteractionStarted()
 
     visible: !pooled && (interactionActive || drafts.length > 0)
@@ -1597,7 +1598,7 @@ Item {
 
     function showSelectionActions(x, y, candidate) {
         if (controller.tool !== PDFEditController.SelectTool
-                || !candidate.editable
+                || (!candidate.editable && !candidate.deletable)
                 || !selectCandidate(candidate)) {
             selectionActions.close()
             return
@@ -1714,8 +1715,15 @@ Item {
     }
 
     function deleteSelectedObject() {
-        if (controller.selectedPage !== page || !controller.selectedEditable)
+        if (controller.selectedPage !== page || !controller.selectedDeletable)
             return false
+
+        if (isCommentKind(controller.selectedKind)) {
+            deleteCommentRequested(
+                controller.selectedPage,
+                controller.selectedObjectId)
+            return true
+        }
 
         controller.deleteSelectedObject()
         controller.clearSelection()
@@ -2549,6 +2557,7 @@ Item {
             ? Qt.IBeamCursor
             : root.hasCandidate(root.hoverCandidate)
             ? !root.hoverCandidate.editable
+                    && !root.hoverCandidate.deletable
                 ? Qt.ForbiddenCursor
                 : root.isImageCandidate(root.hoverCandidate)
                         || root.isShapeCandidate(root.hoverCandidate)
@@ -2662,7 +2671,8 @@ Item {
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
             if (root.hasCandidate(root.hoverCandidate)) {
                 if (root.controller.tool === PDFEditController.SelectTool
-                        && root.hoverCandidate.editable) {
+                        && (root.hoverCandidate.editable
+                            || root.hoverCandidate.deletable)) {
                     root.showSelectionActions(
                         mouse.x,
                         mouse.y,
@@ -2977,6 +2987,7 @@ Item {
                 icon.height: 24
                 icon.color: "transparent"
                 font.pixelSize: 10
+                enabled: root.controller.selectedDeletable
 
                 background: Rectangle {
                     radius: 4
@@ -3064,7 +3075,9 @@ Item {
         radius: root.editBoxRadius
         color: "transparent"
         border.width: 2
-        border.color: root.hasCandidate(root.hoverCandidate) && root.hoverCandidate.editable
+        border.color: root.hasCandidate(root.hoverCandidate)
+                && (root.hoverCandidate.editable
+                    || root.hoverCandidate.deletable)
             ? root.editBoxColor
             : "#a5a7aa"
         z: 2

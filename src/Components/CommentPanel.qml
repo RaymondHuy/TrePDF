@@ -26,6 +26,7 @@ Rectangle {
 
     signal collapsedChangeRequested(bool collapsed)
     signal pageRequested(int page)
+    signal deleteCommentRequested(int page, string objectId)
 
     readonly property int commentCount:
         editController.commentItems
@@ -269,14 +270,7 @@ Rectangle {
                 || objectId.length === 0) {
             return
         }
-
-        if (root.replyTargetPage === page
-                && root.replyTargetObjectId === objectId) {
-            root.cancelPendingReply()
-        }
-        if (!root.commitActiveEditor())
-            return
-        root.editController.removeComment(page, objectId)
+        root.deleteCommentRequested(page, objectId)
     }
 
     function ensureCommentIndex() {
@@ -513,6 +507,10 @@ Rectangle {
                                     ? false
                                     : Boolean(
                                         modelData.commentTextEditable)
+                            readonly property bool commentDeletable:
+                                modelData.deletable === undefined
+                                    ? false
+                                    : Boolean(modelData.deletable)
                             readonly property string commentTextEditReason:
                                 modelData.commentTextEditReason === undefined
                                     ? ""
@@ -798,7 +796,7 @@ Rectangle {
                                         icon.color: "transparent"
                                         enabled: root.document.loaded
                                             && !root.editController.saving
-                                            && commentCard.commentTextEditable
+                                            && commentCard.commentDeletable
                                             && commentCard.page >= 0
                                             && commentCard.objectId.length > 0
                                         focusPolicy: Qt.TabFocus
