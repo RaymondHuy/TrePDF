@@ -119,7 +119,13 @@ Rectangle {
     function commitPendingEdit() {
         if (!commitActiveEditor())
             return false
-        return submitPendingReply()
+        if (root.replyTargetObjectId.length === 0)
+            return true
+        if (root.replyDraftText.trim().length === 0) {
+            root.cancelPendingReply()
+            return true
+        }
+        return false
     }
 
     function commentThreadKey(page, objectId) {
@@ -190,9 +196,10 @@ Rectangle {
             return
         if (root.replyTargetObjectId.length > 0
                 && (root.replyTargetPage !== page
-                    || root.replyTargetObjectId !== objectId)
-                && !root.submitPendingReply()) {
-            return
+                    || root.replyTargetObjectId !== objectId)) {
+            if (root.replyDraftText.trim().length > 0)
+                return
+            root.cancelPendingReply()
         }
         root.replyTargetPage = page
         root.replyTargetObjectId = objectId
@@ -292,7 +299,6 @@ Rectangle {
         ensureCommentIndex()
     }
     Component.onCompleted: ensureCommentIndex()
-    Component.onDestruction: commitPendingEdit()
 
     Connections {
         target: root.document

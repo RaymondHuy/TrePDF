@@ -17,6 +17,7 @@
 
 #include <QElapsedTimer>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetricsF>
@@ -4834,6 +4835,103 @@ public:
     using FormFieldLayer::mouseReleaseEvent;
 };
 
+bool registerQmlTestTypes(const QString &themePath)
+{
+    static bool registered = false;
+    if (registered) {
+        return true;
+    }
+    if (themePath.isEmpty()) {
+        return false;
+    }
+
+    const bool cppTypesRegistered = qmlRegisterType<PDFDocument>(
+                                        "TrePDF",
+                                        1,
+                                        0,
+                                        "PDFDocument") >= 0
+        && qmlRegisterType<PDFEditController>(
+               "TrePDF",
+               1,
+               0,
+               "PDFEditController") >= 0
+        && qmlRegisterType<PDFFormController>(
+               "TrePDF",
+               1,
+               0,
+               "PDFFormController") >= 0
+        && qmlRegisterType<PDFFormDesignerController>(
+               "TrePDF",
+               1,
+               0,
+               "PDFFormDesignerController") >= 0
+        && qmlRegisterType<PDFFormView>(
+               "TrePDF",
+               1,
+               0,
+               "PDFFormView") >= 0
+        && qmlRegisterType<FormFieldLayer>(
+               "TrePDF",
+               1,
+               0,
+               "FormFieldLayer") >= 0
+        && qmlRegisterType<PDFPageItem>(
+               "TrePDF",
+               1,
+               0,
+               "PDFPageView") >= 0
+        && qmlRegisterType<DraftImageItem>(
+               "TrePDF",
+               1,
+               0,
+               "DraftImageView") >= 0
+        && qmlRegisterUncreatableType<PDFDocumentSession>(
+               "TrePDF",
+               1,
+               0,
+               "PDFDocumentSession",
+               QStringLiteral(
+                   "PDF document sessions are created by PDFTabModel")) >= 0
+        && qmlRegisterType<PDFTabModel>(
+               "TrePDF",
+               1,
+               0,
+               "PDFTabModel") >= 0
+        && qmlRegisterType(
+               QUrl::fromLocalFile(themePath),
+               "TrePDF",
+               1,
+               0,
+               "AppTheme") >= 0;
+    if (!cppTypesRegistered) {
+        return false;
+    }
+
+    const QDir componentsDirectory(QFileInfo(themePath).absolutePath());
+    const QStringList qmlFiles = componentsDirectory.entryList(
+        {QStringLiteral("*.qml")},
+        QDir::Files,
+        QDir::Name);
+    for (const QString &fileName : qmlFiles) {
+        const QString typeName = QFileInfo(fileName).completeBaseName();
+        if (typeName == QLatin1String("AppTheme")) {
+            continue;
+        }
+        const QByteArray encodedTypeName = typeName.toUtf8();
+        if (qmlRegisterType(
+                QUrl::fromLocalFile(
+                    componentsDirectory.absoluteFilePath(fileName)),
+                "TrePDF",
+                1,
+                0,
+                encodedTypeName.constData()) < 0) {
+            return false;
+        }
+    }
+    registered = true;
+    return registered;
+}
+
 } // namespace
 
 class PDFEditControllerTest : public QObject
@@ -4952,6 +5050,8 @@ private slots:
     void savesStampPresetWithUndoRedo();
     void editsAndDeletesSourceStampThreadRoundTrip();
     void addsCommentReplyWithOneLevelModelAndUndo();
+    void keepsUncommittedCommentPanelState();
+    void guardsRibbonActionsWithPendingCommentPanel();
     void editsSourceStickyNoteComment();
     void editsSourceTextMarkupComment_data();
     void editsSourceTextMarkupComment();
@@ -14526,6 +14626,303 @@ void PDFEditControllerTest::addsCommentReplyWithOneLevelModelAndUndo()
         1);
 }
 
+void PDFEditControllerTest::keepsUncommittedCommentPanelState()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-panel-pending-state.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap rootComment = controller.addStickyNote(
+        0,
+        QPointF(0.2, 0.3));
+    QVERIFY(!rootComment.isEmpty());
+    const QString rootObjectId = rootComment
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const qsizetype initialCommentCount = controller.commentItems().size();
+    QCOMPARE(initialCommentCount, 1);
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString panelPath = QFINDTESTDATA(
+        "../src/Components/CommentPanel.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!panelPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(
+        QByteArrayLiteral("import TrePDF\nAppTheme {}"),
+        QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+
+    QQmlComponent panelComponent(
+        &engine,
+        QUrl::fromLocalFile(panelPath));
+    const QVariantMap initialProperties{
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("document"), QVariant::fromValue(&document)},
+        {QStringLiteral("editController"), QVariant::fromValue(&controller)}};
+    const auto createPanel = [&]() {
+        std::unique_ptr<QObject> panel(
+            panelComponent.createWithInitialProperties(initialProperties));
+        if (!panel) {
+            qWarning().noquote() << panelComponent.errorString();
+        }
+        return panel;
+    };
+    const auto commitPendingEdit = [](QObject *panel) {
+        QVariant result;
+        const bool invoked = QMetaObject::invokeMethod(
+            panel,
+            "commitPendingEdit",
+            Qt::DirectConnection,
+            Q_RETURN_ARG(QVariant, result));
+        return qMakePair(invoked, result.toBool());
+    };
+
+    {
+        std::unique_ptr<QObject> panel = createPanel();
+        QVERIFY(panel);
+        const QString replyText = QStringLiteral("Unsent reply");
+        QVERIFY(panel->setProperty("replyTargetPage", 0));
+        QVERIFY(panel->setProperty("replyTargetObjectId", rootObjectId));
+        QVERIFY(panel->setProperty("replyDraftText", replyText));
+        QVERIFY(panel->property("textEditPending").toBool());
+
+        const auto [invoked, committed] = commitPendingEdit(panel.get());
+        QVERIFY(invoked);
+        QVERIFY(!committed);
+        QCOMPARE(panel->property("replyDraftText").toString(), replyText);
+        QCOMPARE(controller.commentItems().size(), initialCommentCount);
+
+        panel->setProperty("visible", false);
+        QCoreApplication::processEvents();
+        QCOMPARE(panel->property("replyDraftText").toString(), replyText);
+        QVERIFY(panel->property("textEditPending").toBool());
+        panel.reset();
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.commentItems().size(), initialCommentCount);
+    }
+
+    {
+        std::unique_ptr<QObject> panel = createPanel();
+        QVERIFY(panel);
+        const QString oversizedText(
+            controller.maximumCommentCharacters() + 1,
+            QLatin1Char('x'));
+        QVERIFY(panel->setProperty("activeEditorPage", 0));
+        QVERIFY(panel->setProperty("activeEditorObjectId", rootObjectId));
+        QVERIFY(panel->setProperty("activeEditorSourceText", QString()));
+        QVERIFY(panel->setProperty("activeEditorText", oversizedText));
+        QVERIFY(panel->setProperty("activeEditorDirty", true));
+        QVERIFY(panel->property("textEditPending").toBool());
+
+        const auto [invoked, committed] = commitPendingEdit(panel.get());
+        QVERIFY(invoked);
+        QVERIFY(!committed);
+        panel->setProperty("visible", false);
+        QCoreApplication::processEvents();
+        QCOMPARE(
+            panel->property("activeEditorText").toString(),
+            oversizedText);
+        QVERIFY(panel->property("activeEditorDirty").toBool());
+        QVERIFY(panel->property("textEditPending").toBool());
+    }
+}
+
+void PDFEditControllerTest::guardsRibbonActionsWithPendingCommentPanel()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("ribbon-pending-comment-actions.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString mainPath = QFINDTESTDATA("../src/Main.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!mainPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent mainComponent(
+        &engine,
+        QUrl::fromLocalFile(mainPath));
+    std::unique_ptr<QObject> mainWindow(mainComponent.create());
+    QVERIFY2(mainWindow, qPrintable(mainComponent.errorString()));
+    QVERIFY(mainWindow->setProperty("visible", false));
+
+    auto *tabModel = mainWindow->findChild<PDFTabModel *>();
+    QVERIFY(tabModel);
+    PDFDocumentSession *session = tabModel->open(
+        QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+    QCOMPARE(session->document()->pageCount(), 3);
+
+    QObject *workspace = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            const QList<QObject *> objects
+                = mainWindow->findChildren<QObject *>();
+            const auto candidate = std::find_if(
+                objects.cbegin(),
+                objects.cend(),
+                [](QObject *object) {
+                    return object->metaObject()->indexOfProperty(
+                               "commentPanelEditPending") >= 0;
+                });
+            workspace = candidate == objects.cend() ? nullptr : *candidate;
+            return workspace != nullptr;
+        })(),
+        5000);
+    QVERIFY(workspace->setProperty("commentPanelEditPending", true));
+
+    QObject *commentPanel = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            const QList<QObject *> objects
+                = workspace->findChildren<QObject *>();
+            const auto candidate = std::find_if(
+                objects.cbegin(),
+                objects.cend(),
+                [](QObject *object) {
+                    return object->metaObject()->indexOfProperty(
+                               "replyDraftText") >= 0
+                        && object->metaObject()->indexOfMethod(
+                               "commitPendingEdit()") >= 0;
+                });
+            commentPanel = candidate == objects.cend() ? nullptr : *candidate;
+            return commentPanel != nullptr;
+        })(),
+        5000);
+
+    PDFEditController *controller = session->editController();
+    const QVariantMap rootComment = controller->addStickyNote(
+        0,
+        QPointF(0.2, 0.3));
+    const QVariantMap transientComment = controller->addStickyNote(
+        0,
+        QPointF(0.4, 0.3));
+    QVERIFY(!rootComment.isEmpty());
+    QVERIFY(!transientComment.isEmpty());
+    const QString rootObjectId = rootComment
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QCOMPARE(controller->commentItems().size(), 2);
+    QCOMPARE(controller->undo(), -1);
+    QCOMPARE(controller->commentItems().size(), 1);
+    QVERIFY(controller->canUndo());
+    QVERIFY(controller->canRedo());
+
+    const QString replyText = QStringLiteral("Reply still being drafted");
+    QVERIFY(commentPanel->setProperty("replyTargetPage", 0));
+    QVERIFY(commentPanel->setProperty(
+        "replyTargetObjectId", rootObjectId));
+    QVERIFY(commentPanel->setProperty("replyDraftText", replyText));
+    QVERIFY(commentPanel->property("textEditPending").toBool());
+
+    const auto invokeBooleanAction = [&](const char *method) {
+        QVariant result;
+        const bool invoked = QMetaObject::invokeMethod(
+            mainWindow.get(),
+            method,
+            Qt::DirectConnection,
+            Q_RETURN_ARG(QVariant, result));
+        return qMakePair(invoked, result.toBool());
+    };
+    const auto verifyPendingState = [&]() {
+        QCOMPARE(controller->commentItems().size(), 1);
+        QCOMPARE(
+            commentPanel->property("replyDraftText").toString(),
+            replyText);
+        QVERIFY(commentPanel->property("textEditPending").toBool());
+    };
+
+    const auto [redoInvoked, redone] = invokeBooleanAction("requestRedo");
+    QVERIFY(redoInvoked);
+    QVERIFY(!redone);
+    QVERIFY(controller->canRedo());
+    verifyPendingState();
+
+    const auto [undoInvoked, undone] = invokeBooleanAction("requestUndo");
+    QVERIFY(undoInvoked);
+    QVERIFY(!undone);
+    QVERIFY(controller->canUndo());
+    verifyPendingState();
+
+    QVariant deleteResult;
+    QVERIFY(QMetaObject::invokeMethod(
+        mainWindow.get(),
+        "requestDeleteComment",
+        Qt::DirectConnection,
+        Q_RETURN_ARG(QVariant, deleteResult),
+        Q_ARG(QVariant, 0),
+        Q_ARG(QVariant, rootObjectId)));
+    QVERIFY(!deleteResult.toBool());
+    verifyPendingState();
+
+    QVERIFY(QMetaObject::invokeMethod(
+        mainWindow.get(),
+        "requestDeletePage",
+        Qt::DirectConnection,
+        Q_ARG(QVariant, 0)));
+    QCOMPARE(session->document()->pageCount(), 3);
+    QVERIFY(!mainWindow->property("deletePageSession")
+                 .value<PDFDocumentSession *>());
+    verifyPendingState();
+
+    QVERIFY(QMetaObject::invokeMethod(
+        commentPanel,
+        "cancelPendingReply",
+        Qt::DirectConnection));
+    const QString oversizedText(
+        controller->maximumCommentCharacters() + 1,
+        QLatin1Char('x'));
+    QVERIFY(commentPanel->setProperty("activeEditorPage", 0));
+    QVERIFY(commentPanel->setProperty(
+        "activeEditorObjectId", rootObjectId));
+    QVERIFY(commentPanel->setProperty(
+        "activeEditorSourceText",
+        rootComment.value(QStringLiteral("text")).toString()));
+    QVERIFY(commentPanel->setProperty("activeEditorText", oversizedText));
+    QVERIFY(commentPanel->setProperty("activeEditorDirty", true));
+
+    deleteResult.clear();
+    QVERIFY(QMetaObject::invokeMethod(
+        mainWindow.get(),
+        "requestDeleteComment",
+        Qt::DirectConnection,
+        Q_RETURN_ARG(QVariant, deleteResult),
+        Q_ARG(QVariant, 0),
+        Q_ARG(QVariant, rootObjectId)));
+    QVERIFY(!deleteResult.toBool());
+    QCOMPARE(controller->commentItems().size(), 1);
+    QCOMPARE(
+        commentPanel->property("activeEditorText").toString(),
+        oversizedText);
+    QVERIFY(commentPanel->property("activeEditorDirty").toBool());
+
+    const QString editedText = QStringLiteral("Committed before undo");
+    QVERIFY(commentPanel->setProperty("activeEditorText", editedText));
+    const auto [editUndoInvoked, editUndone]
+        = invokeBooleanAction("requestUndo");
+    QVERIFY(editUndoInvoked);
+    QVERIFY(editUndone);
+    QCOMPARE(controller->commentItems().size(), 1);
+    QCOMPARE(
+        controller->commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        rootComment.value(QStringLiteral("text")).toString());
+
+    QVERIFY(mainWindow->setProperty("allowWindowClose", true));
+}
+
 void PDFEditControllerTest::editsSourceStickyNoteComment()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -15967,22 +16364,7 @@ void PDFEditControllerTest::coalescesInkPreviewUpdates()
         "../src/Components/EditOverlay.qml");
     QVERIFY(!themePath.isEmpty());
     QVERIFY(!overlayPath.isEmpty());
-    QVERIFY(qmlRegisterType<PDFEditController>(
-        "TrePDF",
-        1,
-        0,
-        "PDFEditController") >= 0);
-    QVERIFY(qmlRegisterType<DraftImageItem>(
-        "TrePDF",
-        1,
-        0,
-        "DraftImageView") >= 0);
-    QVERIFY(qmlRegisterType(
-        QUrl::fromLocalFile(themePath),
-        "TrePDF",
-        1,
-        0,
-        "AppTheme") >= 0);
+    QVERIFY(registerQmlTestTypes(themePath));
 
     QQmlEngine engine;
     QQmlComponent themeComponent(&engine);

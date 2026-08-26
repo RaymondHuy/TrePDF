@@ -21,6 +21,7 @@ Item {
     property bool dropdownToolActive: false
     property bool listBoxToolActive: false
     property bool combFieldToolActive: false
+    property bool commentPanelEditPending: false
     property string transientStatus
     readonly property string selectedFormFieldId:
         session.formDesignerController.selectedFieldId
@@ -204,6 +205,24 @@ Item {
         return true
     }
 
+    function updateCommentPanelEditPending(pending) {
+        if (pending) {
+            commentPanelEditPending = true
+            return
+        }
+
+        Qt.callLater(function() {
+            if (commentPanelLoader.status !== Loader.Ready) {
+                root.commentPanelEditPending = false
+                return
+            }
+            const commentPanel = commentPanelLoader.item as CommentPanel
+            root.commentPanelEditPending = commentPanel
+                ? commentPanel.textEditPending
+                : false
+        })
+    }
+
     function prepareForDeactivation() {
         if (!commitPendingPanelEdits())
             return false
@@ -257,14 +276,21 @@ Item {
         Loader {
             id: commentPanelLoader
 
-            Layout.preferredWidth: active
+            Layout.preferredWidth: visible
                 ? root.session.panelCollapsed ? 42 : 280
                 : 0
             Layout.fillHeight: true
             active: root.session.document.loaded
+                && ((root.commentTabActive
+                     && root.commentsPanelVisible)
+                    || root.commentPanelEditPending)
+            visible: root.session.document.loaded
                 && root.commentTabActive
                 && root.commentsPanelVisible
-            visible: active
+            onStatusChanged: {
+                if (status === Loader.Null)
+                    root.commentPanelEditPending = false
+            }
 
             sourceComponent: Component {
                 CommentPanel {
@@ -275,6 +301,8 @@ Item {
                     onCollapsedChangeRequested: collapsed => {
                         root.session.panelCollapsed = collapsed
                     }
+                    onTextEditPendingChanged:
+                        root.updateCommentPanelEditPending(textEditPending)
                     onPageRequested: page => root.navigateToPage(page)
                 }
             }

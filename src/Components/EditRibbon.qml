@@ -10,9 +10,12 @@ Flickable {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    property bool hasPendingPanelEdits: false
 
     signal pageRequested(int page)
     signal deletePageRequested(int page)
+    signal undoRequested()
+    signal redoRequested()
     signal toolRequested(string toolName)
 
     readonly property var shapeOptions: [
@@ -321,11 +324,7 @@ Flickable {
                     && root.editController.canUndo
                     && !root.editController.saving
                     && !root.editController.textEditActive
-                onClicked: {
-                    const page = root.editController.undo()
-                    if (page >= 0)
-                        root.pageRequested(page)
-                }
+                onClicked: root.undoRequested()
             }
 
             RibbonButton {
@@ -336,13 +335,10 @@ Flickable {
                 iconSource: "../assets/icons/redo-2.svg"
                 enabled: root.document.loaded
                     && root.editController.canRedo
+                    && !root.hasPendingPanelEdits
                     && !root.editController.saving
                     && !root.editController.textEditActive
-                onClicked: {
-                    const page = root.editController.redo()
-                    if (page >= 0)
-                        root.pageRequested(page)
-                }
+                onClicked: root.redoRequested()
             }
         }
     }
