@@ -12,12 +12,16 @@ Flickable {
     required property PDFDocument document
     required property PDFEditController editController
     property bool commentsPanelVisible: false
+    property bool hasPendingPanelEdits: false
 
     signal pageRequested(int page)
     signal toolRequested(string toolName)
     signal commentsPanelToggleRequested()
     signal previousCommentRequested()
     signal nextCommentRequested()
+    signal deleteCommentRequested(int page, string objectId)
+    signal undoRequested()
+    signal redoRequested()
 
     readonly property real highlightOpacity: 96 / 255
     readonly property real lineMarkupOpacity: 192 / 255
@@ -1077,15 +1081,14 @@ Flickable {
                 iconSource: "../assets/icons/remove-text.svg"
                 enabled: root.document.loaded
                     && !root.editController.saving
-                    && root.editController.selectedKind !== "comment"
+                    && root.editController.selectedDeletable
                     && root.isCommentKind(
                         root.editController.selectedKind)
                 onClicked: {
                     if (root.isCommentKind(
                             root.editController.selectedKind)
-                            && root.editController.selectedKind
-                                !== "comment") {
-                        root.editController.removeComment(
+                            && root.editController.selectedDeletable) {
+                        root.deleteCommentRequested(
                             root.editController.selectedPage,
                             root.editController.selectedObjectId)
                     }
@@ -1108,11 +1111,7 @@ Flickable {
                     && root.editController.canUndo
                     && !root.editController.saving
                     && !root.editController.textEditActive
-                onClicked: {
-                    const page = root.editController.undo()
-                    if (page >= 0)
-                        root.pageRequested(page)
-                }
+                onClicked: root.undoRequested()
             }
 
             RibbonButton {
@@ -1123,13 +1122,10 @@ Flickable {
                 iconSource: "../assets/icons/redo-2.svg"
                 enabled: root.document.loaded
                     && root.editController.canRedo
+                    && !root.hasPendingPanelEdits
                     && !root.editController.saving
                     && !root.editController.textEditActive
-                onClicked: {
-                    const page = root.editController.redo()
-                    if (page >= 0)
-                        root.pageRequested(page)
-                }
+                onClicked: root.redoRequested()
             }
         }
     }

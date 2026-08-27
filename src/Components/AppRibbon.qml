@@ -54,6 +54,9 @@ Column {
     signal fitWidthRequested()
     signal rotateRequested(int quarterTurns)
     signal toolRequested(string toolName)
+    signal deleteCommentRequested(int page, string objectId)
+    signal undoRequested()
+    signal redoRequested()
 
     spacing: 0
 
@@ -69,6 +72,8 @@ Column {
             || tool === PDFEditController.LineTool
             || tool === PDFEditController.PolygonTool
             || tool === PDFEditController.PolyLineTool
+            || tool === PDFEditController.InkTool
+            || tool === PDFEditController.StampTool
     }
 
     function navigateRelativeComment(direction) {
@@ -159,8 +164,11 @@ Column {
             theme: root.theme
             document: root.document
             editController: root.editController
+            hasPendingPanelEdits: root.hasPendingPanelEdits
             onPageRequested: page => root.pageRequested(page)
             onDeletePageRequested: page => root.deletePageRequested(page)
+            onUndoRequested: root.undoRequested()
+            onRedoRequested: root.redoRequested()
             onToolRequested: toolName => root.toolRequested(toolName)
         }
     }
@@ -173,6 +181,7 @@ Column {
             document: root.document
             editController: root.editController
             commentsPanelVisible: root.commentsPanelVisible
+            hasPendingPanelEdits: root.hasPendingPanelEdits
             onPageRequested: page => root.pageRequested(page)
             onToolRequested: toolName => root.toolRequested(toolName)
             onCommentsPanelToggleRequested: {
@@ -180,6 +189,11 @@ Column {
             }
             onPreviousCommentRequested: root.navigateRelativeComment(-1)
             onNextCommentRequested: root.navigateRelativeComment(1)
+            onDeleteCommentRequested: (page, objectId) => {
+                root.deleteCommentRequested(page, objectId)
+            }
+            onUndoRequested: root.undoRequested()
+            onRedoRequested: root.redoRequested()
         }
     }
 

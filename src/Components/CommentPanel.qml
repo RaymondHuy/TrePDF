@@ -26,15 +26,12 @@ Rectangle {
 
     signal collapsedChangeRequested(bool collapsed)
     signal pageRequested(int page)
+    signal deleteCommentRequested(int page, string objectId)
 
-    readonly property int commentCount:
-        editController.commentItems
-            ? editController.commentItems.length
-            : 0
+    readonly property var allCommentItems: editController.commentPanelItems
+    readonly property int commentCount: allCommentItems.length
     readonly property var displayedCommentItems: {
-        const comments = root.editController.commentItems
-            ? root.editController.commentItems
-            : []
+        const comments = root.allCommentItems
         const displayedComments = []
         const expandedThreads = root.expandedReplyThreads
         for (let index = 0; index < comments.length; ++index) {
@@ -59,6 +56,27 @@ Rectangle {
     readonly property int replyIndent: 30
     readonly property int maximumCommentCharacters:
         root.editController.maximumCommentCharacters
+    readonly property bool commentIndexLoading:
+        root.document.loaded
+        && (root.editController.commentIndexState
+                === PDFEditController.CommentIndexIdle
+            || root.editController.commentIndexState
+                === PDFEditController.CommentIndexLoading)
+    readonly property bool commentIndexFailed:
+        root.editController.commentIndexState
+            === PDFEditController.CommentIndexFailed
+    readonly property bool commentIndexLimited:
+        root.editController.commentIndexState
+            === PDFEditController.CommentIndexLimited
+    readonly property bool showNoCommentsState:
+        root.commentCount === 0
+        && root.editController.commentIndexState
+            === PDFEditController.CommentIndexReady
+    readonly property bool showCommentIndexBanner:
+        root.commentCount > 0
+        && (root.commentIndexLoading
+            || root.commentIndexFailed
+            || root.commentIndexLimited)
 
     implicitWidth: collapsed ? 42 : 280
     color: theme.ribbonSurface
@@ -119,7 +137,13 @@ Rectangle {
     function commitPendingEdit() {
         if (!commitActiveEditor())
             return false
-        return submitPendingReply()
+        if (root.replyTargetObjectId.length === 0)
+            return true
+        if (root.replyDraftText.trim().length === 0) {
+            root.cancelPendingReply()
+            return true
+        }
+        return false
     }
 
     function commentThreadKey(page, objectId) {
@@ -156,14 +180,16 @@ Rectangle {
     }
 
     function expandSelectedReply() {
-        if (!root.editController)
+        if (!root.editController
+                || !root.editController.selectedCommentReply) {
             return
+        }
 
         const selectedPage = root.editController.selectedPage
         const selectedObjectId = root.editController.selectedObjectId
         if (selectedPage < 0 || selectedObjectId.length === 0)
             return
-        const comments = root.editController.commentItems
+        const comments = root.allCommentItems
         for (let index = 0; index < comments.length; ++index) {
             const comment = comments[index]
             if (Number(comment.page) !== selectedPage
@@ -190,9 +216,10 @@ Rectangle {
             return
         if (root.replyTargetObjectId.length > 0
                 && (root.replyTargetPage !== page
-                    || root.replyTargetObjectId !== objectId)
-                && !root.submitPendingReply()) {
-            return
+                    || root.replyTargetObjectId !== objectId)) {
+            if (root.replyDraftText.trim().length > 0)
+                return
+            root.cancelPendingReply()
         }
         root.replyTargetPage = page
         root.replyTargetObjectId = objectId
@@ -209,7 +236,7 @@ Rectangle {
         if (root.replyTargetObjectId.length === 0)
             return true
 
-        const comments = root.editController.commentItems
+        const comments = root.allCommentItems
         for (let index = 0; index < comments.length; ++index) {
             const comment = comments[index]
             if (Number(comment.page) === root.replyTargetPage
@@ -262,14 +289,7 @@ Rectangle {
                 || objectId.length === 0) {
             return
         }
-
-        if (root.replyTargetPage === page
-                && root.replyTargetObjectId === objectId) {
-            root.cancelPendingReply()
-        }
-        if (!root.commitActiveEditor())
-            return
-        root.editController.removeComment(page, objectId)
+        root.deleteCommentRequested(page, objectId)
     }
 
     function ensureCommentIndex() {
@@ -292,7 +312,6 @@ Rectangle {
         ensureCommentIndex()
     }
     Component.onCompleted: ensureCommentIndex()
-    Component.onDestruction: commitPendingEdit()
 
     Connections {
         target: root.document
@@ -443,6 +462,10 @@ Rectangle {
 
                         anchors.fill: parent
                         anchors.margins: 12
+                        anchors.topMargin: 12
+                            + (commentIndexBanner.visible
+                                ? commentIndexBanner.height + 8
+                                : 0)
                         model: root.displayedCommentItems
                         spacing: 8
                         clip: true
@@ -507,6 +530,10 @@ Rectangle {
                                     ? false
                                     : Boolean(
                                         modelData.commentTextEditable)
+                            readonly property bool commentDeletable:
+                                modelData.deletable === undefined
+                                    ? false
+                                    : Boolean(modelData.deletable)
                             readonly property string commentTextEditReason:
                                 modelData.commentTextEditReason === undefined
                                     ? ""
@@ -792,7 +819,7 @@ Rectangle {
                                         icon.color: "transparent"
                                         enabled: root.document.loaded
                                             && !root.editController.saving
-                                            && commentCard.commentTextEditable
+                                            && commentCard.commentDeletable
                                             && commentCard.page >= 0
                                             && commentCard.objectId.length > 0
                                         focusPolicy: Qt.TabFocus
@@ -1189,16 +1216,133 @@ Rectangle {
                         }
                     }
 
-                    Label {
+                    Rectangle {
+                        id: commentIndexBanner
+
+                        objectName: "commentIndexBanner"
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.topMargin: 12
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        height: commentIndexBannerRow.implicitHeight + 12
+                        visible: root.showCommentIndexBanner
+                        color: root.theme.foxitPaleOrange
+                        radius: 6
+                        border.width: 1
+                        border.color: root.theme.ribbonBorder
+                        z: 1
+
+                        RowLayout {
+                            id: commentIndexBannerRow
+
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 8
+
+                            BusyIndicator {
+                                Layout.preferredWidth: 20
+                                Layout.preferredHeight: 20
+                                visible: root.commentIndexLoading
+                                running: visible
+                            }
+
+                            Label {
+                                objectName: "commentIndexBannerLabel"
+                                Layout.fillWidth: true
+                                text: {
+                                    if (root.commentIndexLoading) {
+                                        //% "Loading comments…"
+                                        return qsTrId("LoadingComments")
+                                    }
+                                    if (root.commentIndexLimited) {
+                                        //% "Too many comments to load all of them."
+                                        return qsTrId(
+                                            "CommentIndexLimitedMessage")
+                                    }
+                                    //% "Comments couldn't be loaded."
+                                    return qsTrId("CommentsLoadFailed")
+                                }
+                                color: root.theme.ribbonTextColor
+                                font.pixelSize: 11
+                                wrapMode: Text.Wrap
+                            }
+
+                            Button {
+                                objectName: "retryCommentIndexBannerButton"
+                                visible: root.commentIndexFailed
+                                enabled: visible
+                                    && !root.editController.saving
+                                //% "Retry"
+                                text: qsTrId("RetryCommentIndex")
+                                onClicked:
+                                    root.editController.requestCommentIndex()
+                            }
+                        }
+                    }
+
+                    Column {
+                        id: commentIndexStatus
+
+                        objectName: "commentIndexStatus"
                         anchors.centerIn: parent
                         width: Math.max(0, parent.width - 32)
-                        visible: commentList.count === 0
-                        //% "No comments yet."
-                        text: qsTrId("NoCommentsYet")
-                        color: "#747176"
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.Wrap
+                        spacing: 10
+                        visible: root.commentCount === 0
+                            && (root.commentIndexLoading
+                                || root.commentIndexFailed
+                                || root.commentIndexLimited
+                                || root.showNoCommentsState)
+
+                        BusyIndicator {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: 28
+                            height: 28
+                            visible: root.commentIndexLoading
+                            running: visible
+                        }
+
+                        Label {
+                            id: commentIndexStatusLabel
+
+                            objectName: "commentIndexStatusLabel"
+                            width: parent.width
+                            text: {
+                                if (root.commentIndexLoading) {
+                                    //% "Loading comments…"
+                                    return qsTrId("LoadingComments")
+                                }
+                                if (root.commentIndexFailed) {
+                                    //% "Comments couldn't be loaded."
+                                    return qsTrId("CommentsLoadFailed")
+                                }
+                                if (root.commentIndexLimited) {
+                                    //% "Too many comments to load all of them."
+                                    return qsTrId(
+                                        "CommentIndexLimitedMessage")
+                                }
+                                //% "No comments yet."
+                                return qsTrId("NoCommentsYet")
+                            }
+                            color: "#747176"
+                            font.pixelSize: 12
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                        }
+
+                        Button {
+                            id: retryCommentIndexButton
+
+                            objectName: "retryCommentIndexButton"
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            visible: root.commentIndexFailed
+                            enabled: visible && !root.editController.saving
+                            //% "Retry"
+                            text: qsTrId("RetryCommentIndex")
+                            onClicked:
+                                root.editController.requestCommentIndex()
+                        }
                     }
                 }
             }

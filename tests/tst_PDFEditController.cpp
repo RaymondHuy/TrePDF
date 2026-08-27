@@ -17,6 +17,7 @@
 
 #include <QElapsedTimer>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetricsF>
@@ -85,6 +86,7 @@ constexpr int kPdfButtonNoToggleToOff = 1 << 14;
 constexpr int kPdfButtonRadio = 1 << 15;
 constexpr int kPdfTextDoNotScroll = 1 << 23;
 constexpr int kPdfTextComb = 1 << 24;
+constexpr qsizetype kCommentIndexBudgetFieldCharacters = 1536 * 1024;
 
 class PdfFileWriter : public FPDF_FILEWRITE
 {
@@ -1403,6 +1405,50 @@ bool createProtectedCommentTextPdf(const QString &filePath)
                 "<< /Type /Annot /Subtype /Text /P 3 0 R "
                 "/Rect [60 144 84 168] /Contents (Locked comment) "
                 "/NM (locked-contents-comment) /F 512 >>"),
+    });
+}
+
+bool createLockedCommentTextPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [4 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [24 144 48 168] /Contents (Locked annotation) "
+                "/NM (locked-annotation) /F 132 >>"),
+    });
+}
+
+bool createLockedCommentReplyThreadPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [4 0 R 5 0 R 6 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [24 144 48 168] /Contents (Root comment) "
+                "/NM (locked-thread-root) /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [52 144 76 168] /Contents (First reply) "
+                "/NM (locked-thread-first-reply) "
+                "/IRT 4 0 R /RT /R /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [80 144 104 168] /Contents (Locked nested reply) "
+                "/NM (locked-thread-nested-reply) "
+                "/IRT 5 0 R /RT /R /F 132 >>"),
         });
 }
 
@@ -1533,6 +1579,62 @@ bool createRootCommentOnlyPdf(const QString &filePath)
                 "<< /Type /Annot /Subtype /Text /P 3 0 R "
                 "/Rect [24 144 48 168] /Contents (Root comment) "
                 "/CreationDate (D:20240101090000Z) /NM (root-comment) /F 4 >>"),
+        });
+}
+
+bool createCommentIndexMemoryBudgetPdf(const QString &filePath)
+{
+    const QByteArray largeString(
+        kCommentIndexBudgetFieldCharacters,
+        'x');
+    const QByteArray largeStringObject
+        = QByteArray("(") + largeString + QByteArray(")");
+    const auto largeAnnotationObject = [](int pageObject,
+                                          int index,
+                                          int replyParentObject = -1) {
+        QByteArray annotation = QByteArray(
+                   "<< /Type /Annot /Subtype /Text /P ")
+            + QByteArray::number(pageObject)
+            + QByteArray(" 0 R /Rect [24 144 48 168] "
+                         "/Contents 10 0 R /T 10 0 R /Subj 10 0 R "
+                         "/NM (memory-budget-comment-")
+            + QByteArray::number(index)
+            + QByteArray(")");
+        if (replyParentObject >= 0) {
+            annotation += QByteArray(" /IRT ")
+                + QByteArray::number(replyParentObject)
+                + QByteArray(" 0 R /RT /R");
+        }
+        annotation += QByteArray(" /F 4 >>");
+        return annotation;
+    };
+
+    // The same indirect string is intentionally referenced by several fields.
+    // The fixture stays compact while each indexed Candidate must own the
+    // decoded Contents, author, and subject strings independently.
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray(
+                "<< /Type /Pages /Kids [3 0 R 5 0 R 8 0 R] /Count 3 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [4 0 R] >>"),
+            largeAnnotationObject(3, 0),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [6 0 R 7 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 5 0 R "
+                "/Rect [24 144 48 168] /Contents (Small root) "
+                "/NM (memory-budget-small-root) /F 4 >>"),
+            largeAnnotationObject(5, 1, 6),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [9 0 R] >>"),
+            largeAnnotationObject(8, 2),
+            largeStringObject,
         });
 }
 
@@ -4834,6 +4936,103 @@ public:
     using FormFieldLayer::mouseReleaseEvent;
 };
 
+bool registerQmlTestTypes(const QString &themePath)
+{
+    static bool registered = false;
+    if (registered) {
+        return true;
+    }
+    if (themePath.isEmpty()) {
+        return false;
+    }
+
+    const bool cppTypesRegistered = qmlRegisterType<PDFDocument>(
+                                        "TrePDF",
+                                        1,
+                                        0,
+                                        "PDFDocument") >= 0
+        && qmlRegisterType<PDFEditController>(
+               "TrePDF",
+               1,
+               0,
+               "PDFEditController") >= 0
+        && qmlRegisterType<PDFFormController>(
+               "TrePDF",
+               1,
+               0,
+               "PDFFormController") >= 0
+        && qmlRegisterType<PDFFormDesignerController>(
+               "TrePDF",
+               1,
+               0,
+               "PDFFormDesignerController") >= 0
+        && qmlRegisterType<PDFFormView>(
+               "TrePDF",
+               1,
+               0,
+               "PDFFormView") >= 0
+        && qmlRegisterType<FormFieldLayer>(
+               "TrePDF",
+               1,
+               0,
+               "FormFieldLayer") >= 0
+        && qmlRegisterType<PDFPageItem>(
+               "TrePDF",
+               1,
+               0,
+               "PDFPageView") >= 0
+        && qmlRegisterType<DraftImageItem>(
+               "TrePDF",
+               1,
+               0,
+               "DraftImageView") >= 0
+        && qmlRegisterUncreatableType<PDFDocumentSession>(
+               "TrePDF",
+               1,
+               0,
+               "PDFDocumentSession",
+               QStringLiteral(
+                   "PDF document sessions are created by PDFTabModel")) >= 0
+        && qmlRegisterType<PDFTabModel>(
+               "TrePDF",
+               1,
+               0,
+               "PDFTabModel") >= 0
+        && qmlRegisterType(
+               QUrl::fromLocalFile(themePath),
+               "TrePDF",
+               1,
+               0,
+               "AppTheme") >= 0;
+    if (!cppTypesRegistered) {
+        return false;
+    }
+
+    const QDir componentsDirectory(QFileInfo(themePath).absolutePath());
+    const QStringList qmlFiles = componentsDirectory.entryList(
+        {QStringLiteral("*.qml")},
+        QDir::Files,
+        QDir::Name);
+    for (const QString &fileName : qmlFiles) {
+        const QString typeName = QFileInfo(fileName).completeBaseName();
+        if (typeName == QLatin1String("AppTheme")) {
+            continue;
+        }
+        const QByteArray encodedTypeName = typeName.toUtf8();
+        if (qmlRegisterType(
+                QUrl::fromLocalFile(
+                    componentsDirectory.absoluteFilePath(fileName)),
+                "TrePDF",
+                1,
+                0,
+                encodedTypeName.constData()) < 0) {
+            return false;
+        }
+    }
+    registered = true;
+    return registered;
+}
+
 } // namespace
 
 class PDFEditControllerTest : public QObject
@@ -4952,12 +5151,18 @@ private slots:
     void savesStampPresetWithUndoRedo();
     void editsAndDeletesSourceStampThreadRoundTrip();
     void addsCommentReplyWithOneLevelModelAndUndo();
+    void distinguishesCommentIndexLoadingAndFailureFromEmptyState();
+    void boundsWholeDocumentCommentIndexMemory();
+    void keepsUncommittedCommentPanelState();
+    void guardsRibbonActionsWithPendingCommentPanel();
     void editsSourceStickyNoteComment();
     void editsSourceTextMarkupComment_data();
     void editsSourceTextMarkupComment();
     void editsSourceReplyComment();
     void importsZeroRectUnderlineReply();
     void rejectsEditingProtectedSourceComments();
+    void protectsLockedSourceCommentFromDeletion();
+    void protectsLockedReplyAncestorsFromDeletion();
     void protectsSourceFreeTextComments();
     void enforcesCommentTextLengthLimit();
     void boundsSharedAnnotationStringReads();
@@ -4968,6 +5173,10 @@ private slots:
     void ownsPendingDrawingInteractionAcrossPages();
     void rejectsInvalidDrawingCommentGeometry_data();
     void rejectsInvalidDrawingCommentGeometry();
+    void defersDrawingCommentListUpdatesDuringFrameGestures_data();
+    void defersDrawingCommentListUpdatesDuringFrameGestures();
+    void refreshesSourceDrawingAfterFrameGesture_data();
+    void refreshesSourceDrawingAfterFrameGesture();
     void savesDrawingCommentsRoundTrip_data();
     void savesDrawingCommentsRoundTrip();
     void coalescesInkPreviewUpdates();
@@ -14162,6 +14371,7 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
     QVERIFY(!objectId.isEmpty());
     QCOMPARE(controller.selectedObjectId(), objectId);
     QVERIFY(controller.selectedEditable());
+    QVERIFY(controller.selectedDeletable());
     QCOMPARE(controller.draftsForPage(0).size(), 1);
     QCOMPARE(controller.commentItems().size(), 1);
 
@@ -14328,6 +14538,7 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
         .value<QColor>()
         .isValid());
     QVERIFY(!sourceStamp.value(QStringLiteral("editable")).toBool());
+    QVERIFY(sourceStamp.value(QStringLiteral("deletable")).toBool());
     QVERIFY(sourceStamp
         .value(QStringLiteral("commentTextEditable"))
         .toBool());
@@ -14337,6 +14548,68 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
     QVERIFY(!objectId.isEmpty());
     QVERIFY(controller.selectComment(0, objectId));
     QVERIFY(!controller.selectedEditable());
+    QVERIFY(controller.selectedDeletable());
+
+    {
+        const QString themePath = QFINDTESTDATA(
+            "../src/Components/AppTheme.qml");
+        const QString overlayPath = QFINDTESTDATA(
+            "../src/Components/EditOverlay.qml");
+        QVERIFY(!themePath.isEmpty());
+        QVERIFY(!overlayPath.isEmpty());
+        QVERIFY(registerQmlTestTypes(themePath));
+
+        QQmlEngine engine;
+        QQmlComponent themeComponent(&engine);
+        themeComponent.setData(
+            QByteArrayLiteral("import TrePDF\nAppTheme {}"),
+            QUrl());
+        std::unique_ptr<QObject> theme(themeComponent.create());
+        QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+
+        QQmlComponent overlayComponent(
+            &engine,
+            QUrl::fromLocalFile(overlayPath));
+        const QVariantMap overlayProperties{
+            {QStringLiteral("page"), 0},
+            {QStringLiteral("pooled"), false},
+            {QStringLiteral("draftTextureCurrent"), true},
+            {QStringLiteral("draftTextureReady"), true},
+            {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+            {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+            {QStringLiteral("pagePointScale"), 1.0},
+            {QStringLiteral("width"), 200.0},
+            {QStringLiteral("height"), 200.0}};
+        std::unique_ptr<QObject> overlay(
+            overlayComponent.createWithInitialProperties(overlayProperties));
+        QVERIFY2(overlay, qPrintable(overlayComponent.errorString()));
+        QSignalSpy deleteCommentRequestSpy(
+            overlay.get(),
+            SIGNAL(deleteCommentRequested(int,QString)));
+        QVERIFY(deleteCommentRequestSpy.isValid());
+
+        QVariant deletedByKeyboardPath;
+        QVERIFY(QMetaObject::invokeMethod(
+            overlay.get(),
+            "deleteSelectedNonText",
+            Qt::DirectConnection,
+            Q_RETURN_ARG(QVariant, deletedByKeyboardPath)));
+        QVERIFY(deletedByKeyboardPath.toBool());
+        QCOMPARE(deleteCommentRequestSpy.count(), 1);
+        const QList<QVariant> deleteArguments
+            = deleteCommentRequestSpy.takeFirst();
+        QCOMPARE(deleteArguments.at(0).toInt(), 0);
+        QCOMPARE(deleteArguments.at(1).toString(), objectId);
+        QCOMPARE(controller.commentItems().size(), 12);
+        QVERIFY(controller.removeComment(
+            deleteArguments.at(0).toInt(),
+            deleteArguments.at(1).toString()));
+        QCOMPARE(controller.commentItems().size(), 11);
+        QVERIFY(controller.selectedObjectId().isEmpty());
+        QCOMPARE(controller.undo(), -1);
+        QCOMPARE(controller.commentItems().size(), 12);
+        QVERIFY(controller.selectComment(0, objectId));
+    }
 
     const QString editedContents = QStringLiteral(
         "Nội dung Stamp đã được chỉnh sửa.");
@@ -14404,10 +14677,14 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
     QCOMPARE(
         rehydratedStamp.value(QStringLiteral("replyCount")).toInt(),
         1);
+    QVERIFY(rehydratedStamp.value(QStringLiteral("deletable")).toBool());
 
-    QVERIFY(controller.removeComment(
+    QVERIFY(controller.selectComment(
         0,
         rehydratedStamp.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(!controller.selectedEditable());
+    QVERIFY(controller.selectedDeletable());
+    controller.deleteSelectedObject();
     QCOMPARE(controller.commentItems().size(), 11);
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(deletedPath)));
     QVERIFY(!controller.hasDrafts());
@@ -14524,6 +14801,578 @@ void PDFEditControllerTest::addsCommentReplyWithOneLevelModelAndUndo()
         controller.commentItems().constFirst().toMap()
             .value(QStringLiteral("replyCount")).toInt(),
         1);
+}
+
+void PDFEditControllerTest::distinguishesCommentIndexLoadingAndFailureFromEmptyState()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-index-state-source.pdf"));
+    const QString backupPath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-index-state-source.backup"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QCOMPARE(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexIdle);
+
+    QVERIFY(QFile::rename(sourcePath, backupPath));
+    bool sourceRestored = false;
+    const auto restoreSource = qScopeGuard([&]() {
+        if (!sourceRestored) {
+            QFile::remove(sourcePath);
+            QFile::rename(backupPath, sourcePath);
+        }
+    });
+    QVERIFY(writePdfObjects(
+        sourcePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray("(not a page dictionary)"),
+        }));
+    bool malformedPageFailsToLoad = false;
+    {
+        PDFiumProcessLock pdfiumLock;
+        const QByteArray encodedPath = QFile::encodeName(sourcePath);
+        FPDF_DOCUMENT malformedDocument = FPDF_LoadDocument(
+            encodedPath.constData(),
+            nullptr);
+        if (malformedDocument) {
+            FPDF_PAGE malformedPage = FPDF_LoadPage(malformedDocument, 0);
+            malformedPageFailsToLoad
+                = FPDF_GetPageCount(malformedDocument) == 1
+                && !malformedPage;
+            if (malformedPage) {
+                FPDF_ClosePage(malformedPage);
+            }
+            FPDF_CloseDocument(malformedDocument);
+        }
+    }
+    QVERIFY(malformedPageFailsToLoad);
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString panelPath = QFINDTESTDATA(
+        "../src/Components/CommentPanel.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!panelPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(
+        QByteArrayLiteral("import TrePDF\nAppTheme {}"),
+        QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+
+    QQmlComponent panelComponent(
+        &engine,
+        QUrl::fromLocalFile(panelPath));
+    const QVariantMap initialProperties{
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("document"), QVariant::fromValue(&document)},
+        {QStringLiteral("editController"), QVariant::fromValue(&controller)}};
+    std::unique_ptr<QObject> panel;
+    {
+        PDFiumProcessLock mainThreadLock;
+        panel.reset(
+            panelComponent.createWithInitialProperties(initialProperties));
+        QVERIFY2(panel, qPrintable(panelComponent.errorString()));
+        QCOMPARE(
+            controller.commentIndexState(),
+            PDFEditController::CommentIndexLoading);
+        QVERIFY(panel->property("commentIndexLoading").toBool());
+        QVERIFY(!panel->property("commentIndexFailed").toBool());
+        QVERIFY(!panel->property("showNoCommentsState").toBool());
+    }
+
+    QObject *status = panel->findChild<QObject *>(
+        QStringLiteral("commentIndexStatus"));
+    QObject *statusLabel = panel->findChild<QObject *>(
+        QStringLiteral("commentIndexStatusLabel"));
+    QObject *retryButton = panel->findChild<QObject *>(
+        QStringLiteral("retryCommentIndexButton"));
+    QObject *banner = panel->findChild<QObject *>(
+        QStringLiteral("commentIndexBanner"));
+    QObject *bannerLabel = panel->findChild<QObject *>(
+        QStringLiteral("commentIndexBannerLabel"));
+    QObject *bannerRetryButton = panel->findChild<QObject *>(
+        QStringLiteral("retryCommentIndexBannerButton"));
+    QVERIFY(status);
+    QVERIFY(statusLabel);
+    QVERIFY(retryButton);
+    QVERIFY(banner);
+    QVERIFY(bannerLabel);
+    QVERIFY(bannerRetryButton);
+    QVERIFY(status->property("visible").toBool());
+    QVERIFY(!banner->property("visible").toBool());
+    QVERIFY(!retryButton->property("visible").toBool());
+    const QString loadingText = statusLabel->property("text").toString();
+    QVERIFY(!loadingText.isEmpty());
+
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexFailed,
+        5000);
+    QVERIFY(!panel->property("commentIndexLoading").toBool());
+    QVERIFY(panel->property("commentIndexFailed").toBool());
+    QVERIFY(!panel->property("showNoCommentsState").toBool());
+    QVERIFY(status->property("visible").toBool());
+    QVERIFY(!banner->property("visible").toBool());
+    QVERIFY(retryButton->property("visible").toBool());
+    QVERIFY(retryButton->property("enabled").toBool());
+    const QString failedText = statusLabel->property("text").toString();
+    QVERIFY(!failedText.isEmpty());
+    QVERIFY(failedText != loadingText);
+
+    QVariantMap partialComment;
+    QString bannerLoadingText;
+    {
+        PDFiumProcessLock mainThreadLock;
+        partialComment = controller.addStickyNote(
+            0,
+            QPointF(0.2, 0.3));
+        QVERIFY(!partialComment.isEmpty());
+        QCOMPARE(controller.commentItems().size(), 1);
+        QCOMPARE(
+            controller.commentIndexState(),
+            PDFEditController::CommentIndexLoading);
+        QVERIFY(panel->property("commentIndexLoading").toBool());
+        QVERIFY(panel->property("showCommentIndexBanner").toBool());
+        QVERIFY(!panel->property("showNoCommentsState").toBool());
+        QVERIFY(!status->property("visible").toBool());
+        QVERIFY(banner->property("visible").toBool());
+        QVERIFY(!bannerRetryButton->property("visible").toBool());
+        bannerLoadingText = bannerLabel->property("text").toString();
+        QVERIFY(!bannerLoadingText.isEmpty());
+    }
+
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexFailed,
+        5000);
+    QCOMPARE(controller.commentItems().size(), 1);
+    QVERIFY(panel->property("commentIndexFailed").toBool());
+    QVERIFY(panel->property("showCommentIndexBanner").toBool());
+    QVERIFY(!panel->property("showNoCommentsState").toBool());
+    QVERIFY(!status->property("visible").toBool());
+    QVERIFY(banner->property("visible").toBool());
+    QVERIFY(bannerRetryButton->property("visible").toBool());
+    QVERIFY(bannerRetryButton->property("enabled").toBool());
+    const QString bannerFailedText = bannerLabel->property("text").toString();
+    QVERIFY(!bannerFailedText.isEmpty());
+    QVERIFY(bannerFailedText != bannerLoadingText);
+
+    QVERIFY(QFile::remove(sourcePath));
+    QVERIFY(QFile::rename(backupPath, sourcePath));
+    sourceRestored = true;
+    QVERIFY(QMetaObject::invokeMethod(
+        bannerRetryButton,
+        "clicked",
+        Qt::DirectConnection));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexReady,
+        5000);
+    QVERIFY(!panel->property("commentIndexLoading").toBool());
+    QVERIFY(!panel->property("commentIndexFailed").toBool());
+    QCOMPARE(controller.commentItems().size(), 1);
+    QVERIFY(!panel->property("showCommentIndexBanner").toBool());
+    QVERIFY(!panel->property("showNoCommentsState").toBool());
+    QVERIFY(!status->property("visible").toBool());
+    QVERIFY(!banner->property("visible").toBool());
+    QVERIFY(!bannerRetryButton->property("visible").toBool());
+    QVERIFY(controller.removeComment(
+        0,
+        partialComment.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.commentItems().isEmpty());
+    QVERIFY(panel->property("showNoCommentsState").toBool());
+    QVERIFY(status->property("visible").toBool());
+    QVERIFY(!retryButton->property("visible").toBool());
+    const QString emptyText = statusLabel->property("text").toString();
+    QVERIFY(!emptyText.isEmpty());
+    QVERIFY(emptyText != failedText);
+}
+
+void PDFEditControllerTest::boundsWholeDocumentCommentIndexMemory()
+{
+    const QString oversizedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-index-memory-budget.pdf"));
+    const QString smallPath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-index-memory-small.pdf"));
+    QVERIFY(createCommentIndexMemoryBudgetPdf(oversizedPath));
+    QVERIFY(createRootCommentOnlyPdf(smallPath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(oversizedPath)));
+    QCOMPARE(document.pageCount(), 3);
+    controller.setDocument(&document);
+
+    controller.requestCommentIndex();
+    QCOMPARE(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexLoading);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexLimited,
+        10000);
+    const QVariantList partialIndex = controller.commentItems();
+    // Page 1 starts with a small root before its oversized reply. The whole
+    // page must be discarded when the reply crosses the remaining budget.
+    QCOMPARE(partialIndex.size(), 1);
+    QCOMPARE(
+        partialIndex.constFirst().toMap()
+            .value(QStringLiteral("text")).toString().size(),
+        kCommentIndexBudgetFieldCharacters);
+    QCOMPARE(
+        partialIndex.constFirst().toMap()
+            .value(QStringLiteral("commentAuthor")).toString().size(),
+        kCommentIndexBudgetFieldCharacters);
+    QCOMPARE(
+        partialIndex.constFirst().toMap()
+            .value(QStringLiteral("page")).toInt(),
+        0);
+
+    QSignalSpy limitedStateSpy(
+        &controller,
+        &PDFEditController::commentIndexStateChanged);
+    controller.requestCommentIndex();
+    QTest::qWait(100);
+    QCOMPARE(limitedStateSpy.count(), 0);
+    QCOMPARE(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexLimited);
+    QCOMPARE(controller.commentItems().size(), partialIndex.size());
+
+    controller.setDocument(nullptr);
+    QCOMPARE(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexIdle);
+    QVERIFY(document.open(QUrl::fromLocalFile(smallPath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexReady,
+        5000);
+    QCOMPARE(controller.commentItems().size(), 1);
+}
+
+void PDFEditControllerTest::keepsUncommittedCommentPanelState()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-panel-pending-state.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap rootComment = controller.addStickyNote(
+        0,
+        QPointF(0.2, 0.3));
+    QVERIFY(!rootComment.isEmpty());
+    const QString rootObjectId = rootComment
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const qsizetype initialCommentCount = controller.commentItems().size();
+    QCOMPARE(initialCommentCount, 1);
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString panelPath = QFINDTESTDATA(
+        "../src/Components/CommentPanel.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!panelPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(
+        QByteArrayLiteral("import TrePDF\nAppTheme {}"),
+        QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+
+    QQmlComponent panelComponent(
+        &engine,
+        QUrl::fromLocalFile(panelPath));
+    const QVariantMap initialProperties{
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("document"), QVariant::fromValue(&document)},
+        {QStringLiteral("editController"), QVariant::fromValue(&controller)}};
+    const auto createPanel = [&]() {
+        std::unique_ptr<QObject> panel(
+            panelComponent.createWithInitialProperties(initialProperties));
+        if (!panel) {
+            qWarning().noquote() << panelComponent.errorString();
+        }
+        return panel;
+    };
+    const auto commitPendingEdit = [](QObject *panel) {
+        QVariant result;
+        const bool invoked = QMetaObject::invokeMethod(
+            panel,
+            "commitPendingEdit",
+            Qt::DirectConnection,
+            Q_RETURN_ARG(QVariant, result));
+        return qMakePair(invoked, result.toBool());
+    };
+
+    {
+        std::unique_ptr<QObject> panel = createPanel();
+        QVERIFY(panel);
+        const QString replyText = QStringLiteral("Unsent reply");
+        QVERIFY(panel->setProperty("replyTargetPage", 0));
+        QVERIFY(panel->setProperty("replyTargetObjectId", rootObjectId));
+        QVERIFY(panel->setProperty("replyDraftText", replyText));
+        QVERIFY(panel->property("textEditPending").toBool());
+
+        QSignalSpy deleteCommentRequestSpy(
+            panel.get(),
+            SIGNAL(deleteCommentRequested(int,QString)));
+        QVERIFY(deleteCommentRequestSpy.isValid());
+        QVERIFY(QMetaObject::invokeMethod(
+            panel.get(),
+            "removeComment",
+            Qt::DirectConnection,
+            Q_ARG(QVariant, 0),
+            Q_ARG(QVariant, rootObjectId)));
+        QCOMPARE(deleteCommentRequestSpy.count(), 1);
+        QCOMPARE(panel->property("replyDraftText").toString(), replyText);
+        QCOMPARE(controller.commentItems().size(), initialCommentCount);
+
+        const auto [invoked, committed] = commitPendingEdit(panel.get());
+        QVERIFY(invoked);
+        QVERIFY(!committed);
+        QCOMPARE(panel->property("replyDraftText").toString(), replyText);
+        QCOMPARE(controller.commentItems().size(), initialCommentCount);
+
+        panel->setProperty("visible", false);
+        QCoreApplication::processEvents();
+        QCOMPARE(panel->property("replyDraftText").toString(), replyText);
+        QVERIFY(panel->property("textEditPending").toBool());
+        panel.reset();
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.commentItems().size(), initialCommentCount);
+    }
+
+    {
+        std::unique_ptr<QObject> panel = createPanel();
+        QVERIFY(panel);
+        const QString oversizedText(
+            controller.maximumCommentCharacters() + 1,
+            QLatin1Char('x'));
+        QVERIFY(panel->setProperty("activeEditorPage", 0));
+        QVERIFY(panel->setProperty("activeEditorObjectId", rootObjectId));
+        QVERIFY(panel->setProperty("activeEditorSourceText", QString()));
+        QVERIFY(panel->setProperty("activeEditorText", oversizedText));
+        QVERIFY(panel->setProperty("activeEditorDirty", true));
+        QVERIFY(panel->property("textEditPending").toBool());
+
+        const auto [invoked, committed] = commitPendingEdit(panel.get());
+        QVERIFY(invoked);
+        QVERIFY(!committed);
+        panel->setProperty("visible", false);
+        QCoreApplication::processEvents();
+        QCOMPARE(
+            panel->property("activeEditorText").toString(),
+            oversizedText);
+        QVERIFY(panel->property("activeEditorDirty").toBool());
+        QVERIFY(panel->property("textEditPending").toBool());
+    }
+}
+
+void PDFEditControllerTest::guardsRibbonActionsWithPendingCommentPanel()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("ribbon-pending-comment-actions.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString mainPath = QFINDTESTDATA("../src/Main.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!mainPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent mainComponent(
+        &engine,
+        QUrl::fromLocalFile(mainPath));
+    std::unique_ptr<QObject> mainWindow(mainComponent.create());
+    QVERIFY2(mainWindow, qPrintable(mainComponent.errorString()));
+    QVERIFY(mainWindow->setProperty("visible", false));
+
+    auto *tabModel = mainWindow->findChild<PDFTabModel *>();
+    QVERIFY(tabModel);
+    PDFDocumentSession *session = tabModel->open(
+        QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+    QCOMPARE(session->document()->pageCount(), 3);
+
+    QObject *workspace = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            const QList<QObject *> objects
+                = mainWindow->findChildren<QObject *>();
+            const auto candidate = std::find_if(
+                objects.cbegin(),
+                objects.cend(),
+                [](QObject *object) {
+                    return object->metaObject()->indexOfProperty(
+                               "commentPanelEditPending") >= 0;
+                });
+            workspace = candidate == objects.cend() ? nullptr : *candidate;
+            return workspace != nullptr;
+        })(),
+        5000);
+    QVERIFY(workspace->setProperty("commentPanelEditPending", true));
+
+    QObject *commentPanel = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            const QList<QObject *> objects
+                = workspace->findChildren<QObject *>();
+            const auto candidate = std::find_if(
+                objects.cbegin(),
+                objects.cend(),
+                [](QObject *object) {
+                    return object->metaObject()->indexOfProperty(
+                               "replyDraftText") >= 0
+                        && object->metaObject()->indexOfMethod(
+                               "commitPendingEdit()") >= 0;
+                });
+            commentPanel = candidate == objects.cend() ? nullptr : *candidate;
+            return commentPanel != nullptr;
+        })(),
+        5000);
+
+    PDFEditController *controller = session->editController();
+    const QVariantMap rootComment = controller->addStickyNote(
+        0,
+        QPointF(0.2, 0.3));
+    const QVariantMap transientComment = controller->addStickyNote(
+        0,
+        QPointF(0.4, 0.3));
+    QVERIFY(!rootComment.isEmpty());
+    QVERIFY(!transientComment.isEmpty());
+    const QString rootObjectId = rootComment
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QCOMPARE(controller->commentItems().size(), 2);
+    QCOMPARE(controller->undo(), -1);
+    QCOMPARE(controller->commentItems().size(), 1);
+    QVERIFY(controller->canUndo());
+    QVERIFY(controller->canRedo());
+
+    const QString replyText = QStringLiteral("Reply still being drafted");
+    QVERIFY(commentPanel->setProperty("replyTargetPage", 0));
+    QVERIFY(commentPanel->setProperty(
+        "replyTargetObjectId", rootObjectId));
+    QVERIFY(commentPanel->setProperty("replyDraftText", replyText));
+    QVERIFY(commentPanel->property("textEditPending").toBool());
+
+    const auto invokeBooleanAction = [&](const char *method) {
+        QVariant result;
+        const bool invoked = QMetaObject::invokeMethod(
+            mainWindow.get(),
+            method,
+            Qt::DirectConnection,
+            Q_RETURN_ARG(QVariant, result));
+        return qMakePair(invoked, result.toBool());
+    };
+    const auto verifyPendingState = [&]() {
+        QCOMPARE(controller->commentItems().size(), 1);
+        QCOMPARE(
+            commentPanel->property("replyDraftText").toString(),
+            replyText);
+        QVERIFY(commentPanel->property("textEditPending").toBool());
+    };
+
+    const auto [redoInvoked, redone] = invokeBooleanAction("requestRedo");
+    QVERIFY(redoInvoked);
+    QVERIFY(!redone);
+    QVERIFY(controller->canRedo());
+    verifyPendingState();
+
+    const auto [undoInvoked, undone] = invokeBooleanAction("requestUndo");
+    QVERIFY(undoInvoked);
+    QVERIFY(!undone);
+    QVERIFY(controller->canUndo());
+    verifyPendingState();
+
+    QVariant deleteResult;
+    QVERIFY(QMetaObject::invokeMethod(
+        mainWindow.get(),
+        "requestDeleteComment",
+        Qt::DirectConnection,
+        Q_RETURN_ARG(QVariant, deleteResult),
+        Q_ARG(QVariant, 0),
+        Q_ARG(QVariant, rootObjectId)));
+    QVERIFY(!deleteResult.toBool());
+    verifyPendingState();
+
+    QVERIFY(QMetaObject::invokeMethod(
+        mainWindow.get(),
+        "requestDeletePage",
+        Qt::DirectConnection,
+        Q_ARG(QVariant, 0)));
+    QCOMPARE(session->document()->pageCount(), 3);
+    QVERIFY(!mainWindow->property("deletePageSession")
+                 .value<PDFDocumentSession *>());
+    verifyPendingState();
+
+    QVERIFY(QMetaObject::invokeMethod(
+        commentPanel,
+        "cancelPendingReply",
+        Qt::DirectConnection));
+    const QString oversizedText(
+        controller->maximumCommentCharacters() + 1,
+        QLatin1Char('x'));
+    QVERIFY(commentPanel->setProperty("activeEditorPage", 0));
+    QVERIFY(commentPanel->setProperty(
+        "activeEditorObjectId", rootObjectId));
+    QVERIFY(commentPanel->setProperty(
+        "activeEditorSourceText",
+        rootComment.value(QStringLiteral("text")).toString()));
+    QVERIFY(commentPanel->setProperty("activeEditorText", oversizedText));
+    QVERIFY(commentPanel->setProperty("activeEditorDirty", true));
+
+    deleteResult.clear();
+    QVERIFY(QMetaObject::invokeMethod(
+        mainWindow.get(),
+        "requestDeleteComment",
+        Qt::DirectConnection,
+        Q_RETURN_ARG(QVariant, deleteResult),
+        Q_ARG(QVariant, 0),
+        Q_ARG(QVariant, rootObjectId)));
+    QVERIFY(!deleteResult.toBool());
+    QCOMPARE(controller->commentItems().size(), 1);
+    QCOMPARE(
+        commentPanel->property("activeEditorText").toString(),
+        oversizedText);
+    QVERIFY(commentPanel->property("activeEditorDirty").toBool());
+
+    const QString editedText = QStringLiteral("Committed before undo");
+    QVERIFY(commentPanel->setProperty("activeEditorText", editedText));
+    const auto [editUndoInvoked, editUndone]
+        = invokeBooleanAction("requestUndo");
+    QVERIFY(editUndoInvoked);
+    QVERIFY(editUndone);
+    QCOMPARE(controller->commentItems().size(), 1);
+    QCOMPARE(
+        controller->commentItems().constFirst().toMap()
+            .value(QStringLiteral("text")).toString(),
+        rootComment.value(QStringLiteral("text")).toString());
+
+    QVERIFY(mainWindow->setProperty("allowWindowClose", true));
 }
 
 void PDFEditControllerTest::editsSourceStickyNoteComment()
@@ -15063,6 +15912,12 @@ void PDFEditControllerTest::rejectsEditingProtectedSourceComments()
         QVERIFY(!comment.value(QStringLiteral("editable")).toBool());
         QVERIFY(!comment
             .value(QStringLiteral("commentTextEditable")).toBool());
+        QVERIFY(!comment.value(QStringLiteral("deletable")).toBool());
+        QVERIFY(controller.selectComment(
+            comment.value(QStringLiteral("page")).toInt(),
+            comment.value(QStringLiteral("objectId")).toString()));
+        QVERIFY(!controller.selectedDeletable());
+        controller.deleteSelectedObject();
         QVERIFY(!controller.setCommentText(
             comment.value(QStringLiteral("page")).toInt(),
             comment.value(QStringLiteral("objectId")).toString(),
@@ -15073,6 +15928,77 @@ void PDFEditControllerTest::rejectsEditingProtectedSourceComments()
     }
 
     QCOMPARE(controller.commentItems(), comments);
+}
+
+void PDFEditControllerTest::protectsLockedSourceCommentFromDeletion()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("locked-source-comment.pdf"));
+    QVERIFY(createLockedCommentTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+
+    const QVariantMap comment = controller.commentItems().constFirst().toMap();
+    QVERIFY(!comment.value(QStringLiteral("editable")).toBool());
+    QVERIFY(comment
+        .value(QStringLiteral("commentTextEditable"))
+        .toBool());
+    QVERIFY(!comment.value(QStringLiteral("deletable")).toBool());
+
+    const int page = comment.value(QStringLiteral("page")).toInt();
+    const QString objectId = comment
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(controller.selectComment(page, objectId));
+    QVERIFY(!controller.selectedEditable());
+    QVERIFY(!controller.selectedDeletable());
+    controller.deleteSelectedObject();
+    QVERIFY(!controller.removeComment(page, objectId));
+    QVERIFY(!controller.hasDrafts());
+
+    QVERIFY(controller.setCommentText(
+        page,
+        objectId,
+        QStringLiteral("Editable locked contents")));
+    QVERIFY(controller.hasDrafts());
+}
+
+void PDFEditControllerTest::protectsLockedReplyAncestorsFromDeletion()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("locked-source-comment-thread.pdf"));
+    QVERIFY(createLockedCommentReplyThreadPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 3, 5000);
+
+    const QVariantList comments = controller.commentItems();
+    for (const QVariant &commentValue : comments) {
+        const QVariantMap comment = commentValue.toMap();
+        QVERIFY(comment
+            .value(QStringLiteral("commentTextEditable"))
+            .toBool());
+        QVERIFY(!comment.value(QStringLiteral("deletable")).toBool());
+        const int page = comment.value(QStringLiteral("page")).toInt();
+        const QString objectId = comment
+            .value(QStringLiteral("objectId"))
+            .toString();
+        QVERIFY(controller.selectComment(page, objectId));
+        QVERIFY(!controller.selectedDeletable());
+        QVERIFY(!controller.removeComment(page, objectId));
+    }
+
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
 }
 
 void PDFEditControllerTest::protectsSourceFreeTextComments()
@@ -15577,6 +16503,318 @@ void PDFEditControllerTest::rejectsInvalidDrawingCommentGeometry()
     QCOMPARE(controller.tool(), static_cast<PDFEditController::Tool>(tool));
 }
 
+void PDFEditControllerTest::
+    defersDrawingCommentListUpdatesDuringFrameGestures_data()
+{
+    QTest::addColumn<int>("tool");
+    QTest::addColumn<QString>("kind");
+    QTest::addColumn<QVariantList>("vertices");
+    QTest::addColumn<QString>("geometryKey");
+
+    QTest::newRow("square")
+        << static_cast<int>(PDFEditController::SquareTool)
+        << QStringLiteral("square")
+        << QVariantList{
+               QVariant::fromValue(QPointF(0.14, 0.18)),
+               QVariant::fromValue(QPointF(0.42, 0.38))}
+        << QStringLiteral("annotationPoints");
+
+    QVariantList inkPoints;
+    inkPoints.reserve(256);
+    for (int index = 0; index < 256; ++index) {
+        inkPoints.append(QVariant::fromValue(QPointF(
+            0.12 + static_cast<qreal>(index) * 0.001,
+            index % 2 == 0 ? 0.20 : 0.32)));
+    }
+    QTest::newRow("ink")
+        << static_cast<int>(PDFEditController::InkTool)
+        << QStringLiteral("ink")
+        << inkPoints
+        << QStringLiteral("annotationStrokes");
+}
+
+void PDFEditControllerTest::
+    defersDrawingCommentListUpdatesDuringFrameGestures()
+{
+    QFETCH(int, tool);
+    QFETCH(QString, kind);
+    QFETCH(QVariantList, vertices);
+    QFETCH(QString, geometryKey);
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("deferred-comment-geometry-%1.pdf").arg(kind));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(static_cast<PDFEditController::Tool>(tool));
+
+    const QVariantMap added = controller.addDrawingComment(0, vertices);
+    QVERIFY(!added.isEmpty());
+    QCOMPARE(added.value(QStringLiteral("kind")).toString(), kind);
+    const QString objectId = added
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QRectF originalFrame = added
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QVariantList originalGeometry = added
+        .value(geometryKey)
+        .toList();
+    QVERIFY(!objectId.isEmpty());
+    QVERIFY(originalFrame.isValid());
+    QVERIFY(!originalGeometry.isEmpty());
+    QCOMPARE(controller.commentItems().size(), 1);
+
+    QSignalSpy commentsChangedSpy(
+        &controller,
+        &PDFEditController::commentsChanged);
+    QSignalSpy selectionChangedSpy(
+        &controller,
+        &PDFEditController::selectionChanged);
+    QSignalSpy selectedGeometryChangedSpy(
+        &controller,
+        &PDFEditController::selectedGeometryChanged);
+    QSignalSpy pageDataChangedSpy(
+        &controller,
+        &PDFEditController::pageDataChanged);
+    QSignalSpy draftRenderStateChangedSpy(
+        &controller,
+        &PDFEditController::draftRenderStateChanged);
+    QSignalSpy historyStateChangedSpy(
+        &controller,
+        &PDFEditController::historyStateChanged);
+    QVERIFY(controller.selectCandidate(0, objectId));
+    controller.beginSelectedFrameResize();
+    QVERIFY(controller.textEditActive());
+    commentsChangedSpy.clear();
+    selectionChangedSpy.clear();
+    selectedGeometryChangedSpy.clear();
+    pageDataChangedSpy.clear();
+    draftRenderStateChangedSpy.clear();
+    historyStateChangedSpy.clear();
+
+    QRectF finalFrame;
+    constexpr int updateCount = 12;
+    for (int index = 1; index <= updateCount; ++index) {
+        const qreal progress
+            = static_cast<qreal>(index) / updateCount;
+        finalFrame = QRectF(
+            originalFrame.x() + 0.12 * progress,
+            originalFrame.y() + 0.08 * progress,
+            originalFrame.width() * (1.0 - 0.25 * progress),
+            originalFrame.height() * (1.0 + 0.30 * progress));
+        QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(finalFrame));
+        controller.updateSelectedFrameRect(finalFrame);
+        QCOMPARE(controller.selectedFrameRect(), finalFrame);
+        QCOMPARE(commentsChangedSpy.count(), 0);
+        QCOMPARE(selectionChangedSpy.count(), 0);
+        QCOMPARE(selectedGeometryChangedSpy.count(), index);
+        QCOMPARE(pageDataChangedSpy.count(), 0);
+        QCOMPARE(draftRenderStateChangedSpy.count(), 0);
+        QCOMPARE(historyStateChangedSpy.count(), 0);
+    }
+
+    controller.finishSelectedFrameResize();
+    QVERIFY(!controller.textEditActive());
+    QCOMPARE(commentsChangedSpy.count(), 1);
+    QCOMPARE(pageDataChangedSpy.count(), 1);
+    QVERIFY(draftRenderStateChangedSpy.count() >= 1);
+    QVERIFY(historyStateChangedSpy.count() >= 1);
+    QCOMPARE(controller.selectedFrameRect(), finalFrame);
+
+    const auto commentForObject = [&controller, &objectId]() {
+        for (const QVariant &commentValue : controller.commentItems()) {
+            const QVariantMap comment = commentValue.toMap();
+            if (comment.value(QStringLiteral("objectId")).toString()
+                == objectId) {
+                return comment;
+            }
+        }
+        return QVariantMap();
+    };
+    const QVariantList expectedFinalGeometry
+        = kind == QLatin1String("ink")
+        ? transformedInkStrokes(
+              originalGeometry,
+              originalFrame,
+              finalFrame)
+        : transformedDrawingVertices(
+              originalGeometry,
+              originalFrame,
+              finalFrame);
+    QVariantMap comment = commentForObject();
+    QVERIFY(!comment.isEmpty());
+    QCOMPARE(
+        comment.value(QStringLiteral("frameRect")).toRectF(),
+        finalFrame);
+    QCOMPARE(comment.value(geometryKey).toList(), expectedFinalGeometry);
+
+    commentsChangedSpy.clear();
+    pageDataChangedSpy.clear();
+    draftRenderStateChangedSpy.clear();
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(commentsChangedSpy.count(), 1);
+    QCOMPARE(pageDataChangedSpy.count(), 1);
+    QCOMPARE(draftRenderStateChangedSpy.count(), 1);
+    comment = commentForObject();
+    QCOMPARE(
+        comment.value(QStringLiteral("frameRect")).toRectF(),
+        originalFrame);
+    QCOMPARE(comment.value(geometryKey).toList(), originalGeometry);
+
+    commentsChangedSpy.clear();
+    pageDataChangedSpy.clear();
+    draftRenderStateChangedSpy.clear();
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(commentsChangedSpy.count(), 1);
+    QCOMPARE(pageDataChangedSpy.count(), 1);
+    QCOMPARE(draftRenderStateChangedSpy.count(), 1);
+    comment = commentForObject();
+    QCOMPARE(
+        comment.value(QStringLiteral("frameRect")).toRectF(),
+        finalFrame);
+    QCOMPARE(comment.value(geometryKey).toList(), expectedFinalGeometry);
+
+    commentsChangedSpy.clear();
+    controller.beginSelectedFrameResize();
+    commentsChangedSpy.clear();
+    selectionChangedSpy.clear();
+    selectedGeometryChangedSpy.clear();
+    pageDataChangedSpy.clear();
+    draftRenderStateChangedSpy.clear();
+    historyStateChangedSpy.clear();
+    const QRectF cancelledFrame = finalFrame.translated(-0.05, -0.04);
+    for (int index = 1; index <= updateCount; ++index) {
+        const qreal progress
+            = static_cast<qreal>(index) / updateCount;
+        const QRectF previewFrame(
+            QPointF(
+                finalFrame.x()
+                    + (cancelledFrame.x() - finalFrame.x()) * progress,
+                finalFrame.y()
+                    + (cancelledFrame.y() - finalFrame.y()) * progress),
+            finalFrame.size());
+        controller.updateSelectedFrameRect(previewFrame);
+        QCOMPARE(controller.selectedFrameRect(), previewFrame);
+        QCOMPARE(commentsChangedSpy.count(), 0);
+        QCOMPARE(selectionChangedSpy.count(), 0);
+        QCOMPARE(selectedGeometryChangedSpy.count(), index);
+        QCOMPARE(pageDataChangedSpy.count(), 0);
+        QCOMPARE(draftRenderStateChangedSpy.count(), 0);
+        QCOMPARE(historyStateChangedSpy.count(), 0);
+    }
+    controller.cancelSelectedFrameResize();
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(commentsChangedSpy.count() <= 1);
+    QCOMPARE(controller.selectedFrameRect(), finalFrame);
+    comment = commentForObject();
+    QCOMPARE(
+        comment.value(QStringLiteral("frameRect")).toRectF(),
+        finalFrame);
+    QCOMPARE(comment.value(geometryKey).toList(), expectedFinalGeometry);
+}
+
+void PDFEditControllerTest::refreshesSourceDrawingAfterFrameGesture_data()
+{
+    QTest::addColumn<QString>("kind");
+
+    QTest::newRow("square") << QStringLiteral("square");
+    QTest::newRow("ink") << QStringLiteral("ink");
+}
+
+void PDFEditControllerTest::refreshesSourceDrawingAfterFrameGesture()
+{
+    QFETCH(QString, kind);
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-drawing-frame-exit-%1.pdf").arg(kind));
+    QVERIFY(createUnsupportedMarkupCommentsPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+
+    const QVariantMap sourceDrawing = candidateForKind(
+        waitForCandidates(controller, 0),
+        kind);
+    QVERIFY(!sourceDrawing.isEmpty());
+    QVERIFY(sourceDrawing.value(QStringLiteral("editable")).toBool());
+    const QString objectId = sourceDrawing
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QRectF originalFrame = sourceDrawing
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    QVERIFY(controller.selectCandidate(0, objectId));
+
+    QSignalSpy commentsChangedSpy(
+        &controller,
+        &PDFEditController::commentsChanged);
+    QSignalSpy pageDataChangedSpy(
+        &controller,
+        &PDFEditController::pageDataChanged);
+    QSignalSpy draftRenderStateChangedSpy(
+        &controller,
+        &PDFEditController::draftRenderStateChanged);
+
+    const quint64 initialRevision = controller.draftRevisionForPage(0);
+    controller.beginSelectedFrameResize();
+    const quint64 noOpSuppressionRevision
+        = controller.draftRevisionForPage(0);
+    QVERIFY(noOpSuppressionRevision > initialRevision);
+    QCOMPARE(
+        controller.deletedSourceCommentAnnotationsForPage(0).size(),
+        1);
+    commentsChangedSpy.clear();
+    pageDataChangedSpy.clear();
+    draftRenderStateChangedSpy.clear();
+
+    controller.finishSelectedFrameResize();
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(controller.draftRevisionForPage(0)
+        > noOpSuppressionRevision);
+    QVERIFY(controller.deletedSourceCommentAnnotationsForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QCOMPARE(commentsChangedSpy.count(), 0);
+    QCOMPARE(pageDataChangedSpy.count(), 1);
+    QVERIFY(draftRenderStateChangedSpy.count() >= 1);
+
+    controller.beginSelectedFrameResize();
+    const quint64 cancelSuppressionRevision
+        = controller.draftRevisionForPage(0);
+    QCOMPARE(
+        controller.deletedSourceCommentAnnotationsForPage(0).size(),
+        1);
+    commentsChangedSpy.clear();
+    pageDataChangedSpy.clear();
+    draftRenderStateChangedSpy.clear();
+
+    const QRectF previewFrame = originalFrame.translated(0.08, 0.04);
+    QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(previewFrame));
+    controller.updateSelectedFrameRect(previewFrame);
+    QCOMPARE(controller.selectedFrameRect(), previewFrame);
+    QCOMPARE(controller.draftRevisionForPage(0), cancelSuppressionRevision);
+    QCOMPARE(commentsChangedSpy.count(), 0);
+    QCOMPARE(pageDataChangedSpy.count(), 0);
+    QCOMPARE(draftRenderStateChangedSpy.count(), 0);
+
+    controller.cancelSelectedFrameResize();
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(controller.draftRevisionForPage(0)
+        > cancelSuppressionRevision);
+    QVERIFY(controller.deletedSourceCommentAnnotationsForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QCOMPARE(commentsChangedSpy.count(), 0);
+    QCOMPARE(pageDataChangedSpy.count(), 1);
+    QVERIFY(draftRenderStateChangedSpy.count() >= 1);
+}
+
 void PDFEditControllerTest::savesDrawingCommentsRoundTrip_data()
 {
     QTest::addColumn<int>("tool");
@@ -15967,22 +17205,7 @@ void PDFEditControllerTest::coalescesInkPreviewUpdates()
         "../src/Components/EditOverlay.qml");
     QVERIFY(!themePath.isEmpty());
     QVERIFY(!overlayPath.isEmpty());
-    QVERIFY(qmlRegisterType<PDFEditController>(
-        "TrePDF",
-        1,
-        0,
-        "PDFEditController") >= 0);
-    QVERIFY(qmlRegisterType<DraftImageItem>(
-        "TrePDF",
-        1,
-        0,
-        "DraftImageView") >= 0);
-    QVERIFY(qmlRegisterType(
-        QUrl::fromLocalFile(themePath),
-        "TrePDF",
-        1,
-        0,
-        "AppTheme") >= 0);
+    QVERIFY(registerQmlTestTypes(themePath));
 
     QQmlEngine engine;
     QQmlComponent themeComponent(&engine);

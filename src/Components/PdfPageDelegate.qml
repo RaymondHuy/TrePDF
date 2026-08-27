@@ -40,6 +40,8 @@ Item {
         ? document.maximumPageHeight
         : document.maximumPageWidth
 
+    signal deleteCommentRequested(int page, string objectId)
+
     width: Math.max(viewWidth, maximumViewPageWidth * zoom + pageMargin * 2)
     height: pageFrame.height + pageLabel.implicitHeight + 12
 
@@ -153,6 +155,8 @@ Item {
                 pageSurface.height
             ]
             z: 1
+            onDeleteCommentRequested: (page, objectId) =>
+                pageCard.deleteCommentRequested(page, objectId)
         }
     }
 

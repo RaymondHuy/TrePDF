@@ -57,8 +57,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(QString selectedKind READ selectedKind NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedCommentReply READ selectedCommentReply NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QRectF selectedSourceRect READ selectedSourceRect NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(QRectF selectedFrameRect READ selectedFrameRect NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(QRectF selectedContentBounds READ selectedContentBounds NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QRectF selectedFrameRect READ selectedFrameRect NOTIFY selectedGeometryChanged FINAL)
+    Q_PROPERTY(QRectF selectedContentBounds READ selectedContentBounds NOTIFY selectedGeometryChanged FINAL)
     Q_PROPERTY(QVariantList selectedSourceRects READ selectedSourceRects NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QVariantList selectedCharacterSpans READ selectedCharacterSpans NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QVariantList selectedParagraphFormats READ selectedParagraphFormats NOTIFY selectionChanged FINAL)
@@ -76,8 +76,11 @@ class PDFEditController : public QObject
     Q_PROPERTY(QColor selectedColor READ selectedColor NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(int selectedParagraphAlignment READ selectedParagraphAlignment NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedDeletable READ selectedDeletable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QVariantList commentItems READ commentItems NOTIFY commentsChanged FINAL)
+    Q_PROPERTY(QVariantList commentPanelItems READ commentPanelItems NOTIFY commentsChanged FINAL)
+    Q_PROPERTY(CommentIndexState commentIndexState READ commentIndexState NOTIFY commentIndexStateChanged FINAL)
     Q_PROPERTY(int maximumCommentCharacters READ maximumCommentCharacters CONSTANT FINAL)
 
 public:
@@ -97,6 +100,15 @@ public:
         int annotationIndex = -1;
         int annotationSubtype = 0;
     };
+
+    enum CommentIndexState {
+        CommentIndexIdle,
+        CommentIndexLoading,
+        CommentIndexReady,
+        CommentIndexFailed,
+        CommentIndexLimited
+    };
+    Q_ENUM(CommentIndexState)
 
     enum Tool {
         BrowseTool,
@@ -218,8 +230,11 @@ public:
     QColor selectedColor() const;
     int selectedParagraphAlignment() const;
     bool selectedEditable() const;
+    bool selectedDeletable() const;
     QString selectedReason() const;
     QVariantList commentItems() const;
+    QVariantList commentPanelItems() const;
+    CommentIndexState commentIndexState() const;
     int maximumCommentCharacters() const;
     int pendingDrawingCommentPage() const;
     quint64 draftRevisionForPage(int page) const;
@@ -230,7 +245,9 @@ public:
     bool allDraftedTextObjectsSuppressibleForPage(int page) const;
 
     Q_INVOKABLE QVariantList candidatesForPage(int page);
+    Q_INVOKABLE void requestCandidatesForPage(int page);
     Q_INVOKABLE QVariantList draftsForPage(int page) const;
+    Q_INVOKABLE QVariantMap selectedDraftPreview() const;
     Q_INVOKABLE QVariantMap candidateAt(int page, qreal x, qreal y);
     Q_INVOKABLE QVariantMap addText(int page, qreal x, qreal y);
     Q_INVOKABLE void requestAddImage(int page, qreal x, qreal y);
@@ -344,8 +361,10 @@ signals:
     void savingChanged();
     void textEditActiveChanged();
     void selectionChanged();
+    void selectedGeometryChanged();
     void textFormatStateChanged();
     void commentsChanged();
+    void commentIndexStateChanged();
     void typingFormatApplied(int start, int length);
     void selectionFontStyleApplied(int start,
                                    int length,
@@ -410,6 +429,7 @@ private:
         int replyDirectParentSourceAnnotationIndex = -1;
         bool isReplyAnnotation = false;
         bool commentTextReadOnly = false;
+        bool commentThreadDeletionProtected = false;
         bool replyToParentAdded = false;
         QString fontFamily;
         QString fontIdentity;
@@ -463,6 +483,14 @@ private:
         QStringList bundledFontFamilies;
         QStringList systemFontFamilies;
         qsizetype maximumEmbeddedFontSnapshotBytes = 0;
+        qsizetype maximumCommentIndexBytes = -1;
+    };
+
+    struct CommentPageScanResult {
+        QVector<Candidate> candidates;
+        qsizetype estimatedRetainedBytes = 0;
+        bool memoryBudgetExceeded = false;
+        bool succeeded = false;
     };
 
     struct PendingSquigglyCreation {
@@ -616,14 +644,19 @@ private:
     void prunePageCandidateCache(int protectedPage);
     bool isPageCandidateCachePinned(int page) const;
     void resetCommentIndex();
-    void cacheCommentCandidates(
+    void setCommentIndexState(CommentIndexState state);
+    bool cacheCommentCandidates(
         int page,
+        const QVector<Candidate> &candidates);
+    static qsizetype estimatedCommentCandidateBytes(
+        const Candidate &candidate);
+    static qsizetype estimatedCommentCandidatePageBytes(
         const QVector<Candidate> &candidates);
     CandidateScanRequest candidateScanRequest(int page) const;
     static QVector<Candidate> scanPageFromFile(
         const CandidateScanRequest &request,
         const std::shared_ptr<std::atomic_bool> &cancellation);
-    static QVector<Candidate> scanCommentPageLocked(
+    static CommentPageScanResult scanCommentPageLocked(
         FPDF_DOCUMENT document,
         const CandidateScanRequest &request,
         const std::shared_ptr<std::atomic_bool> &cancellation);
@@ -631,6 +664,8 @@ private:
         FPDF_DOCUMENT document,
         const CandidateScanRequest &request,
         const std::shared_ptr<std::atomic_bool> &cancellation = {});
+    static void applyCommentThreadDeletionProtection(
+        QVector<Candidate> &candidates);
     QVector<Candidate> finalizePageCandidates(
         QVector<Candidate> candidates,
         int page,
@@ -649,24 +684,30 @@ private:
         const std::shared_ptr<std::atomic_bool> &cancellation);
     QVector<Candidate> groupTextLineCandidates(QVector<Candidate> candidates,
                                                const QSizeF &pageSize) const;
-    static void appendAnnotationCandidates(
+    static bool appendAnnotationCandidates(
         FPDF_PAGE page,
         const CandidateScanRequest &request,
         QVector<Candidate> &candidates,
-        const std::shared_ptr<std::atomic_bool> &cancellation);
+        const std::shared_ptr<std::atomic_bool> &cancellation,
+        qsizetype &estimatedCommentBytes,
+        bool &commentMemoryBudgetExceeded);
     const Candidate *findCandidate(int page, const QString &objectId);
     const Candidate *findCommentCandidate(int page,
                                           const QString &objectId);
+    bool candidateDeletable(const Candidate &candidate) const;
     QVariantList candidateSourceRects(const Candidate &candidate) const;
     QVariantList characterSpanMaps(const QVector<CharacterSpan> &spans) const;
     QVariantList paragraphFormatMaps(const QVector<ParagraphFormat> &formats) const;
     QVariantMap candidateMap(const Draft &draft) const;
+    QVariantList buildCommentItems(bool includeCandidateDetails) const;
     bool documentAllowsEditing() const;
     bool documentAllowsAnnotations() const;
     bool documentAllowsPageAssembly() const;
     QString draftKey(int page, const QString &objectId) const;
     bool commentReplyIsVisible(const Candidate &candidate) const;
-    void markDraftStateChanged(int page, bool immediate);
+    void markDraftStateChanged(int page,
+                               bool immediate,
+                               bool notifyComments = true);
     void requestDraftRender(int page, bool immediate);
     bool removeCommentCandidate(const Candidate &candidate);
     static void setInitialGeometry(Candidate &candidate, const QRectF &sourceRect);
@@ -763,8 +804,8 @@ private:
     std::shared_ptr<std::atomic_bool> m_candidateScanCancellation;
     QVector<PendingSquigglyCreation> m_pendingSquigglyCreations;
     QHash<int, QVector<Candidate>> m_indexedCommentCandidates;
-    bool m_commentIndexInFlight = false;
-    bool m_commentIndexComplete = false;
+    qsizetype m_indexedCommentCandidateBytes = 0;
+    CommentIndexState m_commentIndexState = CommentIndexIdle;
     std::shared_ptr<std::atomic_bool> m_commentIndexCancellation;
     QVector<Candidate> m_addedCandidates;
     QVector<PDFPageInsertion> m_pageInsertions;

@@ -3759,6 +3759,16 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
                 pageIndex,
                 draft.objectId);
         }
+        const int annotationFlags = FPDFAnnot_GetFlags(annotation.get());
+        if ((annotationFlags
+             & (FPDF_ANNOT_FLAG_READONLY
+                | FPDF_ANNOT_FLAG_LOCKED
+                | kAnnotationFlagLockedContents)) != 0) {
+            return failure(
+                PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
+                pageIndex,
+                draft.objectId);
+        }
         removalObjectIds.insert(
             draft.sourceAnnotationIndex,
             draft.objectId);
@@ -3798,6 +3808,18 @@ PDFSaveWriter::Result removeDeletedCommentAnnotations(
                 const QString rootObjectId = removalObjectIds.value(
                     parentIndex);
                 if (!markupReplyChain) {
+                    FPDFPage_CloseAnnot(parent);
+                    return failure(
+                        PDFSaveWriter::Error::CommentAnnotationRemovalFailed,
+                        pageIndex,
+                        rootObjectId);
+                }
+                const int annotationFlags
+                    = FPDFAnnot_GetFlags(annotation.get());
+                if ((annotationFlags
+                     & (FPDF_ANNOT_FLAG_READONLY
+                        | FPDF_ANNOT_FLAG_LOCKED
+                        | kAnnotationFlagLockedContents)) != 0) {
                     FPDFPage_CloseAnnot(parent);
                     return failure(
                         PDFSaveWriter::Error::CommentAnnotationRemovalFailed,

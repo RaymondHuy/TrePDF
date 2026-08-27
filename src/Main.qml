@@ -163,6 +163,60 @@ ApplicationWindow {
         saveAsDialog.open()
     }
 
+    function commitActivePanelEdits() {
+        const workspace = activeWorkspace()
+        return !workspace || workspace.commitPendingPanelEdits()
+    }
+
+    function requestUndo() {
+        if (!activeSession
+                || tabModel.anySaving
+                || activeEditController.textEditActive
+                || activeFormDesignerController.textFieldFocused
+                || appRibbon.formsTabActive
+                || !commitActivePanelEdits()) {
+            return false
+        }
+        if (!activeEditController.canUndo)
+            return false
+
+        const page = activeEditController.undo()
+        if (page >= 0)
+            goToPage(page)
+        return true
+    }
+
+    function requestRedo() {
+        if (!activeSession
+                || tabModel.anySaving
+                || activeEditController.textEditActive
+                || activeFormDesignerController.textFieldFocused
+                || appRibbon.formsTabActive
+                || !commitActivePanelEdits()) {
+            return false
+        }
+        if (!activeEditController.canRedo)
+            return false
+
+        const page = activeEditController.redo()
+        if (page >= 0)
+            goToPage(page)
+        return true
+    }
+
+    function requestDeleteComment(page, objectId) {
+        if (!activeSession
+                || tabModel.anySaving
+                || activeEditController.saving
+                || page < 0
+                || objectId.length === 0
+                || !commitActivePanelEdits()) {
+            return false
+        }
+
+        return activeEditController.removeComment(page, objectId)
+    }
+
     function requestImageFile(controller, page, x, y) {
         imageInsertController = controller
         imageInsertPage = page
@@ -205,7 +259,8 @@ ApplicationWindow {
             || tabModel.anySaving
             || page < 0
             || page >= activeDocument.pageCount
-            || activeDocument.pageCount <= 1) {
+            || activeDocument.pageCount <= 1
+            || !commitActivePanelEdits()) {
             return
         }
 
@@ -223,7 +278,8 @@ ApplicationWindow {
             || session.saving
             || page < 0
             || page >= session.document.pageCount
-            || session.document.pageCount <= 1) {
+            || session.document.pageCount <= 1
+            || !commitActivePanelEdits()) {
             return
         }
 
@@ -499,26 +555,19 @@ ApplicationWindow {
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
             && !tabModel.anySaving
-        onActivated: {
-            const page = window.activeEditController.undo()
-            if (page >= 0)
-                window.goToPage(page)
-        }
+        onActivated: window.requestUndo()
     }
 
     Shortcut {
         sequences: [StandardKey.Redo]
         enabled: window.activeSession !== null
             && window.activeEditController.canRedo
+            && !window.activeWorkspaceHasPendingEdits
             && !window.activeEditController.textEditActive
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
             && !tabModel.anySaving
-        onActivated: {
-            const page = window.activeEditController.redo()
-            if (page >= 0)
-                window.goToPage(page)
-        }
+        onActivated: window.requestRedo()
     }
 
     Shortcut {
@@ -879,6 +928,11 @@ ApplicationWindow {
             onFitWidthRequested: window.fitToWidth()
             onRotateRequested: quarterTurns => window.rotateView(quarterTurns)
             onToolRequested: toolName => window.showComingSoon(toolName)
+            onDeleteCommentRequested: (page, objectId) => {
+                window.requestDeleteComment(page, objectId)
+            }
+            onUndoRequested: window.requestUndo()
+            onRedoRequested: window.requestRedo()
         }
 
         DocumentTabBar {
@@ -943,6 +997,9 @@ ApplicationWindow {
                 transientStatus: window.transientStatus
                 enabled: !tabModel.anySaving
                 onOpenRequested: window.requestOpen()
+                onDeleteCommentRequested: (page, objectId) => {
+                    window.requestDeleteComment(page, objectId)
+                }
             }
         }
     }
