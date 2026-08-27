@@ -1355,7 +1355,7 @@ bool createTextMarkupCommentPdf(const QString &filePath,
     const QByteArray appearanceObject
         = QByteArray(
               "<< /Type /XObject /Subtype /Form /FormType 1 "
-              "/BBox [0 0 140 22] /Resources << >> /Length ")
+              "/BBox [0 0 164 48] /Resources << >> /Length ")
         + QByteArray::number(appearanceContent.size())
         + QByteArray(" >>\nstream\n")
         + appearanceContent
@@ -1371,8 +1371,10 @@ bool createTextMarkupCommentPdf(const QString &filePath,
             QByteArray("<< /Type /Annot /Subtype /")
                 + subtypeName
                 + QByteArray(
-                    " /P 3 0 R /Rect [20 120 160 142] "
-                    "/QuadPoints [20 142 160 142 20 120 160 120] "
+                    " /P 3 0 R /Rect [18 96 182 144] "
+                    "/QuadPoints ["
+                    "20 142 90 144 18 122 88 120 "
+                    "106 118 180 116 108 98 182 96] "
                     "/Contents (")
                 + contents
                 + QByteArray(
@@ -14455,11 +14457,11 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
     QVERIFY(qAbs(rehydratedFrame.y() - resizedPlacement.y()) < 0.001);
     QVERIFY(qAbs(rehydratedFrame.width() - resizedPlacement.width()) < 0.001);
     QVERIFY(qAbs(rehydratedFrame.height() - resizedPlacement.height()) < 0.001);
-    QVERIFY(!rehydratedStamp.value(QStringLiteral("editable")).toBool());
+    QVERIFY(rehydratedStamp.value(QStringLiteral("editable")).toBool());
     QVERIFY(controller.selectComment(
         0,
         rehydratedStamp.value(QStringLiteral("objectId")).toString()));
-    QVERIFY(!controller.selectedEditable());
+    QVERIFY(controller.selectedEditable());
 
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
@@ -14537,7 +14539,7 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
         .value(QStringLiteral("stampColor"))
         .value<QColor>()
         .isValid());
-    QVERIFY(!sourceStamp.value(QStringLiteral("editable")).toBool());
+    QVERIFY(sourceStamp.value(QStringLiteral("editable")).toBool());
     QVERIFY(sourceStamp.value(QStringLiteral("deletable")).toBool());
     QVERIFY(sourceStamp
         .value(QStringLiteral("commentTextEditable"))
@@ -14545,9 +14547,13 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
     const QString objectId = sourceStamp
         .value(QStringLiteral("objectId"))
         .toString();
+    const QRectF sourceFrame = sourceStamp
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QRectF savedFrame(0.25, 0.25, 0.45, 0.12);
     QVERIFY(!objectId.isEmpty());
     QVERIFY(controller.selectComment(0, objectId));
-    QVERIFY(!controller.selectedEditable());
+    QVERIFY(controller.selectedEditable());
     QVERIFY(controller.selectedDeletable());
 
     {
@@ -14583,6 +14589,73 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
         std::unique_ptr<QObject> overlay(
             overlayComponent.createWithInitialProperties(overlayProperties));
         QVERIFY2(overlay, qPrintable(overlayComponent.errorString()));
+
+        const auto invokeOneArgument = [&overlay](
+                                           const char *method,
+                                           const QVariant &argument) {
+            QVariant result;
+            const bool invoked = QMetaObject::invokeMethod(
+                overlay.get(),
+                method,
+                Qt::DirectConnection,
+                Q_RETURN_ARG(QVariant, result),
+                Q_ARG(QVariant, argument));
+            return qMakePair(invoked, result);
+        };
+        for (const QString &geometryKind : {
+                 QStringLiteral("stickyNote"),
+                 QStringLiteral("freeText"),
+                 QStringLiteral("stamp"),
+                 QStringLiteral("highlight")}) {
+            const auto movable = invokeOneArgument(
+                "isMovableKind",
+                geometryKind);
+            QVERIFY(movable.first);
+            QVERIFY(movable.second.toBool());
+        }
+        const auto compactHitExtent = invokeOneArgument(
+            "resizeHandleHitExtent",
+            18.0);
+        QVERIFY(compactHitExtent.first);
+        QCOMPARE(compactHitExtent.second.toReal(), 5.0);
+
+        const auto resizeCursor = [&overlay](int horizontal, int vertical) {
+            QVariant result;
+            const QVariant horizontalValue = horizontal;
+            const QVariant verticalValue = vertical;
+            const bool invoked = QMetaObject::invokeMethod(
+                overlay.get(),
+                "resizeCursorForHandle",
+                Qt::DirectConnection,
+                Q_RETURN_ARG(QVariant, result),
+                Q_ARG(QVariant, horizontalValue),
+                Q_ARG(QVariant, verticalValue));
+            return qMakePair(invoked, result);
+        };
+        auto cursor = resizeCursor(1, 0);
+        QVERIFY(cursor.first);
+        QCOMPARE(cursor.second.toInt(), static_cast<int>(Qt::SizeHorCursor));
+        QVERIFY(overlay->setProperty("viewRotation", 90));
+        cursor = resizeCursor(1, 0);
+        QVERIFY(cursor.first);
+        QCOMPARE(cursor.second.toInt(), static_cast<int>(Qt::SizeVerCursor));
+
+        QVERIFY(QMetaObject::invokeMethod(
+            overlay.get(),
+            "startFrameResize",
+            Qt::DirectConnection));
+        QVERIFY(overlay->property("resizingFrame").toBool());
+        QCOMPARE(
+            overlay->property("frameResizePreview").toMap()
+                .value(QStringLiteral("kind")).toString(),
+            QStringLiteral("stamp"));
+        QVERIFY(QMetaObject::invokeMethod(
+            overlay.get(),
+            "cancelFrameResize",
+            Qt::DirectConnection));
+        QVERIFY(!overlay->property("resizingFrame").toBool());
+        QVERIFY(!controller.hasDrafts());
+
         QSignalSpy deleteCommentRequestSpy(
             overlay.get(),
             SIGNAL(deleteCommentRequested(int,QString)));
@@ -14610,6 +14683,15 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
         QCOMPARE(controller.commentItems().size(), 12);
         QVERIFY(controller.selectComment(0, objectId));
     }
+
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(savedFrame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), savedFrame);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), sourceFrame);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), savedFrame);
 
     const QString editedContents = QStringLiteral(
         "Nội dung Stamp đã được chỉnh sửa.");
@@ -14644,6 +14726,26 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
     QCOMPARE(editedInspection.appearanceName, QStringLiteral("Draft"));
     QCOMPARE(editedInspection.contents, editedContents);
     QCOMPARE(editedInspection.appearance, originalInspection.appearance);
+    QVERIFY(qAbs(editedInspection.rect.left
+                 - savedFrame.left() * 300.0) < 0.05);
+    QVERIFY(qAbs(editedInspection.rect.right
+                 - savedFrame.right() * 300.0) < 0.05);
+    QVERIFY(qAbs(editedInspection.rect.top
+                 - (1.0 - savedFrame.top()) * 600.0) < 0.05);
+    QVERIFY(qAbs(editedInspection.rect.bottom
+                 - (1.0 - savedFrame.bottom()) * 600.0) < 0.05);
+    const QByteArray editedDictionary = annotationDictionaryBytes(
+        editedPath,
+        sourceName);
+    QVERIFY(!editedDictionary.contains(
+        "TrePDFSourceCommentGeometryId"));
+    const AnnotationAppearanceStructureInspection originalAppearanceStructure
+        = inspectAnnotationAppearanceStructure(sourcePath, sourceName);
+    const AnnotationAppearanceStructureInspection editedAppearanceStructure
+        = inspectAnnotationAppearanceStructure(editedPath, sourceName);
+    QCOMPARE(
+        editedAppearanceStructure.boundingBox,
+        originalAppearanceStructure.boundingBox);
     const CommentAnnotationInspection replyInspection
         = inspectCommentAnnotation(editedPath, replyId);
     QVERIFY(replyInspection.readable);
@@ -14677,12 +14779,19 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
     QCOMPARE(
         rehydratedStamp.value(QStringLiteral("replyCount")).toInt(),
         1);
+    const QRectF rehydratedFrame = rehydratedStamp
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    QVERIFY(qAbs(rehydratedFrame.x() - savedFrame.x()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.y() - savedFrame.y()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.width() - savedFrame.width()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.height() - savedFrame.height()) < 0.001);
     QVERIFY(rehydratedStamp.value(QStringLiteral("deletable")).toBool());
 
     QVERIFY(controller.selectComment(
         0,
         rehydratedStamp.value(QStringLiteral("objectId")).toString()));
-    QVERIFY(!controller.selectedEditable());
+    QVERIFY(controller.selectedEditable());
     QVERIFY(controller.selectedDeletable());
     controller.deleteSelectedObject();
     QCOMPARE(controller.commentItems().size(), 11);
@@ -15408,9 +15517,17 @@ void PDFEditControllerTest::editsSourceStickyNoteComment()
     QCOMPARE(
         sourceComment.value(QStringLiteral("text")).toString(),
         sourceInspection.contents);
-    QVERIFY(!sourceComment.value(QStringLiteral("editable")).toBool());
+    QVERIFY(sourceComment.value(QStringLiteral("editable")).toBool());
     QVERIFY(sourceComment
         .value(QStringLiteral("commentTextEditable")).toBool());
+    const QRectF sourceFrame = sourceComment
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QRectF savedFrame(
+        0.34,
+        0.18,
+        sourceFrame.width() * 1.5,
+        sourceFrame.height() * 1.25);
     const QString objectId = sourceComment
         .value(QStringLiteral("objectId"))
         .toString();
@@ -15452,6 +15569,14 @@ void PDFEditControllerTest::editsSourceStickyNoteComment()
 
     const QString savedText = QStringLiteral("Saved source sticky note");
     QVERIFY(controller.selectComment(0, objectId));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(savedFrame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), savedFrame);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), sourceFrame);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), savedFrame);
     controller.setSelectedCommentText(savedText);
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     QVERIFY(!controller.hasDrafts());
@@ -15485,13 +15610,31 @@ void PDFEditControllerTest::editsSourceStickyNoteComment()
     QVERIFY(outputInspection.popupIndex >= 0);
     QVERIFY(outputInspection.popupParentMatches);
     QVERIFY(qAbs(outputInspection.rect.left
-                 - sourceInspection.rect.left) < 0.001);
+                 - savedFrame.left() * 200.0) < 0.05);
     QVERIFY(qAbs(outputInspection.rect.right
-                 - sourceInspection.rect.right) < 0.001);
+                 - savedFrame.right() * 200.0) < 0.05);
     QVERIFY(qAbs(outputInspection.rect.top
-                 - sourceInspection.rect.top) < 0.001);
+                 - (1.0 - savedFrame.top()) * 200.0) < 0.05);
     QVERIFY(qAbs(outputInspection.rect.bottom
-                 - sourceInspection.rect.bottom) < 0.001);
+                 - (1.0 - savedFrame.bottom()) * 200.0) < 0.05);
+    const QByteArray outputDictionary = annotationDictionaryBytes(
+        outputPath,
+        QStringLiteral("preserved-popup-comment"));
+    QVERIFY(!outputDictionary.contains(
+        "TrePDFSourceCommentGeometryId"));
+    const AnnotationAppearanceStructureInspection sourceAppearanceStructure
+        = inspectAnnotationAppearanceStructure(
+            sourcePath,
+            QStringLiteral("preserved-popup-comment"));
+    const AnnotationAppearanceStructureInspection outputAppearanceStructure
+        = inspectAnnotationAppearanceStructure(
+            outputPath,
+            QStringLiteral("preserved-popup-comment"));
+    QVERIFY(sourceAppearanceStructure.appearanceObjectFound);
+    QVERIFY(outputAppearanceStructure.appearanceObjectFound);
+    QCOMPARE(
+        outputAppearanceStructure.boundingBox,
+        sourceAppearanceStructure.boundingBox);
 
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
@@ -15505,7 +15648,14 @@ void PDFEditControllerTest::editsSourceStickyNoteComment()
     QCOMPARE(
         rehydratedComment.value(QStringLiteral("text")).toString(),
         savedText);
-    QVERIFY(!rehydratedComment.value(QStringLiteral("editable")).toBool());
+    const QRectF rehydratedFrame = rehydratedComment
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    QVERIFY(qAbs(rehydratedFrame.x() - savedFrame.x()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.y() - savedFrame.y()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.width() - savedFrame.width()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.height() - savedFrame.height()) < 0.001);
+    QVERIFY(rehydratedComment.value(QStringLiteral("editable")).toBool());
     QVERIFY(rehydratedComment
         .value(QStringLiteral("commentTextEditable")).toBool());
 }
@@ -15575,7 +15725,7 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
     QVERIFY(sourceInspection.readable);
     QCOMPARE(sourceInspection.annotationCount, 1);
     QCOMPARE(sourceInspection.subtype, subtype);
-    QCOMPARE(sourceInspection.quadPoints.size(), 1);
+    QCOMPARE(sourceInspection.quadPoints.size(), 2);
     QVERIFY(sourceInspection.hasAppearance);
     QVERIFY(sourceInspection.appearance.contains(
         QStringLiteral("TrePDF source text markup appearance sentinel")));
@@ -15596,12 +15746,47 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
             .value(QStringLiteral("highlightColor"))
             .value<QColor>(),
         QColor(33, 69, 156, 255));
-    QVERIFY(!sourceComment.value(QStringLiteral("editable")).toBool());
+    QVERIFY(sourceComment.value(QStringLiteral("editable")).toBool());
     QVERIFY(sourceComment
         .value(QStringLiteral("commentTextEditable")).toBool());
     const QString objectId = sourceComment
         .value(QStringLiteral("objectId"))
         .toString();
+
+    const QRectF sourceFrame = sourceComment
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    const QRectF savedFrame(0.18, 0.22, 0.55, 0.18);
+    QVERIFY(controller.selectComment(0, objectId));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(savedFrame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), savedFrame);
+    const QVariantList transformedPreviewRects
+        = controller.selectedDraftPreview()
+              .value(QStringLiteral("highlightRects"))
+              .toList();
+    QCOMPARE(transformedPreviewRects.size(), 2);
+    QRectF transformedPreviewBounds;
+    for (const QVariant &previewRectValue : transformedPreviewRects) {
+        const QVariantMap previewRect = previewRectValue.toMap();
+        const QRectF rect(
+            previewRect.value(QStringLiteral("x")).toReal(),
+            previewRect.value(QStringLiteral("y")).toReal(),
+            previewRect.value(QStringLiteral("width")).toReal(),
+            previewRect.value(QStringLiteral("height")).toReal());
+        transformedPreviewBounds = transformedPreviewBounds.isEmpty()
+            ? rect
+            : transformedPreviewBounds.united(rect);
+    }
+    QVERIFY(qAbs(transformedPreviewBounds.x() - savedFrame.x()) < 0.001);
+    QVERIFY(qAbs(transformedPreviewBounds.y() - savedFrame.y()) < 0.001);
+    QVERIFY(qAbs(transformedPreviewBounds.width() - savedFrame.width()) < 0.001);
+    QVERIFY(qAbs(transformedPreviewBounds.height() - savedFrame.height()) < 0.001);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), sourceFrame);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), savedFrame);
 
     QVERIFY(controller.setCommentText(0, objectId, savedText));
     QCOMPARE(
@@ -15632,29 +15817,76 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
         != sourceInspection.modificationDate);
     QVERIFY(outputInspection.hasAppearance);
     QCOMPARE(outputInspection.appearance, sourceInspection.appearance);
+    constexpr qreal pageWidth = 200.0;
+    constexpr qreal pageHeight = 200.0;
     QVERIFY(qAbs(outputInspection.rect.left
-                 - sourceInspection.rect.left) < 0.001);
+                 - savedFrame.left() * pageWidth) < 0.05);
     QVERIFY(qAbs(outputInspection.rect.right
-                 - sourceInspection.rect.right) < 0.001);
+                 - savedFrame.right() * pageWidth) < 0.05);
     QVERIFY(qAbs(outputInspection.rect.top
-                 - sourceInspection.rect.top) < 0.001);
+                 - (1.0 - savedFrame.top()) * pageHeight) < 0.05);
     QVERIFY(qAbs(outputInspection.rect.bottom
-                 - sourceInspection.rect.bottom) < 0.001);
+                 - (1.0 - savedFrame.bottom()) * pageHeight) < 0.05);
     QCOMPARE(
         outputInspection.quadPoints.size(),
         sourceInspection.quadPoints.size());
-    const FS_QUADPOINTSF sourceQuad
-        = sourceInspection.quadPoints.constFirst();
-    const FS_QUADPOINTSF outputQuad
-        = outputInspection.quadPoints.constFirst();
-    QVERIFY(qAbs(outputQuad.x1 - sourceQuad.x1) < 0.001);
-    QVERIFY(qAbs(outputQuad.y1 - sourceQuad.y1) < 0.001);
-    QVERIFY(qAbs(outputQuad.x2 - sourceQuad.x2) < 0.001);
-    QVERIFY(qAbs(outputQuad.y2 - sourceQuad.y2) < 0.001);
-    QVERIFY(qAbs(outputQuad.x3 - sourceQuad.x3) < 0.001);
-    QVERIFY(qAbs(outputQuad.y3 - sourceQuad.y3) < 0.001);
-    QVERIFY(qAbs(outputQuad.x4 - sourceQuad.x4) < 0.001);
-    QVERIFY(qAbs(outputQuad.y4 - sourceQuad.y4) < 0.001);
+    const auto transformedPagePoint = [
+        &sourceFrame,
+        &savedFrame,
+        pageWidth,
+        pageHeight](qreal pageX, qreal pageY) {
+        const QPointF normalized(
+            pageX / pageWidth,
+            1.0 - pageY / pageHeight);
+        const QPointF transformed(
+            savedFrame.left()
+                + (normalized.x() - sourceFrame.left())
+                    * savedFrame.width() / sourceFrame.width(),
+            savedFrame.top()
+                + (normalized.y() - sourceFrame.top())
+                    * savedFrame.height() / sourceFrame.height());
+        return QPointF(
+            transformed.x() * pageWidth,
+            (1.0 - transformed.y()) * pageHeight);
+    };
+    for (qsizetype quadIndex = 0;
+         quadIndex < sourceInspection.quadPoints.size();
+         ++quadIndex) {
+        const FS_QUADPOINTSF sourceQuad
+            = sourceInspection.quadPoints.at(quadIndex);
+        const FS_QUADPOINTSF outputQuad
+            = outputInspection.quadPoints.at(quadIndex);
+        const std::array<QPointF, 4> expectedPoints{
+            transformedPagePoint(sourceQuad.x1, sourceQuad.y1),
+            transformedPagePoint(sourceQuad.x2, sourceQuad.y2),
+            transformedPagePoint(sourceQuad.x3, sourceQuad.y3),
+            transformedPagePoint(sourceQuad.x4, sourceQuad.y4)};
+        const std::array<QPointF, 4> outputPoints{
+            QPointF(outputQuad.x1, outputQuad.y1),
+            QPointF(outputQuad.x2, outputQuad.y2),
+            QPointF(outputQuad.x3, outputQuad.y3),
+            QPointF(outputQuad.x4, outputQuad.y4)};
+        for (size_t pointIndex = 0;
+             pointIndex < expectedPoints.size();
+             ++pointIndex) {
+            QVERIFY(qAbs(outputPoints.at(pointIndex).x()
+                         - expectedPoints.at(pointIndex).x()) < 0.05);
+            QVERIFY(qAbs(outputPoints.at(pointIndex).y()
+                         - expectedPoints.at(pointIndex).y()) < 0.05);
+        }
+    }
+    const QByteArray outputDictionary = annotationDictionaryBytes(
+        outputPath,
+        annotationName);
+    QVERIFY(!outputDictionary.contains(
+        "TrePDFSourceCommentGeometryId"));
+    const AnnotationAppearanceStructureInspection sourceAppearanceStructure
+        = inspectAnnotationAppearanceStructure(sourcePath, annotationName);
+    const AnnotationAppearanceStructureInspection outputAppearanceStructure
+        = inspectAnnotationAppearanceStructure(outputPath, annotationName);
+    QCOMPARE(
+        outputAppearanceStructure.boundingBox,
+        sourceAppearanceStructure.boundingBox);
 
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
@@ -15668,7 +15900,14 @@ void PDFEditControllerTest::editsSourceTextMarkupComment()
     QCOMPARE(
         rehydratedComment.value(QStringLiteral("text")).toString(),
         savedText);
-    QVERIFY(!rehydratedComment.value(QStringLiteral("editable")).toBool());
+    const QRectF rehydratedFrame = rehydratedComment
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    QVERIFY(qAbs(rehydratedFrame.x() - savedFrame.x()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.y() - savedFrame.y()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.width() - savedFrame.width()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.height() - savedFrame.height()) < 0.001);
+    QVERIFY(rehydratedComment.value(QStringLiteral("editable")).toBool());
     QVERIFY(rehydratedComment
         .value(QStringLiteral("commentTextEditable")).toBool());
 }
@@ -18729,7 +18968,7 @@ void PDFEditControllerTest::indexesDrawingAndUnsupportedMarkupComments()
         const bool stampComment
             = text == QLatin1String("unsupported-stamp");
         const bool supportedComment = drawingComment || stampComment;
-        const bool pageEditable = drawingComment;
+        const bool pageEditable = drawingComment || stampComment;
         QCOMPARE(
             comment.value(QStringLiteral("kind")).toString(),
             drawingComment
@@ -19476,11 +19715,11 @@ void PDFEditControllerTest::savesStickyNoteRoundTrip()
     QCOMPARE(
         rehydratedModificationDate.toSecsSinceEpoch(),
         modificationDate.toSecsSinceEpoch());
-    QVERIFY(!rehydratedNote.value(QStringLiteral("editable")).toBool());
+    QVERIFY(rehydratedNote.value(QStringLiteral("editable")).toBool());
     QVERIFY(controller.selectComment(
         0,
         rehydratedNote.value(QStringLiteral("objectId")).toString()));
-    QVERIFY(!controller.selectedEditable());
+    QVERIFY(controller.selectedEditable());
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
     QVERIFY(controller.commentItems().constFirst().toMap()
@@ -19602,10 +19841,25 @@ void PDFEditControllerTest::savesAndEditsFreeTextRoundTrip()
     QVERIFY(rehydrated
         .value(QStringLiteral("commentTextEditable"))
         .toBool());
+    QVERIFY(rehydrated.value(QStringLiteral("editable")).toBool());
     const QString rehydratedObjectId = rehydrated
         .value(QStringLiteral("objectId"))
         .toString();
     QVERIFY(!rehydratedObjectId.isEmpty());
+    const QRectF rehydratedSourceFrame = rehydrated
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+
+    const QRectF secondPlacement(0.48, 0.18, 0.34, 0.20);
+    QVERIFY(controller.selectComment(0, rehydratedObjectId));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(secondPlacement);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), secondPlacement);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), rehydratedSourceFrame);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), secondPlacement);
 
     const QString secondText = QStringLiteral(
         "Nội dung Free Text đã được chỉnh sửa sau khi mở lại.");
@@ -19637,6 +19891,18 @@ void PDFEditControllerTest::savesAndEditsFreeTextRoundTrip()
     QCOMPARE(secondInspection.contents, secondText);
     QVERIFY(secondInspection.hasAppearance);
     QVERIFY(!secondInspection.modificationDate.isEmpty());
+    QVERIFY(closeEnough(
+        secondInspection.rect.left,
+        secondPlacement.left() * pageSize.width()));
+    QVERIFY(closeEnough(
+        secondInspection.rect.right,
+        secondPlacement.right() * pageSize.width()));
+    QVERIFY(closeEnough(
+        secondInspection.rect.top,
+        (1.0 - secondPlacement.top()) * pageSize.height()));
+    QVERIFY(closeEnough(
+        secondInspection.rect.bottom,
+        (1.0 - secondPlacement.bottom()) * pageSize.height()));
     const CommentAnnotationInspection replyInspection
         = inspectCommentAnnotation(secondOutputPath, replyId);
     QVERIFY(replyInspection.readable);
@@ -19654,6 +19920,15 @@ void PDFEditControllerTest::savesAndEditsFreeTextRoundTrip()
             firstWithAnnotations,
             secondWithAnnotations,
             placementPixels) > 0);
+    const QRect secondPlacementPixels(
+        qRound(secondPlacement.x() * renderSize.width()),
+        qRound(secondPlacement.y() * renderSize.height()),
+        qRound(secondPlacement.width() * renderSize.width()),
+        qRound(secondPlacement.height() * renderSize.height()));
+    QVERIFY(changedPixelCount(
+        sourceWithoutAnnotations,
+        secondWithAnnotations,
+        secondPlacementPixels) > 0);
 
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
@@ -19671,6 +19946,14 @@ void PDFEditControllerTest::savesAndEditsFreeTextRoundTrip()
     QCOMPARE(
         rehydratedRoot.value(QStringLiteral("text")).toString(),
         secondText);
+    QVERIFY(rehydratedRoot.value(QStringLiteral("editable")).toBool());
+    const QRectF rehydratedFrame = rehydratedRoot
+        .value(QStringLiteral("frameRect"))
+        .toRectF();
+    QVERIFY(qAbs(rehydratedFrame.x() - secondPlacement.x()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.y() - secondPlacement.y()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.width() - secondPlacement.width()) < 0.001);
+    QVERIFY(qAbs(rehydratedFrame.height() - secondPlacement.height()) < 0.001);
 }
 
 void PDFEditControllerTest::savesFreeTextWithPageLocalDuplicateNames()
@@ -19837,7 +20120,7 @@ void PDFEditControllerTest::savesCommentReplyRoundTrip()
     QCOMPARE(
         rehydratedReply.value(QStringLiteral("replyCount")).toInt(),
         0);
-    QVERIFY(!rehydratedRoot.value(QStringLiteral("editable")).toBool());
+    QVERIFY(rehydratedRoot.value(QStringLiteral("editable")).toBool());
     QVERIFY(!rehydratedReply.value(QStringLiteral("editable")).toBool());
     QVERIFY(rehydratedRoot
         .value(QStringLiteral("commentTextEditable")).toBool());

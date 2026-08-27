@@ -23,6 +23,7 @@
 #include <QtQml/qqmlregistration.h>
 
 #include <atomic>
+#include <array>
 #include <functional>
 #include <memory>
 
@@ -457,6 +458,7 @@ private:
         QPointF shapeEndRatio = QPointF(1.0, 1.0);
         qreal shapeStrokeWidthRatio = 0.0;
         QVector<QRectF> highlightRects;
+        QVector<std::array<QPointF, 4>> textMarkupQuads;
         QColor highlightColor;
         PDFCommentAnnotation::DrawingType drawingType
             = PDFCommentAnnotation::DrawingType::Square;
@@ -722,6 +724,9 @@ private:
         const QString &text,
         const ParagraphFormat &prototype);
     static Draft initialDraftForCandidate(const Candidate &candidate);
+    static QVector<QRectF> highlightRectsForDraft(const Draft &draft);
+    static QVector<std::array<QPointF, 4>> textMarkupQuadsForDraft(
+        const Draft &draft);
     static QVector<QPointF> drawingVerticesForDraft(const Draft &draft);
     static QVector<QVector<QPointF>> inkStrokesForDraft(const Draft &draft);
     static QPointF layoutOriginForDraft(const Draft &draft);

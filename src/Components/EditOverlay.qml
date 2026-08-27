@@ -14,6 +14,7 @@ Item {
     required property AppTheme theme
     required property PDFEditController controller
     required property real pagePointScale
+    property int viewRotation: 0
 
     property var drafts: []
     property var contentDrafts: []
@@ -54,6 +55,12 @@ Item {
             frameResizePreview.inkStrokes === undefined
                 ? []
                 : frameResizePreview.inkStrokes,
+            frameResizePreviewSourceRect)
+    readonly property var frameResizePreviewRects:
+        normalizedRectsForFrame(
+            frameResizePreview.highlightRects === undefined
+                ? []
+                : frameResizePreview.highlightRects,
             frameResizePreviewSourceRect)
     property bool editingSourceTextMoveOnly: false
     property real editingSourceTranslationX: 0
@@ -732,6 +739,87 @@ Item {
             || kind === "stamp"
     }
 
+    function isGeometryCommentKind(kind) {
+        return isTextMarkupKind(kind)
+            || isDrawingCommentKind(kind)
+            || kind === "stickyNote"
+            || kind === "freeText"
+            || kind === "ink"
+            || kind === "stamp"
+    }
+
+    function resizeHandleHitExtent(overlayExtent) {
+        return Math.min(
+            resizeHandleHitSize,
+            Math.max(2, (Number(overlayExtent) - 8) / 2))
+    }
+
+    function resizeCursorForHandle(horizontal, vertical) {
+        const rotation = ((viewRotation % 360) + 360) % 360
+        const quarterTurn = rotation === 90 || rotation === 270
+        if (horizontal === 0)
+            return quarterTurn ? Qt.SizeHorCursor : Qt.SizeVerCursor
+        if (vertical === 0)
+            return quarterTurn ? Qt.SizeVerCursor : Qt.SizeHorCursor
+
+        const forwardDiagonal = horizontal === vertical
+        return forwardDiagonal !== quarterTurn
+            ? Qt.SizeFDiagCursor
+            : Qt.SizeBDiagCursor
+    }
+
+    function directionalResizeAccessibilityName(baseName,
+                                                  horizontal,
+                                                  vertical) {
+        if (horizontal < 0 && vertical < 0) {
+            //% "%1 from top-left"
+            const pattern = qsTrId("ResizeFromTopLeft")
+            return formattedResizeAccessibilityName(pattern, baseName)
+        }
+        if (horizontal === 0 && vertical < 0) {
+            //% "%1 from top"
+            const pattern = qsTrId("ResizeFromTop")
+            return formattedResizeAccessibilityName(pattern, baseName)
+        }
+        if (horizontal > 0 && vertical < 0) {
+            //% "%1 from top-right"
+            const pattern = qsTrId("ResizeFromTopRight")
+            return formattedResizeAccessibilityName(pattern, baseName)
+        }
+        if (horizontal > 0 && vertical === 0) {
+            //% "%1 from right"
+            const pattern = qsTrId("ResizeFromRight")
+            return formattedResizeAccessibilityName(pattern, baseName)
+        }
+        if (horizontal > 0 && vertical > 0) {
+            //% "%1 from bottom-right"
+            const pattern = qsTrId("ResizeFromBottomRight")
+            return formattedResizeAccessibilityName(pattern, baseName)
+        }
+        if (horizontal === 0 && vertical > 0) {
+            //% "%1 from bottom"
+            const pattern = qsTrId("ResizeFromBottom")
+            return formattedResizeAccessibilityName(pattern, baseName)
+        }
+        if (horizontal < 0 && vertical > 0) {
+            //% "%1 from bottom-left"
+            const pattern = qsTrId("ResizeFromBottomLeft")
+            return formattedResizeAccessibilityName(pattern, baseName)
+        }
+        if (horizontal < 0 && vertical === 0) {
+            //% "%1 from left"
+            const pattern = qsTrId("ResizeFromLeft")
+            return formattedResizeAccessibilityName(pattern, baseName)
+        }
+        return baseName
+    }
+
+    function formattedResizeAccessibilityName(pattern, baseName) {
+        return pattern.indexOf("%1") >= 0
+            ? pattern.arg(baseName)
+            : pattern
+    }
+
     function isTextMarkupTool() {
         return controller.tool === PDFEditController.HighlightTool
             || controller.tool === PDFEditController.UnderlineTool
@@ -788,11 +876,9 @@ Item {
     function isMovableKind(kind) {
         return isImageKind(kind)
             || isShapeKind(kind)
-            || isDrawingCommentKind(kind)
+            || isGeometryCommentKind(kind)
             || kind === "text"
             || kind === "addedText"
-            || kind === "ink"
-            || kind === "stamp"
     }
 
     function isImageCandidate(candidate) {
@@ -1070,13 +1156,30 @@ Item {
         return normalizedStrokes
     }
 
+    function normalizedRectsForFrame(rects, frameRect) {
+        const frameWidth = Number(frameRect.width)
+        const frameHeight = Number(frameRect.height)
+        if (frameWidth <= 0 || frameHeight <= 0)
+            return []
+
+        const normalizedRects = []
+        for (let index = 0; index < rects.length; ++index) {
+            const rect = rects[index]
+            normalizedRects.push(Qt.rect(
+                (Number(rect.x) - Number(frameRect.x)) / frameWidth,
+                (Number(rect.y) - Number(frameRect.y)) / frameHeight,
+                Number(rect.width) / frameWidth,
+                Number(rect.height) / frameHeight))
+        }
+        return normalizedRects
+    }
+
     function startFrameResize() {
         controller.beginSelectedFrameResize()
         resizingFrame = true
         resizingObjectId = controller.selectedObjectId
         const selectedKind = controller.selectedKind
-        frameResizePreview = isDrawingCommentKind(selectedKind)
-                || selectedKind === "ink"
+        frameResizePreview = isGeometryCommentKind(selectedKind)
             ? controller.selectedDraftPreview()
             : ({})
     }
@@ -2051,6 +2154,8 @@ Item {
             width: root.width
             height: root.height
             z: 0
+            visible: !(root.resizingFrame
+                && String(modelData.objectId) === root.resizingObjectId)
 
             Repeater {
                 model: highlightItem.modelData.highlightRects
@@ -2234,6 +2339,185 @@ Item {
         Accessible.ignored: true
     }
 
+    Item {
+        id: textMarkupFrameResizePreview
+
+        readonly property rect frameRect: root.controller.selectedFrameRect
+        readonly property string markupKind: root.frameResizePreviewKind
+
+        x: frameRect.x * root.width
+        y: frameRect.y * root.height
+        width: Math.max(1, frameRect.width * root.width)
+        height: Math.max(1, frameRect.height * root.height)
+        visible: root.resizingFrame
+            && root.isTextMarkupKind(markupKind)
+            && root.frameResizePreviewRects.length > 0
+        z: 2
+        Accessible.ignored: true
+
+        Repeater {
+            model: root.frameResizePreviewRects
+
+            delegate: Rectangle {
+                id: previewMarkupRect
+
+                required property var modelData
+
+                x: modelData.x * textMarkupFrameResizePreview.width
+                y: modelData.y * textMarkupFrameResizePreview.height
+                width: Math.max(
+                    1,
+                    modelData.width * textMarkupFrameResizePreview.width)
+                height: Math.max(
+                    1,
+                    modelData.height * textMarkupFrameResizePreview.height)
+                color: textMarkupFrameResizePreview.markupKind === "highlight"
+                    ? (root.frameResizePreview.highlightColor !== undefined
+                        ? root.frameResizePreview.highlightColor
+                        : "#ffd740")
+                    : "transparent"
+                Accessible.ignored: true
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom:
+                        textMarkupFrameResizePreview.markupKind === "underline"
+                            ? parent.bottom
+                            : undefined
+                    anchors.verticalCenter:
+                        textMarkupFrameResizePreview.markupKind === "strikeout"
+                            ? parent.verticalCenter
+                            : undefined
+                    height: Math.max(
+                        1,
+                        Math.min(3, parent.height * 0.12))
+                    visible: textMarkupFrameResizePreview.markupKind
+                            !== "highlight"
+                        && textMarkupFrameResizePreview.markupKind
+                            !== "squiggly"
+                    color: root.frameResizePreview.highlightColor !== undefined
+                        ? root.frameResizePreview.highlightColor
+                        : "#ffd740"
+                    Accessible.ignored: true
+                }
+
+                SquigglyLine {
+                    anchors.fill: parent
+                    waveColor: root.frameResizePreview.highlightColor !== undefined
+                        ? root.frameResizePreview.highlightColor
+                        : "#ffd740"
+                    pagePointScale: root.pagePointScale
+                    visible: textMarkupFrameResizePreview.markupKind
+                        === "squiggly"
+                    Accessible.ignored: true
+                }
+            }
+        }
+    }
+
+    StampView {
+        readonly property rect frameRect: root.controller.selectedFrameRect
+
+        x: frameRect.x * root.width
+        y: frameRect.y * root.height
+        width: Math.max(1, frameRect.width * root.width)
+        height: Math.max(1, frameRect.height * root.height)
+        stampName: String(root.frameResizePreview.stampName || "")
+        stampText: String(root.frameResizePreview.stampText || "")
+        stampColor: root.frameResizePreview.stampColor !== undefined
+            ? root.frameResizePreview.stampColor
+            : "#c62828"
+        visible: root.resizingFrame
+            && root.frameResizePreviewKind === "stamp"
+        z: 2
+        Accessible.ignored: true
+    }
+
+    Rectangle {
+        id: stickyNoteFrameResizePreview
+
+        readonly property rect frameRect: root.controller.selectedFrameRect
+
+        x: frameRect.x * root.width
+        y: frameRect.y * root.height
+        width: Math.max(18, frameRect.width * root.width)
+        height: Math.max(18, frameRect.height * root.height)
+        radius: 4
+        color: root.frameResizePreview.highlightColor !== undefined
+            ? root.frameResizePreview.highlightColor
+            : "#ffeb3b"
+        border.width: 1
+        border.color: "#b8a316"
+        visible: root.resizingFrame
+            && root.frameResizePreviewKind === "stickyNote"
+        z: 2
+        Accessible.ignored: true
+
+        Image {
+            anchors.fill: parent
+            anchors.margins: Math.max(
+                3,
+                Math.min(parent.width, parent.height) * 0.2)
+            source: "../assets/icons/comment.svg"
+            sourceSize.width: width
+            sourceSize.height: height
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            Accessible.ignored: true
+        }
+    }
+
+    Rectangle {
+        id: freeTextFrameResizePreview
+
+        readonly property rect frameRect: root.controller.selectedFrameRect
+        readonly property real fontPixelSize: Math.max(
+            1,
+            (Number(root.frameResizePreview.displayFontSizeRatio) > 0
+                ? Number(root.frameResizePreview.displayFontSizeRatio)
+                : 0.018) * root.height)
+        readonly property font displayFont:
+            root.controller.fontForDisplay(
+                String(root.frameResizePreview.fontFamily || "Helvetica"),
+                Number(root.frameResizePreview.fontStretch || 100),
+                root.frameResizePreview.fontBold === true,
+                root.frameResizePreview.fontItalic === true,
+                root.frameResizePreview.fontUnderline === true,
+                fontPixelSize)
+        readonly property real contentMargin: Math.min(
+            Math.max(2, 4 * root.pagePointScale),
+            Math.max(0, Math.min(width, height) / 4))
+
+        x: frameRect.x * root.width
+        y: frameRect.y * root.height
+        width: Math.max(1, frameRect.width * root.width)
+        height: Math.max(1, frameRect.height * root.height)
+        color: "#ffffff"
+        border.width: Math.max(1, root.pagePointScale)
+        border.color: "#000000"
+        clip: true
+        visible: root.resizingFrame
+            && root.frameResizePreviewKind === "freeText"
+        z: 2
+        Accessible.ignored: true
+
+        Text {
+            anchors.fill: parent
+            anchors.margins: freeTextFrameResizePreview.contentMargin
+            text: String(root.frameResizePreview.text || "")
+            textFormat: Text.PlainText
+            color: root.frameResizePreview.color !== undefined
+                ? root.frameResizePreview.color
+                : "#202124"
+            font: freeTextFrameResizePreview.displayFont
+            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+            elide: Text.ElideNone
+            verticalAlignment: Text.AlignTop
+            Accessible.ignored: true
+        }
+    }
+
     Repeater {
         model: root.stampDrafts
 
@@ -2254,6 +2538,9 @@ Item {
             visible: (modelData.added === true
                     || modelData.geometryChanged === true)
                 && modelData.deleted !== true
+                && !(root.resizingFrame
+                    && String(modelData.objectId)
+                        === root.resizingObjectId)
             z: 1
             Accessible.ignored: true
         }
@@ -2277,6 +2564,9 @@ Item {
             border.width: 1
             border.color: "#b8a316"
             visible: modelData.deleted !== true
+                && !(root.resizingFrame
+                    && String(modelData.objectId)
+                        === root.resizingObjectId)
             z: 1
             Accessible.ignored: true
 
@@ -2330,6 +2620,9 @@ Item {
             border.color: "#000000"
             clip: true
             visible: modelData.deleted !== true
+                && !(root.resizingFrame
+                    && String(modelData.objectId)
+                        === root.resizingObjectId)
             z: 1
             Accessible.ignored: true
 
@@ -3586,6 +3879,11 @@ Item {
                     //% "Move stamp comment"
                     return qsTrId("MoveStampComment")
                 }
+                if (root.isGeometryCommentKind(
+                        root.controller.selectedKind)) {
+                    //% "Move comment"
+                    return qsTrId("MoveComment")
+                }
                 //% "Move text"
                 return qsTrId("MoveText")
             }
@@ -3672,44 +3970,26 @@ Item {
         Repeater {
             model: {
                 const selectedKind = root.controller.selectedKind
-                if (selectedKind === "image"
-                        || (root.isCommentKind(selectedKind)
-                            && !root.isDrawingCommentKind(selectedKind)
-                            && selectedKind !== "ink"
-                            && selectedKind !== "stamp")) {
+                if (selectedKind === "image") {
                     return []
                 }
-                if (root.isDrawingCommentKind(selectedKind)
-                        || selectedKind === "ink"
-                        || selectedKind === "stamp") {
+                if (root.isGeometryCommentKind(selectedKind)) {
                     return [
-                        { horizontal: -1, vertical: -1,
-                            cursor: Qt.SizeFDiagCursor },
-                        { horizontal: 0, vertical: -1,
-                            cursor: Qt.SizeVerCursor },
-                        { horizontal: 1, vertical: -1,
-                            cursor: Qt.SizeBDiagCursor },
-                        { horizontal: 1, vertical: 0,
-                            cursor: Qt.SizeHorCursor },
-                        { horizontal: 1, vertical: 1,
-                            cursor: Qt.SizeFDiagCursor },
-                        { horizontal: 0, vertical: 1,
-                            cursor: Qt.SizeVerCursor },
-                        { horizontal: -1, vertical: 1,
-                            cursor: Qt.SizeBDiagCursor },
-                        { horizontal: -1, vertical: 0,
-                            cursor: Qt.SizeHorCursor }
+                        { horizontal: -1, vertical: -1 },
+                        { horizontal: 0, vertical: -1 },
+                        { horizontal: 1, vertical: -1 },
+                        { horizontal: 1, vertical: 0 },
+                        { horizontal: 1, vertical: 1 },
+                        { horizontal: 0, vertical: 1 },
+                        { horizontal: -1, vertical: 1 },
+                        { horizontal: -1, vertical: 0 }
                     ]
                 }
                 return [
-                    { horizontal: 0, vertical: -1,
-                        cursor: Qt.SizeVerCursor },
-                    { horizontal: 1, vertical: 0,
-                        cursor: Qt.SizeHorCursor },
-                    { horizontal: 0, vertical: 1,
-                        cursor: Qt.SizeVerCursor },
-                    { horizontal: -1, vertical: 0,
-                        cursor: Qt.SizeHorCursor }
+                    { horizontal: 0, vertical: -1 },
+                    { horizontal: 1, vertical: 0 },
+                    { horizontal: 0, vertical: 1 },
+                    { horizontal: -1, vertical: 0 }
                 ]
             }
 
@@ -3719,7 +3999,7 @@ Item {
                 required property var modelData
                 property rect dragStartFrameRect: Qt.rect(0, 0, 0, 0)
                 property point dragStartPosition: Qt.point(0, 0)
-                readonly property string accessibilityName: {
+                readonly property string baseAccessibilityName: {
                     if (root.controller.selectedKind === "addedImage") {
                         //% "Resize image"
                         return qsTrId("ResizeImage")
@@ -3741,9 +4021,19 @@ Item {
                         //% "Resize stamp comment"
                         return qsTrId("ResizeStampComment")
                     }
+                    if (root.isGeometryCommentKind(
+                            root.controller.selectedKind)) {
+                        //% "Resize comment"
+                        return qsTrId("ResizeComment")
+                    }
                     //% "Resize text box"
                     return qsTrId("ResizeTextBox")
                 }
+                readonly property string accessibilityName:
+                    root.directionalResizeAccessibilityName(
+                        baseAccessibilityName,
+                        Number(modelData.horizontal),
+                        Number(modelData.vertical))
 
                 x: modelData.horizontal < 0
                     ? -width / 2
@@ -3755,14 +4045,14 @@ Item {
                     : modelData.vertical > 0
                         ? resizeOverlay.height - height / 2
                         : (resizeOverlay.height - height) / 2
-                width: root.resizeHandleHitSize
-                height: root.resizeHandleHitSize
+                width: root.resizeHandleHitExtent(resizeOverlay.width)
+                height: root.resizeHandleHitExtent(resizeOverlay.height)
 
                 Rectangle {
                     anchors.centerIn: parent
-                    width: root.resizeHandleSize
-                    height: root.resizeHandleSize
-                    radius: width / 2
+                    width: Math.min(root.resizeHandleSize, parent.width)
+                    height: Math.min(root.resizeHandleSize, parent.height)
+                    radius: Math.min(width, height) / 2
                     color: root.editBoxColor
                     border.width: 1
                     border.color: "#fffdfb"
@@ -3776,7 +4066,9 @@ Item {
                     acceptedButtons: Qt.LeftButton
                     hoverEnabled: true
                     preventStealing: true
-                    cursorShape: resizeHandle.modelData.cursor
+                    cursorShape: root.resizeCursorForHandle(
+                        Number(resizeHandle.modelData.horizontal),
+                        Number(resizeHandle.modelData.vertical))
                     activeFocusOnTab: true
                     Accessible.role: Accessible.Button
                     Accessible.name: resizeHandle.accessibilityName

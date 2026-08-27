@@ -3546,6 +3546,39 @@ QByteArrayView textMarkupSubtypeName(
     return {};
 }
 
+QByteArrayView sourceCommentGeometrySubtypeName(
+    PDFAcroFormCanonicalizer::SourceCommentGeometryType type)
+{
+    switch (type) {
+    case PDFAcroFormCanonicalizer::SourceCommentGeometryType::StickyNote:
+        return QByteArrayView("/Text");
+    case PDFAcroFormCanonicalizer::SourceCommentGeometryType::Stamp:
+        return QByteArrayView("/Stamp");
+    case PDFAcroFormCanonicalizer::SourceCommentGeometryType::Highlight:
+        return QByteArrayView("/Highlight");
+    case PDFAcroFormCanonicalizer::SourceCommentGeometryType::Underline:
+        return QByteArrayView("/Underline");
+    case PDFAcroFormCanonicalizer::SourceCommentGeometryType::Squiggly:
+        return QByteArrayView("/Squiggly");
+    case PDFAcroFormCanonicalizer::SourceCommentGeometryType::StrikeOut:
+        return QByteArrayView("/StrikeOut");
+    }
+    return {};
+}
+
+bool isSourceTextMarkupGeometryType(
+    PDFAcroFormCanonicalizer::SourceCommentGeometryType type)
+{
+    return type
+            == PDFAcroFormCanonicalizer::SourceCommentGeometryType::Highlight
+        || type
+            == PDFAcroFormCanonicalizer::SourceCommentGeometryType::Underline
+        || type
+            == PDFAcroFormCanonicalizer::SourceCommentGeometryType::Squiggly
+        || type
+            == PDFAcroFormCanonicalizer::SourceCommentGeometryType::StrikeOut;
+}
+
 bool directDictionaryValueRange(const QByteArray &dictionary,
                                 QByteArrayView key,
                                 qsizetype &valueStart,
@@ -3968,6 +4001,22 @@ QByteArray pdfPointArray(const QVector<QPointF> &points)
             value += ' ';
         }
         value += pdfNumber(point.x()) + ' ' + pdfNumber(point.y());
+    }
+    value += ']';
+    return value;
+}
+
+QByteArray pdfQuadPointArray(
+    const QVector<std::array<QPointF, 4>> &quads)
+{
+    QByteArray value = QByteArrayLiteral("[");
+    for (const std::array<QPointF, 4> &quad : quads) {
+        for (const QPointF &point : quad) {
+            if (value.size() > 1) {
+                value += ' ';
+            }
+            value += pdfNumber(point.x()) + ' ' + pdfNumber(point.y());
+        }
     }
     value += ']';
     return value;
@@ -8355,6 +8404,299 @@ bool PDFAcroFormCanonicalizer::finalizeSourceDrawingGeometryUpdates(
         root,
         previousXref,
         nextObjectNumber,
+        sourceEndsWithNewline,
+        std::move(incrementalObjects),
+        error);
+}
+
+bool PDFAcroFormCanonicalizer::finalizeSourceCommentGeometryUpdates(
+    const QString &filePath,
+    const QVector<SourceCommentGeometryUpdate> &updates,
+    QString &error)
+{
+    constexpr qsizetype maximumAnnotations = 4096;
+    constexpr qsizetype maximumQuadsPerAnnotation = 4096;
+    constexpr qsizetype maximumTotalQuadPoints = 65536;
+    constexpr qreal maximumCoordinateMagnitudePoints = 10'000'000.0;
+    if (updates.isEmpty()) {
+        return true;
+    }
+    if (updates.size() > maximumAnnotations) {
+        error = QStringLiteral(
+            "Too many source comment geometry updates were requested.");
+        return false;
+    }
+
+    QSet<QString> markerIds;
+    qsizetype totalQuadPoints = 0;
+    const auto finitePoint = [
+        maximumCoordinateMagnitudePoints](const QPointF &point) {
+        return std::isfinite(point.x())
+            && std::isfinite(point.y())
+            && qAbs(point.x()) <= maximumCoordinateMagnitudePoints
+            && qAbs(point.y()) <= maximumCoordinateMagnitudePoints;
+    };
+    for (const SourceCommentGeometryUpdate &update : updates) {
+        const QRectF bounds = update.pageRect.normalized();
+        const bool textMarkup = isSourceTextMarkupGeometryType(update.type);
+        if (update.markerId.isEmpty()
+            || markerIds.contains(update.markerId)
+            || update.page < 0
+            || sourceCommentGeometrySubtypeName(update.type).isEmpty()
+            || !bounds.isValid()
+            || bounds.width() <= 0.0
+            || bounds.height() <= 0.0
+            || !finitePoint(bounds.topLeft())
+            || !finitePoint(bounds.bottomRight())
+            || (textMarkup
+                && (update.pageQuadPoints.isEmpty()
+                    || update.pageQuadPoints.size()
+                        > maximumQuadsPerAnnotation))
+            || (!textMarkup && !update.pageQuadPoints.isEmpty())) {
+            error = QStringLiteral(
+                "A source comment geometry update is invalid or duplicated.");
+            return false;
+        }
+        markerIds.insert(update.markerId);
+        for (const std::array<QPointF, 4> &quad
+             : update.pageQuadPoints) {
+            if (totalQuadPoints
+                    > maximumTotalQuadPoints
+                        - static_cast<qsizetype>(quad.size())
+                || !std::all_of(
+                    quad.cbegin(),
+                    quad.cend(),
+                    finitePoint)) {
+                error = QStringLiteral(
+                    "Source text markup geometry exceeds the safety limit.");
+                return false;
+            }
+            qreal minimumX = quad.front().x();
+            qreal maximumX = minimumX;
+            qreal minimumY = quad.front().y();
+            qreal maximumY = minimumY;
+            for (const QPointF &point : quad) {
+                minimumX = qMin(minimumX, point.x());
+                maximumX = qMax(maximumX, point.x());
+                minimumY = qMin(minimumY, point.y());
+                maximumY = qMax(maximumY, point.y());
+            }
+            if (maximumX <= minimumX || maximumY <= minimumY) {
+                error = QStringLiteral(
+                    "A source text markup quadrilateral is empty.");
+                return false;
+            }
+            totalQuadPoints += static_cast<qsizetype>(quad.size());
+        }
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0) {
+        error = file.errorString();
+        return false;
+    }
+    const qint64 fileSize = file.size();
+    uchar *mapped = file.map(0, fileSize);
+    if (!mapped) {
+        error = file.errorString();
+        return false;
+    }
+
+    ParsedPdf pdf;
+    if (!parseXref(
+            reinterpret_cast<const char *>(mapped),
+            fileSize,
+            pdf,
+            error)) {
+        file.unmap(mapped);
+        return false;
+    }
+    const auto fail = [&file, mapped, &error](const QString &message) {
+        error = message;
+        file.unmap(mapped);
+        return false;
+    };
+
+    int highestObject = 0;
+    for (auto entry = pdf.entries.cbegin(); entry != pdf.entries.cend(); ++entry) {
+        highestObject = (std::max)(highestObject, entry.key());
+    }
+    const int declaredSize = (std::max)(
+        pdf.declaredSize,
+        highestObject + 1);
+
+    struct DictionaryReplacement {
+        qsizetype start = -1;
+        qsizetype end = -1;
+        QByteArray value;
+    };
+    QHash<int, QVector<DictionaryReplacement>> replacementsByContainer;
+    QHash<int, ObjectReference> containerReferences;
+    QHash<int, QByteArray> rewrittenObjects;
+    QHash<int, ObjectReference> rewrittenReferences;
+    QList<IncrementalObject> incrementalObjects;
+    incrementalObjects.reserve(updates.size());
+    const QByteArray markerDictionaryKey
+        = QByteArrayLiteral("/") + kSourceCommentGeometryMarkerKey;
+
+    for (const SourceCommentGeometryUpdate &update : updates) {
+        const PlaceholderLocation placeholder = annotationForStringId(
+            pdf,
+            QByteArrayView(markerDictionaryKey),
+            update.markerId,
+            sourceCommentGeometrySubtypeName(update.type));
+        const bool located = placeholder.widget.number >= 0
+            || (placeholder.container.number >= 0
+                && placeholder.dictionaryStart >= 0
+                && placeholder.dictionaryEnd > placeholder.dictionaryStart);
+        if (!located) {
+            return fail(QStringLiteral(
+                "A marked source comment annotation could not be located."));
+        }
+
+        QByteArray object;
+        qsizetype dictionaryStart = -1;
+        qsizetype dictionaryEnd = -1;
+        if (placeholder.isDirect()) {
+            object = completeObject(pdf, placeholder.container.number, error);
+            dictionaryStart = placeholder.dictionaryStart;
+            dictionaryEnd = placeholder.dictionaryEnd;
+        } else {
+            object = completeObject(pdf, placeholder.widget.number, error);
+            dictionaryStart = object.indexOf("<<");
+            if (dictionaryStart >= 0
+                && !matchingDictionaryEnd(
+                    object.constData(),
+                    object.size(),
+                    dictionaryStart,
+                    dictionaryEnd)) {
+                dictionaryEnd = -1;
+            }
+        }
+        if (object.isEmpty()
+            || dictionaryStart < 0
+            || dictionaryEnd <= dictionaryStart
+            || dictionaryEnd > object.size()) {
+            return fail(error.isEmpty()
+                    ? QStringLiteral(
+                        "A source comment annotation dictionary is malformed.")
+                    : error);
+        }
+
+        QByteArray dictionary = object.mid(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart);
+        const QRectF bounds = update.pageRect.normalized();
+        const QByteArray rect = QByteArrayLiteral("[")
+            + pdfNumber(bounds.left()) + ' '
+            + pdfNumber(bounds.top()) + ' '
+            + pdfNumber(bounds.right()) + ' '
+            + pdfNumber(bounds.bottom()) + ']';
+        bool geometryUpdated = replaceTopLevelDictionaryValue(
+            dictionary,
+            QByteArrayView("/Rect"),
+            rect,
+            true,
+            error);
+        if (geometryUpdated
+            && isSourceTextMarkupGeometryType(update.type)) {
+            geometryUpdated = replaceTopLevelDictionaryValue(
+                dictionary,
+                QByteArrayView("/QuadPoints"),
+                pdfQuadPointArray(update.pageQuadPoints),
+                true,
+                error);
+        }
+        if (!geometryUpdated
+            || !removeTopLevelDictionaryValue(
+                dictionary,
+                QByteArrayView(markerDictionaryKey),
+                error)) {
+            return fail(error);
+        }
+
+        if (placeholder.isDirect()) {
+            replacementsByContainer[placeholder.container.number].append({
+                dictionaryStart,
+                dictionaryEnd,
+                dictionary});
+            containerReferences.insert(
+                placeholder.container.number,
+                placeholder.container);
+            continue;
+        }
+        if (rewrittenObjects.contains(placeholder.widget.number)) {
+            return fail(QStringLiteral(
+                "Two source comment updates resolved to the same annotation."));
+        }
+        object.replace(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart,
+            dictionary);
+        rewrittenObjects.insert(placeholder.widget.number, std::move(object));
+        rewrittenReferences.insert(
+            placeholder.widget.number,
+            placeholder.widget);
+    }
+
+    for (auto container = replacementsByContainer.begin();
+         container != replacementsByContainer.end();
+         ++container) {
+        if (rewrittenObjects.contains(container.key())) {
+            return fail(QStringLiteral(
+                "A source comment annotation container cannot be rewritten safely."));
+        }
+        QByteArray object = completeObject(pdf, container.key(), error);
+        if (object.isEmpty()) {
+            return fail(error);
+        }
+        std::sort(
+            container->begin(),
+            container->end(),
+            [](const DictionaryReplacement &left,
+               const DictionaryReplacement &right) {
+                return left.start > right.start;
+            });
+        qsizetype previousStart = object.size();
+        for (const DictionaryReplacement &replacement
+             : std::as_const(*container)) {
+            if (replacement.start < 0
+                || replacement.end <= replacement.start
+                || replacement.end > previousStart
+                || replacement.end > object.size()) {
+                return fail(QStringLiteral(
+                    "Overlapping source comment annotation rewrites are not supported."));
+            }
+            object.replace(
+                replacement.start,
+                replacement.end - replacement.start,
+                replacement.value);
+            previousStart = replacement.start;
+        }
+        rewrittenObjects.insert(container.key(), std::move(object));
+        rewrittenReferences.insert(
+            container.key(),
+            containerReferences.value(container.key()));
+    }
+    for (auto rewritten = rewrittenObjects.begin();
+         rewritten != rewrittenObjects.end();
+         ++rewritten) {
+        incrementalObjects.append({
+            rewrittenReferences.value(rewritten.key()),
+            std::move(rewritten.value())});
+    }
+
+    const bool sourceEndsWithNewline = fileSize > 0
+        && reinterpret_cast<const char *>(mapped)[fileSize - 1] == '\n';
+    const ObjectReference root = pdf.root;
+    const qint64 previousXref = pdf.startXref;
+    file.unmap(mapped);
+    file.close();
+    return appendIncrementalUpdate(
+        filePath,
+        root,
+        previousXref,
+        declaredSize,
         sourceEndsWithNewline,
         std::move(incrementalObjects),
         error);
