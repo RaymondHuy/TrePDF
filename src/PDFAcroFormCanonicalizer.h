@@ -3,10 +3,13 @@
 #include "PDFCommentAnnotation.h"
 
 #include <QColor>
+#include <QPointF>
 #include <QRectF>
 #include <QString>
 #include <QStringList>
 #include <QVector>
+
+#include <array>
 
 class PDFAcroFormCanonicalizer
 {
@@ -76,6 +79,27 @@ public:
         QRectF pageRect;
     };
 
+    enum class SourceCommentGeometryType {
+        StickyNote,
+        Stamp,
+        Highlight,
+        Underline,
+        Squiggly,
+        StrikeOut
+    };
+
+    struct SourceCommentGeometryUpdate {
+        QString markerId;
+        int page = -1;
+        SourceCommentGeometryType type
+            = SourceCommentGeometryType::StickyNote;
+        QRectF pageRect;
+        QVector<std::array<QPointF, 4>> pageQuadPoints;
+    };
+
+    inline static constexpr char kSourceCommentGeometryMarkerKey[]
+        = "TrePDFSourceCommentGeometryId";
+
     static bool finalizeFields(const QString &filePath,
                                const QVector<Field> &fields,
                                QString &error);
@@ -102,5 +126,9 @@ public:
     static bool finalizeSourceDrawingGeometryUpdates(
         const QString &filePath,
         const QVector<PDFCommentAnnotation::SourceDrawingGeometryUpdate> &updates,
+        QString &error);
+    static bool finalizeSourceCommentGeometryUpdates(
+        const QString &filePath,
+        const QVector<SourceCommentGeometryUpdate> &updates,
         QString &error);
 };

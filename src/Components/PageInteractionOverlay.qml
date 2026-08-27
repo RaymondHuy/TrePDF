@@ -137,6 +137,9 @@ Item {
         theme: root.theme
         controller: root.editController
         pagePointScale: root.pagePointScale
+        viewRotation: root.viewportTransformState.length > 0
+            ? Number(root.viewportTransformState[0])
+            : 0
         draftTextureCurrent: root.draftTextureCurrent
         draftTextureReady: root.draftTextureReady
         z: 2

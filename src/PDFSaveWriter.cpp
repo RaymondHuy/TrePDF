@@ -112,6 +112,7 @@ struct SaveDraft {
     QRectF sourceRect;
     QRectF frameRect;
     QVector<QRectF> highlightRects;
+    QVector<std::array<QPointF, 4>> textMarkupQuads;
     QColor highlightColor;
     FPDF_ANNOTATION_SUBTYPE annotationSubtype = FPDF_ANNOT_HIGHLIGHT;
     PDFCommentAnnotation::DrawingType drawingType
@@ -3345,7 +3346,9 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
     qreal pageHeight,
     const PageCoordinateMapper &coordinateMapper,
     QVector<PDFCommentAnnotation::SourceDrawingGeometryUpdate>
-        &sourceDrawingGeometryUpdates)
+        &sourceDrawingGeometryUpdates,
+    QVector<PDFAcroFormCanonicalizer::SourceCommentGeometryUpdate>
+        &sourceCommentGeometryUpdates)
 {
     if (draft.added || draft.deleted) {
         return {};
@@ -3369,12 +3372,17 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
     const bool commentTextReadOnly
         = (annotationFlags & FPDF_ANNOT_FLAG_READONLY) != 0
         || (annotationFlags & kAnnotationFlagLockedContents) != 0;
+    const bool geometryComment
+        = draft.kind == SaveDraft::Kind::TextMarkup
+        || draft.kind == SaveDraft::Kind::StickyNote
+        || draft.kind == SaveDraft::Kind::FreeText
+        || draft.kind == SaveDraft::Kind::Stamp
+        || draft.kind == SaveDraft::Kind::DrawingComment;
+    const bool sourceGeometryChanged = geometryComment
+        && draft.frameRect != draft.sourceRect;
     const bool movesSourceDrawingComment
-        = draft.kind == SaveDraft::Kind::DrawingComment
-        && draft.frameRect != draft.sourceRect;
-    const bool movesSourceFreeText
-        = draft.kind == SaveDraft::Kind::FreeText
-        && draft.frameRect != draft.sourceRect;
+        = sourceGeometryChanged
+        && draft.kind == SaveDraft::Kind::DrawingComment;
     const bool geometryLocked
         = commentTextReadOnly
         || (annotationFlags & FPDF_ANNOT_FLAG_LOCKED) != 0;
@@ -3438,7 +3446,7 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
         && sourceIdentityMatches
         && FPDFAnnot_GetSubtype(annotation.get())
             == sourceAnnotationSubtypeForDraft(draft)
-        && (!(movesSourceDrawingComment || movesSourceFreeText)
+        && (!sourceGeometryChanged
             || !geometryLocked);
     if (updated && textChanged) {
         const QString commentContents = pdfCommentContents(draft.text);
@@ -3459,8 +3467,7 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
     }
     if (updated
         && (textChanged
-            || movesSourceDrawingComment
-            || movesSourceFreeText)) {
+            || sourceGeometryChanged)) {
         updated = setOptionalAnnotationString(
             annotation.get(),
             "M",
@@ -3474,7 +3481,17 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
             0);
         if (appearanceBytes <= sizeof(FPDF_WCHAR)) {
             FS_RECTF annotationRect{};
-            updated = FPDFAnnot_GetRect(annotation.get(), &annotationRect);
+            updated = sourceGeometryChanged
+                ? annotationRectForFrame(
+                      draft.frameRect,
+                      pageWidth,
+                      pageHeight,
+                      coordinateMapper,
+                      annotationRect)
+                    && FPDFAnnot_SetRect(
+                        annotation.get(),
+                        &annotationRect)
+                : FPDFAnnot_GetRect(annotation.get(), &annotationRect);
             const bool hasUsableRect = updated
                 && annotationRect.right > annotationRect.left
                 && annotationRect.top > annotationRect.bottom;
@@ -3585,6 +3602,95 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
                 markerId,
                 std::move(appearanceRequest),
                 resized && hasTrePDFManagedDrawingAppearance});
+        }
+    }
+    if (updated
+        && sourceGeometryChanged
+        && draft.kind != SaveDraft::Kind::FreeText
+        && draft.kind != SaveDraft::Kind::DrawingComment) {
+        FS_RECTF annotationRect{};
+        updated = annotationRectForFrame(
+            draft.frameRect,
+            pageWidth,
+            pageHeight,
+            coordinateMapper,
+            annotationRect);
+        PDFAcroFormCanonicalizer::SourceCommentGeometryUpdate update;
+        update.markerId = QUuid::createUuid().toString(
+            QUuid::WithoutBraces);
+        update.page = draft.page;
+        update.pageRect = QRectF(
+            QPointF(annotationRect.left, annotationRect.bottom),
+            QPointF(annotationRect.right, annotationRect.top)).normalized();
+        if (draft.kind == SaveDraft::Kind::StickyNote) {
+            update.type = PDFAcroFormCanonicalizer::
+                SourceCommentGeometryType::StickyNote;
+        } else if (draft.kind == SaveDraft::Kind::Stamp) {
+            update.type = PDFAcroFormCanonicalizer::
+                SourceCommentGeometryType::Stamp;
+        } else {
+            switch (draft.annotationSubtype) {
+            case FPDF_ANNOT_UNDERLINE:
+                update.type = PDFAcroFormCanonicalizer::
+                    SourceCommentGeometryType::Underline;
+                break;
+            case FPDF_ANNOT_SQUIGGLY:
+                update.type = PDFAcroFormCanonicalizer::
+                    SourceCommentGeometryType::Squiggly;
+                break;
+            case FPDF_ANNOT_STRIKEOUT:
+                update.type = PDFAcroFormCanonicalizer::
+                    SourceCommentGeometryType::StrikeOut;
+                break;
+            case FPDF_ANNOT_HIGHLIGHT:
+                update.type = PDFAcroFormCanonicalizer::
+                    SourceCommentGeometryType::Highlight;
+                break;
+            default:
+                updated = false;
+                break;
+            }
+            if (updated && draft.textMarkupQuads.isEmpty()) {
+                updated = false;
+            }
+            if (updated) {
+                update.pageQuadPoints.reserve(
+                    draft.textMarkupQuads.size());
+                for (const std::array<QPointF, 4> &normalizedQuad
+                     : draft.textMarkupQuads) {
+                    std::array<QPointF, 4> pageQuad;
+                    for (size_t pointIndex = 0;
+                         pointIndex < normalizedQuad.size();
+                         ++pointIndex) {
+                        const QPointF &point = normalizedQuad.at(pointIndex);
+                        if (!coordinateMapper.pagePoint(
+                                point.x() * pageWidth,
+                                point.y() * pageHeight,
+                                pageQuad.at(pointIndex))) {
+                            updated = false;
+                            break;
+                        }
+                    }
+                    if (!updated) {
+                        break;
+                    }
+                    update.pageQuadPoints.append(pageQuad);
+                }
+            }
+        }
+        updated = updated
+            && !FPDFAnnot_HasKey(
+                annotation.get(),
+                PDFAcroFormCanonicalizer::
+                    kSourceCommentGeometryMarkerKey)
+            && FPDFAnnot_SetStringValue(
+                annotation.get(),
+                PDFAcroFormCanonicalizer::
+                    kSourceCommentGeometryMarkerKey,
+                reinterpret_cast<const FPDF_WCHAR *>(
+                    update.markerId.utf16()));
+        if (updated) {
+            sourceCommentGeometryUpdates.append(std::move(update));
         }
     }
     return updated
@@ -3911,7 +4017,9 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                                       QVector<PDFCommentAnnotation::DrawingAnnotation>
                                           &drawingAnnotations,
                                       QVector<PDFCommentAnnotation::SourceDrawingGeometryUpdate>
-                                          &sourceDrawingGeometryUpdates)
+                                          &sourceDrawingGeometryUpdates,
+                                      QVector<PDFAcroFormCanonicalizer::SourceCommentGeometryUpdate>
+                                          &sourceCommentGeometryUpdates)
 {
     assertPDFiumProcessLockHeld();
     FPDF_PAGE loadedPage = FPDF_LoadPage(document, pageIndex);
@@ -4177,7 +4285,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 pageWidth,
                 pageHeight,
                 coordinateMapper,
-                sourceDrawingGeometryUpdates);
+                sourceDrawingGeometryUpdates,
+                sourceCommentGeometryUpdates);
         if (!annotationUpdateResult.succeeded()) {
             return annotationUpdateResult;
         }
@@ -4790,7 +4899,10 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
                    : draft->candidate.initialDraftFrameRect)
             : draft->candidate.geometry.sourceRect;
         saveDraft.frameRect = draft->frameRect;
-        saveDraft.highlightRects = draft->candidate.highlightRects;
+        saveDraft.highlightRects
+            = PDFEditController::highlightRectsForDraft(*draft);
+        saveDraft.textMarkupQuads
+            = PDFEditController::textMarkupQuadsForDraft(*draft);
         saveDraft.highlightColor = draft->candidate.highlightColor;
         saveDraft.drawingType = draft->candidate.drawingType;
         saveDraft.drawingVertices
@@ -5010,6 +5122,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     QVector<PDFCommentAnnotation::DrawingAnnotation> drawingAnnotations;
     QVector<PDFCommentAnnotation::SourceDrawingGeometryUpdate>
         sourceDrawingGeometryUpdates;
+    QVector<PDFAcroFormCanonicalizer::SourceCommentGeometryUpdate>
+        sourceCommentGeometryUpdates;
     qsizetype start = 0;
     while (start < request.m_data->drafts.size()) {
         qsizetype end = start + 1;
@@ -5029,7 +5143,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             fontResolver,
             stampAnnotations,
             drawingAnnotations,
-            sourceDrawingGeometryUpdates);
+            sourceDrawingGeometryUpdates,
+            sourceCommentGeometryUpdates);
         if (!result.succeeded()) {
             return result;
         }
@@ -5113,7 +5228,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         && textMarkupAnnotations.isEmpty()
         && stampAnnotations.isEmpty()
         && drawingAnnotations.isEmpty()
-        && sourceDrawingGeometryUpdates.isEmpty()) {
+        && sourceDrawingGeometryUpdates.isEmpty()
+        && sourceCommentGeometryUpdates.isEmpty()) {
         return writeDocument(document.get(), request.m_data->targetFilePath);
     }
 
@@ -5220,6 +5336,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
                     geometryError);
             }
         }
+        if (!sourceCommentGeometryUpdates.isEmpty()) {
+            QString geometryError;
+            if (!PDFAcroFormCanonicalizer::finalizeSourceCommentGeometryUpdates(
+                    contentFilePath,
+                    sourceCommentGeometryUpdates,
+                    geometryError)) {
+                return failure(
+                    Error::CommentAnnotationUpdateFailed,
+                    -1,
+                    geometryError);
+            }
+        }
         const Result replyValidation = validateAnnotationReplies(
             contentFilePath,
             annotationReplies);
@@ -5306,6 +5434,18 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         if (!PDFAcroFormCanonicalizer::finalizeSourceDrawingGeometryUpdates(
                 formFilePath,
                 sourceDrawingGeometryUpdates,
+                geometryError)) {
+            return failure(
+                Error::CommentAnnotationUpdateFailed,
+                -1,
+                geometryError);
+        }
+    }
+    if (!sourceCommentGeometryUpdates.isEmpty()) {
+        QString geometryError;
+        if (!PDFAcroFormCanonicalizer::finalizeSourceCommentGeometryUpdates(
+                formFilePath,
+                sourceCommentGeometryUpdates,
                 geometryError)) {
             return failure(
                 Error::CommentAnnotationUpdateFailed,

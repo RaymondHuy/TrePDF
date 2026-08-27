@@ -101,6 +101,7 @@ constexpr unsigned long kMaximumSourceInkStrokes = 64;
 constexpr unsigned long kMaximumSourceInkPointsPerStroke = 4096;
 constexpr unsigned long kMaximumSourceInkPoints = 32768;
 constexpr size_t kMaximumSourceTextMarkupRects = 50000;
+constexpr size_t kMaximumEditableSourceTextMarkupQuads = 4096;
 // This is a conservative estimate of heap storage retained by the
 // whole-document source-comment index. Per-page interaction caches have their
 // own LRU bound and are not charged twice for implicitly shared payloads.
@@ -813,6 +814,15 @@ bool isDrawingCommentCandidateKind(const QString &kind)
         || kind == QLatin1String("polygon")
         || kind == QLatin1String("polyLine")
         || kind == QLatin1String("ink");
+}
+
+bool isGeometryCommentCandidateKind(const QString &kind)
+{
+    return isTextMarkupCandidateKind(kind)
+        || isDrawingCommentCandidateKind(kind)
+        || kind == QLatin1String("stickyNote")
+        || kind == QLatin1String("freeText")
+        || kind == QLatin1String("stamp");
 }
 
 bool isCommentCandidateKind(const QString &kind)
@@ -3058,14 +3068,14 @@ PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
     QVector<DraftAnnotationDeletion> deletions;
     for (auto draft = m_drafts.cbegin(); draft != m_drafts.cend(); ++draft) {
         const Candidate &candidate = draft->candidate;
-        const bool movesDrawingComment
-            = isDrawingCommentCandidateKind(candidate.kind)
+        const bool movesGeometryComment
+            = isGeometryCommentCandidateKind(candidate.kind)
             && draft->frameRect
                 != initialDraftForCandidate(candidate).frameRect;
         const bool suppressesSourceAppearance
             = draft->deleted
             || candidate.kind == QLatin1String("freeText")
-            || movesDrawingComment;
+            || movesGeometryComment;
         if (candidate.page != page
             || candidate.added
             || !suppressesSourceAppearance
@@ -3084,7 +3094,7 @@ PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
     if (m_frameResizeActive
         && m_hasSelection
         && m_selectedCandidate.page == page
-        && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+        && isGeometryCommentCandidateKind(m_selectedCandidate.kind)
         && !m_selectedCandidate.added
         && m_selectedCandidate.sourceAnnotationIndex >= 0) {
         deletions.append(DraftAnnotationDeletion{
@@ -3275,8 +3285,7 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
         const bool draftGeometryCandidate
             = candidate.kind == QLatin1String("image")
             || candidate.kind == QLatin1String("addedImage")
-            || candidate.kind == QLatin1String("freeText")
-            || isDrawingCommentCandidateKind(candidate.kind)
+            || isGeometryCommentCandidateKind(candidate.kind)
             || isShapeCandidateKind(candidate.kind);
         const QRectF candidateRect
             = draftGeometryCandidate && draft != m_drafts.cend()
@@ -4122,6 +4131,15 @@ QVariantMap PDFEditController::materializeTextMarkupDraft(
     candidate.commentAuthor = currentCommentAuthor();
     candidate.commentCreationDate = QDateTime::currentDateTime();
     candidate.highlightRects = annotationRects;
+    candidate.textMarkupQuads.reserve(annotationRects.size());
+    for (const QRectF &rect : annotationRects) {
+        const QRectF bounds = rect.normalized();
+        candidate.textMarkupQuads.append(std::array<QPointF, 4>{
+            bounds.topLeft(),
+            bounds.topRight(),
+            bounds.bottomLeft(),
+            bounds.bottomRight()});
+    }
     candidate.highlightColor = color;
     QRectF annotationBounds;
     for (const QRectF &rect : std::as_const(annotationRects)) {
@@ -6016,7 +6034,7 @@ void PDFEditController::beginSelectedFrameResize()
         = m_textEditGeometryExplicitlyChanged;
     m_frameResizeStartFrameRect = draft.frameRect;
     m_frameResizeStartContentBounds = draft.contentBounds;
-    if (isDrawingCommentCandidateKind(draft.candidate.kind)
+    if (isGeometryCommentCandidateKind(draft.candidate.kind)
         && !draft.candidate.added) {
         markDraftStateChanged(draft.candidate.page, true, false);
     }
@@ -6074,6 +6092,8 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         || draft.candidate.kind == QLatin1String("addedImage")
         || draft.candidate.kind == QLatin1String("freeText")
         || draft.candidate.kind == QLatin1String("stamp")
+        || draft.candidate.kind == QLatin1String("stickyNote")
+        || isTextMarkupCandidateKind(draft.candidate.kind)
         || isDrawingCommentCandidateKind(draft.candidate.kind)
         || isShapeCandidateKind(draft.candidate.kind);
     if (!movesFrame && sourceImageDraft) {
@@ -6108,7 +6128,7 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         = boundedRect != m_textEditInitialDisplayFrameRect;
     draft.frameRect = boundedRect;
     draft.contentBounds = resizedContentBounds;
-    if (isDrawingCommentCandidateKind(draft.candidate.kind)) {
+    if (isGeometryCommentCandidateKind(draft.candidate.kind)) {
         m_textEditDisplayDraft = draft;
         emit selectedGeometryChanged();
         return;
@@ -6147,13 +6167,13 @@ void PDFEditController::finishSelectedFrameResize()
         return;
     }
 
-    const bool refreshesSourceDrawing = m_hasSelection
-        && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+    const bool refreshesSourceComment = m_hasSelection
+        && isGeometryCommentCandidateKind(m_selectedCandidate.kind)
         && !m_selectedCandidate.added;
-    const int page = refreshesSourceDrawing
+    const int page = refreshesSourceComment
         ? m_selectedCandidate.page
         : -1;
-    const quint64 suppressionRevision = refreshesSourceDrawing
+    const quint64 suppressionRevision = refreshesSourceComment
         ? draftRevisionForPage(page)
         : 0;
     const bool ownsTextEdit = m_frameResizeOwnsTextEdit;
@@ -6161,9 +6181,9 @@ void PDFEditController::finishSelectedFrameResize()
     if (ownsTextEdit) {
         finishSelectedTextEdit();
     }
-    if (refreshesSourceDrawing
+    if (refreshesSourceComment
         && draftRevisionForPage(page) == suppressionRevision) {
-        // Beginning a source drawing gesture renders a texture with the source
+        // Beginning a source comment gesture renders a texture with the source
         // annotation suppressed. A no-op finish still needs a new revision;
         // otherwise PDFPageItem can reuse that suppressed texture forever.
         markDraftStateChanged(page, true, false);
@@ -6176,13 +6196,13 @@ void PDFEditController::cancelSelectedFrameResize()
         return;
     }
 
-    const bool refreshesSourceDrawing = m_hasSelection
-        && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+    const bool refreshesSourceComment = m_hasSelection
+        && isGeometryCommentCandidateKind(m_selectedCandidate.kind)
         && !m_selectedCandidate.added;
-    const int page = refreshesSourceDrawing
+    const int page = refreshesSourceComment
         ? m_selectedCandidate.page
         : -1;
-    const quint64 suppressionRevision = refreshesSourceDrawing
+    const quint64 suppressionRevision = refreshesSourceComment
         ? draftRevisionForPage(page)
         : 0;
     const bool ownsTextEdit = m_frameResizeOwnsTextEdit;
@@ -6194,7 +6214,7 @@ void PDFEditController::cancelSelectedFrameResize()
 
     if (ownsTextEdit) {
         cancelSelectedTextEdit();
-        if (refreshesSourceDrawing
+        if (refreshesSourceComment
             && draftRevisionForPage(page) == suppressionRevision) {
             markDraftStateChanged(page, true, false);
         }
@@ -6206,7 +6226,7 @@ void PDFEditController::cancelSelectedFrameResize()
     draft.contentBounds = startContentBounds;
     updateSelectedDraft(draft);
     m_textEditGeometryExplicitlyChanged = startGeometryExplicitlyChanged;
-    if (refreshesSourceDrawing
+    if (refreshesSourceComment
         && draftRevisionForPage(page) == suppressionRevision) {
         markDraftStateChanged(page, true, false);
     }
@@ -6581,15 +6601,12 @@ void PDFEditController::finishSelectedTextEdit()
         = !sameDraftContent(finalizedDraft, baseline.before);
     if (draftChanged) {
         applyUnicodeFontFallback(finalizedDraft);
-        const bool movesDrawingComment
-            = isDrawingCommentCandidateKind(finalizedDraft.candidate.kind)
-            && finalizedDraft.frameRect != baseline.before.frameRect;
-        const bool movesStamp
-            = finalizedDraft.candidate.kind == QLatin1String("stamp")
+        const bool movesGeometryComment
+            = isGeometryCommentCandidateKind(
+                  finalizedDraft.candidate.kind)
             && finalizedDraft.frameRect != baseline.before.frameRect;
         if (finalizedDraft.candidate.kind == QLatin1String("freeText")
-            || movesDrawingComment
-            || movesStamp) {
+            || movesGeometryComment) {
             finalizedDraft.candidate.commentModifiedDate
                 = QDateTime::currentDateTime();
         }
@@ -7792,6 +7809,9 @@ qsizetype PDFEditController::estimatedCommentCandidateBytes(
         candidate.highlightRects.capacity(),
         sizeof(QRectF)));
     addBytes(estimatedContiguousStorageBytes(
+        candidate.textMarkupQuads.capacity(),
+        sizeof(std::array<QPointF, 4>)));
+    addBytes(estimatedContiguousStorageBytes(
         candidate.drawingVertices.capacity(),
         sizeof(QPointF)));
     addBytes(estimatedContiguousStorageBytes(
@@ -8734,9 +8754,17 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 rootThreadId);
 
             QVector<QRectF> annotationRects;
+            QVector<std::array<QPointF, 4>> textMarkupQuads;
+            bool textMarkupGeometryValid = !textMarkupSubtype;
             if (textMarkupSubtype) {
                 const size_t quadCount
                     = FPDFAnnot_CountAttachmentPoints(annotation);
+                textMarkupGeometryValid = quadCount > 0
+                    && quadCount <= kMaximumEditableSourceTextMarkupQuads;
+                if (textMarkupGeometryValid) {
+                    textMarkupQuads.reserve(
+                        static_cast<qsizetype>(quadCount));
+                }
                 if (quadCount <= kMaximumSourceTextMarkupRects) {
                     annotationRects.reserve(
                         static_cast<qsizetype>(quadCount));
@@ -8748,6 +8776,7 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                                 annotation,
                                 quadIndex,
                                 &quad)) {
+                            textMarkupGeometryValid = false;
                             continue;
                         }
                         const std::array<QPointF, 4> points{
@@ -8776,7 +8805,33 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                         if (!rect.isEmpty()) {
                             annotationRects.append(rect);
                         }
+                        if (textMarkupGeometryValid) {
+                            std::array<QPointF, 4> normalizedQuad;
+                            bool normalized = !rect.isEmpty();
+                            for (size_t pointIndex = 0;
+                                 pointIndex < points.size() && normalized;
+                                 ++pointIndex) {
+                                normalized = normalizedPagePoint(
+                                    page,
+                                    pageSize,
+                                    points.at(pointIndex),
+                                    normalizedQuad.at(pointIndex));
+                            }
+                            if (normalized) {
+                                textMarkupQuads.append(normalizedQuad);
+                            } else {
+                                textMarkupGeometryValid = false;
+                            }
+                        }
                     }
+                }
+                textMarkupGeometryValid = textMarkupGeometryValid
+                    && textMarkupQuads.size()
+                        == static_cast<qsizetype>(quadCount)
+                    && annotationRects.size()
+                        == static_cast<qsizetype>(quadCount);
+                if (!textMarkupGeometryValid) {
+                    textMarkupQuads.clear();
                 }
             }
 
@@ -8959,6 +9014,7 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             setInitialGeometry(candidate, geometry);
             if (textMarkupSubtype) {
                 candidate.highlightRects = annotationRects;
+                candidate.textMarkupQuads = std::move(textMarkupQuads);
             }
 
             QColor defaultColor = stickyNoteSubtype
@@ -9151,9 +9207,18 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             }
             candidate.commentTextReadOnly
                 = candidate.commentTextReadOnly || !drawingGeometryValid;
+            const bool sourceGeometrySupported
+                = drawingCommentSubtype
+                    ? drawingGeometryValid
+                    : textMarkupSubtype
+                        ? textMarkupGeometryValid
+                        : stickyNoteSubtype
+                            || freeTextSubtype
+                            || stampSubtype;
             candidate.editable = request.annotationsAllowed
-                && drawingCommentSubtype
-                && drawingGeometryValid
+                && sourceGeometrySupported
+                && !isReplyAnnotation
+                && !geometry.isEmpty()
                 && !candidate.commentTextReadOnly
                 && (annotationFlags & FPDF_ANNOT_FLAG_LOCKED) == 0;
             if (freeTextSubtype) {
@@ -9266,13 +9331,15 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             if (candidate.commentTextReadOnly) {
                 //% "This comment is read-only."
                 candidate.reason = qtTrId("ReadOnlyCommentCannotBeEdited");
-            } else if ((freeTextSubtype
+            } else if ((textMarkupSubtype
+                        || stickyNoteSubtype
+                        || freeTextSubtype
                         || drawingCommentSubtype
                         || stampSubtype)
                        && !request.annotationsAllowed) {
                 //% "This PDF does not permit changing annotations."
                 candidate.reason = qtTrId("PdfAnnotationsNotPermitted");
-            } else if (drawingCommentSubtype && candidate.editable) {
+            } else if (candidate.editable) {
                 candidate.reason.clear();
             } else {
                 //% "Edit the comment text in the Comments panel. Moving or resizing existing comments is not available."
@@ -9581,11 +9648,19 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(
         QStringLiteral("shapeStrokeWidthRatio"),
         candidate.shapeStrokeWidthRatio);
-    map.insert(
-        QStringLiteral("highlightRects"),
-        candidate.highlightRects.isEmpty()
-            ? QVariantList()
-            : candidateSourceRects(candidate));
+    const QVector<QRectF> displayedHighlightRects
+        = highlightRectsForDraft(draft);
+    QVariantList highlightRects;
+    highlightRects.reserve(displayedHighlightRects.size());
+    for (const QRectF &rect : displayedHighlightRects) {
+        QVariantMap rectMap;
+        rectMap.insert(QStringLiteral("x"), rect.x());
+        rectMap.insert(QStringLiteral("y"), rect.y());
+        rectMap.insert(QStringLiteral("width"), rect.width());
+        rectMap.insert(QStringLiteral("height"), rect.height());
+        highlightRects.append(rectMap);
+    }
+    map.insert(QStringLiteral("highlightRects"), highlightRects);
     map.insert(QStringLiteral("highlightColor"), candidate.highlightColor);
     map.insert(
         QStringLiteral("stampName"),
@@ -9967,6 +10042,114 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
         : candidate.initialDraftFrameRect;
     draft.contentBounds = draft.frameRect;
     return draft;
+}
+
+QVector<QRectF> PDFEditController::highlightRectsForDraft(
+    const Draft &draft)
+{
+    QVector<QRectF> rects = draft.candidate.highlightRects;
+    if (!isTextMarkupCandidateKind(draft.candidate.kind)
+        || rects.isEmpty()) {
+        return rects;
+    }
+
+    const QRectF initialFrameRect = (
+        draft.candidate.initialDraftFrameRect.isEmpty()
+            ? draft.candidate.geometry.sourceRect
+            : draft.candidate.initialDraftFrameRect).normalized();
+    const QRectF currentFrameRect = draft.frameRect.normalized();
+    if (currentFrameRect == initialFrameRect) {
+        return rects;
+    }
+    if (!initialFrameRect.isValid()
+        || initialFrameRect.width() <= 0.0
+        || initialFrameRect.height() <= 0.0
+        || !currentFrameRect.isValid()
+        || currentFrameRect.width() <= 0.0
+        || currentFrameRect.height() <= 0.0) {
+        return {};
+    }
+
+    const qreal horizontalScale
+        = currentFrameRect.width() / initialFrameRect.width();
+    const qreal verticalScale
+        = currentFrameRect.height() / initialFrameRect.height();
+    const auto transformedPoint = [
+        &initialFrameRect,
+        &currentFrameRect,
+        horizontalScale,
+        verticalScale](const QPointF &point) {
+        return QPointF(
+            currentFrameRect.left()
+                + (point.x() - initialFrameRect.left()) * horizontalScale,
+            currentFrameRect.top()
+                + (point.y() - initialFrameRect.top()) * verticalScale);
+    };
+    for (QRectF &rect : rects) {
+        const QRectF bounds = rect.normalized();
+        rect = QRectF(
+            transformedPoint(bounds.topLeft()),
+            transformedPoint(bounds.bottomRight())).normalized();
+    }
+    return rects;
+}
+
+QVector<std::array<QPointF, 4>>
+PDFEditController::textMarkupQuadsForDraft(const Draft &draft)
+{
+    QVector<std::array<QPointF, 4>> quads
+        = draft.candidate.textMarkupQuads;
+    if (!isTextMarkupCandidateKind(draft.candidate.kind)) {
+        return quads;
+    }
+    if (quads.isEmpty()) {
+        quads.reserve(draft.candidate.highlightRects.size());
+        for (const QRectF &rect : draft.candidate.highlightRects) {
+            const QRectF bounds = rect.normalized();
+            quads.append(std::array<QPointF, 4>{
+                bounds.topLeft(),
+                bounds.topRight(),
+                bounds.bottomLeft(),
+                bounds.bottomRight()});
+        }
+    }
+    if (quads.isEmpty()) {
+        return quads;
+    }
+
+    const QRectF initialFrameRect = (
+        draft.candidate.initialDraftFrameRect.isEmpty()
+            ? draft.candidate.geometry.sourceRect
+            : draft.candidate.initialDraftFrameRect).normalized();
+    const QRectF currentFrameRect = draft.frameRect.normalized();
+    if (currentFrameRect == initialFrameRect) {
+        return quads;
+    }
+    if (!initialFrameRect.isValid()
+        || initialFrameRect.width() <= 0.0
+        || initialFrameRect.height() <= 0.0
+        || !currentFrameRect.isValid()
+        || currentFrameRect.width() <= 0.0
+        || currentFrameRect.height() <= 0.0) {
+        return {};
+    }
+
+    const qreal horizontalScale
+        = currentFrameRect.width() / initialFrameRect.width();
+    const qreal verticalScale
+        = currentFrameRect.height() / initialFrameRect.height();
+    for (std::array<QPointF, 4> &quad : quads) {
+        for (QPointF &point : quad) {
+            point = QPointF(
+                currentFrameRect.left()
+                    + (point.x() - initialFrameRect.left())
+                        * horizontalScale,
+                currentFrameRect.top()
+                    + (point.y() - initialFrameRect.top())
+                        * verticalScale);
+        }
+    }
+    return quads;
 }
 
 QVector<QPointF> PDFEditController::drawingVerticesForDraft(
@@ -10778,12 +10961,12 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
 
     m_selectedText = normalizedDraft.text;
     if (changed) {
-        const bool reusesSourceDrawingSuppressionTexture
+        const bool reusesSourceCommentSuppressionTexture
             = m_frameResizeActive
-            && isDrawingCommentCandidateKind(
+            && isGeometryCommentCandidateKind(
                 normalizedDraft.candidate.kind)
             && !normalizedDraft.candidate.added;
-        if (reusesSourceDrawingSuppressionTexture) {
+        if (reusesSourceCommentSuppressionTexture) {
             emit pageDataChanged(m_selectedCandidate.page);
         } else {
             const bool notifyComments = !m_frameResizeActive
