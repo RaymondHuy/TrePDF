@@ -34,6 +34,27 @@ Item {
     property bool editorLayoutDirty: false
     property bool resizingFrame: false
     property string resizingObjectId: ""
+    property var frameResizePreview: ({})
+    readonly property string frameResizePreviewKind:
+        frameResizePreview.kind === undefined
+            ? ""
+            : String(frameResizePreview.kind)
+    readonly property rect frameResizePreviewSourceRect:
+        frameResizePreview.frameRect === undefined
+            ? Qt.rect(0, 0, 0, 0)
+            : frameResizePreview.frameRect
+    readonly property var frameResizePreviewVertices:
+        normalizedPointsForFrame(
+            frameResizePreview.annotationPoints === undefined
+                ? []
+                : frameResizePreview.annotationPoints,
+            frameResizePreviewSourceRect)
+    readonly property var frameResizePreviewStrokes:
+        normalizedStrokesForFrame(
+            frameResizePreview.inkStrokes === undefined
+                ? []
+                : frameResizePreview.inkStrokes,
+            frameResizePreviewSourceRect)
     property bool editingSourceTextMoveOnly: false
     property real editingSourceTranslationX: 0
     property real editingSourceTranslationY: 0
@@ -239,6 +260,7 @@ Item {
             inkDrafts = []
             stampDrafts = []
             hoverCandidate = ({})
+            frameResizePreview = ({})
             cancelHighlight()
             cancelShape()
             cancelFreeTextPlacement()
@@ -250,7 +272,7 @@ Item {
         }
 
         if (interactionActive)
-            controller.candidatesForPage(page)
+            controller.requestCandidatesForPage(page)
 
         const previousDrafts = drafts
         const currentDrafts = controller.draftsForPage(page)
@@ -1022,6 +1044,54 @@ Item {
         return Qt.rect(left, top, frameWidth, frameHeight)
     }
 
+    function normalizedPointsForFrame(points, frameRect) {
+        const frameWidth = Number(frameRect.width)
+        const frameHeight = Number(frameRect.height)
+        if (frameWidth <= 0 || frameHeight <= 0)
+            return []
+
+        const normalizedPoints = []
+        for (let index = 0; index < points.length; ++index) {
+            const point = points[index]
+            normalizedPoints.push(Qt.point(
+                (Number(point.x) - Number(frameRect.x)) / frameWidth,
+                (Number(point.y) - Number(frameRect.y)) / frameHeight))
+        }
+        return normalizedPoints
+    }
+
+    function normalizedStrokesForFrame(strokes, frameRect) {
+        const normalizedStrokes = []
+        for (let index = 0; index < strokes.length; ++index) {
+            normalizedStrokes.push(normalizedPointsForFrame(
+                strokes[index],
+                frameRect))
+        }
+        return normalizedStrokes
+    }
+
+    function startFrameResize() {
+        controller.beginSelectedFrameResize()
+        resizingFrame = true
+        resizingObjectId = controller.selectedObjectId
+        const selectedKind = controller.selectedKind
+        frameResizePreview = isDrawingCommentKind(selectedKind)
+                || selectedKind === "ink"
+            ? controller.selectedDraftPreview()
+            : ({})
+    }
+
+    function finishFrameResize() {
+        if (!resizingFrame)
+            return
+
+        controller.finishSelectedFrameResize()
+        resizingFrame = false
+        resizingObjectId = ""
+        frameResizePreview = ({})
+        reloadData()
+    }
+
     function cancelFrameResize() {
         if (!resizingFrame)
             return
@@ -1029,6 +1099,7 @@ Item {
         controller.cancelSelectedFrameResize()
         resizingFrame = false
         resizingObjectId = ""
+        frameResizePreview = ({})
         reloadData()
     }
 
@@ -1655,6 +1726,7 @@ Item {
             controller.finishSelectedFrameResize()
             resizingFrame = false
             resizingObjectId = ""
+            frameResizePreview = ({})
         }
 
         syncingEditorPreview = true
@@ -1699,6 +1771,7 @@ Item {
             controller.finishSelectedFrameResize()
             resizingFrame = false
             resizingObjectId = ""
+            frameResizePreview = ({})
         }
     }
 
@@ -1900,6 +1973,7 @@ Item {
                             !== root.resizingObjectId)) {
                 root.resizingFrame = false
                 root.resizingObjectId = ""
+                root.frameResizePreview = ({})
             }
             if (selectionActions.opened
                     && (root.controller.selectedPage !== root.page
@@ -2051,6 +2125,9 @@ Item {
             visible: (modelData.added === true
                     || modelData.geometryChanged === true)
                 && modelData.deleted !== true
+                && !(root.resizingFrame
+                    && String(modelData.objectId)
+                        === root.resizingObjectId)
             z: 1
             Accessible.ignored: true
         }
@@ -2071,9 +2148,90 @@ Item {
             visible: (modelData.added === true
                     || modelData.geometryChanged === true)
                 && modelData.deleted !== true
+                && !(root.resizingFrame
+                    && String(modelData.objectId)
+                        === root.resizingObjectId)
             z: 1
             Accessible.ignored: true
         }
+    }
+
+    CommentDrawingView {
+        readonly property rect frameRect: root.controller.selectedFrameRect
+
+        x: frameRect.x * root.width
+        y: frameRect.y * root.height
+        width: Math.max(1, frameRect.width * root.width)
+        height: Math.max(1, frameRect.height * root.height)
+        drawingKind: root.frameResizePreviewKind
+        vertices: root.frameResizePreviewVertices
+        strokeColor: root.frameResizePreview.strokeColor === undefined
+            ? "#000000"
+            : root.frameResizePreview.strokeColor
+        interiorColor: root.frameResizePreview.fillColor === undefined
+            ? "transparent"
+            : root.frameResizePreview.fillColor
+        hasInterior:
+            root.frameResizePreview.drawingHasInterior === true
+        borderWidth: Number(
+            root.frameResizePreview.strokeWidthRatio === undefined
+                ? 0
+                : root.frameResizePreview.strokeWidthRatio) * root.height
+        borderStyle: Number(
+            root.frameResizePreview.borderStyle === undefined
+                ? 0
+                : root.frameResizePreview.borderStyle)
+        dashPattern: root.frameResizePreview.dashPattern === undefined
+            ? []
+            : root.frameResizePreview.dashPattern
+        dashScale: root.pagePointScale
+        borderEffect: Number(
+            root.frameResizePreview.borderEffect === undefined
+                ? 0
+                : root.frameResizePreview.borderEffect)
+        lineStartStyle: Number(
+            root.frameResizePreview.lineStartStyle === undefined
+                ? 0
+                : root.frameResizePreview.lineStartStyle)
+        lineEndStyle: Number(
+            root.frameResizePreview.lineEndStyle === undefined
+                ? 0
+                : root.frameResizePreview.lineEndStyle)
+        drawingOpacity: Number(
+            root.frameResizePreview.opacity === undefined
+                ? 1
+                : root.frameResizePreview.opacity)
+        visible: root.resizingFrame
+            && root.isDrawingCommentKind(root.frameResizePreviewKind)
+            && root.frameResizePreviewVertices.length >= 2
+        z: 2
+        Accessible.ignored: true
+    }
+
+    InkDrawingView {
+        readonly property rect frameRect: root.controller.selectedFrameRect
+
+        x: frameRect.x * root.width
+        y: frameRect.y * root.height
+        width: Math.max(1, frameRect.width * root.width)
+        height: Math.max(1, frameRect.height * root.height)
+        strokes: root.frameResizePreviewStrokes
+        strokeColor: root.frameResizePreview.strokeColor === undefined
+            ? "#000000"
+            : root.frameResizePreview.strokeColor
+        strokeWidth: Number(
+            root.frameResizePreview.strokeWidthRatio === undefined
+                ? 0
+                : root.frameResizePreview.strokeWidthRatio) * root.height
+        drawingOpacity: Number(
+            root.frameResizePreview.opacity === undefined
+                ? 1
+                : root.frameResizePreview.opacity)
+        visible: root.resizingFrame
+            && root.frameResizePreviewKind === "ink"
+            && root.frameResizePreviewStrokes.length > 0
+        z: 2
+        Accessible.ignored: true
     }
 
     Repeater {
@@ -3434,15 +3592,10 @@ Item {
 
             function commitKeyboardMove(deltaX, deltaY) {
                 const startFrameRect = resizeOverlay.layoutFrameRect
-                root.controller.beginSelectedFrameResize()
-                root.resizingFrame = true
-                root.resizingObjectId = root.controller.selectedObjectId
+                root.startFrameResize()
                 root.controller.updateSelectedFrameRect(
                     root.movedFrameRect(startFrameRect, deltaX, deltaY))
-                root.controller.finishSelectedFrameResize()
-                root.resizingFrame = false
-                root.resizingObjectId = ""
-                root.reloadData()
+                root.finishFrameResize()
             }
 
             onPressed: mouse => {
@@ -3451,9 +3604,7 @@ Item {
                 selectionActions.close()
                 dragStartFrameRect = resizeOverlay.layoutFrameRect
                 dragStartPosition = mapToItem(root, mouse.x, mouse.y)
-                root.controller.beginSelectedFrameResize()
-                root.resizingFrame = true
-                root.resizingObjectId = root.controller.selectedObjectId
+                root.startFrameResize()
                 mouse.accepted = true
             }
             onPositionChanged: mouse => {
@@ -3470,10 +3621,7 @@ Item {
                 if (!root.resizingFrame)
                     return
 
-                root.controller.finishSelectedFrameResize()
-                root.resizingFrame = false
-                root.resizingObjectId = ""
-                root.reloadData()
+                root.finishFrameResize()
             }
             onCanceled: root.cancelFrameResize()
             onDoubleClicked: mouse => {
@@ -3644,10 +3792,7 @@ Item {
                             root,
                             mouse.x,
                             mouse.y)
-                        root.controller.beginSelectedFrameResize()
-                        root.resizingFrame = true
-                        root.resizingObjectId
-                            = root.controller.selectedObjectId
+                        root.startFrameResize()
                         mouse.accepted = true
                     }
                     onPositionChanged: mouse => {
@@ -3677,10 +3822,7 @@ Item {
                             root.syncEditorContentBounds()
                         else
                             root.syncSelectedDraftContentBounds()
-                        root.controller.finishSelectedFrameResize()
-                        root.resizingFrame = false
-                        root.resizingObjectId = ""
-                        root.reloadData()
+                        root.finishFrameResize()
                     }
                     onCanceled: root.cancelFrameResize()
 
@@ -3713,10 +3855,7 @@ Item {
                             = resizeOverlay.frameRect
                         if (root.editing)
                             root.editorLayoutDirty = true
-                        root.controller.beginSelectedFrameResize()
-                        root.resizingFrame = true
-                        root.resizingObjectId
-                            = root.controller.selectedObjectId
+                        root.startFrameResize()
                         root.controller.updateSelectedFrameRect(
                             root.resizedFrameRect(
                                 startFrameRect,
@@ -3728,10 +3867,7 @@ Item {
                             root.syncEditorContentBounds()
                         else
                             root.syncSelectedDraftContentBounds()
-                        root.controller.finishSelectedFrameResize()
-                        root.resizingFrame = false
-                        root.resizingObjectId = ""
-                        root.reloadData()
+                        root.finishFrameResize()
                         if (root.editing)
                             Qt.callLater(root.syncEditorContentBounds)
                         event.accepted = true

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 #include <QByteArray>
@@ -99,6 +100,13 @@ constexpr qreal kInkSimplificationTolerancePoints = 0.75;
 constexpr unsigned long kMaximumSourceInkStrokes = 64;
 constexpr unsigned long kMaximumSourceInkPointsPerStroke = 4096;
 constexpr unsigned long kMaximumSourceInkPoints = 32768;
+constexpr size_t kMaximumSourceTextMarkupRects = 50000;
+// This is a conservative estimate of heap storage retained by the
+// whole-document source-comment index. Per-page interaction caches have their
+// own LRU bound and are not charged twice for implicitly shared payloads.
+constexpr qsizetype kMaximumCommentIndexBytes = 16 * 1024 * 1024;
+constexpr qsizetype kEstimatedHeapAllocationOverhead = 32;
+constexpr qsizetype kEstimatedIndexedCandidateOverhead = 128;
 constexpr qint64 kMaximumAddedImageFileBytes = 64 * 1024 * 1024;
 constexpr qint64 kMaximumAddedImagePixels = 40 * 1000 * 1000;
 constexpr unsigned long kMaximumAnnotationStringBytes
@@ -135,6 +143,36 @@ constexpr char kPreservedPaintMark[] = "TrePDFPreservedPaint";
 constexpr char kCommentThreadIdKey[] = "TrePDFThreadId";
 constexpr char kCommentReplyToKey[] = "TrePDFReplyTo";
 constexpr int kAnnotationFlagLockedContents = 1 << 9;
+
+qsizetype saturatedByteCountAdd(qsizetype left, qsizetype right)
+{
+    constexpr qsizetype maximum = (std::numeric_limits<qsizetype>::max)();
+    if (left < 0 || right < 0 || left > maximum - right) {
+        return maximum;
+    }
+    return left + right;
+}
+
+qsizetype estimatedContiguousStorageBytes(qsizetype elementCount,
+                                          qsizetype elementSize)
+{
+    if (elementCount <= 0 || elementSize <= 0) {
+        return 0;
+    }
+    constexpr qsizetype maximum = (std::numeric_limits<qsizetype>::max)();
+    if (elementCount > (maximum - kEstimatedHeapAllocationOverhead)
+            / elementSize) {
+        return maximum;
+    }
+    return kEstimatedHeapAllocationOverhead + elementCount * elementSize;
+}
+
+qsizetype estimatedStringStorageBytes(const QString &value)
+{
+    return estimatedContiguousStorageBytes(
+        qMax(value.size(), value.capacity()),
+        sizeof(QChar));
+}
 
 struct StampPreset {
     const char *name;
@@ -2014,6 +2052,11 @@ PDFEditController::PDFEditController(QObject *parent)
         &PDFEditController::selectionChanged,
         this,
         &PDFEditController::textFormatStateChanged);
+    connect(
+        this,
+        &PDFEditController::selectionChanged,
+        this,
+        &PDFEditController::selectedGeometryChanged);
 }
 
 PDFEditController::~PDFEditController()
@@ -2699,6 +2742,17 @@ QString PDFEditController::selectedReason() const
 
 QVariantList PDFEditController::commentItems() const
 {
+    return buildCommentItems(true);
+}
+
+QVariantList PDFEditController::commentPanelItems() const
+{
+    return buildCommentItems(false);
+}
+
+QVariantList PDFEditController::buildCommentItems(
+    bool includeCandidateDetails) const
+{
     QVector<const Candidate *> comments;
     for (auto page = m_indexedCommentCandidates.cbegin();
          page != m_indexedCommentCandidates.cend();
@@ -2783,15 +2837,47 @@ QVariantList PDFEditController::commentItems() const
     QVariantList result;
     result.reserve(comments.size());
     QSet<QString> appendedReplies;
-    const auto appendComment = [this, &result](const Candidate *candidate,
-                                               bool isReply,
-                                               int replyCount) {
+    const auto appendComment = [this,
+                                &result,
+                                includeCandidateDetails](
+                                   const Candidate *candidate,
+                                   bool isReply,
+                                   int replyCount) {
         const auto draft = m_drafts.constFind(
             draftKey(candidate->page, candidate->objectId));
         const Draft displayDraft = draft == m_drafts.cend()
             ? initialDraftForCandidate(*candidate)
             : *draft;
-        QVariantMap map = candidateMap(displayDraft);
+        const Candidate &displayCandidate = displayDraft.candidate;
+        QVariantMap map;
+        if (includeCandidateDetails) {
+            map = candidateMap(displayDraft);
+        } else {
+            map.insert(
+                QStringLiteral("objectId"),
+                displayCandidate.objectId);
+            map.insert(QStringLiteral("kind"), displayCandidate.kind);
+            map.insert(QStringLiteral("label"), displayCandidate.label);
+            map.insert(QStringLiteral("text"), displayDraft.text);
+            map.insert(
+                QStringLiteral("commentAuthor"),
+                displayCandidate.commentAuthor);
+            map.insert(
+                QStringLiteral("commentCreationDate"),
+                displayCandidate.commentCreationDate);
+            map.insert(
+                QStringLiteral("commentModifiedDate"),
+                displayCandidate.commentModifiedDate);
+            map.insert(
+                QStringLiteral("commentDate"),
+                displayCandidate.commentModifiedDate.isValid()
+                    ? displayCandidate.commentModifiedDate
+                    : displayCandidate.commentCreationDate);
+            map.insert(
+                QStringLiteral("deletable"),
+                candidateDeletable(displayCandidate));
+            map.insert(QStringLiteral("added"), displayCandidate.added);
+        }
         map.insert(QStringLiteral("page"), candidate->page);
         map.insert(
             QStringLiteral("commentTextEditable"),
@@ -2855,6 +2941,11 @@ QVariantList PDFEditController::commentItems() const
         appendComment(reply, false, 0);
     }
     return result;
+}
+
+PDFEditController::CommentIndexState PDFEditController::commentIndexState() const
+{
+    return m_commentIndexState;
 }
 
 int PDFEditController::maximumCommentCharacters() const
@@ -3081,6 +3172,11 @@ QVariantList PDFEditController::candidatesForPage(int page)
     return result;
 }
 
+void PDFEditController::requestCandidatesForPage(int page)
+{
+    ensurePageCandidates(page);
+}
+
 QVariantList PDFEditController::draftsForPage(int page) const
 {
     QVariantList result;
@@ -3136,6 +3232,13 @@ QVariantList PDFEditController::draftsForPage(int page) const
         result.append(map);
     }
     return result;
+}
+
+QVariantMap PDFEditController::selectedDraftPreview() const
+{
+    return m_hasSelection
+        ? candidateMap(selectedDraftForDisplay())
+        : QVariantMap();
 }
 
 QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
@@ -5459,19 +5562,22 @@ void PDFEditController::requestCommentIndex()
     ensureCacheRevision();
     if (!m_document
         || !m_document->isLoaded()
-        || m_commentIndexInFlight
-        || m_commentIndexComplete) {
+        || m_commentIndexState == CommentIndexLoading
+        || m_commentIndexState == CommentIndexReady
+        || m_commentIndexState == CommentIndexLimited) {
         return;
     }
 
     const QString filePath = m_document->renderFilePath();
     const int revision = m_document->renderRevision();
     if (filePath.isEmpty()) {
+        setCommentIndexState(CommentIndexFailed);
         return;
     }
 
     QVector<CandidateScanRequest> requests;
     requests.reserve(m_document->pageCount());
+    bool scanSetupFailed = false;
     for (int page = 0; page < m_document->pageCount(); ++page) {
         CandidateScanRequest request;
         request.filePath = filePath;
@@ -5481,30 +5587,69 @@ void PDFEditController::requestCommentIndex()
         request.pageSize = m_document->pageSize(page);
         request.editingAllowed = documentAllowsEditing();
         request.annotationsAllowed = documentAllowsAnnotations();
-        if (request.sourcePage >= 0 && !request.pageSize.isEmpty()) {
-            requests.append(std::move(request));
+        if (request.sourcePage < 0) {
+            continue;
         }
+        if (request.pageSize.isEmpty()) {
+            scanSetupFailed = true;
+            continue;
+        }
+        requests.append(std::move(request));
     }
 
-    m_commentIndexInFlight = !requests.isEmpty();
-    m_commentIndexComplete = requests.isEmpty();
-    m_commentIndexCancellation
-        = std::make_shared<std::atomic_bool>(false);
-    const std::shared_ptr<std::atomic_bool> cancellation
-        = m_commentIndexCancellation;
+    QSet<int> completeIndexedPages;
+    completeIndexedPages.reserve(
+        m_indexedCommentCandidates.size() + m_pageCandidates.size());
+    for (auto page = m_indexedCommentCandidates.cbegin();
+         page != m_indexedCommentCandidates.cend();
+         ++page) {
+        completeIndexedPages.insert(page.key());
+    }
 
+    bool commentMemoryBudgetExceeded
+        = m_indexedCommentCandidateBytes > kMaximumCommentIndexBytes;
     for (auto page = m_pageCandidates.cbegin();
          page != m_pageCandidates.cend();
          ++page) {
-        cacheCommentCandidates(page.key(), page.value());
+        if (completeIndexedPages.contains(page.key())) {
+            continue;
+        }
+        if (!cacheCommentCandidates(page.key(), page.value())) {
+            commentMemoryBudgetExceeded = true;
+            break;
+        }
+        completeIndexedPages.insert(page.key());
     }
     if (!m_indexedCommentCandidates.isEmpty()) {
         emit commentsChanged();
     }
-    if (requests.isEmpty()) {
-        m_commentIndexCancellation.reset();
+    if (commentMemoryBudgetExceeded) {
+        setCommentIndexState(CommentIndexLimited);
         return;
     }
+
+    requests.erase(
+        std::remove_if(
+            requests.begin(),
+            requests.end(),
+            [&completeIndexedPages](const CandidateScanRequest &request) {
+                return completeIndexedPages.contains(request.page);
+            }),
+        requests.end());
+    const qsizetype initialIndexedBytes
+        = m_indexedCommentCandidateBytes;
+
+    if (requests.isEmpty()) {
+        setCommentIndexState(
+            scanSetupFailed ? CommentIndexFailed : CommentIndexReady);
+        return;
+    }
+
+    m_commentIndexCancellation
+        = std::make_shared<std::atomic_bool>(false);
+    const std::shared_ptr<std::atomic_bool> cancellation
+        = m_commentIndexCancellation;
+    setCommentIndexState(CommentIndexLoading);
 
     const QPointer<PDFEditController> controller(this);
     commentIndexThreadPool().start(QRunnable::create(
@@ -5512,65 +5657,93 @@ void PDFEditController::requestCommentIndex()
          requests = std::move(requests),
          filePath,
          revision,
+         indexedBytes = initialIndexedBytes,
+         initialScanFailed = scanSetupFailed,
          cancellation]() mutable {
             CandidateScanDocument commentDocument;
+            bool scanFailed = initialScanFailed;
+            bool indexLimited = false;
             for (const CandidateScanRequest &request : requests) {
                 if (candidateScanCancelled(cancellation)) {
                     break;
                 }
-                QVector<Candidate> comments;
+                CandidateScanRequest budgetedRequest = request;
+                budgetedRequest.maximumCommentIndexBytes = qMax<qsizetype>(
+                    0,
+                    kMaximumCommentIndexBytes - indexedBytes);
+                CommentPageScanResult scanResult;
                 {
                     PDFiumProcessLock pdfiumLock;
                     FPDF_DOCUMENT document = commentDocument.documentLocked(
                         filePath,
                         revision);
-                    comments = PDFEditController::scanCommentPageLocked(
+                    scanResult = PDFEditController::scanCommentPageLocked(
                         document,
-                        request,
+                        budgetedRequest,
                         cancellation);
                 }
                 if (candidateScanCancelled(cancellation)) {
                     break;
                 }
-                if (comments.isEmpty()) {
-                    continue;
-                }
-                QObject *app = QCoreApplication::instance();
-                if (!app) {
-                    cancellation->store(true, std::memory_order_relaxed);
+                if (scanResult.memoryBudgetExceeded) {
+                    indexLimited = true;
                     break;
                 }
-                QMetaObject::invokeMethod(
-                    app,
-                    [controller,
-                     request,
-                     comments = std::move(comments),
-                     cancellation]() mutable {
-                        if (!controller
-                            || controller->m_commentIndexCancellation
-                                != cancellation
-                            || !controller->m_document
-                            || !controller->m_document->isLoaded()
-                            || controller->m_document->renderRevision()
-                                != request.revision
-                            || controller->m_document->renderFilePath()
-                                != request.filePath
-                            || request.page < 0
-                            || request.page
-                                >= controller->m_document->pageCount()
-                            || controller->m_document->sourcePageIndex(
-                                   request.page)
-                                != request.sourcePage
-                            || controller->m_document->pageSize(request.page)
-                                != request.pageSize) {
-                            return;
-                        }
-                        controller->cacheCommentCandidates(
-                            request.page,
-                            comments);
-                        emit controller->commentsChanged();
-                    },
-                    Qt::QueuedConnection);
+                if (!scanResult.succeeded) {
+                    scanFailed = true;
+                    continue;
+                }
+                indexedBytes = saturatedByteCountAdd(
+                    indexedBytes,
+                    scanResult.estimatedRetainedBytes);
+                QVector<Candidate> comments
+                    = std::move(scanResult.candidates);
+                if (!comments.isEmpty()) {
+                    QObject *app = QCoreApplication::instance();
+                    if (!app) {
+                        cancellation->store(true, std::memory_order_relaxed);
+                        break;
+                    }
+                    QMetaObject::invokeMethod(
+                        app,
+                        [controller,
+                         request,
+                         comments = std::move(comments),
+                         cancellation]() mutable {
+                            if (!controller
+                                || candidateScanCancelled(cancellation)
+                                || controller->m_commentIndexCancellation
+                                    != cancellation
+                                || !controller->m_document
+                                || !controller->m_document->isLoaded()
+                                || controller->m_document->renderRevision()
+                                    != request.revision
+                                || controller->m_document->renderFilePath()
+                                    != request.filePath
+                                || request.page < 0
+                                || request.page
+                                    >= controller->m_document->pageCount()
+                                || controller->m_document->sourcePageIndex(
+                                       request.page)
+                                    != request.sourcePage
+                                || controller->m_document->pageSize(request.page)
+                                    != request.pageSize) {
+                                return;
+                            }
+                            if (!controller->cacheCommentCandidates(
+                                    request.page,
+                                    comments)) {
+                                cancellation->store(
+                                    true,
+                                    std::memory_order_relaxed);
+                                controller->setCommentIndexState(
+                                    CommentIndexLimited);
+                                return;
+                            }
+                            emit controller->commentsChanged();
+                        },
+                        Qt::QueuedConnection);
+                }
             }
 
             QObject *app = QCoreApplication::instance();
@@ -5579,21 +5752,39 @@ void PDFEditController::requestCommentIndex()
             }
             QMetaObject::invokeMethod(
                 app,
-                [controller, filePath, revision, cancellation]() {
+                [controller,
+                 filePath,
+                 revision,
+                 cancellation,
+                 scanFailed,
+                 indexLimited]() {
                     if (!controller
                         || controller->m_commentIndexCancellation
                             != cancellation) {
                         return;
                     }
-                    controller->m_commentIndexInFlight = false;
+                    const CommentIndexState terminalState
+                        = controller->m_commentIndexState;
                     controller->m_commentIndexCancellation.reset();
-                    controller->m_commentIndexComplete
+                    if (terminalState == CommentIndexFailed
+                        || terminalState == CommentIndexLimited) {
+                        return;
+                    }
+                    const bool completedCurrentDocument
                         = !candidateScanCancelled(cancellation)
                         && controller->m_document
                         && controller->m_document->isLoaded()
                         && controller->m_document->renderRevision() == revision
                         && controller->m_document->renderFilePath()
                             == filePath;
+                    controller->setCommentIndexState(
+                        !completedCurrentDocument
+                            ? CommentIndexIdle
+                            : indexLimited
+                                ? CommentIndexLimited
+                                : scanFailed
+                                    ? CommentIndexFailed
+                                    : CommentIndexReady);
                 },
                 Qt::QueuedConnection);
         }));
@@ -5827,7 +6018,7 @@ void PDFEditController::beginSelectedFrameResize()
     m_frameResizeStartContentBounds = draft.contentBounds;
     if (isDrawingCommentCandidateKind(draft.candidate.kind)
         && !draft.candidate.added) {
-        markDraftStateChanged(draft.candidate.page, true);
+        markDraftStateChanged(draft.candidate.page, true, false);
     }
 }
 
@@ -5917,6 +6108,11 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         = boundedRect != m_textEditInitialDisplayFrameRect;
     draft.frameRect = boundedRect;
     draft.contentBounds = resizedContentBounds;
+    if (isDrawingCommentCandidateKind(draft.candidate.kind)) {
+        m_textEditDisplayDraft = draft;
+        emit selectedGeometryChanged();
+        return;
+    }
     updateSelectedDraft(draft);
 }
 
@@ -5951,10 +6147,26 @@ void PDFEditController::finishSelectedFrameResize()
         return;
     }
 
+    const bool refreshesSourceDrawing = m_hasSelection
+        && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+        && !m_selectedCandidate.added;
+    const int page = refreshesSourceDrawing
+        ? m_selectedCandidate.page
+        : -1;
+    const quint64 suppressionRevision = refreshesSourceDrawing
+        ? draftRevisionForPage(page)
+        : 0;
     const bool ownsTextEdit = m_frameResizeOwnsTextEdit;
     resetFrameResizeState();
     if (ownsTextEdit) {
         finishSelectedTextEdit();
+    }
+    if (refreshesSourceDrawing
+        && draftRevisionForPage(page) == suppressionRevision) {
+        // Beginning a source drawing gesture renders a texture with the source
+        // annotation suppressed. A no-op finish still needs a new revision;
+        // otherwise PDFPageItem can reuse that suppressed texture forever.
+        markDraftStateChanged(page, true, false);
     }
 }
 
@@ -5964,6 +6176,15 @@ void PDFEditController::cancelSelectedFrameResize()
         return;
     }
 
+    const bool refreshesSourceDrawing = m_hasSelection
+        && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+        && !m_selectedCandidate.added;
+    const int page = refreshesSourceDrawing
+        ? m_selectedCandidate.page
+        : -1;
+    const quint64 suppressionRevision = refreshesSourceDrawing
+        ? draftRevisionForPage(page)
+        : 0;
     const bool ownsTextEdit = m_frameResizeOwnsTextEdit;
     const QRectF startFrameRect = m_frameResizeStartFrameRect;
     const QRectF startContentBounds = m_frameResizeStartContentBounds;
@@ -5973,6 +6194,10 @@ void PDFEditController::cancelSelectedFrameResize()
 
     if (ownsTextEdit) {
         cancelSelectedTextEdit();
+        if (refreshesSourceDrawing
+            && draftRevisionForPage(page) == suppressionRevision) {
+            markDraftStateChanged(page, true, false);
+        }
         return;
     }
 
@@ -5981,6 +6206,10 @@ void PDFEditController::cancelSelectedFrameResize()
     draft.contentBounds = startContentBounds;
     updateSelectedDraft(draft);
     m_textEditGeometryExplicitlyChanged = startGeometryExplicitlyChanged;
+    if (refreshesSourceDrawing
+        && draftRevisionForPage(page) == suppressionRevision) {
+        markDraftStateChanged(page, true, false);
+    }
 }
 
 void PDFEditController::setSelectedTextRange(int start, int length)
@@ -7393,7 +7622,16 @@ void PDFEditController::completePageCandidateScan(
             std::move(candidates),
             request.page,
             request.pageSize);
-        cacheCommentCandidates(request.page, finalizedCandidates);
+        if (m_commentIndexState == CommentIndexIdle
+            || m_commentIndexState == CommentIndexFailed) {
+            if (!m_indexedCommentCandidates.contains(request.page)) {
+                if (!cacheCommentCandidates(
+                        request.page,
+                        finalizedCandidates)) {
+                    setCommentIndexState(CommentIndexLimited);
+                }
+            }
+        }
         m_pageCandidates.insert(
             request.page,
             std::move(finalizedCandidates));
@@ -7485,12 +7723,115 @@ void PDFEditController::resetCommentIndex()
         m_commentIndexCancellation->store(true, std::memory_order_relaxed);
     }
     m_commentIndexCancellation.reset();
-    m_commentIndexInFlight = false;
-    m_commentIndexComplete = false;
+    setCommentIndexState(CommentIndexIdle);
     m_indexedCommentCandidates.clear();
+    m_indexedCommentCandidateBytes = 0;
 }
 
-void PDFEditController::cacheCommentCandidates(
+void PDFEditController::setCommentIndexState(CommentIndexState state)
+{
+    if (m_commentIndexState == state) {
+        return;
+    }
+    m_commentIndexState = state;
+    emit commentIndexStateChanged();
+}
+
+qsizetype PDFEditController::estimatedCommentCandidateBytes(
+    const Candidate &candidate)
+{
+    qsizetype bytes = saturatedByteCountAdd(
+        static_cast<qsizetype>(sizeof(Candidate)),
+        kEstimatedIndexedCandidateOverhead);
+    const auto addBytes = [&bytes](qsizetype additionalBytes) {
+        bytes = saturatedByteCountAdd(bytes, additionalBytes);
+    };
+    const auto addString = [&addBytes](const QString &value) {
+        addBytes(estimatedStringStorageBytes(value));
+    };
+
+    addString(candidate.objectId);
+    addString(candidate.sourceWidgetId);
+    addString(candidate.kind);
+    addString(candidate.label);
+    addString(candidate.text);
+    addString(candidate.sourceAnnotationName);
+    addString(candidate.commentAuthor);
+    addString(candidate.commentThreadId);
+    addString(candidate.replyToObjectId);
+    addString(candidate.replyToThreadId);
+    addString(candidate.fontFamily);
+    addString(candidate.fontIdentity);
+    addString(candidate.stampText);
+    addString(candidate.reason);
+    addString(candidate.pendingFontExpectedFamily);
+    addString(candidate.pendingBundledFontFamily);
+    addString(candidate.pendingSystemFontFamily);
+    addString(candidate.commentProperties.subject);
+    addString(candidate.commentProperties.intent);
+    addString(candidate.commentProperties.name);
+
+    addBytes(estimatedContiguousStorageBytes(
+        candidate.objectPath.capacity(),
+        sizeof(int)));
+    addBytes(estimatedContiguousStorageBytes(
+        candidate.parts.capacity(),
+        sizeof(CandidatePart)));
+    for (const CandidatePart &part : candidate.parts) {
+        addString(part.objectId);
+        addString(part.text);
+        addString(part.separatorAfter);
+        addBytes(estimatedContiguousStorageBytes(
+            part.objectPath.capacity(),
+            sizeof(int)));
+    }
+    addBytes(estimatedContiguousStorageBytes(
+        candidate.textGlyphRects.capacity(),
+        sizeof(QRectF)));
+    addBytes(estimatedContiguousStorageBytes(
+        candidate.highlightRects.capacity(),
+        sizeof(QRectF)));
+    addBytes(estimatedContiguousStorageBytes(
+        candidate.drawingVertices.capacity(),
+        sizeof(QPointF)));
+    addBytes(estimatedContiguousStorageBytes(
+        candidate.inkStrokes.capacity(),
+        sizeof(QVector<QPointF>)));
+    for (const QVector<QPointF> &stroke : candidate.inkStrokes) {
+        addBytes(estimatedContiguousStorageBytes(
+            stroke.capacity(),
+            sizeof(QPointF)));
+    }
+    addBytes(estimatedContiguousStorageBytes(
+        candidate.commentProperties.dashPattern.capacity(),
+        sizeof(qreal)));
+    addBytes(estimatedContiguousStorageBytes(
+        candidate.pendingEmbeddedFontData.capacity(),
+        sizeof(char)));
+    addBytes(candidate.image.sizeInBytes());
+    return bytes;
+}
+
+qsizetype PDFEditController::estimatedCommentCandidatePageBytes(
+    const QVector<Candidate> &candidates)
+{
+    const qsizetype spareCapacity = qMax<qsizetype>(
+        0,
+        candidates.capacity() - candidates.size());
+    qsizetype bytes = estimatedContiguousStorageBytes(
+        spareCapacity,
+        sizeof(Candidate));
+    for (const Candidate &candidate : candidates) {
+        if (isCommentCandidateKind(candidate.kind)) {
+            bytes = saturatedByteCountAdd(
+                bytes,
+                estimatedCommentCandidateBytes(candidate));
+        }
+    }
+    return bytes;
+}
+
+bool PDFEditController::cacheCommentCandidates(
     int page,
     const QVector<Candidate> &candidates)
 {
@@ -7501,11 +7842,30 @@ void PDFEditController::cacheCommentCandidates(
         }
     }
 
+    const auto existing = m_indexedCommentCandidates.constFind(page);
+    const qsizetype existingBytes
+        = existing == m_indexedCommentCandidates.cend()
+        ? 0
+        : estimatedCommentCandidatePageBytes(existing.value());
+    const qsizetype retainedWithoutPage
+        = m_indexedCommentCandidateBytes >= existingBytes
+        ? m_indexedCommentCandidateBytes - existingBytes
+        : 0;
+    const qsizetype replacementBytes
+        = estimatedCommentCandidatePageBytes(comments);
+    if (retainedWithoutPage > kMaximumCommentIndexBytes
+        || replacementBytes
+            > kMaximumCommentIndexBytes - retainedWithoutPage) {
+        return false;
+    }
+
     if (comments.isEmpty()) {
         m_indexedCommentCandidates.remove(page);
     } else {
         m_indexedCommentCandidates.insert(page, std::move(comments));
     }
+    m_indexedCommentCandidateBytes = retainedWithoutPage + replacementBytes;
+    return true;
 }
 
 PDFEditController::CandidateScanRequest PDFEditController::candidateScanRequest(
@@ -7564,38 +7924,70 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageFromFile(
     return candidates;
 }
 
-QVector<PDFEditController::Candidate>
+PDFEditController::CommentPageScanResult
 PDFEditController::scanCommentPageLocked(
     FPDF_DOCUMENT document,
     const CandidateScanRequest &request,
     const std::shared_ptr<std::atomic_bool> &cancellation)
 {
     assertPDFiumProcessLockHeld();
-    QVector<Candidate> candidates;
+    CommentPageScanResult result;
     if (!document
         || candidateScanCancelled(cancellation)
         || request.sourcePage < 0
         || request.pageSize.isEmpty()) {
-        return candidates;
+        return result;
     }
 
     FPDF_PAGE page = FPDF_LoadPage(document, request.sourcePage);
     if (!page) {
-        return candidates;
+        return result;
     }
-    appendAnnotationCandidates(page, request, candidates, cancellation);
+    qsizetype estimatedCommentBytes = 0;
+    bool commentMemoryBudgetExceeded = false;
+    const bool annotationScanSucceeded = appendAnnotationCandidates(
+        page,
+        request,
+        result.candidates,
+        cancellation,
+        estimatedCommentBytes,
+        commentMemoryBudgetExceeded);
     FPDF_ClosePage(page);
+    if (candidateScanCancelled(cancellation)) {
+        result.candidates.clear();
+        return result;
+    }
+    if (commentMemoryBudgetExceeded) {
+        // A partial page could omit a reply ancestor or descendant and make
+        // the retained thread look safely deletable when it is not.
+        result.candidates.clear();
+        result.memoryBudgetExceeded = true;
+        result.succeeded = annotationScanSucceeded;
+        return result;
+    }
 
-    candidates.erase(
+    result.candidates.erase(
         std::remove_if(
-            candidates.begin(),
-            candidates.end(),
+            result.candidates.begin(),
+            result.candidates.end(),
             [](const Candidate &candidate) {
                 return !isCommentCandidateKind(candidate.kind);
             }),
-        candidates.end());
-    applyCommentThreadDeletionProtection(candidates);
-    return candidates;
+        result.candidates.end());
+    applyCommentThreadDeletionProtection(result.candidates);
+    result.estimatedRetainedBytes
+        = estimatedCommentCandidatePageBytes(result.candidates);
+    if (request.maximumCommentIndexBytes >= 0
+        && result.estimatedRetainedBytes
+            > request.maximumCommentIndexBytes) {
+        result.candidates.clear();
+        result.estimatedRetainedBytes = 0;
+        result.memoryBudgetExceeded = true;
+        result.succeeded = annotationScanSucceeded;
+        return result;
+    }
+    result.succeeded = annotationScanSucceeded;
+    return result;
 }
 
 QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
@@ -7719,7 +8111,15 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
             cancellation);
     }
     if (!candidateScanCancelled(cancellation)) {
-        appendAnnotationCandidates(page, request, candidates, cancellation);
+        qsizetype ignoredCommentBytes = 0;
+        bool ignoredCommentMemoryBudgetExceeded = false;
+        appendAnnotationCandidates(
+            page,
+            request,
+            candidates,
+            cancellation,
+            ignoredCommentBytes,
+            ignoredCommentMemoryBudgetExceeded);
     }
 
     if (textPage) {
@@ -8273,19 +8673,26 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
     return groupedCandidates;
 }
 
-void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
+bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                                                    const CandidateScanRequest &request,
                                                    QVector<Candidate> &candidates,
-    const std::shared_ptr<std::atomic_bool> &cancellation)
+    const std::shared_ptr<std::atomic_bool> &cancellation,
+    qsizetype &estimatedCommentBytes,
+    bool &commentMemoryBudgetExceeded)
 {
     assertPDFiumProcessLockHeld();
     const QSizeF &pageSize = request.pageSize;
     const int annotationCount = FPDFPage_GetAnnotCount(page);
+    if (annotationCount < 0) {
+        return false;
+    }
+    bool succeeded = true;
     for (int index = 0;
          index < annotationCount && !candidateScanCancelled(cancellation);
          ++index) {
         FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(page, index);
         if (!annotation) {
+            succeeded = false;
             continue;
         }
 
@@ -8330,42 +8737,45 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             if (textMarkupSubtype) {
                 const size_t quadCount
                     = FPDFAnnot_CountAttachmentPoints(annotation);
-                annotationRects.reserve(static_cast<qsizetype>(quadCount));
-                for (size_t quadIndex = 0;
-                     quadIndex < quadCount;
-                     ++quadIndex) {
-                    FS_QUADPOINTSF quad{};
-                    if (!FPDFAnnot_GetAttachmentPoints(
-                            annotation,
-                            quadIndex,
-                            &quad)) {
-                        continue;
-                    }
-                    const std::array<QPointF, 4> points{
-                        QPointF(quad.x1, quad.y1),
-                        QPointF(quad.x2, quad.y2),
-                        QPointF(quad.x3, quad.y3),
-                        QPointF(quad.x4, quad.y4)};
-                    qreal minimumX = points.front().x();
-                    qreal maximumX = minimumX;
-                    qreal minimumY = points.front().y();
-                    qreal maximumY = minimumY;
-                    for (const QPointF &point : points) {
-                        minimumX = qMin(minimumX, point.x());
-                        maximumX = qMax(maximumX, point.x());
-                        minimumY = qMin(minimumY, point.y());
-                        maximumY = qMax(maximumY, point.y());
-                    }
-                    const QRectF rect = normalizedRect(
-                        page,
-                        minimumX,
-                        minimumY,
-                        maximumX,
-                        maximumY,
-                        kIdentityMatrix,
-                        pageSize);
-                    if (!rect.isEmpty()) {
-                        annotationRects.append(rect);
+                if (quadCount <= kMaximumSourceTextMarkupRects) {
+                    annotationRects.reserve(
+                        static_cast<qsizetype>(quadCount));
+                    for (size_t quadIndex = 0;
+                         quadIndex < quadCount;
+                         ++quadIndex) {
+                        FS_QUADPOINTSF quad{};
+                        if (!FPDFAnnot_GetAttachmentPoints(
+                                annotation,
+                                quadIndex,
+                                &quad)) {
+                            continue;
+                        }
+                        const std::array<QPointF, 4> points{
+                            QPointF(quad.x1, quad.y1),
+                            QPointF(quad.x2, quad.y2),
+                            QPointF(quad.x3, quad.y3),
+                            QPointF(quad.x4, quad.y4)};
+                        qreal minimumX = points.front().x();
+                        qreal maximumX = minimumX;
+                        qreal minimumY = points.front().y();
+                        qreal maximumY = minimumY;
+                        for (const QPointF &point : points) {
+                            minimumX = qMin(minimumX, point.x());
+                            maximumX = qMax(maximumX, point.x());
+                            minimumY = qMin(minimumY, point.y());
+                            maximumY = qMax(maximumY, point.y());
+                        }
+                        const QRectF rect = normalizedRect(
+                            page,
+                            minimumX,
+                            minimumY,
+                            maximumX,
+                            maximumY,
+                            kIdentityMatrix,
+                            pageSize);
+                        if (!rect.isEmpty()) {
+                            annotationRects.append(rect);
+                        }
                     }
                 }
             }
@@ -8869,12 +9279,29 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 candidate.reason = qtTrId(
                     "ExistingCommentPageAppearanceReadOnly");
             }
+            if (request.maximumCommentIndexBytes >= 0) {
+                const qsizetype candidateBytes
+                    = estimatedCommentCandidateBytes(candidate);
+                if (estimatedCommentBytes
+                        > request.maximumCommentIndexBytes
+                    || candidateBytes
+                        > request.maximumCommentIndexBytes
+                            - estimatedCommentBytes) {
+                    commentMemoryBudgetExceeded = true;
+                    FPDFPage_CloseAnnot(annotation);
+                    break;
+                }
+                estimatedCommentBytes = saturatedByteCountAdd(
+                    estimatedCommentBytes,
+                    candidateBytes);
+            }
             candidates.append(std::move(candidate));
             FPDFPage_CloseAnnot(annotation);
             continue;
         }
 
-        if (subtype != FPDF_ANNOT_WIDGET) {
+        if (request.maximumCommentIndexBytes >= 0
+            || subtype != FPDF_ANNOT_WIDGET) {
             FPDFPage_CloseAnnot(annotation);
             continue;
         }
@@ -8924,7 +9351,7 @@ void PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
         candidates.append(candidate);
         FPDFPage_CloseAnnot(annotation);
     }
-
+    return succeeded;
 }
 
 const PDFEditController::Candidate *PDFEditController::findCandidate(int page,
@@ -10358,22 +10785,31 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
             && !normalizedDraft.candidate.added;
         if (reusesSourceDrawingSuppressionTexture) {
             emit pageDataChanged(m_selectedCandidate.page);
-            emit commentsChanged();
         } else {
-            markDraftStateChanged(m_selectedCandidate.page, false);
+            const bool notifyComments = !m_frameResizeActive
+                || !isCommentCandidateKind(
+                    normalizedDraft.candidate.kind);
+            markDraftStateChanged(
+                m_selectedCandidate.page,
+                false,
+                notifyComments);
         }
         emit historyStateChanged();
     }
     emit selectionChanged();
 }
 
-void PDFEditController::markDraftStateChanged(int page, bool immediate)
+void PDFEditController::markDraftStateChanged(int page,
+                                              bool immediate,
+                                              bool notifyComments)
 {
     const quint64 revision = ++m_nextDraftRevision;
     m_pageDraftRevisions.insert(page, revision);
     emit draftRenderStateChanged(page, revision, immediate);
     emit pageDataChanged(page);
-    emit commentsChanged();
+    if (notifyComments) {
+        emit commentsChanged();
+    }
 }
 
 void PDFEditController::requestDraftRender(int page, bool immediate)
