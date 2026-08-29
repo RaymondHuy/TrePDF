@@ -7976,6 +7976,8 @@ bool PDFAcroFormCanonicalizer::finalizeSourceDrawingGeometryUpdates(
             : 2;
         if (update.markerId.isEmpty()
             || markerIds.contains(update.markerId)
+            || (!update.geometryChanged && !update.propertiesChanged)
+            || (update.propertiesChanged && !update.regenerateAppearance)
             || annotation.page < 0
             || !bounds.isValid()
             || bounds.width() <= 0.0
@@ -7983,7 +7985,7 @@ bool PDFAcroFormCanonicalizer::finalizeSourceDrawingGeometryUpdates(
             || !finitePoint(bounds.topLeft())
             || !finitePoint(bounds.bottomRight())) {
             error = QStringLiteral(
-                "A source drawing geometry update is invalid or duplicated.");
+                "A source drawing update is invalid or duplicated.");
             return false;
         }
         markerIds.insert(update.markerId);
@@ -8240,48 +8242,80 @@ bool PDFAcroFormCanonicalizer::finalizeSourceDrawingGeometryUpdates(
         QByteArray dictionary = object.mid(
             dictionaryStart,
             dictionaryEnd - dictionaryStart);
-        const QRectF bounds = annotation.pageRect.normalized();
-        const QByteArray rect = QByteArrayLiteral("[")
-            + pdfNumber(bounds.left()) + ' '
-            + pdfNumber(bounds.top()) + ' '
-            + pdfNumber(bounds.right()) + ' '
-            + pdfNumber(bounds.bottom()) + ']';
-        bool geometryUpdated = replaceTopLevelDictionaryValue(
-            dictionary,
-            QByteArrayView("/Rect"),
-            rect,
-            true,
-            error);
-        if (geometryUpdated
-            && annotation.type == PDFCommentAnnotation::DrawingType::Ink) {
-            geometryUpdated = replaceTopLevelDictionaryValue(
+        bool dictionaryUpdated = true;
+        if (update.geometryChanged) {
+            const QRectF bounds = annotation.pageRect.normalized();
+            const QByteArray rect = QByteArrayLiteral("[")
+                + pdfNumber(bounds.left()) + ' '
+                + pdfNumber(bounds.top()) + ' '
+                + pdfNumber(bounds.right()) + ' '
+                + pdfNumber(bounds.bottom()) + ']';
+            dictionaryUpdated = replaceTopLevelDictionaryValue(
                 dictionary,
-                QByteArrayView("/InkList"),
-                pdfInkList(annotation.pageStrokes),
+                QByteArrayView("/Rect"),
+                rect,
                 true,
                 error);
-        } else if (geometryUpdated
-                   && annotation.type
-                       == PDFCommentAnnotation::DrawingType::Line) {
-            geometryUpdated = replaceTopLevelDictionaryValue(
-                dictionary,
-                QByteArrayView("/L"),
-                pdfPointArray(annotation.pageVertices),
-                true,
-                error);
-        } else if (geometryUpdated
-                   && (annotation.type
-                           == PDFCommentAnnotation::DrawingType::Polygon
-                       || annotation.type
-                           == PDFCommentAnnotation::DrawingType::PolyLine)) {
-            geometryUpdated = replaceTopLevelDictionaryValue(
-                dictionary,
-                QByteArrayView("/Vertices"),
-                pdfPointArray(annotation.pageVertices),
-                true,
-                error);
+            if (dictionaryUpdated
+                && annotation.type == PDFCommentAnnotation::DrawingType::Ink) {
+                dictionaryUpdated = replaceTopLevelDictionaryValue(
+                    dictionary,
+                    QByteArrayView("/InkList"),
+                    pdfInkList(annotation.pageStrokes),
+                    true,
+                    error);
+            } else if (dictionaryUpdated
+                       && annotation.type
+                           == PDFCommentAnnotation::DrawingType::Line) {
+                dictionaryUpdated = replaceTopLevelDictionaryValue(
+                    dictionary,
+                    QByteArrayView("/L"),
+                    pdfPointArray(annotation.pageVertices),
+                    true,
+                    error);
+            } else if (dictionaryUpdated
+                       && (annotation.type
+                               == PDFCommentAnnotation::DrawingType::Polygon
+                           || annotation.type
+                               == PDFCommentAnnotation::DrawingType::PolyLine)) {
+                dictionaryUpdated = replaceTopLevelDictionaryValue(
+                    dictionary,
+                    QByteArrayView("/Vertices"),
+                    pdfPointArray(annotation.pageVertices),
+                    true,
+                    error);
+            }
         }
-        if (!geometryUpdated
+        if (dictionaryUpdated && update.propertiesChanged) {
+            dictionaryUpdated = replaceTopLevelDictionaryValue(
+                    dictionary,
+                    QByteArrayView("/C"),
+                    pdfColorArray(annotation.properties.strokeColor),
+                    true,
+                    error)
+                && replaceTopLevelDictionaryValue(
+                    dictionary,
+                    QByteArrayView("/CA"),
+                    pdfNumber(annotation.properties.opacity),
+                    true,
+                    error);
+            if (dictionaryUpdated
+                && annotation.type != PDFCommentAnnotation::DrawingType::Ink
+                && annotation.properties.interiorColor.isValid()) {
+                dictionaryUpdated = replaceTopLevelDictionaryValue(
+                    dictionary,
+                    QByteArrayView("/IC"),
+                    pdfColorArray(annotation.properties.interiorColor),
+                    true,
+                    error);
+            } else if (dictionaryUpdated) {
+                dictionaryUpdated = removeTopLevelDictionaryValue(
+                    dictionary,
+                    QByteArrayView("/IC"),
+                    error);
+            }
+        }
+        if (!dictionaryUpdated
             || !removeTopLevelDictionaryValue(
                 dictionary,
                 QByteArrayView(markerDictionaryKey),
@@ -8310,6 +8344,11 @@ bool PDFAcroFormCanonicalizer::finalizeSourceDrawingGeometryUpdates(
                     generatedAppearance = true;
                 }
             }
+        }
+        if (update.propertiesChanged && !generatedAppearance) {
+            return fail(QStringLiteral(
+                "A source drawing property update could not regenerate "
+                "its normal appearance."));
         }
         if (generatedAppearance) {
             const int appearanceObjectNumber = nextObjectNumber++;

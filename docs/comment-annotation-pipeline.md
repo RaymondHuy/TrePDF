@@ -135,6 +135,8 @@ highlightColor
 drawingVertices            // storage nội bộ cho /L hoặc /Vertices
 inkStrokes                 // mỗi path /InkList là một stroke riêng
 commentProperties          // stroke/interior/opacity/border/effect/endings
+sourceDrawingAppearanceFingerprint // SHA-256 bounded của normal AP nguồn
+drawingPropertiesEditable  // capability style riêng, không dùng chung geometry
 commentAuthor              // /T
 commentCreationDate        // /CreationDate
 commentModifiedDate        // /M
@@ -167,6 +169,7 @@ khóa chung này.
 
 ```text
 candidate
+commentProperties          // style hiện hành cho preview/history/save
 text
 characterSpans
 paragraphFormats
@@ -309,6 +312,15 @@ Card chỉ đọc vẫn chọn và điều hướng được, nhưng nút sửa,
 Ink có geometry hợp lệ dùng kind `ink` nên sửa `/Contents`, Reply và xóa giống
 comment được hỗ trợ; chỉ Ink bị downgrade generic mới khóa các action này.
 
+Khi chọn drawing comment, panel hiện property editor cho stroke, fill (chỉ
+Square/Circle/Polygon) và opacity. Color dialog chỉ được tạo khi mở; slider
+opacity preview giá trị local nhưng commit đúng một history command khi thả,
+còn phím mũi tên commit theo từng bước. Added comment luôn dùng được editor.
+Cả sáu source drawing subtype chỉ bật khi provenance TrePDF, normal `/AP`,
+border/dash/fill và flags đều nằm trong tập có thể round-trip; appearance
+ngoài/custom hiển thị thông báo chỉ đọc. Property-only Save của Line/PolyLine
+giữ nguyên `/LE` cùng `/BS`, `/BE` và các dictionary entry không liên quan.
+
 QML cho phép text tạm vượt 700 UTF-16 code unit để không phá IME/local undo,
 nhưng commit, gửi reply và Save bị chặn cho đến khi độ dài hợp lệ. C++ kiểm lại
 cùng giới hạn; không dựa riêng vào validation QML.
@@ -449,6 +461,11 @@ Các quy tắc tránh vẽ hai lần:
 - source annotation bị draft xóa được tạm ẩn trong render worker;
 - Ink nguồn đang kéo/đã dịch được tạm ẩn, còn `InkDrawingView` vẽ mọi stroke ở
   vị trí draft để không phụ thuộc appearance nguồn cũ;
+- source drawing đổi style được tạm ẩn và delegate vẽ stroke/fill/opacity draft;
+  delegate chỉ vẽ khi object ID có trong suppression snapshot đi cùng texture;
+  undo/discard giữ một restoration preview theo đúng object cho tới khi texture
+  sạch thay snapshot đó, còn content-only draft không được vẽ chồng appearance
+  nguồn;
 - reply appearance được tạm ẩn nhưng reply vẫn ở CommentPanel;
 - Free Text nguồn chưa đổi giữ appearance gốc;
 - Free Text đã sửa được preview bằng hộp trắng, viền đen và text wrap của TrePDF;
@@ -457,7 +474,9 @@ Các quy tắc tránh vẽ hai lần:
 
 Render suppression phải luôn phục hồi annotation flags trước khi đóng page.
 Page, document handle và process-wide PDFium lock phải sống trong toàn bộ
-lifetime của guard.
+lifetime của guard. `PDFPageItem` publish snapshot object ID trước scene-graph
+sync và giữ ảnh pending đã accept qua draft invalidation, để QML overlay và ảnh
+PDFium luôn đổi cùng một rendered frame.
 
 ## 10. Save và Save As
 
@@ -533,24 +552,34 @@ Trước khi sửa, writer xác thực annotation index, subtype, original `/Con
   wrapped Unicode appearance.
 
 Với drawing comment đổi geometry, controller translate hoặc scale từng vertex
-hay Ink stroke từ frame ban đầu sang frame mới. Writer map frame và geometry
+hay Ink stroke từ frame ban đầu sang frame mới. Với property edit, draft giữ
+stroke/interior/opacity hiện hành tách khỏi snapshot gốc để mỗi action là một
+command undoable. Writer map frame và geometry
 qua `FPDF_DeviceToPage()`, gắn marker UUID tạm rồi để canonicalizer thay trực
 tiếp `/Rect` cùng `/L`, `/Vertices` hoặc `/InkList` sau bước serialize. Luồng
 này tránh side effect của `FPDFAnnot_SetRect()` có thể nới `/AP /BBox` mà không
 scale drawing commands. Move thuần và appearance ngoài/custom giữ nguyên `/AP`.
 Với annotation có provenance TrePDF hợp lệ (`/NM` và `/TrePDFThreadId` cùng ID
 `<kind>:<uuid>`), resize tạo normal `/AP` mới từ geometry đã scale nếu toàn bộ
-properties được hỗ trợ; nếu không thì giữ appearance nguồn. Marker luôn bị xóa
+properties được hỗ trợ và fingerprint AP nguồn vẫn khớp; nếu không thì giữ
+appearance nguồn. Marker luôn bị xóa
 trong cùng incremental transaction; `/Popup`, `/IRT`, metadata và key mở rộng
 không bị viết lại. Save annotation-only không gọi
 `FPDFPage_GenerateContent()`.
 
+Property Save nguồn chỉ nhận drawing comment TrePDF-managed đã qua capability
+check. Writer xác thực lại subtype/identity/flags và SHA-256 của normal `/AP`
+đã index trước khi mutation. Canonicalizer chỉ thay `/C`, `/IC`, `/CA` và
+normal `/AP`; `/BS`, `/BE`, `/LE` cùng các key mở rộng được giữ nguyên. Nếu AP
+đổi giữa index và Save, hoặc không thể tạo replacement AP atomically, toàn bộ
+Save thất bại trước khi commit target.
+
 Sticky Note, text markup và Ink giữ nguyên appearance nguồn khi chỉ sửa nội dung
 vì page geometry không đổi. Nếu Sticky Note/reply nguồn đang được sửa nhưng thiếu
 normal appearance, writer bổ sung `/AP` vector từ Rect và color hiện có.
-Canonicalizer chỉ nhận danh sách text markup/drawing mới, nên không thay `/AP`
-của annotation nguồn đã có. Free Text là ngoại lệ vì text hiển thị trực tiếp
-trên trang.
+Canonicalizer nhận drawing nguồn chỉ khi geometry hoặc property thực sự đổi.
+Content-only source drawing vẫn giữ `/AP`; Free Text là ngoại lệ vì text hiển
+thị trực tiếp trên trang.
 
 ### 10.4 Xóa annotation nguồn
 
@@ -681,7 +710,7 @@ Bảng này không mô tả tính năng đã có.
 | Ưu tiên | Gap | Hướng triển khai |
 |---|---|---|
 | P0 | Text-aware markup đồng nhất | Dùng glyph cache của Squiggly cho Highlight, Underline và Strikeout. |
-| P1 | Sửa source geometry/style | Move/resize và property editor, giữ dictionary/AP/Popup/thread metadata. |
+| P1 | Drawing style nâng cao | UI cho border width/style, dash, effect và line endings với parser/capability source đầy đủ. |
 | P1 | Free Text nâng cao | `/IT /FreeTextCallout`, `/CL`, `/LE`, Typewriter, `/Q`, `/RC`/`DS`, border/fill/opacity. |
 | P1 | Review state và grouping | Phân biệt `/State` + `/StateModel`, `/RT /R` và `/RT /Group`; hỗ trợ Accepted/Rejected/Completed/Marked. |
 | P1 | Text-edit marks | `/Caret`, Insert/Replace review workflow. |

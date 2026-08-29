@@ -1787,6 +1787,7 @@ struct AnnotationAppearanceStyle {
     bool hasStroke = false;
     bool hasFill = false;
     bool hasStrokeWidth = false;
+    bool dashPatternSupported = true;
 };
 
 AnnotationAppearanceStyle annotationAppearanceStyle(
@@ -1829,19 +1830,28 @@ AnnotationAppearanceStyle annotationAppearanceStyle(
             }
 
             const int dashCount = FPDFPageObj_GetDashCount(object);
-            if (dashCount > 0 && dashCount <= 16) {
+            if (dashCount < 0 || dashCount > 16) {
+                result.dashPatternSupported = false;
+            } else if (dashCount > 0) {
                 QVector<float> dashes(dashCount);
-                if (FPDFPageObj_GetDashArray(
+                if (!FPDFPageObj_GetDashArray(
                         object,
                         dashes.data(),
                         static_cast<size_t>(dashCount))) {
-                    result.dashPattern.reserve(dashCount);
+                    result.dashPatternSupported = false;
+                } else {
+                    QVector<qreal> parsedDashes;
+                    parsedDashes.reserve(dashCount);
                     for (float dash : std::as_const(dashes)) {
                         if (!std::isfinite(dash) || dash <= 0.0F) {
-                            result.dashPattern.clear();
+                            result.dashPatternSupported = false;
+                            parsedDashes.clear();
                             break;
                         }
-                        result.dashPattern.append(dash);
+                        parsedDashes.append(dash);
+                    }
+                    if (result.dashPatternSupported) {
+                        result.dashPattern = std::move(parsedDashes);
                     }
                 }
             }
@@ -1859,6 +1869,15 @@ AnnotationAppearanceStyle annotationAppearanceStyle(
         }
     }
     return result;
+}
+
+bool hasCanonicalDrawingAppearance(QStringView appearanceText)
+{
+    const QString appearance = appearanceText.trimmed().toString();
+    return appearance.startsWith(QLatin1String("q\n"))
+        && appearance.endsWith(QLatin1Char('Q'))
+        && appearance.contains(QLatin1String("/GS gs"))
+        && appearance.contains(QLatin1String("1 J 1 j"));
 }
 
 QColor annotationColor(FPDF_ANNOTATION annotation,
@@ -2740,9 +2759,66 @@ bool PDFEditController::candidateDeletable(const Candidate &candidate) const
         && (candidate.added || candidate.sourceAnnotationIndex >= 0);
 }
 
+bool PDFEditController::drawingSupportsFill(const QString &kind)
+{
+    return kind == QLatin1String("square")
+        || kind == QLatin1String("circle")
+        || kind == QLatin1String("polygon");
+}
+
+bool PDFEditController::drawingPropertiesEditable(
+    const Candidate &candidate) const
+{
+    return isDrawingCommentCandidateKind(candidate.kind)
+        && candidate.editable
+        && candidate.drawingPropertiesEditable
+        && documentAllowsAnnotations();
+}
+
 bool PDFEditController::selectedDeletable() const
 {
     return m_hasSelection && candidateDeletable(m_selectedCandidate);
+}
+
+bool PDFEditController::selectedDrawingPropertiesEditable() const
+{
+    return m_hasSelection
+        && drawingPropertiesEditable(m_selectedCandidate);
+}
+
+bool PDFEditController::selectedDrawingSupportsFill() const
+{
+    return m_hasSelection
+        && drawingSupportsFill(m_selectedCandidate.kind);
+}
+
+QColor PDFEditController::selectedDrawingStrokeColor() const
+{
+    return m_hasSelection
+            && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+        ? selectedDraftForDisplay().commentProperties.strokeColor
+        : QColor();
+}
+
+QColor PDFEditController::selectedDrawingInteriorColor() const
+{
+    return m_hasSelection
+            && drawingSupportsFill(m_selectedCandidate.kind)
+        ? selectedDraftForDisplay().commentProperties.interiorColor
+        : QColor();
+}
+
+bool PDFEditController::selectedDrawingHasInterior() const
+{
+    return selectedDrawingInteriorColor().isValid();
+}
+
+qreal PDFEditController::selectedDrawingOpacity() const
+{
+    return m_hasSelection
+            && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+        ? selectedDraftForDisplay().commentProperties.opacity
+        : 1.0;
 }
 
 QString PDFEditController::selectedReason() const
@@ -2906,9 +2982,12 @@ QVariantList PDFEditController::buildCommentItems(
         map.insert(
             QStringLiteral("commentTextEditReason"),
             commentTextEditReason);
-        const QColor markerColor = candidate->highlightColor.isValid()
-            ? candidate->highlightColor
-            : candidate->kind == QLatin1String("stickyNote")
+        const QColor markerColor
+            = isDrawingCommentCandidateKind(displayCandidate.kind)
+            ? displayDraft.commentProperties.strokeColor
+            : candidate->highlightColor.isValid()
+                ? candidate->highlightColor
+                : candidate->kind == QLatin1String("stickyNote")
                 ? QColor(kHighlightRed, kHighlightGreen, kHighlightBlue)
                 : QColor(kHighlightRed,
                          kHighlightGreen,
@@ -3072,10 +3151,14 @@ PDFEditController::deletedSourceCommentAnnotationsForPage(int page) const
             = isGeometryCommentCandidateKind(candidate.kind)
             && draft->frameRect
                 != initialDraftForCandidate(candidate).frameRect;
+        const bool changesDrawingProperties
+            = isDrawingCommentCandidateKind(candidate.kind)
+            && draft->commentProperties != candidate.commentProperties;
         const bool suppressesSourceAppearance
             = draft->deleted
             || candidate.kind == QLatin1String("freeText")
-            || movesGeometryComment;
+            || movesGeometryComment
+            || changesDrawingProperties;
         if (candidate.page != page
             || candidate.added
             || !suppressesSourceAppearance
@@ -3212,6 +3295,11 @@ QVariantList PDFEditController::draftsForPage(int page) const
                 paragraphFormatMaps(originalDraft.paragraphFormats));
             map.insert(QStringLiteral("originalFrameRect"), originalDraft.frameRect);
             map.insert(QStringLiteral("originalContentBounds"), originalDraft.contentBounds);
+            if (isDrawingCommentCandidateKind(candidate.kind)) {
+                map.insert(
+                    QStringLiteral("originalPreview"),
+                    candidateMap(originalDraft));
+            }
             result.append(map);
         }
     }
@@ -4756,6 +4844,7 @@ QVariantMap PDFEditController::addDrawingComment(
     candidate.commentThreadId = candidate.objectId;
     candidate.label = drawingLabel(type);
     candidate.editable = true;
+    candidate.drawingPropertiesEditable = true;
     candidate.added = true;
     candidate.commentAuthor = currentCommentAuthor();
     candidate.commentCreationDate = QDateTime::currentDateTime();
@@ -6797,6 +6886,105 @@ void PDFEditController::setSelectedCommentText(const QString &text)
         text);
 }
 
+bool PDFEditController::updateSelectedDrawingProperties(
+    const std::function<void(
+        PDFCommentAnnotation::CommonProperties &)> &update)
+{
+    if (m_saving
+        || !m_hasSelection
+        || !drawingPropertiesEditable(m_selectedCandidate)) {
+        return false;
+    }
+
+    const QString key = draftKey(
+        m_selectedCandidate.page,
+        m_selectedCandidate.objectId);
+    const auto existingDraft = m_drafts.constFind(key);
+    const bool hadBefore = existingDraft != m_drafts.cend();
+    const Draft before = hadBefore
+        ? *existingDraft
+        : initialDraftForCandidate(m_selectedCandidate);
+    if (before.deleted) {
+        return false;
+    }
+
+    Command command;
+    command.key = key;
+    command.page = m_selectedCandidate.page;
+    command.objectId = m_selectedCandidate.objectId;
+    command.hadBefore = hadBefore;
+    command.before = before;
+    command.after = before;
+    update(command.after.commentProperties);
+    if (command.after.commentProperties == before.commentProperties) {
+        return true;
+    }
+
+    command.after.candidate.commentModifiedDate
+        = QDateTime::currentDateTime();
+    command.hadAfter = m_selectedCandidate.added
+        || !sameDraftContent(
+            command.after,
+            initialDraftForCandidate(m_selectedCandidate));
+    m_undoStack.append(command);
+    m_redoStack.clear();
+    applyDraftState(command, true, true);
+    emit historyStateChanged();
+    return true;
+}
+
+bool PDFEditController::setSelectedDrawingStrokeColor(const QColor &color)
+{
+    if (!color.isValid()) {
+        return false;
+    }
+    QColor normalized = color.toRgb();
+    normalized.setAlpha(255);
+    return updateSelectedDrawingProperties(
+        [&normalized](PDFCommentAnnotation::CommonProperties &properties) {
+            properties.strokeColor = normalized;
+        });
+}
+
+bool PDFEditController::setSelectedDrawingInteriorColor(const QColor &color)
+{
+    if (!m_hasSelection
+        || !drawingSupportsFill(m_selectedCandidate.kind)
+        || !color.isValid()) {
+        return false;
+    }
+    QColor normalized = color.toRgb();
+    normalized.setAlpha(255);
+    return updateSelectedDrawingProperties(
+        [&normalized](PDFCommentAnnotation::CommonProperties &properties) {
+            properties.interiorColor = normalized;
+        });
+}
+
+bool PDFEditController::clearSelectedDrawingInteriorColor()
+{
+    if (!m_hasSelection
+        || !drawingSupportsFill(m_selectedCandidate.kind)) {
+        return false;
+    }
+    return updateSelectedDrawingProperties(
+        [](PDFCommentAnnotation::CommonProperties &properties) {
+            properties.interiorColor = QColor();
+        });
+}
+
+bool PDFEditController::setSelectedDrawingOpacity(qreal opacity)
+{
+    if (!std::isfinite(opacity)) {
+        return false;
+    }
+    const qreal normalized = qBound<qreal>(0.0, opacity, 1.0);
+    return updateSelectedDrawingProperties(
+        [normalized](PDFCommentAnnotation::CommonProperties &properties) {
+            properties.opacity = normalized;
+        });
+}
+
 bool PDFEditController::removeCommentCandidate(const Candidate &candidate)
 {
     if (!isCommentCandidateKind(candidate.kind)
@@ -7825,6 +8013,9 @@ qsizetype PDFEditController::estimatedCommentCandidateBytes(
     addBytes(estimatedContiguousStorageBytes(
         candidate.commentProperties.dashPattern.capacity(),
         sizeof(qreal)));
+    addBytes(estimatedContiguousStorageBytes(
+        candidate.sourceDrawingAppearanceFingerprint.capacity(),
+        sizeof(char)));
     addBytes(estimatedContiguousStorageBytes(
         candidate.pendingEmbeddedFontData.capacity(),
         sizeof(char)));
@@ -9324,6 +9515,69 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 candidate.label = qtTrId("ProjectionAnnotation");
                 break;
             }
+            if (drawingCommentSubtype) {
+                const QString sourceDrawingAppearance
+                    = PDFAnnotationUtils::annotationNormalAppearance(annotation);
+                candidate.sourceDrawingAppearanceFingerprint
+                    = PDFAnnotationUtils::normalAppearanceFingerprint(
+                        sourceDrawingAppearance);
+                const QString identityPrefix
+                    = drawingKind(candidate.drawingType)
+                    + QLatin1Char(':');
+                const QString uuidText
+                    = candidate.sourceAnnotationName.startsWith(
+                          identityPrefix)
+                    ? candidate.sourceAnnotationName.mid(
+                        identityPrefix.size())
+                    : QString();
+                const QUuid drawingUuid = QUuid::fromString(uuidText);
+                const bool managedIdentity
+                    = candidate.sourceAnnotationHasName
+                    && !drawingUuid.isNull()
+                    && drawingUuid.toString(
+                           QUuid::WithoutBraces).compare(
+                           uuidText,
+                           Qt::CaseInsensitive) == 0
+                    && candidate.commentThreadId
+                        == candidate.sourceAnnotationName;
+                const bool closedShape
+                    = subtype == FPDF_ANNOT_SQUARE
+                    || subtype == FPDF_ANNOT_CIRCLE
+                    || subtype == FPDF_ANNOT_POLYGON;
+                const bool interiorSupported = closedShape
+                    ? candidate.commentProperties.interiorColor.isValid()
+                        == appearanceStyle.hasFill
+                    : !candidate.commentProperties.interiorColor.isValid()
+                        && !appearanceStyle.hasFill;
+                const bool dashPatternSupported
+                    = candidate.commentProperties.dashPattern.size() <= 16
+                    && std::all_of(
+                        candidate.commentProperties.dashPattern.cbegin(),
+                        candidate.commentProperties.dashPattern.cend(),
+                        [](qreal dash) {
+                            return std::isfinite(dash)
+                                && dash > 0.0
+                                && dash <= 10'000.0;
+                        });
+                candidate.drawingPropertiesEditable
+                    = candidate.editable
+                    && managedIdentity
+                    && hasCanonicalDrawingAppearance(sourceDrawingAppearance)
+                    && appearanceStyle.hasStroke
+                    && appearanceStyle.hasStrokeWidth
+                    && appearanceStyle.dashPatternSupported
+                    && std::isfinite(
+                        candidate.commentProperties.opacity)
+                    && candidate.commentProperties.opacity >= 0.0
+                    && candidate.commentProperties.opacity <= 1.0
+                    && std::isfinite(
+                        candidate.commentProperties.borderWidth)
+                    && candidate.commentProperties.borderWidth > 0.0
+                    && candidate.commentProperties.borderWidth <= 1024.0
+                    && dashPatternSupported
+                    && interiorSupported
+                    && !FPDFAnnot_HasKey(annotation, "BE");
+            }
             if (!candidate.replyToObjectId.isEmpty()) {
                 //% "Reply"
                 candidate.label = qtTrId("Reply");
@@ -9569,6 +9823,8 @@ QVariantList PDFEditController::paragraphFormatMaps(
 QVariantMap PDFEditController::candidateMap(const Draft &draft) const
 {
     const Candidate &candidate = draft.candidate;
+    const PDFCommentAnnotation::CommonProperties &commentProperties
+        = draft.commentProperties;
     const CharacterFormat format = primaryCharacterFormat(draft);
     const QPointF layoutOrigin = layoutOriginForDraft(draft);
     const QRectF initialFrameRect = candidate.initialDraftFrameRect.isEmpty()
@@ -9584,6 +9840,10 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(
         QStringLiteral("geometryChanged"),
         draft.frameRect != initialFrameRect);
+    map.insert(
+        QStringLiteral("styleChanged"),
+        isDrawingCommentCandidateKind(candidate.kind)
+            && commentProperties != candidate.commentProperties);
     map.insert(QStringLiteral("deleted"), draft.deleted);
     map.insert(QStringLiteral("sourceRects"), candidateSourceRects(candidate));
     map.insert(QStringLiteral("grouped"), candidate.parts.size() > 1);
@@ -9692,70 +9952,69 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("annotationStrokes"), inkStrokes);
     map.insert(
         QStringLiteral("drawingStrokeColor"),
-        candidate.commentProperties.strokeColor);
+        commentProperties.strokeColor);
     map.insert(
         QStringLiteral("strokeColor"),
-        candidate.commentProperties.strokeColor);
+        commentProperties.strokeColor);
     map.insert(
         QStringLiteral("drawingInteriorColor"),
-        candidate.commentProperties.interiorColor);
+        commentProperties.interiorColor);
     map.insert(
         QStringLiteral("fillColor"),
-        candidate.commentProperties.interiorColor);
+        commentProperties.interiorColor);
     map.insert(
         QStringLiteral("drawingHasInterior"),
-        candidate.commentProperties.interiorColor.isValid());
+        commentProperties.interiorColor.isValid());
     map.insert(
         QStringLiteral("drawingOpacity"),
-        candidate.commentProperties.opacity);
+        commentProperties.opacity);
     map.insert(
         QStringLiteral("opacity"),
-        candidate.commentProperties.opacity);
+        commentProperties.opacity);
     map.insert(
         QStringLiteral("drawingBorderWidth"),
-        candidate.commentProperties.borderWidth);
+        commentProperties.borderWidth);
     qreal strokeWidthRatio = 0.0;
     if (m_document
         && candidate.page >= 0
         && candidate.page < m_document->pageCount()) {
         const qreal pageHeight = m_document->pageSize(candidate.page).height();
         if (pageHeight > 0.0) {
-            strokeWidthRatio
-                = candidate.commentProperties.borderWidth / pageHeight;
+            strokeWidthRatio = commentProperties.borderWidth / pageHeight;
         }
     }
     map.insert(QStringLiteral("strokeWidthRatio"), strokeWidthRatio);
     map.insert(
         QStringLiteral("drawingBorderStyle"),
-        static_cast<int>(candidate.commentProperties.borderStyle));
+        static_cast<int>(commentProperties.borderStyle));
     map.insert(
         QStringLiteral("borderStyle"),
-        static_cast<int>(candidate.commentProperties.borderStyle));
+        static_cast<int>(commentProperties.borderStyle));
     QVariantList dashPattern;
-    dashPattern.reserve(candidate.commentProperties.dashPattern.size());
-    for (qreal dash : candidate.commentProperties.dashPattern) {
+    dashPattern.reserve(commentProperties.dashPattern.size());
+    for (qreal dash : commentProperties.dashPattern) {
         dashPattern.append(dash);
     }
     map.insert(QStringLiteral("drawingDashPattern"), dashPattern);
     map.insert(QStringLiteral("dashPattern"), dashPattern);
     map.insert(
         QStringLiteral("drawingBorderEffect"),
-        static_cast<int>(candidate.commentProperties.borderEffect));
+        static_cast<int>(commentProperties.borderEffect));
     map.insert(
         QStringLiteral("borderEffect"),
-        static_cast<int>(candidate.commentProperties.borderEffect));
+        static_cast<int>(commentProperties.borderEffect));
     map.insert(
         QStringLiteral("drawingStartLineEnding"),
-        static_cast<int>(candidate.commentProperties.startLineEnding));
+        static_cast<int>(commentProperties.startLineEnding));
     map.insert(
         QStringLiteral("lineStartStyle"),
-        static_cast<int>(candidate.commentProperties.startLineEnding));
+        static_cast<int>(commentProperties.startLineEnding));
     map.insert(
         QStringLiteral("drawingEndLineEnding"),
-        static_cast<int>(candidate.commentProperties.endLineEnding));
+        static_cast<int>(commentProperties.endLineEnding));
     map.insert(
         QStringLiteral("lineEndStyle"),
-        static_cast<int>(candidate.commentProperties.endLineEnding));
+        static_cast<int>(commentProperties.endLineEnding));
     map.insert(QStringLiteral("reason"), candidate.reason);
     return map;
 }
@@ -10031,6 +10290,7 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
 {
     Draft draft;
     draft.candidate = candidate;
+    draft.commentProperties = candidate.commentProperties;
     draft.text = candidate.text;
     draft.characterSpans.append(CharacterSpan{
         0,
@@ -10309,6 +10569,7 @@ bool PDFEditController::sameParagraphFormats(
 bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
 {
     return left.text == right.text
+        && left.commentProperties == right.commentProperties
         && sameCharacterSpans(left.characterSpans, right.characterSpans)
         && sameParagraphFormats(left.paragraphFormats, right.paragraphFormats)
         && left.frameRect == right.frameRect

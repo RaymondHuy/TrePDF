@@ -119,7 +119,9 @@ struct SaveDraft {
         = PDFCommentAnnotation::DrawingType::Square;
     QVector<QPointF> drawingVertices;
     QVector<QVector<QPointF>> inkStrokes;
+    PDFCommentAnnotation::CommonProperties originalCommentProperties;
     PDFCommentAnnotation::CommonProperties commentProperties;
+    QByteArray sourceDrawingAppearanceFingerprint;
     QString stampName;
     QString stampText;
     QColor stampColor;
@@ -3380,9 +3382,18 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
         || draft.kind == SaveDraft::Kind::DrawingComment;
     const bool sourceGeometryChanged = geometryComment
         && draft.frameRect != draft.sourceRect;
-    const bool movesSourceDrawingComment
-        = sourceGeometryChanged
-        && draft.kind == SaveDraft::Kind::DrawingComment;
+    const bool sourceDrawingPropertiesChanged
+        = draft.kind == SaveDraft::Kind::DrawingComment
+        && draft.commentProperties != draft.originalCommentProperties;
+    const bool sourceDrawingAppearanceMatches
+        = !draft.sourceDrawingAppearanceFingerprint.isEmpty()
+            && PDFAnnotationUtils::normalAppearanceFingerprint(
+                   PDFAnnotationUtils::annotationNormalAppearance(
+                       annotation.get()))
+                == draft.sourceDrawingAppearanceFingerprint;
+    const bool updatesSourceDrawingComment
+        = draft.kind == SaveDraft::Kind::DrawingComment
+        && (sourceGeometryChanged || sourceDrawingPropertiesChanged);
     const bool geometryLocked
         = commentTextReadOnly
         || (annotationFlags & FPDF_ANNOT_FLAG_LOCKED) != 0;
@@ -3394,7 +3405,7 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
     const QString sourceThreadId = annotation.get()
         ? annotationString(
               annotation.get(),
-              kCommentThreadIdKey)
+              kCommentThreadIdKey).trimmed()
         : QString();
     QString drawingPrefix;
     switch (draft.drawingType) {
@@ -3446,8 +3457,11 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
         && sourceIdentityMatches
         && FPDFAnnot_GetSubtype(annotation.get())
             == sourceAnnotationSubtypeForDraft(draft)
-        && (!sourceGeometryChanged
-            || !geometryLocked);
+        && (!(sourceGeometryChanged || sourceDrawingPropertiesChanged)
+            || !geometryLocked)
+        && (!sourceDrawingPropertiesChanged
+            || (hasTrePDFManagedDrawingAppearance
+                && sourceDrawingAppearanceMatches));
     if (updated && textChanged) {
         const QString commentContents = pdfCommentContents(draft.text);
         updated = FPDFAnnot_SetStringValue(
@@ -3467,7 +3481,8 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
     }
     if (updated
         && (textChanged
-            || sourceGeometryChanged)) {
+            || sourceGeometryChanged
+            || sourceDrawingPropertiesChanged)) {
         updated = setOptionalAnnotationString(
             annotation.get(),
             "M",
@@ -3559,7 +3574,7 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
                 FPDF_ANNOT_APPEARANCEMODE_NORMAL,
                 nullptr);
     }
-    if (updated && movesSourceDrawingComment) {
+    if (updated && updatesSourceDrawingComment) {
         PDFCommentAnnotation::DrawingAnnotation appearanceRequest;
         const PDFSaveWriter::Result geometryResult
             = prepareDrawingCommentAnnotation(
@@ -3601,7 +3616,12 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
             sourceDrawingGeometryUpdates.append({
                 markerId,
                 std::move(appearanceRequest),
-                resized && hasTrePDFManagedDrawingAppearance});
+                sourceGeometryChanged,
+                sourceDrawingPropertiesChanged,
+                sourceDrawingPropertiesChanged
+                    || (resized
+                        && hasTrePDFManagedDrawingAppearance
+                        && sourceDrawingAppearanceMatches)});
         }
     }
     if (updated
@@ -4909,8 +4929,12 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             = PDFEditController::drawingVerticesForDraft(*draft);
         saveDraft.inkStrokes
             = PDFEditController::inkStrokesForDraft(*draft);
-        saveDraft.commentProperties = draft->candidate.commentProperties;
-        saveDraft.stampName = draft->candidate.commentProperties.name;
+        saveDraft.originalCommentProperties
+            = draft->candidate.commentProperties;
+        saveDraft.commentProperties = draft->commentProperties;
+        saveDraft.sourceDrawingAppearanceFingerprint
+            = draft->candidate.sourceDrawingAppearanceFingerprint;
+        saveDraft.stampName = draft->commentProperties.name;
         saveDraft.stampText = draft->candidate.stampText;
         saveDraft.stampColor = draft->candidate.highlightColor;
         saveDraft.sourceAnnotationIndex

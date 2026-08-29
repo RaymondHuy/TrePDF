@@ -12,6 +12,7 @@
 #include <QImage>
 #include <QPointer>
 #include <QQuickItem>
+#include <QStringList>
 #include <QTimer>
 #include <QtQml/qqmlregistration.h>
 
@@ -35,6 +36,9 @@ class PDFPageItem : public QQuickItem
     Q_PROPERTY(QColor pageColor READ pageColor WRITE setPageColor NOTIFY pageColorChanged FINAL)
     Q_PROPERTY(bool draftTextureCurrent READ draftTextureCurrent NOTIFY draftTextureCurrentChanged FINAL)
     Q_PROPERTY(bool draftTextureReady READ draftTextureReady NOTIFY draftTextureReadyChanged FINAL)
+    Q_PROPERTY(QStringList displayedSuppressedCommentObjectIds
+                   READ displayedSuppressedCommentObjectIds
+                   NOTIFY displayedSuppressedCommentObjectIdsChanged FINAL)
 
 public:
     explicit PDFPageItem(QQuickItem *parent = nullptr);
@@ -50,6 +54,7 @@ public:
     QColor pageColor() const;
     bool draftTextureCurrent() const;
     bool draftTextureReady() const;
+    QStringList displayedSuppressedCommentObjectIds() const;
 
     void setDocument(PDFDocument *document);
     void setEditController(PDFEditController *editController);
@@ -72,6 +77,7 @@ signals:
     void pageColorChanged();
     void draftTextureCurrentChanged();
     void draftTextureReadyChanged();
+    void displayedSuppressedCommentObjectIdsChanged();
 
 protected:
     void componentComplete() override;
@@ -91,6 +97,7 @@ private:
     quint64 currentFormRevision() const;
     void setDraftTextureCurrent(bool current);
     void setDraftTextureReady(bool ready);
+    void setDisplayedSuppressedCommentObjectIds(QStringList objectIds);
     void markTextureReady(quint64 requestId,
                           quint64 draftRevision,
                           quint64 formRevision,
@@ -110,6 +117,7 @@ private:
                             quint64 draftRevision,
                             quint64 formRevision,
                             bool suppressionApplied,
+                            const QStringList &suppressedCommentObjectIds,
                             const QImage &image);
 
     QPointer<PDFDocument> m_document;
@@ -127,6 +135,7 @@ private:
     bool m_clearTexture = true;
     bool m_draftTextureCurrent = false;
     bool m_draftTextureReady = false;
+    QStringList m_displayedSuppressedCommentObjectIds;
     bool m_renderScheduled = false;
     QTimer m_draftRenderTimer;
     QSize m_cachedPixelSize;

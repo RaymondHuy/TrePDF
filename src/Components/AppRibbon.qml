@@ -76,6 +76,21 @@ Column {
             || tool === PDFEditController.StampTool
     }
 
+    function drawingCommentSelected() {
+        const kind = editController.selectedKind
+        return kind === "square"
+            || kind === "circle"
+            || kind === "line"
+            || kind === "polygon"
+            || kind === "polyLine"
+            || kind === "ink"
+    }
+
+    function revealDrawingCommentProperties() {
+        if (commentTabActive && drawingCommentSelected())
+            commentsPanelVisible = true
+    }
+
     function navigateRelativeComment(direction) {
         const page = editController.selectRelativeComment(direction)
         if (page < 0)
@@ -107,6 +122,7 @@ Column {
         } else if (!editTabActive) {
             editController.tool = PDFEditController.BrowseTool
         }
+        revealDrawingCommentProperties()
     }
 
     Component.onCompleted: syncEditTool()
@@ -134,6 +150,14 @@ Column {
 
         function onLoadedChanged() {
             root.syncEditTool()
+        }
+    }
+
+    Connections {
+        target: root.editController
+
+        function onSelectionChanged() {
+            root.revealDrawingCommentProperties()
         }
     }
 

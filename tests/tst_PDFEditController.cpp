@@ -23,6 +23,7 @@
 #include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QImage>
+#include <QJSValue>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QQuickItemGrabResult>
@@ -5181,6 +5182,11 @@ private slots:
     void refreshesSourceDrawingAfterFrameGesture();
     void savesDrawingCommentsRoundTrip_data();
     void savesDrawingCommentsRoundTrip();
+    void editsSelectedDrawingPropertiesWithUndoRedo();
+    void keepsDrawingPreviewAlignedWithDisplayedTexture();
+    void savesSelectedDrawingPropertiesRoundTrip();
+    void rejectsInteriorColorForOpenDrawingComments_data();
+    void rejectsInteriorColorForOpenDrawingComments();
     void coalescesInkPreviewUpdates();
     void movesAndResizesAddedInkWithUndoRedoAndDiscard();
     void savesInkCommentRoundTrip();
@@ -14581,6 +14587,8 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
             {QStringLiteral("pooled"), false},
             {QStringLiteral("draftTextureCurrent"), true},
             {QStringLiteral("draftTextureReady"), true},
+            {QStringLiteral("displayedSuppressedCommentObjectIds"),
+             QStringList()},
             {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
             {QStringLiteral("controller"), QVariant::fromValue(&controller)},
             {QStringLiteral("pagePointScale"), 1.0},
@@ -17283,6 +17291,79 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
             QStringLiteral(
                 R"(/LE\s*\[\s*/None\s+/None\s*\])")));
     }
+    const bool openDrawingComment
+        = kind == QLatin1String("line")
+        || kind == QLatin1String("polyLine");
+    struct BorderDictionarySemantics {
+        QString type;
+        QString style;
+        qreal width = -1.0;
+        bool hasDashPattern = false;
+        QString dashPattern;
+    };
+    const auto borderDictionarySemantics = [](
+        const QByteArray &dictionary) {
+        BorderDictionarySemantics semantics;
+        const QString dictionaryText = QString::fromLatin1(dictionary);
+        const auto nameValue = [&dictionaryText](const QString &key) {
+            const QRegularExpression expression(
+                QStringLiteral(R"(/%1\s*/([^\s/<>{}\[\]()]+))")
+                    .arg(QRegularExpression::escape(key)));
+            return expression.match(dictionaryText).captured(1);
+        };
+        semantics.type = nameValue(QStringLiteral("Type"));
+        semantics.style = nameValue(QStringLiteral("S"));
+
+        const QRegularExpression widthExpression(
+            QStringLiteral(
+                R"(/W\s+([+-]?(?:\d+(?:\.\d*)?|\.\d+)))"));
+        const QRegularExpressionMatch widthMatch
+            = widthExpression.match(dictionaryText);
+        if (widthMatch.hasMatch()) {
+            semantics.width = widthMatch.captured(1).toDouble();
+        }
+
+        const QRegularExpression dashExpression(
+            QStringLiteral(R"(/D\s*(\[[^\]]*\]))"));
+        const QRegularExpressionMatch dashMatch
+            = dashExpression.match(dictionaryText);
+        semantics.hasDashPattern = dashMatch.hasMatch();
+        if (semantics.hasDashPattern) {
+            semantics.dashPattern = dashMatch.captured(1);
+            semantics.dashPattern.remove(
+                QRegularExpression(QStringLiteral(R"(\s+)")));
+        }
+        return semantics;
+    };
+    BorderDictionarySemantics originalBorderSemantics;
+    QStringList originalLineEndings;
+    if (openDrawingComment) {
+        const PdfDictionaryRange annotationRange = pdfDictionaryRangeAt(
+            annotationDictionary,
+            0);
+        const PdfDictionaryRange borderRange = pdfDirectDictionaryValue(
+            annotationDictionary,
+            annotationRange,
+            QByteArrayLiteral("BS"));
+        QVERIFY(borderRange.isValid());
+        originalBorderSemantics = borderDictionarySemantics(
+            annotationDictionary.mid(
+                borderRange.start,
+                borderRange.end - borderRange.start));
+        QCOMPARE(originalBorderSemantics.type, QStringLiteral("Border"));
+        QVERIFY(!originalBorderSemantics.style.isEmpty());
+        QVERIFY(originalBorderSemantics.width >= 0.0);
+
+        const QRegularExpression lineEndingsExpression(
+            QStringLiteral(
+                R"(/LE\s*\[\s*/([A-Za-z]+)\s*/([A-Za-z]+)\s*\])"));
+        const QRegularExpressionMatch lineEndingsMatch
+            = lineEndingsExpression.match(annotationDictionaryText);
+        QVERIFY(lineEndingsMatch.hasMatch());
+        originalLineEndings = {
+            lineEndingsMatch.captured(1),
+            lineEndingsMatch.captured(2)};
+    }
     const AnnotationAppearanceStructureInspection appearance
         = inspectAnnotationAppearanceStructure(outputPath, annotationId);
     QVERIFY(appearance.readable);
@@ -17377,6 +17458,14 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
     QVERIFY(controller.selectComment(
         0,
         rehydratedComment.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.selectedDrawingPropertiesEditable());
+    if (openDrawingComment) {
+        QVERIFY(!controller.selectedDrawingSupportsFill());
+        QVERIFY(controller.setSelectedDrawingStrokeColor(
+            QColor(255, 0, 0)));
+        QVERIFY(controller.setSelectedDrawingOpacity(0.4));
+        QVERIFY(controller.hasDrafts());
+    }
     controller.beginSelectedFrameResize();
     controller.updateSelectedFrameRect(resizedFrame);
     controller.finishSelectedFrameResize();
@@ -17421,9 +17510,629 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
         annotationId);
     QVERIFY(!resizedDictionary.contains(
         "/TrePDFSourceDrawingGeometryId"));
+    if (openDrawingComment) {
+        const QString resizedDictionaryText = QString::fromLatin1(
+            resizedDictionary);
+        const PdfDictionaryRange resizedAnnotationRange
+            = pdfDictionaryRangeAt(resizedDictionary, 0);
+        const PdfDictionaryRange resizedBorderRange
+            = pdfDirectDictionaryValue(
+                resizedDictionary,
+                resizedAnnotationRange,
+                QByteArrayLiteral("BS"));
+        QVERIFY(resizedBorderRange.isValid());
+        const BorderDictionarySemantics resizedBorderSemantics
+            = borderDictionarySemantics(resizedDictionary.mid(
+                resizedBorderRange.start,
+                resizedBorderRange.end - resizedBorderRange.start));
+        QCOMPARE(resizedBorderSemantics.type, originalBorderSemantics.type);
+        QCOMPARE(resizedBorderSemantics.style, originalBorderSemantics.style);
+        QVERIFY(qAbs(
+            resizedBorderSemantics.width
+                - originalBorderSemantics.width) < 0.000001);
+        QCOMPARE(
+            resizedBorderSemantics.hasDashPattern,
+            originalBorderSemantics.hasDashPattern);
+        QCOMPARE(
+            resizedBorderSemantics.dashPattern,
+            originalBorderSemantics.dashPattern);
+
+        const QRegularExpression lineEndingsExpression(
+            QStringLiteral(
+                R"(/LE\s*\[\s*/([A-Za-z]+)\s*/([A-Za-z]+)\s*\])"));
+        const QRegularExpressionMatch lineEndingsMatch
+            = lineEndingsExpression.match(resizedDictionaryText);
+        QVERIFY2(
+            lineEndingsMatch.hasMatch(),
+            resizedDictionary.constData());
+        QCOMPARE(
+            QStringList({
+                lineEndingsMatch.captured(1),
+                lineEndingsMatch.captured(2)}),
+            originalLineEndings);
+        const QRegularExpression strokeColorExpression(
+            QStringLiteral(
+                R"(/C\s*\[\s*1(?:\.0+)?\s+0(?:\.0+)?\s+0(?:\.0+)?\s*\])"));
+        QVERIFY(strokeColorExpression
+            .match(resizedDictionaryText)
+            .hasMatch());
+        QVERIFY(QRegularExpression(QStringLiteral(R"(/CA\s+0\.4\b)"))
+            .match(resizedDictionaryText)
+            .hasMatch());
+        const QRegularExpression appearanceStrokeColorExpression(
+            QStringLiteral(
+                R"(1(?:\.0+)?\s+0(?:\.0+)?\s+0(?:\.0+)?\s+RG\b)"));
+        QVERIFY(appearanceStrokeColorExpression
+            .match(resizedInspection.appearance)
+            .hasMatch());
+        QVERIFY(qAbs(resizedAppearance.strokingOpacity - 0.4) < 0.002);
+        QVERIFY(qAbs(resizedAppearance.nonStrokingOpacity - 0.4) < 0.002);
+    }
     QCOMPARE(
         inspectCommentAnnotation(outputPath, annotationId).appearance,
         inspection.appearance);
+}
+
+void PDFEditControllerTest::editsSelectedDrawingPropertiesWithUndoRedo()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("selected-drawing-properties.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquareTool);
+
+    const QVariantMap added = controller.addDrawingComment(
+        0,
+        QVariantList{
+            QVariant::fromValue(QPointF(0.14, 0.18)),
+            QVariant::fromValue(QPointF(0.42, 0.38))});
+    QVERIFY(!added.isEmpty());
+    QCOMPARE(
+        added.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("square"));
+    QVERIFY(controller.selectedDrawingPropertiesEditable());
+    QVERIFY(controller.selectedDrawingSupportsFill());
+
+    const QColor initialStroke = controller.selectedDrawingStrokeColor();
+    const qreal initialOpacity = controller.selectedDrawingOpacity();
+    QVERIFY(initialStroke.isValid());
+    QVERIFY(!controller.selectedDrawingHasInterior());
+    QVERIFY(!controller.selectedDrawingInteriorColor().isValid());
+    QCOMPARE(
+        initialStroke,
+        added.value(QStringLiteral("drawingStrokeColor")).value<QColor>());
+    QVERIFY(qAbs(
+        initialOpacity
+            - added.value(QStringLiteral("drawingOpacity")).toReal())
+        < 0.000001);
+    QVERIFY(!controller.selectedDraftPreview()
+        .value(QStringLiteral("styleChanged"))
+        .toBool());
+
+    const QColor editedStroke(20, 90, 180);
+    controller.setSelectedDrawingStrokeColor(editedStroke);
+    QCOMPARE(controller.selectedDrawingStrokeColor(), editedStroke);
+    QVariantMap preview = controller.selectedDraftPreview();
+    QVERIFY(preview.value(QStringLiteral("styleChanged")).toBool());
+    QCOMPARE(
+        preview.value(QStringLiteral("drawingStrokeColor")).value<QColor>(),
+        editedStroke);
+    QCOMPARE(
+        controller.draftsForPage(0)
+            .constFirst()
+            .toMap()
+            .value(QStringLiteral("drawingStrokeColor"))
+            .value<QColor>(),
+        editedStroke);
+
+    // Reapplying the selected value is a no-op. A single undo must restore
+    // the original stroke instead of consuming a duplicate command.
+    controller.setSelectedDrawingStrokeColor(editedStroke);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedDrawingStrokeColor(), initialStroke);
+    QVERIFY(!controller.selectedDraftPreview()
+        .value(QStringLiteral("styleChanged"))
+        .toBool());
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedDrawingStrokeColor(), editedStroke);
+
+    const QColor editedInterior(236, 170, 35);
+    constexpr qreal editedOpacity = 0.35;
+    controller.setSelectedDrawingInteriorColor(editedInterior);
+    controller.setSelectedDrawingOpacity(editedOpacity);
+    QVERIFY(controller.selectedDrawingHasInterior());
+    QCOMPARE(controller.selectedDrawingInteriorColor(), editedInterior);
+    QVERIFY(qAbs(controller.selectedDrawingOpacity() - editedOpacity)
+        < 0.000001);
+
+    preview = controller.selectedDraftPreview();
+    QVERIFY(preview.value(QStringLiteral("styleChanged")).toBool());
+    QVERIFY(preview.value(QStringLiteral("drawingHasInterior")).toBool());
+    QCOMPARE(
+        preview.value(QStringLiteral("drawingInteriorColor")).value<QColor>(),
+        editedInterior);
+    QVERIFY(qAbs(
+        preview.value(QStringLiteral("drawingOpacity")).toReal()
+            - editedOpacity)
+        < 0.000001);
+
+    // Each accepted property change is one command and undo must retain the
+    // other property deltas already present in the draft.
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(qAbs(controller.selectedDrawingOpacity() - initialOpacity)
+        < 0.000001);
+    QVERIFY(controller.selectedDrawingHasInterior());
+    QCOMPARE(controller.selectedDrawingStrokeColor(), editedStroke);
+
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(!controller.selectedDrawingHasInterior());
+    QVERIFY(!controller.selectedDrawingInteriorColor().isValid());
+    QCOMPARE(controller.selectedDrawingStrokeColor(), editedStroke);
+
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedDrawingStrokeColor(), initialStroke);
+    QVERIFY(!controller.selectedDraftPreview()
+        .value(QStringLiteral("styleChanged"))
+        .toBool());
+
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedDrawingStrokeColor(), editedStroke);
+    QCOMPARE(controller.selectedDrawingInteriorColor(), editedInterior);
+    QVERIFY(qAbs(controller.selectedDrawingOpacity() - editedOpacity)
+        < 0.000001);
+
+    controller.clearSelectedDrawingInteriorColor();
+    QVERIFY(!controller.selectedDrawingHasInterior());
+    QVERIFY(!controller.selectedDrawingInteriorColor().isValid());
+    preview = controller.selectedDraftPreview();
+    QVERIFY(!preview.value(QStringLiteral("drawingHasInterior")).toBool());
+    QVERIFY(!preview
+        .value(QStringLiteral("drawingInteriorColor"))
+        .value<QColor>()
+        .isValid());
+    QVERIFY(preview.value(QStringLiteral("styleChanged")).toBool());
+
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(controller.selectedDrawingHasInterior());
+    QCOMPARE(controller.selectedDrawingInteriorColor(), editedInterior);
+    QCOMPARE(controller.redo(), -1);
+    QVERIFY(!controller.selectedDrawingHasInterior());
+
+    controller.discardDrafts();
+}
+
+void PDFEditControllerTest::keepsDrawingPreviewAlignedWithDisplayedTexture()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("drawing-preview-texture-source.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("drawing-preview-texture-saved.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquareTool);
+    QVERIFY(!controller.addDrawingComment(
+        0,
+        QVariantList{
+            QVariant::fromValue(QPointF(0.16, 0.20)),
+            QVariant::fromValue(QPointF(0.46, 0.42))}).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+
+    controller.requestCommentIndex();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.commentItems().isEmpty(), 5000);
+    const QVariantMap sourceSquare = candidateForKind(
+        controller.commentItems(),
+        QStringLiteral("square"));
+    QVERIFY(!sourceSquare.isEmpty());
+    const QString objectId = sourceSquare
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(!waitForCandidates(controller, 0).isEmpty());
+    QVERIFY(controller.selectComment(0, objectId));
+    QVERIFY(controller.selectedDrawingPropertiesEditable());
+    const QColor originalStroke = controller.selectedDrawingStrokeColor();
+    const QColor editedStroke(
+        255 - originalStroke.red(),
+        255 - originalStroke.green(),
+        255 - originalStroke.blue());
+    QVERIFY(editedStroke != originalStroke);
+    QVERIFY(controller.setSelectedDrawingStrokeColor(editedStroke));
+    QCOMPARE(controller.selectedDrawingStrokeColor(), editedStroke);
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString overlayPath = QFINDTESTDATA(
+        "../src/Components/EditOverlay.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!overlayPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(
+        QByteArrayLiteral("import TrePDF\nAppTheme {}"),
+        QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+
+    QQmlComponent overlayComponent(
+        &engine,
+        QUrl::fromLocalFile(overlayPath));
+    const QVariantMap initialProperties{
+        {QStringLiteral("page"), 0},
+        {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false},
+        {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"),
+         QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), 1.0},
+        {QStringLiteral("width"), 200.0},
+        {QStringLiteral("height"), 200.0}};
+    std::unique_ptr<QObject> overlay(
+        overlayComponent.createWithInitialProperties(initialProperties));
+    QVERIFY2(overlay, qPrintable(overlayComponent.errorString()));
+
+    const auto reload = [&overlay]() {
+        QVERIFY(QMetaObject::invokeMethod(
+            overlay.get(),
+            "reloadData",
+            Qt::DirectConnection));
+    };
+    const auto previewCanRender = [&overlay](const QVariantMap &draft) {
+        QVariant result;
+        const QVariant argument = draft;
+        const bool invoked = QMetaObject::invokeMethod(
+            overlay.get(),
+            "drawingPreviewCanRender",
+            Qt::DirectConnection,
+            Q_RETURN_ARG(QVariant, result),
+            Q_ARG(QVariant, argument));
+        return invoked && result.toBool();
+    };
+    const auto drawingDrafts = [&overlay]() {
+        const QVariant value = overlay->property("drawingCommentDrafts");
+        return value.metaType() == QMetaType::fromType<QJSValue>()
+            ? value.value<QJSValue>().toVariant().toList()
+            : value.toList();
+    };
+
+    reload();
+    QVariantList visibleDrafts = drawingDrafts();
+    QCOMPARE(visibleDrafts.size(), 1);
+    QVariantMap styleDraft = visibleDrafts.constFirst().toMap();
+    QVERIFY(styleDraft.value(QStringLiteral("styleChanged")).toBool());
+    QVERIFY(!previewCanRender(styleDraft));
+
+    QVERIFY(overlay->setProperty(
+        "displayedSuppressedCommentObjectIds",
+        QStringList{objectId}));
+    reload();
+    visibleDrafts = drawingDrafts();
+    QCOMPARE(visibleDrafts.size(), 1);
+    styleDraft = visibleDrafts.constFirst().toMap();
+    QVERIFY(previewCanRender(styleDraft));
+
+    QCOMPARE(controller.undo(), -1);
+    reload();
+    visibleDrafts = drawingDrafts();
+    QCOMPARE(visibleDrafts.size(), 1);
+    const QVariantMap restoration = visibleDrafts.constFirst().toMap();
+    QVERIFY(restoration.value(QStringLiteral("restoration")).toBool());
+    QVERIFY(previewCanRender(restoration));
+
+    QVERIFY(overlay->setProperty(
+        "displayedSuppressedCommentObjectIds",
+        QStringList()));
+    reload();
+    QVERIFY(drawingDrafts().isEmpty());
+
+    QCOMPARE(controller.redo(), -1);
+    reload();
+    visibleDrafts = drawingDrafts();
+    QCOMPARE(visibleDrafts.size(), 1);
+    QVERIFY(!previewCanRender(visibleDrafts.constFirst().toMap()));
+}
+
+void PDFEditControllerTest::savesSelectedDrawingPropertiesRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("selected-drawing-properties-source.pdf"));
+    const QString addedOutputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("selected-drawing-properties-added.pdf"));
+    const QString sourceOutputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("selected-drawing-properties-source-edited.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquareTool);
+
+    const QVariantMap added = controller.addDrawingComment(
+        0,
+        QVariantList{
+            QVariant::fromValue(QPointF(0.16, 0.20)),
+            QVariant::fromValue(QPointF(0.46, 0.42))});
+    QVERIFY(!added.isEmpty());
+    const QString annotationId
+        = added.value(QStringLiteral("objectId")).toString();
+    const QColor addedStroke(24, 96, 184);
+    const QColor addedInterior(238, 174, 38);
+    constexpr qreal addedOpacity = 0.42;
+    QVERIFY(controller.setSelectedDrawingStrokeColor(addedStroke));
+    QVERIFY(controller.setSelectedDrawingInteriorColor(addedInterior));
+    QVERIFY(controller.setSelectedDrawingOpacity(addedOpacity));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(addedOutputPath)));
+
+    const auto dictionaryColor = [](const QByteArray &dictionary,
+                                    const QString &key) {
+        static const QString number
+            = QStringLiteral(R"(([+-]?(?:\d+(?:\.\d*)?|\.\d+)))");
+        const QRegularExpression expression(
+            QStringLiteral(R"(/%1\s*\[\s*%2\s+%2\s+%2\s*\])")
+                .arg(QRegularExpression::escape(key), number));
+        const QRegularExpressionMatch match = expression.match(
+            QString::fromLatin1(dictionary));
+        if (!match.hasMatch()) {
+            return QColor();
+        }
+        return QColor::fromRgbF(
+            match.captured(1).toDouble(),
+            match.captured(2).toDouble(),
+            match.captured(3).toDouble());
+    };
+    const auto appearanceColor = [](const QString &appearance,
+                                    const QString &paintOperator) {
+        static const QString number
+            = QStringLiteral(R"(([+-]?(?:\d+(?:\.\d*)?|\.\d+)))");
+        const QRegularExpression expression(
+            QStringLiteral(R"(%1\s+%1\s+%1\s+%2\b)")
+                .arg(
+                    number,
+                    QRegularExpression::escape(paintOperator)));
+        const QRegularExpressionMatch match = expression.match(appearance);
+        if (!match.hasMatch()) {
+            return QColor();
+        }
+        return QColor::fromRgbF(
+            match.captured(1).toDouble(),
+            match.captured(2).toDouble(),
+            match.captured(3).toDouble());
+    };
+    const QByteArray addedDictionary = annotationDictionaryBytes(
+        addedOutputPath,
+        annotationId);
+    const PdfDictionaryRange addedDictionaryRange
+        = pdfDictionaryRangeAt(addedDictionary, 0);
+    const PdfDictionaryRange addedBorderRange = pdfDirectDictionaryValue(
+        addedDictionary,
+        addedDictionaryRange,
+        QByteArrayLiteral("BS"));
+    QVERIFY(addedBorderRange.isValid());
+    const QByteArray addedBorderDictionary = addedDictionary.mid(
+        addedBorderRange.start,
+        addedBorderRange.end - addedBorderRange.start);
+
+    const CommentAnnotationInspection addedInspection
+        = inspectCommentAnnotation(addedOutputPath, annotationId);
+    QVERIFY(addedInspection.readable);
+    QCOMPARE(addedInspection.subtype, FPDF_ANNOT_SQUARE);
+    QCOMPARE(
+        appearanceColor(addedInspection.appearance, QStringLiteral("RG"))
+            .rgb(),
+        addedStroke.rgb());
+    QCOMPARE(
+        appearanceColor(addedInspection.appearance, QStringLiteral("rg"))
+            .rgb(),
+        addedInterior.rgb());
+    QCOMPARE(
+        dictionaryColor(addedDictionary, QStringLiteral("C")).rgb(),
+        addedStroke.rgb());
+    QCOMPARE(
+        dictionaryColor(addedDictionary, QStringLiteral("IC")).rgb(),
+        addedInterior.rgb());
+    QVERIFY(addedInspection.hasAppearance);
+    const AnnotationAppearanceStructureInspection addedAppearance
+        = inspectAnnotationAppearanceStructure(
+            addedOutputPath,
+            annotationId);
+    QVERIFY(addedAppearance.appearanceObjectFound);
+    QVERIFY(qAbs(addedAppearance.strokingOpacity - addedOpacity) < 0.002);
+    QVERIFY(qAbs(addedAppearance.nonStrokingOpacity - addedOpacity) < 0.002);
+    QVERIFY(addedDictionary.contains("/IC"));
+    QVERIFY(QRegularExpression(QStringLiteral(R"(/CA\s+0\.42\b)"))
+        .match(QString::fromLatin1(addedDictionary))
+        .hasMatch());
+
+    controller.requestCommentIndex();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.commentItems().isEmpty(), 5000);
+    QVariantMap sourceComment;
+    for (const QVariant &commentValue : controller.commentItems()) {
+        const QVariantMap comment = commentValue.toMap();
+        if (comment.value(QStringLiteral("kind")).toString()
+                == QLatin1String("square")) {
+            sourceComment = comment;
+            break;
+        }
+    }
+    QVERIFY(!sourceComment.isEmpty());
+    QVERIFY(controller.selectComment(
+        0,
+        sourceComment.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.selectedDrawingPropertiesEditable());
+    QVERIFY(controller.selectedDrawingSupportsFill());
+    QCOMPARE(controller.selectedDrawingStrokeColor(), addedStroke);
+    QCOMPARE(controller.selectedDrawingInteriorColor(), addedInterior);
+    QVERIFY(qAbs(controller.selectedDrawingOpacity() - addedOpacity) < 0.01);
+
+    const QColor sourceStroke(32, 154, 92);
+    constexpr qreal sourceOpacity = 0.73;
+    QVERIFY(controller.setSelectedDrawingStrokeColor(sourceStroke));
+    QVERIFY(controller.clearSelectedDrawingInteriorColor());
+    QVERIFY(controller.setSelectedDrawingOpacity(sourceOpacity));
+    QVERIFY(controller.selectedDraftPreview()
+        .value(QStringLiteral("styleChanged"))
+        .toBool());
+    const QVector<PDFEditController::DraftAnnotationDeletion> suppressions
+        = controller.deletedSourceCommentAnnotationsForPage(0);
+    QCOMPARE(suppressions.size(), 1);
+    QCOMPARE(suppressions.constFirst().annotationSubtype, FPDF_ANNOT_SQUARE);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(sourceOutputPath)));
+
+    const CommentAnnotationInspection sourceInspection
+        = inspectCommentAnnotation(sourceOutputPath, annotationId);
+    QVERIFY(sourceInspection.readable);
+    QCOMPARE(sourceInspection.subtype, FPDF_ANNOT_SQUARE);
+    QVERIFY(sourceInspection.hasAppearance);
+    QVERIFY(sourceInspection.appearance != addedInspection.appearance);
+    QCOMPARE(
+        appearanceColor(sourceInspection.appearance, QStringLiteral("RG"))
+            .rgb(),
+        sourceStroke.rgb());
+    QVERIFY(!appearanceColor(
+        sourceInspection.appearance,
+        QStringLiteral("rg")).isValid());
+    QVERIFY(qAbs(sourceInspection.rect.left - addedInspection.rect.left) < 0.02);
+    QVERIFY(qAbs(sourceInspection.rect.bottom - addedInspection.rect.bottom) < 0.02);
+    QVERIFY(qAbs(sourceInspection.rect.right - addedInspection.rect.right) < 0.02);
+    QVERIFY(qAbs(sourceInspection.rect.top - addedInspection.rect.top) < 0.02);
+
+    const AnnotationAppearanceStructureInspection sourceAppearance
+        = inspectAnnotationAppearanceStructure(
+            sourceOutputPath,
+            annotationId);
+    QVERIFY(sourceAppearance.appearanceObjectFound);
+    QVERIFY(qAbs(sourceAppearance.strokingOpacity - sourceOpacity) < 0.002);
+    QVERIFY(qAbs(sourceAppearance.nonStrokingOpacity - sourceOpacity) < 0.002);
+    const QByteArray sourceDictionary = annotationDictionaryBytes(
+        sourceOutputPath,
+        annotationId);
+    const PdfDictionaryRange sourceDictionaryRange
+        = pdfDictionaryRangeAt(sourceDictionary, 0);
+    const PdfDictionaryRange sourceBorderRange = pdfDirectDictionaryValue(
+        sourceDictionary,
+        sourceDictionaryRange,
+        QByteArrayLiteral("BS"));
+    QVERIFY(sourceBorderRange.isValid());
+    const QByteArray sourceBorderDictionary = sourceDictionary.mid(
+        sourceBorderRange.start,
+        sourceBorderRange.end - sourceBorderRange.start);
+    const QRegularExpression solidBorderStyle(
+        QStringLiteral(R"(/S\s*/S\b)"));
+    const QRegularExpression borderWidth(
+        QStringLiteral(R"(/W\s+1\.5\b)"));
+    QVERIFY(solidBorderStyle.match(
+        QString::fromLatin1(addedBorderDictionary)).hasMatch());
+    QVERIFY(solidBorderStyle.match(
+        QString::fromLatin1(sourceBorderDictionary)).hasMatch());
+    QVERIFY(borderWidth.match(
+        QString::fromLatin1(addedBorderDictionary)).hasMatch());
+    QVERIFY(borderWidth.match(
+        QString::fromLatin1(sourceBorderDictionary)).hasMatch());
+    QCOMPARE(
+        dictionaryColor(sourceDictionary, QStringLiteral("C")).rgb(),
+        sourceStroke.rgb());
+    QVERIFY(!dictionaryColor(
+        sourceDictionary,
+        QStringLiteral("IC")).isValid());
+    QVERIFY(!sourceDictionary.contains("/IC"));
+    QVERIFY(!sourceDictionary.contains(
+        "/TrePDFSourceDrawingGeometryId"));
+    QVERIFY(QRegularExpression(QStringLiteral(R"(/CA\s+0\.73\b)"))
+        .match(QString::fromLatin1(sourceDictionary))
+        .hasMatch());
+}
+
+void PDFEditControllerTest::rejectsInteriorColorForOpenDrawingComments_data()
+{
+    QTest::addColumn<int>("tool");
+    QTest::addColumn<QString>("kind");
+    QTest::addColumn<QVariantList>("vertices");
+
+    QTest::newRow("line")
+        << static_cast<int>(PDFEditController::LineTool)
+        << QStringLiteral("line")
+        << QVariantList{
+               QVariant::fromValue(QPointF(0.12, 0.24)),
+               QVariant::fromValue(QPointF(0.52, 0.31))};
+    QTest::newRow("polyline")
+        << static_cast<int>(PDFEditController::PolyLineTool)
+        << QStringLiteral("polyLine")
+        << QVariantList{
+               QVariant::fromValue(QPointF(0.12, 0.20)),
+               QVariant::fromValue(QPointF(0.30, 0.34)),
+               QVariant::fromValue(QPointF(0.54, 0.25))};
+    QTest::newRow("ink")
+        << static_cast<int>(PDFEditController::InkTool)
+        << QStringLiteral("ink")
+        << QVariantList{
+               QVariant::fromValue(QPointF(0.14, 0.22)),
+               QVariant::fromValue(QPointF(0.28, 0.36)),
+               QVariant::fromValue(QPointF(0.46, 0.24))};
+}
+
+void PDFEditControllerTest::rejectsInteriorColorForOpenDrawingComments()
+{
+    QFETCH(int, tool);
+    QFETCH(QString, kind);
+    QFETCH(QVariantList, vertices);
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("selected-%1-properties.pdf").arg(kind));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(static_cast<PDFEditController::Tool>(tool));
+
+    const QVariantMap added = controller.addDrawingComment(0, vertices);
+    QVERIFY(!added.isEmpty());
+    QCOMPARE(added.value(QStringLiteral("kind")).toString(), kind);
+    QVERIFY(controller.selectedDrawingPropertiesEditable());
+    QVERIFY(!controller.selectedDrawingSupportsFill());
+    QVERIFY(!controller.selectedDrawingHasInterior());
+    QVERIFY(!controller.selectedDrawingInteriorColor().isValid());
+    QVERIFY(!controller.selectedDraftPreview()
+        .value(QStringLiteral("styleChanged"))
+        .toBool());
+
+    QSignalSpy historyStateChangedSpy(
+        &controller,
+        &PDFEditController::historyStateChanged);
+    QSignalSpy pageDataChangedSpy(
+        &controller,
+        &PDFEditController::pageDataChanged);
+    controller.setSelectedDrawingInteriorColor(QColor(220, 60, 90));
+    controller.clearSelectedDrawingInteriorColor();
+
+    QVERIFY(!controller.selectedDrawingHasInterior());
+    QVERIFY(!controller.selectedDrawingInteriorColor().isValid());
+    QVERIFY(!controller.selectedDraftPreview()
+        .value(QStringLiteral("styleChanged"))
+        .toBool());
+    QCOMPARE(historyStateChangedSpy.count(), 0);
+    QCOMPARE(pageDataChangedSpy.count(), 0);
+
+    // A rejected fill edit must not insert an undo command. The next undo is
+    // therefore still the original add operation.
+    QCOMPARE(controller.undo(), -1);
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(!controller.selectedDrawingPropertiesEditable());
 }
 
 void PDFEditControllerTest::coalescesInkPreviewUpdates()
@@ -17462,6 +18171,8 @@ void PDFEditControllerTest::coalescesInkPreviewUpdates()
         {QStringLiteral("pooled"), false},
         {QStringLiteral("draftTextureCurrent"), true},
         {QStringLiteral("draftTextureReady"), true},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"),
+         QStringList()},
         {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
         {QStringLiteral("controller"), QVariant::fromValue(&controller)},
         {QStringLiteral("pagePointScale"), 1.0},
@@ -18118,6 +18829,10 @@ void PDFEditControllerTest::movesAndResizesSourceInkRoundTrip()
     QVERIFY(QRectF(0.0, 0.0, 1.0, 1.0).contains(movedFrame));
     QVERIFY(controller.selectCandidate(0, objectId));
     QVERIFY(controller.selectedEditable());
+    QVERIFY(!controller.selectedDrawingPropertiesEditable());
+    QVERIFY(!controller.setSelectedDrawingStrokeColor(QColor(210, 45, 65)));
+    QVERIFY(!controller.setSelectedDrawingOpacity(0.4));
+    QVERIFY(!controller.hasDrafts());
     controller.beginSelectedFrameResize();
     QCOMPARE(
         controller.deletedSourceCommentAnnotationsForPage(0).size(),

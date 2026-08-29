@@ -97,12 +97,20 @@ panel but their standalone appearances are hidden from the PDF page viewer.
 Square, Circle, Line, Polygon, and PolyLine comments use shared semantic stroke,
 interior, opacity, border, effect, and line-ending properties. Save writes
 standard `/Rect`, `/L` or `/Vertices` geometry and a matching vector `/AP`.
+Selecting a drawing comment exposes stroke color, optional fill color, and
+opacity in the Comments panel. Each accepted property change is independently
+undoable; preview updates immediately. Added drawing comments support this
+before their first Save. All six reopened TrePDF-managed drawing subtypes also
+support it when their captured appearance is safe; external/custom appearances
+remain property-read-only. Property-only Save preserves `/BS`, `/BE`, `/LE`,
+and unrelated dictionary entries.
 Valid source drawing comments can be dragged or moved with arrow keys, resized
 with eight handles, deleted, undone/redone, discarded, saved, and reopened.
 Source geometry updates patch `/Rect` plus `/L` or `/Vertices` after PDFium
 serialization. Pure moves and external/custom appearances preserve `/AP`;
 resized TrePDF-managed comments receive a matching canonical `/AP` when all
-captured properties are supported.
+captured properties are supported and the indexed source appearance still
+matches at Save time.
 Each Pencil drag creates one `/Ink` annotation. QML samples the freehand path at
 least one logical pixel apart, keeps at most 4,096 raw points, and continues
 tracking the final endpoint at that cap; the controller validates and

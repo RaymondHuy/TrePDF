@@ -25,6 +25,7 @@ Item {
     required property bool combFieldToolActive
     required property bool draftTextureCurrent
     required property bool draftTextureReady
+    required property var displayedSuppressedCommentObjectIds
     required property Item viewportItem
     required property real viewportContentX
     required property real viewportContentY
@@ -142,6 +143,8 @@ Item {
             : 0
         draftTextureCurrent: root.draftTextureCurrent
         draftTextureReady: root.draftTextureReady
+        displayedSuppressedCommentObjectIds:
+            root.displayedSuppressedCommentObjectIds
         z: 2
 
         onDeleteCommentRequested: (page, objectId) =>
