@@ -78,6 +78,12 @@ class PDFEditController : public QObject
     Q_PROPERTY(int selectedParagraphAlignment READ selectedParagraphAlignment NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDeletable READ selectedDeletable NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedDrawingPropertiesEditable READ selectedDrawingPropertiesEditable NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedDrawingSupportsFill READ selectedDrawingSupportsFill NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QColor selectedDrawingStrokeColor READ selectedDrawingStrokeColor NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QColor selectedDrawingInteriorColor READ selectedDrawingInteriorColor NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedDrawingHasInterior READ selectedDrawingHasInterior NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(qreal selectedDrawingOpacity READ selectedDrawingOpacity NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedReason READ selectedReason NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QVariantList commentItems READ commentItems NOTIFY commentsChanged FINAL)
     Q_PROPERTY(QVariantList commentPanelItems READ commentPanelItems NOTIFY commentsChanged FINAL)
@@ -232,6 +238,12 @@ public:
     int selectedParagraphAlignment() const;
     bool selectedEditable() const;
     bool selectedDeletable() const;
+    bool selectedDrawingPropertiesEditable() const;
+    bool selectedDrawingSupportsFill() const;
+    QColor selectedDrawingStrokeColor() const;
+    QColor selectedDrawingInteriorColor() const;
+    bool selectedDrawingHasInterior() const;
+    qreal selectedDrawingOpacity() const;
     QString selectedReason() const;
     QVariantList commentItems() const;
     QVariantList commentPanelItems() const;
@@ -338,6 +350,10 @@ public:
                                     const QString &objectId,
                                     const QString &text);
     Q_INVOKABLE void setSelectedCommentText(const QString &text);
+    Q_INVOKABLE bool setSelectedDrawingStrokeColor(const QColor &color);
+    Q_INVOKABLE bool setSelectedDrawingInteriorColor(const QColor &color);
+    Q_INVOKABLE bool clearSelectedDrawingInteriorColor();
+    Q_INVOKABLE bool setSelectedDrawingOpacity(qreal opacity);
     Q_INVOKABLE void deleteSelectedObject();
     Q_INVOKABLE int undo();
     Q_INVOKABLE int redo();
@@ -465,6 +481,8 @@ private:
         QVector<QPointF> drawingVertices;
         QVector<QVector<QPointF>> inkStrokes;
         PDFCommentAnnotation::CommonProperties commentProperties;
+        QByteArray sourceDrawingAppearanceFingerprint;
+        bool drawingPropertiesEditable = false;
         QString stampText;
         QString reason;
         int pendingFontSnapshotIndex = -1;
@@ -556,6 +574,7 @@ private:
 
     struct Draft {
         Candidate candidate;
+        PDFCommentAnnotation::CommonProperties commentProperties;
         QString text;
         QVector<CharacterSpan> characterSpans;
         QVector<ParagraphFormat> paragraphFormats;
@@ -697,6 +716,8 @@ private:
     const Candidate *findCommentCandidate(int page,
                                           const QString &objectId);
     bool candidateDeletable(const Candidate &candidate) const;
+    bool drawingPropertiesEditable(const Candidate &candidate) const;
+    static bool drawingSupportsFill(const QString &kind);
     QVariantList candidateSourceRects(const Candidate &candidate) const;
     QVariantList characterSpanMaps(const QVector<CharacterSpan> &spans) const;
     QVariantList paragraphFormatMaps(const QVector<ParagraphFormat> &formats) const;
@@ -754,6 +775,9 @@ private:
     QRectF expandedTextEditFrame(const Draft &draft);
     Draft selectedDraftForDisplay() const;
     void updateSelectedDraft(const Draft &draft);
+    bool updateSelectedDrawingProperties(
+        const std::function<void(
+            PDFCommentAnnotation::CommonProperties &)> &update);
     void selectedTextRangeForDraft(const Draft &draft,
                                    qsizetype &start,
                                    qsizetype &length) const;

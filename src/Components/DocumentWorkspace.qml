@@ -85,22 +85,36 @@ Item {
     signal openRequested()
     signal deleteCommentRequested(int page, string objectId)
 
+    function drawingCommentSelected() {
+        const kind = session.editController.selectedKind
+        return kind === "square"
+            || kind === "circle"
+            || kind === "line"
+            || kind === "polygon"
+            || kind === "polyLine"
+            || kind === "ink"
+    }
+
+    function expandSelectedCommentProperties() {
+        if (commentTabActive
+                && commentsPanelVisible
+                && (session.editController.tool
+                        === PDFEditController.FreeTextTool
+                    || drawingCommentSelected())) {
+            session.panelCollapsed = false
+        }
+    }
+
     onCommentTabActiveChanged: {
         if (!commentTabActive)
             return
 
         session.formDesignerController.clearTextFieldFocus()
         session.formDesignerController.clearTextFieldSelection()
+        expandSelectedCommentProperties()
     }
 
-    onCommentsPanelVisibleChanged: {
-        if (commentsPanelVisible
-                && commentTabActive
-                && session.editController.tool
-                    === PDFEditController.FreeTextTool) {
-            session.panelCollapsed = false
-        }
-    }
+    onCommentsPanelVisibleChanged: expandSelectedCommentProperties()
 
     Connections {
         target: root.session.editController
@@ -111,6 +125,10 @@ Item {
                         === PDFEditController.FreeTextTool) {
                 root.session.panelCollapsed = false
             }
+        }
+
+        function onSelectionChanged() {
+            root.expandSelectedCommentProperties()
         }
     }
 

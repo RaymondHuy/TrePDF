@@ -2,12 +2,15 @@
 
 #include "PDFiumSynchronization.h"
 
+#include <QCryptographicHash>
 #include <QVector>
 
 namespace {
 
 constexpr unsigned long kMaximumAnnotationStringBytes
     = 4UL * 1024UL * 1024UL;
+constexpr unsigned long kMaximumAnnotationAppearanceBytes
+    = 1UL * 1024UL * 1024UL;
 
 } // namespace
 
@@ -52,6 +55,60 @@ QString annotationString(FPDF_ANNOTATION annotation, FPDF_BYTESTRING key)
     return QString::fromUtf16(
         reinterpret_cast<const char16_t *>(buffer.constData()),
         characterCount);
+}
+
+QString annotationNormalAppearance(FPDF_ANNOTATION annotation)
+{
+    assertPDFiumProcessLockHeld();
+    if (!annotation) {
+        return {};
+    }
+
+    const unsigned long byteLength = FPDFAnnot_GetAP(
+        annotation,
+        FPDF_ANNOT_APPEARANCEMODE_NORMAL,
+        nullptr,
+        0);
+    if (byteLength < sizeof(FPDF_WCHAR)
+        || byteLength > kMaximumAnnotationAppearanceBytes
+        || byteLength % sizeof(FPDF_WCHAR) != 0) {
+        return {};
+    }
+
+    QVector<FPDF_WCHAR> buffer(static_cast<qsizetype>(
+        byteLength / sizeof(FPDF_WCHAR)));
+    const unsigned long actualLength = FPDFAnnot_GetAP(
+        annotation,
+        FPDF_ANNOT_APPEARANCEMODE_NORMAL,
+        buffer.data(),
+        byteLength);
+    if (actualLength < sizeof(FPDF_WCHAR)
+        || actualLength > byteLength
+        || actualLength % sizeof(FPDF_WCHAR) != 0) {
+        return {};
+    }
+
+    qsizetype characterCount = static_cast<qsizetype>(
+        actualLength / sizeof(FPDF_WCHAR));
+    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
+        --characterCount;
+    }
+    return QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(buffer.constData()),
+        characterCount);
+}
+
+QByteArray normalAppearanceFingerprint(QStringView appearance)
+{
+    if (appearance.isEmpty()) {
+        return {};
+    }
+
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(QByteArrayView(
+        reinterpret_cast<const char *>(appearance.utf16()),
+        appearance.size() * static_cast<qsizetype>(sizeof(char16_t))));
+    return hash.result();
 }
 
 QString normalizedCommentText(QString text)

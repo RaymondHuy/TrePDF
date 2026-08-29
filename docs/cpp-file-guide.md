@@ -194,6 +194,11 @@ Tệp định nghĩa hai lớp có ownership khác nhau.
   sở hữu.
 - Expose `draftTextureCurrent`/`draftTextureReady` để `EditOverlay` biết khi nào
   cần tự vẽ preview hoặc mask texture sạch.
+- Expose thêm `displayedSuppressedCommentObjectIds`, là snapshot chính xác các
+  source comment đã bị ẩn trong texture được accept. Snapshot được publish trước
+  scene-graph sync và ảnh pending tương ứng không bị bỏ bởi một draft revision
+  mới, nhờ đó QML không bao giờ ghép preview của revision mới với texture của
+  revision cũ theo cách vẽ source/draft hai lần.
 
 **Ranh giới:** mọi thay đổi file này phải test native Metal, scroll/pool nhanh,
 zoom, đóng/mở khi render đang chạy và shutdown render thread.
@@ -265,9 +270,14 @@ orchestration Save.
 
 - Draft chứa kind, source ids/paths, text, character spans, paragraph formats,
   immutable source rect, layout frame, content bounds, image snapshot, shape,
-  text-markup/sticky-note geometry, các stroke Ink và insertion order tùy loại.
+  text-markup/sticky-note geometry, các stroke Ink, common drawing properties
+  hiện hành và insertion order tùy loại.
 - Mỗi action logic tạo snapshot command: add, delete, move, resize, format, page
   insert/delete. Undo/redo phục hồi toàn bộ state liên quan, không chỉ text.
+- API selection tách capability property khỏi move/resize/delete. Stroke,
+  interior và opacity tạo từng snapshot command riêng; no-op không thêm history.
+  Source style chỉ bật cho cả sáu drawing subtype TrePDF-managed có normal AP
+  và style đã capture an toàn; fingerprint AP bounded được giữ để Save xác thực.
 - `hasDrafts` bao gồm edit history, transient page structure, form runtime draft
   và form designer changes.
 - `discardDrafts()` phục hồi session state nhưng không ghi document.
@@ -384,7 +394,12 @@ orchestration Save.
   sau đó canonicalizer cập nhật `/Rect` cùng `/L`, `/Vertices` hoặc `/InkList`
   đã translate/scale trên annotation hiện có. Move và AP ngoài/custom giữ
   nguyên `/AP`; resize TrePDF-managed chỉ tái tạo AP khi properties được hỗ
-  trợ. Geometry-only không ghi đè `/Contents` hoặc `/RC`.
+  trợ và fingerprint AP nguồn vẫn khớp. Geometry-only không ghi đè `/Contents`
+  hoặc `/RC`.
+- Với source property edit, writer còn so normal-AP fingerprint với snapshot
+  lúc index rồi chuyển cả original/current properties sang canonicalizer.
+  Canonicalizer cập nhật `/C`, optional `/IC`, `/CA` và replacement `/AP` trong
+  cùng transaction nhưng giữ nguyên `/BS`, `/BE`, `/LE` cùng key mở rộng.
 - Sticky Note và reply mới được gắn normal `/AP` vector ngay trên writer
   annotation; source Sticky Note đang sửa mà thiếu AP cũng được bổ sung. Nội
   dung comment dùng LF trong model, chuẩn hóa thành CR khi ghi `/Contents`.

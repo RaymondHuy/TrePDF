@@ -128,6 +128,8 @@ Check Box, Radio Button, Dropdown, List Box và Comb Field của Forms.
   phiên trước.
 - Khi Comment active, yêu cầu annotation-only comment index cho toàn tài liệu,
   kể cả khi panel danh sách đang được ẩn.
+- Khi chọn drawing comment có property section, tự mở/expand Comments panel để
+  stroke/fill/opacity luôn truy cập được mà không đổi tool hiện hành.
 - Khi chọn Forms tool, bảo đảm Text Field, Check Box, Radio Button, Dropdown,
   List Box và Comb Field loại trừ nhau.
 - Chuyển tiếp signal Open/Save/Save As, page, delete page, zoom, fit, rotate và
@@ -246,6 +248,10 @@ Note/Free Text đang chọn và phản hồi một cấp.
   Panel dùng chung trạng thái thu gọn theo document session.
 - Square, Circle, Line, Polygon, PolyLine và Ink có kind riêng, hỗ trợ chọn,
   drag/phím mũi tên, resize tám handle, sửa nội dung, xóa, reply và history.
+  Phần property phía trên danh sách cho đổi stroke, fill của shape đóng và
+  opacity; `ColorDialog` được load theo nhu cầu, slider chỉ commit một command
+  khi kết thúc pointer gesture và mọi callback giữ identity `page + objectId`.
+  Source không đủ capability hiển thị cùng giá trị nhưng khóa control.
   Stamp nguồn giữ geometry/AP; Caret,
   FileAttachment, Sound, Redact và Projection dùng card `comment` chỉ đọc. Ink có `/InkList` malformed
   hoặc vượt giới hạn scan 64 stroke, 4.096 điểm/stroke hay 32.768 điểm tổng cũng
@@ -301,7 +307,8 @@ Note/Free Text đang chọn và phản hồi một cấp.
   chọn Text Field, `DropdownOptionsPanel` khi chọn Dropdown hoặc List Box,
   `CombFieldOptionsPanel` khi chọn Comb Field, hoặc `RadioButtonOptionsPanel`
   khi chọn Radio Button trong Forms. Khi Text Field hoặc Comb Field vừa được
-  chọn, panel tương ứng tự mở; trạng thái collapsed được lưu theo session.
+  chọn, panel tương ứng tự mở; drawing comment cũng tự mở Comments panel và
+  expand property section. Trạng thái collapsed được lưu theo session.
 - Chuyển các signal font family, bold/italic/underline, color và paragraph
   alignment vào `PDFEditController`.
 
@@ -381,7 +388,8 @@ background selection được xử lý bởi các `MouseArea` riêng trong form 
 draft trên một trang. Đây là tệp QML phức tạp nhất dự án.
 
 **Dữ liệu vào:** page, page-point scale, trạng thái pooled, hai cờ texture draft,
-theme và `PDFEditController`. Component tải
+snapshot object ID của source comment đang bị texture ẩn, theme và
+`PDFEditController`. Component tải
 `candidatesForPage()`/`draftsForPage()` và làm mới khi controller báo page
 data/candidate/history/selection đổi.
 
@@ -431,6 +439,11 @@ data/candidate/history/selection đổi.
   với round cap/join, cùng màu, opacity và border width của save snapshot. Khi
   geometry Ink nguồn đổi, delegate vẽ stroke đã translate/scale trên texture đã
   suppress appearance nguồn.
+- Style-only draft cũng suppress appearance drawing nguồn và dùng delegate hiện
+  hành để preview stroke/fill/opacity, nhưng chỉ khi object ID của nó có trong
+  suppression snapshot của texture đang được trình bày. Khi undo/discard,
+  overlay giữ restoration preview đúng cho từng object cho tới khi texture sạch
+  thay thế snapshot đó; content-only draft không bị vẽ chồng source appearance.
 - `StampView` vẽ viền kép, màu và artwork text dùng chung cho menu preset,
   preview placement và draft Stamp mới.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.

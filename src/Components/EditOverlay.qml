@@ -11,6 +11,7 @@ Item {
     required property bool pooled
     required property bool draftTextureCurrent
     required property bool draftTextureReady
+    required property var displayedSuppressedCommentObjectIds
     required property AppTheme theme
     required property PDFEditController controller
     required property real pagePointScale
@@ -284,24 +285,50 @@ Item {
         const previousDrafts = drafts
         const currentDrafts = controller.draftsForPage(page)
         const displayedDrafts = []
-        for (let index = 0; index < currentDrafts.length; ++index)
-            displayedDrafts.push(currentDrafts[index])
-
-        if (!draftTextureCurrent) {
-            for (let index = 0; index < previousDrafts.length; ++index) {
-                const previousDraft = previousDrafts[index]
-                if (containsObject(currentDrafts, previousDraft.objectId))
-                    continue
-
-                if (previousDraft.added === true)
-                    continue
-                else if (previousDraft.kind === "image")
-                    continue
-                else if (previousDraft.restoration === true)
-                    displayedDrafts.push(previousDraft)
-                else if (previousDraft.originalText !== undefined)
-                    displayedDrafts.push(restorationOverlay(previousDraft))
+        for (let index = 0; index < currentDrafts.length; ++index) {
+            const currentDraft = currentDrafts[index]
+            displayedDrafts.push(currentDraft)
+            const drawingDraft = currentDraft.kind === "ink"
+                || isDrawingCommentKind(currentDraft.kind)
+            if (drawingDraft
+                    && currentDraft.added !== true
+                    && displayedTextureSuppressesComment(
+                        String(currentDraft.objectId))
+                    && !drawingAppearanceSuppressed(currentDraft)) {
+                displayedDrafts.push(restorationOverlay(currentDraft))
             }
+        }
+
+        for (let index = 0; index < previousDrafts.length; ++index) {
+            const previousDraft = previousDrafts[index]
+            const currentDraft = draftForObject(
+                currentDrafts,
+                previousDraft.objectId)
+            const drawingDraft = previousDraft.kind === "ink"
+                || isDrawingCommentKind(previousDraft.kind)
+            if (drawingDraft) {
+                if (!currentDraft
+                        && previousDraft.added !== true
+                        && displayedTextureSuppressesComment(
+                            String(previousDraft.objectId))) {
+                    displayedDrafts.push(
+                        previousDraft.restoration === true
+                            ? previousDraft
+                            : restorationOverlay(previousDraft))
+                }
+                continue
+            }
+
+            if (draftTextureCurrent || currentDraft)
+                continue
+            if (previousDraft.added === true
+                    || previousDraft.kind === "image") {
+                continue
+            }
+            if (previousDraft.restoration === true)
+                displayedDrafts.push(previousDraft)
+            else if (previousDraft.originalText !== undefined)
+                displayedDrafts.push(restorationOverlay(previousDraft))
         }
         const displayedContentDrafts = []
         const displayedHighlightDrafts = []
@@ -349,6 +376,44 @@ Item {
         return false
     }
 
+    function draftForObject(items, objectId) {
+        for (let index = 0; index < items.length; ++index) {
+            if (items[index].objectId === objectId)
+                return items[index]
+        }
+        return null
+    }
+
+    function drawingAppearanceSuppressed(draft) {
+        return draft !== null
+            && (draft.kind === "ink" || isDrawingCommentKind(draft.kind))
+            && (draft.deleted === true
+                || draft.geometryChanged === true
+                || draft.styleChanged === true)
+    }
+
+    function displayedTextureSuppressesComment(objectId) {
+        if (objectId.length === 0
+                || displayedSuppressedCommentObjectIds === undefined
+                || displayedSuppressedCommentObjectIds === null) {
+            return false
+        }
+        for (let index = 0;
+             index < displayedSuppressedCommentObjectIds.length;
+             ++index) {
+            if (String(displayedSuppressedCommentObjectIds[index])
+                    === objectId) {
+                return true
+            }
+        }
+        return false
+    }
+
+    function drawingPreviewCanRender(draft) {
+        return draft.added === true
+            || displayedTextureSuppressesComment(String(draft.objectId))
+    }
+
     function hasActiveDraft(objectId) {
         if (objectId.length === 0)
             return false
@@ -376,6 +441,19 @@ Item {
     }
 
     function restorationOverlay(draft) {
+        if (draft.originalPreview !== undefined) {
+            const restored = ({})
+            const original = draft.originalPreview
+            for (const key in original)
+                restored[key] = original[key]
+            restored.restoration = true
+            // Keep the source annotation covered until the refreshed PDF
+            // texture containing its original appearance is ready.
+            restored.geometryChanged = true
+            restored.styleChanged = true
+            return restored
+        }
+
         const characterSpans = draft.originalCharacterSpans !== undefined
             ? draft.originalCharacterSpans
             : draft.characterSpans
@@ -2002,6 +2080,7 @@ Item {
         if (draftTextureCurrent)
             reloadData()
     }
+    onDisplayedSuppressedCommentObjectIdsChanged: reloadData()
     Component.onCompleted: reloadData()
 
     FrameAnimation {
@@ -2228,7 +2307,9 @@ Item {
             lineEndStyle: Number(modelData.lineEndStyle)
             drawingOpacity: Number(modelData.opacity)
             visible: (modelData.added === true
-                    || modelData.geometryChanged === true)
+                    || modelData.geometryChanged === true
+                    || modelData.styleChanged === true)
+                && root.drawingPreviewCanRender(modelData)
                 && modelData.deleted !== true
                 && !(root.resizingFrame
                     && String(modelData.objectId)
@@ -2251,7 +2332,9 @@ Item {
             strokeWidth: Number(modelData.strokeWidthRatio) * root.height
             drawingOpacity: Number(modelData.opacity)
             visible: (modelData.added === true
-                    || modelData.geometryChanged === true)
+                    || modelData.geometryChanged === true
+                    || modelData.styleChanged === true)
+                && root.drawingPreviewCanRender(modelData)
                 && modelData.deleted !== true
                 && !(root.resizingFrame
                     && String(modelData.objectId)
@@ -2309,6 +2392,7 @@ Item {
         visible: root.resizingFrame
             && root.isDrawingCommentKind(root.frameResizePreviewKind)
             && root.frameResizePreviewVertices.length >= 2
+            && root.drawingPreviewCanRender(root.frameResizePreview)
         z: 2
         Accessible.ignored: true
     }
@@ -2335,6 +2419,7 @@ Item {
         visible: root.resizingFrame
             && root.frameResizePreviewKind === "ink"
             && root.frameResizePreviewStrokes.length > 0
+            && root.drawingPreviewCanRender(root.frameResizePreview)
         z: 2
         Accessible.ignored: true
     }

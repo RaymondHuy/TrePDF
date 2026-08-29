@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import TrePDF
 
@@ -23,6 +24,10 @@ Rectangle {
     property string replyTargetObjectId: ""
     property string replyDraftText: ""
     property var expandedReplyThreads: ({})
+    property bool drawingColorDialogEditsInterior: false
+    property int drawingColorDialogPage: -1
+    property string drawingColorDialogObjectId: ""
+    property color drawingColorDialogInitialColor: "white"
 
     signal collapsedChangeRequested(bool collapsed)
     signal pageRequested(int page)
@@ -77,6 +82,30 @@ Rectangle {
         && (root.commentIndexLoading
             || root.commentIndexFailed
             || root.commentIndexLimited)
+    readonly property bool drawingCommentSelected: {
+        const kind = root.editController.selectedKind
+        return kind === "square"
+            || kind === "circle"
+            || kind === "line"
+            || kind === "polygon"
+            || kind === "polyLine"
+            || kind === "ink"
+    }
+    //% "Stroke color"
+    readonly property string strokeColorLabel: qsTrId("StrokeColor")
+    //% "Fill color"
+    readonly property string fillColorLabel: qsTrId("FillColor")
+    //% "Stroke color: %1"
+    readonly property string strokeColorAccessibleName:
+        qsTrId("StrokeColorValue").arg(root.colorText(
+            root.editController.selectedDrawingStrokeColor))
+    readonly property string fillColorAccessibleName:
+        root.editController.selectedDrawingHasInterior
+            //% "Fill color: %1"
+            ? qsTrId("FillColorValue").arg(root.colorText(
+                root.editController.selectedDrawingInteriorColor))
+            //% "Fill color: No fill"
+            : qsTrId("FillColorNoFill")
 
     implicitWidth: collapsed ? 42 : 280
     color: theme.ribbonSurface
@@ -297,16 +326,88 @@ Rectangle {
             editController.requestCommentIndex()
     }
 
+    function opaqueColor(color) {
+        return Qt.rgba(color.r, color.g, color.b, 1)
+    }
+
+    function colorText(color) {
+        return root.opaqueColor(color).toString().toUpperCase()
+    }
+
+    function closeDrawingColorDialog() {
+        root.drawingColorDialogPage = -1
+        root.drawingColorDialogObjectId = ""
+        if (drawingColorDialogLoader.status === Loader.Ready) {
+            const dialog = drawingColorDialogLoader.item as ColorDialog
+            if (dialog && dialog.visible)
+                dialog.close()
+        }
+        drawingColorDialogLoader.active = false
+    }
+
+    function drawingColorDialogMatchesSelection() {
+        return root.drawingColorDialogPage
+                === root.editController.selectedPage
+            && root.drawingColorDialogObjectId.length > 0
+            && root.drawingColorDialogObjectId
+                === root.editController.selectedObjectId
+    }
+
+    function openDrawingColorDialog(interior) {
+        if (!root.drawingCommentSelected
+                || !root.editController.selectedDrawingPropertiesEditable
+                || root.editController.saving) {
+            return
+        }
+
+        root.drawingColorDialogEditsInterior = interior
+        root.drawingColorDialogPage = root.editController.selectedPage
+        root.drawingColorDialogObjectId
+            = root.editController.selectedObjectId
+        const currentColor = interior
+            && root.editController.selectedDrawingHasInterior
+            ? root.editController.selectedDrawingInteriorColor
+            : interior
+                ? Qt.rgba(1, 1, 1, 1)
+                : root.editController.selectedDrawingStrokeColor
+        root.drawingColorDialogInitialColor = root.opaqueColor(currentColor)
+        drawingColorDialogLoader.active = true
+    }
+
+    function applyDrawingColor() {
+        if (drawingColorDialogLoader.status === Loader.Ready
+                && root.drawingColorDialogMatchesSelection()
+                && root.editController.selectedDrawingPropertiesEditable
+                && !root.editController.saving) {
+            const dialog = drawingColorDialogLoader.item as ColorDialog
+            if (dialog) {
+                const color = root.opaqueColor(dialog.selectedColor)
+                if (root.drawingColorDialogEditsInterior) {
+                    root.editController.setSelectedDrawingInteriorColor(color)
+                } else {
+                    root.editController.setSelectedDrawingStrokeColor(color)
+                }
+            }
+        }
+        root.drawingColorDialogPage = -1
+        root.drawingColorDialogObjectId = ""
+        drawingColorDialogLoader.active = false
+    }
+
     onCollapsedChanged: {
-        if (collapsed)
+        if (collapsed) {
+            closeDrawingColorDialog()
             commitPendingEdit()
+        }
     }
     onDocumentChanged: {
+        closeDrawingColorDialog()
         cancelPendingReply()
         expandedReplyThreads = ({})
         ensureCommentIndex()
     }
     onEditControllerChanged: {
+        closeDrawingColorDialog()
         cancelPendingReply()
         expandedReplyThreads = ({})
         ensureCommentIndex()
@@ -335,6 +436,10 @@ Rectangle {
         }
 
         function onSelectionChanged() {
+            if (drawingColorDialogLoader.active
+                    && !root.drawingColorDialogMatchesSelection()) {
+                root.closeDrawingColorDialog()
+            }
             root.expandSelectedReply()
         }
     }
@@ -448,6 +553,297 @@ Rectangle {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 1
+                    color: root.theme.ribbonBorder
+                    Accessible.ignored: true
+                }
+
+                ColumnLayout {
+                    id: drawingPropertiesSection
+
+                    objectName: "drawingPropertiesSection"
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
+                    Layout.topMargin: 12
+                    Layout.bottomMargin: 12
+                    spacing: 8
+                    visible: root.drawingCommentSelected
+
+                    Label {
+                        Layout.fillWidth: true
+                        //% "Drawing comment properties"
+                        text: qsTrId("ShapeCommentProperties")
+                        color: root.theme.ribbonTextColor
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: !root.editController
+                            .selectedDrawingPropertiesEditable
+                        //% "This drawing comment's appearance is read-only."
+                        text: qsTrId("DrawingPropertiesReadOnly")
+                        color: "#747176"
+                        font.pixelSize: 10
+                        wrapMode: Text.Wrap
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.strokeColorLabel
+                        color: root.theme.ribbonTextColor
+                        font.pixelSize: 11
+                        font.weight: Font.Medium
+                    }
+
+                    Button {
+                        id: drawingStrokeColorButton
+
+                        objectName: "drawingStrokeColorButton"
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 36
+                        enabled: root.editController
+                                .selectedDrawingPropertiesEditable
+                            && !root.editController.saving
+                        Accessible.name: root.strokeColorAccessibleName
+                        onClicked: root.openDrawingColorDialog(false)
+
+                        contentItem: RowLayout {
+                            spacing: 10
+
+                            Rectangle {
+                                Layout.preferredWidth: 20
+                                Layout.preferredHeight: 20
+                                radius: 3
+                                color: root.editController
+                                    .selectedDrawingStrokeColor
+                                border.width: 1
+                                border.color: "#8a8785"
+                                Accessible.ignored: true
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.colorText(root.editController
+                                    .selectedDrawingStrokeColor)
+                                color: drawingStrokeColorButton.enabled
+                                    ? root.theme.ribbonTextColor
+                                    : "#aaa8a6"
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+
+                        background: Rectangle {
+                            radius: 4
+                            color: !drawingStrokeColorButton.enabled
+                                ? "#f4f1ef"
+                                : drawingStrokeColorButton.down
+                                    ? "#f5dfcf"
+                                    : drawingStrokeColorButton.hovered
+                                        ? root.theme.foxitPaleOrange
+                                        : "#ffffff"
+                            border.width: 1
+                            border.color: drawingStrokeColorButton.enabled
+                                ? root.theme.ribbonBorder
+                                : "#ddd9d6"
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: root.editController
+                            .selectedDrawingSupportsFill
+                        text: root.fillColorLabel
+                        color: root.theme.ribbonTextColor
+                        font.pixelSize: 11
+                        font.weight: Font.Medium
+                    }
+
+                    RowLayout {
+                        id: drawingFillColorRow
+
+                        objectName: "drawingFillColorRow"
+                        Layout.fillWidth: true
+                        spacing: 6
+                        visible: root.editController
+                            .selectedDrawingSupportsFill
+
+                        Button {
+                            id: drawingFillColorButton
+
+                            objectName: "drawingFillColorButton"
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 36
+                            enabled: root.editController
+                                    .selectedDrawingPropertiesEditable
+                                && !root.editController.saving
+                            Accessible.name: root.fillColorAccessibleName
+                            onClicked: root.openDrawingColorDialog(true)
+
+                            contentItem: RowLayout {
+                                spacing: 10
+
+                                Rectangle {
+                                    Layout.preferredWidth: 20
+                                    Layout.preferredHeight: 20
+                                    radius: 3
+                                    color: root.editController
+                                            .selectedDrawingHasInterior
+                                        ? root.editController
+                                            .selectedDrawingInteriorColor
+                                        : "#ffffff"
+                                    border.width: 1
+                                    border.color: "#8a8785"
+                                    Accessible.ignored: true
+
+                                    Label {
+                                        anchors.centerIn: parent
+                                        visible: !root.editController
+                                            .selectedDrawingHasInterior
+                                        text: "\u2571"
+                                        color: "#b3261e"
+                                        font.pixelSize: 18
+                                        Accessible.ignored: true
+                                    }
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: root.editController
+                                            .selectedDrawingHasInterior
+                                        ? root.colorText(root.editController
+                                            .selectedDrawingInteriorColor)
+                                        : noFillButton.text
+                                    color: drawingFillColorButton.enabled
+                                        ? root.theme.ribbonTextColor
+                                        : "#aaa8a6"
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                            }
+
+                            background: Rectangle {
+                                radius: 4
+                                color: !drawingFillColorButton.enabled
+                                    ? "#f4f1ef"
+                                    : drawingFillColorButton.down
+                                        ? "#f5dfcf"
+                                        : drawingFillColorButton.hovered
+                                            ? root.theme.foxitPaleOrange
+                                            : "#ffffff"
+                                border.width: 1
+                                border.color: drawingFillColorButton.enabled
+                                    ? root.theme.ribbonBorder
+                                    : "#ddd9d6"
+                            }
+                        }
+
+                        Button {
+                            id: noFillButton
+
+                            objectName: "drawingNoFillButton"
+                            Layout.preferredHeight: 36
+                            Layout.preferredWidth: 72
+                            enabled: root.editController
+                                    .selectedDrawingPropertiesEditable
+                                && root.editController
+                                    .selectedDrawingHasInterior
+                                && !root.editController.saving
+                            //% "No fill"
+                            text: qsTrId("NoFill")
+                            onClicked: root.editController
+                                .clearSelectedDrawingInteriorColor()
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 2
+                        spacing: 8
+
+                        Label {
+                            Layout.fillWidth: true
+                            //% "Opacity"
+                            text: qsTrId("Opacity")
+                            color: root.theme.ribbonTextColor
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
+
+                        Label {
+                            //% "%1%"
+                            text: qsTrId("PercentValue").arg(
+                                Math.round(drawingOpacitySlider.value))
+                            color: "#747176"
+                            font.pixelSize: 10
+                            horizontalAlignment: Text.AlignRight
+                        }
+                    }
+
+                    Slider {
+                        id: drawingOpacitySlider
+
+                        objectName: "drawingOpacitySlider"
+                        property bool pointerValueChanged: false
+                        property int pointerPage: -1
+                        property string pointerObjectId: ""
+
+                        Layout.fillWidth: true
+                        from: 0
+                        to: 100
+                        stepSize: 1
+                        snapMode: Slider.SnapAlways
+                        value: root.editController.selectedDrawingOpacity * 100
+                        enabled: root.editController
+                                .selectedDrawingPropertiesEditable
+                            && !root.editController.saving
+                        //% "Opacity"
+                        Accessible.name: qsTrId("Opacity")
+                        onPressedChanged: {
+                            if (pressed) {
+                                pointerValueChanged = false
+                                pointerPage = root.editController.selectedPage
+                                pointerObjectId
+                                    = root.editController.selectedObjectId
+                                return
+                            }
+
+                            const sameSelection = pointerPage
+                                    === root.editController.selectedPage
+                                && pointerObjectId.length > 0
+                                && pointerObjectId
+                                    === root.editController.selectedObjectId
+                            if (pointerValueChanged
+                                    && sameSelection
+                                    && root.editController
+                                        .selectedDrawingPropertiesEditable
+                                    && !root.editController.saving) {
+                                root.editController
+                                    .setSelectedDrawingOpacity(value / 100)
+                            }
+                            pointerValueChanged = false
+                            pointerPage = -1
+                            pointerObjectId = ""
+                        }
+                        onMoved: {
+                            if (pressed) {
+                                pointerValueChanged = true
+                            } else if (root.editController
+                                           .selectedDrawingPropertiesEditable
+                                       && !root.editController.saving) {
+                                // Keyboard changes are already discrete; commit
+                                // once for each completed keyboard step.
+                                root.editController
+                                    .setSelectedDrawingOpacity(value / 100)
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    visible: root.drawingCommentSelected
                     color: root.theme.ribbonBorder
                     Accessible.ignored: true
                 }
@@ -1345,6 +1741,32 @@ Rectangle {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    Loader {
+        id: drawingColorDialogLoader
+
+        active: false
+        sourceComponent: Component {
+            ColorDialog {
+                title: root.drawingColorDialogEditsInterior
+                    ? root.fillColorLabel
+                    : root.strokeColorLabel
+                onAccepted: root.applyDrawingColor()
+                onRejected: {
+                    root.drawingColorDialogPage = -1
+                    root.drawingColorDialogObjectId = ""
+                    drawingColorDialogLoader.active = false
+                }
+            }
+        }
+        onLoaded: {
+            const dialog = item as ColorDialog
+            if (dialog) {
+                dialog.selectedColor = root.drawingColorDialogInitialColor
+                dialog.open()
             }
         }
     }

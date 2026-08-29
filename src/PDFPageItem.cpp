@@ -879,6 +879,11 @@ bool PDFPageItem::draftTextureReady() const
     return m_draftTextureReady;
 }
 
+QStringList PDFPageItem::displayedSuppressedCommentObjectIds() const
+{
+    return m_displayedSuppressedCommentObjectIds;
+}
+
 void PDFPageItem::setDocument(PDFDocument *document)
 {
     if (m_document == document) {
@@ -1192,6 +1197,7 @@ void PDFPageItem::invalidateCache()
     m_pendingTextureDraftRevision = 0;
     m_pendingTextureFormRevision = 0;
     m_pendingSuppressionApplied = false;
+    setDisplayedSuppressedCommentObjectIds({});
     m_cachedPixelSize = QSize();
     m_cachedPage = -1;
     m_cachedZoom = 0.0;
@@ -1224,12 +1230,11 @@ void PDFPageItem::invalidateDraftCache(bool immediate)
 {
     cancelPendingRender();
     ++m_requestSerial;
-    m_pendingImage = QImage();
-    m_textureDirty = false;
-    m_pendingTextureRequestId = 0;
-    m_pendingTextureDraftRevision = 0;
-    m_pendingTextureFormRevision = 0;
-    m_pendingSuppressionApplied = false;
+    // Keep an already accepted image. Its suppression snapshot has already
+    // been published to QML and will be uploaded together with the matching
+    // overlay state on the next scene-graph sync. A newer render may replace
+    // it before then, but dropping it here would leave QML describing a
+    // texture that can no longer be displayed.
     m_renderPending = false;
     m_requestedPixelSize = QSize();
     m_requestedPage = -1;
@@ -1370,6 +1375,16 @@ void PDFPageItem::setDraftTextureReady(bool ready)
     emit draftTextureReadyChanged();
 }
 
+void PDFPageItem::setDisplayedSuppressedCommentObjectIds(
+    QStringList objectIds)
+{
+    if (m_displayedSuppressedCommentObjectIds == objectIds) {
+        return;
+    }
+    m_displayedSuppressedCommentObjectIds = std::move(objectIds);
+    emit displayedSuppressedCommentObjectIdsChanged();
+}
+
 void PDFPageItem::markTextureReady(quint64 requestId,
                                    quint64 draftRevision,
                                    quint64 formRevision,
@@ -1508,6 +1523,14 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             && editController->document() == document
         ? editController->deletedSourceCommentAnnotationsForPage(page)
         : QVector<PDFEditController::DraftAnnotationDeletion>();
+    QStringList suppressedCommentObjectIds;
+    suppressedCommentObjectIds.reserve(deletedCommentAnnotations.size());
+    for (const PDFEditController::DraftAnnotationDeletion &deletion
+         : deletedCommentAnnotations) {
+        suppressedCommentObjectIds.append(
+            QStringLiteral("annotation:")
+            + QString::number(deletion.annotationIndex));
+    }
     const bool allDraftObjectsSuppressible = !editController
         || editController->document() != document
         || editController->allDraftedTextObjectsSuppressibleForPage(page);
@@ -1547,6 +1570,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                                        draftObjectPaths,
                                        draftObjectMoves,
                                        deletedCommentAnnotations,
+                                       suppressedCommentObjectIds,
                                        suppressedFormWidgetIds,
                                        allDraftObjectsSuppressible,
                                        requestId,
@@ -1586,6 +1610,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                                         draftRevision,
                                         formRevision,
                                         result = std::move(result),
+                                        suppressedCommentObjectIds,
                                         requestId,
                                         cancellation]() {
             if (!item || isCancelled(cancellation)) {
@@ -1605,6 +1630,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                 draftRevision,
                 formRevision,
                 result.suppressionApplied,
+                suppressedCommentObjectIds,
                 result.image);
         }, Qt::QueuedConnection);
     });
@@ -1622,6 +1648,7 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
                                      quint64 draftRevision,
                                      quint64 formRevision,
                                      bool suppressionApplied,
+                                     const QStringList &suppressedCommentObjectIds,
                                      const QImage &image)
 {
     QQuickWindow *quickWindow = window();
@@ -1657,6 +1684,10 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
         return;
     }
 
+    // Publish the suppression snapshot before requesting a scene-graph sync.
+    // QML and the new texture are then synchronized into the same rendered
+    // frame; the previously displayed frame remains internally consistent.
+    setDisplayedSuppressedCommentObjectIds(suppressedCommentObjectIds);
     m_pendingImage = image;
     m_cachedPixelSize = pixelSize;
     m_cachedPage = page;

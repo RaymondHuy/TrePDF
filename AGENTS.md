@@ -53,6 +53,15 @@ Current features:
   mutate the source appearance `/BBox`. Pure movement and external/custom
   appearances preserve `/AP`; a resized TrePDF-managed drawing comment receives
   a matching canonical `/AP` when its captured properties are fully supported.
+  Selecting a drawing comment opens stroke color, optional interior color, and
+  opacity controls in the Comments panel. Each accepted change is one undoable
+  command and previews live. Added drawing comments support these controls;
+  all six reopened TrePDF-managed drawing subtypes support them only when
+  provenance and captured appearance properties are safe. External/custom
+  appearances stay property-read-only. Source style Save patches `/C`, `/IC`,
+  and `/CA`, regenerates the matching `/AP`, preserves `/BS`, `/BE`, `/LE`, and
+  unrelated dictionary entries, and revalidates the indexed appearance
+  fingerprint before committing.
   Squiggly accepts only non-whitespace source-text glyphs intersected by the
   drag gesture, snaps the result into per-line rectangles/QuadPoints, and
   rejects whitespace-only or no-text selections. Nearly horizontal gestures use

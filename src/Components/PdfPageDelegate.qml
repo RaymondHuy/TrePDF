@@ -139,6 +139,8 @@ Item {
             combFieldToolActive: pageCard.combFieldToolActive
             draftTextureCurrent: pageView.draftTextureCurrent
             draftTextureReady: pageView.draftTextureReady
+            displayedSuppressedCommentObjectIds:
+                pageView.displayedSuppressedCommentObjectIds
             viewportItem: pageCard.viewportItem
             viewportContentX: pageCard.viewContentX
             viewportContentY: pageCard.viewContentY
