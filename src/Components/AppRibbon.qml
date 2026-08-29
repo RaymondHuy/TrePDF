@@ -86,7 +86,7 @@ Column {
             || kind === "ink"
     }
 
-    function revealDrawingCommentProperties() {
+    function revealSelectedDrawingComment() {
         if (commentTabActive && drawingCommentSelected())
             commentsPanelVisible = true
     }
@@ -122,7 +122,7 @@ Column {
         } else if (!editTabActive) {
             editController.tool = PDFEditController.BrowseTool
         }
-        revealDrawingCommentProperties()
+        revealSelectedDrawingComment()
     }
 
     Component.onCompleted: syncEditTool()
@@ -157,7 +157,7 @@ Column {
         target: root.editController
 
         function onSelectionChanged() {
-            root.revealDrawingCommentProperties()
+            root.revealSelectedDrawingComment()
         }
     }
 
@@ -320,7 +320,12 @@ Column {
                 Layout.fillHeight: true
                 spacing: 0
                 background: Item {}
-                onCurrentIndexChanged: root.syncEditTool()
+                onCurrentIndexChanged: {
+                    root.syncEditTool()
+                    if (ribbonTabs.currentIndex === 1 && root.document.loaded) {
+                        root.editController.tool = PDFEditController.SelectTool
+                    }
+                }
 
                 RibbonTabButton {
                     theme: root.theme

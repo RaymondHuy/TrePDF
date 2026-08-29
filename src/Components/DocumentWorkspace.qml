@@ -52,6 +52,17 @@ Item {
         && selectedFormFieldId.length > 0
         && Number(selectedFormField.type)
             === PDFFormDesignerController.RadioButton
+    readonly property bool drawingCommentSelected: {
+        const kind = session.editController.selectedKind
+        return kind === "square"
+            || kind === "circle"
+            || kind === "line"
+            || kind === "polygon"
+            || kind === "polyLine"
+            || kind === "ink"
+    }
+    readonly property bool drawingCommentPropertiesPanelActive:
+        editTabActive && drawingCommentSelected
     readonly property bool hasPendingPanelEdits: {
         if (commentPanelLoader.status === Loader.Ready) {
             const commentPanel = commentPanelLoader.item as CommentPanel
@@ -85,22 +96,12 @@ Item {
     signal openRequested()
     signal deleteCommentRequested(int page, string objectId)
 
-    function drawingCommentSelected() {
-        const kind = session.editController.selectedKind
-        return kind === "square"
-            || kind === "circle"
-            || kind === "line"
-            || kind === "polygon"
-            || kind === "polyLine"
-            || kind === "ink"
-    }
-
-    function expandSelectedCommentProperties() {
+    function expandCommentsPanelForSelection() {
         if (commentTabActive
                 && commentsPanelVisible
                 && (session.editController.tool
                         === PDFEditController.FreeTextTool
-                    || drawingCommentSelected())) {
+                    || drawingCommentSelected)) {
             session.panelCollapsed = false
         }
     }
@@ -111,10 +112,10 @@ Item {
 
         session.formDesignerController.clearTextFieldFocus()
         session.formDesignerController.clearTextFieldSelection()
-        expandSelectedCommentProperties()
+        expandCommentsPanelForSelection()
     }
 
-    onCommentsPanelVisibleChanged: expandSelectedCommentProperties()
+    onCommentsPanelVisibleChanged: expandCommentsPanelForSelection()
 
     Connections {
         target: root.session.editController
@@ -128,7 +129,7 @@ Item {
         }
 
         function onSelectionChanged() {
-            root.expandSelectedCommentProperties()
+            root.expandCommentsPanelForSelection()
         }
     }
 
@@ -139,6 +140,11 @@ Item {
 
     onCombFieldOptionsPanelActiveChanged: {
         if (combFieldOptionsPanelActive)
+            session.panelCollapsed = false
+    }
+
+    onDrawingCommentPropertiesPanelActiveChanged: {
+        if (drawingCommentPropertiesPanelActive)
             session.panelCollapsed = false
     }
 
@@ -406,6 +412,30 @@ Item {
         }
 
         Loader {
+            id: drawingCommentPropertiesPanelLoader
+
+            Layout.preferredWidth: active
+                ? root.session.panelCollapsed ? 42 : 264
+                : 0
+            Layout.fillHeight: true
+            active: root.session.document.loaded
+                && root.drawingCommentPropertiesPanelActive
+            visible: active
+
+            sourceComponent: Component {
+                DrawingCommentPropertiesPanel {
+                    theme: root.theme
+                    document: root.session.document
+                    editController: root.session.editController
+                    collapsed: root.session.panelCollapsed
+                    onCollapsedChangeRequested: collapsed => {
+                        root.session.panelCollapsed = collapsed
+                    }
+                }
+            }
+        }
+
+        Loader {
             id: textFormatPanelLoader
 
             Layout.preferredWidth: active
@@ -419,6 +449,7 @@ Item {
                 && !root.dropdownOptionsPanelActive
                 && !root.listBoxOptionsPanelActive
                 && !root.radioButtonOptionsPanelActive
+                && !root.drawingCommentPropertiesPanelActive
                 && root.session.editController.tool !== PDFEditController.BrowseTool
             visible: active
 
