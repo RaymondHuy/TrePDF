@@ -446,6 +446,7 @@ private:
         int replyToSourceAnnotationIndex = -1;
         int replyDirectParentSourceAnnotationIndex = -1;
         bool isReplyAnnotation = false;
+        bool commentStateAnnotation = false;
         bool commentTextReadOnly = false;
         bool commentThreadDeletionProtected = false;
         bool replyToParentAdded = false;

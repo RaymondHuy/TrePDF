@@ -178,6 +178,37 @@ bool isMarkupAnnotation(FPDF_ANNOTATION annotation)
             || isProjectionAnnotation(annotation));
 }
 
+bool isCommentStateAnnotation(FPDF_ANNOTATION annotation)
+{
+    assertPDFiumProcessLockHeld();
+    // PDF 1.5+ stores annotation state transitions in separate Text
+    // annotations linked to the reviewed annotation through /IRT.
+    if (!annotation
+        || FPDFAnnot_GetSubtype(annotation) != FPDF_ANNOT_TEXT
+        || !annotationUsesReplyRelation(annotation)) {
+        return false;
+    }
+    const QString state = annotationString(annotation, "State").trimmed();
+    const QString stateModel
+        = annotationString(annotation, "StateModel").trimmed();
+    if (state.isEmpty()
+        || (stateModel.compare(
+                QLatin1String("Review"),
+                Qt::CaseInsensitive) != 0
+            && stateModel.compare(
+                   QLatin1String("Marked"),
+                   Qt::CaseInsensitive) != 0)) {
+        return false;
+    }
+
+    FPDF_ANNOTATION parent = FPDFAnnot_GetLinkedAnnot(annotation, "IRT");
+    if (!parent) {
+        return false;
+    }
+    FPDFPage_CloseAnnot(parent);
+    return true;
+}
+
 bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation)
 {
     assertPDFiumProcessLockHeld();

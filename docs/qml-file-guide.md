@@ -247,7 +247,10 @@ Note/Free Text đang chọn và phản hồi một cấp.
   vào kèm đường nhánh cấp hai trong cùng model phẳng và không có action phản
   hồi tiếp, nên UI luôn chỉ có một cấp con. Reply chỉ hiện trong panel; API dữ
   liệu theo trang và selection decoration của `EditOverlay` không vẽ reply lên
-  viewer.
+  viewer. Annotation chuyển trạng thái do Foxit/reader khác tạo với `/State` và
+  `/StateModel /Review` hoặc `/Marked` bị loại khỏi model, reply count và
+  selection; controller vẫn giữ chúng nội bộ để kiểm permission và cascade
+  thread an toàn.
 - Comment có sẵn trong PDF được liệt kê để đọc, điều hướng, sửa nội dung và xóa
   dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
   được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.

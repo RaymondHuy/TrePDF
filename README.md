@@ -97,8 +97,11 @@ its text is edited in the comments panel and is saved as a standard
 `/FreeText` annotation with semantic `/Contents` plus a wrapped,
 Unicode-capable appearance. Root comments can receive replies;
 each root has a dropdown control that expands its replies at one visual level,
-and reply-to-reply is not offered. Reply annotations remain available in this
-panel but their standalone appearances are hidden from the PDF page viewer.
+and reply-to-reply is not offered. Annotation-state transition records created
+by readers such as Foxit (`/State` with `/StateModel /Review` or `/Marked`) are
+not shown as comments, while remaining part of the internal thread graph for
+safe deletion and permission checks. Reply annotations remain available in this panel but
+their standalone appearances are hidden from the PDF page viewer.
 Square, Circle, Line, Polygon, and PolyLine comments use shared semantic stroke,
 interior, opacity, border, effect, and line-ending properties. Save writes
 standard `/Rect`, `/L` or `/Vertices` geometry and a matching vector `/AP`.

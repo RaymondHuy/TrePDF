@@ -46,6 +46,7 @@ namespace {
 using PDFAnnotationUtils::annotationString;
 using PDFAnnotationUtils::annotationUsesReplyRelation;
 using PDFAnnotationUtils::isMarkupAnnotation;
+using PDFAnnotationUtils::isCommentStateAnnotation;
 using PDFAnnotationUtils::isSupportedCommentAnnotationSubtype;
 using PDFAnnotationUtils::normalizedCommentText;
 
@@ -2847,13 +2848,15 @@ QVariantList PDFEditController::buildCommentItems(
          page != m_indexedCommentCandidates.cend();
          ++page) {
         for (const Candidate &candidate : page.value()) {
-            if (isCommentCandidateKind(candidate.kind)) {
+            if (isCommentCandidateKind(candidate.kind)
+                && !candidate.commentStateAnnotation) {
                 comments.append(&candidate);
             }
         }
     }
     for (const Candidate &candidate : m_addedCandidates) {
-        if (isCommentCandidateKind(candidate.kind)) {
+        if (isCommentCandidateKind(candidate.kind)
+            && !candidate.commentStateAnnotation) {
             comments.append(&candidate);
         }
     }
@@ -4927,7 +4930,9 @@ QVariantMap PDFEditController::addCommentReply(
 
     Candidate parentCandidate;
     const Candidate *pageCandidate = findCandidate(page, parentObjectId);
-    if (pageCandidate && isCommentCandidateKind(pageCandidate->kind)) {
+    if (pageCandidate
+        && isCommentCandidateKind(pageCandidate->kind)
+        && !pageCandidate->commentStateAnnotation) {
         parentCandidate = *pageCandidate;
     } else {
         const auto indexedPage = m_indexedCommentCandidates.constFind(page);
@@ -4939,7 +4944,8 @@ QVariantMap PDFEditController::addCommentReply(
             indexedPage->cend(),
             [&parentObjectId](const Candidate &candidate) {
                 return candidate.objectId == parentObjectId
-                    && isCommentCandidateKind(candidate.kind);
+                    && isCommentCandidateKind(candidate.kind)
+                    && !candidate.commentStateAnnotation;
             });
         if (indexedCandidate == indexedPage->cend()) {
             return {};
@@ -5647,7 +5653,7 @@ bool PDFEditController::selectCandidate(int page, const QString &objectId)
     }
 
     const Candidate *candidate = findCandidate(page, objectId);
-    if (!candidate) {
+    if (!candidate || candidate->commentStateAnnotation) {
         clearSelection();
         return false;
     }
@@ -5911,7 +5917,9 @@ void PDFEditController::requestCommentIndex()
 bool PDFEditController::selectComment(int page, const QString &objectId)
 {
     const Candidate *candidate = findCandidate(page, objectId);
-    if (candidate && isCommentCandidateKind(candidate->kind)) {
+    if (candidate
+        && isCommentCandidateKind(candidate->kind)
+        && !candidate->commentStateAnnotation) {
         return selectCandidate(page, objectId);
     }
 
@@ -5922,6 +5930,9 @@ bool PDFEditController::selectComment(int page, const QString &objectId)
     for (const Candidate &indexedCandidate : indexedPage.value()) {
         if (indexedCandidate.objectId != objectId) {
             continue;
+        }
+        if (indexedCandidate.commentStateAnnotation) {
+            return false;
         }
         setSelection(&indexedCandidate);
         if (!documentAllowsAnnotations()) {
@@ -5948,7 +5959,9 @@ bool PDFEditController::removeComment(int page, const QString &objectId)
 
     Candidate candidate;
     const Candidate *pageCandidate = findCandidate(page, objectId);
-    if (pageCandidate && isCommentCandidateKind(pageCandidate->kind)) {
+    if (pageCandidate
+        && isCommentCandidateKind(pageCandidate->kind)
+        && !pageCandidate->commentStateAnnotation) {
         candidate = *pageCandidate;
     } else {
         const auto indexedPage = m_indexedCommentCandidates.constFind(page);
@@ -5960,7 +5973,8 @@ bool PDFEditController::removeComment(int page, const QString &objectId)
             indexedPage->cend(),
             [&objectId](const Candidate &current) {
                 return current.objectId == objectId
-                    && isCommentCandidateKind(current.kind);
+                    && isCommentCandidateKind(current.kind)
+                    && !current.commentStateAnnotation;
             });
         if (indexedCandidate == indexedPage->cend()) {
             return false;
@@ -8919,6 +8933,8 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
         }
 
         const int subtype = FPDFAnnot_GetSubtype(annotation);
+        const bool commentStateAnnotation
+            = isCommentStateAnnotation(annotation);
         const bool textMarkupSubtype
             = subtype == FPDF_ANNOT_HIGHLIGHT
             || subtype == FPDF_ANNOT_UNDERLINE
@@ -9185,6 +9201,7 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 annotation,
                 kCommentReplyToKey).trimmed();
             candidate.isReplyAnnotation = isReplyAnnotation;
+            candidate.commentStateAnnotation = commentStateAnnotation;
             const int annotationFlags = FPDFAnnot_GetFlags(annotation);
             candidate.commentTextReadOnly
                 = !supportedCommentSubtype
@@ -9712,7 +9729,9 @@ const PDFEditController::Candidate *PDFEditController::findCommentCandidate(
     const QString &objectId)
 {
     const Candidate *candidate = findCandidate(page, objectId);
-    if (candidate && isCommentCandidateKind(candidate->kind)) {
+    if (candidate
+        && isCommentCandidateKind(candidate->kind)
+        && !candidate->commentStateAnnotation) {
         return candidate;
     }
 
@@ -9725,7 +9744,8 @@ const PDFEditController::Candidate *PDFEditController::findCommentCandidate(
         indexedPage->cend(),
         [&objectId](const Candidate &current) {
             return current.objectId == objectId
-                && isCommentCandidateKind(current.kind);
+                && isCommentCandidateKind(current.kind)
+                && !current.commentStateAnnotation;
         });
     return indexedCandidate == indexedPage->cend()
         ? nullptr
@@ -11464,6 +11484,7 @@ void PDFEditController::setSelection(const Candidate *candidate)
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
     if (!candidate
+        || candidate->commentStateAnnotation
         || (m_tool == CommentSelectTool
             && !isCommentCandidateKind(candidate->kind))) {
         m_hasSelection = false;

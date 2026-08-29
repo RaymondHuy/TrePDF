@@ -91,7 +91,10 @@ Current features:
   The comments panel shows each annotation's author and modification date,
   falling back to its creation date. Root comments accept replies; the panel
   flattens imported reply chains to one display level, saves new replies with
-  standard `/IRT`, and cascades root deletion across the thread. Reply
+  standard `/IRT`, and cascades root deletion across the thread. PDF annotation
+  state transitions with `/State` and `/StateModel /Review` or `/Marked` stay in
+  the internal thread graph for safe deletion/flag checks but are excluded from
+  the comment list and selection APIs. Reply
   annotation appearances stay hidden from the page viewer while the replies
   remain available and editable in the panel. New Sticky Notes and replies have
   vector normal appearances, and comment line endings are saved as PDF CR while

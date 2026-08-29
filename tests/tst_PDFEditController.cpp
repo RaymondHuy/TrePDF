@@ -1537,6 +1537,43 @@ bool createNestedCommentRepliesPdf(const QString &filePath)
         });
 }
 
+bool createCommentStateThreadPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> /Annots [4 0 R 5 0 R 6 0 R 7 0 R 8 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [24 144 48 168] /Contents (Root comment) "
+                "/CreationDate (D:20240101090000Z) /NM (state-root) /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Visible reply) "
+                "/CreationDate (D:20240101100000Z) /NM (visible-reply) "
+                "/IRT 4 0 R /RT /R /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Accepted set by Foxit User) "
+                "/CreationDate (D:20240101110000Z) /NM (accepted-state) "
+                "/IRT 4 0 R /State /Accepted /StateModel /Review /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Rejected set by Foxit User) "
+                "/CreationDate (D:20240101120000Z) /NM (rejected-state) "
+                "/IRT 6 0 R /State (Rejected) /StateModel (Review) /F 132 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (None set by Foxit User) "
+                "/CreationDate (D:20240101130000Z) /NM (unmarked-state) "
+                "/IRT 4 0 R /State (Unmarked) /StateModel (Marked) /F 30 >>"),
+        });
+}
+
 bool createZeroRectUnderlineReplyPdf(const QString &filePath)
 {
     return writePdfObjects(
@@ -5172,6 +5209,7 @@ private slots:
     void enforcesCommentTextLengthLimit();
     void boundsSharedAnnotationStringReads();
     void flattensNestedSourceCommentReplies();
+    void excludesCommentStateAnnotationsFromCommentModels();
     void hidesCommentRepliesFromViewer();
     void hidesUnresolvedSourceReplyFromViewerModel();
     void indexesDrawingAndUnsupportedMarkupComments();
@@ -16643,6 +16681,51 @@ void PDFEditControllerTest::flattensNestedSourceCommentReplies()
     QVERIFY(rootInspection.readable);
     QCOMPARE(rootInspection.count, 1);
     QCOMPARE(rootInspection.contents, QStringLiteral("Root comment"));
+}
+
+void PDFEditControllerTest::excludesCommentStateAnnotationsFromCommentModels()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-state-thread.pdf"));
+    QVERIFY(createCommentStateThreadPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller.commentIndexState(),
+        PDFEditController::CommentIndexReady,
+        5000);
+
+    const auto verifyModel = [](const QVariantList &comments) {
+        QCOMPARE(comments.size(), 2);
+        const QVariantMap root = comments.at(0).toMap();
+        const QVariantMap reply = comments.at(1).toMap();
+        const QString rootObjectId = root
+            .value(QStringLiteral("objectId"))
+            .toString();
+        QCOMPARE(
+            root.value(QStringLiteral("text")).toString(),
+            QStringLiteral("Root comment"));
+        QVERIFY(!root.value(QStringLiteral("isReply")).toBool());
+        QCOMPARE(root.value(QStringLiteral("replyCount")).toInt(), 1);
+        QVERIFY(!root.value(QStringLiteral("deletable")).toBool());
+        QCOMPARE(
+            reply.value(QStringLiteral("text")).toString(),
+            QStringLiteral("Visible reply"));
+        QVERIFY(reply.value(QStringLiteral("isReply")).toBool());
+        QCOMPARE(
+            reply.value(QStringLiteral("parentObjectId")).toString(),
+            rootObjectId);
+    };
+
+    verifyModel(controller.commentItems());
+    verifyModel(controller.commentPanelItems());
+    QVERIFY(!controller.selectComment(0, QStringLiteral("annotation:2")));
+    QVERIFY(!controller.selectComment(0, QStringLiteral("annotation:3")));
+    QVERIFY(!controller.selectComment(0, QStringLiteral("annotation:4")));
 }
 
 void PDFEditControllerTest::hidesCommentRepliesFromViewer()

@@ -18,6 +18,7 @@ bool isSupportedCommentAnnotationSubtype(int subtype);
 bool isMarkupAnnotationSubtype(int subtype);
 bool isProjectionAnnotation(FPDF_ANNOTATION annotation);
 bool isMarkupAnnotation(FPDF_ANNOTATION annotation);
+bool isCommentStateAnnotation(FPDF_ANNOTATION annotation);
 bool annotationUsesReplyRelation(FPDF_ANNOTATION annotation);
 
 } // namespace PDFAnnotationUtils
