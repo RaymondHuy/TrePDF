@@ -5158,6 +5158,7 @@ private slots:
     void distinguishesCommentIndexLoadingAndFailureFromEmptyState();
     void boundsWholeDocumentCommentIndexMemory();
     void keepsUncommittedCommentPanelState();
+    void defaultsCommentTabToCommentSelectTool();
     void guardsRibbonActionsWithPendingCommentPanel();
     void editsSourceStickyNoteComment();
     void editsSourceTextMarkupComment_data();
@@ -15370,6 +15371,63 @@ void PDFEditControllerTest::keepsUncommittedCommentPanelState()
         QVERIFY(panel->property("activeEditorDirty").toBool());
         QVERIFY(panel->property("textEditPending").toBool());
     }
+}
+
+void PDFEditControllerTest::defaultsCommentTabToCommentSelectTool()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-tab-default-select.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString mainPath = QFINDTESTDATA("../src/Main.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!mainPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent mainComponent(
+        &engine,
+        QUrl::fromLocalFile(mainPath));
+    std::unique_ptr<QObject> mainWindow(mainComponent.create());
+    QVERIFY2(mainWindow, qPrintable(mainComponent.errorString()));
+    QVERIFY(mainWindow->setProperty("visible", false));
+
+    auto *tabModel = mainWindow->findChild<PDFTabModel *>();
+    QVERIFY(tabModel);
+    PDFDocumentSession *session = tabModel->open(
+        QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+
+    QObject *ribbonTabs = mainWindow->findChild<QObject *>(
+        QStringLiteral("ribbonTabs"));
+    QVERIFY(ribbonTabs);
+
+    PDFEditController *controller = session->editController();
+    QVERIFY(ribbonTabs->setProperty("currentIndex", 1));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller->tool(),
+        PDFEditController::SelectTool,
+        1000);
+
+    QVERIFY(ribbonTabs->setProperty("currentIndex", 2));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller->tool(),
+        PDFEditController::CommentSelectTool,
+        1000);
+
+    QObject *selectButton = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            selectButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("commentSelectButton"));
+            return selectButton != nullptr;
+        })(),
+        1000);
+    QVERIFY(selectButton->property("primary").toBool());
+
+    QVERIFY(mainWindow->setProperty("allowWindowClose", true));
 }
 
 void PDFEditControllerTest::guardsRibbonActionsWithPendingCommentPanel()

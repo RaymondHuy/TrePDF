@@ -613,6 +613,7 @@ Flickable {
             title: qsTrId("Notes")
 
             RibbonButton {
+                objectName: "commentSelectButton"
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Select"
