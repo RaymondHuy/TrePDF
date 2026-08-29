@@ -148,38 +148,38 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="328"/>
+        <location filename="../src/Components/AppRibbon.qml" line="333"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="334"/>
+        <location filename="../src/Components/AppRibbon.qml" line="339"/>
         <location filename="../src/Components/EditOverlay.qml" line="3489"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Comment">
-        <location filename="../src/Components/AppRibbon.qml" line="340"/>
+        <location filename="../src/Components/AppRibbon.qml" line="345"/>
         <source>Comment</source>
         <translation>Bình luận</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="346"/>
+        <location filename="../src/Components/AppRibbon.qml" line="351"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="352"/>
+        <location filename="../src/Components/AppRibbon.qml" line="357"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="377"/>
+        <location filename="../src/Components/AppRibbon.qml" line="382"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="381"/>
+        <location filename="../src/Components/AppRibbon.qml" line="386"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
@@ -697,7 +697,7 @@
         <translation>Bình luận sau</translation>
     </message>
     <message id="DeleteSelectedComment">
-        <location filename="../src/Components/CommentPanel.qml" line="1224"/>
+        <location filename="../src/Components/CommentPanel.qml" line="827"/>
         <location filename="../src/Components/CommentRibbon.qml" line="1080"/>
         <source>Delete selected comment</source>
         <translation>Xóa bình luận đã chọn</translation>
@@ -721,168 +721,178 @@
         <translation>Làm lại</translation>
     </message>
     <message id="ExpandCommentsPanel">
-        <location filename="../src/Components/CommentPanel.qml" line="472"/>
+        <location filename="../src/Components/CommentPanel.qml" line="366"/>
         <source>Expand comments panel</source>
         <translation>Mở rộng bảng bình luận</translation>
     </message>
     <message id="CommentsCount">
-        <location filename="../src/Components/CommentPanel.qml" line="512"/>
+        <location filename="../src/Components/CommentPanel.qml" line="406"/>
         <source>Comments (%1)</source>
         <translation>Bình luận (%1)</translation>
     </message>
     <message id="CloseCommentsPanel">
-        <location filename="../src/Components/CommentPanel.qml" line="532"/>
+        <location filename="../src/Components/CommentPanel.qml" line="426"/>
         <source>Close comments panel</source>
         <translation>Đóng bảng bình luận</translation>
     </message>
     <message id="ShapeCommentProperties">
-        <location filename="../src/Components/CommentPanel.qml" line="575"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="208"/>
         <source>Drawing comment properties</source>
         <oldsource>Shape comment properties</oldsource>
         <translation>Thuộc tính chú thích hình vẽ</translation>
     </message>
     <message id="DrawingPropertiesReadOnly">
-        <location filename="../src/Components/CommentPanel.qml" line="586"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="269"/>
         <source>This drawing comment&apos;s appearance is read-only.</source>
         <oldsource>This shape comment&apos;s appearance is read-only.</oldsource>
         <translation>Không thể chỉnh sửa hình thức của chú thích hình vẽ này.</translation>
     </message>
     <message id="StrokeColor">
-        <location filename="../src/Components/CommentPanel.qml" line="95"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="32"/>
         <source>Stroke color</source>
         <translation>Màu nét</translation>
     </message>
     <message id="FillColor">
-        <location filename="../src/Components/CommentPanel.qml" line="97"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="34"/>
         <source>Fill color</source>
         <translation>Màu tô</translation>
     </message>
     <message id="StrokeColorValue">
-        <location filename="../src/Components/CommentPanel.qml" line="100"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="37"/>
         <source>Stroke color: %1</source>
         <translation>Màu nét: %1</translation>
     </message>
     <message id="FillColorValue">
-        <location filename="../src/Components/CommentPanel.qml" line="105"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="42"/>
         <source>Fill color: %1</source>
         <translation>Màu tô: %1</translation>
     </message>
     <message id="FillColorNoFill">
-        <location filename="../src/Components/CommentPanel.qml" line="108"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="45"/>
         <source>Fill color: No fill</source>
         <translation>Màu tô: Không tô</translation>
     </message>
+    <message id="ExpandDrawingCommentProperties">
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="161"/>
+        <source>Expand drawing comment properties</source>
+        <translation>Mở rộng thuộc tính chú thích hình vẽ</translation>
+    </message>
+    <message id="CollapseDrawingCommentProperties">
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="228"/>
+        <source>Collapse drawing comment properties</source>
+        <translation>Thu gọn thuộc tính chú thích hình vẽ</translation>
+    </message>
     <message id="NoFill">
-        <location filename="../src/Components/CommentPanel.qml" line="753"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="434"/>
         <source>No fill</source>
         <translation>Không tô</translation>
     </message>
     <message id="Opacity">
-        <location filename="../src/Components/CommentPanel.qml" line="767"/>
-        <location filename="../src/Components/CommentPanel.qml" line="801"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="448"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="483"/>
         <source>Opacity</source>
         <translation>Độ mờ</translation>
     </message>
     <message id="PercentValue">
-        <location filename="../src/Components/CommentPanel.qml" line="775"/>
+        <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="456"/>
         <source>%1%</source>
         <translation>%1%</translation>
     </message>
     <message id="CommentsList">
-        <location filename="../src/Components/CommentPanel.qml" line="873"/>
+        <location filename="../src/Components/CommentPanel.qml" line="476"/>
         <source>Comments</source>
         <translation>Danh sách bình luận</translation>
     </message>
     <message id="CommentItemAccessibleName">
-        <location filename="../src/Components/CommentPanel.qml" line="1002"/>
+        <location filename="../src/Components/CommentPanel.qml" line="605"/>
         <source>%1, page %2</source>
         <translation>%1, trang %2</translation>
     </message>
     <message id="NewComment">
-        <location filename="../src/Components/CommentPanel.qml" line="1128"/>
+        <location filename="../src/Components/CommentPanel.qml" line="731"/>
         <source>New</source>
         <translation>Mới</translation>
     </message>
     <message id="PageNumber">
-        <location filename="../src/Components/CommentPanel.qml" line="1144"/>
+        <location filename="../src/Components/CommentPanel.qml" line="747"/>
         <location filename="../src/Components/PdfPageDelegate.qml" line="169"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
     <message id="ToggleReplies">
-        <location filename="../src/Components/CommentPanel.qml" line="1179"/>
+        <location filename="../src/Components/CommentPanel.qml" line="782"/>
         <source>Show or hide replies</source>
         <translation>Hiện hoặc ẩn phản hồi</translation>
     </message>
     <message id="Reply">
-        <location filename="../src/Components/CommentPanel.qml" line="1304"/>
+        <location filename="../src/Components/CommentPanel.qml" line="907"/>
         <location filename="../src/PDFEditController.cpp" line="5017"/>
-        <location filename="../src/PDFEditController.cpp" line="9585"/>
+        <location filename="../src/PDFEditController.cpp" line="9583"/>
         <source>Reply</source>
         <translation>Phản hồi</translation>
     </message>
     <message id="CommentCharacterCount">
-        <location filename="../src/Components/CommentPanel.qml" line="1354"/>
-        <location filename="../src/Components/CommentPanel.qml" line="1478"/>
+        <location filename="../src/Components/CommentPanel.qml" line="957"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1081"/>
         <source>%1 / %2 characters</source>
         <translation>%1 / %2 ký tự</translation>
     </message>
     <message id="WriteReplyPlaceholder">
-        <location filename="../src/Components/CommentPanel.qml" line="1373"/>
+        <location filename="../src/Components/CommentPanel.qml" line="976"/>
         <source>Write a reply</source>
         <translation>Nhập phản hồi</translation>
     </message>
     <message id="ReplyText">
-        <location filename="../src/Components/CommentPanel.qml" line="1376"/>
+        <location filename="../src/Components/CommentPanel.qml" line="979"/>
         <source>Reply text</source>
         <translation>Nội dung phản hồi</translation>
     </message>
     <message id="CancelReply">
-        <location filename="../src/Components/CommentPanel.qml" line="1447"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1050"/>
         <source>Cancel reply</source>
         <translation>Hủy phản hồi</translation>
     </message>
     <message id="SendReply">
-        <location filename="../src/Components/CommentPanel.qml" line="1454"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1057"/>
         <source>Send reply</source>
         <translation>Gửi phản hồi</translation>
     </message>
     <message id="WriteCommentPlaceholder">
-        <location filename="../src/Components/CommentPanel.qml" line="1509"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1112"/>
         <source>Write a comment</source>
         <translation>Nhập bình luận</translation>
     </message>
     <message id="CommentText">
-        <location filename="../src/Components/CommentPanel.qml" line="1511"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1114"/>
         <source>Comment text</source>
         <translation>Nội dung bình luận</translation>
     </message>
     <message id="LoadingComments">
-        <location filename="../src/Components/CommentPanel.qml" line="1653"/>
-        <location filename="../src/Components/CommentPanel.qml" line="1710"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1256"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1313"/>
         <source>Loading comments…</source>
         <translation>Đang tải bình luận…</translation>
     </message>
     <message id="CommentIndexLimitedMessage">
-        <location filename="../src/Components/CommentPanel.qml" line="1657"/>
-        <location filename="../src/Components/CommentPanel.qml" line="1718"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1260"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1321"/>
         <source>Too many comments to load all of them.</source>
         <translation>Có quá nhiều bình luận để tải tất cả.</translation>
     </message>
     <message id="CommentsLoadFailed">
-        <location filename="../src/Components/CommentPanel.qml" line="1661"/>
-        <location filename="../src/Components/CommentPanel.qml" line="1714"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1264"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1317"/>
         <source>Comments couldn&apos;t be loaded.</source>
         <translation>Không thể tải bình luận.</translation>
     </message>
     <message id="NoCommentsYet">
-        <location filename="../src/Components/CommentPanel.qml" line="1722"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1325"/>
         <source>No comments yet.</source>
         <translation>Chưa có bình luận.</translation>
     </message>
     <message id="RetryCommentIndex">
-        <location filename="../src/Components/CommentPanel.qml" line="1674"/>
-        <location filename="../src/Components/CommentPanel.qml" line="1738"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1277"/>
+        <location filename="../src/Components/CommentPanel.qml" line="1341"/>
         <source>Retry</source>
         <translation>Thử lại</translation>
     </message>
@@ -1242,7 +1252,7 @@
         <location filename="../src/PDFEditController.cpp" line="3682"/>
         <location filename="../src/PDFEditController.cpp" line="8574"/>
         <location filename="../src/PDFEditController.cpp" line="8642"/>
-        <location filename="../src/PDFEditController.cpp" line="9669"/>
+        <location filename="../src/PDFEditController.cpp" line="9667"/>
         <source>This PDF does not permit content editing.</source>
         <translation>Tệp PDF này không cho phép chỉnh sửa nội dung.</translation>
     </message>
@@ -1359,7 +1369,7 @@
         <location filename="../src/PDFEditController.cpp" line="2975"/>
         <location filename="../src/PDFEditController.cpp" line="4947"/>
         <location filename="../src/PDFEditController.cpp" line="6997"/>
-        <location filename="../src/PDFEditController.cpp" line="9589"/>
+        <location filename="../src/PDFEditController.cpp" line="9587"/>
         <source>This comment is read-only.</source>
         <translation>Bình luận này chỉ có thể đọc.</translation>
     </message>
@@ -1445,7 +1455,7 @@
         <translation>Chú thích phép chiếu</translation>
     </message>
     <message id="ExistingCommentPageAppearanceReadOnly">
-        <location filename="../src/PDFEditController.cpp" line="9602"/>
+        <location filename="../src/PDFEditController.cpp" line="9600"/>
         <source>Edit the comment text in the Comments panel. Moving or resizing existing comments is not available.</source>
         <translation>Sửa nội dung bình luận trong bảng Bình luận. Hiện chưa thể di chuyển hoặc thay đổi kích thước bình luận có sẵn.</translation>
     </message>
@@ -1491,7 +1501,7 @@
         <location filename="../src/PDFEditController.cpp" line="5918"/>
         <location filename="../src/PDFEditController.cpp" line="6828"/>
         <location filename="../src/PDFEditController.cpp" line="7002"/>
-        <location filename="../src/PDFEditController.cpp" line="9597"/>
+        <location filename="../src/PDFEditController.cpp" line="9595"/>
         <source>This PDF does not permit changing annotations.</source>
         <oldsource>This PDF does not permit adding or deleting annotations.</oldsource>
         <translation>Tệp PDF này không cho phép thay đổi chú thích.</translation>
@@ -1563,12 +1573,12 @@
         <translation>Chú thích văn bản tự do</translation>
     </message>
     <message id="FormField">
-        <location filename="../src/PDFEditController.cpp" line="9664"/>
+        <location filename="../src/PDFEditController.cpp" line="9662"/>
         <source>Form field</source>
         <translation>Trường biểu mẫu</translation>
     </message>
     <message id="DraftEditorUnsupportedAnnotations">
-        <location filename="../src/PDFEditController.cpp" line="9672"/>
+        <location filename="../src/PDFEditController.cpp" line="9670"/>
         <source>Editing form fields and free-text annotations is not available in this draft editor yet.</source>
         <translation>Trình chỉnh sửa bản nháp này chưa hỗ trợ chỉnh sửa trường biểu mẫu và chú thích văn bản tự do.</translation>
     </message>

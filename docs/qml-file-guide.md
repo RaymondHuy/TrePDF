@@ -45,6 +45,7 @@ Main.qml
     │           └── FormTextFieldOverlay.qml
     │               └── FormFieldLayer (C++)
     ├── CommentPanel.qml
+    ├── DrawingCommentPropertiesPanel.qml
     ├── TextFormatPanel.qml
     ├── TextFieldOptionsPanel.qml
     ├── CombFieldOptionsPanel.qml
@@ -128,8 +129,9 @@ Check Box, Radio Button, Dropdown, List Box và Comb Field của Forms.
   phiên trước.
 - Khi Comment active, yêu cầu annotation-only comment index cho toàn tài liệu,
   kể cả khi panel danh sách đang được ẩn.
-- Khi chọn drawing comment có property section, tự mở/expand Comments panel để
-  stroke/fill/opacity luôn truy cập được mà không đổi tool hiện hành.
+- Mỗi lần chuyển sang Edit, đặt `PDFEditController.tool` về Select để nút Chọn
+  được bật sẵn; panel thuộc tính drawing comment do `DocumentWorkspace` quản lý
+  theo selection hiện tại.
 - Khi chọn Forms tool, bảo đảm Text Field, Check Box, Radio Button, Dropdown,
   List Box và Comb Field loại trừ nhau.
 - Chuyển tiếp signal Open/Save/Save As, page, delete page, zoom, fit, rotate và
@@ -248,14 +250,28 @@ Note/Free Text đang chọn và phản hồi một cấp.
   Panel dùng chung trạng thái thu gọn theo document session.
 - Square, Circle, Line, Polygon, PolyLine và Ink có kind riêng, hỗ trợ chọn,
   drag/phím mũi tên, resize tám handle, sửa nội dung, xóa, reply và history.
-  Phần property phía trên danh sách cho đổi stroke, fill của shape đóng và
-  opacity; `ColorDialog` được load theo nhu cầu, slider chỉ commit một command
-  khi kết thúc pointer gesture và mọi callback giữ identity `page + objectId`.
-  Source không đủ capability hiển thị cùng giá trị nhưng khóa control.
-  Stamp nguồn giữ geometry/AP; Caret,
+  Panel này chỉ xử lý nội dung/thread; stroke, fill và opacity được tách sang
+  `DrawingCommentPropertiesPanel` trong tab Edit. Stamp nguồn giữ geometry/AP;
+  Caret,
   FileAttachment, Sound, Redact và Projection dùng card `comment` chỉ đọc. Ink có `/InkList` malformed
   hoặc vượt giới hạn scan 64 stroke, 4.096 điểm/stroke hay 32.768 điểm tổng cũng
   hạ xuống card generic chỉ đọc thay vì cấp phát dữ liệu không giới hạn.
+
+### [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml)
+
+**Vai trò:** panel thuộc tính riêng cho drawing comment đang chọn trong tab
+Edit; không lập chỉ mục, hiển thị hay sửa nội dung comment/thread.
+
+- `DocumentWorkspace` chỉ load panel khi selection là Square, Circle, Line,
+  Polygon, PolyLine hoặc Ink và tab Edit đang active; panel tự mở rộng khi vừa
+  được kích hoạt và thay `TextFormatPanel` ở cùng vị trí cạnh phải.
+- Cho đổi stroke, fill của shape đóng và opacity. `ColorDialog` được load theo
+  nhu cầu; slider chỉ commit một command khi kết thúc pointer gesture và mọi
+  callback giữ identity `page + objectId` để không áp vào selection mới.
+- Added comment luôn sửa được. Source drawing comment chỉ bật control khi
+  controller xác nhận appearance có thể round-trip; source ngoài/custom vẫn
+  hiển thị giá trị nhưng khóa chỉnh sửa.
+- Trạng thái thu gọn dùng chung `session.panelCollapsed` với các panel phải khác.
 
 ### [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml)
 
@@ -303,12 +319,12 @@ Note/Free Text đang chọn và phản hồi một cấp.
 - Thực hiện Fit Width từ kích thước viewport và maximum page dimension đã xoay;
   initial-fit chỉ chạy khi session còn `initialFitPending`.
 - Load đúng một panel ở cạnh phải: `CommentPanel` khi Comment active và danh
-  sách được bật, `TextFormatPanel` khi Edit active, `TextFieldOptionsPanel` khi
-  chọn Text Field, `DropdownOptionsPanel` khi chọn Dropdown hoặc List Box,
-  `CombFieldOptionsPanel` khi chọn Comb Field, hoặc `RadioButtonOptionsPanel`
-  khi chọn Radio Button trong Forms. Khi Text Field hoặc Comb Field vừa được
-  chọn, panel tương ứng tự mở; drawing comment cũng tự mở Comments panel và
-  expand property section. Trạng thái collapsed được lưu theo session.
+  sách được bật; `DrawingCommentPropertiesPanel` khi tab Edit đang active và
+  chọn Square/Circle/Line/Polygon/PolyLine/Ink; `TextFormatPanel` cho các trạng
+  thái Edit còn lại; hoặc panel Text Field, Comb Field, Dropdown/List Box và
+  Radio Button tương ứng trong Forms. Panel thuộc tính drawing comment có ưu
+  tiên hơn `TextFormatPanel`. Khi một panel thuộc tính vừa được kích hoạt, nó tự
+  mở rộng; trạng thái collapsed được lưu theo session.
 - Chuyển các signal font family, bold/italic/underline, color và paragraph
   alignment vào `PDFEditController`.
 

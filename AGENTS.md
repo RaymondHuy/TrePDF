@@ -53,10 +53,13 @@ Current features:
   mutate the source appearance `/BBox`. Pure movement and external/custom
   appearances preserve `/AP`; a resized TrePDF-managed drawing comment receives
   a matching canonical `/AP` when its captured properties are fully supported.
-  Selecting a drawing comment opens stroke color, optional interior color, and
-  opacity controls in the Comments panel. Each accepted change is one undoable
-  command and previews live. Added drawing comments support these controls;
-  all six reopened TrePDF-managed drawing subtypes support them only when
+  Selecting a drawing comment while the Edit tab is active opens a dedicated
+  Drawing Comment Properties panel with stroke color, optional interior color,
+  and opacity controls. The Comments panel remains dedicated to comment/thread
+  content and no longer hosts drawing appearance controls. Each accepted
+  change is one undoable command and previews live. Added drawing comments
+  support these controls; all six reopened TrePDF-managed drawing subtypes
+  support them only when
   provenance and captured appearance properties are safe. External/custom
   appearances stay property-read-only. Source style Save patches `/C`, `/IC`,
   and `/CA`, regenerates the matching `/AP`, preserves `/BS`, `/BE`, `/LE`, and
@@ -230,6 +233,9 @@ Current features:
   upload for one page delegate.
 - `src/Components/FormChoiceOverlay.qml`: custom combo-box and list-box
   presentation for the safe subset of AcroForm choice fields.
+- `src/Components/DrawingCommentPropertiesPanel.qml`: dedicated Edit-tab panel
+  for stroke, optional interior color, and opacity of the selected drawing
+  comment; comment/thread content remains in `CommentPanel.qml`.
 - `src/Components/ShapeDraftView.qml`: shared Qt Quick Shapes preview used by
   the ribbon palette, drag preview, and added-shape draft delegates.
 - `src/Components/CommentDrawingView.qml`: vector preview shared by Square,

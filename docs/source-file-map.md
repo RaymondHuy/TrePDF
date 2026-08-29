@@ -217,8 +217,9 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
-| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel comment/format/Text Field/Comb/Dropdown/List Box/Radio cho một session. |
-| [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ, gồm Ink hợp lệ; sáu markup subtype còn lại và Ink malformed/oversized hiển thị chỉ đọc. |
+| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel comment, thuộc tính drawing comment, format text và các panel Forms cho một session. |
+| [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ; không chứa control appearance. |
+| [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml) | Panel tab Edit cho stroke, fill và opacity của Square/Circle/Line/Polygon/PolyLine/Ink đang chọn; source appearance không an toàn chỉ đọc. |
 | [`src/Components/TextFieldOptionsPanel.qml`](../src/Components/TextFieldOptionsPanel.qml) | Panel multi-line, giới hạn ký tự tùy chọn và xóa Text Field đang chọn. |
 | [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml) | Panel số ô/giới hạn ký tự bắt buộc và xóa Comb Field đang chọn. |
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |
@@ -269,7 +270,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 |---|---|---|
 | Ribbon, bố cục, dialog | `Main.qml`, ribbon tương ứng | `i18n/qml_vi.ts`, `AppTheme.qml` |
 | Scroll/zoom/rotation/pooling | `DocumentView.qml`, `PdfPageDelegate.qml` | `PDFPageItem.cpp`, state trong `PDFDocumentSession` |
-| Chọn hoặc sửa text/image/shape/comment | `EditOverlay.qml` | `EditRibbon.qml` hoặc `CommentRibbon.qml`, `CommentPanel.qml`, `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
+| Chọn hoặc sửa text/image/shape/comment | `EditOverlay.qml` | `EditRibbon.qml` hoặc `CommentRibbon.qml`, `CommentPanel.qml`, `DrawingCommentPropertiesPanel.qml`, `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
 | Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp` | `PDFEditController.cpp`, `PDFSaveWriter.cpp` |
 | Form PDF đang chạy | `PDFFormView.cpp`, `PDFFormController.cpp` | `PDFFormWorker.cpp`, `FormChoiceOverlay.qml` |
 | Form designer | `FormTextFieldOverlay.qml`, `FormFieldLayer.cpp` | `PDFFormDesignerController.cpp`, AcroForm writer/canonicalizer |

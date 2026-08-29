@@ -14,8 +14,10 @@ Các tệp chính:
   tool, màu markup và history.
 - [`CommentPanel.qml`](../src/Components/CommentPanel.qml): chỉ mục comment toàn
   tài liệu, sửa `/Contents`, reply một cấp, điều hướng và xóa.
-- [`DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml): mở panel
-  Comment cho đúng document session.
+- [`DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml):
+  stroke, fill và opacity của drawing comment được chọn trong tab Edit.
+- [`DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml): chọn đúng
+  panel Comment hoặc Drawing Comment Properties cho document session hiện tại.
 - [`EditOverlay.qml`](../src/Components/EditOverlay.qml): gesture tạo annotation,
   preview, selection và draft presentation trên trang.
 - [`SquigglyLine.qml`](../src/Components/SquigglyLine.qml): renderer zigzag dùng
@@ -98,6 +100,7 @@ flowchart LR
     Ribbon --> Panel["CommentPanel\nindex + text + replies"]
     Overlay --> Controller["PDFEditController\ncandidate + draft + history"]
     Panel --> Controller
+    Properties["DrawingCommentPropertiesPanel\nstroke + fill + opacity"] --> Controller
     Controller --> Scan["Annotation-only scan\nworker document + PDFium lock"]
     Controller --> PageItem["PDFPageItem\nrender + suppression"]
     Controller --> Prepare["PDFSaveWriter::prepare\nGUI-thread snapshot"]
@@ -312,18 +315,30 @@ Card chỉ đọc vẫn chọn và điều hướng được, nhưng nút sửa,
 Ink có geometry hợp lệ dùng kind `ink` nên sửa `/Contents`, Reply và xóa giống
 comment được hỗ trợ; chỉ Ink bị downgrade generic mới khóa các action này.
 
-Khi chọn drawing comment, panel hiện property editor cho stroke, fill (chỉ
-Square/Circle/Polygon) và opacity. Color dialog chỉ được tạo khi mở; slider
-opacity preview giá trị local nhưng commit đúng một history command khi thả,
-còn phím mũi tên commit theo từng bước. Added comment luôn dùng được editor.
-Cả sáu source drawing subtype chỉ bật khi provenance TrePDF, normal `/AP`,
-border/dash/fill và flags đều nằm trong tập có thể round-trip; appearance
-ngoài/custom hiển thị thông báo chỉ đọc. Property-only Save của Line/PolyLine
-giữ nguyên `/LE` cùng `/BS`, `/BE` và các dictionary entry không liên quan.
+Panel chỉ chứa comment/thread. Nó không còn sở hữu control stroke, fill hoặc
+opacity; appearance của drawing comment được chỉnh ở panel riêng trong tab
+Edit.
 
 QML cho phép text tạm vượt 700 UTF-16 code unit để không phá IME/local undo,
 nhưng commit, gửi reply và Save bị chặn cho đến khi độ dài hợp lệ. C++ kiểm lại
 cùng giới hạn; không dựa riêng vào validation QML.
+
+### 5.4 `DrawingCommentPropertiesPanel`
+
+`DocumentWorkspace` load panel này khi tab Edit đang active và selection là
+Square, Circle, Line, Polygon, PolyLine hoặc Ink. Panel tự mở rộng khi được kích
+hoạt và thay `TextFormatPanel` ở cùng cạnh phải; đổi khỏi selection drawing hoặc
+rời tab Edit sẽ unload nó.
+
+Panel cho đổi stroke, fill (chỉ Square/Circle/Polygon) và opacity. Color dialog
+chỉ được tạo khi mở; slider opacity preview giá trị local nhưng commit đúng một
+history command khi thả, còn phím mũi tên commit theo từng bước. Mọi callback
+giữ identity `page + objectId` để không áp kết quả dialog/gesture vào selection
+mới. Added comment luôn dùng được editor. Cả sáu source drawing subtype chỉ bật
+khi provenance TrePDF, normal `/AP`, border/dash/fill và flags đều nằm trong tập
+có thể round-trip; appearance ngoài/custom hiển thị thông báo chỉ đọc.
+Property-only Save của Line/PolyLine giữ nguyên `/LE` cùng `/BS`, `/BE` và các
+dictionary entry không liên quan.
 
 ## 6. Geometry text markup, Squiggly và Ink
 
@@ -734,7 +749,8 @@ orphan trước khi đổi model.
 1. Thêm tool/kind và xác định rõ subtype là comment, page content hay form.
 2. Mở rộng candidate scan và annotation-only index với giới hạn dữ liệu đầu vào.
 3. Bổ sung `Candidate`/`Draft` fields và snapshot equality/history.
-4. Thêm ribbon, cursor/gesture, overlay preview và CommentPanel label/property.
+4. Thêm ribbon, cursor/gesture, overlay preview, label/thread trong
+   `CommentPanel` và control appearance trong panel thuộc tính riêng nếu cần.
 5. Xác định normalized geometry và phép đổi qua `FPDF_DeviceToPage()`.
 6. Xác định `/Contents`, metadata, flags, subtype-specific dictionary và `/AP`.
 7. Quyết định source annotation nào chỉ đọc, sửa được, move/resize được hoặc
