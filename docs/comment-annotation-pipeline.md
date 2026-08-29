@@ -47,6 +47,13 @@ TrePDF coi **comment** là tập con của markup annotation trong PDF. Widget c
 AcroForm, Link, nội dung text của page và shape thuộc tab Edit không đi qua
 pipeline này.
 
+`CommentSelectTool` là tool chọn/điều hướng, không phải một PDF annotation
+subtype nên không nằm trong bảng dưới. Nó dùng chung interaction chọn của
+`SelectTool`, nhưng controller và overlay chỉ cho hit-test/chọn candidate có
+kind comment. Text, image, shape thuộc tab Edit và form object không thể trở
+thành selection trong mode này; undo/redo cũng không được phục hồi một
+selection ngoài comment khi tool đang active.
+
 | Công cụ UI | `Candidate.kind` | PDF subtype | Geometry hiện tại |
 |---|---|---|---|
 | Highlight | `highlight` | `/Highlight` | Rectangle tự do, ghi thành một hoặc nhiều `/QuadPoints`. |
@@ -258,9 +265,12 @@ sâu trong UI; item vẫn có thể được trình bày như comment top-level 
 
 ### 5.1 `CommentRibbon`
 
-Khi mở tab Comment, ribbon chọn Highlight làm tool mặc định. Người dùng có thể
-chuyển sang Sticky Note, Free Text, text markup, Pencil hoặc năm
-drawing-comment tool mà không bật form designer.
+Nút Select nằm đầu tab Comment ở cùng vị trí với Select của tab Edit. Khi mở
+tab Comment, `AppRibbon` đặt `CommentSelectTool` làm tool mặc định và nút nhận
+trạng thái `primary`. `syncEditTool()` đọc trực tiếp `TabBar.currentIndex` mới
+trong signal chuyển tab để không dùng giá trị binding `commentTabActive` còn
+trễ một nhịp. Người dùng có thể chuyển sang Sticky Note, Free Text, text markup,
+Pencil hoặc năm drawing-comment tool mà không bật form designer.
 
 Năm drawing-comment tool nằm trong một dropdown Shapes dạng lưới, dùng cùng mẫu
 popup với dropdown Shapes của tab Edit và đánh dấu tool hiện hành.
@@ -274,6 +284,9 @@ History dùng chung `PDFEditController::undo()` và `redo()`.
 
 Overlay giữ gesture tạm trong QML và chỉ commit một draft command khi release:
 
+- `SelectTool` và `CommentSelectTool` dùng chung pointer/keyboard selection;
+  mode thứ hai lọc hit-test, draft delegate và traversal xuống đúng comment
+  candidate trước khi gọi controller;
 - text markup nhận rectangle kéo;
 - Sticky Note nhận một click;
 - Free Text nhận click hoặc drag;
@@ -305,7 +318,7 @@ Khi được load, panel yêu cầu annotation-only index. Mỗi card hiển th�
 page, màu, author, ngày, nội dung và draft state. Chọn card sẽ:
 
 1. commit editor comment đang mở nếu hợp lệ;
-2. chuyển controller về Select;
+2. chuyển controller về `CommentSelectTool`;
 3. chọn candidate bằng `page + objectId`;
 4. phát `pageRequested()` để điều hướng.
 
@@ -658,7 +671,9 @@ cần chiến lược `/AP` riêng và regression mở bằng reader ngoài PDFi
    bỏ khỏi index hoặc save request.
 9. Normalized geometry không phụ thuộc view rotation.
 10. Save failure phải giữ target cũ, draft và undo/redo để người dùng thử lại.
-11. User-visible string mới phải dùng `qsTrId()`/`qtTrId()` literal với `//%` và
+11. `CommentSelectTool` không được để hit-test, API chọn trực tiếp hoặc
+    undo/redo phục hồi selection không phải comment.
+12. User-visible string mới phải dùng `qsTrId()`/`qtTrId()` literal với `//%` và
     cập nhật `i18n/qml_vi.ts`.
 
 ## 12. Kiểm thử
@@ -668,6 +683,8 @@ nhỏ nhất tự dựng được, sau đó kiểm cả state trước Save và 
 
 Coverage comment hiện cần được duy trì cho:
 
+- chuyển Edit → Comment phải bật `CommentSelectTool`, đặt nút Select ở trạng
+  thái `primary`, và mode này chỉ hit-test/chọn/khôi phục comment candidate;
 - round-trip Highlight, Underline, Squiggly và Strikeout;
 - Squiggly glyph snap, OCR Invisible, pending scan, whitespace rejection,
   rotated glyph và safety cap;

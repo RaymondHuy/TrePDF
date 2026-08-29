@@ -350,7 +350,7 @@ coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-tes
 |---|---|---|---|---|
 | View | `false` | Có thể interactive nếu form session sẵn sàng. | Không bắt input; draft vẫn có thể hiện. | Source-backed field bị ẩn; không đặt/move/resize. |
 | Edit | `true` | Không interactive vì tool là Select hoặc tool edit khác Browse. | Active: select, edit, add hoặc shape theo tool. | Source-backed field hiện; action designer hỗ trợ vẫn gate theo read-only, nhưng không có placement/delete Forms-only. |
-| Comment | `false` | Không interactive vì tool comment khác Browse. | Active để đặt Sticky Note, Free Text, text markup, Pencil hoặc Square/Circle/Line/Polygon/PolyLine; Select dùng khi điều hướng danh sách. | Source-backed field bị ẩn và không interactive. |
+| Comment | `false` | Không interactive vì tool comment khác Browse. | Active; `CommentSelectTool` là mặc định và chỉ chọn comment, hoặc đặt Sticky Note, Free Text, text markup, Pencil, Stamp hay Square/Circle/Line/Polygon/PolyLine. | Source-backed field bị ẩn và không interactive. |
 | Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Text Field/Dropdown/List Box source-backed được hỗ trợ có thể tạo draft xóa. |
 | Forms, tool đặt field | `true` | Bị tắt bởi cờ tool Text Field/Check Box/Radio Button/Dropdown/List Box/Comb Field. | Không active. | `placementArea` xử lý vùng trống; không move trong lúc placement tool bật. |
 | Đang Save hoặc delegate pooled | Không dùng để tương tác | Bị tắt/clear state. | Bị tắt; khi pooled còn xóa data/gesture cục bộ. | Hủy placement/resize/move/focus; khi pooled không render field. |
@@ -358,10 +358,16 @@ coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-tes
 `AppRibbon` duy trì điều này bằng `syncEditTool()`:
 
 - Vào Edit đặt tool mặc định là Select nếu đang Browse hoặc đang giữ tool Comment.
-- Vào Comment đặt tool là Highlight.
+- Vào Comment đặt tool là `CommentSelectTool`; nút Select của Comment nhận trạng
+  thái active và overlay chỉ cho chọn comment candidate.
 - Rời Edit/Comment đặt `PDFEditController.tool = BrowseTool`.
 - Tool đặt Text Field/Check Box/Radio Button/Dropdown/List Box/Comb Field chỉ sống trong
   Forms tab và loại trừ nhau.
+
+Trong signal `TabBar.currentIndexChanged`, `syncEditTool()` đọc trực tiếp
+`currentIndex` mới thay vì dựa vào các property active dẫn xuất có thể chưa kịp
+reevaluate. Đây là invariant quan trọng để trạng thái tool và nút `primary`
+không bị giữ lại từ tab trước.
 
 `formDesignMode` khác với `PDFFormView.interactive`: ở Edit và Forms,
 `PDFPageItem` có thể cần suppress Widget gốc để designer vẽ nó, trong khi native

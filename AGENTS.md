@@ -20,10 +20,15 @@ Current features:
   page, with undo/redo/discard and Save/Save As persistence.
 - Add Sticky Note, Free Text, Highlight, Squiggly, Underline, Strikeout,
   Square, Circle, Line, Polygon, PolyLine, and Ink annotations from the Comment
-  tab; Ink is drawn with the Pencil tool. New comments are undoable session
-  drafts; supported source comments can be indexed, selected, edited, and deleted with
-  undo/redo/discard. Save/Save As persists additions, content edits, and
-  removals without rewriting page content streams on annotation-only pages.
+  tab; Ink is drawn with the Pencil tool. The Comment tab has its own Select
+  button and activates it by default on entry. This `CommentSelectTool` shares
+  the normal selection mechanics but only accepts comment candidates through
+  hit testing, direct selection, keyboard traversal, and history restoration;
+  page text, images, Edit shapes, and form objects remain excluded. New comments
+  are undoable session drafts; supported source comments can be indexed,
+  selected, edited, and deleted with undo/redo/discard. Save/Save As persists
+  additions, content edits, and removals without rewriting page content streams
+  on annotation-only pages.
   Square, Circle, Line, Polygon, and PolyLine are drawing-comment drafts with
   shared stroke/interior/opacity/border/effect/line-ending properties. Ink
   shares the stroke/opacity/border pipeline without interior, effect, or line
