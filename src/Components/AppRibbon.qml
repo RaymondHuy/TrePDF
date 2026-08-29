@@ -61,7 +61,8 @@ Column {
     spacing: 0
 
     function isCommentTool(tool) {
-        return tool === PDFEditController.HighlightTool
+        return tool === PDFEditController.CommentSelectTool
+            || tool === PDFEditController.HighlightTool
             || tool === PDFEditController.UnderlineTool
             || tool === PDFEditController.SquigglyTool
             || tool === PDFEditController.StrikeoutTool
@@ -87,7 +88,7 @@ Column {
     }
 
     function revealSelectedDrawingComment() {
-        if (commentTabActive && drawingCommentSelected())
+        if (ribbonTabs.currentIndex === 2 && drawingCommentSelected())
             commentsPanelVisible = true
     }
 
@@ -96,12 +97,17 @@ Column {
         if (page < 0)
             return
 
-        editController.tool = PDFEditController.SelectTool
+        editController.tool = PDFEditController.CommentSelectTool
         pageRequested(page)
     }
 
     function syncEditTool() {
-        if (!document.loaded || !formsTabActive) {
+        const activeTabIndex = ribbonTabs.currentIndex
+        const editActive = activeTabIndex === 1
+        const commentActive = activeTabIndex === 2
+        const formsActive = activeTabIndex === 3
+
+        if (!document.loaded || !formsActive) {
             textFieldToolSelected = false
             checkboxToolSelected = false
             radioButtonToolSelected = false
@@ -112,14 +118,14 @@ Column {
 
         if (!document.loaded) {
             editController.tool = PDFEditController.BrowseTool
-        } else if (commentTabActive) {
-            editController.tool = PDFEditController.HighlightTool
+        } else if (commentActive) {
+            editController.tool = PDFEditController.CommentSelectTool
             editController.requestCommentIndex()
-        } else if (editTabActive
+        } else if (editActive
                    && (editController.tool === PDFEditController.BrowseTool
                        || isCommentTool(editController.tool))) {
             editController.tool = PDFEditController.SelectTool
-        } else if (!editTabActive) {
+        } else if (!editActive) {
             editController.tool = PDFEditController.BrowseTool
         }
         revealSelectedDrawingComment()
@@ -315,17 +321,13 @@ Column {
 
             TabBar {
                 id: ribbonTabs
+                objectName: "ribbonTabs"
 
                 Layout.preferredWidth: 520
                 Layout.fillHeight: true
                 spacing: 0
                 background: Item {}
-                onCurrentIndexChanged: {
-                    root.syncEditTool()
-                    if (ribbonTabs.currentIndex === 1 && root.document.loaded) {
-                        root.editController.tool = PDFEditController.SelectTool
-                    }
-                }
+                onCurrentIndexChanged: root.syncEditTool()
 
                 RibbonTabButton {
                     theme: root.theme

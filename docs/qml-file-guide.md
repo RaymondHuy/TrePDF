@@ -124,14 +124,16 @@ Check Box, Radio Button, Dropdown, List Box và Comb Field của Forms.
 - Vẽ hàng tab ribbon, vùng lệnh tương ứng và trạng thái tên tài liệu/draft/save.
 - Tính `viewTabActive`, `editTabActive`, `commentTabActive`, `formsTabActive` và
   các cờ tool form để workspace biết overlay nào được phép hiện/tương tác.
-- Khi vào Edit, mặc định về Select; khi vào Comment, bật Highlight; rời cả hai
-  tab đưa `PDFEditController.tool` về Browse để không giữ một tool tương tác từ
-  phiên trước.
+- Khi vào Edit, mặc định về `SelectTool`; khi vào Comment, bật
+  `CommentSelectTool`; rời cả hai tab đưa `PDFEditController.tool` về Browse để
+  không giữ một tool tương tác từ phiên trước.
 - Khi Comment active, yêu cầu annotation-only comment index cho toàn tài liệu,
   kể cả khi panel danh sách đang được ẩn.
-- Mỗi lần chuyển sang Edit, đặt `PDFEditController.tool` về Select để nút Chọn
-  được bật sẵn; panel thuộc tính drawing comment do `DocumentWorkspace` quản lý
-  theo selection hiện tại.
+- `syncEditTool()` đọc trực tiếp `ribbonTabs.currentIndex` trong signal đổi tab,
+  tránh dùng các binding `editTabActive`/`commentTabActive` chưa kịp cập nhật;
+  nhờ đó nút Chọn đúng tab luôn nhận trạng thái active ngay khi chuyển.
+- Panel thuộc tính drawing comment do `DocumentWorkspace` quản lý theo selection
+  hiện tại.
 - Khi chọn Forms tool, bảo đảm Text Field, Check Box, Radio Button, Dropdown,
   List Box và Comb Field loại trừ nhau.
 - Chuyển tiếp signal Open/Save/Save As, page, delete page, zoom, fit, rotate và
@@ -178,9 +180,11 @@ ghi Save; mọi thay đổi vẫn là draft.
 
 **Vai trò:** command surface cho PDF comment/markup, nằm ngay sau tab Edit.
 
-- Khi tab mở, `AppRibbon` bật `PDFEditController.HighlightTool`; người dùng có
-  thể chuyển sang Sticky Note, Free Text, text markup, Pencil hoặc năm
-  drawing-comment tool mà không bật form design mode.
+- Select nằm đầu ribbon, cùng vị trí với Select của tab Edit. Khi tab mở,
+  `AppRibbon` bật `PDFEditController.CommentSelectTool` và nút hiển thị trạng
+  thái `primary`; mode này chỉ chọn comment candidate. Người dùng có thể chuyển
+  sang Sticky Note, Free Text, text markup, Pencil hoặc năm drawing-comment
+  tool mà không bật form design mode.
 - Năm drawing-comment tool được gom trong một dropdown Shapes ba cột, cùng kiểu
   trình bày và tương tác với dropdown Shapes của tab Edit.
 - Highlight, Underline, Squiggly và Strikeout là split button: phần chính dùng
@@ -412,6 +416,9 @@ data/candidate/history/selection đổi.
 **Hit testing và con trỏ:**
 
 - Chuyển pointer pixel sang tỉ lệ trang và gọi candidate cache của controller.
+- `SelectTool` và `CommentSelectTool` dùng chung interaction chọn, nhưng
+  `candidateMatchesSelectionTool()` lọc hit-test, draft delegate và keyboard
+  traversal của mode Comment xuống đúng các kind comment trước khi chọn.
 - Với Squiggly, QML chỉ gửi rectangle chuẩn hóa cho preview/commit và render
   geometry đã được controller snap theo glyph/dòng. Geometry glyph đến từ page
   scan bất đồng bộ/cache; QML không truy cập handle PDFium và không tự dò text.

@@ -622,7 +622,7 @@ Rectangle {
                                 }
 
                                 root.editController.tool
-                                    = PDFEditController.SelectTool
+                                    = PDFEditController.CommentSelectTool
                                 root.editController.selectComment(
                                     targetPage,
                                     targetObjectId)

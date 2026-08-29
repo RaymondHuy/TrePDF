@@ -66,11 +66,16 @@ PDF. Compatible text objects on the same visual line are grouped into one
 editable candidate while retaining every source object path for draft rendering
 and persistence.
 
-The Comment ribbon provides Sticky Note, Free Text, Highlight, Squiggly,
-Underline, Strikeout, Rectangle, Oval, Line, Polygon, Polyline, and Pencil tools
-plus a collapsible, whole-document comments panel. Supported comments and replies,
-including annotations already in the PDF, can be selected
-and have their text edited in the panel. Markup uses a compact curated color
+The Comment ribbon starts with a Select tool in the same position as the Edit
+ribbon, followed by Sticky Note, Free Text, Highlight, Squiggly, Underline,
+Strikeout, Rectangle, Oval, Line, Polygon, Polyline, and Pencil tools plus a
+collapsible, whole-document comments panel. Entering the Comment tab activates
+its Select tool by default. This mode shares the normal selection interaction
+but filters hit testing, direct selection, keyboard traversal, and history
+restoration to comment candidates, so page text, images, Edit shapes, and form
+objects cannot be selected through it. Supported comments and replies,
+including annotations already in the PDF, can be selected and have their text
+edited in the panel. Markup uses a compact curated color
 grid and a system picker for custom colors. Squiggly is source-text-aware: its
 drag rectangle is intersected with non-whitespace glyphs from the PDF text
 layer, then snapped into per-line rectangles and QuadPoints.

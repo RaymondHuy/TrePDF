@@ -817,6 +817,16 @@ Item {
             || kind === "stamp"
     }
 
+    function isSelectionTool() {
+        return controller.tool === PDFEditController.SelectTool
+            || controller.tool === PDFEditController.CommentSelectTool
+    }
+
+    function candidateMatchesSelectionTool(candidate) {
+        return controller.tool !== PDFEditController.CommentSelectTool
+            || (hasCandidate(candidate) && isCommentKind(candidate.kind))
+    }
+
     function isGeometryCommentKind(kind) {
         return isTextMarkupKind(kind)
             || isDrawingCommentKind(kind)
@@ -1849,7 +1859,7 @@ Item {
     }
 
     function showSelectionActions(x, y, candidate) {
-        if (controller.tool !== PDFEditController.SelectTool
+        if (!isSelectionTool()
                 || (!candidate.editable && !candidate.deletable)
                 || !selectCandidate(candidate)) {
             selectionActions.close()
@@ -2000,7 +2010,7 @@ Item {
     }
 
     function selectRelativeCandidate(direction) {
-        if (controller.tool !== PDFEditController.SelectTool
+        if (!isSelectionTool()
                 && controller.tool !== PDFEditController.EditTextTool) {
             return false
         }
@@ -2008,9 +2018,10 @@ Item {
         const candidates = controller.candidatesForPage(page)
         const selectable = []
         for (let index = 0; index < candidates.length; ++index) {
-            if (controller.tool !== PDFEditController.EditTextTool
-                    || (candidates[index].editable
-                        && isTextBoxCandidate(candidates[index]))) {
+            if (candidateMatchesSelectionTool(candidates[index])
+                    && (controller.tool !== PDFEditController.EditTextTool
+                        || (candidates[index].editable
+                            && isTextBoxCandidate(candidates[index])))) {
                 selectable.push(candidates[index])
             }
         }
@@ -2998,6 +3009,7 @@ Item {
                     && !root.editing
                     && draftItem.modelData.restoration !== true
                     && draftItem.hasContent
+                    && root.candidateMatchesSelectionTool(draftItem.modelData)
                     && draftItem.hovered
                     && !draftItem.selected
             }
@@ -3012,12 +3024,13 @@ Item {
                     && root.controller.tool !== PDFEditController.AddImageTool
                     && root.controller.tool !== PDFEditController.AddShapeTool
                     && !root.isCommentCreationTool()
+                    && root.candidateMatchesSelectionTool(draftItem.modelData)
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
                 preventStealing: false
                 cursorShape: draftItem.isImage || draftItem.isShape
                     ? Qt.ArrowCursor
-                    : root.controller.tool === PDFEditController.SelectTool
+                    : root.isSelectionTool()
                     ? root.selectCursorActive ? Qt.BlankCursor : Qt.ArrowCursor
                     : Qt.IBeamCursor
                 onEntered: {
@@ -3047,7 +3060,7 @@ Item {
                     hitArea.forceActiveFocus()
                 }
                 onClicked: mouse => {
-                    if (root.controller.tool === PDFEditController.SelectTool) {
+                    if (root.isSelectionTool()) {
                         root.showSelectionActions(
                             draftItem.x + mouse.x,
                             draftItem.y + mouse.y,
@@ -3206,7 +3219,7 @@ Item {
 
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
             if (root.hasCandidate(root.hoverCandidate)) {
-                if (root.controller.tool === PDFEditController.SelectTool
+                if (root.isSelectionTool()
                         && (root.hoverCandidate.editable
                             || root.hoverCandidate.deletable)) {
                     root.showSelectionActions(

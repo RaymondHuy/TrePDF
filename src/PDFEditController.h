@@ -137,6 +137,7 @@ public:
         PolyLineTool,
         InkTool,
         StampTool,
+        CommentSelectTool,
         // Compatibility aliases for QML/tests written during the initial
         // drawing-comment implementation.
         SquareCommentTool = SquareTool,

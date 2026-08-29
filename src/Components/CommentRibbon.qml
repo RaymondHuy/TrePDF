@@ -613,6 +613,23 @@ Flickable {
             title: qsTrId("Notes")
 
             RibbonButton {
+                objectName: "commentSelectButton"
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Select"
+                text: qsTrId("Select")
+                iconSource: "../assets/icons/mouse-pointer-2.svg"
+                enabled: root.document.loaded
+                    && !root.editController.saving
+                primary: root.editController.tool
+                    === PDFEditController.CommentSelectTool
+                onClicked: {
+                    root.editController.tool
+                        = PDFEditController.CommentSelectTool
+                }
+            }
+
+            RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Sticky Note"

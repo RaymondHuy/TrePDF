@@ -774,6 +774,11 @@ Trong Select tool, click text editable mở popup Edit/Delete. Trong Edit Text
 tool, double-click mở editor trực tiếp. Nhấn Enter trên candidate đang chọn
 cũng mở editor.
 
+`CommentSelectTool` dùng chung hạ tầng pointer/keyboard selection nhưng lọc mọi
+candidate không phải comment ở cả QML và controller. Vì vậy khi tab Comment
+active, text page không thể bị hover/chọn trực tiếp, qua traversal, hoặc được
+phục hồi thành selection bởi undo/redo.
+
 Click image top-level trong Select tool mở popup chỉ có Delete. Khi image đang
 được chọn, Backspace hoặc Delete tạo draft xóa; image nguồn không có resize
 handle và không mở inline text editor.

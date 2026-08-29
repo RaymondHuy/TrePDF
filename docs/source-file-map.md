@@ -125,9 +125,13 @@ flowchart TD
 
 ### Sửa nội dung trang
 
-1. `EditRibbon` hoặc `CommentRibbon` đổi tool trên `PDFEditController`.
+1. `AppRibbon` đồng bộ tool theo tab, rồi `EditRibbon` hoặc `CommentRibbon` đổi
+   tool trên `PDFEditController`. Comment dùng `CommentSelectTool` mặc định;
+   `syncEditTool()` đọc trực tiếp tab index mới để nút Select active ngay.
 2. `EditOverlay` chuyển tọa độ pointer sang tỉ lệ chuẩn hóa của trang, hit-test
-   candidate và gọi API của controller. Với Squiggly, controller giao vùng kéo
+   candidate và gọi API của controller. Trong `CommentSelectTool`, overlay và
+   controller chỉ nhận comment kind, nên text/image/Edit shape không thể bị
+   chọn. Với Squiggly, controller giao vùng kéo
    với glyph source-text không-whitespace trong cache scan bất đồng bộ, snap
    rectangle/QuadPoints theo từng dòng; nét gần-ngang dùng dải hit-test 3 px và
    gesture release khi cache chưa sẵn sàng được giữ pending, ưu tiên scan đúng
@@ -213,7 +217,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
-| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Sticky Note, Free Text, text markup, Pencil, Square/Circle/Line/Polygon/PolyLine, quản lý comment và history. |
+| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Select chỉ dành cho comment, Sticky Note, Free Text, text markup, Pencil, Square/Circle/Line/Polygon/PolyLine, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
@@ -249,7 +253,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFTabModel.cpp`](../src/PDFTabModel.cpp) | Session mỗi tab và model nhiều tab. |
 | [`src/PDFDocument.cpp`](../src/PDFDocument.cpp) | Document GUI-thread, kích thước và page map transient. |
 | [`src/PDFPageItem.cpp`](../src/PDFPageItem.cpp) | Render trang bất đồng bộ và upload texture. |
-| [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) | Candidate, selection, draft, edit, history và save orchestration. |
+| [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) | Candidate, selection thường/comment-only, draft, edit, history và save orchestration. |
 | [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) | Ghi PDF giao dịch từ snapshot bất biến. |
 | [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) | Đọc chuỗi, chuẩn hóa nội dung và phân loại comment annotation dùng chung cho index, render và save. |
 | [`src/PDFCommentAnnotation.h`](../src/PDFCommentAnnotation.h) | Contract geometry/common properties cho drawing/Ink comment và `/AP`; Ink giữ từng stroke `/InkList` riêng. |

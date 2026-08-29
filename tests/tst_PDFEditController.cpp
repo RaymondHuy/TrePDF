@@ -5093,6 +5093,7 @@ private slots:
     void keepsExpandedColumnFrameStableAcrossEdits();
     void followsCurrentRightColumnDraftBoundary();
     void hidesDeletedTextFromInteraction();
+    void limitsCommentSelectToolToComments();
     void persistsExpandedFrameForTextChanges();
     void persistsExpandedFrameForParagraphAlignment();
     void keepsStandaloneResizeFrameUnexpanded();
@@ -5157,6 +5158,7 @@ private slots:
     void distinguishesCommentIndexLoadingAndFailureFromEmptyState();
     void boundsWholeDocumentCommentIndexMemory();
     void keepsUncommittedCommentPanelState();
+    void defaultsCommentTabToCommentSelectTool();
     void guardsRibbonActionsWithPendingCommentPanel();
     void editsSourceStickyNoteComment();
     void editsSourceTextMarkupComment_data();
@@ -10821,6 +10823,71 @@ void PDFEditControllerTest::hidesDeletedTextFromInteraction()
     m_controller.discardDrafts();
 }
 
+void PDFEditControllerTest::limitsCommentSelectToolToComments()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-select-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
+    const QString textObjectId = textCandidate
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QPointF textHitPoint = textCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF()
+        .center();
+    QVERIFY(controller.selectCandidate(0, textObjectId));
+    QVERIFY(controller.addBlankPage() >= 0);
+
+    controller.setTool(PDFEditController::CommentSelectTool);
+    QVERIFY(controller.selectedObjectId().isEmpty());
+    QVERIFY(controller.undo() >= 0);
+    QVERIFY(controller.selectedObjectId().isEmpty());
+    QVERIFY(controller.candidateAt(
+        0,
+        textHitPoint.x(),
+        textHitPoint.y()).isEmpty());
+    QVERIFY(!controller.selectCandidate(0, textObjectId));
+
+    controller.setTool(PDFEditController::StickyNoteTool);
+    const QVariantMap note = controller.addStickyNote(
+        0,
+        QPointF(0.85, 0.85));
+    QVERIFY(!note.isEmpty());
+    const QString noteObjectId = note
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QPointF noteHitPoint = note
+        .value(QStringLiteral("sourceRect"))
+        .toRectF()
+        .center();
+
+    controller.setTool(PDFEditController::CommentSelectTool);
+    QCOMPARE(controller.selectedObjectId(), noteObjectId);
+    QCOMPARE(
+        controller.candidateAt(
+            0,
+            noteHitPoint.x(),
+            noteHitPoint.y())
+            .value(QStringLiteral("objectId"))
+            .toString(),
+        noteObjectId);
+    QVERIFY(controller.selectCandidate(0, noteObjectId));
+
+    const QVariantList candidates = controller.candidatesForPage(0);
+    QVERIFY(!candidateForKind(candidates, QStringLiteral("stickyNote")).isEmpty());
+}
+
 void PDFEditControllerTest::persistsExpandedFrameForTextChanges()
 {
     m_controller.discardDrafts();
@@ -14168,7 +14235,7 @@ void PDFEditControllerTest::addsStickyNoteWithPanelModelAndUndo()
     QCOMPARE(
         note.value(QStringLiteral("kind")).toString(),
         QStringLiteral("stickyNote"));
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     QCOMPARE(controller.selectedObjectId(),
              note.value(QStringLiteral("objectId")).toString());
     const QDateTime creationDate = note
@@ -14259,7 +14326,7 @@ void PDFEditControllerTest::addsFreeTextWithPanelModelAndUndo()
     QCOMPARE(
         freeText.value(QStringLiteral("kind")).toString(),
         QStringLiteral("freeText"));
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     const QString objectId = freeText
         .value(QStringLiteral("objectId"))
         .toString();
@@ -14371,7 +14438,7 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
         .value<QColor>();
     QVERIFY(stampColor.isValid());
     QVERIFY(addedStamp.value(QStringLiteral("editable")).toBool());
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     QCOMPARE(controller.selectedPage(), 0);
     const QString objectId = addedStamp
         .value(QStringLiteral("objectId"))
@@ -15304,6 +15371,63 @@ void PDFEditControllerTest::keepsUncommittedCommentPanelState()
         QVERIFY(panel->property("activeEditorDirty").toBool());
         QVERIFY(panel->property("textEditPending").toBool());
     }
+}
+
+void PDFEditControllerTest::defaultsCommentTabToCommentSelectTool()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-tab-default-select.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString mainPath = QFINDTESTDATA("../src/Main.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!mainPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent mainComponent(
+        &engine,
+        QUrl::fromLocalFile(mainPath));
+    std::unique_ptr<QObject> mainWindow(mainComponent.create());
+    QVERIFY2(mainWindow, qPrintable(mainComponent.errorString()));
+    QVERIFY(mainWindow->setProperty("visible", false));
+
+    auto *tabModel = mainWindow->findChild<PDFTabModel *>();
+    QVERIFY(tabModel);
+    PDFDocumentSession *session = tabModel->open(
+        QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+
+    QObject *ribbonTabs = mainWindow->findChild<QObject *>(
+        QStringLiteral("ribbonTabs"));
+    QVERIFY(ribbonTabs);
+
+    PDFEditController *controller = session->editController();
+    QVERIFY(ribbonTabs->setProperty("currentIndex", 1));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller->tool(),
+        PDFEditController::SelectTool,
+        1000);
+
+    QVERIFY(ribbonTabs->setProperty("currentIndex", 2));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller->tool(),
+        PDFEditController::CommentSelectTool,
+        1000);
+
+    QObject *selectButton = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            selectButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("commentSelectButton"));
+            return selectButton != nullptr;
+        })(),
+        1000);
+    QVERIFY(selectButton->property("primary").toBool());
+
+    QVERIFY(mainWindow->setProperty("allowWindowClose", true));
 }
 
 void PDFEditControllerTest::guardsRibbonActionsWithPendingCommentPanel()
@@ -17161,7 +17285,7 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
     QCOMPARE(added.value(QStringLiteral("borderEffect")).toInt(), 0);
     QCOMPARE(added.value(QStringLiteral("lineStartStyle")).toInt(), 0);
     QCOMPARE(added.value(QStringLiteral("lineEndStyle")).toInt(), 0);
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     QCOMPARE(controller.selectedKind(), kind);
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
@@ -18542,7 +18666,7 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
     QVERIFY(qAbs(
         added.value(QStringLiteral("strokeWidthRatio")).toReal()
             - 1.5 / pageSize.height()) < 0.000001);
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     QCOMPARE(controller.selectedKind(), QStringLiteral("ink"));
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());

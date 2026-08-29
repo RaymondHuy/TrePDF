@@ -274,6 +274,10 @@ orchestration Save.
   hiện hành và insertion order tùy loại.
 - Mỗi action logic tạo snapshot command: add, delete, move, resize, format, page
   insert/delete. Undo/redo phục hồi toàn bộ state liên quan, không chỉ text.
+- `CommentSelectTool` dùng cùng selection API với `SelectTool` nhưng
+  `candidateAt()`, `selectCandidate()` và guard trung tâm `setSelection()` chỉ
+  nhận comment kind. Đổi sang tool này sẽ xóa selection ngoài comment; restore
+  từ undo/redo cũng đi qua guard nên không thể hồi sinh text/image/Edit shape.
 - API selection tách capability property khỏi move/resize/delete. Stroke,
   interior và opacity tạo từng snapshot command riêng; no-op không thêm history.
   Source style chỉ bật cho cả sáu drawing subtype TrePDF-managed có normal AP
@@ -783,8 +787,8 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   button action, URI sandbox, external-link routing và PDFium serialization
   giữa thread.
 - Candidate/hover: scan ngoài GUI thread, cancellation/reschedule/defer khi lock
-  bận, grouping theo dòng/cột/style/font, giới hạn editable scope và comment
-  index/điều hướng xuyên trang.
+  bận, grouping theo dòng/cột/style/font, giới hạn editable scope, comment-only
+  selection/default tab tool và comment index/điều hướng xuyên trang.
 - Font: bundled/system registration, language filters, mixed-style intersection,
   embedding rejection, glyph coverage, TTC/subset collision và stretch
   calibration.
