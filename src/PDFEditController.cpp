@@ -2279,7 +2279,10 @@ void PDFEditController::setTool(Tool tool)
     finishSelectedTextEdit();
     setPendingDrawingCommentPage(-1);
     m_tool = tool;
-    if (m_tool == BrowseTool
+    if ((m_tool == CommentSelectTool
+         && m_hasSelection
+         && !isCommentCandidateKind(m_selectedCandidate.kind))
+        || m_tool == BrowseTool
         || m_tool == StickyNoteTool
         || m_tool == FreeTextTool
         || m_tool == StampTool
@@ -3359,6 +3362,10 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
         if (candidate.isReplyAnnotation) {
             return;
         }
+        if (m_tool == CommentSelectTool
+            && !isCommentCandidateKind(candidate.kind)) {
+            return;
+        }
         if (m_tool == EditTextTool
             && isCommentCandidateKind(candidate.kind)) {
             return;
@@ -4419,7 +4426,7 @@ QVariantMap PDFEditController::addStickyNote(int page,
     m_undoStack.append(command);
     m_redoStack.clear();
 
-    setTool(SelectTool);
+    setTool(CommentSelectTool);
     setSelection(&addedCandidate);
     markDraftStateChanged(page, true);
     emit historyStateChanged();
@@ -4537,7 +4544,7 @@ QVariantMap PDFEditController::addFreeText(int page,
     m_undoStack.append(command);
     m_redoStack.clear();
 
-    setTool(SelectTool);
+    setTool(CommentSelectTool);
     setSelection(&addedCandidate);
     markDraftStateChanged(page, true);
     emit historyStateChanged();
@@ -4657,7 +4664,7 @@ QVariantMap PDFEditController::addStamp(int page,
     m_undoStack.append(command);
     m_redoStack.clear();
 
-    setTool(SelectTool);
+    setTool(CommentSelectTool);
     setSelection(&addedCandidate);
     markDraftStateChanged(page, true);
     emit historyStateChanged();
@@ -4883,7 +4890,7 @@ QVariantMap PDFEditController::addDrawingComment(
     m_undoStack.append(command);
     m_redoStack.clear();
 
-    setTool(SelectTool);
+    setTool(CommentSelectTool);
     setSelection(&addedCandidate);
     markDraftStateChanged(page, true);
     emit historyStateChanged();
@@ -5052,7 +5059,7 @@ QVariantMap PDFEditController::addCommentReply(
     m_undoStack.append(command);
     m_redoStack.clear();
 
-    setTool(SelectTool);
+    setTool(CommentSelectTool);
     setSelection(&addedCandidate);
     markDraftStateChanged(page, true);
     emit historyStateChanged();
@@ -5642,6 +5649,10 @@ bool PDFEditController::selectCandidate(int page, const QString &objectId)
     const Candidate *candidate = findCandidate(page, objectId);
     if (!candidate) {
         clearSelection();
+        return false;
+    }
+    if (m_tool == CommentSelectTool
+        && !isCommentCandidateKind(candidate->kind)) {
         return false;
     }
     const auto draft = m_drafts.constFind(draftKey(page, objectId));
@@ -11452,7 +11463,9 @@ void PDFEditController::setSelection(const Candidate *candidate)
     resetTypingFormat();
     m_selectedTextRangeStart = 0;
     m_selectedTextRangeLength = 0;
-    if (!candidate) {
+    if (!candidate
+        || (m_tool == CommentSelectTool
+            && !isCommentCandidateKind(candidate->kind))) {
         m_hasSelection = false;
         m_selectedCandidate = Candidate();
         m_selectedText.clear();

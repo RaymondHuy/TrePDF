@@ -61,7 +61,8 @@ Column {
     spacing: 0
 
     function isCommentTool(tool) {
-        return tool === PDFEditController.HighlightTool
+        return tool === PDFEditController.CommentSelectTool
+            || tool === PDFEditController.HighlightTool
             || tool === PDFEditController.UnderlineTool
             || tool === PDFEditController.SquigglyTool
             || tool === PDFEditController.StrikeoutTool
@@ -96,7 +97,7 @@ Column {
         if (page < 0)
             return
 
-        editController.tool = PDFEditController.SelectTool
+        editController.tool = PDFEditController.CommentSelectTool
         pageRequested(page)
     }
 

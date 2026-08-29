@@ -5093,6 +5093,7 @@ private slots:
     void keepsExpandedColumnFrameStableAcrossEdits();
     void followsCurrentRightColumnDraftBoundary();
     void hidesDeletedTextFromInteraction();
+    void limitsCommentSelectToolToComments();
     void persistsExpandedFrameForTextChanges();
     void persistsExpandedFrameForParagraphAlignment();
     void keepsStandaloneResizeFrameUnexpanded();
@@ -10821,6 +10822,71 @@ void PDFEditControllerTest::hidesDeletedTextFromInteraction()
     m_controller.discardDrafts();
 }
 
+void PDFEditControllerTest::limitsCommentSelectToolToComments()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("comment-select-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
+    const QString textObjectId = textCandidate
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QPointF textHitPoint = textCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF()
+        .center();
+    QVERIFY(controller.selectCandidate(0, textObjectId));
+    QVERIFY(controller.addBlankPage() >= 0);
+
+    controller.setTool(PDFEditController::CommentSelectTool);
+    QVERIFY(controller.selectedObjectId().isEmpty());
+    QVERIFY(controller.undo() >= 0);
+    QVERIFY(controller.selectedObjectId().isEmpty());
+    QVERIFY(controller.candidateAt(
+        0,
+        textHitPoint.x(),
+        textHitPoint.y()).isEmpty());
+    QVERIFY(!controller.selectCandidate(0, textObjectId));
+
+    controller.setTool(PDFEditController::StickyNoteTool);
+    const QVariantMap note = controller.addStickyNote(
+        0,
+        QPointF(0.85, 0.85));
+    QVERIFY(!note.isEmpty());
+    const QString noteObjectId = note
+        .value(QStringLiteral("objectId"))
+        .toString();
+    const QPointF noteHitPoint = note
+        .value(QStringLiteral("sourceRect"))
+        .toRectF()
+        .center();
+
+    controller.setTool(PDFEditController::CommentSelectTool);
+    QCOMPARE(controller.selectedObjectId(), noteObjectId);
+    QCOMPARE(
+        controller.candidateAt(
+            0,
+            noteHitPoint.x(),
+            noteHitPoint.y())
+            .value(QStringLiteral("objectId"))
+            .toString(),
+        noteObjectId);
+    QVERIFY(controller.selectCandidate(0, noteObjectId));
+
+    const QVariantList candidates = controller.candidatesForPage(0);
+    QVERIFY(!candidateForKind(candidates, QStringLiteral("stickyNote")).isEmpty());
+}
+
 void PDFEditControllerTest::persistsExpandedFrameForTextChanges()
 {
     m_controller.discardDrafts();
@@ -14168,7 +14234,7 @@ void PDFEditControllerTest::addsStickyNoteWithPanelModelAndUndo()
     QCOMPARE(
         note.value(QStringLiteral("kind")).toString(),
         QStringLiteral("stickyNote"));
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     QCOMPARE(controller.selectedObjectId(),
              note.value(QStringLiteral("objectId")).toString());
     const QDateTime creationDate = note
@@ -14259,7 +14325,7 @@ void PDFEditControllerTest::addsFreeTextWithPanelModelAndUndo()
     QCOMPARE(
         freeText.value(QStringLiteral("kind")).toString(),
         QStringLiteral("freeText"));
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     const QString objectId = freeText
         .value(QStringLiteral("objectId"))
         .toString();
@@ -14371,7 +14437,7 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
         .value<QColor>();
     QVERIFY(stampColor.isValid());
     QVERIFY(addedStamp.value(QStringLiteral("editable")).toBool());
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     QCOMPARE(controller.selectedPage(), 0);
     const QString objectId = addedStamp
         .value(QStringLiteral("objectId"))
@@ -17161,7 +17227,7 @@ void PDFEditControllerTest::savesDrawingCommentsRoundTrip()
     QCOMPARE(added.value(QStringLiteral("borderEffect")).toInt(), 0);
     QCOMPARE(added.value(QStringLiteral("lineStartStyle")).toInt(), 0);
     QCOMPARE(added.value(QStringLiteral("lineEndStyle")).toInt(), 0);
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     QCOMPARE(controller.selectedKind(), kind);
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
@@ -18542,7 +18608,7 @@ void PDFEditControllerTest::savesInkCommentRoundTrip()
     QVERIFY(qAbs(
         added.value(QStringLiteral("strokeWidthRatio")).toReal()
             - 1.5 / pageSize.height()) < 0.000001);
-    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     QCOMPARE(controller.selectedKind(), QStringLiteral("ink"));
     QVERIFY(controller.hasDrafts());
     QVERIFY(controller.canUndo());
