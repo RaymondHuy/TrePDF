@@ -68,31 +68,31 @@ and persistence.
 
 The Comment ribbon starts with a Select tool in the same position as the Edit
 ribbon, followed by Sticky Note, Free Text, Highlight, Squiggly, Underline,
-Strikeout, Rectangle, Oval, Line, Polygon, Polyline, and Pencil tools plus a
-collapsible, whole-document comments panel. Entering the Comment tab activates
-its Select tool by default. This mode shares the normal selection interaction
-but filters hit testing, direct selection, keyboard traversal, and history
-restoration to comment candidates, so page text, images, Edit shapes, and form
-objects cannot be selected through it. Supported comments and replies,
+Strikeout, Stamp, Rectangle, Oval, Line, Polygon, Polyline, and Pencil tools
+plus a collapsible, whole-document comments panel. Entering the Comment tab
+activates its Select tool by default. This mode shares the normal selection
+interaction but filters hit testing, direct selection, keyboard traversal, and
+history restoration to comment candidates, so page text, images, Edit shapes,
+and form objects cannot be selected through it. Supported comments and replies,
 including annotations already in the PDF, can be selected and have their text
 edited in the panel. Markup uses a compact curated color
-grid and a system picker for custom colors. Squiggly is source-text-aware: its
-drag rectangle is intersected with non-whitespace glyphs from the PDF text
-layer, then snapped into per-line rectangles and QuadPoints.
+grid and a system picker for custom colors. Highlight, Underline, Squiggly, and
+Strikeout are source-text-aware: their drag rectangle is intersected with
+non-whitespace glyphs from the PDF text layer, then snapped into per-line
+rectangles and QuadPoints.
 Nearly horizontal drags use a three-pixel hit-test band, so small differences
 in pointer height do not silently discard the gesture. If the asynchronous text
-scan is still running at release, TrePDF keeps the page, selection, and color,
+scan is still running at release, TrePDF keeps the page, selection, tool, and color,
 prioritizes that page, and creates the draft automatically when geometry is
 ready.
 Dragging only across whitespace or an area without source text creates no
 annotation. Invisible OCR text layers are accepted for this hit testing but do
 not become selectable or editable text candidates. Image-only scans without a
-usable text layer therefore do not support Squiggly. The current axis-aligned
+usable text layer therefore do not support these text-markup tools. The current axis-aligned
 geometry accepts upright horizontal glyphs only; rotated or vertical glyphs
 remain unsupported until oriented QuadPoints are implemented. Pages with more
 than 50,000 text-layer characters skip the per-glyph cache for memory safety and
-do not support Squiggly. Highlight, Underline, and Strikeout keep their existing
-free-rectangle behavior. Free Text places a bounded text box by click or drag;
+do not support glyph-aware text markup. Free Text places a bounded text box by click or drag;
 its text is edited in the comments panel and is saved as a standard
 `/FreeText` annotation with semantic `/Contents` plus a wrapped,
 Unicode-capable appearance. Root comments can receive replies;
@@ -122,9 +122,10 @@ support this before their first Save. All six reopened TrePDF-managed drawing
 subtypes also support it when their captured appearance is safe;
 external/custom appearances remain property-read-only. Property-only Save
 preserves `/BS`, `/BE`, `/LE`, and unrelated dictionary entries.
-Valid source drawing comments can be dragged or moved with arrow keys, resized
-with eight handles, deleted, undone/redone, discarded, saved, and reopened.
-Source geometry updates patch `/Rect` plus `/L` or `/Vertices` after PDFium
+Valid source Square, Circle, Line, Polygon, PolyLine, and Ink comments can be
+dragged or moved with arrow keys, resized with eight handles, deleted,
+undone/redone, discarded, saved, and reopened. Source geometry updates patch
+`/Rect` plus `/L`, `/Vertices`, or `/InkList` after PDFium
 serialization. Pure moves and external/custom appearances preserve `/AP`;
 resized TrePDF-managed comments receive a matching canonical `/AP` when all
 captured properties are supported and the indexed source appearance still

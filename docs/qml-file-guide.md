@@ -194,16 +194,16 @@ ghi Save; mọi thay đổi vẫn là draft.
   `editController.highlightColor`, `editController.underlineColor`,
   `editController.squigglyColor` hoặc `editController.strikeoutColor`.
 - Cả bốn text-markup tool dùng chung gesture kéo vùng, draft history và pipeline
-  lưu annotation. Riêng Squiggly chỉ dùng rectangle kéo làm đầu vào: controller
-  hit-test glyph source-text đã cache, bỏ whitespace và snap kết quả theo từng
-  dòng trước khi tạo draft. Gesture gần như nằm ngang được mở thành dải hit-test
+  lưu annotation. Rectangle kéo chỉ là đầu vào: controller hit-test glyph
+  source-text đã cache, bỏ whitespace và snap kết quả theo từng dòng trước khi
+  tạo draft. Gesture gần như nằm ngang được mở thành dải hit-test
   tối thiểu 3 px, nên không bị bỏ chỉ vì độ lệch dọc của pointer quá nhỏ. Khi
-  cache glyph còn tải, controller giữ gesture và tự hoàn tất sau scan thay vì
-  yêu cầu người dùng kéo lại. OCR ẩn tham gia hit-test nhưng không xuất hiện như
+  cache glyph còn tải, controller giữ gesture cùng tool/màu và tự hoàn tất sau
+  scan thay vì yêu cầu người dùng kéo lại. OCR ẩn tham gia hit-test nhưng không xuất hiện như
   text candidate để chọn/sửa. Kéo vùng không có glyph khả dụng không tạo
   annotation; hiện glyph phải ngang/upright, còn page không có text layer khả
-  dụng hoặc vượt safety cap 50.000 ký tự không hỗ trợ Squiggly. Highlight,
-  Underline và Strikeout vẫn dùng free rectangle hiện tại. Sticky Note đặt bằng
+  dụng hoặc vượt safety cap 50.000 ký tự không hỗ trợ bốn text-markup tool.
+  Sticky Note đặt bằng
   một lần bấm. Free Text nhận click hoặc drag để tạo hộp chữ; cả hai chỉnh nội
   dung trong panel bên phải. Chọn Free Text cũng mở panel nếu panel đang đóng.
 - Rectangle/Oval/Line dùng drag; Polygon/Polyline dùng multi-click, Enter hoặc
@@ -214,9 +214,15 @@ ghi Save; mọi thay đổi vẫn là draft.
 - Stamp là split button với sáu preset Approved, Draft, Final, Confidential,
   For Comment và Not Approved. Menu dùng `StampView` để preview đúng artwork và
   màu; phần chính giữ preset hiện tại rồi chuyển sang `StampTool`.
-- Ink đã tạo và Ink nguồn hợp lệ dùng cùng selection frame như Foxit: kéo toàn
-  bounding box hoặc dùng phím mũi tên để di chuyển, kéo tám handle cạnh/góc để
-  đổi kích thước; Escape/cancel session trả frame và stroke về geometry ban đầu.
+- Cả sáu drawing subtype Square, Circle, Line, Polygon, PolyLine và Ink đã tạo
+  hoặc source hợp lệ dùng cùng selection frame như Foxit: kéo toàn bounding box
+  hoặc dùng phím mũi tên để di chuyển, kéo tám handle cạnh/góc để đổi kích thước.
+  Frame scale endpoint, vertex hoặc toàn bộ stroke tương ứng; Escape/cancel
+  session trả frame và geometry về trạng thái ban đầu. Source chỉ nhận geometry
+  interaction khi annotation permission và các cờ
+  ReadOnly/LockedContents/Locked cho phép; capability sửa style vẫn được gate
+  riêng theo độ an toàn round-trip của `/AP`. Stamp nguồn giữ geometry và `/AP`,
+  không đi qua interaction này.
 - Gesture drawing có owner page duy nhất ở `PDFEditController`; bắt đầu trên
   trang khác sẽ hủy polygon/polyline hoặc Ink tạm của delegate trước để pooling
   không giữ hai path dang dở song song.
@@ -235,10 +241,10 @@ Note/Free Text đang chọn và phản hồi một cấp.
   viewport và tự hủy khi document/revision đổi.
 - Hiển thị loại, trang, màu, nội dung rút gọn và trạng thái draft; chọn item sẽ
   chuyển về Select, chọn candidate tương ứng và điều hướng tới trang đó.
-- Comment được hỗ trợ, gồm Sticky Note, Free Text, text markup, Ink và reply có
-  sẵn trong PDF, dùng `TextArea` để sửa `/Contents`; nội dung được buffer theo
-  `page + objectId` và commit khi mất focus, thu gọn panel, đổi session hoặc
-  thực hiện Save.
+- Comment được hỗ trợ, gồm Sticky Note, Free Text, text markup, Stamp, cả sáu
+  drawing subtype và reply có sẵn trong PDF, dùng `TextArea` để sửa `/Contents`;
+  nội dung được buffer theo `page + objectId` và commit khi mất focus, thu gọn
+  panel, đổi session hoặc thực hiện Save.
 - Hai editor có bộ đếm trực tiếp và soft-limit 700 UTF-16 code unit. Nội dung có
   thể tạm vượt giới hạn để không phá IME/undo, nhưng Gửi, commit và Save bị chặn
   cho tới khi người dùng rút gọn về 700 hoặc ít hơn.
@@ -264,8 +270,9 @@ Note/Free Text đang chọn và phản hồi một cấp.
   dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
   được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.
   Panel dùng chung trạng thái thu gọn theo document session.
-- Square, Circle, Line, Polygon, PolyLine và Ink có kind riêng, hỗ trợ chọn,
-  drag/phím mũi tên, resize tám handle, sửa nội dung, xóa, reply và history.
+- Square, Circle, Line, Polygon, PolyLine và Ink có kind riêng; cả draft mới lẫn
+  source hợp lệ đều hỗ trợ chọn, drag/phím mũi tên, resize tám handle, sửa nội
+  dung, xóa, reply và history.
   Panel này chỉ xử lý nội dung/thread; stroke, fill và opacity được tách sang
   `DrawingCommentPropertiesPanel` trong tab Edit. Stamp nguồn giữ geometry/AP;
   Caret,
@@ -431,9 +438,10 @@ data/candidate/history/selection đổi.
 - `SelectTool` và `CommentSelectTool` dùng chung interaction chọn, nhưng
   `candidateMatchesSelectionTool()` lọc hit-test, draft delegate và keyboard
   traversal của mode Comment xuống đúng các kind comment trước khi chọn.
-- Với Squiggly, QML chỉ gửi rectangle chuẩn hóa cho preview/commit và render
-  geometry đã được controller snap theo glyph/dòng. Geometry glyph đến từ page
-  scan bất đồng bộ/cache; QML không truy cập handle PDFium và không tự dò text.
+- Với cả bốn text-markup tool, QML chỉ gửi rectangle chuẩn hóa cho
+  preview/commit và render geometry đã được controller snap theo glyph/dòng.
+  Geometry glyph đến từ page scan bất đồng bộ/cache; QML không truy cập handle
+  PDFium và không tự dò text.
 - Có hit-test riêng cho rectangle/oval/line/arrow/polygon với tolerance theo
   kích thước trang.
 - Quản lý con trỏ Select/Add Text bằng SVG và fallback cursor; ẩn cursor khi
@@ -469,7 +477,9 @@ data/candidate/history/selection đổi.
   chồng preview không cần thiết.
 - `DraftImageView` vẽ pixel snapshot của ảnh thêm mới; `ShapeDraftView` vẽ vector.
 - `CommentDrawingView` vẽ Square/Circle/Line/Polygon/PolyLine từ cùng geometry
-  và common properties mà writer dùng để dựng `/AP`.
+  và common properties mà writer dùng để dựng `/AP`. Khi geometry source của
+  năm subtype này đổi, delegate vẽ endpoint/vertex đã translate/scale trên
+  texture đã suppress appearance nguồn.
 - `InkDrawingView` vẽ preview Pencil và từng stroke draft bằng Qt Quick Shapes
   với round cap/join, cùng màu, opacity và border width của save snapshot. Khi
   geometry Ink nguồn đổi, delegate vẽ stroke đã translate/scale trên texture đã
@@ -482,10 +492,12 @@ data/candidate/history/selection đổi.
 - `StampView` vẽ viền kép, màu và artwork text dùng chung cho menu preset,
   preview placement và draft Stamp mới.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
-- Drag text/image/shape/Ink/Stamp giữ preview trong QML nhưng chỉ commit geometry
-  một lần khi thả; phím mũi tên tạo move command, Shift dùng bước lớn hơn. Ink
-  và Stamp mới nhận tám resize handle ở cạnh/góc; Ink scale mọi stroke theo
-  frame mới.
+- Drag text/image/shape, cả sáu drawing subtype và Stamp mới giữ preview trong
+  QML nhưng chỉ commit geometry một lần khi thả; phím mũi tên tạo move command,
+  Shift dùng bước lớn hơn. Cả sáu drawing subtype mới hoặc source hợp lệ và
+  Stamp mới nhận tám resize handle ở cạnh/góc; frame scale endpoint/vertex của
+  Square/Circle/Line/Polygon/PolyLine hoặc mọi stroke của Ink. Stamp nguồn giữ
+  geometry và `/AP`, nên không nhận move/resize handle.
 
 **Dọn state:** `prepareForSessionChange()` kết thúc hoặc hủy editor/resize/draw,
 ẩn cursor và xóa dữ liệu trang. Bất kỳ bổ sung gesture nào cũng phải đi qua

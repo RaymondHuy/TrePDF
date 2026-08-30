@@ -230,10 +230,12 @@ orchestration Save.
 - Đọc Highlight, Squiggly, Underline, Strikeout, Text, FreeText, Stamp, Square,
   Circle, Line, Polygon, PolyLine và Ink annotation;
   chuẩn hóa quad/rect, màu và `/Contents` thành comment candidate. Nội dung
-  annotation nguồn được sửa trong panel bằng draft riêng; canvas cho move và
-  resize Ink nguồn hợp lệ bằng cách transform toàn bộ stroke. Annotation nguồn
-  khác chưa cho move/resize; ReadOnly/LockedContents không nhận mutation và
-  Locked chặn geometry Ink.
+  annotation nguồn được sửa trong panel bằng draft riêng. Cả sáu drawing subtype
+  Square, Circle, Line, Polygon, PolyLine và Ink nguồn hợp lệ cho move/resize trên
+  canvas bằng cách transform endpoint, vertex hoặc toàn bộ stroke tương ứng.
+  Annotation nguồn ngoài sáu subtype này chưa cho move/resize;
+  ReadOnly/LockedContents không nhận mutation và Locked chặn thay đổi geometry
+  drawing comment.
   Xóa tạo tombstone draft theo annotation index và subtype.
 - Khi text markup có explicit `/AP`, lấy fill/stroke RGBA từ path trong normal
   appearance nếu PDFium không trả annotation color; AP là nguồn hiển thị có
@@ -262,14 +264,14 @@ orchestration Save.
 - Trích source bounds, baseline/origin, font family/style/size/stretch, render
   mode/color, character span và paragraph format.
 - Giữ geometry chuẩn hóa của từng glyph source-text không phải whitespace trong
-  kết quả scan/cache theo page và revision. Squiggly hit-test trên dữ liệu này;
+  kết quả scan/cache theo page và revision. Bốn text-markup tool hit-test trên dữ liệu này;
   GUI/QML không mở `FPDF_PAGE`/`FPDF_TEXTPAGE` hay gọi PDFium để dò chữ.
 - Text có render mode Invisible, thường là OCR ẩn trên trang scan, được giữ dưới
-  dạng record nội bộ chỉ phục vụ hit-test Squiggly và bị loại khỏi
+  dạng record nội bộ chỉ phục vụ hit-test text markup và bị loại khỏi
   `candidatesForPage()`/`candidateAt()`, nên không thể select/edit như source
   text thường. Geometry axis-aligned hiện chỉ nhận glyph ngang/upright (góc gần
   0°); glyph xoay/dọc bị bỏ qua cho tới khi pipeline hỗ trợ oriented QuadPoints.
-- Mỗi page chỉ cache per-glyph Squiggly geometry khi text layer có tối đa 50.000
+- Mỗi page chỉ cache per-glyph text-markup geometry khi text layer có tối đa 50.000
   ký tự. Nếu vượt safety cap này, scan không giữ partial glyph geometry nào cho
   page đó để giới hạn RAM; candidate/source text editing vẫn được quét như cũ.
 - Cache candidate theo page/revision; hover có đường try-lock/defer để không khóa
@@ -310,15 +312,15 @@ orchestration Save.
 
 - Add Image decode/giới hạn ảnh trên GUI thread rồi lưu pixel snapshot.
 - Add Shape chuẩn hóa geometry và snap line/arrow gần trục. Khi kết thúc gesture
-  Squiggly, controller lấy các glyph không-whitespace giao vùng kéo, nhóm theo
+  Highlight/Underline/Squiggly/Strikeout, controller lấy các glyph
+  không-whitespace giao vùng kéo, nhóm theo
   visual line rồi tạo rectangle/QuadPoints đã snap cho từng dòng. Không có glyph
   khả dụng thì không tạo draft. Nếu cache glyph chưa sẵn sàng khi thả chuột,
-  controller giữ pending request cùng revision/page/selection/màu, ưu tiên scan
-  page đó và tự tạo draft sau khi geometry về; Discard xóa cả pending request.
+  controller giữ pending request cùng revision/page/selection/tool/màu, ưu tiên
+  scan page đó và tự tạo đúng subtype sau khi geometry về; Discard xóa cả pending request.
   OCR ẩn vẫn dùng được, nhưng page không có text
   layer khả dụng, chỉ có glyph xoay/dọc hoặc vượt safety cap 50.000 ký tự thì
-  không dùng được Squiggly. Highlight, Underline và Strikeout vẫn giữ free
-  rectangle/quad của gesture. Sticky Note giữ frame 24 pt. Free Text nhận click
+  không dùng được text markup. Sticky Note giữ frame 24 pt. Free Text nhận click
   hoặc drag để tạo frame text box, dùng kích thước mặc định cho click; nội dung
   của cả hai được chỉnh từ `CommentPanel`.
 - Ink đi qua `addDrawingComment()` nhưng giữ geometry dạng mảng stroke. Một
@@ -327,10 +329,12 @@ orchestration Save.
   0,75 PDF point. Nếu vẫn quá lớn, tolerance tăng có giới hạn và output bị
   hard-cap ở 1.024 điểm. Một drag tạo một annotation/stroke; model vẫn hỗ trợ
   nhiều stroke khi rehydrate `/InkList` nguồn.
-- Move Ink dùng frame draft chung với text/image/shape nhưng chỉ chấp nhận kích
-  thước không đổi. `inkStrokesForDraft()` áp cùng delta frame vào mọi stroke;
-  source appearance bị suppress trong preview, còn gesture hoàn tất thành đúng
-  một command undo/redo.
+- Move/resize cả sáu drawing subtype dùng frame draft chung với
+  text/image/shape. Move giữ kích thước và áp cùng delta vào endpoint, vertex
+  hoặc stroke; resize áp scale ngang/dọc của frame vào toàn bộ geometry. Riêng
+  `inkStrokesForDraft()` biến đổi từng stroke mà không flatten `/InkList`.
+  Source appearance bị suppress trong preview, còn mỗi gesture hoàn tất thành
+  đúng một command undo/redo.
 - `commentItems`, `selectComment` và `selectRelativeComment` cấp model/điều
   hướng phẳng cho panel theo thứ tự root rồi replies. `setCommentText()` định
   danh bằng `page + objectId`, còn nội dung comment/reply nguồn hoặc mới đều tham
@@ -391,8 +395,8 @@ orchestration Save.
   Text annotation, FreeText annotation và Stamp với rect/`Contents`/`NM`/Print
   flag. Stamp snapshot giữ preset `/Name`, artwork text và màu; canonicalizer
   gắn normal `/AP` vector mà không regenerate page content.
-  Squiggly ghi quad từ các rectangle dòng đã snap; ba text-markup còn lại ghi
-  geometry tự do hiện có. Sau khi serialize staging file, canonicalizer thêm
+  Cả bốn text-markup subtype ghi quad từ các rectangle dòng đã snap. Sau khi
+  serialize staging file, canonicalizer thêm
   normal `/AP` vector cho text markup mới mà không regenerate page content.
 - Tạo drawing comment qua Square placeholder, snapshot common properties và
   map normalized geometry bằng `FPDF_DeviceToPage()`; canonicalizer đổi subtype,
@@ -402,13 +406,13 @@ orchestration Save.
   `/Subtype /Ink`, `/InkList`, `/BS`, `/C`, `/CA`, Print flag và `/AP` vector
   có round cap/join. Writer giới hạn 64 stroke, 4.096 điểm mỗi stroke và 32.768
   điểm tổng trước khi serialize.
-- Với drawing comment nguồn đổi geometry, writer xác thực lại subtype, `/NM`,
-  `/Contents`, annotation permission và các cờ ReadOnly/LockedContents/Locked;
-  sau đó canonicalizer cập nhật `/Rect` cùng `/L`, `/Vertices` hoặc `/InkList`
-  đã translate/scale trên annotation hiện có. Move và AP ngoài/custom giữ
-  nguyên `/AP`; resize TrePDF-managed chỉ tái tạo AP khi properties được hỗ
-  trợ và fingerprint AP nguồn vẫn khớp. Geometry-only không ghi đè `/Contents`
-  hoặc `/RC`.
+- Với một trong sáu drawing comment nguồn đổi geometry, writer xác thực lại
+  subtype, `/NM`, `/Contents`, annotation permission và các cờ
+  ReadOnly/LockedContents/Locked; sau đó canonicalizer cập nhật `/Rect` cùng
+  `/L`, `/Vertices` hoặc `/InkList` đã translate/scale trên annotation hiện có.
+  Move của cả sáu subtype và mọi AP ngoài/custom giữ nguyên `/AP`; resize
+  TrePDF-managed chỉ tái tạo AP khi properties được hỗ trợ và fingerprint AP
+  nguồn vẫn khớp. Geometry-only không ghi đè `/Contents` hoặc `/RC`.
 - Với source property edit, writer còn so normal-AP fingerprint với snapshot
   lúc index rồi chuyển cả original/current properties sang canonicalizer.
   Canonicalizer cập nhật `/C`, optional `/IC`, `/CA` và replacement `/AP` trong
@@ -805,8 +809,10 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   formatting, typing format, paragraph alignment, editor undo và scale qua nhiều
   lần save.
 - Content round-trip: text, Vietnamese, paint Fill/Stroke/pattern/grayscale,
-  Highlight/Squiggly/Underline/Strikeout/Sticky Note/Free Text/Ink, image,
-  shape, source move/delete, z-order, CropBox và rotated page. Ink coverage gồm
+  Highlight/Squiggly/Underline/Strikeout/Sticky Note/Free Text, image, shape,
+  source move/delete, z-order, CropBox và rotated page. Drawing-comment coverage
+  gồm move/resize source Square/Circle/Line/Polygon/PolyLine/Ink, transform
+  endpoint/vertex/stroke, AP-preservation và các safety gate. Ink còn kiểm
   validate/dedup/simplify/cap, nhiều stroke rehydrate, bounded malformed-source
   fallback, contents/reply/delete/history, `/InkList` và vector `/AP` round
   cap/join.

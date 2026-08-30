@@ -540,11 +540,12 @@ private:
         bool succeeded = false;
     };
 
-    struct PendingSquigglyCreation {
+    struct PendingTextMarkupCreation {
         QString filePath;
         QRectF selectionRect;
         QSizeF pageSize;
         QColor color;
+        Tool tool = HighlightTool;
         int revision = -1;
         int page = -1;
         int sourcePage = -1;
@@ -667,6 +668,7 @@ private:
     QVector<QRectF> resolvedTextMarkupRectsForSelection(
         int page,
         const QRectF &selectionRect,
+        Tool tool,
         bool *geometryReady);
     QVariantMap addTextMarkupDraft(
         int page,
@@ -678,10 +680,10 @@ private:
         const QVector<QRectF> &annotationRects,
         Tool tool,
         const QColor &color);
-    bool pendingSquigglyCreationIsCurrent(
-        const PendingSquigglyCreation &creation) const;
-    int pendingSquigglyScanPage() const;
-    void completePendingSquigglyCreations(int page);
+    bool pendingTextMarkupCreationIsCurrent(
+        const PendingTextMarkupCreation &creation) const;
+    int pendingTextMarkupScanPage() const;
+    void completePendingTextMarkupCreations(int page);
     const QVector<Candidate> &ensurePageCandidates(int page);
     const QVector<Candidate> *cachedPageCandidates(int page);
     void requestPageCandidateScan(int page);
@@ -867,7 +869,7 @@ private:
     int m_candidateScanInFlightPage = -1;
     bool m_candidateScanInFlight = false;
     std::shared_ptr<std::atomic_bool> m_candidateScanCancellation;
-    QVector<PendingSquigglyCreation> m_pendingSquigglyCreations;
+    QVector<PendingTextMarkupCreation> m_pendingTextMarkupCreations;
     QHash<int, QVector<Candidate>> m_indexedCommentCandidates;
     qsizetype m_indexedCommentCandidateBytes = 0;
     CommentIndexState m_commentIndexState = CommentIndexIdle;

@@ -33,7 +33,7 @@ flowchart TD
     Delegate["PdfPageDelegate\nMột trang đang hiện"]
     PageItem["PDFPageItem\nRender texture PDF"]
     Interaction["PageInteractionOverlay\nĐiều phối input theo trang"]
-    EditOverlay["EditOverlay\nEdit text/image/shape/text markup/Ink"]
+    EditOverlay["EditOverlay\nEdit text/image/shape/comment markup/drawing/Stamp"]
     FormView["PDFFormView + FormChoiceOverlay\nForm PDFium đang chạy"]
     Designer["FormTextFieldOverlay + FormFieldLayer\nThiết kế form"]
     Document["PDFDocument\nHandle PDF GUI thread + cấu trúc trang"]
@@ -100,7 +100,7 @@ flowchart TD
 
 | Thành phần | Thread/queue | Quy tắc quan trọng |
 |---|---|---|
-| QML, `PDFDocument`, các controller | GUI thread | Không đưa handle `FPDF_DOCUMENT` của `PDFDocument` sang worker; Squiggly chỉ hit-test geometry glyph normalized trong candidate cache. |
+| QML, `PDFDocument`, các controller | GUI thread | Không đưa handle `FPDF_DOCUMENT` của `PDFDocument` sang worker; text markup chỉ hit-test geometry glyph normalized trong candidate cache. |
 | Candidate scan của `PDFEditController` | Worker bất đồng bộ | Mở page/text handle riêng dưới PDFium lock và trả geometry glyph normalized, gồm OCR Invisible dạng hit-test-only; chỉ cache glyph ngang/upright và bỏ toàn bộ per-glyph geometry nếu page vượt 50.000 text characters. GUI/QML không truy cập các handle này. |
 | Render của `PDFPageItem` | Hàng đợi worker có giới hạn | Worker mở handle riêng từ đường dẫn, có cancellation và khóa chống kết quả cũ. |
 | `PDFFormWorker` | Hàng đợi tuần tự dùng chung cho form session | Sở hữu document/form handle riêng; callback quay lại GUI bằng queued invocation. |
@@ -131,15 +131,15 @@ flowchart TD
 2. `EditOverlay` chuyển tọa độ pointer sang tỉ lệ chuẩn hóa của trang, hit-test
    candidate và gọi API của controller. Trong `CommentSelectTool`, overlay và
    controller chỉ nhận comment kind, nên text/image/Edit shape không thể bị
-   chọn. Với Squiggly, controller giao vùng kéo
-   với glyph source-text không-whitespace trong cache scan bất đồng bộ, snap
+   chọn. Với Highlight, Underline, Squiggly và Strikeout, controller giao vùng
+   kéo với glyph source-text không-whitespace trong cache scan bất đồng bộ, snap
    rectangle/QuadPoints theo từng dòng; nét gần-ngang dùng dải hit-test 3 px và
-   gesture release khi cache chưa sẵn sàng được giữ pending, ưu tiên scan đúng
-   page rồi tự materialize thành draft. Controller từ chối vùng chỉ có khoảng trắng hoặc
+   gesture release khi cache chưa sẵn sàng được giữ pending cùng tool/màu, ưu
+   tiên scan đúng page rồi tự materialize thành draft. Controller từ chối vùng chỉ có khoảng trắng hoặc
    không có glyph khả dụng. OCR Invisible được hit-test nhưng không select/edit;
    glyph xoay/dọc, page không có text layer khả dụng và page vượt safety cap
-   50.000 ký tự không tạo Squiggly. Highlight/Underline/Strikeout vẫn giữ free
-   rect. Free Text nhận click/drag, tạo text-box comment và mở panel nội dung.
+   50.000 ký tự không tạo text markup. Free Text nhận click/drag, tạo text-box
+   comment và mở panel nội dung.
    Pencil sample point cách nhau tối thiểu 1 logical pixel, giữ tối đa 4.096 raw
    points và tiếp tục cập nhật endpoint cuối khi đã đầy, rồi controller
    validate/dedup/RDP-simplify khoảng 0,75 PDF point và
@@ -149,11 +149,17 @@ flowchart TD
    Ink nguồn chỉ rehydrate khi `/InkList` nằm trong giới hạn 64 stroke, 4.096
    điểm/stroke và 32.768 điểm tổng; dữ liệu malformed/oversized thành comment
    generic chỉ đọc.
-4. Page text dùng editor rich text; image, shape, text markup, Free Text và Ink
-   dùng delegate/preview riêng. Nội dung Free Text được sửa trong CommentPanel.
-   Move/resize chỉ commit một command khi gesture kết thúc. Ink mới và Ink
-   nguồn hợp lệ hỗ trợ translate toàn bộ stroke bằng bounding box/phím mũi tên,
-   đồng thời scale các stroke bằng tám resize handle ở cạnh/góc.
+4. Page text dùng editor rich text; image, shape, text markup, Free Text, Stamp
+   và sáu drawing subtype Square/Circle/Line/Polygon/PolyLine/Ink dùng
+   delegate/preview riêng. Nội dung Free Text được sửa trong CommentPanel.
+   Move/resize chỉ commit một command khi gesture kết thúc. Cả sáu drawing
+   subtype mới hoặc source hợp lệ hỗ trợ translate endpoint, vertex hay toàn bộ
+   stroke bằng bounding box/phím mũi tên, đồng thời scale toàn bộ geometry bằng
+   tám resize handle ở cạnh/góc. Stamp mới hỗ trợ geometry tương tự, còn Stamp
+   nguồn giữ nguyên geometry và `/AP`. Source drawing chỉ nhận geometry mutation
+   khi annotation permission và các cờ ReadOnly/LockedContents/Locked cho phép;
+   move giữ `/AP`, còn resize chỉ tái tạo `/AP` TrePDF-managed khi provenance,
+   properties và fingerprint vẫn an toàn.
 5. `PDFSaveWriter` phân biệt thay đổi chỉ dịch chuyển với thay đổi cần thay object
    để giữ font, ma trận, resource và z-order khi có thể.
 
@@ -217,7 +223,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
-| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Select chỉ dành cho comment, Sticky Note, Free Text, text markup, Pencil, Square/Circle/Line/Polygon/PolyLine, quản lý comment và history. |
+| [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Select chỉ dành cho comment, Sticky Note, Free Text, text markup, Pencil/Ink, Square/Circle/Line/Polygon/PolyLine, Stamp, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
