@@ -96,7 +96,14 @@ Giới hạn hiện tại:
 - mỗi comment hoặc reply tối đa 700 UTF-16 code unit;
 - Rectangle, Ellipse, Line, Arrow, Triangle và Diamond trong tab Edit là page
   content path object, không phải drawing comment annotation;
-- review state và XFDF chưa được model hóa;
+- Import/export XFDF chưa được model hóa. Trạng thái PDF hiện hành theo author
+  được đọc từ các annotation `/State` + `/StateModel /Review` hoặc `/Marked`;
+  các log này bị ẩn khỏi danh sách comment. Set Status và Mark with Checkmark
+  tạo hai draft độc lập, có undo/redo/discard và được Save/Save As. Các biến thể
+  hoa/thường của reviewer dùng lại spelling chính xác đã được thiết lập trong
+  tài liệu, kể cả khi reply đích chưa có state riêng;
+  terminal `/IRT` quyết định state độc lập cho comment gốc hoặc reply đích,
+  còn `/M` và annotation index chỉ phân xử những nhánh rẽ có cùng độ sâu;
 - 5 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
 
 ## 2. Luồng kiến trúc tổng thể
@@ -235,6 +242,24 @@ trong CommentPanel vì nó không cần standalone page geometry; appearance c�
 tiếp tục bị ẩn trong viewer. Annotation không phải reply vẫn phải có `/Rect`
 hoặc QuadPoints hữu dụng, nên comment gốc có geometry rỗng vẫn bị loại.
 
+Foxit và các reader khác còn lưu mỗi lần đổi trạng thái thành một annotation
+`/Text` riêng có `/IRT`, `/State` và `/StateModel /Review` hoặc `/Marked`.
+`Review` chứa các trạng thái như Accepted/Rejected/Completed, còn Foxit ghi
+"None" bằng `/State /Unmarked` thuộc model `Marked`. Scanner giữ các entry này
+trong graph nội bộ để kiểm cờ Locked/ReadOnly, cascade xóa và ẩn appearance đúng
+cách, nhưng đánh dấu chúng là annotation-state để loại khỏi `commentItems()`,
+`commentPanelItems()`, reply count và mọi API chọn/sửa/xóa comment trực tiếp.
+Predicate dùng metadata PDF và parent `/IRT` hợp lệ, không dựa vào chuỗi
+`/Contents` do reader tự sinh. Với author hiện tại, scanner gom evidence của
+các spelling khác hoa/thường trên page để chọn spelling canonical đã được thiết
+lập rõ nhất. Trên từng target, exact-case history canonical được ưu tiên; nếu
+target chưa có history đó thì mới fallback sang alias tương thích. Terminal có
+chain `/IRT` sâu nhất được chọn riêng cho model `Review` và `Marked`; `/M` mới
+nhất và annotation index chỉ là tie-breaker cho các terminal cùng độ sâu. Mỗi
+state được gán cho annotation không phải state
+gần nhất khi lần ngược `/IRT`, nên hai giá trị tổng hợp được đưa lên đúng card
+comment gốc hoặc reply thay vì luôn dồn về root của thread.
+
 Kết quả được cache theo display page và document revision. Khi revision đổi,
 mọi kết quả cũ và callback đến muộn phải bị loại.
 
@@ -256,6 +281,8 @@ revision hoặc session thay đổi.
 Comment gốc được sắp theo page, vị trí trên-trái, insertion order rồi object id.
 Replies của một root ưu tiên creation date, sau đó source annotation index và
 geometry. Model trả về theo thứ tự `root, replies..., root, replies...`.
+Annotation-state transition vẫn tham gia graph an toàn nội bộ nhưng không tham
+gia thứ tự/model hiển thị này.
 
 Quan hệ reply malformed, dangling hoặc cross-page không được tạo thành thread
 sâu trong UI; item vẫn có thể được trình bày như comment top-level để người dùng
@@ -331,6 +358,14 @@ comment được hỗ trợ; chỉ Ink bị downgrade generic mới khóa các a
 Panel chỉ chứa comment/thread. Nó không còn sở hữu control stroke, fill hoặc
 opacity; appearance của drawing comment được chỉnh ở panel riêng trong tab
 Edit.
+
+Hàng action của mỗi comment gốc và reply có nút ba chấm ở mép phải; nút Reply
+vẫn chỉ hiện trên comment gốc. Nút ba chấm mở một `Menu` dùng chung được
+tạo/hủy bằng `Loader`; submenu Set Status dùng cascade desktop
+để mở khi hover và liệt kê None, Accepted, Rejected, Cancelled, Completed,
+Deferred, Future. Mark with Checkmark là action cùng cấp. Các action phản ánh
+trạng thái checked hiện hành, tôn trọng permission/annotation flags và gọi
+controller để tạo command có undo/redo/discard. Hai model được chỉnh độc lập.
 
 QML cho phép text tạm vượt 700 UTF-16 code unit để không phá IME/local undo,
 nhưng commit, gửi reply và Save bị chặn cho đến khi độ dài hợp lệ. C++ kiểm lại
@@ -420,8 +455,14 @@ Khi nhập một PDF có chuỗi reply nhiều tầng, controller lần `/IRT` v
 flatten các descendants thành một cấp hiển thị.
 
 `/RT /Group` không phải reply relation và không đi qua thread logic hiện tại.
-Review state dùng `/IRT` nhưng có `/State` và `/StateModel`; đây là gap cần phân
-biệt rõ trước khi bổ sung status để state entry không bị coi là reply thường.
+Annotation state dùng `/IRT` nhưng có `/State` và `/StateModel`. Scanner hiện
+phân biệt hai model `/Review` và `/Marked` với reply thường, không đưa state
+entry vào panel. Scanner lần `/IRT` qua các state liên tiếp đến annotation
+không phải state đầu tiên, rồi tổng hợp terminal của canonical author hiện tại
+lên đúng comment gốc hoặc reply đó. Spelling canonical được tìm lại trên toàn
+bộ candidate cache trước khi ghi, nên reply chưa có state vẫn dùng cùng reviewer
+identity với Foxit. Set Status ghi `Review`; Mark with Checkmark ghi
+`Marked`/`Unmarked`.
 
 ### 7.2 ID tạm trong save pipeline
 
@@ -466,8 +507,9 @@ Mọi mutation comment phải vượt qua hai lớp kiểm tra:
 2. source annotation không có ReadOnly hoặc LockedContents.
 
 Annotation bị bảo vệ vẫn được index, hiển thị và điều hướng, nhưng không cho sửa
-text hoặc xóa. Cả QML và controller đều có trạng thái disable/reason; writer vẫn
-kiểm lại flags để chống source thay đổi giữa scan và Save.
+text, trạng thái hoặc xóa. Thay đổi trạng thái còn tôn trọng cờ Locked. Cả QML
+và controller đều có trạng thái disable/reason; writer vẫn kiểm lại flags để
+chống source thay đổi giữa scan và Save.
 
 Ngoại lệ geometry hiện tại là Ink nguồn hợp lệ: move/resize cần annotation
 permission, không có ReadOnly/LockedContents/Locked và writer kiểm lại các điều
@@ -675,6 +717,9 @@ cần chiến lược `/AP` riêng và regression mở bằng reader ngoài PDFi
     undo/redo phục hồi selection không phải comment.
 12. User-visible string mới phải dùng `qsTrId()`/`qtTrId()` literal với `//%` và
     cập nhật `i18n/qml_vi.ts`.
+13. Annotation-state transition thuộc model `/Review` hoặc `/Marked` không được
+    xuất hiện trong comment model/selection, nhưng vẫn phải còn trong graph nội
+    bộ để cascade xóa và bảo vệ ancestor.
 
 ## 12. Kiểm thử
 
@@ -709,6 +754,8 @@ Coverage comment hiện cần được duy trì cho:
 - sửa `/Contents`, `/M` và `/RC` của annotation nguồn;
 - ReadOnly/LockedContents và document annotation permission;
 - reply vào comment mới/nguồn, nested import flattening và standard `/IRT`;
+- annotation-state `/StateModel /Review` hoặc `/Marked` từ Foxit không xuất hiện
+  như reply/comment, không tăng reply count và vẫn bảo vệ/cascade thread nội bộ;
 - xóa reply, cascade root deletion, Popup và mixed-subtype descendants;
 - undo/redo/discard trước Save;
 - annotation-only Save không làm thay đổi page-content object count;

@@ -91,7 +91,21 @@ Current features:
   The comments panel shows each annotation's author and modification date,
   falling back to its creation date. Root comments accept replies; the panel
   flattens imported reply chains to one display level, saves new replies with
-  standard `/IRT`, and cascades root deletion across the thread. Reply
+  standard `/IRT`, and cascades root deletion across the thread. PDF annotation
+  state transitions with `/State` and `/StateModel /Review` or `/Marked` stay in
+  the internal thread graph for safe deletion/flag checks but are excluded from
+  the comment list and selection APIs. Each root and reply comment card has a lazily
+  loaded three-dot menu with a cascading Set Status submenu and a Mark with
+  Checkmark item. Status and checkmark changes are independent undoable drafts;
+  Save/Save As appends author-specific `/Text` state transitions with `/IRT`,
+  `/State`, and `/StateModel`, chains later transitions to the previous state
+  for the same author/model when its `/NM` is safe, and restores the terminal
+  state independently for its root or reply target after reopen. Reader-specific
+  case variants of the current reviewer reuse the exact spelling established by
+  the document, including for replies without prior state. The canonical
+  exact-case history is preferred; `/IRT` depth is authoritative within it,
+  while `/M` and annotation order are deterministic tie-breakers for forks.
+  Reply
   annotation appearances stay hidden from the page viewer while the replies
   remain available and editable in the panel. New Sticky Notes and replies have
   vector normal appearances, and comment line endings are saved as PDF CR while

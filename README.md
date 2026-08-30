@@ -97,8 +97,20 @@ its text is edited in the comments panel and is saved as a standard
 `/FreeText` annotation with semantic `/Contents` plus a wrapped,
 Unicode-capable appearance. Root comments can receive replies;
 each root has a dropdown control that expands its replies at one visual level,
-and reply-to-reply is not offered. Reply annotations remain available in this
-panel but their standalone appearances are hidden from the PDF page viewer.
+and reply-to-reply is not offered. Annotation-state transition records created
+by readers such as Foxit (`/State` with `/StateModel /Review` or `/Marked`) are
+not shown as comments, while remaining part of the internal thread graph for
+safe deletion and permission checks. Root and reply cards expose a three-dot action menu
+with a cascading Set Status submenu and Mark with Checkmark. Both controls create
+independent undoable drafts and Save/Save As writes author-specific PDF state
+transition annotations. Reviewer-name case variants reuse the exact spelling
+established by the document, including on replies without their own prior state.
+The canonical exact-case history is preferred, and its terminal `/IRT` node
+restores each Review and Marked state after reopen without exposing transition
+logs as comments. Active status and
+checkmark values appear as compact badges on their root or reply comment card.
+Reply annotations remain available in this panel but their standalone appearances
+are hidden from the PDF page viewer.
 Square, Circle, Line, Polygon, and PolyLine comments use shared semantic stroke,
 interior, opacity, border, effect, and line-ending properties. Save writes
 standard `/Rect`, `/L` or `/Vertices` geometry and a matching vector `/AP`.

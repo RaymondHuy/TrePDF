@@ -211,7 +211,8 @@ zoom, đóng/mở khi render đang chạy và shutdown render thread.
 **Vai trò:** contract dùng chung cho comment annotation giữa candidate index,
 render suppression và save cascade. Utility đọc chuỗi annotation với giới hạn
 4 MiB, chuẩn hóa CR/LF, phân loại editable/full markup (kể cả `/Projection`) và
-nhận diện quan hệ reply. Các hàm chỉ mượn annotation handle, yêu cầu caller đã
+nhận diện quan hệ reply cùng annotation-state `/StateModel /Review` hoặc
+`/Marked`. Các hàm chỉ mượn annotation handle, yêu cầu caller đã
 giữ `PDFiumProcessLock` và không tự đóng handle hoặc acquire lock.
 
 ### [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) và
@@ -240,6 +241,14 @@ orchestration Save.
 - Đọc quan hệ reply chuẩn qua `/IRT` và `/RT`; chuỗi reply nhiều tầng từ PDF
   ngoài được lần về root rồi trình bày thành đúng một cấp. Metadata private chỉ
   dùng để định danh ổn định parent trong pipeline ghi trước khi tạo `/IRT` chuẩn.
+- Nhận diện annotation `/Text` có parent `/IRT`, `/State` và `/StateModel`
+  `/Review` hoặc `/Marked` như log chuyển trạng thái. Candidate vẫn nằm trong
+  graph nội bộ để bảo vệ ancestor/cascade xóa, nhưng bị loại khỏi comment
+  model, reply count và các API chọn/mutation trực tiếp. Controller canonical
+  hóa exact spelling của reviewer theo history hiện hữu, chọn terminal sâu nhất
+  của chuỗi `/IRT` và chỉ dùng `/M`/index để phân xử nhánh rẽ. Hai API
+  `setCommentStatus()` và `setCommentMarked()` tạo các draft độc lập có
+  undo/redo/discard.
 - `requestCommentIndex()` dùng worker riêng để quét annotation-only từng trang,
   nhả PDFium lock giữa các trang và chỉ giữ comment candidate. Vì vậy danh sách
   toàn tài liệu không làm phình cache text/image 12 trang của viewport.

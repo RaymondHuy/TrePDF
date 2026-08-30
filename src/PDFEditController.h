@@ -117,6 +117,17 @@ public:
     };
     Q_ENUM(CommentIndexState)
 
+    enum CommentStatus {
+        NoCommentStatus,
+        AcceptedCommentStatus,
+        RejectedCommentStatus,
+        CancelledCommentStatus,
+        CompletedCommentStatus,
+        DeferredCommentStatus,
+        FutureCommentStatus
+    };
+    Q_ENUM(CommentStatus)
+
     enum Tool {
         BrowseTool,
         SelectTool,
@@ -327,6 +338,12 @@ public:
     Q_INVOKABLE void requestCommentIndex();
     Q_INVOKABLE bool selectComment(int page, const QString &objectId);
     Q_INVOKABLE bool removeComment(int page, const QString &objectId);
+    Q_INVOKABLE bool setCommentStatus(int page,
+                                      const QString &objectId,
+                                      CommentStatus status);
+    Q_INVOKABLE bool setCommentMarked(int page,
+                                      const QString &objectId,
+                                      bool marked);
     Q_INVOKABLE int selectRelativeComment(int direction);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
@@ -446,6 +463,14 @@ private:
         int replyToSourceAnnotationIndex = -1;
         int replyDirectParentSourceAnnotationIndex = -1;
         bool isReplyAnnotation = false;
+        bool commentStateAnnotation = false;
+        QString commentState;
+        QString commentStateModel;
+        QString commentStateAuthor;
+        CommentStatus commentStatus = NoCommentStatus;
+        bool commentMarked = false;
+        int commentStatusAnnotationIndex = -1;
+        int commentMarkedAnnotationIndex = -1;
         bool commentTextReadOnly = false;
         bool commentThreadDeletionProtected = false;
         bool replyToParentAdded = false;
@@ -501,6 +526,7 @@ private:
         QSizeF pageSize;
         bool editingAllowed = false;
         bool annotationsAllowed = false;
+        QString commentAuthor;
         QStringList bundledFontFamilies;
         QStringList systemFontFamilies;
         qsizetype maximumEmbeddedFontSnapshotBytes = 0;
@@ -581,6 +607,10 @@ private:
         QVector<ParagraphFormat> paragraphFormats;
         QRectF frameRect;
         QRectF contentBounds;
+        CommentStatus commentStatus = NoCommentStatus;
+        bool commentMarked = false;
+        QString commentStateAuthor;
+        QDateTime commentStateModifiedDate;
         bool deleted = false;
     };
 
@@ -717,6 +747,11 @@ private:
     const Candidate *findCommentCandidate(int page,
                                           const QString &objectId);
     bool candidateDeletable(const Candidate &candidate) const;
+    bool commentStateEditable(const Candidate &candidate) const;
+    QString canonicalCommentStateAuthor(
+        const QString &requestedAuthor) const;
+    static std::optional<CommentStatus> commentStatusForPdfName(
+        const QString &state);
     bool drawingPropertiesEditable(const Candidate &candidate) const;
     static bool drawingSupportsFill(const QString &kind);
     QVariantList candidateSourceRects(const Candidate &candidate) const;

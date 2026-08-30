@@ -132,6 +132,16 @@ struct SaveDraft {
     QString commentThreadId;
     QString replyToThreadId;
     int replyToSourceAnnotationIndex = -1;
+    PDFEditController::CommentStatus originalCommentStatus
+        = PDFEditController::NoCommentStatus;
+    PDFEditController::CommentStatus commentStatus
+        = PDFEditController::NoCommentStatus;
+    bool originalCommentMarked = false;
+    bool commentMarked = false;
+    int commentStatusParentAnnotationIndex = -1;
+    int commentMarkedParentAnnotationIndex = -1;
+    QString commentStateAuthor;
+    QDateTime commentStateModifiedDate;
     QImage image;
     PDFEditController::ShapeType shapeType
         = PDFEditController::RectangleShape;
@@ -2524,6 +2534,166 @@ bool setCommentAnnotationMetadata(FPDF_ANNOTATION annotation,
             draft.replyToThreadId);
 }
 
+QString commentStatusPdfName(PDFEditController::CommentStatus status)
+{
+    switch (status) {
+    case PDFEditController::NoCommentStatus:
+        return QStringLiteral("None");
+    case PDFEditController::AcceptedCommentStatus:
+        return QStringLiteral("Accepted");
+    case PDFEditController::RejectedCommentStatus:
+        return QStringLiteral("Rejected");
+    case PDFEditController::CancelledCommentStatus:
+        return QStringLiteral("Cancelled");
+    case PDFEditController::CompletedCommentStatus:
+        return QStringLiteral("Completed");
+    case PDFEditController::DeferredCommentStatus:
+        return QStringLiteral("Deferred");
+    case PDFEditController::FutureCommentStatus:
+        return QStringLiteral("Future");
+    }
+    return {};
+}
+
+QString uniqueSourceStateAnnotationName(FPDF_PAGE page,
+                                        int annotationIndex,
+                                        const QString &stateModel,
+                                        const QString &author)
+{
+    const int annotationCount = FPDFPage_GetAnnotCount(page);
+    if (annotationIndex < 0 || annotationIndex >= annotationCount) {
+        return {};
+    }
+
+    PdfAnnotationHandle stateAnnotation(FPDFPage_GetAnnot(
+        page,
+        annotationIndex));
+    const QString annotationName = stateAnnotation.get()
+        ? annotationString(stateAnnotation.get(), "NM")
+        : QString();
+    if (!stateAnnotation.get()
+        || FPDFAnnot_GetSubtype(stateAnnotation.get()) != FPDF_ANNOT_TEXT
+        || annotationName.isEmpty()
+        || annotationString(stateAnnotation.get(), "State").trimmed().isEmpty()
+        || annotationString(stateAnnotation.get(), "StateModel").trimmed()
+               .compare(stateModel, Qt::CaseInsensitive)
+            != 0
+        || annotationString(stateAnnotation.get(), "T").trimmed().compare(
+               author.trimmed(),
+               Qt::CaseSensitive)
+            != 0) {
+        return {};
+    }
+
+    int matchingNames = 0;
+    for (int index = 0; index < annotationCount; ++index) {
+        PdfAnnotationHandle annotation(FPDFPage_GetAnnot(page, index));
+        if (annotation.get()
+            && annotationString(annotation.get(), "NM") == annotationName) {
+            ++matchingNames;
+        }
+    }
+    return matchingNames == 1 ? annotationName : QString();
+}
+
+PDFSaveWriter::Result createCommentStateAnnotation(
+    FPDF_PAGE page,
+    const SaveDraft &draft,
+    const QString &state,
+    const QString &stateModel,
+    const QString &parentAnnotationId,
+    QVector<PDFAcroFormCanonicalizer::AnnotationRelationship>
+        &annotationRelationships)
+{
+    if (!page
+        || draft.page < 0
+        || draft.objectId.isEmpty()
+        || draft.commentThreadId.isEmpty()
+        || draft.commentStateAuthor.trimmed().isEmpty()
+        || !draft.commentStateModifiedDate.isValid()
+        || state.isEmpty()
+        || stateModel.isEmpty()) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    const QString annotationId = QStringLiteral("comment-state:")
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString displayedState
+        = stateModel == QLatin1String("Marked")
+            && state == QLatin1String("Unmarked")
+        ? QStringLiteral("None")
+        : state;
+    const QString contents = displayedState
+        + QStringLiteral(" set by ")
+        + draft.commentStateAuthor;
+    const QString modificationDate = pdfAnnotationDateString(
+        draft.commentStateModifiedDate);
+    constexpr int stateFlags = FPDF_ANNOT_FLAG_HIDDEN
+        | FPDF_ANNOT_FLAG_PRINT
+        | FPDF_ANNOT_FLAG_NOZOOM
+        | FPDF_ANNOT_FLAG_NOROTATE;
+    FS_RECTF stateRect{};
+    PdfAnnotationHandle annotation(
+        FPDFPage_CreateAnnot(page, FPDF_ANNOT_TEXT));
+    if (!annotation.get()
+        || !FPDFAnnot_SetRect(annotation.get(), &stateRect)
+        || !FPDFAnnot_SetFlags(annotation.get(), stateFlags)
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "NM",
+            reinterpret_cast<const FPDF_WCHAR *>(annotationId.utf16()))
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "T",
+            reinterpret_cast<const FPDF_WCHAR *>(
+                draft.commentStateAuthor.utf16()))
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "Contents",
+            reinterpret_cast<const FPDF_WCHAR *>(contents.utf16()))
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "CreationDate",
+            reinterpret_cast<const FPDF_WCHAR *>(
+                modificationDate.utf16()))
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "M",
+            reinterpret_cast<const FPDF_WCHAR *>(
+                modificationDate.utf16()))
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "State",
+            reinterpret_cast<const FPDF_WCHAR *>(state.utf16()))
+        || !FPDFAnnot_SetStringValue(
+            annotation.get(),
+            "StateModel",
+            reinterpret_cast<const FPDF_WCHAR *>(stateModel.utf16()))) {
+        return failure(
+            PDFSaveWriter::Error::CommentAnnotationCreationFailed,
+            draft.page,
+            draft.objectId);
+    }
+
+    PDFAcroFormCanonicalizer::AnnotationRelationship relationship;
+    relationship.page = draft.page;
+    if (parentAnnotationId.isEmpty()) {
+        relationship.parentThreadId = draft.commentThreadId;
+    } else {
+        relationship.parentAnnotationId = parentAnnotationId;
+    }
+    relationship.childAnnotationId = annotationId;
+    relationship.kind = PDFAcroFormCanonicalizer::
+        AnnotationRelationshipKind::State;
+    relationship.expectedState = state;
+    relationship.expectedStateModel = stateModel;
+    annotationRelationships.append(std::move(relationship));
+    return {};
+}
+
 QString freeTextAppearanceId(const SaveDraft &draft)
 {
     if (draft.page < 0 || draft.objectId.isEmpty()) {
@@ -3450,6 +3620,9 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
     const bool textChanged
         = normalizedCommentText(draft.text)
         != normalizedCommentText(draft.originalText);
+    const bool commentStateChanged
+        = draft.commentStatus != draft.originalCommentStatus
+        || draft.commentMarked != draft.originalCommentMarked;
     const QString modificationDate = pdfAnnotationDateString(
         draft.commentModifiedDate);
     bool updated = annotation.get()
@@ -3478,6 +3651,15 @@ PDFSaveWriter::Result updateSourceCommentAnnotation(
             annotation.get(),
             "RC",
             reinterpret_cast<const FPDF_WCHAR *>(richText.utf16()));
+    }
+    if (updated && commentStateChanged) {
+        updated = !draft.commentThreadId.isEmpty()
+            && (sourceThreadId.isEmpty()
+                || sourceThreadId == draft.commentThreadId)
+            && setOptionalAnnotationString(
+                annotation.get(),
+                kCommentThreadIdKey,
+                draft.commentThreadId);
     }
     if (updated
         && (textChanged
@@ -4032,6 +4214,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                                       int pageIndex,
                                       const QVector<SaveDraft> &drafts,
                                       FontResolver &fontResolver,
+                                      QVector<PDFAcroFormCanonicalizer::AnnotationRelationship>
+                                          &annotationRelationships,
                                       QVector<PDFAcroFormCanonicalizer::StampAnnotation>
                                           &stampAnnotations,
                                       QVector<PDFCommentAnnotation::DrawingAnnotation>
@@ -4287,6 +4471,38 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         return replyParentResult;
     }
 
+    QHash<QString, QString> statusParentAnnotationIds;
+    QHash<QString, QString> markedParentAnnotationIds;
+    for (const SaveDraft &draft : drafts) {
+        if (draft.deleted || draft.added) {
+            continue;
+        }
+        if (draft.commentStatus != draft.originalCommentStatus) {
+            const QString parentName = uniqueSourceStateAnnotationName(
+                page.get(),
+                draft.commentStatusParentAnnotationIndex,
+                QStringLiteral("Review"),
+                draft.commentStateAuthor);
+            if (!parentName.isEmpty()) {
+                statusParentAnnotationIds.insert(
+                    draft.objectId,
+                    parentName);
+            }
+        }
+        if (draft.commentMarked != draft.originalCommentMarked) {
+            const QString parentName = uniqueSourceStateAnnotationName(
+                page.get(),
+                draft.commentMarkedParentAnnotationIndex,
+                QStringLiteral("Marked"),
+                draft.commentStateAuthor);
+            if (!parentName.isEmpty()) {
+                markedParentAnnotationIds.insert(
+                    draft.objectId,
+                    parentName);
+            }
+        }
+    }
+
     for (const SaveDraft &draft : drafts) {
         if ((draft.kind != SaveDraft::Kind::TextMarkup
              && draft.kind != SaveDraft::Kind::StickyNote
@@ -4379,6 +4595,42 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
             return annotationResult;
         }
     }
+
+    for (const SaveDraft &draft : drafts) {
+        if (draft.deleted) {
+            continue;
+        }
+        if (draft.commentStatus != draft.originalCommentStatus) {
+            const QString status = commentStatusPdfName(
+                draft.commentStatus);
+            const PDFSaveWriter::Result stateResult
+                = createCommentStateAnnotation(
+                    page.get(),
+                    draft,
+                    status,
+                    QStringLiteral("Review"),
+                    statusParentAnnotationIds.value(draft.objectId),
+                    annotationRelationships);
+            if (!stateResult.succeeded()) {
+                return stateResult;
+            }
+        }
+        if (draft.commentMarked != draft.originalCommentMarked) {
+            const PDFSaveWriter::Result stateResult
+                = createCommentStateAnnotation(
+                    page.get(),
+                    draft,
+                    draft.commentMarked
+                        ? QStringLiteral("Marked")
+                        : QStringLiteral("Unmarked"),
+                    QStringLiteral("Marked"),
+                    markedParentAnnotationIds.value(draft.objectId),
+                    annotationRelationships);
+            if (!stateResult.succeeded()) {
+                return stateResult;
+            }
+        }
+    }
     return {};
 }
 
@@ -4459,12 +4711,13 @@ PDFSaveWriter::Result commitDocumentFile(const QString &sourceFilePath,
     return {};
 }
 
-PDFSaveWriter::Result validateAnnotationReplies(
+PDFSaveWriter::Result validateAnnotationRelationships(
     const QString &filePath,
-    const QVector<PDFAcroFormCanonicalizer::AnnotationReply> &replies)
+    const QVector<PDFAcroFormCanonicalizer::AnnotationRelationship>
+        &relationships)
 {
     assertPDFiumProcessLockHeld();
-    if (replies.isEmpty()) {
+    if (relationships.isEmpty()) {
         return {};
     }
 
@@ -4474,23 +4727,28 @@ PDFSaveWriter::Result validateAnnotationReplies(
         return failure(PDFSaveWriter::Error::CommentAnnotationCreationFailed);
     }
     const int pageCount = FPDF_GetPageCount(document.get());
-    for (const PDFAcroFormCanonicalizer::AnnotationReply &reply : replies) {
-        if (reply.page < 0 || reply.page >= pageCount) {
+    for (const PDFAcroFormCanonicalizer::AnnotationRelationship &relationship
+         : relationships) {
+        if (relationship.page < 0 || relationship.page >= pageCount) {
             return failure(
                 PDFSaveWriter::Error::CommentAnnotationCreationFailed,
-                reply.page,
-                reply.replyId);
+                relationship.page,
+                relationship.childAnnotationId);
         }
-        PdfPageHandle page(FPDF_LoadPage(document.get(), reply.page));
+        PdfPageHandle page(FPDF_LoadPage(
+            document.get(),
+            relationship.page));
         if (!page.get()) {
             return failure(
                 PDFSaveWriter::Error::CommentAnnotationCreationFailed,
-                reply.page,
-                reply.replyId);
+                relationship.page,
+                relationship.childAnnotationId);
         }
 
         int parentIndex = -1;
-        int replyIndex = -1;
+        int childIndex = -1;
+        const bool parentByThreadId
+            = !relationship.parentThreadId.isEmpty();
         const int annotationCount = FPDFPage_GetAnnotCount(page.get());
         for (int annotationIndex = 0;
              annotationIndex < annotationCount;
@@ -4501,57 +4759,76 @@ PDFSaveWriter::Result validateAnnotationReplies(
             if (!annotation.get()) {
                 continue;
             }
-            if (annotationString(annotation.get(), kCommentThreadIdKey)
-                    == reply.parentThreadId) {
+            const QString parentIdentifier = annotationString(
+                annotation.get(),
+                parentByThreadId ? kCommentThreadIdKey : "NM");
+            const QString expectedParentIdentifier = parentByThreadId
+                ? relationship.parentThreadId
+                : relationship.parentAnnotationId;
+            if (parentIdentifier == expectedParentIdentifier) {
                 if (parentIndex >= 0) {
                     return failure(
                         PDFSaveWriter::Error::CommentAnnotationCreationFailed,
-                        reply.page,
-                        reply.replyId);
+                        relationship.page,
+                        relationship.childAnnotationId);
                 }
                 parentIndex = annotationIndex;
             }
-            if (annotationString(annotation.get(), "NM") == reply.replyId) {
-                if (replyIndex >= 0) {
+            if (annotationString(annotation.get(), "NM")
+                == relationship.childAnnotationId) {
+                if (childIndex >= 0) {
                     return failure(
                         PDFSaveWriter::Error::CommentAnnotationCreationFailed,
-                        reply.page,
-                        reply.replyId);
+                        relationship.page,
+                        relationship.childAnnotationId);
                 }
-                replyIndex = annotationIndex;
+                childIndex = annotationIndex;
             }
         }
-        if (parentIndex < 0 || replyIndex < 0) {
+        if (parentIndex < 0 || childIndex < 0) {
             return failure(
                 PDFSaveWriter::Error::CommentAnnotationCreationFailed,
-                reply.page,
-                reply.replyId);
+                relationship.page,
+                relationship.childAnnotationId);
         }
 
-        PdfAnnotationHandle replyAnnotation(FPDFPage_GetAnnot(
+        PdfAnnotationHandle childAnnotation(FPDFPage_GetAnnot(
             page.get(),
-            replyIndex));
-        PdfAnnotationHandle linkedParent(replyAnnotation.get()
-                ? FPDFAnnot_GetLinkedAnnot(replyAnnotation.get(), "IRT")
+            childIndex));
+        PdfAnnotationHandle linkedParent(childAnnotation.get()
+                ? FPDFAnnot_GetLinkedAnnot(childAnnotation.get(), "IRT")
                 : nullptr);
         const int linkedParentIndex = linkedParent.get()
             ? FPDFPage_GetAnnotIndex(page.get(), linkedParent.get())
             : -1;
-        const QString relation = replyAnnotation.get()
-            ? annotationString(replyAnnotation.get(), "RT").trimmed()
+        const QString relation = childAnnotation.get()
+            ? annotationString(childAnnotation.get(), "RT").trimmed()
             : QString();
-        if (!replyAnnotation.get()
-            || FPDFAnnot_GetSubtype(replyAnnotation.get()) != FPDF_ANNOT_TEXT
-            || linkedParentIndex != parentIndex
-            || (!relation.isEmpty()
-                && relation.compare(
-                    QLatin1String("R"),
-                    Qt::CaseInsensitive)
-                    != 0)) {
+        bool valid = childAnnotation.get()
+            && FPDFAnnot_GetSubtype(childAnnotation.get()) == FPDF_ANNOT_TEXT
+            && linkedParentIndex == parentIndex;
+        if (valid
+            && relationship.kind
+                == PDFAcroFormCanonicalizer::
+                    AnnotationRelationshipKind::Reply) {
+            valid = relation.compare(
+                        QLatin1String("R"),
+                        Qt::CaseInsensitive)
+                == 0;
+        } else if (valid) {
+            valid = relation.isEmpty()
+                && annotationString(childAnnotation.get(), "State").trimmed()
+                    == relationship.expectedState
+                && annotationString(
+                       childAnnotation.get(),
+                       "StateModel").trimmed()
+                    == relationship.expectedStateModel;
+        }
+        if (!valid) {
             return failure(
                 PDFSaveWriter::Error::CommentAnnotationCreationFailed,
-                reply.page,
-                reply.replyId);
+                relationship.page,
+                relationship.childAnnotationId);
         }
     }
     return {};
@@ -4949,6 +5226,27 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.replyToSourceAnnotationIndex
             = draft->candidate.replyToSourceAnnotationIndex;
         saveDraft.reply = !draft->candidate.replyToObjectId.isEmpty();
+        saveDraft.originalCommentStatus
+            = draft->candidate.commentStatus;
+        saveDraft.commentStatus = draft->commentStatus;
+        saveDraft.originalCommentMarked
+            = draft->candidate.commentMarked;
+        saveDraft.commentMarked = draft->commentMarked;
+        saveDraft.commentStatusParentAnnotationIndex
+            = draft->candidate.commentStatusAnnotationIndex;
+        saveDraft.commentMarkedParentAnnotationIndex
+            = draft->candidate.commentMarkedAnnotationIndex;
+        saveDraft.commentStateAuthor = draft->commentStateAuthor;
+        saveDraft.commentStateModifiedDate
+            = draft->commentStateModifiedDate;
+        if ((saveDraft.commentStatus
+                 != saveDraft.originalCommentStatus
+             || saveDraft.commentMarked
+                 != saveDraft.originalCommentMarked)
+            && !saveDraft.commentStateModifiedDate.isValid()) {
+            saveDraft.commentStateModifiedDate
+                = QDateTime::currentDateTime();
+        }
         if (draft->candidate.kind == QLatin1String("underline")) {
             saveDraft.annotationSubtype = FPDF_ANNOT_UNDERLINE;
         } else if (draft->candidate.kind == QLatin1String("squiggly")) {
@@ -5142,6 +5440,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     }
 
     FontResolver fontResolver(document.get());
+    QVector<PDFAcroFormCanonicalizer::AnnotationRelationship>
+        annotationRelationships;
     QVector<PDFAcroFormCanonicalizer::StampAnnotation> stampAnnotations;
     QVector<PDFCommentAnnotation::DrawingAnnotation> drawingAnnotations;
     QVector<PDFCommentAnnotation::SourceDrawingGeometryUpdate>
@@ -5165,6 +5465,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             request.m_data->drafts.at(start).page,
             pageDrafts,
             fontResolver,
+            annotationRelationships,
             stampAnnotations,
             drawingAnnotations,
             sourceDrawingGeometryUpdates,
@@ -5175,7 +5476,6 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         start = end;
     }
 
-    QVector<PDFAcroFormCanonicalizer::AnnotationReply> annotationReplies;
     QVector<PDFAcroFormCanonicalizer::FreeTextAnnotation>
         freeTextAnnotations;
     QVector<PDFAcroFormCanonicalizer::TextMarkupAnnotation>
@@ -5240,14 +5540,17 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
                 draft.page,
                 draft.objectId);
         }
-        annotationReplies.append({
-            draft.page,
-            draft.replyToThreadId,
-            draft.objectId});
+        PDFAcroFormCanonicalizer::AnnotationRelationship relationship;
+        relationship.page = draft.page;
+        relationship.parentThreadId = draft.replyToThreadId;
+        relationship.childAnnotationId = draft.objectId;
+        relationship.kind = PDFAcroFormCanonicalizer::
+            AnnotationRelationshipKind::Reply;
+        annotationRelationships.append(std::move(relationship));
     }
 
     if (request.m_data->formFields.isEmpty()
-        && annotationReplies.isEmpty()
+        && annotationRelationships.isEmpty()
         && freeTextAnnotations.isEmpty()
         && textMarkupAnnotations.isEmpty()
         && stampAnnotations.isEmpty()
@@ -5287,16 +5590,16 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         return contentResult;
     }
 
-    if (!annotationReplies.isEmpty()) {
-        QString replyError;
-        if (!PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
+    if (!annotationRelationships.isEmpty()) {
+        QString relationshipError;
+        if (!PDFAcroFormCanonicalizer::finalizeAnnotationRelationships(
                 contentFilePath,
-                annotationReplies,
-                replyError)) {
+                annotationRelationships,
+                relationshipError)) {
             return failure(
                 Error::CommentAnnotationCreationFailed,
                 -1,
-                replyError);
+                relationshipError);
         }
     }
     if (request.m_data->formFields.isEmpty()) {
@@ -5372,11 +5675,11 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
                     geometryError);
             }
         }
-        const Result replyValidation = validateAnnotationReplies(
+        const Result relationshipValidation = validateAnnotationRelationships(
             contentFilePath,
-            annotationReplies);
-        if (!replyValidation.succeeded()) {
-            return replyValidation;
+            annotationRelationships);
+        if (!relationshipValidation.succeeded()) {
+            return relationshipValidation;
         }
         return commitDocumentFile(
             contentFilePath,
@@ -5477,11 +5780,11 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
                 geometryError);
         }
     }
-    const Result replyValidation = validateAnnotationReplies(
+    const Result relationshipValidation = validateAnnotationRelationships(
         formFilePath,
-        annotationReplies);
-    if (!replyValidation.succeeded()) {
-        return replyValidation;
+        annotationRelationships);
+    if (!relationshipValidation.succeeded()) {
+        return relationshipValidation;
     }
     return commitDocumentFile(
         formFilePath,

@@ -44,10 +44,20 @@ public:
         Operation operation = Operation::Add;
     };
 
-    struct AnnotationReply {
+    enum class AnnotationRelationshipKind {
+        Reply,
+        State
+    };
+
+    struct AnnotationRelationship {
         int page = -1;
         QString parentThreadId;
-        QString replyId;
+        QString parentAnnotationId;
+        QString childAnnotationId;
+        AnnotationRelationshipKind kind
+            = AnnotationRelationshipKind::Reply;
+        QString expectedState;
+        QString expectedStateModel;
     };
 
     struct FreeTextAnnotation {
@@ -103,9 +113,9 @@ public:
     static bool finalizeFields(const QString &filePath,
                                const QVector<Field> &fields,
                                QString &error);
-    static bool finalizeAnnotationReplies(
+    static bool finalizeAnnotationRelationships(
         const QString &filePath,
-        const QVector<AnnotationReply> &replies,
+        const QVector<AnnotationRelationship> &relationships,
         QString &error);
     static bool finalizeFreeTextAnnotations(
         const QString &filePath,

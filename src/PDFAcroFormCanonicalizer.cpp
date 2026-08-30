@@ -8741,13 +8741,47 @@ bool PDFAcroFormCanonicalizer::finalizeSourceCommentGeometryUpdates(
         error);
 }
 
-bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
+bool PDFAcroFormCanonicalizer::finalizeAnnotationRelationships(
     const QString &filePath,
-    const QVector<AnnotationReply> &replies,
+    const QVector<AnnotationRelationship> &relationships,
     QString &error)
 {
-    if (replies.isEmpty()) {
+    if (relationships.isEmpty()) {
         return true;
+    }
+
+    QSet<QString> childAnnotationIds;
+    for (const AnnotationRelationship &relationship : relationships) {
+        const bool hasParentThreadId
+            = !relationship.parentThreadId.isEmpty();
+        const bool hasParentAnnotationId
+            = !relationship.parentAnnotationId.isEmpty();
+        if (relationship.page < 0
+            || hasParentThreadId == hasParentAnnotationId
+            || relationship.childAnnotationId.isEmpty()
+            || childAnnotationIds.contains(
+                relationship.childAnnotationId)
+            || (hasParentAnnotationId
+                && relationship.parentAnnotationId
+                    == relationship.childAnnotationId)
+            || (relationship.kind
+                    != AnnotationRelationshipKind::Reply
+                && relationship.kind
+                    != AnnotationRelationshipKind::State)
+            || (relationship.kind
+                    == AnnotationRelationshipKind::Reply
+                && (!relationship.expectedState.isEmpty()
+                    || !relationship.expectedStateModel.isEmpty()))
+            || (!relationship.expectedState.isEmpty()
+                && !isSafePdfName(relationship.expectedState))
+            || (!relationship.expectedStateModel.isEmpty()
+                && !isSafePdfName(
+                    relationship.expectedStateModel))) {
+            error = QStringLiteral(
+                "An annotation relationship is invalid or duplicated.");
+            return false;
+        }
+        childAnnotationIds.insert(relationship.childAnnotationId);
     }
 
     QFile file(filePath);
@@ -8781,10 +8815,15 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
     QHash<int, ObjectReference> containerReferences;
     QHash<int, QByteArray> rewrittenObjects;
     QHash<int, ObjectReference> rewrittenReferences;
-    QList<IncrementalObject> newObjects;
-    QHash<QString, ObjectReference> parentReferences;
-    QSet<QString> replyIds;
+    QHash<int, QByteArray> newObjects;
+    QHash<int, ObjectReference> newObjectReferences;
+    QHash<QString, ObjectReference> promotedParentReferences;
+    QVector<ObjectReference> parentReferences;
+    QVector<QString> parentLocationKeys;
+    QSet<QString> childLocationKeys;
     int nextObjectNumber = pdf.declaredSize;
+    parentReferences.reserve(relationships.size());
+    parentLocationKeys.reserve(relationships.size());
 
     const auto fail = [&file, mapped, &error](const QString &message) {
         error = message;
@@ -8797,51 +8836,236 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
             + QByteArray::number(reference.generation)
             + QByteArrayLiteral(" R");
     };
+    const auto locationKey = [](const PlaceholderLocation &location) {
+        if (!location.isDirect()) {
+            return QStringLiteral("I:%1:%2")
+                .arg(location.widget.number)
+                .arg(location.widget.generation);
+        }
+        return QStringLiteral("D:%1:%2:%3:%4")
+            .arg(location.container.number)
+            .arg(location.container.generation)
+            .arg(static_cast<qlonglong>(location.dictionaryStart))
+            .arg(static_cast<qlonglong>(location.dictionaryEnd));
+    };
+    const auto topLevelValue = [
+        &error](const QByteArray &dictionary,
+                QByteArrayView requestedKey,
+                QByteArray &value,
+                bool &present) {
+        value.clear();
+        present = false;
+        qsizetype dictionaryEnd = -1;
+        if (!dictionary.startsWith("<<")
+            || !matchingDictionaryEnd(
+                dictionary.constData(),
+                dictionary.size(),
+                0,
+                dictionaryEnd)
+            || dictionaryEnd != dictionary.size()) {
+            error = QStringLiteral(
+                "An annotation relationship dictionary is malformed.");
+            return false;
+        }
+
+        qsizetype position = 2;
+        while (position < dictionaryEnd - 2) {
+            Cursor cursor(
+                dictionary.constData(),
+                dictionary.size(),
+                position);
+            cursor.skipWhitespaceAndComments();
+            const qsizetype keyStart = cursor.position();
+            if (keyStart >= dictionaryEnd - 2) {
+                break;
+            }
+            if (dictionary.at(keyStart) != '/') {
+                error = QStringLiteral(
+                    "An annotation relationship dictionary entry is malformed.");
+                return false;
+            }
+            qsizetype keyEnd = keyStart + 1;
+            while (keyEnd < dictionaryEnd - 2
+                   && !isDelimiter(dictionary.at(keyEnd))) {
+                ++keyEnd;
+            }
+            Cursor valueCursor(
+                dictionary.constData(),
+                dictionary.size(),
+                keyEnd);
+            valueCursor.skipWhitespaceAndComments();
+            const qsizetype valueStart = valueCursor.position();
+            qsizetype valueEnd = -1;
+            if (valueStart >= dictionaryEnd - 2
+                || !pdfValueEnd(
+                    dictionary.constData(),
+                    dictionaryEnd - 2,
+                    valueStart,
+                    valueEnd)) {
+                error = QStringLiteral(
+                    "An annotation relationship dictionary value is malformed.");
+                return false;
+            }
+            const QByteArrayView key(
+                dictionary.constData() + keyStart,
+                keyEnd - keyStart);
+            if (key == requestedKey) {
+                if (present) {
+                    error = QStringLiteral(
+                        "An annotation relationship dictionary contains a duplicated key.");
+                    return false;
+                }
+                present = true;
+                value = dictionary.mid(
+                    valueStart,
+                    valueEnd - valueStart);
+            }
+            position = valueEnd;
+        }
+        return true;
+    };
+    const auto decodedStateValue = [](const QByteArray &rawValue,
+                                      QString &value) {
+        value.clear();
+        if (rawValue.startsWith('/')) {
+            QByteArray decodedName;
+            decodedName.reserve(rawValue.size() - 1);
+            for (qsizetype index = 1;
+                 index < rawValue.size();
+                 ++index) {
+                if (rawValue.at(index) != '#') {
+                    decodedName.append(rawValue.at(index));
+                    continue;
+                }
+                if (index + 2 >= rawValue.size()) {
+                    return false;
+                }
+                const int high = hexDigitValue(rawValue.at(index + 1));
+                const int low = hexDigitValue(rawValue.at(index + 2));
+                if (high < 0 || low < 0) {
+                    return false;
+                }
+                decodedName.append(
+                    static_cast<char>((high << 4) | low));
+                index += 2;
+            }
+            value = QString::fromLatin1(decodedName);
+            return !value.isEmpty();
+        }
+
+        QByteArray encodedString;
+        if (!parsePdfString(
+                rawValue.constData(),
+                rawValue.size(),
+                0,
+                encodedString)) {
+            return false;
+        }
+        value = decodedPdfString(encodedString);
+        return !value.isEmpty();
+    };
     const auto linkedDictionary = [
         &error,
-        &referenceBytes](QByteArray dictionary,
-                         const ObjectReference &parent) {
+        &referenceBytes,
+        &topLevelValue,
+        &decodedStateValue](QByteArray dictionary,
+                            const ObjectReference &parent,
+                            const AnnotationRelationship &relationship) {
         if (dictionary.size() < 4
             || !dictionary.startsWith("<<")
             || !dictionary.endsWith(">>")) {
             error = QStringLiteral(
-                "A comment reply annotation dictionary is malformed.");
+                "An annotation relationship dictionary is malformed.");
             return QByteArray();
         }
-        if (keyPosition(
-                dictionary.constData(),
-                dictionary.size(),
-                QByteArrayView("/IRT"))
-            >= 0) {
-            error = QStringLiteral(
-                "A comment reply already contains an IRT relationship.");
+
+        QByteArray irtValue;
+        QByteArray replyTypeValue;
+        QByteArray stateValue;
+        QByteArray stateModelValue;
+        bool hasIrt = false;
+        bool hasReplyType = false;
+        bool hasState = false;
+        bool hasStateModel = false;
+        if (!topLevelValue(
+                dictionary,
+                QByteArrayView("/IRT"),
+                irtValue,
+                hasIrt)
+            || !topLevelValue(
+                dictionary,
+                QByteArrayView("/RT"),
+                replyTypeValue,
+                hasReplyType)
+            || !topLevelValue(
+                dictionary,
+                QByteArrayView("/State"),
+                stateValue,
+                hasState)
+            || !topLevelValue(
+                dictionary,
+                QByteArrayView("/StateModel"),
+                stateModelValue,
+                hasStateModel)) {
             return QByteArray();
+        }
+        if (hasIrt || hasReplyType) {
+            error = QStringLiteral(
+                "An annotation child already contains a relationship.");
+            return QByteArray();
+        }
+
+        QByteArray relationshipEntries
+            = QByteArrayLiteral(" /IRT ")
+            + referenceBytes(parent);
+        if (relationship.kind == AnnotationRelationshipKind::Reply) {
+            if (hasState || hasStateModel) {
+                error = QStringLiteral(
+                    "A reply annotation contains state entries.");
+                return QByteArray();
+            }
+            relationshipEntries += QByteArrayLiteral(" /RT /R");
+        } else {
+            if (!hasState || !hasStateModel) {
+                error = QStringLiteral(
+                    "A state annotation is missing State or StateModel.");
+                return QByteArray();
+            }
+            QString state;
+            QString stateModel;
+            if (!decodedStateValue(stateValue, state)
+                || !decodedStateValue(stateModelValue, stateModel)
+                || !isSafePdfName(state)
+                || !isSafePdfName(stateModel)
+                || (!relationship.expectedState.isEmpty()
+                    && state != relationship.expectedState)
+                || (!relationship.expectedStateModel.isEmpty()
+                    && stateModel
+                        != relationship.expectedStateModel)) {
+                error = QStringLiteral(
+                    "A state annotation does not match its expected state.");
+                return QByteArray();
+            }
         }
         dictionary.insert(
             dictionary.size() - 2,
-            QByteArrayLiteral(" /IRT ")
-                + referenceBytes(parent)
-                + QByteArrayLiteral(" /RT /R"));
+            relationshipEntries);
         return dictionary;
     };
 
-    for (const AnnotationReply &reply : replies) {
-        if (reply.page < 0
-            || reply.parentThreadId.isEmpty()
-            || reply.replyId.isEmpty()
-            || replyIds.contains(reply.replyId)) {
-            return fail(QStringLiteral(
-                "A comment reply relationship is invalid or duplicated."));
-        }
-        replyIds.insert(reply.replyId);
-
-        if (parentReferences.contains(reply.parentThreadId)) {
-            continue;
-        }
+    for (const AnnotationRelationship &relationship : relationships) {
+        const bool lookupByThreadId
+            = !relationship.parentThreadId.isEmpty();
+        const QByteArrayView parentKey = lookupByThreadId
+            ? QByteArrayView("/TrePDFThreadId")
+            : QByteArrayView("/NM");
+        const QString &parentIdentifier = lookupByThreadId
+            ? relationship.parentThreadId
+            : relationship.parentAnnotationId;
         const PlaceholderLocation parent = annotationForStringId(
             pdf,
-            QByteArrayView("/TrePDFThreadId"),
-            reply.parentThreadId,
+            parentKey,
+            parentIdentifier,
             QByteArrayView());
         const bool parentLocated = parent.widget.number >= 0
             || (parent.container.number >= 0
@@ -8849,12 +9073,19 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
                 && parent.dictionaryEnd > parent.dictionaryStart);
         if (!parentLocated) {
             return fail(QStringLiteral(
-                "The parent annotation for a comment reply could not be located."));
+                "An annotation relationship parent could not be located."));
         }
+        const QString parentLocationKey = locationKey(parent);
+        parentLocationKeys.append(parentLocationKey);
         if (!parent.isDirect()) {
-            parentReferences.insert(
-                reply.parentThreadId,
-                parent.widget);
+            parentReferences.append(parent.widget);
+            continue;
+        }
+
+        const auto promoted = promotedParentReferences.constFind(
+            parentLocationKey);
+        if (promoted != promotedParentReferences.cend()) {
+            parentReferences.append(*promoted);
             continue;
         }
 
@@ -8868,12 +9099,12 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
             || parent.dictionaryEnd > containerObject.size()) {
             return fail(error.isEmpty()
                     ? QStringLiteral(
-                        "A direct parent comment annotation is malformed.")
+                        "A direct annotation relationship parent is malformed.")
                     : error);
         }
         if (nextObjectNumber >= std::numeric_limits<int>::max()) {
             return fail(QStringLiteral(
-                "The PDF has no available object number for a comment reply."));
+                "The PDF has no available object number for an annotation relationship."));
         }
         const ObjectReference promotedReference{nextObjectNumber++, 0};
         QByteArray promotedObject = QByteArray::number(
@@ -8883,31 +9114,42 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
                 parent.dictionaryStart,
                 parent.dictionaryEnd - parent.dictionaryStart)
             + QByteArrayLiteral("\nendobj");
-        newObjects.append({promotedReference, std::move(promotedObject)});
+        newObjects.insert(
+            promotedReference.number,
+            std::move(promotedObject));
+        newObjectReferences.insert(
+            promotedReference.number,
+            promotedReference);
         replacementsByContainer[parent.container.number].append({
             parent.dictionaryStart,
             parent.dictionaryEnd,
-            referenceBytes(promotedReference)});
+            QByteArrayLiteral(" ")
+                + referenceBytes(promotedReference)
+                + QByteArrayLiteral(" ")});
         containerReferences.insert(
             parent.container.number,
             parent.container);
-        parentReferences.insert(
-            reply.parentThreadId,
+        promotedParentReferences.insert(
+            parentLocationKey,
             promotedReference);
+        parentReferences.append(promotedReference);
     }
 
-    for (const AnnotationReply &reply : replies) {
-        const ObjectReference parentReference = parentReferences.value(
-            reply.parentThreadId,
-            ObjectReference{});
+    for (qsizetype relationshipIndex = 0;
+         relationshipIndex < relationships.size();
+         ++relationshipIndex) {
+        const AnnotationRelationship &relationship
+            = relationships.at(relationshipIndex);
+        const ObjectReference parentReference
+            = parentReferences.at(relationshipIndex);
         if (parentReference.number < 0) {
             return fail(QStringLiteral(
-                "The parent annotation reference for a comment reply is missing."));
+                "An annotation relationship parent reference is missing."));
         }
         const PlaceholderLocation child = annotationForStringId(
             pdf,
             QByteArrayView("/NM"),
-            reply.replyId,
+            relationship.childAnnotationId,
             QByteArrayView("/Text"));
         const bool childLocated = child.widget.number >= 0
             || (child.container.number >= 0
@@ -8915,10 +9157,57 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
                 && child.dictionaryEnd > child.dictionaryStart);
         if (!childLocated) {
             return fail(QStringLiteral(
-                "A comment reply annotation could not be located."));
+                "An annotation relationship child could not be located."));
         }
+        const QString childLocationKey = locationKey(child);
+        if (childLocationKeys.contains(childLocationKey)
+            || childLocationKey
+                == parentLocationKeys.at(relationshipIndex)) {
+            return fail(QStringLiteral(
+                "An annotation relationship child is duplicated or self-referential."));
+        }
+        childLocationKeys.insert(childLocationKey);
 
         if (child.isDirect()) {
+            const auto promoted = promotedParentReferences.constFind(
+                childLocationKey);
+            if (promoted != promotedParentReferences.cend()) {
+                QByteArray childObject = newObjects.value(
+                    promoted->number);
+                const qsizetype dictionaryStart = findBytes(
+                    childObject.constData(),
+                    childObject.size(),
+                    "<<");
+                qsizetype dictionaryEnd = -1;
+                if (childObject.isEmpty()
+                    || dictionaryStart < 0
+                    || !matchingDictionaryEnd(
+                        childObject.constData(),
+                        childObject.size(),
+                        dictionaryStart,
+                        dictionaryEnd)) {
+                    return fail(QStringLiteral(
+                        "A promoted annotation relationship child is malformed."));
+                }
+                const QByteArray dictionary = linkedDictionary(
+                    childObject.mid(
+                        dictionaryStart,
+                        dictionaryEnd - dictionaryStart),
+                    parentReference,
+                    relationship);
+                if (dictionary.isEmpty()) {
+                    return fail(error);
+                }
+                childObject.replace(
+                    dictionaryStart,
+                    dictionaryEnd - dictionaryStart,
+                    dictionary);
+                newObjects.insert(
+                    promoted->number,
+                    std::move(childObject));
+                continue;
+            }
+
             const QByteArray containerObject = completeObject(
                 pdf,
                 child.container.number,
@@ -8929,14 +9218,15 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
                 || child.dictionaryEnd > containerObject.size()) {
                 return fail(error.isEmpty()
                         ? QStringLiteral(
-                            "A direct comment reply annotation is malformed.")
+                            "A direct annotation relationship child is malformed.")
                         : error);
             }
             const QByteArray dictionary = linkedDictionary(
                 containerObject.mid(
                     child.dictionaryStart,
                     child.dictionaryEnd - child.dictionaryStart),
-                parentReference);
+                parentReference,
+                relationship);
             if (dictionary.isEmpty()) {
                 return fail(error);
             }
@@ -8968,14 +9258,15 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
                 dictionaryEnd)) {
             return fail(error.isEmpty()
                     ? QStringLiteral(
-                        "An indirect comment reply annotation is malformed.")
+                        "An indirect annotation relationship child is malformed.")
                     : error);
         }
         const QByteArray dictionary = linkedDictionary(
             childObject.mid(
                 dictionaryStart,
                 dictionaryEnd - dictionaryStart),
-            parentReference);
+            parentReference,
+            relationship);
         if (dictionary.isEmpty()) {
             return fail(error);
         }
@@ -8983,6 +9274,10 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
             dictionaryStart,
             dictionaryEnd - dictionaryStart,
             dictionary);
+        if (rewrittenObjects.contains(child.widget.number)) {
+            return fail(QStringLiteral(
+                "An annotation relationship child was resolved more than once."));
+        }
         rewrittenObjects.insert(child.widget.number, std::move(childObject));
         rewrittenReferences.insert(child.widget.number, child.widget);
     }
@@ -9027,7 +9322,16 @@ bool PDFAcroFormCanonicalizer::finalizeAnnotationReplies(
             containerReferences.value(container.key()));
     }
 
-    QList<IncrementalObject> incrementalObjects = std::move(newObjects);
+    QList<IncrementalObject> incrementalObjects;
+    incrementalObjects.reserve(
+        newObjects.size() + rewrittenObjects.size());
+    for (auto object = newObjects.begin();
+         object != newObjects.end();
+         ++object) {
+        incrementalObjects.append({
+            newObjectReferences.value(object.key()),
+            std::move(object.value())});
+    }
     for (auto object = rewrittenObjects.begin();
          object != rewrittenObjects.end();
          ++object) {
