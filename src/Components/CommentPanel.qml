@@ -840,6 +840,30 @@ Rectangle {
                                 modelData.commentStatus === undefined
                                     ? PDFEditController.NoCommentStatus
                                     : Number(modelData.commentStatus)
+                            readonly property string commentStatusText: {
+                                switch (commentStatus) {
+                                case PDFEditController.AcceptedCommentStatus:
+                                    //% "Accepted"
+                                    return qsTrId("CommentStatusAccepted")
+                                case PDFEditController.RejectedCommentStatus:
+                                    //% "Rejected"
+                                    return qsTrId("CommentStatusRejected")
+                                case PDFEditController.CancelledCommentStatus:
+                                    //% "Cancelled"
+                                    return qsTrId("CommentStatusCancelled")
+                                case PDFEditController.CompletedCommentStatus:
+                                    //% "Completed"
+                                    return qsTrId("CommentStatusCompleted")
+                                case PDFEditController.DeferredCommentStatus:
+                                    //% "Deferred"
+                                    return qsTrId("CommentStatusDeferred")
+                                case PDFEditController.FutureCommentStatus:
+                                    //% "Future"
+                                    return qsTrId("CommentStatusFuture")
+                                default:
+                                    return ""
+                                }
+                            }
                             readonly property bool commentMarked:
                                 modelData.commentMarked === undefined
                                     ? false
@@ -1191,6 +1215,66 @@ Rectangle {
                                         text: commentCard.commentDateText
                                         color: "#747176"
                                         font.pixelSize: 10
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: 13
+                                    visible: !commentCard.isReply
+                                        && (commentCard.commentStatusText
+                                                .length > 0
+                                            || commentCard.commentMarked)
+                                    spacing: 6
+
+                                    Label {
+                                        objectName: "commentStatusBadge"
+                                        Layout.preferredHeight: 20
+                                        visible: commentCard.commentStatusText
+                                            .length > 0
+                                        leftPadding: 7
+                                        rightPadding: 7
+                                        text: commentCard.commentStatusText
+                                        color: root.theme.foxitDarkOrange
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        verticalAlignment: Text.AlignVCenter
+                                        Accessible.name: text
+
+                                        background: Rectangle {
+                                            radius: 10
+                                            color: root.theme.foxitPaleOrange
+                                            border.width: 1
+                                            border.color:
+                                                root.theme.foxitBorderOrange
+                                        }
+                                    }
+
+                                    Label {
+                                        objectName: "commentMarkedBadge"
+                                        Layout.preferredWidth: 20
+                                        Layout.preferredHeight: 20
+                                        visible: commentCard.commentMarked
+                                        text: "\u2713"
+                                        color: root.theme.signGreen
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        //% "Mark with Checkmark"
+                                        Accessible.name:
+                                            qsTrId("MarkCommentWithCheckmark")
+
+                                        background: Rectangle {
+                                            radius: 10
+                                            color: root.theme.signPaleGreen
+                                            border.width: 1
+                                            border.color: root.theme.signGreen
+                                        }
+                                    }
+
+                                    Item {
+                                        Layout.fillWidth: true
                                     }
                                 }
 

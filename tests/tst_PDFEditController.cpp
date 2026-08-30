@@ -15643,6 +15643,71 @@ void PDFEditControllerTest::showsCommentStatusActionsMenuUi()
         .value(QStringLiteral("commentStateEditable"))
         .toBool());
 
+    const auto findBadge = [&](const QString &objectName) {
+        return findQuickItem(
+            findQuickItem,
+            window.contentItem(),
+            objectName);
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(
+        findBadge(QStringLiteral("commentStatusBadge")) != nullptr,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        findBadge(QStringLiteral("commentMarkedBadge")) != nullptr,
+        1000);
+    QVERIFY(!findBadge(
+        QStringLiteral("commentStatusBadge"))->property("visible").toBool());
+    QVERIFY(!findBadge(
+        QStringLiteral("commentMarkedBadge"))->property("visible").toBool());
+
+    const int rootPage = rootComment.value(QStringLiteral("page")).toInt();
+    const QString rootObjectId = rootComment
+        .value(QStringLiteral("objectId"))
+        .toString();
+    QVERIFY(controller.setCommentStatus(
+        rootPage,
+        rootObjectId,
+        PDFEditController::CancelledCommentStatus));
+    QString cancelledBadgeText;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            QQuickItem *badge = findBadge(
+                QStringLiteral("commentStatusBadge"));
+            if (!badge || !badge->property("visible").toBool()) {
+                return false;
+            }
+            cancelledBadgeText = badge->property("text").toString();
+            return !cancelledBadgeText.isEmpty();
+        })(),
+        1000);
+    QVERIFY(controller.setCommentMarked(rootPage, rootObjectId, true));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            QQuickItem *badge = findBadge(
+                QStringLiteral("commentMarkedBadge"));
+            return badge
+                && badge->property("visible").toBool()
+                && badge->property("text").toString().contains(
+                    QChar(0x2713));
+        })(),
+        1000);
+
+    controller.discardDrafts();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            QQuickItem *badge = findBadge(
+                QStringLiteral("commentStatusBadge"));
+            return badge && !badge->property("visible").toBool();
+        })(),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            QQuickItem *badge = findBadge(
+                QStringLiteral("commentMarkedBadge"));
+            return badge && !badge->property("visible").toBool();
+        })(),
+        1000);
+
     QQuickItem *actionsButton = nullptr;
     QTRY_VERIFY_WITH_TIMEOUT(
         ([&]() {
@@ -15699,6 +15764,8 @@ void PDFEditControllerTest::showsCommentStatusActionsMenuUi()
         QStringLiteral("commentStatusDeferredAction"),
         QStringLiteral("commentStatusFutureAction")};
     int checkedStatusCount = 0;
+    QString cancelledActionText;
+    QString completedActionText;
     for (const QString &actionName : statusActionNames) {
         QObject *action = actionsMenu->findChild<QObject *>(actionName);
         QVERIFY2(action, qPrintable(actionName));
@@ -15713,8 +15780,16 @@ void PDFEditControllerTest::showsCommentStatusActionsMenuUi()
                 actionName,
                 QStringLiteral("commentStatusNoneAction"));
         }
+        if (actionName == QLatin1String("commentStatusCancelledAction")) {
+            cancelledActionText = action->property("text").toString();
+        } else if (actionName
+                   == QLatin1String("commentStatusCompletedAction")) {
+            completedActionText = action->property("text").toString();
+        }
     }
     QCOMPARE(checkedStatusCount, 1);
+    QCOMPARE(cancelledBadgeText, cancelledActionText);
+    QVERIFY(cancelledBadgeText != completedActionText);
 
     QVERIFY(!controller.hasDrafts());
     QCOMPARE(controller.commentItems().size(), 1);

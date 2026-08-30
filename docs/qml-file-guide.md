@@ -256,7 +256,8 @@ Note/Free Text đang chọn và phản hồi một cấp.
   (None, Accepted, Rejected, Cancelled, Completed, Deferred, Future) và
   `Mark with Checkmark`. Các action bind checked/enabled theo model, gọi
   `setCommentStatus()` hoặc `setCommentMarked()` và tạo draft có
-  undo/redo/discard; Save ghi annotation state chuẩn rồi reopen cập nhật model.
+  undo/redo/discard; status hiện hành và checkmark được hiển thị bằng badge trên
+  card gốc. Save ghi annotation state chuẩn rồi reopen cập nhật model.
 - Comment có sẵn trong PDF được liệt kê để đọc, điều hướng, sửa nội dung và xóa
   dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
   được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.

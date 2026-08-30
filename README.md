@@ -105,7 +105,8 @@ with a cascading Set Status submenu and Mark with Checkmark. Both controls creat
 independent undoable drafts and Save/Save As writes author-specific PDF state
 transition annotations. Reviewer-name case variants reuse the established exact
 spelling, and the terminal `/IRT` node restores each Review and Marked state
-after reopen without exposing transition logs as comments. Reply annotations remain
+after reopen without exposing transition logs as comments. Active status and
+checkmark values appear as compact badges on the root comment card. Reply annotations remain
 available in this panel but their standalone appearances are hidden from the PDF
 page viewer.
 Square, Circle, Line, Polygon, and PolyLine comments use shared semantic stroke,
