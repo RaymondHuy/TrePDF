@@ -61,7 +61,7 @@ constexpr qreal kMinimumShapeDragPoints = 3.0;
 constexpr qreal kMinimumShapeFramePoints = 6.0;
 constexpr qreal kAddedShapeStrokeWidthRatio = 0.0022;
 constexpr qreal kShapeAxisSnapRatio = 0.12;
-constexpr qreal kMinimumHighlightDimensionRatio = 0.0005;
+constexpr qreal kMinimumTextMarkupDimensionRatio = 0.0005;
 constexpr qreal kStickyNoteSizePoints = 24.0;
 constexpr qreal kFreeTextDefaultWidthPoints = 160.0;
 constexpr qreal kFreeTextDefaultHeightPoints = 64.0;
@@ -125,7 +125,7 @@ constexpr qreal kTextMarkupLineCenterToleranceRatio = 0.55;
 constexpr qreal kTextMarkupMaximumGapHeightRatio = 1.25;
 constexpr qreal kTextMarkupMaximumAngleRadians = 0.017453292519943295;
 constexpr qreal kSquigglyBottomPaddingPoints = 3.5;
-constexpr qsizetype kMaximumPendingSquigglyCreations = 32;
+constexpr qsizetype kMaximumPendingTextMarkupCreations = 32;
 constexpr qreal kFullTurnRadians = 6.2831853071795864769;
 constexpr int kMaximumTextMarkupCharactersPerPage = 50000;
 constexpr qreal kInitialTextFrameSafetyPoints = 4.0;
@@ -2558,7 +2558,7 @@ QColor PDFEditController::stampColor() const
 bool PDFEditController::hasDrafts() const
 {
     return !m_drafts.isEmpty()
-        || !m_pendingSquigglyCreations.isEmpty()
+        || !m_pendingTextMarkupCreations.isEmpty()
         || !m_pageInsertions.isEmpty()
         || !m_deletedSourcePages.isEmpty()
         || (m_formController && m_formController->hasDrafts())
@@ -4167,6 +4167,7 @@ qreal PDFEditController::shapeHitToleranceRatio(
 QVector<QRectF> PDFEditController::resolvedTextMarkupRectsForSelection(
     int page,
     const QRectF &selectionRect,
+    Tool tool,
     bool *geometryReady)
 {
     if (geometryReady) {
@@ -4253,15 +4254,16 @@ QVector<QRectF> PDFEditController::resolvedTextMarkupRectsForSelection(
         std::move(selectedGlyphRects),
         pageSize);
 
-    // This resolver currently feeds only Squiggly preview and creation. Keep
-    // the top and width aligned to the glyphs while extending the bottom by
-    // enough padding for the wave band plus a visible gap. Other markup tools
-    // keep their freehand rectangle.
-    const qreal gapRatio = kSquigglyBottomPaddingPoints / pageSize.height();
-    for (QRectF &markupRect : markupRects) {
-        markupRect.setBottom(qMin<qreal>(
-            1.0,
-            markupRect.bottom() + gapRatio));
+    if (tool == SquigglyTool) {
+        // Keep the top and width aligned to the glyphs while extending the
+        // bottom by enough padding for the wave band plus a visible gap.
+        const qreal gapRatio
+            = kSquigglyBottomPaddingPoints / pageSize.height();
+        for (QRectF &markupRect : markupRects) {
+            markupRect.setBottom(qMin<qreal>(
+                1.0,
+                markupRect.bottom() + gapRatio));
+        }
     }
     return markupRects;
 }
@@ -4270,9 +4272,13 @@ QVariantList PDFEditController::textMarkupRectsForSelection(
     int page,
     const QRectF &selectionRect)
 {
+    const Tool markupTool = isTextMarkupTool(m_tool)
+        ? m_tool
+        : HighlightTool;
     const QVector<QRectF> rects = resolvedTextMarkupRectsForSelection(
         page,
         selectionRect,
+        markupTool,
         nullptr);
 
     QVariantList result;
@@ -4312,61 +4318,65 @@ QVariantMap PDFEditController::addHighlight(int page,
 
     const QRectF normalizedRect = selectionRect.normalized().intersected(
         QRectF(0.0, 0.0, 1.0, 1.0));
-    const Tool markupTool = m_tool;
-    if (normalizedRect.width() < kMinimumHighlightDimensionRatio
-        || (markupTool != SquigglyTool
-            && normalizedRect.height() < kMinimumHighlightDimensionRatio)
+    const Tool markupTool = isTextMarkupTool(m_tool)
+        ? m_tool
+        : HighlightTool;
+    if (normalizedRect.width() < kMinimumTextMarkupDimensionRatio
         || normalizedRect.height() <= 0.0) {
         return {};
     }
 
-    QVector<QRectF> annotationRects{normalizedRect};
-    if (markupTool == SquigglyTool) {
-        bool geometryReady = false;
-        annotationRects = resolvedTextMarkupRectsForSelection(
-            page,
-            normalizedRect,
-            &geometryReady);
-        if (!geometryReady) {
-            if (m_pendingSquigglyCreations.size()
-                >= kMaximumPendingSquigglyCreations) {
-                //% "Text information is still loading. Please try again."
-                emit statusMessage(qtTrId("TextGeometryStillLoading"));
-                return {};
-            }
-
-            PendingSquigglyCreation pendingCreation;
-            pendingCreation.filePath = m_document->renderFilePath();
-            pendingCreation.selectionRect = normalizedRect;
-            pendingCreation.pageSize = m_document->pageSize(page);
-            pendingCreation.color = m_squigglyColor;
-            pendingCreation.revision = m_document->renderRevision();
-            pendingCreation.page = page;
-            pendingCreation.sourcePage = m_document->sourcePageIndex(page);
-            m_pendingSquigglyCreations.append(std::move(pendingCreation));
-            requestPageCandidateScan(page);
-            emit historyStateChanged();
-
-            QVariantMap pendingResult;
-            pendingResult.insert(QStringLiteral("kind"), QStringLiteral("squiggly"));
-            pendingResult.insert(QStringLiteral("page"), page);
-            pendingResult.insert(QStringLiteral("pending"), true);
-            return pendingResult;
-        }
-        if (annotationRects.isEmpty()) {
-            //% "No text was found in the selected area."
-            emit statusMessage(qtTrId("NoTextInSelectedArea"));
-            return {};
-        }
-    }
-
     QColor markupColor = m_highlightColor;
+    QString markupKind = QStringLiteral("highlight");
     if (markupTool == UnderlineTool) {
         markupColor = m_underlineColor;
+        markupKind = QStringLiteral("underline");
     } else if (markupTool == SquigglyTool) {
         markupColor = m_squigglyColor;
+        markupKind = QStringLiteral("squiggly");
     } else if (markupTool == StrikeoutTool) {
         markupColor = m_strikeoutColor;
+        markupKind = QStringLiteral("strikeout");
+    }
+
+    bool geometryReady = false;
+    const QVector<QRectF> annotationRects
+        = resolvedTextMarkupRectsForSelection(
+            page,
+            normalizedRect,
+            markupTool,
+            &geometryReady);
+    if (!geometryReady) {
+        if (m_pendingTextMarkupCreations.size()
+            >= kMaximumPendingTextMarkupCreations) {
+            //% "Text information is still loading. Please try again."
+            emit statusMessage(qtTrId("TextGeometryStillLoading"));
+            return {};
+        }
+
+        PendingTextMarkupCreation pendingCreation;
+        pendingCreation.filePath = m_document->renderFilePath();
+        pendingCreation.selectionRect = normalizedRect;
+        pendingCreation.pageSize = m_document->pageSize(page);
+        pendingCreation.color = markupColor;
+        pendingCreation.tool = markupTool;
+        pendingCreation.revision = m_document->renderRevision();
+        pendingCreation.page = page;
+        pendingCreation.sourcePage = m_document->sourcePageIndex(page);
+        m_pendingTextMarkupCreations.append(std::move(pendingCreation));
+        requestPageCandidateScan(page);
+        emit historyStateChanged();
+
+        QVariantMap pendingResult;
+        pendingResult.insert(QStringLiteral("kind"), markupKind);
+        pendingResult.insert(QStringLiteral("page"), page);
+        pendingResult.insert(QStringLiteral("pending"), true);
+        return pendingResult;
+    }
+    if (annotationRects.isEmpty()) {
+        //% "No text was found in the selected area."
+        emit statusMessage(qtTrId("NoTextInSelectedArea"));
+        return {};
     }
     return addTextMarkupDraft(
         page,
@@ -4483,8 +4493,8 @@ QVariantMap PDFEditController::materializeTextMarkupDraft(
     return candidateMap(draft);
 }
 
-bool PDFEditController::pendingSquigglyCreationIsCurrent(
-    const PendingSquigglyCreation &creation) const
+bool PDFEditController::pendingTextMarkupCreationIsCurrent(
+    const PendingTextMarkupCreation &creation) const
 {
     return m_document
         && m_document->isLoaded()
@@ -4496,11 +4506,11 @@ bool PDFEditController::pendingSquigglyCreationIsCurrent(
         && m_document->pageSize(creation.page) == creation.pageSize;
 }
 
-int PDFEditController::pendingSquigglyScanPage() const
+int PDFEditController::pendingTextMarkupScanPage() const
 {
-    for (const PendingSquigglyCreation &creation
-         : m_pendingSquigglyCreations) {
-        if (pendingSquigglyCreationIsCurrent(creation)
+    for (const PendingTextMarkupCreation &creation
+         : m_pendingTextMarkupCreations) {
+        if (pendingTextMarkupCreationIsCurrent(creation)
             && !m_pageCandidates.contains(creation.page)) {
             return creation.page;
         }
@@ -4508,32 +4518,33 @@ int PDFEditController::pendingSquigglyScanPage() const
     return -1;
 }
 
-void PDFEditController::completePendingSquigglyCreations(int page)
+void PDFEditController::completePendingTextMarkupCreations(int page)
 {
-    if (m_pendingSquigglyCreations.isEmpty()) {
+    if (m_pendingTextMarkupCreations.isEmpty()) {
         return;
     }
 
-    QVector<PendingSquigglyCreation> readyCreations;
-    QVector<PendingSquigglyCreation> remainingCreations;
-    readyCreations.reserve(m_pendingSquigglyCreations.size());
-    remainingCreations.reserve(m_pendingSquigglyCreations.size());
-    for (PendingSquigglyCreation &creation : m_pendingSquigglyCreations) {
+    QVector<PendingTextMarkupCreation> readyCreations;
+    QVector<PendingTextMarkupCreation> remainingCreations;
+    readyCreations.reserve(m_pendingTextMarkupCreations.size());
+    remainingCreations.reserve(m_pendingTextMarkupCreations.size());
+    for (PendingTextMarkupCreation &creation
+         : m_pendingTextMarkupCreations) {
         if (creation.page == page) {
             readyCreations.append(std::move(creation));
         } else {
             remainingCreations.append(std::move(creation));
         }
     }
-    m_pendingSquigglyCreations = std::move(remainingCreations);
+    m_pendingTextMarkupCreations = std::move(remainingCreations);
     if (readyCreations.isEmpty()) {
         return;
     }
 
     bool createdDraft = false;
     bool pendingStateChanged = false;
-    for (const PendingSquigglyCreation &creation : readyCreations) {
-        if (!pendingSquigglyCreationIsCurrent(creation)) {
+    for (const PendingTextMarkupCreation &creation : readyCreations) {
+        if (!pendingTextMarkupCreationIsCurrent(creation)) {
             pendingStateChanged = true;
             continue;
         }
@@ -4549,9 +4560,10 @@ void PDFEditController::completePendingSquigglyCreations(int page)
             = resolvedTextMarkupRectsForSelection(
                 creation.page,
                 creation.selectionRect,
+                creation.tool,
                 &geometryReady);
         if (!geometryReady) {
-            m_pendingSquigglyCreations.append(creation);
+            m_pendingTextMarkupCreations.append(creation);
             requestPageCandidateScan(creation.page);
             continue;
         }
@@ -4565,7 +4577,7 @@ void PDFEditController::completePendingSquigglyCreations(int page)
         const QVariantMap draft = materializeTextMarkupDraft(
             creation.page,
             annotationRects,
-            SquigglyTool,
+            creation.tool,
             creation.color);
         if (!draft.isEmpty()) {
             markDraftStateChanged(creation.page, true);
@@ -7547,7 +7559,7 @@ void PDFEditController::discardDrafts()
     if (m_saving
         || (!m_textEditActive
             && m_drafts.isEmpty()
-            && m_pendingSquigglyCreations.isEmpty()
+            && m_pendingTextMarkupCreations.isEmpty()
             && m_pageInsertions.isEmpty()
             && m_deletedSourcePages.isEmpty()
             && m_undoStack.isEmpty()
@@ -7567,8 +7579,8 @@ void PDFEditController::discardDrafts()
          ++revision) {
         affectedPages.insert(revision.key());
     }
-    for (const PendingSquigglyCreation &creation
-         : std::as_const(m_pendingSquigglyCreations)) {
+    for (const PendingTextMarkupCreation &creation
+         : std::as_const(m_pendingTextMarkupCreations)) {
         affectedPages.insert(creation.page);
     }
     const bool discardedPageStructure
@@ -7598,7 +7610,7 @@ void PDFEditController::discardDrafts()
         resetCommentIndex();
     }
     m_addedCandidates.clear();
-    m_pendingSquigglyCreations.clear();
+    m_pendingTextMarkupCreations.clear();
     m_pageInsertions.clear();
     m_deletedSourcePages.clear();
     if (m_document) {
@@ -7666,7 +7678,7 @@ bool PDFEditController::saveAs(const QUrl &target)
         emit statusMessage(qtTrId("NoPdfOpenForSaving"));
         return false;
     }
-    if (!m_pendingSquigglyCreations.isEmpty()) {
+    if (!m_pendingTextMarkupCreations.isEmpty()) {
         //% "Text information is still loading. Please try again."
         emit statusMessage(qtTrId("TextGeometryStillLoading"));
         return false;
@@ -7743,7 +7755,7 @@ bool PDFEditController::requestSaveAs(const QUrl &target)
         emit statusMessage(qtTrId("NoPdfOpenForSaving"));
         return false;
     }
-    if (!m_pendingSquigglyCreations.isEmpty()) {
+    if (!m_pendingTextMarkupCreations.isEmpty()) {
         //% "Text information is still loading. Please try again."
         emit statusMessage(qtTrId("TextGeometryStillLoading"));
         return false;
@@ -7938,7 +7950,7 @@ void PDFEditController::resetSession()
         m_candidateScanCancellation->store(true, std::memory_order_relaxed);
     }
     m_deferredCandidateScanPage = -1;
-    m_pendingSquigglyCreations.clear();
+    m_pendingTextMarkupCreations.clear();
     m_pageCandidates.clear();
     m_pageCandidateLru.clear();
     resetCommentIndex();
@@ -7990,19 +8002,19 @@ void PDFEditController::ensureCacheRevision()
         return;
     }
 
-    const bool hadPendingSquigglyCreations
-        = !m_pendingSquigglyCreations.isEmpty();
+    const bool hadPendingTextMarkupCreations
+        = !m_pendingTextMarkupCreations.isEmpty();
     m_cachedRevision = revision;
     if (m_candidateScanCancellation) {
         m_candidateScanCancellation->store(true, std::memory_order_relaxed);
     }
     m_deferredCandidateScanPage = -1;
-    m_pendingSquigglyCreations.clear();
+    m_pendingTextMarkupCreations.clear();
     m_pageCandidates.clear();
     m_pageCandidateLru.clear();
     resetCommentIndex();
     emit commentsChanged();
-    if (hadPendingSquigglyCreations) {
+    if (hadPendingTextMarkupCreations) {
         emit historyStateChanged();
     }
 }
@@ -8081,11 +8093,11 @@ void PDFEditController::requestPageCandidateScan(int page)
         return;
     }
 
-    const int priorityPage = pendingSquigglyScanPage();
+    const int priorityPage = pendingTextMarkupScanPage();
     if (priorityPage < 0) {
         m_deferredCandidateScanPage = page;
     } else if (page != priorityPage) {
-        // Preserve the latest ordinary request while unfinished Squiggly
+        // Preserve the latest ordinary request while unfinished text-markup
         // geometry takes priority.
         m_deferredCandidateScanPage = page;
     }
@@ -8114,9 +8126,9 @@ void PDFEditController::startPendingCandidateScan()
         return;
     }
 
-    const int priorityPage = pendingSquigglyScanPage();
-    const bool pendingSquigglyPriority = priorityPage >= 0;
-    const int page = pendingSquigglyPriority
+    const int priorityPage = pendingTextMarkupScanPage();
+    const bool pendingTextMarkupPriority = priorityPage >= 0;
+    const int page = pendingTextMarkupPriority
         ? priorityPage
         : m_deferredCandidateScanPage;
     if (page < 0) {
@@ -8236,7 +8248,7 @@ void PDFEditController::completePageCandidateScan(
             std::move(finalizedCandidates));
         touchPageCandidateCache(request.page);
         prunePageCandidateCache(request.page);
-        completePendingSquigglyCreations(request.page);
+        completePendingTextMarkupCreations(request.page);
         emit pageCandidatesReady(request.page);
         emit commentsChanged();
     }
@@ -8278,8 +8290,8 @@ bool PDFEditController::isPageCandidateCachePinned(int page) const
         return true;
     }
 
-    for (const PendingSquigglyCreation &creation
-         : m_pendingSquigglyCreations) {
+    for (const PendingTextMarkupCreation &creation
+         : m_pendingTextMarkupCreations) {
         if (creation.page == page) {
             return true;
         }
@@ -8687,8 +8699,8 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
             } else {
                 objectLayout->bounds = objectLayout->bounds.united(characterBounds);
             }
-            // The current preview and writer use upright axis-aligned quads.
-            // Do not create a misleading horizontal Squiggly for rotated text.
+            // The current previews and writer use upright axis-aligned quads.
+            // Do not create misleading horizontal markup for rotated text.
             if (!generated
                 && hasUsableUnicode
                 && !whitespace
@@ -12212,10 +12224,10 @@ void PDFEditController::applyPageState(const PageState &state)
             = m_document->displayPageIndexForSourcePage(deferredSourcePage);
     }
 
-    QVector<PendingSquigglyCreation> remappedPendingCreations;
-    remappedPendingCreations.reserve(m_pendingSquigglyCreations.size());
-    for (PendingSquigglyCreation creation
-         : std::as_const(m_pendingSquigglyCreations)) {
+    QVector<PendingTextMarkupCreation> remappedPendingCreations;
+    remappedPendingCreations.reserve(m_pendingTextMarkupCreations.size());
+    for (PendingTextMarkupCreation creation
+         : std::as_const(m_pendingTextMarkupCreations)) {
         const int remappedPage
             = m_document->displayPageIndexForSourcePage(creation.sourcePage);
         if (remappedPage < 0) {
@@ -12229,12 +12241,12 @@ void PDFEditController::applyPageState(const PageState &state)
         }
         creation.page = remappedPage;
         creation.pageSize = remappedPageSize;
-        if (!pendingSquigglyCreationIsCurrent(creation)) {
+        if (!pendingTextMarkupCreationIsCurrent(creation)) {
             continue;
         }
         remappedPendingCreations.append(std::move(creation));
     }
-    m_pendingSquigglyCreations = std::move(remappedPendingCreations);
+    m_pendingTextMarkupCreations = std::move(remappedPendingCreations);
 
     if (state.hasSelection) {
         const Candidate selectedCandidate = state.selectedCandidate;

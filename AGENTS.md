@@ -18,7 +18,7 @@ Current features:
 - Open multiple local PDF files in independent tabs and close them separately.
 - Insert a blank page immediately after the current page or delete the current
   page, with undo/redo/discard and Save/Save As persistence.
-- Add Sticky Note, Free Text, Highlight, Squiggly, Underline, Strikeout,
+- Add Sticky Note, Free Text, Highlight, Squiggly, Underline, Strikeout, Stamp,
   Square, Circle, Line, Polygon, PolyLine, and Ink annotations from the Comment
   tab; Ink is drawn with the Pencil tool. The Comment tab has its own Select
   button and activates it by default on entry. This `CommentSelectTool` shares
@@ -70,20 +70,20 @@ Current features:
   and `/CA`, regenerates the matching `/AP`, preserves `/BS`, `/BE`, `/LE`, and
   unrelated dictionary entries, and revalidates the indexed appearance
   fingerprint before committing.
-  Squiggly accepts only non-whitespace source-text glyphs intersected by the
-  drag gesture, snaps the result into per-line rectangles/QuadPoints, and
-  rejects whitespace-only or no-text selections. Nearly horizontal gestures use
-  a three-pixel hit-test band. If glyph geometry is still loading at release,
-  preserve the pending revision/page/selection/color, prioritize that page's
-  candidate scan, and materialize the draft automatically; Discard must cancel
-  pending Squiggly creation. Invisible OCR text is eligible
+  Highlight, Underline, Squiggly, and Strikeout accept only non-whitespace
+  source-text glyphs intersected by the drag gesture, snap the result into
+  per-line rectangles/QuadPoints, and reject whitespace-only or no-text
+  selections. Nearly horizontal gestures use a three-pixel hit-test band. If
+  glyph geometry is still loading at release, preserve the pending
+  revision/page/selection/tool/color, prioritize that page's candidate scan,
+  and materialize the draft automatically; Discard must cancel pending text
+  markup creation. Invisible OCR text is eligible
   for hit testing but never exposed as a selectable/editable text candidate.
-  Scans without a usable text layer do not support Squiggly. Current
+  Scans without a usable text layer do not support glyph-aware text markup. Current
   axis-aligned geometry accepts upright horizontal glyphs only; rotated/vertical
   glyphs require oriented QuadPoints and are ignored. Pages above the 50,000
   text-character safety cap do not cache partial glyph geometry and therefore
-  do not support Squiggly. Highlight, Underline, and Strikeout remain
-  free-rectangle markup tools.
+  do not support these four text-markup tools.
   Free Text accepts a click or drag to place a bounded text box. Its contents
   are edited through the comments panel and remain semantic `/Contents` text;
   Save writes a standard `/FreeText` annotation with a wrapped Unicode-safe
@@ -375,14 +375,14 @@ clipped or elided unintentionally.
   `QPointer<PDFPageItem>`.
 - Reject a result when its request id, document pointer, revision, page, zoom,
   device pixel ratio, or pixel size no longer matches.
-- Keep source-text glyph discovery for Squiggly inside the asynchronous page
+- Keep source-text glyph discovery for text markup inside the asynchronous page
   candidate scan. Return and cache only normalized glyph geometry on the GUI
   side; QML and GUI-thread controller paths must never open or inspect PDFium
   page/text handles for hit testing.
-- Preserve invisible OCR text as internal Squiggly hit-test geometry without
+- Preserve invisible OCR text as internal text-markup hit-test geometry without
   surfacing it through normal candidate selection/editing. Cache only
   non-whitespace, upright horizontal glyphs. If a page reports more than 50,000
-  text characters, cache no per-glyph Squiggly geometry for that page rather
+  text characters, cache no per-glyph text-markup geometry for that page rather
   than keeping a partial result; normal source-candidate scanning remains
   unchanged.
 
@@ -490,9 +490,9 @@ clipped or elided unintentionally.
   Polygon, PolyLine, and Ink through the subtype-safe drawing placeholder
   pipeline. Adding annotations alone must not call
   `FPDFPage_GenerateContent()`; mixed text/image edits still regenerate the
-  affected page content normally. A Squiggly selection carries snapped
-  rectangle/QuadPoints entries grouped by matched text line; Highlight,
-  Underline, and Strikeout keep the free rectangle drawn by the user. Free Text
+  affected page content normally. Highlight, Squiggly, Underline, and Strikeout
+  selections carry snapped rectangle/QuadPoints entries grouped by matched text
+  line. Free Text
   must keep `/Contents`, `/DA`, comment metadata, and a wrapped Unicode-capable
   `/AP`; editing a source Free Text annotation must replace its stale
   appearance. New Stamp annotations keep their standard preset `/Name`,

@@ -284,20 +284,20 @@ một history command khi mouse release. `TextEdit` đồng bộ rich text, rang
 content bounds với controller, nhưng giữ document local để undo/redo của editor
 không bị thay bằng một document mới.
 
-Squiggly có bước resolve geometry riêng cho preview và commit. `EditOverlay` gửi
-vùng kéo normalized cho controller; controller chỉ hit-test các glyph source-text
-không phải whitespace đã có trong kết quả page scan/cache bất đồng bộ, nhóm hit
-theo visual line và trả các rectangle/QuadPoints đã snap. Nét kéo gần-ngang dùng
-dải hit-test tối thiểu 3 px. Nếu cache chưa sẵn sàng lúc release, controller giữ
-pending gesture theo document revision/page/selection/màu, ưu tiên scan page đó
-và tự materialize draft khi geometry về; Discard hủy pending gesture. Không có glyph thì
-không tạo draft. Invisible OCR text được giữ như geometry hit-test-only và không
-được đưa vào candidate selection/editing. Geometry hiện chỉ nhận glyph
-ngang/upright; glyph xoay/dọc bị bỏ qua cho tới khi có oriented QuadPoints. Page
-không có text layer khả dụng hoặc có hơn 50.000 text characters không cache
-per-glyph geometry và không nhận Squiggly. QML không đụng tới PDFium handle.
-Highlight, Underline và Strikeout không đi qua bước snap này và tiếp tục dùng
-free rectangle của gesture.
+Highlight, Underline, Squiggly và Strikeout dùng cùng bước resolve geometry cho
+preview và commit. `EditOverlay` gửi vùng kéo normalized cho controller;
+controller chỉ hit-test các glyph source-text không phải whitespace đã có trong
+kết quả page scan/cache bất đồng bộ, nhóm hit theo visual line và trả các
+rectangle/QuadPoints đã snap. Nét kéo gần-ngang dùng dải hit-test tối thiểu 3
+px. Nếu cache chưa sẵn sàng lúc release, controller giữ pending gesture theo
+document revision/page/selection/tool/màu, ưu tiên scan page đó và tự
+materialize đúng subtype khi geometry về; Discard hủy pending gesture. Không có
+glyph thì không tạo draft. Invisible OCR text được giữ như geometry
+hit-test-only và không được đưa vào candidate selection/editing. Geometry hiện
+chỉ nhận glyph ngang/upright; glyph xoay/dọc bị bỏ qua cho tới khi có oriented
+QuadPoints. Page không có text layer khả dụng hoặc có hơn 50.000 text characters
+không cache per-glyph geometry và không nhận text markup. QML không đụng tới
+PDFium handle.
 
 Free Text dùng cùng nguyên tắc preview-then-commit: QML chỉ giữ điểm bắt đầu và
 hiện tại khi kéo, rồi gửi rectangle normalized mới nhất một lần khi thả. Một

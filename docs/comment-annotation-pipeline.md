@@ -56,10 +56,10 @@ selection ngoài comment khi tool đang active.
 
 | Công cụ UI | `Candidate.kind` | PDF subtype | Geometry hiện tại |
 |---|---|---|---|
-| Highlight | `highlight` | `/Highlight` | Rectangle tự do, ghi thành một hoặc nhiều `/QuadPoints`. |
-| Underline | `underline` | `/Underline` | Rectangle tự do, ghi thành `/QuadPoints`. |
+| Highlight | `highlight` | `/Highlight` | Giao gesture với glyph nguồn, snap thành rectangle/QuadPoints theo dòng. |
+| Underline | `underline` | `/Underline` | Giao gesture với glyph nguồn, snap thành rectangle/QuadPoints theo dòng. |
 | Squiggly | `squiggly` | `/Squiggly` | Giao gesture với glyph nguồn, snap thành rectangle/QuadPoints theo dòng. |
-| Strikeout | `strikeout` | `/StrikeOut` | Rectangle tự do, ghi thành `/QuadPoints`. |
+| Strikeout | `strikeout` | `/StrikeOut` | Giao gesture với glyph nguồn, snap thành rectangle/QuadPoints theo dòng. |
 | Sticky Note | `stickyNote` | `/Text` | Frame cố định 24 PDF point tại vị trí click. |
 | Free Text | `freeText` | `/FreeText` | Click dùng frame mặc định; drag dùng text box đã clamp trong page. |
 | Stamp | `stamp` | `/Stamp` | Sáu preset chuẩn; click dùng frame 160 × 50 point, drag dùng Rect đã clamp. |
@@ -90,7 +90,10 @@ Với cả mười ba loại có kind riêng ở bảng trên, implementation hi
 
 Giới hạn hiện tại:
 
-- ngoài Ink nguồn hợp lệ, geometry annotation nguồn không move/resize được;
+- geometry nguồn chỉ move/resize được cho Square, Circle, Line, Polygon,
+  PolyLine và Ink có geometry hợp lệ, khi document cho phép sửa annotation và
+  annotation không có ReadOnly, LockedContents hoặc Locked; các subtype nguồn
+  khác chưa có mutation geometry an toàn theo subtype;
 - reply-to-reply không được tạo từ UI;
 - reply chain nhập từ phần mềm khác được flatten thành một cấp hiển thị;
 - mỗi comment hoặc reply tối đa 700 UTF-16 code unit;
@@ -200,7 +203,7 @@ một command before/after; undo và redo phục hồi toàn bộ candidate/draf
 Xóa annotation nguồn được biểu diễn bằng tombstone draft thay vì gỡ annotation
 khỏi document đang mở.
 
-`hasDrafts` còn tính cả pending Squiggly creation. Vì vậy thả chuột khi glyph
+`hasDrafts` còn tính cả pending text-markup creation. Vì vậy thả chuột khi glyph
 geometry chưa sẵn sàng vẫn kích hoạt draft guard; Discard phải hủy cả pending
 request đó.
 
@@ -388,14 +391,11 @@ có thể round-trip; appearance ngoài/custom hiển thị thông báo chỉ đ
 Property-only Save của Line/PolyLine giữ nguyên `/LE` cùng `/BS`, `/BE` và các
 dictionary entry không liên quan.
 
-## 6. Geometry text markup, Squiggly và Ink
+## 6. Geometry text markup và Ink
 
-### 6.1 Text markup và Squiggly
+### 6.1 Text markup bám glyph
 
-Highlight, Underline và Strikeout hiện giữ free rectangle của gesture. Writer
-đổi rectangle này thành QuadPoints và bounding `/Rect`.
-
-Squiggly có pipeline riêng:
+Cả Highlight, Underline, Squiggly và Strikeout dùng chung pipeline geometry:
 
 1. Candidate scan cache bbox normalized của glyph source-text không whitespace.
 2. OCR Invisible được giữ dạng hit-test-only, không xuất hiện như text có thể
@@ -406,18 +406,21 @@ Squiggly có pipeline riêng:
 5. Vùng chỉ có whitespace hoặc không có glyph bị từ chối.
 
 Nét gần nằm ngang dùng hit-test band tối thiểu ba pixel. Nếu glyph geometry vẫn
-đang tải lúc release, controller giữ revision/page/selection/color, ưu tiên scan
-page đó và tự materialize draft khi kết quả về.
+đang tải lúc release, controller giữ revision/page/selection/tool/color, ưu tiên
+scan page đó và tự materialize đúng subtype khi kết quả về.
 
 Giới hạn an toàn:
 
 - chỉ glyph ngang/upright được cache;
 - glyph xoay/dọc cần oriented QuadPoints và hiện bị bỏ qua;
 - page trên 50.000 text characters không giữ partial per-glyph cache;
-- image-only page hoặc page không có usable text layer không hỗ trợ Squiggly.
+- image-only page hoặc page không có usable text layer không hỗ trợ bốn công cụ
+  text markup này.
 
-`SquigglyLine` chỉ vẽ presentation. Hit-test, grouping và QuadPoints luôn thuộc
-controller/writer, không được sao chép logic sang QML.
+`SquigglyLine` chỉ vẽ presentation zigzag của Squiggly; Highlight, Underline và
+Strikeout dùng cùng các rectangle đã resolve với renderer riêng. Hit-test,
+grouping và QuadPoints luôn thuộc controller/writer, không được sao chép logic
+sang QML.
 
 ### 6.2 Ink
 
@@ -511,10 +514,15 @@ text, trạng thái hoặc xóa. Thay đổi trạng thái còn tôn trọng c�
 và controller đều có trạng thái disable/reason; writer vẫn kiểm lại flags để
 chống source thay đổi giữa scan và Save.
 
-Ngoại lệ geometry hiện tại là Ink nguồn hợp lệ: move/resize cần annotation
-permission, không có ReadOnly/LockedContents/Locked và writer kiểm lại các điều
-kiện này trước Save. Các annotation nguồn khác vẫn không được move/resize page
-appearance nếu UI chưa cung cấp mutation đó.
+Geometry nguồn hiện hỗ trợ move/resize cho sáu drawing subtype Square, Circle,
+Line, Polygon, PolyLine và Ink khi geometry đã được scan hợp lệ. Mutation này
+cần annotation permission, không có ReadOnly/LockedContents/Locked và writer
+kiểm lại subtype, identity, geometry cùng các điều kiện đó trước Save. Move thuần
+giữ nguyên `/AP`; resize chỉ tái tạo `/AP` cho drawing comment TrePDF-managed có
+provenance, fingerprint và properties nằm trong capability an toàn, còn
+appearance ngoài/custom được giữ nguyên. Các annotation nguồn ngoài sáu subtype
+này vẫn không được move/resize nếu chưa có UI/writer mutation an toàn theo
+subtype.
 
 ## 9. Render và draft presentation
 
@@ -529,8 +537,9 @@ fill/stroke thực tế từ path object trong normal appearance. Không dùng `
 Các quy tắc tránh vẽ hai lần:
 
 - source annotation bị draft xóa được tạm ẩn trong render worker;
-- Ink nguồn đang kéo/đã dịch được tạm ẩn, còn `InkDrawingView` vẽ mọi stroke ở
-  vị trí draft để không phụ thuộc appearance nguồn cũ;
+- source Square/Circle/Line/Polygon/PolyLine/Ink đang move/resize được tạm ẩn;
+  `CommentDrawingView` vẽ endpoint/vertex và `InkDrawingView` vẽ mọi stroke ở
+  geometry draft để không phụ thuộc appearance nguồn cũ;
 - source drawing đổi style được tạm ẩn và delegate vẽ stroke/fill/opacity draft;
   delegate chỉ vẽ khi object ID có trong suppression snapshot đi cùng texture;
   undo/discard giữ một restoration preview theo đúng object cho tới khi texture
@@ -555,7 +564,7 @@ PDFium luôn đổi cùng một rendered frame.
 Trên GUI thread, controller:
 
 1. commit editor comment đang mở;
-2. từ chối Save nếu còn pending Squiggly geometry;
+2. từ chối Save nếu còn pending text-markup geometry;
 3. lấy form snapshot nếu form runtime có draft;
 4. gọi `PDFSaveWriter::prepare()` để copy draft, page map, metadata và target;
 5. đặt `saving = true` để khóa mutation/tab lifecycle.
@@ -731,8 +740,8 @@ Coverage comment hiện cần được duy trì cho:
 - chuyển Edit → Comment phải bật `CommentSelectTool`, đặt nút Select ở trạng
   thái `primary`, và mode này chỉ hit-test/chọn/khôi phục comment candidate;
 - round-trip Highlight, Underline, Squiggly và Strikeout;
-- Squiggly glyph snap, OCR Invisible, pending scan, whitespace rejection,
-  rotated glyph và safety cap;
+- glyph snap của cả bốn text-markup subtype, OCR Invisible, pending scan,
+  whitespace rejection, rotated glyph và safety cap;
 - Sticky Note và Free Text Unicode appearance;
 - normal `/AP` của Sticky Note/reply và chuẩn hóa CR trong `/Contents`;
 - round-trip Square, Circle, Line, Polygon và PolyLine, gồm source/add geometry,
@@ -784,14 +793,15 @@ Sau thay đổi appearance/render suppression, cần mở file kết quả bằn
 
 ## 13. Gaps và roadmap
 
-Bảng này không mô tả tính năng đã có.
+Bảng này không mô tả tính năng đã có. Review/Marked, Set Status với
+Accepted/Rejected/Cancelled/Completed/Deferred/Future và Mark with Checkmark đã
+thuộc implementation hiện tại; gap còn lại trong nhóm này chỉ là `/RT /Group`.
 
 | Ưu tiên | Gap | Hướng triển khai |
 |---|---|---|
-| P0 | Text-aware markup đồng nhất | Dùng glyph cache của Squiggly cho Highlight, Underline và Strikeout. |
 | P1 | Drawing style nâng cao | UI cho border width/style, dash, effect và line endings với parser/capability source đầy đủ. |
 | P1 | Free Text nâng cao | `/IT /FreeTextCallout`, `/CL`, `/LE`, Typewriter, `/Q`, `/RC`/`DS`, border/fill/opacity. |
-| P1 | Review state và grouping | Phân biệt `/State` + `/StateModel`, `/RT /R` và `/RT /Group`; hỗ trợ Accepted/Rejected/Completed/Marked. |
+| P1 | Annotation grouping | Bổ sung semantics `/RT /Group` tách biệt với reply `/RT /R` và state-transition graph hiện tại. |
 | P1 | Text-edit marks | `/Caret`, Insert/Replace review workflow. |
 | P1 | Comment workflow | Search/filter/sort, author profile, export selected và import/export XFDF. |
 | P2 | File attachment comment | `/FileAttachment` + `/FS`, byte snapshot, size limit và sandbox mở/extract. |

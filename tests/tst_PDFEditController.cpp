@@ -5376,7 +5376,8 @@ private slots:
     void savesNormalizedVietnameseRichText();
     void addsHighlightWithUndoRedoAndDiscard();
     void keepsTextMarkupColorsIndependent();
-    void requiresSourceTextOnlyForSquiggly();
+    void requiresSourceTextForAllMarkupTools_data();
+    void requiresSourceTextForAllMarkupTools();
     void prioritizesPendingSquigglyCandidateScan();
     void resumesNormalCandidateScanAfterPendingSquigglyPriority();
     void discardsPendingSquigglyBeforeCandidateScanCompletes();
@@ -5390,8 +5391,8 @@ private slots:
     void rejectsVerticalTextForSquiggly();
     void matchesSquigglyPreviewGeometryToPdfium();
     void matchesSquigglyPreviewRenderingToSavedPdfium();
-    void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete_data();
-    void addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete();
+    void addsTextMarkupWithUndoRedoAndDelete_data();
+    void addsTextMarkupWithUndoRedoAndDelete();
     void addsStickyNoteWithPanelModelAndUndo();
     void addsFreeTextWithPanelModelAndUndo();
     void savesStampPresetWithUndoRedo();
@@ -5454,8 +5455,8 @@ private slots:
     void deletesSourceCommentsWithUndoRedoDiscardAndSave();
     void deletesSourceCommentPopupRoundTrip();
     void savesHighlightAnnotationRoundTrip();
-    void savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip_data();
-    void savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip();
+    void savesTextMarkupAnnotationRoundTrip_data();
+    void savesTextMarkupAnnotationRoundTrip();
     void savesStickyNoteRoundTrip();
     void savesAndEditsFreeTextRoundTrip();
     void savesFreeTextWithPageLocalDuplicateNames();
@@ -13152,6 +13153,11 @@ void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
     const QRectF selectionRect = textCandidate
         .value(QStringLiteral("sourceRect"))
         .toRectF();
+    const QVariantList snappedRects
+        = controller.textMarkupRectsForSelection(0, selectionRect);
+    QVERIFY(!snappedRects.isEmpty());
+    const QRectF expectedSourceRect
+        = boundingRectForCoordinateMaps(snappedRects);
     const QVariantMap highlight = controller.addHighlight(
         0,
         selectionRect);
@@ -13160,13 +13166,13 @@ void PDFEditControllerTest::addsHighlightWithUndoRedoAndDiscard()
         QStringLiteral("highlight"));
     QCOMPARE(
         highlight.value(QStringLiteral("sourceRect")).toRectF(),
-        selectionRect);
+        expectedSourceRect);
     QCOMPARE(
         highlight.value(QStringLiteral("highlightColor")).value<QColor>(),
         chosenColor);
     QCOMPARE(
-        highlight.value(QStringLiteral("highlightRects")).toList().size(),
-        1);
+        highlight.value(QStringLiteral("highlightRects")).toList(),
+        snappedRects);
     QCOMPARE(controller.draftsForPage(0).size(), 1);
     QCOMPARE(
         candidateForKind(
@@ -13315,10 +13321,17 @@ void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
     controller.setStrikeoutColor(strikeoutColor);
     QCOMPARE(strikeoutColorSpy.count(), 1);
 
+    const QRectF selectionRect = textCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+
     controller.setTool(PDFEditController::HighlightTool);
     const QVariantMap highlight = controller.addHighlight(
         0,
-        QRectF(0.10, 0.20, 0.30, 0.05));
+        selectionRect);
+    QCOMPARE(
+        highlight.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("highlight"));
     QCOMPARE(
         highlight.value(QStringLiteral("highlightColor")).value<QColor>(),
         highlightColor);
@@ -13326,7 +13339,7 @@ void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
     controller.setTool(PDFEditController::UnderlineTool);
     const QVariantMap underline = controller.addHighlight(
         0,
-        QRectF(0.12, 0.30, 0.30, 0.05));
+        selectionRect);
     QCOMPARE(
         underline.value(QStringLiteral("kind")).toString(),
         QStringLiteral("underline"));
@@ -13337,7 +13350,7 @@ void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
     controller.setTool(PDFEditController::SquigglyTool);
     const QVariantMap squiggly = controller.addHighlight(
         0,
-        textCandidate.value(QStringLiteral("sourceRect")).toRectF());
+        selectionRect);
     QCOMPARE(
         squiggly.value(QStringLiteral("kind")).toString(),
         QStringLiteral("squiggly"));
@@ -13348,7 +13361,7 @@ void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
     controller.setTool(PDFEditController::StrikeoutTool);
     const QVariantMap strikeout = controller.addHighlight(
         0,
-        QRectF(0.14, 0.40, 0.30, 0.05));
+        selectionRect);
     QCOMPARE(
         strikeout.value(QStringLiteral("kind")).toString(),
         QStringLiteral("strikeout"));
@@ -13358,50 +13371,113 @@ void PDFEditControllerTest::keepsTextMarkupColorsIndependent()
     QCOMPARE(controller.draftsForPage(0).size(), 4);
 }
 
-void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
+void PDFEditControllerTest::requiresSourceTextForAllMarkupTools_data()
 {
+    QTest::addColumn<int>("tool");
+    QTest::addColumn<QString>("kind");
+    QTest::addColumn<QColor>("queuedColor");
+
+    QTest::newRow("highlight")
+        << static_cast<int>(PDFEditController::HighlightTool)
+        << QStringLiteral("highlight")
+        << QColor(255, 128, 171, 151);
+    QTest::newRow("underline")
+        << static_cast<int>(PDFEditController::UnderlineTool)
+        << QStringLiteral("underline")
+        << QColor(73, 91, 211, 187);
+    QTest::newRow("squiggly")
+        << static_cast<int>(PDFEditController::SquigglyTool)
+        << QStringLiteral("squiggly")
+        << QColor(38, 166, 154, 173);
+    QTest::newRow("strikeout")
+        << static_cast<int>(PDFEditController::StrikeoutTool)
+        << QStringLiteral("strikeout")
+        << QColor(123, 31, 162, 181);
+}
+
+void PDFEditControllerTest::requiresSourceTextForAllMarkupTools()
+{
+    QFETCH(int, tool);
+    QFETCH(QString, kind);
+    QFETCH(QColor, queuedColor);
+
     const QString sourcePath = m_temporaryDirectory.filePath(
-        QStringLiteral("squiggly-text-hit-source.pdf"));
+        QStringLiteral("%1-text-hit-source.pdf").arg(kind));
     QVERIFY(createFontStylePdf(sourcePath));
 
     PDFDocument document;
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
-    controller.setTool(PDFEditController::SquigglyTool);
-    const QColor queuedSquigglyColor(73, 91, 211, 187);
-    controller.setSquigglyColor(queuedSquigglyColor);
+    const auto markupTool = static_cast<PDFEditController::Tool>(tool);
+    controller.setTool(markupTool);
+    switch (markupTool) {
+    case PDFEditController::HighlightTool:
+        controller.setHighlightColor(queuedColor);
+        break;
+    case PDFEditController::UnderlineTool:
+        controller.setUnderlineColor(queuedColor);
+        break;
+    case PDFEditController::SquigglyTool:
+        controller.setSquigglyColor(queuedColor);
+        break;
+    case PDFEditController::StrikeoutTool:
+        controller.setStrikeoutColor(queuedColor);
+        break;
+    default:
+        QFAIL("Unexpected text-markup tool");
+    }
     QSignalSpy statusSpy(
         &controller,
         &PDFEditController::statusMessage);
-    const QVariantMap pendingSquiggly = controller.addHighlight(
+    const QVariantMap pendingMarkup = controller.addHighlight(
         0,
         QRectF(0.05, 0.05, 0.90, 0.90));
     QCOMPARE(
-        pendingSquiggly.value(QStringLiteral("kind")).toString(),
-        QStringLiteral("squiggly"));
-    QVERIFY(pendingSquiggly.value(QStringLiteral("pending")).toBool());
+        pendingMarkup.value(QStringLiteral("kind")).toString(),
+        kind);
+    QVERIFY(pendingMarkup.value(QStringLiteral("pending")).toBool());
     QVERIFY(controller.draftsForPage(0).isEmpty());
     QVERIFY(controller.hasDrafts());
     QCOMPARE(statusSpy.count(), 0);
 
-    controller.setTool(PDFEditController::HighlightTool);
-    controller.setSquigglyColor(QColor(198, 40, 40, 192));
+    controller.setTool(PDFEditController::SelectTool);
+    const QColor changedColor(17, 29, 43, 109);
+    switch (markupTool) {
+    case PDFEditController::HighlightTool:
+        controller.setHighlightColor(changedColor);
+        break;
+    case PDFEditController::UnderlineTool:
+        controller.setUnderlineColor(changedColor);
+        break;
+    case PDFEditController::SquigglyTool:
+        controller.setSquigglyColor(changedColor);
+        break;
+    case PDFEditController::StrikeoutTool:
+        controller.setStrikeoutColor(changedColor);
+        break;
+    default:
+        QFAIL("Unexpected text-markup tool");
+    }
 
     const QVariantList candidates = waitForCandidates(controller, 0);
     QTRY_COMPARE_WITH_TIMEOUT(controller.draftsForPage(0).size(), 1, 2000);
-    const QVariantMap completedSquiggly = controller
+    const QVariantMap completedMarkup = controller
         .draftsForPage(0)
         .constFirst()
         .toMap();
     QCOMPARE(
-        completedSquiggly.value(QStringLiteral("kind")).toString(),
-        QStringLiteral("squiggly"));
+        completedMarkup.value(QStringLiteral("kind")).toString(),
+        kind);
     QCOMPARE(
-        completedSquiggly
+        completedMarkup
             .value(QStringLiteral("highlightColor"))
             .value<QColor>(),
-        queuedSquigglyColor);
+        queuedColor);
+    QVERIFY(!completedMarkup
+        .value(QStringLiteral("highlightRects"))
+        .toList()
+        .isEmpty());
     QCOMPARE(controller.undo(), -1);
     QVERIFY(controller.draftsForPage(0).isEmpty());
     QVERIFY(!controller.hasDrafts());
@@ -13433,13 +13509,26 @@ void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
         gapWidth - 2.0 * horizontalInset,
         gapBottom - gapTop);
     QVERIFY(whitespaceRect.isValid());
+    controller.setTool(markupTool);
     QVERIFY(controller
         .textMarkupRectsForSelection(0, whitespaceRect)
         .isEmpty());
 
-    controller.setTool(PDFEditController::SquigglyTool);
     statusSpy.clear();
     QVERIFY(controller.addHighlight(0, whitespaceRect).isEmpty());
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(statusSpy.count(), 1);
+    QCOMPARE(
+        statusSpy.constFirst().constFirst().toString(),
+        qtTrId("NoTextInSelectedArea"));
+
+    const QRectF noTextRect(0.82, 0.82, 0.12, 0.08);
+    QVERIFY(controller
+        .textMarkupRectsForSelection(0, noTextRect)
+        .isEmpty());
+    statusSpy.clear();
+    QVERIFY(controller.addHighlight(0, noTextRect).isEmpty());
     QVERIFY(controller.draftsForPage(0).isEmpty());
     QVERIFY(!controller.hasDrafts());
     QCOMPARE(statusSpy.count(), 1);
@@ -13453,40 +13542,45 @@ void PDFEditControllerTest::requiresSourceTextOnlyForSquiggly()
         leftWordRect.center().y() - thinSelectionHeight / 2.0,
         leftWordRect.width(),
         thinSelectionHeight);
-    const QVariantMap thinSquiggly = controller.addHighlight(
+    const QVariantList thinMarkupRects
+        = controller.textMarkupRectsForSelection(0, thinTextSelection);
+    QCOMPARE(thinMarkupRects.size(), 1);
+    const QRectF thinMarkupRect = rectFromCoordinateMap(
+        thinMarkupRects.constFirst());
+    const QRectF helloGlyphBounds = normalizedGlyphBoundsForText(
+        sourcePath,
+        QStringLiteral("Hello"));
+    QVERIFY(helloGlyphBounds.isValid());
+    constexpr qreal normalizedTolerance = 0.00001;
+    QVERIFY(qAbs(thinMarkupRect.left() - helloGlyphBounds.left())
+        < normalizedTolerance);
+    QVERIFY(qAbs(thinMarkupRect.top() - helloGlyphBounds.top())
+        < normalizedTolerance);
+    QVERIFY(qAbs(thinMarkupRect.right() - helloGlyphBounds.right())
+        < normalizedTolerance);
+    const qreal expectedBottom = markupTool == PDFEditController::SquigglyTool
+        ? qMin<qreal>(
+              1.0,
+              helloGlyphBounds.bottom()
+                  + 3.5 / document.pageSize(0).height())
+        : helloGlyphBounds.bottom();
+    QVERIFY(qAbs(thinMarkupRect.bottom() - expectedBottom)
+        < normalizedTolerance);
+    const QVariantMap thinMarkup = controller.addHighlight(
         0,
         thinTextSelection);
     QCOMPARE(
-        thinSquiggly.value(QStringLiteral("kind")).toString(),
-        QStringLiteral("squiggly"));
+        thinMarkup.value(QStringLiteral("kind")).toString(),
+        kind);
+    QCOMPARE(
+        thinMarkup.value(QStringLiteral("highlightRects")).toList(),
+        thinMarkupRects);
+    QCOMPARE(
+        thinMarkup.value(QStringLiteral("sourceRect")).toRectF(),
+        boundingRectForCoordinateMaps(thinMarkupRects));
     QCOMPARE(controller.draftsForPage(0).size(), 1);
     QCOMPARE(controller.undo(), -1);
     QVERIFY(controller.draftsForPage(0).isEmpty());
-
-    struct MarkupCase {
-        PDFEditController::Tool tool;
-        QString kind;
-    };
-    const MarkupCase freeformCases[] = {
-        {PDFEditController::HighlightTool, QStringLiteral("highlight")},
-        {PDFEditController::UnderlineTool, QStringLiteral("underline")},
-        {PDFEditController::StrikeoutTool, QStringLiteral("strikeout")},
-    };
-    for (const MarkupCase &markupCase : freeformCases) {
-        controller.setTool(markupCase.tool);
-        const QVariantMap annotation = controller.addHighlight(
-            0,
-            whitespaceRect);
-        QCOMPARE(
-            annotation.value(QStringLiteral("kind")).toString(),
-            markupCase.kind);
-        QCOMPARE(
-            annotation.value(QStringLiteral("sourceRect")).toRectF(),
-            whitespaceRect);
-        QCOMPARE(controller.draftsForPage(0).size(), 1);
-        QCOMPARE(controller.undo(), -1);
-        QVERIFY(controller.draftsForPage(0).isEmpty());
-    }
 }
 
 void PDFEditControllerTest::prioritizesPendingSquigglyCandidateScan()
@@ -13804,6 +13898,7 @@ void PDFEditControllerTest::keepsSquigglyGapGroupingStableAcrossPageAspectRatios
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     QCOMPARE(document.pageCount(), 2);
     controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
 
     QVector<QVariantList> markupRectsByPage;
     QVector<QRectF> physicalBoundsByPage;
@@ -13857,6 +13952,7 @@ void PDFEditControllerTest::snapsSquigglyToSourceTextAndSavesQuadPoints()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
     const QVariantList candidates = waitForCandidates(controller, 0);
     const QVariantMap firstLine = candidateForText(
         candidates,
@@ -14012,6 +14108,7 @@ void PDFEditControllerTest::clipsSquigglyGapAtPageBottom()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
     const QVariantMap textCandidate = candidateForText(
         waitForCandidates(controller, 0),
         QString::fromLatin1(kBottomEdgeText));
@@ -14066,6 +14163,7 @@ void PDFEditControllerTest::usesInvisibleOcrTextForSquiggly()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
 
     QSignalSpy candidatesReadySpy(
         &controller,
@@ -14141,6 +14239,7 @@ void PDFEditControllerTest::rejectsVerticalTextForSquiggly()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
     const QVariantList candidates = waitForCandidates(controller, 0);
     const QVariantMap uprightCandidate = candidateForText(
         candidates,
@@ -14260,6 +14359,7 @@ void PDFEditControllerTest::matchesSquigglyPreviewRenderingToSavedPdfium()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    controller.setTool(PDFEditController::SquigglyTool);
     const QVariantMap textCandidate = candidateForText(
         waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
@@ -14381,11 +14481,14 @@ void PDFEditControllerTest::matchesSquigglyPreviewRenderingToSavedPdfium()
     }
 }
 
-void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete_data()
+void PDFEditControllerTest::addsTextMarkupWithUndoRedoAndDelete_data()
 {
     QTest::addColumn<int>("tool");
     QTest::addColumn<QString>("kind");
 
+    QTest::newRow("highlight")
+        << static_cast<int>(PDFEditController::HighlightTool)
+        << QStringLiteral("highlight");
     QTest::newRow("underline")
         << static_cast<int>(PDFEditController::UnderlineTool)
         << QStringLiteral("underline");
@@ -14397,7 +14500,7 @@ void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDele
         << QStringLiteral("squiggly");
 }
 
-void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDelete()
+void PDFEditControllerTest::addsTextMarkupWithUndoRedoAndDelete()
 {
     QFETCH(int, tool);
     QFETCH(QString, kind);
@@ -14411,22 +14514,14 @@ void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDele
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
 
-    QRectF selectionRect(0.12, 0.18, 0.28, 0.045);
-    QRectF expectedSourceRect = selectionRect;
-    if (tool == static_cast<int>(PDFEditController::SquigglyTool)) {
-        const QVariantMap textCandidate = candidateForText(
-            waitForCandidates(controller, 0),
-            QString::fromLatin1(kRegularText));
-        QVERIFY(!textCandidate.isEmpty());
-        selectionRect = textCandidate
-            .value(QStringLiteral("sourceRect"))
-            .toRectF();
-        const QVariantList snappedRects
-            = controller.textMarkupRectsForSelection(0, selectionRect);
-        QVERIFY(!snappedRects.isEmpty());
-        expectedSourceRect = boundingRectForCoordinateMaps(snappedRects);
-    }
+    QVERIFY(!waitForCandidates(controller, 0).isEmpty());
     controller.setTool(static_cast<PDFEditController::Tool>(tool));
+    const QRectF selectionRect(0.05, 0.05, 0.90, 0.65);
+    const QVariantList snappedRects
+        = controller.textMarkupRectsForSelection(0, selectionRect);
+    QVERIFY(snappedRects.size() > 1);
+    const QRectF expectedSourceRect
+        = boundingRectForCoordinateMaps(snappedRects);
     const QVariantMap annotation = controller.addHighlight(
         0,
         selectionRect);
@@ -14434,6 +14529,9 @@ void PDFEditControllerTest::addsUnderlineStrikeoutAndSquigglyWithUndoRedoAndDele
     QCOMPARE(
         annotation.value(QStringLiteral("sourceRect")).toRectF(),
         expectedSourceRect);
+    QCOMPARE(
+        annotation.value(QStringLiteral("highlightRects")).toList(),
+        snappedRects);
     QVERIFY(
         annotation.value(QStringLiteral("objectId")).toString().startsWith(
             kind + QLatin1Char(':')));
@@ -21353,29 +21451,30 @@ void PDFEditControllerTest::deletesSourceCommentsWithUndoRedoDiscardAndSave()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(basePath)));
     controller.setDocument(&document);
-    const QVariantMap squigglyTextCandidate = candidateForText(
+    const QVariantMap textMarkupCandidate = candidateForText(
         waitForCandidates(controller, 0),
         QString::fromLatin1(kUprightText));
-    QVERIFY(!squigglyTextCandidate.isEmpty());
+    QVERIFY(!textMarkupCandidate.isEmpty());
+    const QRectF textMarkupRect = textMarkupCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
 
     controller.setTool(PDFEditController::HighlightTool);
     QVERIFY(!controller.addHighlight(
         0,
-        QRectF(0.10, 0.18, 0.22, 0.04)).isEmpty());
+        textMarkupRect).isEmpty());
     controller.setTool(PDFEditController::UnderlineTool);
     QVERIFY(!controller.addHighlight(
         0,
-        QRectF(0.12, 0.28, 0.24, 0.04)).isEmpty());
+        textMarkupRect).isEmpty());
     controller.setTool(PDFEditController::StrikeoutTool);
     QVERIFY(!controller.addHighlight(
         0,
-        QRectF(0.14, 0.38, 0.26, 0.04)).isEmpty());
+        textMarkupRect).isEmpty());
     controller.setTool(PDFEditController::SquigglyTool);
     QVERIFY(!controller.addHighlight(
         0,
-        squigglyTextCandidate
-            .value(QStringLiteral("sourceRect"))
-            .toRectF()).isEmpty());
+        textMarkupRect).isEmpty());
     controller.setTool(PDFEditController::StickyNoteTool);
     QVERIFY(!controller.addStickyNote(0, QPointF(0.2, 0.6)).isEmpty());
     controller.setSelectedCommentText(QStringLiteral("Source comment"));
@@ -21546,13 +21645,28 @@ void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QSizeF pageSize = document.pageSize(0);
-    const QRectF selectionRect(0.10, 0.20, 0.30, 0.05);
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
+    controller.setTool(PDFEditController::HighlightTool);
+    const QRectF selectionRect = textCandidate
+        .value(QStringLiteral("sourceRect"))
+        .toRectF();
+    const QVariantList snappedRects
+        = controller.textMarkupRectsForSelection(0, selectionRect);
+    QCOMPARE(snappedRects.size(), 1);
+    const QRectF expectedRect = rectFromCoordinateMap(
+        snappedRects.constFirst());
     const QColor highlightColor(139, 195, 74, 96);
     controller.setHighlightColor(highlightColor);
     const QVariantMap addedHighlight = controller.addHighlight(
         0,
         selectionRect);
     QVERIFY(!addedHighlight.isEmpty());
+    QCOMPARE(
+        addedHighlight.value(QStringLiteral("highlightRects")).toList(),
+        snappedRects);
     QVERIFY(!addedHighlight
         .value(QStringLiteral("commentAuthor"))
         .toString()
@@ -21598,11 +21712,11 @@ void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
     QVERIFY(!inspection.creationDate.isEmpty());
     QVERIFY(inspection.modificationDate.isEmpty());
 
-    const qreal expectedLeft = selectionRect.left() * pageSize.width();
-    const qreal expectedRight = selectionRect.right() * pageSize.width();
-    const qreal expectedTop = (1.0 - selectionRect.top())
+    const qreal expectedLeft = expectedRect.left() * pageSize.width();
+    const qreal expectedRight = expectedRect.right() * pageSize.width();
+    const qreal expectedTop = (1.0 - expectedRect.top())
         * pageSize.height();
-    const qreal expectedBottom = (1.0 - selectionRect.bottom())
+    const qreal expectedBottom = (1.0 - expectedRect.bottom())
         * pageSize.height();
     const auto closeEnough = [](qreal actual, qreal expected) {
         return qAbs(actual - expected) < 0.05;
@@ -21622,12 +21736,16 @@ void PDFEditControllerTest::savesHighlightAnnotationRoundTrip()
     QVERIFY(closeEnough(quad.y4, expectedBottom));
 }
 
-void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip_data()
+void PDFEditControllerTest::savesTextMarkupAnnotationRoundTrip_data()
 {
     QTest::addColumn<int>("tool");
     QTest::addColumn<int>("subtype");
     QTest::addColumn<QString>("kind");
 
+    QTest::newRow("highlight")
+        << static_cast<int>(PDFEditController::HighlightTool)
+        << static_cast<int>(FPDF_ANNOT_HIGHLIGHT)
+        << QStringLiteral("highlight");
     QTest::newRow("underline")
         << static_cast<int>(PDFEditController::UnderlineTool)
         << static_cast<int>(FPDF_ANNOT_UNDERLINE)
@@ -21642,7 +21760,7 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
         << QStringLiteral("squiggly");
 }
 
-void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTrip()
+void PDFEditControllerTest::savesTextMarkupAnnotationRoundTrip()
 {
     QFETCH(int, tool);
     QFETCH(int, subtype);
@@ -21659,27 +21777,17 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
     const QSizeF pageSize = document.pageSize(0);
-    QRectF selectionRect(0.14, 0.24, 0.32, 0.04);
-    QVector<QRectF> expectedRects;
-    if (tool == static_cast<int>(PDFEditController::SquigglyTool)) {
-        const QVariantMap textCandidate = candidateForText(
-            waitForCandidates(controller, 0),
-            QString::fromLatin1(kGroupedText));
-        QVERIFY(!textCandidate.isEmpty());
-        selectionRect = textCandidate
-            .value(QStringLiteral("sourceRect"))
-            .toRectF();
-        const QVariantList snappedRects
-            = controller.textMarkupRectsForSelection(0, selectionRect);
-        QVERIFY(!snappedRects.isEmpty());
-        expectedRects.reserve(snappedRects.size());
-        for (const QVariant &rectValue : snappedRects) {
-            expectedRects.append(rectFromCoordinateMap(rectValue));
-        }
-    } else {
-        expectedRects.append(selectionRect);
-    }
+    QVERIFY(!waitForCandidates(controller, 0).isEmpty());
     controller.setTool(static_cast<PDFEditController::Tool>(tool));
+    const QRectF selectionRect(0.05, 0.05, 0.90, 0.65);
+    const QVariantList snappedRects
+        = controller.textMarkupRectsForSelection(0, selectionRect);
+    QVERIFY(snappedRects.size() > 1);
+    QVector<QRectF> expectedRects;
+    expectedRects.reserve(snappedRects.size());
+    for (const QVariant &rectValue : snappedRects) {
+        expectedRects.append(rectFromCoordinateMap(rectValue));
+    }
     const QColor annotationColor(38, 166, 154, 160);
     const QColor unrelatedHighlightColor(255, 128, 171, 96);
     if (tool == static_cast<int>(PDFEditController::UnderlineTool)) {
@@ -21708,6 +21816,9 @@ void PDFEditControllerTest::savesUnderlineStrikeoutAndSquigglyAnnotationRoundTri
             .value(QStringLiteral("highlightColor"))
             .value<QColor>(),
         annotationColor);
+    QCOMPARE(
+        addedAnnotation.value(QStringLiteral("highlightRects")).toList(),
+        snappedRects);
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     QVERIFY(!controller.hasDrafts());
@@ -22324,16 +22435,21 @@ void PDFEditControllerTest::normalizesCommentContentsLineEndingsOnSave()
         QStringLiteral("comment-line-endings-source.pdf"));
     const QString outputPath = m_temporaryDirectory.filePath(
         QStringLiteral("comment-line-endings-output.pdf"));
-    QVERIFY(createRootCommentOnlyPdf(sourcePath));
+    QVERIFY(createFontStylePdf(sourcePath));
 
     PDFDocument document;
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
-    controller.requestCommentIndex();
-    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
-
-    const QVariantMap root = controller.commentItems().constFirst().toMap();
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
+    controller.setTool(PDFEditController::StickyNoteTool);
+    const QVariantMap root = controller.addStickyNote(
+        0,
+        QPointF(0.12, 0.16));
+    QVERIFY(!root.isEmpty());
     const QString rootObjectId = root
         .value(QStringLiteral("objectId"))
         .toString();
@@ -22366,9 +22482,10 @@ void PDFEditControllerTest::normalizesCommentContentsLineEndingsOnSave()
         0,
         freeText.value(QStringLiteral("objectId")).toString(),
         mixedLineEndings));
+    controller.setTool(PDFEditController::HighlightTool);
     const QVariantMap highlight = controller.addHighlight(
         0,
-        QRectF(0.15, 0.35, 0.35, 0.05));
+        textCandidate.value(QStringLiteral("sourceRect")).toRectF());
     QVERIFY(!highlight.isEmpty());
     QVERIFY(controller.setCommentText(
         0,
@@ -22377,7 +22494,7 @@ void PDFEditControllerTest::normalizesCommentContentsLineEndingsOnSave()
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     const QVector<QString> annotationNames{
-        QStringLiteral("root-comment"),
+        rootObjectId,
         reply.value(QStringLiteral("objectId")).toString(),
         freeText.value(QStringLiteral("objectId")).toString(),
         highlight.value(QStringLiteral("objectId")).toString(),
@@ -22459,10 +22576,14 @@ void PDFEditControllerTest::keepsMarkupReplyIdsUniqueAcrossReopen()
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
 
+    QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
     controller.setTool(PDFEditController::HighlightTool);
     QVERIFY(!controller.addHighlight(
         0,
-        QRectF(0.12, 0.18, 0.22, 0.04)).isEmpty());
+        textCandidate.value(QStringLiteral("sourceRect")).toRectF()).isEmpty());
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     controller.requestCommentIndex();
     QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
@@ -22472,10 +22593,14 @@ void PDFEditControllerTest::keepsMarkupReplyIdsUniqueAcrossReopen()
         .value(QStringLiteral("objectId"))
         .toString();
 
+    textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!textCandidate.isEmpty());
     controller.setTool(PDFEditController::HighlightTool);
     const QVariantMap secondHighlight = controller.addHighlight(
         0,
-        QRectF(0.12, 0.28, 0.22, 0.04));
+        textCandidate.value(QStringLiteral("sourceRect")).toRectF());
     QVERIFY(!secondHighlight.isEmpty());
     const QVariantMap reply = controller.addCommentReply(
         0,
@@ -22692,9 +22817,11 @@ void PDFEditControllerTest::savesHighlightAlongsideTextEdit()
         waitForCandidates(controller, 0),
         QString::fromLatin1(kRegularText));
     QVERIFY(!textCandidate.isEmpty());
+    controller.setTool(PDFEditController::HighlightTool);
     QVERIFY(!controller.addHighlight(
         0,
-        QRectF(0.12, 0.16, 0.25, 0.04)).isEmpty());
+        textCandidate.value(QStringLiteral("sourceRect")).toRectF()).isEmpty());
+    controller.setTool(PDFEditController::EditTextTool);
     QVERIFY(controller.selectCandidate(
         0,
         textCandidate.value(QStringLiteral("objectId")).toString()));
@@ -22729,9 +22856,14 @@ void PDFEditControllerTest::preservesPatternGraphicsWhenSavingHighlight()
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
+    const QVariantMap textCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QStringLiteral("Pattern edit text"));
+    QVERIFY(!textCandidate.isEmpty());
+    controller.setTool(PDFEditController::HighlightTool);
     QVERIFY(!controller.addHighlight(
         0,
-        QRectF(0.70, 0.10, 0.20, 0.05)).isEmpty());
+        textCandidate.value(QStringLiteral("sourceRect")).toRectF()).isEmpty());
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     const HighlightSaveInspection inspection
