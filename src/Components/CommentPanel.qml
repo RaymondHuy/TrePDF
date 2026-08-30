@@ -1221,10 +1221,9 @@ Rectangle {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Layout.leftMargin: 13
-                                    visible: !commentCard.isReply
-                                        && (commentCard.commentStatusText
-                                                .length > 0
-                                            || commentCard.commentMarked)
+                                    visible: commentCard.commentStatusText
+                                            .length > 0
+                                        || commentCard.commentMarked
                                     spacing: 6
 
                                     Label {
@@ -1292,17 +1291,18 @@ Rectangle {
 
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    visible: !commentCard.isReply
                                     spacing: 6
 
                                     ToolButton {
                                         id: replyButton
 
+                                        objectName: "replyButton"
                                         Layout.alignment: Qt.AlignLeft
-                                        visible: root.replyTargetPage
-                                                !== commentCard.page
-                                            || root.replyTargetObjectId
-                                                !== commentCard.objectId
+                                        visible: !commentCard.isReply
+                                            && (root.replyTargetPage
+                                                    !== commentCard.page
+                                                || root.replyTargetObjectId
+                                                    !== commentCard.objectId)
                                         enabled: root.document.loaded
                                             && !root.editController.saving
                                             && commentCard.commentTextEditable

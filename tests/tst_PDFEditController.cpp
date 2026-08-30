@@ -57,6 +57,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <tuple>
 
 namespace {
 
@@ -1571,6 +1572,64 @@ bool createCommentStateThreadPdf(const QString &filePath)
                 "/Rect [0 0 0 0] /Contents (None set by Foxit User) "
                 "/CreationDate (D:20240101130000Z) /NM (unmarked-state) "
                 "/IRT 4 0 R /State (Unmarked) /StateModel (Marked) /F 30 >>"),
+        });
+}
+
+bool createReplyCommentStateHistoryPdf(const QString &filePath)
+{
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << >> "
+                "/Annots [4 0 R 5 0 R 9 0 R 6 0 R 10 0 R 8 0 R 7 0 R] >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [24 144 48 168] /Contents (Root comment) "
+                "/T (trepdfreviewer) /CreationDate (D:20240101090000Z) "
+                "/NM (reply-state-root) "
+                "/TrePDFThreadId (reply-state-root) /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Reply comment) "
+                "/T (trepdfreviewer) /CreationDate (D:20240101093000Z) "
+                "/NM (reply-state-child) "
+                "/TrePDFThreadId (reply-state-child) "
+                "/TrePDFReplyTo (reply-state-root) "
+                "/IRT 4 0 R /RT /R /F 4 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Accepted root state) "
+                "/T (TREPDFREVIEWER) /M (D:20240101100000Z) "
+                "/NM (root-accepted) /IRT 4 0 R "
+                "/State /Accepted /StateModel /Review /F 30 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Cancelled root state) "
+                "/T (TREPDFREVIEWER) /M (D:20240101110000Z) "
+                "/NM (root-cancelled) /IRT 6 0 R "
+                "/State /Cancelled /StateModel /Review /F 30 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Rejected reply state) "
+                "/T (trepdfreviewer) /M (D:20240101120000Z) "
+                "/NM (reply-rejected-lower) /IRT 5 0 R "
+                "/State /Rejected /StateModel /Review /F 30 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Deferred reply state) "
+                "/T (TREPDFREVIEWER) /M (D:20240101130000Z) "
+                "/NM (reply-deferred-upper) /IRT 5 0 R "
+                "/State (Deferred) /StateModel (Review) /F 30 >>"),
+            QByteArray(
+                "<< /Type /Annot /Subtype /Text /P 3 0 R "
+                "/Rect [0 0 0 0] /Contents (Marked reply state) "
+                "/T (TREPDFREVIEWER) /M (D:20240101140000Z) "
+                "/NM (reply-marked) /IRT 5 0 R "
+                "/State /Marked /StateModel /Marked /F 30 >>"),
         });
 }
 
@@ -5344,8 +5403,10 @@ private slots:
     void showsCommentStatusActionsMenuUi();
     void editsSourceCommentStateWithUndoRedoAndDiscard();
     void savesAndRehydratesCommentStateTransitions();
+    void importsAndSavesReplyCommentStateIndependently();
     void rehydratesAndExtendsCanonicalMixedCaseCommentStateHistory();
     void savesStateForAddedCommentBeforeFirstSave();
+    void savesStateForAddedReplyBeforeFirstSave();
     void rejectsProtectedCommentStateChanges();
     void defaultsCommentTabToCommentSelectTool();
     void guardsRibbonActionsWithPendingCommentPanel();
@@ -15627,6 +15688,36 @@ void PDFEditControllerTest::showsCommentStatusActionsMenuUi()
         }
         return nullptr;
     };
+    const auto findQuickItemForComment = [](
+                                             auto &&self,
+                                             QQuickItem *item,
+                                             const QString &objectName,
+                                             const QString &objectId)
+        -> QQuickItem * {
+        if (!item) {
+            return nullptr;
+        }
+        if (item->objectName() == objectName) {
+            for (QQuickItem *ancestor = item;
+                 ancestor;
+                 ancestor = ancestor->parentItem()) {
+                if (ancestor->property("objectId").toString()
+                    == objectId) {
+                    return item;
+                }
+            }
+        }
+        for (QQuickItem *child : item->childItems()) {
+            if (QQuickItem *match = self(
+                    self,
+                    child,
+                    objectName,
+                    objectId)) {
+                return match;
+            }
+        }
+        return nullptr;
+    };
 
     QTRY_COMPARE_WITH_TIMEOUT(
         controller.commentIndexState(),
@@ -15802,6 +15893,101 @@ void PDFEditControllerTest::showsCommentStatusActionsMenuUi()
             QStringLiteral("commentActionsMenu")) == nullptr,
         1000);
     QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.commentItems().size(), 1);
+
+    const QVariantMap reply = controller.addCommentReply(
+        rootPage,
+        rootObjectId,
+        QStringLiteral("Reply status UI"));
+    QVERIFY(!reply.isEmpty());
+    const QString replyObjectId
+        = reply.value(QStringLiteral("objectId")).toString();
+    QVERIFY(controller.setCommentStatus(
+        rootPage,
+        replyObjectId,
+        PDFEditController::AcceptedCommentStatus));
+    QVERIFY(controller.setCommentMarked(rootPage, replyObjectId, true));
+    QVERIFY(QMetaObject::invokeMethod(
+        panel.get(),
+        "setThreadRepliesExpanded",
+        Qt::DirectConnection,
+        Q_ARG(QVariant, rootPage),
+        Q_ARG(QVariant, rootObjectId),
+        Q_ARG(QVariant, true)));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        panel->property("displayedCommentItems").toList().size(),
+        2,
+        1000);
+
+    const auto replyItem = [&](const QString &objectName) {
+        return findQuickItemForComment(
+            findQuickItemForComment,
+            window.contentItem(),
+            objectName,
+            replyObjectId);
+    };
+    QQuickItem *replyStatusBadge = nullptr;
+    QQuickItem *replyMarkedBadge = nullptr;
+    QQuickItem *replyActionsButton = nullptr;
+    QQuickItem *nestedReplyButton = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            replyStatusBadge = replyItem(
+                QStringLiteral("commentStatusBadge"));
+            replyMarkedBadge = replyItem(
+                QStringLiteral("commentMarkedBadge"));
+            replyActionsButton = replyItem(
+                QStringLiteral("commentActionsButton"));
+            nestedReplyButton = replyItem(QStringLiteral("replyButton"));
+            return replyStatusBadge
+                && replyMarkedBadge
+                && replyActionsButton
+                && nestedReplyButton;
+        })(),
+        1000);
+    QVERIFY(replyStatusBadge->property("visible").toBool());
+    QVERIFY(replyMarkedBadge->property("visible").toBool());
+    QVERIFY(replyActionsButton->property("visible").toBool());
+    QVERIFY(replyActionsButton->property("enabled").toBool());
+    QVERIFY(!nestedReplyButton->property("visible").toBool());
+
+    QVERIFY(QMetaObject::invokeMethod(
+        replyActionsButton,
+        "clicked",
+        Qt::DirectConnection));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            actionsMenu = menuLoader->findChild<QObject *>(
+                QStringLiteral("commentActionsMenu"));
+            return actionsMenu
+                && actionsMenu->property("opened").toBool();
+        })(),
+        1000);
+    QCOMPARE(
+        panel->property("commentActionsObjectId").toString(),
+        replyObjectId);
+    QCOMPARE(
+        panel->property("commentActionsStatus").toInt(),
+        static_cast<int>(PDFEditController::AcceptedCommentStatus));
+    QVERIFY(panel->property("commentActionsMarked").toBool());
+    QObject *acceptedAction = actionsMenu->findChild<QObject *>(
+        QStringLiteral("commentStatusAcceptedAction"));
+    markAction = actionsMenu->findChild<QObject *>(
+        QStringLiteral("markCommentWithCheckmarkAction"));
+    QVERIFY(acceptedAction);
+    QVERIFY(markAction);
+    QVERIFY(acceptedAction->property("checked").toBool());
+    QVERIFY(markAction->property("checked").toBool());
+
+    QVERIFY(QMetaObject::invokeMethod(
+        actionsMenu,
+        "dismiss",
+        Qt::DirectConnection));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        menuLoader->findChild<QObject *>(
+            QStringLiteral("commentActionsMenu")) == nullptr,
+        1000);
+    controller.discardDrafts();
     QCOMPARE(controller.commentItems().size(), 1);
 }
 
@@ -16078,6 +16264,128 @@ void PDFEditControllerTest::savesAndRehydratesCommentStateTransitions()
     verifyCurrentState(PDFEditController::NoCommentStatus, false);
 }
 
+void PDFEditControllerTest::importsAndSavesReplyCommentStateIndependently()
+{
+    const bool userWasSet = qEnvironmentVariableIsSet("USER");
+    const QByteArray originalUser = qgetenv("USER");
+    const auto restoreUser = qScopeGuard([userWasSet, originalUser]() {
+        if (userWasSet) {
+            qputenv("USER", originalUser);
+        } else {
+            qunsetenv("USER");
+        }
+    });
+    QVERIFY(qputenv("USER", "trepdfreviewer"));
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("reply-comment-state-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("reply-comment-state-output.pdf"));
+    QVERIFY(createReplyCommentStateHistoryPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+
+    const auto currentComments = [&]() {
+        QPair<QVariantMap, QVariantMap> result;
+        for (const QVariant &value : controller.commentItems()) {
+            const QVariantMap comment = value.toMap();
+            if (comment.value(QStringLiteral("isReply")).toBool()) {
+                result.second = comment;
+            } else {
+                result.first = comment;
+            }
+        }
+        return result;
+    };
+    auto [root, reply] = currentComments();
+    QVERIFY(!root.isEmpty());
+    QVERIFY(!reply.isEmpty());
+    QCOMPARE(
+        root.value(QStringLiteral("commentStatus")).toInt(),
+        static_cast<int>(PDFEditController::CancelledCommentStatus));
+    QVERIFY(!root.value(QStringLiteral("commentMarked")).toBool());
+    QCOMPARE(
+        reply.value(QStringLiteral("commentStatus")).toInt(),
+        static_cast<int>(PDFEditController::DeferredCommentStatus));
+    QVERIFY(reply.value(QStringLiteral("commentMarked")).toBool());
+    QVERIFY(root.value(QStringLiteral("commentStateEditable")).toBool());
+    QVERIFY(reply.value(QStringLiteral("commentStateEditable")).toBool());
+    QCOMPARE(
+        reply.value(QStringLiteral("parentObjectId")).toString(),
+        root.value(QStringLiteral("objectId")).toString());
+
+    const int replyPage = reply.value(QStringLiteral("page")).toInt();
+    const QString replyObjectId
+        = reply.value(QStringLiteral("objectId")).toString();
+    QVERIFY(controller.setCommentStatus(
+        replyPage,
+        replyObjectId,
+        PDFEditController::CompletedCommentStatus));
+    QVERIFY(controller.setCommentMarked(replyPage, replyObjectId, false));
+
+    std::tie(root, reply) = currentComments();
+    QCOMPARE(
+        root.value(QStringLiteral("commentStatus")).toInt(),
+        static_cast<int>(PDFEditController::CancelledCommentStatus));
+    QVERIFY(!root.value(QStringLiteral("commentMarked")).toBool());
+    QCOMPARE(
+        reply.value(QStringLiteral("commentStatus")).toInt(),
+        static_cast<int>(PDFEditController::CompletedCommentStatus));
+    QVERIFY(!reply.value(QStringLiteral("commentMarked")).toBool());
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+
+    const CommentStateInspection inspection
+        = inspectCommentStateTransitions(outputPath);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.annotationCount, 9);
+    QCOMPARE(inspection.transitions.size(), 7);
+    bool foundCompletedReplyState = false;
+    bool foundUnmarkedReplyState = false;
+    for (const CommentStateTransitionInspection &transition
+         : inspection.transitions) {
+        if (transition.stateModel == QLatin1String("Review")
+            && transition.state == QLatin1String("Completed")) {
+            QCOMPARE(
+                transition.parentName,
+                QStringLiteral("reply-deferred-upper"));
+            QCOMPARE(
+                transition.author,
+                QStringLiteral("TREPDFREVIEWER"));
+            foundCompletedReplyState = true;
+        } else if (transition.stateModel == QLatin1String("Marked")
+                   && transition.state == QLatin1String("Unmarked")) {
+            QCOMPARE(
+                transition.parentName,
+                QStringLiteral("reply-marked"));
+            QCOMPARE(
+                transition.author,
+                QStringLiteral("TREPDFREVIEWER"));
+            foundUnmarkedReplyState = true;
+        }
+    }
+    QVERIFY(foundCompletedReplyState);
+    QVERIFY(foundUnmarkedReplyState);
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+    std::tie(root, reply) = currentComments();
+    QCOMPARE(
+        root.value(QStringLiteral("commentStatus")).toInt(),
+        static_cast<int>(PDFEditController::CancelledCommentStatus));
+    QVERIFY(!root.value(QStringLiteral("commentMarked")).toBool());
+    QCOMPARE(
+        reply.value(QStringLiteral("commentStatus")).toInt(),
+        static_cast<int>(PDFEditController::CompletedCommentStatus));
+    QVERIFY(!reply.value(QStringLiteral("commentMarked")).toBool());
+}
+
 void PDFEditControllerTest::rehydratesAndExtendsCanonicalMixedCaseCommentStateHistory()
 {
     const bool userWasSet = qEnvironmentVariableIsSet("USER");
@@ -16222,6 +16530,112 @@ void PDFEditControllerTest::savesStateForAddedCommentBeforeFirstSave()
         .value(QStringLiteral("commentStateEditable"))
         .toBool());
     QCOMPARE(rehydrated.value(QStringLiteral("replyCount")).toInt(), 0);
+}
+
+void PDFEditControllerTest::savesStateForAddedReplyBeforeFirstSave()
+{
+    const bool userWasSet = qEnvironmentVariableIsSet("USER");
+    const QByteArray originalUser = qgetenv("USER");
+    const auto restoreUser = qScopeGuard([userWasSet, originalUser]() {
+        if (userWasSet) {
+            qputenv("USER", originalUser);
+        } else {
+            qunsetenv("USER");
+        }
+    });
+    QVERIFY(qputenv("USER", "trepdfreviewer"));
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("added-reply-state-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("added-reply-state-output.pdf"));
+    QVERIFY(createMixedCaseCommentStateHistoryPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 1, 5000);
+
+    const QVariantMap root
+        = controller.commentItems().constFirst().toMap();
+    const QVariantMap addedReply = controller.addCommentReply(
+        0,
+        root.value(QStringLiteral("objectId")).toString(),
+        QStringLiteral("Reply with state"));
+    QVERIFY(!addedReply.isEmpty());
+    const QString replyObjectId
+        = addedReply.value(QStringLiteral("objectId")).toString();
+    QVERIFY(!replyObjectId.isEmpty());
+    QCOMPARE(controller.commentItems().size(), 2);
+
+    QVariantMap pendingReply;
+    for (const QVariant &value : controller.commentItems()) {
+        const QVariantMap comment = value.toMap();
+        if (comment.value(QStringLiteral("isReply")).toBool()) {
+            pendingReply = comment;
+            break;
+        }
+    }
+    QVERIFY(!pendingReply.isEmpty());
+    QVERIFY(pendingReply
+        .value(QStringLiteral("commentStateEditable"))
+        .toBool());
+    QVERIFY(controller.setCommentStatus(
+        0,
+        replyObjectId,
+        PDFEditController::FutureCommentStatus));
+    QVERIFY(controller.setCommentMarked(0, replyObjectId, true));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+
+    const CommentStateInspection inspection
+        = inspectCommentStateTransitions(outputPath);
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.annotationCount, 9);
+    QCOMPARE(inspection.transitions.size(), 7);
+    int replyTransitionCount = 0;
+    for (const CommentStateTransitionInspection &transition
+         : inspection.transitions) {
+        if (transition.parentName == replyObjectId) {
+            ++replyTransitionCount;
+            QCOMPARE(
+                transition.author,
+                QStringLiteral("TREPDFREVIEWER"));
+            QVERIFY(transition.relation.isEmpty());
+        }
+    }
+    QCOMPARE(replyTransitionCount, 2);
+
+    controller.requestCommentIndex();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.commentItems().size(), 2, 5000);
+    QVariantMap rehydratedRoot;
+    QVariantMap rehydratedReply;
+    for (const QVariant &value : controller.commentItems()) {
+        const QVariantMap comment = value.toMap();
+        if (comment.value(QStringLiteral("isReply")).toBool()) {
+            rehydratedReply = comment;
+        } else {
+            rehydratedRoot = comment;
+        }
+    }
+    QVERIFY(!rehydratedRoot.isEmpty());
+    QVERIFY(!rehydratedReply.isEmpty());
+    QCOMPARE(
+        rehydratedRoot.value(QStringLiteral("commentStatus")).toInt(),
+        static_cast<int>(PDFEditController::CancelledCommentStatus));
+    QVERIFY(!rehydratedRoot.value(QStringLiteral("commentMarked")).toBool());
+    QCOMPARE(
+        rehydratedReply.value(QStringLiteral("commentStatus")).toInt(),
+        static_cast<int>(PDFEditController::FutureCommentStatus));
+    QVERIFY(rehydratedReply
+        .value(QStringLiteral("commentMarked"))
+        .toBool());
+    QVERIFY(rehydratedReply
+        .value(QStringLiteral("commentStateEditable"))
+        .toBool());
 }
 
 void PDFEditControllerTest::rejectsProtectedCommentStateChanges()

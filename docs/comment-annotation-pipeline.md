@@ -100,9 +100,10 @@ Giới hạn hiện tại:
   được đọc từ các annotation `/State` + `/StateModel /Review` hoặc `/Marked`;
   các log này bị ẩn khỏi danh sách comment. Set Status và Mark with Checkmark
   tạo hai draft độc lập, có undo/redo/discard và được Save/Save As. Các biến thể
-  hoa/thường của reviewer được quy về spelling chính xác của history đã tồn tại;
-  terminal `/IRT` quyết định state, còn `/M` và annotation index chỉ phân xử
-  những nhánh rẽ có cùng độ sâu;
+  hoa/thường của reviewer dùng lại spelling chính xác đã được thiết lập trong
+  tài liệu, kể cả khi reply đích chưa có state riêng;
+  terminal `/IRT` quyết định state độc lập cho comment gốc hoặc reply đích,
+  còn `/M` và annotation index chỉ phân xử những nhánh rẽ có cùng độ sâu;
 - 5 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
 
 ## 2. Luồng kiến trúc tổng thể
@@ -249,11 +250,15 @@ trong graph nội bộ để kiểm cờ Locked/ReadOnly, cascade xóa và ẩn 
 cách, nhưng đánh dấu chúng là annotation-state để loại khỏi `commentItems()`,
 `commentPanelItems()`, reply count và mọi API chọn/sửa/xóa comment trực tiếp.
 Predicate dùng metadata PDF và parent `/IRT` hợp lệ, không dựa vào chuỗi
-`/Contents` do reader tự sinh. Với author hiện tại, scanner gom các spelling
-khác hoa/thường, chọn spelling của history lâu đời/hoàn chỉnh hơn, rồi tách lại
-theo exact author. Terminal có chain `/IRT` sâu nhất được chọn riêng cho model
-`Review` và `Marked`; `/M` mới nhất và annotation index chỉ là tie-breaker cho
-các terminal cùng độ sâu. Hai giá trị tổng hợp được đưa lên card gốc.
+`/Contents` do reader tự sinh. Với author hiện tại, scanner gom evidence của
+các spelling khác hoa/thường trên page để chọn spelling canonical đã được thiết
+lập rõ nhất. Trên từng target, exact-case history canonical được ưu tiên; nếu
+target chưa có history đó thì mới fallback sang alias tương thích. Terminal có
+chain `/IRT` sâu nhất được chọn riêng cho model `Review` và `Marked`; `/M` mới
+nhất và annotation index chỉ là tie-breaker cho các terminal cùng độ sâu. Mỗi
+state được gán cho annotation không phải state
+gần nhất khi lần ngược `/IRT`, nên hai giá trị tổng hợp được đưa lên đúng card
+comment gốc hoặc reply thay vì luôn dồn về root của thread.
 
 Kết quả được cache theo display page và document revision. Khi revision đổi,
 mọi kết quả cũ và callback đến muộn phải bị loại.
@@ -354,8 +359,9 @@ Panel chỉ chứa comment/thread. Nó không còn sở hữu control stroke, fi
 opacity; appearance của drawing comment được chỉnh ở panel riêng trong tab
 Edit.
 
-Hàng Reply của mỗi comment gốc có nút ba chấm ở mép phải. Nút mở một `Menu`
-dùng chung được tạo/hủy bằng `Loader`; submenu Set Status dùng cascade desktop
+Hàng action của mỗi comment gốc và reply có nút ba chấm ở mép phải; nút Reply
+vẫn chỉ hiện trên comment gốc. Nút ba chấm mở một `Menu` dùng chung được
+tạo/hủy bằng `Loader`; submenu Set Status dùng cascade desktop
 để mở khi hover và liệt kê None, Accepted, Rejected, Cancelled, Completed,
 Deferred, Future. Mark with Checkmark là action cùng cấp. Các action phản ánh
 trạng thái checked hiện hành, tôn trọng permission/annotation flags và gọi
@@ -451,10 +457,12 @@ flatten các descendants thành một cấp hiển thị.
 `/RT /Group` không phải reply relation và không đi qua thread logic hiện tại.
 Annotation state dùng `/IRT` nhưng có `/State` và `/StateModel`. Scanner hiện
 phân biệt hai model `/Review` và `/Marked` với reply thường, không đưa state
-entry vào panel và tổng hợp terminal của canonical author hiện tại lên comment
-gốc. Canonical author giữ exact spelling của history tương thích đã tồn tại để
-không trộn hai nhánh chỉ khác hoa/thường. Set Status ghi `Review`; Mark with
-Checkmark ghi `Marked`/`Unmarked`.
+entry vào panel. Scanner lần `/IRT` qua các state liên tiếp đến annotation
+không phải state đầu tiên, rồi tổng hợp terminal của canonical author hiện tại
+lên đúng comment gốc hoặc reply đó. Spelling canonical được tìm lại trên toàn
+bộ candidate cache trước khi ghi, nên reply chưa có state vẫn dùng cùng reviewer
+identity với Foxit. Set Status ghi `Review`; Mark with Checkmark ghi
+`Marked`/`Unmarked`.
 
 ### 7.2 ID tạm trong save pipeline
 

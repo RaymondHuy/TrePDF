@@ -1521,6 +1521,82 @@ QString currentCommentAuthor()
     return {};
 }
 
+struct CommentStateAuthorEvidence {
+    QString author;
+    qsizetype transitionCount = 0;
+    QDateTime latestTimestamp;
+    qint64 firstSequence = (std::numeric_limits<qint64>::max)();
+    bool exactlyMatchesRequestedAuthor = false;
+};
+
+void includeCommentStateAuthorEvidence(
+    QHash<QString, CommentStateAuthorEvidence> &evidenceByAuthor,
+    const QString &requestedAuthor,
+    const QString &stateAuthor,
+    const QDateTime &timestamp,
+    qint64 sequence)
+{
+    const QString author = stateAuthor.trimmed();
+    if (author.isEmpty()
+        || author.compare(requestedAuthor, Qt::CaseInsensitive) != 0) {
+        return;
+    }
+
+    auto evidence = evidenceByAuthor.find(author);
+    if (evidence == evidenceByAuthor.end()) {
+        CommentStateAuthorEvidence added;
+        added.author = author;
+        added.exactlyMatchesRequestedAuthor = author == requestedAuthor;
+        evidence = evidenceByAuthor.insert(author, std::move(added));
+    }
+    ++evidence->transitionCount;
+    if (timestamp.isValid()
+        && (!evidence->latestTimestamp.isValid()
+            || timestamp > evidence->latestTimestamp)) {
+        evidence->latestTimestamp = timestamp;
+    }
+    evidence->firstSequence = qMin(evidence->firstSequence, sequence);
+}
+
+QString preferredCommentStateAuthor(
+    const QHash<QString, CommentStateAuthorEvidence> &evidenceByAuthor,
+    const QString &requestedAuthor)
+{
+    const auto isBetter = [](const CommentStateAuthorEvidence &candidate,
+                             const CommentStateAuthorEvidence &current) {
+        if (candidate.transitionCount != current.transitionCount) {
+            return candidate.transitionCount > current.transitionCount;
+        }
+        if (candidate.latestTimestamp.isValid()
+            && current.latestTimestamp.isValid()
+            && candidate.latestTimestamp != current.latestTimestamp) {
+            return candidate.latestTimestamp > current.latestTimestamp;
+        }
+        if (candidate.latestTimestamp.isValid()
+            != current.latestTimestamp.isValid()) {
+            return candidate.latestTimestamp.isValid();
+        }
+        if (candidate.exactlyMatchesRequestedAuthor
+            != current.exactlyMatchesRequestedAuthor) {
+            return candidate.exactlyMatchesRequestedAuthor;
+        }
+        if (candidate.firstSequence != current.firstSequence) {
+            return candidate.firstSequence < current.firstSequence;
+        }
+        return candidate.author < current.author;
+    };
+
+    const CommentStateAuthorEvidence *preferred = nullptr;
+    for (auto evidence = evidenceByAuthor.cbegin();
+         evidence != evidenceByAuthor.cend();
+         ++evidence) {
+        if (!preferred || isBetter(*evidence, *preferred)) {
+            preferred = &*evidence;
+        }
+    }
+    return preferred ? preferred->author : requestedAuthor.trimmed();
+}
+
 QString pdfFontName(FPDF_FONT font, bool baseName)
 {
     if (!font) {
@@ -2817,12 +2893,65 @@ bool PDFEditController::commentStateEditable(
     return isCommentCandidateKind(candidate.kind)
         && supportsCommentState(candidate.kind)
         && !candidate.commentStateAnnotation
-        && !candidate.isReplyAnnotation
-        && candidate.replyToObjectId.isEmpty()
+        && (!candidate.isReplyAnnotation
+            || (!candidate.replyToObjectId.isEmpty()
+                && commentReplyIsVisible(candidate)))
         && documentAllowsAnnotations()
         && (candidate.commentProperties.flags & protectedFlags) == 0
         && !candidate.commentTextReadOnly
         && (candidate.added || candidate.sourceAnnotationIndex >= 0);
+}
+
+QString PDFEditController::canonicalCommentStateAuthor(
+    const QString &requestedAuthor) const
+{
+    const QString requested = requestedAuthor.trimmed();
+    if (requested.isEmpty()) {
+        return {};
+    }
+
+    QHash<QString, CommentStateAuthorEvidence> evidenceByAuthor;
+    QSet<QString> seenSourceStates;
+    const auto includeCandidates = [&](const QVector<Candidate> &candidates) {
+        for (const Candidate &candidate : candidates) {
+            if (!candidate.commentStateAnnotation
+                || candidate.sourceAnnotationIndex < 0) {
+                continue;
+            }
+            const QString sourceKey = QString::number(candidate.page)
+                + QLatin1Char('|')
+                + QString::number(candidate.sourceAnnotationIndex);
+            if (seenSourceStates.contains(sourceKey)) {
+                continue;
+            }
+            seenSourceStates.insert(sourceKey);
+            const QDateTime timestamp
+                = candidate.commentModifiedDate.isValid()
+                ? candidate.commentModifiedDate
+                : candidate.commentCreationDate;
+            const qint64 pageSequence
+                = static_cast<qint64>(qMax(0, candidate.page))
+                    * (static_cast<qint64>(1) << 32)
+                + candidate.sourceAnnotationIndex;
+            includeCommentStateAuthorEvidence(
+                evidenceByAuthor,
+                requested,
+                candidate.commentAuthor,
+                timestamp,
+                pageSequence);
+        }
+    };
+    for (auto page = m_indexedCommentCandidates.cbegin();
+         page != m_indexedCommentCandidates.cend();
+         ++page) {
+        includeCandidates(page.value());
+    }
+    for (auto page = m_pageCandidates.cbegin();
+         page != m_pageCandidates.cend();
+         ++page) {
+        includeCandidates(page.value());
+    }
+    return preferredCommentStateAuthor(evidenceByAuthor, requested);
 }
 
 bool PDFEditController::drawingSupportsFill(const QString &kind)
@@ -7041,11 +7170,16 @@ bool PDFEditController::setCommentStatus(int page,
     command.before = before;
     command.after = before;
     command.after.commentStatus = status;
-    if (command.after.commentStateAuthor.trimmed().isEmpty()) {
-        command.after.commentStateAuthor = currentCommentAuthor();
+    const QString stateAuthor = canonicalCommentStateAuthor(
+        currentCommentAuthor());
+    if (!stateAuthor.isEmpty()) {
+        command.after.commentStateAuthor = stateAuthor;
     }
     command.after.commentStateModifiedDate = QDateTime::currentDateTime();
-    if (command.after.candidate.commentThreadId.isEmpty()) {
+    if (command.after.candidate.commentThreadId.isEmpty()
+        || (command.after.candidate.isReplyAnnotation
+            && command.after.candidate.commentThreadId
+                == command.after.candidate.replyToThreadId)) {
         command.after.candidate.commentThreadId
             = QStringLiteral("trepdf-thread:")
             + QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -7110,11 +7244,16 @@ bool PDFEditController::setCommentMarked(int page,
     command.before = before;
     command.after = before;
     command.after.commentMarked = marked;
-    if (command.after.commentStateAuthor.trimmed().isEmpty()) {
-        command.after.commentStateAuthor = currentCommentAuthor();
+    const QString stateAuthor = canonicalCommentStateAuthor(
+        currentCommentAuthor());
+    if (!stateAuthor.isEmpty()) {
+        command.after.commentStateAuthor = stateAuthor;
     }
     command.after.commentStateModifiedDate = QDateTime::currentDateTime();
-    if (command.after.candidate.commentThreadId.isEmpty()) {
+    if (command.after.candidate.commentThreadId.isEmpty()
+        || (command.after.candidate.isReplyAnnotation
+            && command.after.candidate.commentThreadId
+                == command.after.candidate.replyToThreadId)) {
         command.after.candidate.commentThreadId
             = QStringLiteral("trepdf-thread:")
             + QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -9943,26 +10082,80 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
 
     const QString requestedStateAuthor = request.commentAuthor.trimmed();
     if (!requestedStateAuthor.isEmpty()) {
-        QHash<QString, qsizetype> rootsByObjectId;
-        QHash<QString, QVector<const Candidate *>> stateHistoriesByRoot;
+        QHash<int, qsizetype> candidatesBySourceAnnotationIndex;
+        QHash<QString, qsizetype> stateTargetsByObjectId;
+        QHash<QString, CommentStateAuthorEvidence>
+            stateAuthorEvidenceBySpelling;
         for (qsizetype candidateIndex = 0;
              candidateIndex < candidates.size();
              ++candidateIndex) {
             const Candidate &candidate = candidates.at(candidateIndex);
+            if (candidate.sourceAnnotationIndex >= 0) {
+                candidatesBySourceAnnotationIndex.insert(
+                    candidate.sourceAnnotationIndex,
+                    candidateIndex);
+            }
             if (isCommentCandidateKind(candidate.kind)
-                && !candidate.commentStateAnnotation
-                && !candidate.isReplyAnnotation
-                && candidate.replyToObjectId.isEmpty()) {
-                rootsByObjectId.insert(candidate.objectId, candidateIndex);
+                && !candidate.commentStateAnnotation) {
+                stateTargetsByObjectId.insert(
+                    candidate.objectId,
+                    candidateIndex);
+            }
+            if (candidate.commentStateAnnotation) {
+                const QDateTime timestamp
+                    = candidate.commentModifiedDate.isValid()
+                    ? candidate.commentModifiedDate
+                    : candidate.commentCreationDate;
+                includeCommentStateAuthorEvidence(
+                    stateAuthorEvidenceBySpelling,
+                    requestedStateAuthor,
+                    candidate.commentAuthor,
+                    timestamp,
+                    candidate.sourceAnnotationIndex);
+            }
+        }
+        const QString canonicalStateAuthor
+            = preferredCommentStateAuthor(
+                stateAuthorEvidenceBySpelling,
+                requestedStateAuthor);
+
+        QHash<QString, QVector<const Candidate *>> stateHistoriesByTarget;
+        for (const Candidate &candidate : std::as_const(candidates)) {
+            if (!candidate.commentStateAnnotation
+                || candidate.commentAuthor.trimmed().compare(
+                       requestedStateAuthor,
+                       Qt::CaseInsensitive) != 0) {
                 continue;
             }
-            if (candidate.commentStateAnnotation
-                && !candidate.replyToObjectId.isEmpty()
-                && candidate.commentAuthor.trimmed().compare(
-                       requestedStateAuthor,
-                       Qt::CaseInsensitive) == 0) {
-                stateHistoriesByRoot[candidate.replyToObjectId].append(
-                    &candidate);
+
+            // State transitions can point to an earlier state. The first
+            // non-state /IRT ancestor is the actual root-or-reply owner.
+            int parentAnnotationIndex
+                = candidate.replyDirectParentSourceAnnotationIndex;
+            QSet<int> visitedAnnotationIndices;
+            while (parentAnnotationIndex >= 0
+                   && !visitedAnnotationIndices.contains(
+                       parentAnnotationIndex)) {
+                visitedAnnotationIndices.insert(parentAnnotationIndex);
+                const auto parentIndex
+                    = candidatesBySourceAnnotationIndex.constFind(
+                        parentAnnotationIndex);
+                if (parentIndex
+                    == candidatesBySourceAnnotationIndex.cend()) {
+                    break;
+                }
+
+                const Candidate &parentCandidate
+                    = candidates.at(*parentIndex);
+                if (!parentCandidate.commentStateAnnotation) {
+                    if (isCommentCandidateKind(parentCandidate.kind)) {
+                        stateHistoriesByTarget[parentCandidate.objectId]
+                            .append(&candidate);
+                    }
+                    break;
+                }
+                parentAnnotationIndex = parentCandidate
+                    .replyDirectParentSourceAnnotationIndex;
             }
         }
 
@@ -10044,6 +10237,7 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             int maximumDepth = 0;
             int earliestAnnotationIndex = (std::numeric_limits<int>::max)();
             QDateTime earliestTimestamp;
+            QDateTime latestTimestamp;
             bool exactlyMatchesRequestedAuthor = false;
         };
         const auto authorHistoryIsBetter = [](const AuthorHistory &candidate,
@@ -10053,6 +10247,16 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             }
             if (candidate.states.size() != current.states.size()) {
                 return candidate.states.size() > current.states.size();
+            }
+            if (candidate.latestTimestamp.isValid()
+                && current.latestTimestamp.isValid()
+                && candidate.latestTimestamp != current.latestTimestamp) {
+                return candidate.latestTimestamp
+                    > current.latestTimestamp;
+            }
+            if (candidate.latestTimestamp.isValid()
+                != current.latestTimestamp.isValid()) {
+                return candidate.latestTimestamp.isValid();
             }
             if (candidate.earliestTimestamp.isValid()
                 && current.earliestTimestamp.isValid()
@@ -10148,12 +10352,12 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                   return best;
               };
 
-        for (auto rootHistory = stateHistoriesByRoot.cbegin();
-             rootHistory != stateHistoriesByRoot.cend();
-             ++rootHistory) {
-            const auto rootIndex = rootsByObjectId.constFind(
-                rootHistory.key());
-            if (rootIndex == rootsByObjectId.cend()) {
+        for (auto targetHistory = stateHistoriesByTarget.cbegin();
+             targetHistory != stateHistoriesByTarget.cend();
+             ++targetHistory) {
+            const auto targetIndex = stateTargetsByObjectId.constFind(
+                targetHistory.key());
+            if (targetIndex == stateTargetsByObjectId.cend()) {
                 continue;
             }
 
@@ -10162,7 +10366,7 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             // Match environment/profile aliases case-insensitively only long
             // enough to find their histories. From this point onward, exact
             // spelling identifies a reviewer, matching Foxit's behavior.
-            for (const Candidate *stateCandidate : rootHistory.value()) {
+            for (const Candidate *stateCandidate : targetHistory.value()) {
                 const QString author = stateCandidate->commentAuthor.trimmed();
                 auto historyIndex = historyIndexByAuthor.constFind(author);
                 if (historyIndex == historyIndexByAuthor.cend()) {
@@ -10186,6 +10390,11 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                         || timestamp < history.earliestTimestamp)) {
                     history.earliestTimestamp = timestamp;
                 }
+                if (timestamp.isValid()
+                    && (!history.latestTimestamp.isValid()
+                        || timestamp > history.latestTimestamp)) {
+                    history.latestTimestamp = timestamp;
+                }
             }
             for (AuthorHistory &history : authorHistories) {
                 const QHash<int, int> depths = stateDepths(history.states);
@@ -10199,21 +10408,30 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 continue;
             }
 
-            const AuthorHistory *selectedHistory = &authorHistories.constFirst();
-            for (qsizetype historyIndex = 1;
-                 historyIndex < authorHistories.size();
-                 ++historyIndex) {
-                const AuthorHistory &candidateHistory
-                    = authorHistories.at(historyIndex);
-                if (authorHistoryIsBetter(
-                        candidateHistory,
-                        *selectedHistory)) {
-                    selectedHistory = &candidateHistory;
+            const AuthorHistory *selectedHistory = nullptr;
+            for (const AuthorHistory &history : std::as_const(authorHistories)) {
+                if (history.author == canonicalStateAuthor) {
+                    selectedHistory = &history;
+                    break;
+                }
+            }
+            if (!selectedHistory) {
+                selectedHistory = &authorHistories.constFirst();
+                for (qsizetype historyIndex = 1;
+                     historyIndex < authorHistories.size();
+                     ++historyIndex) {
+                    const AuthorHistory &candidateHistory
+                        = authorHistories.at(historyIndex);
+                    if (authorHistoryIsBetter(
+                            candidateHistory,
+                            *selectedHistory)) {
+                        selectedHistory = &candidateHistory;
+                    }
                 }
             }
 
-            Candidate &rootCandidate = candidates[*rootIndex];
-            rootCandidate.commentStateAuthor = selectedHistory->author;
+            Candidate &targetCandidate = candidates[*targetIndex];
+            targetCandidate.commentStateAuthor = canonicalStateAuthor;
             // A state transition is ordered by /IRT, not by its position in
             // /Annots. Date and annotation index only resolve equal-depth
             // terminal forks in malformed or concurrently edited files.
@@ -10221,18 +10439,18 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 *selectedHistory,
                 QLatin1StringView("Review"));
             if (reviewState) {
-                rootCandidate.commentStatusAnnotationIndex
+                targetCandidate.commentStatusAnnotationIndex
                     = reviewState->sourceAnnotationIndex;
-                rootCandidate.commentStatus = commentStatusForPdfName(
+                targetCandidate.commentStatus = commentStatusForPdfName(
                     reviewState->commentState).value_or(NoCommentStatus);
             }
             const Candidate *markedState = terminalStateForModel(
                 *selectedHistory,
                 QLatin1StringView("Marked"));
             if (markedState) {
-                rootCandidate.commentMarkedAnnotationIndex
+                targetCandidate.commentMarkedAnnotationIndex
                     = markedState->sourceAnnotationIndex;
-                rootCandidate.commentMarked
+                targetCandidate.commentMarked
                     = markedState->commentState.compare(
                           QLatin1String("Marked"),
                           Qt::CaseInsensitive) == 0;

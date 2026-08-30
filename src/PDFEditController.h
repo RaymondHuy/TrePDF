@@ -748,6 +748,8 @@ private:
                                           const QString &objectId);
     bool candidateDeletable(const Candidate &candidate) const;
     bool commentStateEditable(const Candidate &candidate) const;
+    QString canonicalCommentStateAuthor(
+        const QString &requestedAuthor) const;
     static std::optional<CommentStatus> commentStatusForPdfName(
         const QString &state);
     bool drawingPropertiesEditable(const Candidate &candidate) const;

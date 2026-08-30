@@ -251,13 +251,15 @@ Note/Free Text đang chọn và phản hồi một cấp.
   `/StateModel /Review` hoặc `/Marked` bị loại khỏi model, reply count và
   selection; controller vẫn giữ chúng nội bộ để kiểm permission và cascade
   thread an toàn.
-- Hàng Phản hồi của comment gốc có nút ba chấm ở mép phải. Menu dùng chung được
-  tạo khi cần bằng `Loader`, gồm `Set Status` với submenu cascade khi hover
+- Hàng action của comment gốc và reply có nút ba chấm ở mép phải; nút Phản hồi
+  vẫn chỉ có trên comment gốc. Menu dùng chung được tạo khi cần bằng `Loader`,
+  gồm `Set Status` với submenu cascade khi hover
   (None, Accepted, Rejected, Cancelled, Completed, Deferred, Future) và
   `Mark with Checkmark`. Các action bind checked/enabled theo model, gọi
   `setCommentStatus()` hoặc `setCommentMarked()` và tạo draft có
   undo/redo/discard; status hiện hành và checkmark được hiển thị bằng badge trên
-  card gốc. Save ghi annotation state chuẩn rồi reopen cập nhật model.
+  đúng card comment gốc hoặc reply. Save ghi annotation state chuẩn, giữ history
+  độc lập theo annotation đích rồi reopen cập nhật model.
 - Comment có sẵn trong PDF được liệt kê để đọc, điều hướng, sửa nội dung và xóa
   dưới dạng draft có undo/redo/discard. Annotation ReadOnly/LockedContents vẫn
   được bảo vệ. Xóa comment gốc ẩn cả thread, còn xóa reply chỉ tác động item đó.
