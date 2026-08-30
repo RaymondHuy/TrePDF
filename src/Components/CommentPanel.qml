@@ -23,6 +23,13 @@ Rectangle {
     property string replyTargetObjectId: ""
     property string replyDraftText: ""
     property var expandedReplyThreads: ({})
+    property Item commentActionsAnchor: null
+    property int commentActionsPage: -1
+    property string commentActionsObjectId: ""
+    property int commentActionsStatus: PDFEditController.NoCommentStatus
+    property bool commentActionsMarked: false
+    property bool commentActionsStateEditable: false
+    property string commentActionsStateEditReason: ""
 
     signal collapsedChangeRequested(bool collapsed)
     signal pageRequested(int page)
@@ -291,21 +298,84 @@ Rectangle {
         root.deleteCommentRequested(page, objectId)
     }
 
+    function showCommentActionsMenu() {
+        const menu = commentActionsMenuLoader.item as Menu
+        if (commentActionsMenuLoader.status !== Loader.Ready
+                || !menu
+                || !root.commentActionsAnchor) {
+            return
+        }
+        const popupX = Math.min(
+            0,
+            root.commentActionsAnchor.width - menu.implicitWidth)
+        menu.popup(
+            root.commentActionsAnchor,
+            Qt.point(popupX, root.commentActionsAnchor.height + 2))
+    }
+
+    function openCommentActionsMenu(anchor, page, objectId, status, marked,
+                                    stateEditable, stateEditReason) {
+        if (!anchor
+                || !root.document.loaded
+                || root.editController.saving
+                || page < 0
+                || objectId.length === 0) {
+            return
+        }
+        root.commentActionsAnchor = anchor
+        root.commentActionsPage = page
+        root.commentActionsObjectId = objectId
+        root.commentActionsStatus = status
+        root.commentActionsMarked = marked
+        root.commentActionsStateEditable = stateEditable
+        root.commentActionsStateEditReason = stateEditReason
+        if (commentActionsMenuLoader.status === Loader.Ready)
+            root.showCommentActionsMenu()
+        else
+            commentActionsMenuLoader.active = true
+    }
+
+    function clearCommentActionsContext() {
+        root.commentActionsAnchor = null
+        root.commentActionsPage = -1
+        root.commentActionsObjectId = ""
+        root.commentActionsStatus = PDFEditController.NoCommentStatus
+        root.commentActionsMarked = false
+        root.commentActionsStateEditable = false
+        root.commentActionsStateEditReason = ""
+    }
+
+    function dismissCommentActionsMenu() {
+        root.clearCommentActionsContext()
+        const menu = commentActionsMenuLoader.item as Menu
+        if (commentActionsMenuLoader.status === Loader.Ready
+                && menu
+                && menu.opened) {
+            menu.dismiss()
+        } else {
+            commentActionsMenuLoader.active = false
+        }
+    }
+
     function ensureCommentIndex() {
         if (document && editController && document.loaded)
             editController.requestCommentIndex()
     }
 
     onCollapsedChanged: {
-        if (collapsed)
+        if (collapsed) {
             commitPendingEdit()
+            dismissCommentActionsMenu()
+        }
     }
     onDocumentChanged: {
+        dismissCommentActionsMenu()
         cancelPendingReply()
         expandedReplyThreads = ({})
         ensureCommentIndex()
     }
     onEditControllerChanged: {
+        dismissCommentActionsMenu()
         cancelPendingReply()
         expandedReplyThreads = ({})
         ensureCommentIndex()
@@ -317,6 +387,7 @@ Rectangle {
 
         function onLoadedChanged() {
             if (!root.document.loaded) {
+                root.dismissCommentActionsMenu()
                 root.cancelPendingReply()
                 root.expandedReplyThreads = ({})
             }
@@ -336,6 +407,233 @@ Rectangle {
         function onSelectionChanged() {
             root.expandSelectedReply()
         }
+    }
+
+    Component {
+        id: commentMenuItemDelegate
+
+        MenuItem {
+            id: menuItem
+
+            implicitWidth: 190
+            implicitHeight: 32
+            leftPadding: 12
+            rightPadding: 28
+            font.pixelSize: 12
+            palette.text: root.theme.ribbonTextColor
+            palette.highlightedText: root.theme.ribbonTextColor
+            ToolTip.text: root.commentActionsStateEditReason
+            ToolTip.visible: menuItem.hovered
+                && !menuItem.enabled
+                && root.commentActionsStateEditReason.length > 0
+            ToolTip.delay: 500
+            Accessible.description: root.commentActionsStateEditReason
+
+            background: Rectangle {
+                radius: 4
+                color: menuItem.highlighted
+                    ? root.theme.foxitPaleOrange
+                    : "transparent"
+            }
+        }
+    }
+
+    Loader {
+        id: commentActionsMenuLoader
+
+        objectName: "commentActionsMenuLoader"
+        active: false
+        asynchronous: false
+
+        sourceComponent: Component {
+            Menu {
+                id: commentActionsMenu
+
+                objectName: "commentActionsMenu"
+                implicitWidth: 190
+                padding: 4
+                cascade: true
+                popupType: Popup.Item
+                modal: false
+                focus: true
+                closePolicy: Popup.CloseOnEscape
+                    | Popup.CloseOnPressOutsideParent
+                delegate: commentMenuItemDelegate
+
+                background: Rectangle {
+                    radius: 7
+                    color: root.theme.ribbonSurface
+                    border.width: 1
+                    border.color: root.theme.ribbonBorder
+                }
+
+                Menu {
+                    id: setCommentStatusMenu
+
+                    objectName: "setCommentStatusMenu"
+                    implicitWidth: 190
+                    padding: 4
+                    cascade: true
+                    popupType: Popup.Item
+                    delegate: commentMenuItemDelegate
+                    enabled: root.commentActionsStateEditable
+                        && root.document.loaded
+                        && !root.editController.saving
+                    //% "Set Status"
+                    title: qsTrId("SetCommentStatus")
+
+                    background: Rectangle {
+                        radius: 7
+                        color: root.theme.ribbonSurface
+                        border.width: 1
+                        border.color: root.theme.ribbonBorder
+                    }
+
+                    Action {
+                        objectName: "commentStatusNoneAction"
+                        checkable: true
+                        checked: root.commentActionsStatus
+                            === PDFEditController.NoCommentStatus
+                        enabled: root.commentActionsStateEditable
+                            && root.document.loaded
+                            && !root.editController.saving
+                        //% "None"
+                        text: qsTrId("CommentStatusNone")
+                        onTriggered: root.editController.setCommentStatus(
+                            root.commentActionsPage,
+                            root.commentActionsObjectId,
+                            PDFEditController.NoCommentStatus)
+                    }
+
+                    Action {
+                        objectName: "commentStatusAcceptedAction"
+                        checkable: true
+                        checked: root.commentActionsStatus
+                            === PDFEditController.AcceptedCommentStatus
+                        enabled: root.commentActionsStateEditable
+                            && root.document.loaded
+                            && !root.editController.saving
+                        //% "Accepted"
+                        text: qsTrId("CommentStatusAccepted")
+                        onTriggered: root.editController.setCommentStatus(
+                            root.commentActionsPage,
+                            root.commentActionsObjectId,
+                            PDFEditController.AcceptedCommentStatus)
+                    }
+
+                    Action {
+                        objectName: "commentStatusRejectedAction"
+                        checkable: true
+                        checked: root.commentActionsStatus
+                            === PDFEditController.RejectedCommentStatus
+                        enabled: root.commentActionsStateEditable
+                            && root.document.loaded
+                            && !root.editController.saving
+                        //% "Rejected"
+                        text: qsTrId("CommentStatusRejected")
+                        onTriggered: root.editController.setCommentStatus(
+                            root.commentActionsPage,
+                            root.commentActionsObjectId,
+                            PDFEditController.RejectedCommentStatus)
+                    }
+
+                    Action {
+                        objectName: "commentStatusCancelledAction"
+                        checkable: true
+                        checked: root.commentActionsStatus
+                            === PDFEditController.CancelledCommentStatus
+                        enabled: root.commentActionsStateEditable
+                            && root.document.loaded
+                            && !root.editController.saving
+                        //% "Cancelled"
+                        text: qsTrId("CommentStatusCancelled")
+                        onTriggered: root.editController.setCommentStatus(
+                            root.commentActionsPage,
+                            root.commentActionsObjectId,
+                            PDFEditController.CancelledCommentStatus)
+                    }
+
+                    Action {
+                        objectName: "commentStatusCompletedAction"
+                        checkable: true
+                        checked: root.commentActionsStatus
+                            === PDFEditController.CompletedCommentStatus
+                        enabled: root.commentActionsStateEditable
+                            && root.document.loaded
+                            && !root.editController.saving
+                        //% "Completed"
+                        text: qsTrId("CommentStatusCompleted")
+                        onTriggered: root.editController.setCommentStatus(
+                            root.commentActionsPage,
+                            root.commentActionsObjectId,
+                            PDFEditController.CompletedCommentStatus)
+                    }
+
+                    Action {
+                        objectName: "commentStatusDeferredAction"
+                        checkable: true
+                        checked: root.commentActionsStatus
+                            === PDFEditController.DeferredCommentStatus
+                        enabled: root.commentActionsStateEditable
+                            && root.document.loaded
+                            && !root.editController.saving
+                        //% "Deferred"
+                        text: qsTrId("CommentStatusDeferred")
+                        onTriggered: root.editController.setCommentStatus(
+                            root.commentActionsPage,
+                            root.commentActionsObjectId,
+                            PDFEditController.DeferredCommentStatus)
+                    }
+
+                    Action {
+                        objectName: "commentStatusFutureAction"
+                        checkable: true
+                        checked: root.commentActionsStatus
+                            === PDFEditController.FutureCommentStatus
+                        enabled: root.commentActionsStateEditable
+                            && root.document.loaded
+                            && !root.editController.saving
+                        //% "Future"
+                        text: qsTrId("CommentStatusFuture")
+                        onTriggered: root.editController.setCommentStatus(
+                            root.commentActionsPage,
+                            root.commentActionsObjectId,
+                            PDFEditController.FutureCommentStatus)
+                    }
+                }
+
+                Action {
+                    objectName: "markCommentWithCheckmarkAction"
+                    checkable: true
+                    checked: root.commentActionsMarked
+                    enabled: root.commentActionsStateEditable
+                        && root.document.loaded
+                        && !root.editController.saving
+                    //% "Mark with Checkmark"
+                    text: qsTrId("MarkCommentWithCheckmark")
+                    onTriggered: root.editController.setCommentMarked(
+                        root.commentActionsPage,
+                        root.commentActionsObjectId,
+                        !root.commentActionsMarked)
+                }
+
+                onClosed: {
+                    root.clearCommentActionsContext()
+                    Qt.callLater(function() {
+                        const loadedMenu
+                            = commentActionsMenuLoader.item as Menu
+                        if (commentActionsMenuLoader.status
+                                !== Loader.Ready
+                                || !loadedMenu
+                                || !loadedMenu.opened) {
+                            commentActionsMenuLoader.active = false
+                        }
+                    })
+                }
+            }
+        }
+
+        onLoaded: root.showCommentActionsMenu()
     }
 
     Rectangle {
@@ -538,6 +836,24 @@ Rectangle {
                                     ? ""
                                     : String(
                                         modelData.commentTextEditReason)
+                            readonly property int commentStatus:
+                                modelData.commentStatus === undefined
+                                    ? PDFEditController.NoCommentStatus
+                                    : Number(modelData.commentStatus)
+                            readonly property bool commentMarked:
+                                modelData.commentMarked === undefined
+                                    ? false
+                                    : Boolean(modelData.commentMarked)
+                            readonly property bool commentStateEditable:
+                                modelData.commentStateEditable === undefined
+                                    ? false
+                                    : Boolean(
+                                        modelData.commentStateEditable)
+                            readonly property string commentStateEditReason:
+                                modelData.commentStateEditReason === undefined
+                                    ? ""
+                                    : String(
+                                        modelData.commentStateEditReason)
                             readonly property bool added:
                                 modelData.added === undefined
                                     ? false
@@ -890,47 +1206,113 @@ Rectangle {
                                     maximumLineCount: 3
                                 }
 
-                                ToolButton {
-                                    id: replyButton
-
-                                    Layout.alignment: Qt.AlignLeft
+                                RowLayout {
+                                    Layout.fillWidth: true
                                     visible: !commentCard.isReply
-                                        && (root.replyTargetPage
+                                    spacing: 6
+
+                                    ToolButton {
+                                        id: replyButton
+
+                                        Layout.alignment: Qt.AlignLeft
+                                        visible: root.replyTargetPage
                                                 !== commentCard.page
                                             || root.replyTargetObjectId
-                                                !== commentCard.objectId)
-                                    enabled: root.document.loaded
-                                        && !root.editController.saving
-                                        && commentCard.commentTextEditable
-                                    focusPolicy: Qt.TabFocus
-                                    //% "Reply"
-                                    text: qsTrId("Reply")
-                                    icon.source:
-                                        "../assets/icons/comment.svg"
-                                    icon.width: 14
-                                    icon.height: 14
-                                    icon.color:
-                                        root.theme.ribbonTextColor
-                                    display: AbstractButton.TextBesideIcon
-                                    spacing: 6
-                                    Accessible.name: text
-                                    onClicked: root.beginReply(
-                                        commentCard.page,
-                                        commentCard.objectId)
+                                                !== commentCard.objectId
+                                        enabled: root.document.loaded
+                                            && !root.editController.saving
+                                            && commentCard.commentTextEditable
+                                        focusPolicy: Qt.TabFocus
+                                        //% "Reply"
+                                        text: qsTrId("Reply")
+                                        icon.source:
+                                            "../assets/icons/comment.svg"
+                                        icon.width: 14
+                                        icon.height: 14
+                                        icon.color:
+                                            root.theme.ribbonTextColor
+                                        display:
+                                            AbstractButton.TextBesideIcon
+                                        spacing: 6
+                                        Accessible.name: text
+                                        onClicked: root.beginReply(
+                                            commentCard.page,
+                                            commentCard.objectId)
 
-                                    background: Rectangle {
-                                        radius: 4
-                                        color: replyButton.down
-                                            ? "#f5dfcf"
-                                            : replyButton.hovered
-                                                ? root.theme.foxitPaleOrange
-                                                : "transparent"
-                                        border.color:
-                                            replyButton.visualFocus
-                                                ? root.theme.foxitDarkOrange
-                                                : "transparent"
-                                        border.width:
-                                            replyButton.visualFocus ? 1 : 0
+                                        background: Rectangle {
+                                            radius: 4
+                                            color: replyButton.down
+                                                ? "#f5dfcf"
+                                                : replyButton.hovered
+                                                    ? root.theme
+                                                        .foxitPaleOrange
+                                                    : "transparent"
+                                            border.color:
+                                                replyButton.visualFocus
+                                                    ? root.theme
+                                                        .foxitDarkOrange
+                                                    : "transparent"
+                                            border.width:
+                                                replyButton.visualFocus
+                                                    ? 1
+                                                    : 0
+                                        }
+                                    }
+
+                                    Item {
+                                        Layout.fillWidth: true
+                                    }
+
+                                    ToolButton {
+                                        id: commentActionsButton
+
+                                        objectName: "commentActionsButton"
+                                        Layout.preferredWidth: 24
+                                        Layout.preferredHeight: 24
+                                        enabled: root.document.loaded
+                                            && !root.editController.saving
+                                            && commentCard.page >= 0
+                                            && commentCard.objectId.length > 0
+                                        focusPolicy: Qt.TabFocus
+                                        text: "\u22ef"
+                                        display: AbstractButton.TextOnly
+                                        font.pixelSize: 18
+                                        //% "More comment actions"
+                                        ToolTip.text:
+                                            qsTrId("MoreCommentActions")
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
+                                        Accessible.name: ToolTip.text
+                                        onClicked:
+                                            root.openCommentActionsMenu(
+                                                commentActionsButton,
+                                                commentCard.page,
+                                                commentCard.objectId,
+                                                commentCard.commentStatus,
+                                                commentCard.commentMarked,
+                                                commentCard
+                                                    .commentStateEditable,
+                                                commentCard
+                                                    .commentStateEditReason)
+
+                                        background: Rectangle {
+                                            radius: 4
+                                            color: commentActionsButton.down
+                                                ? "#f5dfcf"
+                                                : commentActionsButton.hovered
+                                                    ? root.theme
+                                                        .foxitPaleOrange
+                                                    : "transparent"
+                                            border.color:
+                                                commentActionsButton.visualFocus
+                                                    ? root.theme
+                                                        .foxitDarkOrange
+                                                    : "transparent"
+                                            border.width:
+                                                commentActionsButton.visualFocus
+                                                    ? 1
+                                                    : 0
+                                        }
                                     }
                                 }
 

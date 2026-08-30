@@ -244,7 +244,11 @@ orchestration Save.
 - Nhận diện annotation `/Text` có parent `/IRT`, `/State` và `/StateModel`
   `/Review` hoặc `/Marked` như log chuyển trạng thái. Candidate vẫn nằm trong
   graph nội bộ để bảo vệ ancestor/cascade xóa, nhưng bị loại khỏi comment
-  model, reply count và các API chọn/mutation trực tiếp.
+  model, reply count và các API chọn/mutation trực tiếp. Controller canonical
+  hóa exact spelling của reviewer theo history hiện hữu, chọn terminal sâu nhất
+  của chuỗi `/IRT` và chỉ dùng `/M`/index để phân xử nhánh rẽ. Hai API
+  `setCommentStatus()` và `setCommentMarked()` tạo các draft độc lập có
+  undo/redo/discard.
 - `requestCommentIndex()` dùng worker riêng để quét annotation-only từng trang,
   nhả PDFium lock giữa các trang và chỉ giữ comment candidate. Vì vậy danh sách
   toàn tài liệu không làm phình cache text/image 12 trang của viewport.

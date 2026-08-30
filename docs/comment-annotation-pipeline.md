@@ -96,9 +96,13 @@ Giới hạn hiện tại:
 - mỗi comment hoặc reply tối đa 700 UTF-16 code unit;
 - Rectangle, Ellipse, Line, Arrow, Triangle và Diamond trong tab Edit là page
   content path object, không phải drawing comment annotation;
-- UI chỉnh/hiển thị annotation state và XFDF chưa được model hóa; các annotation
-  chuyển trạng thái `/State` + `/StateModel /Review` hoặc `/Marked` được nhận
-  diện và ẩn khỏi danh sách comment;
+- Import/export XFDF chưa được model hóa. Trạng thái PDF hiện hành theo author
+  được đọc từ các annotation `/State` + `/StateModel /Review` hoặc `/Marked`;
+  các log này bị ẩn khỏi danh sách comment. Set Status và Mark with Checkmark
+  tạo hai draft độc lập, có undo/redo/discard và được Save/Save As. Các biến thể
+  hoa/thường của reviewer được quy về spelling chính xác của history đã tồn tại;
+  terminal `/IRT` quyết định state, còn `/M` và annotation index chỉ phân xử
+  những nhánh rẽ có cùng độ sâu;
 - 5 markup subtype chỉ đọc chưa có tool tạo mới, property editor hoặc writer.
 
 ## 2. Luồng kiến trúc tổng thể
@@ -245,7 +249,11 @@ trong graph nội bộ để kiểm cờ Locked/ReadOnly, cascade xóa và ẩn 
 cách, nhưng đánh dấu chúng là annotation-state để loại khỏi `commentItems()`,
 `commentPanelItems()`, reply count và mọi API chọn/sửa/xóa comment trực tiếp.
 Predicate dùng metadata PDF và parent `/IRT` hợp lệ, không dựa vào chuỗi
-`/Contents` do reader tự sinh.
+`/Contents` do reader tự sinh. Với author hiện tại, scanner gom các spelling
+khác hoa/thường, chọn spelling của history lâu đời/hoàn chỉnh hơn, rồi tách lại
+theo exact author. Terminal có chain `/IRT` sâu nhất được chọn riêng cho model
+`Review` và `Marked`; `/M` mới nhất và annotation index chỉ là tie-breaker cho
+các terminal cùng độ sâu. Hai giá trị tổng hợp được đưa lên card gốc.
 
 Kết quả được cache theo display page và document revision. Khi revision đổi,
 mọi kết quả cũ và callback đến muộn phải bị loại.
@@ -346,6 +354,13 @@ Panel chỉ chứa comment/thread. Nó không còn sở hữu control stroke, fi
 opacity; appearance của drawing comment được chỉnh ở panel riêng trong tab
 Edit.
 
+Hàng Reply của mỗi comment gốc có nút ba chấm ở mép phải. Nút mở một `Menu`
+dùng chung được tạo/hủy bằng `Loader`; submenu Set Status dùng cascade desktop
+để mở khi hover và liệt kê None, Accepted, Rejected, Cancelled, Completed,
+Deferred, Future. Mark with Checkmark là action cùng cấp. Các action phản ánh
+trạng thái checked hiện hành, tôn trọng permission/annotation flags và gọi
+controller để tạo command có undo/redo/discard. Hai model được chỉnh độc lập.
+
 QML cho phép text tạm vượt 700 UTF-16 code unit để không phá IME/local undo,
 nhưng commit, gửi reply và Save bị chặn cho đến khi độ dài hợp lệ. C++ kiểm lại
 cùng giới hạn; không dựa riêng vào validation QML.
@@ -435,9 +450,11 @@ flatten các descendants thành một cấp hiển thị.
 
 `/RT /Group` không phải reply relation và không đi qua thread logic hiện tại.
 Annotation state dùng `/IRT` nhưng có `/State` và `/StateModel`. Scanner hiện
-phân biệt hai model `/Review` và `/Marked` với reply thường và không đưa state
-entry vào panel; việc hiển thị/chỉnh trạng thái Accepted/Rejected/Completed hay
-Marked/Unmarked vẫn là gap riêng.
+phân biệt hai model `/Review` và `/Marked` với reply thường, không đưa state
+entry vào panel và tổng hợp terminal của canonical author hiện tại lên comment
+gốc. Canonical author giữ exact spelling của history tương thích đã tồn tại để
+không trộn hai nhánh chỉ khác hoa/thường. Set Status ghi `Review`; Mark with
+Checkmark ghi `Marked`/`Unmarked`.
 
 ### 7.2 ID tạm trong save pipeline
 
@@ -482,8 +499,9 @@ Mọi mutation comment phải vượt qua hai lớp kiểm tra:
 2. source annotation không có ReadOnly hoặc LockedContents.
 
 Annotation bị bảo vệ vẫn được index, hiển thị và điều hướng, nhưng không cho sửa
-text hoặc xóa. Cả QML và controller đều có trạng thái disable/reason; writer vẫn
-kiểm lại flags để chống source thay đổi giữa scan và Save.
+text, trạng thái hoặc xóa. Thay đổi trạng thái còn tôn trọng cờ Locked. Cả QML
+và controller đều có trạng thái disable/reason; writer vẫn kiểm lại flags để
+chống source thay đổi giữa scan và Save.
 
 Ngoại lệ geometry hiện tại là Ink nguồn hợp lệ: move/resize cần annotation
 permission, không có ReadOnly/LockedContents/Locked và writer kiểm lại các điều

@@ -94,7 +94,16 @@ Current features:
   standard `/IRT`, and cascades root deletion across the thread. PDF annotation
   state transitions with `/State` and `/StateModel /Review` or `/Marked` stay in
   the internal thread graph for safe deletion/flag checks but are excluded from
-  the comment list and selection APIs. Reply
+  the comment list and selection APIs. Each root comment card has a lazily
+  loaded three-dot menu with a cascading Set Status submenu and a Mark with
+  Checkmark item. Status and checkmark changes are independent undoable drafts;
+  Save/Save As appends author-specific `/Text` state transitions with `/IRT`,
+  `/State`, and `/StateModel`, chains later transitions to the previous state
+  for the same author/model when its `/NM` is safe, and restores the terminal
+  state after reopen. Reader-specific case variants of the current reviewer
+  name are canonicalized to the established exact spelling before histories
+  are separated; `/IRT` depth is authoritative, while `/M` and annotation order
+  are only deterministic tie-breakers for malformed forks. Reply
   annotation appearances stay hidden from the page viewer while the replies
   remain available and editable in the panel. New Sticky Notes and replies have
   vector normal appearances, and comment line endings are saved as PDF CR while
