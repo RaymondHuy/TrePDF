@@ -17,16 +17,11 @@ Flickable {
     signal pageRequested(int page)
     signal toolRequested(string toolName)
     signal commentsPanelToggleRequested()
-    signal previousCommentRequested()
-    signal nextCommentRequested()
-    signal deleteCommentRequested(int page, string objectId)
     signal undoRequested()
     signal redoRequested()
 
     readonly property real highlightOpacity: 96 / 255
     readonly property real lineMarkupOpacity: 192 / 255
-    readonly property bool hasComments:
-        editController.commentItems.length > 0
     readonly property var highlightColors: [
         "#ffeb3b", "#ffc107", "#ff9800", "#ff7043", "#ef5350",
         "#ec407a", "#ab47bc", "#42a5f5", "#26c6da", "#66bb6a",
@@ -282,24 +277,6 @@ Flickable {
             drawingCommentPopup.close()
         if (stampPresetPopup)
             stampPresetPopup.close()
-    }
-
-    function isCommentKind(kind) {
-        return kind === "comment"
-            || kind === "stickyNote"
-            || kind === "note"
-            || kind === "highlight"
-            || kind === "underline"
-            || kind === "squiggly"
-            || kind === "strikeout"
-            || kind === "freeText"
-            || kind === "square"
-            || kind === "circle"
-            || kind === "line"
-            || kind === "polygon"
-            || kind === "polyLine"
-            || kind === "ink"
-            || kind === "stamp"
     }
 
     onDocumentChanged: closePopups()
@@ -1058,58 +1035,6 @@ Flickable {
                     && !root.editController.saving
                 primary: root.commentsPanelVisible
                 onClicked: root.commentsPanelToggleRequested()
-            }
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Previous"
-                text: qsTrId("Previous")
-                //% "Previous comment"
-                toolTipText: qsTrId("PreviousComment")
-                iconSource: "../assets/icons/chevron-left.svg"
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                    && root.hasComments
-                onClicked: root.previousCommentRequested()
-            }
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Next"
-                text: qsTrId("Next")
-                //% "Next comment"
-                toolTipText: qsTrId("NextComment")
-                iconSource: "../assets/icons/chevron-right.svg"
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                    && root.hasComments
-                onClicked: root.nextCommentRequested()
-            }
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Delete"
-                text: qsTrId("Delete")
-                //% "Delete selected comment"
-                toolTipText: qsTrId("DeleteSelectedComment")
-                iconSource: "../assets/icons/remove-text.svg"
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                    && root.editController.selectedDeletable
-                    && root.isCommentKind(
-                        root.editController.selectedKind)
-                onClicked: {
-                    if (root.isCommentKind(
-                            root.editController.selectedKind)
-                            && root.editController.selectedDeletable) {
-                        root.deleteCommentRequested(
-                            root.editController.selectedPage,
-                            root.editController.selectedObjectId)
-                    }
-                }
             }
         }
 

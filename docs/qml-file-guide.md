@@ -227,8 +227,8 @@ ghi Save; mọi thay đổi vẫn là draft.
 - Gesture drawing có owner page duy nhất ở `PDFEditController`; bắt đầu trên
   trang khác sẽ hủy polygon/polyline hoặc Ink tạm của delegate trước để pooling
   không giữ hai path dang dở song song.
-- Nhóm Manage bật/tắt danh sách, chọn bình luận trước/sau và xóa comment đang
-  chọn; nhóm History dùng chung undo/redo của `PDFEditController`.
+- Nhóm Manage bật/tắt danh sách comment; nhóm History dùng chung undo/redo của
+  `PDFEditController`.
 - Undo/Redo dùng chung history của `PDFEditController` và điều hướng tới trang
   bị thay đổi qua `pageRequested()`.
 

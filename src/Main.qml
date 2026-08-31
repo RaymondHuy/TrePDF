@@ -928,9 +928,6 @@ ApplicationWindow {
             onFitWidthRequested: window.fitToWidth()
             onRotateRequested: quarterTurns => window.rotateView(quarterTurns)
             onToolRequested: toolName => window.showComingSoon(toolName)
-            onDeleteCommentRequested: (page, objectId) => {
-                window.requestDeleteComment(page, objectId)
-            }
             onUndoRequested: window.requestUndo()
             onRedoRequested: window.requestRedo()
         }

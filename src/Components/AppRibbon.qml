@@ -54,7 +54,6 @@ Column {
     signal fitWidthRequested()
     signal rotateRequested(int quarterTurns)
     signal toolRequested(string toolName)
-    signal deleteCommentRequested(int page, string objectId)
     signal undoRequested()
     signal redoRequested()
 
@@ -90,15 +89,6 @@ Column {
     function revealSelectedDrawingComment() {
         if (ribbonTabs.currentIndex === 2 && drawingCommentSelected())
             commentsPanelVisible = true
-    }
-
-    function navigateRelativeComment(direction) {
-        const page = editController.selectRelativeComment(direction)
-        if (page < 0)
-            return
-
-        editController.tool = PDFEditController.CommentSelectTool
-        pageRequested(page)
     }
 
     function syncEditTool() {
@@ -216,11 +206,6 @@ Column {
             onToolRequested: toolName => root.toolRequested(toolName)
             onCommentsPanelToggleRequested: {
                 root.commentsPanelVisible = !root.commentsPanelVisible
-            }
-            onPreviousCommentRequested: root.navigateRelativeComment(-1)
-            onNextCommentRequested: root.navigateRelativeComment(1)
-            onDeleteCommentRequested: (page, objectId) => {
-                root.deleteCommentRequested(page, objectId)
             }
             onUndoRequested: root.undoRequested()
             onRedoRequested: root.redoRequested()
