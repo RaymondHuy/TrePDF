@@ -686,9 +686,11 @@ chỉ có comment vẫn không gọi `FPDFPage_GenerateContent()`.
 
 Stamp mới được canonicalizer ghi `/Subtype /Stamp`, preset `/Name`, `/C`, Print
 flag và normal `/AP` vector dùng Helvetica Bold, viền kép và màu preset.
-`/Contents` vẫn là semantic comment text; sửa Stamp nguồn giữ nguyên geometry
-và `/AP` hiện có. Stamp nguồn không move/resize, còn Stamp mới dùng cùng frame
-draft và tám handle cạnh/góc trước lần Save đầu tiên.
+`/Contents` vẫn là semantic comment text. Stamp mới và Stamp nguồn hợp lệ dùng
+cùng frame draft, drag/phím mũi tên và tám handle cạnh/góc. Với Stamp nguồn,
+writer gắn marker tạm rồi canonicalizer vá trực tiếp `/Rect` sau serialization,
+xóa marker và giữ nguyên `/AP`, appearance `/BBox` cùng các dictionary entry
+không liên quan.
 
 Ink dùng một path mở cho mỗi entry `/InkList`, round cap/join, cùng border width,
 màu và opacity giữa dictionary với appearance. Pipeline vẫn chưa phải generic
@@ -756,7 +758,8 @@ Coverage comment hiện cần được duy trì cho:
 - source Ink malformed/oversized downgrade thành generic read-only theo giới hạn
   64 stroke, 4.096 điểm/stroke và 32.768 điểm tổng;
 - Stamp preset: add/move/resize/history, `/Name`/`Contents`/Print/vector `/AP`,
-  annotation-only Save, reopen, source contents/reply/delete và giữ source `/AP`;
+  annotation-only Save và reopen; source move/resize/content/reply/delete,
+  undo/redo/discard, vá `/Rect` và giữ source `/AP`/`BBox`;
 - read-only index cho 5 markup subtype chưa hỗ trợ mutation;
 - author, creation/modification date và 700 UTF-16 code-unit limit;
 - comment index xuyên trang, duplicate page-local `/NM` và navigation;

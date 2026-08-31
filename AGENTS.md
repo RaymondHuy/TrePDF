@@ -45,8 +45,11 @@ Current features:
   Final, Confidential, For Comment, and Not Approved presets. Added Stamp
   drafts support click/drag placement, move, eight-handle resize, delete,
   undo/redo/discard, and Save/Save As as `/Stamp` with `/Name`, `/Contents`,
-  Print, and vector `/AP`. Source Stamp supports contents edits, replies, and
-  deletion while preserving source geometry and `/AP`. Caret, FileAttachment,
+  Print, and vector `/AP`. Eligible source Stamp supports drag/arrow-key move,
+  eight-handle resize, contents edits, replies, deletion, undo/redo/discard,
+  and Save/Save As. Source geometry Save patches `/Rect` after serialization
+  while preserving the original `/AP`, its `/BBox`, and unrelated dictionary
+  entries. Caret, FileAttachment,
   Sound, Redact, and PDF 2.0 Projection remain indexed read-only for panel
   navigation.
   Added and valid source Square, Circle, Line, Polygon, PolyLine, and Ink can be
