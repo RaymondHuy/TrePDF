@@ -147,8 +147,11 @@ Approved, Draft, Final, Confidential, For Comment, and Not Approved presets.
 A click uses a 160-by-50-point frame and a drag sets a custom frame; new Stamp
 drafts can be moved, resized with eight handles, deleted, undone/redone, and
 saved as standard `/Stamp` annotations with `/Name`, semantic `/Contents`, the
-Print flag, and a vector `/AP`. Existing Stamp contents, replies, and deletion
-are supported while source geometry and custom appearances remain unchanged.
+Print flag, and a vector `/AP`. Eligible existing Stamp annotations also support
+drag/arrow-key movement, eight-handle resize, contents, replies, deletion,
+undo/redo/discard, and Save/Save As. Saving source Stamp geometry patches
+`/Rect` while preserving its original `/AP`, appearance `/BBox`, and unrelated
+dictionary entries.
 Caret, FileAttachment, Sound, Redact, and PDF 2.0 Projection are still indexed
 read-only for reading and navigation.
 Comment changes are per-tab session drafts with

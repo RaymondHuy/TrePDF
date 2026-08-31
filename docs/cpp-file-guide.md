@@ -341,10 +341,12 @@ orchestration Save.
   gia cùng snapshot undo/redo. `setCommentText()` và `addCommentReply()` cùng
   enforce tối đa 700 UTF-16 code unit; `addCommentReply()` chỉ nhận root.
 - Annotation-only scan giữ kind riêng cho
-  Line/Square/Circle/Polygon/PolyLine/Ink/Stamp. Stamp nguồn cho sửa nội dung,
-  reply và xóa nhưng không cho đổi geometry; Caret/FileAttachment/Sound/Redact/
-  Projection dùng kind `comment` chỉ đọc. Mọi đường sửa, xóa và reply đều kiểm
-  `commentTextReadOnly` trước khi tạo draft.
+  Line/Square/Circle/Polygon/PolyLine/Ink/Stamp. Stamp nguồn hợp lệ cho
+  drag/phím mũi tên, resize tám handle, sửa nội dung, reply và xóa; geometry
+  dùng chung frame draft và history undo/redo/discard. Save vá `/Rect` sau
+  serialization để giữ nguyên `/AP` và `/BBox`. Caret/FileAttachment/Sound/
+  Redact/Projection dùng kind `comment` chỉ đọc. Mọi đường sửa, xóa và reply
+  đều kiểm `commentTextReadOnly` trước khi tạo draft.
 - Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 

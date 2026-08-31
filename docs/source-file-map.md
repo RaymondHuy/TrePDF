@@ -155,11 +155,13 @@ flowchart TD
    Move/resize chỉ commit một command khi gesture kết thúc. Cả sáu drawing
    subtype mới hoặc source hợp lệ hỗ trợ translate endpoint, vertex hay toàn bộ
    stroke bằng bounding box/phím mũi tên, đồng thời scale toàn bộ geometry bằng
-   tám resize handle ở cạnh/góc. Stamp mới hỗ trợ geometry tương tự, còn Stamp
-   nguồn giữ nguyên geometry và `/AP`. Source drawing chỉ nhận geometry mutation
+   tám resize handle ở cạnh/góc. Stamp mới và Stamp nguồn hợp lệ dùng cùng
+   interaction frame; Save của Stamp nguồn vá `/Rect` nhưng giữ nguyên `/AP` và
+   appearance `/BBox`. Source comment chỉ nhận geometry mutation
    khi annotation permission và các cờ ReadOnly/LockedContents/Locked cho phép;
-   move giữ `/AP`, còn resize chỉ tái tạo `/AP` TrePDF-managed khi provenance,
-   properties và fingerprint vẫn an toàn.
+   Stamp luôn giữ `/AP` khi move/resize. Với source drawing comment, move giữ
+   `/AP`, còn resize chỉ tái tạo `/AP` TrePDF-managed khi provenance, properties
+   và fingerprint vẫn an toàn.
 5. `PDFSaveWriter` phân biệt thay đổi chỉ dịch chuyển với thay đổi cần thay object
    để giữ font, ma trận, resource và z-order khi có thể.
 

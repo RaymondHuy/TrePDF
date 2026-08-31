@@ -221,8 +221,9 @@ ghi Save; mọi thay đổi vẫn là draft.
   session trả frame và geometry về trạng thái ban đầu. Source chỉ nhận geometry
   interaction khi annotation permission và các cờ
   ReadOnly/LockedContents/Locked cho phép; capability sửa style vẫn được gate
-  riêng theo độ an toàn round-trip của `/AP`. Stamp nguồn giữ geometry và `/AP`,
-  không đi qua interaction này.
+  riêng theo độ an toàn round-trip của `/AP`. Stamp nguồn hợp lệ cũng dùng
+  bounding-box drag/phím mũi tên và tám handle; Save chỉ đổi `/Rect`, giữ `/AP`
+  và appearance `/BBox`.
 - Gesture drawing có owner page duy nhất ở `PDFEditController`; bắt đầu trên
   trang khác sẽ hủy polygon/polyline hoặc Ink tạm của delegate trước để pooling
   không giữ hai path dang dở song song.
@@ -274,8 +275,8 @@ Note/Free Text đang chọn và phản hồi một cấp.
   source hợp lệ đều hỗ trợ chọn, drag/phím mũi tên, resize tám handle, sửa nội
   dung, xóa, reply và history.
   Panel này chỉ xử lý nội dung/thread; stroke, fill và opacity được tách sang
-  `DrawingCommentPropertiesPanel` trong tab Edit. Stamp nguồn giữ geometry/AP;
-  Caret,
+  `DrawingCommentPropertiesPanel` trong tab Edit. Stamp nguồn dùng selection
+  frame để move/resize nhưng không dùng drawing-style panel; Caret,
   FileAttachment, Sound, Redact và Projection dùng card `comment` chỉ đọc. Ink có `/InkList` malformed
   hoặc vượt giới hạn scan 64 stroke, 4.096 điểm/stroke hay 32.768 điểm tổng cũng
   hạ xuống card generic chỉ đọc thay vì cấp phát dữ liệu không giới hạn.
@@ -492,12 +493,12 @@ data/candidate/history/selection đổi.
 - `StampView` vẽ viền kép, màu và artwork text dùng chung cho menu preset,
   preview placement và draft Stamp mới.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
-- Drag text/image/shape, cả sáu drawing subtype và Stamp mới giữ preview trong
-  QML nhưng chỉ commit geometry một lần khi thả; phím mũi tên tạo move command,
+- Drag text/image/shape, cả sáu drawing subtype và Stamp mới/nguồn giữ preview
+  trong QML nhưng chỉ commit geometry một lần khi thả; phím mũi tên tạo move command,
   Shift dùng bước lớn hơn. Cả sáu drawing subtype mới hoặc source hợp lệ và
-  Stamp mới nhận tám resize handle ở cạnh/góc; frame scale endpoint/vertex của
-  Square/Circle/Line/Polygon/PolyLine hoặc mọi stroke của Ink. Stamp nguồn giữ
-  geometry và `/AP`, nên không nhận move/resize handle.
+  Stamp mới/nguồn hợp lệ nhận tám resize handle ở cạnh/góc; frame scale
+  endpoint/vertex của Square/Circle/Line/Polygon/PolyLine hoặc mọi stroke của
+  Ink. Stamp nguồn chỉ đổi frame `/Rect`; `/AP` và `/BBox` được giữ nguyên.
 
 **Dọn state:** `prepareForSessionChange()` kết thúc hoặc hủy editor/resize/draw,
 ẩn cursor và xóa dữ liệu trang. Bất kỳ bổ sung gesture nào cũng phải đi qua
