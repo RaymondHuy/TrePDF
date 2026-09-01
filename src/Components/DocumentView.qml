@@ -11,6 +11,7 @@ Rectangle {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    required property PDFSearchController searchController
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
     property bool formsTabActive: false
@@ -28,6 +29,11 @@ Rectangle {
     property string transientStatus
     property int pendingNavigationPage: -1
     property int navigationGeneration: 0
+    property int pendingSearchNavigationGeneration: -1
+    property real pendingSearchNavigationX: 0.5
+    property real pendingSearchNavigationY: 0.0
+    property real pendingSearchResultsRevision: -1
+    property int pendingSearchNavigationAttempts: 0
     property int sessionChangeGeneration: 0
     property bool formDesignModePrepared: false
     readonly property bool formDesignMode:
@@ -39,6 +45,7 @@ Rectangle {
     signal openRequested()
     signal beginSelectedEditingRequested()
     signal deleteCommentRequested(int page, string objectId)
+    signal navigationSettled(int generation)
 
     color: "#f2efec"
 
@@ -56,8 +63,9 @@ Rectangle {
 
     function navigateToPage(page) {
         if (!document.loaded || page < 0 || page >= document.pageCount)
-            return
+            return -1
 
+        cancelPendingSearchNavigation()
         const generation = ++navigationGeneration
         pendingNavigationPage = page
         document.setCurrentPage(page)
@@ -70,6 +78,7 @@ Rectangle {
 
             if (!root.document.loaded || page >= root.document.pageCount) {
                 root.pendingNavigationPage = -1
+                root.navigationSettled(generation)
                 return
             }
 
@@ -84,11 +93,97 @@ Rectangle {
 
                 root.document.setCurrentPage(page)
                 root.pendingNavigationPage = -1
+                root.navigationSettled(generation)
             })
         })
+        return generation
+    }
+
+    function cancelPendingSearchNavigation() {
+        searchNavigationTimer.stop()
+        pendingSearchNavigationGeneration = -1
+        pendingSearchResultsRevision = -1
+        pendingSearchNavigationAttempts = 0
+    }
+
+    function finishSearchNavigation() {
+        const generation = pendingSearchNavigationGeneration
+        const page = pendingNavigationPage
+        if (navigationGeneration !== generation
+                || page < 0
+                || !document.loaded
+                || page >= document.pageCount
+                || searchController.resultsRevision
+                    !== pendingSearchResultsRevision) {
+            pendingNavigationPage = -1
+            cancelPendingSearchNavigation()
+            return
+        }
+
+        const delegate = viewer.itemAtIndex(page) as PdfPageDelegate
+        if (!delegate || !delegate.searchNavigationReady) {
+            ++pendingSearchNavigationAttempts
+            if (pendingSearchNavigationAttempts >= 120) {
+                pendingNavigationPage = -1
+                cancelPendingSearchNavigation()
+                return
+            }
+            viewer.positionViewAtIndex(page, ListView.Beginning)
+            return
+        }
+
+        const localPoint = delegate.searchResultPoint(
+            pendingSearchNavigationX,
+            pendingSearchNavigationY)
+        const contentPoint = delegate.mapToItem(
+            viewer.contentItem,
+            localPoint.x,
+            localPoint.y)
+        viewer.contentX = Math.max(
+            0,
+            Math.min(
+                contentPoint.x - viewer.width * 0.5,
+                Math.max(0, viewer.contentWidth - viewer.width)))
+        viewer.contentY = Math.max(
+            0,
+            Math.min(
+                contentPoint.y - viewer.height * 0.5,
+                Math.max(0, viewer.contentHeight - viewer.height)))
+        document.setCurrentPage(page)
+        pendingNavigationPage = -1
+        cancelPendingSearchNavigation()
+        navigationSettled(generation)
+    }
+
+    function navigateToSearchResult(page,
+                                    normalizedX,
+                                    normalizedY,
+                                    resultsRevision) {
+        if (!document.loaded
+                || page < 0
+                || page >= document.pageCount
+                || searchController.resultsRevision !== resultsRevision) {
+            return -1
+        }
+
+        cancelPendingSearchNavigation()
+        const generation = ++navigationGeneration
+        pendingNavigationPage = page
+        pendingSearchNavigationGeneration = generation
+        pendingSearchNavigationX = normalizedX
+        pendingSearchNavigationY = normalizedY
+        pendingSearchResultsRevision = resultsRevision
+        pendingSearchNavigationAttempts = 0
+        document.setCurrentPage(page)
+        viewer.positionViewAtIndex(page, ListView.Beginning)
+        finishSearchNavigation()
+        if (pendingSearchNavigationGeneration === generation)
+            searchNavigationTimer.start()
+        return generation
     }
 
     function prepareForSessionChange() {
+        cancelPendingSearchNavigation()
         ++sessionChangeGeneration
         editController.finishSelectedFrameResize()
         editController.finishSelectedTextEdit()
@@ -108,8 +203,12 @@ Rectangle {
         prepareForSessionChange()
         const generation = navigationGeneration
         Qt.callLater(function() {
-            if (root.navigationGeneration !== generation || !root.document.loaded)
+            if (root.navigationGeneration !== generation)
                 return
+            if (!root.document.loaded) {
+                root.navigationSettled(generation)
+                return
+            }
 
             viewer.contentX = Math.max(
                 0,
@@ -120,7 +219,9 @@ Rectangle {
                 Math.min(Number(savedContentY),
                          Math.max(0, viewer.contentHeight - viewer.height)))
             root.syncCurrentPageFromScroll()
+            root.navigationSettled(generation)
         })
+        return generation
     }
 
     function syncCurrentPageFromScroll() {
@@ -150,6 +251,27 @@ Rectangle {
         function onPageNavigationRequested(page) {
             root.navigateToPage(page)
         }
+    }
+
+    Connections {
+        target: root.searchController
+
+        function onResultsChanged() {
+            if (root.pendingSearchNavigationGeneration >= 0
+                    && root.searchController.resultsRevision
+                        !== root.pendingSearchResultsRevision) {
+                root.pendingNavigationPage = -1
+                root.cancelPendingSearchNavigation()
+            }
+        }
+    }
+
+    Timer {
+        id: searchNavigationTimer
+
+        interval: 16
+        repeat: true
+        onTriggered: root.finishSearchNavigation()
     }
 
     ListView {
@@ -195,6 +317,7 @@ Rectangle {
             theme: root.theme
             document: root.document
             editController: root.editController
+            searchController: root.searchController
             formController: root.formController
             formDesignerController: root.formDesignerController
             formsTabActive: root.formsTabActive

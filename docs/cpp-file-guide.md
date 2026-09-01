@@ -1,9 +1,9 @@
 # Hướng dẫn toàn bộ tệp C++
 
-Tài liệu này mô tả 16 tệp triển khai C++ trong `src/`, tệp kiểm thử C++ trong
-`tests/`, các header đi cùng và hai header hỗ trợ không có `.cpp` riêng. Nội dung
-tập trung vào trách nhiệm thật của mỗi tệp, ownership, thread, dữ liệu trao đổi
-và ranh giới không nên phá khi sửa code.
+Tài liệu này mô tả 18 tệp triển khai C++ trong `src/`, 20 header và một tệp kiểm
+thử C++ trong `tests/`. Trong số header, 17 tệp đi cùng implementation và ba tệp
+hỗ trợ không có `.cpp` riêng. Nội dung tập trung vào trách nhiệm thật của mỗi
+tệp, ownership, thread, dữ liệu trao đổi và ranh giới không nên phá khi sửa code.
 
 ## Quy ước kiến trúc C++
 
@@ -11,7 +11,7 @@ và ranh giới không nên phá khi sửa code.
   expose, không truy cập handle PDFium trực tiếp.
 - PDFium không thread-safe ngay cả khi dùng các document handle khác nhau. Mọi
   transaction PDFium phải đi qua `PDFiumProcessLock` toàn tiến trình.
-- Render, form runtime và save mở document handle riêng; không dùng
+- Render, search, form runtime và save mở document handle riêng; không dùng
   `FPDF_DOCUMENT` thuộc `PDFDocument` trên worker.
 - Mọi kết quả bất đồng bộ phải được kiểm request id/generation/document key/
   revision trước khi áp vào object GUI.
@@ -124,10 +124,11 @@ Tệp định nghĩa hai lớp có ownership khác nhau.
 
 #### `PDFDocumentSession`
 
-- Sở hữu `PDFDocument`, `PDFEditController`, `PDFFormController` và
-  `PDFFormDesignerController` của một tab.
-- Nối document vào ba controller, nối form/designer vào edit controller để draft
-  guard và save snapshot bao quát cả content lẫn AcroForm.
+- Sở hữu `PDFDocument`, `PDFEditController`, `PDFFormController`,
+  `PDFFormDesignerController` và `PDFSearchController` của một tab.
+- Nối document vào bốn controller, nối form/designer vào edit controller để draft
+  guard và save snapshot bao quát cả content lẫn AcroForm. Search state không
+  tham gia draft/save và được giữ độc lập theo tab.
 - Giữ state view riêng: zoom, scroll X/Y, quarter-turn rotation, panel collapsed
   và cờ initial fit.
 - Tổng hợp `hasDrafts`/`saving`, title/path và chuyển tiếp status, save finished,
@@ -149,6 +150,50 @@ Tệp định nghĩa hai lớp có ownership khác nhau.
 
 **Ranh giới:** model không tự hiển thị prompt; nó trả trạng thái/signal để QML
 điều phối lựa chọn người dùng.
+
+### [`src/PDFSearchController.cpp`](../src/PDFSearchController.cpp) và
+[`src/PDFSearchController.h`](../src/PDFSearchController.h)
+
+**Type QML:** `PDFSearchController`, facade GUI-thread cho tìm text toàn tài liệu.
+
+**State và API:**
+
+- Expose query, `Idle/Searching/Ready/Limited/Failed`, tổng số kết quả, index hiện
+  tại và `resultsRevision`; `prepareSearchText()`, `scheduleSearch()`, `search()`,
+  `clearSearch()`, `nextResult()`, `previousResult()` và `highlightsForPage()` là
+  API QML. Timer debounce 300 ms nằm trong controller nên không mất request khi
+  `ViewRibbon` bị hủy hoặc đổi document tab.
+- Kết quả lưu theo thứ tự display page/match. Previous/Next quay vòng và phát
+  `resultActivated(page, normalizedX, normalizedY, resultsRevision)`; QML dùng
+  điểm anchor và revision để cuộn đúng match vào giữa viewport thay vì chỉ đi
+  tới đầu trang hoặc replay một match đã stale.
+- Rect trả cho QML là normalized geometry của trang logic, kèm cờ `current`; UI
+  không giữ hoặc tự suy ra PDF text geometry.
+
+**Worker và giới hạn:**
+
+- Mỗi query chụp path, document revision, ánh xạ display/source page và page
+  size. Controller chỉ giữ snapshot pending mới nhất; `tryStart()` cùng timer
+  retry không để request đã cancel tích tụ trong queue của pool một thread.
+  Worker mở một `FPDF_DOCUMENT` riêng từ path và chỉ chạm PDFium dưới
+  `PDFiumProcessLock`, với cancellation được kiểm lại ngay sau khi lấy lock.
+- Dùng text page của PDFium để tìm không phân biệt hoa thường, gom rect của từng
+  match và đổi PDF coordinates sang normalized top-left coordinates qua
+  `FPDF_PageToDevice()`.
+- Query tối đa 256 UTF-16 code units; mỗi page tối đa 2.000.000 text characters;
+  toàn query tối đa 20.000 matches, 100.000 rectangles và 256 rectangles/match.
+  QML chỉ materialize tối đa 512 rectangle trên mỗi page nhưng luôn ưu tiên
+  current match. Cắt query không để lại high surrogate đơn lẻ. Scan không hoàn
+  tất do cap/page lỗi hoặc thiếu page metrics dùng state `Limited`; text trên
+  page thiếu metrics vẫn được đếm nhưng không tạo geometry không đáng tin.
+- Query mới đặt cancellation token của request cũ. Callback chỉ nhận kết quả khi
+  controller, token, path, revision và query vẫn khớp. `sourceChanged` hoặc
+  `pageStructureChanged` hủy request và clear state. Session cũng clear search
+  khi edit history đổi để highlight nguồn không nằm trên draft render đã khác.
+
+**Ranh giới:** controller này đọc text layer nguồn, không dùng candidate cache
+của `PDFEditController`, không tìm trong draft chưa Save và không giữ handle
+PDFium trên GUI thread.
 
 ### [`src/PDFPageItem.cpp`](../src/PDFPageItem.cpp) và
 [`src/PDFPageItem.h`](../src/PDFPageItem.h)
@@ -804,6 +849,9 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
 - Candidate/hover: scan ngoài GUI thread, cancellation/reschedule/defer khi lock
   bận, grouping theo dòng/cột/style/font, giới hạn editable scope, comment-only
   selection/default tab tool và comment index/điều hướng xuyên trang.
+- Search: tìm text không phân biệt hoa thường xuyên nhiều trang, normalized
+  highlight/current result, Previous/Next wrap, thay query loại request cũ và
+  document close/reset xóa state.
 - Font: bundled/system registration, language filters, mixed-style intersection,
   embedding rejection, glyph coverage, TTC/subset collision và stretch
   calibration.
@@ -844,6 +892,7 @@ thay thế kiểm thử native Metal thủ công.
 | `PDFFormView.cpp` | `PDFFormView.h` |
 | `PDFFormWorker.cpp` | `PDFFormWorker.h` |
 | `PDFPageItem.cpp` | `PDFPageItem.h` |
+| `PDFSearchController.cpp` | `PDFSearchController.h` |
 | `PDFSaveWriter.cpp` | `PDFSaveWriter.h` |
 | `PDFTabModel.cpp` | `PDFTabModel.h` |
 | `PDFWidgetAnnotationSuppression.cpp` | `PDFWidgetAnnotationSuppression.h` |

@@ -9,6 +9,7 @@ Item {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    required property PDFSearchController searchController
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
     property bool formsTabActive: false
@@ -39,6 +40,9 @@ Item {
     readonly property real maximumViewPageWidth: quarterTurn
         ? document.maximumPageHeight
         : document.maximumPageWidth
+    readonly property bool searchNavigationReady: !pooled
+        && pageSurface.width > 0
+        && pageSurface.height > 0
 
     signal deleteCommentRequested(int page, string objectId)
 
@@ -51,6 +55,13 @@ Item {
 
     function beginSelectedEditing() {
         pageInteractionOverlay.beginSelectedEditing()
+    }
+
+    function searchResultPoint(normalizedX, normalizedY) {
+        return pageSurface.mapToItem(
+            pageCard,
+            Math.max(0, Math.min(1, normalizedX)) * pageSurface.width,
+            Math.max(0, Math.min(1, normalizedY)) * pageSurface.height)
     }
 
     onSessionChangeGenerationChanged: prepareForSessionChange()
@@ -114,6 +125,14 @@ Item {
                 : "#c6cad1"
             border.width: pageCard.index === pageCard.document.currentPage ? 2 : 1
             visible: pageView.width > 0 && pageView.height > 0
+        }
+
+        SearchHighlightLayer {
+            anchors.fill: pageView
+            controller: pageCard.searchController
+            page: pageCard.index
+            pooled: pageCard.pooled
+            z: 0.5
         }
 
         PageInteractionOverlay {

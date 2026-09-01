@@ -1,6 +1,6 @@
 # Hướng dẫn toàn bộ tệp QML
 
-Tài liệu này mô tả 30 tệp QML đang được đăng ký trong QML module `TrePDF`.
+Tài liệu này mô tả 34 tệp QML đang được đăng ký trong QML module `TrePDF`.
 Mỗi mục tập trung vào trách nhiệm, dữ liệu đi vào/đi ra, quan hệ với C++ và các
 ràng buộc vòng đời cần giữ khi sửa code.
 
@@ -24,6 +24,7 @@ ràng buộc vòng đời cần giữ khi sửa code.
 Main.qml
 ├── AppRibbon.qml
 │   ├── ViewRibbon.qml
+│   │   └── SearchRibbonControl.qml
 │   ├── EditRibbon.qml
 │   ├── CommentRibbon.qml
 │   ├── FormRibbon.qml
@@ -33,6 +34,7 @@ Main.qml
     ├── DocumentView.qml
     │   └── PdfPageDelegate.qml (mỗi trang đang hiện)
     │       ├── PDFPageView (C++)
+    │       ├── SearchHighlightLayer.qml
     │       └── PageInteractionOverlay.qml
     │           ├── PDFFormView (C++)
     │           │   └── FormChoiceOverlay.qml
@@ -66,15 +68,19 @@ phạm vi toàn ứng dụng.
 
 **Sở hữu và liên kết:**
 
-- Tạo `AppTheme`, `PDFTabModel` và bốn object rỗng làm fallback khi chưa có tab:
-  document, edit controller, form controller và form designer controller. Nhờ
-  vậy ribbon vẫn có object hợp lệ để bind trong empty state.
-- Theo dõi `activeSession`, `activeDocument`, `activeEditController` và
-  `activeFormDesignerController` từ `tabModel.currentSession`.
+- Tạo `AppTheme`, `PDFTabModel` và năm object rỗng làm fallback khi chưa có tab:
+  document, edit controller, form controller, form designer controller và search
+  controller. Nhờ vậy ribbon vẫn có object hợp lệ để bind trong empty state.
+- Theo dõi `activeSession`, `activeDocument`, `activeEditController`,
+  `activeFormDesignerController` và `activeSearchController` từ
+  `tabModel.currentSession`.
 - Tạo `DocumentWorkspace` bằng `Loader` chỉ cho session đang active. Hàm
   `prepareActiveWorkspace()` kết thúc editor/gesture trước khi đổi tab;
   `rebuildWorkspace()` phá và tạo lại workspace để tab không active không giữ
   page delegate hoặc texture.
+- Navigation search chụp `resultsRevision`; workspace mới chỉ nhận target sau
+  barrier restore/fit ban đầu, nên callback Loader hoặc query cũ không ghi đè
+  scroll của session mới.
 
 **Điều phối hành động:**
 
@@ -116,8 +122,9 @@ chỉ là state của workflow UI và phải được xóa khi popup đóng ho�
 **Vai trò:** host của năm tab View, Edit, Comment, Forms, Sign và cầu nối giữa
 ribbon con với `Main.qml`.
 
-**Đầu vào:** `theme`, `document`, `editController`; giữ lựa chọn tool Text Field,
-Check Box, Radio Button, Dropdown, List Box và Comb Field của Forms.
+**Đầu vào:** `theme`, `document`, `editController`, `searchController`; giữ lựa
+chọn tool Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field
+của Forms.
 
 **Việc chính:**
 
@@ -134,6 +141,10 @@ Check Box, Radio Button, Dropdown, List Box và Comb Field của Forms.
   nhờ đó nút Chọn đúng tab luôn nhận trạng thái active ngay khi chuyển.
 - Panel thuộc tính drawing comment do `DocumentWorkspace` quản lý theo selection
   hiện tại.
+- Chỉ khi View còn active, chuyển
+  `PDFSearchController::resultActivated(page, x, y, resultsRevision)` thành
+  `searchResultRequested(...)` để viewport cuộn tới đúng match chuẩn hóa;
+  `Main.qml` giữ request kèm revision nếu workspace bất đồng bộ chưa tạo xong.
 - Khi chọn Forms tool, bảo đảm Text Field, Check Box, Radio Button, Dropdown,
   List Box và Comb Field loại trừ nhau.
 - Chuyển tiếp signal Open/Save/Save As, page, delete page, zoom, fit, rotate và
@@ -146,14 +157,30 @@ dialog, đổi tab hoặc ghi tệp.
 
 **Vai trò:** nhóm lệnh đọc và điều hướng tài liệu.
 
-- Nhận `document` và `editController` để enable/disable lệnh theo `loaded` và
-  `saving`.
+- Nhận `document`, `editController` và `searchController` để enable/disable lệnh
+  theo `loaded`/`saving` và giữ tìm kiếm đúng session.
 - Phát Open, Save, Save As; trang trước/sau hoặc số trang yêu cầu; Zoom Out/In,
   Fit Width và Rotate Left/Right.
-- Hiển thị tool chưa triển khai bằng `toolRequested(toolName)` thay vì giả lập
-  hành vi trong component.
+- Gắn `SearchRibbonControl` trong nhóm Search để tìm kiếm tài liệu ngay
+  trên ribbon.
 - Dùng `RibbonGroup` và `RibbonButton`, nên logic enable/split button phải thống
   nhất với component dùng chung.
+
+### [`src/Components/SearchRibbonControl.qml`](../src/Components/SearchRibbonControl.qml)
+
+**Vai trò:** command surface tìm text trong tài liệu của tab View.
+
+- Ô nhập giới hạn 256 ký tự và chuyển text vào controller của session ngay;
+  controller sở hữu debounce 300 ms nên input không mất khi component bị hủy.
+  IME composition chỉ chuẩn bị query cho tới commit; Enter tìm ngay, Escape hoặc
+  nút Clear xóa query, kết quả và highlight.
+- Hiển thị Searching, Failed, No results hoặc vị trí `%1 / %2`; trạng thái
+  `Limited` thêm dấu `+` để không ngụ ý đã giữ toàn bộ kết quả.
+- Previous/Next gọi navigation vòng của `PDFSearchController`; component không
+  tự scroll trang hoặc giữ bản sao danh sách kết quả.
+- `Connections` đồng bộ lại text khi controller/tab đổi hoặc bị clear do đổi
+  document/cấu trúc trang. Mọi label, tooltip và accessible name đều dùng
+  translation ID.
 
 ### [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml)
 
@@ -227,8 +254,8 @@ ghi Save; mọi thay đổi vẫn là draft.
 - Gesture drawing có owner page duy nhất ở `PDFEditController`; bắt đầu trên
   trang khác sẽ hủy polygon/polyline hoặc Ink tạm của delegate trước để pooling
   không giữ hai path dang dở song song.
-- Nhóm Manage bật/tắt danh sách, chọn bình luận trước/sau và xóa comment đang
-  chọn; nhóm History dùng chung undo/redo của `PDFEditController`.
+- Nhóm Manage bật/tắt danh sách comment; nhóm History dùng chung undo/redo của
+  `PDFEditController`.
 - Undo/Redo dùng chung history của `PDFEditController` và điều hướng tới trang
   bị thay đổi qua `pageRequested()`.
 
@@ -337,7 +364,8 @@ Edit; không lập chỉ mục, hiển thị hay sửa nội dung comment/thread
 
 **Kết nối state:**
 
-- Bind `session.document`, edit/form/designer controller vào `DocumentView`.
+- Bind `session.document`, edit/form/designer/search controller vào
+  `DocumentView`.
 - Hai chiều hóa zoom và vị trí scroll với `session.zoom`, `scrollX`, `scrollY`;
   truyền `session.viewRotation` và trạng thái tab/tool form.
 - Thực hiện Fit Width từ kích thước viewport và maximum page dimension đã xoay;
@@ -365,10 +393,14 @@ hủy interaction và lưu scroll trước khi workspace bị phá; hàm cũng c
 - `ListView` dọc có `reuseItems: true`, `clip: true`, cache buffer bảo thủ và
   model là `document.pageCount`.
 - Delegate là `PdfPageDelegate`, nhận tất cả controller, zoom, rotation và cờ
-  mode/tool.
+  mode/tool; search controller chỉ cấp dữ liệu highlight, không tham gia input.
 - `currentPage` của document được suy ra từ trang nổi trội trong viewport;
   navigation theo lệnh dùng `pendingNavigationPage` và generation để tránh một
   callback scroll cũ ghi đè thao tác mới.
+- Navigation kết quả map điểm normalized qua `pageSurface` đã xoay rồi căn giữa
+  điểm đó trong viewport; một timer có generation/revision và deadline chờ
+  delegate ảo hóa cùng page metrics sẵn sàng. Vì vậy match giữa/cuối trang không
+  bị khuất ở zoom lớn và query cũ không replay sau khi bị clear/thay.
 - Khôi phục `contentX/contentY`, expose viewport geometry cho workspace và fit.
 - Khi vào Forms/Edit có source form fields, gọi chuẩn bị design mode một lần theo
   generation; theo dõi yêu cầu rollback page/focus từ form controller.
@@ -387,8 +419,8 @@ Retina đầy trang. Mọi state delegate phụ thuộc trang phải reset khi r
 **Bố cục:**
 
 - Tính kích thước trang từ `document.pageSize(index)`, zoom và quarter-turn.
-- `pageSurface` dùng chung chứa `PDFPageView` và
-  `PageInteractionOverlay`; coordinator này chứa runtime form, edit và form
+- `pageSurface` dùng chung chứa `PDFPageView`, `SearchHighlightLayer` và
+  `PageInteractionOverlay`; coordinator sau cùng chứa runtime form, edit và form
   designer.
 - Rotation 90° được áp lên chính container dùng chung này; do đó texture, hit
   target form và overlay edit luôn xoay cùng nhau, còn tọa độ lưu không đổi.
@@ -396,6 +428,8 @@ Retina đầy trang. Mọi state delegate phụ thuộc trang phải reset khi r
   suppression và draft preview.
 - Delegate chuyển controller, mode, texture revision và viewport transform vào
   `PageInteractionOverlay`; coordinator xử lý z-order và cleanup chung.
+- `SearchHighlightLayer` nằm ở `z: 0.5`, dưới coordinator tương tác; nó đọc rect
+  normalized của đúng display page và tự xoay cùng `pageSurface`.
 - Hiển thị số trang ngoài page surface.
 
 Xem [overlay-architecture.md](overlay-architecture.md) để có cây item, z-order
@@ -404,6 +438,19 @@ và ma trận mode/input đầy đủ của các nhánh này.
 **Pooling:** `ListView.onPooled` đặt `pooled = true`, khiến child ngắt document,
 interaction và focus; `onReused` bật lại để request state của page mới. Đây là
 invariant quan trọng nhất của tệp.
+
+### [`src/Components/SearchHighlightLayer.qml`](../src/Components/SearchHighlightLayer.qml)
+
+**Vai trò:** vẽ highlight tìm kiếm không tương tác trên một trang đang hiện.
+
+- Đọc `highlightsForPage(page)` lại khi `resultsRevision` thay đổi; mỗi rect được
+  đổi từ normalized geometry sang pixel bằng kích thước page surface. Controller
+  giới hạn 512 rect/page và luôn đưa current match vào tập hiển thị.
+- Kết quả thường dùng vàng bán trong suốt; mọi rect thuộc match hiện tại dùng
+  cam và viền cam.
+- `enabled: false`, không bắt pointer/keyboard và nằm dưới toàn bộ
+  `PageInteractionOverlay`. Khi delegate pooled, layer ẩn và không giữ geometry
+  mutable riêng của page cũ.
 
 ### [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml)
 
@@ -751,6 +798,7 @@ không cần toàn bộ semantics của ribbon.
 | `PDFTabModel`, `PDFDocumentSession` | `PDFTabModel.cpp` | `Main.qml`, tab bar, workspace |
 | `PDFDocument` | `PDFDocument.cpp` | ribbon, view, delegate |
 | `PDFEditController` | `PDFEditController.cpp` | ribbon edit, overlay, panel format |
+| `PDFSearchController` | `PDFSearchController.cpp` | View ribbon và search highlight |
 | `PDFFormController` | `PDFFormController.cpp` | page delegate và `PDFFormView` |
 | `PDFFormDesignerController` | `PDFFormDesignerController.cpp` | form designer overlay/layer và panel Dropdown/Radio |
 | `PDFPageView` | `PDFPageItem.cpp` | `PdfPageDelegate.qml` |

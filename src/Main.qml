@@ -35,6 +35,11 @@ ApplicationWindow {
     property int imageInsertPage: -1
     property real imageInsertX: 0
     property real imageInsertY: 0
+    property PDFDocumentSession pendingSearchNavigationSession: null
+    property int pendingSearchNavigationPage: -1
+    property real pendingSearchNavigationX: 0.5
+    property real pendingSearchNavigationY: 0.0
+    property real pendingSearchNavigationRevision: -1
     readonly property PDFDocumentSession activeSession: tabModel.currentSession
     readonly property PDFDocument activeDocument: activeSession
         ? activeSession.document
@@ -42,6 +47,9 @@ ApplicationWindow {
     readonly property PDFEditController activeEditController: activeSession
         ? activeSession.editController
         : emptyEditController
+    readonly property PDFSearchController activeSearchController: activeSession
+        ? activeSession.searchController
+        : emptySearchController
     readonly property PDFFormDesignerController activeFormDesignerController:
         activeSession
             ? activeSession.formDesignerController
@@ -102,6 +110,44 @@ ApplicationWindow {
         const workspace = activeWorkspace()
         if (workspace)
             workspace.navigateToPage(page)
+    }
+
+    function clearPendingSearchNavigation() {
+        pendingSearchNavigationSession = null
+        pendingSearchNavigationPage = -1
+        pendingSearchNavigationRevision = -1
+    }
+
+    function goToSearchResult(page,
+                              normalizedX,
+                              normalizedY,
+                              resultsRevision) {
+        if (!activeSession
+                || !appRibbon.viewTabActive
+                || !activeDocument.loaded
+                || page < 0
+                || page >= activeDocument.pageCount
+                || activeSearchController.resultsRevision
+                    !== resultsRevision) {
+            return
+        }
+
+        const workspace = activeWorkspace()
+        if (workspace) {
+            clearPendingSearchNavigation()
+            workspace.navigateToSearchResult(
+                page,
+                normalizedX,
+                normalizedY,
+                resultsRevision)
+            return
+        }
+
+        pendingSearchNavigationSession = activeSession
+        pendingSearchNavigationPage = page
+        pendingSearchNavigationX = normalizedX
+        pendingSearchNavigationY = normalizedY
+        pendingSearchNavigationRevision = resultsRevision
     }
 
     function rotateView(quarterTurns) {
@@ -459,6 +505,10 @@ ApplicationWindow {
     }
 
     onActiveSessionChanged: {
+        if (pendingSearchNavigationSession
+                && pendingSearchNavigationSession !== activeSession) {
+            clearPendingSearchNavigation()
+        }
         if (Number(externalLinkRequestId) !== 0
             && externalLinkSession !== activeSession) {
             cancelExternalLinkPrompt()
@@ -500,6 +550,12 @@ ApplicationWindow {
 
     PDFEditController {
         id: emptyEditController
+
+        document: emptyDocument
+    }
+
+    PDFSearchController {
+        id: emptySearchController
 
         document: emptyDocument
     }
@@ -908,12 +964,22 @@ ApplicationWindow {
             theme: appTheme
             document: window.activeDocument
             editController: window.activeEditController
+            searchController: window.activeSearchController
             hasPendingPanelEdits: window.activeWorkspaceHasPendingEdits
             enabled: !tabModel.anySaving
             onOpenRequested: window.requestOpen()
             onSaveRequested: window.requestSave()
             onSaveAsRequested: window.requestSaveAs()
             onPageRequested: page => window.goToPage(page)
+            onSearchResultRequested: (page,
+                                      normalizedX,
+                                      normalizedY,
+                                      resultsRevision) =>
+                window.goToSearchResult(
+                    page,
+                    normalizedX,
+                    normalizedY,
+                    resultsRevision)
             onDeletePageRequested: page => window.requestDeletePage(page)
             onZoomOutRequested: {
                 window.setZoom(window.activeSession
@@ -928,9 +994,6 @@ ApplicationWindow {
             onFitWidthRequested: window.fitToWidth()
             onRotateRequested: quarterTurns => window.rotateView(quarterTurns)
             onToolRequested: toolName => window.showComingSoon(toolName)
-            onDeleteCommentRequested: (page, objectId) => {
-                window.requestDeleteComment(page, objectId)
-            }
             onUndoRequested: window.requestUndo()
             onRedoRequested: window.requestRedo()
         }
@@ -952,6 +1015,7 @@ ApplicationWindow {
         theme: appTheme
         document: emptyDocument
         editController: emptyEditController
+        searchController: emptySearchController
         formController: emptyFormController
         formDesignerController: emptyFormDesignerController
         formsTabActive: appRibbon.formsTabActive
@@ -976,10 +1040,41 @@ ApplicationWindow {
         anchors.fill: parent
         active: false
         asynchronous: true
+        onStatusChanged: {
+            if (status !== Loader.Ready
+                    || window.pendingSearchNavigationPage < 0
+                    || window.pendingSearchNavigationSession
+                        !== window.activeSession) {
+                return
+            }
+
+            const workspace = item as DocumentWorkspace
+            if (!workspace)
+                return
+            const page = window.pendingSearchNavigationPage
+            const normalizedX = window.pendingSearchNavigationX
+            const normalizedY = window.pendingSearchNavigationY
+            const resultsRevision
+                = window.pendingSearchNavigationRevision
+            const session = window.pendingSearchNavigationSession
+            if (!appRibbon.viewTabActive
+                    || session.searchController.resultsRevision
+                        !== resultsRevision) {
+                window.clearPendingSearchNavigation()
+                return
+            }
+            window.clearPendingSearchNavigation()
+            workspace.navigateToSearchResult(
+                page,
+                normalizedX,
+                normalizedY,
+                resultsRevision)
+        }
         sourceComponent: Component {
             DocumentWorkspace {
                 theme: appTheme
                 session: window.workspaceSession
+                viewTabActive: appRibbon.viewTabActive
                 formsTabActive: appRibbon.formsTabActive
                 editTabActive: appRibbon.editTabActive
                 commentTabActive: appRibbon.commentTabActive

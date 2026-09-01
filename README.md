@@ -2,9 +2,9 @@
 
 TrePDF is a Qt Quick Controls desktop PDF reader powered by PDFium. The app
 supports multiple PDFs in independent tabs, continuous page viewing,
-asynchronous rendering, per-tab left/right view rotation, rich-text content
-edits, image insertion, Save/Save As, and an ID-based localization system with
-Vietnamese enabled by default.
+asynchronous rendering, per-tab whole-document text search and left/right view
+rotation, rich-text content edits, image insertion, Save/Save As, and an
+ID-based localization system with Vietnamese enabled by default.
 
 Standard AcroForm widgets are rendered and interactive in Browse mode. Text
 fields support focus, selection, typing, IME commits, clipboard shortcuts, and
@@ -56,9 +56,23 @@ source-backed Check Box and arbitrary AcroForm structures are not removed by
 this path.
 
 Each document tab owns its PDF handle, draft/undo history, selection, zoom,
-scroll position, and formatting-panel state. Only the active tab creates page
-delegates and textures. Opening an already-open canonical path activates its
-existing tab, and Save As cannot overwrite a PDF used by another open tab.
+scroll position, search query/results, and formatting-panel state. Only the
+active tab creates page delegates and textures. Opening an already-open
+canonical path activates its existing tab, and Save As cannot overwrite a PDF
+used by another open tab.
+
+The View tab searches the current PDF text asynchronously across its source
+pages. Typing is debounced, a newer query cancels the older scan, and stale
+results are rejected after a document or page-structure revision. Matches on
+visible pages are highlighted in normalized page coordinates; the active match
+uses orange, while Previous and Next cycle through the result set and center the
+active match in the viewport, including after view rotation. Pending input and
+results remain isolated per tab; a background completion never changes the page
+after the user leaves View. Search text is
+limited to 256 UTF-16 code units, result geometry shown by QML is bounded per
+page, and bounded scan caps report a limited result set instead of retaining
+unbounded data. Search reads the saved source text, so a new edit-history change
+clears any existing query and highlights.
 
 In Edit mode, selecting editable text opens contextual Edit and Delete actions.
 Changes remain undoable session drafts until Save or Save As writes them into a
@@ -292,10 +306,10 @@ caret at the end. Font size is currently UI-only.
   thread boundaries, main runtime flows, and an index of every current QML/C++
   implementation file.
 - [`docs/qml-file-guide.md`](docs/qml-file-guide.md): detailed responsibilities,
-  inputs, outputs, lifecycle, and C++ relationships for all 27 QML files.
+  inputs, outputs, lifecycle, and C++ relationships for all 34 QML files.
 - [`docs/cpp-file-guide.md`](docs/cpp-file-guide.md): detailed responsibilities,
-  ownership, threading, persistence boundaries, and tests for all 16 `src/` C++
-  implementations, the C++ test file, and support headers.
+  ownership, threading, persistence boundaries, and tests for all 18 `src/` C++
+  implementations, 20 headers, and the C++ test file.
 - [`docs/overlay-architecture.md`](docs/overlay-architecture.md): the current
   per-page overlay tree, stacking order, coordinate systems, mode gates, input
   routing, texture synchronization, and pooling cleanup.
