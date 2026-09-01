@@ -10,6 +10,7 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
     , m_editController(new PDFEditController(this))
     , m_formController(new PDFFormController(this))
     , m_formDesignerController(new PDFFormDesignerController(this))
+    , m_searchController(new PDFSearchController(this))
 {
     m_formDesignerController->setDocument(m_document);
     m_formController->setDocument(m_document);
@@ -17,6 +18,12 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
     m_editController->setDocument(m_document);
     m_editController->setFormController(m_formController);
     m_editController->setFormDesignerController(m_formDesignerController);
+    m_searchController->setDocument(m_document);
+    connect(
+        m_editController,
+        &PDFEditController::historyStateChanged,
+        m_searchController,
+        &PDFSearchController::clearSearch);
 
     connect(m_document,
             &PDFDocument::sourceChanged,
@@ -80,6 +87,11 @@ PDFFormController *PDFDocumentSession::formController() const
 PDFFormDesignerController *PDFDocumentSession::formDesignerController() const
 {
     return m_formDesignerController;
+}
+
+PDFSearchController *PDFDocumentSession::searchController() const
+{
+    return m_searchController;
 }
 
 QString PDFDocumentSession::title() const

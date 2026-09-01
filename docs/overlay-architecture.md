@@ -8,11 +8,13 @@ mode, và cách chúng giữ đồng bộ với texture PDF bên dưới.
 Phạm vi chính là:
 
 - [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml)
+- [`src/Components/SearchHighlightLayer.qml`](../src/Components/SearchHighlightLayer.qml)
 - [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml)
 - [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml)
 - [`src/Components/FormChoiceOverlay.qml`](../src/Components/FormChoiceOverlay.qml)
 - [`src/Components/FormTextFieldOverlay.qml`](../src/Components/FormTextFieldOverlay.qml)
 - [`src/PDFPageItem.cpp`](../src/PDFPageItem.cpp),
+  [`src/PDFSearchController.cpp`](../src/PDFSearchController.cpp),
   [`src/PDFFormView.cpp`](../src/PDFFormView.cpp), và
   [`src/FormFieldLayer.cpp`](../src/FormFieldLayer.cpp)
 
@@ -35,6 +37,7 @@ DocumentView (ListView, reuseItems: true)
     ├── pageSurface                  mặt phẳng chung, rotation = viewRotation
     │   ├── PDFPageView              z 0: texture PDF từ worker
     │   ├── page border              z 0: vẽ sau texture nên nằm trên texture
+    │   ├── SearchHighlightLayer     z 0.5: highlight không tương tác
     │   └── PageInteractionOverlay   z 1: coordinator input của trang
     │       ├── PDFFormView          z 1: bridge input form PDFium
     │       │   └── FormChoiceOverlay
@@ -43,10 +46,10 @@ DocumentView (ListView, reuseItems: true)
     └── page label                   ngoài mặt phẳng trang
 ```
 
-`pageSurface` là invariant quan trọng: texture, runtime form, edit overlay và
-form designer phải là con của cùng một item này nếu chúng chia sẻ tọa độ trang.
-Nhờ vậy mọi lớp xoay đồng thời khi người dùng đổi `viewRotation`, còn dữ liệu
-lưu vẫn dùng geometry của trang logic ban đầu.
+`pageSurface` là invariant quan trọng: texture, search highlight, runtime form,
+edit overlay và form designer phải là con của cùng một item này nếu chúng chia
+sẻ tọa độ trang. Nhờ vậy mọi lớp xoay đồng thời khi người dùng đổi
+`viewRotation`, còn dữ liệu lưu vẫn dùng geometry của trang logic ban đầu.
 
 `PageInteractionOverlay` chỉ là `Item` điều phối. Nó không vẽ, không clip,
 không bật `layer.enabled` và không tạo FBO/texture riêng. Việc thêm coordinator
@@ -63,6 +66,7 @@ trạng thái.
 |---:|---|---:|---|---|
 | 0 | `PDFPageView` | 0 | Texture nền do `PDFPageItem` render. | Không trực tiếp. |
 | 0 | viền trang `Rectangle` | 0 | Viền current page; được khai báo sau texture nên nằm trên texture cùng `z`. | Không. |
+| 0.5 | `SearchHighlightLayer` | 0.5 | Vẽ tập rect match đã giới hạn trên display page; match hiện tại có màu cam. | Không; root luôn `enabled: false`. |
 | 1 | `PageInteractionOverlay` | 1 | Coordinator chứa toàn bộ runtime/edit/designer interaction. | Root không tự nhận input; child quyết định. |
 
 ### Lớp bên trong `PageInteractionOverlay`
@@ -137,8 +141,8 @@ Một field/draft có thể đi qua bốn hệ tọa độ. Tất cả sửa geo
 |---|---|---|---|
 | ListView/page card | px trong content đã scroll | `DocumentView` / `PdfPageDelegate` | Layout dọc, margin, vị trí trang. Không lưu geometry ở đây. |
 | `pageFrame` | px của envelope hiển thị | `PdfPageDelegate` | Đổi width/height khi xoay 90°/270°. Không phải mặt phẳng của PDF. |
-| `pageSurface` và coordinator | px của trang logic chưa xoay | `PDFPageView`, `PageInteractionOverlay` và ba nhánh con | Vẽ, hit-test và nhận pointer cục bộ. |
-| Normalized page rect | `0..1` theo width/height trang logic | C++ controller/model | Draft, field designer, choice field và dữ liệu chuẩn bị Save. |
+| `pageSurface` và coordinator | px của trang logic chưa xoay | `PDFPageView`, `SearchHighlightLayer`, `PageInteractionOverlay` và ba nhánh con | Vẽ, hit-test và nhận pointer cục bộ. |
+| Normalized page rect | `0..1` theo width/height trang logic | C++ controller/model | Search highlight, draft, field designer, choice field và dữ liệu chuẩn bị Save. |
 
 Các overlay convert rect chuẩn hóa bằng cùng công thức:
 
@@ -178,15 +182,17 @@ index và `identityToken`. Khi focus hoặc chọn option, `PDFFormView` gửi c
 controller/worker để resolve lại live field, không tin index cũ sau thay đổi cấu
 trúc trang hay async refresh.
 
-## 4. Bốn lớp có dữ liệu khác nhau
+## 4. Năm lớp có dữ liệu khác nhau
 
 ```mermaid
 flowchart LR
     Render["PDFPageItem\ntexture worker"] --> Surface["pageSurface"]
+    SearchLayer["SearchHighlightLayer\npresentation-only"] --> SearchController["PDFSearchController"]
     FormView["PDFFormView\ninput native/IME"] --> FormController["PDFFormController"]
     Choice["FormChoiceOverlay\nchoice UI an toàn"] --> FormView
     Edit["EditOverlay\ndraft presentation + edit"] --> EditController["PDFEditController"]
     Designer["FormTextFieldOverlay\nFormFieldLayer + editor"] --> DesignerController["PDFFormDesignerController"]
+    Surface --> SearchLayer
     Surface --> FormView
     Surface --> Edit
     Surface --> Designer
@@ -211,6 +217,23 @@ Khi texture vẫn là bản sạch hoặc cũ, `EditOverlay` mask source rect v�
 draft/recovery tạm thời để không thấy text/image hai lần. Khi texture mới đã
 sẵn sàng, QML nhường phần đó cho texture để tránh chồng bản preview lên bản đã
 render.
+
+### `SearchHighlightLayer`: presentation-only trên text nguồn
+
+Layer nhận `PDFSearchController`, display page và cờ pooled. Khi
+`resultsRevision` đổi, nó gọi `highlightsForPage(page)` để lấy normalized rect,
+đổi sang pixel theo width/height của `pageSurface` và dùng `Repeater` vẽ chúng.
+Controller trả tối đa 512 rect/page và luôn ưu tiên current match để số item QML
+được chặn. Match thường có màu vàng bán trong suốt; match hiện tại có màu cam và
+viền cam.
+
+Layer không thay texture, không suppress text nguồn, không có gesture và luôn
+`enabled: false`. Nó đặt trực tiếp trong `pageSurface` vì chỉ trình bày dữ liệu;
+mọi interaction vẫn thuộc `PageInteractionOverlay` ở phía trên. Search state
+nằm trong `PDFDocumentSession`, vì vậy đổi mode ribbon không xóa highlight còn
+đổi document/cấu trúc page thì controller sẽ clear kết quả. Completion nền chỉ
+được `AppRibbon` chuyển thành navigation khi tab View còn active; target scroll
+luôn mang `resultsRevision` để Loader/delegate không replay geometry cũ.
 
 ### `PDFFormView` + `FormChoiceOverlay`: form runtime
 
@@ -354,6 +377,10 @@ coordinator xóa focus/selection form designer. Nhờ vậy giới hạn hit-tes
 | Forms, không chọn tool đặt field | `true` | Có thể interactive. Point nằm trên source-backed field do TrePDF thiết kế bị guard khỏi native path. | Không active vì tool Browse. | Field hiện, có thể chọn/activate/move; Text Field/Dropdown/List Box source-backed được hỗ trợ có thể tạo draft xóa. |
 | Forms, tool đặt field | `true` | Bị tắt bởi cờ tool Text Field/Check Box/Radio Button/Dropdown/List Box/Comb Field. | Không active. | `placementArea` xử lý vùng trống; không move trong lúc placement tool bật. |
 | Đang Save hoặc delegate pooled | Không dùng để tương tác | Bị tắt/clear state. | Bị tắt; khi pooled còn xóa data/gesture cục bộ. | Hủy placement/resize/move/focus; khi pooled không render field. |
+
+`SearchHighlightLayer` độc lập với mode trong bảng: khi controller còn kết quả,
+nó có thể hiện ở View, Edit, Comment hoặc Forms nhưng không bao giờ nhận input.
+Khi delegate pooled, layer ẩn; Save không xem search là draft.
 
 `AppRibbon` duy trì điều này bằng `syncEditTool()`:
 
@@ -502,6 +529,8 @@ Khi pooled:
 - `pageSurface.visible` thành false.
 - `PDFPageView` nhận document/controller `null`, hủy render cũ và không giữ
   texture của trang đang bị recycle.
+- `SearchHighlightLayer` ẩn theo `pooled`; geometry vẫn thuộc search controller
+  của session và được đọc lại cho display page mới khi delegate reused.
 - `PageInteractionOverlay` chuyển `pooled` xuống ba nhánh và gom cleanup đồng bộ.
 - `PDFFormView` mất controller/interactivity; choice snapshot/pending refresh bị
   clear hoặc loại bằng request serial.
@@ -541,8 +570,9 @@ controller pointer cùng page vào callback. `FormChoiceOverlay` đóng popup kh
 ## 9. Checklist khi thêm hoặc sửa overlay
 
 1. **Đặt đúng parent.** Interaction dùng tọa độ PDF phải nằm trong
-   `PageInteractionOverlay`, còn coordinator nằm trong `pageSurface` và
-   `anchors.fill: pageView`; không đặt vào `pageFrame` hoặc `ListView` trực tiếp.
+   `PageInteractionOverlay`, còn presentation-only như search highlight có thể
+   nằm trực tiếp trong `pageSurface` dưới coordinator. Không đặt lớp tọa độ PDF
+   vào `pageFrame` hoặc `ListView` trực tiếp.
 2. **Chọn tầng gốc trước.** Xác định nó nằm dưới runtime form, giữa form/edit hay
    trên designer. Ghi rõ `z` và không so `z` nội bộ với sibling khác parent.
 3. **Tách visible khỏi enabled.** Preview chưa lưu có thể cần hiện khi không cho
@@ -566,6 +596,7 @@ controller pointer cùng page vào callback. `FormChoiceOverlay` đóng popup kh
 | Muốn thay đổi | Bắt đầu tại | Luôn kiểm thêm |
 |---|---|---|
 | Thêm nhánh interaction trên trang | `PageInteractionOverlay.qml` | z nội bộ, mode ownership, focus và pooling. |
+| Đổi search highlight | `SearchHighlightLayer.qml` | `PDFSearchController`, normalized geometry, z dưới interaction và pooling. |
 | Đổi texture/khung trang | `PdfPageDelegate.qml` | `pageSurface`, rotation và kích thước delegate. |
 | Thêm tool edit/gesture | `EditOverlay.qml` | `PDFEditController`, `PDFPageItem` draft revision, Save writer. |
 | Đổi choice popup | `FormChoiceOverlay.qml` | `PDFFormView`, token/source-page validation, viewport mapping. |

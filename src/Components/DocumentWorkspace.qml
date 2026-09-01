@@ -9,6 +9,7 @@ Item {
 
     required property AppTheme theme
     required property PDFDocumentSession session
+    property bool viewTabActive: false
     property bool formsTabActive: false
     property bool editTabActive: false
     property bool commentTabActive: false
@@ -23,6 +24,12 @@ Item {
     property bool combFieldToolActive: false
     property bool commentPanelEditPending: false
     property string transientStatus
+    property bool initialViewReady: false
+    property int initialNavigationGeneration: -1
+    property int pendingSearchPage: -1
+    property real pendingSearchX: 0.5
+    property real pendingSearchY: 0.0
+    property real pendingSearchResultsRevision: -1
     readonly property string selectedFormFieldId:
         session.formDesignerController.selectedFieldId
     readonly property var selectedFormField: selectedFormFieldId.length > 0
@@ -170,6 +177,53 @@ Item {
         documentView.navigateToPage(page)
     }
 
+    function clearPendingSearchNavigation() {
+        pendingSearchPage = -1
+        pendingSearchResultsRevision = -1
+    }
+
+    function dispatchPendingSearchNavigation() {
+        if (!initialViewReady || pendingSearchPage < 0)
+            return
+
+        const page = pendingSearchPage
+        const normalizedX = pendingSearchX
+        const normalizedY = pendingSearchY
+        const resultsRevision = pendingSearchResultsRevision
+        clearPendingSearchNavigation()
+        if (!viewTabActive
+                || session.searchController.resultsRevision
+                    !== resultsRevision) {
+            return
+        }
+        documentView.navigateToSearchResult(
+            page,
+            normalizedX,
+            normalizedY,
+            resultsRevision)
+    }
+
+    function navigateToSearchResult(page,
+                                    normalizedX,
+                                    normalizedY,
+                                    resultsRevision) {
+        pendingSearchPage = page
+        pendingSearchX = normalizedX
+        pendingSearchY = normalizedY
+        pendingSearchResultsRevision = resultsRevision
+        dispatchPendingSearchNavigation()
+    }
+
+    function finishInitialView(generation) {
+        if (initialViewReady
+                || initialNavigationGeneration < 0
+                || generation < initialNavigationGeneration) {
+            return
+        }
+        initialViewReady = true
+        dispatchPendingSearchNavigation()
+    }
+
     function rotateView(quarterTurns) {
         if (!session.document.loaded)
             return
@@ -191,12 +245,27 @@ Item {
         if (session.initialFitPending) {
             fitToWidth()
             session.initialFitPending = false
+            initialNavigationGeneration = documentView.navigationGeneration + 1
             Qt.callLater(function() {
-                if (root.session.document.loaded)
-                    documentView.navigateToPage(root.session.document.currentPage)
+                if (root.initialViewReady)
+                    return
+                if (!root.session.document.loaded) {
+                    root.initialViewReady = true
+                    root.dispatchPendingSearchNavigation()
+                    return
+                }
+                const generation = documentView.navigateToPage(
+                    root.session.document.currentPage)
+                root.initialNavigationGeneration = generation
+                if (generation < 0) {
+                    root.initialViewReady = true
+                    root.dispatchPendingSearchNavigation()
+                }
             })
         } else {
-            documentView.restorePosition(session.scrollX, session.scrollY)
+            initialNavigationGeneration = documentView.restorePosition(
+                session.scrollX,
+                session.scrollY)
         }
     }
 
@@ -261,6 +330,11 @@ Item {
 
     Component.onDestruction: prepareForDeactivation()
 
+    onViewTabActiveChanged: {
+        if (!viewTabActive)
+            clearPendingSearchNavigation()
+    }
+
     Timer {
         interval: 0
         running: true
@@ -280,6 +354,7 @@ Item {
             theme: root.theme
             document: root.session.document
             editController: root.session.editController
+            searchController: root.session.searchController
             formController: root.session.formController
             formDesignerController: root.session.formDesignerController
             formsTabActive: root.formsTabActive
@@ -296,6 +371,8 @@ Item {
             viewRotation: root.session.viewRotation
             transientStatus: root.transientStatus
             onOpenRequested: root.openRequested()
+            onNavigationSettled: generation =>
+                root.finishInitialView(generation)
             onDeleteCommentRequested: (page, objectId) =>
                 root.deleteCommentRequested(page, objectId)
         }

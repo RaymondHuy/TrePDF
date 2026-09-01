@@ -8,6 +8,7 @@ Flickable {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    required property PDFSearchController searchController
     property bool hasPendingPanelEdits: false
     readonly property bool hasUnsavedChanges:
         editController.hasDrafts || hasPendingPanelEdits
@@ -20,7 +21,6 @@ Flickable {
     signal zoomInRequested()
     signal fitWidthRequested()
     signal rotateRequested(int quarterTurns)
-    signal toolRequested(string toolName)
 
     clip: true
     contentWidth: ribbonRow.implicitWidth + 16
@@ -169,25 +169,13 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
-            //% "Find & Panels"
-            title: qsTrId("FindAndPanels")
+            //% "Search"
+            title: qsTrId("Search")
 
-            RibbonButton {
+            SearchRibbonControl {
                 theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Thumbnails"
-                text: qsTrId("Thumbnails")
-                iconSource: "../assets/icons/panel-left.svg"
-                onClicked: root.toolRequested(text)
-            }
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Search"
-                text: qsTrId("Search")
-                iconSource: "../assets/icons/search.svg"
-                onClicked: root.toolRequested(text)
+                document: root.document
+                controller: root.searchController
             }
         }
     }

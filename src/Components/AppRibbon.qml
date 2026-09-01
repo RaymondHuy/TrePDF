@@ -11,6 +11,7 @@ Column {
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
+    required property PDFSearchController searchController
     property bool hasPendingPanelEdits: false
     readonly property bool hasUnsavedChanges:
         editController.hasDrafts || hasPendingPanelEdits
@@ -48,6 +49,10 @@ Column {
     signal saveRequested()
     signal saveAsRequested()
     signal pageRequested(int page)
+    signal searchResultRequested(int page,
+                                 real normalizedX,
+                                 real normalizedY,
+                                 real resultsRevision)
     signal deletePageRequested(int page)
     signal zoomOutRequested()
     signal zoomInRequested()
@@ -157,6 +162,23 @@ Column {
         }
     }
 
+    Connections {
+        target: root.searchController
+
+        function onResultActivated(page,
+                                   normalizedX,
+                                   normalizedY,
+                                   resultsRevision) {
+            if (root.viewTabActive) {
+                root.searchResultRequested(
+                    page,
+                    normalizedX,
+                    normalizedY,
+                    resultsRevision)
+            }
+        }
+    }
+
     Component {
         id: viewRibbonComponent
 
@@ -164,6 +186,7 @@ Column {
             theme: root.theme
             document: root.document
             editController: root.editController
+            searchController: root.searchController
             hasPendingPanelEdits: root.hasPendingPanelEdits
             onOpenRequested: root.openRequested()
             onSaveRequested: root.saveRequested()
@@ -173,7 +196,6 @@ Column {
             onZoomInRequested: root.zoomInRequested()
             onFitWidthRequested: root.fitWidthRequested()
             onRotateRequested: quarterTurns => root.rotateRequested(quarterTurns)
-            onToolRequested: toolName => root.toolRequested(toolName)
         }
     }
 

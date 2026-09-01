@@ -124,6 +124,16 @@ Current features:
 - Virtualized continuous scrolling with reusable QML delegates.
 - Asynchronous page rendering on a worker thread.
 - Page navigation, zoom, and fit-to-width controls.
+- The View tab searches source-page text across the current document on a
+  dedicated bounded worker. Search state is per tab; newer queries cancel older
+  scans, Previous/Next wrap through matches and center the active match in the
+  viewport, and visible-page matches use normalized highlight geometry with the
+  active result distinguished in orange. Pending text and worker dispatch are
+  owned per session, and background completion does not navigate outside View.
+  Document, page-structure, or draft
+  history changes clear the query/results because search reads saved source
+  text. Queries are capped at 256 UTF-16 code units, retained highlight geometry
+  is bounded, and incomplete scans surface a limited state.
 - Per-tab left/right view rotation in 90-degree steps. Rotation is a scene-graph
   view transform only: it rotates the page texture and edit overlay together
   without changing PDF page geometry, drafts, or saved content.
@@ -238,6 +248,9 @@ Current features:
   predicates used by indexing, rendering, and saving.
 - `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
   rich-text draft state, snapshot-based undo/redo history, and save commands.
+- `src/PDFSearchController.h/.cpp`: asynchronous whole-document text search,
+  cancellation/stale-result validation, per-page normalized match geometry, and
+  cyclic result navigation.
 - `src/PDFFormController.h/.cpp`: per-tab AcroForm state, asynchronous form
   interaction, host actions, focus state, draft guards, and choice-field
   requests.
@@ -255,6 +268,10 @@ Current features:
   upload for one page delegate.
 - `src/Components/FormChoiceOverlay.qml`: custom combo-box and list-box
   presentation for the safe subset of AcroForm choice fields.
+- `src/Components/SearchRibbonControl.qml`: View-tab query, status, previous,
+  next, and clear controls.
+- `src/Components/SearchHighlightLayer.qml`: non-interactive per-page search
+  highlights inside the shared rotated page surface.
 - `src/Components/DrawingCommentPropertiesPanel.qml`: dedicated Edit-tab panel
   for stroke, optional interior color, and opacity of the selected drawing
   comment; comment/thread content remains in `CommentPanel.qml`.
@@ -370,8 +387,14 @@ clipped or elided unintentionally.
 
 - Rendering uses one `QThreadPool` worker to bound decoder memory and avoid
   concurrent access to the same PDFium document.
-- The worker owns a separate thread-local `FPDF_DOCUMENT` opened from the file
-  path. It must never use the GUI thread's document handle.
+- Document search uses its own single-thread pool and opens a separate PDFium
+  document from `renderFilePath()`. Coalesce queued work per controller so only
+  the newest pending snapshot remains. Keep each PDFium transaction under the
+  process-wide lock, recheck cancellation after acquiring that lock, and
+  validate controller, path, document revision, query, and cancellation token
+  before accepting results.
+- The rendering worker owns a separate thread-local `FPDF_DOCUMENT` opened from
+  the file path. It must never use the GUI thread's document handle.
 - Each request has an atomic cancellation flag. Check it before expensive work
   and before posting the rendered image back to the GUI thread.
 - Deliver results with a queued invocation and guard the target with
@@ -420,6 +443,9 @@ clipped or elided unintentionally.
 - Keep view rotation on the shared page-surface container so `PDFPageView` and
   `EditOverlay` receive the same transform. Do not feed view rotation back into
   `PDFDocument::pageSize()` or save-time normalized coordinates.
+- Keep `SearchHighlightLayer` in that same page surface, below the interaction
+  coordinator. It is presentation-only, reads normalized rectangles from the
+  session search controller, and must not capture pointer or keyboard input.
 - Wrap user-visible text in `qsTrId()` using the localization rules above.
 
 ### Form Interaction Architecture

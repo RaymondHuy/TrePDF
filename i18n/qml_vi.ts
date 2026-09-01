@@ -9,21 +9,21 @@
         <translation>TrePDF</translation>
     </message>
     <message id="FeatureComingSoon">
-        <location filename="../src/Main.qml" line="453"/>
+        <location filename="../src/Main.qml" line="499"/>
         <source>%1 is coming soon</source>
         <translation>Tính năng %1 sắp ra mắt</translation>
     </message>
     <message id="WaitForPdfSave">
-        <location filename="../src/Main.qml" line="130"/>
-        <location filename="../src/Main.qml" line="382"/>
-        <location filename="../src/Main.qml" line="437"/>
-        <location filename="../src/Main.qml" line="480"/>
-        <location filename="../src/PDFTabModel.cpp" line="311"/>
+        <location filename="../src/Main.qml" line="176"/>
+        <location filename="../src/Main.qml" line="428"/>
+        <location filename="../src/Main.qml" line="483"/>
+        <location filename="../src/Main.qml" line="530"/>
+        <location filename="../src/PDFTabModel.cpp" line="323"/>
         <source>Please wait for the PDF to finish saving.</source>
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Components/DocumentView.qml" line="246"/>
+        <location filename="../src/Components/DocumentView.qml" line="369"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="48"/>
@@ -31,19 +31,19 @@
         <translation>Mở PDF</translation>
     </message>
     <message id="PdfFileFilter">
-        <location filename="../src/Main.qml" line="608"/>
-        <location filename="../src/Main.qml" line="631"/>
+        <location filename="../src/Main.qml" line="664"/>
+        <location filename="../src/Main.qml" line="687"/>
         <source>PDF files (*.pdf)</source>
         <translation>Tệp PDF (*.pdf)</translation>
     </message>
     <message id="SavePdfAs">
-        <location filename="../src/Main.qml" line="628"/>
+        <location filename="../src/Main.qml" line="684"/>
         <location filename="../src/Components/ViewRibbon.qml" line="76"/>
         <source>Save PDF As</source>
         <translation>Lưu PDF thành</translation>
     </message>
     <message id="OpenPdfs">
-        <location filename="../src/Main.qml" line="605"/>
+        <location filename="../src/Main.qml" line="661"/>
         <source>Open PDFs</source>
         <translation>Mở các tệp PDF</translation>
     </message>
@@ -64,70 +64,70 @@
         <translation type="vanished">Một số tính năng biểu mẫu tự động không khả dụng cho tệp PDF này.</translation>
     </message>
     <message id="SelectImage">
-        <location filename="../src/Main.qml" line="616"/>
+        <location filename="../src/Main.qml" line="672"/>
         <source>Select Image</source>
         <translation>Chọn hình ảnh</translation>
     </message>
     <message id="ImageFileFilter">
-        <location filename="../src/Main.qml" line="619"/>
+        <location filename="../src/Main.qml" line="675"/>
         <source>Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</source>
         <translation>Tệp hình ảnh (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</translation>
     </message>
     <message id="SaveChangesToDocumentQuestion">
-        <location filename="../src/Main.qml" line="785"/>
+        <location filename="../src/Main.qml" line="841"/>
         <source>Save changes to “%1”?</source>
         <translation>Lưu các thay đổi vào “%1”?</translation>
     </message>
     <message id="UnsavedEditsDescription">
-        <location filename="../src/Main.qml" line="796"/>
+        <location filename="../src/Main.qml" line="852"/>
         <source>Your edits exist only in this session and have not been saved to the PDF.</source>
         <translation>Các chỉnh sửa của bạn chỉ tồn tại trong phiên này và chưa được lưu vào tệp PDF.</translation>
     </message>
     <message id="Cancel">
-        <location filename="../src/Main.qml" line="744"/>
-        <location filename="../src/Main.qml" line="811"/>
-        <location filename="../src/Main.qml" line="886"/>
+        <location filename="../src/Main.qml" line="800"/>
+        <location filename="../src/Main.qml" line="867"/>
+        <location filename="../src/Main.qml" line="942"/>
         <source>Cancel</source>
         <translation>Hủy</translation>
     </message>
     <message id="ExternalLinkOpenFailed">
-        <location filename="../src/Main.qml" line="356"/>
+        <location filename="../src/Main.qml" line="402"/>
         <source>The link could not be opened in your default browser.</source>
         <translation>Không thể mở liên kết bằng trình duyệt mặc định.</translation>
     </message>
     <message id="OpenExternalLinkQuestion">
-        <location filename="../src/Main.qml" line="668"/>
+        <location filename="../src/Main.qml" line="724"/>
         <source>Open link to %1?</source>
         <translation>Mở liên kết đến %1?</translation>
     </message>
     <message id="ExternalLinkDocumentWantsToOpen">
-        <location filename="../src/Main.qml" line="682"/>
+        <location filename="../src/Main.qml" line="738"/>
         <source>“%1” wants to open this address in your default browser.</source>
         <translation>“%1” muốn mở địa chỉ này bằng trình duyệt mặc định.</translation>
     </message>
     <message id="InsecureHttpLinkWarning">
-        <location filename="../src/Main.qml" line="725"/>
+        <location filename="../src/Main.qml" line="781"/>
         <source>This link uses HTTP, so the connection may not be secure.</source>
         <translation>Liên kết này dùng HTTP nên kết nối có thể không an toàn.</translation>
     </message>
     <message id="OpenInBrowser">
-        <location filename="../src/Main.qml" line="752"/>
+        <location filename="../src/Main.qml" line="808"/>
         <source>Open in Browser</source>
         <translation>Mở trong trình duyệt</translation>
     </message>
     <message id="Save">
-        <location filename="../src/Main.qml" line="819"/>
+        <location filename="../src/Main.qml" line="875"/>
         <location filename="../src/Components/ViewRibbon.qml" line="59"/>
         <source>Save</source>
         <translation>Lưu</translation>
     </message>
     <message id="Discard">
-        <location filename="../src/Main.qml" line="829"/>
+        <location filename="../src/Main.qml" line="885"/>
         <source>Discard</source>
         <translation>Bỏ thay đổi</translation>
     </message>
     <message id="ConfirmDeletePageQuestion">
-        <location filename="../src/Main.qml" line="868"/>
+        <location filename="../src/Main.qml" line="924"/>
         <source>Do you want to delete page %1?</source>
         <translation>Bạn có muốn xóa trang %1 không?</translation>
     </message>
@@ -148,44 +148,44 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="320"/>
+        <location filename="../src/Components/AppRibbon.qml" line="342"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="326"/>
+        <location filename="../src/Components/AppRibbon.qml" line="348"/>
         <location filename="../src/Components/EditOverlay.qml" line="3505"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Comment">
-        <location filename="../src/Components/AppRibbon.qml" line="332"/>
+        <location filename="../src/Components/AppRibbon.qml" line="354"/>
         <source>Comment</source>
         <translation>Bình luận</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="338"/>
+        <location filename="../src/Components/AppRibbon.qml" line="360"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="344"/>
+        <location filename="../src/Components/AppRibbon.qml" line="366"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="369"/>
+        <location filename="../src/Components/AppRibbon.qml" line="391"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="373"/>
+        <location filename="../src/Components/AppRibbon.qml" line="395"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="237"/>
+        <location filename="../src/Components/DocumentView.qml" line="360"/>
         <location filename="../src/PDFDocument.cpp" line="80"/>
         <location filename="../src/PDFDocument.cpp" line="232"/>
         <source>No document open</source>
@@ -202,7 +202,7 @@
         <translation type="vanished">Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo văn bản, hình ảnh hoặc hình dạng đã chọn để di chuyển, vẽ bằng công cụ Hình dạng hoặc đánh dấu văn bản, kéo hoặc bấm bằng công cụ Văn bản tự do, hoặc bấm bằng công cụ Ghi chú để thêm bình luận</translation>
     </message>
     <message id="Delete">
-        <location filename="../src/Main.qml" line="894"/>
+        <location filename="../src/Main.qml" line="950"/>
         <location filename="../src/Components/EditOverlay.qml" line="3536"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
         <source>Delete</source>
@@ -864,7 +864,7 @@
     </message>
     <message id="PageNumber">
         <location filename="../src/Components/CommentPanel.qml" line="1087"/>
-        <location filename="../src/Components/PdfPageDelegate.qml" line="169"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="188"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -1214,18 +1214,8 @@
         <source>Rotate Right</source>
         <translation>Xoay phải</translation>
     </message>
-    <message id="FindAndPanels">
-        <location filename="../src/Components/ViewRibbon.qml" line="173"/>
-        <source>Find &amp; Panels</source>
-        <translation>Tìm kiếm &amp; Bảng</translation>
-    </message>
-    <message id="Thumbnails">
-        <location filename="../src/Components/ViewRibbon.qml" line="179"/>
-        <source>Thumbnails</source>
-        <translation>Hình thu nhỏ</translation>
-    </message>
     <message id="Search">
-        <location filename="../src/Components/ViewRibbon.qml" line="188"/>
+        <location filename="../src/Components/ViewRibbon.qml" line="173"/>
         <source>Search</source>
         <translation>Tìm kiếm</translation>
     </message>
@@ -1754,12 +1744,12 @@
         <translation>Đóng tab</translation>
     </message>
     <message id="AutomaticFormFeaturesUnavailableForDocument">
-        <location filename="../src/PDFTabModel.cpp" line="60"/>
+        <location filename="../src/PDFTabModel.cpp" line="67"/>
         <source>Some automatic form features are unavailable in “%1”.</source>
         <translation>Một số tính năng biểu mẫu tự động không khả dụng trong “%1”.</translation>
     </message>
     <message id="CannotSaveOverOpenPdf">
-        <location filename="../src/PDFTabModel.cpp" line="411"/>
+        <location filename="../src/PDFTabModel.cpp" line="423"/>
         <source>Another open tab is already using that PDF file.</source>
         <translation>Một tab đang mở khác đã sử dụng tệp PDF đó.</translation>
     </message>
@@ -2070,6 +2060,56 @@
         <location filename="../src/Components/CombFieldOptionsPanel.qml" line="335"/>
         <source>Delete comb field</source>
         <translation>Xóa trường chia ô</translation>
+    </message>
+    <message id="SearchingDocument">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="55"/>
+        <source>Searching…</source>
+        <translation>Đang tìm…</translation>
+    </message>
+    <message id="DocumentSearchFailed">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="59"/>
+        <source>Search failed</source>
+        <translation>Lỗi tìm kiếm</translation>
+    </message>
+    <message id="DocumentSearchIncomplete">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="66"/>
+        <source>Search incomplete</source>
+        <translation>Chưa tìm hết</translation>
+    </message>
+    <message id="NoSearchResults">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="70"/>
+        <source>No results</source>
+        <translation>Không thấy</translation>
+    </message>
+    <message id="LimitedSearchResultPosition">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="74"/>
+        <source>%1 / %2+</source>
+        <translation>%1 / %2+</translation>
+    </message>
+    <message id="SearchResultPosition">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="79"/>
+        <source>%1 / %2</source>
+        <translation>%1 / %2</translation>
+    </message>
+    <message id="SearchDocument">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="101"/>
+        <source>Search document</source>
+        <translation>Tìm trong tài liệu</translation>
+    </message>
+    <message id="PreviousSearchResult">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="187"/>
+        <source>Previous search result</source>
+        <translation>Kết quả tìm kiếm trước</translation>
+    </message>
+    <message id="NextSearchResult">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="218"/>
+        <source>Next search result</source>
+        <translation>Kết quả tìm kiếm tiếp theo</translation>
+    </message>
+    <message id="ClearDocumentSearch">
+        <location filename="../src/Components/SearchRibbonControl.qml" line="248"/>
+        <source>Clear search</source>
+        <translation>Xóa tìm kiếm</translation>
     </message>
 </context>
 </TS>

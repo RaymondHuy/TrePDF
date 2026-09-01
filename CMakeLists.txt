@@ -80,6 +80,8 @@ qt_add_qml_module(trepdf
         src/PDFFormWorker.h
         src/PDFSaveWriter.cpp
         src/PDFSaveWriter.h
+        src/PDFSearchController.cpp
+        src/PDFSearchController.h
         src/PDFTabModel.cpp
         src/PDFTabModel.h
         src/PDFiumSynchronization.h
@@ -115,6 +117,8 @@ qt_add_qml_module(trepdf
         src/Components/RibbonTabButton.qml
         src/Components/ShapeDraftView.qml
         src/Components/SignRibbon.qml
+        src/Components/SearchHighlightLayer.qml
+        src/Components/SearchRibbonControl.qml
         src/Components/SquigglyLine.qml
         src/Components/StampView.qml
         src/Components/TextFieldOptionsPanel.qml

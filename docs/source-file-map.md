@@ -7,10 +7,10 @@ nguyên ảnh/phông chữ.
 
 Tại thời điểm cập nhật, phạm vi có:
 
-- 30 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
-- 16 tệp triển khai C++ trong `src/` và 1 tệp kiểm thử C++: xem
+- 34 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
+- 18 tệp triển khai C++ trong `src/` và 1 tệp kiểm thử C++: xem
   [Hướng dẫn tệp C++](cpp-file-guide.md).
-- 17 header C++; trong đó 15 header đi cùng tệp triển khai và 2 header dùng
+- 20 header C++; trong đó 17 header đi cùng tệp triển khai và 3 header dùng
   chung không có `.cpp` riêng.
 
 Tài liệu chuyên sâu về pipeline sửa text vẫn nằm ở
@@ -32,12 +32,14 @@ flowchart TD
     View["DocumentView\nListView ảo hóa"]
     Delegate["PdfPageDelegate\nMột trang đang hiện"]
     PageItem["PDFPageItem\nRender texture PDF"]
+    SearchLayer["SearchHighlightLayer\nHighlight không tương tác"]
     Interaction["PageInteractionOverlay\nĐiều phối input theo trang"]
     EditOverlay["EditOverlay\nEdit text/image/shape/comment markup/drawing/Stamp"]
     FormView["PDFFormView + FormChoiceOverlay\nForm PDFium đang chạy"]
     Designer["FormTextFieldOverlay + FormFieldLayer\nThiết kế form"]
     Document["PDFDocument\nHandle PDF GUI thread + cấu trúc trang"]
     Edit["PDFEditController\nDraft, selection, undo/redo"]
+    Search["PDFSearchController\nTìm text và navigation kết quả"]
     Form["PDFFormController\nFacade form trên GUI thread"]
     FormDesigner["PDFFormDesignerController\nModel field thiết kế"]
     Worker["PDFFormWorker\nForm session trên hàng đợi tuần tự"]
@@ -52,16 +54,20 @@ flowchart TD
     Workspace --> View
     View --> Delegate
     Delegate --> PageItem
+    Delegate --> SearchLayer
     Delegate --> Interaction
     Interaction --> EditOverlay
     Interaction --> FormView
     Interaction --> Designer
     Session --> Document
     Session --> Edit
+    Session --> Search
     Session --> Form
     Session --> FormDesigner
     PageItem --> Worker
     PageItem --> Pdfium
+    SearchLayer --> Search
+    Search --> Pdfium
     EditOverlay --> Edit
     FormView --> Form
     Form --> Worker
@@ -78,8 +84,8 @@ flowchart TD
 | Lớp | Trách nhiệm | Tệp tiêu biểu |
 |---|---|---|
 | Vỏ ứng dụng | Cửa sổ, hộp thoại, ribbon, tab, phím tắt và điều phối hành động cấp ứng dụng | `Main.qml`, `AppRibbon.qml`, `DocumentTabBar.qml` |
-| Trình bày trang | ListView ảo hóa, delegate trang, texture PDF, overlay edit/form và biến đổi xoay view | `DocumentView.qml`, `PdfPageDelegate.qml`, `PDFPageItem.cpp`, `EditOverlay.qml` |
-| Trạng thái nghiệp vụ | Mỗi tab có document, draft edit, form runtime, form designer và trạng thái view độc lập | `PDFTabModel.cpp`, `PDFDocument.cpp`, `PDFEditController.cpp`, `PDFFormController.cpp`, `PDFFormDesignerController.cpp` |
+| Trình bày trang | ListView ảo hóa, delegate trang, texture PDF, highlight tìm kiếm, overlay edit/form và biến đổi xoay view | `DocumentView.qml`, `PdfPageDelegate.qml`, `SearchHighlightLayer.qml`, `PDFPageItem.cpp`, `EditOverlay.qml` |
+| Trạng thái nghiệp vụ | Mỗi tab có document, search, draft edit, form runtime, form designer và trạng thái view độc lập | `PDFTabModel.cpp`, `PDFDocument.cpp`, `PDFSearchController.cpp`, `PDFEditController.cpp`, `PDFFormController.cpp`, `PDFFormDesignerController.cpp` |
 | Hạ tầng PDF | Serialize PDFium, render worker, ghi nội dung/annotation/AcroForm, khóa PDFium toàn tiến trình | `PDFFormWorker.cpp`, `PDFSaveWriter.cpp`, `PDFAcroFormWriter.cpp`, `PDFAcroFormCanonicalizer.cpp`, `PDFiumSynchronization.h` |
 
 ## Ownership và vòng đời
@@ -87,7 +93,8 @@ flowchart TD
 1. `Main.qml` sở hữu một `PDFTabModel`.
 2. Mỗi hàng trong model là một `PDFDocumentSession`.
 3. Mỗi session sở hữu đúng một bộ `PDFDocument`, `PDFEditController`,
-   `PDFFormController` và `PDFFormDesignerController`.
+   `PDFSearchController`, `PDFFormController` và `PDFFormDesignerController`.
+   Query, kết quả và current match vì vậy không rò giữa các tab.
 4. Chỉ session đang active được gắn vào `DocumentWorkspace`. Khi đổi tab,
    workspace cũ được chuẩn bị ngắt rồi tạo lại để delegate, texture, editor và
    focus của tab cũ không tiếp tục sống ngầm.
@@ -102,6 +109,7 @@ flowchart TD
 |---|---|---|
 | QML, `PDFDocument`, các controller | GUI thread | Không đưa handle `FPDF_DOCUMENT` của `PDFDocument` sang worker; text markup chỉ hit-test geometry glyph normalized trong candidate cache. |
 | Candidate scan của `PDFEditController` | Worker bất đồng bộ | Mở page/text handle riêng dưới PDFium lock và trả geometry glyph normalized, gồm OCR Invisible dạng hit-test-only; chỉ cache glyph ngang/upright và bỏ toàn bộ per-glyph geometry nếu page vượt 50.000 text characters. GUI/QML không truy cập các handle này. |
+| Search của `PDFSearchController` | Pool riêng tối đa một worker | Debounce/controller giữ tối đa một snapshot pending mới nhất cho mỗi tab; query mở document riêng từ path, giữ PDFium lock khi dùng page/text handle và kiểm cancellation sau khi lấy lock; callback chỉ nhận khi token, path, revision và query còn khớp. |
 | Render của `PDFPageItem` | Hàng đợi worker có giới hạn | Worker mở handle riêng từ đường dẫn, có cancellation và khóa chống kết quả cũ. |
 | `PDFFormWorker` | Hàng đợi tuần tự dùng chung cho form session | Sở hữu document/form handle riêng; callback quay lại GUI bằng queued invocation. |
 | `PDFSaveWriter` | Chuẩn bị snapshot ở GUI, ghi trên worker | Request không giữ con trỏ controller/document; writer mở document riêng. |
@@ -122,6 +130,29 @@ flowchart TD
    kích thước pixel, revision draft/form rồi đưa việc render sang worker.
 6. Kết quả chỉ được nhận nếu request id và toàn bộ render key vẫn khớp; texture
    được upload trong `updatePaintNode()`.
+
+### Tìm kiếm text toàn tài liệu
+
+1. `SearchRibbonControl` đẩy text vào controller ngay; controller sở hữu debounce
+   300 ms nên đổi ribbon/document tab không làm mất input. IME composition chỉ
+   cập nhật pending text; Enter chạy ngay, Escape/Clear xóa state.
+2. Controller chụp path, document revision và ánh xạ display/source page, hủy
+   request trước rồi coalesce snapshot pending mới nhất trước pool search một
+   thread.
+3. Worker mở document PDFium riêng, tìm trên text layer của từng source page và
+   đổi rectangle PDF thành normalized top-left geometry. Query và geometry được
+   giữ bằng các cap cố định; chạm giới hạn trả state `Limited`.
+4. Callback stale bị bỏ nếu controller/token/path/revision/query đã đổi. Kết quả
+   hợp lệ phát `resultActivated(page, x, y, resultsRevision)`; `AppRibbon` chỉ
+   forward khi View còn active. `Main.qml` và `DocumentWorkspace` giữ revision,
+   chờ restore/fit ban đầu hoàn tất, rồi `DocumentView` chờ delegate ảo hóa sẵn
+   sàng trước khi map điểm qua rotation và căn match vào giữa viewport.
+5. `SearchHighlightLayer` của mỗi delegate đọc các rect thuộc display page; tất
+   cả match hiện vàng, match hiện tại cam. Layer nằm trong `pageSurface`, xoay
+   cùng trang và không nhận input. Previous/Next quay vòng qua danh sách.
+6. Mỗi page chỉ materialize tối đa 512 rect QML và luôn ưu tiên current match.
+   `sourceChanged`, `pageStructureChanged` hoặc edit-history change hủy/clear
+   search; search chỉ đọc text nguồn đã lưu, không tham gia draft hoặc Save.
 
 ### Sửa nội dung trang
 
@@ -223,7 +254,8 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Main.qml`](../src/Main.qml) | Cửa sổ chính và điều phối toàn ứng dụng. |
 | [`src/Components/AppTheme.qml`](../src/Components/AppTheme.qml) | Bảng màu dùng chung. |
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
-| [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit và xoay view. |
+| [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit, xoay view và host tìm kiếm. |
+| [`src/Components/SearchRibbonControl.qml`](../src/Components/SearchRibbonControl.qml) | Ô query, trạng thái, Previous/Next và Clear của tìm kiếm tài liệu. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
 | [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Select chỉ dành cho comment, Sticky Note, Free Text, text markup, Pencil/Ink, Square/Circle/Line/Polygon/PolyLine, Stamp, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
@@ -237,7 +269,8 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |
 | [`src/Components/RadioButtonOptionsPanel.qml`](../src/Components/RadioButtonOptionsPanel.qml) | Panel Group ID và xóa Radio Button đang chọn. |
 | [`src/Components/DocumentView.qml`](../src/Components/DocumentView.qml) | ListView trang liên tục và ảo hóa. |
-| [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, coordinator interaction, rotation và layout của một trang. |
+| [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, search highlight, coordinator interaction, rotation và layout của một trang. |
+| [`src/Components/SearchHighlightLayer.qml`](../src/Components/SearchHighlightLayer.qml) | Vẽ rect kết quả tìm kiếm normalized, không tương tác. |
 | [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml) | Gom mode, z-order, choice handshake và cleanup của runtime/edit/form designer. |
 | [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml) | Tương tác sửa nội dung trang, gesture và preview/draft comment. |
 | [`src/Components/CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml) | Renderer vector chung cho năm drawing-comment subtype. |
@@ -261,6 +294,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFTabModel.cpp`](../src/PDFTabModel.cpp) | Session mỗi tab và model nhiều tab. |
 | [`src/PDFDocument.cpp`](../src/PDFDocument.cpp) | Document GUI-thread, kích thước và page map transient. |
 | [`src/PDFPageItem.cpp`](../src/PDFPageItem.cpp) | Render trang bất đồng bộ và upload texture. |
+| [`src/PDFSearchController.cpp`](../src/PDFSearchController.cpp) | Tìm text bất đồng bộ, giữ kết quả theo tab và điều hướng current match. |
 | [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) | Candidate, selection thường/comment-only, draft, edit, history và save orchestration. |
 | [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) | Ghi PDF giao dịch từ snapshot bất biến. |
 | [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) | Đọc chuỗi, chuẩn hóa nội dung và phân loại comment annotation dùng chung cho index, render và save. |
@@ -274,7 +308,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFAcroFormWriter.cpp`](../src/PDFAcroFormWriter.cpp) | Pipeline cấp cao để ghi field TrePDF. |
 | [`src/PDFAcroFormCanonicalizer.cpp`](../src/PDFAcroFormCanonicalizer.cpp) | Hoàn thiện AcroForm, Free Text, text/drawing/Ink markup `/AP` và `/IRT` reply bằng incremental update. |
 | [`src/PDFWidgetAnnotationSuppression.cpp`](../src/PDFWidgetAnnotationSuppression.cpp) | Ẩn Widget tạm thời và phục hồi patch khi render designer. |
-| [`tests/tst_PDFEditController.cpp`](../tests/tst_PDFEditController.cpp) | Bộ test tích hợp/hồi quy của edit, save, form, font và tab. |
+| [`tests/tst_PDFEditController.cpp`](../tests/tst_PDFEditController.cpp) | Bộ test tích hợp/hồi quy của edit, search, save, form, font và tab. |
 
 ## Khi cần sửa một tính năng, bắt đầu ở đâu
 
@@ -282,6 +316,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 |---|---|---|
 | Ribbon, bố cục, dialog | `Main.qml`, ribbon tương ứng | `i18n/qml_vi.ts`, `AppTheme.qml` |
 | Scroll/zoom/rotation/pooling | `DocumentView.qml`, `PdfPageDelegate.qml` | `PDFPageItem.cpp`, state trong `PDFDocumentSession` |
+| Tìm text tài liệu | `SearchRibbonControl.qml`, `PDFSearchController.cpp` | `SearchHighlightLayer.qml`, navigation trong `AppRibbon.qml`, translation và test async/stale |
 | Chọn hoặc sửa text/image/shape/comment | `EditOverlay.qml` | `EditRibbon.qml` hoặc `CommentRibbon.qml`, `CommentPanel.qml`, `DrawingCommentPropertiesPanel.qml`, `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
 | Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp` | `PDFEditController.cpp`, `PDFSaveWriter.cpp` |
 | Form PDF đang chạy | `PDFFormView.cpp`, `PDFFormController.cpp` | `PDFFormWorker.cpp`, `FormChoiceOverlay.qml` |
