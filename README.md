@@ -1,7 +1,7 @@
 # TrePDF
 
 TrePDF is a Qt Quick Controls desktop PDF reader powered by PDFium. The app
-supports multiple PDFs in independent tabs, continuous page viewing,
+supports multiple PDFs in independent tabs, four page-display layouts,
 asynchronous rendering, per-tab whole-document text search and left/right view
 rotation, rich-text content edits, image insertion, Save/Save As, and an
 ID-based localization system with Vietnamese enabled by default.
@@ -56,10 +56,18 @@ source-backed Check Box and arbitrary AcroForm structures are not removed by
 this path.
 
 Each document tab owns its PDF handle, draft/undo history, selection, zoom,
-scroll position, search query/results, and formatting-panel state. Only the
-active tab creates page delegates and textures. Opening an already-open
-canonical path activates its existing tab, and Save As cannot overwrite a PDF
-used by another open tab.
+scroll position, page-display mode, separate-cover and split-view state, search
+query/results, and formatting-panel state. The View tab exposes Page Display as
+a compact dropdown: four layout actions, a Separate Cover toggle available only
+for the two Facing layouts, and a Split action with Vertical, Horizontal, and
+Spreadsheet variants in a nested menu. Single Page and Facing materialize only the active
+page or spread, while both Continuous layouts virtualize their stacked rows and
+derive the current page from the page occupying most of the viewport. Vertical
+and Horizontal Split provide two independently scrollable, zoomable, navigable
+views of the same PDF; Spreadsheet Split provides four regions with coordinated
+row/column scrolling. Only the active tab creates page delegates and textures.
+Opening an already-open canonical path activates its existing tab, and Save As
+cannot overwrite a PDF used by another open tab.
 
 The View tab searches the current PDF text asynchronously across its source
 pages. Typing is debounced, a newer query cancels the older scan, and stale
@@ -306,7 +314,7 @@ caret at the end. Font size is currently UI-only.
   thread boundaries, main runtime flows, and an index of every current QML/C++
   implementation file.
 - [`docs/qml-file-guide.md`](docs/qml-file-guide.md): detailed responsibilities,
-  inputs, outputs, lifecycle, and C++ relationships for all 34 QML files.
+  inputs, outputs, lifecycle, and C++ relationships for all 36 QML files.
 - [`docs/cpp-file-guide.md`](docs/cpp-file-guide.md): detailed responsibilities,
   ownership, threading, persistence boundaries, and tests for all 18 `src/` C++
   implementations, 20 headers, and the C++ test file.

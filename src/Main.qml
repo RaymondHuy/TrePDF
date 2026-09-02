@@ -41,6 +41,10 @@ ApplicationWindow {
     property real pendingSearchNavigationY: 0.0
     property real pendingSearchNavigationRevision: -1
     readonly property PDFDocumentSession activeSession: tabModel.currentSession
+    readonly property DocumentWorkspace activeWorkspaceItem:
+        workspaceLoader.status === Loader.Ready
+            ? workspaceLoader.item as DocumentWorkspace
+            : null
     readonly property PDFDocument activeDocument: activeSession
         ? activeSession.document
         : emptyDocument
@@ -68,9 +72,7 @@ ApplicationWindow {
     palette.window: "#f7f2ee"
 
     function activeWorkspace() {
-        return workspaceLoader.status === Loader.Ready
-            ? workspaceLoader.item
-            : null
+        return activeWorkspaceItem
     }
 
     function prepareActiveWorkspace() {
@@ -93,8 +95,19 @@ ApplicationWindow {
     }
 
     function setZoom(value) {
-        if (activeSession)
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.setZoom(value)
+        else if (activeSession)
             activeSession.zoom = Math.max(0.1, Math.min(5.0, value))
+    }
+
+    function zoomBy(factor) {
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.zoomBy(factor)
+        else if (activeSession)
+            setZoom(activeSession.zoom * factor)
     }
 
     function fitToWidth() {
@@ -965,12 +978,31 @@ ApplicationWindow {
             document: window.activeDocument
             editController: window.activeEditController
             searchController: window.activeSearchController
+            session: window.activeSession
             hasPendingPanelEdits: window.activeWorkspaceHasPendingEdits
+            viewNavigationPage: window.activeWorkspaceItem
+                ? window.activeWorkspaceItem.activePage
+                : window.activeDocument.currentPage
+            viewCanNavigateBackward: window.activeWorkspaceItem
+                ? window.activeWorkspaceItem.canNavigateBackward
+                : window.activeDocument.currentPage > 0
+            viewCanNavigateForward: window.activeWorkspaceItem
+                ? window.activeWorkspaceItem.canNavigateForward
+                : window.activeDocument.loaded
+                    && window.activeDocument.currentPage + 1
+                        < window.activeDocument.pageCount
             enabled: !tabModel.anySaving
             onOpenRequested: window.requestOpen()
             onSaveRequested: window.requestSave()
             onSaveAsRequested: window.requestSaveAs()
             onPageRequested: page => window.goToPage(page)
+            onPageStepRequested: direction => {
+                const workspace = window.activeWorkspace()
+                if (workspace)
+                    workspace.navigateByStep(direction)
+                else if (window.activeDocument.loaded)
+                    window.goToPage(window.activeDocument.currentPage + direction)
+            }
             onSearchResultRequested: (page,
                                       normalizedX,
                                       normalizedY,
@@ -982,17 +1014,52 @@ ApplicationWindow {
                     resultsRevision)
             onDeletePageRequested: page => window.requestDeletePage(page)
             onZoomOutRequested: {
-                window.setZoom(window.activeSession
-                    ? window.activeSession.zoom / 1.15
-                    : 1.0)
+                window.zoomBy(1 / 1.15)
             }
             onZoomInRequested: {
-                window.setZoom(window.activeSession
-                    ? window.activeSession.zoom * 1.15
-                    : 1.0)
+                window.zoomBy(1.15)
             }
             onFitWidthRequested: window.fitToWidth()
             onRotateRequested: quarterTurns => window.rotateView(quarterTurns)
+            onPageDisplayModeRequested: mode => {
+                const workspace = window.activeWorkspace()
+                if (workspace)
+                    workspace.setPageDisplayMode(mode)
+                else if (window.activeSession)
+                    window.activeSession.pageDisplayMode = mode
+            }
+            onSeparateCoverPageToggleRequested: {
+                const workspace = window.activeWorkspace()
+                if (workspace) {
+                    workspace.toggleSeparateCoverPage()
+                } else if (window.activeSession) {
+                    const mode = window.activeSession.pageDisplayMode
+                    const facingMode = mode
+                            === PDFDocumentSession.FacingMode
+                        || mode
+                            === PDFDocumentSession.ContinuousFacingMode
+                    if (facingMode) {
+                        window.activeSession.separateCoverPage
+                            = !window.activeSession.separateCoverPage
+                    }
+                }
+            }
+            onSplitViewModeRequested: mode => {
+                const workspace = window.activeWorkspace()
+                if (workspace)
+                    workspace.setSplitViewMode(mode)
+                else if (window.activeSession)
+                    window.activeSession.splitViewMode = mode
+            }
+            onSplitViewToggleRequested: {
+                const workspace = window.activeWorkspace()
+                if (workspace) {
+                    workspace.toggleSplitView()
+                } else if (window.activeSession) {
+                    window.activeSession.splitViewEnabled
+                        = !window.activeSession.splitViewEnabled
+                }
+            }
             onToolRequested: toolName => window.showComingSoon(toolName)
             onUndoRequested: window.requestUndo()
             onRedoRequested: window.requestRedo()

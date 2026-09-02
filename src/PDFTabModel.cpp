@@ -4,6 +4,88 @@
 #include <QFileInfo>
 #include <QtTranslation>
 
+PDFViewState::PDFViewState(QObject *parent)
+    : QObject(parent)
+{
+}
+
+qreal PDFViewState::zoom() const
+{
+    return m_zoom;
+}
+
+qreal PDFViewState::scrollX() const
+{
+    return m_scrollX;
+}
+
+qreal PDFViewState::scrollY() const
+{
+    return m_scrollY;
+}
+
+int PDFViewState::currentPage() const
+{
+    return m_currentPage;
+}
+
+bool PDFViewState::positionInitialized() const
+{
+    return m_positionInitialized;
+}
+
+void PDFViewState::setZoom(qreal zoom)
+{
+    const qreal clampedZoom = qBound(0.1, zoom, 5.0);
+    if (qFuzzyCompare(m_zoom, clampedZoom)) {
+        return;
+    }
+
+    m_zoom = clampedZoom;
+    emit zoomChanged();
+}
+
+void PDFViewState::setScrollX(qreal scrollX)
+{
+    setScrollPosition(scrollX, m_scrollY);
+}
+
+void PDFViewState::setScrollY(qreal scrollY)
+{
+    setScrollPosition(m_scrollX, scrollY);
+}
+
+void PDFViewState::setCurrentPage(int page)
+{
+    const int clampedPage = qMax(0, page);
+    if (m_currentPage == clampedPage) {
+        return;
+    }
+
+    m_currentPage = clampedPage;
+    emit currentPageChanged();
+}
+
+void PDFViewState::setScrollPosition(qreal scrollX, qreal scrollY)
+{
+    const qreal clampedScrollX = qMax<qreal>(0.0, scrollX);
+    const qreal clampedScrollY = qMax<qreal>(0.0, scrollY);
+    const bool positionChanged
+        = !qFuzzyCompare(m_scrollX + 1.0, clampedScrollX + 1.0)
+        || !qFuzzyCompare(m_scrollY + 1.0, clampedScrollY + 1.0);
+    const bool initializedChanged = !m_positionInitialized;
+
+    m_scrollX = clampedScrollX;
+    m_scrollY = clampedScrollY;
+    m_positionInitialized = true;
+    if (positionChanged) {
+        emit scrollPositionChanged();
+    }
+    if (initializedChanged) {
+        emit positionInitializedChanged();
+    }
+}
+
 PDFDocumentSession::PDFDocumentSession(QObject *parent)
     : QObject(parent)
     , m_document(new PDFDocument(this))
@@ -11,6 +93,9 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
     , m_formController(new PDFFormController(this))
     , m_formDesignerController(new PDFFormDesignerController(this))
     , m_searchController(new PDFSearchController(this))
+    , m_secondaryViewState(new PDFViewState(this))
+    , m_bottomLeftViewState(new PDFViewState(this))
+    , m_bottomRightViewState(new PDFViewState(this))
 {
     m_formDesignerController->setDocument(m_document);
     m_formController->setDocument(m_document);
@@ -67,6 +152,14 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
                 qtTrId("AutomaticFormFeaturesUnavailableForDocument")
                     .arg(m_title));
         });
+    connect(m_secondaryViewState,
+            &PDFViewState::scrollPositionChanged,
+            this,
+            &PDFDocumentSession::splitScrollPositionChanged);
+    connect(m_secondaryViewState,
+            &PDFViewState::positionInitializedChanged,
+            this,
+            &PDFDocumentSession::splitScrollPositionInitializedChanged);
 }
 
 PDFDocument *PDFDocumentSession::document() const
@@ -122,6 +215,56 @@ qreal PDFDocumentSession::scrollY() const
 int PDFDocumentSession::viewRotation() const
 {
     return m_viewRotation;
+}
+
+PDFDocumentSession::PageDisplayMode PDFDocumentSession::pageDisplayMode() const
+{
+    return m_pageDisplayMode;
+}
+
+bool PDFDocumentSession::separateCoverPage() const
+{
+    return m_separateCoverPage;
+}
+
+PDFDocumentSession::SplitViewMode PDFDocumentSession::splitViewMode() const
+{
+    return m_splitViewMode;
+}
+
+bool PDFDocumentSession::splitViewEnabled() const
+{
+    return m_splitViewMode != NoSplit;
+}
+
+PDFViewState *PDFDocumentSession::secondaryViewState() const
+{
+    return m_secondaryViewState;
+}
+
+PDFViewState *PDFDocumentSession::bottomLeftViewState() const
+{
+    return m_bottomLeftViewState;
+}
+
+PDFViewState *PDFDocumentSession::bottomRightViewState() const
+{
+    return m_bottomRightViewState;
+}
+
+qreal PDFDocumentSession::splitScrollX() const
+{
+    return m_secondaryViewState->scrollX();
+}
+
+qreal PDFDocumentSession::splitScrollY() const
+{
+    return m_secondaryViewState->scrollY();
+}
+
+bool PDFDocumentSession::splitScrollPositionInitialized() const
+{
+    return m_secondaryViewState->positionInitialized();
 }
 
 bool PDFDocumentSession::panelCollapsed() const
@@ -187,6 +330,84 @@ void PDFDocumentSession::setViewRotation(int rotation)
 
     m_viewRotation = normalizedRotation;
     emit viewRotationChanged();
+}
+
+void PDFDocumentSession::setPageDisplayMode(PageDisplayMode mode)
+{
+    switch (mode) {
+    case SinglePageMode:
+    case ContinuousMode:
+    case FacingMode:
+    case ContinuousFacingMode:
+        break;
+    default:
+        return;
+    }
+
+    if (m_pageDisplayMode == mode) {
+        return;
+    }
+
+    m_pageDisplayMode = mode;
+    emit pageDisplayModeChanged();
+}
+
+void PDFDocumentSession::setSeparateCoverPage(bool separate)
+{
+    if (m_separateCoverPage == separate) {
+        return;
+    }
+
+    m_separateCoverPage = separate;
+    emit separateCoverPageChanged();
+}
+
+void PDFDocumentSession::setSplitViewMode(SplitViewMode mode)
+{
+    switch (mode) {
+    case NoSplit:
+    case VerticalSplit:
+    case HorizontalSplit:
+    case SpreadsheetSplit:
+        break;
+    default:
+        return;
+    }
+
+    if (m_splitViewMode == mode) {
+        return;
+    }
+
+    const bool wasEnabled = splitViewEnabled();
+    m_splitViewMode = mode;
+    emit splitViewModeChanged();
+    if (wasEnabled != splitViewEnabled()) {
+        emit splitViewEnabledChanged();
+    }
+}
+
+void PDFDocumentSession::setSplitViewEnabled(bool enabled)
+{
+    setSplitViewMode(enabled
+                         ? (m_splitViewMode == NoSplit
+                                ? VerticalSplit
+                                : m_splitViewMode)
+                         : NoSplit);
+}
+
+void PDFDocumentSession::setSplitScrollX(qreal scrollX)
+{
+    m_secondaryViewState->setScrollX(scrollX);
+}
+
+void PDFDocumentSession::setSplitScrollY(qreal scrollY)
+{
+    m_secondaryViewState->setScrollY(scrollY);
+}
+
+void PDFDocumentSession::setSplitScrollPosition(qreal scrollX, qreal scrollY)
+{
+    m_secondaryViewState->setScrollPosition(scrollX, scrollY);
 }
 
 void PDFDocumentSession::setPanelCollapsed(bool collapsed)

@@ -122,6 +122,15 @@ Current features:
   arrows snap horizontally or vertically.
 - Render every page through PDFium.
 - Virtualized continuous scrolling with reusable QML delegates.
+- Per-tab Page Display modes for Single Page, Continuous, Facing, and Continuous
+  Facing, exposed through a compact dropdown. Single Page and Facing keep
+  exactly one active page/spread delegate; both Continuous modes virtualize
+  stacked rows and select the current page by dominant visible area. Facing
+  modes alone can keep the cover page separate. A nested Split menu selects
+  Vertical, Horizontal, or Spreadsheet. Vertical and Horizontal Split
+  create two independent scroll/zoom/page viewports over the same document;
+  Spreadsheet Split creates four regions with coordinated row/column scrolling.
+  Edit/form interaction remains in the primary pane.
 - Asynchronous page rendering on a worker thread.
 - Page navigation, zoom, and fit-to-width controls.
 - The View tab searches source-page text across the current document on a

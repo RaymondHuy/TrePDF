@@ -1,6 +1,6 @@
 # Hướng dẫn toàn bộ tệp QML
 
-Tài liệu này mô tả 34 tệp QML đang được đăng ký trong QML module `TrePDF`.
+Tài liệu này mô tả 36 tệp QML đang được đăng ký trong QML module `TrePDF`.
 Mỗi mục tập trung vào trách nhiệm, dữ liệu đi vào/đi ra, quan hệ với C++ và các
 ràng buộc vòng đời cần giữ khi sửa code.
 
@@ -24,6 +24,7 @@ ràng buộc vòng đời cần giữ khi sửa code.
 Main.qml
 ├── AppRibbon.qml
 │   ├── ViewRibbon.qml
+│   │   ├── PageDisplayControl.qml
 │   │   └── SearchRibbonControl.qml
 │   ├── EditRibbon.qml
 │   ├── CommentRibbon.qml
@@ -31,21 +32,23 @@ Main.qml
 │   └── SignRibbon.qml
 ├── DocumentTabBar.qml
 └── DocumentWorkspace.qml
-    ├── DocumentView.qml
-    │   └── PdfPageDelegate.qml (mỗi trang đang hiện)
-    │       ├── PDFPageView (C++)
-    │       ├── SearchHighlightLayer.qml
-    │       └── PageInteractionOverlay.qml
-    │           ├── PDFFormView (C++)
-    │           │   └── FormChoiceOverlay.qml
-    │           ├── EditOverlay.qml
-    │           │   ├── ShapeDraftView.qml
-    │           │   ├── SquigglyLine.qml
-    │           │   ├── CommentDrawingView.qml
-    │           │   ├── InkDrawingView.qml
-    │           │   └── StampView.qml
-    │           └── FormTextFieldOverlay.qml
-    │               └── FormFieldLayer (C++)
+    ├── DocumentView.qml (khung chính và tùy chọn khung phụ)
+    │   └── PageLayoutDelegate.qml (một hàng hoặc spread)
+    │       ├── PdfPageDelegate.qml (trang thứ nhất)
+    │       │   ├── PDFPageView (C++)
+    │       │   ├── SearchHighlightLayer.qml
+    │       │   └── PageInteractionOverlay.qml
+    │       │       ├── PDFFormView (C++)
+    │       │       │   └── FormChoiceOverlay.qml
+    │       │       ├── EditOverlay.qml
+    │       │       │   ├── ShapeDraftView.qml
+    │       │       │   ├── SquigglyLine.qml
+    │       │       │   ├── CommentDrawingView.qml
+    │       │       │   ├── InkDrawingView.qml
+    │       │       │   └── StampView.qml
+    │       │       └── FormTextFieldOverlay.qml
+    │       │           └── FormFieldLayer (C++)
+    │       └── PdfPageDelegate.qml (trang thứ hai, khi Facing; cùng cấu trúc)
     ├── CommentPanel.qml
     ├── DrawingCommentPropertiesPanel.qml
     ├── TextFormatPanel.qml
@@ -81,6 +84,9 @@ phạm vi toàn ứng dụng.
 - Navigation search chụp `resultsRevision`; workspace mới chỉ nhận target sau
   barrier restore/fit ban đầu, nên callback Loader hoặc query cũ không ghi đè
   scroll của session mới.
+- Truyền session đang active vào ribbon và chuyển các intent Page Display thành
+  thay đổi trên đúng `DocumentWorkspace`; khi Loader chưa sẵn sàng thì cập nhật
+  state session để workspace mới nhận lại.
 
 **Điều phối hành động:**
 
@@ -157,14 +163,34 @@ dialog, đổi tab hoặc ghi tệp.
 
 **Vai trò:** nhóm lệnh đọc và điều hướng tài liệu.
 
-- Nhận `document`, `editController` và `searchController` để enable/disable lệnh
-  theo `loaded`/`saving` và giữ tìm kiếm đúng session.
+- Nhận `document`, `editController`, `searchController` và `session` để
+  enable/disable lệnh theo `loaded`/`saving`, giữ tìm kiếm và Page Display đúng
+  tab.
 - Phát Open, Save, Save As; trang trước/sau hoặc số trang yêu cầu; Zoom Out/In,
   Fit Width và Rotate Left/Right.
+- Gắn `PageDisplayControl` dạng dropdown gọn trong nhóm Page Display, bind trực
+  tiếp mode/cover/split của `PDFDocumentSession` và chuyển intent cho Single
+  Page, Continuous, Facing, Continuous Facing, Separate Cover Page cùng ba kiểu
+  Split lên `AppRibbon`.
 - Gắn `SearchRibbonControl` trong nhóm Search để tìm kiếm tài liệu ngay
   trên ribbon.
 - Dùng `RibbonGroup` và `RibbonButton`, nên logic enable/split button phải thống
   nhất với component dùng chung.
+
+### [`src/Components/PageDisplayControl.qml`](../src/Components/PageDisplayControl.qml)
+
+**Vai trò:** control Page Display dạng dropdown trong tab View.
+
+- Bốn nút layout chọn `SinglePageMode`, `ContinuousMode`, `FacingMode` hoặc
+  `ContinuousFacingMode`; trạng thái active đọc trực tiếp từ session.
+- `Separate Cover Page` là toggle, chỉ enable khi mode hiện tại là Facing hoặc
+  Continuous Facing. Nó không tạo thêm một layout độc lập.
+- Hàng Split là action ghép trong dropdown: phần chính bật/tắt Vertical Split,
+  còn mũi tên mở menu con chọn Vertical, Horizontal hoặc Spreadsheet Split.
+  Icon phản ánh kiểu đang dùng.
+- Phát signal có kiểu cho đổi mode, cover và `SplitViewMode`. Component không tự
+  đổi layout hay giữ bản sao state; `Main.qml`/`DocumentWorkspace` áp intent lên
+  session đang active.
 
 ### [`src/Components/SearchRibbonControl.qml`](../src/Components/SearchRibbonControl.qml)
 
@@ -367,7 +393,18 @@ Edit; không lập chỉ mục, hiển thị hay sửa nội dung comment/thread
 - Bind `session.document`, edit/form/designer/search controller vào
   `DocumentView`.
 - Hai chiều hóa zoom và vị trí scroll với `session.zoom`, `scrollX`, `scrollY`;
-  truyền `session.viewRotation` và trạng thái tab/tool form.
+  truyền `session.viewRotation`, `pageDisplayMode`, `separateCoverPage` và trạng
+  thái tab/tool form.
+- `NoSplit` tạo một viewport. Vertical/Horizontal Split tạo hai `DocumentView`
+  theo trái-phải hoặc trên-dưới; mỗi pane giữ zoom, scroll và current page riêng,
+  và toolbar điều hướng/zoom pane vừa được kích hoạt.
+- Spreadsheet Split tạo lưới 2x2. Bốn vùng dùng cùng zoom để giữ thẳng hàng;
+  workspace phối hợp trục X giữa hai vùng cùng cột và trục Y giữa hai vùng cùng
+  hàng, tương tự frozen panes. Chuyển trang ở mode phân trang cũng đồng bộ theo
+  từng hàng của lưới.
+- Ba pane phụ tắt interaction Edit/Form; pane chính vẫn là chủ sở hữu selection
+  và controller tương tác. Workspace lưu/khôi phục `PDFViewState` của từng pane
+  trước khi đổi split mode hoặc phá workspace.
 - Thực hiện Fit Width từ kích thước viewport và maximum page dimension đã xoay;
   initial-fit chỉ chạy khi session còn `initialFitPending`.
 - Load đúng một panel ở cạnh phải: `CommentPanel` khi Comment active và danh
@@ -386,16 +423,26 @@ hủy interaction và lưu scroll trước khi workspace bị phá; hàm cũng c
 
 ### [`src/Components/DocumentView.qml`](../src/Components/DocumentView.qml)
 
-**Vai trò:** viewport trang liên tục và nơi quản lý virtualization/navigation.
+**Vai trò:** viewport ảo hóa cho bốn bố cục trang và nơi quản lý navigation.
 
 **Cấu trúc và state:**
 
-- `ListView` dọc có `reuseItems: true`, `clip: true`, cache buffer bảo thủ và
-  model là `document.pageCount`.
-- Delegate là `PdfPageDelegate`, nhận tất cả controller, zoom, rotation và cờ
-  mode/tool; search controller chỉ cấp dữ liệu highlight, không tham gia input.
-- `currentPage` của document được suy ra từ trang nổi trội trong viewport;
-  navigation theo lệnh dùng `pendingNavigationPage` và generation để tránh một
+- `ListView` dọc có `reuseItems: true`, `clip: true` và cache buffer bảo thủ.
+  Single Page và Facing đặt model đúng một delegate, rồi ánh xạ delegate đó tới
+  page/spread active; vì vậy không tồn tại hàng trước/sau để lộ một phần trong
+  viewport. Trang hoặc spread được căn giữa mà không thay đổi zoom hiện tại.
+- Trong hai mode phân trang, wheel/phím trước hết thay đổi `contentX/contentY`
+  bên trong page/spread đang phóng to. Chỉ khi chạm biên mới chuyển trang hoặc
+  chuyển cả spread; trang kế tiếp được đặt ở đầu và trang trước ở cuối.
+- Continuous dùng một trang mỗi hàng; Continuous Facing dùng một spread mỗi
+  hàng. Cả hai giữ model đầy đủ nhưng chỉ materialize vùng đang thấy/gần thấy,
+  dùng `pageGap` cấu hình được và cho cuộn xuyên suốt tài liệu.
+- Delegate là `PageLayoutDelegate`. Ở mode continuous, current page là child có
+  diện tích giao với viewport lớn nhất, không chỉ là child gần tâm; mỗi pane
+  split giữ current page độc lập.
+- Navigation ánh xạ display page sang hàng/spread rồi căn giữa đúng child page;
+  search navigation vẫn map normalized point qua surface xoay của trang đích.
+- Navigation theo lệnh dùng `pendingNavigationPage` và generation để tránh một
   callback scroll cũ ghi đè thao tác mới.
 - Navigation kết quả map điểm normalized qua `pageSurface` đã xoay rồi căn giữa
   điểm đó trong viewport; một timer có generation/revision và deadline chờ
@@ -409,16 +456,31 @@ hủy interaction và lưu scroll trước khi workspace bị phá; hàm cũng c
 **API nội bộ quan trọng:** chuẩn bị session change, bắt đầu edit selected text,
 đi tới trang, lưu/khôi phục vị trí và đồng bộ form design mode.
 
-**Ràng buộc:** không tăng `cacheBuffer` tùy tiện; mỗi delegate có thể giữ texture
+**Ràng buộc:** không tăng `cacheBuffer` tùy tiện; mỗi hàng có thể giữ hai texture
 Retina đầy trang. Mọi state delegate phụ thuộc trang phải reset khi reused.
+
+### [`src/Components/PageLayoutDelegate.qml`](../src/Components/PageLayoutDelegate.qml)
+
+**Vai trò:** một hàng ảo hóa chứa một trang hoặc một spread hai trang.
+
+- Ánh xạ `layoutIndex` thành `firstPage`/`secondPage`, kể cả quy tắc trang bìa
+  đứng riêng, rồi đặt một hoặc hai `PdfPageDelegate` cạnh nhau. Trong mode phân
+  trang, `layoutIndex` là spread/page active dù model chỉ có một delegate.
+- Tính chiều rộng cột theo viewport, zoom, rotation và page lớn nhất; trang bìa
+  hoặc trang lẻ cuối được căn giữa.
+- Chuyển tiếp helper navigation/search từ `DocumentView` tới đúng child page và
+  tính diện tích visible của từng child để đồng bộ `currentPage` trong spread.
+- Sở hữu `ListView.onPooled/onReused`; khi pool sẽ tắt Loader trang thứ hai và
+  đưa cả hai page delegate vào trạng thái cleanup.
 
 ### [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml)
 
-**Vai trò:** một trang trong `ListView`, ghép nội dung PDF với mọi lớp tương tác.
+**Vai trò:** một trang vật lý trong hàng layout, ghép nội dung PDF với mọi lớp
+tương tác.
 
 **Bố cục:**
 
-- Tính kích thước trang từ `document.pageSize(index)`, zoom và quarter-turn.
+- Tính kích thước trang từ `document.pageSize(page)`, zoom và quarter-turn.
 - `pageSurface` dùng chung chứa `PDFPageView`, `SearchHighlightLayer` và
   `PageInteractionOverlay`; coordinator sau cùng chứa runtime form, edit và form
   designer.
@@ -435,9 +497,9 @@ Retina đầy trang. Mọi state delegate phụ thuộc trang phải reset khi r
 Xem [overlay-architecture.md](overlay-architecture.md) để có cây item, z-order
 và ma trận mode/input đầy đủ của các nhánh này.
 
-**Pooling:** `ListView.onPooled` đặt `pooled = true`, khiến child ngắt document,
-interaction và focus; `onReused` bật lại để request state của page mới. Đây là
-invariant quan trọng nhất của tệp.
+**Pooling:** nhận cờ `pooled` từ `PageLayoutDelegate`; khi true, child ngắt
+document, interaction và focus. Wrapper bật lại khi hàng được reuse để request
+state của page mới.
 
 ### [`src/Components/SearchHighlightLayer.qml`](../src/Components/SearchHighlightLayer.qml)
 
@@ -650,6 +712,21 @@ undo/redo, không chỉ state click gần nhất trong panel.
   draft form và giữ flag Comb.
 - Nút xóa gọi `removeField()`; thay đổi chỉ ghi vào PDF khi Save/Save As.
 - Nội dung panel nằm trong `Loader` và dùng trạng thái collapsed của session.
+
+### [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml)
+
+**Vai trò:** panel tùy chọn dùng chung cho Dropdown và List Box đang chọn.
+
+- `listBoxMode` chọn nhãn, loại field mong đợi và thông báo lỗi tương ứng; panel
+  đọc option hiện tại từ `PDFFormDesignerController` theo `fieldId`.
+- Cho thêm, đổi tên và xóa option; trim chuỗi, cấm trùng và luôn giữ ít nhất một
+  option trước khi gọi `setFieldOptions()`.
+- Đồng bộ lại model cục bộ khi controller thay đổi selection/draft; lỗi cập nhật
+  không làm panel giả vờ đã commit.
+- Nút xóa gọi `removeField()` cho field mới hoặc source-backed do TrePDF tạo;
+  thay đổi vẫn là draft cho tới Save/Save As.
+- Nội dung có trạng thái collapsed theo session và dùng toàn bộ label/accessible
+  name riêng cho Dropdown hoặc List Box.
 
 ### [`src/Components/RadioButtonOptionsPanel.qml`](../src/Components/RadioButtonOptionsPanel.qml)
 
