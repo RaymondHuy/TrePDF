@@ -5,13 +5,15 @@ import TrePDF
 Item {
     id: pageCard
 
-    required property int index
+    required property int page
     required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
     required property PDFSearchController searchController
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
+    required property Flickable viewportItem
+    required property real availableWidth
     property bool formsTabActive: false
     property bool editTabActive: false
     property bool formFieldsVisible: false
@@ -24,15 +26,13 @@ Item {
     property bool combFieldToolActive: false
     property real zoom: 1.0
     property int viewRotation: 0
+    property int currentPage: 0
     property bool pooled: false
     property int sessionChangeGeneration: 0
     readonly property real pageMargin: 32
-    readonly property Item viewportItem: ListView.view
-    readonly property real viewWidth: ListView.view ? ListView.view.width : 0
-    readonly property real viewContentX:
-        ListView.view ? ListView.view.contentX : 0
-    readonly property real viewContentY:
-        ListView.view ? ListView.view.contentY : 0
+    readonly property real viewWidth: availableWidth
+    readonly property real viewContentX: viewportItem.contentX
+    readonly property real viewContentY: viewportItem.contentY
     readonly property int normalizedViewRotation:
         ((viewRotation % 360) + 360) % 360
     readonly property bool quarterTurn:
@@ -65,9 +65,6 @@ Item {
     }
 
     onSessionChangeGenerationChanged: prepareForSessionChange()
-
-    ListView.onPooled: pooled = true
-    ListView.onReused: pooled = false
 
     Item {
         id: pageFrame
@@ -110,7 +107,7 @@ Item {
                 ? null
                 : pageCard.formDesignerController
             formDesignMode: pageInteractionOverlay.formDesignMode
-            page: pageCard.index
+            page: pageCard.page
             zoom: pageCard.zoom
             pageColor: "white"
             width: implicitWidth
@@ -120,17 +117,17 @@ Item {
         Rectangle {
             anchors.fill: pageView
             color: "transparent"
-            border.color: pageCard.index === pageCard.document.currentPage
+            border.color: pageCard.page === pageCard.currentPage
                 ? pageCard.theme.foxitOrange
                 : "#c6cad1"
-            border.width: pageCard.index === pageCard.document.currentPage ? 2 : 1
+            border.width: pageCard.page === pageCard.currentPage ? 2 : 1
             visible: pageView.width > 0 && pageView.height > 0
         }
 
         SearchHighlightLayer {
             anchors.fill: pageView
             controller: pageCard.searchController
-            page: pageCard.index
+            page: pageCard.page
             pooled: pageCard.pooled
             z: 0.5
         }
@@ -143,7 +140,7 @@ Item {
             editController: pageCard.editController
             formController: pageCard.formController
             formDesignerController: pageCard.formDesignerController
-            page: pageCard.index
+            page: pageCard.page
             pagePointScale: pageCard.zoom
             pooled: pageCard.pooled
             formsTabActive: pageCard.formsTabActive
@@ -185,8 +182,8 @@ Item {
         id: pageLabel
 
         //% "Page %1"
-        text: qsTrId("PageNumber").arg(pageCard.index + 1)
-        color: pageCard.index === pageCard.document.currentPage
+        text: qsTrId("PageNumber").arg(pageCard.page + 1)
+        color: pageCard.page === pageCard.currentPage
             ? pageCard.theme.foxitDarkOrange
             : "#6b625d"
         font.pixelSize: 12

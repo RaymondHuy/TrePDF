@@ -109,6 +109,8 @@ qt_add_qml_module(trepdf
         src/Components/FormTextFieldOverlay.qml
         src/Components/InkDrawingView.qml
         src/Components/OrangeButton.qml
+        src/Components/PageDisplayControl.qml
+        src/Components/PageLayoutDelegate.qml
         src/Components/PageInteractionOverlay.qml
         src/Components/PdfPageDelegate.qml
         src/Components/RadioButtonOptionsPanel.qml
@@ -155,6 +157,14 @@ qt_add_qml_module(trepdf
         src/assets/icons/mouse-pointer-2.svg
         src/assets/icons/mouse-pointer-filled-orange.svg
         src/assets/icons/oval.svg
+        src/assets/icons/page-continuous-facing.svg
+        src/assets/icons/page-continuous.svg
+        src/assets/icons/page-facing.svg
+        src/assets/icons/page-separate-cover.svg
+        src/assets/icons/page-single.svg
+        src/assets/icons/page-split-horizontal.svg
+        src/assets/icons/page-split-spreadsheet.svg
+        src/assets/icons/page-split-vertical.svg
         src/assets/icons/panel-left.svg
         src/assets/icons/pen-line.svg
         src/assets/icons/pencil.svg

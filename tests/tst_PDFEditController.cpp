@@ -27,6 +27,7 @@
 #include <QJSValue>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QQuickItem>
 #include <QQuickItemGrabResult>
 #include <QQuickTextDocument>
 #include <QQuickWindow>
@@ -5417,6 +5418,7 @@ private slots:
     void rejectsProtectedCommentStateChanges();
     void defaultsCommentTabToCommentSelectTool();
     void keepsViewSearchStatePerTab();
+    void appliesPageDisplayActionsToActiveTab();
     void guardsRibbonActionsWithPendingCommentPanel();
     void editsSourceStickyNoteComment();
     void editsSourceTextMarkupComment_data();
@@ -5517,6 +5519,7 @@ private slots:
     void keepsDraftsWhenSaveFails();
     void opensDocumentsInIndependentTabs();
     void keepsViewRotationIndependentAcrossTabs();
+    void keepsPageDisplayStateIndependentAcrossTabs();
     void clearsTabIdentityWhenDocumentCloses();
     void keepsTabDraftsIndependent();
     void savesOnlyRequestedTab();
@@ -16986,6 +16989,342 @@ void PDFEditControllerTest::keepsViewSearchStatePerTab()
     QVERIFY(mainWindow->setProperty("allowWindowClose", true));
 }
 
+void PDFEditControllerTest::appliesPageDisplayActionsToActiveTab()
+{
+    if (QGuiApplication::screens().isEmpty()) {
+        QSKIP("The Page Display integration test needs a Qt Quick screen.");
+    }
+
+    const QString firstPath = m_temporaryDirectory.filePath(
+        QStringLiteral("page-display-ui-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("page-display-ui-second.pdf"));
+    QVERIFY(createThreePageTextPdf(firstPath));
+    QVERIFY(createThreePageTextPdf(secondPath));
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString mainPath = QFINDTESTDATA("../src/Main.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!mainPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent mainComponent(
+        &engine,
+        QUrl::fromLocalFile(mainPath));
+    std::unique_ptr<QObject> mainWindow(mainComponent.create());
+    QVERIFY2(mainWindow, qPrintable(mainComponent.errorString()));
+    QVERIFY(mainWindow->setProperty("visible", false));
+
+    auto *tabModel = mainWindow->findChild<PDFTabModel *>();
+    QVERIFY(tabModel);
+    PDFDocumentSession *firstSession = tabModel->open(
+        QUrl::fromLocalFile(firstPath));
+    QVERIFY(firstSession);
+
+    QObject *pageDisplayControl = nullptr;
+    QObject *pageDisplayPopup = nullptr;
+    QObject *singlePageItem = nullptr;
+    QObject *continuousItem = nullptr;
+    QObject *facingItem = nullptr;
+    QObject *continuousFacingItem = nullptr;
+    QObject *separateCoverItem = nullptr;
+    QObject *splitItem = nullptr;
+    QObject *splitMenuButton = nullptr;
+    QObject *splitModeMenu = nullptr;
+    QObject *verticalSplitItem = nullptr;
+    QObject *horizontalSplitItem = nullptr;
+    QObject *spreadsheetSplitItem = nullptr;
+    QObject *previousPageButton = nullptr;
+    QObject *nextPageButton = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            pageDisplayControl = mainWindow->findChild<QObject *>(
+                QStringLiteral("pageDisplayControl"));
+            pageDisplayPopup = mainWindow->findChild<QObject *>(
+                QStringLiteral("pageDisplayPopup"));
+            singlePageItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("singlePageDisplayItem"));
+            continuousItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("continuousPageDisplayItem"));
+            facingItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("facingPageDisplayItem"));
+            continuousFacingItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("continuousFacingPageDisplayItem"));
+            separateCoverItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("separateCoverPageDisplayItem"));
+            splitItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("splitPageDisplayItem"));
+            splitMenuButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("splitPageDisplayMenuButton"));
+            splitModeMenu = mainWindow->findChild<QObject *>(
+                QStringLiteral("splitPageDisplayModeMenu"));
+            verticalSplitItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("verticalSplitPageDisplayItem"));
+            horizontalSplitItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("horizontalSplitPageDisplayItem"));
+            spreadsheetSplitItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("spreadsheetSplitPageDisplayItem"));
+            previousPageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("previousViewPageButton"));
+            nextPageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("nextViewPageButton"));
+            return pageDisplayControl
+                && pageDisplayPopup
+                && singlePageItem
+                && continuousItem
+                && facingItem
+                && continuousFacingItem
+                && separateCoverItem
+                && splitItem
+                && splitMenuButton
+                && splitModeMenu
+                && verticalSplitItem
+                && horizontalSplitItem
+                && spreadsheetSplitItem
+                && previousPageButton
+                && nextPageButton;
+        })(),
+        3000);
+
+    const auto click = [](QObject *item) {
+        return QMetaObject::invokeMethod(
+            item,
+            "clicked",
+            Qt::DirectConnection);
+    };
+    const auto trigger = [](QObject *item) {
+        return QMetaObject::invokeMethod(
+            item,
+            "triggered",
+            Qt::DirectConnection);
+    };
+    const auto polishSplitLayout = [](QObject *loader) {
+        auto *loaderItem = qobject_cast<QQuickItem *>(loader);
+        QQuickItem *layoutItem = loaderItem
+            ? loaderItem->parentItem()
+            : nullptr;
+        if (!layoutItem) {
+            return false;
+        }
+        layoutItem->ensurePolished();
+        return true;
+    };
+
+    QCOMPARE(
+        pageDisplayControl->property("pageDisplayMode").toInt(),
+        static_cast<int>(PDFDocumentSession::ContinuousMode));
+    QVERIFY(continuousItem->property("checked").toBool());
+    QVERIFY(!singlePageItem->property("checked").toBool());
+    QVERIFY(pageDisplayControl->property("menuIndicatorVisible").toBool());
+    QVERIFY(click(pageDisplayControl));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        pageDisplayPopup->property("visible").toBool(),
+        1000);
+    QVERIFY(click(splitMenuButton));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        splitModeMenu->property("visible").toBool(),
+        1000);
+    QVERIFY(QMetaObject::invokeMethod(
+        splitModeMenu,
+        "close",
+        Qt::DirectConnection));
+    QVERIFY(QMetaObject::invokeMethod(
+        pageDisplayPopup,
+        "close",
+        Qt::DirectConnection));
+    QVERIFY(!separateCoverItem->property("enabled").toBool());
+    QVERIFY(click(separateCoverItem));
+    QVERIFY(!firstSession->separateCoverPage());
+
+    QVERIFY(click(facingItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->pageDisplayMode(),
+        PDFDocumentSession::FacingMode,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        facingItem->property("checked").toBool(),
+        1000);
+    QObject *pagedPageList = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            QObject *initialPrimaryView = mainWindow->findChild<QObject *>(
+                QStringLiteral("primaryDocumentView"));
+            pagedPageList = initialPrimaryView
+                ? initialPrimaryView->findChild<QObject *>(
+                    QStringLiteral("documentPageList"))
+                : nullptr;
+            return pagedPageList
+                && pagedPageList->property("count").toInt() == 1;
+        })(),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        separateCoverItem->property("enabled").toBool(),
+        1000);
+
+    QVERIFY(click(nextPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 2, 1000);
+    QVERIFY(click(previousPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 0, 1000);
+
+    QVERIFY(click(separateCoverItem));
+    QTRY_VERIFY_WITH_TIMEOUT(firstSession->separateCoverPage(), 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        separateCoverItem->property("checked").toBool(),
+        1000);
+    QVERIFY(click(nextPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 1, 1000);
+    QVERIFY(click(previousPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 0, 1000);
+
+    QVERIFY(click(splitItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->splitViewMode(),
+        PDFDocumentSession::VerticalSplit,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        splitItem->property("checked").toBool(),
+        1000);
+
+    QObject *primaryView = nullptr;
+    QObject *secondaryView = nullptr;
+    QObject *secondaryViewLoader = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            primaryView = mainWindow->findChild<QObject *>(
+                QStringLiteral("primaryDocumentView"));
+            secondaryView = mainWindow->findChild<QObject *>(
+                QStringLiteral("secondaryDocumentView"));
+            secondaryViewLoader = mainWindow->findChild<QObject *>(
+                QStringLiteral("secondaryDocumentViewLoader"));
+            return primaryView
+                && secondaryView
+                && secondaryViewLoader
+                && polishSplitLayout(secondaryViewLoader)
+                && secondaryViewLoader->property("x").toReal()
+                    > primaryView->property("x").toReal();
+        })(),
+        3000);
+
+    QVERIFY(trigger(horizontalSplitItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->splitViewMode(),
+        PDFDocumentSession::HorizontalSplit,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        polishSplitLayout(secondaryViewLoader)
+            && secondaryViewLoader->property("y").toReal()
+            > primaryView->property("y").toReal(),
+        3000);
+
+    QVERIFY(trigger(spreadsheetSplitItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->splitViewMode(),
+        PDFDocumentSession::SpreadsheetSplit,
+        1000);
+    QObject *bottomLeftView = nullptr;
+    QObject *bottomRightView = nullptr;
+    QObject *bottomLeftViewLoader = nullptr;
+    QObject *bottomRightViewLoader = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            bottomLeftView = mainWindow->findChild<QObject *>(
+                QStringLiteral("bottomLeftDocumentView"));
+            bottomRightView = mainWindow->findChild<QObject *>(
+                QStringLiteral("bottomRightDocumentView"));
+            bottomLeftViewLoader = mainWindow->findChild<QObject *>(
+                QStringLiteral("bottomLeftDocumentViewLoader"));
+            bottomRightViewLoader = mainWindow->findChild<QObject *>(
+                QStringLiteral("bottomRightDocumentViewLoader"));
+            return bottomLeftView
+                && bottomRightView
+                && bottomLeftViewLoader
+                && bottomRightViewLoader
+                && polishSplitLayout(secondaryViewLoader);
+        })(),
+        3000);
+    QVERIFY(bottomLeftViewLoader->property("y").toReal()
+            > primaryView->property("y").toReal());
+    QVERIFY(bottomRightViewLoader->property("x").toReal()
+            > bottomLeftViewLoader->property("x").toReal());
+
+    PDFDocumentSession *secondSession = tabModel->open(
+        QUrl::fromLocalFile(secondPath));
+    QVERIFY(secondSession);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageDisplayControl->property("pageDisplayMode").toInt(),
+        static_cast<int>(PDFDocumentSession::ContinuousMode),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !pageDisplayControl->property("separateCoverPage").toBool(),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !pageDisplayControl->property("splitViewEnabled").toBool(),
+        1000);
+
+    secondSession->setZoom(1.6);
+    QVERIFY(click(singlePageItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        secondSession->pageDisplayMode(),
+        PDFDocumentSession::SinglePageMode,
+        1000);
+    QCOMPARE(secondSession->zoom(), 1.6);
+    QVERIFY(!separateCoverItem->property("enabled").toBool());
+
+    secondSession->setSplitScrollPosition(20.0, 40.0);
+    QVERIFY(click(splitItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        secondSession->splitViewMode(),
+        PDFDocumentSession::VerticalSplit,
+        1000);
+    QCOMPARE(secondSession->splitScrollX(), 20.0);
+    QCOMPARE(secondSession->splitScrollY(), 40.0);
+    QVERIFY(click(splitItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        secondSession->splitViewMode(),
+        PDFDocumentSession::NoSplit,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !splitItem->property("checked").toBool(),
+        1000);
+    QVERIFY(firstSession->splitViewEnabled());
+
+    tabModel->setCurrentIndex(0);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageDisplayControl->property("pageDisplayMode").toInt(),
+        static_cast<int>(PDFDocumentSession::FacingMode),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        pageDisplayControl->property("separateCoverPage").toBool(),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        pageDisplayControl->property("splitViewEnabled").toBool(),
+        1000);
+    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::SpreadsheetSplit);
+
+    QVERIFY(click(continuousItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->pageDisplayMode(),
+        PDFDocumentSession::ContinuousMode,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !separateCoverItem->property("enabled").toBool(),
+        1000);
+    QVERIFY(click(separateCoverItem));
+    QVERIFY(firstSession->separateCoverPage());
+
+    QVERIFY(click(continuousFacingItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->pageDisplayMode(),
+        PDFDocumentSession::ContinuousFacingMode,
+        1000);
+    QVERIFY(click(splitItem));
+    QTRY_VERIFY_WITH_TIMEOUT(!firstSession->splitViewEnabled(), 1000);
+
+    QVERIFY(mainWindow->setProperty("allowWindowClose", true));
+}
+
 void PDFEditControllerTest::guardsRibbonActionsWithPendingCommentPanel()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -25330,6 +25669,131 @@ void PDFEditControllerTest::keepsViewRotationIndependentAcrossTabs()
 
     firstSession->setViewRotation(90);
     QCOMPARE(rotationSpy.count(), 3);
+}
+
+void PDFEditControllerTest::keepsPageDisplayStateIndependentAcrossTabs()
+{
+    const QString firstPath = m_temporaryDirectory.filePath(
+        QStringLiteral("page-display-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("page-display-second.pdf"));
+    QVERIFY(createFontStylePdf(firstPath));
+    QVERIFY(createFontStylePdf(secondPath));
+
+    PDFTabModel tabs;
+    PDFDocumentSession *firstSession = tabs.open(QUrl::fromLocalFile(firstPath));
+    QVERIFY(firstSession);
+    QCOMPARE(firstSession->pageDisplayMode(), PDFDocumentSession::ContinuousMode);
+    QVERIFY(!firstSession->separateCoverPage());
+    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::NoSplit);
+    QVERIFY(!firstSession->splitViewEnabled());
+    QVERIFY(firstSession->secondaryViewState());
+    QVERIFY(firstSession->bottomLeftViewState());
+    QVERIFY(firstSession->bottomRightViewState());
+    QVERIFY(firstSession->secondaryViewState()
+            != firstSession->bottomLeftViewState());
+    QCOMPARE(firstSession->splitScrollX(), 0.0);
+    QCOMPARE(firstSession->splitScrollY(), 0.0);
+    QVERIFY(!firstSession->splitScrollPositionInitialized());
+
+    QSignalSpy modeSpy(firstSession, &PDFDocumentSession::pageDisplayModeChanged);
+    QSignalSpy coverSpy(firstSession, &PDFDocumentSession::separateCoverPageChanged);
+    QSignalSpy splitSpy(firstSession, &PDFDocumentSession::splitViewEnabledChanged);
+    QSignalSpy splitModeSpy(firstSession, &PDFDocumentSession::splitViewModeChanged);
+    QSignalSpy splitScrollSpy(
+        firstSession,
+        &PDFDocumentSession::splitScrollPositionChanged);
+
+    firstSession->setPageDisplayMode(PDFDocumentSession::FacingMode);
+    QCOMPARE(firstSession->pageDisplayMode(), PDFDocumentSession::FacingMode);
+    QCOMPARE(modeSpy.count(), 1);
+    firstSession->setPageDisplayMode(PDFDocumentSession::FacingMode);
+    firstSession->setPageDisplayMode(
+        static_cast<PDFDocumentSession::PageDisplayMode>(-1));
+    QCOMPARE(firstSession->pageDisplayMode(), PDFDocumentSession::FacingMode);
+    QCOMPARE(modeSpy.count(), 1);
+
+    firstSession->setSeparateCoverPage(true);
+    QVERIFY(firstSession->separateCoverPage());
+    QCOMPARE(coverSpy.count(), 1);
+    firstSession->setSeparateCoverPage(true);
+    QCOMPARE(coverSpy.count(), 1);
+
+    firstSession->setSplitViewEnabled(true);
+    QVERIFY(firstSession->splitViewEnabled());
+    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::VerticalSplit);
+    QCOMPARE(splitSpy.count(), 1);
+    QCOMPARE(splitModeSpy.count(), 1);
+    firstSession->setSplitViewEnabled(true);
+    QCOMPARE(splitSpy.count(), 1);
+    QCOMPARE(splitModeSpy.count(), 1);
+
+    firstSession->setSplitViewMode(PDFDocumentSession::HorizontalSplit);
+    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::HorizontalSplit);
+    QVERIFY(firstSession->splitViewEnabled());
+    QCOMPARE(splitSpy.count(), 1);
+    QCOMPARE(splitModeSpy.count(), 2);
+    firstSession->setSplitViewMode(
+        static_cast<PDFDocumentSession::SplitViewMode>(-1));
+    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::HorizontalSplit);
+    QCOMPARE(splitModeSpy.count(), 2);
+
+    firstSession->setSplitScrollX(144.5);
+    QVERIFY(firstSession->splitScrollPositionInitialized());
+    firstSession->setSplitScrollY(320.25);
+    QCOMPARE(firstSession->splitScrollX(), 144.5);
+    QCOMPARE(firstSession->splitScrollY(), 320.25);
+    QCOMPARE(splitScrollSpy.count(), 2);
+
+    firstSession->secondaryViewState()->setZoom(1.75);
+    firstSession->secondaryViewState()->setCurrentPage(3);
+    QCOMPARE(firstSession->secondaryViewState()->zoom(), 1.75);
+    QCOMPARE(firstSession->secondaryViewState()->currentPage(), 3);
+    firstSession->bottomLeftViewState()->setZoom(2.25);
+    firstSession->bottomLeftViewState()->setCurrentPage(4);
+    firstSession->bottomLeftViewState()->setScrollPosition(22.0, 44.0);
+    QCOMPARE(firstSession->bottomLeftViewState()->zoom(), 2.25);
+    QCOMPARE(firstSession->bottomLeftViewState()->currentPage(), 4);
+    QCOMPARE(firstSession->bottomLeftViewState()->scrollX(), 22.0);
+    QCOMPARE(firstSession->bottomLeftViewState()->scrollY(), 44.0);
+    firstSession->setSplitScrollX(144.5);
+    firstSession->setSplitScrollY(320.25);
+    QCOMPARE(splitScrollSpy.count(), 2);
+
+    PDFDocumentSession *secondSession = tabs.open(QUrl::fromLocalFile(secondPath));
+    QVERIFY(secondSession);
+    QVERIFY(secondSession != firstSession);
+    QCOMPARE(secondSession->pageDisplayMode(), PDFDocumentSession::ContinuousMode);
+    QVERIFY(!secondSession->separateCoverPage());
+    QCOMPARE(secondSession->splitViewMode(), PDFDocumentSession::NoSplit);
+    QVERIFY(!secondSession->splitViewEnabled());
+    QCOMPARE(secondSession->splitScrollX(), 0.0);
+    QCOMPARE(secondSession->splitScrollY(), 0.0);
+    QVERIFY(!secondSession->splitScrollPositionInitialized());
+
+    secondSession->setPageDisplayMode(PDFDocumentSession::SinglePageMode);
+    secondSession->setSplitViewMode(PDFDocumentSession::SpreadsheetSplit);
+    secondSession->setSplitScrollX(20.0);
+    secondSession->setSplitScrollY(40.0);
+    QVERIFY(secondSession->splitScrollPositionInitialized());
+    QCOMPARE(firstSession->pageDisplayMode(), PDFDocumentSession::FacingMode);
+    QVERIFY(firstSession->separateCoverPage());
+    QVERIFY(firstSession->splitViewEnabled());
+    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::HorizontalSplit);
+    QCOMPARE(firstSession->splitScrollX(), 144.5);
+    QCOMPARE(firstSession->splitScrollY(), 320.25);
+
+    const QString duplicatePath = QFileInfo(firstPath).dir().filePath(
+        QStringLiteral("./page-display-first.pdf"));
+    QCOMPARE(tabs.open(QUrl::fromLocalFile(duplicatePath)), firstSession);
+    QCOMPARE(tabs.count(), 2);
+    QCOMPARE(tabs.currentSession(), firstSession);
+    QCOMPARE(firstSession->pageDisplayMode(), PDFDocumentSession::FacingMode);
+    QVERIFY(firstSession->separateCoverPage());
+    QVERIFY(firstSession->splitViewEnabled());
+    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::HorizontalSplit);
+    QCOMPARE(firstSession->splitScrollX(), 144.5);
+    QCOMPARE(firstSession->splitScrollY(), 320.25);
 }
 
 void PDFEditControllerTest::clearsTabIdentityWhenDocumentCloses()

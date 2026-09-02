@@ -7,6 +7,7 @@ mode, và cách chúng giữ đồng bộ với texture PDF bên dưới.
 
 Phạm vi chính là:
 
+- [`src/Components/PageLayoutDelegate.qml`](../src/Components/PageLayoutDelegate.qml)
 - [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml)
 - [`src/Components/SearchHighlightLayer.qml`](../src/Components/SearchHighlightLayer.qml)
 - [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml)
@@ -20,9 +21,10 @@ Phạm vi chính là:
 
 ## 1. Một trang được ghép như thế nào
 
-`DocumentView` là `ListView` liên tục. Mỗi delegate là một
-`PdfPageDelegate`; chỉ các delegate đang thấy hoặc gần vùng nhìn mới sống. Một
-delegate có hai phần tách biệt:
+`DocumentView` là `ListView` ảo hóa cho Single, Continuous, Facing và Continuous
+Facing. Mỗi delegate là một `PageLayoutDelegate`, chứa một `PdfPageDelegate`
+hoặc hai child đặt cạnh nhau khi ở Facing. Chỉ các hàng/spread đang thấy hoặc
+gần vùng nhìn mới sống. Mỗi page delegate có hai phần tách biệt:
 
 - `pageFrame`: khung layout đã tính margin, zoom và kích thước sau quarter-turn.
   Nó chỉ quyết định trang chiếm bao nhiêu chỗ trong `ListView`.
@@ -31,20 +33,40 @@ delegate có hai phần tách biệt:
 
 ```text
 DocumentView (ListView, reuseItems: true)
-└── PdfPageDelegate  [pageCard]
-    ├── pageFrame                    khung layout / kích thước hiển thị
-    ├── shadow                       ngoài mặt phẳng trang
-    ├── pageSurface                  mặt phẳng chung, rotation = viewRotation
-    │   ├── PDFPageView              z 0: texture PDF từ worker
-    │   ├── page border              z 0: vẽ sau texture nên nằm trên texture
-    │   ├── SearchHighlightLayer     z 0.5: highlight không tương tác
-    │   └── PageInteractionOverlay   z 1: coordinator input của trang
-    │       ├── PDFFormView          z 1: bridge input form PDFium
-    │       │   └── FormChoiceOverlay
-    │       ├── EditOverlay          z 2: draft và interaction Edit
-    │       └── FormTextFieldOverlay z 3: form designer
-    └── page label                   ngoài mặt phẳng trang
+└── PageLayoutDelegate              một hàng hoặc spread
+    ├── PdfPageDelegate [trang thứ nhất]
+    │   ├── pageFrame                khung layout / kích thước hiển thị
+    │   ├── shadow                   ngoài mặt phẳng trang
+    │   ├── pageSurface              mặt phẳng chung, rotation = viewRotation
+    │   │   ├── PDFPageView          z 0: texture PDF từ worker
+    │   │   ├── page border          z 0: nằm trên texture
+    │   │   ├── SearchHighlightLayer z 0.5: highlight không tương tác
+    │   │   └── PageInteractionOverlay z 1: coordinator input
+    │   │       ├── PDFFormView      z 1: bridge input form PDFium
+    │   │       │   └── FormChoiceOverlay
+    │   │       ├── EditOverlay      z 2: draft và interaction Edit
+    │   │       └── FormTextFieldOverlay z 3: form designer
+    │   └── page label               ngoài mặt phẳng trang
+    └── PdfPageDelegate [trang thứ hai, tùy chọn]
 ```
+
+Hai mode phân trang và hai mode liên tục cố ý dùng model khác nhau:
+
+- Single Page/Facing chỉ giữ **một** `PageLayoutDelegate`; `layoutIndex` của nó
+  trỏ tới page/spread active. Không có delegate kề bên nên trang/spread trước và
+  sau không thể lộ một phần. Wheel và phím cuộn bên trong delegate trước, chỉ
+  đổi page/spread khi đã chạm biên; zoom hiện tại được giữ nguyên.
+- Continuous/Continuous Facing giữ toàn bộ page row/spread trong model nhưng
+  chỉ materialize các delegate gần viewport nhờ pooling. Các hàng cách nhau qua
+  `pageGap`; current page là child có diện tích giao viewport lớn nhất.
+- Separate Cover chỉ thay đổi mapping của hai Facing mode: page 1 đứng riêng,
+  các page còn lại ghép cặp. Toggle không tạo layout thứ năm.
+
+`DocumentWorkspace` có thể host một viewport, hai viewport trái-phải/trên-dưới,
+hoặc bốn viewport 2x2. Hai kiểu split cơ bản giữ scroll, zoom và page độc lập;
+Spreadsheet Split dùng chung zoom và phối hợp X/Y theo cột/hàng. Chỉ viewport
+chính chứa interaction Edit/Form hoạt động, nên không nhân đôi focus/controller
+ownership dù texture và navigation xuất hiện ở mọi vùng.
 
 `pageSurface` là invariant quan trọng: texture, search highlight, runtime form,
 edit overlay và form designer phải là con của cùng một item này nếu chúng chia
@@ -139,7 +161,7 @@ Một field/draft có thể đi qua bốn hệ tọa độ. Tất cả sửa geo
 
 | Hệ | Đơn vị | Chủ sở hữu | Dùng cho |
 |---|---|---|---|
-| ListView/page card | px trong content đã scroll | `DocumentView` / `PdfPageDelegate` | Layout dọc, margin, vị trí trang. Không lưu geometry ở đây. |
+| ListView/layout row/page card | px trong content đã scroll | `DocumentView` / `PageLayoutDelegate` / `PdfPageDelegate` | Layout dọc, spread, margin và vị trí trang. Không lưu geometry ở đây. |
 | `pageFrame` | px của envelope hiển thị | `PdfPageDelegate` | Đổi width/height khi xoay 90°/270°. Không phải mặt phẳng của PDF. |
 | `pageSurface` và coordinator | px của trang logic chưa xoay | `PDFPageView`, `SearchHighlightLayer`, `PageInteractionOverlay` và ba nhánh con | Vẽ, hit-test và nhận pointer cục bộ. |
 | Normalized page rect | `0..1` theo width/height trang logic | C++ controller/model | Search highlight, draft, field designer, choice field và dữ liệu chuẩn bị Save. |
@@ -176,8 +198,9 @@ tràn khỏi phần page đang trong viewport.
 
 ### Display page và source page
 
-`pageCard.index` là **display page**: nó có thể đổi sau khi chèn/xóa page trong
-session. Form field/choice field từ worker mang thêm `sourcePage`, annotation
+`PdfPageDelegate.page` là **display page**: nó có thể đổi sau khi chèn/xóa page
+trong session. `PageLayoutDelegate.index` chỉ là chỉ số hàng/spread. Form
+field/choice field từ worker mang thêm `sourcePage`, annotation
 index và `identityToken`. Khi focus hoặc chọn option, `PDFFormView` gửi cả ba về
 controller/worker để resolve lại live field, không tin index cũ sau thay đổi cấu
 trúc trang hay async refresh.
@@ -517,14 +540,15 @@ khi revision đổi.
 
 ### Delegate pooling
 
-`DocumentView` dùng `ListView.reuseItems: true`. `PdfPageDelegate` phản ứng:
+`DocumentView` dùng `ListView.reuseItems: true`. Wrapper
+`PageLayoutDelegate` phản ứng:
 
 ```text
-ListView.onPooled  → pooled = true
-ListView.onReused  → pooled = false
+ListView.onPooled  → wrapper.pooled = true, tắt child thứ hai
+ListView.onReused  → wrapper.pooled = false, tạo lại child khi cần
 ```
 
-Khi pooled:
+Wrapper chuyển cờ `pooled` vào từng `PdfPageDelegate`. Khi pooled:
 
 - `pageSurface.visible` thành false.
 - `PDFPageView` nhận document/controller `null`, hủy render cũ và không giữ
@@ -545,8 +569,8 @@ pool phải nằm trong property/reset explicit hoặc controller session.
 ### Đổi session/tab
 
 `DocumentView.prepareForSessionChange()` tăng generation, hoàn tất editor/resize
-của controller và hủy navigation pending. `PdfPageDelegate` nghe
-`sessionChangeGeneration` rồi gọi
+của controller và hủy navigation pending. `PageLayoutDelegate` chuyển
+`sessionChangeGeneration` cho từng `PdfPageDelegate`; mỗi child gọi
 `PageInteractionOverlay.prepareForSessionChange()`. Coordinator tiếp tục gọi:
 
 - `EditOverlay.prepareForSessionChange()`;
@@ -595,6 +619,7 @@ controller pointer cùng page vào callback. `FormChoiceOverlay` đóng popup kh
 
 | Muốn thay đổi | Bắt đầu tại | Luôn kiểm thêm |
 |---|---|---|
+| Đổi Single/Continuous/Facing hoặc mapping cover | `DocumentView.qml`, `PageLayoutDelegate.qml` | navigation, fit width, split view và pooling cả hai child. |
 | Thêm nhánh interaction trên trang | `PageInteractionOverlay.qml` | z nội bộ, mode ownership, focus và pooling. |
 | Đổi search highlight | `SearchHighlightLayer.qml` | `PDFSearchController`, normalized geometry, z dưới interaction và pooling. |
 | Đổi texture/khung trang | `PdfPageDelegate.qml` | `pageSurface`, rotation và kích thước delegate. |

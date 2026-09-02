@@ -9,7 +9,12 @@ Flickable {
     required property PDFDocument document
     required property PDFEditController editController
     required property PDFSearchController searchController
+    property PDFDocumentSession session: null
     property bool hasPendingPanelEdits: false
+    property int navigationPage: document.currentPage
+    property bool canNavigateBackward: navigationPage > 0
+    property bool canNavigateForward:
+        document.loaded && navigationPage + 1 < document.pageCount
     readonly property bool hasUnsavedChanges:
         editController.hasDrafts || hasPendingPanelEdits
 
@@ -17,10 +22,15 @@ Flickable {
     signal saveRequested()
     signal saveAsRequested()
     signal pageRequested(int page)
+    signal pageStepRequested(int direction)
     signal zoomOutRequested()
     signal zoomInRequested()
     signal fitWidthRequested()
     signal rotateRequested(int quarterTurns)
+    signal pageDisplayModeRequested(int mode)
+    signal separateCoverPageToggleRequested()
+    signal splitViewModeRequested(int mode)
+    signal splitViewToggleRequested()
 
     clip: true
     contentWidth: ribbonRow.implicitWidth + 16
@@ -86,6 +96,7 @@ Flickable {
             title: qsTrId("Navigation")
 
             RibbonButton {
+                objectName: "previousViewPageButton"
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Previous"
@@ -93,11 +104,12 @@ Flickable {
                 //% "Previous Page"
                 toolTipText: qsTrId("PreviousPage")
                 iconSource: "../assets/icons/chevron-left.svg"
-                enabled: root.document.currentPage > 0
-                onClicked: root.pageRequested(root.document.currentPage - 1)
+                enabled: root.canNavigateBackward
+                onClicked: root.pageStepRequested(-1)
             }
 
             RibbonButton {
+                objectName: "nextViewPageButton"
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Next"
@@ -105,8 +117,8 @@ Flickable {
                 //% "Next Page"
                 toolTipText: qsTrId("NextPage")
                 iconSource: "../assets/icons/chevron-right.svg"
-                enabled: root.document.loaded && root.document.currentPage + 1 < root.document.pageCount
-                onClicked: root.pageRequested(root.document.currentPage + 1)
+                enabled: root.canNavigateForward
+                onClicked: root.pageStepRequested(1)
             }
         }
 
@@ -164,6 +176,36 @@ Flickable {
                 text: qsTrId("RotateRight")
                 iconSource: "../assets/icons/rotate-cw.svg"
                 onClicked: root.rotateRequested(1)
+            }
+        }
+
+        RibbonGroup {
+            theme: root.theme
+            //% "Page Display"
+            title: qsTrId("PageDisplay")
+
+            PageDisplayControl {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                pageDisplayMode: root.session
+                    ? root.session.pageDisplayMode
+                    : PDFDocumentSession.ContinuousMode
+                separateCoverPage: root.session
+                    ? root.session.separateCoverPage
+                    : false
+                splitViewEnabled: root.session
+                    ? root.session.splitViewEnabled
+                    : false
+                splitViewMode: root.session
+                    ? root.session.splitViewMode
+                    : PDFDocumentSession.NoSplit
+                onPageDisplayModeRequested: mode =>
+                    root.pageDisplayModeRequested(mode)
+                onSeparateCoverPageToggleRequested:
+                    root.separateCoverPageToggleRequested()
+                onSplitViewModeRequested: mode =>
+                    root.splitViewModeRequested(mode)
+                onSplitViewToggleRequested: root.splitViewToggleRequested()
             }
         }
 

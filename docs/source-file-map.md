@@ -7,7 +7,7 @@ nguyên ảnh/phông chữ.
 
 Tại thời điểm cập nhật, phạm vi có:
 
-- 34 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
+- 36 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
 - 18 tệp triển khai C++ trong `src/` và 1 tệp kiểm thử C++: xem
   [Hướng dẫn tệp C++](cpp-file-guide.md).
 - 20 header C++; trong đó 17 header đi cùng tệp triển khai và 3 header dùng
@@ -30,6 +30,7 @@ flowchart TD
     Session["PDFDocumentSession\nTrạng thái một tab"]
     Workspace["DocumentWorkspace"]
     View["DocumentView\nListView ảo hóa"]
+    Layout["PageLayoutDelegate\nMột hàng hoặc spread"]
     Delegate["PdfPageDelegate\nMột trang đang hiện"]
     PageItem["PDFPageItem\nRender texture PDF"]
     SearchLayer["SearchHighlightLayer\nHighlight không tương tác"]
@@ -52,7 +53,8 @@ flowchart TD
     Tabs --> Session
     Main --> Workspace
     Workspace --> View
-    View --> Delegate
+    View --> Layout
+    Layout --> Delegate
     Delegate --> PageItem
     Delegate --> SearchLayer
     Delegate --> Interaction
@@ -84,7 +86,7 @@ flowchart TD
 | Lớp | Trách nhiệm | Tệp tiêu biểu |
 |---|---|---|
 | Vỏ ứng dụng | Cửa sổ, hộp thoại, ribbon, tab, phím tắt và điều phối hành động cấp ứng dụng | `Main.qml`, `AppRibbon.qml`, `DocumentTabBar.qml` |
-| Trình bày trang | ListView ảo hóa, delegate trang, texture PDF, highlight tìm kiếm, overlay edit/form và biến đổi xoay view | `DocumentView.qml`, `PdfPageDelegate.qml`, `SearchHighlightLayer.qml`, `PDFPageItem.cpp`, `EditOverlay.qml` |
+| Trình bày trang | Bốn layout trang, spread một/hai trang, split view, ListView ảo hóa, texture PDF, highlight, overlay edit/form và xoay view | `DocumentView.qml`, `PageLayoutDelegate.qml`, `PdfPageDelegate.qml`, `SearchHighlightLayer.qml`, `PDFPageItem.cpp`, `EditOverlay.qml` |
 | Trạng thái nghiệp vụ | Mỗi tab có document, search, draft edit, form runtime, form designer và trạng thái view độc lập | `PDFTabModel.cpp`, `PDFDocument.cpp`, `PDFSearchController.cpp`, `PDFEditController.cpp`, `PDFFormController.cpp`, `PDFFormDesignerController.cpp` |
 | Hạ tầng PDF | Serialize PDFium, render worker, ghi nội dung/annotation/AcroForm, khóa PDFium toàn tiến trình | `PDFFormWorker.cpp`, `PDFSaveWriter.cpp`, `PDFAcroFormWriter.cpp`, `PDFAcroFormCanonicalizer.cpp`, `PDFiumSynchronization.h` |
 
@@ -94,13 +96,15 @@ flowchart TD
 2. Mỗi hàng trong model là một `PDFDocumentSession`.
 3. Mỗi session sở hữu đúng một bộ `PDFDocument`, `PDFEditController`,
    `PDFSearchController`, `PDFFormController` và `PDFFormDesignerController`.
-   Query, kết quả và current match vì vậy không rò giữa các tab.
+   Query, kết quả, current match, Page Display mode, cover/split và state của tối
+   đa bốn viewport vì vậy không rò giữa các tab.
 4. Chỉ session đang active được gắn vào `DocumentWorkspace`. Khi đổi tab,
    workspace cũ được chuẩn bị ngắt rồi tạo lại để delegate, texture, editor và
    focus của tab cũ không tiếp tục sống ngầm.
-5. `DocumentView` chỉ tạo delegate cho trang đang thấy hoặc gần vùng nhìn.
-   Delegate bị pool phải ngắt document/render state; khi được tái sử dụng phải
-   nạp lại toàn bộ state theo trang mới.
+5. `DocumentView` chỉ tạo `PageLayoutDelegate` cho hàng/spread đang thấy hoặc gần
+   vùng nhìn; mỗi hàng giữ một hay hai `PdfPageDelegate`. Wrapper bị pool phải
+   ngắt document/render state của cả hai child; khi tái sử dụng phải nạp lại state
+   theo page mapping mới.
 6. Save chỉ xóa draft/history sau khi tệp đích đã commit và mở lại thành công.
 
 ## Ranh giới thread và PDFium
@@ -254,21 +258,23 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Main.qml`](../src/Main.qml) | Cửa sổ chính và điều phối toàn ứng dụng. |
 | [`src/Components/AppTheme.qml`](../src/Components/AppTheme.qml) | Bảng màu dùng chung. |
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
-| [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit, xoay view và host tìm kiếm. |
+| [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit, xoay view, Page Display theo session và host tìm kiếm. |
+| [`src/Components/PageDisplayControl.qml`](../src/Components/PageDisplayControl.qml) | Dropdown cho bốn layout, toggle trang bìa và Split menu con ba kiểu. |
 | [`src/Components/SearchRibbonControl.qml`](../src/Components/SearchRibbonControl.qml) | Ô query, trạng thái, Previous/Next và Clear của tìm kiếm tài liệu. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
 | [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Select chỉ dành cho comment, Sticky Note, Free Text, text markup, Pencil/Ink, Square/Circle/Line/Polygon/PolyLine, Stamp, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
-| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép document view với panel comment, thuộc tính drawing comment, format text và các panel Forms cho một session. |
+| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép một, hai hoặc bốn document view; lưu state pane và phối hợp trục Spreadsheet Split. |
 | [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ; không chứa control appearance. |
 | [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml) | Panel tab Edit cho stroke, fill và opacity của Square/Circle/Line/Polygon/PolyLine/Ink đang chọn; source appearance không an toàn chỉ đọc. |
 | [`src/Components/TextFieldOptionsPanel.qml`](../src/Components/TextFieldOptionsPanel.qml) | Panel multi-line, giới hạn ký tự tùy chọn và xóa Text Field đang chọn. |
 | [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml) | Panel số ô/giới hạn ký tự bắt buộc và xóa Comb Field đang chọn. |
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |
 | [`src/Components/RadioButtonOptionsPanel.qml`](../src/Components/RadioButtonOptionsPanel.qml) | Panel Group ID và xóa Radio Button đang chọn. |
-| [`src/Components/DocumentView.qml`](../src/Components/DocumentView.qml) | ListView trang liên tục và ảo hóa. |
+| [`src/Components/DocumentView.qml`](../src/Components/DocumentView.qml) | Một delegate active cho Single/Facing; ListView ảo hóa và dominant-page tracking cho hai mode Continuous. |
+| [`src/Components/PageLayoutDelegate.qml`](../src/Components/PageLayoutDelegate.qml) | Hàng một trang hoặc spread hai trang, mapping cover, visible-area helper và pooling child. |
 | [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, search highlight, coordinator interaction, rotation và layout của một trang. |
 | [`src/Components/SearchHighlightLayer.qml`](../src/Components/SearchHighlightLayer.qml) | Vẽ rect kết quả tìm kiếm normalized, không tương tác. |
 | [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml) | Gom mode, z-order, choice handshake và cleanup của runtime/edit/form designer. |
@@ -276,6 +282,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml) | Renderer vector chung cho năm drawing-comment subtype. |
 | [`src/Components/InkDrawingView.qml`](../src/Components/InkDrawingView.qml) | Renderer Qt Quick Shapes dùng chung cho gesture Pencil và các stroke Ink draft. |
 | [`src/Components/SquigglyLine.qml`](../src/Components/SquigglyLine.qml) | Preview Squiggly theo đúng hình học 1pt/2pt của PDFium và scale trang. |
+| [`src/Components/StampView.qml`](../src/Components/StampView.qml) | Preview vector cho preset Stamp trong palette, gesture và draft đã đặt. |
 | [`src/Components/FormChoiceOverlay.qml`](../src/Components/FormChoiceOverlay.qml) | Combo/list overlay cho choice field an toàn. |
 | [`src/Components/FormTextFieldOverlay.qml`](../src/Components/FormTextFieldOverlay.qml) | Đặt và chỉnh field thiết kế. |
 | [`src/Components/TextFormatPanel.qml`](../src/Components/TextFormatPanel.qml) | Panel font/style/color/alignment. |
@@ -315,7 +322,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | Nhu cầu | Điểm vào | Thường phải kiểm tra cùng |
 |---|---|---|
 | Ribbon, bố cục, dialog | `Main.qml`, ribbon tương ứng | `i18n/qml_vi.ts`, `AppTheme.qml` |
-| Scroll/zoom/rotation/pooling | `DocumentView.qml`, `PdfPageDelegate.qml` | `PDFPageItem.cpp`, state trong `PDFDocumentSession` |
+| Scroll/zoom/rotation/Page Display/pooling | `DocumentView.qml`, `PageLayoutDelegate.qml`, `PdfPageDelegate.qml` | `DocumentWorkspace.qml`, `PDFPageItem.cpp`, state trong `PDFDocumentSession` |
 | Tìm text tài liệu | `SearchRibbonControl.qml`, `PDFSearchController.cpp` | `SearchHighlightLayer.qml`, navigation trong `AppRibbon.qml`, translation và test async/stale |
 | Chọn hoặc sửa text/image/shape/comment | `EditOverlay.qml` | `EditRibbon.qml` hoặc `CommentRibbon.qml`, `CommentPanel.qml`, `DrawingCommentPropertiesPanel.qml`, `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
 | Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp` | `PDFEditController.cpp`, `PDFSaveWriter.cpp` |

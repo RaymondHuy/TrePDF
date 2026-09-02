@@ -120,7 +120,15 @@ worker result mang revision cũ phải bị loại.
 ### [`src/PDFTabModel.cpp`](../src/PDFTabModel.cpp) và
 [`src/PDFTabModel.h`](../src/PDFTabModel.h)
 
-Tệp định nghĩa hai lớp có ownership khác nhau.
+Tệp định nghĩa ba lớp có ownership khác nhau.
+
+#### `PDFViewState`
+
+- Là state object QML-anonymous cho một pane phụ, gồm zoom, scroll X/Y, current
+  page và cờ `positionInitialized` để phân biệt vị trí `(0, 0)` hợp lệ với pane
+  chưa từng được khởi tạo.
+- Clamp zoom/page/scroll trước khi phát signal; `setScrollPosition()` cập nhật hai
+  trục như một thao tác để workspace lưu/khôi phục viewport nhất quán.
 
 #### `PDFDocumentSession`
 
@@ -129,8 +137,11 @@ Tệp định nghĩa hai lớp có ownership khác nhau.
 - Nối document vào bốn controller, nối form/designer vào edit controller để draft
   guard và save snapshot bao quát cả content lẫn AcroForm. Search state không
   tham gia draft/save và được giữ độc lập theo tab.
-- Giữ state view riêng: zoom, scroll X/Y, quarter-turn rotation, panel collapsed
-  và cờ initial fit.
+- Giữ state view chính: zoom, scroll X/Y, quarter-turn rotation, bốn mode Page
+  Display, cờ trang bìa riêng, panel collapsed và cờ initial fit.
+- Expose `SplitViewMode` gồm No/Vertical/Horizontal/Spreadsheet cùng ba child
+  `PDFViewState` cho pane phụ, bottom-left và bottom-right. Vertical/Horizontal
+  dùng pane phụ độc lập; Spreadsheet dùng cả ba state để QML điều phối bốn vùng.
 - Tổng hợp `hasDrafts`/`saving`, title/path và chuyển tiếp status, save finished,
   external-link request cho model/QML.
 - `prepareForDeactivation()` kết thúc edit/focus form trước khi QML phá workspace.
@@ -868,8 +879,11 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   cap/join.
 - Page operation: insert/delete, undo/redo/discard, source page mapping và save.
 - Save lifecycle: async save, failure giữ draft, Save/Save As và reopen.
-- Multi-tab: document/session độc lập, rotation/draft riêng, save đúng tab và
-  chặn Save As đè tab khác.
+- Multi-tab: document/session độc lập, rotation/Page Display/split/draft riêng,
+  state zoom/scroll/page của từng pane không rò tab, save đúng tab và chặn Save
+  As đè tab khác.
+- Page Display: enum/mapping cover, model một delegate cho Single/Facing, điều
+  hướng theo spread và ba kiểu Split với state pane tương ứng.
 
 **Cách thêm regression:** tạo fixture nhỏ nhất tái hiện lỗi, kiểm cả state trước
 save và PDF mở lại sau save. Với thay đổi renderer/scene graph, test này không

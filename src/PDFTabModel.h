@@ -11,6 +11,49 @@
 #include <QVector>
 #include <QtQml/qqmlregistration.h>
 
+class PDFViewState : public QObject
+{
+    Q_OBJECT
+    QML_ANONYMOUS
+    Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
+    Q_PROPERTY(qreal scrollX READ scrollX WRITE setScrollX
+                   NOTIFY scrollPositionChanged FINAL)
+    Q_PROPERTY(qreal scrollY READ scrollY WRITE setScrollY
+                   NOTIFY scrollPositionChanged FINAL)
+    Q_PROPERTY(int currentPage READ currentPage WRITE setCurrentPage
+                   NOTIFY currentPageChanged FINAL)
+    Q_PROPERTY(bool positionInitialized READ positionInitialized
+                   NOTIFY positionInitializedChanged FINAL)
+
+public:
+    explicit PDFViewState(QObject *parent = nullptr);
+
+    qreal zoom() const;
+    qreal scrollX() const;
+    qreal scrollY() const;
+    int currentPage() const;
+    bool positionInitialized() const;
+
+    void setZoom(qreal zoom);
+    void setScrollX(qreal scrollX);
+    void setScrollY(qreal scrollY);
+    void setCurrentPage(int page);
+    Q_INVOKABLE void setScrollPosition(qreal scrollX, qreal scrollY);
+
+signals:
+    void zoomChanged();
+    void scrollPositionChanged();
+    void currentPageChanged();
+    void positionInitializedChanged();
+
+private:
+    qreal m_zoom = 1.0;
+    qreal m_scrollX = 0.0;
+    qreal m_scrollY = 0.0;
+    int m_currentPage = 0;
+    bool m_positionInitialized = false;
+};
+
 class PDFDocumentSession : public QObject
 {
     Q_OBJECT
@@ -30,6 +73,24 @@ class PDFDocumentSession : public QObject
     Q_PROPERTY(qreal scrollY READ scrollY WRITE setScrollY NOTIFY scrollPositionChanged FINAL)
     Q_PROPERTY(int viewRotation READ viewRotation WRITE setViewRotation
                    NOTIFY viewRotationChanged FINAL)
+    Q_PROPERTY(PageDisplayMode pageDisplayMode READ pageDisplayMode
+                   WRITE setPageDisplayMode NOTIFY pageDisplayModeChanged FINAL)
+    Q_PROPERTY(bool separateCoverPage READ separateCoverPage
+                   WRITE setSeparateCoverPage NOTIFY separateCoverPageChanged FINAL)
+    Q_PROPERTY(SplitViewMode splitViewMode READ splitViewMode
+                   WRITE setSplitViewMode NOTIFY splitViewModeChanged FINAL)
+    Q_PROPERTY(bool splitViewEnabled READ splitViewEnabled
+                   WRITE setSplitViewEnabled NOTIFY splitViewEnabledChanged FINAL)
+    Q_PROPERTY(PDFViewState *secondaryViewState READ secondaryViewState CONSTANT FINAL)
+    Q_PROPERTY(PDFViewState *bottomLeftViewState READ bottomLeftViewState CONSTANT FINAL)
+    Q_PROPERTY(PDFViewState *bottomRightViewState READ bottomRightViewState CONSTANT FINAL)
+    Q_PROPERTY(qreal splitScrollX READ splitScrollX WRITE setSplitScrollX
+                   NOTIFY splitScrollPositionChanged FINAL)
+    Q_PROPERTY(qreal splitScrollY READ splitScrollY WRITE setSplitScrollY
+                   NOTIFY splitScrollPositionChanged FINAL)
+    Q_PROPERTY(bool splitScrollPositionInitialized
+                   READ splitScrollPositionInitialized
+                   NOTIFY splitScrollPositionInitializedChanged FINAL)
     Q_PROPERTY(bool panelCollapsed READ panelCollapsed WRITE setPanelCollapsed
                    NOTIFY panelCollapsedChanged FINAL)
     Q_PROPERTY(bool initialFitPending READ initialFitPending WRITE setInitialFitPending
@@ -38,6 +99,22 @@ class PDFDocumentSession : public QObject
     Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
 
 public:
+    enum PageDisplayMode {
+        SinglePageMode,
+        ContinuousMode,
+        FacingMode,
+        ContinuousFacingMode
+    };
+    Q_ENUM(PageDisplayMode)
+
+    enum SplitViewMode {
+        NoSplit,
+        VerticalSplit,
+        HorizontalSplit,
+        SpreadsheetSplit
+    };
+    Q_ENUM(SplitViewMode)
+
     explicit PDFDocumentSession(QObject *parent = nullptr);
 
     PDFDocument *document() const;
@@ -51,6 +128,16 @@ public:
     qreal scrollX() const;
     qreal scrollY() const;
     int viewRotation() const;
+    PageDisplayMode pageDisplayMode() const;
+    bool separateCoverPage() const;
+    SplitViewMode splitViewMode() const;
+    bool splitViewEnabled() const;
+    PDFViewState *secondaryViewState() const;
+    PDFViewState *bottomLeftViewState() const;
+    PDFViewState *bottomRightViewState() const;
+    qreal splitScrollX() const;
+    qreal splitScrollY() const;
+    bool splitScrollPositionInitialized() const;
     bool panelCollapsed() const;
     bool initialFitPending() const;
     bool hasDrafts() const;
@@ -60,6 +147,13 @@ public:
     void setScrollX(qreal scrollX);
     void setScrollY(qreal scrollY);
     void setViewRotation(int rotation);
+    void setPageDisplayMode(PageDisplayMode mode);
+    void setSeparateCoverPage(bool separate);
+    void setSplitViewMode(SplitViewMode mode);
+    void setSplitViewEnabled(bool enabled);
+    void setSplitScrollX(qreal scrollX);
+    void setSplitScrollY(qreal scrollY);
+    Q_INVOKABLE void setSplitScrollPosition(qreal scrollX, qreal scrollY);
     void setPanelCollapsed(bool collapsed);
     void setInitialFitPending(bool pending);
 
@@ -73,6 +167,12 @@ signals:
     void zoomChanged();
     void scrollPositionChanged();
     void viewRotationChanged();
+    void pageDisplayModeChanged();
+    void separateCoverPageChanged();
+    void splitViewModeChanged();
+    void splitViewEnabledChanged();
+    void splitScrollPositionChanged();
+    void splitScrollPositionInitializedChanged();
     void panelCollapsedChanged();
     void initialFitPendingChanged();
     void hasDraftsChanged();
@@ -93,12 +193,18 @@ private:
     PDFFormController *m_formController = nullptr;
     PDFFormDesignerController *m_formDesignerController = nullptr;
     PDFSearchController *m_searchController = nullptr;
+    PDFViewState *m_secondaryViewState = nullptr;
+    PDFViewState *m_bottomLeftViewState = nullptr;
+    PDFViewState *m_bottomRightViewState = nullptr;
     QString m_title;
     QString m_filePath;
     qreal m_zoom = 1.0;
     qreal m_scrollX = 0.0;
     qreal m_scrollY = 0.0;
     int m_viewRotation = 0;
+    PageDisplayMode m_pageDisplayMode = ContinuousMode;
+    bool m_separateCoverPage = false;
+    SplitViewMode m_splitViewMode = NoSplit;
     bool m_panelCollapsed = false;
     bool m_initialFitPending = true;
 };

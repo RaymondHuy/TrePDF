@@ -12,7 +12,12 @@ Column {
     required property PDFDocument document
     required property PDFEditController editController
     required property PDFSearchController searchController
+    property PDFDocumentSession session: null
     property bool hasPendingPanelEdits: false
+    property int viewNavigationPage: document.currentPage
+    property bool viewCanNavigateBackward: viewNavigationPage > 0
+    property bool viewCanNavigateForward:
+        document.loaded && viewNavigationPage + 1 < document.pageCount
     readonly property bool hasUnsavedChanges:
         editController.hasDrafts || hasPendingPanelEdits
     property bool textFieldToolSelected: false
@@ -49,6 +54,7 @@ Column {
     signal saveRequested()
     signal saveAsRequested()
     signal pageRequested(int page)
+    signal pageStepRequested(int direction)
     signal searchResultRequested(int page,
                                  real normalizedX,
                                  real normalizedY,
@@ -58,6 +64,10 @@ Column {
     signal zoomInRequested()
     signal fitWidthRequested()
     signal rotateRequested(int quarterTurns)
+    signal pageDisplayModeRequested(int mode)
+    signal separateCoverPageToggleRequested()
+    signal splitViewModeRequested(int mode)
+    signal splitViewToggleRequested()
     signal toolRequested(string toolName)
     signal undoRequested()
     signal redoRequested()
@@ -187,15 +197,28 @@ Column {
             document: root.document
             editController: root.editController
             searchController: root.searchController
+            session: root.session
             hasPendingPanelEdits: root.hasPendingPanelEdits
+            navigationPage: root.viewNavigationPage
+            canNavigateBackward: root.viewCanNavigateBackward
+            canNavigateForward: root.viewCanNavigateForward
             onOpenRequested: root.openRequested()
             onSaveRequested: root.saveRequested()
             onSaveAsRequested: root.saveAsRequested()
             onPageRequested: page => root.pageRequested(page)
+            onPageStepRequested: direction =>
+                root.pageStepRequested(direction)
             onZoomOutRequested: root.zoomOutRequested()
             onZoomInRequested: root.zoomInRequested()
             onFitWidthRequested: root.fitWidthRequested()
             onRotateRequested: quarterTurns => root.rotateRequested(quarterTurns)
+            onPageDisplayModeRequested: mode =>
+                root.pageDisplayModeRequested(mode)
+            onSeparateCoverPageToggleRequested:
+                root.separateCoverPageToggleRequested()
+            onSplitViewModeRequested: mode =>
+                root.splitViewModeRequested(mode)
+            onSplitViewToggleRequested: root.splitViewToggleRequested()
         }
     }
 
