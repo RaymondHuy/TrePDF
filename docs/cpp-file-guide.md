@@ -139,9 +139,8 @@ Tệp định nghĩa ba lớp có ownership khác nhau.
   tham gia draft/save và được giữ độc lập theo tab.
 - Giữ state view chính: zoom, scroll X/Y, quarter-turn rotation, bốn mode Page
   Display, cờ trang bìa riêng, panel collapsed và cờ initial fit.
-- Expose `SplitViewMode` gồm No/Vertical/Horizontal/Spreadsheet cùng ba child
-  `PDFViewState` cho pane phụ, bottom-left và bottom-right. Vertical/Horizontal
-  dùng pane phụ độc lập; Spreadsheet dùng cả ba state để QML điều phối bốn vùng.
+- Expose `SplitViewMode` gồm No/Vertical/Horizontal cùng một child
+  `PDFViewState` để pane phụ giữ zoom, trang và vị trí cuộn độc lập.
 - Tổng hợp `hasDrafts`/`saving`, title/path và chuyển tiếp status, save finished,
   external-link request cho model/QML.
 - `prepareForDeactivation()` kết thúc edit/focus form trước khi QML phá workspace.
@@ -883,7 +882,7 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   state zoom/scroll/page của từng pane không rò tab, save đúng tab và chặn Save
   As đè tab khác.
 - Page Display: enum/mapping cover, model một delegate cho Single/Facing, điều
-  hướng theo spread và ba kiểu Split với state pane tương ứng.
+  hướng theo spread và hai kiểu Split với state pane tương ứng.
 
 **Cách thêm regression:** tạo fixture nhỏ nhất tái hiện lỗi, kiểm cả state trước
 save và PDF mở lại sau save. Với thay đổi renderer/scene graph, test này không

@@ -82,8 +82,6 @@ class PDFDocumentSession : public QObject
     Q_PROPERTY(bool splitViewEnabled READ splitViewEnabled
                    WRITE setSplitViewEnabled NOTIFY splitViewEnabledChanged FINAL)
     Q_PROPERTY(PDFViewState *secondaryViewState READ secondaryViewState CONSTANT FINAL)
-    Q_PROPERTY(PDFViewState *bottomLeftViewState READ bottomLeftViewState CONSTANT FINAL)
-    Q_PROPERTY(PDFViewState *bottomRightViewState READ bottomRightViewState CONSTANT FINAL)
     Q_PROPERTY(qreal splitScrollX READ splitScrollX WRITE setSplitScrollX
                    NOTIFY splitScrollPositionChanged FINAL)
     Q_PROPERTY(qreal splitScrollY READ splitScrollY WRITE setSplitScrollY
@@ -110,8 +108,7 @@ public:
     enum SplitViewMode {
         NoSplit,
         VerticalSplit,
-        HorizontalSplit,
-        SpreadsheetSplit
+        HorizontalSplit
     };
     Q_ENUM(SplitViewMode)
 
@@ -133,8 +130,6 @@ public:
     SplitViewMode splitViewMode() const;
     bool splitViewEnabled() const;
     PDFViewState *secondaryViewState() const;
-    PDFViewState *bottomLeftViewState() const;
-    PDFViewState *bottomRightViewState() const;
     qreal splitScrollX() const;
     qreal splitScrollY() const;
     bool splitScrollPositionInitialized() const;
@@ -194,8 +189,6 @@ private:
     PDFFormDesignerController *m_formDesignerController = nullptr;
     PDFSearchController *m_searchController = nullptr;
     PDFViewState *m_secondaryViewState = nullptr;
-    PDFViewState *m_bottomLeftViewState = nullptr;
-    PDFViewState *m_bottomRightViewState = nullptr;
     QString m_title;
     QString m_filePath;
     qreal m_zoom = 1.0;

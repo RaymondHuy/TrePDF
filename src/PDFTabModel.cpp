@@ -94,8 +94,6 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
     , m_formDesignerController(new PDFFormDesignerController(this))
     , m_searchController(new PDFSearchController(this))
     , m_secondaryViewState(new PDFViewState(this))
-    , m_bottomLeftViewState(new PDFViewState(this))
-    , m_bottomRightViewState(new PDFViewState(this))
 {
     m_formDesignerController->setDocument(m_document);
     m_formController->setDocument(m_document);
@@ -242,16 +240,6 @@ PDFViewState *PDFDocumentSession::secondaryViewState() const
     return m_secondaryViewState;
 }
 
-PDFViewState *PDFDocumentSession::bottomLeftViewState() const
-{
-    return m_bottomLeftViewState;
-}
-
-PDFViewState *PDFDocumentSession::bottomRightViewState() const
-{
-    return m_bottomRightViewState;
-}
-
 qreal PDFDocumentSession::splitScrollX() const
 {
     return m_secondaryViewState->scrollX();
@@ -368,7 +356,6 @@ void PDFDocumentSession::setSplitViewMode(SplitViewMode mode)
     case NoSplit:
     case VerticalSplit:
     case HorizontalSplit:
-    case SpreadsheetSplit:
         break;
     default:
         return;

@@ -59,13 +59,22 @@ Each document tab owns its PDF handle, draft/undo history, selection, zoom,
 scroll position, page-display mode, separate-cover and split-view state, search
 query/results, and formatting-panel state. The View tab exposes Page Display as
 a compact dropdown: four layout actions, a Separate Cover toggle available only
-for the two Facing layouts, and a Split action with Vertical, Horizontal, and
-Spreadsheet variants in a nested menu. Single Page and Facing materialize only the active
+for the two Facing layouts, and a Split action with Vertical and Horizontal
+variants in a nested menu. Single Page and Facing materialize only the active
 page or spread, while both Continuous layouts virtualize their stacked rows and
 derive the current page from the page occupying most of the viewport. Vertical
 and Horizontal Split provide two independently scrollable, zoomable, navigable
-views of the same PDF; Spreadsheet Split provides four regions with coordinated
-row/column scrolling. Only the active tab creates page delegates and textures.
+views of the same PDF. Only the active tab creates page delegates and textures.
+Every viewport supports horizontal scrolling when zoomed pages or facing spreads
+exceed its width. A horizontal scrollbar remains visible while there is overflow;
+it disappears when the content fits, including after zooming out.
+The fixed reader bar at the bottom provides first/previous/next/last navigation,
+direct one-based page entry, bounded Previous/Next View history, four quick
+page-layout buttons, a logarithmic zoom slider, and 10–500% zoom presets. In
+Split mode these navigation and zoom controls follow the pane most recently
+activated by the user. View history is isolated by tab and pane and also tracks
+page or zoom changes initiated by ribbon commands, search navigation, and page
+scrolling after the initial fit completes.
 Opening an already-open canonical path activates its existing tab, and Save As
 cannot overwrite a PDF used by another open tab.
 

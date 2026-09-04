@@ -9,16 +9,16 @@
         <translation>TrePDF</translation>
     </message>
     <message id="FeatureComingSoon">
-        <location filename="../src/Main.qml" line="512"/>
+        <location filename="../src/Main.qml" line="528"/>
         <source>%1 is coming soon</source>
         <translation>Tính năng %1 sắp ra mắt</translation>
     </message>
     <message id="WaitForPdfSave">
-        <location filename="../src/Main.qml" line="189"/>
-        <location filename="../src/Main.qml" line="441"/>
-        <location filename="../src/Main.qml" line="496"/>
-        <location filename="../src/Main.qml" line="543"/>
-        <location filename="../src/PDFTabModel.cpp" line="544"/>
+        <location filename="../src/Main.qml" line="205"/>
+        <location filename="../src/Main.qml" line="457"/>
+        <location filename="../src/Main.qml" line="512"/>
+        <location filename="../src/Main.qml" line="559"/>
+        <location filename="../src/PDFTabModel.cpp" line="531"/>
         <source>Please wait for the PDF to finish saving.</source>
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
@@ -31,19 +31,19 @@
         <translation>Mở PDF</translation>
     </message>
     <message id="PdfFileFilter">
-        <location filename="../src/Main.qml" line="677"/>
-        <location filename="../src/Main.qml" line="700"/>
+        <location filename="../src/Main.qml" line="693"/>
+        <location filename="../src/Main.qml" line="716"/>
         <source>PDF files (*.pdf)</source>
         <translation>Tệp PDF (*.pdf)</translation>
     </message>
     <message id="SavePdfAs">
-        <location filename="../src/Main.qml" line="697"/>
+        <location filename="../src/Main.qml" line="713"/>
         <location filename="../src/Components/ViewRibbon.qml" line="86"/>
         <source>Save PDF As</source>
         <translation>Lưu PDF thành</translation>
     </message>
     <message id="OpenPdfs">
-        <location filename="../src/Main.qml" line="674"/>
+        <location filename="../src/Main.qml" line="690"/>
         <source>Open PDFs</source>
         <translation>Mở các tệp PDF</translation>
     </message>
@@ -64,70 +64,70 @@
         <translation type="vanished">Một số tính năng biểu mẫu tự động không khả dụng cho tệp PDF này.</translation>
     </message>
     <message id="SelectImage">
-        <location filename="../src/Main.qml" line="685"/>
+        <location filename="../src/Main.qml" line="701"/>
         <source>Select Image</source>
         <translation>Chọn hình ảnh</translation>
     </message>
     <message id="ImageFileFilter">
-        <location filename="../src/Main.qml" line="688"/>
+        <location filename="../src/Main.qml" line="704"/>
         <source>Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</source>
         <translation>Tệp hình ảnh (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</translation>
     </message>
     <message id="SaveChangesToDocumentQuestion">
-        <location filename="../src/Main.qml" line="854"/>
+        <location filename="../src/Main.qml" line="870"/>
         <source>Save changes to “%1”?</source>
         <translation>Lưu các thay đổi vào “%1”?</translation>
     </message>
     <message id="UnsavedEditsDescription">
-        <location filename="../src/Main.qml" line="865"/>
+        <location filename="../src/Main.qml" line="881"/>
         <source>Your edits exist only in this session and have not been saved to the PDF.</source>
         <translation>Các chỉnh sửa của bạn chỉ tồn tại trong phiên này và chưa được lưu vào tệp PDF.</translation>
     </message>
     <message id="Cancel">
-        <location filename="../src/Main.qml" line="813"/>
-        <location filename="../src/Main.qml" line="880"/>
-        <location filename="../src/Main.qml" line="955"/>
+        <location filename="../src/Main.qml" line="829"/>
+        <location filename="../src/Main.qml" line="896"/>
+        <location filename="../src/Main.qml" line="971"/>
         <source>Cancel</source>
         <translation>Hủy</translation>
     </message>
     <message id="ExternalLinkOpenFailed">
-        <location filename="../src/Main.qml" line="415"/>
+        <location filename="../src/Main.qml" line="431"/>
         <source>The link could not be opened in your default browser.</source>
         <translation>Không thể mở liên kết bằng trình duyệt mặc định.</translation>
     </message>
     <message id="OpenExternalLinkQuestion">
-        <location filename="../src/Main.qml" line="737"/>
+        <location filename="../src/Main.qml" line="753"/>
         <source>Open link to %1?</source>
         <translation>Mở liên kết đến %1?</translation>
     </message>
     <message id="ExternalLinkDocumentWantsToOpen">
-        <location filename="../src/Main.qml" line="751"/>
+        <location filename="../src/Main.qml" line="767"/>
         <source>“%1” wants to open this address in your default browser.</source>
         <translation>“%1” muốn mở địa chỉ này bằng trình duyệt mặc định.</translation>
     </message>
     <message id="InsecureHttpLinkWarning">
-        <location filename="../src/Main.qml" line="794"/>
+        <location filename="../src/Main.qml" line="810"/>
         <source>This link uses HTTP, so the connection may not be secure.</source>
         <translation>Liên kết này dùng HTTP nên kết nối có thể không an toàn.</translation>
     </message>
     <message id="OpenInBrowser">
-        <location filename="../src/Main.qml" line="821"/>
+        <location filename="../src/Main.qml" line="837"/>
         <source>Open in Browser</source>
         <translation>Mở trong trình duyệt</translation>
     </message>
     <message id="Save">
-        <location filename="../src/Main.qml" line="888"/>
+        <location filename="../src/Main.qml" line="904"/>
         <location filename="../src/Components/ViewRibbon.qml" line="69"/>
         <source>Save</source>
         <translation>Lưu</translation>
     </message>
     <message id="Discard">
-        <location filename="../src/Main.qml" line="898"/>
+        <location filename="../src/Main.qml" line="914"/>
         <source>Discard</source>
         <translation>Bỏ thay đổi</translation>
     </message>
     <message id="ConfirmDeletePageQuestion">
-        <location filename="../src/Main.qml" line="937"/>
+        <location filename="../src/Main.qml" line="953"/>
         <source>Do you want to delete page %1?</source>
         <translation>Bạn có muốn xóa trang %1 không?</translation>
     </message>
@@ -202,7 +202,7 @@
         <translation type="vanished">Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo văn bản, hình ảnh hoặc hình dạng đã chọn để di chuyển, vẽ bằng công cụ Hình dạng hoặc đánh dấu văn bản, kéo hoặc bấm bằng công cụ Văn bản tự do, hoặc bấm bằng công cụ Ghi chú để thêm bình luận</translation>
     </message>
     <message id="Delete">
-        <location filename="../src/Main.qml" line="963"/>
+        <location filename="../src/Main.qml" line="979"/>
         <location filename="../src/Components/EditOverlay.qml" line="3536"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
         <source>Delete</source>
@@ -792,6 +792,7 @@
     </message>
     <message id="PercentValue">
         <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="456"/>
+        <location filename="../src/Components/ReaderControlBar.qml" line="330"/>
         <source>%1%</source>
         <translation>%1%</translation>
     </message>
@@ -1138,6 +1139,7 @@
         <translation>Trước</translation>
     </message>
     <message id="PreviousPage">
+        <location filename="../src/Components/ReaderControlBar.qml" line="530"/>
         <location filename="../src/Components/ViewRibbon.qml" line="105"/>
         <source>Previous Page</source>
         <translation>Trang trước</translation>
@@ -1148,21 +1150,52 @@
         <translation>Tiếp</translation>
     </message>
     <message id="NextPage">
+        <location filename="../src/Components/ReaderControlBar.qml" line="609"/>
         <location filename="../src/Components/ViewRibbon.qml" line="118"/>
         <source>Next Page</source>
         <translation>Trang tiếp theo</translation>
     </message>
     <message id="Zoom">
+        <location filename="../src/Components/ReaderControlBar.qml" line="774"/>
+        <location filename="../src/Components/ReaderControlBar.qml" line="876"/>
+        <location filename="../src/Components/ReaderControlBar.qml" line="926"/>
         <location filename="../src/Components/ViewRibbon.qml" line="128"/>
         <source>Zoom</source>
         <translation>Thu phóng</translation>
     </message>
     <message id="ZoomOut">
+        <location filename="../src/Components/ReaderControlBar.qml" line="758"/>
         <location filename="../src/Components/ViewRibbon.qml" line="134"/>
         <source>Zoom Out</source>
         <translation>Thu nhỏ</translation>
     </message>
+    <message id="FirstPage">
+        <location filename="../src/Components/ReaderControlBar.qml" line="516"/>
+        <source>First Page</source>
+        <translation>Trang đầu</translation>
+    </message>
+    <message id="PageCountSuffix">
+        <location filename="../src/Components/ReaderControlBar.qml" line="339"/>
+        <source>/ %1</source>
+        <translation>/ %1</translation>
+    </message>
+    <message id="LastPage">
+        <location filename="../src/Components/ReaderControlBar.qml" line="624"/>
+        <source>Last Page</source>
+        <translation>Trang cuối</translation>
+    </message>
+    <message id="PreviousView">
+        <location filename="../src/Components/ReaderControlBar.qml" line="645"/>
+        <source>Previous View</source>
+        <translation>Khung nhìn trước</translation>
+    </message>
+    <message id="NextView">
+        <location filename="../src/Components/ReaderControlBar.qml" line="659"/>
+        <source>Next View</source>
+        <translation>Khung nhìn tiếp theo</translation>
+    </message>
     <message id="ZoomIn">
+        <location filename="../src/Components/ReaderControlBar.qml" line="859"/>
         <location filename="../src/Components/ViewRibbon.qml" line="143"/>
         <source>Zoom In</source>
         <translation>Phóng to</translation>
@@ -1190,6 +1223,7 @@
     </message>
     <message id="Page">
         <location filename="../src/Components/EditRibbon.qml" line="276"/>
+        <location filename="../src/Components/ReaderControlBar.qml" line="553"/>
         <location filename="../src/Components/ViewRibbon.qml" line="161"/>
         <source>Page</source>
         <translation>Trang</translation>
@@ -1749,12 +1783,12 @@
         <translation>Đóng tab</translation>
     </message>
     <message id="AutomaticFormFeaturesUnavailableForDocument">
-        <location filename="../src/PDFTabModel.cpp" line="152"/>
+        <location filename="../src/PDFTabModel.cpp" line="150"/>
         <source>Some automatic form features are unavailable in “%1”.</source>
         <translation>Một số tính năng biểu mẫu tự động không khả dụng trong “%1”.</translation>
     </message>
     <message id="CannotSaveOverOpenPdf">
-        <location filename="../src/PDFTabModel.cpp" line="644"/>
+        <location filename="../src/PDFTabModel.cpp" line="631"/>
         <source>Another open tab is already using that PDF file.</source>
         <translation>Một tab đang mở khác đã sử dụng tệp PDF đó.</translation>
     </message>
@@ -2129,21 +2163,25 @@
     </message>
     <message id="PageDisplaySinglePage">
         <location filename="../src/Components/PageDisplayControl.qml" line="125"/>
+        <location filename="../src/Components/ReaderControlBar.qml" line="682"/>
         <source>Single Page</source>
         <translation>Một trang</translation>
     </message>
     <message id="PageDisplayContinuous">
         <location filename="../src/Components/PageDisplayControl.qml" line="144"/>
+        <location filename="../src/Components/ReaderControlBar.qml" line="700"/>
         <source>Continuous</source>
         <translation>Cuộn liên tục</translation>
     </message>
     <message id="PageDisplayFacing">
         <location filename="../src/Components/PageDisplayControl.qml" line="163"/>
+        <location filename="../src/Components/ReaderControlBar.qml" line="718"/>
         <source>Facing</source>
         <translation>Hai trang đối diện</translation>
     </message>
     <message id="PageDisplayContinuousFacing">
         <location filename="../src/Components/PageDisplayControl.qml" line="183"/>
+        <location filename="../src/Components/ReaderControlBar.qml" line="736"/>
         <source>Continuous Facing</source>
         <translation>Hai trang đối diện liên tục</translation>
     </message>
@@ -2153,29 +2191,24 @@
         <translation>Tách riêng trang bìa</translation>
     </message>
     <message id="PageDisplaySplit">
-        <location filename="../src/Components/PageDisplayControl.qml" line="262"/>
+        <location filename="../src/Components/PageDisplayControl.qml" line="264"/>
         <source>Split</source>
         <translation>Chia khung nhìn</translation>
     </message>
     <message id="ChooseSplitViewMode">
-        <location filename="../src/Components/PageDisplayControl.qml" line="289"/>
+        <location filename="../src/Components/PageDisplayControl.qml" line="291"/>
         <source>Choose split view mode</source>
         <translation>Chọn kiểu chia khung nhìn</translation>
     </message>
     <message id="PageDisplayVerticalSplit">
-        <location filename="../src/Components/PageDisplayControl.qml" line="342"/>
+        <location filename="../src/Components/PageDisplayControl.qml" line="344"/>
         <source>Vertical Split</source>
         <translation>Chia dọc</translation>
     </message>
     <message id="PageDisplayHorizontalSplit">
-        <location filename="../src/Components/PageDisplayControl.qml" line="356"/>
+        <location filename="../src/Components/PageDisplayControl.qml" line="358"/>
         <source>Horizontal Split</source>
         <translation>Chia ngang</translation>
-    </message>
-    <message id="PageDisplaySpreadsheetSplit">
-        <location filename="../src/Components/PageDisplayControl.qml" line="370"/>
-        <source>Spreadsheet Split</source>
-        <translation>Chia kiểu bảng tính</translation>
     </message>
 </context>
 </TS>
