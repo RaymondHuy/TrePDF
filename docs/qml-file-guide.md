@@ -1,6 +1,6 @@
 # Hướng dẫn toàn bộ tệp QML
 
-Tài liệu này mô tả 36 tệp QML đang được đăng ký trong QML module `TrePDF`.
+Tài liệu này mô tả 37 tệp QML đang được đăng ký trong QML module `TrePDF`.
 Mỗi mục tập trung vào trách nhiệm, dữ liệu đi vào/đi ra, quan hệ với C++ và các
 ràng buộc vòng đời cần giữ khi sửa code.
 
@@ -31,6 +31,7 @@ Main.qml
 │   ├── FormRibbon.qml
 │   └── SignRibbon.qml
 ├── DocumentTabBar.qml
+├── ReaderControlBar.qml (footer cố định)
 └── DocumentWorkspace.qml
     ├── DocumentView.qml (khung chính và tùy chọn khung phụ)
     │   └── PageLayoutDelegate.qml (một hàng hoặc spread)
@@ -87,6 +88,8 @@ phạm vi toàn ứng dụng.
 - Truyền session đang active vào ribbon và chuyển các intent Page Display thành
   thay đổi trên đúng `DocumentWorkspace`; khi Loader chưa sẵn sàng thì cập nhật
   state session để workspace mới nhận lại.
+- Gắn `ReaderControlBar` làm footer cố định, bind trang/zoom theo pane đang active
+  và chuyển điều hướng trực tiếp của thanh đáy tới đúng `DocumentView` đó.
 
 **Điều phối hành động:**
 
@@ -170,7 +173,7 @@ dialog, đổi tab hoặc ghi tệp.
   Fit Width và Rotate Left/Right.
 - Gắn `PageDisplayControl` dạng dropdown gọn trong nhóm Page Display, bind trực
   tiếp mode/cover/split của `PDFDocumentSession` và chuyển intent cho Single
-  Page, Continuous, Facing, Continuous Facing, Separate Cover Page cùng ba kiểu
+  Page, Continuous, Facing, Continuous Facing, Separate Cover Page cùng hai kiểu
   Split lên `AppRibbon`.
 - Gắn `SearchRibbonControl` trong nhóm Search để tìm kiếm tài liệu ngay
   trên ribbon.
@@ -186,7 +189,7 @@ dialog, đổi tab hoặc ghi tệp.
 - `Separate Cover Page` là toggle, chỉ enable khi mode hiện tại là Facing hoặc
   Continuous Facing. Nó không tạo thêm một layout độc lập.
 - Hàng Split là action ghép trong dropdown: phần chính bật/tắt Vertical Split,
-  còn mũi tên mở menu con chọn Vertical, Horizontal hoặc Spreadsheet Split.
+  còn mũi tên mở menu con chọn Vertical hoặc Horizontal Split.
   Icon phản ánh kiểu đang dùng.
 - Phát signal có kiểu cho đổi mode, cover và `SplitViewMode`. Component không tự
   đổi layout hay giữ bản sao state; `Main.qml`/`DocumentWorkspace` áp intent lên
@@ -207,6 +210,24 @@ dialog, đổi tab hoặc ghi tệp.
 - `Connections` đồng bộ lại text khi controller/tab đổi hoặc bị clear do đổi
   document/cấu trúc trang. Mọi label, tooltip và accessible name đều dùng
   translation ID.
+
+### [`src/Components/ReaderControlBar.qml`](../src/Components/ReaderControlBar.qml)
+
+**Vai trò:** thanh điều khiển đọc cố định ở đáy cửa sổ.
+
+- Hiển thị First/Previous, ô nhập số trang một-based và tổng trang,
+  Next/Last; các nút biên tự disable theo trang hiện tại.
+- Giữ tối đa 64 trạng thái trang/zoom cho Previous View và Next View, tách theo
+  identity của session và pane; một drag slider chỉ tạo một bước history.
+- Quan sát page/zoom đã bind nên history nhận cả thay đổi từ ribbon, tìm kiếm và
+  cuộn trang. Việc ghi chỉ bắt đầu sau initial fit, còn đổi cấu trúc trang sẽ
+  khởi tạo lại history của context để không phục hồi page index cũ.
+- Cung cấp bốn nút nhanh cho Single, Continuous, Facing và Continuous Facing,
+  bind trực tiếp `pageDisplayMode` của session đang active.
+- Zoom dùng thang logarit trong khoảng 10–500%, có nút bước, slider và danh sách
+  preset; mọi đường điều khiển đều đi qua clamp và API zoom của workspace.
+- Chỉ phát intent. `Main.qml` và `DocumentWorkspace` quyết định pane nhận page/
+  zoom, nên footer không giữ document hoặc controller và không can thiệp pooling.
 
 ### [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml)
 
@@ -398,13 +419,9 @@ Edit; không lập chỉ mục, hiển thị hay sửa nội dung comment/thread
 - `NoSplit` tạo một viewport. Vertical/Horizontal Split tạo hai `DocumentView`
   theo trái-phải hoặc trên-dưới; mỗi pane giữ zoom, scroll và current page riêng,
   và toolbar điều hướng/zoom pane vừa được kích hoạt.
-- Spreadsheet Split tạo lưới 2x2. Bốn vùng dùng cùng zoom để giữ thẳng hàng;
-  workspace phối hợp trục X giữa hai vùng cùng cột và trục Y giữa hai vùng cùng
-  hàng, tương tự frozen panes. Chuyển trang ở mode phân trang cũng đồng bộ theo
-  từng hàng của lưới.
-- Ba pane phụ tắt interaction Edit/Form; pane chính vẫn là chủ sở hữu selection
-  và controller tương tác. Workspace lưu/khôi phục `PDFViewState` của từng pane
-  trước khi đổi split mode hoặc phá workspace.
+- Pane phụ tắt interaction Edit/Form; pane chính vẫn là chủ sở hữu selection và
+  controller tương tác. Workspace lưu/khôi phục `PDFViewState` của pane phụ trước
+  khi đổi split mode hoặc phá workspace.
 - Thực hiện Fit Width từ kích thước viewport và maximum page dimension đã xoay;
   initial-fit chỉ chạy khi session còn `initialFitPending`.
 - Load đúng một panel ở cạnh phải: `CommentPanel` khi Comment active và danh
@@ -431,6 +448,10 @@ hủy interaction và lưu scroll trước khi workspace bị phá; hàm cũng c
   Single Page và Facing đặt model đúng một delegate, rồi ánh xạ delegate đó tới
   page/spread active; vì vậy không tồn tại hàng trước/sau để lộ một phần trong
   viewport. Trang hoặc spread được căn giữa mà không thay đổi zoom hiện tại.
+- `contentWidth` được khai báo theo chiều rộng trang lớn nhất sau xoay, zoom,
+  số cột và khoảng cách của `PageLayoutDelegate`; không lấy `childrenRect` từ
+  các delegate ảo hóa. Thanh cuộn ngang luôn hiện khi nội dung tràn viewport,
+  ẩn khi nội dung vừa khung và giữ vị trí độc lập cho từng pane Split.
 - Trong hai mode phân trang, wheel/phím trước hết thay đổi `contentX/contentY`
   bên trong page/spread đang phóng to. Chỉ khi chạm biên mới chuyển trang hoặc
   chuyển cả spread; trang kế tiếp được đặt ở đầu và trang trước ở cuối.

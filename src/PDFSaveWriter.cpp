@@ -1544,6 +1544,118 @@ bool materializeWhitePathFill(FPDF_PAGEOBJECT inspectionObject,
         alpha);
 }
 
+bool materializeTextObjectPaint(FPDF_PAGEOBJECT inspectionObject,
+                                FPDF_PAGEOBJECT sourceObject)
+{
+    const FPDF_TEXT_RENDERMODE renderMode
+        = FPDFTextObj_GetTextRenderMode(inspectionObject);
+    bool usesFill = false;
+    bool usesStroke = false;
+    switch (renderMode) {
+    case FPDF_TEXTRENDERMODE_FILL:
+    case FPDF_TEXTRENDERMODE_FILL_CLIP:
+        usesFill = true;
+        break;
+    case FPDF_TEXTRENDERMODE_STROKE:
+    case FPDF_TEXTRENDERMODE_STROKE_CLIP:
+        usesStroke = true;
+        break;
+    case FPDF_TEXTRENDERMODE_FILL_STROKE:
+    case FPDF_TEXTRENDERMODE_FILL_STROKE_CLIP:
+        usesFill = true;
+        usesStroke = true;
+        break;
+    case FPDF_TEXTRENDERMODE_INVISIBLE:
+    case FPDF_TEXTRENDERMODE_CLIP:
+        return true;
+    case FPDF_TEXTRENDERMODE_UNKNOWN:
+    default:
+        return false;
+    }
+
+    if (usesFill) {
+        unsigned int red = 0;
+        unsigned int green = 0;
+        unsigned int blue = 0;
+        unsigned int alpha = 0;
+        if (!FPDFPageObj_GetFillColor(
+                inspectionObject,
+                &red,
+                &green,
+                &blue,
+                &alpha)
+            || !FPDFPageObj_SetFillColor(
+                sourceObject,
+                red,
+                green,
+                blue,
+                alpha)) {
+            return false;
+        }
+    }
+    if (usesStroke) {
+        unsigned int red = 0;
+        unsigned int green = 0;
+        unsigned int blue = 0;
+        unsigned int alpha = 0;
+        if (!FPDFPageObj_GetStrokeColor(
+                inspectionObject,
+                &red,
+                &green,
+                &blue,
+                &alpha)
+            || !FPDFPageObj_SetStrokeColor(
+                sourceObject,
+                red,
+                green,
+                blue,
+                alpha)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+PDFSaveWriter::Result materializeTextPaints(
+    FPDF_PAGE page,
+    FPDF_PAGE inspectionPage,
+    int pageIndex,
+    const QSet<int> &removedTextObjectIndexes)
+{
+    assertPDFiumProcessLockHeld();
+    const int objectCount = FPDFPage_CountObjects(page);
+    if (objectCount != FPDFPage_CountObjects(inspectionPage)) {
+        return failure(PDFSaveWriter::Error::SourceObjectMissing, pageIndex);
+    }
+
+    for (int index = 0; index < objectCount; ++index) {
+        FPDF_PAGEOBJECT inspectionObject = FPDFPage_GetObject(
+            inspectionPage,
+            index);
+        FPDF_PAGEOBJECT sourceObject = FPDFPage_GetObject(page, index);
+        if (!inspectionObject
+            || !sourceObject
+            || FPDFPageObj_GetType(inspectionObject)
+                != FPDFPageObj_GetType(sourceObject)) {
+            return failure(PDFSaveWriter::Error::SourceObjectMissing, pageIndex);
+        }
+        if (removedTextObjectIndexes.contains(index)
+            || FPDFPageObj_GetType(inspectionObject) != FPDF_PAGEOBJ_TEXT) {
+            continue;
+        }
+
+        // PDFium can resolve an inherited ICC/CMYK text paint while parsing but
+        // omit it when regenerating the page content stream. Materialize the
+        // effective RGBA on the writer object before that regeneration.
+        if (!materializeTextObjectPaint(inspectionObject, sourceObject)) {
+            return failure(
+                PDFSaveWriter::Error::PageContentGenerationFailed,
+                pageIndex);
+        }
+    }
+    return {};
+}
+
 bool createRasterizedPaint(FPDF_DOCUMENT document,
                            FPDF_PAGE page,
                            FPDF_PAGEOBJECT sourceObject,
@@ -4274,6 +4386,32 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 && draft.kind != SaveDraft::Kind::DrawingComment
                 && !draft.added;
         });
+    if (hasPageObjectDrafts) {
+        QSet<int> removedTextObjectIndexes;
+        QSet<int> retainedTextObjectIndexes;
+        for (const SaveDraft &draft : drafts) {
+            if (draft.kind != SaveDraft::Kind::Text || draft.added) {
+                continue;
+            }
+            QSet<int> &objectIndexes = draft.movesSourceObjects
+                ? retainedTextObjectIndexes
+                : removedTextObjectIndexes;
+            for (const QVector<int> &path : draft.sourceObjectPaths) {
+                if (path.size() == 1) {
+                    objectIndexes.insert(path.constFirst());
+                }
+            }
+        }
+        removedTextObjectIndexes.subtract(retainedTextObjectIndexes);
+        const PDFSaveWriter::Result textPaintResult = materializeTextPaints(
+            page.get(),
+            inspectionPage.get(),
+            pageIndex,
+            removedTextObjectIndexes);
+        if (!textPaintResult.succeeded()) {
+            return textPaintResult;
+        }
+    }
     if (modifiesExistingObject) {
         // PDFium's content generator cannot serialize pattern and shading
         // paints reliably, and can lose implicit opaque-white path fills while

@@ -54,6 +54,23 @@ Rectangle {
     readonly property bool pagedMode:
         pageDisplayMode === PDFDocumentSession.SinglePageMode
         || pageDisplayMode === PDFDocumentSession.FacingMode
+    readonly property int normalizedViewRotation:
+        ((viewRotation % 360) + 360) % 360
+    readonly property bool quarterTurn:
+        normalizedViewRotation === 90 || normalizedViewRotation === 270
+    readonly property real maximumViewPageWidth: quarterTurn
+        ? document.maximumPageHeight
+        : document.maximumPageWidth
+    readonly property real pageLayoutContentWidth: {
+        if (!document.loaded)
+            return viewer.width
+
+        const columnCount = facingMode ? 2 : 1
+        const spreadGap = facingMode ? 16 : 0
+        return Math.max(
+            viewer.width,
+            columnCount * (maximumViewPageWidth * zoom + 64) + spreadGap)
+    }
     readonly property int viewCurrentPage: updatesCurrentPage
         ? document.currentPage
         : Math.max(
@@ -601,6 +618,7 @@ Rectangle {
         model: root.pagedMode
             ? root.document.loaded ? 1 : 0
             : root.layoutItemCount
+        contentWidth: root.pageLayoutContentWidth
         spacing: root.pagedMode ? 0 : root.pageGap
         snapMode: ListView.NoSnap
         reuseItems: true
@@ -628,7 +646,13 @@ Rectangle {
         }
 
         ScrollBar.horizontal: ScrollBar {
-            policy: ScrollBar.AsNeeded
+            objectName: "documentHorizontalScrollBar"
+            implicitHeight: 12
+            policy: viewer.contentWidth > viewer.width + 0.5
+                ? ScrollBar.AlwaysOn
+                : ScrollBar.AlwaysOff
+            palette.mid: "#847e79"
+            palette.dark: "#625c58"
         }
 
         onMovementStarted: root.activated()

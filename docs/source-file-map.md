@@ -97,7 +97,7 @@ flowchart TD
 3. Mỗi session sở hữu đúng một bộ `PDFDocument`, `PDFEditController`,
    `PDFSearchController`, `PDFFormController` và `PDFFormDesignerController`.
    Query, kết quả, current match, Page Display mode, cover/split và state của tối
-   đa bốn viewport vì vậy không rò giữa các tab.
+   đa hai viewport vì vậy không rò giữa các tab.
 4. Chỉ session đang active được gắn vào `DocumentWorkspace`. Khi đổi tab,
    workspace cũ được chuẩn bị ngắt rồi tạo lại để delegate, texture, editor và
    focus của tab cũ không tiếp tục sống ngầm.
@@ -259,14 +259,15 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/AppTheme.qml`](../src/Components/AppTheme.qml) | Bảng màu dùng chung. |
 | [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml) | Host của các tab ribbon và đồng bộ mode/tool. |
 | [`src/Components/ViewRibbon.qml`](../src/Components/ViewRibbon.qml) | Lệnh file, điều hướng, zoom, fit, xoay view, Page Display theo session và host tìm kiếm. |
-| [`src/Components/PageDisplayControl.qml`](../src/Components/PageDisplayControl.qml) | Dropdown cho bốn layout, toggle trang bìa và Split menu con ba kiểu. |
+| [`src/Components/PageDisplayControl.qml`](../src/Components/PageDisplayControl.qml) | Dropdown cho bốn layout, toggle trang bìa và Split menu con dọc/ngang. |
+| [`src/Components/ReaderControlBar.qml`](../src/Components/ReaderControlBar.qml) | Footer điều hướng trang/view, chọn nhanh layout và điều khiển zoom theo tab/pane active. |
 | [`src/Components/SearchRibbonControl.qml`](../src/Components/SearchRibbonControl.qml) | Ô query, trạng thái, Previous/Next và Clear của tìm kiếm tài liệu. |
 | [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml) | Tool sửa text/image/shape, history và page operation. |
 | [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml) | Select chỉ dành cho comment, Sticky Note, Free Text, text markup, Pencil/Ink, Square/Circle/Line/Polygon/PolyLine, Stamp, quản lý comment và history. |
 | [`src/Components/FormRibbon.qml`](../src/Components/FormRibbon.qml) | Tool đặt Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field. |
 | [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml) | UI tab ký, hiện chủ yếu là điểm mở rộng. |
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
-| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép một, hai hoặc bốn document view; lưu state pane và phối hợp trục Spreadsheet Split. |
+| [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép một hoặc hai document view và lưu state riêng cho pane phụ. |
 | [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ; không chứa control appearance. |
 | [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml) | Panel tab Edit cho stroke, fill và opacity của Square/Circle/Line/Polygon/PolyLine/Ink đang chọn; source appearance không an toàn chỉ đọc. |
 | [`src/Components/TextFieldOptionsPanel.qml`](../src/Components/TextFieldOptionsPanel.qml) | Panel multi-line, giới hạn ký tự tùy chọn và xóa Text Field đang chọn. |

@@ -114,6 +114,7 @@ qt_add_qml_module(trepdf
         src/Components/PageInteractionOverlay.qml
         src/Components/PdfPageDelegate.qml
         src/Components/RadioButtonOptionsPanel.qml
+        src/Components/ReaderControlBar.qml
         src/Components/RibbonButton.qml
         src/Components/RibbonGroup.qml
         src/Components/RibbonTabButton.qml
@@ -163,7 +164,6 @@ qt_add_qml_module(trepdf
         src/assets/icons/page-separate-cover.svg
         src/assets/icons/page-single.svg
         src/assets/icons/page-split-horizontal.svg
-        src/assets/icons/page-split-spreadsheet.svg
         src/assets/icons/page-split-vertical.svg
         src/assets/icons/panel-left.svg
         src/assets/icons/pen-line.svg

@@ -62,11 +62,10 @@ Hai mode phân trang và hai mode liên tục cố ý dùng model khác nhau:
 - Separate Cover chỉ thay đổi mapping của hai Facing mode: page 1 đứng riêng,
   các page còn lại ghép cặp. Toggle không tạo layout thứ năm.
 
-`DocumentWorkspace` có thể host một viewport, hai viewport trái-phải/trên-dưới,
-hoặc bốn viewport 2x2. Hai kiểu split cơ bản giữ scroll, zoom và page độc lập;
-Spreadsheet Split dùng chung zoom và phối hợp X/Y theo cột/hàng. Chỉ viewport
-chính chứa interaction Edit/Form hoạt động, nên không nhân đôi focus/controller
-ownership dù texture và navigation xuất hiện ở mọi vùng.
+`DocumentWorkspace` có thể host một viewport hoặc hai viewport trái-phải/trên-dưới.
+Hai kiểu split giữ scroll, zoom và page độc lập. Chỉ viewport chính chứa
+interaction Edit/Form hoạt động, nên không nhân đôi focus/controller ownership
+dù texture và navigation xuất hiện ở cả hai vùng.
 
 `pageSurface` là invariant quan trọng: texture, search highlight, runtime form,
 edit overlay và form designer phải là con của cùng một item này nếu chúng chia

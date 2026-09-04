@@ -41,10 +41,14 @@ ApplicationWindow {
     property real pendingSearchNavigationY: 0.0
     property real pendingSearchNavigationRevision: -1
     readonly property PDFDocumentSession activeSession: tabModel.currentSession
-    readonly property DocumentWorkspace activeWorkspaceItem:
-        workspaceLoader.status === Loader.Ready
-            ? workspaceLoader.item as DocumentWorkspace
+    readonly property DocumentWorkspace activeWorkspaceItem: {
+        if (workspaceLoader.status !== Loader.Ready)
+            return null
+        const workspace = workspaceLoader.item as DocumentWorkspace
+        return workspace && workspace.session === activeSession
+            ? workspace
             : null
+    }
     readonly property PDFDocument activeDocument: activeSession
         ? activeSession.document
         : emptyDocument
@@ -58,13 +62,8 @@ ApplicationWindow {
         activeSession
             ? activeSession.formDesignerController
             : emptyFormDesignerController
-    readonly property bool activeWorkspaceHasPendingEdits: {
-        if (workspaceLoader.status !== Loader.Ready)
-            return false
-
-        const workspace = workspaceLoader.item as DocumentWorkspace
-        return workspace ? workspace.hasPendingPanelEdits : false
-    }
+    readonly property bool activeWorkspaceHasPendingEdits:
+        activeWorkspaceItem ? activeWorkspaceItem.hasPendingPanelEdits : false
 
     palette.highlight: appTheme.foxitOrange
     palette.button: appTheme.foxitPaleOrange
@@ -123,6 +122,23 @@ ApplicationWindow {
         const workspace = activeWorkspace()
         if (workspace)
             workspace.navigateToPage(page)
+    }
+
+    function goToActivePage(page) {
+        const workspace = activeWorkspace()
+        if (workspace) {
+            workspace.navigateActivePaneToPage(page)
+        } else if (activeDocument.loaded) {
+            activeDocument.currentPage = page
+        }
+    }
+
+    function setPageDisplayMode(mode) {
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.setPageDisplayMode(mode)
+        else if (activeSession)
+            activeSession.pageDisplayMode = mode
     }
 
     function clearPendingSearchNavigation() {
@@ -1021,13 +1037,8 @@ ApplicationWindow {
             }
             onFitWidthRequested: window.fitToWidth()
             onRotateRequested: quarterTurns => window.rotateView(quarterTurns)
-            onPageDisplayModeRequested: mode => {
-                const workspace = window.activeWorkspace()
-                if (workspace)
-                    workspace.setPageDisplayMode(mode)
-                else if (window.activeSession)
-                    window.activeSession.pageDisplayMode = mode
-            }
+            onPageDisplayModeRequested: mode =>
+                window.setPageDisplayMode(mode)
             onSeparateCoverPageToggleRequested: {
                 const workspace = window.activeWorkspace()
                 if (workspace) {
@@ -1073,6 +1084,67 @@ ApplicationWindow {
             onTabRequested: index => window.switchToTab(index)
             onCloseRequested: session => window.requestCloseSession(session)
             onOpenRequested: window.requestOpen()
+        }
+    }
+
+    footer: ReaderControlBar {
+        id: readerControlBar
+
+        theme: appTheme
+        documentLoaded: window.activeDocument.loaded
+        navigationPage: window.activeWorkspaceItem
+            ? window.activeWorkspaceItem.activePage
+            : window.activeDocument.currentPage
+        pageCount: window.activeDocument.pageCount
+        canNavigateBackward: window.activeWorkspaceItem
+            ? window.activeWorkspaceItem.canNavigateBackward
+            : window.activeDocument.currentPage > 0
+        canNavigateForward: window.activeWorkspaceItem
+            ? window.activeWorkspaceItem.canNavigateForward
+            : window.activeDocument.loaded
+                && window.activeDocument.currentPage + 1
+                    < window.activeDocument.pageCount
+        zoom: window.activeWorkspaceItem
+            ? window.activeWorkspaceItem.activeZoom
+            : window.activeSession
+                ? window.activeSession.zoom
+                : 1.0
+        pageDisplayMode: window.activeSession
+            ? window.activeSession.pageDisplayMode
+            : PDFDocumentSession.ContinuousMode
+        viewReady: window.activeWorkspaceItem
+            ? window.activeWorkspaceItem.initialViewReady
+            : !workspaceLoader.active && window.activeDocument.loaded
+        viewContextOwner: window.activeSession
+        viewContextPane: window.activeWorkspaceItem
+            ? window.activeWorkspaceItem.activePaneIndex
+            : 0
+        enabled: !tabModel.anySaving
+        onPageRequested: page => window.goToActivePage(page)
+        onPageStepRequested: direction => {
+            const workspace = window.activeWorkspace()
+            if (workspace) {
+                workspace.navigateByStep(direction)
+            } else if (window.activeDocument.loaded) {
+                window.goToActivePage(
+                    window.activeDocument.currentPage + direction)
+            }
+        }
+        onZoomRequested: value => window.setZoom(value)
+        onPageDisplayModeRequested: mode =>
+            window.setPageDisplayMode(mode)
+        onViewRestoreRequested: (page, restoredZoom) => {
+            const session = window.activeSession
+            const pane = window.activeWorkspaceItem
+                ? window.activeWorkspaceItem.activePaneIndex
+                : 0
+            window.setZoom(restoredZoom)
+            Qt.callLater(function() {
+                const workspace = window.activeWorkspace()
+                const activePane = workspace ? workspace.activePaneIndex : 0
+                if (window.activeSession === session && activePane === pane)
+                    window.goToActivePage(page)
+            })
         }
     }
 

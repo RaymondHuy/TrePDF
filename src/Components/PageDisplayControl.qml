@@ -27,8 +27,6 @@ RibbonButton {
     readonly property url activeSplitIcon: {
         if (splitViewMode === PDFDocumentSession.HorizontalSplit)
             return "../assets/icons/page-split-horizontal.svg"
-        if (splitViewMode === PDFDocumentSession.SpreadsheetSplit)
-            return "../assets/icons/page-split-spreadsheet.svg"
         return "../assets/icons/page-split-vertical.svg"
     }
 
@@ -361,20 +359,6 @@ RibbonButton {
                         onTriggered: {
                             root.splitViewModeRequested(
                                 PDFDocumentSession.HorizontalSplit)
-                            pageDisplayPopup.close()
-                        }
-                    }
-
-                    MenuItem {
-                        objectName: "spreadsheetSplitPageDisplayItem"
-                        checkable: true
-                        checked: root.splitViewMode
-                            === PDFDocumentSession.SpreadsheetSplit
-                        //% "Spreadsheet Split"
-                        text: qsTrId("PageDisplaySpreadsheetSplit")
-                        onTriggered: {
-                            root.splitViewModeRequested(
-                                PDFDocumentSession.SpreadsheetSplit)
                             pageDisplayPopup.close()
                         }
                     }

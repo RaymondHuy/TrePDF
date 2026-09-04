@@ -32,8 +32,6 @@ Item {
     property real pendingSearchY: 0.0
     property real pendingSearchResultsRevision: -1
     property int activePaneIndex: 0
-    property bool synchronizingSpreadsheetScroll: false
-    property bool synchronizingSpreadsheetPage: false
     readonly property string selectedFormFieldId:
         session.formDesignerController.selectedFieldId
     readonly property var selectedFormField: selectedFormFieldId.length > 0
@@ -77,14 +75,6 @@ Item {
     readonly property DocumentView splitDocumentView:
         splitDocumentViewLoader.status === Loader.Ready
             ? splitDocumentViewLoader.item as DocumentView
-            : null
-    readonly property DocumentView bottomLeftDocumentView:
-        bottomLeftDocumentViewLoader.status === Loader.Ready
-            ? bottomLeftDocumentViewLoader.item as DocumentView
-            : null
-    readonly property DocumentView bottomRightDocumentView:
-        bottomRightDocumentViewLoader.status === Loader.Ready
-            ? bottomRightDocumentViewLoader.item as DocumentView
             : null
     readonly property DocumentView activeDocumentView:
         paneView(activePaneIndex) || documentView
@@ -140,11 +130,7 @@ Item {
 
         objectName: paneIndex === 0
             ? "primaryDocumentView"
-            : paneIndex === 1
-                ? "secondaryDocumentView"
-                : paneIndex === 2
-                    ? "bottomLeftDocumentView"
-                    : "bottomRightDocumentView"
+            : "secondaryDocumentView"
         theme: root.theme
         document: root.session.document
         editController: root.session.editController
@@ -163,12 +149,9 @@ Item {
         dropdownToolActive: !secondaryPane && root.dropdownToolActive
         listBoxToolActive: !secondaryPane && root.listBoxToolActive
         combFieldToolActive: !secondaryPane && root.combFieldToolActive
-        zoom: root.session.splitViewMode
-                === PDFDocumentSession.SpreadsheetSplit
+        zoom: paneIndex === 0
             ? root.session.zoom
-            : paneIndex === 0
-                ? root.session.zoom
-                : paneState ? paneState.zoom : root.session.zoom
+            : paneState ? paneState.zoom : root.session.zoom
         viewRotation: root.session.viewRotation
         pageDisplayMode: root.session.pageDisplayMode
         separateCoverPage: root.session.separateCoverPage
@@ -184,11 +167,7 @@ Item {
             if (paneState)
                 paneState.currentPage = page
         }
-        onViewCurrentPageChanged:
-            root.coordinateSpreadsheetPage(paneIndex, viewCurrentPage)
         onActivated: root.activePaneIndex = paneIndex
-        onViewportPositionChanged: (x, y) =>
-            root.coordinateSpreadsheetScroll(paneIndex, x, y)
     }
 
     function expandCommentsPanelForSelection() {
@@ -246,10 +225,6 @@ Item {
     function viewStateForPane(paneIndex) {
         if (paneIndex === 1)
             return session.secondaryViewState
-        if (paneIndex === 2)
-            return session.bottomLeftViewState
-        if (paneIndex === 3)
-            return session.bottomRightViewState
         return null
     }
 
@@ -258,17 +233,12 @@ Item {
             return documentView
         if (paneIndex === 1)
             return splitDocumentView
-        if (paneIndex === 2)
-            return bottomLeftDocumentView
-        if (paneIndex === 3)
-            return bottomRightDocumentView
         return null
     }
 
     function setZoom(value) {
         const clampedZoom = Math.max(0.1, Math.min(5.0, value))
-        if (session.splitViewMode === PDFDocumentSession.SpreadsheetSplit
-                || activePaneIndex === 0) {
+        if (activePaneIndex === 0) {
             session.zoom = clampedZoom
             return
         }
@@ -301,7 +271,7 @@ Item {
     }
 
     function preparePaneViews() {
-        for (let paneIndex = 0; paneIndex < 4; ++paneIndex) {
+        for (let paneIndex = 0; paneIndex < 2; ++paneIndex) {
             const view = paneView(paneIndex)
             if (view)
                 view.prepareForSessionChange()
@@ -319,8 +289,6 @@ Item {
 
     function storeSplitPositions() {
         storePanePosition(1)
-        storePanePosition(2)
-        storePanePosition(3)
     }
 
     function initializePaneState(paneIndex) {
@@ -336,7 +304,7 @@ Item {
 
     function setSplitViewMode(mode) {
         if (mode < PDFDocumentSession.NoSplit
-                || mode > PDFDocumentSession.SpreadsheetSplit
+                || mode > PDFDocumentSession.HorizontalSplit
                 || session.splitViewMode === mode) {
             return
         }
@@ -345,14 +313,8 @@ Item {
         preparePaneViews()
         if (mode !== PDFDocumentSession.NoSplit)
             initializePaneState(1)
-        if (mode === PDFDocumentSession.SpreadsheetSplit) {
-            initializePaneState(2)
-            initializePaneState(3)
-        }
         session.splitViewMode = mode
-        if (mode === PDFDocumentSession.NoSplit
-                || (mode !== PDFDocumentSession.SpreadsheetSplit
-                    && activePaneIndex > 1)) {
+        if (mode === PDFDocumentSession.NoSplit) {
             activePaneIndex = 0
         }
     }
@@ -374,57 +336,6 @@ Item {
         }
     }
 
-    function coordinateSpreadsheetScroll(paneIndex, x, y) {
-        if (session.splitViewMode !== PDFDocumentSession.SpreadsheetSplit
-                || synchronizingSpreadsheetScroll) {
-            return
-        }
-
-        const topLeft = documentView
-        const topRight = splitDocumentView
-        const bottomLeft = bottomLeftDocumentView
-        const bottomRight = bottomRightDocumentView
-        if (!topRight || !bottomLeft || !bottomRight)
-            return
-
-        synchronizingSpreadsheetScroll = true
-        if (paneIndex === 0) {
-            bottomLeft.setViewportPosition(x, bottomLeft.contentY)
-            topRight.setViewportPosition(topRight.contentX, y)
-        } else if (paneIndex === 1) {
-            bottomRight.setViewportPosition(x, bottomRight.contentY)
-            topLeft.setViewportPosition(topLeft.contentX, y)
-        } else if (paneIndex === 2) {
-            topLeft.setViewportPosition(x, topLeft.contentY)
-            bottomRight.setViewportPosition(bottomRight.contentX, y)
-        } else if (paneIndex === 3) {
-            topRight.setViewportPosition(x, topRight.contentY)
-            bottomLeft.setViewportPosition(bottomLeft.contentX, y)
-        }
-        synchronizingSpreadsheetScroll = false
-    }
-
-    function coordinateSpreadsheetPage(paneIndex, page) {
-        if (session.splitViewMode !== PDFDocumentSession.SpreadsheetSplit
-                || synchronizingSpreadsheetPage) {
-            return
-        }
-
-        const sourceView = paneView(paneIndex)
-        if (!sourceView || !sourceView.pagedMode)
-            return
-        const pairedPane = paneIndex === 0 ? 1
-            : paneIndex === 1 ? 0
-                : paneIndex === 2 ? 3 : 2
-        const pairedView = paneView(pairedPane)
-        if (!pairedView || pairedView.viewCurrentPage === page)
-            return
-
-        synchronizingSpreadsheetPage = true
-        pairedView.navigateToPage(page)
-        synchronizingSpreadsheetPage = false
-    }
-
     function fitToWidth() {
         const maximumViewPageWidth = session.viewRotation % 180 === 0
             ? session.document.maximumPageWidth
@@ -441,6 +352,12 @@ Item {
 
     function navigateToPage(page) {
         documentView.navigateToPage(page)
+    }
+
+    function navigateActivePaneToPage(page) {
+        if (!activeDocumentView)
+            return -1
+        return activeDocumentView.navigateToPage(page)
     }
 
     function navigateByStep(direction) {
@@ -632,14 +549,10 @@ Item {
                     anchors.fill: parent
                     columns: root.session.splitViewMode
                             === PDFDocumentSession.VerticalSplit
-                        || root.session.splitViewMode
-                            === PDFDocumentSession.SpreadsheetSplit
                         ? 2 : 1
                     columnSpacing: columns > 1 ? 3 : 0
                     rowSpacing: root.session.splitViewMode
                             === PDFDocumentSession.HorizontalSplit
-                        || root.session.splitViewMode
-                            === PDFDocumentSession.SpreadsheetSplit
                         ? 3 : 0
                     uniformCellWidths: true
                     uniformCellHeights: true
@@ -680,52 +593,6 @@ Item {
                         sourceComponent: Component {
                             WorkspaceDocumentView {
                                 paneIndex: 1
-                            }
-                        }
-                    }
-
-                    Loader {
-                        id: bottomLeftDocumentViewLoader
-                        objectName: "bottomLeftDocumentViewLoader"
-
-                        Layout.row: 1
-                        Layout.column: 0
-                        Layout.fillWidth: active
-                        Layout.fillHeight: active
-                        Layout.preferredWidth: active ? 1 : 0
-                        Layout.preferredHeight: active ? 1 : 0
-                        active: root.session.document.loaded
-                            && root.session.splitViewMode
-                                === PDFDocumentSession.SpreadsheetSplit
-                        visible: active
-                        onLoaded: root.restorePane(2, item as DocumentView)
-
-                        sourceComponent: Component {
-                            WorkspaceDocumentView {
-                                paneIndex: 2
-                            }
-                        }
-                    }
-
-                    Loader {
-                        id: bottomRightDocumentViewLoader
-                        objectName: "bottomRightDocumentViewLoader"
-
-                        Layout.row: 1
-                        Layout.column: 1
-                        Layout.fillWidth: active
-                        Layout.fillHeight: active
-                        Layout.preferredWidth: active ? 1 : 0
-                        Layout.preferredHeight: active ? 1 : 0
-                        active: root.session.document.loaded
-                            && root.session.splitViewMode
-                                === PDFDocumentSession.SpreadsheetSplit
-                        visible: active
-                        onLoaded: root.restorePane(3, item as DocumentView)
-
-                        sourceComponent: Component {
-                            WorkspaceDocumentView {
-                                paneIndex: 3
                             }
                         }
                     }

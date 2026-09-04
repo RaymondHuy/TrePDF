@@ -25,6 +25,7 @@
 #include <QGuiApplication>
 #include <QImage>
 #include <QJSValue>
+#include <QLocale>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QQuickItem>
@@ -32,6 +33,7 @@
 #include <QQuickTextDocument>
 #include <QQuickWindow>
 #include <QRawFont>
+#include <QColorSpace>
 #include <QRegularExpression>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -616,6 +618,52 @@ bool createGrayscaleWhiteFillPdf(const QString &filePath)
             QByteArray(
                 "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
             contentStream(pageContent),
+        });
+}
+
+bool createIccBasedTextPdf(const QString &filePath)
+{
+    const QByteArray iccProfile = QColorSpace(QColorSpace::SRgb).iccProfile();
+    if (iccProfile.isEmpty()) {
+        return false;
+    }
+
+    const QByteArray pageContent(
+        "/CS1 cs\n"
+        "0 0.435294 0.752941 scn\n"
+        "BT\n"
+        "/F1 20 Tf\n"
+        "20 150 Td\n"
+        "(Untouched ICC blue) Tj\n"
+        "ET\n"
+        "0 g\n"
+        "BT\n"
+        "/F1 20 Tf\n"
+        "20 80 Td\n"
+        "(Editable sibling) Tj\n"
+        "ET\n");
+    const auto contentStream = [](const QByteArray &dictionary,
+                                  const QByteArray &content) {
+        return dictionary + " /Length " + QByteArray::number(content.size())
+            + " >>\nstream\n" + content + "\nendstream";
+    };
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /F1 4 0 R >> "
+                "/ColorSpace << /CS1 [/ICCBased 6 0 R] >> >> "
+                "/Contents 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+            contentStream("<<", pageContent),
+            contentStream(
+                "<< /N 3 /Alternate /DeviceRGB",
+                iccProfile),
         });
 }
 
@@ -2713,6 +2761,76 @@ QString pageObjectText(FPDF_PAGEOBJECT object, FPDF_TEXTPAGE textPage)
     return QString::fromUtf16(
         reinterpret_cast<const char16_t *>(buffer.constData()),
         characterCount);
+}
+
+struct TextPaintInspection {
+    bool readable = false;
+    bool found = false;
+    int objectType = FPDF_PAGEOBJ_UNKNOWN;
+    FPDF_TEXT_RENDERMODE renderMode = FPDF_TEXTRENDERMODE_UNKNOWN;
+    bool hasFillColor = false;
+    QColor fillColor;
+};
+
+TextPaintInspection inspectTopLevelTextPaint(const QString &filePath,
+                                             const QString &targetText)
+{
+    PDFiumProcessLock pdfiumLock;
+    TextPaintInspection inspection;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    inspection.readable = document && page && textPage;
+    if (inspection.readable) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (!object) {
+                continue;
+            }
+            const int objectType = FPDFPageObj_GetType(object);
+            if (objectType != FPDF_PAGEOBJ_TEXT
+                || !pageObjectText(object, textPage).contains(targetText)) {
+                continue;
+            }
+
+            inspection.found = true;
+            inspection.objectType = objectType;
+            inspection.renderMode = FPDFTextObj_GetTextRenderMode(object);
+            unsigned int red = 0;
+            unsigned int green = 0;
+            unsigned int blue = 0;
+            unsigned int alpha = 0;
+            inspection.hasFillColor = FPDFPageObj_GetFillColor(
+                object,
+                &red,
+                &green,
+                &blue,
+                &alpha);
+            if (inspection.hasFillColor) {
+                inspection.fillColor = QColor::fromRgb(
+                    red,
+                    green,
+                    blue,
+                    alpha);
+            }
+            break;
+        }
+    }
+
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return inspection;
 }
 
 QString baseFontName(FPDF_PAGEOBJECT textObject)
@@ -5372,6 +5490,8 @@ private slots:
     void preservesPatternFilledGraphicsWhenSavingText();
     void preservesPatternStrokedGraphicsWhenSavingText();
     void preservesGrayscaleWhiteFillWhenSavingText();
+    void preservesIccBasedTextColorWhenEditingSibling();
+    void preservesIccBasedTextColorWhenAddingText();
     void savesVietnameseEditWithEmbeddedArial_data();
     void savesVietnameseEditWithEmbeddedArial();
     void savesVietnameseEditWithEmbeddedSystemFont_data();
@@ -5419,6 +5539,9 @@ private slots:
     void defaultsCommentTabToCommentSelectTool();
     void keepsViewSearchStatePerTab();
     void appliesPageDisplayActionsToActiveTab();
+    void supportsHorizontalScrollingAcrossPageDisplayModes();
+    void keepsHorizontalScrollingIndependentAcrossSplitPanes();
+    void controlsReaderStatusBarForActiveTab();
     void guardsRibbonActionsWithPendingCommentPanel();
     void editsSourceStickyNoteComment();
     void editsSourceTextMarkupComment_data();
@@ -12568,6 +12691,104 @@ void PDFEditControllerTest::preservesGrayscaleWhiteFillWhenSavingText()
         0);
 }
 
+void PDFEditControllerTest::preservesIccBasedTextColorWhenEditingSibling()
+{
+    const QString untouchedText = QStringLiteral("Untouched ICC blue");
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("icc-text-edit-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("icc-text-edit-output.pdf"));
+    QVERIFY(createIccBasedTextPdf(sourcePath));
+
+    const auto verifyUntouchedBlueText = [&untouchedText](
+                                             const QString &filePath) {
+        const TextPaintInspection inspection = inspectTopLevelTextPaint(
+            filePath,
+            untouchedText);
+        QVERIFY(inspection.readable);
+        QVERIFY(inspection.found);
+        QCOMPARE(inspection.objectType, FPDF_PAGEOBJ_TEXT);
+        QCOMPARE(inspection.renderMode, FPDF_TEXTRENDERMODE_FILL);
+        QVERIFY(inspection.hasFillColor);
+        QVERIFY2(
+            qAbs(inspection.fillColor.red() - 0) <= 2
+                && qAbs(inspection.fillColor.green() - 111) <= 2
+                && qAbs(inspection.fillColor.blue() - 192) <= 2
+                && inspection.fillColor.alpha() == 255,
+            qPrintable(QStringLiteral("Unexpected text fill: %1")
+                           .arg(inspection.fillColor.name(QColor::HexArgb))));
+        QVERIFY(normalizedPageText(filePath).contains(untouchedText));
+    };
+    verifyUntouchedBlueText(sourcePath);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0),
+        QStringLiteral("Editable sibling"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0,
+        candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Edited sibling"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    verifyUntouchedBlueText(outputPath);
+    QVERIFY(normalizedPageText(outputPath).contains(
+        QStringLiteral("Edited sibling")));
+    const QVariantMap savedCandidate = candidateForText(
+        waitForCandidates(controller, 0),
+        untouchedText);
+    QVERIFY(!savedCandidate.isEmpty());
+    QCOMPARE(
+        savedCandidate.value(QStringLiteral("kind")).toString(),
+        QStringLiteral("text"));
+
+    const QString verificationPath = qEnvironmentVariable(
+        "TREPDF_ICC_TEXT_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(outputPath, verificationPath));
+    }
+}
+
+void PDFEditControllerTest::preservesIccBasedTextColorWhenAddingText()
+{
+    const QString untouchedText = QStringLiteral("Untouched ICC blue");
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("icc-text-add-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("icc-text-add-output.pdf"));
+    QVERIFY(createIccBasedTextPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.addText(0, 0.2, 0.55).isEmpty());
+    controller.updateSelectedTextPreview(QStringLiteral("Added text"));
+    controller.finishSelectedTextEdit();
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const TextPaintInspection inspection = inspectTopLevelTextPaint(
+        outputPath,
+        untouchedText);
+    QVERIFY(inspection.readable);
+    QVERIFY(inspection.found);
+    QCOMPARE(inspection.objectType, FPDF_PAGEOBJ_TEXT);
+    QCOMPARE(inspection.renderMode, FPDF_TEXTRENDERMODE_FILL);
+    QVERIFY(inspection.hasFillColor);
+    QVERIFY(qAbs(inspection.fillColor.red() - 0) <= 2);
+    QVERIFY(qAbs(inspection.fillColor.green() - 111) <= 2);
+    QVERIFY(qAbs(inspection.fillColor.blue() - 192) <= 2);
+    QCOMPARE(inspection.fillColor.alpha(), 255);
+    const QString savedText = normalizedPageText(outputPath);
+    QVERIFY(savedText.contains(untouchedText));
+    QVERIFY(savedText.contains(QStringLiteral("Added text")));
+}
+
 void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial_data()
 {
     QTest::addColumn<QString>("editedText");
@@ -17035,7 +17256,6 @@ void PDFEditControllerTest::appliesPageDisplayActionsToActiveTab()
     QObject *splitModeMenu = nullptr;
     QObject *verticalSplitItem = nullptr;
     QObject *horizontalSplitItem = nullptr;
-    QObject *spreadsheetSplitItem = nullptr;
     QObject *previousPageButton = nullptr;
     QObject *nextPageButton = nullptr;
     QTRY_VERIFY_WITH_TIMEOUT(
@@ -17064,8 +17284,6 @@ void PDFEditControllerTest::appliesPageDisplayActionsToActiveTab()
                 QStringLiteral("verticalSplitPageDisplayItem"));
             horizontalSplitItem = mainWindow->findChild<QObject *>(
                 QStringLiteral("horizontalSplitPageDisplayItem"));
-            spreadsheetSplitItem = mainWindow->findChild<QObject *>(
-                QStringLiteral("spreadsheetSplitPageDisplayItem"));
             previousPageButton = mainWindow->findChild<QObject *>(
                 QStringLiteral("previousViewPageButton"));
             nextPageButton = mainWindow->findChild<QObject *>(
@@ -17082,11 +17300,12 @@ void PDFEditControllerTest::appliesPageDisplayActionsToActiveTab()
                 && splitModeMenu
                 && verticalSplitItem
                 && horizontalSplitItem
-                && spreadsheetSplitItem
                 && previousPageButton
                 && nextPageButton;
         })(),
         3000);
+    QVERIFY(!mainWindow->findChild<QObject *>(
+        QStringLiteral("spreadsheetSplitPageDisplayItem")));
 
     const auto click = [](QObject *item) {
         return QMetaObject::invokeMethod(
@@ -17218,37 +17437,6 @@ void PDFEditControllerTest::appliesPageDisplayActionsToActiveTab()
             > primaryView->property("y").toReal(),
         3000);
 
-    QVERIFY(trigger(spreadsheetSplitItem));
-    QTRY_COMPARE_WITH_TIMEOUT(
-        firstSession->splitViewMode(),
-        PDFDocumentSession::SpreadsheetSplit,
-        1000);
-    QObject *bottomLeftView = nullptr;
-    QObject *bottomRightView = nullptr;
-    QObject *bottomLeftViewLoader = nullptr;
-    QObject *bottomRightViewLoader = nullptr;
-    QTRY_VERIFY_WITH_TIMEOUT(
-        ([&]() {
-            bottomLeftView = mainWindow->findChild<QObject *>(
-                QStringLiteral("bottomLeftDocumentView"));
-            bottomRightView = mainWindow->findChild<QObject *>(
-                QStringLiteral("bottomRightDocumentView"));
-            bottomLeftViewLoader = mainWindow->findChild<QObject *>(
-                QStringLiteral("bottomLeftDocumentViewLoader"));
-            bottomRightViewLoader = mainWindow->findChild<QObject *>(
-                QStringLiteral("bottomRightDocumentViewLoader"));
-            return bottomLeftView
-                && bottomRightView
-                && bottomLeftViewLoader
-                && bottomRightViewLoader
-                && polishSplitLayout(secondaryViewLoader);
-        })(),
-        3000);
-    QVERIFY(bottomLeftViewLoader->property("y").toReal()
-            > primaryView->property("y").toReal());
-    QVERIFY(bottomRightViewLoader->property("x").toReal()
-            > bottomLeftViewLoader->property("x").toReal());
-
     PDFDocumentSession *secondSession = tabModel->open(
         QUrl::fromLocalFile(secondPath));
     QVERIFY(secondSession);
@@ -17301,7 +17489,7 @@ void PDFEditControllerTest::appliesPageDisplayActionsToActiveTab()
     QTRY_VERIFY_WITH_TIMEOUT(
         pageDisplayControl->property("splitViewEnabled").toBool(),
         1000);
-    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::SpreadsheetSplit);
+    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::HorizontalSplit);
 
     QVERIFY(click(continuousItem));
     QTRY_COMPARE_WITH_TIMEOUT(
@@ -17321,6 +17509,746 @@ void PDFEditControllerTest::appliesPageDisplayActionsToActiveTab()
         1000);
     QVERIFY(click(splitItem));
     QTRY_VERIFY_WITH_TIMEOUT(!firstSession->splitViewEnabled(), 1000);
+
+    QVERIFY(mainWindow->setProperty("allowWindowClose", true));
+}
+
+void PDFEditControllerTest::supportsHorizontalScrollingAcrossPageDisplayModes()
+{
+    if (QGuiApplication::screens().isEmpty()) {
+        QSKIP("The horizontal scrolling integration test needs a Qt Quick screen.");
+    }
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("horizontal-scrolling-ui.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString mainPath = QFINDTESTDATA("../src/Main.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!mainPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent mainComponent(
+        &engine,
+        QUrl::fromLocalFile(mainPath));
+    std::unique_ptr<QObject> mainWindow(mainComponent.create());
+    QVERIFY2(mainWindow, qPrintable(mainComponent.errorString()));
+    QVERIFY(mainWindow->setProperty("visible", false));
+
+    auto *tabModel = mainWindow->findChild<PDFTabModel *>();
+    QVERIFY(tabModel);
+    PDFDocumentSession *session = tabModel->open(
+        QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+
+    QObject *workspace = nullptr;
+    QObject *primaryView = nullptr;
+    QObject *pageList = nullptr;
+    QObject *horizontalScrollBar = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            workspace = mainWindow->findChild<QObject *>(
+                QStringLiteral("documentWorkspace"));
+            primaryView = mainWindow->findChild<QObject *>(
+                QStringLiteral("primaryDocumentView"));
+            pageList = primaryView
+                ? primaryView->findChild<QObject *>(
+                    QStringLiteral("documentPageList"))
+                : nullptr;
+            horizontalScrollBar = primaryView
+                ? primaryView->findChild<QObject *>(
+                    QStringLiteral("documentHorizontalScrollBar"))
+                : nullptr;
+            return workspace && primaryView && pageList && horizontalScrollBar;
+        })(),
+        3000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        workspace->property("initialViewReady").toBool(),
+        3000);
+
+    const auto setPosition = [primaryView](qreal x, qreal y) {
+        return QMetaObject::invokeMethod(
+            primaryView,
+            "setViewportPosition",
+            Qt::DirectConnection,
+            Q_ARG(QVariant, x),
+            Q_ARG(QVariant, y));
+    };
+    session->setZoom(3.0);
+    const QVector<PDFDocumentSession::PageDisplayMode> modes{
+        PDFDocumentSession::SinglePageMode,
+        PDFDocumentSession::ContinuousMode,
+        PDFDocumentSession::FacingMode,
+        PDFDocumentSession::ContinuousFacingMode,
+    };
+    for (const PDFDocumentSession::PageDisplayMode mode : modes) {
+        const int previousNavigationGeneration
+            = primaryView->property("navigationGeneration").toInt();
+        session->setPageDisplayMode(mode);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            primaryView->property("navigationGeneration").toInt()
+                >= previousNavigationGeneration + 2,
+            2000);
+        QTRY_COMPARE_WITH_TIMEOUT(
+            primaryView->property("pendingNavigationPage").toInt(),
+            -1,
+            2000);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            pageList->property("contentWidth").toReal()
+                > pageList->property("width").toReal() + 1.0,
+            2000);
+
+        const qreal maximumX
+            = pageList->property("contentWidth").toReal()
+            - pageList->property("width").toReal();
+        const qreal targetX = maximumX * 0.5;
+        QVERIFY(setPosition(targetX, 0.0));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(pageList->property("contentX").toReal() - targetX) < 1.0,
+            1000);
+        QVERIFY(horizontalScrollBar->property("size").toReal() < 0.999);
+        auto *thumb = qvariant_cast<QQuickItem *>(
+            horizontalScrollBar->property("contentItem"));
+        QVERIFY(thumb);
+        QTRY_VERIFY_WITH_TIMEOUT(thumb->opacity() > 0.5, 1000);
+
+        // An attached scrollbar must move the same content as programmatic pan.
+        const qreal barTargetX = maximumX * 0.25;
+        QVERIFY(horizontalScrollBar->setProperty(
+            "position",
+            barTargetX / pageList->property("contentWidth").toReal()));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(pageList->property("contentX").toReal() - barTargetX) < 1.0,
+            1000);
+        if (mode == PDFDocumentSession::SinglePageMode
+            || mode == PDFDocumentSession::FacingMode) {
+            const int pageBefore = session->document()->currentPage();
+            QVariant handled;
+            QVERIFY(QMetaObject::invokeMethod(
+                primaryView,
+                "scrollPagedBy",
+                Qt::DirectConnection,
+                Q_RETURN_ARG(QVariant, handled),
+                Q_ARG(QVariant, 48.0),
+                Q_ARG(QVariant, 0.0)));
+            QVERIFY(handled.toBool());
+            QVERIFY(pageList->property("contentX").toReal() > barTargetX);
+            QCOMPARE(session->document()->currentPage(), pageBefore);
+        }
+
+        QVERIFY(setPosition(maximumX + 500.0, 0.0));
+        QCOMPARE(pageList->property("contentX").toReal(), maximumX);
+        session->setZoom(0.1);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(pageList->property("contentWidth").toReal()
+                 - pageList->property("width").toReal()) < 1.0,
+            2000);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            qAbs(pageList->property("contentX").toReal()) < 1.0,
+            1000);
+        QTRY_VERIFY_WITH_TIMEOUT(thumb->opacity() < 0.01, 1000);
+        session->setZoom(3.0);
+    }
+
+    const qreal unrotatedWidth = pageList->property("contentWidth").toReal();
+    session->setViewRotation(90);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        pageList->property("contentWidth").toReal() > unrotatedWidth,
+        2000);
+    QVERIFY(setPosition(120.0, 0.0));
+    QCOMPARE(pageList->property("contentX").toReal(), 120.0);
+
+    QVERIFY(mainWindow->setProperty("allowWindowClose", true));
+}
+
+void PDFEditControllerTest::keepsHorizontalScrollingIndependentAcrossSplitPanes()
+{
+    if (QGuiApplication::screens().isEmpty()) {
+        QSKIP("The split horizontal scrolling test needs a Qt Quick screen.");
+    }
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("split-horizontal-scrolling-ui.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+    const QString themePath = QFINDTESTDATA("../src/Components/AppTheme.qml");
+    const QString mainPath = QFINDTESTDATA("../src/Main.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!mainPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent mainComponent(&engine, QUrl::fromLocalFile(mainPath));
+    std::unique_ptr<QObject> mainWindow(mainComponent.create());
+    QVERIFY2(mainWindow, qPrintable(mainComponent.errorString()));
+    QVERIFY(mainWindow->setProperty("visible", false));
+    auto *tabModel = mainWindow->findChild<PDFTabModel *>();
+    QVERIFY(tabModel);
+    PDFDocumentSession *session = tabModel->open(QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+
+    QObject *workspace = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            workspace = mainWindow->findChild<QObject *>(
+                QStringLiteral("documentWorkspace"));
+            return workspace && workspace->property("initialViewReady").toBool();
+        })(),
+        3000);
+    session->setZoom(3.0);
+    session->setPageDisplayMode(PDFDocumentSession::FacingMode);
+    auto *primaryView = workspace->findChild<QObject *>(
+        QStringLiteral("primaryDocumentView"));
+    QVERIFY(primaryView);
+    auto *primaryList = primaryView->findChild<QObject *>(
+        QStringLiteral("documentPageList"));
+    QVERIFY(primaryList);
+
+    const auto setSplitMode = [workspace](PDFDocumentSession::SplitViewMode mode) {
+        return QMetaObject::invokeMethod(
+            workspace, "setSplitViewMode", Qt::DirectConnection,
+            Q_ARG(QVariant, static_cast<int>(mode)));
+    };
+    const auto setPosition = [](QObject *view, qreal x) {
+        return QMetaObject::invokeMethod(
+            view, "setViewportPosition", Qt::DirectConnection,
+            Q_ARG(QVariant, x), Q_ARG(QVariant, 0.0));
+    };
+    const QVector<PDFDocumentSession::SplitViewMode> splitModes{
+        PDFDocumentSession::VerticalSplit,
+        PDFDocumentSession::HorizontalSplit,
+    };
+    for (const auto mode : splitModes) {
+        QVERIFY(setSplitMode(mode));
+        QObject *secondaryView = nullptr;
+        QObject *secondaryList = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT(
+            ([&]() {
+                auto *loader = workspace->findChild<QQuickItem *>(
+                    QStringLiteral("secondaryDocumentViewLoader"));
+                if (loader && loader->parentItem())
+                    loader->parentItem()->ensurePolished();
+                secondaryView = workspace->findChild<QObject *>(
+                    QStringLiteral("secondaryDocumentView"));
+                secondaryList = secondaryView
+                    ? secondaryView->findChild<QObject *>(
+                        QStringLiteral("documentPageList"))
+                    : nullptr;
+                return secondaryList
+                    && secondaryList->property("contentWidth").toReal()
+                        > secondaryList->property("width").toReal() + 160.0;
+            })(),
+            3000);
+        QCoreApplication::processEvents();
+        QTRY_COMPARE_WITH_TIMEOUT(
+            primaryView->property("pendingNavigationPage").toInt(), -1, 2000);
+        QVERIFY(setPosition(primaryView, 80.0));
+        QVERIFY(setPosition(secondaryView, 160.0));
+        QTRY_COMPARE_WITH_TIMEOUT(primaryList->property("contentX").toReal(), 80.0, 1000);
+        QTRY_COMPARE_WITH_TIMEOUT(secondaryList->property("contentX").toReal(), 160.0, 1000);
+
+        QVERIFY(setSplitMode(PDFDocumentSession::NoSplit));
+        QCOMPARE(session->secondaryViewState()->scrollX(), 160.0);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !workspace->findChild<QObject *>(QStringLiteral("secondaryDocumentView")),
+            1000);
+        QVERIFY(setSplitMode(mode));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            ([&]() {
+                secondaryView = workspace->findChild<QObject *>(
+                    QStringLiteral("secondaryDocumentView"));
+                return secondaryView
+                    && qAbs(secondaryView->property("contentX").toReal() - 160.0) < 1.0;
+            })(),
+            3000);
+        QCOMPARE(primaryList->property("contentX").toReal(), 80.0);
+        QVERIFY(setSplitMode(PDFDocumentSession::NoSplit));
+    }
+
+    QVERIFY(mainWindow->setProperty("allowWindowClose", true));
+}
+
+void PDFEditControllerTest::controlsReaderStatusBarForActiveTab()
+{
+    if (QGuiApplication::screens().isEmpty()) {
+        QSKIP("The reader status bar integration test needs a Qt Quick screen.");
+    }
+
+    const QString firstPath = m_temporaryDirectory.filePath(
+        QStringLiteral("reader-status-bar-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("reader-status-bar-second.pdf"));
+    QVERIFY(createThreePageTextPdf(firstPath));
+    QVERIFY(createThreePageTextPdf(secondPath));
+
+    const QString themePath = QFINDTESTDATA(
+        "../src/Components/AppTheme.qml");
+    const QString mainPath = QFINDTESTDATA("../src/Main.qml");
+    QVERIFY(!themePath.isEmpty());
+    QVERIFY(!mainPath.isEmpty());
+    QVERIFY(registerQmlTestTypes(themePath));
+
+    QQmlEngine engine;
+    QQmlComponent mainComponent(
+        &engine,
+        QUrl::fromLocalFile(mainPath));
+    std::unique_ptr<QObject> mainWindow(mainComponent.create());
+    QVERIFY2(mainWindow, qPrintable(mainComponent.errorString()));
+    QVERIFY(mainWindow->setProperty("visible", false));
+
+    auto *tabModel = mainWindow->findChild<PDFTabModel *>();
+    QVERIFY(tabModel);
+    PDFDocumentSession *firstSession = tabModel->open(
+        QUrl::fromLocalFile(firstPath));
+    QVERIFY(firstSession);
+
+    QObject *controlBar = nullptr;
+    QObject *firstPageButton = nullptr;
+    QObject *previousPageButton = nullptr;
+    QObject *pageField = nullptr;
+    QObject *pageCountLabel = nullptr;
+    QObject *nextPageButton = nullptr;
+    QObject *lastPageButton = nullptr;
+    QObject *previousViewButton = nullptr;
+    QObject *nextViewButton = nullptr;
+    QObject *singlePageButton = nullptr;
+    QObject *continuousPageButton = nullptr;
+    QObject *facingPageButton = nullptr;
+    QObject *continuousFacingPageButton = nullptr;
+    QObject *zoomOutButton = nullptr;
+    QObject *zoomSlider = nullptr;
+    QObject *zoomInButton = nullptr;
+    QObject *zoomComboBox = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            controlBar = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerControlBar"));
+            firstPageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerFirstPageButton"));
+            previousPageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerPreviousPageButton"));
+            pageField = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerPageField"));
+            pageCountLabel = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerPageCountLabel"));
+            nextPageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerNextPageButton"));
+            lastPageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerLastPageButton"));
+            previousViewButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerPreviousViewButton"));
+            nextViewButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerNextViewButton"));
+            singlePageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerSinglePageButton"));
+            continuousPageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerContinuousPageButton"));
+            facingPageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerFacingPageButton"));
+            continuousFacingPageButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerContinuousFacingPageButton"));
+            zoomOutButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerZoomOutButton"));
+            zoomSlider = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerZoomSlider"));
+            zoomInButton = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerZoomInButton"));
+            zoomComboBox = mainWindow->findChild<QObject *>(
+                QStringLiteral("readerZoomComboBox"));
+            return controlBar
+                && firstPageButton
+                && previousPageButton
+                && pageField
+                && pageCountLabel
+                && nextPageButton
+                && lastPageButton
+                && previousViewButton
+                && nextViewButton
+                && singlePageButton
+                && continuousPageButton
+                && facingPageButton
+                && continuousFacingPageButton
+                && zoomOutButton
+                && zoomSlider
+                && zoomInButton
+                && zoomComboBox;
+        })(),
+        3000);
+
+    const auto click = [](QObject *item) {
+        return QMetaObject::invokeMethod(
+            item,
+            "clicked",
+            Qt::DirectConnection);
+    };
+
+    QCOMPARE(controlBar->property("pageCount").toInt(), 3);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageField->property("text").toString(),
+        QStringLiteral("1"),
+        1000);
+    QVERIFY(pageCountLabel->property("text").toString().contains(
+        QStringLiteral("3")));
+    QVERIFY(!firstPageButton->property("enabled").toBool());
+    QVERIFY(!previousPageButton->property("enabled").toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(
+        controlBar->property("viewReady").toBool(),
+        3000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        nextPageButton->property("enabled").toBool(),
+        1000);
+    QVERIFY(lastPageButton->property("enabled").toBool());
+    QVERIFY(!previousViewButton->property("enabled").toBool());
+    QVERIFY(!nextViewButton->property("enabled").toBool());
+    QVERIFY(singlePageButton->property("checkable").toBool());
+    QVERIFY(continuousPageButton->property("checkable").toBool());
+    QVERIFY(facingPageButton->property("checkable").toBool());
+    QVERIFY(continuousFacingPageButton->property("checkable").toBool());
+    QVERIFY(singlePageButton->property("autoExclusive").toBool());
+    QVERIFY(continuousPageButton->property("autoExclusive").toBool());
+    QVERIFY(facingPageButton->property("autoExclusive").toBool());
+    QVERIFY(continuousFacingPageButton->property("autoExclusive").toBool());
+    QVERIFY(continuousPageButton->property("selected").toBool());
+    QVERIFY(continuousPageButton->property("checked").toBool());
+
+    QVERIFY(click(nextPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 1, 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageField->property("text").toString(),
+        QStringLiteral("2"),
+        1000);
+    QVERIFY(firstPageButton->property("enabled").toBool());
+    QVERIFY(previousPageButton->property("enabled").toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(
+        previousViewButton->property("enabled").toBool(),
+        1000);
+    QVERIFY(!nextViewButton->property("enabled").toBool());
+
+    QVERIFY(click(previousViewButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 0, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        nextViewButton->property("enabled").toBool(),
+        1000);
+    QVERIFY(click(nextViewButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 1, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        previousViewButton->property("enabled").toBool(),
+        1000);
+    QVERIFY(!nextViewButton->property("enabled").toBool());
+
+    firstSession->document()->setCurrentPage(2);
+    QCoreApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !controlBar->property("_observationPending").toBool(),
+        1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageField->property("text").toString(),
+        QStringLiteral("3"),
+        1000);
+    QVERIFY(click(previousViewButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 1, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        nextViewButton->property("enabled").toBool(),
+        1000);
+
+    QVERIFY(click(lastPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 2, 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageField->property("text").toString(),
+        QStringLiteral("3"),
+        1000);
+    QVERIFY(!nextPageButton->property("enabled").toBool());
+    QVERIFY(!lastPageButton->property("enabled").toBool());
+
+    QVERIFY(click(firstPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 0, 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageField->property("text").toString(),
+        QStringLiteral("1"),
+        1000);
+    QVERIFY(!firstPageButton->property("enabled").toBool());
+    QVERIFY(!previousPageButton->property("enabled").toBool());
+
+    QVERIFY(pageField->setProperty("text", QStringLiteral("2")));
+    QVERIFY(QMetaObject::invokeMethod(
+        pageField,
+        "accepted",
+        Qt::DirectConnection));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 1, 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageField->property("text").toString(),
+        QStringLiteral("2"),
+        1000);
+    QVERIFY(click(firstPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 0, 1000);
+
+    QVERIFY(click(lastPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 2, 1000);
+
+    QVERIFY(click(singlePageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->pageDisplayMode(),
+        PDFDocumentSession::SinglePageMode,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        singlePageButton->property("selected").toBool(),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        singlePageButton->property("checked").toBool(),
+        1000);
+
+    QVERIFY(click(continuousFacingPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->pageDisplayMode(),
+        PDFDocumentSession::ContinuousFacingMode,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        continuousFacingPageButton->property("selected").toBool(),
+        1000);
+
+    QVERIFY(click(facingPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->pageDisplayMode(),
+        PDFDocumentSession::FacingMode,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        facingPageButton->property("selected").toBool(),
+        1000);
+
+    const qreal initialZoom = firstSession->zoom();
+    const qreal initialSliderValue = zoomSlider->property("value").toReal();
+    const QString initialZoomText
+        = zoomComboBox->property("displayText").toString();
+    QVERIFY(!initialZoomText.isEmpty());
+    QVERIFY(click(zoomInButton));
+    QTRY_VERIFY_WITH_TIMEOUT(firstSession->zoom() > initialZoom, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        zoomSlider->property("value").toReal() > initialSliderValue,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        zoomComboBox->property("displayText").toString() != initialZoomText,
+        1000);
+
+    const qreal increasedZoom = firstSession->zoom();
+    QVERIFY(click(zoomOutButton));
+    QTRY_VERIFY_WITH_TIMEOUT(firstSession->zoom() < increasedZoom, 1000);
+    QVERIFY(click(zoomInButton));
+    QTRY_VERIFY_WITH_TIMEOUT(firstSession->zoom() > initialZoom, 1000);
+    QCoreApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !controlBar->property("_observationPending").toBool(),
+        1000);
+    const qreal firstZoom = firstSession->zoom();
+    const qreal firstSliderValue = zoomSlider->property("value").toReal();
+    const QString firstZoomText
+        = zoomComboBox->property("displayText").toString();
+
+    const qreal externalZoom = firstZoom > 4.5
+        ? firstZoom - 0.37
+        : firstZoom + 0.37;
+    firstSession->setZoom(externalZoom);
+    QCoreApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !controlBar->property("_observationPending").toBool(),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(firstSession->zoom() - externalZoom) < 0.0001,
+        1000);
+    QVERIFY(click(previousViewButton));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(firstSession->zoom() - firstZoom) < 0.0001,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        nextViewButton->property("enabled").toBool(),
+        1000);
+    QVERIFY(click(nextViewButton));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(firstSession->zoom() - externalZoom) < 0.0001,
+        1000);
+    QVERIFY(click(previousViewButton));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(firstSession->zoom() - firstZoom) < 0.0001,
+        1000);
+
+    PDFDocumentSession *secondSession = tabModel->open(
+        QUrl::fromLocalFile(secondPath));
+    QVERIFY(secondSession);
+    QVERIFY(secondSession != firstSession);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageField->property("text").toString(),
+        QStringLiteral("1"),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        continuousPageButton->property("selected").toBool(),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        nextPageButton->property("enabled").toBool(),
+        3000);
+
+    QVERIFY(click(nextPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(secondSession->document()->currentPage(), 1, 1000);
+    QCoreApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !controlBar->property("_observationPending").toBool(),
+        1000);
+    QVERIFY(click(singlePageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        secondSession->pageDisplayMode(),
+        PDFDocumentSession::SinglePageMode,
+        1000);
+    const qreal secondInitialZoom = secondSession->zoom();
+    QVERIFY(click(zoomOutButton));
+    QTRY_VERIFY_WITH_TIMEOUT(secondSession->zoom() < secondInitialZoom, 1000);
+    const qreal secondZoom = secondSession->zoom();
+    QCoreApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !controlBar->property("_observationPending").toBool(),
+        1000);
+
+    tabModel->setCurrentIndex(0);
+    QTRY_COMPARE_WITH_TIMEOUT(firstSession->document()->currentPage(), 2, 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageField->property("text").toString(),
+        QStringLiteral("3"),
+        1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->pageDisplayMode(),
+        PDFDocumentSession::FacingMode,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        facingPageButton->property("selected").toBool(),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(firstSession->zoom() - firstZoom) < 0.0001,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(zoomSlider->property("value").toReal() - firstSliderValue)
+            < 0.0001,
+        1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        zoomComboBox->property("displayText").toString(),
+        firstZoomText,
+        1000);
+
+    tabModel->setCurrentIndex(1);
+    QTRY_COMPARE_WITH_TIMEOUT(secondSession->document()->currentPage(), 1, 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageField->property("text").toString(),
+        QStringLiteral("2"),
+        1000);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        secondSession->pageDisplayMode(),
+        PDFDocumentSession::SinglePageMode,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        singlePageButton->property("selected").toBool(),
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(secondSession->zoom() - secondZoom) < 0.0001,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        previousViewButton->property("enabled").toBool(),
+        1000);
+    QVERIFY(click(previousViewButton));
+    QTRY_COMPARE_WITH_TIMEOUT(secondSession->document()->currentPage(), 1, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(secondSession->zoom() - secondInitialZoom) < 0.0001,
+        1000);
+    QVERIFY(click(previousViewButton));
+    QTRY_COMPARE_WITH_TIMEOUT(secondSession->document()->currentPage(), 0, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        nextViewButton->property("enabled").toBool(),
+        1000);
+    QVERIFY(click(nextViewButton));
+    QTRY_COMPARE_WITH_TIMEOUT(secondSession->document()->currentPage(), 1, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(secondSession->zoom() - secondInitialZoom) < 0.0001,
+        1000);
+    QVERIFY(click(nextViewButton));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        qAbs(secondSession->zoom() - secondZoom) < 0.0001,
+        1000);
+
+    tabModel->setCurrentIndex(0);
+    QObject *splitItem = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            splitItem = mainWindow->findChild<QObject *>(
+                QStringLiteral("splitPageDisplayItem"));
+            return splitItem != nullptr;
+        })(),
+        1000);
+    QVERIFY(click(splitItem));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->splitViewMode(),
+        PDFDocumentSession::VerticalSplit,
+        1000);
+
+    QObject *secondaryView = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        ([&]() {
+            secondaryView = mainWindow->findChild<QObject *>(
+                QStringLiteral("secondaryDocumentView"));
+            return secondaryView != nullptr;
+        })(),
+        3000);
+    QVERIFY(QMetaObject::invokeMethod(
+        secondaryView,
+        "activated",
+        Qt::DirectConnection));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controlBar->property("navigationPage").toInt(),
+        2,
+        1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        firstPageButton->property("enabled").toBool(),
+        1000);
+
+    QVERIFY(click(firstPageButton));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        firstSession->secondaryViewState()->currentPage(),
+        0,
+        1000);
+    QCOMPARE(firstSession->document()->currentPage(), 2);
+
+    const qreal primaryZoomBefore = firstSession->zoom();
+    const qreal secondaryZoomBefore
+        = firstSession->secondaryViewState()->zoom();
+    QVERIFY(click(zoomOutButton));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        firstSession->secondaryViewState()->zoom() < secondaryZoomBefore,
+        1000);
+    QCOMPARE(firstSession->zoom(), primaryZoomBefore);
+
+    QVERIFY(tabModel->closeSession(firstSession));
+    PDFDocumentSession *reopenedSession = tabModel->open(
+        QUrl::fromLocalFile(firstPath));
+    QVERIFY(reopenedSession);
+    QVERIFY(reopenedSession != firstSession);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        controlBar->property("viewReady").toBool(),
+        3000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        nextPageButton->property("enabled").toBool(),
+        1000);
+    QVERIFY(!previousViewButton->property("enabled").toBool());
+    QVERIFY(!nextViewButton->property("enabled").toBool());
+
+    QVERIFY(controlBar->setProperty("pageCount", 2000));
+    const QString localizedPage = QLocale().toString(1000);
+    QVERIFY(localizedPage != QStringLiteral("1000"));
+    QVERIFY(pageField->setProperty("text", localizedPage));
+    QVERIFY(pageField->property("acceptableInput").toBool());
+    QSignalSpy pageRequestedSpy(controlBar, SIGNAL(pageRequested(int)));
+    QVERIFY(pageRequestedSpy.isValid());
+    QVERIFY(QMetaObject::invokeMethod(
+        pageField,
+        "accepted",
+        Qt::DirectConnection));
+    QCOMPARE(pageRequestedSpy.count(), 1);
+    QCOMPARE(pageRequestedSpy.takeFirst().at(0).toInt(), 999);
 
     QVERIFY(mainWindow->setProperty("allowWindowClose", true));
 }
@@ -25688,10 +26616,6 @@ void PDFEditControllerTest::keepsPageDisplayStateIndependentAcrossTabs()
     QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::NoSplit);
     QVERIFY(!firstSession->splitViewEnabled());
     QVERIFY(firstSession->secondaryViewState());
-    QVERIFY(firstSession->bottomLeftViewState());
-    QVERIFY(firstSession->bottomRightViewState());
-    QVERIFY(firstSession->secondaryViewState()
-            != firstSession->bottomLeftViewState());
     QCOMPARE(firstSession->splitScrollX(), 0.0);
     QCOMPARE(firstSession->splitScrollY(), 0.0);
     QVERIFY(!firstSession->splitScrollPositionInitialized());
@@ -25737,6 +26661,10 @@ void PDFEditControllerTest::keepsPageDisplayStateIndependentAcrossTabs()
         static_cast<PDFDocumentSession::SplitViewMode>(-1));
     QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::HorizontalSplit);
     QCOMPARE(splitModeSpy.count(), 2);
+    firstSession->setSplitViewMode(
+        static_cast<PDFDocumentSession::SplitViewMode>(3));
+    QCOMPARE(firstSession->splitViewMode(), PDFDocumentSession::HorizontalSplit);
+    QCOMPARE(splitModeSpy.count(), 2);
 
     firstSession->setSplitScrollX(144.5);
     QVERIFY(firstSession->splitScrollPositionInitialized());
@@ -25749,13 +26677,6 @@ void PDFEditControllerTest::keepsPageDisplayStateIndependentAcrossTabs()
     firstSession->secondaryViewState()->setCurrentPage(3);
     QCOMPARE(firstSession->secondaryViewState()->zoom(), 1.75);
     QCOMPARE(firstSession->secondaryViewState()->currentPage(), 3);
-    firstSession->bottomLeftViewState()->setZoom(2.25);
-    firstSession->bottomLeftViewState()->setCurrentPage(4);
-    firstSession->bottomLeftViewState()->setScrollPosition(22.0, 44.0);
-    QCOMPARE(firstSession->bottomLeftViewState()->zoom(), 2.25);
-    QCOMPARE(firstSession->bottomLeftViewState()->currentPage(), 4);
-    QCOMPARE(firstSession->bottomLeftViewState()->scrollX(), 22.0);
-    QCOMPARE(firstSession->bottomLeftViewState()->scrollY(), 44.0);
     firstSession->setSplitScrollX(144.5);
     firstSession->setSplitScrollY(320.25);
     QCOMPARE(splitScrollSpy.count(), 2);
@@ -25772,10 +26693,11 @@ void PDFEditControllerTest::keepsPageDisplayStateIndependentAcrossTabs()
     QVERIFY(!secondSession->splitScrollPositionInitialized());
 
     secondSession->setPageDisplayMode(PDFDocumentSession::SinglePageMode);
-    secondSession->setSplitViewMode(PDFDocumentSession::SpreadsheetSplit);
+    secondSession->setSplitViewMode(PDFDocumentSession::VerticalSplit);
     secondSession->setSplitScrollX(20.0);
     secondSession->setSplitScrollY(40.0);
     QVERIFY(secondSession->splitScrollPositionInitialized());
+    QCOMPARE(secondSession->splitViewMode(), PDFDocumentSession::VerticalSplit);
     QCOMPARE(firstSession->pageDisplayMode(), PDFDocumentSession::FacingMode);
     QVERIFY(firstSession->separateCoverPage());
     QVERIFY(firstSession->splitViewEnabled());
