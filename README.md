@@ -234,8 +234,8 @@ and laid-out content bounds. Existing PDF text seeds its frame from the Qt text
 width so the original line fits. When its inline editor opens, TrePDF
 transiently extends that frame from its current left edge to the remaining
 column width, or to the inferred right page margin when no same-row text blocks
-it. The wider frame is stored after a real text edit, a paragraph-format
-change, or an explicit resize; opening and closing the editor without changes
+it. The wider frame is stored after a real text edit, a font-size or
+paragraph-format change, or an explicit resize; opening and closing the editor without changes
 leaves the PDF geometry unchanged. The selected frame exposes four edge resize
 handles; dragging an edge reflows text live and stores the geometry change in
 session undo/redo.
@@ -315,7 +315,12 @@ support undo/redo. While the inline editor is active, bold, italic, and
 underline affect only the highlighted range; with a collapsed caret they set
 the format of text typed next without restyling existing text. Using one of
 those controls on selected text automatically opens the inline editor with the
-caret at the end. Font size is currently UI-only.
+caret at the end. Font size accepts whole PDF points from 1 to 512 and reflects
+the selected text independently of zoom; mixed sizes show an empty value.
+Changing size on a selected text object formats the whole object. In an active
+editor it formats the selected range, or only subsequently typed text at a
+collapsed caret. Size changes preserve local editor undo/redo, reflow live,
+and persist through Save/Save As.
 
 ## Source documentation
 

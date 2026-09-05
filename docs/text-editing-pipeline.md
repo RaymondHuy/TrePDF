@@ -511,10 +511,18 @@ dùng đổi style, draft cập nhật cờ này và `QFont::setItalic()` đổi
 
 ### 7.4 Underline
 
-PDF text object không có thuộc tính underline tương đương QFont; gạch chân
-trong PDF thường là một path riêng. Vì vậy candidate nguồn mặc định
-`fontUnderline = false`. Khi người dùng bật Underline, draft lưu cờ này và Qt
-vẽ underline bằng `QFont::setUnderline()`.
+PDF text object không có thuộc tính underline tương đương QFont; Save tạo một
+path riêng ngay sau từng text run có gạch chân. Cặp TEXT/PATH có content mark
+`TrePDFUnderline` và cùng UUID trong `/Id`. Candidate scan xác minh cặp này,
+khôi phục `fontUnderline` và giữ `CandidatePart.underlineObjectPath` cùng
+`underlineRect`, tách khỏi source text bounds bất biến.
+
+Với file TrePDF cũ chưa có mark, chỉ nhận path ngay sau TEXT khi đúng cấu trúc
+hai điểm, stroke solid không fill, màu, origin, baseline offset, độ dày và chiều
+rộng của underline do writer tạo. Đường kẻ không khớp vẫn giữ nguyên. Khi sửa
+hoặc xóa text, mask/suppression và Save xử lý cả path nguồn; bỏ Underline không
+tạo path thay thế. Move-only dịch cả hai matrix, còn undo/redo/discard giữ cùng
+ownership. Qt preview vẫn dùng `QFont::setUnderline()` trên character spans.
 
 ### 7.5 Font size
 
@@ -541,14 +549,29 @@ Hai property được giữ riêng để sau này có thể hiệu chỉnh riên
 thấy mà không làm mất em-size đọc từ PDF. Khi `displayFontSizeRatio <= 0`, code
 fallback về `fontSizeRatio`.
 
-Với text có sẵn trong PDF, giá trị tối thiểu là 1 px. Với Add Text, tối thiểu
-là 6 px. `fontForDisplay()` làm tròn và chặn lần cuối:
+Với text có sẵn trong PDF và Add Text, giá trị tối thiểu là 1 px.
+`fontForDisplay()` làm tròn và chặn lần cuối:
 
 ```text
 QFont.pixelSize = max(1, round(baseFontPixelSize))
 ```
 
 Đây vẫn là em-size quy đổi sang pixel, không phải glyph bbox height.
+
+Ô cỡ chữ nhận số nguyên từ 1 đến 512 pt. Khi editor đóng, thay đổi áp dụng cho
+toàn bộ object được chọn; khi đang edit, nó áp dụng cho vùng bôi đen hoặc trở
+thành cỡ gõ tiếp tại caret. Vùng có nhiều cỡ chữ hiển thị ô trống. Controller
+đổi point sang ratio theo chiều cao trang PDF, không theo zoom. Đổi size thật
+trong editor cũng giữ frame đã mở rộng để text reflow; undo size về ban đầu rồi
+đóng editor không tạo draft geometry nếu không có thay đổi khác.
+
+Sau khi load rich HTML, controller gắn semantic size ratio vào custom properties
+của từng `QTextCharFormat` và cố định pixel size theo chiều cao trang hiển thị.
+Khi đổi size, `QTextCursor` chỉ merge size và stretch đã hiệu chỉnh vào range.
+Local undo/redo đọc lại các ratio này, tránh suy ngược point từ pixel đã làm tròn
+hoặc để size mặc định mới làm thay đổi những ký tự ngoài vùng chọn.
+Đổi zoom ở pane chính commit editor trước khi đổi kích thước trang hiển thị;
+draft sau đó được dựng lại theo zoom mới.
 
 ### 7.6 Font stretch
 
@@ -606,8 +629,8 @@ gọi cùng bộ hiệu chỉnh theo family/style/pixel size của chính span �
 caret, selection và wrap vẫn do `TextEdit` xử lý nhưng dùng cùng metric với
 layout khi save.
 
-Character spacing và word spacing chưa được lấy từ PDF. Underline nguồn cũng
-chưa được ghép từ các path trang vào text candidate.
+Character spacing và word spacing chưa được lấy từ PDF. Underline nguồn được
+nhận diện cho cặp TEXT/PATH do TrePDF tạo theo quy tắc ở mục 7.4.
 
 ### 7.9 Rich-text draft
 
@@ -628,16 +651,22 @@ stretch, bold, italic, underline và color. `ParagraphFormat` chứa alignment,
 list style (`none`, `bullet`, `decimal`), list level và số bắt đầu.
 
 Controller giữ thêm typing format tạm khi selection có length bằng `0`. Bấm
-Bold/Italic/Underline chỉ thay trạng thái này, không tạo draft hoặc undo command.
+Bold/Italic/Underline hoặc cỡ chữ chỉ thay trạng thái này, không tạo draft hoặc undo command.
 Khi text mới được chèn đúng caret, `setDraftText()` dùng typing format cho range
 vừa chèn; di chuyển caret hoặc tạo selection sẽ trở về format tại vị trí mới.
 QML truyền cả vị trí caret sau edit để controller neo delta quanh vị trí gõ,
-tránh suy sai range khi chuỗi có ký tự lặp. Range mới chèn được merge B/I/U trực
+tránh suy sai range khi chuỗi có ký tự lặp. Range mới chèn được merge B/I/U và cỡ chữ trực
 tiếp vào `QQuickTextDocument` bằng `QTextCursor` và nối với edit block trước đó;
-không reload toàn bộ rich HTML nên undo nội bộ của `TextEdit` vẫn xóa thao tác gõ
+với phím gõ hoặc IME, event filter mở block trước khi Qt chèn text và đóng sau
+input event. QML đồng bộ text/format sau khi block đóng để đọc đúng nội dung và
+giữ cả ký tự lẫn định dạng trong cùng bước undo. Filter chỉ hoạt động khi có
+typing format tạm.
+Block kết thúc bằng một custom undo item không đổi nội dung để Qt khôi phục
+caret theo vùng text thay đổi, tránh cộng đôi độ dài insertion và format khi redo.
+Không reload toàn bộ rich HTML nên undo nội bộ của `TextEdit` vẫn xóa thao tác gõ
 và format trong một lần. Format cho range bôi đen cũng được merge trực tiếp bằng
 `QTextCursor` nhưng dùng edit block riêng. Sau undo/redo local, `onTextChanged`
-đọc lại B/I/U từ document vào character spans của controller, nên preview và dữ
+đọc lại B/I/U và semantic size ratio từ document vào character spans của controller, nên preview và dữ
 liệu Save không bị lệch nhau.
 
 Draft khởi tạo với một character span phủ toàn bộ text và một paragraph format

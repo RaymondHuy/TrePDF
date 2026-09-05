@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <utility>
 
@@ -23,6 +24,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
+#include <QInputMethodEvent>
+#include <QKeyEvent>
 #include <QMutexLocker>
 #include <QPolygonF>
 #include <QQuickTextDocument>
@@ -51,6 +54,77 @@ using PDFAnnotationUtils::isSupportedCommentAnnotationSubtype;
 using PDFAnnotationUtils::normalizedCommentText;
 
 constexpr int kCoordinateMapExtent = 100000;
+// Keep PDF sizes in QTextDocument history independently of rounded display
+// pixels, so local undo at any zoom restores the exact source size.
+constexpr int kEditorFontSizeRatio = QTextFormat::UserProperty + 1;
+constexpr int kEditorDisplayFontSizeRatio = QTextFormat::UserProperty + 2;
+
+// Qt adds the insertion length and following format length when calculating
+// the redo cursor. A final custom item makes it use the changed text bounds
+// instead, without adding another user-visible undo step.
+class EditorTypingCursorBoundary final : public QAbstractUndoItem
+{
+public:
+    void undo() override {}
+    void redo() override {}
+};
+
+// Native key insertion can be a single QTextDocument command, which
+// joinPreviousEditBlock() cannot join. Start its block before Qt handles the
+// input, then close it after the event so insertion and typing format undo together.
+class EditorTypingEditBlock final : public QObject
+{
+public:
+    EditorTypingEditBlock(QQuickTextDocument *document, std::function<bool()> enabled)
+        : QObject(document), m_document(document), m_enabled(std::move(enabled))
+    {
+        setObjectName(QStringLiteral("trepdfTypingEditBlock"));
+        if (document->parent()) {
+            document->parent()->installEventFilter(this);
+        }
+    }
+
+    ~EditorTypingEditBlock() override
+    {
+        finish();
+    }
+
+protected:
+    bool eventFilter(QObject *editor, QEvent *event) override
+    {
+        bool insertsText = false;
+        if (event->type() == QEvent::KeyPress) {
+            const auto *key = static_cast<QKeyEvent *>(event);
+            insertsText = !key->text().isEmpty()
+                && !(key->modifiers() & (Qt::ControlModifier | Qt::MetaModifier));
+        } else if (event->type() == QEvent::InputMethod) {
+            insertsText = !static_cast<QInputMethodEvent *>(event)->commitString().isEmpty();
+        }
+        if (insertsText && m_enabled() && m_cursor.isNull()
+            && m_document->textDocument()) {
+            m_cursor = QTextCursor(m_document->textDocument());
+            m_cursor.setPosition(qBound(0, editor->property("cursorPosition").toInt(),
+                                         m_document->textDocument()->characterCount() - 1));
+            m_cursor.beginEditBlock();
+            QMetaObject::invokeMethod(this, [this]() { finish(); }, Qt::QueuedConnection);
+        }
+        return false;
+    }
+
+private:
+    void finish()
+    {
+        if (!m_cursor.isNull()) {
+            QTextCursor cursor = std::exchange(m_cursor, QTextCursor());
+            cursor.endEditBlock();
+        }
+    }
+
+    QQuickTextDocument *m_document;
+    std::function<bool()> m_enabled;
+    QTextCursor m_cursor;
+};
+
 constexpr qsizetype kMaximumCachedCandidatePages = 12;
 constexpr qreal kAddedTextWidthRatio = 0.25;
 constexpr qreal kAddedTextMinimumWidthRatio = 0.02;
@@ -2019,6 +2093,152 @@ QColor textColor(FPDF_PAGEOBJECT object, FPDF_TEXT_RENDERMODE renderMode)
     return pageObjectColor(object, strokeOnly);
 }
 
+// Empty means an unmarked legacy object. Reject malformed/duplicate ownership
+// marks instead of falling back to geometry and adopting an unrelated path.
+bool textUnderlineId(FPDF_PAGEOBJECT object, QString &id)
+{
+    const int count = FPDFPageObj_CountMarks(object);
+    if (count < 0 || count > 64) {
+        return false;
+    }
+    for (int index = 0; index < count; ++index) {
+        FPDF_PAGEOBJECTMARK mark = FPDFPageObj_GetMark(object, index);
+        std::array<FPDF_WCHAR, 64> buffer{};
+        unsigned long length = 0;
+        if (!mark
+            || !FPDFPageObjMark_GetName(mark, buffer.data(), sizeof(buffer), &length)
+            || length < sizeof(FPDF_WCHAR) || length > sizeof(buffer)
+            || length % sizeof(FPDF_WCHAR) != 0) {
+            return false;
+        }
+        const auto stringValue = [&buffer](unsigned long byteLength) {
+            qsizetype size = byteLength / sizeof(FPDF_WCHAR);
+            while (size > 0 && buffer[size - 1] == 0) {
+                --size;
+            }
+            return QString::fromUtf16(
+                reinterpret_cast<const char16_t *>(buffer.data()), size);
+        };
+        if (stringValue(length) != QLatin1String("TrePDFUnderline")) {
+            continue;
+        }
+        if (!id.isEmpty()
+            || !FPDFPageObjMark_GetParamStringValue(
+                mark, "Id", buffer.data(), sizeof(buffer), &length)
+            || length < sizeof(FPDF_WCHAR) || length > sizeof(buffer)
+            || length % sizeof(FPDF_WCHAR) != 0) {
+            return false;
+        }
+        id = stringValue(length);
+        if (id.size() != 36 || QUuid(id).isNull()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool sourceTextUnderlineRect(FPDF_PAGE page,
+                             FPDF_PAGEOBJECT textObject,
+                             FPDF_PAGEOBJECT path,
+                             const QSizeF &pageSize,
+                             qreal fontSize,
+                             const QColor &color,
+                             QRectF &rect)
+{
+    if (!path || FPDFPageObj_GetType(path) != FPDF_PAGEOBJ_PATH
+        || FPDFPath_CountSegments(path) != 2) {
+        return false;
+    }
+    QString textId;
+    QString pathId;
+    if (!textUnderlineId(textObject, textId) || !textUnderlineId(path, pathId)
+        || textId != pathId) {
+        return false;
+    }
+    const bool marked = !textId.isEmpty();
+    int fillMode = FPDF_FILLMODE_NONE;
+    FPDF_BOOL stroke = false;
+    float strokeWidth = 0.0F;
+    FS_MATRIX pathMatrix{};
+    if (!FPDFPath_GetDrawMode(path, &fillMode, &stroke)
+        || fillMode != FPDF_FILLMODE_NONE || !stroke
+        || FPDFPageObj_GetDashCount(path) != 0
+        || !FPDFPageObj_GetStrokeWidth(path, &strokeWidth)
+        || !std::isfinite(strokeWidth) || strokeWidth <= 0.0F
+        || !FPDFPageObj_GetMatrix(path, &pathMatrix)) {
+        return false;
+    }
+    const auto pagePoint = [&](const QPointF &point, QPointF &result) {
+        QPointF normalized;
+        if (!std::isfinite(point.x()) || !std::isfinite(point.y())
+            || !normalizedPagePoint(page, pageSize, point, normalized)) {
+            return false;
+        }
+        result = QPointF(normalized.x() * pageSize.width(),
+                         normalized.y() * pageSize.height());
+        return true;
+    };
+    std::array<QPointF, 2> points;
+    for (int index = 0; index < 2; ++index) {
+        FPDF_PATHSEGMENT segment = FPDFPath_GetPathSegment(path, index);
+        float x = 0.0F;
+        float y = 0.0F;
+        if (!segment
+            || FPDFPathSegment_GetType(segment)
+                != (index == 0 ? FPDF_SEGMENT_MOVETO : FPDF_SEGMENT_LINETO)
+            || FPDFPathSegment_GetClose(segment)
+            || !FPDFPathSegment_GetPoint(segment, &x, &y)
+            || !pagePoint(mapPoint(pathMatrix, QPointF(x, y)), points[index])) {
+            return false;
+        }
+    }
+    constexpr qreal tolerance = 0.08; // PDF serialization and device-map rounding.
+    const qreal width = points[1].x() - points[0].x();
+    if (width <= 0.0 || qAbs(points[0].y() - points[1].y()) > tolerance) {
+        return false;
+    }
+    const qreal thickness = strokeWidth * std::hypot(pathMatrix.c, pathMatrix.d);
+    if (!qIsFinite(thickness) || thickness <= 0.0) {
+        return false;
+    }
+    if (!marked) {
+        // Old TrePDF saves emit TEXT immediately followed by a solid underline
+        // with this exact origin, offset, width, thickness and paint. Merely
+        // being a horizontal rule below some text is not sufficient ownership.
+        FS_MATRIX textMatrix{};
+        QPointF origin;
+        float left = 0.0F;
+        float bottom = 0.0F;
+        float right = 0.0F;
+        float top = 0.0F;
+        if (FPDFPageObj_CountMarks(textObject) != 0
+            || FPDFPageObj_CountMarks(path) != 0
+            || pageObjectColor(path, true) != color
+            || FPDFPageObj_GetLineCap(path) != FPDF_LINECAP_BUTT
+            || !FPDFPageObj_GetMatrix(textObject, &textMatrix)
+            || !pagePoint(QPointF(textMatrix.e, textMatrix.f), origin)
+            || qAbs(points[0].x() - origin.x()) > tolerance
+            || qAbs(points[0].y() - origin.y() - qMax<qreal>(0.8, fontSize * 0.10))
+                > tolerance
+            || qAbs(thickness - qMax<qreal>(0.5, fontSize * 0.05)) > tolerance
+            || !FPDFPageObj_GetBounds(textObject, &left, &bottom, &right, &top)) {
+            return false;
+        }
+        const QRectF bounds = normalizedRect(
+            page, left, bottom, right, top, kIdentityMatrix, pageSize);
+        // The writer uses layout advance; PDFium bounds exclude side bearings.
+        if (qAbs(bounds.width() * pageSize.width() - width)
+            > qMax<qreal>(1.0, fontSize * 0.20)) {
+            return false;
+        }
+    }
+    rect = QRectF(points[0], points[1]).normalized()
+        .adjusted(-thickness / 2, -thickness / 2, thickness / 2, thickness / 2);
+    rect = QRectF(rect.x() / pageSize.width(), rect.y() / pageSize.height(),
+                  rect.width() / pageSize.width(), rect.height() / pageSize.height());
+    return true;
+}
+
 bool isSuppressibleTextRenderMode(FPDF_TEXT_RENDERMODE renderMode)
 {
     return renderMode == FPDF_TEXTRENDERMODE_FILL
@@ -2804,6 +3024,36 @@ qreal PDFEditController::selectedFontSizeRatio() const
         : 0.0;
 }
 
+qreal PDFEditController::selectedFontSize() const
+{
+    if (!m_document || !m_hasSelection || !isTextCandidateKind(m_selectedCandidate.kind)) {
+        return 0.0;
+    }
+    const qreal pageHeight = m_document->pageSize(m_selectedCandidate.page).height();
+    const CharacterFormat selectedFormat = selectedCharacterFormatForDisplay();
+    const auto sizeRatio = [](const CharacterFormat &format) {
+        return format.displayFontSizeRatio > 0.0
+            ? format.displayFontSizeRatio : format.fontSizeRatio;
+    };
+    const qreal points = sizeRatio(selectedFormat) * pageHeight;
+    if (!qIsFinite(points) || points <= 0.0) {
+        return 0.0;
+    }
+    if (!m_textEditActive || m_selectedTextRangeLength > 0) {
+        const Draft draft = selectedDraftForDisplay();
+        qsizetype start = 0;
+        qsizetype length = 0;
+        selectedTextRangeForDraft(draft, start, length);
+        for (const CharacterSpan &span : draft.characterSpans) {
+            if (span.start < start + length && span.start + span.length > start
+                && qAbs(sizeRatio(span.format) * pageHeight - points) > 0.01) {
+                return 0.0;
+            }
+        }
+    }
+    return qRound(points);
+}
+
 qreal PDFEditController::selectedDisplayFontSizeRatio() const
 {
     if (!m_hasSelection) {
@@ -3283,6 +3533,9 @@ QVector<QVector<int>> PDFEditController::draftedTextObjectPathsForPage(int page)
                     if (!part.objectPath.isEmpty()) {
                         objectPaths.append(part.objectPath);
                     }
+                    if (!part.underlineObjectPath.isEmpty()) {
+                        objectPaths.append(part.underlineObjectPath);
+                    }
                 }
             } else if (!candidate.objectPath.isEmpty()) {
                 objectPaths.append(candidate.objectPath);
@@ -3335,12 +3588,13 @@ PDFEditController::draftedObjectMovesForPage(int page) const
         const auto appendTextMove = [
             &moves,
             &initialFrameRect,
-            &movedFrameRect](const QVector<int> &objectPath) {
+            &movedFrameRect](const QVector<int> &objectPath,
+                            DraftObjectMove::Kind kind = DraftObjectMove::Kind::Text) {
             if (objectPath.size() != 1) {
                 return;
             }
             moves.append(DraftObjectMove{
-                DraftObjectMove::Kind::Text,
+                kind,
                 objectPath,
                 initialFrameRect,
                 movedFrameRect});
@@ -3350,6 +3604,7 @@ PDFEditController::draftedObjectMovesForPage(int page) const
         } else {
             for (const CandidatePart &part : candidate.parts) {
                 appendTextMove(part.objectPath);
+                appendTextMove(part.underlineObjectPath, DraftObjectMove::Kind::Path);
             }
         }
     }
@@ -5519,7 +5774,8 @@ int PDFEditController::displayFontStretch(const QString &fontFamily,
 void PDFEditController::applyTypingFormatToEditorDocument(
     QObject *textDocument,
     int start,
-    int length) const
+    int length,
+    qreal displayedPageHeight) const
 {
     auto *quickTextDocument = qobject_cast<QQuickTextDocument *>(textDocument);
     QTextDocument *document = quickTextDocument
@@ -5544,13 +5800,140 @@ void PDFEditController::applyTypingFormatToEditorDocument(
         m_typingCharacterFormat.fontBold ? QFont::Bold : QFont::Normal);
     format.setFontItalic(m_typingCharacterFormat.fontItalic);
     format.setFontUnderline(m_typingCharacterFormat.fontUnderline);
+    format.setProperty(kEditorFontSizeRatio, m_typingCharacterFormat.fontSizeRatio);
+    format.setProperty(kEditorDisplayFontSizeRatio,
+                       m_typingCharacterFormat.displayFontSizeRatio);
+    if (qIsFinite(displayedPageHeight) && displayedPageHeight > 0.0) {
+        const qreal ratio = m_typingCharacterFormat.displayFontSizeRatio > 0.0
+            ? m_typingCharacterFormat.displayFontSizeRatio
+            : m_typingCharacterFormat.fontSizeRatio;
+        const int pixels = qMax(1, qRound(ratio * displayedPageHeight));
+        format.setProperty(QTextFormat::FontPixelSize, pixels);
+        format.setFontStretch(displayFontStretch(
+            m_typingCharacterFormat.fontFamily, m_typingCharacterFormat.fontStretch,
+            m_typingCharacterFormat.fontBold, m_typingCharacterFormat.fontItalic, pixels));
+    }
 
     QTextCursor cursor(document);
+    const auto properties = format.properties();
+    bool needsFormat = false;
+    for (int position = rangeStart; position < rangeEnd && !needsFormat; ++position) {
+        cursor.setPosition(position);
+        cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+        const QTextCharFormat current = cursor.charFormat();
+        for (auto property = properties.cbegin(); property != properties.cend(); ++property) {
+            if (current.property(property.key()) != property.value()) {
+                needsFormat = true;
+                break;
+            }
+        }
+    }
+    // Redo already restores the inserted character's format. Do not append a
+    // formatting command while Qt is restoring its cursor and history.
+    if (!needsFormat) {
+        return;
+    }
     cursor.setPosition(rangeStart);
     cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
     cursor.joinPreviousEditBlock();
     cursor.mergeCharFormat(format);
+    document->appendUndoItem(new EditorTypingCursorBoundary);
     cursor.endEditBlock();
+}
+
+void PDFEditController::initializeEditorFontSizes(
+    QObject *textDocument, qreal displayedPageHeight) const
+{
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickDocument ? quickDocument->textDocument() : nullptr;
+    if (!document || !m_textEditActive || !m_hasSelection) {
+        return;
+    }
+    const Draft draft = selectedDraftForDisplay();
+    if (document->toPlainText() != draft.text) {
+        return;
+    }
+    if (!quickDocument->findChild<QObject *>(QStringLiteral("trepdfTypingEditBlock"),
+                                            Qt::FindDirectChildrenOnly)) {
+        new EditorTypingEditBlock(quickDocument, [controller = QPointer<const PDFEditController>(this)]() {
+            return controller && controller->m_textEditActive
+                && controller->m_typingCharacterFormatActive;
+        });
+    }
+    // Called only immediately after loading a new rich document, before user
+    // edits. Metadata must not become a visible undo step.
+    const bool undoEnabled = document->isUndoRedoEnabled();
+    document->setUndoRedoEnabled(false);
+    QTextCursor cursor(document);
+    for (const CharacterSpan &span : draft.characterSpans) {
+        const int start = qBound<qsizetype>(0, span.start, draft.text.size());
+        const int end = qBound<qsizetype>(start, span.start + span.length, draft.text.size());
+        if (end <= start) {
+            continue;
+        }
+        QTextCharFormat format;
+        format.setProperty(kEditorFontSizeRatio, span.format.fontSizeRatio);
+        format.setProperty(kEditorDisplayFontSizeRatio, span.format.displayFontSizeRatio);
+        if (qIsFinite(displayedPageHeight) && displayedPageHeight > 0.0) {
+            const qreal ratio = span.format.displayFontSizeRatio > 0.0
+                ? span.format.displayFontSizeRatio : span.format.fontSizeRatio;
+            const int pixels = qMax(1, qRound(ratio * displayedPageHeight));
+            format.setProperty(QTextFormat::FontPixelSize, pixels);
+            format.setFontStretch(displayFontStretch(
+                span.format.fontFamily, span.format.fontStretch,
+                span.format.fontBold, span.format.fontItalic, pixels));
+        }
+        cursor.setPosition(start);
+        cursor.setPosition(end, QTextCursor::KeepAnchor);
+        cursor.mergeCharFormat(format);
+    }
+    document->setUndoRedoEnabled(undoEnabled);
+}
+
+bool PDFEditController::applyFontSizeToEditorDocument(
+    QObject *textDocument, int start, int length,
+    qreal fontSizeRatio, qreal displayedPageHeight) const
+{
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickDocument ? quickDocument->textDocument() : nullptr;
+    if (!document || !m_textEditActive || !m_hasSelection || length <= 0
+        || !qIsFinite(fontSizeRatio) || fontSizeRatio <= 0.0
+        || !qIsFinite(displayedPageHeight) || displayedPageHeight <= 0.0) {
+        return false;
+    }
+    const Draft draft = selectedDraftForDisplay();
+    if (document->toPlainText() != draft.text) {
+        return false;
+    }
+    const int maximum = qMax(0, document->characterCount() - 1);
+    const int first = qBound(0, start, maximum);
+    const int last = static_cast<int>(qBound(qint64(first), qint64(start) + length,
+                                            qint64(maximum)));
+    if (last <= first) {
+        return false;
+    }
+    const int pixels = qMax(1, qRound(fontSizeRatio * displayedPageHeight));
+    QTextCursor cursor(document);
+    cursor.beginEditBlock();
+    for (const CharacterSpan &span : draft.characterSpans) {
+        const int rangeStart = qMax<qsizetype>(first, span.start);
+        const int rangeEnd = qMin<qsizetype>(last, span.start + span.length);
+        if (rangeEnd <= rangeStart) {
+            continue;
+        }
+        QTextCharFormat format;
+        format.setProperty(kEditorFontSizeRatio, fontSizeRatio);
+        format.setProperty(kEditorDisplayFontSizeRatio, fontSizeRatio);
+        format.setProperty(QTextFormat::FontPixelSize, pixels);
+        format.setFontStretch(displayFontStretch(
+            span.format.fontFamily, span.format.fontStretch,
+            span.format.fontBold, span.format.fontItalic, pixels));
+        cursor.setPosition(rangeStart);
+        cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
+        cursor.mergeCharFormat(format);
+    }
+    cursor.endEditBlock();
+    return true;
 }
 
 bool PDFEditController::applyFontStyleToEditorDocument(
@@ -5640,6 +6023,16 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
         format.fontBold = editorFormat.fontWeight() >= QFont::Bold;
         format.fontItalic = editorFormat.fontItalic();
         format.fontUnderline = editorFormat.fontUnderline();
+        if (editorFormat.hasProperty(kEditorFontSizeRatio)
+            && editorFormat.hasProperty(kEditorDisplayFontSizeRatio)) {
+            const qreal ratio = editorFormat.doubleProperty(kEditorFontSizeRatio);
+            const qreal displayRatio = editorFormat.doubleProperty(kEditorDisplayFontSizeRatio);
+            if (qIsFinite(ratio) && ratio > 0.0
+                && qIsFinite(displayRatio) && displayRatio >= 0.0) {
+                format.fontSizeRatio = ratio;
+                format.displayFontSizeRatio = displayRatio;
+            }
+        }
     }
 
     QVector<CharacterSpan> spans;
@@ -6691,6 +7084,72 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
     }
 }
 
+void PDFEditController::setSelectedFontSize(qreal points)
+{
+    if (m_saving || !m_document || !m_hasSelection || !m_selectedCandidate.editable
+        || !isTextCandidateKind(m_selectedCandidate.kind)
+        || !qIsFinite(points) || points < 1.0 || points > 512.0
+        || points != std::floor(points)) {
+        return;
+    }
+    const qreal pageHeight = m_document->pageSize(m_selectedCandidate.page).height();
+    if (!qIsFinite(pageHeight) || pageHeight <= 0.0) {
+        return;
+    }
+    const qreal ratio = points / pageHeight;
+    const auto changeSize = [points, ratio, pageHeight](CharacterFormat &format) {
+        const qreal current = (format.displayFontSizeRatio > 0.0
+            ? format.displayFontSizeRatio : format.fontSizeRatio) * pageHeight;
+        // Candidate scan rounds through device coordinates. Re-selecting the
+        // displayed integral point size should not create a source-text draft.
+        if (qAbs(current - points) <= 0.01) {
+            return;
+        }
+        format.fontSizeRatio = ratio;
+        format.displayFontSizeRatio = ratio;
+    };
+    Draft draft = selectedDraftForDisplay();
+    if (m_textEditActive && m_selectedTextRangeLength == 0) {
+        const CharacterFormat current = selectedCharacterFormatForDisplay();
+        CharacterFormat typing = current;
+        changeSize(typing);
+        if (sameCharacterFormat(current, typing)) {
+            return;
+        }
+        const qsizetype caret = qBound<qsizetype>(
+            0, m_selectedTextRangeStart, draft.text.size());
+        if (sameCharacterFormat(typing, characterFormatAtPosition(draft, caret, true))) {
+            resetTypingFormat();
+        } else {
+            m_typingCharacterFormat = typing;
+            m_typingCharacterFormatPosition = caret;
+            m_typingCharacterFormatActive = true;
+        }
+        emit textFormatStateChanged();
+        return;
+    }
+    qsizetype start = 0;
+    qsizetype length = 0;
+    selectedTextRangeForDraft(draft, start, length);
+    if (!updateCharacterFormats(draft, start, length, changeSize)) {
+        return;
+    }
+    const bool finishImmediately = !m_textEditActive;
+    if (finishImmediately) {
+        beginSelectedTextEditSession(false);
+    }
+    if (!m_textEditActive) {
+        return;
+    }
+    if (!finishImmediately && length > 0) {
+        emit selectionFontSizeApplied(static_cast<int>(start), static_cast<int>(length), ratio);
+    }
+    updateSelectedDraft(draft);
+    if (finishImmediately) {
+        finishSelectedTextEdit();
+    }
+}
+
 void PDFEditController::setSelectedFontBold(bool enabled)
 {
     setSelectedFontStyle(FontStyle::Bold, enabled);
@@ -6931,9 +7390,34 @@ void PDFEditController::finishSelectedTextEdit()
 
     const Command baseline = m_textEditCommand;
     Draft finalizedDraft = selectedDraftForDisplay();
+    const auto fontSizesUnchanged = [&]() {
+        qsizetype left = 0;
+        qsizetype right = 0;
+        while (left < finalizedDraft.characterSpans.size()
+               && right < baseline.before.characterSpans.size()) {
+            const CharacterSpan &current = finalizedDraft.characterSpans.at(left);
+            const CharacterSpan &previous = baseline.before.characterSpans.at(right);
+            if (!qFuzzyCompare(current.format.fontSizeRatio, previous.format.fontSizeRatio)
+                || !qFuzzyCompare(current.format.displayFontSizeRatio,
+                                  previous.format.displayFontSizeRatio)) {
+                return false;
+            }
+            const qsizetype currentEnd = current.start + current.length;
+            const qsizetype previousEnd = previous.start + previous.length;
+            if (currentEnd <= previousEnd) {
+                ++left;
+            }
+            if (previousEnd <= currentEnd) {
+                ++right;
+            }
+        }
+        return left == finalizedDraft.characterSpans.size()
+            && right == baseline.before.characterSpans.size();
+    };
     if (m_textEditFrameAutomaticallyExpanded
         && !m_textEditGeometryExplicitlyChanged
         && finalizedDraft.text == baseline.before.text
+        && fontSizesUnchanged()
         && sameParagraphFormats(
             finalizedDraft.paragraphFormats,
             baseline.before.paragraphFormats)) {
@@ -8398,6 +8882,9 @@ qsizetype PDFEditController::estimatedCommentCandidateBytes(
         addBytes(estimatedContiguousStorageBytes(
             part.objectPath.capacity(),
             sizeof(int)));
+        addBytes(estimatedContiguousStorageBytes(
+            part.underlineObjectPath.capacity(),
+            sizeof(int)));
     }
     addBytes(estimatedContiguousStorageBytes(
         candidate.textGlyphRects.capacity(),
@@ -9068,6 +9555,17 @@ void PDFEditController::appendPageObjectCandidates(
     part.origin = candidate.origin;
     part.text = candidate.text;
     part.hasBaseline = candidate.hasBaseline;
+    if (candidate.editable && objectPath.size() == 1) {
+        const int underlineIndex = objectPath.constFirst() + 1;
+        if (underlineIndex < FPDFPage_CountObjects(page)
+            && sourceTextUnderlineRect(
+                page, pageObject, FPDFPage_GetObject(page, underlineIndex),
+                pageSize, candidate.fontSizeRatio * pageSize.height(),
+                candidate.color, part.underlineRect)) {
+            part.underlineObjectPath = QVector<int>{underlineIndex};
+            candidate.fontUnderline = true;
+        }
+    }
     candidate.parts.append(part);
     candidates.append(candidate);
 }
@@ -10544,6 +11042,9 @@ QVariantList PDFEditController::candidateSourceRects(const Candidate &candidate)
         sourceRects.reserve(candidate.parts.size());
         for (const CandidatePart &part : candidate.parts) {
             appendRect(part.sourceRect);
+            if (!part.underlineRect.isEmpty()) {
+                appendRect(part.underlineRect);
+            }
         }
     }
     return sourceRects;
@@ -11995,6 +12496,8 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
     const bool fontBold = m_typingCharacterFormat.fontBold;
     const bool fontItalic = m_typingCharacterFormat.fontItalic;
     const bool fontUnderline = m_typingCharacterFormat.fontUnderline;
+    const qreal fontSizeRatio = m_typingCharacterFormat.fontSizeRatio;
+    const qreal displayFontSizeRatio = m_typingCharacterFormat.displayFontSizeRatio;
     m_typingCharacterFormat = characterFormatAtPosition(
         draft,
         m_typingCharacterFormatPosition,
@@ -12002,6 +12505,8 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
     m_typingCharacterFormat.fontBold = fontBold;
     m_typingCharacterFormat.fontItalic = fontItalic;
     m_typingCharacterFormat.fontUnderline = fontUnderline;
+    m_typingCharacterFormat.fontSizeRatio = fontSizeRatio;
+    m_typingCharacterFormat.displayFontSizeRatio = displayFontSizeRatio;
 }
 
 void PDFEditController::resetFrameResizeState()

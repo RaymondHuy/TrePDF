@@ -593,7 +593,7 @@ data/candidate/history/selection đổi.
 - Phân biệt source bounds bất biến, layout frame và laid-out content bounds.
 - Khi mở source text, frame có thể mở rộng transient tới biên cột; chỉ controller
   quyết định khi nào geometry trở thành draft thật.
-- Đồng bộ selection range, typing format và B/I/U với `QTextDocument` mà không
+- Đồng bộ selection range, typing format, cỡ chữ và B/I/U với `QTextDocument` mà không
   thay toàn bộ document, nhờ đó local undo/redo của editor không bị mất.
 - Commit/cancel editor, sync content bounds sau layout và chuyển focus an toàn
   khi session/tool/selection đổi.
@@ -700,8 +700,10 @@ font/style/color/alignment đang chọn và `formattingEnabled`.
   hiện tại làm giá trị hiển thị nếu nó bị lọc khỏi danh sách chọn.
 - Nút Bold, Italic, Underline, color picker và menu căn trái/phải/giữa/justify.
 - Phát signal yêu cầu thay đổi; panel không tự sửa draft.
-- Có UI font size nhưng pipeline hiện chưa nối size vào draft formatting; không
-  mô tả control đó như tính năng lưu được cho tới khi backend được nối.
+- Cỡ chữ nhận số nguyên 1–512 PDF point, đồng bộ từ selection/caret và để trống
+  khi vùng chọn có nhiều cỡ chữ. Dropdown, Enter hoặc mất focus gửi intent vào
+  controller; đổi selection/session hủy input cũ. Ngoài editor áp toàn đối tượng,
+  trong editor áp vùng chọn hoặc typing format tại caret; có undo/redo và Save.
 - `collapsedChangeRequested` cho phép session giữ trạng thái thu gọn độc lập.
 
 **Ràng buộc:** style button phải phản ánh state controller sau local editor

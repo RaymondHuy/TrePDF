@@ -91,6 +91,12 @@ Item {
         ? activeDocumentView.canNavigateForward
         : false
     readonly property bool hasPendingPanelEdits: {
+        if (textFormatPanelLoader.status === Loader.Ready) {
+            const textFormatPanel = textFormatPanelLoader.item as TextFormatPanel
+            if (textFormatPanel && textFormatPanel.fontSizeEditPending)
+                return true
+        }
+
         if (commentPanelLoader.status === Loader.Ready) {
             const commentPanel = commentPanelLoader.item as CommentPanel
             if (commentPanel && commentPanel.textEditPending)
@@ -239,6 +245,13 @@ Item {
     function setZoom(value) {
         const clampedZoom = Math.max(0.1, Math.min(5.0, value))
         if (activePaneIndex === 0) {
+            if (Math.abs(session.zoom - clampedZoom) < 0.000001)
+                return
+            if (!commitPendingPanelEdits())
+                return
+            const view = paneView(0)
+            if (view)
+                view.prepareForSessionChange()
             session.zoom = clampedZoom
             return
         }
@@ -458,6 +471,12 @@ Item {
     }
 
     function commitPendingPanelEdits() {
+        if (textFormatPanelLoader.status === Loader.Ready) {
+            const textFormatPanel = textFormatPanelLoader.item as TextFormatPanel
+            if (textFormatPanel && !textFormatPanel.commitPendingEdit())
+                return false
+        }
+
         if (commentPanelLoader.status === Loader.Ready) {
             const commentPanel = commentPanelLoader.item as CommentPanel
             if (commentPanel && !commentPanel.commitPendingEdit())
@@ -764,6 +783,13 @@ Item {
                     }
                     selectedFontFamily:
                         root.session.editController.selectedFontFamily
+                    selectedFontSize: root.session.editController.selectedFontSize
+                    formattingSession: root.session
+                    formattingContextKey: root.session.document.source + ":"
+                        + root.session.editController.selectedPage + ":"
+                        + root.session.editController.selectedObjectId + ":"
+                        + root.session.editController.textEditActive + ":"
+                        + root.session.editController.saving
                     selectedFontBold: root.session.editController.selectedFontBold
                     selectedFontItalic:
                         root.session.editController.selectedFontItalic
@@ -779,6 +805,9 @@ Item {
                                 === "addedText")
                     onFontFamilyChangeRequested: fontFamily => {
                         root.session.editController.setSelectedFontFamily(fontFamily)
+                    }
+                    onFontSizeChangeRequested: fontSize => {
+                        root.session.editController.setSelectedFontSize(fontSize)
                     }
                     onFontBoldChangeRequested: enabled => {
                         const editWasActive = root.session.editController.textEditActive

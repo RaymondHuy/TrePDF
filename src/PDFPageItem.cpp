@@ -490,7 +490,9 @@ public:
             const int expectedType
                 = move.kind == PDFEditController::DraftObjectMove::Kind::Text
                 ? FPDF_PAGEOBJ_TEXT
-                : FPDF_PAGEOBJ_IMAGE;
+                : move.kind == PDFEditController::DraftObjectMove::Kind::Path
+                    ? FPDF_PAGEOBJ_PATH
+                    : FPDF_PAGEOBJ_IMAGE;
             if (!object || FPDFPageObj_GetType(object) != expectedType) {
                 restore();
                 return false;

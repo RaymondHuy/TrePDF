@@ -13,12 +13,16 @@ Rectangle {
     required property var availableFontFamilies
     required property var fontFamiliesForFilter
     required property string selectedFontFamily
+    required property real selectedFontSize
+    required property var formattingSession
+    required property string formattingContextKey
     required property bool selectedFontBold
     required property bool selectedFontItalic
     required property bool selectedFontUnderline
     required property color selectedColor
     required property int selectedParagraphAlignment
     property bool formattingEnabled: false
+    readonly property bool fontSizeEditPending: fontSizeEditState.pending
 
     property var displayedFontFamilies: availableFontFamilies
     property int fontFamilyFilter: PDFEditController.VietnameseFonts
@@ -89,11 +93,17 @@ Rectangle {
             : families
     }
 
+    function commitPendingEdit() {
+        fontSizeEditState.commitRequested()
+        return true
+    }
+
     onAvailableFontFamiliesChanged:
         root.refreshDisplayedFontFamilies()
 
     signal collapsedChangeRequested(bool collapsed)
     signal fontFamilyChangeRequested(string fontFamily)
+    signal fontSizeChangeRequested(real fontSize)
     signal fontBoldChangeRequested(bool enabled)
     signal fontItalicChangeRequested(bool enabled)
     signal fontUnderlineChangeRequested(bool enabled)
@@ -102,6 +112,13 @@ Rectangle {
 
     implicitWidth: collapsed ? 42 : 264
     color: theme.ribbonSurface
+
+    QtObject {
+        id: fontSizeEditState
+
+        property bool pending: false
+        signal commitRequested()
+    }
 
     ButtonGroup {
         id: paragraphAlignmentGroup
@@ -426,11 +443,88 @@ Rectangle {
                         ComboBox {
                             id: fontSizeBox
 
+                            property var pendingSession: null
+                            property string pendingContextKey: ""
+
+                            function syncCurrentSize() {
+                                fontSizeEditState.pending = false
+                                const sizeText = root.selectedFontSize > 0
+                                    ? String(root.selectedFontSize)
+                                    : ""
+                                currentIndex = model.indexOf(sizeText)
+                                editText = sizeText
+                            }
+
+                            function beginSizeEdit() {
+                                if (fontSizeEditState.pending)
+                                    return
+
+                                fontSizeEditState.pending = true
+                                pendingSession = root.formattingSession
+                                pendingContextKey = root.formattingContextKey
+                            }
+
+                            function commitSizeText() {
+                                const enteredText = editText.trim()
+                                const points = Number(enteredText)
+                                const apply = fontSizeEditState.pending
+                                    && root.formattingEnabled
+                                    && pendingSession === root.formattingSession
+                                    && pendingContextKey === root.formattingContextKey
+                                    && /^[0-9]+$/.test(enteredText)
+                                    && Number.isInteger(points)
+                                    && points >= 1 && points <= 512
+                                    && Math.abs(points - root.selectedFontSize) > 0.0001
+                                fontSizeEditState.pending = false
+                                if (apply)
+                                    root.fontSizeChangeRequested(points)
+                                syncCurrentSize()
+                            }
+
                             Layout.fillWidth: true
                             editable: true
                             model: ["8", "9", "10", "11", "12", "14", "16", "18", "24", "36", "48", "72"]
-                            currentIndex: 4
+                            currentIndex: -1
+                            inputMethodHints: Qt.ImhDigitsOnly
                             clip: true
+                            //% "Font size"
+                            Accessible.name: qsTrId("FontSize")
+                            Component.onCompleted: syncCurrentSize()
+                            Component.onDestruction: fontSizeEditState.pending = false
+                            onActivated: index => {
+                                beginSizeEdit()
+                                editText = textAt(index)
+                                commitSizeText()
+                            }
+                            onAccepted: commitSizeText()
+
+                            Connections {
+                                target: fontSizeEditState
+
+                                function onCommitRequested() {
+                                    fontSizeBox.commitSizeText()
+                                }
+                            }
+
+                            Connections {
+                                target: root
+
+                                function onSelectedFontSizeChanged() {
+                                    fontSizeBox.syncCurrentSize()
+                                }
+
+                                function onFormattingSessionChanged() {
+                                    fontSizeBox.syncCurrentSize()
+                                }
+
+                                function onFormattingContextKeyChanged() {
+                                    fontSizeBox.syncCurrentSize()
+                                }
+
+                                function onFormattingEnabledChanged() {
+                                    fontSizeBox.syncCurrentSize()
+                                }
+                            }
 
                             background: Rectangle {
                                 radius: 6
@@ -460,6 +554,21 @@ Rectangle {
                                 selectionColor: fontSizeBox.palette.highlight
                                 selectedTextColor: fontSizeBox.palette.highlightedText
                                 verticalAlignment: Text.AlignVCenter
+                                //% "Font size"
+                                Accessible.name: qsTrId("FontSize")
+                                onTextEdited: fontSizeBox.beginSizeEdit()
+                                onActiveFocusChanged: {
+                                    if (!activeFocus && !fontSizeBox.popup.visible)
+                                        fontSizeBox.commitSizeText()
+                                }
+                                Keys.onPressed: event => {
+                                    if ((event.key === Qt.Key_Return
+                                            || event.key === Qt.Key_Enter)
+                                            && !fontSizeBox.popup.visible) {
+                                        fontSizeBox.commitSizeText()
+                                        event.accepted = true
+                                    }
+                                }
 
                                 background: Rectangle {
                                     visible: fontSizeBox.enabled

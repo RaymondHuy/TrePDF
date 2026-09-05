@@ -122,7 +122,7 @@ Item {
     readonly property real editBoxRightBleed: 3
     readonly property real editBoxVerticalBleed: 3
     readonly property real boundingBoxPadding: 3
-    readonly property real minimumTextPixelSize: 6
+    readonly property real minimumTextPixelSize: 1
     readonly property real resizeHandleSize: 8
     readonly property real resizeHandleHitSize: 24
     readonly property real minimumResizePixelSize: 24
@@ -755,12 +755,26 @@ Item {
     }
 
     function syncEditorSelection() {
-        if (!editing || loadingEditorText)
+        if (!editing || loadingEditorText
+                || editorPlainText() !== controller.selectedText)
             return
 
         const start = Math.min(editor.selectionStart, editor.selectionEnd)
         const end = Math.max(editor.selectionStart, editor.selectionEnd)
         controller.setSelectedTextRange(start, end - start)
+    }
+
+    function syncEditorTextPreview() {
+        if (!editing || loadingEditorText)
+            return
+
+        syncingEditorPreview = true
+        controller.updateSelectedTextPreview(
+            editorPlainText(), editor.cursorPosition)
+        syncingEditorPreview = false
+        syncEditorSelection()
+        syncEditorDocumentFontStyles()
+        Qt.callLater(root.syncEditorContentBounds)
     }
 
     function syncEditorDocumentFontStyles() {
@@ -786,6 +800,7 @@ Item {
             controller.selectedParagraphFormats,
             selectedBaseFormat(),
             editorFrame.baseFontPixelSize)
+        controller.initializeEditorFontSizes(editor.textDocument, root.height)
         const maximumPosition = editor.length
         const start = Math.max(0, Math.min(maximumPosition, selectionStart))
         const end = Math.max(0, Math.min(maximumPosition, selectionEnd))
@@ -2225,8 +2240,26 @@ Item {
                 root.controller.applyTypingFormatToEditorDocument(
                     editor.textDocument,
                     start,
-                    length)
+                    length,
+                    root.height)
             }
+        }
+
+        function onSelectionFontSizeApplied(start, length, fontSizeRatio) {
+            if (!root.editing)
+                return
+
+            root.suppressNextEditorReload = true
+            root.applyingEditorDocumentFormat = true
+            const applied = root.controller.applyFontSizeToEditorDocument(
+                editor.textDocument,
+                start,
+                length,
+                fontSizeRatio,
+                root.height)
+            root.applyingEditorDocumentFormat = false
+            if (!applied)
+                root.suppressNextEditorReload = false
         }
 
         function onSelectionFontStyleApplied(start, length, style, enabled) {
@@ -3843,19 +3876,14 @@ Item {
             persistentSelection: true
             verticalAlignment: TextEdit.AlignTop
             clip: true
-            onTextChanged: Qt.callLater(root.syncEditorDocumentFontStyles)
+            onTextChanged: Qt.callLater(root.syncEditorTextPreview)
             onTextEdited: {
                 if (root.loadingEditorText)
                     return
 
                 root.editorLayoutDirty = true
-                root.syncingEditorPreview = true
-                root.controller.updateSelectedTextPreview(
-                    root.editorPlainText(),
-                    editor.cursorPosition)
-                root.syncingEditorPreview = false
-                root.syncEditorSelection()
-                Qt.callLater(root.syncEditorContentBounds)
+                // The native typing block closes after this input event.
+                Qt.callLater(root.syncEditorTextPreview)
             }
             onContentHeightChanged: {
                 if (root.editorLayoutDirty)
