@@ -202,8 +202,8 @@ Current features:
   from its Qt text width so the original line fits before reflow. On entering
   text edit, a transient frame extends from the existing left edge to the next
   same-row text boundary or the inferred right page margin. It is persisted
-  only by a real text edit, a paragraph-format change, or explicit resize, so a
-  no-op editor session does not create a draft. Four edge resize handles update
+  only by a real text edit, a font-size or paragraph-format change, or explicit
+  resize, so a no-op editor session does not create a draft. Four edge resize handles update
   the normalized frame, reflow text live, and commit geometry through the same
   draft undo/redo snapshots as text and formatting.
 - Compatible same-line text objects are grouped into one draft edit while each
@@ -217,14 +217,21 @@ Current features:
   untouched. Drafts and history are cleared only after the saved file reopens.
 - An edit-only, collapsible right-side text-formatting panel provides UI for
   font family, size, color, bold, italic, and underline. Materialized character
-  formatting participates in draft undo/redo; size is not connected to draft
-  formatting yet. During inline editing, bold/italic/underline apply to the
+  formatting participates in draft undo/redo. Font size accepts integral PDF
+  points from 1 to 512, formats the selected object or active text range, and
+  sets a transient typing size at a collapsed caret. Mixed sizes show a blank
+  panel value. Store semantic size ratios in the live QTextDocument so local
+  undo/redo restores exact source sizes independently of zoom; merge size and
+  calibrated stretch without replacing the editor document. Commit the active
+  editor before changing primary-pane zoom so its pixel formats cannot become
+  stale. During inline
+  editing, bold/italic/underline apply to the
   selected range; with only a caret they become the typing format for
   subsequently inserted text without changing existing characters. Invoking
   one of those controls on a selected text object opens its inline editor first
   and leaves the caret at the end, so it never restyles the whole object. The
   editor merges range formatting directly into its text document and syncs
-  B/I/U back after local undo/redo without replacing the rich-text document.
+  B/I/U and size back after local undo/redo without replacing the rich-text document.
   The font picker filters system faces by the active bold/italic style using a
   lightweight save-compatibility probe; filtered PDF source fonts remain
   visible as the current value only.

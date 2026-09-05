@@ -24,6 +24,7 @@
 #include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QImage>
+#include <QInputMethodEvent>
 #include <QJSValue>
 #include <QLocale>
 #include <QMouseEvent>
@@ -3181,6 +3182,131 @@ struct RichSaveInspection {
     bool greenIsNextLine = false;
 };
 
+bool createTextUnderlineSourcePdf(const QString &filePath,
+                                 const QByteArray &underlineCommands = {})
+{
+    const QByteArray content = QByteArray(
+        "BT /F1 24 Tf 1 0 0 1 72 640 Tm (Hello world) Tj ET\n")
+        + underlineCommands
+        + QByteArray("q 0 0 0 RG 1 w 72 740 m 300 740 l S Q\n");
+    return writePdfObjects(filePath, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                   "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"),
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+        QByteArray("<< /Length ") + QByteArray::number(content.size())
+            + QByteArray(" >>\nstream\n") + content + QByteArray("endstream"),
+    });
+}
+
+bool createSavedTextUnderlinePdf(const QString &filePath, bool legacy)
+{
+    if (legacy) {
+        // Previous TrePDF versions emitted an unmarked path immediately after
+        // the text. Helvetica's advance for "Hello world" at 24 pt is 118.68 pt.
+        return createTextUnderlineSourcePdf(filePath, QByteArray(
+            "q 0 0 0 RG 1.2 w 72 637.6 m 190.68 637.6 l S Q\n"));
+    }
+
+    const QString sourcePath = filePath + QStringLiteral(".source.pdf");
+    if (!createTextUnderlineSourcePdf(sourcePath)) {
+        return false;
+    }
+    PDFDocument document;
+    PDFEditController controller;
+    if (!document.open(QUrl::fromLocalFile(sourcePath))) {
+        return false;
+    }
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello world"));
+    if (!controller.selectCandidate(
+            0, candidate.value(QStringLiteral("objectId")).toString())) {
+        return false;
+    }
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(0, 11);
+    controller.setSelectedFontUnderline(true);
+    controller.finishSelectedTextEdit();
+    return controller.saveAs(QUrl::fromLocalFile(filePath));
+}
+
+struct TextUnderlineInspection {
+    bool readable = false;
+    int textIndex = -1;
+    int textCount = 0;
+    QPointF textOrigin;
+    QVector<int> underlineIndexes;
+    QVector<QLineF> underlines;
+    QVector<QLineF> unrelatedLines;
+};
+
+TextUnderlineInspection inspectTextUnderlinePaths(const QString &filePath)
+{
+    PDFiumProcessLock pdfiumLock;
+    TextUnderlineInspection inspection;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    inspection.readable = page != nullptr;
+    if (page) {
+        for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            const int type = FPDFPageObj_GetType(object);
+            if (type == FPDF_PAGEOBJ_TEXT) {
+                inspection.textIndex = index;
+                ++inspection.textCount;
+                FS_MATRIX matrix{};
+                if (FPDFPageObj_GetMatrix(object, &matrix)) {
+                    inspection.textOrigin = QPointF(matrix.e, matrix.f);
+                }
+                continue;
+            }
+            if (type != FPDF_PAGEOBJ_PATH
+                || FPDFPath_CountSegments(object) != 2) {
+                continue;
+            }
+            FS_MATRIX matrix{};
+            float x1 = 0.0F;
+            float y1 = 0.0F;
+            float x2 = 0.0F;
+            float y2 = 0.0F;
+            if (!FPDFPageObj_GetMatrix(object, &matrix)
+                || !FPDFPathSegment_GetPoint(
+                    FPDFPath_GetPathSegment(object, 0), &x1, &y1)
+                || !FPDFPathSegment_GetPoint(
+                    FPDFPath_GetPathSegment(object, 1), &x2, &y2)) {
+                inspection.readable = false;
+                break;
+            }
+            const auto transform = [&matrix](qreal x, qreal y) {
+                return QPointF(matrix.a * x + matrix.c * y + matrix.e,
+                               matrix.b * x + matrix.d * y + matrix.f);
+            };
+            const QLineF line(transform(x1, y1), transform(x2, y2));
+            if (qAbs(line.y1() - 740.0) < 0.01) {
+                inspection.unrelatedLines.append(line);
+            } else {
+                inspection.underlineIndexes.append(index);
+                inspection.underlines.append(line);
+            }
+        }
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return inspection;
+}
+
+void addTextUnderlineFixtureRows()
+{
+    QTest::addColumn<bool>("legacy");
+    QTest::newRow("saved-marked-underline") << false;
+    QTest::newRow("legacy-unmarked-underline") << true;
+}
+
 RichSaveInspection inspectRichSave(const QString &filePath)
 {
     RichSaveInspection inspection;
@@ -5471,6 +5597,14 @@ private slots:
     void resizesDraftFrameWithUndoRedo();
     void storesReflowedContentBoundsWithUndoRedo();
     void changesFontFamilyForCurrentEdit();
+    void changesFontSizeWithUndoRedo();
+    void rejectsInvalidAndNoOpFontSizes();
+    void formatsFontSizeInSelectedRange();
+    void appliesFontSizeToTypingAtCaret();
+    void joinsNativeFontSizeTypingUndo_data();
+    void joinsNativeFontSizeTypingUndo();
+    void preservesEditorUndoWhenChangingFontSize();
+    void savesFontSizeRoundTrip();
     void resetsStretchWhenChangingFontFamily();
     void normalizesSourceStretchWhenReselectingFontFamily();
     void preservesSourceHorizontalScaleWhenResizing_data();
@@ -5635,6 +5769,16 @@ private slots:
     void savesDeletedTopLevelImageRoundTrip();
     void preservesAddedTextLayerOrder();
     void savesRichMultilineTextRoundTrip();
+    void shortensSavedTextUnderline_data();
+    void shortensSavedTextUnderline();
+    void deletesSavedTextUnderlineWithUndoRedoDiscard_data();
+    void deletesSavedTextUnderlineWithUndoRedoDiscard();
+    void disablesSavedTextUnderline_data();
+    void disablesSavedTextUnderline();
+    void movesSavedTextUnderline_data();
+    void movesSavedTextUnderline();
+    void preservesUnrelatedPathsNearText_data();
+    void preservesUnrelatedPathsNearText();
     void savesOffsetCropCoordinates();
     void savesAddedTextOnRotatedPage();
     void preservesStrokeAppearanceAndRejectsClipping();
@@ -11653,6 +11797,476 @@ void PDFEditControllerTest::changesFontFamilyForCurrentEdit()
         replacementFamily);
 
     m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::changesFontSizeWithUndoRedo()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    const qreal originalSize = m_controller.selectedFontSize();
+    const qreal originalRatio = m_controller.selectedFontSizeRatio();
+    const qreal baseline = m_controller.selectedBaselineY();
+    const QRectF sourceRect = m_controller.selectedSourceRect();
+    QCOMPARE(originalSize, 24.0);
+
+    m_controller.setSelectedFontSize(36.0);
+    QVERIFY(!m_controller.textEditActive());
+    QCOMPARE(m_controller.selectedFontSize(), 36.0);
+    QCOMPARE(m_controller.selectedFontSizeRatio(), 36.0 / m_document.pageSize(0).height());
+    QCOMPARE(m_controller.selectedDisplayFontSizeRatio(), m_controller.selectedFontSizeRatio());
+    QCOMPARE(m_controller.selectedText(), QString::fromLatin1(kRegularText));
+    QCOMPARE(m_controller.selectedSourceRect(), sourceRect);
+    QCOMPARE(m_controller.selectedBaselineY(), baseline);
+    const QVariantList spans = m_controller.selectedCharacterSpans();
+    QCOMPARE(spans.size(), 1);
+    QCOMPARE(spans.constFirst().toMap().value(QStringLiteral("fontSizeRatio")).toReal(),
+             36.0 / m_document.pageSize(0).height());
+    QVERIFY(m_controller.canUndo());
+
+    m_controller.undo();
+    QCOMPARE(m_controller.selectedFontSize(), originalSize);
+    QCOMPARE(m_controller.selectedFontSizeRatio(), originalRatio);
+    QVERIFY(!m_controller.hasDrafts());
+    QVERIFY(!m_controller.canUndo());
+    QVERIFY(m_controller.canRedo());
+    m_controller.redo();
+    QCOMPARE(m_controller.selectedFontSize(), 36.0);
+    QVERIFY(m_controller.hasDrafts());
+
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(m_controller.selectedFontSize(), originalSize);
+    QVERIFY(!m_controller.hasDrafts());
+
+    m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedTextRange(0, m_controller.selectedText().size());
+    m_controller.setSelectedFontSize(48.0);
+    QCOMPARE(m_controller.selectedFontSize(), 48.0);
+    m_controller.cancelSelectedTextEdit();
+    QCOMPARE(m_controller.selectedFontSize(), originalSize);
+    QVERIFY(!m_controller.hasDrafts());
+    QVERIFY(!m_controller.canUndo());
+
+    m_controller.beginSelectedTextEdit();
+    const QRectF expandedFrame = m_controller.selectedFrameRect();
+    m_controller.setSelectedTextRange(0, m_controller.selectedText().size());
+    m_controller.setSelectedFontSize(48.0);
+    m_controller.finishSelectedTextEdit();
+    QCOMPARE(m_controller.selectedFrameRect(), expandedFrame);
+    m_controller.undo();
+    QVERIFY(!m_controller.hasDrafts());
+}
+
+void PDFEditControllerTest::rejectsInvalidAndNoOpFontSizes()
+{
+    PDFEditController emptyController;
+    QCOMPARE(emptyController.selectedFontSize(), 0.0);
+    emptyController.setSelectedFontSize(36.0);
+    QCOMPARE(emptyController.selectedFontSize(), 0.0);
+    QVERIFY(!emptyController.hasDrafts());
+
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    const qreal originalSize = m_controller.selectedFontSize();
+    const QRectF originalFrame = m_controller.selectedFrameRect();
+    const QVariantList originalSpans = m_controller.selectedCharacterSpans();
+    const QList<qreal> rejectedSizes = {
+        -10.0, 0.0, 0.5, 12.5, 512.5, 513.0,
+        std::numeric_limits<qreal>::infinity(),
+        -std::numeric_limits<qreal>::infinity(),
+        std::numeric_limits<qreal>::quiet_NaN(),
+        originalSize
+    };
+    for (qreal size : rejectedSizes) {
+        m_controller.setSelectedFontSize(size);
+        QCOMPARE(m_controller.selectedFontSize(), originalSize);
+        QCOMPARE(m_controller.selectedFrameRect(), originalFrame);
+        QCOMPARE(m_controller.selectedCharacterSpans(), originalSpans);
+        QVERIFY(!m_controller.textEditActive());
+        QVERIFY(!m_controller.hasDrafts());
+        QVERIFY(!m_controller.canUndo());
+    }
+
+    for (qreal size : { 1.0, 512.0 }) {
+        m_controller.setSelectedFontSize(size);
+        QCOMPARE(m_controller.selectedFontSize(), size);
+        QVERIFY(m_controller.hasDrafts());
+        m_controller.undo();
+        QCOMPARE(m_controller.selectedFontSize(), originalSize);
+        QVERIFY(!m_controller.hasDrafts());
+    }
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::formatsFontSizeInSelectedRange()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    const qreal pageHeight = m_document.pageSize(0).height();
+    const qreal originalRatio = m_controller.selectedFontSizeRatio();
+    const qreal originalDisplayRatio = m_controller.selectedDisplayFontSizeRatio();
+    const qreal baseline = m_controller.selectedBaselineY();
+    m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedTextRange(8, 3);
+    m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedFontItalic(true);
+    m_controller.setSelectedFontUnderline(true);
+    const QColor rangeColor(QStringLiteral("#1565c0"));
+    m_controller.setSelectedColor(rangeColor);
+    QSignalSpy sizeAppliedSpy(&m_controller, &PDFEditController::selectionFontSizeApplied);
+    m_controller.setSelectedFontSize(36.0);
+    QCOMPARE(sizeAppliedSpy.size(), 1);
+    QCOMPARE(sizeAppliedSpy.constFirst().at(0).toInt(), 8);
+    QCOMPARE(sizeAppliedSpy.constFirst().at(1).toInt(), 3);
+    QCOMPARE(sizeAppliedSpy.constFirst().at(2).toReal(), 36.0 / pageHeight);
+    QCOMPARE(m_controller.selectedFontSize(), 36.0);
+    QCOMPARE(m_controller.selectedBaselineY(), baseline);
+
+    const QVariantList spans = m_controller.selectedCharacterSpans();
+    QCOMPARE(spans.size(), 3);
+    const QVariantMap selectedSpan = spans.at(1).toMap();
+    QCOMPARE(selectedSpan.value(QStringLiteral("start")).toInt(), 8);
+    QCOMPARE(selectedSpan.value(QStringLiteral("length")).toInt(), 3);
+    QCOMPARE(selectedSpan.value(QStringLiteral("fontSizeRatio")).toReal(), 36.0 / pageHeight);
+    QCOMPARE(selectedSpan.value(QStringLiteral("displayFontSizeRatio")).toReal(), 36.0 / pageHeight);
+    QVERIFY(selectedSpan.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(selectedSpan.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(selectedSpan.value(QStringLiteral("fontUnderline")).toBool());
+    QCOMPARE(selectedSpan.value(QStringLiteral("color")).value<QColor>(), rangeColor);
+    for (int index : { 0, 2 }) {
+        const QVariantMap unchangedSpan = spans.at(index).toMap();
+        QCOMPARE(unchangedSpan.value(QStringLiteral("fontSizeRatio")).toReal(), originalRatio);
+        QCOMPARE(unchangedSpan.value(QStringLiteral("displayFontSizeRatio")).toReal(), originalDisplayRatio);
+        QVERIFY(!unchangedSpan.value(QStringLiteral("fontBold")).toBool());
+    }
+
+    m_controller.setSelectedTextRange(0, m_controller.selectedText().size());
+    QCOMPARE(m_controller.selectedFontSize(), 0.0);
+    m_controller.setSelectedTextRange(1, 2);
+    QCOMPARE(m_controller.selectedFontSize(), 24.0);
+    m_controller.setSelectedTextRange(9, 0);
+    QCOMPARE(m_controller.selectedFontSize(), 36.0);
+    m_controller.cancelSelectedTextEdit();
+    QVERIFY(!m_controller.hasDrafts());
+    QCOMPARE(m_controller.selectedFontSize(), 24.0);
+}
+
+void PDFEditControllerTest::appliesFontSizeToTypingAtCaret()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    const QString originalText = m_controller.selectedText();
+    const qreal originalRatio = m_controller.selectedFontSizeRatio();
+    const qreal pageHeight = m_document.pageSize(0).height();
+    m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedTextRange(8, 0);
+    m_controller.setSelectedFontSize(36.0);
+    m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedFontItalic(true);
+    m_controller.setSelectedFontUnderline(true);
+    QCOMPARE(m_controller.selectedFontSize(), 36.0);
+    QVERIFY(!m_controller.hasDrafts());
+    QVERIFY(!m_controller.canUndo());
+    m_controller.finishSelectedTextEdit();
+    QVERIFY(!m_controller.hasDrafts());
+    QCOMPARE(m_controller.selectedFontSize(), 24.0);
+
+    m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedTextRange(8, 0);
+    m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedFontSize(36.0);
+    m_controller.setSelectedFontItalic(true);
+    m_controller.setSelectedFontUnderline(true);
+    const QString inserted = QStringLiteral("new");
+    const QString editedText = originalText.left(8) + inserted + originalText.mid(8);
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral(
+        "import QtQuick\n"
+        "TextEdit { textFormat: TextEdit.RichText; font.pixelSize: 36 }"), QUrl());
+    std::unique_ptr<QObject> textEdit(component.create());
+    QVERIFY2(textEdit, qPrintable(component.errorString()));
+    QVERIFY(textEdit->setProperty("text", originalText));
+    auto *quickDocument = textEdit->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QVERIFY(textDocument);
+    m_controller.initializeEditorFontSizes(quickDocument);
+    QVERIFY(QMetaObject::invokeMethod(textEdit.get(), "insert",
+                                     Q_ARG(int, 8), Q_ARG(QString, inserted)));
+    m_controller.updateSelectedTextPreview(editedText, 11);
+    m_controller.applyTypingFormatToEditorDocument(quickDocument, 8, 3, pageHeight * 1.5);
+    QTextCursor typedCursor(textDocument);
+    typedCursor.setPosition(8);
+    typedCursor.setPosition(11, QTextCursor::KeepAnchor);
+    QCOMPARE(typedCursor.charFormat().font().pixelSize(), 54);
+    QCOMPARE(typedCursor.charFormat().fontWeight(), QFont::Bold);
+    QVERIFY(typedCursor.charFormat().fontItalic());
+    QVERIFY(typedCursor.charFormat().fontUnderline());
+    textDocument->undo();
+    QCOMPARE(textDocument->toPlainText(), originalText);
+    m_controller.setSelectedTextRange(11, 0);
+    QCOMPARE(m_controller.selectedFontSize(), 36.0);
+    const QVariantList spans = m_controller.selectedCharacterSpans();
+    QCOMPARE(spans.size(), 3);
+    QCOMPARE(spans.at(0).toMap().value(QStringLiteral("fontSizeRatio")).toReal(), originalRatio);
+    QCOMPARE(spans.at(2).toMap().value(QStringLiteral("fontSizeRatio")).toReal(), originalRatio);
+    const QVariantMap insertionSpan = spans.at(1).toMap();
+    QCOMPARE(insertionSpan.value(QStringLiteral("start")).toInt(), 8);
+    QCOMPARE(insertionSpan.value(QStringLiteral("length")).toInt(), 3);
+    QCOMPARE(insertionSpan.value(QStringLiteral("fontSizeRatio")).toReal(), 36.0 / pageHeight);
+    QVERIFY(insertionSpan.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(insertionSpan.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(insertionSpan.value(QStringLiteral("fontUnderline")).toBool());
+    m_controller.setSelectedTextRange(2, 0);
+    QCOMPARE(m_controller.selectedFontSize(), 24.0);
+    QVERIFY(!m_controller.selectedFontBold());
+    m_controller.finishSelectedTextEdit();
+    m_controller.undo();
+    QVERIFY(!m_controller.hasDrafts());
+    QCOMPARE(m_controller.selectedText(), originalText);
+    m_controller.redo();
+    QCOMPARE(m_controller.selectedText(), editedText);
+    QCOMPARE(m_controller.selectedCharacterSpans(), spans);
+    m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::joinsNativeFontSizeTypingUndo_data()
+{
+    QTest::addColumn<bool>("inputMethod");
+    QTest::newRow("keyboard") << false;
+    QTest::newRow("vietnamese-ime") << true;
+}
+
+void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
+{
+    QFETCH(bool, inputMethod);
+    const QString insertedText = inputMethod ? QStringLiteral("ế") : QStringLiteral("x");
+    m_controller.discardDrafts();
+    m_controller.setTool(PDFEditController::SelectTool);
+    QVERIFY(m_controller.selectCandidate(
+        0, m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    const QString originalText = m_controller.selectedText();
+    const qreal displayedHeight = m_document.pageSize(0).height() * 1.5;
+    const QString themePath = QFINDTESTDATA("../src/Components/AppTheme.qml");
+    const QString overlayPath = QFINDTESTDATA("../src/Components/EditOverlay.qml");
+    QVERIFY(registerQmlTestTypes(themePath));
+    QQuickWindow window;
+    window.resize(900, 600);
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(overlayPath));
+    const QVariantMap properties{
+        {QStringLiteral("page"), 0},
+        {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false},
+        {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&m_controller)},
+        {QStringLiteral("pagePointScale"), 1.5},
+        {QStringLiteral("width"), 900.0},
+        {QStringLiteral("height"), displayedHeight}};
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties(properties));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    qobject_cast<QQuickItem *>(overlay.get())->setParentItem(window.contentItem());
+    window.show();
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    QObject *textEdit = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            textEdit = child;
+            break;
+        }
+    }
+    QVERIFY(textEdit);
+    auto *item = qobject_cast<QQuickItem *>(textEdit);
+    QVERIFY(item);
+    auto *quickDocument = textEdit->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *document = quickDocument->textDocument();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(textEdit->setProperty("cursorPosition", originalText.size()));
+    m_controller.setSelectedTextRange(originalText.size(), 0);
+    m_controller.setSelectedFontSize(32);
+    m_controller.setSelectedFontUnderline(true);
+    item->forceActiveFocus();
+    if (inputMethod) {
+        QInputMethodEvent event;
+        event.setCommitString(insertedText);
+        QCoreApplication::sendEvent(item, &event);
+    } else {
+        QTest::keyClick(&window, Qt::Key_X);
+    }
+    QTRY_COMPARE(m_controller.selectedText(), originalText + insertedText);
+    QTextCursor cursor(document);
+    cursor.setPosition(originalText.size());
+    cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+    QCOMPARE(cursor.charFormat().font().pixelSize(), 48);
+    QVERIFY(cursor.charFormat().fontUnderline());
+    QVERIFY(QMetaObject::invokeMethod(textEdit, "undo"));
+    QTRY_COMPARE(m_controller.selectedText(), originalText);
+    QCOMPARE(document->toPlainText(), originalText);
+    QVERIFY(!document->isUndoAvailable());
+    QVERIFY(QMetaObject::invokeMethod(textEdit, "redo"));
+    QTRY_COMPARE(m_controller.selectedText(), originalText + insertedText);
+    QCOMPARE(textEdit->property("cursorPosition").toInt(),
+             originalText.size() + insertedText.size());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "cancelEditing"));
+}
+
+void PDFEditControllerTest::preservesEditorUndoWhenChangingFontSize()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0,
+        m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    const QString originalText = m_controller.selectedText();
+    const qreal originalRatio = m_controller.selectedFontSizeRatio();
+    const qreal originalDisplayRatio = m_controller.selectedDisplayFontSizeRatio();
+    const qreal baseline = m_controller.selectedBaselineY();
+    const qreal displayedHeight = m_document.pageSize(0).height() * 1.5;
+    m_controller.beginSelectedTextEdit();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral(
+        "import QtQuick\n"
+        "TextEdit { textFormat: TextEdit.RichText; font.pixelSize: 36 }"), QUrl());
+    std::unique_ptr<QObject> textEdit(component.create());
+    QVERIFY2(textEdit, qPrintable(component.errorString()));
+    QVERIFY(textEdit->setProperty("text", originalText));
+    auto *quickDocument = textEdit->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QVERIFY(textDocument);
+    m_controller.initializeEditorFontSizes(quickDocument, displayedHeight);
+    QVERIFY(!textDocument->isUndoAvailable());
+
+    QVERIFY(QMetaObject::invokeMethod(textEdit.get(), "insert",
+                                     Q_ARG(int, originalText.size()),
+                                     Q_ARG(QString, QStringLiteral("X"))));
+    const QString editedText = originalText + QLatin1Char('X');
+    QCOMPARE(textDocument->toPlainText(), editedText);
+    m_controller.updateSelectedTextPreview(editedText, editedText.size());
+    m_controller.setSelectedTextRange(1, 2);
+    QSignalSpy sizeAppliedSpy(&m_controller, &PDFEditController::selectionFontSizeApplied);
+    m_controller.setSelectedFontSize(36.0);
+    QCOMPARE(sizeAppliedSpy.size(), 1);
+    const QList<QVariant> sizeArguments = sizeAppliedSpy.constFirst();
+    QVERIFY(m_controller.applyFontSizeToEditorDocument(
+        quickDocument, sizeArguments.at(0).toInt(), sizeArguments.at(1).toInt(),
+        sizeArguments.at(2).toReal(), displayedHeight));
+    QTextCursor formattedCursor(textDocument);
+    formattedCursor.setPosition(1);
+    formattedCursor.setPosition(3, QTextCursor::KeepAnchor);
+    QCOMPARE(formattedCursor.charFormat().font().pixelSize(), 54);
+    formattedCursor.setPosition(0);
+    formattedCursor.setPosition(1, QTextCursor::KeepAnchor);
+    QCOMPARE(formattedCursor.charFormat().font().pixelSize(), 36);
+    QCOMPARE(m_controller.selectedFontSize(), 36.0);
+    QCOMPARE(m_controller.selectedBaselineY(), baseline);
+
+    textDocument->undo();
+    QCOMPARE(textDocument->toPlainText(), editedText);
+    QVERIFY(m_controller.syncEditorFontStyles(quickDocument));
+    QCOMPARE(m_controller.selectedFontSize(), 24.0);
+    QCOMPARE(m_controller.selectedFontSizeRatio(), originalRatio);
+    QCOMPARE(m_controller.selectedDisplayFontSizeRatio(), originalDisplayRatio);
+    QCOMPARE(m_controller.selectedCharacterSpans().size(), 1);
+    textDocument->redo();
+    QVERIFY(m_controller.syncEditorFontStyles(quickDocument));
+    QCOMPARE(m_controller.selectedFontSize(), 36.0);
+    textDocument->undo();
+    QVERIFY(m_controller.syncEditorFontStyles(quickDocument));
+    textDocument->undo();
+    QCOMPARE(textDocument->toPlainText(), originalText);
+    m_controller.updateSelectedTextPreview(originalText, originalText.size());
+    m_controller.syncEditorFontStyles(quickDocument);
+    m_controller.finishSelectedTextEdit();
+    QVERIFY(!m_controller.hasDrafts());
+    QVERIFY(!m_controller.canUndo());
+    QCOMPARE(m_controller.selectedFontSize(), 24.0);
+}
+
+void PDFEditControllerTest::savesFontSizeRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("font-size-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(QStringLiteral("font-size-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), QString::fromLatin1(kRegularText));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.setSelectedFontSize(18.0);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    candidate = candidateForText(waitForCandidates(controller, 0), QString::fromLatin1(kRegularText));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedFontSize(), 18.0);
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(8, 3);
+    controller.setSelectedFontSize(30.0);
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.save());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    const QVariantList reopenedCandidates = waitForCandidates(controller, 0);
+    candidate = candidateForText(reopenedCandidates, QStringLiteral("PDF"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedFontSize(), 30.0);
+
+    const QByteArray encodedPath = QFile::encodeName(outputPath);
+    FPDF_DOCUMENT savedDocument = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    QVERIFY(savedDocument);
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(savedDocument); });
+    FPDF_PAGE page = FPDF_LoadPage(savedDocument, 0);
+    QVERIFY(page);
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+    QVERIFY(textPage);
+    const auto closeTextPage = qScopeGuard([&] { FPDFText_ClosePage(textPage); });
+    bool foundResizedRange = false;
+    bool foundUnchangedRange = false;
+    for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
+        FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+        if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT) {
+            continue;
+        }
+        const QString text = pageObjectText(object, textPage);
+        float pointSize = 0.0F;
+        if (text.trimmed() == QStringLiteral("PDF")) {
+            QVERIFY(FPDFTextObj_GetFontSize(object, &pointSize));
+            QCOMPARE(pointSize, 30.0F);
+            foundResizedRange = true;
+        } else if (text.contains(QStringLiteral("Regular"))) {
+            QVERIFY(FPDFTextObj_GetFontSize(object, &pointSize));
+            QCOMPARE(pointSize, 18.0F);
+            foundUnchangedRange = true;
+        }
+    }
+    QVERIFY(foundResizedRange);
+    QVERIFY(foundUnchangedRange);
+    QVERIFY(normalizedPageText(sourcePath).contains(QString::fromLatin1(kRegularText)));
 }
 
 void PDFEditControllerTest::resetsStretchWhenChangingFontFamily()
@@ -26353,6 +26967,271 @@ void PDFEditControllerTest::savesRichMultilineTextRoundTrip()
     QVERIFY(inspection.underlinePath);
     QVERIFY(inspection.redAndBlueShareBaseline);
     QVERIFY(inspection.greenIsNextLine);
+}
+
+void PDFEditControllerTest::shortensSavedTextUnderline_data()
+{
+    addTextUnderlineFixtureRows();
+}
+
+void PDFEditControllerTest::shortensSavedTextUnderline()
+{
+    QFETCH(bool, legacy);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("shorten-text-underline-%1.pdf").arg(legacy));
+    const QString outputPath = sourcePath + QStringLiteral(".shortened.pdf");
+    QVERIFY(createSavedTextUnderlinePdf(sourcePath, legacy));
+    const TextUnderlineInspection original = inspectTextUnderlinePaths(sourcePath);
+    QVERIFY(original.readable);
+    QCOMPARE(original.textCount, 1);
+    QCOMPARE(original.underlines.size(), 1);
+    QCOMPARE(original.unrelatedLines.size(), 1);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello world"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(candidate.value(QStringLiteral("fontUnderline")).toBool());
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.selectedFontUnderline());
+    controller.commitSelectedText(QStringLiteral("Hello"));
+
+    const QVector<QVector<int>> suppressed
+        = controller.draftedTextObjectPathsForPage(0);
+    QCOMPARE(suppressed.size(), 2);
+    QVERIFY(suppressed.contains(QVector<int>{original.textIndex}));
+    QVERIFY(suppressed.contains(QVector<int>{original.underlineIndexes.constFirst()}));
+    QVERIFY(controller.allDraftedTextObjectsSuppressibleForPage(0));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    const TextUnderlineInspection saved = inspectTextUnderlinePaths(outputPath);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.textCount, 1);
+    QCOMPARE(saved.underlines.size(), 1);
+    QVERIFY(saved.underlines.constFirst().length() > 1.0);
+    QVERIFY(saved.underlines.constFirst().length()
+        < original.underlines.constFirst().length() * 0.7);
+    QCOMPARE(saved.unrelatedLines, original.unrelatedLines);
+    QCOMPARE(normalizedPageText(outputPath), QStringLiteral("Hello"));
+    const QVariantMap reopened = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello"));
+    QVERIFY(reopened.value(QStringLiteral("fontUnderline")).toBool());
+}
+
+void PDFEditControllerTest::deletesSavedTextUnderlineWithUndoRedoDiscard_data()
+{
+    QTest::addColumn<bool>("legacy");
+    QTest::addColumn<bool>("inlineDeletion");
+    QTest::newRow("marked-delete-object") << false << false;
+    QTest::newRow("legacy-delete-object") << true << false;
+    QTest::newRow("marked-clear-editor") << false << true;
+    QTest::newRow("legacy-clear-editor") << true << true;
+}
+
+void PDFEditControllerTest::deletesSavedTextUnderlineWithUndoRedoDiscard()
+{
+    QFETCH(bool, legacy);
+    QFETCH(bool, inlineDeletion);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("delete-text-underline-%1.pdf").arg(legacy));
+    const QString outputPath = sourcePath + QStringLiteral(".deleted.pdf");
+    QVERIFY(createSavedTextUnderlinePdf(sourcePath, legacy));
+    const TextUnderlineInspection original = inspectTextUnderlinePaths(sourcePath);
+    QCOMPARE(original.underlines.size(), 1);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello world"));
+    const QString objectId = candidate.value(QStringLiteral("objectId")).toString();
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QVERIFY(controller.selectedFontUnderline());
+    const auto deleteText = [&controller, inlineDeletion]() {
+        if (inlineDeletion) {
+            controller.beginSelectedTextEdit();
+            controller.updateSelectedTextPreview(QString());
+            controller.finishSelectedTextEdit();
+        } else {
+            controller.deleteSelectedObject();
+        }
+    };
+    deleteText();
+    QVERIFY(controller.hasDrafts());
+    QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 2);
+    QVERIFY(controller.allDraftedTextObjectsSuppressibleForPage(0));
+    QVERIFY(!controller.selectCandidate(0, objectId));
+
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(controller.draftedTextObjectPathsForPage(0).isEmpty());
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QVERIFY(controller.selectedFontUnderline());
+    controller.redo();
+    QVERIFY(controller.hasDrafts());
+    QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 2);
+    controller.discardDrafts();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(controller.draftedTextObjectPathsForPage(0).isEmpty());
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QVERIFY(controller.selectedFontUnderline());
+
+    deleteText();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const TextUnderlineInspection saved = inspectTextUnderlinePaths(outputPath);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.textCount, 0);
+    QVERIFY(saved.underlines.isEmpty());
+    QCOMPARE(saved.unrelatedLines, original.unrelatedLines);
+    QVERIFY(normalizedPageText(outputPath).isEmpty());
+}
+
+void PDFEditControllerTest::disablesSavedTextUnderline_data()
+{
+    addTextUnderlineFixtureRows();
+}
+
+void PDFEditControllerTest::disablesSavedTextUnderline()
+{
+    QFETCH(bool, legacy);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("disable-text-underline-%1.pdf").arg(legacy));
+    const QString outputPath = sourcePath + QStringLiteral(".disabled.pdf");
+    QVERIFY(createSavedTextUnderlinePdf(sourcePath, legacy));
+    const TextUnderlineInspection original = inspectTextUnderlinePaths(sourcePath);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello world"));
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(0, 11);
+    QVERIFY(controller.selectedFontUnderline());
+    controller.setSelectedFontUnderline(false);
+    controller.finishSelectedTextEdit();
+    QVERIFY(!controller.selectedFontUnderline());
+    QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 2);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    const TextUnderlineInspection saved = inspectTextUnderlinePaths(outputPath);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.textCount, 1);
+    QVERIFY(saved.underlines.isEmpty());
+    QCOMPARE(saved.unrelatedLines, original.unrelatedLines);
+    QCOMPARE(normalizedPageText(outputPath), QStringLiteral("Hello world"));
+    const QVariantMap reopened = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello world"));
+    QVERIFY(!reopened.isEmpty());
+    QVERIFY(!reopened.value(QStringLiteral("fontUnderline")).toBool());
+}
+
+void PDFEditControllerTest::movesSavedTextUnderline_data()
+{
+    addTextUnderlineFixtureRows();
+}
+
+void PDFEditControllerTest::movesSavedTextUnderline()
+{
+    QFETCH(bool, legacy);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("move-text-underline-%1.pdf").arg(legacy));
+    const QString outputPath = sourcePath + QStringLiteral(".moved.pdf");
+    QVERIFY(createSavedTextUnderlinePdf(sourcePath, legacy));
+    const TextUnderlineInspection original = inspectTextUnderlinePaths(sourcePath);
+    QCOMPARE(original.underlines.size(), 1);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello world"));
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QRectF originalFrame = controller.selectedFrameRect();
+    const QPointF translation(0.05, 0.06);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(originalFrame.translated(translation));
+    controller.finishSelectedFrameResize();
+    QVERIFY(controller.draftedTextObjectPathsForPage(0).isEmpty());
+    const QVector<PDFEditController::DraftObjectMove> moves
+        = controller.draftedObjectMovesForPage(0);
+    QCOMPARE(moves.size(), 2);
+    QCOMPARE(std::count_if(moves.cbegin(), moves.cend(), [](const auto &move) {
+        return move.kind == PDFEditController::DraftObjectMove::Kind::Text;
+    }), 1);
+    QCOMPARE(std::count_if(moves.cbegin(), moves.cend(), [](const auto &move) {
+        return move.kind == PDFEditController::DraftObjectMove::Kind::Path;
+    }), 1);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+
+    const TextUnderlineInspection saved = inspectTextUnderlinePaths(outputPath);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.underlines.size(), 1);
+    QCOMPARE(saved.unrelatedLines, original.unrelatedLines);
+    const QPointF pdfTranslation(translation.x() * 595.0,
+                                 -translation.y() * 842.0);
+    const QLineF expected = original.underlines.constFirst().translated(pdfTranslation);
+    // Save maps coordinates at 1/64 pt; independently rounded endpoints can
+    // differ from the ideal delta by up to 1/64 pt per axis.
+    QVERIFY(QLineF(saved.underlines.constFirst().p1(), expected.p1()).length() < 0.03);
+    QVERIFY(QLineF(saved.underlines.constFirst().p2(), expected.p2()).length() < 0.03);
+    const QPointF textDelta = saved.textOrigin - original.textOrigin;
+    const QPointF underlineDelta = saved.underlines.constFirst().p1()
+        - original.underlines.constFirst().p1();
+    QVERIFY(QLineF(textDelta, underlineDelta).length() < 0.001);
+    const QVariantMap reopened = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello world"));
+    QVERIFY(reopened.value(QStringLiteral("fontUnderline")).toBool());
+}
+
+void PDFEditControllerTest::preservesUnrelatedPathsNearText_data()
+{
+    QTest::addColumn<QByteArray>("pathCommands");
+    QTest::newRow("different-color")
+        << QByteArray("q 1 0 0 RG 1.2 w 72 637.6 m 190.68 637.6 l S Q\n");
+    QTest::newRow("different-width")
+        << QByteArray("q 0 0 0 RG 1.2 w 72 637.6 m 300 637.6 l S Q\n");
+    QTest::newRow("dashed-line")
+        << QByteArray("q 0 0 0 RG 1.2 w [3 2] 0 d 72 637.6 m 190.68 637.6 l S Q\n");
+}
+
+void PDFEditControllerTest::preservesUnrelatedPathsNearText()
+{
+    QFETCH(QByteArray, pathCommands);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("unrelated-text-path-%1.pdf")
+            .arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString outputPath = sourcePath + QStringLiteral(".deleted.pdf");
+    QVERIFY(createTextUnderlineSourcePdf(sourcePath, pathCommands));
+    const TextUnderlineInspection original = inspectTextUnderlinePaths(sourcePath);
+    QCOMPARE(original.underlines.size(), 1);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello world"));
+    QVERIFY(!candidate.value(QStringLiteral("fontUnderline")).toBool());
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.deleteSelectedObject();
+    QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 1);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const TextUnderlineInspection saved = inspectTextUnderlinePaths(outputPath);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.textCount, 0);
+    QCOMPARE(saved.underlines, original.underlines);
+    QCOMPARE(saved.unrelatedLines, original.unrelatedLines);
 }
 
 void PDFEditControllerTest::savesOffsetCropCoordinates()

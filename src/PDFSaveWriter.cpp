@@ -55,6 +55,8 @@ constexpr qreal kUnsupportedPaintRasterScale = 4.0;
 constexpr qint64 kMaximumUnsupportedPaintPixels = 8 * 1024 * 1024;
 constexpr int kPaintColorTolerance = 12;
 constexpr char kPreservedPaintMark[] = "TrePDFPreservedPaint";
+constexpr char kUnderlineMark[] = "TrePDFUnderline";
+constexpr char kUnderlineIdKey[] = "Id";
 constexpr char kCommentThreadIdKey[] = "TrePDFThreadId";
 constexpr char kCommentReplyToKey[] = "TrePDFReplyTo";
 constexpr char kFreeTextAppearanceIdKey[]
@@ -103,6 +105,7 @@ struct SaveDraft {
     int page = -1;
     QString objectId;
     QVector<QVector<int>> sourceObjectPaths;
+    QVector<QVector<int>> sourceUnderlineObjectPaths;
     QString originalText;
     QString text;
     QString sourceAnnotationName;
@@ -1870,6 +1873,59 @@ QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
     return objects;
 }
 
+QVector<SourceObject> sourceUnderlineObjectsForDraft(
+    FPDF_PAGE page,
+    const SaveDraft &draft,
+    PDFSaveWriter::Result &result)
+{
+    QVector<SourceObject> objects;
+    QSet<FPDF_PAGEOBJECT> seen;
+    for (const QVector<int> &path : draft.sourceUnderlineObjectPaths) {
+        if (draft.kind != SaveDraft::Kind::Text || path.size() != 1) {
+            result = failure(
+                PDFSaveWriter::Error::UnsupportedSourceObject,
+                draft.page,
+                draft.objectId);
+            return {};
+        }
+        const SourceObject source = sourceObjectAtPath(page, path);
+        if (!source.object
+            || FPDFPageObj_GetType(source.object) != FPDF_PAGEOBJ_PATH) {
+            result = failure(
+                PDFSaveWriter::Error::SourceObjectMissing,
+                draft.page,
+                draft.objectId);
+            return {};
+        }
+        if (!seen.contains(source.object)) {
+            seen.insert(source.object);
+            objects.append(source);
+        }
+    }
+    return objects;
+}
+
+bool markUnderlinePair(FPDF_DOCUMENT document,
+                       FPDF_PAGEOBJECT textObject,
+                       FPDF_PAGEOBJECT underlineObject)
+{
+    const QByteArray id = QUuid::createUuid()
+        .toString(QUuid::WithoutBraces).toLatin1();
+    for (FPDF_PAGEOBJECT object : {textObject, underlineObject}) {
+        FPDF_PAGEOBJECTMARK mark = FPDFPageObj_AddMark(object, kUnderlineMark);
+        if (!mark
+            || !FPDFPageObjMark_SetStringParam(
+                document,
+                object,
+                mark,
+                kUnderlineIdKey,
+                id.constData())) {
+            return false;
+        }
+    }
+    return true;
+}
+
 FPDF_PAGEOBJECT createUnderline(const LayoutRun &run,
                                 qreal fontSize,
                                 const PageCoordinateMapper &coordinateMapper)
@@ -2533,7 +2589,10 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 run,
                 fontSize,
                 coordinateMapper);
-            if (!underline) {
+            if (!underline || !markUnderlinePair(document, textObject, underline)) {
+                if (underline) {
+                    FPDFPageObj_Destroy(underline);
+                }
                 return failure(
                     PDFSaveWriter::Error::TextObjectCreationFailed,
                     draft.page,
@@ -4480,6 +4539,22 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 }
             }
         }
+        // Decorations share text ownership, but must not participate in
+        // original-font resolution or the text-only source-object contract.
+        const QVector<SourceObject> underlineSources = sourceUnderlineObjectsForDraft(
+            page.get(),
+            draft,
+            sourceResult);
+        if (!sourceResult.succeeded()) {
+            destroyPreparedObjects(preparedDrafts);
+            return sourceResult;
+        }
+        for (const SourceObject &source : underlineSources) {
+            prepared.insertionIndex = qMin(
+                prepared.insertionIndex,
+                source.topLevelIndex);
+            prepared.sources.append(source);
+        }
         const PDFSaveWriter::Result createResult = createDraftObjects(
             document,
             page.get(),
@@ -5437,6 +5512,10 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             for (const PDFEditController::CandidatePart &part : draft->candidate.parts) {
                 if (!part.objectPath.isEmpty()) {
                     saveDraft.sourceObjectPaths.append(part.objectPath);
+                }
+                if (!part.underlineObjectPath.isEmpty()) {
+                    saveDraft.sourceUnderlineObjectPaths.append(
+                        part.underlineObjectPath);
                 }
             }
         } else if (!draft->candidate.objectPath.isEmpty()) {

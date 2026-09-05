@@ -68,6 +68,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(qreal selectedBaselineY READ selectedBaselineY NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedText READ selectedText NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedFontFamily READ selectedFontFamily NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(qreal selectedFontSize READ selectedFontSize NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(qreal selectedFontSizeRatio READ selectedFontSizeRatio NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(qreal selectedDisplayFontSizeRatio READ selectedDisplayFontSizeRatio NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(int selectedFontStretch READ selectedFontStretch NOTIFY textFormatStateChanged FINAL)
@@ -94,7 +95,8 @@ public:
     struct DraftObjectMove {
         enum class Kind {
             Text,
-            Image
+            Image,
+            Path
         };
 
         Kind kind = Kind::Text;
@@ -240,6 +242,7 @@ public:
     qreal selectedBaselineY() const;
     QString selectedText() const;
     QString selectedFontFamily() const;
+    qreal selectedFontSize() const;
     qreal selectedFontSizeRatio() const;
     qreal selectedDisplayFontSizeRatio() const;
     int selectedFontStretch() const;
@@ -326,7 +329,15 @@ public:
                                        qreal pixelSize) const;
     Q_INVOKABLE void applyTypingFormatToEditorDocument(QObject *textDocument,
                                                        int start,
-                                                       int length) const;
+                                                       int length,
+                                                       qreal displayedPageHeight = 0.0) const;
+    Q_INVOKABLE void initializeEditorFontSizes(QObject *textDocument,
+                                               qreal displayedPageHeight = 0.0) const;
+    Q_INVOKABLE bool applyFontSizeToEditorDocument(QObject *textDocument,
+                                                   int start,
+                                                   int length,
+                                                   qreal fontSizeRatio,
+                                                   qreal displayedPageHeight) const;
     Q_INVOKABLE bool applyFontStyleToEditorDocument(QObject *textDocument,
                                                     int start,
                                                     int length,
@@ -356,6 +367,7 @@ public:
     Q_INVOKABLE void cancelSelectedFrameResize();
     Q_INVOKABLE void setSelectedTextRange(int start, int length);
     Q_INVOKABLE void setSelectedFontFamily(const QString &fontFamily);
+    Q_INVOKABLE void setSelectedFontSize(qreal points);
     Q_INVOKABLE void setSelectedFontBold(bool enabled);
     Q_INVOKABLE void setSelectedFontItalic(bool enabled);
     Q_INVOKABLE void setSelectedFontUnderline(bool enabled);
@@ -401,6 +413,7 @@ signals:
     void commentsChanged();
     void commentIndexStateChanged();
     void typingFormatApplied(int start, int length);
+    void selectionFontSizeApplied(int start, int length, qreal fontSizeRatio);
     void selectionFontStyleApplied(int start,
                                    int length,
                                    int style,
@@ -426,6 +439,8 @@ private:
     struct CandidatePart {
         QString objectId;
         QVector<int> objectPath;
+        QVector<int> underlineObjectPath;
+        QRectF underlineRect;
         QRectF sourceRect;
         QPointF origin;
         QString text;
