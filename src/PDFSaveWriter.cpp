@@ -779,12 +779,12 @@ bool originalTextContainsCharacters(const QString &originalText,
 {
     QSet<uint> originalCharacters;
     for (uint character : originalText.toUcs4()) {
-        if (!QChar::isSpace(static_cast<char32_t>(character))) {
-            originalCharacters.insert(character);
-        }
+        originalCharacters.insert(character);
     }
     for (uint character : text.toUcs4()) {
-        if (!QChar::isSpace(static_cast<char32_t>(character))
+        // Only LF is consumed by layoutRuns rather than encoded as a glyph.
+        // Even a space can be absent from the original PDF font's subset/map.
+        if (character != '\n'
             && !originalCharacters.contains(character)) {
             return false;
         }
@@ -5398,6 +5398,15 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.page = draft->candidate.page;
         saveDraft.objectId = draft->candidate.objectId;
         saveDraft.originalText = draft->candidate.text;
+        if (saveDraft.kind == SaveDraft::Kind::Text
+            && !draft->candidate.parts.isEmpty()) {
+            // Grouped candidates include inferred separators. Only characters
+            // encoded in the source parts prove that the font can reuse them.
+            saveDraft.originalText.clear();
+            for (const auto &part : draft->candidate.parts) {
+                saveDraft.originalText.append(part.text);
+            }
+        }
         saveDraft.text = draft->text;
         saveDraft.sourceAnnotationName
             = draft->candidate.sourceAnnotationName;
