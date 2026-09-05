@@ -1103,8 +1103,13 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
 4. Chuẩn hóa text đã sửa về Unicode NFC theo grapheme cluster và remap lại các
    character span UTF-16. Writer có thể tái sử dụng font PDF gốc khi
    family/style phù hợp và replacement run chỉ chứa các ký tự đã có trong text
-   nguồn; nhờ đó thao tác chỉ đổi màu/gạch chân trên text Unicode không thay
-   font không cần nhúng lại. Ký tự Unicode mới không dùng font nguồn vì đó có
+   nguồn, kể cả dấu cách. Bộ ký tự nguồn lấy từ text thực của từng source part,
+   không tính separator được suy ra khi ghép các object cùng dòng. Chỉ LF được
+   bỏ qua vì layout xử lý xuống dòng riêng và không ghi nó thành glyph. Nhờ đó
+   dấu cách đầu tiên được thêm vào một font subset cũng buộc writer chọn font
+   có đủ glyph, tránh ghi CID 0 và hiện ô vuông sau Save. Thao tác chỉ đổi
+   màu/gạch chân trên text Unicode không thay font vẫn có thể tái sử dụng font
+   nguồn. Ký tự Unicode mới không dùng font nguồn vì đó có
    thể là subset thiếu glyph hoặc ToUnicode mapping. Family Arial/Helvetica kế
    thừa từ nguồn được chuyển sang đúng face Arial bundled, kiểm tra coverage rồi
    nhúng dạng CID Unicode. Với family hệ thống khác do người dùng chọn, prepare

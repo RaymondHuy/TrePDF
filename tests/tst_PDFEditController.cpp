@@ -2265,6 +2265,52 @@ bool createEmbeddedFontPdf(const QString &filePath,
     return succeeded;
 }
 
+bool createGroupedSubsetFontPdf(const QString &filePath)
+{
+    const QByteArray fontData = ApplicationFonts::bundledFontData(
+        QStringLiteral("Arial"), false, false);
+    if (fontData.isEmpty()) {
+        return false;
+    }
+
+    PDFiumProcessLock pdfiumLock;
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+    FPDF_FONT font = FPDFText_LoadFont(
+        document,
+        reinterpret_cast<const uint8_t *>(fontData.constData()),
+        static_cast<uint32_t>(fontData.size()),
+        FPDF_FONT_TRUETYPE,
+        true);
+    FPDF_PAGE page = font ? FPDFPage_New(document, 0, 595.0, 842.0) : nullptr;
+    // The visible word gap comes entirely from object positions. Neither
+    // source object encodes a space, so the subset has no space mapping.
+    bool succeeded = page
+        && addTextObjectWithFont(
+            document, page, font, QStringLiteral("Hello"), 72.0, 740.0)
+        && addTextObjectWithFont(
+            document, page, font, QStringLiteral("world"), 140.0, 740.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(
+                document,
+                &writer,
+                FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS);
+    }
+    if (font) {
+        FPDFFont_Close(font);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
 bool createOffsetCropPdf(const QString &filePath)
 {
     FPDF_DOCUMENT document = FPDF_CreateNewDocument();
@@ -5574,6 +5620,8 @@ private slots:
     void dropsAsyncResultsAfterControllerDestruction();
     void registersBundledFonts();
     void keepsArialLayoutStableAfterEmbeddedSubsetCollision();
+    void preservesFirstSpaceAfterSubsetSave();
+    void preservesInferredSpaceAfterGroupedSubsetEdit();
     void filtersUnsupportedSystemFonts();
     void filtersFontFamiliesByLanguage();
     void intersectsFontFiltersAcrossMixedStyles();
@@ -10872,6 +10920,124 @@ void PDFEditControllerTest::keepsArialLayoutStableAfterEmbeddedSubsetCollision()
     QVERIFY2(
         topLevelTextObjects(outputPath).contains(editedText),
         qPrintable(topLevelTextObjects(outputPath).join(QLatin1Char('|'))));
+}
+
+void PDFEditControllerTest::preservesFirstSpaceAfterSubsetSave()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("first-space-source.pdf"));
+    const QString subsetPath = m_temporaryDirectory.filePath(
+        QStringLiteral("first-space-subset.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("first-space-output.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.addText(0, 0.2, 0.65).isEmpty());
+    const QString originalText = QStringLiteral("ashdljasdsdadasd");
+    controller.updateSelectedTextPreview(originalText);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(QRectF(0.2, 0.65, 0.7, 0.15));
+    controller.finishSelectedFrameResize();
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(subsetPath)));
+    const TextObjectFontInfo subsetFont = textObjectFontInfo(
+        subsetPath, originalText);
+    QVERIFY2(subsetFont.found,
+             qPrintable(topLevelTextObjects(subsetPath).join(QLatin1Char('|'))));
+    QCOMPARE(subsetFont.embedded, 1);
+    QVERIFY(hasSubsetFontPrefix(subsetFont.baseName));
+
+    const QString verificationPath = qEnvironmentVariable(
+        "TREPDF_FIRST_SPACE_TEST_OUTPUT");
+    if (!verificationPath.isEmpty()) {
+        const QString subsetVerificationPath
+            = verificationPath + QStringLiteral(".subset.pdf");
+        QFile::remove(subsetVerificationPath);
+        QVERIFY(QFile::copy(subsetPath, subsetVerificationPath));
+    }
+
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), originalText);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    // Only the space is new. Introducing a new visible letter would already
+    // force embedding and hide the missing-space CID in the original subset.
+    const QString editedText = originalText + QStringLiteral(" ddads");
+    controller.beginSelectedTextEdit();
+    controller.commitSelectedText(editedText);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    if (!verificationPath.isEmpty()) {
+        QFile::remove(verificationPath);
+        QVERIFY(QFile::copy(outputPath, verificationPath));
+    }
+    const QStringList savedObjects = topLevelTextObjects(outputPath);
+    QVERIFY2(savedObjects.contains(editedText),
+             qPrintable(QStringLiteral("Saved text objects: %1")
+                            .arg(savedObjects.join(QLatin1Char('|')))));
+    QVERIFY(pageText(outputPath).contains(editedText));
+
+    const QVariantMap reopenedCandidate = candidateForText(
+        waitForCandidates(controller, 0), editedText);
+    QVERIFY(!reopenedCandidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0, reopenedCandidate.value(QStringLiteral("objectId")).toString()));
+    const QString repeatedText = editedText + QStringLiteral(" asd");
+    controller.beginSelectedTextEdit();
+    controller.commitSelectedText(repeatedText);
+    QVERIFY(controller.save());
+    QVERIFY(topLevelTextObjects(outputPath).contains(repeatedText));
+    QVERIFY(pageText(outputPath).contains(repeatedText));
+    QVERIFY(!candidateForText(
+        waitForCandidates(controller, 0), repeatedText).isEmpty());
+}
+
+void PDFEditControllerTest::preservesInferredSpaceAfterGroupedSubsetEdit()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("grouped-subset-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("grouped-subset-output.pdf"));
+    QVERIFY(createGroupedSubsetFontPdf(sourcePath));
+    const QStringList sourceObjects = topLevelTextObjects(sourcePath);
+    QCOMPARE(sourceObjects.size(), 2);
+    // PDFium's extraction can append a generated space for the visual gap;
+    // the fixture passes only the letters to FPDFText_SetText().
+    QCOMPARE(sourceObjects.at(0).trimmed(), QStringLiteral("Hello"));
+    QCOMPARE(sourceObjects.at(1).trimmed(), QStringLiteral("world"));
+    const TextObjectFontInfo sourceFont = textObjectFontInfo(
+        sourcePath, QStringLiteral("Hello"));
+    QVERIFY(sourceFont.found);
+    QCOMPARE(sourceFont.embedded, 1);
+    QVERIFY(hasSubsetFontPrefix(sourceFont.baseName));
+    QVERIFY(textObjectsShareFont(
+        sourcePath, QStringLiteral("Hello"), QStringLiteral("world")));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString groupedText = QString::fromLatin1(kGroupedText);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), groupedText);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(candidate.value(QStringLiteral("grouped")).toBool());
+    QCOMPARE(candidate.value(QStringLiteral("sourceRects")).toList().size(), 2);
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    // Formatting materializes the inferred separator even though the user
+    // has not introduced any new character into the displayed candidate.
+    controller.setSelectedColor(QColor(QStringLiteral("#c62828")));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QStringList savedObjects = topLevelTextObjects(outputPath);
+    QCOMPARE(savedObjects, QStringList({groupedText}));
+    QVERIFY(pageText(outputPath).contains(groupedText));
+    QVERIFY(!candidateForText(
+        waitForCandidates(controller, 0), groupedText).isEmpty());
 }
 
 void PDFEditControllerTest::filtersUnsupportedSystemFonts()
