@@ -125,9 +125,12 @@ Current features:
   New shapes use a black outline with transparent fill; near-axis lines and
   arrows snap horizontally or vertically. Newly saved top-level paths marked
   `TrePDFShape` rehydrate as `sourceShape` only after bounded canonical geometry
-  and style validation. They retain style/move/resize/delete, history/discard,
-  and Save/reopen support. Arbitrary, legacy unmarked, and nested paths remain
-  excluded; these Edit shapes are page content, separate from comment annotations.
+  and style validation. Unmarked top-level paths can also rehydrate when their
+  geometry and style match a canonical rectangle, triangle, or diamond. They
+  retain style/move/resize/delete, history/discard, and Save/reopen support; the first
+  edited Save adds `TrePDFShape` metadata. Arbitrary and nested paths remain
+  excluded, and invalid marked paths never fall back to unmarked recognition.
+  These Edit shapes are page content, separate from comment annotations.
 - Render every page through PDFium.
 - Virtualized continuous scrolling with reusable QML delegates.
 - Per-tab Page Display modes for Single Page, Continuous, Facing, and Continuous
@@ -584,10 +587,14 @@ clipped or elided unintentionally.
   external/custom appearances remain intact.
 - Persist Edit shapes as top-level PDF path objects marked with `TrePDFShape`.
   Use `PDFShapeUtils.h` for the same canonical path and metadata validation in
-  scanner and writer; only validated marked top-level paths become `sourceShape`.
+  scanner and writer. Validated marked paths and canonical rectangle, triangle,
+  or diamond paths with no marks can become `sourceShape`, only at the page's
+  top level.
+  Invalid marked paths must never fall back to unmarked recognition.
   Keep semantic stroke/interior colors and opacity separate in
   `Draft.commentProperties`, combining alpha only for preview and serialization.
-  Revalidate source identity, geometry, and style before rewriting or deleting;
+  Revalidate the captured source fingerprint, geometry, and style before
+  rewriting or deleting; add `TrePDFShape` metadata to edited unmarked shapes;
   rebuild changed source shapes at their original z-order. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain

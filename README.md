@@ -216,8 +216,10 @@ redo, and discard. Save and Save As write shapes as PDF path objects, including 
 Bézier ovals, so they remain sharp when zoomed and keep the same placement on
 cropped or rotated pages. Newly saved TrePDF shapes carry `TrePDFShape` metadata;
 validated top-level paths reopen as editable shapes with the same properties,
-move/resize/delete, history, and persistence. Arbitrary PDF paths, older unmarked
-shapes, and paths inside Form XObjects are excluded. Rewriting a source shape
+move/resize/delete, history, and persistence. Older unmarked top-level paths
+also become editable when their geometry and style match a canonical rectangle,
+triangle, or diamond; editing and saving them adds `TrePDFShape` metadata.
+Arbitrary PDF paths and paths inside Form XObjects are excluded. Rewriting a source shape
 preserves its position in the page's drawing order; Edit shapes remain page
 content, separate from drawing-comment annotations.
 

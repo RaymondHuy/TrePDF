@@ -1425,13 +1425,20 @@ join dùng kiểu tròn. Shape mới được chèn theo `addedOrder`, gọi
 `FPDFPage_GenerateContent()` cùng các draft page-object khác và chỉ tồn tại
 trong file sau khi transaction `QSaveFile` commit thành công.
 
-Writer gắn metadata `TrePDFShape` cho shape mới. Page scan chỉ rehydrate thành
-`kind = "sourceShape"` khi path top-level có marker này và geometry/style khớp
-contract canonical qua bộ đọc có giới hạn trong `PDFShapeUtils.h`. Path tùy ý,
-shape TrePDF cũ chưa có marker và path lồng trong Form XObject không được nhận
-là Edit shape. Shape nguồn hợp lệ hỗ trợ chọn, style, move/resize, xóa,
+Writer gắn metadata `TrePDFShape` cho shape mới. Page scan rehydrate thành
+`kind = "sourceShape"` khi path top-level có marker hợp lệ và geometry/style
+khớp contract canonical qua bộ đọc có giới hạn trong `PDFShapeUtils.h`.
+Path top-level không có mark cũng được nhận nếu geometry/style khớp hình chữ
+nhật, tam giác hoặc hình thoi canonical. Bộ nhận diện chấp nhận điểm bắt đầu và
+chiều đi quanh polygon tương đương, yêu cầu matrix identity, cap/join tròn,
+không dash/clip và cùng opacity cho stroke/fill; fill trong suốt được xem là
+không tô. Path có marker lỗi không được thử lại qua
+nhánh không marker; path tùy ý và path lồng trong Form XObject vẫn bị bỏ qua.
+Shape nguồn hợp lệ hỗ trợ chọn, style, move/resize, xóa,
 undo/redo/discard và Save/reopen như draft mới. Worker suppress path nguồn để
 QML vẽ preview draft; undo/discard phục hồi preview gốc trong lúc chờ texture.
-Save xác thực lại path nguồn, thay shape đã sửa tại z-order cũ hoặc gỡ shape bị
-xóa, rồi regenerate page content. Pipeline này ghi page-content path, độc lập
+Save xác thực lại fingerprint, geometry và style của path nguồn, thay shape đã
+sửa tại z-order cũ hoặc gỡ shape bị xóa, rồi regenerate page content. Shape
+không marker nhận metadata `TrePDFShape` khi được sửa và lưu lần đầu.
+Pipeline này ghi page-content path, độc lập
 với `/Subtype`, `/Rect` và `/AP` của drawing-comment annotation.

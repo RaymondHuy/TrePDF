@@ -189,9 +189,11 @@ flowchart TD
    delegate/preview riêng. Nội dung Free Text được sửa trong CommentPanel.
    Sáu Edit shape mới hoặc `sourceShape` hợp lệ dùng tám handle và panel chung
    `DrawingCommentPropertiesPanel` với tiêu đề riêng, sửa stroke/fill/opacity
-   qua `selectedDrawing*`. Chỉ path top-level mới có `TrePDFShape` và
-   geometry/style canonical đã validate được rehydrate; path tùy ý, cũ không
-   marker hoặc lồng trong Form XObject không được chọn như Edit shape.
+   qua `selectedDrawing*`. Path top-level có `TrePDFShape` hợp lệ hoặc hoàn toàn
+   không có mark nhưng geometry/style khớp hình chữ nhật, tam giác hoặc hình
+   thoi canonical có thể được rehydrate. Path có marker lỗi, path tùy ý hoặc lồng trong Form
+   XObject không được chọn như Edit shape. Shape không marker nhận metadata
+   khi được sửa và lưu lần đầu.
    Move/resize chỉ commit một command khi gesture kết thúc. Cả sáu drawing
    subtype mới hoặc source hợp lệ hỗ trợ translate endpoint, vertex hay toàn bộ
    stroke bằng bounding box/phím mũi tên, đồng thời scale toàn bộ geometry bằng

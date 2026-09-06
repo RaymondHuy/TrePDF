@@ -301,9 +301,12 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 - Scan page bất đồng bộ từ document handle riêng dưới PDFium lock.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
-- Path top-level có marker `TrePDFShape` mới được xét thành `sourceShape`;
-  `PDFShapeUtils.h` đọc metadata có giới hạn và xác thực geometry/style canonical
-  trước khi expose. Path tùy ý, shape cũ không marker và path lồng đều bị bỏ qua.
+- Path top-level được xét thành `sourceShape` qua `PDFShapeUtils.h`: đọc metadata
+  `TrePDFShape` có giới hạn và xác thực geometry/style canonical, hoặc nhận diện
+  hình chữ nhật, tam giác hoặc hình thoi canonical khi path hoàn toàn không có
+  mark.
+  Path có marker lỗi không được thử lại qua nhánh không marker; path tùy ý và
+  path lồng đều bị bỏ qua.
 - Đọc Highlight, Squiggly, Underline, Strikeout, Text, FreeText, Stamp, Square,
   Circle, Line, Polygon, PolyLine và Ink annotation;
   chuẩn hóa quad/rect, màu và `/Contents` thành comment candidate. Nội dung
@@ -484,8 +487,9 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   serialize staging file, canonicalizer thêm
   normal `/AP` vector cho text markup mới mà không regenerate page content.
 - Edit shape dùng canonical builder trong `PDFShapeUtils.h` và marker
-  `TrePDFShape`. Với `sourceShape`, xác thực lại path/metadata/geometry/style
-  trước khi gỡ hoặc rebuild; replacement giữ z-order nguồn. Edit shape là
+  `TrePDFShape`. Với `sourceShape`, xác thực lại fingerprint/geometry/style
+  trước khi gỡ hoặc rebuild; replacement giữ z-order nguồn và thêm metadata
+  cho shape không marker được sửa. Edit shape là
   page-content path nên thay đổi vẫn gọi GenerateContent, không dùng annotation
   placeholder hay `/AP` của drawing comment.
 - Tạo drawing comment qua Square placeholder, snapshot common properties và
@@ -854,8 +858,16 @@ designer, rồi phục hồi document và pixel nền an toàn.
 
 - Dựng canonical path cho sáu Edit shape và encode/decode metadata `TrePDFShape`.
 - Validator có giới hạn, kiểm geometry/style nguồn khớp contract trước khi
-  scanner trả `sourceShape` hoặc writer nhận sửa/xóa path đó. Chỉ path top-level
-  có marker được hỗ trợ; không suy đoán shape từ path tùy ý hoặc path lồng.
+  scanner trả `sourceShape` hoặc writer nhận sửa/xóa path đó. Path top-level có
+  marker hợp lệ hoặc không có mark nhưng khớp hình chữ nhật, tam giác hay hình
+  thoi canonical có thể được chỉnh sửa; path có marker lỗi không dùng nhánh
+  không marker.
+  Path tùy ý và path lồng vẫn bị bỏ qua; writer xác thực lại fingerprint đã chụp
+  khi scan trước khi sửa/xóa.
+- Nhánh không mark nhận polygon kín có 3/4 đỉnh LINETO, không phụ thuộc điểm bắt
+  đầu hay chiều đi quanh polygon. Matrix phải identity, cap/join tròn, không
+  dash/clip và stroke/fill dùng cùng opacity; fill trong suốt được xem là không
+  tô. Nhánh này không nhận oval, line hoặc arrow.
 - Scanner và writer dùng chung builder/validator để preview, Save và rehydrate
   không lệch geometry hay nhân opacity qua nhiều lần lưu.
 

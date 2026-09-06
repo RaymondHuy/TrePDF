@@ -12,13 +12,15 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 #include <fpdf_edit.h>
 #include <fpdf_transformpage.h>
 
-// A shape is adopted only when its bounded semantic metadata reproduces its
-// actual PDF path. Unmarked paths, nested objects and custom paint stay outside
-// this contract. These helpers run only inside a worker PDFium transaction.
+// A shape is adopted only when bounded semantic data reproduces its actual PDF
+// path. Unmarked paths have a narrower, closed-polygon recognition contract;
+// callers must exclude nested objects. These helpers run only inside a worker
+// PDFium transaction.
 namespace PDFShapeUtils {
 
 inline constexpr char kMarkName[] = "TrePDFShape";
@@ -77,6 +79,31 @@ public:
         }
         point = QPointF(pageX, pageY);
         return true;
+    }
+
+    bool devicePoint(const QPointF &point, QPointF &result) const
+    {
+        // Invert the same display mapping used by createPath, retaining the
+        // subpixel coordinates that FPDF_PageToDevice's integer output loses.
+        QPointF origin, right, down;
+        if (!pagePoint(0, 0, origin) || !pagePoint(1, 0, right)
+            || !pagePoint(0, 1, down)) {
+            return false;
+        }
+        const QPointF horizontal = right - origin;
+        const QPointF vertical = down - origin;
+        const qreal determinant = horizontal.x() * vertical.y()
+            - horizontal.y() * vertical.x();
+        if (!std::isfinite(determinant) || std::abs(determinant) < 1e-12) {
+            return false;
+        }
+        const QPointF relative = point - origin;
+        result = QPointF(
+            (relative.x() * vertical.y() - relative.y() * vertical.x())
+                / determinant,
+            (horizontal.x() * relative.y() - horizontal.y() * relative.x())
+                / determinant);
+        return std::isfinite(result.x()) && std::isfinite(result.y());
     }
 
     qreal strokeWidth(qreal width) const
@@ -630,6 +657,220 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
     metadata = parsed;
     bytes = raw;
     return true;
+}
+
+inline bool closedPolygon(FPDF_PAGEOBJECT path, QVector<QPointF> &vertices,
+                          QJsonArray *rawSegments = nullptr)
+{
+    vertices.clear();
+    if (rawSegments) {
+        *rawSegments = QJsonArray();
+    }
+    // Three/four corners, optionally followed by an explicit closing vertex.
+    const int count = FPDFPath_CountSegments(path);
+    if (count < 3 || count > 5) {
+        return false;
+    }
+    for (int index = 0; index < count; ++index) {
+        const FPDF_PATHSEGMENT segment = FPDFPath_GetPathSegment(path, index);
+        float x = 0.0F, y = 0.0F;
+        if (!segment || !FPDFPathSegment_GetPoint(segment, &x, &y)
+            || !std::isfinite(x) || !std::isfinite(y)) {
+            return false;
+        }
+        const int type = FPDFPathSegment_GetType(segment);
+        const bool closes = FPDFPathSegment_GetClose(segment);
+        if (type != (index == 0 ? FPDF_SEGMENT_MOVETO : FPDF_SEGMENT_LINETO)
+            || closes != (index == count - 1)) {
+            return false;
+        }
+        vertices.append(QPointF(x, y));
+        if (rawSegments) {
+            rawSegments->append(QJsonArray{x, y, type, closes});
+        }
+    }
+    if (vertices.last() == vertices.first()) {
+        vertices.removeLast();
+    }
+    return vertices.size() == 3 || vertices.size() == 4;
+}
+
+inline bool polygonsMatch(const QVector<QPointF> &actual,
+                          const QVector<QPointF> &canonical)
+{
+    if (actual.size() != canonical.size()) {
+        return false;
+    }
+    // Independent rounding of a midpoint and its two extrema can differ by
+    // one 1/64 display-point step in paths written by earlier TrePDF versions.
+    constexpr qreal tolerance = 1.0 / 64.0 + 0.0001;
+    const int count = static_cast<int>(actual.size());
+    for (int direction : {1, -1}) {
+        for (int offset = 0; offset < count; ++offset) {
+            bool matches = true;
+            for (int index = 0; index < count; ++index) {
+                const QPointF delta = actual[index]
+                    - canonical[(offset + direction * index + count) % count];
+                if (std::abs(delta.x()) > tolerance
+                    || std::abs(delta.y()) > tolerance) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+inline bool readEditableShape(FPDF_PAGE page, const QSizeF &pageSize,
+                              FPDF_PAGEOBJECT path, Metadata &metadata,
+                              QByteArray &bytes)
+{
+    assertPDFiumProcessLockHeld();
+    bytes.clear();
+    if (!path || FPDFPageObj_GetType(path) != FPDF_PAGEOBJ_PATH) {
+        return false;
+    }
+    // A damaged or unrelated mark must never gain eligibility through the
+    // fallback. Managed shapes keep their original, stricter validation.
+    if (FPDFPageObj_CountMarks(path) != 0) {
+        return readMetadata(page, pageSize, path, metadata, bytes);
+    }
+    if (!page || pageSize.isEmpty() || !std::isfinite(pageSize.width())
+        || !std::isfinite(pageSize.height()) || pageSize.width() > 1000000.0
+        || pageSize.height() > 1000000.0) {
+        return false;
+    }
+    const QJsonArray actualSignature = physicalSignature(path);
+    QVector<QPointF> vertices;
+    QJsonArray rawSegments;
+    if (actualSignature.isEmpty() || !closedPolygon(path, vertices, &rawSegments)) {
+        return false;
+    }
+
+    int fillMode = FPDF_FILLMODE_NONE;
+    FPDF_BOOL stroked = false;
+    unsigned int sr = 0, sg = 0, sb = 0, sa = 0;
+    unsigned int fr = 0, fg = 0, fb = 0, fa = 0;
+    float strokeWidth = 0.0F;
+    if (!FPDFPath_GetDrawMode(path, &fillMode, &stroked) || !stroked
+        || (fillMode != FPDF_FILLMODE_NONE && fillMode != FPDF_FILLMODE_WINDING
+            && fillMode != FPDF_FILLMODE_ALTERNATE)
+        || !FPDFPageObj_GetStrokeColor(path, &sr, &sg, &sb, &sa)
+        || !FPDFPageObj_GetStrokeWidth(path, &strokeWidth)
+        || !FPDFPageObj_GetFillColor(path, &fr, &fg, &fb, &fa)
+        || (fillMode != FPDF_FILLMODE_NONE && fa != 0 && fa != sa)) {
+        return false;
+    }
+    const CoordinateMapper mapper(page, pageSize);
+    const qreal scale = mapper.strokeWidth(1.0);
+    const qreal deviceStrokeWidth = strokeWidth / scale;
+    if (!std::isfinite(scale) || scale <= 0.0
+        || !std::isfinite(deviceStrokeWidth) || deviceStrokeWidth < 0.75 - 0.0001) {
+        return false;
+    }
+    for (QPointF &vertex : vertices) {
+        QPointF displayed;
+        if (!mapper.devicePoint(vertex, displayed)) {
+            return false;
+        }
+        vertex = displayed;
+    }
+    qreal left = vertices.first().x(), right = left;
+    qreal top = vertices.first().y(), bottom = top;
+    for (const QPointF &vertex : std::as_const(vertices)) {
+        left = qMin(left, vertex.x());
+        right = qMax(right, vertex.x());
+        top = qMin(top, vertex.y());
+        bottom = qMax(bottom, vertex.y());
+    }
+    const QRectF drawingRect(QPointF(left, top), QPointF(right, bottom));
+    // Keep degenerate/tiny polygons outside a matcher with subpixel tolerance.
+    if (drawingRect.width() < 0.25 || drawingRect.height() < 0.25) {
+        return false;
+    }
+    const qreal inset = std::min({deviceStrokeWidth / 2.0,
+                                  drawingRect.width() / 2.0,
+                                  drawingRect.height() / 2.0});
+    const QRectF frame = drawingRect.adjusted(-inset, -inset, inset, inset);
+    Metadata parsed;
+    parsed.frame = QRectF(frame.x() / pageSize.width(), frame.y() / pageSize.height(),
+                          frame.width() / pageSize.width(),
+                          frame.height() / pageSize.height());
+    parsed.strokeWidthRatio = deviceStrokeWidth / pageSize.height();
+    parsed.stroke = QColor(static_cast<int>(sr), static_cast<int>(sg),
+                            static_cast<int>(sb));
+    parsed.fill = fillMode == FPDF_FILLMODE_NONE || fa == 0
+        ? QColor() : QColor(static_cast<int>(fr),
+        static_cast<int>(fg), static_cast<int>(fb));
+    parsed.opacity = sa / 255.0;
+    if (!validMetadata(parsed)) {
+        return false;
+    }
+
+    for (const auto type : {PDFEditController::RectangleShape,
+                            PDFEditController::TriangleShape,
+                            PDFEditController::DiamondShape}) {
+        parsed.type = type;
+        FPDF_PAGEOBJECT canonical = createPath(page, pageSize, parsed);
+        if (!canonical) {
+            continue;
+        }
+        // Transparent fill and stroke-only are equivalent for these simple
+        // polygons. Match the original spelling on this temporary object so
+        // color/transparency validation still observes the source paint state.
+        // PDFium includes inactive fill alpha in HasTransparency even when
+        // the path only strokes, so mirror that state on the temporary path.
+        const bool configured = FPDFPath_SetDrawMode(canonical, fillMode, true)
+            && FPDFPageObj_SetFillColor(canonical, fr, fg, fb, fa);
+        QVector<QPointF> canonicalVertices;
+        bool matches = configured && closedPolygon(canonical, canonicalVertices);
+        for (QPointF &vertex : canonicalVertices) {
+            QPointF displayed;
+            if (!mapper.devicePoint(vertex, displayed)) {
+                matches = false;
+                break;
+            }
+            vertex = displayed;
+        }
+        matches = matches && polygonsMatch(vertices, canonicalVertices);
+        const QJsonArray canonicalSignature = physicalSignature(canonical);
+        if (matches && !canonicalSignature.isEmpty()) {
+            // Geometry was compared allowing cyclic starts and both windings;
+            // retain the existing strict physical comparison for paint/width.
+            QJsonArray comparable = actualSignature;
+            comparable[comparable.size() - 1] = canonicalSignature.last();
+            matches = signaturesMatch(comparable, canonicalSignature)
+                && static_cast<bool>(FPDFPageObj_HasTransparency(path))
+                    == static_cast<bool>(FPDFPageObj_HasTransparency(canonical));
+        } else {
+            matches = false;
+        }
+        FPDFPageObj_Destroy(canonical);
+        if (!matches) {
+            continue;
+        }
+        // No mark is written during discovery. Save revalidates this exact
+        // source snapshot, including its original segment spelling and paint.
+        const QJsonObject snapshot{
+            {QStringLiteral("kind"), QStringLiteral("unmarkedCanonicalShape")},
+            {QStringLiteral("shape"), QJsonDocument::fromJson(
+                encodeMetadata(parsed, path)).object()},
+            {QStringLiteral("segments"), rawSegments},
+            {QStringLiteral("transparency"),
+                static_cast<bool>(FPDFPageObj_HasTransparency(path))}};
+        const QByteArray fingerprint = QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
+        if (fingerprint.size() > kMaximumMetadataBytes) {
+            return false;
+        }
+        metadata = parsed;
+        bytes = fingerprint;
+        return true;
+    }
+    return false;
 }
 
 } // namespace PDFShapeUtils

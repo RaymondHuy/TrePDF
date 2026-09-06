@@ -2138,8 +2138,8 @@ void PDFEditController::appendPageObjectCandidates(
         PDFShapeUtils::Metadata metadata;
         QByteArray bytes;
         if (objectPath.size() != 1
-            || !PDFShapeUtils::readMetadata(page, pageSize, pageObject,
-                                            metadata, bytes)) {
+            || !PDFShapeUtils::readEditableShape(page, pageSize, pageObject,
+                                                 metadata, bytes)) {
             return;
         }
         Candidate candidate;

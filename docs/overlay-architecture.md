@@ -334,8 +334,10 @@ Edit shape `addedShape`/`sourceShape` dùng tám resize handle cạnh/góc và
 PDF texture và lấy candidate để hit-test. Khi chọn trong Edit,
 `DocumentWorkspace` mở panel chung `DrawingCommentPropertiesPanel` với tiêu đề
 **Thuộc tính hình vẽ**, sửa stroke/fill/no fill/opacity qua `selectedDrawing*`.
-Chỉ scanner C++ xác nhận path top-level có metadata `TrePDFShape` hợp lệ mới
-được expose thành `sourceShape`; QML không suy đoán provenance từ hình hiển thị.
+Scanner C++ chỉ expose path top-level thành `sourceShape` sau khi xác thực
+metadata `TrePDFShape`, hoặc nhận diện geometry/style hình chữ nhật, tam giác,
+hình thoi canonical của path hoàn toàn không có mark. Path có marker lỗi không
+dùng nhánh nhận diện không marker; QML không suy đoán khả năng chỉnh sửa từ hình hiển thị.
 
 Highlight, Underline, Squiggly và Strikeout dùng cùng bước resolve geometry cho
 preview và commit. `EditOverlay` gửi vùng kéo normalized cho controller;

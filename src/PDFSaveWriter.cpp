@@ -1880,7 +1880,7 @@ QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
             PDFShapeUtils::Metadata metadata;
             QByteArray bytes;
             if (draft.sourceShapeMetadata.isEmpty()
-                || !PDFShapeUtils::readMetadata(page,
+                || !PDFShapeUtils::readEditableShape(page,
                     QSizeF(FPDF_GetPageWidthF(page), FPDF_GetPageHeightF(page)),
                     source.object, metadata, bytes)
                 || bytes != draft.sourceShapeMetadata) {
