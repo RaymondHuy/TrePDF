@@ -1,8 +1,9 @@
 # Hướng dẫn toàn bộ tệp C++
 
-Tài liệu này mô tả 18 tệp triển khai C++ trong `src/`, 20 header và một tệp kiểm
-thử C++ trong `tests/`. Trong số header, 17 tệp đi cùng implementation và ba tệp
-hỗ trợ không có `.cpp` riêng. Nội dung tập trung vào trách nhiệm thật của mỗi
+Tài liệu này mô tả 26 tệp triển khai C++ trong `src/`, 21 header và một tệp kiểm
+thử C++ trong `tests/`. Trong số header, 17 tệp API đi cùng phần triển khai,
+`PDFEditController_p.h` dùng nội bộ và ba tệp hỗ trợ không có `.cpp` riêng.
+Nội dung tập trung vào trách nhiệm thật của mỗi
 tệp, ownership, thread, dữ liệu trao đổi và ranh giới không nên phá khi sửa code.
 
 ## Quy ước kiến trúc C++
@@ -276,6 +277,24 @@ giữ `PDFiumProcessLock` và không tự đóng handle hoặc acquire lock.
 **Vai trò:** trung tâm nghiệp vụ của Edit/Comment: khám phá nội dung và
 annotation, selection, draft, rich text, history, page operation và
 orchestration Save.
+
+**Phân chia tệp triển khai:** các phương thức vẫn thuộc cùng một lớp
+`PDFEditController`. Việc chia tệp không tạo controller mới, không đổi ownership,
+state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
+`PDFEditController.h`.
+
+| Tệp | Phần triển khai |
+|---|---|
+| [`PDFEditController.cpp`](../src/PDFEditController.cpp) | Vòng đời, kết nối document/form session, tool và selection thường/comment-only. |
+| [`PDFEditControllerCandidates.cpp`](../src/PDFEditControllerCandidates.cpp) | Candidate cache, điều phối scan bất đồng bộ, khám phá text nguồn và font. |
+| [`PDFEditControllerAnnotationScan.cpp`](../src/PDFEditControllerAnnotationScan.cpp) | Scan annotation nguồn, chỉ mục comment và trạng thái thread. |
+| [`PDFEditControllerText.cpp`](../src/PDFEditControllerText.cpp) | Inline editor, font và định dạng rich text. |
+| [`PDFEditControllerComments.cpp`](../src/PDFEditControllerComments.cpp) | Tạo/sửa comment, text markup, reply, status/checkmark và appearance properties. |
+| [`PDFEditControllerGeometry.cpp`](../src/PDFEditControllerGeometry.cpp) | Thêm text/image/shape, thao tác trang và di chuyển/resize draft. |
+| [`PDFEditControllerDrafts.cpp`](../src/PDFEditControllerDrafts.cpp) | Snapshot, undo/redo/discard, dữ liệu trình bày và render draft. |
+| [`PDFEditControllerSave.cpp`](../src/PDFEditControllerSave.cpp) | Điều phối Save/Save As đồng bộ và bất đồng bộ. |
+| [`PDFEditControllerSupport.cpp`](../src/PDFEditControllerSupport.cpp) | Helper dùng chung giữa các tệp triển khai. |
+| [`PDFEditController_p.h`](../src/PDFEditController_p.h) | Khai báo helper/type nội bộ được dùng chung; không phải API công khai. |
 
 **Khám phá candidate:**
 
@@ -900,6 +919,14 @@ thay thế kiểm thử native Metal thủ công.
 | `PDFAnnotationUtils.cpp` | `PDFAnnotationUtils.h` |
 | `PDFDocument.cpp` | `PDFDocument.h` |
 | `PDFEditController.cpp` | `PDFEditController.h` |
+| `PDFEditControllerCandidates.cpp` | `PDFEditController.h`; dùng thêm `PDFEditController_p.h` nội bộ |
+| `PDFEditControllerAnnotationScan.cpp` | `PDFEditController.h`; dùng thêm `PDFEditController_p.h` nội bộ |
+| `PDFEditControllerText.cpp` | `PDFEditController.h`; dùng thêm `PDFEditController_p.h` nội bộ |
+| `PDFEditControllerComments.cpp` | `PDFEditController.h`; dùng thêm `PDFEditController_p.h` nội bộ |
+| `PDFEditControllerGeometry.cpp` | `PDFEditController.h`; dùng thêm `PDFEditController_p.h` nội bộ |
+| `PDFEditControllerDrafts.cpp` | `PDFEditController.h`; dùng thêm `PDFEditController_p.h` nội bộ |
+| `PDFEditControllerSave.cpp` | `PDFEditController.h`; dùng thêm `PDFEditController_p.h` nội bộ |
+| `PDFEditControllerSupport.cpp` | `PDFEditController_p.h` nội bộ |
 | `PDFFormController.cpp` | `PDFFormController.h` |
 | `PDFFormDesignerController.cpp` | `PDFFormDesignerController.h` |
 | `PDFFormView.cpp` | `PDFFormView.h` |

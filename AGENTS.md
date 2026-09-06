@@ -261,8 +261,21 @@ Current features:
 - `src/PDFAnnotationUtils.h/.cpp`: shared bounded annotation-string access,
   comment newline normalization, markup classification, and reply-relation
   predicates used by indexing, rendering, and saving.
-- `src/PDFEditController.h/.cpp`: editable-content discovery, selection,
-  rich-text draft state, snapshot-based undo/redo history, and save commands.
+- `src/PDFEditController.h`: the shared class declaration, Qt/QML API and state
+  for editable-content discovery, selection, rich-text drafts, history and save.
+  Its implementation is split by responsibility while retaining one controller
+  and the same ownership and behavior:
+  `PDFEditController.cpp` (lifecycle, session connections, tools and selection),
+  `PDFEditControllerCandidates.cpp` (candidate cache/async scan, source text and
+  fonts), `PDFEditControllerAnnotationScan.cpp` (source annotation indexing and
+  thread state), `PDFEditControllerText.cpp` (inline editor and rich-text
+  formatting), `PDFEditControllerComments.cpp` (comment creation, markup,
+  replies, state and style), `PDFEditControllerGeometry.cpp` (adding
+  text/image/shape, page operations and move/resize),
+  `PDFEditControllerDrafts.cpp` (history, snapshots and draft presentation/render),
+  and `PDFEditControllerSave.cpp` (sync/async save orchestration).
+  `PDFEditControllerSupport.cpp` and private `PDFEditController_p.h` hold shared
+  implementation helpers.
 - `src/PDFSearchController.h/.cpp`: asynchronous whole-document text search,
   cancellation/stale-result validation, per-page normalized match geometry, and
   cyclic result navigation.

@@ -8,10 +8,10 @@ nguyên ảnh/phông chữ.
 Tại thời điểm cập nhật, phạm vi có:
 
 - 36 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
-- 18 tệp triển khai C++ trong `src/` và 1 tệp kiểm thử C++: xem
+- 26 tệp triển khai C++ trong `src/` và 1 tệp kiểm thử C++: xem
   [Hướng dẫn tệp C++](cpp-file-guide.md).
-- 20 header C++; trong đó 17 header đi cùng tệp triển khai và 3 header dùng
-  chung không có `.cpp` riêng.
+- 21 header C++; gồm 17 header API đi cùng phần triển khai, header nội bộ
+  `PDFEditController_p.h` và 3 header dùng chung không có `.cpp` riêng.
 
 Tài liệu chuyên sâu về pipeline sửa text vẫn nằm ở
 [text-editing-pipeline.md](text-editing-pipeline.md).
@@ -303,7 +303,16 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFDocument.cpp`](../src/PDFDocument.cpp) | Document GUI-thread, kích thước và page map transient. |
 | [`src/PDFPageItem.cpp`](../src/PDFPageItem.cpp) | Render trang bất đồng bộ và upload texture. |
 | [`src/PDFSearchController.cpp`](../src/PDFSearchController.cpp) | Tìm text bất đồng bộ, giữ kết quả theo tab và điều hướng current match. |
-| [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) | Candidate, selection thường/comment-only, draft, edit, history và save orchestration. |
+| [`src/PDFEditController.cpp`](../src/PDFEditController.cpp) | Vòng đời controller, kết nối session, tool và selection thường/comment-only. |
+| [`src/PDFEditControllerCandidates.cpp`](../src/PDFEditControllerCandidates.cpp) | Candidate cache/scan bất đồng bộ, khám phá text nguồn và font. |
+| [`src/PDFEditControllerAnnotationScan.cpp`](../src/PDFEditControllerAnnotationScan.cpp) | Scan annotation nguồn, chỉ mục comment và trạng thái thread. |
+| [`src/PDFEditControllerText.cpp`](../src/PDFEditControllerText.cpp) | Inline editor, chọn font và định dạng rich text. |
+| [`src/PDFEditControllerComments.cpp`](../src/PDFEditControllerComments.cpp) | Tạo/sửa comment, text markup, reply, status/checkmark và appearance properties. |
+| [`src/PDFEditControllerGeometry.cpp`](../src/PDFEditControllerGeometry.cpp) | Thêm text/image/shape, thao tác trang và di chuyển/resize draft. |
+| [`src/PDFEditControllerDrafts.cpp`](../src/PDFEditControllerDrafts.cpp) | Snapshot, undo/redo/discard, dữ liệu trình bày và render draft. |
+| [`src/PDFEditControllerSave.cpp`](../src/PDFEditControllerSave.cpp) | Điều phối Save/Save As đồng bộ và bất đồng bộ. |
+| [`src/PDFEditControllerSupport.cpp`](../src/PDFEditControllerSupport.cpp) | Helper dùng chung giữa các phần triển khai controller. |
+| [`src/PDFEditController_p.h`](../src/PDFEditController_p.h) | Khai báo nội bộ dùng chung; API và state của controller vẫn ở `PDFEditController.h`. |
 | [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) | Ghi PDF giao dịch từ snapshot bất biến. |
 | [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) | Đọc chuỗi, chuẩn hóa nội dung và phân loại comment annotation dùng chung cho index, render và save. |
 | [`src/PDFCommentAnnotation.h`](../src/PDFCommentAnnotation.h) | Contract geometry/common properties cho drawing/Ink comment và `/AP`; Ink giữ từng stroke `/InkList` riêng. |
@@ -326,11 +335,11 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | Scroll/zoom/rotation/Page Display/pooling | `DocumentView.qml`, `PageLayoutDelegate.qml`, `PdfPageDelegate.qml` | `DocumentWorkspace.qml`, `PDFPageItem.cpp`, state trong `PDFDocumentSession` |
 | Tìm text tài liệu | `SearchRibbonControl.qml`, `PDFSearchController.cpp` | `SearchHighlightLayer.qml`, navigation trong `AppRibbon.qml`, translation và test async/stale |
 | Chọn hoặc sửa text/image/shape/comment | `EditOverlay.qml` | `EditRibbon.qml` hoặc `CommentRibbon.qml`, `CommentPanel.qml`, `DrawingCommentPropertiesPanel.qml`, `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
-| Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp` | `PDFEditController.cpp`, `PDFSaveWriter.cpp` |
+| Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp` | `PDFEditControllerText.cpp`, `PDFEditControllerCandidates.cpp`, `PDFSaveWriter.cpp` |
 | Form PDF đang chạy | `PDFFormView.cpp`, `PDFFormController.cpp` | `PDFFormWorker.cpp`, `FormChoiceOverlay.qml` |
 | Form designer | `FormTextFieldOverlay.qml`, `FormFieldLayer.cpp` | `PDFFormDesignerController.cpp`, AcroForm writer/canonicalizer |
 | Lỗi render/texture | `PDFPageItem.cpp` | cancellation, revision, PDFium lock, delegate pooling |
-| Lỗi Save/Save As | `PDFEditController.cpp`, `PDFSaveWriter.cpp` | `PDFTabModel.cpp`, form snapshot, reopen sau commit |
+| Lỗi Save/Save As | `PDFEditControllerSave.cpp`, `PDFSaveWriter.cpp` | `PDFTabModel.cpp`, form snapshot, reopen sau commit |
 
 ## Giữ tài liệu đồng bộ
 
