@@ -690,7 +690,9 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
                 candidate.shapeStartRatio,
                 candidate.shapeEndRatio,
                 candidate.shapeStrokeWidthRatio,
-                candidate.fillColor,
+                draft != m_drafts.cend()
+                    ? draft->commentProperties.interiorColor
+                    : candidate.commentProperties.interiorColor,
                 pageSize,
                 point)) {
             return;

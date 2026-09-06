@@ -98,7 +98,8 @@ bool isTextCandidateKind(const QString &kind)
 
 bool isShapeCandidateKind(const QString &kind)
 {
-    return kind == QLatin1String("addedShape");
+    return kind == QLatin1String("addedShape")
+        || kind == QLatin1String("sourceShape");
 }
 
 bool isSupportedShapeType(PDFEditController::ShapeType shapeType)

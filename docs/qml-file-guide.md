@@ -148,7 +148,7 @@ của Forms.
 - `syncEditTool()` đọc trực tiếp `ribbonTabs.currentIndex` trong signal đổi tab,
   tránh dùng các binding `editTabActive`/`commentTabActive` chưa kịp cập nhật;
   nhờ đó nút Chọn đúng tab luôn nhận trạng thái active ngay khi chuyển.
-- Panel thuộc tính drawing comment do `DocumentWorkspace` quản lý theo selection
+- Panel thuộc tính Edit shape/drawing comment do `DocumentWorkspace` quản lý theo selection
   hiện tại.
 - Chỉ khi View còn active, chuyển
   `PDFSearchController::resultActivated(page, x, y, resultsRevision)` thành
@@ -357,16 +357,21 @@ Note/Free Text đang chọn và phản hồi một cấp.
 
 ### [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml)
 
-**Vai trò:** panel thuộc tính riêng cho drawing comment đang chọn trong tab
-Edit; không lập chỉ mục, hiển thị hay sửa nội dung comment/thread.
+**Vai trò:** panel thuộc tính chung cho Edit shape và drawing comment đang chọn
+trong tab Edit; không lập chỉ mục, hiển thị hay sửa nội dung comment/thread.
 
-- `DocumentWorkspace` chỉ load panel khi selection là Square, Circle, Line,
-  Polygon, PolyLine hoặc Ink và tab Edit đang active; panel tự mở rộng khi vừa
-  được kích hoạt và thay `TextFormatPanel` ở cùng vị trí cạnh phải.
-- Cho đổi stroke, fill của shape đóng và opacity. `ColorDialog` được load theo
+- `DocumentWorkspace` load panel khi selection là `addedShape`, `sourceShape`
+  hoặc Square/Circle/Line/Polygon/PolyLine/Ink và tab Edit đang active; panel tự
+  mở rộng khi vừa được kích hoạt và thay `TextFormatPanel` ở cùng vị trí cạnh
+  phải. Edit shape dùng tiêu đề **Thuộc tính hình vẽ**, drawing comment giữ
+  **Thuộc tính chú thích hình vẽ**.
+- API `selectedDrawing*` dùng chung cho stroke, fill/no fill của hình đóng và
+  opacity. `ColorDialog` được load theo
   nhu cầu; slider chỉ commit một command khi kết thúc pointer gesture và mọi
   callback giữ identity `page + objectId` để không áp vào selection mới.
-- Added comment luôn sửa được. Source drawing comment chỉ bật control khi
+- Edit shape mới và `sourceShape` đã validate có thể sửa thuộc tính và lưu lại;
+  QML không tự nhận diện path nguồn hoặc đọc metadata. Added comment luôn sửa
+  được. Source drawing comment chỉ bật control khi
   controller xác nhận appearance có thể round-trip; source ngoài/custom vẫn
   hiển thị giá trị nhưng khóa chỉnh sửa.
 - Trạng thái thu gọn dùng chung `session.panelCollapsed` với các panel phải khác.
@@ -426,9 +431,10 @@ Edit; không lập chỉ mục, hiển thị hay sửa nội dung comment/thread
   initial-fit chỉ chạy khi session còn `initialFitPending`.
 - Load đúng một panel ở cạnh phải: `CommentPanel` khi Comment active và danh
   sách được bật; `DrawingCommentPropertiesPanel` khi tab Edit đang active và
-  chọn Square/Circle/Line/Polygon/PolyLine/Ink; `TextFormatPanel` cho các trạng
+  chọn `addedShape`/`sourceShape` hoặc Square/Circle/Line/Polygon/PolyLine/Ink;
+  `TextFormatPanel` cho các trạng
   thái Edit còn lại; hoặc panel Text Field, Comb Field, Dropdown/List Box và
-  Radio Button tương ứng trong Forms. Panel thuộc tính drawing comment có ưu
+  Radio Button tương ứng trong Forms. Panel thuộc tính shape/comment có ưu
   tiên hơn `TextFormatPanel`. Khi một panel thuộc tính vừa được kích hoạt, nó tự
   mở rộng; trạng thái collapsed được lưu theo session.
 - Chuyển các signal font family, bold/italic/underline, color và paragraph
@@ -606,7 +612,10 @@ data/candidate/history/selection đổi.
   appearance gốc; khi sửa nội dung, draft được preview bằng style hộp mặc định
   này. Nếu render worker đã trả texture draft đúng revision, component tránh
   chồng preview không cần thiết.
-- `DraftImageView` vẽ pixel snapshot của ảnh thêm mới; `ShapeDraftView` vẽ vector.
+- `DraftImageView` vẽ pixel snapshot của ảnh thêm mới; `ShapeDraftView` vẽ vector
+  cho `addedShape` và draft `sourceShape`. Shape nguồn chưa có draft giữ hình
+  trong PDF texture; khi undo/discard, `originalPreview` phục hồi hình gốc trong
+  lúc đợi texture. Hit-test shape nguồn đã chọn dùng candidate nếu chưa có draft.
 - `CommentDrawingView` vẽ Square/Circle/Line/Polygon/PolyLine từ cùng geometry
   và common properties mà writer dùng để dựng `/AP`. Khi geometry source của
   năm subtype này đổi, delegate vẽ endpoint/vertex đã translate/scale trên
@@ -625,7 +634,8 @@ data/candidate/history/selection đổi.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
 - Drag text/image/shape, cả sáu drawing subtype và Stamp mới/nguồn giữ preview
   trong QML nhưng chỉ commit geometry một lần khi thả; phím mũi tên tạo move command,
-  Shift dùng bước lớn hơn. Cả sáu drawing subtype mới hoặc source hợp lệ và
+  Shift dùng bước lớn hơn. Sáu Edit shape mới/nguồn hợp lệ, cả sáu drawing subtype
+  mới hoặc source hợp lệ và
   Stamp mới/nguồn hợp lệ nhận tám resize handle ở cạnh/góc; frame scale
   endpoint/vertex của Square/Circle/Line/Polygon/PolyLine hoặc mọi stroke của
   Ink. Stamp nguồn chỉ đổi frame `/Rect`; `/AP` và `/BBox` được giữ nguyên.
@@ -676,7 +686,7 @@ click/drag và draft chưa Save.
 ### [`src/Components/ShapeDraftView.qml`](../src/Components/ShapeDraftView.qml)
 
 **Vai trò:** renderer vector dùng lại cho preview trong menu, gesture đang vẽ và
-draft shape đã tạo.
+draft shape mới hoặc `sourceShape` đang sửa.
 
 - Input: `shapeType`, `startRatio`, `endRatio`, fill/stroke color và stroke width.
 - Dùng `QtQuick.Shapes` để tạo Rectangle, Oval cubic Bézier, Line, Arrow,

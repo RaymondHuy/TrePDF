@@ -514,6 +514,7 @@ private:
         QPointF shapeStartRatio;
         QPointF shapeEndRatio = QPointF(1.0, 1.0);
         qreal shapeStrokeWidthRatio = 0.0;
+        QByteArray sourceShapeMetadata;
         QVector<QRectF> highlightRects;
         QVector<std::array<QPointF, 4>> textMarkupQuads;
         QColor highlightColor;

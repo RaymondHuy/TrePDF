@@ -95,6 +95,7 @@ int commentAnnotationSubtype(const QString &kind)
 bool draftSuppressesSourceObjects(const QString &kind, bool deleted)
 {
     return kind == QLatin1String("text")
+        || kind == QLatin1String("sourceShape")
         || (kind == QLatin1String("image") && deleted);
 }
 
@@ -306,7 +307,8 @@ QVariantList PDFEditController::draftsForPage(int page) const
                 paragraphFormatMaps(originalDraft.paragraphFormats));
             map.insert(QStringLiteral("originalFrameRect"), originalDraft.frameRect);
             map.insert(QStringLiteral("originalContentBounds"), originalDraft.contentBounds);
-            if (isDrawingCommentCandidateKind(candidate.kind)) {
+            if (isDrawingCommentCandidateKind(candidate.kind)
+                || isShapeCandidateKind(candidate.kind)) {
                 map.insert(
                     QStringLiteral("originalPreview"),
                     candidateMap(originalDraft));
@@ -352,7 +354,7 @@ QVariantMap PDFEditController::selectedDraftPreview() const
 
 void PDFEditController::deleteSelectedObject()
 {
-    if (!selectedDeletable()) {
+    if (m_saving || !selectedDeletable()) {
         return;
     }
     if (isCommentCandidateKind(m_selectedCandidate.kind)) {
@@ -370,7 +372,7 @@ void PDFEditController::deleteSelectedObject()
         m_selectedCandidate.objectId);
     const auto existingDraft = m_drafts.constFind(key);
     if (m_selectedCandidate.kind == QLatin1String("addedImage")
-        || isShapeCandidateKind(m_selectedCandidate.kind)) {
+        || m_selectedCandidate.kind == QLatin1String("addedShape")) {
         if (existingDraft == m_drafts.cend()) {
             return;
         }
@@ -389,7 +391,8 @@ void PDFEditController::deleteSelectedObject()
         emit historyStateChanged();
         return;
     }
-    if (m_selectedCandidate.kind != QLatin1String("image")) {
+    if (m_selectedCandidate.kind != QLatin1String("image")
+        && m_selectedCandidate.kind != QLatin1String("sourceShape")) {
         return;
     }
 
@@ -764,8 +767,17 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
         static_cast<int>(candidate.shapeType));
     map.insert(QStringLiteral("shapeStart"), candidate.shapeStartRatio);
     map.insert(QStringLiteral("shapeEnd"), candidate.shapeEndRatio);
-    map.insert(QStringLiteral("shapeFillColor"), candidate.fillColor);
-    map.insert(QStringLiteral("shapeStrokeColor"), candidate.strokeColor);
+    const auto shapeColor = [&commentProperties](const QColor &color) {
+        QColor result = color.isValid() ? color.toRgb() : QColor(Qt::transparent);
+        result.setAlphaF(result.alphaF() * commentProperties.opacity);
+        return result;
+    };
+    map.insert(
+        QStringLiteral("shapeFillColor"),
+        shapeColor(commentProperties.interiorColor));
+    map.insert(
+        QStringLiteral("shapeStrokeColor"),
+        shapeColor(commentProperties.strokeColor));
     map.insert(
         QStringLiteral("shapeStrokeWidthRatio"),
         candidate.shapeStrokeWidthRatio);
@@ -990,7 +1002,7 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
     const auto existingDraft = m_drafts.constFind(key);
     const bool matchesOriginal
         = m_selectedCandidate.kind != QLatin1String("addedImage")
-        && !isShapeCandidateKind(m_selectedCandidate.kind)
+        && m_selectedCandidate.kind != QLatin1String("addedShape")
         && !(m_selectedCandidate.added
              && m_selectedCandidate.kind == QLatin1String("freeText"))
         && sameDraftContent(normalizedDraft, originalDraft);

@@ -352,7 +352,8 @@ Item {
             }
             if (previousDraft.restoration === true)
                 displayedDrafts.push(previousDraft)
-            else if (previousDraft.originalText !== undefined)
+            else if (previousDraft.originalText !== undefined
+                    || previousDraft.originalPreview !== undefined)
                 displayedDrafts.push(restorationOverlay(previousDraft))
         }
         const displayedContentDrafts = []
@@ -472,7 +473,7 @@ Item {
             for (const key in original)
                 restored[key] = original[key]
             restored.restoration = true
-            // Keep the source annotation covered until the refreshed PDF
+            // Keep the source appearance covered until the refreshed PDF
             // texture containing its original appearance is ready.
             restored.geometryChanged = true
             restored.styleChanged = true
@@ -998,7 +999,7 @@ Item {
     }
 
     function isShapeKind(kind) {
-        return kind === "addedShape"
+        return kind === "addedShape" || kind === "sourceShape"
     }
 
     function isMovableKind(kind) {
@@ -1021,6 +1022,15 @@ Item {
         for (let index = 0; index < contentDrafts.length; ++index) {
             if (contentDrafts[index].objectId === objectId)
                 return contentDrafts[index]
+        }
+        if (!pooled
+                && controller.selectedPage === page
+                && controller.selectedKind === "sourceShape") {
+            const candidates = controller.candidatesForPage(page)
+            for (let index = 0; index < candidates.length; ++index) {
+                if (candidates[index].objectId === objectId)
+                    return candidates[index]
+            }
         }
         return ({})
     }
@@ -1094,8 +1104,7 @@ Item {
         const tolerance = root.controller.shapeHitToleranceRatio(
             root.page,
             strokeRatio) * root.height
-        const includeInterior = candidate.shapeFillColor !== undefined
-            && Number(candidate.shapeFillColor.a) > 0
+        const includeInterior = candidate.drawingHasInterior === true
         const boundedRatio = value => Math.max(
             0,
             Math.min(1, Number(value)))
@@ -4102,7 +4111,8 @@ Item {
                 if (selectedKind === "image") {
                     return []
                 }
-                if (root.isGeometryCommentKind(selectedKind)) {
+                if (root.isGeometryCommentKind(selectedKind)
+                        || root.isShapeKind(selectedKind)) {
                     return [
                         { horizontal: -1, vertical: -1 },
                         { horizontal: 0, vertical: -1 },

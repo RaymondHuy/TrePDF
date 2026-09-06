@@ -10,8 +10,8 @@ Tại thời điểm cập nhật, phạm vi có:
 - 36 tệp QML: xem [Hướng dẫn tệp QML](qml-file-guide.md).
 - 26 tệp triển khai C++ trong `src/` và 1 tệp kiểm thử C++: xem
   [Hướng dẫn tệp C++](cpp-file-guide.md).
-- 21 header C++; gồm 17 header API đi cùng phần triển khai, header nội bộ
-  `PDFEditController_p.h` và 3 header dùng chung không có `.cpp` riêng.
+- 22 header C++; gồm 17 header API đi cùng phần triển khai, header nội bộ
+  `PDFEditController_p.h` và 4 header dùng chung không có `.cpp` riêng.
 
 Tài liệu chuyên sâu về pipeline sửa text vẫn nằm ở
 [text-editing-pipeline.md](text-editing-pipeline.md).
@@ -187,6 +187,11 @@ flowchart TD
 4. Page text dùng editor rich text; image, shape, text markup, Free Text, Stamp
    và sáu drawing subtype Square/Circle/Line/Polygon/PolyLine/Ink dùng
    delegate/preview riêng. Nội dung Free Text được sửa trong CommentPanel.
+   Sáu Edit shape mới hoặc `sourceShape` hợp lệ dùng tám handle và panel chung
+   `DrawingCommentPropertiesPanel` với tiêu đề riêng, sửa stroke/fill/opacity
+   qua `selectedDrawing*`. Chỉ path top-level mới có `TrePDFShape` và
+   geometry/style canonical đã validate được rehydrate; path tùy ý, cũ không
+   marker hoặc lồng trong Form XObject không được chọn như Edit shape.
    Move/resize chỉ commit một command khi gesture kết thúc. Cả sáu drawing
    subtype mới hoặc source hợp lệ hỗ trợ translate endpoint, vertex hay toàn bộ
    stroke bằng bounding box/phím mũi tên, đồng thời scale toàn bộ geometry bằng
@@ -199,6 +204,9 @@ flowchart TD
    và fingerprint vẫn an toàn.
 5. `PDFSaveWriter` phân biệt thay đổi chỉ dịch chuyển với thay đổi cần thay object
    để giữ font, ma trận, resource và z-order khi có thể.
+   Edit shape nguồn được xác thực rồi rebuild tại z-order cũ; style semantic
+   dùng `Draft.commentProperties` với opacity riêng. Chúng vẫn là page-content
+   path, không đi qua pipeline annotation `/AP` của drawing comment.
 
 ### Tương tác AcroForm có sẵn
 
@@ -269,7 +277,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/DocumentTabBar.qml`](../src/Components/DocumentTabBar.qml) | Thanh tab PDF. |
 | [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép một hoặc hai document view và lưu state riêng cho pane phụ. |
 | [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ; không chứa control appearance. |
-| [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml) | Panel tab Edit cho stroke, fill và opacity của Square/Circle/Line/Polygon/PolyLine/Ink đang chọn; source appearance không an toàn chỉ đọc. |
+| [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml) | Panel tab Edit dùng chung cho stroke, fill/no fill và opacity của Edit shape hoặc drawing comment; tiêu đề theo loại selection, source comment appearance không an toàn chỉ đọc. |
 | [`src/Components/TextFieldOptionsPanel.qml`](../src/Components/TextFieldOptionsPanel.qml) | Panel multi-line, giới hạn ký tự tùy chọn và xóa Text Field đang chọn. |
 | [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml) | Panel số ô/giới hạn ký tự bắt buộc và xóa Comb Field đang chọn. |
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |
@@ -316,6 +324,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) | Ghi PDF giao dịch từ snapshot bất biến. |
 | [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) | Đọc chuỗi, chuẩn hóa nội dung và phân loại comment annotation dùng chung cho index, render và save. |
 | [`src/PDFCommentAnnotation.h`](../src/PDFCommentAnnotation.h) | Contract geometry/common properties cho drawing/Ink comment và `/AP`; Ink giữ từng stroke `/InkList` riêng. |
+| [`src/PDFShapeUtils.h`](../src/PDFShapeUtils.h) | Canonical builder và bounded validator cho geometry/style, metadata `TrePDFShape`; scanner và writer dùng chung để rehydrate/lưu Edit shape. |
 | [`src/DraftImageItem.cpp`](../src/DraftImageItem.cpp) | Vẽ snapshot ảnh draft trong QML. |
 | [`src/PDFFormController.cpp`](../src/PDFFormController.cpp) | Facade GUI-thread của form runtime. |
 | [`src/PDFFormWorker.cpp`](../src/PDFFormWorker.cpp) | Session PDFium form trên hàng đợi tuần tự. |

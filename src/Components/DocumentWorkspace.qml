@@ -71,7 +71,9 @@ Item {
             || kind === "ink"
     }
     readonly property bool drawingCommentPropertiesPanelActive:
-        editTabActive && drawingCommentSelected
+        editTabActive && (drawingCommentSelected
+            || session.editController.selectedKind === "addedShape"
+            || session.editController.selectedKind === "sourceShape")
     readonly property DocumentView splitDocumentView:
         splitDocumentViewLoader.status === Loader.Ready
             ? splitDocumentViewLoader.item as DocumentView

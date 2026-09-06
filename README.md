@@ -208,11 +208,18 @@ an orphaned thread.
 The Shapes dropdown offers rectangles, ovals, lines, arrows, triangles, and
 diamonds. After choosing a shape, drag over a page to create a vector session
 draft with a black outline and transparent fill, then select it to move, resize,
-or delete it. Near-horizontal and near-vertical lines and arrows snap to their
-axis. Shape creation and geometry changes participate in undo, redo, and
-discard. Save and Save As write shapes as PDF path objects, including cubic
+or delete it. Shapes have eight side/corner resize handles, and selecting one
+in Edit opens Shape Properties for stroke color, fill/no fill on closed shapes,
+and opacity. Near-horizontal and near-vertical lines and arrows snap to their
+axis. Shape creation, geometry, appearance, and deletion participate in undo,
+redo, and discard. Save and Save As write shapes as PDF path objects, including cubic
 Bézier ovals, so they remain sharp when zoomed and keep the same placement on
-cropped or rotated pages.
+cropped or rotated pages. Newly saved TrePDF shapes carry `TrePDFShape` metadata;
+validated top-level paths reopen as editable shapes with the same properties,
+move/resize/delete, history, and persistence. Arbitrary PDF paths, older unmarked
+shapes, and paths inside Form XObjects are excluded. Rewriting a source shape
+preserves its position in the page's drawing order; Edit shapes remain page
+content, separate from drawing-comment annotations.
 
 The Image tool changes the page cursor to a placement `+`. Clicking a page opens
 the local image picker; the chosen PNG, JPEG, BMP, GIF, WebP, or TIFF is decoded
@@ -331,7 +338,7 @@ and persist through Save/Save As.
   inputs, outputs, lifecycle, and C++ relationships for all 36 QML files.
 - [`docs/cpp-file-guide.md`](docs/cpp-file-guide.md): detailed responsibilities,
   ownership, threading, persistence boundaries, and tests for all 26 `src/` C++
-  implementations, 21 headers, and the C++ test file, including the separate
+  implementations, 22 headers, and the C++ test file, including the separate
   implementation files of `PDFEditController`.
 - [`docs/overlay-architecture.md`](docs/overlay-architecture.md): the current
   per-page overlay tree, stacking order, coordinate systems, mode gates, input

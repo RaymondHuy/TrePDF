@@ -1,8 +1,8 @@
 # Hướng dẫn toàn bộ tệp C++
 
-Tài liệu này mô tả 26 tệp triển khai C++ trong `src/`, 21 header và một tệp kiểm
+Tài liệu này mô tả 26 tệp triển khai C++ trong `src/`, 22 header và một tệp kiểm
 thử C++ trong `tests/`. Trong số header, 17 tệp API đi cùng phần triển khai,
-`PDFEditController_p.h` dùng nội bộ và ba tệp hỗ trợ không có `.cpp` riêng.
+`PDFEditController_p.h` dùng nội bộ và bốn tệp hỗ trợ không có `.cpp` riêng.
 Nội dung tập trung vào trách nhiệm thật của mỗi
 tệp, ownership, thread, dữ liệu trao đổi và ranh giới không nên phá khi sửa code.
 
@@ -301,6 +301,9 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 - Scan page bất đồng bộ từ document handle riêng dưới PDFium lock.
 - Duyệt top-level page objects và đường dẫn object con để nhận diện text/image;
   chỉ đánh dấu editable cho loại có thể lưu mà vẫn bảo toàn scope/resource.
+- Path top-level có marker `TrePDFShape` mới được xét thành `sourceShape`;
+  `PDFShapeUtils.h` đọc metadata có giới hạn và xác thực geometry/style canonical
+  trước khi expose. Path tùy ý, shape cũ không marker và path lồng đều bị bỏ qua.
 - Đọc Highlight, Squiggly, Underline, Strikeout, Text, FreeText, Stamp, Square,
   Circle, Line, Polygon, PolyLine và Ink annotation;
   chuẩn hóa quad/rect, màu và `/Contents` thành comment candidate. Nội dung
@@ -365,6 +368,10 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   từ undo/redo cũng đi qua guard nên không thể hồi sinh text/image/Edit shape.
 - API selection tách capability property khỏi move/resize/delete. Stroke,
   interior và opacity tạo từng snapshot command riêng; no-op không thêm history.
+  `selectedDrawing*` cũng phục vụ `addedShape`/`sourceShape`; Edit shape giữ style
+  semantic trong `Draft.commentProperties` với opacity riêng, chỉ ghép alpha
+  khi preview hoặc serialize. Shape mới và nguồn hợp lệ đều có
+  style/move/resize/delete, undo/redo/discard và Save/reopen.
   Source style chỉ bật cho cả sáu drawing subtype TrePDF-managed có normal AP
   và style đã capture an toàn; fingerprint AP bounded được giữ để Save xác thực.
 - `hasDrafts` bao gồm edit history, transient page structure, form runtime draft
@@ -385,7 +392,9 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 **Công cụ khác:**
 
 - Add Image decode/giới hạn ảnh trên GUI thread rồi lưu pixel snapshot.
-- Add Shape chuẩn hóa geometry và snap line/arrow gần trục. Khi kết thúc gesture
+- Add Shape chuẩn hóa geometry và snap line/arrow gần trục; sáu Edit shape có
+  tám handle cạnh/góc và panel stroke/fill/no fill/opacity trong tab Edit.
+  Khi kết thúc gesture
   Highlight/Underline/Squiggly/Strikeout, controller lấy các glyph
   không-whitespace giao vùng kéo, nhóm theo
   visual line rồi tạo rectangle/QuadPoints đã snap cho từng dòng. Không có glyph
@@ -474,6 +483,11 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   Cả bốn text-markup subtype ghi quad từ các rectangle dòng đã snap. Sau khi
   serialize staging file, canonicalizer thêm
   normal `/AP` vector cho text markup mới mà không regenerate page content.
+- Edit shape dùng canonical builder trong `PDFShapeUtils.h` và marker
+  `TrePDFShape`. Với `sourceShape`, xác thực lại path/metadata/geometry/style
+  trước khi gỡ hoặc rebuild; replacement giữ z-order nguồn. Edit shape là
+  page-content path nên thay đổi vẫn gọi GenerateContent, không dùng annotation
+  placeholder hay `/AP` của drawing comment.
 - Tạo drawing comment qua Square placeholder, snapshot common properties và
   map normalized geometry bằng `FPDF_DeviceToPage()`; canonicalizer đổi subtype,
   ghi `/L`/`/Vertices`, dictionary style và vector `/AP` cuối cùng.
@@ -835,6 +849,15 @@ designer, rồi phục hồi document và pixel nền an toàn.
 - Mọi patch kiểm format 32-bit, bounds và kích thước trước `memcpy`.
 
 ## Header hỗ trợ không có `.cpp`
+
+### [`src/PDFShapeUtils.h`](../src/PDFShapeUtils.h)
+
+- Dựng canonical path cho sáu Edit shape và encode/decode metadata `TrePDFShape`.
+- Validator có giới hạn, kiểm geometry/style nguồn khớp contract trước khi
+  scanner trả `sourceShape` hoặc writer nhận sửa/xóa path đó. Chỉ path top-level
+  có marker được hỗ trợ; không suy đoán shape từ path tùy ý hoặc path lồng.
+- Scanner và writer dùng chung builder/validator để preview, Save và rehydrate
+  không lệch geometry hay nhân opacity qua nhiều lần lưu.
 
 ### [`src/PDFFormAppearance.h`](../src/PDFFormAppearance.h)
 

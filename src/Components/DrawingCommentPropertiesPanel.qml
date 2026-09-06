@@ -19,6 +19,9 @@ Rectangle {
     property string colorDialogObjectId: ""
     property color colorDialogInitialColor: "white"
 
+    readonly property bool editShapeSelected:
+        root.editController.selectedKind === "addedShape"
+            || root.editController.selectedKind === "sourceShape"
     readonly property bool drawingCommentSelected: {
         const kind = root.editController.selectedKind
         return kind === "square"
@@ -76,7 +79,7 @@ Rectangle {
     }
 
     function openColorDialog(interior) {
-        if (!root.drawingCommentSelected
+        if ((!root.drawingCommentSelected && !root.editShapeSelected)
                 || !root.editController.selectedDrawingPropertiesEditable
                 || root.editController.saving) {
             return
@@ -157,8 +160,11 @@ Rectangle {
         icon.color: root.theme.foxitDarkOrange
         display: AbstractButton.IconOnly
         focusPolicy: Qt.TabFocus
-        //% "Expand drawing comment properties"
-        ToolTip.text: qsTrId("ExpandDrawingCommentProperties")
+        ToolTip.text: root.editShapeSelected
+            //% "Expand shape properties"
+            ? qsTrId("ExpandShapeProperties")
+            //% "Expand drawing comment properties"
+            : qsTrId("ExpandDrawingCommentProperties")
         ToolTip.visible: hovered
         ToolTip.delay: 500
         Accessible.name: ToolTip.text
@@ -204,8 +210,11 @@ Rectangle {
 
                         Label {
                             Layout.fillWidth: true
-                            //% "Drawing comment properties"
-                            text: qsTrId("ShapeCommentProperties")
+                            text: root.editShapeSelected
+                                //% "Shape properties"
+                                ? qsTrId("ShapeProperties")
+                                //% "Drawing comment properties"
+                                : qsTrId("ShapeCommentProperties")
                             color: root.theme.ribbonTextColor
                             font.pixelSize: 17
                             font.weight: Font.DemiBold
@@ -223,9 +232,11 @@ Rectangle {
                             icon.color: root.theme.foxitDarkOrange
                             display: AbstractButton.IconOnly
                             focusPolicy: Qt.TabFocus
-                            //% "Collapse drawing comment properties"
-                            ToolTip.text:
-                                qsTrId("CollapseDrawingCommentProperties")
+                            ToolTip.text: root.editShapeSelected
+                                //% "Collapse shape properties"
+                                ? qsTrId("CollapseShapeProperties")
+                                //% "Collapse drawing comment properties"
+                                : qsTrId("CollapseDrawingCommentProperties")
                             ToolTip.visible: hovered
                             ToolTip.delay: 500
                             Accessible.name: ToolTip.text
@@ -265,8 +276,11 @@ Rectangle {
                             Layout.fillWidth: true
                             visible: !root.editController
                                 .selectedDrawingPropertiesEditable
-                            //% "This drawing comment's appearance is read-only."
-                            text: qsTrId("DrawingPropertiesReadOnly")
+                            text: root.editShapeSelected
+                                //% "This shape's appearance is read-only."
+                                ? qsTrId("ShapePropertiesReadOnly")
+                                //% "This drawing comment's appearance is read-only."
+                                : qsTrId("DrawingPropertiesReadOnly")
                             color: "#747176"
                             font.pixelSize: 10
                             wrapMode: Text.Wrap

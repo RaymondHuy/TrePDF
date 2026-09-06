@@ -5,6 +5,7 @@
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
 #include "PDFSaveWriter.h"
+#include "PDFShapeUtils.h"
 #include "PDFiumSynchronization.h"
 
 #include <algorithm>
@@ -2130,6 +2131,42 @@ void PDFEditController::appendPageObjectCandidates(
                 embeddedFontDataBytes,
                 cancellation);
         }
+        return;
+    }
+
+    if (type == FPDF_PAGEOBJ_PATH) {
+        PDFShapeUtils::Metadata metadata;
+        QByteArray bytes;
+        if (objectPath.size() != 1
+            || !PDFShapeUtils::readMetadata(page, pageSize, pageObject,
+                                            metadata, bytes)) {
+            return;
+        }
+        Candidate candidate;
+        candidate.objectId = pageObjectId(objectPath);
+        candidate.objectPath = objectPath;
+        candidate.kind = QStringLiteral("sourceShape");
+        //% "Shapes"
+        candidate.label = qtTrId("Shapes");
+        setInitialGeometry(candidate, metadata.frame);
+        candidate.shapeType = metadata.type;
+        candidate.shapeStartRatio = metadata.start;
+        candidate.shapeEndRatio = metadata.end;
+        candidate.shapeStrokeWidthRatio = metadata.strokeWidthRatio;
+        candidate.fillColor = metadata.fill.isValid()
+            ? metadata.fill : QColor(Qt::transparent);
+        candidate.strokeColor = metadata.stroke;
+        candidate.commentProperties.strokeColor = metadata.stroke;
+        candidate.commentProperties.interiorColor = metadata.fill;
+        candidate.commentProperties.opacity = metadata.opacity;
+        candidate.sourceShapeMetadata = bytes;
+        candidate.editable = request.editingAllowed;
+        candidate.renderSuppressible = true;
+        if (!request.editingAllowed) {
+            //% "This PDF does not permit content editing."
+            candidate.reason = qtTrId("PdfEditingNotPermitted");
+        }
+        candidates.append(std::move(candidate));
         return;
     }
 

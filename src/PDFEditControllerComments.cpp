@@ -615,6 +615,9 @@ bool PDFEditController::drawingSupportsFill(const QString &kind)
 bool PDFEditController::drawingPropertiesEditable(
     const Candidate &candidate) const
 {
+    if (isShapeCandidateKind(candidate.kind)) {
+        return candidate.editable && documentAllowsEditing();
+    }
     return isDrawingCommentCandidateKind(candidate.kind)
         && candidate.editable
         && candidate.drawingPropertiesEditable
@@ -630,21 +633,24 @@ bool PDFEditController::selectedDrawingPropertiesEditable() const
 bool PDFEditController::selectedDrawingSupportsFill() const
 {
     return m_hasSelection
-        && drawingSupportsFill(m_selectedCandidate.kind);
+        && (drawingSupportsFill(m_selectedCandidate.kind)
+            || (isShapeCandidateKind(m_selectedCandidate.kind)
+                && m_selectedCandidate.shapeType != LineShape
+                && m_selectedCandidate.shapeType != ArrowShape));
 }
 
 QColor PDFEditController::selectedDrawingStrokeColor() const
 {
     return m_hasSelection
-            && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+            && (isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+                || isShapeCandidateKind(m_selectedCandidate.kind))
         ? selectedDraftForDisplay().commentProperties.strokeColor
         : QColor();
 }
 
 QColor PDFEditController::selectedDrawingInteriorColor() const
 {
-    return m_hasSelection
-            && drawingSupportsFill(m_selectedCandidate.kind)
+    return selectedDrawingSupportsFill()
         ? selectedDraftForDisplay().commentProperties.interiorColor
         : QColor();
 }
@@ -657,7 +663,8 @@ bool PDFEditController::selectedDrawingHasInterior() const
 qreal PDFEditController::selectedDrawingOpacity() const
 {
     return m_hasSelection
-            && isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+            && (isDrawingCommentCandidateKind(m_selectedCandidate.kind)
+                || isShapeCandidateKind(m_selectedCandidate.kind))
         ? selectedDraftForDisplay().commentProperties.opacity
         : 1.0;
 }
@@ -2415,8 +2422,10 @@ bool PDFEditController::updateSelectedDrawingProperties(
         return true;
     }
 
-    command.after.candidate.commentModifiedDate
-        = QDateTime::currentDateTime();
+    if (isDrawingCommentCandidateKind(m_selectedCandidate.kind)) {
+        command.after.candidate.commentModifiedDate
+            = QDateTime::currentDateTime();
+    }
     command.hadAfter = m_selectedCandidate.added
         || !sameDraftContent(
             command.after,
@@ -2444,7 +2453,7 @@ bool PDFEditController::setSelectedDrawingStrokeColor(const QColor &color)
 bool PDFEditController::setSelectedDrawingInteriorColor(const QColor &color)
 {
     if (!m_hasSelection
-        || !drawingSupportsFill(m_selectedCandidate.kind)
+        || !selectedDrawingSupportsFill()
         || !color.isValid()) {
         return false;
     }
@@ -2459,7 +2468,7 @@ bool PDFEditController::setSelectedDrawingInteriorColor(const QColor &color)
 bool PDFEditController::clearSelectedDrawingInteriorColor()
 {
     if (!m_hasSelection
-        || !drawingSupportsFill(m_selectedCandidate.kind)) {
+        || !selectedDrawingSupportsFill()) {
         return false;
     }
     return updateSelectedDrawingProperties(

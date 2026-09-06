@@ -38,6 +38,7 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFPageItem.h
     ../src/PDFSaveWriter.cpp
     ../src/PDFSaveWriter.h
+    ../src/PDFShapeUtils.h
     ../src/PDFSearchController.cpp
     ../src/PDFSearchController.h
     ../src/PDFTabModel.cpp
