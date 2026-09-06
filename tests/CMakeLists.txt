@@ -16,6 +16,15 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFDocument.h
     ../src/PDFEditController.cpp
     ../src/PDFEditController.h
+    ../src/PDFEditControllerCandidates.cpp
+    ../src/PDFEditControllerAnnotationScan.cpp
+    ../src/PDFEditControllerText.cpp
+    ../src/PDFEditControllerComments.cpp
+    ../src/PDFEditControllerGeometry.cpp
+    ../src/PDFEditControllerDrafts.cpp
+    ../src/PDFEditControllerSave.cpp
+    ../src/PDFEditControllerSupport.cpp
+    ../src/PDFEditController_p.h
     ../src/PDFFormController.cpp
     ../src/PDFFormController.h
     ../src/PDFFormAppearance.h

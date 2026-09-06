@@ -330,8 +330,9 @@ and persist through Save/Save As.
 - [`docs/qml-file-guide.md`](docs/qml-file-guide.md): detailed responsibilities,
   inputs, outputs, lifecycle, and C++ relationships for all 36 QML files.
 - [`docs/cpp-file-guide.md`](docs/cpp-file-guide.md): detailed responsibilities,
-  ownership, threading, persistence boundaries, and tests for all 18 `src/` C++
-  implementations, 20 headers, and the C++ test file.
+  ownership, threading, persistence boundaries, and tests for all 26 `src/` C++
+  implementations, 21 headers, and the C++ test file, including the separate
+  implementation files of `PDFEditController`.
 - [`docs/overlay-architecture.md`](docs/overlay-architecture.md): the current
   per-page overlay tree, stacking order, coordinate systems, mode gates, input
   routing, texture synchronization, and pooling cleanup.
