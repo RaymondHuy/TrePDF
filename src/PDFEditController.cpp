@@ -83,11 +83,9 @@ constexpr int kDrawingCommentAlpha = 255;
 
 bool polygonContainsPoint(const QPolygonF &polygon,
                           const QPointF &point,
-                          qreal tolerance,
-                          bool includeInterior)
+                          qreal tolerance)
 {
-    if (includeInterior
-        && polygon.containsPoint(point, Qt::OddEvenFill)) {
+    if (polygon.containsPoint(point, Qt::OddEvenFill)) {
         return true;
     }
 
@@ -106,7 +104,6 @@ bool shapeContainsPoint(PDFEditController::ShapeType shapeType,
                         const QPointF &startRatio,
                         const QPointF &endRatio,
                         qreal strokeWidthRatio,
-                        const QColor &fillColor,
                         const QSizeF &pageSize,
                         const QPointF &normalizedPoint)
 {
@@ -150,9 +147,9 @@ bool shapeContainsPoint(PDFEditController::ShapeType shapeType,
                 + qBound<qreal>(0.0, ratio.y(), 1.0)
                     * frame.height());
     };
-    const bool includeInterior = fillColor.isValid()
-        && fillColor.alpha() > 0;
 
+    // Closed shapes remain interactive throughout their interior, regardless
+    // of fill or opacity. Keep this in sync with EditOverlay's move mask.
     switch (shapeType) {
     case PDFEditController::RectangleShape: {
         QPolygonF polygon;
@@ -163,8 +160,7 @@ bool shapeContainsPoint(PDFEditController::ShapeType shapeType,
         return polygonContainsPoint(
             polygon,
             point,
-            tolerance,
-            includeInterior);
+            tolerance);
     }
     case PDFEditController::EllipseShape: {
         const qreal radiusX = drawingRect.width() / 2.0;
@@ -173,18 +169,7 @@ bool shapeContainsPoint(PDFEditController::ShapeType shapeType,
         const qreal deltaY = point.y() - drawingRect.center().y();
         const qreal outerX = deltaX / (radiusX + tolerance);
         const qreal outerY = deltaY / (radiusY + tolerance);
-        const bool insideOuter
-            = outerX * outerX + outerY * outerY <= 1.0;
-        if (!insideOuter
-            || includeInterior
-            || radiusX <= tolerance
-            || radiusY <= tolerance) {
-            return insideOuter;
-        }
-
-        const qreal innerX = deltaX / (radiusX - tolerance);
-        const qreal innerY = deltaY / (radiusY - tolerance);
-        return innerX * innerX + innerY * innerY >= 1.0;
+        return outerX * outerX + outerY * outerY <= 1.0;
     }
     case PDFEditController::LineShape:
         return distanceToSegment(
@@ -230,8 +215,7 @@ bool shapeContainsPoint(PDFEditController::ShapeType shapeType,
         return polygonContainsPoint(
             polygon,
             point,
-            tolerance,
-            includeInterior);
+            tolerance);
     }
     case PDFEditController::DiamondShape: {
         QPolygonF polygon;
@@ -242,8 +226,7 @@ bool shapeContainsPoint(PDFEditController::ShapeType shapeType,
         return polygonContainsPoint(
             polygon,
             point,
-            tolerance,
-            includeInterior);
+            tolerance);
     }
     }
     return false;
@@ -690,9 +673,6 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
                 candidate.shapeStartRatio,
                 candidate.shapeEndRatio,
                 candidate.shapeStrokeWidthRatio,
-                draft != m_drafts.cend()
-                    ? draft->commentProperties.interiorColor
-                    : candidate.commentProperties.interiorColor,
                 pageSize,
                 point)) {
             return;

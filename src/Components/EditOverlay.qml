@@ -1054,8 +1054,7 @@ Item {
             point.y - (start.y + projection * deltaY))
     }
 
-    function polygonContainsPoint(
-            points, point, tolerance, includeInterior) {
+    function polygonContainsPoint(points, point, tolerance) {
         let inside = false
         for (let index = 0, previous = points.length - 1;
                 index < points.length;
@@ -1077,7 +1076,7 @@ Item {
                 inside = !inside
             }
         }
-        return includeInterior && inside
+        return inside
     }
 
     function shapeContainsPoint(candidate, point, shapeWidth, shapeHeight) {
@@ -1104,7 +1103,6 @@ Item {
         const tolerance = root.controller.shapeHitToleranceRatio(
             root.page,
             strokeRatio) * root.height
-        const includeInterior = candidate.drawingHasInterior === true
         const boundedRatio = value => Math.max(
             0,
             Math.min(1, Number(value)))
@@ -1118,6 +1116,8 @@ Item {
             ? candidate.shapeEnd
             : Qt.point(1, 1)
 
+        // Match controller hover/selection: closed interiors also accept
+        // dragging when the shape has no fill or is fully transparent.
         switch (Number(candidate.shapeType)) {
         case PDFEditController.RectangleShape:
             return polygonContainsPoint([
@@ -1125,7 +1125,7 @@ Item {
                 Qt.point(right, top),
                 Qt.point(right, bottom),
                 Qt.point(left, bottom)
-            ], point, tolerance, includeInterior)
+            ], point, tolerance)
         case PDFEditController.EllipseShape: {
             const radiusX = (right - left) / 2
             const radiusY = (bottom - top) / 2
@@ -1133,17 +1133,7 @@ Item {
             const deltaY = point.y - centerY
             const outerX = deltaX / (radiusX + tolerance)
             const outerY = deltaY / (radiusY + tolerance)
-            const insideOuter = outerX * outerX + outerY * outerY <= 1
-            if (!insideOuter
-                    || includeInterior
-                    || radiusX <= tolerance
-                    || radiusY <= tolerance) {
-                return insideOuter
-            }
-
-            const innerX = deltaX / (radiusX - tolerance)
-            const innerY = deltaY / (radiusY - tolerance)
-            return innerX * innerX + innerY * innerY >= 1
+            return outerX * outerX + outerY * outerY <= 1
         }
         case PDFEditController.LineShape:
             return distanceToSegment(
@@ -1184,14 +1174,14 @@ Item {
                 Qt.point(centerX, top),
                 Qt.point(right, bottom),
                 Qt.point(left, bottom)
-            ], point, tolerance, includeInterior)
+            ], point, tolerance)
         case PDFEditController.DiamondShape:
             return polygonContainsPoint([
                 Qt.point(centerX, top),
                 Qt.point(right, centerY),
                 Qt.point(centerX, bottom),
                 Qt.point(left, centerY)
-            ], point, tolerance, includeInterior)
+            ], point, tolerance)
         }
         return false
     }
@@ -3970,7 +3960,7 @@ Item {
             enabled: !root.editing
                 && root.isMovableKind(root.controller.selectedKind)
             containmentMask: QtObject {
-                function contains(point) {
+                function contains(point: point): bool {
                     if (!root.isShapeKind(root.controller.selectedKind))
                         return true
 

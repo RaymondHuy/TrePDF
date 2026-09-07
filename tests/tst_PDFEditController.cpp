@@ -26530,10 +26530,10 @@ void PDFEditControllerTest::addsShapeWithUndoRedo()
     const QString transparentDiamondId = transparentDiamond
         .value(QStringLiteral("objectId"))
         .toString();
-    QVERIFY(
+    QCOMPARE(
         controller.candidateAt(0, 0.75, 0.20)
-            .value(QStringLiteral("objectId")).toString()
-        != transparentDiamondId);
+            .value(QStringLiteral("objectId")).toString(),
+        transparentDiamondId);
     QCOMPARE(
         controller.candidateAt(0, 0.75, 0.10)
             .value(QStringLiteral("objectId")).toString(),
@@ -26673,6 +26673,40 @@ void PDFEditControllerTest::editsShapePropertiesWithUndoRedo()
     QCOMPARE(controller.selectedDrawingOpacity(), 1.0);
     QVERIFY(!controller.selectedDrawingHasInterior());
 
+    const auto verifyInteriorHit = [&controller, &frame, &objectId]() {
+        const QVariantList draftsBefore = controller.draftsForPage(0);
+        QSignalSpy historyChanges(&controller, &PDFEditController::historyStateChanged);
+        controller.clearSelection();
+        const QVariantMap hovered = controller.candidateAt(
+            0, frame.center().x(), frame.center().y());
+        QCOMPARE(hovered.value(QStringLiteral("objectId")).toString(), objectId);
+        QVERIFY(controller.selectCandidate(
+            0, hovered.value(QStringLiteral("objectId")).toString()));
+        QCOMPARE(controller.draftsForPage(0), draftsBefore);
+        QCOMPARE(historyChanges.count(), 0);
+    };
+    if (supportsFill) {
+        // Hover and click use the closed shape's interior even without fill,
+        // and neither operation should materialize a style/history change.
+        verifyInteriorHit();
+        QVERIFY(!controller.selectedDrawingHasInterior());
+        if (shapeType != PDFEditController::RectangleShape) {
+            const QPointF outsideContour(
+                frame.left() + frame.width() * 0.05,
+                frame.top() + frame.height() * 0.05);
+            QVERIFY(controller.candidateAt(0, outsideContour.x(), outsideContour.y())
+                        .value(QStringLiteral("objectId")).toString() != objectId);
+        }
+    } else {
+        const QPointF offStroke(
+            frame.left() + frame.width() * 0.15,
+            frame.top() + frame.height() * 0.85);
+        QVERIFY(controller.candidateAt(0, offStroke.x(), offStroke.y())
+                    .value(QStringLiteral("objectId")).toString() != objectId);
+        QCOMPARE(controller.candidateAt(0, frame.center().x(), frame.center().y())
+                     .value(QStringLiteral("objectId")).toString(), objectId);
+    }
+
     const QColor stroke(29, 101, 183);
     QVERIFY(controller.setSelectedDrawingStrokeColor(QColor(29, 101, 183, 17)));
     QCOMPARE(controller.selectedDrawingStrokeColor(), stroke);
@@ -26690,10 +26724,6 @@ void PDFEditControllerTest::editsShapePropertiesWithUndoRedo()
 
     const QColor interior(223, 164, 38);
     if (supportsFill) {
-        // An unfilled closed path must not capture its empty interior. Once
-        // filled, the same point must select the shape through controller hit testing.
-        QVERIFY(controller.candidateAt(0, frame.center().x(), frame.center().y())
-                    .value(QStringLiteral("objectId")).toString() != objectId);
         QVERIFY(controller.setSelectedDrawingInteriorColor(QColor(223, 164, 38, 3)));
         QCOMPARE(controller.selectedDrawingInteriorColor(), interior);
         QVERIFY(controller.selectedDrawingHasInterior());
@@ -26702,6 +26732,7 @@ void PDFEditControllerTest::editsShapePropertiesWithUndoRedo()
         QVERIFY(controller.setSelectedDrawingInteriorColor(interior));
         controller.undo();
         QVERIFY(!controller.selectedDrawingHasInterior());
+        verifyInteriorHit();
         controller.redo();
         QCOMPARE(controller.selectedDrawingInteriorColor(), interior);
     } else {
@@ -26732,6 +26763,9 @@ void PDFEditControllerTest::editsShapePropertiesWithUndoRedo()
 
     QVERIFY(controller.setSelectedDrawingOpacity(-1.0));
     QCOMPARE(controller.selectedDrawingOpacity(), 0.0);
+    if (supportsFill) {
+        verifyInteriorHit();
+    }
     QVERIFY(controller.setSelectedDrawingOpacity(2.0));
     QCOMPARE(controller.selectedDrawingOpacity(), 1.0);
     controller.undo();
@@ -26742,6 +26776,12 @@ void PDFEditControllerTest::editsShapePropertiesWithUndoRedo()
         QVERIFY(controller.clearSelectedDrawingInteriorColor());
         QVERIFY(controller.clearSelectedDrawingInteriorColor());
         QVERIFY(!controller.selectedDrawingHasInterior());
+        verifyInteriorHit();
+        QVERIFY(controller.setSelectedDrawingOpacity(0.0));
+        verifyInteriorHit();
+        QVERIFY(!controller.selectedDrawingHasInterior());
+        controller.undo();
+        QCOMPARE(controller.selectedDrawingOpacity(), 0.4);
         controller.undo();
         QCOMPARE(controller.selectedDrawingInteriorColor(), interior);
     }
@@ -26896,6 +26936,25 @@ void PDFEditControllerTest::editsSavedShapesRoundTrip()
                    resizedFrame.topLeft()).length() < 0.002);
     QVERIFY(QLineF(controller.selectedFrameRect().bottomRight(),
                    resizedFrame.bottomRight()).length() < 0.002);
+    const QString editedId = editedShape.value(QStringLiteral("objectId")).toString();
+    const QRectF reopenedFrame = controller.selectedFrameRect();
+    if (supportsFill) {
+        controller.clearSelection();
+        const QVariantMap hovered = controller.candidateAt(
+            0, reopenedFrame.center().x(), reopenedFrame.center().y());
+        QCOMPARE(hovered.value(QStringLiteral("objectId")).toString(), editedId);
+        QVERIFY(controller.selectCandidate(
+            0, hovered.value(QStringLiteral("objectId")).toString()));
+        QVERIFY(!controller.selectedDrawingHasInterior());
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(!controller.canUndo());
+    } else {
+        const QPointF offStroke(
+            reopenedFrame.left() + reopenedFrame.width() * 0.15,
+            reopenedFrame.top() + reopenedFrame.height() * 0.85);
+        QVERIFY(controller.candidateAt(0, offStroke.x(), offStroke.y())
+                    .value(QStringLiteral("objectId")).toString() != editedId);
+    }
     controller.deleteSelectedObject();
     QVERIFY(controller.save());
     QCOMPARE(inspectShapePaths(editedPath).count, 0);
@@ -27008,12 +27067,17 @@ void PDFEditControllerTest::editsLegacyUnmarkedShapesRoundTrip()
         QVERIFY(!controller.selectedDrawingHasInterior());
         QCOMPARE(controller.selectedDrawingStrokeColor(), QColor(Qt::black));
         QCOMPARE(controller.selectedDrawingOpacity(), 1.0);
-        // Both unfilled shapes select at their bottom edge, never at their
-        // empty center. This exercises the pointer hit-test used by the UI.
+        // Legacy unfilled shapes support the same interior hover/click as
+        // newly added shapes without creating a draft just by selecting them.
         QCOMPARE(controller.candidateAt(0, frame.center().x(), frame.bottom())
                      .value(QStringLiteral("objectId")).toString(), objectId);
-        QVERIFY(controller.candidateAt(0, frame.center().x(), frame.center().y())
-                    .value(QStringLiteral("objectId")).toString() != objectId);
+        controller.clearSelection();
+        const QVariantMap hovered = controller.candidateAt(
+            0, frame.center().x(), frame.center().y());
+        QCOMPARE(hovered.value(QStringLiteral("objectId")).toString(), objectId);
+        QVERIFY(controller.selectCandidate(
+            0, hovered.value(QStringLiteral("objectId")).toString()));
+        QVERIFY(!controller.selectedDrawingHasInterior());
         QVERIFY(controller.setSelectedDrawingStrokeColor(Qt::black));
         QVERIFY(!controller.hasDrafts());
         QVERIFY(!controller.canUndo());
