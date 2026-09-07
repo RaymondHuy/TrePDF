@@ -329,6 +329,20 @@ một history command khi mouse release. `TextEdit` đồng bộ rich text, rang
 content bounds với controller, nhưng giữ document local để undo/redo của editor
 không bị thay bằng một document mới.
 
+Edit shape `addedShape`/`sourceShape` dùng tám resize handle cạnh/góc và
+`ShapeDraftView` cho draft preview; shape nguồn chưa có draft vẫn lấy hình từ
+PDF texture và lấy candidate để hit-test. Khi chọn trong Edit,
+`DocumentWorkspace` mở panel chung `DrawingCommentPropertiesPanel` với tiêu đề
+**Thuộc tính hình vẽ**, sửa stroke/fill/no fill/opacity qua `selectedDrawing*`.
+Hover/chọn và vùng kéo shape đã chọn nhận toàn bộ phần bên trong hình kín,
+kể cả khi không có màu tô hoặc opacity bằng 0. Điểm ngoài đường bao vẫn bị
+loại; line/arrow chỉ nhận điểm gần nét vẽ. Controller và containment mask của
+`EditOverlay` dùng cùng quy tắc này cho shape mới và shape nguồn.
+Scanner C++ chỉ expose path top-level thành `sourceShape` sau khi xác thực
+metadata `TrePDFShape`, hoặc nhận diện geometry/style hình chữ nhật, tam giác,
+hình thoi canonical của path hoàn toàn không có mark. Path có marker lỗi không
+dùng nhánh nhận diện không marker; QML không suy đoán khả năng chỉnh sửa từ hình hiển thị.
+
 Highlight, Underline, Squiggly và Strikeout dùng cùng bước resolve geometry cho
 preview và commit. `EditOverlay` gửi vùng kéo normalized cho controller;
 controller chỉ hit-test các glyph source-text không phải whitespace đã có trong
@@ -493,6 +507,11 @@ Overlay hiện tại phối hợp với render worker, không phải chỉ “v�
    dựa trên draft data.
 4. Khi result đúng revision về, `PDFPageItem` đánh dấu texture current/ready; QML
    bỏ fallback đúng lúc.
+
+Với Edit shape nguồn, worker suppress page-content path gốc và QML vẽ draft
+shape; `originalPreview` giữ hình trước sửa để undo/discard chờ texture phục
+hồi. Source shape vẫn theo pipeline content path, tách khỏi annotation
+suppression và `/AP` của drawing comment.
 
 Ink dùng `InkDrawingView` ở cả lớp draft và preview. `EditOverlay` giữ raw path
 chỉ trong lifetime của một drag, sample tối thiểu cách nhau 1 logical pixel,

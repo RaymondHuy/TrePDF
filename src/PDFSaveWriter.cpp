@@ -1,4 +1,5 @@
 #include "PDFSaveWriter.h"
+#include "PDFShapeUtils.h"
 
 #include "ApplicationFonts.h"
 #include "PDFAcroFormCanonicalizer.h"
@@ -150,9 +151,8 @@ struct SaveDraft {
         = PDFEditController::RectangleShape;
     QPointF shapeStartRatio;
     QPointF shapeEndRatio = QPointF(1.0, 1.0);
-    QColor shapeFillColor;
-    QColor shapeStrokeColor;
     qreal shapeStrokeWidthRatio = 0.0;
+    QByteArray sourceShapeMetadata;
     QPointF layoutOrigin;
     SaveFormat originalFormat;
     qreal originalHorizontalScale = 1.0;
@@ -1749,6 +1749,16 @@ PDFSaveWriter::Result prepareUnsupportedPaints(
             continue;
         }
         if (objectType == FPDF_PAGEOBJ_PATH) {
+            PDFShapeUtils::Metadata shapeMetadata;
+            QByteArray shapeBytes;
+            if (PDFShapeUtils::readMetadata(inspectionPage,
+                    QSizeF(FPDF_GetPageWidthF(inspectionPage),
+                           FPDF_GetPageHeightF(inspectionPage)),
+                    inspectionObject, shapeMetadata, shapeBytes)) {
+                // Canonical managed paths have explicit solid paint. Keep
+                // their path and identity intact, including a white fill.
+                continue;
+            }
             int fillMode = FPDF_FILLMODE_NONE;
             FPDF_BOOL strokes = false;
             if (!FPDFPath_GetDrawMode(
@@ -1857,13 +1867,27 @@ QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
         }
         const int expectedType = draft.kind == SaveDraft::Kind::Image
             ? FPDF_PAGEOBJ_IMAGE
-            : FPDF_PAGEOBJ_TEXT;
+            : draft.kind == SaveDraft::Kind::Shape
+                ? FPDF_PAGEOBJ_PATH : FPDF_PAGEOBJ_TEXT;
         if (FPDFPageObj_GetType(source.object) != expectedType) {
             result = failure(
                 PDFSaveWriter::Error::SourceObjectMissing,
                 draft.page,
                 draft.objectId);
             return {};
+        }
+        if (draft.kind == SaveDraft::Kind::Shape) {
+            PDFShapeUtils::Metadata metadata;
+            QByteArray bytes;
+            if (draft.sourceShapeMetadata.isEmpty()
+                || !PDFShapeUtils::readEditableShape(page,
+                    QSizeF(FPDF_GetPageWidthF(page), FPDF_GetPageHeightF(page)),
+                    source.object, metadata, bytes)
+                || bytes != draft.sourceShapeMetadata) {
+                result = failure(PDFSaveWriter::Error::SourceObjectMissing,
+                                 draft.page, draft.objectId);
+                return {};
+            }
         }
         if (!seen.contains(source.object)) {
             seen.insert(source.object);
@@ -2046,258 +2070,31 @@ PDFSaveWriter::Result createImageDraftObject(
 }
 
 PDFSaveWriter::Result createShapeDraftObject(
+    FPDF_DOCUMENT document,
+    FPDF_PAGE page,
     const SaveDraft &draft,
     qreal pageWidth,
     qreal pageHeight,
-    const PageCoordinateMapper &coordinateMapper,
     QVector<FPDF_PAGEOBJECT> &objects)
 {
-    if (draft.frameRect.isEmpty()
-        || !std::isfinite(draft.frameRect.x())
-        || !std::isfinite(draft.frameRect.y())
-        || !std::isfinite(draft.frameRect.width())
-        || !std::isfinite(draft.frameRect.height())) {
-        return failure(
-            PDFSaveWriter::Error::ShapeObjectCreationFailed,
-            draft.page,
-            draft.objectId);
-    }
-
-    const QRectF frame(
-        draft.frameRect.x() * pageWidth,
-        draft.frameRect.y() * pageHeight,
-        draft.frameRect.width() * pageWidth,
-        draft.frameRect.height() * pageHeight);
-    const qreal strokeDeviceWidth = qMax<qreal>(
-        0.75,
-        draft.shapeStrokeWidthRatio * pageHeight);
-    const qreal inset = std::min({
-        strokeDeviceWidth / 2.0,
-        frame.width() / 4.0,
-        frame.height() / 4.0});
-    const QRectF drawingRect = frame.adjusted(
-        inset,
-        inset,
-        -inset,
-        -inset);
-    if (drawingRect.isEmpty()) {
-        return failure(
-            PDFSaveWriter::Error::ShapeObjectCreationFailed,
-            draft.page,
-            draft.objectId);
-    }
-
-    const auto mapPoint = [&coordinateMapper](
-                              const QPointF &devicePoint,
-                              QPointF &pagePoint) {
-        return coordinateMapper.pagePoint(
-            devicePoint.x(),
-            devicePoint.y(),
-            pagePoint);
-    };
-    FPDF_PAGEOBJECT path = nullptr;
-    const auto createPath = [&path, &mapPoint](const QPointF &start) {
-        QPointF pagePoint;
-        if (!mapPoint(start, pagePoint)) {
-            return false;
-        }
-        path = FPDFPageObj_CreateNewPath(
-            static_cast<float>(pagePoint.x()),
-            static_cast<float>(pagePoint.y()));
-        return path != nullptr;
-    };
-    const auto lineTo = [&path, &mapPoint](const QPointF &end) {
-        QPointF pagePoint;
-        return path
-            && mapPoint(end, pagePoint)
-            && FPDFPath_LineTo(
-                path,
-                static_cast<float>(pagePoint.x()),
-                static_cast<float>(pagePoint.y()));
-    };
-    const auto moveTo = [&path, &mapPoint](const QPointF &point) {
-        QPointF pagePoint;
-        return path
-            && mapPoint(point, pagePoint)
-            && FPDFPath_MoveTo(
-                path,
-                static_cast<float>(pagePoint.x()),
-                static_cast<float>(pagePoint.y()));
-    };
-    const auto bezierTo = [&path, &mapPoint](
-                              const QPointF &control1,
-                              const QPointF &control2,
-                              const QPointF &end) {
-        QPointF pageControl1;
-        QPointF pageControl2;
-        QPointF pageEnd;
-        return path
-            && mapPoint(control1, pageControl1)
-            && mapPoint(control2, pageControl2)
-            && mapPoint(end, pageEnd)
-            && FPDFPath_BezierTo(
-                path,
-                static_cast<float>(pageControl1.x()),
-                static_cast<float>(pageControl1.y()),
-                static_cast<float>(pageControl2.x()),
-                static_cast<float>(pageControl2.y()),
-                static_cast<float>(pageEnd.x()),
-                static_cast<float>(pageEnd.y()));
-    };
-    const auto ratioPoint = [&frame](const QPointF &ratio) {
-        return QPointF(
-            frame.x()
-                + qBound<qreal>(0.0, ratio.x(), 1.0)
-                    * frame.width(),
-            frame.y()
-                + qBound<qreal>(0.0, ratio.y(), 1.0)
-                    * frame.height());
-    };
-
-    bool closedShape = false;
-    bool shapeCreated = false;
-    switch (draft.shapeType) {
-    case PDFEditController::RectangleShape: {
-        const QPointF topLeft = drawingRect.topLeft();
-        shapeCreated = createPath(topLeft)
-            && lineTo(drawingRect.topRight())
-            && lineTo(drawingRect.bottomRight())
-            && lineTo(drawingRect.bottomLeft())
-            && FPDFPath_Close(path);
-        closedShape = true;
-        break;
-    }
-    case PDFEditController::EllipseShape: {
-        constexpr qreal kappa = 0.5522847498307936;
-        const qreal centerX = drawingRect.center().x();
-        const qreal centerY = drawingRect.center().y();
-        const qreal radiusX = drawingRect.width() / 2.0;
-        const qreal radiusY = drawingRect.height() / 2.0;
-        shapeCreated = createPath(QPointF(centerX, drawingRect.top()))
-            && bezierTo(
-                QPointF(centerX + kappa * radiusX, drawingRect.top()),
-                QPointF(drawingRect.right(), centerY - kappa * radiusY),
-                QPointF(drawingRect.right(), centerY))
-            && bezierTo(
-                QPointF(drawingRect.right(), centerY + kappa * radiusY),
-                QPointF(centerX + kappa * radiusX, drawingRect.bottom()),
-                QPointF(centerX, drawingRect.bottom()))
-            && bezierTo(
-                QPointF(centerX - kappa * radiusX, drawingRect.bottom()),
-                QPointF(drawingRect.left(), centerY + kappa * radiusY),
-                QPointF(drawingRect.left(), centerY))
-            && bezierTo(
-                QPointF(drawingRect.left(), centerY - kappa * radiusY),
-                QPointF(centerX - kappa * radiusX, drawingRect.top()),
-                QPointF(centerX, drawingRect.top()))
-            && FPDFPath_Close(path);
-        closedShape = true;
-        break;
-    }
-    case PDFEditController::LineShape:
-    case PDFEditController::ArrowShape: {
-        const QPointF start = ratioPoint(draft.shapeStartRatio);
-        const QPointF end = ratioPoint(draft.shapeEndRatio);
-        shapeCreated = createPath(start) && lineTo(end);
-        if (shapeCreated
-            && draft.shapeType == PDFEditController::ArrowShape) {
-            const QPointF direction = end - start;
-            const qreal length = std::hypot(
-                direction.x(),
-                direction.y());
-            if (length <= 0.0) {
-                shapeCreated = false;
-                break;
-            }
-            const QPointF unit = direction / length;
-            const QPointF normal(-unit.y(), unit.x());
-            const qreal headLength = qMin(
-                qMax<qreal>(6.0, strokeDeviceWidth * 4.0),
-                length * 0.35);
-            const qreal halfWidth = headLength * 0.55;
-            const QPointF headBase = end - unit * headLength;
-            const QPointF headLeft = headBase + normal * halfWidth;
-            const QPointF headRight = headBase - normal * halfWidth;
-            shapeCreated = moveTo(headLeft)
-                && lineTo(end)
-                && lineTo(headRight);
-        }
-        break;
-    }
-    case PDFEditController::TriangleShape: {
-        shapeCreated = createPath(
-                           QPointF(
-                               drawingRect.center().x(),
-                               drawingRect.top()))
-            && lineTo(drawingRect.bottomRight())
-            && lineTo(drawingRect.bottomLeft())
-            && FPDFPath_Close(path);
-        closedShape = true;
-        break;
-    }
-    case PDFEditController::DiamondShape: {
-        shapeCreated = createPath(
-                           QPointF(
-                               drawingRect.center().x(),
-                               drawingRect.top()))
-            && lineTo(
-                QPointF(
-                    drawingRect.right(),
-                    drawingRect.center().y()))
-            && lineTo(
-                QPointF(
-                    drawingRect.center().x(),
-                    drawingRect.bottom()))
-            && lineTo(
-                QPointF(
-                    drawingRect.left(),
-                    drawingRect.center().y()))
-            && FPDFPath_Close(path);
-        closedShape = true;
-        break;
-    }
-    }
-
-    const QColor strokeColor = draft.shapeStrokeColor.isValid()
-        ? draft.shapeStrokeColor.toRgb()
-        : QColor(Qt::black);
-    const QColor fillColor = draft.shapeFillColor.isValid()
-        ? draft.shapeFillColor.toRgb()
-        : QColor(Qt::transparent);
-    const bool configured = shapeCreated
-        && FPDFPageObj_SetStrokeColor(
-            path,
-            static_cast<unsigned int>(strokeColor.red()),
-            static_cast<unsigned int>(strokeColor.green()),
-            static_cast<unsigned int>(strokeColor.blue()),
-            static_cast<unsigned int>(strokeColor.alpha()))
-        && FPDFPageObj_SetStrokeWidth(
-            path,
-            static_cast<float>(
-                coordinateMapper.strokeWidth(strokeDeviceWidth)))
-        && FPDFPageObj_SetLineJoin(path, FPDF_LINEJOIN_ROUND)
-        && FPDFPageObj_SetLineCap(path, FPDF_LINECAP_ROUND)
-        && (!closedShape
-            || FPDFPageObj_SetFillColor(
-                path,
-                static_cast<unsigned int>(fillColor.red()),
-                static_cast<unsigned int>(fillColor.green()),
-                static_cast<unsigned int>(fillColor.blue()),
-                static_cast<unsigned int>(fillColor.alpha())))
-        && FPDFPath_SetDrawMode(
-            path,
-            closedShape ? FPDF_FILLMODE_WINDING : FPDF_FILLMODE_NONE,
-            true);
-    if (!configured) {
+    PDFShapeUtils::Metadata metadata;
+    metadata.type = draft.shapeType;
+    metadata.frame = draft.frameRect;
+    metadata.start = draft.shapeStartRatio;
+    metadata.end = draft.shapeEndRatio;
+    metadata.strokeWidthRatio = draft.shapeStrokeWidthRatio;
+    metadata.stroke = draft.commentProperties.strokeColor;
+    metadata.fill = draft.commentProperties.interiorColor;
+    metadata.opacity = draft.commentProperties.opacity;
+    FPDF_PAGEOBJECT path = PDFShapeUtils::createPath(
+        page, QSizeF(pageWidth, pageHeight), metadata);
+    if (!path || !PDFShapeUtils::markPath(document, path, metadata)) {
         if (path) {
             FPDFPageObj_Destroy(path);
         }
-        return failure(
-            PDFSaveWriter::Error::ShapeObjectCreationFailed,
-            draft.page,
-            draft.objectId);
+        return failure(PDFSaveWriter::Error::ShapeObjectCreationFailed,
+                       draft.page, draft.objectId);
     }
-
     objects.append(path);
     return {};
 }
@@ -2391,10 +2188,11 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
     }
     if (draft.kind == SaveDraft::Kind::Shape) {
         return createShapeDraftObject(
+            document,
+            page,
             draft,
             pageWidth,
             pageHeight,
-            coordinateMapper,
             objects);
     }
 
@@ -4424,6 +4222,23 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         pageWidth,
         pageHeight);
     RasterizedPaints rasterizedPaints;
+    // Validate indexed shape identity before the paint-preservation pass can
+    // replace any source objects. Deletions require the same validation.
+    for (const SaveDraft &draft : drafts) {
+        if (draft.kind != SaveDraft::Kind::Shape || draft.added) {
+            continue;
+        }
+        PDFSaveWriter::Result sourceResult;
+        const QVector<SourceObject> sources = sourceObjectsForDraft(
+            page.get(), draft, sourceResult);
+        if (!sourceResult.succeeded()) {
+            return sourceResult;
+        }
+        if (sources.size() != 1) {
+            return failure(PDFSaveWriter::Error::SourceObjectMissing,
+                           pageIndex, draft.objectId);
+        }
+    }
     const bool hasPageObjectDrafts = std::any_of(
         drafts.cbegin(),
         drafts.cend(),
@@ -5361,7 +5176,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         const bool imageDraft = draft->candidate.kind == QLatin1String("addedImage")
             || draft->candidate.kind == QLatin1String("image");
         const bool shapeDraft
-            = draft->candidate.kind == QLatin1String("addedShape");
+            = draft->candidate.kind == QLatin1String("addedShape")
+            || draft->candidate.kind == QLatin1String("sourceShape");
         const bool textMarkupDraft
             = draft->candidate.kind == QLatin1String("highlight")
             || draft->candidate.kind == QLatin1String("underline")
@@ -5495,8 +5311,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.shapeType = draft->candidate.shapeType;
         saveDraft.shapeStartRatio = draft->candidate.shapeStartRatio;
         saveDraft.shapeEndRatio = draft->candidate.shapeEndRatio;
-        saveDraft.shapeFillColor = draft->candidate.fillColor;
-        saveDraft.shapeStrokeColor = draft->candidate.strokeColor;
+        saveDraft.sourceShapeMetadata = draft->candidate.sourceShapeMetadata;
         saveDraft.shapeStrokeWidthRatio
             = draft->candidate.shapeStrokeWidthRatio;
         saveDraft.layoutOrigin = PDFEditController::layoutOriginForDraft(*draft);

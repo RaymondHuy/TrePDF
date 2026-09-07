@@ -117,9 +117,20 @@ Current features:
   remain protected.
 - Draw rectangles, ovals, lines, arrows, triangles, and diamonds from the
   Shapes dropdown. Added shapes are vector session drafts that can be selected,
-  moved, resized, deleted, undone/redone, and persisted as PDF path objects.
+  moved, resized with eight side/corner handles, deleted, undone/redone, and
+  persisted as PDF path objects. Selecting an Edit shape opens Shape Properties
+  for stroke color, fill/no fill on closed shapes, and opacity; each accepted
+  change is undoable. Semantic style lives in `Draft.commentProperties` with
+  opacity independent from stroke/interior colors.
   New shapes use a black outline with transparent fill; near-axis lines and
-  arrows snap horizontally or vertically.
+  arrows snap horizontally or vertically. Newly saved top-level paths marked
+  `TrePDFShape` rehydrate as `sourceShape` only after bounded canonical geometry
+  and style validation. Unmarked top-level paths can also rehydrate when their
+  geometry and style match a canonical rectangle, triangle, or diamond. They
+  retain style/move/resize/delete, history/discard, and Save/reopen support; the first
+  edited Save adds `TrePDFShape` metadata. Arbitrary and nested paths remain
+  excluded, and invalid marked paths never fall back to unmarked recognition.
+  These Edit shapes are page content, separate from comment annotations.
 - Render every page through PDFium.
 - Virtualized continuous scrolling with reusable QML delegates.
 - Per-tab Page Display modes for Single Page, Continuous, Facing, and Continuous
@@ -292,6 +303,8 @@ Current features:
   page content, and writes the PDF transactionally.
 - `src/PDFCommentAnnotation.h`: shared drawing-comment geometry/property
   contract used by controller snapshots, writer, and the `/AP` canonicalizer.
+- `src/PDFShapeUtils.h`: shared canonical Edit-shape path builder and bounded
+  `TrePDFShape` metadata/geometry/style validator used by scanning and saving.
 - `src/PDFPageItem.h/.cpp`: asynchronous rendering and scene graph texture
   upload for one page delegate.
 - `src/Components/FormChoiceOverlay.qml`: custom combo-box and list-box
@@ -302,9 +315,10 @@ Current features:
   highlights inside the shared rotated page surface.
 - `src/Components/DrawingCommentPropertiesPanel.qml`: dedicated Edit-tab panel
   for stroke, optional interior color, and opacity of the selected drawing
-  comment; comment/thread content remains in `CommentPanel.qml`.
+  comment or Edit shape through the shared `selectedDrawing*` API, with distinct
+  panel titles; comment/thread content remains in `CommentPanel.qml`.
 - `src/Components/ShapeDraftView.qml`: shared Qt Quick Shapes preview used by
-  the ribbon palette, drag preview, and added-shape draft delegates.
+  the ribbon palette, drag preview, and added/source-shape draft delegates.
 - `src/Components/CommentDrawingView.qml`: vector preview shared by Square,
   Circle, Line, Polygon, and PolyLine comment drafts and gestures.
 - `src/Components/InkDrawingView.qml`: Qt Quick Shapes freehand preview shared
@@ -571,7 +585,17 @@ clipped or elided unintentionally.
   regenerates a matching normal appearance only for a provenance-validated
   TrePDF drawing comment with fully supported captured properties, while
   external/custom appearances remain intact.
-- Persist added shapes as top-level PDF path objects. Convert every path point
+- Persist Edit shapes as top-level PDF path objects marked with `TrePDFShape`.
+  Use `PDFShapeUtils.h` for the same canonical path and metadata validation in
+  scanner and writer. Validated marked paths and canonical rectangle, triangle,
+  or diamond paths with no marks can become `sourceShape`, only at the page's
+  top level.
+  Invalid marked paths must never fall back to unmarked recognition.
+  Keep semantic stroke/interior colors and opacity separate in
+  `Draft.commentProperties`, combining alpha only for preview and serialization.
+  Revalidate the captured source fingerprint, geometry, and style before
+  rewriting or deleting; add `TrePDFShape` metadata to edited unmarked shapes;
+  rebuild changed source shapes at their original z-order. Convert every path point
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain
   insertion order with the other added page objects.

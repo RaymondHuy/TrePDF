@@ -1401,11 +1401,19 @@ mỏng theo một trục được nới tối thiểu để vẫn hit-test và r
 đầu đường vẫn nằm đúng tại điểm nhấn/thả. Đường thẳng và mũi tên gần ngang hoặc
 gần dọc được controller snap về đúng trục; preview gọi cùng hàm constraint nên
 không nhảy vị trí lúc thả chuột. Sau khi tạo, tool trở về `SelectTool`; shape hỗ
-trợ kéo, bốn edge handle, phím mũi tên, Delete, undo/redo và discard qua cùng
+trợ kéo, tám handle cạnh/góc, phím mũi tên, Delete, undo/redo và discard qua cùng
 snapshot `Draft` với text và image.
 
+Chọn `addedShape` hoặc `sourceShape` trong Edit mở
+`DrawingCommentPropertiesPanel` với tiêu đề riêng **Thuộc tính hình vẽ**.
+Panel dùng API `selectedDrawing*` chung để đổi stroke, fill/no fill của hình
+đóng và opacity; mỗi thay đổi là một command. Style semantic nằm trong
+`Draft.commentProperties`: màu stroke/interior và opacity độc lập, chỉ ghép
+alpha khi tạo dữ liệu preview hoặc ghi PDF để không nhân opacity lặp qua Save.
+
 Khi Save/Save As, `PDFSaveWriter` đổi các điểm từ editor sang page bằng
-`FPDF_DeviceToPage()` rồi tạo top-level `FPDF_PAGEOBJ_PATH`:
+`FPDF_DeviceToPage()` rồi dùng canonical builder trong `PDFShapeUtils.h` tạo
+top-level `FPDF_PAGEOBJ_PATH`:
 
 - hình chữ nhật, tam giác và hình thoi là path đóng;
 - oval dùng bốn cubic Bézier, nên vẫn là vector;
@@ -1416,3 +1424,21 @@ Mặc định fill trong suốt và stroke đen được ghi bằng màu RGBA; l
 join dùng kiểu tròn. Shape mới được chèn theo `addedOrder`, gọi
 `FPDFPage_GenerateContent()` cùng các draft page-object khác và chỉ tồn tại
 trong file sau khi transaction `QSaveFile` commit thành công.
+
+Writer gắn metadata `TrePDFShape` cho shape mới. Page scan rehydrate thành
+`kind = "sourceShape"` khi path top-level có marker hợp lệ và geometry/style
+khớp contract canonical qua bộ đọc có giới hạn trong `PDFShapeUtils.h`.
+Path top-level không có mark cũng được nhận nếu geometry/style khớp hình chữ
+nhật, tam giác hoặc hình thoi canonical. Bộ nhận diện chấp nhận điểm bắt đầu và
+chiều đi quanh polygon tương đương, yêu cầu matrix identity, cap/join tròn,
+không dash/clip và cùng opacity cho stroke/fill; fill trong suốt được xem là
+không tô. Path có marker lỗi không được thử lại qua
+nhánh không marker; path tùy ý và path lồng trong Form XObject vẫn bị bỏ qua.
+Shape nguồn hợp lệ hỗ trợ chọn, style, move/resize, xóa,
+undo/redo/discard và Save/reopen như draft mới. Worker suppress path nguồn để
+QML vẽ preview draft; undo/discard phục hồi preview gốc trong lúc chờ texture.
+Save xác thực lại fingerprint, geometry và style của path nguồn, thay shape đã
+sửa tại z-order cũ hoặc gỡ shape bị xóa, rồi regenerate page content. Shape
+không marker nhận metadata `TrePDFShape` khi được sửa và lưu lần đầu.
+Pipeline này ghi page-content path, độc lập
+với `/Subtype`, `/Rect` và `/AP` của drawing-comment annotation.
