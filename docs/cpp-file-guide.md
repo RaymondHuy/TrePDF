@@ -213,12 +213,19 @@ PDFium trên GUI thread.
 
 **Lập lịch render:**
 
-- Theo dõi document, edit/form/designer controller, page, zoom, color và kích
-  thước item/DPR.
-- Tạo render key gồm request id, pointer document, render revision, display/source
-  page, pixel size, zoom, DPR, draft/form/designer revision.
-- Debounce thay đổi draft ngắn bằng timer để thao tác kéo không tạo hàng đợi render
-  vô hạn; request cũ có atomic cancellation flag.
+- Theo dõi document, edit/form/designer controller, page, visual zoom, color và
+  kích thước item/DPR. Visual zoom đổi kích thước logic của toàn bộ
+  `pageSurface`, nên texture và các overlay vẫn dùng chung một hệ tọa độ.
+- Render/content key gồm request id, pointer document, render revision,
+  display/source page, raster pixel size, DPR và draft/form revision; designer
+  invalidates cache khi suppression thay đổi. Visual zoom không phải một key
+  độc lập.
+- Khi zoom đang đổi, giữ texture đã accept và để scene graph scale texture đó;
+  sau 140 ms không có thay đổi kích thước mới thì request một raster đúng pixel
+  size cuối. Nếu pixel size cuối đã có trong cache hoặc đúng bằng request đang
+  chạy thì tái sử dụng, không render lại raster đã khớp. Thay đổi draft vẫn dùng timer
+  debounce riêng để thao tác kéo không tạo hàng đợi render vô hạn; request cũ có
+  atomic cancellation flag.
 - Gửi việc qua hàng đợi render có giới hạn của `PDFFormWorker`, nhờ đó render và
   form cùng dùng session document tuần tự thay vì đụng handle.
 
@@ -242,10 +249,16 @@ PDFium trên GUI thread.
 
 **Nhận kết quả và scene graph:**
 
-- Callback giữ `QPointer<PDFPageItem>` và kiểm lại toàn bộ render key. Kết quả cũ
-  chỉ bị bỏ, không thay texture hiện hành.
+- Callback giữ `QPointer<PDFPageItem>` và kiểm lại toàn bộ render key, request
+  serial và pixel size hiện tại. Kết quả cũ chỉ bị bỏ, không thay texture hiện
+  hành; high-resolution result của lần zoom trước cũng không thể thắng lần zoom
+  mới hơn.
 - `updatePaintNode()` tạo texture từ pending `QImage`, dùng
   `QSGSimpleTextureNode::setOwnsTexture(true)` và xóa bản CPU ngay sau upload.
+- Request id của raster đã accept được giữ riêng với serial của worker. Khi node
+  bị Qt giải phóng, item về zero-size hoặc upload texture thất bại, token này bị
+  xóa; một callback có guard trở về GUI thread để hạ cờ readiness và request lại
+  khi surface hợp lệ.
 - Không gọi `setTexture(nullptr)` và không delete thủ công texture đã được node
   sở hữu.
 - Expose `draftTextureCurrent`/`draftTextureReady` để `EditOverlay` biết khi nào

@@ -441,8 +441,11 @@ clipped or elided unintentionally.
   and before posting the rendered image back to the GUI thread.
 - Deliver results with a queued invocation and guard the target with
   `QPointer<PDFPageItem>`.
-- Reject a result when its request id, document pointer, revision, page, zoom,
-  device pixel ratio, or pixel size no longer matches.
+- Treat QML zoom as visual geometry, not a separate render-content key. Preserve
+  and scene-graph-scale the accepted texture while zoom input changes, then
+  request the final raster after a short settle interval.
+- Reject a result when its request id/serial, document pointer, revision, page,
+  device pixel ratio, or raster pixel size no longer matches.
 - Keep source-text glyph discovery for text markup inside the asynchronous page
   candidate scan. Return and cache only normalized glyph geometry on the GUI
   side; QML and GUI-thread controller paths must never open or inspect PDFium
@@ -467,6 +470,10 @@ clipped or elided unintentionally.
   the argument; this previously caused an `EXC_BAD_ACCESS` crash on
   `QSGRenderThread` with the Metal backend.
 - Do not manually delete an owned texture.
+- If the node or texture is lost, invalidate the accepted-raster token during
+  scene-graph sync, then use a guarded queued callback to clear GUI readiness
+  state and schedule recovery; never emit the QML-facing signals directly from
+  the render thread.
 - Clear the CPU-side pending `QImage` immediately after creating the scene graph
   texture. Keeping both copies defeats the memory optimization.
 

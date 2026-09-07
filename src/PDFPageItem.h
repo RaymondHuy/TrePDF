@@ -86,15 +86,25 @@ protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data) override;
 
 private:
+    // Tests observe request generations without adding a QML diagnostics API.
+    friend class PDFEditControllerTest;
+
     void refreshMetrics();
+    void updateImplicitPageSize();
     void invalidateCache();
     void invalidateDraftCache(bool immediate);
+    void invalidateRasterCache();
     void cancelPendingRender();
     void handleDraftRenderStateChanged(int page, quint64 revision, bool immediate);
     void handleFormRenderStateChanged(int page, quint64 revision);
     bool refreshSuppressedFormWidgetIds();
     quint64 currentDraftRevision() const;
     quint64 currentFormRevision() const;
+    bool cachedRasterMatchesCurrentState(const QSize &pixelSize,
+                                         qreal devicePixelRatio) const;
+    bool pendingRenderMatchesCurrentState(const QSize &pixelSize,
+                                          qreal devicePixelRatio) const;
+    void queueTextureLossRecovery();
     void setDraftTextureCurrent(bool current);
     void setDraftTextureReady(bool ready);
     void setDisplayedSuppressedCommentObjectIds(QStringList objectIds);
@@ -111,7 +121,6 @@ private:
                             PDFFormController *formController,
                             int revision,
                             int page,
-                            qreal zoom,
                             qreal devicePixelRatio,
                             const QSize &pixelSize,
                             quint64 draftRevision,
@@ -138,9 +147,10 @@ private:
     QStringList m_displayedSuppressedCommentObjectIds;
     bool m_renderScheduled = false;
     QTimer m_draftRenderTimer;
+    QTimer m_zoomRenderTimer;
+    quint64 m_cachedRequestId = 0;
     QSize m_cachedPixelSize;
     int m_cachedPage = -1;
-    qreal m_cachedZoom = 0.0;
     qreal m_cachedDevicePixelRatio = 0.0;
     int m_cachedRevision = -1;
     PDFDocument *m_cachedDocument = nullptr;
@@ -151,7 +161,6 @@ private:
     bool m_renderPending = false;
     QSize m_requestedPixelSize;
     int m_requestedPage = -1;
-    qreal m_requestedZoom = 0.0;
     qreal m_requestedDevicePixelRatio = 0.0;
     int m_requestedRevision = -1;
     PDFDocument *m_requestedDocument = nullptr;
