@@ -36,6 +36,8 @@
 #include <QRawFont>
 #include <QColorSpace>
 #include <QRegularExpression>
+#include <QSGSimpleTextureNode>
+#include <QSGTexture>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <qqml.h>
@@ -59,10 +61,13 @@
 #include <fpdf_transformpage.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <memory>
 #include <tuple>
+#include <utility>
 
 namespace {
 
@@ -848,6 +853,34 @@ public:
             componentComplete();
         }
     }
+
+    QSize texturePixelSizeForTest() const
+    {
+        return QSize(
+            m_textureWidth.load(std::memory_order_relaxed),
+            m_textureHeight.load(std::memory_order_relaxed));
+    }
+
+protected:
+    QSGNode *updatePaintNode(QSGNode *oldNode,
+                             UpdatePaintNodeData *data) override
+    {
+        QSGNode *node = PDFPageItem::updatePaintNode(oldNode, data);
+        QSize textureSize;
+        if (node) {
+            auto *textureNode = static_cast<QSGSimpleTextureNode *>(node);
+            if (QSGTexture *texture = textureNode->texture()) {
+                textureSize = texture->textureSize();
+            }
+        }
+        m_textureWidth.store(textureSize.width(), std::memory_order_relaxed);
+        m_textureHeight.store(textureSize.height(), std::memory_order_relaxed);
+        return node;
+    }
+
+private:
+    std::atomic<int> m_textureWidth = 0;
+    std::atomic<int> m_textureHeight = 0;
 };
 
 QImage renderFirstPageInViewer(const QString &filePath,
@@ -5828,6 +5861,7 @@ private slots:
     void flattensNestedSourceCommentReplies();
     void excludesCommentStateAnnotationsFromCommentModels();
     void hidesCommentRepliesFromViewer();
+    void coalescesZoomRasterUntilInputSettles();
     void hidesUnresolvedSourceReplyFromViewerModel();
     void indexesDrawingAndUnsupportedMarkupComments();
     void ownsPendingDrawingInteractionAcrossPages();
@@ -20457,6 +20491,111 @@ void PDFEditControllerTest::hidesCommentRepliesFromViewer()
                     == QStringLiteral("Root comment"));
     }
     QVERIFY(rootCandidateFound);
+}
+
+void PDFEditControllerTest::coalescesZoomRasterUntilInputSettles()
+{
+    if (QGuiApplication::screens().isEmpty()) {
+        QSKIP("The PDF viewer regression test needs a Qt Quick render screen.");
+    }
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("viewer-zoom-raster-settle.pdf"));
+    QVERIFY(createRootCommentOnlyPdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController editController;
+    PDFFormController formController;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    editController.setDocument(&document);
+    formController.setDocument(&document);
+
+    QQuickWindow window;
+    window.setColor(Qt::white);
+    window.resize(360, 360);
+
+    TestablePDFPageItem pageItem(window.contentItem());
+    pageItem.setWidth(200);
+    pageItem.setHeight(200);
+    pageItem.setEditController(&editController);
+    pageItem.setFormController(&formController);
+    pageItem.setDocument(&document);
+    pageItem.setPage(0);
+    pageItem.completeForTest();
+
+    window.show();
+    QTRY_VERIFY_WITH_TIMEOUT(window.isExposed(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(pageItem.draftTextureCurrent(), 5000);
+    const qreal devicePixelRatio = window.devicePixelRatio();
+    const QSize initialRasterSize(
+        qRound(200 * devicePixelRatio),
+        qRound(200 * devicePixelRatio));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageItem.texturePixelSizeForTest(), initialRasterSize, 5000);
+
+    QSignalSpy textureCurrentSpy(
+        &pageItem,
+        &PDFPageItem::draftTextureCurrentChanged);
+    const std::array<std::pair<qreal, int>, 4> zoomSteps = {{
+        {1.2, 240},
+        {1.5, 300},
+        {1.8, 360},
+        {2.0, 400},
+    }};
+    quint64 settledSerial = 0;
+    for (const auto &[zoom, edge] : zoomSteps) {
+        pageItem.setZoom(zoom);
+        pageItem.setWidth(edge);
+        pageItem.setHeight(edge);
+        settledSerial = pageItem.m_requestSerial;
+
+        // Every input arrives before the 140 ms settle interval. The scene
+        // graph must keep scaling the original raster instead of accepting
+        // any intermediate PDFium render. requestRender() increments the
+        // serial before submitting work, even if its result is later dropped.
+        // The entire sequence exceeds 140 ms to exercise timer restarts.
+        QTest::qWait(50);
+        QCOMPARE(pageItem.m_requestSerial, settledSerial);
+        QVERIFY(!pageItem.m_renderPending);
+        QVERIFY(pageItem.draftTextureCurrent());
+        QCOMPARE(textureCurrentSpy.size(), 0);
+        QCOMPARE(pageItem.texturePixelSizeForTest(), initialRasterSize);
+    }
+
+    const QSize finalRasterSize(
+        qRound(400 * devicePixelRatio),
+        qRound(400 * devicePixelRatio));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageItem.texturePixelSizeForTest(), finalRasterSize, 5000);
+    QCOMPARE(pageItem.m_requestSerial, settledSerial + 1);
+    QCOMPARE(pageItem.m_requestedPixelSize, finalRasterSize);
+
+    // Returning to the accepted raster size during debounce needs no new
+    // submission, even though both visual changes cancel stale generations.
+    const quint64 acceptedRasterId = pageItem.m_cachedRequestId;
+    pageItem.setZoom(1.5);
+    pageItem.setSize(QSizeF(300, 300));
+    pageItem.setZoom(2.0);
+    pageItem.setSize(QSizeF(400, 400));
+    settledSerial = pageItem.m_requestSerial;
+    QTest::qWait(200);
+    QCOMPARE(pageItem.m_requestSerial, settledSerial);
+    QCOMPARE(pageItem.m_cachedRequestId, acceptedRasterId);
+    QVERIFY(!pageItem.m_renderPending);
+
+    // A zero-sized delegate releases its scene-graph texture. Restoring the
+    // previous visual size must not mistake stale cache metadata for a live
+    // texture; it must render and upload the raster again.
+    pageItem.setWidth(0);
+    pageItem.setHeight(0);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        pageItem.texturePixelSizeForTest().isEmpty(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!pageItem.draftTextureCurrent(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!pageItem.draftTextureReady(), 5000);
+    pageItem.setWidth(400);
+    pageItem.setHeight(400);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        pageItem.texturePixelSizeForTest(), finalRasterSize, 5000);
 }
 
 void PDFEditControllerTest::hidesUnresolvedSourceReplyFromViewerModel()

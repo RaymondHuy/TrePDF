@@ -5,6 +5,7 @@
 #include "PDFiumSynchronization.h"
 
 #include <algorithm>
+#include <chrono>
 #include <utility>
 
 #include <QCoreApplication>
@@ -20,6 +21,8 @@
 #include <fpdf_formfill.h>
 
 namespace {
+
+constexpr auto kZoomRenderSettleInterval = std::chrono::milliseconds(140);
 
 using CancellationFlag = std::shared_ptr<std::atomic_bool>;
 using PDFAnnotationUtils::annotationUsesReplyRelation;
@@ -824,6 +827,12 @@ PDFPageItem::PDFPageItem(QQuickItem *parent)
     m_draftRenderTimer.setInterval(250);
     m_draftRenderTimer.setSingleShot(true);
     connect(&m_draftRenderTimer, &QTimer::timeout, this, &PDFPageItem::scheduleRender);
+    m_zoomRenderTimer.setInterval(kZoomRenderSettleInterval);
+    m_zoomRenderTimer.setSingleShot(true);
+    connect(&m_zoomRenderTimer,
+            &QTimer::timeout,
+            this,
+            &PDFPageItem::scheduleRender);
 }
 
 PDFPageItem::~PDFPageItem()
@@ -1050,7 +1059,7 @@ void PDFPageItem::setZoom(qreal zoom)
     }
 
     m_zoom = clampedZoom;
-    refreshMetrics();
+    updateImplicitPageSize();
     emit zoomChanged();
 }
 
@@ -1075,7 +1084,7 @@ void PDFPageItem::geometryChange(const QRectF &newGeometry, const QRectF &oldGeo
 {
     QQuickItem::geometryChange(newGeometry, oldGeometry);
     if (newGeometry.size() != oldGeometry.size()) {
-        invalidateDraftCache(true);
+        invalidateRasterCache();
     }
 }
 
@@ -1114,15 +1123,21 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         delete node;
         m_pendingImage = QImage();
         m_textureDirty = false;
+        m_cachedRequestId = 0;
+        m_cacheDirty = true;
         m_pendingTextureRequestId = 0;
         m_pendingTextureDraftRevision = 0;
         m_pendingTextureFormRevision = 0;
         m_pendingSuppressionApplied = false;
         m_clearTexture = false;
+        queueTextureLossRecovery();
         return nullptr;
     }
 
     if (!node && !m_textureDirty) {
+        m_cachedRequestId = 0;
+        m_cacheDirty = true;
+        queueTextureLossRecovery();
         return nullptr;
     }
 
@@ -1150,7 +1165,9 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 
         if (!texture) {
             delete node;
+            m_cachedRequestId = 0;
             m_cacheDirty = true;
+            queueTextureLossRecovery();
             return nullptr;
         }
         node->setTexture(texture);
@@ -1177,6 +1194,12 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 
 void PDFPageItem::refreshMetrics()
 {
+    updateImplicitPageSize();
+    invalidateCache();
+}
+
+void PDFPageItem::updateImplicitPageSize()
+{
     QSizeF pageSize;
     if (m_document && m_document->isLoaded()) {
         pageSize = m_document->pageSize(m_page);
@@ -1184,12 +1207,12 @@ void PDFPageItem::refreshMetrics()
 
     setImplicitWidth(qMax<qreal>(0.0, pageSize.width() * m_zoom));
     setImplicitHeight(qMax<qreal>(0.0, pageSize.height() * m_zoom));
-    invalidateCache();
 }
 
 void PDFPageItem::invalidateCache()
 {
     m_draftRenderTimer.stop();
+    m_zoomRenderTimer.stop();
     cancelPendingRender();
     ++m_requestSerial;
     m_pendingImage = QImage();
@@ -1200,9 +1223,9 @@ void PDFPageItem::invalidateCache()
     m_pendingTextureFormRevision = 0;
     m_pendingSuppressionApplied = false;
     setDisplayedSuppressedCommentObjectIds({});
+    m_cachedRequestId = 0;
     m_cachedPixelSize = QSize();
     m_cachedPage = -1;
-    m_cachedZoom = 0.0;
     m_cachedDevicePixelRatio = 0.0;
     m_cachedRevision = -1;
     m_cachedDocument = nullptr;
@@ -1213,7 +1236,6 @@ void PDFPageItem::invalidateCache()
     m_renderPending = false;
     m_requestedPixelSize = QSize();
     m_requestedPage = -1;
-    m_requestedZoom = 0.0;
     m_requestedDevicePixelRatio = 0.0;
     m_requestedRevision = -1;
     m_requestedDocument = nullptr;
@@ -1230,6 +1252,7 @@ void PDFPageItem::invalidateCache()
 
 void PDFPageItem::invalidateDraftCache(bool immediate)
 {
+    m_zoomRenderTimer.stop();
     cancelPendingRender();
     ++m_requestSerial;
     // Keep an already accepted image. Its suppression snapshot has already
@@ -1240,7 +1263,6 @@ void PDFPageItem::invalidateDraftCache(bool immediate)
     m_renderPending = false;
     m_requestedPixelSize = QSize();
     m_requestedPage = -1;
-    m_requestedZoom = 0.0;
     m_requestedDevicePixelRatio = 0.0;
     m_requestedRevision = -1;
     m_requestedDocument = nullptr;
@@ -1258,6 +1280,49 @@ void PDFPageItem::invalidateDraftCache(bool immediate)
     } else {
         m_draftRenderTimer.start();
     }
+}
+
+void PDFPageItem::invalidateRasterCache()
+{
+    m_draftRenderTimer.stop();
+    QQuickWindow *quickWindow = window();
+    const qreal devicePixelRatio = quickWindow
+        ? quickWindow->devicePixelRatio()
+        : 0.0;
+    const QSize pixelSize = quickWindow && width() > 0.0 && height() > 0.0
+        ? QSize((std::max)(1, qRound(width() * devicePixelRatio)),
+                (std::max)(1, qRound(height() * devicePixelRatio)))
+        : QSize();
+    if (!pixelSize.isEmpty()
+        && pendingRenderMatchesCurrentState(pixelSize, devicePixelRatio)) {
+        m_zoomRenderTimer.stop();
+        update();
+        return;
+    }
+
+    cancelPendingRender();
+    ++m_requestSerial;
+
+    // A visual resize does not change page contents. Keep the accepted texture
+    // and its suppression snapshot on screen while the scene graph scales it,
+    // then replace it with a sharp raster after zoom input settles.
+    m_renderPending = false;
+    m_requestedPixelSize = QSize();
+    m_requestedPage = -1;
+    m_requestedDevicePixelRatio = 0.0;
+    m_requestedRevision = -1;
+    m_requestedDocument = nullptr;
+    m_requestedDraftRevision = 0;
+    m_requestedEditController = nullptr;
+    m_requestedFormRevision = 0;
+    m_requestedFormController = nullptr;
+    if (!pixelSize.isEmpty()
+        && cachedRasterMatchesCurrentState(pixelSize, devicePixelRatio)) {
+        m_zoomRenderTimer.stop();
+    } else {
+        m_zoomRenderTimer.start();
+    }
+    update();
 }
 
 void PDFPageItem::cancelPendingRender()
@@ -1359,6 +1424,57 @@ quint64 PDFPageItem::currentFormRevision() const
     return m_formController->formRevisionForPage(m_page);
 }
 
+bool PDFPageItem::cachedRasterMatchesCurrentState(
+    const QSize &pixelSize,
+    qreal devicePixelRatio) const
+{
+    return !m_cacheDirty
+        && m_cachedRequestId != 0
+        && m_cachedPixelSize == pixelSize
+        && m_cachedPage == m_page
+        && qFuzzyCompare(m_cachedDevicePixelRatio, devicePixelRatio)
+        && m_document
+        && m_cachedRevision == m_document->renderRevision()
+        && m_cachedDocument == m_document.data()
+        && m_cachedDraftRevision == currentDraftRevision()
+        && m_cachedEditController == m_editController.data()
+        && m_cachedFormRevision == currentFormRevision()
+        && m_cachedFormController == m_formController.data();
+}
+
+bool PDFPageItem::pendingRenderMatchesCurrentState(
+    const QSize &pixelSize,
+    qreal devicePixelRatio) const
+{
+    return m_renderPending
+        && m_requestedPixelSize == pixelSize
+        && m_requestedPage == m_page
+        && qFuzzyCompare(m_requestedDevicePixelRatio, devicePixelRatio)
+        && m_document
+        && m_requestedRevision == m_document->renderRevision()
+        && m_requestedDocument == m_document.data()
+        && m_requestedDraftRevision == currentDraftRevision()
+        && m_requestedEditController == m_editController.data()
+        && m_requestedFormRevision == currentFormRevision()
+        && m_requestedFormController == m_formController.data();
+}
+
+void PDFPageItem::queueTextureLossRecovery()
+{
+    const QPointer<PDFPageItem> item(this);
+    QMetaObject::invokeMethod(this, [item]() {
+        if (!item
+            || item->m_cachedRequestId != 0
+            || !item->m_cacheDirty) {
+            return;
+        }
+
+        item->setDraftTextureCurrent(false);
+        item->setDraftTextureReady(false);
+        item->scheduleRender();
+    }, Qt::QueuedConnection);
+}
+
 void PDFPageItem::setDraftTextureCurrent(bool current)
 {
     if (m_draftTextureCurrent == current) {
@@ -1392,19 +1508,11 @@ void PDFPageItem::markTextureReady(quint64 requestId,
                                    quint64 formRevision,
                                    bool suppressionApplied)
 {
-    QQuickWindow *quickWindow = window();
-    const qreal devicePixelRatio = quickWindow ? quickWindow->devicePixelRatio() : 0.0;
-    const QSize pixelSize(
-        qMax(1, qRound(width() * devicePixelRatio)),
-        qMax(1, qRound(height() * devicePixelRatio)));
-    if (requestId != m_requestSerial
-        || !quickWindow
+    if (m_cacheDirty
+        || requestId != m_cachedRequestId
         || !m_document
         || m_document->renderRevision() != m_cachedRevision
         || m_cachedPage != m_page
-        || !qFuzzyCompare(m_cachedZoom, m_zoom)
-        || !qFuzzyCompare(m_cachedDevicePixelRatio, devicePixelRatio)
-        || m_cachedPixelSize != pixelSize
         || draftRevision != currentDraftRevision()
         || formRevision != currentFormRevision()
         || m_cachedDraftRevision != draftRevision
@@ -1428,7 +1536,8 @@ void PDFPageItem::scheduleRender()
     m_renderScheduled = true;
     QMetaObject::invokeMethod(this, [this]() {
         m_renderScheduled = false;
-        if (m_draftRenderTimer.isActive()) {
+        if (m_draftRenderTimer.isActive()
+            || m_zoomRenderTimer.isActive()) {
             return;
         }
         requestRenderForCurrentSize();
@@ -1446,22 +1555,7 @@ void PDFPageItem::requestRenderForCurrentSize()
     const QSize pixelSize(
         qMax(1, qRound(width() * devicePixelRatio)),
         qMax(1, qRound(height() * devicePixelRatio)));
-    const int revision = m_document->renderRevision();
-    const quint64 draftRevision = currentDraftRevision();
-    const quint64 formRevision = currentFormRevision();
-    const bool cacheMatches = !m_cacheDirty
-        && m_cachedPixelSize == pixelSize
-        && m_cachedPage == m_page
-        && qFuzzyCompare(m_cachedZoom, m_zoom)
-        && qFuzzyCompare(m_cachedDevicePixelRatio, devicePixelRatio)
-        && m_cachedRevision == revision
-        && m_cachedDocument == m_document.data()
-        && m_cachedDraftRevision == draftRevision
-        && m_cachedEditController == m_editController.data()
-        && m_cachedFormRevision == formRevision
-        && m_cachedFormController == m_formController.data();
-
-    if (!cacheMatches) {
+    if (!cachedRasterMatchesCurrentState(pixelSize, devicePixelRatio)) {
         requestRender(pixelSize, devicePixelRatio);
     }
 }
@@ -1477,32 +1571,21 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
         return;
     }
 
-    const int revision = m_document->renderRevision();
-    PDFEditController *editController = m_editController.data();
-    PDFFormController *formController = m_formController.data();
-    const quint64 draftRevision = currentDraftRevision();
-    const quint64 formRevision = currentFormRevision();
-    if (m_renderPending
-        && m_requestedPixelSize == pixelSize
-        && m_requestedPage == m_page
-        && qFuzzyCompare(m_requestedZoom, m_zoom)
-        && qFuzzyCompare(m_requestedDevicePixelRatio, devicePixelRatio)
-        && m_requestedRevision == revision
-        && m_requestedDocument == m_document.data()
-        && m_requestedDraftRevision == draftRevision
-        && m_requestedEditController == editController
-        && m_requestedFormRevision == formRevision
-        && m_requestedFormController == formController) {
+    if (pendingRenderMatchesCurrentState(pixelSize, devicePixelRatio)) {
         return;
     }
 
     cancelPendingRender();
 
+    const int revision = m_document->renderRevision();
+    PDFEditController *editController = m_editController.data();
+    PDFFormController *formController = m_formController.data();
+    const quint64 draftRevision = currentDraftRevision();
+    const quint64 formRevision = currentFormRevision();
     const quint64 requestId = ++m_requestSerial;
     PDFDocument *document = m_document.data();
     const int page = m_page;
     const int sourcePage = document->sourcePageIndex(page);
-    const qreal zoom = m_zoom;
     const QColor background = m_pageColor;
     const bool blankPage = document->isTransientBlankPage(page);
     PDFFormWorker::DocumentKey formDocument;
@@ -1545,7 +1628,6 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
     m_renderPending = true;
     m_requestedPixelSize = pixelSize;
     m_requestedPage = page;
-    m_requestedZoom = zoom;
     m_requestedDevicePixelRatio = devicePixelRatio;
     m_requestedRevision = revision;
     m_requestedDocument = document;
@@ -1562,7 +1644,6 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                                        revision,
                                        page,
                                        sourcePage,
-                                       zoom,
                                        devicePixelRatio,
                                        pixelSize,
                                        background,
@@ -1606,7 +1687,6 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                                         formController,
                                         revision,
                                         page,
-                                        zoom,
                                         devicePixelRatio,
                                         pixelSize,
                                         draftRevision,
@@ -1626,7 +1706,6 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                 formController,
                 revision,
                 page,
-                zoom,
                 devicePixelRatio,
                 pixelSize,
                 draftRevision,
@@ -1644,7 +1723,6 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
                                      PDFFormController *formController,
                                      int revision,
                                      int page,
-                                     qreal zoom,
                                      qreal devicePixelRatio,
                                      const QSize &pixelSize,
                                      quint64 draftRevision,
@@ -1668,7 +1746,6 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
         || m_editController.data() != editController
         || m_formController.data() != formController
         || page != m_page
-        || !qFuzzyCompare(zoom, m_zoom)
         || !qFuzzyCompare(devicePixelRatio, currentDevicePixelRatio)
         || pixelSize != m_requestedPixelSize
         || pixelSize != currentPixelSize
@@ -1691,9 +1768,9 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
     // frame; the previously displayed frame remains internally consistent.
     setDisplayedSuppressedCommentObjectIds(suppressedCommentObjectIds);
     m_pendingImage = image;
+    m_cachedRequestId = requestId;
     m_cachedPixelSize = pixelSize;
     m_cachedPage = page;
-    m_cachedZoom = zoom;
     m_cachedDevicePixelRatio = devicePixelRatio;
     m_cachedRevision = revision;
     m_cachedDocument = document;

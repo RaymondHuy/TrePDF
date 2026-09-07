@@ -227,8 +227,15 @@ flowchart LR
 edit/form/designer controller và render một `QImage` bất đồng bộ rồi upload thành
 scene-graph texture. Nó không tự bắt mouse.
 
-Render key có revision document, draft và form. Kết quả cũ bị bỏ nếu request,
-trang, zoom, DPR hoặc revision không còn khớp. Hai cờ được đưa lên QML có ý nghĩa:
+Zoom ở đây là visual zoom: nó đổi kích thước chung của `pageSurface` để texture,
+search/form/edit overlay và handle follow theo thời gian thực. Trong lúc kích
+thước còn đổi, scene graph scale texture hiện tại; sau 140 ms ổn định,
+`PDFPageItem` mới request raster PDFium ở pixel size cuối.
+
+Render key có raster pixel size, DPR cùng revision document, draft và form;
+visual zoom không nằm trong content key độc lập. Kết quả cũ bị bỏ nếu request
+serial, trang, pixel size, DPR hoặc revision không còn khớp. Hai cờ được đưa lên
+QML có ý nghĩa:
 
 | Cờ | Ý nghĩa cho `EditOverlay` |
 |---|---|
@@ -238,7 +245,8 @@ trang, zoom, DPR hoặc revision không còn khớp. Hai cờ được đưa lê
 Khi texture vẫn là bản sạch hoặc cũ, `EditOverlay` mask source rect và tự vẽ
 draft/recovery tạm thời để không thấy text/image hai lần. Khi texture mới đã
 sẵn sàng, QML nhường phần đó cho texture để tránh chồng bản preview lên bản đã
-render.
+render. Nếu scene graph giải phóng texture (kể cả delegate tạm về zero-size),
+`PDFPageItem` hạ hai cờ qua queued GUI callback và render lại khi surface hợp lệ.
 
 ### `SearchHighlightLayer`: presentation-only trên text nguồn
 
