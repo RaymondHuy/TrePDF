@@ -13,6 +13,7 @@ Item {
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
     required property Flickable viewportItem
+    required property point layoutOrigin
     required property real availableWidth
     property bool formsTabActive: false
     property bool editTabActive: false
@@ -43,6 +44,34 @@ Item {
     readonly property bool searchNavigationReady: !pooled
         && pageSurface.width > 0
         && pageSurface.height > 0
+    readonly property rect visibleRasterRect: {
+        // mapFromItem needs explicit dependencies for ancestor layout/scroll changes.
+        const mappingRevision = pageCard.viewContentX + pageCard.viewContentY
+            + pageCard.layoutOrigin.x + pageCard.layoutOrigin.y
+            + pageCard.x + pageCard.y
+            + pageSurface.x + pageSurface.y
+            + pageSurface.width + pageSurface.height
+            + pageCard.normalizedViewRotation
+        if (pageCard.pooled || !pageCard.visible || !pageCard.viewportItem.visible
+                || !Number.isFinite(mappingRevision)
+                || pageSurface.width <= 0 || pageSurface.height <= 0) {
+            return Qt.rect(0, 0, 0, 0)
+        }
+        // Mapping into the shared surface reverses view rotation without scaling twice.
+        const mapped = pageSurface.mapFromItem(
+            pageCard.viewportItem,
+            0,
+            0,
+            pageCard.viewportItem.width,
+            pageCard.viewportItem.height)
+        const left = Math.max(0, mapped.x)
+        const top = Math.max(0, mapped.y)
+        const right = Math.min(pageSurface.width, mapped.x + mapped.width)
+        const bottom = Math.min(pageSurface.height, mapped.y + mapped.height)
+        if (right <= left || bottom <= top)
+            return Qt.rect(0, 0, 0, 0)
+        return Qt.rect(left, top, right - left, bottom - top)
+    }
 
     signal deleteCommentRequested(int page, string objectId)
 
@@ -109,6 +138,7 @@ Item {
             formDesignMode: pageInteractionOverlay.formDesignMode
             page: pageCard.page
             zoom: pageCard.zoom
+            visiblePageRect: pageCard.visibleRasterRect
             pageColor: "white"
             width: implicitWidth
             height: implicitHeight

@@ -36,6 +36,9 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFFormWorker.h
     ../src/PDFPageItem.cpp
     ../src/PDFPageItem.h
+    ../src/PDFRasterBudget.cpp
+    ../src/PDFRasterBudget.h
+    ../src/PDFRasterPlan.h
     ../src/PDFSaveWriter.cpp
     ../src/PDFSaveWriter.h
     ../src/PDFShapeUtils.h

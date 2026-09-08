@@ -186,6 +186,7 @@ Item {
         formController: root.formController
         formDesignerController: root.formDesignerController
         viewportItem: root.viewportItem
+        layoutOrigin: Qt.point(root.x, root.y)
         availableWidth: root.pageColumnWidth
         formsTabActive: root.formsTabActive
         editTabActive: root.editTabActive
@@ -225,6 +226,9 @@ Item {
                 formController: root.formController
                 formDesignerController: root.formDesignerController
                 viewportItem: root.viewportItem
+                layoutOrigin: Qt.point(
+                    root.x + secondPageLoader.x,
+                    root.y + secondPageLoader.y)
                 availableWidth: root.pageColumnWidth
                 formsTabActive: root.formsTabActive
                 editTabActive: root.editTabActive

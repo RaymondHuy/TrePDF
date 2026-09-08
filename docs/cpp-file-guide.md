@@ -228,12 +228,49 @@ PDFium trên GUI thread.
   atomic cancellation flag.
 - Gửi việc qua hàng đợi render có giới hạn của `PDFFormWorker`, nhờ đó render và
   form cùng dùng session document tuần tự thay vì đụng handle.
+- GUI chỉ lập metadata. Worker render từng ảnh nền/tile, trả kết quả rồi mới
+  enqueue phần tiếp theo cùng page-generation; scheduler vẫn coalesce theo
+  owner và có thể xử lý form hoặc trang khác giữa hai tile.
+
+**Hybrid raster và budget:**
+
+- `PDFRasterPlan.h` chọn full-page khi bitmap không vượt 32 MiB và cạnh không
+  vượt 4096 pixel vật lý. Nhánh tiled quay lại full-page ở ngưỡng 24 MiB để
+  tránh đổi chế độ liên tục. Kích thước luôn bao gồm DPR.
+- Trang lớn nhận preview toàn trang tối đa 4 MiB/cạnh 2048 trước, rồi tile
+  1024 pixel ở native resolution. Mỗi tile có gutter 2 pixel để lọc texture
+  không lộ đường nối; chỉ vẽ core rect. Viewport có preload 128 pixel, tối đa
+  64 tile mỗi kế hoạch, ưu tiên vùng đang nhìn trước.
+- `visiblePageRect` dùng tọa độ logical chưa xoay. QML map viewport vào cùng
+  `pageSurface`; scroll/rotation/split không đổi geometry editor hoặc save.
+- `PDFRasterBudget.h/.cpp` giữ lease trước allocation, tính 2 lần bytes ảnh
+  cho CPU và texture, giới hạn toàn tiến trình 256 MiB. Lease theo ảnh tới node
+  và chỉ giải phóng hoàn toàn khi texture đã bị hủy trên scene-graph thread.
+  Không giữ CPU image lâu dài sau upload. Đây không phải giới hạn RAM decoder
+  PDFium, bộ nhớ staging hay overhead GPU driver.
+- Giữ 16 MiB headroom cho preview thay thế; khi full-page không đủ chỗ, item
+  có thể chuyển sang tiled dù chưa chạm ngưỡng kích thước. Cache loại tile
+  ngoài viewport theo LRU, giữ tối đa 32 MiB lease ngoài viewport mỗi item,
+  đồng thời tuân theo budget chung. Hết budget thì giữ preview và chỉ thử lại
+  khi có release thực tế hoặc input/invalidation mới, không polling worker.
+- Page root và wrapper từng texture dùng `QSGTransformNode` identity để giữ
+  transform từ page khi cập nhật tile từng phần, kể cả backend software.
+  Regression test xóa/undo/xóa rồi Discard comment kiểm tra ảnh thực tế và
+  suppression snapshot cùng trở về revision đúng, không chỉ kiểm tra metadata.
+
+**Kiểm chứng hybrid (2026-09-08):** 341 test offscreen pass; các test tile reuse,
+budget recovery, comment suppression và zoom settling pass trên native Metal.
+Đã thử app với PDF 16 trang, cuộn hai chiều, zoom 500%, cuộn ngang, xoay, split,
+đóng/mở lại và Quit bình thường. Chưa có benchmark tốc độ/RAM trước–sau.
 
 **Render transaction:**
 
 - Với blank page, chỉ tạo ảnh nền.
 - Với source page, mở page qua form worker và giữ một `PDFiumProcessLock` cho toàn
   bộ render/mutate-tạm/restore.
+- PDFium render trực tiếp vào `QImage::bits()` bằng `FPDFBitmap_CreateEx`.
+  Tile dùng offset âm của `renderRect`, nhưng scale vẫn dùng kích thước raster
+  toàn trang; `FPDF_FFLDraw` và widget patch dùng cùng phép đổi tọa độ.
 - `ScopedPageObjectSuppression` ẩn source object đã bị draft thay/xóa.
 - `ScopedPageObjectMoves` áp ma trận preview cho source text/image chỉ-move rồi
   phục hồi object.
@@ -255,6 +292,9 @@ PDFium trên GUI thread.
   mới hơn.
 - `updatePaintNode()` tạo texture từ pending `QImage`, dùng
   `QSGSimpleTextureNode::setOwnsTexture(true)` và xóa bản CPU ngay sau upload.
+- Node gốc chứa ảnh nền và các texture tile. Preview của revision mới thay
+  toàn bộ tile cũ trong cùng scene-graph sync với suppression snapshot; các
+  tile sau chỉ làm nét cùng nội dung đó, không trộn các draft/form revision.
 - Request id của raster đã accept được giữ riêng với serial của worker. Khi node
   bị Qt giải phóng, item về zero-size hoặc upload texture thất bại, token này bị
   xóa; một callback có guard trở về GUI thread để hạ cờ readiness và request lại

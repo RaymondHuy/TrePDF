@@ -446,6 +446,16 @@ clipped or elided unintentionally.
   request the final raster after a short settle interval.
 - Reject a result when its request id/serial, document pointer, revision, page,
   device pixel ratio, or raster pixel size no longer matches.
+- Hybrid rendering uses full-page rasters up to 32 MiB/4096 physical pixels per
+  edge, with a 24 MiB return threshold. Larger pages use a full-page preview
+  (at most 4 MiB/2048 pixels per edge) and 1024-pixel visible tiles with a
+  two-pixel gutter. Plan at most 64 tiles, visible first, with 128-pixel preload.
+  Keep the full-page raster transform separate from the tile bitmap size and
+  origin, including FPDF_FFLDraw and widget suppression patches.
+- Dispatch one preview/tile per queue turn under the same owner/generation;
+  do not enqueue each tile as an independent same-owner render or monopolize
+  the form worker with a whole-page batch. Accept a new-revision full-page
+  preview before detail tiles so source/draft suppression never mixes revisions.
 - Keep source-text glyph discovery for text markup inside the asynchronous page
   candidate scan. Return and cache only normalized glyph geometry on the GUI
   side; QML and GUI-thread controller paths must never open or inspect PDFium
@@ -476,6 +486,10 @@ clipped or elided unintentionally.
   the render thread.
 - Clear the CPU-side pending `QImage` immediately after creating the scene graph
   texture. Keeping both copies defeats the memory optimization.
+- The page node contains owned base/tile texture children. Raster-budget leases
+  stay charged until actual scene-graph texture destruction, not GUI eviction.
+- Use identity `QSGTransformNode` containers for the page and each raster child;
+  incremental software-backend updates must retain the inherited page transform.
 
 ### QML Virtualization
 
@@ -642,9 +656,15 @@ clipped or elided unintentionally.
   `QQuickPaintedItem` backing store.
 - Preserve native device-pixel-ratio quality unless the user explicitly accepts
   lower-quality rendering.
-- Full-page rendering can still be expensive for scanned PDFs or high zoom.
-  Tile rendering with a strict LRU byte budget is the next major optimization,
-  not a larger full-page cache.
+- `PDFRasterBudget` caps estimated app-owned raster bytes at 256 MiB, reserving
+  twice the image bytes before allocation for CPU/texture overlap. This does
+  not cap PDFium decoder or Qt/driver staging memory. Keep 16 MiB headroom for
+  replacement previews; full-page items may switch to tiled under pressure.
+- Evict nonvisible raster entries by LRU, retaining at most 32 MiB of charged
+  nonvisible tile leases per item within the shared cap. Never block or poll
+  the form worker for capacity: retain fallback coverage and retry on actual
+  release or new input. Finite budgets may temporarily leave visible detail
+  at preview resolution when all remaining resident content is pinned.
 
 ## Coding Conventions
 
@@ -681,6 +701,14 @@ The current texture ownership fix was tested on the Metal backend with a
 231-page PDF, 450 random page jumps, and two close/reopen cycles. The process
 exited normally. This is a regression scenario worth repeating after changes to
 `PDFPageItem`.
+
+Hybrid rendering was verified on 2026-09-08 with 341 passing offscreen tests and
+native Metal tests for tile reuse, zoom settling, budget recovery, and atomic
+comment suppression after delete/undo/discard. Manual testing covered a
+16-page PDF, scrolling in both directions, 500% zoom, horizontal scrolling,
+rotation, independent split panes, close/reopen after a zoom change, and normal
+Quit without a new crash report. These are correctness checks, not a throughput
+or memory benchmark.
 
 ## CodeGraph
 

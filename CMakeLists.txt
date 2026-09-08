@@ -99,6 +99,9 @@ qt_add_qml_module(trepdf
         src/PDFWidgetAnnotationSuppression.h
         src/PDFPageItem.cpp
         src/PDFPageItem.h
+        src/PDFRasterBudget.cpp
+        src/PDFRasterBudget.h
+        src/PDFRasterPlan.h
     QML_FILES
         src/Main.qml
         src/Components/AppRibbon.qml

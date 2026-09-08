@@ -23,6 +23,52 @@
 namespace {
 
 constexpr auto kZoomRenderSettleInterval = std::chrono::milliseconds(140);
+constexpr qint64 kRetainedTileBytes = 32 * 1024 * 1024;
+// Leave capacity for a replacement preview even when all detail is visible.
+constexpr qint64 kReplacementHeadroomBytes = 16 * 1024 * 1024;
+
+// GUI-thread metadata only. Reservations themselves are thread-safe and remain
+// charged until both pending images and their scene-graph textures are gone.
+QSet<PDFPageItem *> &rasterItems()
+{
+    static QSet<PDFPageItem *> items;
+    return items;
+}
+
+quint64 nextRasterUse()
+{
+    static quint64 sequence = 0;
+    return ++sequence;
+}
+
+// Identity transform nodes retain inherited item transforms during incremental
+// child updates on both the software and RHI scene-graph backends.
+class RasterTextureNode final : public QSGTransformNode
+{
+public:
+    RasterTextureNode(quint64 rasterId,
+                      QSGTexture *texture,
+                      PDFRasterBudget::Lease lease)
+        : id(rasterId), reservation(std::move(lease))
+    {
+        textureNode = new QSGSimpleTextureNode;
+        textureNode->setOwnsTexture(true);
+        textureNode->setFiltering(QSGTexture::Linear);
+        textureNode->setTexture(texture);
+        appendChildNode(textureNode);
+    }
+
+    ~RasterTextureNode() override
+    {
+        // Destroy the owned texture before the reservation member is released.
+        removeChildNode(textureNode);
+        delete textureNode;
+    }
+
+    quint64 id;
+    QSGSimpleTextureNode *textureNode = nullptr;
+    PDFRasterBudget::Lease reservation;
+};
 
 using CancellationFlag = std::shared_ptr<std::atomic_bool>;
 using PDFAnnotationUtils::annotationUsesReplyRelation;
@@ -610,6 +656,7 @@ PageRenderResult renderPageFromFile(
     const PDFFormWorker::DocumentKey &formDocument,
     int sourcePage,
     const QSize &pixelSize,
+    const QRect &renderRect,
     const QColor &background,
     qreal devicePixelRatio,
     bool blankPage,
@@ -623,11 +670,13 @@ PageRenderResult renderPageFromFile(
     if (!formDocument.isValid()
         || (!blankPage && sourcePage < 0)
         || pixelSize.isEmpty()
+        || renderRect.isEmpty()
+        || !QRect(QPoint(), pixelSize).contains(renderRect)
         || isCancelled(cancellation)) {
         return {};
     }
 
-    QImage image(pixelSize, QImage::Format_RGB32);
+    QImage image(renderRect.size(), QImage::Format_RGB32);
     if (image.isNull() || isCancelled(cancellation)) {
         return {};
     }
@@ -643,6 +692,9 @@ PageRenderResult renderPageFromFile(
     bool annotationSuppressionApplied = false;
     bool widgetSuppressionApplied = suppressedFormWidgetIds.isEmpty();
     bool renderPerformed = false;
+    if (isCancelled(cancellation)) {
+        return {};
+    }
     {
         // One process-wide transaction covers every PDFium call, including
         // restoring temporary draft transforms and destroying all page/bitmap
@@ -664,8 +716,8 @@ PageRenderResult renderPageFromFile(
                 }
 
                 FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
-                    pixelSize.width(),
-                    pixelSize.height(),
+                    image.width(),
+                    image.height(),
                     FPDFBitmap_BGRA,
                     image.bits(),
                     image.bytesPerLine());
@@ -676,8 +728,8 @@ PageRenderResult renderPageFromFile(
                     bitmap,
                     0,
                     0,
-                    pixelSize.width(),
-                    pixelSize.height(),
+                    image.width(),
+                    image.height(),
                     pdfiumColor(background));
 
                 bool renderDocumentReusable = true;
@@ -745,8 +797,8 @@ PageRenderResult renderPageFromFile(
                         FPDF_RenderPageBitmap(
                             bitmap,
                             previewPage,
-                            0,
-                            0,
+                            -renderRect.x(),
+                            -renderRect.y(),
                             pixelSize.width(),
                             pixelSize.height(),
                             0,
@@ -758,7 +810,8 @@ PageRenderResult renderPageFromFile(
                                     pixelSize,
                                     widgetSuppression.pageRects(),
                                     image,
-                                    widgetPatches);
+                                    widgetPatches,
+                                    renderRect.topLeft());
                         }
                         const bool widgetRestoreSucceeded
                             = widgetSuppression.restore();
@@ -767,8 +820,8 @@ PageRenderResult renderPageFromFile(
                                 formHandle,
                                 bitmap,
                                 formPage,
-                                0,
-                                0,
+                                -renderRect.x(),
+                                -renderRect.y(),
                                 pixelSize.width(),
                                 pixelSize.height(),
                                 0,
@@ -822,6 +875,18 @@ PageRenderResult renderPageFromFile(
 PDFPageItem::PDFPageItem(QQuickItem *parent)
     : QQuickItem(parent)
 {
+    rasterItems().insert(this);
+    static const bool budgetCallbackInstalled = []() {
+        PDFRasterBudget::setReleaseCallback([]() {
+            if (QObject *app = QCoreApplication::instance()) {
+                QMetaObject::invokeMethod(app, []() {
+                    PDFPageItem::retryBudgetBlockedRenders();
+                }, Qt::QueuedConnection);
+            }
+        });
+        return true;
+    }();
+    Q_UNUSED(budgetCallbackInstalled);
     setFlag(ItemHasContents, true);
     setAntialiasing(false);
     m_draftRenderTimer.setInterval(250);
@@ -837,6 +902,7 @@ PDFPageItem::PDFPageItem(QQuickItem *parent)
 
 PDFPageItem::~PDFPageItem()
 {
+    rasterItems().remove(this);
     cancelPendingRender();
 }
 
@@ -873,6 +939,65 @@ int PDFPageItem::page() const
 qreal PDFPageItem::zoom() const
 {
     return m_zoom;
+}
+
+QRectF PDFPageItem::visiblePageRect() const
+{
+    return m_hasExplicitVisibleRect ? m_visiblePageRect : boundingRect();
+}
+
+QRectF PDFPageItem::normalizedVisibleRect() const
+{
+    if (width() <= 0 || height() <= 0) {
+        return {};
+    }
+    const QRectF rect = visiblePageRect().intersected(boundingRect());
+    if (rect.isEmpty()) {
+        return {};
+    }
+    return QRectF(rect.x() / width(), rect.y() / height(),
+                  rect.width() / width(), rect.height() / height());
+}
+
+void PDFPageItem::setVisiblePageRect(const QRectF &rect)
+{
+    if (m_hasExplicitVisibleRect && m_visiblePageRect == rect) {
+        return;
+    }
+    m_hasExplicitVisibleRect = true;
+    m_visiblePageRect = rect;
+    m_budgetBlocked = false;
+    trimRasterCache();
+    // Movement within the same tile coverage needs no PDFium work. Replan only
+    // when a newly visible tile is neither resident nor in the current request.
+    if (window()) {
+        const auto pixelSize = PDFRasterPlan::rasterSize(
+            size(), window()->devicePixelRatio());
+        const auto plan = PDFRasterPlan::makePlan(
+            pixelSize, normalizedVisibleRect(), m_cachedTiled, m_forceTiledForBudget);
+        const bool residentCurrent = cachedRasterMatchesCurrentState(
+            pixelSize, window()->devicePixelRatio()) && m_cachedTiled == plan.tiled;
+        bool covered = pendingRenderMatchesCurrentState(
+            pixelSize, window()->devicePixelRatio())
+            || residentCurrent;
+        for (const auto &tile : plan.tiles) {
+            const bool queued = std::any_of(
+                m_renderJobs.cbegin(), m_renderJobs.cend(),
+                [&tile](const RasterJob &job) {
+                    return !job.base && job.rect == tile.rect;
+                });
+            if (!(residentCurrent && hasRasterTile(tile.rect)) && !queued) {
+                covered = false;
+                break;
+            }
+        }
+        if (normalizedVisibleRect().isEmpty() || !covered) {
+            cancelPendingRender();
+            ++m_requestSerial;
+        }
+    }
+    emit visiblePageRectChanged();
+    scheduleRender();
 }
 
 QColor PDFPageItem::pageColor() const
@@ -1117,11 +1242,11 @@ void PDFPageItem::itemChange(ItemChange change, const ItemChangeData &data)
 
 QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
-    auto *node = static_cast<QSGSimpleTextureNode *>(oldNode);
+    QSGNode *node = oldNode;
 
     if (m_clearTexture || width() <= 0.0 || height() <= 0.0) {
         delete node;
-        m_pendingImage = QImage();
+        m_rasters.clear();
         m_textureDirty = false;
         m_cachedRequestId = 0;
         m_cacheDirty = true;
@@ -1135,6 +1260,7 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     }
 
     if (!node && !m_textureDirty) {
+        m_rasters.clear();
         m_cachedRequestId = 0;
         m_cacheDirty = true;
         queueTextureLossRecovery();
@@ -1142,9 +1268,60 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     }
 
     if (!node) {
-        node = new QSGSimpleTextureNode();
-        node->setOwnsTexture(true);
-        node->setFiltering(QSGTexture::Linear);
+        node = new QSGTransformNode;
+    }
+
+    // Synchronize desired IDs first. Only this thread deletes textures and thus
+    // releases their budget leases; GUI eviction removes metadata, not textures.
+    for (QSGNode *child = node->firstChild(); child;) {
+        QSGNode *next = child->nextSibling();
+        const auto *rasterNode = static_cast<RasterTextureNode *>(child);
+        const bool retained = std::any_of(
+            m_rasters.cbegin(), m_rasters.cend(),
+            [rasterNode](const RasterEntry &entry) { return entry.id == rasterNode->id; });
+        if (!retained) {
+            node->removeChildNode(child);
+            delete child;
+        }
+        child = next;
+    }
+    for (RasterEntry &entry : m_rasters) {
+        RasterTextureNode *rasterNode = nullptr;
+        for (QSGNode *child = node->firstChild(); child; child = child->nextSibling()) {
+            auto *candidate = static_cast<RasterTextureNode *>(child);
+            if (candidate->id == entry.id) {
+                rasterNode = candidate;
+                break;
+            }
+        }
+        if (!rasterNode && !entry.image.isNull()) {
+            QSGTexture *texture = window()->createTextureFromImage(
+                entry.image, QQuickWindow::TextureIsOpaque);
+            entry.image = QImage();
+            if (texture) {
+                rasterNode = new RasterTextureNode(entry.id, texture, entry.reservation);
+                node->appendChildNode(rasterNode);
+            }
+        }
+        if (!rasterNode) {
+            delete node;
+            m_rasters.clear();
+            m_textureDirty = false;
+            m_cachedRequestId = 0;
+            m_cacheDirty = true;
+            queueTextureLossRecovery();
+            return nullptr;
+        }
+        const RasterJob &job = entry.job;
+        const qreal sx = width() / job.rasterSize.width();
+        const qreal sy = height() / job.rasterSize.height();
+        rasterNode->textureNode->setRect(QRectF(
+            job.rect.x() * sx, job.rect.y() * sy,
+            job.rect.width() * sx, job.rect.height() * sy));
+        // Crop the two-pixel gutter only at sampling time, avoiding seams when
+        // the accepted tiles are GPU-scaled during a zoom gesture.
+        rasterNode->textureNode->setSourceRect(QRectF(
+            job.rect.translated(-job.renderRect.topLeft())));
     }
 
     if (m_textureDirty) {
@@ -1152,26 +1329,8 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         const quint64 textureDraftRevision = m_pendingTextureDraftRevision;
         const quint64 textureFormRevision = m_pendingTextureFormRevision;
         const bool suppressionApplied = m_pendingSuppressionApplied;
-        QQuickWindow *quickWindow = window();
-        QSGTexture *texture = quickWindow
-            ? quickWindow->createTextureFromImage(m_pendingImage, QQuickWindow::TextureIsOpaque)
-            : nullptr;
-        m_pendingImage = QImage();
         m_textureDirty = false;
         m_pendingTextureRequestId = 0;
-        m_pendingTextureDraftRevision = 0;
-        m_pendingTextureFormRevision = 0;
-        m_pendingSuppressionApplied = false;
-
-        if (!texture) {
-            delete node;
-            m_cachedRequestId = 0;
-            m_cacheDirty = true;
-            queueTextureLossRecovery();
-            return nullptr;
-        }
-        node->setTexture(texture);
-
         const QPointer<PDFPageItem> item(this);
         QMetaObject::invokeMethod(this, [item,
                                          textureRequestId,
@@ -1188,7 +1347,6 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         }, Qt::QueuedConnection);
     }
 
-    node->setRect(boundingRect());
     return node;
 }
 
@@ -1215,7 +1373,10 @@ void PDFPageItem::invalidateCache()
     m_zoomRenderTimer.stop();
     cancelPendingRender();
     ++m_requestSerial;
-    m_pendingImage = QImage();
+    m_rasters.clear();
+    m_cachedTiled = false;
+    m_forceTiledForBudget = false;
+    m_budgetBlocked = false;
     m_textureDirty = false;
     m_clearTexture = true;
     m_pendingTextureRequestId = 0;
@@ -1252,6 +1413,8 @@ void PDFPageItem::invalidateCache()
 
 void PDFPageItem::invalidateDraftCache(bool immediate)
 {
+    m_budgetBlocked = false;
+    m_budgetRetryBytes = 0;
     m_zoomRenderTimer.stop();
     cancelPendingRender();
     ++m_requestSerial;
@@ -1289,10 +1452,8 @@ void PDFPageItem::invalidateRasterCache()
     const qreal devicePixelRatio = quickWindow
         ? quickWindow->devicePixelRatio()
         : 0.0;
-    const QSize pixelSize = quickWindow && width() > 0.0 && height() > 0.0
-        ? QSize((std::max)(1, qRound(width() * devicePixelRatio)),
-                (std::max)(1, qRound(height() * devicePixelRatio)))
-        : QSize();
+    const QSize pixelSize = PDFRasterPlan::rasterSize(size(), devicePixelRatio);
+    m_budgetBlocked = false;
     if (!pixelSize.isEmpty()
         && pendingRenderMatchesCurrentState(pixelSize, devicePixelRatio)) {
         m_zoomRenderTimer.stop();
@@ -1319,6 +1480,7 @@ void PDFPageItem::invalidateRasterCache()
     if (!pixelSize.isEmpty()
         && cachedRasterMatchesCurrentState(pixelSize, devicePixelRatio)) {
         m_zoomRenderTimer.stop();
+        scheduleRender(); // Resume missing tiles if zoom returned to this raster.
     } else {
         m_zoomRenderTimer.start();
     }
@@ -1332,6 +1494,9 @@ void PDFPageItem::cancelPendingRender()
         m_renderCancellation->store(true, std::memory_order_relaxed);
         m_renderCancellation.reset();
     }
+    m_renderPending = false;
+    m_renderJobs.clear();
+    m_renderWork = {};
 }
 
 void PDFPageItem::handleDraftRenderStateChanged(int page,
@@ -1471,6 +1636,9 @@ void PDFPageItem::queueTextureLossRecovery()
 
         item->setDraftTextureCurrent(false);
         item->setDraftTextureReady(false);
+        item->cancelPendingRender();
+        ++item->m_requestSerial;
+        item->m_budgetBlocked = false;
         item->scheduleRender();
     }, Qt::QueuedConnection);
 }
@@ -1552,12 +1720,11 @@ void PDFPageItem::requestRenderForCurrentSize()
     }
 
     const qreal devicePixelRatio = window()->devicePixelRatio();
-    const QSize pixelSize(
-        qMax(1, qRound(width() * devicePixelRatio)),
-        qMax(1, qRound(height() * devicePixelRatio)));
-    if (!cachedRasterMatchesCurrentState(pixelSize, devicePixelRatio)) {
-        requestRender(pixelSize, devicePixelRatio);
+    const QSize pixelSize = PDFRasterPlan::rasterSize(size(), devicePixelRatio);
+    if (pixelSize.isEmpty() || normalizedVisibleRect().isEmpty() || m_budgetBlocked) {
+        return;
     }
+    requestRender(pixelSize, devicePixelRatio);
 }
 
 void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
@@ -1575,7 +1742,30 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
         return;
     }
 
+    const auto plan = PDFRasterPlan::makePlan(
+        pixelSize, normalizedVisibleRect(), m_cachedTiled, m_forceTiledForBudget);
+    const bool reuse = cachedRasterMatchesCurrentState(pixelSize, devicePixelRatio)
+        && m_cachedTiled == plan.tiled;
+    QVector<RasterJob> jobs;
+    if (!reuse) {
+        const QSize baseSize = plan.tiled ? plan.previewSize : pixelSize;
+        const QRect baseRect(QPoint(), baseSize);
+        jobs.append({baseSize, baseRect, baseRect, true});
+    }
+    if (plan.tiled) {
+        for (const auto &tile : plan.tiles) {
+            if (!reuse || !hasRasterTile(tile.rect)) {
+                jobs.append({pixelSize, tile.rect, tile.renderRect, false});
+            }
+        }
+    }
+    if (jobs.isEmpty()) {
+        return;
+    }
     cancelPendingRender();
+    m_renderJobs = std::move(jobs);
+    m_requestedTiled = plan.tiled;
+    m_budgetBlocked = false;
 
     const int revision = m_document->renderRevision();
     PDFEditController *editController = m_editController.data();
@@ -1636,85 +1826,242 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
     m_requestedFormRevision = formRevision;
     m_requestedFormController = formController;
 
-    PDFFormWorker::submitRender(this, formDocument.sessionId, [item,
-                                       formDocument,
-                                       document,
-                                       editController,
-                                       formController,
-                                       revision,
-                                       page,
-                                       sourcePage,
-                                       devicePixelRatio,
-                                       pixelSize,
-                                       background,
-                                       blankPage,
-                                       draftRevision,
-                                       formRevision,
-                                       draftObjectPaths,
-                                       draftObjectMoves,
-                                       deletedCommentAnnotations,
-                                       suppressedCommentObjectIds,
-                                       suppressedFormWidgetIds,
-                                       allDraftObjectsSuppressible,
-                                       requestId,
-                                       cancellation]() {
-        PageRenderResult result = renderPageFromFile(
-            formDocument,
-            sourcePage,
-            pixelSize,
-            background,
-            devicePixelRatio,
-            blankPage,
-            draftObjectPaths,
-            draftObjectMoves,
-            deletedCommentAnnotations,
-            suppressedFormWidgetIds,
-            cancellation);
-        result.suppressionApplied = result.suppressionApplied
-            && allDraftObjectsSuppressible;
-        if (isCancelled(cancellation)) {
-            return;
-        }
+    // A continuation is dispatched by GUI acknowledgement of each result.
+    // The queue can run form commands and other pages between individual tiles.
+    m_renderWork = [item,
+                    formDocument,
+                    document,
+                    editController,
+                    formController,
+                    revision,
+                    page,
+                    sourcePage,
+                    devicePixelRatio,
+                    pixelSize,
+                    background,
+                    blankPage,
+                    draftRevision,
+                    formRevision,
+                    draftObjectPaths,
+                    draftObjectMoves,
+                    deletedCommentAnnotations,
+                    suppressedCommentObjectIds,
+                    suppressedFormWidgetIds,
+                    allDraftObjectsSuppressible,
+                    requestId,
+                    cancellation](const RasterJob &job) {
+        PDFFormWorker::submitRender(item.data(), formDocument.sessionId,
+            [=]() {
+                if (isCancelled(cancellation)) {
+                    return;
+                }
+                const qint64 imageBytes = PDFRasterPlan::imageBytes(job.renderRect.size());
+                const qint64 headroom = !job.base || imageBytes > PDFRasterPlan::previewLimitBytes
+                    ? kReplacementHeadroomBytes : 0;
+                auto reservation = PDFRasterBudget::limitBytes - PDFRasterBudget::usedBytes()
+                        >= 2 * imageBytes + headroom
+                    ? PDFRasterBudget::tryReserve(imageBytes) : PDFRasterBudget::Lease();
+                const bool budgetDenied = !reservation;
+                PageRenderResult result;
+                if (reservation && !isCancelled(cancellation)) {
+                    result = renderPageFromFile(
+                        formDocument,
+                        sourcePage,
+                        job.rasterSize,
+                        job.renderRect,
+                        background,
+                        devicePixelRatio,
+                        blankPage,
+                        draftObjectPaths,
+                        draftObjectMoves,
+                        deletedCommentAnnotations,
+                        suppressedFormWidgetIds,
+                        cancellation);
+                }
+                result.suppressionApplied = result.suppressionApplied
+                    && allDraftObjectsSuppressible;
+                if (isCancelled(cancellation)) {
+                    return;
+                }
 
-        QObject *app = QCoreApplication::instance();
-        if (!app) {
-            return;
-        }
+                QObject *app = QCoreApplication::instance();
+                if (!app) {
+                    return;
+                }
 
-        QMetaObject::invokeMethod(app, [item,
-                                        document,
-                                        editController,
-                                        formController,
-                                        revision,
-                                        page,
-                                        devicePixelRatio,
-                                        pixelSize,
-                                        draftRevision,
-                                        formRevision,
-                                        result = std::move(result),
-                                        suppressedCommentObjectIds,
-                                        requestId,
-                                        cancellation]() {
-            if (!item || isCancelled(cancellation)) {
-                return;
+                QMetaObject::invokeMethod(app, [item,
+                                                document,
+                                                editController,
+                                                formController,
+                                                revision,
+                                                page,
+                                                devicePixelRatio,
+                                                pixelSize,
+                                                draftRevision,
+                                                formRevision,
+                                                job,
+                                                result = std::move(result),
+                                                reservation = std::move(reservation),
+                                                budgetDenied,
+                                                suppressedCommentObjectIds,
+                                                requestId,
+                                                cancellation]() mutable {
+                    if (!item || isCancelled(cancellation)) {
+                        return;
+                    }
+
+                    item->handleRenderResult(
+                        requestId,
+                        document,
+                        editController,
+                        formController,
+                        revision,
+                        page,
+                        devicePixelRatio,
+                        pixelSize,
+                        draftRevision,
+                        formRevision,
+                        result.suppressionApplied,
+                        suppressedCommentObjectIds,
+                        job,
+                        result.image,
+                        std::move(reservation),
+                        budgetDenied);
+                }, Qt::QueuedConnection);
+        });
+    };
+    dispatchNextRaster();
+}
+
+void PDFPageItem::dispatchNextRaster()
+{
+    if (m_renderJobs.isEmpty() || !m_renderWork) {
+        m_renderPending = false;
+        m_renderWork = {};
+        m_renderCancellation.reset();
+        return;
+    }
+    m_renderWork(m_renderJobs.constFirst());
+}
+
+bool PDFPageItem::hasRasterTile(const QRect &rect) const
+{
+    return std::any_of(m_rasters.cbegin(), m_rasters.cend(),
+                       [&rect](const RasterEntry &entry) {
+                           return !entry.job.base && entry.job.rect == rect;
+                       });
+}
+
+void PDFPageItem::trimRasterCache()
+{
+    const QRectF visible = normalizedVisibleRect();
+    qint64 unusedBytes = 0;
+    QVector<quint64> unused;
+    for (RasterEntry &entry : m_rasters) {
+        const auto &job = entry.job;
+        const QRectF normalized(job.rect.x() / qreal(job.rasterSize.width()),
+                                job.rect.y() / qreal(job.rasterSize.height()),
+                                job.rect.width() / qreal(job.rasterSize.width()),
+                                job.rect.height() / qreal(job.rasterSize.height()));
+        if (normalized.intersects(visible)) {
+            entry.lastUsed = nextRasterUse();
+        } else if (!job.base) {
+            unusedBytes += entry.reservation->bytes();
+            unused.append(entry.id);
+        }
+    }
+    std::sort(unused.begin(), unused.end(), [this](quint64 a, quint64 b) {
+        auto used = [this](quint64 id) {
+            for (const auto &entry : m_rasters) {
+                if (entry.id == id) {
+                    return entry.lastUsed;
+                }
             }
-
-            item->handleRenderResult(
-                requestId,
-                document,
-                editController,
-                formController,
-                revision,
-                page,
-                devicePixelRatio,
-                pixelSize,
-                draftRevision,
-                formRevision,
-                result.suppressionApplied,
-                suppressedCommentObjectIds,
-                result.image);
-        }, Qt::QueuedConnection);
+            return quint64{0};
+        };
+        return used(a) < used(b);
     });
+    for (quint64 id : unused) {
+        if (unusedBytes <= kRetainedTileBytes) {
+            break;
+        }
+        for (qsizetype i = 0; i < m_rasters.size(); ++i) {
+            if (m_rasters.at(i).id == id) {
+                unusedBytes -= m_rasters.at(i).reservation->bytes();
+                m_rasters.removeAt(i);
+                update();
+                break;
+            }
+        }
+    }
+}
+
+void PDFPageItem::evictUnusedRasters(qint64 bytesNeeded)
+{
+    struct Candidate {
+        PDFPageItem *item;
+        quint64 id;
+        quint64 lastUsed;
+    };
+    QVector<Candidate> candidates;
+    for (PDFPageItem *item : rasterItems()) {
+        const QRectF visible = item->normalizedVisibleRect();
+        const QSize target = item->window()
+            ? PDFRasterPlan::rasterSize(item->size(), item->window()->devicePixelRatio())
+            : QSize();
+        for (const RasterEntry &entry : item->m_rasters) {
+            const auto &job = entry.job;
+            const QRectF normalized(job.rect.x() / qreal(job.rasterSize.width()),
+                                    job.rect.y() / qreal(job.rasterSize.height()),
+                                    job.rect.width() / qreal(job.rasterSize.width()),
+                                    job.rect.height() / qreal(job.rasterSize.height()));
+            // Keep visible fallback coverage; old-resolution detail tiles may
+            // be reclaimed while a replacement generation is being rendered.
+            if (!normalized.intersects(visible)
+                || (!job.base && (item->m_cacheDirty || target != item->m_cachedPixelSize))) {
+                candidates.append({item, entry.id, entry.lastUsed});
+            }
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate &a, const Candidate &b) { return a.lastUsed < b.lastUsed; });
+    qint64 scheduledRelease = 0;
+    const qint64 shortage = bytesNeeded
+        - (PDFRasterBudget::limitBytes - PDFRasterBudget::usedBytes());
+    for (const Candidate &candidate : candidates) {
+        if (scheduledRelease >= shortage) {
+            break;
+        }
+        auto *item = candidate.item;
+        for (qsizetype i = 0; i < item->m_rasters.size(); ++i) {
+            if (item->m_rasters.at(i).id != candidate.id) {
+                continue;
+            }
+            if (item->m_rasters.at(i).job.base) {
+                for (const auto &entry : item->m_rasters) {
+                    scheduledRelease += entry.reservation->bytes();
+                }
+                item->invalidateCache();
+            } else {
+                scheduledRelease += item->m_rasters.at(i).reservation->bytes();
+                item->m_rasters.removeAt(i);
+                item->update();
+            }
+            break;
+        }
+    }
+}
+
+void PDFPageItem::retryBudgetBlockedRenders()
+{
+    const qint64 available = PDFRasterBudget::limitBytes - PDFRasterBudget::usedBytes();
+    for (PDFPageItem *item : rasterItems()) {
+        if (item->m_budgetBlocked && item->m_budgetRetryBytes <= available
+            && !item->normalizedVisibleRect().isEmpty()) {
+            item->m_budgetBlocked = false;
+            item->scheduleRender();
+        }
+    }
 }
 
 void PDFPageItem::handleRenderResult(quint64 requestId,
@@ -1729,15 +2076,17 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
                                      quint64 formRevision,
                                      bool suppressionApplied,
                                      const QStringList &suppressedCommentObjectIds,
-                                     const QImage &image)
+                                     const RasterJob &job,
+                                     const QImage &image,
+                                     PDFRasterBudget::Lease reservation,
+                                     bool budgetDenied)
 {
     QQuickWindow *quickWindow = window();
     const qreal currentDevicePixelRatio = quickWindow
         ? quickWindow->devicePixelRatio()
         : 0.0;
-    const QSize currentPixelSize(
-        qMax(1, qRound(width() * currentDevicePixelRatio)),
-        qMax(1, qRound(height() * currentDevicePixelRatio)));
+    const QSize currentPixelSize = PDFRasterPlan::rasterSize(
+        size(), currentDevicePixelRatio);
     if (requestId != m_requestSerial
         || !quickWindow
         || m_document.data() != document
@@ -1756,18 +2105,46 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
         return;
     }
 
-    m_renderPending = false;
-    m_renderCancellation.reset();
     if (image.isNull()) {
-        m_cacheDirty = true;
+        cancelPendingRender();
+        if (budgetDenied) {
+            if (job.base && !m_requestedTiled) {
+                // A large full-page replacement can need more headroom than
+                // the remaining capacity. Switch this item to native-resolution
+                // tiles, accepting a small new-revision preview first.
+                m_forceTiledForBudget = true;
+                scheduleRender();
+                return;
+            }
+            m_budgetBlocked = true;
+            m_budgetRetryBytes = 2 * PDFRasterPlan::imageBytes(job.renderRect.size());
+            if (!job.base) {
+                m_budgetRetryBytes += kReplacementHeadroomBytes;
+            }
+            evictUnusedRasters(m_budgetRetryBytes);
+            retryBudgetBlockedRenders();
+        }
+        return;
+    }
+
+    // A preview covers the WHOLE page at the new content revision. Swap it and
+    // remove old tiles together before refining; never mix suppression states.
+    if (job.base) {
+        m_rasters.clear();
+        m_cachedTiled = m_requestedTiled;
+        m_cachedSuppressionApplied = suppressionApplied;
+        setDisplayedSuppressedCommentObjectIds(suppressedCommentObjectIds);
+    } else if (suppressionApplied != m_cachedSuppressionApplied) {
+        // A partial suppression failure must not produce a mixed page mosaic.
+        cancelPendingRender();
         return;
     }
 
     // Publish the suppression snapshot before requesting a scene-graph sync.
     // QML and the new texture are then synchronized into the same rendered
     // frame; the previously displayed frame remains internally consistent.
-    setDisplayedSuppressedCommentObjectIds(suppressedCommentObjectIds);
-    m_pendingImage = image;
+    m_rasters.append({++m_nextRasterId, job, image,
+                      std::move(reservation), nextRasterUse()});
     m_cachedRequestId = requestId;
     m_cachedPixelSize = pixelSize;
     m_cachedPage = page;
@@ -1786,5 +2163,10 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
     m_pendingTextureFormRevision = formRevision;
     m_pendingSuppressionApplied = suppressionApplied;
 
+    if (!m_renderJobs.isEmpty()) {
+        m_renderJobs.removeFirst();
+    }
+    trimRasterCache();
     update();
+    dispatchNextRaster();
 }
