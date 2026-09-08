@@ -152,8 +152,7 @@ PDFEditController::draftedObjectMovesForPage(int page) const
 
         if (candidate.kind == QLatin1String("image")
             && candidate.objectPath.size() == 1
-            && candidate.geometry.sourceRect.topLeft()
-                != draft->frameRect.topLeft()) {
+            && candidate.geometry.sourceRect != draft->frameRect) {
             moves.append(DraftObjectMove{
                 DraftObjectMove::Kind::Image,
                 candidate.objectPath,
@@ -672,6 +671,9 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     QVariantMap map;
     map.insert(QStringLiteral("objectId"), candidate.objectId);
     map.insert(QStringLiteral("kind"), candidate.kind);
+    map.insert(QStringLiteral("imageResizable"), candidate.editable
+        && (candidate.kind == QLatin1String("addedImage")
+            || (candidate.kind == QLatin1String("image") && candidate.imageResizable)));
     map.insert(QStringLiteral("label"), candidate.label);
     map.insert(QStringLiteral("sourceRect"), candidate.geometry.sourceRect);
     map.insert(QStringLiteral("frameRect"), draft.frameRect);

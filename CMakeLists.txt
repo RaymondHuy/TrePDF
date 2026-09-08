@@ -90,6 +90,7 @@ qt_add_qml_module(trepdf
         src/PDFSaveWriter.cpp
         src/PDFSaveWriter.h
         src/PDFShapeUtils.h
+        src/PDFSourceImageGeometry.h
         src/PDFSearchController.cpp
         src/PDFSearchController.h
         src/PDFTabModel.cpp

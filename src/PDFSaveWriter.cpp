@@ -1,5 +1,6 @@
 #include "PDFSaveWriter.h"
 #include "PDFShapeUtils.h"
+#include "PDFSourceImageGeometry.h"
 
 #include "ApplicationFonts.h"
 #include "PDFAcroFormCanonicalizer.h"
@@ -2100,6 +2101,7 @@ PDFSaveWriter::Result createShapeDraftObject(
 }
 
 PDFSaveWriter::Result moveSourceObject(
+    FPDF_PAGE page,
     const SaveDraft &draft,
     const SourceObject &source,
     qreal pageWidth,
@@ -2118,6 +2120,18 @@ PDFSaveWriter::Result moveSourceObject(
             moveError,
             draft.page,
             draft.objectId);
+    }
+
+    if (draft.kind == SaveDraft::Kind::Image) {
+        FS_MATRIX originalMatrix{};
+        FS_MATRIX transformedMatrix{};
+        if (!FPDFPageObj_GetMatrix(source.object, &originalMatrix)
+            || !PDFSourceImageGeometry::transformedMatrix(page, source.object,
+                draft.sourceRect, draft.frameRect, originalMatrix, transformedMatrix)
+            || !FPDFPageObj_SetMatrix(source.object, &transformedMatrix)) {
+            return failure(moveError, draft.page, draft.objectId);
+        }
+        return {};
     }
 
     const QPointF sourceTopLeft(
@@ -4410,6 +4424,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         moveDraft.frameRect = prepared.frameRect;
         for (const SourceObject &source : std::as_const(prepared.sources)) {
             const PDFSaveWriter::Result moveResult = moveSourceObject(
+                page.get(),
                 moveDraft,
                 source,
                 pageWidth,

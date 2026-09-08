@@ -494,6 +494,20 @@ void PDFEditController::setShapeType(ShapeType shapeType)
     emit shapeTypeChanged();
 }
 
+bool PDFEditController::imageAspectRatioLocked() const
+{
+    return m_imageAspectRatioLocked;
+}
+
+void PDFEditController::setImageAspectRatioLocked(bool locked)
+{
+    if (m_imageAspectRatioLocked == locked) {
+        return;
+    }
+    m_imageAspectRatioLocked = locked;
+    emit imageAspectRatioLockedChanged();
+}
+
 bool PDFEditController::hasDrafts() const
 {
     return !m_drafts.isEmpty()
@@ -590,6 +604,14 @@ qreal PDFEditController::selectedBaselineY() const
 bool PDFEditController::selectedEditable() const
 {
     return m_hasSelection && m_selectedCandidate.editable;
+}
+
+bool PDFEditController::selectedImageResizable() const
+{
+    return selectedEditable()
+        && (m_selectedCandidate.kind == QLatin1String("addedImage")
+            || (m_selectedCandidate.kind == QLatin1String("image")
+                && m_selectedCandidate.imageResizable));
 }
 
 bool PDFEditController::candidateDeletable(const Candidate &candidate) const

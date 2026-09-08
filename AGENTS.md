@@ -194,9 +194,17 @@ Current features:
   draft until Save/Save As removes the source object; images nested in Form
   XObjects remain protected.
 - Added images and editable top-level source images can be dragged within the
-  page. A drag preserves image size and creates one undoable command. Source
-  image preview transforms run on the render worker, and Save/Save As translates
-  the original image matrix so pixels, orientation, and z-order remain intact.
+  page. A move preserves image size and creates one undoable command. Added
+  images and eligible source images also have eight side/corner resize handles
+  and a Lock aspect ratio checkbox in their selection popup. The lock defaults
+  to enabled and is transient per-tab controller state; toggling it creates no
+  draft/history entry and writes no PDF property. Each resize is one undoable
+  geometry command. Source resize requires a finite, nonsingular image matrix,
+  no custom clipping, and the entire image inside the visible page. Unsupported
+  top-level images keep their existing move/delete support; nested Form images
+  remain protected. Source preview transforms run on the render worker, and
+  Save/Save As composes the original matrix with the source-to-target frame
+  mapping so pixels, original rotation/reflection, and z-order remain intact.
 - Added text and editable top-level source text can be dragged by the selected
   bounding box or arrow keys. A move is one undoable geometry command. When
   source text is only moved, preview and Save/Save As translate every original
@@ -301,6 +309,8 @@ Current features:
 - `src/PDFSaveWriter.h/.cpp`: resolves source object paths, reflows rich-text
   runs, embeds/reuses fonts, creates added image objects, regenerates changed
   page content, and writes the PDF transactionally.
+- `src/PDFSourceImageGeometry.h`: shared source-image resize eligibility and
+  affine frame mapping for the candidate scanner, render preview, and writer.
 - `src/PDFCommentAnnotation.h`: shared drawing-comment geometry/property
   contract used by controller snapshots, writer, and the `/AP` canonicalizer.
 - `src/PDFShapeUtils.h`: shared canonical Edit-shape path builder and bounded
@@ -549,11 +559,16 @@ clipped or elided unintentionally.
   draft/font/geometry data on the GUI thread, then run `PDFSaveWriter::save()`
   on a worker; the worker request must not retain controller/document pointers.
 - Resolve every source object path before removing source objects. Only
-  top-level page text plus top-level image movement/deletion are currently
+  top-level page text plus top-level image movement/resizing/deletion are currently
   saveable; nested Form XObject content must remain non-editable until its
-  transform/clip/resource scope can be preserved. Keep moved source images in
-  place and translate their existing matrix; this preserves their resource,
-  orientation, size, and z-order. Apply the same matrix-only path to editable
+  transform/clip/resource scope can be preserved. Keep moved/resized source
+  images in place and compose their existing matrix with the source-to-target
+  normalized frame transform; never decode/recreate them. Use the shared
+  `PDFSourceImageGeometry` mapping so CropBox offsets and intrinsic page rotation
+  agree between preview and save. Revalidate resize eligibility in the writer:
+  custom clipping, singular/nonfinite matrices, and partially off-page source
+  images cannot be resized. Pure movement only translates the original matrix.
+  Apply the same matrix-only path to editable
   top-level source text when position is its only change; any text, character
   format, paragraph format, or frame-size change must follow the existing
   remove-and-reflow path.

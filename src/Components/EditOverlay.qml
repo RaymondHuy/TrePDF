@@ -1211,6 +1211,13 @@ Item {
         const minimumHeight = Math.min(
             Number(startFrameRect.height),
             root.minimumResizePixelSize / pageHeight)
+        if (isImageKind(controller.selectedKind)
+                && controller.imageAspectRatioLocked) {
+            return aspectLockedImageFrameRect(
+                startFrameRect, horizontal, vertical, deltaX, deltaY,
+                pageWidth, pageHeight, minimumWidth, minimumHeight)
+        }
+
         let left = Number(startFrameRect.x)
         let top = Number(startFrameRect.y)
         let right = left + Number(startFrameRect.width)
@@ -1237,6 +1244,59 @@ Item {
         }
 
         return Qt.rect(left, top, right - left, bottom - top)
+    }
+
+    function aspectLockedImageFrameRect(startFrameRect, horizontal, vertical,
+                                        deltaX, deltaY, pageWidth, pageHeight,
+                                        minimumWidth, minimumHeight) {
+        const frameWidth = Number(startFrameRect.width)
+        const frameHeight = Number(startFrameRect.height)
+        if (frameWidth <= 0 || frameHeight <= 0)
+            return startFrameRect
+
+        const left = Number(startFrameRect.x)
+        const top = Number(startFrameRect.y)
+        const right = left + frameWidth
+        const bottom = top + frameHeight
+        const centerX = left + frameWidth / 2
+        const centerY = top + frameHeight / 2
+        const pixelWidth = frameWidth * pageWidth
+        const pixelHeight = frameHeight * pageHeight
+        let requestedScale = 1
+        if (horizontal === 0) {
+            requestedScale += vertical * deltaY / pixelHeight
+        } else if (vertical === 0) {
+            requestedScale += horizontal * deltaX / pixelWidth
+        } else {
+            // Project the pointer onto the diagonal through the fixed corner.
+            requestedScale += (horizontal * deltaX * pixelWidth
+                + vertical * deltaY * pixelHeight)
+                / (pixelWidth * pixelWidth + pixelHeight * pixelHeight)
+        }
+
+        const availableWidth = horizontal < 0
+            ? right
+            : horizontal > 0 ? 1 - left : 2 * Math.min(centerX, 1 - centerX)
+        const availableHeight = vertical < 0
+            ? bottom
+            : vertical > 0 ? 1 - top : 2 * Math.min(centerY, 1 - centerY)
+        const maximumScale = Math.min(
+            availableWidth / frameWidth, availableHeight / frameHeight)
+        if (maximumScale <= 0)
+            return startFrameRect
+
+        const minimumScale = Math.max(
+            minimumWidth / frameWidth, minimumHeight / frameHeight)
+        const scale = Math.min(
+            maximumScale, Math.max(minimumScale, requestedScale))
+        const width = frameWidth * scale
+        const height = frameHeight * scale
+        return Qt.rect(
+            horizontal < 0 ? right - width
+                : horizontal > 0 ? left : centerX - width / 2,
+            vertical < 0 ? bottom - height
+                : vertical > 0 ? top : centerY - height / 2,
+            width, height)
     }
 
     function movedFrameRect(startFrameRect, deltaX, deltaY) {
@@ -3480,14 +3540,20 @@ Item {
     Popup {
         id: selectionActions
 
+        readonly property bool imageSelection:
+            root.isImageKind(root.controller.selectedKind)
+            && root.controller.selectedEditable
         readonly property bool compactSelection:
             root.isImageKind(root.controller.selectedKind)
             || root.isShapeKind(root.controller.selectedKind)
             || root.isCommentKind(root.controller.selectedKind)
 
         parent: root
-        width: compactSelection ? 71 : 136
-        height: 62
+        width: imageSelection
+            ? Math.max(1, Math.min(root.width - 8,
+                Math.max(150, imageAspectRatioLock.implicitWidth + 8)))
+            : compactSelection ? 71 : 136
+        height: imageSelection ? 64 + imageAspectRatioLock.implicitHeight : 62
         padding: 4
         modal: false
         focus: true
@@ -3517,7 +3583,9 @@ Item {
             border.color: root.theme.ribbonBorder
         }
 
-        contentItem: Row {
+        contentItem: Column {
+            id: selectionActionsContent
+
             spacing: 2
             focus: true
 
@@ -3526,66 +3594,98 @@ Item {
                     event.accepted = root.deleteSelectedNonText()
             }
 
-            ToolButton {
-                id: editAction
-
-                width: 63
-                height: 54
-                display: AbstractButton.TextUnderIcon
+            Row {
+                x: Math.max(0, (selectionActionsContent.width - width) / 2)
                 spacing: 2
-                //% "Edit"
-                text: qsTrId("Edit")
-                icon.source: "../assets/icons/edit-text.svg"
-                icon.width: 24
-                icon.height: 24
-                icon.color: "transparent"
-                font.pixelSize: 10
-                visible: !selectionActions.compactSelection
 
-                background: Rectangle {
-                    radius: 4
-                    color: editAction.down
-                        ? "#f5dfcf"
-                        : editAction.hovered
-                            ? root.theme.foxitPaleOrange
-                            : "transparent"
+                ToolButton {
+                    id: editAction
+
+                    width: 63
+                    height: 54
+                    display: AbstractButton.TextUnderIcon
+                    spacing: 2
+                    //% "Edit"
+                    text: qsTrId("Edit")
+                    icon.source: "../assets/icons/edit-text.svg"
+                    icon.width: 24
+                    icon.height: 24
+                    icon.color: "transparent"
+                    font.pixelSize: 10
+                    visible: !selectionActions.compactSelection
+
+                    background: Rectangle {
+                        radius: 4
+                        color: editAction.down
+                            ? "#f5dfcf"
+                            : editAction.hovered
+                                ? root.theme.foxitPaleOrange
+                                : "transparent"
+                    }
+
+                    onClicked: {
+                        selectionActions.close()
+                        root.beginSelectedEditing()
+                    }
                 }
 
-                onClicked: {
-                    selectionActions.close()
-                    root.beginSelectedEditing()
+                ToolButton {
+                    id: deleteAction
+
+                    width: 63
+                    height: 54
+                    display: AbstractButton.TextUnderIcon
+                    spacing: 2
+                    //% "Delete"
+                    text: qsTrId("Delete")
+                    icon.source: "../assets/icons/remove-text.svg"
+                    icon.width: 24
+                    icon.height: 24
+                    icon.color: "transparent"
+                    font.pixelSize: 10
+                    enabled: root.controller.selectedDeletable
+
+                    background: Rectangle {
+                        radius: 4
+                        color: deleteAction.down
+                            ? "#f4d9d7"
+                            : deleteAction.hovered
+                                ? "#fff0ef"
+                                : "transparent"
+                    }
+
+                    onClicked: {
+                        selectionActions.close()
+                        root.deleteSelectedObject()
+                    }
                 }
             }
 
-            ToolButton {
-                id: deleteAction
+            CheckBox {
+                id: imageAspectRatioLock
 
-                width: 63
-                height: 54
-                display: AbstractButton.TextUnderIcon
-                spacing: 2
-                //% "Delete"
-                text: qsTrId("Delete")
-                icon.source: "../assets/icons/remove-text.svg"
-                icon.width: 24
-                icon.height: 24
-                icon.color: "transparent"
-                font.pixelSize: 10
-                enabled: root.controller.selectedDeletable
+                width: selectionActionsContent.width
+                visible: selectionActions.imageSelection
+                enabled: root.controller.selectedImageResizable
+                checked: root.controller.imageAspectRatioLocked
+                //% "Lock aspect ratio"
+                text: qsTrId("ImageAspectRatioLocked")
+                font.pixelSize: 11
+                palette.highlight: root.theme.foxitDarkOrange
 
-                background: Rectangle {
-                    radius: 4
-                    color: deleteAction.down
-                        ? "#f4d9d7"
-                        : deleteAction.hovered
-                            ? "#fff0ef"
-                            : "transparent"
+                contentItem: Text {
+                    leftPadding: imageAspectRatioLock.indicator.width
+                        + imageAspectRatioLock.spacing
+                    text: imageAspectRatioLock.text
+                    font: imageAspectRatioLock.font
+                    color: root.theme.ribbonTextColor
+                    verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.WordWrap
                 }
 
-                onClicked: {
-                    selectionActions.close()
-                    root.deleteSelectedObject()
-                }
+                // Accessibility toggles checked without emitting clicked/toggled.
+                onCheckedChanged: root.controller.imageAspectRatioLocked
+                    = imageAspectRatioLock.checked
             }
         }
     }
@@ -4098,10 +4198,12 @@ Item {
         Repeater {
             model: {
                 const selectedKind = root.controller.selectedKind
-                if (selectedKind === "image") {
+                if (root.isImageKind(selectedKind)
+                        && !root.controller.selectedImageResizable) {
                     return []
                 }
-                if (root.isGeometryCommentKind(selectedKind)
+                if (root.isImageKind(selectedKind)
+                        || root.isGeometryCommentKind(selectedKind)
                         || root.isShapeKind(selectedKind)) {
                     return [
                         { horizontal: -1, vertical: -1 },
@@ -4129,7 +4231,7 @@ Item {
                 property rect dragStartFrameRect: Qt.rect(0, 0, 0, 0)
                 property point dragStartPosition: Qt.point(0, 0)
                 readonly property string baseAccessibilityName: {
-                    if (root.controller.selectedKind === "addedImage") {
+                    if (root.isImageKind(root.controller.selectedKind)) {
                         //% "Resize image"
                         return qsTrId("ResizeImage")
                     }
@@ -4205,6 +4307,7 @@ Item {
                     onPressed: mouse => {
                         root.pointerInteractionStarted()
                         forceActiveFocus()
+                        selectionActions.close()
                         resizeHandle.dragStartFrameRect
                             = resizeOverlay.frameRect
                         if (root.editing)
@@ -4335,7 +4438,9 @@ Item {
             && root.controller.selectedPage === root.page
             && root.controller.selectedObjectId.length > 0
             && !root.controller.selectedCommentReply
-            && !root.controller.selectedEditable
+            && (!root.controller.selectedEditable
+                || (root.isImageKind(root.controller.selectedKind)
+                    && !root.controller.selectedImageResizable))
 
         Label {
             id: selectionReason

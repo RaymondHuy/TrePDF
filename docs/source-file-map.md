@@ -289,7 +289,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, search highlight, coordinator interaction, rotation và layout của một trang. |
 | [`src/Components/SearchHighlightLayer.qml`](../src/Components/SearchHighlightLayer.qml) | Vẽ rect kết quả tìm kiếm normalized, không tương tác. |
 | [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml) | Gom mode, z-order, choice handshake và cleanup của runtime/edit/form designer. |
-| [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml) | Tương tác sửa nội dung trang, gesture và preview/draft comment. |
+| [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml) | Tương tác sửa nội dung trang, gesture và preview/draft comment; resize ảnh mới/nguồn đủ điều kiện với tám handle và tùy chọn khóa tỷ lệ. |
 | [`src/Components/CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml) | Renderer vector chung cho năm drawing-comment subtype. |
 | [`src/Components/InkDrawingView.qml`](../src/Components/InkDrawingView.qml) | Renderer Qt Quick Shapes dùng chung cho gesture Pencil và các stroke Ink draft. |
 | [`src/Components/SquigglyLine.qml`](../src/Components/SquigglyLine.qml) | Preview Squiggly theo đúng hình học 1pt/2pt của PDFium và scale trang. |
@@ -327,6 +327,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) | Đọc chuỗi, chuẩn hóa nội dung và phân loại comment annotation dùng chung cho index, render và save. |
 | [`src/PDFCommentAnnotation.h`](../src/PDFCommentAnnotation.h) | Contract geometry/common properties cho drawing/Ink comment và `/AP`; Ink giữ từng stroke `/InkList` riêng. |
 | [`src/PDFShapeUtils.h`](../src/PDFShapeUtils.h) | Canonical builder và bounded validator cho geometry/style, metadata `TrePDFShape`; scanner và writer dùng chung để rehydrate/lưu Edit shape. |
+| [`src/PDFSourceImageGeometry.h`](../src/PDFSourceImageGeometry.h) | Kiểm tra source-image resize an toàn và affine frame mapping dùng chung cho scanner, preview và Save; giữ pixels/resource/drawing order và phép xoay/lật/nghiêng gốc. |
 | [`src/DraftImageItem.cpp`](../src/DraftImageItem.cpp) | Vẽ snapshot ảnh draft trong QML. |
 | [`src/PDFFormController.cpp`](../src/PDFFormController.cpp) | Facade GUI-thread của form runtime. |
 | [`src/PDFFormWorker.cpp`](../src/PDFFormWorker.cpp) | Session PDFium form trên hàng đợi tuần tự. |
@@ -346,6 +347,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | Scroll/zoom/rotation/Page Display/pooling | `DocumentView.qml`, `PageLayoutDelegate.qml`, `PdfPageDelegate.qml` | `DocumentWorkspace.qml`, `PDFPageItem.cpp`, state trong `PDFDocumentSession` |
 | Tìm text tài liệu | `SearchRibbonControl.qml`, `PDFSearchController.cpp` | `SearchHighlightLayer.qml`, navigation trong `AppRibbon.qml`, translation và test async/stale |
 | Chọn hoặc sửa text/image/shape/comment | `EditOverlay.qml` | `EditRibbon.qml` hoặc `CommentRibbon.qml`, `CommentPanel.qml`, `DrawingCommentPropertiesPanel.qml`, `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
+| Resize ảnh nguồn và khóa tỷ lệ | `EditOverlay.qml`, `PDFEditControllerGeometry.cpp` | Capability trong `PDFEditControllerCandidates.cpp`, `PDFSourceImageGeometry.h`, preview trong `PDFPageItem.cpp`, `PDFSaveWriter.cpp`, test geometry/history/round-trip |
 | Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp` | `PDFEditControllerText.cpp`, `PDFEditControllerCandidates.cpp`, `PDFSaveWriter.cpp` |
 | Form PDF đang chạy | `PDFFormView.cpp`, `PDFFormController.cpp` | `PDFFormWorker.cpp`, `FormChoiceOverlay.qml` |
 | Form designer | `FormTextFieldOverlay.qml`, `FormFieldLayer.cpp` | `PDFFormDesignerController.cpp`, AcroForm writer/canonicalizer |
