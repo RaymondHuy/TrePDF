@@ -196,8 +196,11 @@ Current features:
 - Added images and editable top-level source images can be dragged within the
   page. A move preserves image size and creates one undoable command. Added
   images and eligible source images also have eight side/corner resize handles
-  and a Lock aspect ratio checkbox in their selection popup. The lock defaults
-  to enabled and is transient per-tab controller state; toggling it creates no
+  and a Lock aspect ratio checkbox in a dedicated right-side Image Properties
+  panel. The panel appears only when an image is selected in Edit and expands
+  when activated, replacing the text-formatting panel. Its checkbox is disabled
+  for unsupported images or while saving; the selection popup keeps Delete.
+  The lock defaults to enabled and is transient per-tab controller state; toggling it creates no
   draft/history entry and writes no PDF property. Each resize is one undoable
   geometry command. Source resize requires a finite, nonsingular image matrix,
   no custom clipping, and the entire image inside the visible page. Unsupported
@@ -327,6 +330,8 @@ Current features:
   for stroke, optional interior color, and opacity of the selected drawing
   comment or Edit shape through the shared `selectedDrawing*` API, with distinct
   panel titles; comment/thread content remains in `CommentPanel.qml`.
+- `src/Components/ImagePropertiesPanel.qml`: dedicated Edit-tab panel shown for
+  a selected source or added image, with the transient Lock aspect ratio option.
 - `src/Components/ShapeDraftView.qml`: shared Qt Quick Shapes preview used by
   the ribbon palette, drag preview, and added/source-shape draft delegates.
 - `src/Components/CommentDrawingView.qml`: vector preview shared by Square,

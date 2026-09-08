@@ -28582,22 +28582,38 @@ void PDFEditControllerTest::resizesSourceImageThroughQmlHandles()
     controller.undo();
     QCOMPARE(controller.selectedFrameRect(), original);
 
-    // The contextual checkbox changes the session preference without creating
-    // a PDF draft. Its unlocked edge handles change one dimension only.
-    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "showSelectionActions",
-        Q_ARG(QVariant, QVariant(300.0)), Q_ARG(QVariant, QVariant(300.0)),
-        Q_ARG(QVariant, QVariant(candidate))));
-    QQuickItem *checkbox = nullptr;
-    for (QObject *child : overlay->findChildren<QObject *>()) {
-        if (child->property("text").toString() == QLatin1String("ImageAspectRatioLocked")
-            && child->metaObject()->indexOfProperty("checked") >= 0) {
-            checkbox = qobject_cast<QQuickItem *>(child);
-            break;
-        }
-    }
+    // The dedicated image panel changes the session preference without
+    // creating a PDF draft. Its unlocked handles change one dimension only.
+    const QString panelPath = QFINDTESTDATA("../src/Components/ImagePropertiesPanel.qml");
+    QVERIFY(!panelPath.isEmpty());
+    QQuickWindow panelWindow;
+    panelWindow.resize(260, 842);
+    QQmlComponent panelComponent(&engine, QUrl::fromLocalFile(panelPath));
+    const QVariantMap panelProperties{
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("editController"), QVariant::fromValue(&controller)},
+        {QStringLiteral("collapsed"), false},
+        {QStringLiteral("width"), 260.0},
+        {QStringLiteral("height"), 842.0}};
+    std::unique_ptr<QObject> panel(
+        panelComponent.createWithInitialProperties(panelProperties));
+    QVERIFY2(panel, qPrintable(panelComponent.errorString()));
+    auto *panelItem = qobject_cast<QQuickItem *>(panel.get());
+    QVERIFY(panelItem);
+    panelItem->setParentItem(panelWindow.contentItem());
+    panelWindow.show();
+    QTRY_VERIFY_WITH_TIMEOUT(panelWindow.isExposed(), 5000);
+    QPointer<QQuickItem> checkbox = panel->findChild<QQuickItem *>(
+        QStringLiteral("imageAspectRatioLock"));
     QVERIFY(checkbox);
     QTRY_VERIFY(checkbox->isVisible());
-    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centerInWindow(checkbox));
+    QVERIFY(checkbox->isEnabled());
+    QVERIFY(checkbox->property("checked").toBool());
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        QVERIFY(child->property("text").toString() != QLatin1String("ImageAspectRatioLocked")
+                || child->metaObject()->indexOfProperty("checked") < 0);
+    }
+    QTest::mouseClick(&panelWindow, Qt::LeftButton, Qt::NoModifier, centerInWindow(checkbox));
     QVERIFY(!controller.imageAspectRatioLocked());
     QVERIFY(!controller.hasDrafts());
 
@@ -28611,7 +28627,16 @@ void PDFEditControllerTest::resizesSourceImageThroughQmlHandles()
     QVERIFY(!checkbox->property("checked").toBool());
     QVERIFY(!controller.imageAspectRatioLocked());
     QVERIFY(!controller.hasDrafts());
-    QTest::keyClick(&window, Qt::Key_Escape);
+    panel->setProperty("collapsed", true);
+    QTRY_VERIFY(checkbox.isNull());
+    panel->setProperty("collapsed", false);
+    checkbox = panel->findChild<QQuickItem *>(QStringLiteral("imageAspectRatioLock"));
+    QVERIFY(checkbox);
+    QTRY_VERIFY(checkbox->isVisible());
+    QVERIFY(!checkbox->property("checked").toBool());
+    QVERIFY(!controller.hasDrafts());
+    panelWindow.hide();
+    window.requestActivate();
     rightHandle = handle(1, 0);
     QVERIFY(rightHandle);
     rightHandle->forceActiveFocus();

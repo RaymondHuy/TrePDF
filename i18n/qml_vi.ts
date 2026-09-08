@@ -154,7 +154,7 @@
     </message>
     <message id="Edit">
         <location filename="../src/Components/AppRibbon.qml" line="371"/>
-        <location filename="../src/Components/EditOverlay.qml" line="3609"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3603"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
@@ -203,7 +203,7 @@
     </message>
     <message id="Delete">
         <location filename="../src/Main.qml" line="979"/>
-        <location filename="../src/Components/EditOverlay.qml" line="3640"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3634"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
         <source>Delete</source>
         <translation>Xóa</translation>
@@ -258,37 +258,37 @@
         <translation>Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo nội dung đã chọn để di chuyển, vẽ bằng công cụ Hình dạng, đánh dấu hoặc nhận xét hình vẽ, và dùng Enter hoặc nhấp đúp để hoàn tất nhận xét đa giác</translation>
     </message>
     <message id="MoveImage">
-        <location filename="../src/Components/EditOverlay.qml" line="4091"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4058"/>
         <source>Move image</source>
         <translation>Di chuyển hình ảnh</translation>
     </message>
     <message id="MoveShape">
-        <location filename="../src/Components/EditOverlay.qml" line="4095"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4062"/>
         <source>Move shape</source>
         <translation>Di chuyển hình dạng</translation>
     </message>
     <message id="MoveDrawingComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4100"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4067"/>
         <source>Move drawing comment</source>
         <translation>Di chuyển chú thích hình vẽ</translation>
     </message>
     <message id="MoveInkComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4104"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4071"/>
         <source>Move ink comment</source>
         <translation>Di chuyển chú thích nét mực</translation>
     </message>
     <message id="MoveStampComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4108"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4075"/>
         <source>Move stamp comment</source>
         <translation>Di chuyển chú thích con dấu</translation>
     </message>
     <message id="MoveComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4113"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4080"/>
         <source>Move comment</source>
         <translation>Di chuyển chú thích</translation>
     </message>
     <message id="MoveText">
-        <location filename="../src/Components/EditOverlay.qml" line="4116"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4083"/>
         <source>Move text</source>
         <translation>Di chuyển văn bản</translation>
     </message>
@@ -297,48 +297,63 @@
         <source>Images with clipping, unsupported transforms or bounds outside the page cannot be resized.</source>
         <translation>Ảnh có vùng cắt, phép biến đổi không hỗ trợ hoặc vượt mép trang chưa thể đổi kích thước.</translation>
     </message>
+    <message id="ExpandImageProperties">
+        <location filename="../src/Components/ImagePropertiesPanel.qml" line="46"/>
+        <source>Expand image properties</source>
+        <translation>Mở rộng thuộc tính ảnh</translation>
+    </message>
+    <message id="ImageProperties">
+        <location filename="../src/Components/ImagePropertiesPanel.qml" line="93"/>
+        <source>Image properties</source>
+        <translation>Thuộc tính ảnh</translation>
+    </message>
+    <message id="CollapseImageProperties">
+        <location filename="../src/Components/ImagePropertiesPanel.qml" line="112"/>
+        <source>Collapse image properties</source>
+        <translation>Thu gọn thuộc tính ảnh</translation>
+    </message>
     <message id="ImageAspectRatioLocked">
-        <location filename="../src/Components/EditOverlay.qml" line="3672"/>
+        <location filename="../src/Components/ImagePropertiesPanel.qml" line="152"/>
         <source>Lock aspect ratio</source>
-        <translation>Khóa tỷ lệ ảnh</translation>
+        <translation>Giữ tỷ lệ ảnh</translation>
     </message>
     <message id="ResizeImage">
-        <location filename="../src/Components/EditOverlay.qml" line="4236"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4203"/>
         <source>Resize image</source>
         <translation>Đổi kích thước hình ảnh</translation>
     </message>
     <message id="ResizeShape">
-        <location filename="../src/Components/EditOverlay.qml" line="4240"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4207"/>
         <source>Resize shape</source>
         <translation>Đổi kích thước hình dạng</translation>
     </message>
     <message id="ResizeDrawingComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4245"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4212"/>
         <source>Resize drawing comment</source>
         <translation>Đổi kích thước chú thích hình vẽ</translation>
     </message>
     <message id="ResizeInkComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4249"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4216"/>
         <source>Resize ink comment</source>
         <translation>Đổi kích thước chú thích nét mực</translation>
     </message>
     <message id="ResizeStampComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4253"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4220"/>
         <source>Resize stamp comment</source>
         <translation>Đổi kích thước chú thích con dấu</translation>
     </message>
     <message id="ResizeComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4258"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4225"/>
         <source>Resize comment</source>
         <translation>Đổi kích thước chú thích</translation>
     </message>
     <message id="ResizeTextBox">
-        <location filename="../src/Components/EditOverlay.qml" line="4261"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4228"/>
         <source>Resize text box</source>
         <translation>Đổi kích thước hộp văn bản</translation>
     </message>
     <message id="ApplyOrCancelEditHint">
-        <location filename="../src/Components/EditOverlay.qml" line="4420"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4387"/>
         <source>Ctrl/Cmd+Enter to apply · Esc to cancel</source>
         <oldsource>Enter to apply · Esc to cancel</oldsource>
         <translation>Ctrl/Cmd+Enter để áp dụng · Esc để hủy</translation>

@@ -280,6 +280,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/DocumentWorkspace.qml`](../src/Components/DocumentWorkspace.qml) | Ghép một hoặc hai document view và lưu state riêng cho pane phụ. |
 | [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ; không chứa control appearance. |
 | [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml) | Panel tab Edit dùng chung cho stroke, fill/no fill và opacity của Edit shape hoặc drawing comment; tiêu đề theo loại selection, source comment appearance không an toàn chỉ đọc. |
+| [`src/Components/ImagePropertiesPanel.qml`](../src/Components/ImagePropertiesPanel.qml) | Panel Thuộc tính ảnh chỉ hiện khi chọn ảnh trong Edit; chứa khóa tỷ lệ transient riêng từng tab. |
 | [`src/Components/TextFieldOptionsPanel.qml`](../src/Components/TextFieldOptionsPanel.qml) | Panel multi-line, giới hạn ký tự tùy chọn và xóa Text Field đang chọn. |
 | [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml) | Panel số ô/giới hạn ký tự bắt buộc và xóa Comb Field đang chọn. |
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |
@@ -347,7 +348,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | Scroll/zoom/rotation/Page Display/pooling | `DocumentView.qml`, `PageLayoutDelegate.qml`, `PdfPageDelegate.qml` | `DocumentWorkspace.qml`, `PDFPageItem.cpp`, state trong `PDFDocumentSession` |
 | Tìm text tài liệu | `SearchRibbonControl.qml`, `PDFSearchController.cpp` | `SearchHighlightLayer.qml`, navigation trong `AppRibbon.qml`, translation và test async/stale |
 | Chọn hoặc sửa text/image/shape/comment | `EditOverlay.qml` | `EditRibbon.qml` hoặc `CommentRibbon.qml`, `CommentPanel.qml`, `DrawingCommentPropertiesPanel.qml`, `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
-| Resize ảnh nguồn và khóa tỷ lệ | `EditOverlay.qml`, `PDFEditControllerGeometry.cpp` | Capability trong `PDFEditControllerCandidates.cpp`, `PDFSourceImageGeometry.h`, preview trong `PDFPageItem.cpp`, `PDFSaveWriter.cpp`, test geometry/history/round-trip |
+| Resize ảnh nguồn và khóa tỷ lệ | `EditOverlay.qml`, `ImagePropertiesPanel.qml`, `PDFEditControllerGeometry.cpp` | Điều kiện hiện panel trong `DocumentWorkspace.qml`, capability trong `PDFEditControllerCandidates.cpp`, `PDFSourceImageGeometry.h`, preview trong `PDFPageItem.cpp`, `PDFSaveWriter.cpp`, test geometry/history/round-trip |
 | Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp` | `PDFEditControllerText.cpp`, `PDFEditControllerCandidates.cpp`, `PDFSaveWriter.cpp` |
 | Form PDF đang chạy | `PDFFormView.cpp`, `PDFFormController.cpp` | `PDFFormWorker.cpp`, `FormChoiceOverlay.qml` |
 | Form designer | `FormTextFieldOverlay.qml`, `FormFieldLayer.cpp` | `PDFFormDesignerController.cpp`, AcroForm writer/canonicalizer |

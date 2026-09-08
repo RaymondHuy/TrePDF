@@ -3540,20 +3540,14 @@ Item {
     Popup {
         id: selectionActions
 
-        readonly property bool imageSelection:
-            root.isImageKind(root.controller.selectedKind)
-            && root.controller.selectedEditable
         readonly property bool compactSelection:
             root.isImageKind(root.controller.selectedKind)
             || root.isShapeKind(root.controller.selectedKind)
             || root.isCommentKind(root.controller.selectedKind)
 
         parent: root
-        width: imageSelection
-            ? Math.max(1, Math.min(root.width - 8,
-                Math.max(150, imageAspectRatioLock.implicitWidth + 8)))
-            : compactSelection ? 71 : 136
-        height: imageSelection ? 64 + imageAspectRatioLock.implicitHeight : 62
+        width: compactSelection ? 71 : 136
+        height: 62
         padding: 4
         modal: false
         focus: true
@@ -3659,33 +3653,6 @@ Item {
                         root.deleteSelectedObject()
                     }
                 }
-            }
-
-            CheckBox {
-                id: imageAspectRatioLock
-
-                width: selectionActionsContent.width
-                visible: selectionActions.imageSelection
-                enabled: root.controller.selectedImageResizable
-                checked: root.controller.imageAspectRatioLocked
-                //% "Lock aspect ratio"
-                text: qsTrId("ImageAspectRatioLocked")
-                font.pixelSize: 11
-                palette.highlight: root.theme.foxitDarkOrange
-
-                contentItem: Text {
-                    leftPadding: imageAspectRatioLock.indicator.width
-                        + imageAspectRatioLock.spacing
-                    text: imageAspectRatioLock.text
-                    font: imageAspectRatioLock.font
-                    color: root.theme.ribbonTextColor
-                    verticalAlignment: Text.AlignVCenter
-                    wrapMode: Text.WordWrap
-                }
-
-                // Accessibility toggles checked without emitting clicked/toggled.
-                onCheckedChanged: root.controller.imageAspectRatioLocked
-                    = imageAspectRatioLock.checked
             }
         }
     }

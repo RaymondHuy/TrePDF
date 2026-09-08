@@ -115,6 +115,7 @@ qt_add_qml_module(trepdf
         src/Components/DocumentTabBar.qml
         src/Components/DocumentWorkspace.qml
         src/Components/DrawingCommentPropertiesPanel.qml
+        src/Components/ImagePropertiesPanel.qml
         src/Components/DropdownOptionsPanel.qml
         src/Components/EditOverlay.qml
         src/Components/EditRibbon.qml

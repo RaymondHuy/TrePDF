@@ -232,8 +232,10 @@ cropped and rotated pages.
 
 Existing top-level PDF images can be selected in Select mode, dragged, resized
 with eight side/corner handles, or removed with Backspace, Delete, or the
-contextual Delete action. The selection popup offers Lock aspect ratio for
-both added and eligible source images. It starts enabled, stays independent
+contextual Delete action. Selecting an image in Edit opens a dedicated Image
+Properties panel on the right with Lock aspect ratio for both added and
+eligible source images. The panel hides when the selection is no longer an
+image or the user leaves Edit. The lock starts enabled, stays independent
 per tab, and does not create a draft or become a saved PDF property. Unlock it
 to resize width and height independently. Movement, resizing, and deletion
 participate in undo/redo and remain session drafts until Save/Save As succeeds.
