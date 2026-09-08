@@ -272,8 +272,10 @@ budget recovery, comment suppression và zoom settling pass trên native Metal.
   Tile dùng offset âm của `renderRect`, nhưng scale vẫn dùng kích thước raster
   toàn trang; `FPDF_FFLDraw` và widget patch dùng cùng phép đổi tọa độ.
 - `ScopedPageObjectSuppression` ẩn source object đã bị draft thay/xóa.
-- `ScopedPageObjectMoves` áp ma trận preview cho source text/image chỉ-move rồi
-  phục hồi object.
+- `ScopedPageObjectMoves` áp ma trận preview cho source text chỉ-move và source
+  image move/resize rồi phục hồi chính xác matrix gốc. Source image dùng shared
+  helper `PDFSourceImageGeometry` để preview và Save có cùng affine frame mapping
+  trên page có CropBox offset/rotation; không decode thêm bitmap ảnh nguồn.
 - `PDFWidgetAnnotationSuppression` ẩn source widget đang được form designer vẽ
   hoặc Dropdown đang giữ tombstone xóa draft; capture nền vùng widget, cho
   `FPDF_FFLDraw` chạy để form khác vẫn đúng, rồi dán nền lại trên widget bị
@@ -448,6 +450,13 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 **Công cụ khác:**
 
 - Add Image decode/giới hạn ảnh trên GUI thread rồi lưu pixel snapshot.
+- Image mới và source image đủ điều kiện dùng tám resize handle cạnh/góc.
+  `imageAspectRatioLocked` mặc định bật, giữ riêng theo controller của tab và
+  không tham gia draft/history/PDF. Scanner xác định `imageResizable`; source
+  image chỉ resize khi matrix hữu hạn, không suy biến, không có custom clip và
+  nằm trọn trong page hiển thị. Controller expose `selectedImageResizable` và
+  kiểm lại capability trước khi cập nhật frame. Mỗi gesture tạo một command
+  undo/redo; move/resize giữ source rect bất biến.
 - Add Shape chuẩn hóa geometry và snap line/arrow gần trục; sáu Edit shape có
   tám handle cạnh/góc và panel stroke/fill/no fill/opacity trong tab Edit.
   Khi kết thúc gesture
@@ -486,7 +495,9 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   serialization để giữ nguyên `/AP` và `/BBox`. Caret/FileAttachment/Sound/
   Redact/Projection dùng kind `comment` chỉ đọc. Mọi đường sửa, xóa và reply
   đều kiểm `commentTextReadOnly` trước khi tạo draft.
-- Move/delete top-level source text/image; bảo vệ object lồng trong Form XObject.
+- Move/delete top-level source text/image và resize source image đủ điều kiện;
+  bảo vệ object lồng trong Form XObject. Image top-level không đủ điều kiện
+  resize giữ move/delete hiện có.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 
 **Save orchestration:**
@@ -524,6 +535,11 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 - Thực hiện delete/insert page, giữ mapping từ display page về source page.
 - Với source text/image chỉ đổi vị trí, dịch ma trận object gốc để giữ font/pixel,
   orientation và z-order.
+- Với source image resize, `PDFSourceImageGeometry` compose matrix gốc với phép
+  affine map source frame sang target frame. Giữ pixel resource và vị trí object
+  trong drawing order, bảo toàn rotation/reflection/skew ban đầu trong frame mới.
+  Writer kiểm lại điều kiện resize trước khi đổi matrix, không remove/recreate
+  ảnh. Preview dùng cùng helper và phục hồi matrix sau transaction render.
 - Với text đổi nội dung/format/frame, remove source objects và reflow bằng
   `QTextLayout`; tạo object theo line/style run, map top-left Qt sang bottom-left
   PDF và vẽ underline bằng path.

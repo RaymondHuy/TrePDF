@@ -771,7 +771,7 @@ int PDFEditController::deleteCurrentPage()
 
 void PDFEditController::beginSelectedFrameResize()
 {
-    if (m_frameResizeActive
+    if (m_saving || m_frameResizeActive
         || !m_hasSelection
         || !m_selectedCandidate.editable) {
         return;
@@ -800,7 +800,10 @@ void PDFEditController::beginSelectedFrameResize()
 
 void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
 {
-    if (!m_frameResizeActive || !m_textEditActive || !m_hasSelection) {
+    if (m_saving || !m_frameResizeActive || !m_textEditActive || !m_hasSelection
+        || !qIsFinite(frameRect.x()) || !qIsFinite(frameRect.y())
+        || !qIsFinite(frameRect.width()) || !qIsFinite(frameRect.height())
+        || !qIsFinite(frameRect.right()) || !qIsFinite(frameRect.bottom())) {
         return;
     }
 
@@ -813,6 +816,11 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
               <= geometryEpsilon
         && qAbs(normalizedRect.height() - currentFrameRect.height())
                <= geometryEpsilon;
+
+    if (!movesFrame && draft.candidate.kind == QLatin1String("image")
+        && !draft.candidate.imageResizable) {
+        return;
+    }
 
     QRectF boundedRect;
     QRectF resizedContentBounds;
@@ -854,15 +862,6 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         || isTextMarkupCandidateKind(draft.candidate.kind)
         || isDrawingCommentCandidateKind(draft.candidate.kind)
         || isShapeCandidateKind(draft.candidate.kind);
-    if (!movesFrame && sourceImageDraft) {
-        const qreal width = qBound<qreal>(0.0, draft.frameRect.width(), 1.0);
-        const qreal height = qBound<qreal>(0.0, draft.frameRect.height(), 1.0);
-        boundedRect = QRectF(
-            qBound<qreal>(0.0, boundedRect.x(), 1.0 - width),
-            qBound<qreal>(0.0, boundedRect.y(), 1.0 - height),
-            width,
-            height);
-    }
     if (!movesFrame) {
         const qreal previousContentHeight = qMax(
             draft.frameRect.height(),

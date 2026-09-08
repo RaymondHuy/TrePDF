@@ -37,6 +37,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(PDFDocument *document READ document WRITE setDocument NOTIFY documentChanged FINAL)
     Q_PROPERTY(Tool tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
     Q_PROPERTY(ShapeType shapeType READ shapeType WRITE setShapeType NOTIFY shapeTypeChanged FINAL)
+    Q_PROPERTY(bool imageAspectRatioLocked READ imageAspectRatioLocked WRITE setImageAspectRatioLocked NOTIFY imageAspectRatioLockedChanged FINAL)
     Q_PROPERTY(QColor highlightColor READ highlightColor WRITE setHighlightColor NOTIFY highlightColorChanged FINAL)
     Q_PROPERTY(QColor underlineColor READ underlineColor WRITE setUnderlineColor NOTIFY underlineColorChanged FINAL)
     Q_PROPERTY(QColor squigglyColor READ squigglyColor WRITE setSquigglyColor NOTIFY squigglyColorChanged FINAL)
@@ -78,6 +79,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(QColor selectedColor READ selectedColor NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(int selectedParagraphAlignment READ selectedParagraphAlignment NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedImageResizable READ selectedImageResizable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDeletable READ selectedDeletable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingPropertiesEditable READ selectedDrawingPropertiesEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingSupportsFill READ selectedDrawingSupportsFill NOTIFY selectionChanged FINAL)
@@ -93,6 +95,7 @@ class PDFEditController : public QObject
 
 public:
     struct DraftObjectMove {
+        // Images may translate and scale; text and paths only translate.
         enum class Kind {
             Text,
             Image,
@@ -218,6 +221,8 @@ public:
     void setStampName(const QString &name);
     QString stampText() const;
     QColor stampColor() const;
+    bool imageAspectRatioLocked() const;
+    void setImageAspectRatioLocked(bool locked);
 
     bool hasDrafts() const;
     bool canUndo() const;
@@ -252,6 +257,7 @@ public:
     QColor selectedColor() const;
     int selectedParagraphAlignment() const;
     bool selectedEditable() const;
+    bool selectedImageResizable() const;
     bool selectedDeletable() const;
     bool selectedDrawingPropertiesEditable() const;
     bool selectedDrawingSupportsFill() const;
@@ -397,6 +403,7 @@ signals:
     void documentChanged();
     void toolChanged();
     void shapeTypeChanged();
+    void imageAspectRatioLockedChanged();
     void highlightColorChanged();
     void underlineColorChanged();
     void squigglyColorChanged();
@@ -505,6 +512,7 @@ private:
         FPDF_TEXT_RENDERMODE textRenderMode = FPDF_TEXTRENDERMODE_FILL;
         bool hasBaseline = false;
         bool editable = false;
+        bool imageResizable = false;
         bool renderSuppressible = false;
         bool limited = false;
         bool added = false;
@@ -907,6 +915,7 @@ private:
     Candidate m_selectedCandidate;
     bool m_hasSelection = false;
     bool m_saving = false;
+    bool m_imageAspectRatioLocked = true;
     QString m_selectedText;
     bool m_textEditActive = false;
     qsizetype m_selectedTextRangeStart = 0;

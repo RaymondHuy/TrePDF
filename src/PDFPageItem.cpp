@@ -1,6 +1,7 @@
 #include "PDFPageItem.h"
 #include "PDFAnnotationUtils.h"
 #include "PDFFormWorker.h"
+#include "PDFSourceImageGeometry.h"
 #include "PDFWidgetAnnotationSuppression.h"
 #include "PDFiumSynchronization.h"
 
@@ -561,25 +562,25 @@ public:
                 return false;
             }
 
-            QPointF sourcePoint;
-            QPointF targetPoint;
-            if (!pagePoint(
-                    page,
-                    deviceSize,
-                    move.sourceRect.topLeft(),
-                    sourcePoint)
-                || !pagePoint(
-                    page,
-                    deviceSize,
-                    move.frameRect.topLeft(),
-                    targetPoint)) {
-                restore();
-                return false;
-            }
-
             FS_MATRIX movedMatrix = originalMatrix;
-            movedMatrix.e += static_cast<float>(targetPoint.x() - sourcePoint.x());
-            movedMatrix.f += static_cast<float>(targetPoint.y() - sourcePoint.y());
+            if (move.kind == PDFEditController::DraftObjectMove::Kind::Image) {
+                if (!PDFSourceImageGeometry::transformedMatrix(page, object,
+                        move.sourceRect, move.frameRect,
+                        originalMatrix, movedMatrix)) {
+                    restore();
+                    return false;
+                }
+            } else {
+                QPointF sourcePoint;
+                QPointF targetPoint;
+                if (!pagePoint(page, deviceSize, move.sourceRect.topLeft(), sourcePoint)
+                    || !pagePoint(page, deviceSize, move.frameRect.topLeft(), targetPoint)) {
+                    restore();
+                    return false;
+                }
+                movedMatrix.e += static_cast<float>(targetPoint.x() - sourcePoint.x());
+                movedMatrix.f += static_cast<float>(targetPoint.y() - sourcePoint.y());
+            }
             m_states.append(State{object, originalMatrix});
             if (!FPDFPageObj_SetMatrix(object, &movedMatrix)) {
                 restore();

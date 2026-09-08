@@ -6,6 +6,7 @@
 #include "PDFFormDesignerController.h"
 #include "PDFSaveWriter.h"
 #include "PDFShapeUtils.h"
+#include "PDFSourceImageGeometry.h"
 #include "PDFiumSynchronization.h"
 
 #include <algorithm>
@@ -2274,6 +2275,8 @@ void PDFEditController::appendPageObjectCandidates(
         const bool editingAllowed = request.editingAllowed;
         const bool topLevelObject = objectPath.size() == 1;
         candidate.editable = editingAllowed && topLevelObject;
+        candidate.imageResizable = candidate.editable
+            && PDFSourceImageGeometry::canResize(page, pageObject);
         candidate.renderSuppressible = true;
         candidate.limited = true;
         if (!editingAllowed) {
@@ -2282,6 +2285,9 @@ void PDFEditController::appendPageObjectCandidates(
         } else if (!topLevelObject) {
             //% "Images inside a PDF form object cannot be deleted safely yet."
             candidate.reason = qtTrId("PdfFormImageDeleteUnsupported");
+        } else if (!candidate.imageResizable) {
+            //% "Images with clipping, unsupported transforms or bounds outside the page cannot be resized."
+            candidate.reason = qtTrId("PdfImageResizeUnsupported");
         }
         candidates.append(candidate);
         return;

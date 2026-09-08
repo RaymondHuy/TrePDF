@@ -632,6 +632,14 @@ data/candidate/history/selection đổi.
 - `StampView` vẽ viền kép, màu và artwork text dùng chung cho menu preset,
   preview placement và draft Stamp mới.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
+- Image mới và image nguồn đủ điều kiện có tám handle cạnh/góc. Popup khi chọn
+  ảnh có checkbox **Khóa tỷ lệ**, bind `imageAspectRatioLocked` trên controller
+  riêng của tab và mặc định bật; toggle chỉ đổi tùy chọn UI, không tạo draft hay
+  lịch sử. Resize giữ tỷ lệ frame tại đầu gesture khi khóa bật, hoặc cho đổi
+  chiều rộng/cao độc lập khi tắt. QML dùng `selectedImageResizable` từ scanner
+  C++; source image có custom clip, matrix không hợp lệ hoặc vượt biên page
+  không có resize handle, nhưng vẫn giữ move/delete hiện có. Image lồng trong
+  Form XObject tiếp tục được bảo vệ.
 - Drag text/image/shape, cả sáu drawing subtype và Stamp mới/nguồn giữ preview
   trong QML nhưng chỉ commit geometry một lần khi thả; phím mũi tên tạo move command,
   Shift dùng bước lớn hơn. Sáu Edit shape mới/nguồn hợp lệ, cả sáu drawing subtype

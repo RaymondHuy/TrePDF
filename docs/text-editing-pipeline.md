@@ -243,8 +243,8 @@ TrePDF xử lý đệ quy:
 - `FPDF_PAGEOBJ_FORM`: ghép ma trận của form rồi duyệt các child;
 - `FPDF_PAGEOBJ_TEXT`: có thể trở thành text candidate;
 - `FPDF_PAGEOBJ_IMAGE`: tạo candidate hỗ trợ di chuyển/xóa; image top-level
-  editable nếu PDF cho phép sửa nội dung, còn image trong Form XObject không
-  editable;
+  editable nếu PDF cho phép sửa nội dung và có thêm `imageResizable` khi đủ
+  điều kiện đổi kích thước. Image trong Form XObject không editable;
 - các loại path/shading khác: bỏ qua.
 
 Ma trận parent `P` và ma trận local `L` được ghép thành `T = P × L`:
@@ -416,7 +416,7 @@ Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hi�
 | Text nằm trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip khi save |
 | Text xoay/skew/multiline | Có | Không | Layout chưa được hỗ trợ |
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
-| Image top-level | Có | Có, chỉ để xóa, nếu PDF cho phép sửa | Không mở text editor |
+| Image top-level | Có | Di chuyển/xóa nếu PDF cho phép sửa; resize nếu `imageResizable` | Resize yêu cầu matrix hữu hạn, không suy biến, không custom clip và ảnh nằm trọn trong page; không mở text editor |
 | Image trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip/resource khi save |
 | FreeText annotation | Có | Không trong page `TextEdit`; `/Contents` sửa được trong CommentPanel | Là comment annotation, không phải page-content text |
 | Widget/form field | Có | Không | Draft editor chưa hỗ trợ form field |
@@ -807,9 +807,11 @@ candidate không phải comment ở cả QML và controller. Vì vậy khi tab C
 active, text page không thể bị hover/chọn trực tiếp, qua traversal, hoặc được
 phục hồi thành selection bởi undo/redo.
 
-Click image top-level trong Select tool mở popup chỉ có Delete. Khi image đang
-được chọn, Backspace hoặc Delete tạo draft xóa; image nguồn không có resize
-handle và không mở inline text editor.
+Click image top-level trong Select tool mở popup có Delete và tùy chọn
+**Khóa tỷ lệ**. Image mới hoặc nguồn đủ điều kiện có tám resize handle cạnh/góc;
+image nguồn không hỗ trợ resize vẫn giữ move/delete, nhưng khóa tỷ lệ bị vô
+hiệu hóa và không có handle resize. Backspace hoặc Delete tạo draft xóa;
+image không mở inline text editor.
 
 ## 10. Khi người dùng bấm Edit
 
@@ -1332,10 +1334,16 @@ Controller đọc ảnh bằng `QImageReader` với auto-transform, giới hạn
 64 MiB và ảnh decode ở 40 megapixel, rồi snapshot `QImage::Format_ARGB32` vào
 candidate `addedImage`. Frame ban đầu có cạnh lớn nhất bằng 25% page, giữ đúng
 tỷ lệ ảnh theo kích thước page và được đặt quanh điểm click. Draft ảnh dùng
-cùng `frameRect`, bốn edge resize handle, thao tác kéo để đổi vị trí, command
+cùng `frameRect`, tám resize handle cạnh/góc, thao tác kéo để đổi vị trí, command
 snapshot, undo/redo, discard và selection với draft text; `contentBounds` của
 ảnh luôn bằng `frameRect`. Mỗi lần kéo mở một geometry transaction và chỉ tạo
 một undo command khi thả chuột.
+
+Popup khi chọn ảnh có **Khóa tỷ lệ**, mặc định bật cho cả ảnh mới và ảnh nguồn
+đủ điều kiện. `imageAspectRatioLocked` thuộc controller riêng của từng tab;
+thay đổi tùy chọn không tạo draft, không thêm undo command và không ghi vào PDF.
+Khi bật, resize giữ tỷ lệ frame tại đầu gesture và giới hạn trong page. Khi
+tắt, chiều rộng và chiều cao được thay đổi độc lập.
 
 QML hiển thị draft bằng `DraftImageView`, một `QQuickPaintedItem` vẽ trực tiếp
 QImage snapshot thay vì mở lại đường dẫn file gốc. Vì vậy preview và nội dung
@@ -1358,19 +1366,35 @@ page có CropBox offset hoặc rotation. Ảnh mới được append theo `added
 `FPDFPage_GenerateContent()` chung với các draft khác và chỉ xuất hiện trong
 file đích sau khi transaction `QSaveFile` commit thành công.
 
-## 21. Luồng di chuyển và xóa image có sẵn
+## 21. Luồng di chuyển, đổi kích thước và xóa image có sẵn
 
 Image top-level được scan với `kind = "image"`, giữ `objectPath` và source rect
-và hỗ trợ kéo đổi vị trí mà không đổi kích thước. Trong lúc kéo, draft cập nhật
+và hỗ trợ kéo đổi vị trí mà không đổi kích thước. Scanner kiểm tra thêm
+`imageResizable`: matrix phải hữu hạn, không suy biến, không có custom clip và
+toàn bộ ảnh phải nằm trong vùng page hiển thị. Ảnh mới hoặc ảnh nguồn đủ điều
+kiện expose `selectedImageResizable` để QML hiện tám handle cạnh/góc và bật tùy
+chọn khóa tỷ lệ. Ảnh trong Form XObject vẫn không được chỉnh sửa. Ảnh top-level
+không đủ điều kiện resize giữ khả năng move/delete hiện có.
+
+Trong lúc kéo hoặc resize, draft cập nhật
 `frameRect` còn source rect bất biến để fallback mask vẫn che đúng vị trí gốc.
 Hit-test dùng frame mới, và cả một gesture chỉ tạo một command undo/redo.
 
 Preview không decode hoặc giữ thêm bitmap của image nguồn trên GUI thread.
 `PDFPageItem` copy `objectPath`, source rect và frame rect vào render request;
-worker tạm cộng độ dịch chuyển vào `e/f` của matrix image, render page, rồi khôi
-phục matrix trước khi tái sử dụng worker document. Khi Save/Save As, writer áp
-dụng cùng phép dịch lên image object trong document riêng và không remove/recreate
-object, nên giữ nguyên pixel resource, rotation/skew, kích thước và z-order.
+worker dùng `PDFSourceImageGeometry` để compose matrix ảnh gốc với phép affine
+map source frame sang target frame, render page, rồi khôi phục chính xác matrix
+trước khi tái sử dụng worker document. Helper lấy basis trang qua
+`FPDF_DeviceToPage()` nên CropBox offset và page rotation giống nhau ở preview
+và Save; resize không phụ thuộc độ phân giải raster. Với thao tác chỉ di chuyển,
+chỉ `e/f` thay đổi. Khi Save/Save As, writer kiểm lại điều kiện resize và áp cùng
+phép biến đổi lên image object trong document riêng, không remove/recreate
+object. Pixel resource, thứ tự vẽ và phép xoay/lật/nghiêng ban đầu được giữ trong
+frame mới. Matrix hoặc frame không hợp lệ làm transaction thất bại an toàn.
+
+Geometry dùng source rect bất biến nên resize rồi move, undo/redo và Discard
+không tích lũy sai số từ các matrix preview. Bỏ gesture hoặc resize không đổi
+frame không tạo thêm undo command.
 
 Backspace, Delete và contextual Delete tạo một `Draft` có `deleted = true`;
 candidate bị loại khỏi hit-test/candidate list, selection được clear và command

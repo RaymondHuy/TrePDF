@@ -115,7 +115,7 @@ của `PageInteractionOverlay`, rồi mới xét `z` nội bộ của từng nh�
 | Hover/selection box, editor mask, `TextEdit` | 2 | Hiển thị selection và editor rich text. |
 | Con trỏ custom | 4 | Thay thế cursor OS khi cần preview tool. |
 | Preview shape/text markup/Free Text/drawing/Ink comment | 5 | Hiện feedback cho gesture đang chạy. |
-| `resizeOverlay` | 6 | Khung chọn, move area và bốn resize handle của object editable. |
+| `resizeOverlay` | 6 | Khung chọn, move area; bốn handle cạnh cho text và tám handle cạnh/góc cho image, shape, drawing comment hoặc Stamp đủ điều kiện. |
 | Hint commit/cancel editor | 7 | Luôn nổi hơn frame editor. |
 
 Điểm quan trọng: `resizeOverlay` là lớp bắt input cao nhất của edit object đang
@@ -350,6 +350,15 @@ Gesture kéo chỉ giữ preview trong QML trong lúc di chuyển; controller co
 một history command khi mouse release. `TextEdit` đồng bộ rich text, range và
 content bounds với controller, nhưng giữ document local để undo/redo của editor
 không bị thay bằng một document mới.
+
+Ảnh mới và ảnh nguồn đủ điều kiện resize dùng tám handle cạnh/góc. Popup khi
+chọn ảnh có **Khóa tỷ lệ**, mặc định bật qua `imageAspectRatioLocked` trên
+controller riêng của từng tab; toggle không tạo draft/history và không ghi vào
+PDF. QML dùng `selectedImageResizable` để tắt resize khi source image có custom
+clip, matrix không hợp lệ hoặc nằm một phần ngoài page; move/delete top-level
+vẫn theo capability hiện có. Image trong Form XObject được bảo vệ. Preview ảnh
+nguồn chạy trên render worker bằng phép affine từ source frame bất biến tới
+frame hiện tại; không dùng bitmap snapshot trên GUI như ảnh mới.
 
 Edit shape `addedShape`/`sourceShape` dùng tám resize handle cạnh/góc và
 `ShapeDraftView` cho draft preview; shape nguồn chưa có draft vẫn lấy hình từ

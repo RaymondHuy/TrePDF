@@ -230,11 +230,18 @@ to undo/redo. The draft can also be dragged to a new position. Save/Save As
 embeds the pixels as a PDF image object, preserving the editor geometry on
 cropped and rotated pages.
 
-Existing top-level PDF images can be selected in Select mode, dragged without
-changing their size, or removed with Backspace, Delete, or the contextual
-Delete action. Movement and deletion participate in undo/redo and remain
-session drafts until Save/Save As succeeds. Moving an existing image translates
-its original PDF matrix, preserving its pixels, orientation, and z-order.
+Existing top-level PDF images can be selected in Select mode, dragged, resized
+with eight side/corner handles, or removed with Backspace, Delete, or the
+contextual Delete action. The selection popup offers Lock aspect ratio for
+both added and eligible source images. It starts enabled, stays independent
+per tab, and does not create a draft or become a saved PDF property. Unlock it
+to resize width and height independently. Movement, resizing, and deletion
+participate in undo/redo and remain session drafts until Save/Save As succeeds.
+Moving or resizing an existing image transforms its original PDF matrix,
+preserving its pixel resource, drawing order, and original rotation/reflection
+within the new frame. Resizing requires a finite, nonsingular matrix, no custom
+clipping, and an image entirely inside the visible page; other top-level images
+retain their existing move/delete support.
 Images nested inside a Form XObject remain non-editable because their transform,
 clip, and resource scope cannot yet be rewritten safely.
 
@@ -299,7 +306,7 @@ Save writes the current file atomically; Save As preserves the source file and
 opens the saved copy. The controller snapshots the draft on the GUI thread and
 runs serialization on a worker so the interface can keep painting its saving
 state. The writer uses a separate PDFium document, replaces every source object
-that needs replacement or deletion, translates moved source images, lays out
+that needs replacement or deletion, transforms moved/resized source images, lays out
 multiline/rich-text runs, calls
 `FPDFPage_GenerateContent()`, and only clears undo history after the saved PDF
 has reopened successfully.
