@@ -352,9 +352,13 @@ content bounds với controller, nhưng giữ document local để undo/redo c�
 không bị thay bằng một document mới.
 
 Ảnh mới và ảnh nguồn đủ điều kiện resize dùng tám handle cạnh/góc. Popup khi
-chọn ảnh có **Khóa tỷ lệ**, mặc định bật qua `imageAspectRatioLocked` trên
+chọn ảnh giữ Delete; `DocumentWorkspace` mở `ImagePropertiesPanel` ở cạnh phải
+chỉ khi tài liệu đã mở, Edit active và selection là `image` hoặc `addedImage`.
+Panel tự mở rộng khi kích hoạt, thay `TextFormatPanel` và chứa **Khóa tỷ lệ ảnh**,
+mặc định bật qua `imageAspectRatioLocked` trên
 controller riêng của từng tab; toggle không tạo draft/history và không ghi vào
-PDF. QML dùng `selectedImageResizable` để tắt resize khi source image có custom
+PDF. Checkbox bị vô hiệu hóa khi đang lưu hoặc ảnh không hỗ trợ resize.
+QML dùng `selectedImageResizable` để tắt resize khi source image có custom
 clip, matrix không hợp lệ hoặc nằm một phần ngoài page; move/delete top-level
 vẫn theo capability hiện có. Image trong Form XObject được bảo vệ. Preview ảnh
 nguồn chạy trên render worker bằng phép affine từ source frame bất biến tới

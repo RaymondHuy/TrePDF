@@ -807,8 +807,9 @@ candidate không phải comment ở cả QML và controller. Vì vậy khi tab C
 active, text page không thể bị hover/chọn trực tiếp, qua traversal, hoặc được
 phục hồi thành selection bởi undo/redo.
 
-Click image top-level trong Select tool mở popup có Delete và tùy chọn
-**Khóa tỷ lệ**. Image mới hoặc nguồn đủ điều kiện có tám resize handle cạnh/góc;
+Click image top-level trong Select tool mở popup có Delete; trong tab Edit,
+panel riêng **Thuộc tính ảnh** ở cạnh phải hiện tùy chọn **Khóa tỷ lệ ảnh**.
+Panel ẩn khi bỏ chọn ảnh hoặc chuyển khỏi Edit. Image mới hoặc nguồn đủ điều kiện có tám resize handle cạnh/góc;
 image nguồn không hỗ trợ resize vẫn giữ move/delete, nhưng khóa tỷ lệ bị vô
 hiệu hóa và không có handle resize. Backspace hoặc Delete tạo draft xóa;
 image không mở inline text editor.
@@ -1339,8 +1340,12 @@ snapshot, undo/redo, discard và selection với draft text; `contentBounds` c�
 ảnh luôn bằng `frameRect`. Mỗi lần kéo mở một geometry transaction và chỉ tạo
 một undo command khi thả chuột.
 
-Popup khi chọn ảnh có **Khóa tỷ lệ**, mặc định bật cho cả ảnh mới và ảnh nguồn
-đủ điều kiện. `imageAspectRatioLocked` thuộc controller riêng của từng tab;
+`ImagePropertiesPanel` hiện **Khóa tỷ lệ ảnh**, mặc định bật cho cả ảnh mới và
+ảnh nguồn đủ điều kiện. `DocumentWorkspace` chỉ load panel khi tài liệu đã mở,
+tab Edit active và selection có kind `image` hoặc `addedImage`; panel tự mở
+rộng khi được kích hoạt và thay `TextFormatPanel` ở cạnh phải. Checkbox bị vô
+hiệu hóa khi ảnh không hỗ trợ resize hoặc đang lưu.
+`imageAspectRatioLocked` thuộc controller riêng của từng tab;
 thay đổi tùy chọn không tạo draft, không thêm undo command và không ghi vào PDF.
 Khi bật, resize giữ tỷ lệ frame tại đầu gesture và giới hạn trong page. Khi
 tắt, chiều rộng và chiều cao được thay đổi độc lập.

@@ -52,6 +52,7 @@ Main.qml
     │       └── PdfPageDelegate.qml (trang thứ hai, khi Facing; cùng cấu trúc)
     ├── CommentPanel.qml
     ├── DrawingCommentPropertiesPanel.qml
+    ├── ImagePropertiesPanel.qml
     ├── TextFormatPanel.qml
     ├── TextFieldOptionsPanel.qml
     ├── CombFieldOptionsPanel.qml
@@ -355,6 +356,20 @@ Note/Free Text đang chọn và phản hồi một cấp.
   hoặc vượt giới hạn scan 64 stroke, 4.096 điểm/stroke hay 32.768 điểm tổng cũng
   hạ xuống card generic chỉ đọc thay vì cấp phát dữ liệu không giới hạn.
 
+### [`src/Components/ImagePropertiesPanel.qml`](../src/Components/ImagePropertiesPanel.qml)
+
+**Vai trò:** panel **Thuộc tính ảnh** ở cạnh phải, chỉ hiện cho ảnh đang chọn
+trong tab Edit.
+
+- `DocumentWorkspace` load panel khi tài liệu đã mở và selection có kind `image`
+  hoặc `addedImage`. Panel tự mở rộng khi vừa được kích hoạt, thay
+  `TextFormatPanel`, và ẩn khi bỏ chọn ảnh hoặc rời Edit.
+- Checkbox **Khóa tỷ lệ ảnh** bind `imageAspectRatioLocked` trên controller riêng
+  của tab, mặc định bật. Toggle không tạo draft/history hay thuộc tính PDF;
+  checkbox bị vô hiệu hóa khi `selectedImageResizable` là false hoặc đang lưu.
+- Tám resize handle và geometry gesture vẫn thuộc `EditOverlay`; popup khi chọn
+  ảnh chỉ giữ action Delete.
+
 ### [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml)
 
 **Vai trò:** panel thuộc tính chung cho Edit shape và drawing comment đang chọn
@@ -432,9 +447,10 @@ trong tab Edit; không lập chỉ mục, hiển thị hay sửa nội dung comm
 - Load đúng một panel ở cạnh phải: `CommentPanel` khi Comment active và danh
   sách được bật; `DrawingCommentPropertiesPanel` khi tab Edit đang active và
   chọn `addedShape`/`sourceShape` hoặc Square/Circle/Line/Polygon/PolyLine/Ink;
+  `ImagePropertiesPanel` khi tab Edit active và chọn `image`/`addedImage`;
   `TextFormatPanel` cho các trạng
   thái Edit còn lại; hoặc panel Text Field, Comb Field, Dropdown/List Box và
-  Radio Button tương ứng trong Forms. Panel thuộc tính shape/comment có ưu
+  Radio Button tương ứng trong Forms. Panel thuộc tính ảnh/shape/comment có ưu
   tiên hơn `TextFormatPanel`. Khi một panel thuộc tính vừa được kích hoạt, nó tự
   mở rộng; trạng thái collapsed được lưu theo session.
 - Chuyển các signal font family, bold/italic/underline, color và paragraph
@@ -633,9 +649,9 @@ data/candidate/history/selection đổi.
   preview placement và draft Stamp mới.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
 - Image mới và image nguồn đủ điều kiện có tám handle cạnh/góc. Popup khi chọn
-  ảnh có checkbox **Khóa tỷ lệ**, bind `imageAspectRatioLocked` trên controller
-  riêng của tab và mặc định bật; toggle chỉ đổi tùy chọn UI, không tạo draft hay
-  lịch sử. Resize giữ tỷ lệ frame tại đầu gesture khi khóa bật, hoặc cho đổi
+  ảnh giữ Delete; checkbox **Khóa tỷ lệ ảnh** nằm trong `ImagePropertiesPanel`
+  do workspace quản lý. Resize đọc `imageAspectRatioLocked` trên controller
+  riêng của tab để giữ tỷ lệ frame tại đầu gesture khi khóa bật, hoặc cho đổi
   chiều rộng/cao độc lập khi tắt. QML dùng `selectedImageResizable` từ scanner
   C++; source image có custom clip, matrix không hợp lệ hoặc vượt biên page
   không có resize handle, nhưng vẫn giữ move/delete hiện có. Image lồng trong

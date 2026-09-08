@@ -74,6 +74,10 @@ Item {
         editTabActive && (drawingCommentSelected
             || session.editController.selectedKind === "addedShape"
             || session.editController.selectedKind === "sourceShape")
+    readonly property bool imagePropertiesPanelActive:
+        editTabActive && session.editController.selectedObjectId.length > 0
+            && (session.editController.selectedKind === "image"
+                || session.editController.selectedKind === "addedImage")
     readonly property DocumentView splitDocumentView:
         splitDocumentViewLoader.status === Loader.Ready
             ? splitDocumentViewLoader.item as DocumentView
@@ -227,6 +231,11 @@ Item {
 
     onDrawingCommentPropertiesPanelActiveChanged: {
         if (drawingCommentPropertiesPanelActive)
+            session.panelCollapsed = false
+    }
+
+    onImagePropertiesPanelActiveChanged: {
+        if (imagePropertiesPanelActive)
             session.panelCollapsed = false
     }
 
@@ -757,6 +766,29 @@ Item {
         }
 
         Loader {
+            id: imagePropertiesPanelLoader
+
+            Layout.preferredWidth: active
+                ? root.session.panelCollapsed ? 42 : 264
+                : 0
+            Layout.fillHeight: true
+            active: root.session.document.loaded
+                && root.imagePropertiesPanelActive
+            visible: active
+
+            sourceComponent: Component {
+                ImagePropertiesPanel {
+                    theme: root.theme
+                    editController: root.session.editController
+                    collapsed: root.session.panelCollapsed
+                    onCollapsedChangeRequested: collapsed => {
+                        root.session.panelCollapsed = collapsed
+                    }
+                }
+            }
+        }
+
+        Loader {
             id: textFormatPanelLoader
 
             Layout.preferredWidth: active
@@ -771,6 +803,7 @@ Item {
                 && !root.listBoxOptionsPanelActive
                 && !root.radioButtonOptionsPanelActive
                 && !root.drawingCommentPropertiesPanelActive
+                && !root.imagePropertiesPanelActive
                 && root.session.editController.tool !== PDFEditController.BrowseTool
             visible: active
 
