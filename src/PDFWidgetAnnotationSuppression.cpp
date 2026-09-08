@@ -3,6 +3,7 @@
 #include "PDFiumSynchronization.h"
 
 #include <cstring>
+#include <limits>
 #include <utility>
 
 #include <QSet>
@@ -50,7 +51,8 @@ bool capturePDFWidgetRenderPatches(
     const QSize &pixelSize,
     const QVector<QRectF> &pageRects,
     const QImage &image,
-    QVector<PDFWidgetRenderPatch> &patches)
+    QVector<PDFWidgetRenderPatch> &patches,
+    const QPoint &bitmapOrigin)
 {
     assertPDFiumProcessLockHeld();
     patches.clear();
@@ -71,10 +73,10 @@ bool capturePDFWidgetRenderPatches(
             pageRect.bottomRight(),
             pageRect.bottomLeft(),
         };
-        int minimumX = pixelSize.width();
-        int minimumY = pixelSize.height();
-        int maximumX = 0;
-        int maximumY = 0;
+        qint64 minimumX = std::numeric_limits<int>::max();
+        qint64 minimumY = std::numeric_limits<int>::max();
+        qint64 maximumX = std::numeric_limits<int>::min();
+        qint64 maximumY = std::numeric_limits<int>::min();
         for (const QPointF &corner : corners) {
             int deviceX = 0;
             int deviceY = 0;
@@ -92,30 +94,38 @@ bool capturePDFWidgetRenderPatches(
                 patches.clear();
                 return false;
             }
-            minimumX = qMin(minimumX, deviceX);
-            minimumY = qMin(minimumY, deviceY);
-            maximumX = qMax(maximumX, deviceX);
-            maximumY = qMax(maximumY, deviceY);
+            minimumX = qMin(minimumX, qint64(deviceX));
+            minimumY = qMin(minimumY, qint64(deviceY));
+            maximumX = qMax(maximumX, qint64(deviceX));
+            maximumY = qMax(maximumY, qint64(deviceY));
         }
         if (maximumX <= minimumX || maximumY <= minimumY) {
             continue;
         }
 
-        const QRect deviceRect = QRect(
-            minimumX,
-            minimumY,
-            maximumX - minimumX,
-            maximumY - minimumY)
-                                     .adjusted(
-                                         -kWidgetInteractionAdornmentMarginPixels,
-                                         -kWidgetInteractionAdornmentMarginPixels,
-                                         kWidgetInteractionAdornmentMarginPixels,
-                                         kWidgetInteractionAdornmentMarginPixels)
-                                     .intersected(
-                                         QRect(QPoint(), pixelSize));
-        if (deviceRect.isEmpty()) {
+        // Convert the full-page device bounds into this bitmap's coordinates
+        // before clipping. Use wide intermediates so an off-page annotation or
+        // tile origin cannot overflow QRect's signed integer coordinates.
+        const qint64 left = qMax<qint64>(
+            0, minimumX - bitmapOrigin.x()
+                - kWidgetInteractionAdornmentMarginPixels);
+        const qint64 top = qMax<qint64>(
+            0, minimumY - bitmapOrigin.y()
+                - kWidgetInteractionAdornmentMarginPixels);
+        const qint64 right = qMin<qint64>(
+            image.width(), maximumX - bitmapOrigin.x()
+                + kWidgetInteractionAdornmentMarginPixels);
+        const qint64 bottom = qMin<qint64>(
+            image.height(), maximumY - bitmapOrigin.y()
+                + kWidgetInteractionAdornmentMarginPixels);
+        if (right <= left || bottom <= top) {
             continue;
         }
+        const QRect deviceRect(
+            static_cast<int>(left),
+            static_cast<int>(top),
+            static_cast<int>(right - left),
+            static_cast<int>(bottom - top));
         QImage pixels = image.copy(deviceRect);
         if (pixels.isNull()) {
             patches.clear();

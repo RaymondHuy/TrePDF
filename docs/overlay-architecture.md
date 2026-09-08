@@ -74,7 +74,7 @@ sẻ tọa độ trang. Nhờ vậy mọi lớp xoay đồng thời khi người
 
 `PageInteractionOverlay` chỉ là `Item` điều phối. Nó không vẽ, không clip,
 không bật `layer.enabled` và không tạo FBO/texture riêng. Việc thêm coordinator
-không thay đổi đường render full-page; nó gom mode, z-order, choice handshake và
+không thay đổi pipeline raster; nó gom mode, z-order, choice handshake và
 cleanup của ba nhánh tương tác vào một nơi. `PDFPageView.formDesignMode` bind
 vào mode của coordinator để suppression texture và ownership pointer không lệch
 trạng thái.
@@ -224,13 +224,27 @@ flowchart LR
 ### `PDFPageView`: texture nền, không phải input surface
 
 `PDFPageView` là type QML của `PDFPageItem`. Nó nhận document, page, zoom,
-edit/form/designer controller và render một `QImage` bất đồng bộ rồi upload thành
-scene-graph texture. Nó không tự bắt mouse.
+edit/form/designer controller và render bitmap bất đồng bộ rồi upload thành
+scene-graph texture. Nó không tự bắt mouse. Bitmap nhỏ dùng full-page; bitmap
+trên 32 MiB hoặc cạnh trên 4096 pixel vật lý dùng preview toàn trang cùng tile
+1024 pixel ở vùng nhìn thấy. Khi thu nhỏ, ngưỡng quay lại full-page là 24 MiB.
+Budget có thể chọn tiled sớm hơn để dành chỗ cho ảnh thay thế.
+
+`PdfPageDelegate.visibleRasterRect` map viewport của từng pane vào page surface
+chưa xoay và truyền qua `PDFPageView.visiblePageRect`. Scroll, Facing, rotation
+và Split chỉ thay vùng tile cần thiết, không thay normalized geometry của
+overlay. Delegate pooled/ngoài viewport trả rect rỗng. Tile render trực tiếp
+trên worker với scale toàn trang, offset theo tile và gutter 2 pixel; form draw
+và widget suppression patch dùng cùng offset.
 
 Zoom ở đây là visual zoom: nó đổi kích thước chung của `pageSurface` để texture,
 search/form/edit overlay và handle follow theo thời gian thực. Trong lúc kích
 thước còn đổi, scene graph scale texture hiện tại; sau 140 ms ổn định,
 `PDFPageItem` mới request raster PDFium ở pixel size cuối.
+Với tiled, ảnh nền độ phân giải thấp của revision mới được thay đồng bộ với
+suppression snapshot trước khi bổ sung tile nét. Vì ảnh nền phủ toàn trang,
+hai cờ readiness dưới đây phản ánh độ đúng nội dung/suppression, không phải
+cam kết mọi tile đã đạt resolution cuối. Không đổi editor/draft/save flow.
 
 Render key có raster pixel size, DPR cùng revision document, draft và form;
 visual zoom không nằm trong content key độc lập. Kết quả cũ bị bỏ nếu request

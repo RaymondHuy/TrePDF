@@ -4,9 +4,12 @@
 #include "PDFEditController.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
+#include "PDFRasterBudget.h"
+#include "PDFRasterPlan.h"
 
 #include <atomic>
 #include <memory>
+#include <functional>
 
 #include <QColor>
 #include <QImage>
@@ -33,6 +36,8 @@ class PDFPageItem : public QQuickItem
                    NOTIFY formDesignModeChanged FINAL)
     Q_PROPERTY(int page READ page WRITE setPage NOTIFY pageChanged FINAL)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
+    Q_PROPERTY(QRectF visiblePageRect READ visiblePageRect WRITE setVisiblePageRect
+                   NOTIFY visiblePageRectChanged FINAL)
     Q_PROPERTY(QColor pageColor READ pageColor WRITE setPageColor NOTIFY pageColorChanged FINAL)
     Q_PROPERTY(bool draftTextureCurrent READ draftTextureCurrent NOTIFY draftTextureCurrentChanged FINAL)
     Q_PROPERTY(bool draftTextureReady READ draftTextureReady NOTIFY draftTextureReadyChanged FINAL)
@@ -51,6 +56,7 @@ public:
     bool formDesignMode() const;
     int page() const;
     qreal zoom() const;
+    QRectF visiblePageRect() const;
     QColor pageColor() const;
     bool draftTextureCurrent() const;
     bool draftTextureReady() const;
@@ -64,6 +70,7 @@ public:
     void setFormDesignMode(bool formDesignMode);
     void setPage(int page);
     void setZoom(qreal zoom);
+    void setVisiblePageRect(const QRectF &rect);
     void setPageColor(const QColor &pageColor);
 
 signals:
@@ -74,6 +81,7 @@ signals:
     void formDesignModeChanged();
     void pageChanged();
     void zoomChanged();
+    void visiblePageRectChanged();
     void pageColorChanged();
     void draftTextureCurrentChanged();
     void draftTextureReadyChanged();
@@ -88,6 +96,20 @@ protected:
 private:
     // Tests observe request generations without adding a QML diagnostics API.
     friend class PDFEditControllerTest;
+
+    struct RasterJob {
+        QSize rasterSize;
+        QRect rect;
+        QRect renderRect;
+        bool base = false;
+    };
+    struct RasterEntry {
+        quint64 id = 0;
+        RasterJob job;
+        QImage image; // Released at scene-graph upload; never a CPU raster cache.
+        PDFRasterBudget::Lease reservation;
+        quint64 lastUsed = 0;
+    };
 
     void refreshMetrics();
     void updateImplicitPageSize();
@@ -115,6 +137,12 @@ private:
     void scheduleRender();
     void requestRenderForCurrentSize();
     void requestRender(const QSize &pixelSize, qreal devicePixelRatio);
+    void dispatchNextRaster();
+    QRectF normalizedVisibleRect() const;
+    bool hasRasterTile(const QRect &rect) const;
+    void trimRasterCache();
+    static void evictUnusedRasters(qint64 bytesNeeded);
+    static void retryBudgetBlockedRenders();
     void handleRenderResult(quint64 requestId,
                             PDFDocument *document,
                             PDFEditController *editController,
@@ -127,7 +155,10 @@ private:
                             quint64 formRevision,
                             bool suppressionApplied,
                             const QStringList &suppressedCommentObjectIds,
-                            const QImage &image);
+                            const RasterJob &job,
+                            const QImage &image,
+                            PDFRasterBudget::Lease reservation,
+                            bool budgetDenied);
 
     QPointer<PDFDocument> m_document;
     QPointer<PDFEditController> m_editController;
@@ -137,9 +168,20 @@ private:
     QStringList m_suppressedFormWidgetIds;
     int m_page = 0;
     qreal m_zoom = 1.0;
+    QRectF m_visiblePageRect;
+    bool m_hasExplicitVisibleRect = false;
     QColor m_pageColor = Qt::white;
     bool m_cacheDirty = true;
-    QImage m_pendingImage;
+    QVector<RasterEntry> m_rasters;
+    QVector<RasterJob> m_renderJobs;
+    std::function<void(const RasterJob &)> m_renderWork;
+    quint64 m_nextRasterId = 0;
+    bool m_cachedTiled = false;
+    bool m_requestedTiled = false;
+    bool m_forceTiledForBudget = false;
+    bool m_budgetBlocked = false;
+    qint64 m_budgetRetryBytes = 0;
+    bool m_cachedSuppressionApplied = false;
     bool m_textureDirty = false;
     bool m_clearTexture = true;
     bool m_draftTextureCurrent = false;

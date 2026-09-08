@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QImage>
+#include <QPoint>
 #include <QRect>
 #include <QRectF>
 #include <QSize>
@@ -16,12 +17,15 @@ struct PDFWidgetRenderPatch
     QImage pixels;
 };
 
+// pixelSize describes the full page raster; bitmapOrigin is the image's
+// top-left position in that raster. Captured rectangles are local to image.
 bool capturePDFWidgetRenderPatches(
     FPDF_PAGE page,
     const QSize &pixelSize,
     const QVector<QRectF> &pageRects,
     const QImage &image,
-    QVector<PDFWidgetRenderPatch> &patches);
+    QVector<PDFWidgetRenderPatch> &patches,
+    const QPoint &bitmapOrigin = {});
 bool restorePDFWidgetRenderPatches(
     QImage &image,
     const QVector<PDFWidgetRenderPatch> &patches);
