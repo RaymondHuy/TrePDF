@@ -211,6 +211,9 @@ Với mỗi ký tự:
 
 - `FPDFText_GetTextObject()` xác định text object sở hữu ký tự;
 - ký tự không phải generated character được nối vào chuỗi Unicode;
+- dấu nối cuối dòng mà PDFium trả dưới dạng `U+0002` được khôi phục thành `-`
+  chỉ khi `FPDFText_IsHyphen()` xác nhận đó là hyphen; không đưa marker nội bộ
+  vào editor hoặc font encoder khi Save, tránh ghi thành ký tự lỗi/ô vuông;
 - origin của ký tự không-generated đầu tiên được lưu làm baseline origin;
 - `FPDFText_GetCharBox()` được hợp vào glyph bbox của object và box normalized
   của glyph không-whitespace được giữ trong kết quả scan cho text markup nếu góc

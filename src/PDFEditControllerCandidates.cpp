@@ -1929,7 +1929,16 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
                     }
                 }
 
-                const unsigned int unicode = FPDFText_GetUnicode(textPage, index);
+                unsigned int unicode = FPDFText_GetUnicode(textPage, index);
+                // PDFium replaces a visible end-of-line hyphen with its
+                // internal U+0002 marker for text extraction. That marker is
+                // not an encodable source glyph: saving it with a simple font
+                // can silently emit 0xFF and a missing-glyph box. Keep the
+                // visible hyphen in editable text, using PDFium's flag so an
+                // unrelated control character is never guessed to be a dash.
+                if (unicode == 0x0002U && FPDFText_IsHyphen(textPage, index) == 1) {
+                    unicode = '-';
+                }
                 if (unicode > 0
                     && unicode <= 0x10FFFF
                     && !QChar::isSurrogate(static_cast<char32_t>(unicode))) {

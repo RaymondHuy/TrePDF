@@ -5924,6 +5924,8 @@ private slots:
     void propagatesSourceStylesThroughSelection();
     void groupsCompatibleTextObjectsOnSameLine();
     void groupsCompatibleSourceTextLinesIntoParagraph();
+    void preservesSourceLineEndHyphens_data();
+    void preservesSourceLineEndHyphens();
     void groupsSourceParagraphWithFractionalTransforms_data();
     void groupsSourceParagraphWithFractionalTransforms();
     void groupsMixedSourceParagraphWithStylesAndHistory();
@@ -11757,6 +11759,84 @@ void PDFEditControllerTest::groupsSourceParagraphWithFractionalTransforms()
             QVERIFY(!candidate.value(QStringLiteral("grouped")).toBool());
         }
     }
+}
+
+void PDFEditControllerTest::preservesSourceLineEndHyphens_data()
+{
+    QTest::addColumn<bool>("separateHyphenObject");
+    QTest::newRow("hyphen-in-line-object") << false;
+    QTest::newRow("separate-hyphen-object") << true;
+}
+
+void PDFEditControllerTest::preservesSourceLineEndHyphens()
+{
+    QFETCH(bool, separateHyphenObject);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-line-end-hyphens-%1.pdf").arg(separateHyphenObject));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("saved-line-end-hyphens-%1.pdf").arg(separateHyphenObject));
+    const QByteArray lineEnd = separateHyphenObject ? ") Tj (-) Tj" : "-) Tj";
+    const QByteArray content = QByteArray("BT /F1 12 Tf 1 0 0 1 72 740 Tm (The night")
+        + lineEnd + " ET\nBT /F1 12 Tf 1 0 0 1 72 726 Tm (time economy and QD"
+        + lineEnd + " ET\nBT /F1 12 Tf 1 0 0 1 72 712 Tm (TTg 2020) Tj ET\n";
+    QVERIFY(writePdfObjects(sourcePath, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                   "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"),
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+                   "/Encoding /MacRomanEncoding >>"),
+        QByteArray("<< /Length ") + QByteArray::number(content.size())
+            + " >>\nstream\n" + content + "endstream"}));
+    // Prove this is PDFium's extraction marker, not an actual U+0002 encoded
+    // by the fixture. Both visible '-' glyphs become flagged line-end markers.
+    const auto markedHyphenCount = [](const QString &path) {
+        const QByteArray encoded = QFile::encodeName(path);
+        FPDF_DOCUMENT pdf = FPDF_LoadDocument(encoded.constData(), nullptr);
+        FPDF_PAGE page = pdf ? FPDF_LoadPage(pdf, 0) : nullptr;
+        FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+        int count = 0;
+        if (textPage) {
+            for (int index = 0; index < FPDFText_CountChars(textPage); ++index) {
+                if (FPDFText_GetUnicode(textPage, index) == 0x0002U
+                    && FPDFText_IsHyphen(textPage, index) == 1) {
+                    ++count;
+                }
+            }
+            FPDFText_ClosePage(textPage);
+        }
+        if (page) FPDF_ClosePage(page);
+        if (pdf) FPDF_CloseDocument(pdf);
+        return count;
+    };
+    QCOMPARE(markedHyphenCount(sourcePath), 2);
+    const QString original = QStringLiteral("The night-\ntime economy and QD-\nTTg 2020");
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY2(!candidate.isEmpty(), "Editable text must restore visible hyphens, not U+0002 markers");
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(original);
+    controller.finishSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+
+    // Reuse the same font/character repertoire to exercise the source-font
+    // save path that previously accepted U+0002 and wrote 0xFF silently.
+    const QString edited = QStringLiteral("The night-\ntime economy and QD-\nTTg 2022");
+    controller.commitSelectedText(edited);
+    controller.undo();
+    QCOMPARE(controller.selectedText(), original);
+    controller.redo();
+    QCOMPARE(controller.selectedText(), edited);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!candidateForText(waitForCandidates(controller, 0), edited).isEmpty());
+    QCOMPARE(markedHyphenCount(outputPath), 2);
+    QVERIFY(!pageText(outputPath).contains(QChar(0x02c7)));
+    QCOMPARE(markedHyphenCount(sourcePath), 2);
 }
 
 void PDFEditControllerTest::groupsMixedSourceParagraphWithStylesAndHistory()
