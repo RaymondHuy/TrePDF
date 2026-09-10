@@ -336,10 +336,14 @@ Candidate đoạn dùng union source bounds, giữ origin/baseline và style c�
 đầu, ghép text bằng `\n`, đồng thời làm phẳng `parts` và giữ cả underline paths.
 Inline editor và Save dùng layout Qt hiện có để reflow sau khi sửa nội dung;
 leading riêng của PDF nguồn không được khôi phục thành paragraph formatting.
-Mỗi ranh giới dòng nguồn trở thành một ngắt dòng `\n` thật trong editor; thuật
-toán không tự phân biệt soft wrap với ngắt đoạn hoặc bỏ dấu gạch nối cuối dòng.
-Nội dung gõ thêm vẫn wrap trong frame, nhưng các ngắt dòng nguồn chỉ mất khi
-người dùng sửa hoặc thay thế phần text chứa chúng.
+Editor ban đầu giữ `\n` giữa các dòng nguồn. Draft đánh dấu riêng các vị trí
+này trong `sourceLineBreaks`, dịch chuyển dấu khi sửa text và loại dấu nếu ký
+tự nguồn bị thay thế. Bấm Justify nối những dòng nguồn trong đoạn đang chọn
+bằng dấu cách để Qt tự wrap và căn đều; với caret, phạm vi mở rộng đến ranh
+giới đoạn được nhập bằng Enter. Không nối ngắt đoạn do người dùng nhập, không
+bỏ dấu gạch nối cuối dòng. Vị trí UTF-16 giữ nguyên để không đổi spans hoặc
+selection. Metadata này đi cùng snapshot undo/redo/cancel; mở rồi đóng editor
+và chỉ di chuyển đoạn không làm mất các ngắt dòng nguồn.
 Thao tác chỉ di chuyển đoạn vẫn tịnh tiến từng matrix nguồn, giữ bố cục dòng gốc.
 
 ## 5. Đổi tọa độ PDF sang tọa độ normalized
@@ -597,8 +601,13 @@ Hai property được giữ riêng để sau này có thể hiệu chỉnh riên
 thấy mà không làm mất em-size đọc từ PDF. Khi `displayFontSizeRatio <= 0`, code
 fallback về `fontSizeRatio`.
 
-Với text có sẵn trong PDF và Add Text, giá trị tối thiểu là 1 px.
-`fontForDisplay()` làm tròn và chặn lần cuối:
+Editor và draft preview dàn chữ trong hệ tọa độ PDF point rồi áp
+`pagePointScale` lên toàn bộ TextEdit/Text. Chiều rộng, padding, cỡ chữ và
+semantic font size dùng cùng hệ tọa độ như writer. Vì vậy zoom lẻ không làm
+tròn lại font thành một cỡ khác và khiến dòng nguồn tự wrap khi vào editor.
+Baseline, content height và bounds được nhân scale khi đổi sang tọa độ trang
+hiển thị. Với text có sẵn trong PDF và Add Text, cỡ layout tối thiểu là 1.
+`fontForDisplay()` làm tròn và chặn lần cuối trong hệ layout:
 
 ```text
 QFont.pixelSize = max(1, round(baseFontPixelSize))
@@ -614,12 +623,12 @@ trong editor cũng giữ frame đã mở rộng để text reflow; undo size v�
 đóng editor không tạo draft geometry nếu không có thay đổi khác.
 
 Sau khi load rich HTML, controller gắn semantic size ratio vào custom properties
-của từng `QTextCharFormat` và cố định pixel size theo chiều cao trang hiển thị.
+của từng `QTextCharFormat` và cố định pixel size theo chiều cao trang PDF trước zoom.
 Khi đổi size, `QTextCursor` chỉ merge size và stretch đã hiệu chỉnh vào range.
 Local undo/redo đọc lại các ratio này, tránh suy ngược point từ pixel đã làm tròn
 hoặc để size mặc định mới làm thay đổi những ký tự ngoài vùng chọn.
 Đổi zoom ở pane chính commit editor trước khi đổi kích thước trang hiển thị;
-draft sau đó được dựng lại theo zoom mới.
+draft sau đó phóng to cùng trang nhưng giữ nguyên điểm wrap trong layout.
 
 ### 7.6 Font stretch
 
@@ -1184,6 +1193,10 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
    bounds PDFium; sau khi mở lại, hệ số đó trở thành scale nguồn được bảo toàn.
    Vì vậy chuỗi Save/reopen không lấy phần bù cũ nhân thêm ở mỗi lần lưu, còn
    text PDF vốn condensed/expanded có chủ ý vẫn giữ nguyên scale.
+   Với dòng căn đều, writer đặt từng từ theo tọa độ `QTextLine::cursorToX()`;
+   khoảng giãn nằm giữa các từ, không kéo rộng glyph. Font nguồn giữ scale
+   nguồn, font mới dùng stretch semantic. Tab được thể hiện bằng khoảng dịch
+   chuyển thay vì ghi thành glyph; dòng cuối đoạn không được giãn đều.
 5. Xóa mọi source object của draft, insert replacement tại z-order sớm nhất của
    các object nguồn nếu draft có nội dung thay thế, rồi gọi
    `FPDFPage_GenerateContent()` cho từng page đã đổi. Draft xóa image không tạo

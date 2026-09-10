@@ -100,6 +100,9 @@ does not cross columns or intervening content. Paragraphs retain line breaks
 and every source object path for draft rendering and persistence. Editing uses
 the existing Qt reflow; moving a paragraph alone preserves its original text
 matrices and line layout.
+Justify reflows the selected paragraph's source lines as continuous text while
+preserving paragraph breaks entered by the user. Saved PDFs retain the spacing
+between justified words without stretching the letters.
 
 The Comment ribbon starts with a Select tool in the same position as the Edit
 ribbon, followed by Sticky Note, Free Text, Highlight, Squiggly, Underline,

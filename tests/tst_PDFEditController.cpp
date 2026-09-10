@@ -50,7 +50,9 @@
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextBlock>
 #include <QTextCursor>
+#include <QTextLayout>
 #include <QThread>
 #include <QUrl>
 #include <QVariantList>
@@ -5890,12 +5892,16 @@ private slots:
     void groupsCompatibleSourceTextLinesIntoParagraph();
     void groupsSourceParagraphWithFractionalTransforms_data();
     void groupsSourceParagraphWithFractionalTransforms();
+    void justifiesSourceParagraphThroughQmlOverlay();
+    void preservesExplicitParagraphBreaksWhenJustifyingSource();
     void keepsUnsafeSourceTextLinesSeparate_data();
     void keepsUnsafeSourceTextLinesSeparate();
     void groupsParagraphsWithinSeparateColumns();
     void keepsSourceParagraphFrameClearOfOtherText();
     void editsSourceParagraphWithNoOpCancelAndHistory();
     void editsSourceParagraphThroughQmlOverlay();
+    void keepsSourceParagraphLayoutStableAtFractionalZoom_data();
+    void keepsSourceParagraphLayoutStableAtFractionalZoom();
     void savesEditedSourceParagraphRoundTrip();
     void savesMovedSourceParagraphWithoutReflow();
     void seedsGroupedFrameFromQtTextWidth();
@@ -6080,6 +6086,8 @@ private slots:
     void savesMultipleDraftsOnSamePage();
     void savesExpandedFrameBeforeRightColumn();
     void savesParagraphAlignmentOnlyEdit();
+    void savesJustifiedWordPositions_data();
+    void savesJustifiedWordPositions();
     void savesDeletedTextRoundTrip();
     void savesAddedTextRoundTrip();
     void rendersAddedImageSnapshot();
@@ -11713,6 +11721,143 @@ void PDFEditControllerTest::groupsSourceParagraphWithFractionalTransforms()
     }
 }
 
+void PDFEditControllerTest::justifiesSourceParagraphThroughQmlOverlay()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-paragraph-justify-editor.pdf"));
+    QVERIFY(createSourceParagraphPdf(sourcePath));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+    const QString original = QString::fromLatin1(kSourceParagraphText);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(
+        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false},
+        {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), 1.0},
+        {QStringLiteral("width"), 595.0}, {QStringLiteral("height"), 842.0}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    QQuickWindow window;
+    window.resize(595, 842);
+    qobject_cast<QQuickItem *>(overlay.get())->setParentItem(window.contentItem());
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
+                                     Q_ARG(QVariant, QVariant(candidate))));
+    QObject *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = child;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QTRY_COMPARE(textDocument->blockCount(), 3);
+    QTRY_COMPARE(editor->property("cursorPosition").toInt(), original.size());
+    controller.setSelectedParagraphAlignment(PDFEditController::JustifyAlignment);
+    QString expected = original;
+    expected.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    QTRY_COMPARE(textDocument->toPlainText(), expected);
+    QCOMPARE(controller.selectedText(), expected);
+    QCOMPARE(controller.selectedParagraphFormats().size(), 1);
+    QTRY_COMPARE(textDocument->blockCount(), 1);
+    const QTextBlock block = textDocument->begin();
+    QCOMPARE(block.blockFormat().alignment(), Qt::AlignJustify);
+    QTRY_VERIFY(block.layout()->lineCount() >= 2);
+    for (int index = 0; index + 1 < block.layout()->lineCount(); ++index) {
+        const QTextLine line = block.layout()->lineAt(index);
+        int end = line.textStart() + line.textLength();
+        while (end > line.textStart() && expected.at(end - 1).isSpace()) {
+            --end;
+        }
+        QVERIFY(qAbs(line.cursorToX(end) - line.width()) < 0.5);
+    }
+    const QTextLine lastLine = block.layout()->lineAt(block.layout()->lineCount() - 1);
+    QVERIFY(lastLine.cursorToX(expected.size()) < lastLine.width() - 1.0);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    controller.undo();
+    QCOMPARE(controller.selectedText(), original);
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.selectedText(), expected);
+    controller.discardDrafts();
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedText(), original);
+    // The same action also works when selected without an active inline editor.
+    controller.setSelectedParagraphAlignment(PDFEditController::JustifyAlignment);
+    QCOMPARE(controller.selectedText(), expected);
+    QCOMPARE(controller.selectedParagraphFormats().size(), 1);
+}
+
+void PDFEditControllerTest::preservesExplicitParagraphBreaksWhenJustifyingSource()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-paragraph-justify-explicit-break.pdf"));
+    QVERIFY(createSourceParagraphPdf(sourcePath));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString original = QString::fromLatin1(kSourceParagraphText);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    // Inserting Enter adjacent to a source break must retain its own identity.
+    const qsizetype split = original.indexOf(QLatin1Char('\n'));
+    QString edited = original;
+    edited.insert(split, QLatin1Char('\n'));
+    controller.updateSelectedTextPreview(edited, split + 1);
+    controller.setSelectedTextRange(0, edited.size());
+    controller.setSelectedParagraphAlignment(PDFEditController::JustifyAlignment);
+    QString expected = original;
+    expected.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    expected.insert(split, QLatin1Char('\n'));
+    QCOMPARE(controller.selectedText(), expected);
+    QCOMPARE(controller.selectedParagraphFormats().size(), 2);
+    controller.cancelSelectedTextEdit();
+    QCOMPARE(controller.selectedText(), original);
+    QVERIFY(!controller.hasDrafts());
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(edited, split + 1);
+    controller.updateSelectedTextPreview(original, split);
+    controller.finishSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+    controller.setSelectedParagraphAlignment(PDFEditController::JustifyAlignment);
+    expected = original;
+    expected.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    QCOMPARE(controller.selectedText(), expected);
+    controller.undo();
+    controller.beginSelectedTextEdit();
+    edited = original;
+    edited.remove(split, 1);
+    controller.updateSelectedTextPreview(edited, split);
+    controller.updateSelectedTextPreview(original, split + 1);
+    controller.setSelectedTextRange(0, original.size());
+    controller.setSelectedParagraphAlignment(PDFEditController::JustifyAlignment);
+    expected[split] = QLatin1Char('\n');
+    QCOMPARE(controller.selectedText(), expected);
+    QCOMPARE(controller.selectedParagraphFormats().size(), 2);
+}
+
 void PDFEditControllerTest::keepsUnsafeSourceTextLinesSeparate_data()
 {
     QTest::addColumn<double>("secondX");
@@ -11983,6 +12128,116 @@ void PDFEditControllerTest::editsSourceParagraphThroughQmlOverlay()
     QVERIFY(controller.canUndo());
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     QCOMPARE(normalizedPageText(outputPath), replacement.simplified());
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::keepsSourceParagraphLayoutStableAtFractionalZoom_data()
+{
+    QTest::addColumn<qreal>("zoom");
+    QTest::newRow("75-percent") << 0.75;
+    QTest::newRow("100-percent") << 1.0;
+    QTest::newRow("124-percent") << 1.24;
+    QTest::newRow("155-percent") << 1.55;
+    QTest::newRow("200-percent") << 2.0;
+}
+
+void PDFEditControllerTest::keepsSourceParagraphLayoutStableAtFractionalZoom()
+{
+    QFETCH(qreal, zoom);
+    const QStringList lines{
+        QStringLiteral("entertainment experiences (excluding the prostitution industry). In the US, the night-time "),
+        QStringLiteral("economy includes 5 main areas including: Arts, bars, culinary services, sports and "),
+        QStringLiteral("entertainment. Most European countries define the night-time economy in a narrow sense "),
+        QStringLiteral("and define the night-time economic operating time frame from 6:00 p.m. the previous day "),
+        QStringLiteral("to 6:00 a.m. the next morning (Field 2008; Le et al., 2022).")};
+    QVector<SourceParagraphTextPart> parts;
+    for (qsizetype index = 0; index < lines.size(); ++index) {
+        parts.append({lines.at(index), 72.0, 620.0 - index * 14.0, "Helvetica", 1.0, 12.0F});
+    }
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("paragraph-zoom-%1.pdf").arg(zoom));
+    QVERIFY(createSourceParagraphPdf(sourcePath, parts));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString original = lines.join(QLatin1Char('\n'));
+    controller.setTool(PDFEditController::SelectTool);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(
+        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    const QSizeF pageSize = document.pageSize(0);
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false},
+        {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), zoom},
+        {QStringLiteral("width"), pageSize.width() * zoom},
+        {QStringLiteral("height"), pageSize.height() * zoom}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    QQuickWindow window;
+    window.resize(qCeil(pageSize.width() * zoom), qCeil(pageSize.height() * zoom));
+    auto *overlayItem = qobject_cast<QQuickItem *>(overlay.get());
+    overlayItem->setParentItem(window.contentItem());
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
+                                     Q_ARG(QVariant, QVariant(candidate))));
+    QObject *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = child;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *editorItem = qobject_cast<QQuickItem *>(editor);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QTRY_COMPARE(textDocument->toPlainText(), original);
+    QTRY_COMPARE(editor->property("lineCount").toInt(), lines.size());
+    for (QTextBlock block = textDocument->begin(); block.isValid(); block = block.next()) {
+        QCOMPARE(block.layout()->lineCount(), 1);
+    }
+    const qreal baseline = editorItem->mapToItem(overlayItem,
+        QPointF(0.0, editor->property("baselineOffset").toReal())).y();
+    QVERIFY(qAbs(baseline / zoom - controller.selectedBaselineY() * pageSize.height()) < 0.01);
+    const qreal displayedHeight = editorItem->mapRectToItem(overlayItem,
+        QRectF(0.0, 0.0, 1.0, editor->property("contentHeight").toReal())).height();
+    // All five source rows fit at the same physical height regardless of zoom.
+    QVERIFY(qAbs(displayedHeight / zoom - 70.0) < 0.1);
+    const QRectF originalFrame = candidate.value(QStringLiteral("frameRect")).toRectF();
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
+                                     Q_ARG(QVariant, QVariant(candidate))));
+    QTRY_VERIFY(editorItem->hasActiveFocus());
+    QVERIFY(QMetaObject::invokeMethod(editor, "selectAll"));
+    QTRY_COMPARE(editor->property("selectionEnd").toInt(), original.size());
+    controller.setSelectedTextRange(0, original.size());
+    controller.setSelectedFontSize(18);
+    QTextCursor cursor(textDocument);
+    cursor.setPosition(0);
+    cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+    QCOMPARE(cursor.charFormat().font().pixelSize() * editorItem->scale(), 18.0 * zoom);
+    QCOMPARE(controller.selectedFontSize(), 18.0);
+    QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+    QTRY_COMPARE(controller.selectedFontSize(), 12.0);
+    QTRY_COMPARE(editor->property("lineCount").toInt(), lines.size());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "cancelEditing"));
     QVERIFY(!controller.hasDrafts());
 }
 
@@ -13071,7 +13326,7 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
     QTextCursor cursor(document);
     cursor.setPosition(originalText.size());
     cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
-    QCOMPARE(cursor.charFormat().font().pixelSize(), 48);
+    QCOMPARE(cursor.charFormat().font().pixelSize() * item->scale(), 48.0);
     QVERIFY(cursor.charFormat().fontUnderline());
     QVERIFY(QMetaObject::invokeMethod(textEdit, "undo"));
     QTRY_COMPARE(m_controller.selectedText(), originalText);
@@ -27370,6 +27625,152 @@ void PDFEditControllerTest::savesParagraphAlignmentOnlyEdit()
             "Expected right alignment to move text right from %1, got %2")
                        .arg(sourceOrigin.x(), 0, 'f', 3)
                        .arg(savedOrigin.x(), 0, 'f', 3)));
+}
+
+void PDFEditControllerTest::savesJustifiedWordPositions_data()
+{
+    QTest::addColumn<bool>("added");
+    QTest::addColumn<bool>("mixedSpans");
+    QTest::addColumn<QString>("text");
+    const QString text = QStringLiteral(
+        "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu");
+    QTest::newRow("source-font") << false << false << text;
+    QTest::newRow("added-font") << true << false << text;
+    QTest::newRow("mixed-spans") << true << true << text;
+    QTest::newRow("spaces-tabs-hard-break") << true << false << QStringLiteral(
+        "Alpha  beta\tgamma delta epsilon zeta eta theta iota kappa lambda mu\n"
+        "Last paragraph stays short\nShort\tend");
+}
+
+void PDFEditControllerTest::savesJustifiedWordPositions()
+{
+    QFETCH(bool, added);
+    QFETCH(bool, mixedSpans);
+    QFETCH(QString, text);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("justify-%1-source.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("justify-%1-output.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString sourceText = added ? QStringLiteral("Original text") : text;
+    QVERIFY(createSourceParagraphPdf(sourcePath, {
+        {sourceText, 72.0, 740.0, "Helvetica", 1.0, 12.0F}}));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), sourceText);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    if (added) {
+        controller.deleteSelectedObject();
+        QVERIFY(!controller.addText(0, 0.12, 0.2).isEmpty());
+        controller.updateSelectedTextPreview(text);
+        controller.setSelectedTextRange(0, text.size());
+        controller.setSelectedFontSize(12.0);
+    } else {
+        controller.beginSelectedTextEdit();
+    }
+    if (mixedSpans) {
+        // A format boundary within a word must survive positioning that word.
+        controller.setSelectedTextRange(text.indexOf(QStringLiteral("gamma")) + 2, 2);
+        controller.setSelectedColor(Qt::red);
+    }
+    controller.setSelectedTextRange(0, text.size());
+    controller.setSelectedParagraphAlignment(PDFEditController::JustifyAlignment);
+    const QSizeF pageSize = document.pageSize(0);
+    const qreal contentLeft = (controller.selectedHasBaseline()
+        ? controller.selectedOriginX() : controller.selectedFrameRect().left()) * pageSize.width();
+    constexpr qreal layoutWidth = 175.0;
+    QRectF frame = controller.selectedFrameRect();
+    frame.setRight((contentLeft + layoutWidth) / pageSize.width());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(frame);
+    controller.finishSelectedFrameResize();
+    const QFont font = controller.fontForDisplay(
+        controller.selectedFontFamily(), controller.selectedFontStretch(),
+        controller.selectedFontBold(), controller.selectedFontItalic(),
+        controller.selectedFontUnderline(),
+        controller.selectedDisplayFontSizeRatio() * pageSize.height());
+    controller.finishSelectedTextEdit();
+
+    // Compare each word's saved first-glyph origin with Qt's justified layout,
+    // rather than checking only the line's overall bounding box.
+    QVector<QPair<qsizetype, qreal>> expectedStarts;
+    qsizetype denseIndex = 0;
+    int wrappedLines = 0;
+    for (const QString &paragraph : text.split(QLatin1Char('\n'))) {
+        QTextLayout layout(paragraph, font);
+        QTextOption option;
+        option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        option.setAlignment(Qt::AlignJustify);
+        layout.setTextOption(option);
+        layout.beginLayout();
+        while (true) {
+            QTextLine line = layout.createLine();
+            if (!line.isValid()) {
+                break;
+            }
+            line.setLineWidth(layoutWidth);
+            ++wrappedLines;
+            const int end = line.textStart() + line.textLength();
+            const bool positionsSeparated = end < paragraph.size()
+                || paragraph.mid(line.textStart(), line.textLength()).contains(QLatin1Char('\t'));
+            for (int index = line.textStart(); index < end; ++index) {
+                if (paragraph[index].isSpace()) {
+                    continue;
+                }
+                if (index == line.textStart()
+                    || (positionsSeparated && paragraph[index - 1].isSpace())) {
+                    expectedStarts.append({denseIndex, contentLeft + line.cursorToX(index)});
+                }
+                ++denseIndex;
+            }
+        }
+        layout.endLayout();
+    }
+    QVERIFY(wrappedLines >= 3);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QByteArray encodedPath = QFile::encodeName(outputPath);
+    FPDF_DOCUMENT saved = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    QVERIFY(saved);
+    const auto closeDocument = qScopeGuard([&]() { FPDF_CloseDocument(saved); });
+    FPDF_PAGE page = FPDF_LoadPage(saved, 0);
+    QVERIFY(page);
+    const auto closePage = qScopeGuard([&]() { FPDF_ClosePage(page); });
+    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+    QVERIFY(textPage);
+    const auto closeTextPage = qScopeGuard([&]() { FPDFText_ClosePage(textPage); });
+    QVector<QPointF> origins;
+    QString savedDenseText;
+    for (int index = 0; index < FPDFText_CountChars(textPage); ++index) {
+        const QChar character(static_cast<char16_t>(FPDFText_GetUnicode(textPage, index)));
+        if (character.isSpace()) {
+            continue;
+        }
+        double x = 0.0;
+        double y = 0.0;
+        QVERIFY(FPDFText_GetCharOrigin(textPage, index, &x, &y));
+        origins.append(QPointF(x, y));
+        savedDenseText.append(character);
+    }
+    QString denseText = text;
+    denseText.remove(QRegularExpression(QStringLiteral("\\s")));
+    QCOMPARE(savedDenseText, denseText);
+    for (const auto &[index, expectedX] : expectedStarts) {
+        QVERIFY2(qAbs(origins.at(index).x() - expectedX) < 0.1,
+                 qPrintable(QStringLiteral("Word at %1: expected x=%2, saved x=%3")
+                     .arg(index).arg(expectedX).arg(origins.at(index).x())));
+    }
+    if (!added) {
+        FS_MATRIX matrix{};
+        QVERIFY(textObjectMatrix(outputPath, QStringLiteral("Alpha"), matrix));
+        QVERIFY(qAbs(horizontalScale(matrix) - 1.0) < 0.0001);
+    } else {
+        FS_MATRIX matrix{};
+        QVERIFY(textObjectMatrix(outputPath, QStringLiteral("iota"), matrix));
+        QVERIFY(qAbs(horizontalScale(matrix) - 1.0) < 0.0001);
+    }
 }
 
 void PDFEditControllerTest::savesDeletedTextRoundTrip()

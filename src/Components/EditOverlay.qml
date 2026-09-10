@@ -15,6 +15,10 @@ Item {
     required property AppTheme theme
     required property PDFEditController controller
     required property real pagePointScale
+    // Lay out in PDF points, then scale the result with the page. Rounding the
+    // font separately at each zoom otherwise changes wrapping on editor entry.
+    readonly property real textLayoutScale: Math.max(0.01, pagePointScale)
+    readonly property real textLayoutPageHeight: height / textLayoutScale
     property int viewRotation: 0
 
     property var drafts: []
@@ -801,7 +805,7 @@ Item {
             controller.selectedParagraphFormats,
             selectedBaseFormat(),
             editorFrame.baseFontPixelSize)
-        controller.initializeEditorFontSizes(editor.textDocument, root.height)
+        controller.initializeEditorFontSizes(editor.textDocument, root.textLayoutPageHeight)
         const maximumPosition = editor.length
         const start = Math.max(0, Math.min(maximumPosition, selectionStart))
         const end = Math.max(0, Math.min(maximumPosition, selectionEnd))
@@ -2300,7 +2304,7 @@ Item {
                     editor.textDocument,
                     start,
                     length,
-                    root.height)
+                    root.textLayoutPageHeight)
             }
         }
 
@@ -2315,7 +2319,7 @@ Item {
                 start,
                 length,
                 fontSizeRatio,
-                root.height)
+                root.textLayoutPageHeight)
             root.applyingEditorDocumentFormat = false
             if (!applied)
                 root.suppressNextEditorReload = false
@@ -2897,7 +2901,7 @@ Item {
                 + rightBoxBleed
             readonly property real fontPixelSize: Math.max(
                 modelData.added === true ? root.minimumTextPixelSize : 1,
-                modelData.displayFontSizeRatio * root.height)
+                modelData.displayFontSizeRatio * root.textLayoutPageHeight)
             readonly property font displayFont: root.controller.fontForDisplay(
                 modelData.fontFamily,
                 modelData.fontStretch,
@@ -2908,20 +2912,20 @@ Item {
             readonly property real desiredTextPageY: usesBaseline
                 ? Math.min(
                     frameY - root.fallbackBleed,
-                    textBaselineY - draftText.baselineOffset)
+                    textBaselineY - draftText.baselineOffset * root.textLayoutScale)
                 : frameY - root.fallbackBleed
             readonly property real textPageY: Math.max(0, desiredTextPageY)
             readonly property real textTop: usesBaseline
                 ? Math.max(
                     0,
-                    textBaselineY - textPageY - draftText.baselineOffset)
+                    textBaselineY - textPageY - draftText.baselineOffset * root.textLayoutScale)
                 : root.fallbackBleed
             readonly property real frameBottom: frameY
                 + frameHeight
                 + root.fallbackBleed
                 - textPageY
             readonly property real contentBottom: textTop
-                + (isImage || isShape ? 0 : draftText.implicitHeight)
+                + (isImage || isShape ? 0 : draftText.implicitHeight * root.textLayoutScale)
                 + root.fallbackBleed
             readonly property real textHeight: Math.max(
                 1,
@@ -2960,7 +2964,7 @@ Item {
                     root.height,
                     draftItem.textPageY
                         + draftItem.textTop
-                        + draftText.implicitHeight
+                        + draftText.implicitHeight * root.textLayoutScale
                         + root.fallbackBleed)
                 const contentHeight = Math.min(
                     1 - selectedFrameRect.y,
@@ -3034,14 +3038,16 @@ Item {
 
                 x: 0
                 y: draftItem.textTop
-                width: draftItem.width
+                width: draftItem.width / root.textLayoutScale
                 height: implicitHeight
+                scale: root.textLayoutScale
+                transformOrigin: Item.TopLeft
                 leftPadding: Math.max(
                     0,
-                    draftItem.contentLeftPageX - draftItem.x)
+                    draftItem.contentLeftPageX - draftItem.x) / root.textLayoutScale
                 rightPadding: Math.max(
                     0,
-                    draftItem.x + draftItem.width - draftItem.contentRightPageX)
+                    draftItem.x + draftItem.width - draftItem.contentRightPageX) / root.textLayoutScale
                 text: draftItem.richText
                 textFormat: Text.RichText
                 color: draftItem.modelData.color
@@ -3839,7 +3845,7 @@ Item {
             editsAddedText ? root.minimumTextPixelSize : 1,
             (Number(baseFormat.displayFontSizeRatio) > 0
                 ? Number(baseFormat.displayFontSizeRatio)
-                : Number(baseFormat.fontSizeRatio)) * root.height)
+                : Number(baseFormat.fontSizeRatio)) * root.textLayoutPageHeight)
         readonly property font displayFont: root.controller.fontForDisplay(
             String(baseFormat.fontFamily || ""),
             Number(baseFormat.fontStretch || 100),
@@ -3873,17 +3879,17 @@ Item {
         readonly property real desiredPageY: usesBaseline
             ? Math.min(
                 frameY - verticalBleed,
-                textBaselineY - editor.baselineOffset)
+                textBaselineY - editor.baselineOffset * root.textLayoutScale)
             : frameY - verticalBleed
         readonly property real contentTop: usesBaseline
-            ? Math.max(0, textBaselineY - y - editor.baselineOffset)
+            ? Math.max(0, textBaselineY - y - editor.baselineOffset * root.textLayoutScale)
             : inputMargin
         readonly property real frameBottom: frameY
             + Math.max(1, frameHeight)
             + verticalBleed
             - y
         readonly property real editorBottom: contentTop
-            + editor.contentHeight
+            + editor.contentHeight * root.textLayoutScale
             + (usesBaseline ? verticalBleed : inputMargin)
         readonly property real desiredHeight: Math.max(
             editsAddedText ? 1 : 17,
@@ -3920,14 +3926,16 @@ Item {
 
             x: 0
             y: editorFrame.contentTop
-            width: parent.width
+            width: parent.width / root.textLayoutScale
             height: Math.max(1, contentHeight)
+            scale: root.textLayoutScale
+            transformOrigin: Item.TopLeft
             leftPadding: Math.max(
                 0,
-                editorFrame.contentLeftPageX - editorFrame.x)
+                editorFrame.contentLeftPageX - editorFrame.x) / root.textLayoutScale
             rightPadding: Math.max(
                 0,
-                editorFrame.x + editorFrame.width - editorFrame.contentRightPageX)
+                editorFrame.x + editorFrame.width - editorFrame.contentRightPageX) / root.textLayoutScale
             topPadding: 0
             bottomPadding: 0
             textMargin: 0

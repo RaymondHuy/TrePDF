@@ -1176,6 +1176,57 @@ void PDFEditController::setSelectedParagraphAlignment(
     }
 
     bool changed = false;
+    if (alignment == JustifyAlignment && first >= 0 && last >= first
+        && !draft.sourceLineBreaks.isEmpty()) {
+        // Source rows belong to one inferred paragraph. A user-entered newline
+        // remains a paragraph boundary, including when only the caret is active.
+        while (first > 0 && draft.sourceLineBreaks.contains(
+                   draft.paragraphFormats.at(first).start - 1)) {
+            --first;
+        }
+        while (last + 1 < draft.paragraphFormats.size()
+               && draft.sourceLineBreaks.contains(
+                   draft.paragraphFormats.at(last + 1).start - 1)) {
+            ++last;
+        }
+        const qsizetype start = draft.paragraphFormats.at(first).start;
+        const qsizetype end = draft.paragraphFormats.at(last).start
+            + draft.paragraphFormats.at(last).length;
+        for (qsizetype position : std::as_const(draft.sourceLineBreaks)) {
+            if (position >= start && position < end) {
+                // Keep UTF-16 positions stable for character styles and the
+                // live editor selection while enabling normal word wrapping.
+                draft.text[position] = QLatin1Char(' ');
+                changed = true;
+            }
+        }
+        if (changed) {
+            draft.sourceLineBreaks.removeIf([start, end](qsizetype position) {
+                return position >= start && position < end;
+            });
+            const auto oldFormats = draft.paragraphFormats;
+            draft.paragraphFormats = paragraphFormatsForText(draft.text, ParagraphFormat());
+            qsizetype previous = 0;
+            for (qsizetype index = 0; index < draft.paragraphFormats.size(); ++index) {
+                ParagraphFormat &format = draft.paragraphFormats[index];
+                while (previous + 1 < oldFormats.size()
+                       && oldFormats.at(previous + 1).start <= format.start) {
+                    ++previous;
+                }
+                const qsizetype newStart = format.start;
+                const qsizetype newLength = format.length;
+                format = oldFormats.at(previous);
+                format.start = newStart;
+                format.length = newLength;
+                if (format.start == start) {
+                    first = index;
+                }
+                if (format.start <= end) {
+                    last = index;
+                }
+            }
+        }
+    }
     for (qsizetype index = first; index >= 0 && index <= last; ++index) {
         ParagraphFormat &format = draft.paragraphFormats[index];
         if (format.alignment != alignment) {
@@ -1653,6 +1704,13 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
         candidate.text.size(),
         characterFormatForCandidate(candidate)});
     draft.paragraphFormats = paragraphFormatsForText(candidate.text, ParagraphFormat());
+    if (candidate.objectId.startsWith(QLatin1String("paragraph:"))) {
+        for (qsizetype index = 0; index < candidate.text.size(); ++index) {
+            if (candidate.text.at(index) == QLatin1Char('\n')) {
+                draft.sourceLineBreaks.append(index);
+            }
+        }
+    }
     draft.frameRect = candidate.initialDraftFrameRect.isEmpty()
         ? candidate.geometry.sourceRect
         : candidate.initialDraftFrameRect;
@@ -1772,14 +1830,12 @@ PDFEditController::TextChange PDFEditController::setDraftText(
         ++commonSuffix;
     }
 
-    if (typingFormat
-        && typingPosition >= 0
-        && cursorAfterEdit >= 0
+    if (cursorAfterEdit >= 0
         && cursorAfterEdit <= newLength) {
         const qsizetype lengthDelta = newLength - oldLength;
         if (lengthDelta > 0) {
             const qsizetype anchoredStart = cursorAfterEdit - lengthDelta;
-            if (anchoredStart == typingPosition
+            if ((!typingFormat || anchoredStart == typingPosition)
                 && anchoredStart >= 0
                 && draft.text.first(anchoredStart) == text.first(anchoredStart)
                 && draft.text.sliced(anchoredStart)
@@ -1790,7 +1846,7 @@ PDFEditController::TextChange PDFEditController::setDraftText(
         } else if (lengthDelta < 0) {
             const qsizetype removedLength = -lengthDelta;
             const qsizetype anchoredStart = cursorAfterEdit;
-            if ((anchoredStart == typingPosition
+            if ((!typingFormat || anchoredStart == typingPosition
                  || anchoredStart + removedLength == typingPosition)
                 && anchoredStart + removedLength <= oldLength
                 && draft.text.first(anchoredStart) == text.first(anchoredStart)
@@ -1806,6 +1862,16 @@ PDFEditController::TextChange PDFEditController::setDraftText(
     change.start = commonPrefix;
     change.removedLength = oldLength - commonPrefix - commonSuffix;
     change.insertedLength = newLength - commonPrefix - commonSuffix;
+
+    QVector<qsizetype> sourceLineBreaks;
+    for (qsizetype position : std::as_const(draft.sourceLineBreaks)) {
+        if (position < change.start) {
+            sourceLineBreaks.append(position);
+        } else if (position >= change.start + change.removedLength) {
+            sourceLineBreaks.append(position + change.insertedLength - change.removedLength);
+        }
+    }
+    draft.sourceLineBreaks = std::move(sourceLineBreaks);
 
     const QVector<ParagraphFormat> oldParagraphFormats = draft.paragraphFormats;
     const CharacterFormat fallbackFormat = primaryCharacterFormat(draft);

@@ -238,6 +238,11 @@ Current features:
   checks share a 200,000-comparison budget with source/line fallback. Content
   edits use the existing Qt reflow; move-only drafts translate every original
   text matrix and preserve the source line layout.
+  Justify joins tracked source line breaks into spaces within the selected
+  logical paragraph so Qt can wrap and justify it. Explicit user-entered
+  paragraph breaks remain separate. Source-break positions follow text edits
+  and draft snapshots. Saving justified lines positions words independently
+  to retain their spacing without stretching glyphs; the final line stays left aligned.
 - Fonts under `src/assets/fonts` are bundled and preferred over matching system
   families when resolving draft text fonts.
 - Contextual Edit/Delete actions when selecting editable text; deletion remains
@@ -252,9 +257,10 @@ Current features:
   sets a transient typing size at a collapsed caret. Mixed sizes show a blank
   panel value. Store semantic size ratios in the live QTextDocument so local
   undo/redo restores exact source sizes independently of zoom; merge size and
-  calibrated stretch without replacing the editor document. Commit the active
-  editor before changing primary-pane zoom so its pixel formats cannot become
-  stale. During inline
+  calibrated stretch without replacing the editor document. Inline text and
+  draft previews lay out in PDF points, then scale as a whole with page zoom,
+  preserving wrap, baseline, and font-size behavior at fractional zoom levels.
+  Commit the active editor before changing primary-pane zoom. During inline
   editing, bold/italic/underline apply to the
   selected range; with only a caret they become the typing format for
   subsequently inserted text without changing existing characters. Invoking

@@ -630,6 +630,7 @@ private:
         QString text;
         QVector<CharacterSpan> characterSpans;
         QVector<ParagraphFormat> paragraphFormats;
+        QVector<qsizetype> sourceLineBreaks;
         QRectF frameRect;
         QRectF contentBounds;
         CommentStatus commentStatus = NoCommentStatus;
