@@ -970,6 +970,7 @@ bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
         && left.commentMarked == right.commentMarked
         && sameCharacterSpans(left.characterSpans, right.characterSpans)
         && sameParagraphFormats(left.paragraphFormats, right.paragraphFormats)
+        && left.sourceLineBreaks == right.sourceLineBreaks
         && left.frameRect == right.frameRect
         && left.contentBounds == right.contentBounds
         && left.deleted == right.deleted;

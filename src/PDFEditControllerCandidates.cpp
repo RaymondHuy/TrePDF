@@ -77,6 +77,20 @@ constexpr qreal kLineFontSizeToleranceRatio = 0.08;
 
 constexpr qreal kLineFontSizeTolerancePoints = 0.5;
 
+constexpr qreal kParagraphMinimumBaselineGapEm = 0.8;
+
+constexpr qreal kParagraphMaximumBaselineGapEm = 1.6;
+
+constexpr qreal kParagraphLeftAlignmentToleranceEm = 0.4;
+
+constexpr qsizetype kMaximumTextGroupingComparisons = 200000;
+
+constexpr qsizetype kMaximumParagraphLines = 64;
+
+constexpr qsizetype kMaximumParagraphParts = 1024;
+
+constexpr qsizetype kMaximumParagraphCharacters = 32768;
+
 constexpr qreal kTextMarkupMaximumAngleRadians = 0.017453292519943295;
 
 constexpr qreal kFullTurnRadians = 6.2831853071795864769;
@@ -366,28 +380,13 @@ qreal normalizedFontSize(FPDF_PAGE page,
         / deviceSize.height();
 }
 
-qreal horizontalScaleForTransform(FPDF_PAGE page,
-                                  const QSizeF &pageSize,
-                                  const FS_MATRIX &transform)
+qreal horizontalScaleForTransform(const FS_MATRIX &transform)
 {
-    const QSize deviceSize = mappingDeviceSize(pageSize);
-    QPointF origin;
-    QPointF baselinePoint;
-    QPointF verticalPoint;
-    if (deviceSize.isEmpty()
-        || !transformedPointToDevice(
-            page, deviceSize, transform, QPointF(0.0, 0.0), origin)
-        || !transformedPointToDevice(
-            page, deviceSize, transform, QPointF(1.0, 0.0), baselinePoint)
-        || !transformedPointToDevice(
-            page, deviceSize, transform, QPointF(0.0, 1.0), verticalPoint)) {
-        return 1.0;
-    }
-
-    const QPointF baseline = baselinePoint - origin;
-    const QPointF vertical = verticalPoint - origin;
-    const qreal baselineLength = std::hypot(baseline.x(), baseline.y());
-    const qreal verticalLength = std::hypot(vertical.x(), vertical.y());
+    // PageToDevice rounds to integer coordinates, making identical transforms
+    // appear to have different stretches at fractional text origins. Page
+    // rotation and uniform scaling preserve this ratio of the source axes.
+    const qreal baselineLength = std::hypot(qreal(transform.a), qreal(transform.b));
+    const qreal verticalLength = std::hypot(qreal(transform.c), qreal(transform.d));
     if (!qIsFinite(baselineLength)
         || !qIsFinite(verticalLength)
         || baselineLength <= 0.0
@@ -2326,10 +2325,7 @@ void PDFEditController::appendPageObjectCandidates(
         0.0,
         normalizedFontSize(page, pageSize, textTransform, fontSize));
     candidate.displayFontSizeRatio = candidate.fontSizeRatio;
-    candidate.horizontalScale = horizontalScaleForTransform(
-        page,
-        pageSize,
-        textTransform);
+    candidate.horizontalScale = horizontalScaleForTransform(textTransform);
     candidate.fontStretch = qBound(
         static_cast<int>(QFont::UltraCondensed),
         qRound(candidate.horizontalScale * QFont::Unstretched),
@@ -2394,6 +2390,39 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         return candidates;
     }
 
+    // Overprinted or intersecting source text is ambiguous. Keep every
+    // involved object independent, including when their baselines coincide.
+    QVector<qsizetype> sourceTextOrder;
+    for (qsizetype index = 0; index < candidates.size(); ++index) {
+        if (candidates[index].kind == QLatin1String("text")
+            && !candidates[index].textMarkupHitTestOnly) {
+            sourceTextOrder.append(index);
+        }
+    }
+    std::stable_sort(sourceTextOrder.begin(), sourceTextOrder.end(),
+        [&](qsizetype left, qsizetype right) {
+            return candidates[left].geometry.sourceRect.top()
+                < candidates[right].geometry.sourceRect.top();
+        });
+    QSet<QString> overlappingText;
+    qsizetype comparisons = 0;
+    for (qsizetype index = 0; index < sourceTextOrder.size(); ++index) {
+        const Candidate &left = candidates[sourceTextOrder[index]];
+        for (qsizetype next = index + 1; next < sourceTextOrder.size(); ++next) {
+            const Candidate &right = candidates[sourceTextOrder[next]];
+            if (right.geometry.sourceRect.top() >= left.geometry.sourceRect.bottom()) {
+                break;
+            }
+            if (++comparisons > kMaximumTextGroupingComparisons) {
+                return candidates;
+            }
+            if (left.geometry.sourceRect.intersects(right.geometry.sourceRect)) {
+                overlappingText.insert(left.objectId);
+                overlappingText.insert(right.objectId);
+            }
+        }
+    }
+
     struct IndexedCandidate {
         Candidate candidate;
         qsizetype order = -1;
@@ -2417,6 +2446,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             && candidate.editable
             && candidate.hasBaseline
             && !candidate.added
+            && !overlappingText.contains(candidate.objectId)
             && candidate.parts.size() == 1
             && emSize(candidate) > 0.0;
     };
@@ -2509,6 +2539,49 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             ? QString(QLatin1Char(' '))
             : QString();
     };
+    const auto appendSourceText = [&](Candidate &grouped, const Candidate &source) {
+        const qsizetype offset = grouped.text.size();
+        QVector<CharacterSpan> spans = source.sourceCharacterSpans;
+        if (spans.isEmpty()) {
+            spans.append(CharacterSpan{0, source.text.size(),
+                characterFormatForCandidate(source)});
+        }
+        for (CharacterSpan span : std::as_const(spans)) {
+            span.start += offset;
+            if (!grouped.sourceCharacterSpans.isEmpty()) {
+                CharacterSpan &previous = grouped.sourceCharacterSpans.last();
+                if (previous.start + previous.length == span.start
+                    && sameCharacterFormat(previous.format, span.format)) {
+                    previous.length += span.length;
+                    continue;
+                }
+            }
+            grouped.sourceCharacterSpans.append(std::move(span));
+        }
+        grouped.text.append(source.text);
+    };
+    const auto appendSeparator = [&](Candidate &grouped, const QString &separator,
+                                     const Candidate *followingLine = nullptr) {
+        if (followingLine) {
+            // QTextDocument reports a paragraph separator using the following
+            // block's initial character format. Seed inferred breaks the same
+            // way so entering/leaving the editor does not create a style edit.
+            const CharacterFormat format = followingLine->sourceCharacterSpans.isEmpty()
+                ? characterFormatForCandidate(*followingLine)
+                : followingLine->sourceCharacterSpans.constFirst().format;
+            if (!grouped.sourceCharacterSpans.isEmpty()
+                && sameCharacterFormat(grouped.sourceCharacterSpans.constLast().format,
+                                       format)) {
+                grouped.sourceCharacterSpans.last().length += separator.size();
+            } else {
+                grouped.sourceCharacterSpans.append(CharacterSpan{
+                    grouped.text.size(), separator.size(), format});
+            }
+        } else if (!grouped.sourceCharacterSpans.isEmpty()) {
+            grouped.sourceCharacterSpans.last().length += separator.size();
+        }
+        grouped.text.append(separator);
+    };
 
     for (TextLine &line : lines) {
         std::stable_sort(
@@ -2539,6 +2612,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             grouped.objectPath.clear();
             grouped.parts.clear();
             grouped.text.clear();
+            grouped.sourceCharacterSpans.clear();
             grouped.textGlyphRects.clear();
             QRectF groupedSourceRect = run.front().candidate.geometry.sourceRect;
             grouped.renderSuppressible = true;
@@ -2559,13 +2633,13 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                         run[index - 1].candidate,
                         source);
                     grouped.parts.last().separatorAfter = separator;
-                    grouped.text.append(separator);
+                    appendSeparator(grouped, separator);
                 }
 
                 CandidatePart part = source.parts.constFirst();
                 part.separatorAfter.clear();
                 grouped.parts.append(std::move(part));
-                grouped.text.append(source.text);
+                appendSourceText(grouped, source);
                 grouped.textGlyphRects.append(source.textGlyphRects);
                 identity.append(source.objectId.toUtf8());
                 identity.append('\0');
@@ -2592,6 +2666,207 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             run.append(std::move(candidate));
         }
         flushRun();
+    }
+
+    // Work from complete visual lines, then link only unambiguous neighbors
+    // within one column. All paths remain attached to the resulting paragraph
+    // so suppression, deletion, movement and Save share the existing pipeline.
+    const auto canJoinParagraph = [&](const Candidate &candidate) {
+        return candidate.kind == QLatin1String("text")
+            && candidate.editable && candidate.renderSuppressible
+            && candidate.hasBaseline && !candidate.added
+            && !candidate.parts.isEmpty()
+            && !overlappingText.contains(candidate.objectId)
+            && !candidate.text.contains(QLatin1Char('\n'))
+            && !candidate.text.contains(QLatin1Char('\r'))
+            && emSize(candidate) > 0.0;
+    };
+    const auto paragraphStyleMatches = [&](const Candidate &left, const Candidate &right) {
+        // A paragraph can change emphasis without changing its typeface.
+        // Preserve each line's format instead of applying the first line's
+        // bold/italic/underline and calibrated stretch to the entire paragraph.
+        return !left.fontFamily.isEmpty()
+            && sameFontFamily(left.fontFamily, right.fontFamily)
+            && qAbs(emSize(left) - emSize(right))
+                <= qMax<qreal>(0.25, 0.02 * qMax(emSize(left), emSize(right)))
+            && qAbs(left.fontStretch - right.fontStretch) <= 1
+            && left.color == right.color
+            && left.fillColor == right.fillColor
+            && left.strokeColor == right.strokeColor
+            && qFuzzyCompare(left.strokeWidth + 1.0, right.strokeWidth + 1.0)
+            && left.textRenderMode == right.textRenderMode;
+    };
+    const auto alignedLeft = [&](const Candidate &left, const Candidate &right) {
+        return qAbs(left.origin.x() - right.origin.x()) * pageSize.width()
+            <= kParagraphLeftAlignmentToleranceEm * qMax(emSize(left), emSize(right));
+    };
+    QVector<qsizetype> paragraphOrder;
+    for (qsizetype index = 0; index < output.size(); ++index) {
+        if (canJoinParagraph(output[index].candidate)) {
+            paragraphOrder.append(index);
+        }
+    }
+    std::stable_sort(paragraphOrder.begin(), paragraphOrder.end(),
+        [&](qsizetype left, qsizetype right) {
+            return output[left].candidate.origin.y() < output[right].candidate.origin.y();
+        });
+    QVector<qsizetype> successors(output.size(), -1);
+    QVector<qsizetype> predecessorCounts(output.size(), 0);
+    bool budgetExceeded = false;
+    const auto frameObstructed = [&](const QRectF &frame,
+                                      const QVector<qsizetype> &members,
+                                      qsizetype next) {
+        for (qsizetype other = 0; other < output.size(); ++other) {
+            if (++comparisons > kMaximumTextGroupingComparisons) {
+                budgetExceeded = true;
+                return true;
+            }
+            if (other == next || members.contains(other)) {
+                continue;
+            }
+            const Candidate &obstacle = output[other].candidate;
+            if (!obstacle.textMarkupHitTestOnly
+                && (!obstacle.objectPath.isEmpty() || !obstacle.parts.isEmpty())
+                && frame.intersects(obstacle.geometry.sourceRect)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (qsizetype position = 0; position < paragraphOrder.size() && !budgetExceeded;
+         ++position) {
+        const qsizetype index = paragraphOrder[position];
+        const Candidate &upper = output[index].candidate;
+        const qreal upperEm = emSize(upper);
+        qreal nearestGap = (std::numeric_limits<qreal>::max)();
+        for (qsizetype next = position + 1; next < paragraphOrder.size(); ++next) {
+            const qsizetype lowerIndex = paragraphOrder[next];
+            const Candidate &lower = output[lowerIndex].candidate;
+            const qreal gap = (lower.origin.y() - upper.origin.y()) * pageSize.height();
+            if (gap > kParagraphMaximumBaselineGapEm * upperEm) {
+                break;
+            }
+            if (++comparisons > kMaximumTextGroupingComparisons) {
+                budgetExceeded = true;
+                break;
+            }
+            const QRectF upperRect = upper.geometry.sourceRect;
+            const QRectF lowerRect = lower.geometry.sourceRect;
+            const qreal sharedWidth = qMin(upperRect.right(), lowerRect.right())
+                - qMax(upperRect.left(), lowerRect.left());
+            if (gap < kParagraphMinimumBaselineGapEm * upperEm
+                || gap >= nearestGap
+                || lowerRect.top() < upperRect.bottom()
+                || !alignedLeft(upper, lower)
+                || !paragraphStyleMatches(upper, lower)
+                || sharedWidth < 0.65 * qMin(upperRect.width(), lowerRect.width())) {
+                continue;
+            }
+
+            const bool obstructed = frameObstructed(
+                upperRect.united(lowerRect), {index}, lowerIndex);
+            if (budgetExceeded) {
+                break;
+            }
+            if (!obstructed) {
+                successors[index] = lowerIndex;
+                nearestGap = gap;
+            }
+        }
+        if (successors[index] >= 0) {
+            ++predecessorCounts[successors[index]];
+        }
+    }
+    if (!budgetExceeded) {
+        QVector<bool> consumed(output.size(), false);
+        QVector<IndexedCandidate> paragraphs;
+        paragraphs.reserve(output.size());
+        for (qsizetype index : std::as_const(paragraphOrder)) {
+            if (consumed[index]) {
+                continue;
+            }
+            QVector<qsizetype> run{index};
+            const Candidate &first = output[index].candidate;
+            qsizetype partCount = first.parts.size();
+            qsizetype characterCount = first.text.size();
+            qreal previousGap = 0.0;
+            QRectF runRect = first.geometry.sourceRect;
+            while (run.size() < kMaximumParagraphLines) {
+                const qsizetype last = run.constLast();
+                const qsizetype next = successors[last];
+                if (next < 0 || consumed[next] || predecessorCounts[next] != 1) {
+                    break;
+                }
+                const Candidate &source = output[next].candidate;
+                const qreal gap = (source.origin.y() - output[last].candidate.origin.y())
+                    * pageSize.height();
+                if (!alignedLeft(first, source) || !paragraphStyleMatches(first, source)
+                    || (previousGap > 0.0
+                        && qAbs(gap - previousGap) > qMax<qreal>(2.0, 0.2 * emSize(first)))
+                    || partCount + source.parts.size() > kMaximumParagraphParts
+                    || characterCount + 1 + source.text.size() > kMaximumParagraphCharacters) {
+                    break;
+                }
+                // A long first row can cover a neighboring column beside a
+                // later, shorter row even when each adjacent pair is clear.
+                const QRectF expandedRect = runRect.united(source.geometry.sourceRect);
+                if (frameObstructed(expandedRect, run, next)) {
+                    break;
+                }
+                run.append(next);
+                runRect = expandedRect;
+                partCount += source.parts.size();
+                characterCount += 1 + source.text.size();
+                previousGap = gap;
+            }
+            if (budgetExceeded) {
+                break;
+            }
+            if (run.size() < 2) {
+                continue;
+            }
+            Candidate grouped = first;
+            grouped.objectPath.clear();
+            grouped.parts.clear();
+            grouped.text.clear();
+            grouped.sourceCharacterSpans.clear();
+            grouped.textGlyphRects.clear();
+            QRectF sourceRect = first.geometry.sourceRect;
+            qsizetype firstOrder = output[index].order;
+            QByteArray identity;
+            for (qsizetype member : std::as_const(run)) {
+                const Candidate &source = output[member].candidate;
+                if (!grouped.parts.isEmpty()) {
+                    grouped.parts.last().separatorAfter = QStringLiteral("\n");
+                    appendSeparator(grouped, QStringLiteral("\n"), &source);
+                }
+                grouped.parts.append(source.parts);
+                appendSourceText(grouped, source);
+                grouped.textGlyphRects.append(source.textGlyphRects);
+                grouped.limited = grouped.limited || source.limited;
+                sourceRect = sourceRect.united(source.geometry.sourceRect);
+                firstOrder = qMin(firstOrder, output[member].order);
+                for (const CandidatePart &part : source.parts) {
+                    identity.append(part.objectId.toUtf8());
+                    identity.append('\0');
+                }
+                consumed[member] = true;
+            }
+            grouped.objectId = QStringLiteral("paragraph:")
+                + QString::fromLatin1(QCryptographicHash::hash(
+                    identity, QCryptographicHash::Sha256).toHex());
+            setInitialGeometry(grouped, sourceRect);
+            expandInitialTextFrame(grouped, pageSize);
+            paragraphs.append(IndexedCandidate{std::move(grouped), firstOrder});
+        }
+        if (!budgetExceeded) {
+            for (qsizetype index = 0; index < output.size(); ++index) {
+                if (!consumed[index]) {
+                    paragraphs.append(std::move(output[index]));
+                }
+            }
+            output = std::move(paragraphs);
+        }
     }
 
     std::stable_sort(

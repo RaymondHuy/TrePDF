@@ -175,6 +175,7 @@ struct LayoutRun {
     qreal x = 0.0;
     qreal baselineFromTop = 0.0;
     qreal width = 0.0;
+    bool positionedWord = false;
 };
 
 struct SourceObject {
@@ -888,6 +889,26 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
                     boundaries.append(spanStart);
                     boundaries.append(spanEnd);
                 }
+                // A justified line distributes extra width between words.
+                // Preserve each word's Qt position instead of scaling one
+                // PDF text object across the entire justified line.
+                const bool positionedWords = option.alignment().testFlag(Qt::AlignJustify)
+                    && (lineEnd < paragraphEnd
+                        || paragraphText.mid(line.textStart(), line.textLength())
+                            .contains(QLatin1Char('\t')));
+                if (option.alignment().testFlag(Qt::AlignJustify)) {
+                    const bool justifiedLine = lineEnd < paragraphEnd;
+                    for (qsizetype position = lineStart; position < lineEnd; ++position) {
+                        const QChar character = draft.text.at(position);
+                        // Tabs are layout advances, never font glyphs, even
+                        // on the paragraph's final, unexpanded line.
+                        if ((justifiedLine && character.isSpace())
+                            || character == QLatin1Char('\t')) {
+                            boundaries.append(position);
+                            boundaries.append(position + 1);
+                        }
+                    }
+                }
                 std::sort(boundaries.begin(), boundaries.end());
                 boundaries.erase(
                     std::unique(boundaries.begin(), boundaries.end()),
@@ -914,6 +935,7 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
                     run.x = contentLeft + qMin(startX, endX);
                     run.baselineFromTop = baseline;
                     run.width = qMax(kMinimumObjectWidth, std::abs(endX - startX));
+                    run.positionedWord = positionedWords;
                     runs.append(std::move(run));
                 }
             }
@@ -2370,6 +2392,14 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 qIsFinite(draft.originalHorizontalScale)
                     ? draft.originalHorizontalScale
                     : 1.0,
+                kMaximumScale);
+        } else if (configured && run.positionedWord) {
+            // Word spacing is already represented by each run's origin. A
+            // glyph bounding box omits side bearings, so fitting it to the
+            // word advance would stretch the glyphs themselves.
+            horizontalScale = qBound(
+                kMinimumScale,
+                static_cast<qreal>(run.format.fontStretch) / QFont::Unstretched,
                 kMaximumScale);
         } else if (configured
             && FPDFPageObj_GetBounds(textObject, &left, &bottom, &right, &top)

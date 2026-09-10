@@ -93,9 +93,18 @@ clears any existing query and highlights.
 
 In Edit mode, selecting editable text opens contextual Edit and Delete actions.
 Changes remain undoable session drafts until Save or Save As writes them into a
-PDF. Compatible text objects on the same visual line are grouped into one
-editable candidate while retaining every source object path for draft rendering
-and persistence.
+PDF. Compatible text objects on the same visual line are grouped, then nearby
+lines with matching font family and size, left alignment, and regular spacing
+form one editable paragraph. Each line retains its bold, italic, underline,
+and stretch in character spans; stretch may differ by one percentage point.
+Source text with overlapping bounds stays separate, and grouping does not cross
+columns or intervening content. Paragraphs retain line breaks
+and every source object path for draft rendering and persistence. Editing uses
+the existing Qt reflow; moving a paragraph alone preserves its original text
+matrices and line layout.
+Justify reflows the selected paragraph's source lines as continuous text while
+preserving paragraph breaks entered by the user. Saved PDFs retain the spacing
+between justified words without stretching the letters.
 
 The Comment ribbon starts with a Select tool in the same position as the Edit
 ribbon, followed by Sticky Note, Free Text, Highlight, Squiggly, Underline,
@@ -248,9 +257,9 @@ Images nested inside a Form XObject remain non-editable because their transform,
 clip, and resource scope cannot yet be rewritten safely.
 
 Draft geometry keeps immutable PDF source bounds separate from the layout frame
-and laid-out content bounds. Existing PDF text seeds its frame from the Qt text
-width so the original line fits. When its inline editor opens, TrePDF
-transiently extends that frame from its current left edge to the remaining
+and laid-out content bounds. Existing PDF text seeds its frame from the Qt width
+of its longest original line so each line fits. When its inline editor opens,
+TrePDF transiently extends that frame from its current left edge to the remaining
 column width, or to the inferred right page margin when no same-row text blocks
 it. The wider frame is stored after a real text edit, a font-size or
 paragraph-format change, or an explicit resize; opening and closing the editor without changes
