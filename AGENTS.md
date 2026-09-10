@@ -221,15 +221,23 @@ Current features:
 - Editable geometry separates immutable source bounds, the draft layout frame,
   and laid-out content bounds. The frame and content bounds participate in
   draft comparison and undo/redo. Existing PDF text seeds the initial frame
-  from its Qt text width so the original line fits before reflow. On entering
-  text edit, a transient frame extends from the existing left edge to the next
-  same-row text boundary or the inferred right page margin. It is persisted
+  from the Qt width of its longest original line so each line fits before
+  reflow. On entering text edit, a transient frame extends from the existing
+  left edge to the next same-row text boundary or the inferred right page margin. It is persisted
   only by a real text edit, a font-size or paragraph-format change, or explicit
   resize, so a no-op editor session does not create a draft. Four edge resize handles update
   the normalized frame, reflow text live, and commit geometry through the same
   draft undo/redo snapshots as text and formatting.
-- Compatible same-line text objects are grouped into one draft edit while each
-  source object path remains available for rendering suppression.
+- Compatible same-line text objects are grouped, then matching nearby lines
+  become one paragraph draft when style, left origin (within 0.4 em), baseline
+  gaps (0.8–1.6 em), and regular leading agree. Source text with overlapping
+  bounds stays separate; grouping must not cross columns or source obstacles.
+  Paragraphs retain `\n`, the first line's origin/baseline, and every flattened
+  source part for rendering suppression and Save. Each paragraph is bounded to
+  64 lines, 1,024 parts, and 32,768 UTF-16 code units; overlap and paragraph-link
+  checks share a 200,000-comparison budget with source/line fallback. Content
+  edits use the existing Qt reflow; move-only drafts translate every original
+  text matrix and preserve the source line layout.
 - Fonts under `src/assets/fonts` are bundled and preferred over matching system
   families when resolving draft text fonts.
 - Contextual Edit/Delete actions when selecting editable text; deletion remains

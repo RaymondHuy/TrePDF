@@ -33,8 +33,9 @@ flowchart TD
     G --> H{"Top-level, render mode an toàn, có quyền sửa và layout ngang?"}
     H -- Có --> I["editable = true"]
     H -- Không --> J["editable = false + reason"]
-    I --> IA["Gom các candidate cùng dòng và cùng style"]
-    IA --> K["Hover: khung cam"]
+    I --> IA["Giữ riêng text chồng nhau; gom dòng cùng style"]
+    IA --> IB["Gom dòng cùng style/căn trái thành đoạn nếu không có vật cản"]
+    IB --> K["Hover: khung cam"]
     J --> L["Hover: khung xám / forbidden cursor"]
     K --> M["Click chọn hoặc double-click/Edit"]
     M --> N["selectCandidate + beginSelectedTextEdit"]
@@ -72,7 +73,11 @@ line:<sha256-của-các-object-id-nguồn>
 
 Candidate dòng giữ `CandidatePart` cho từng object nguồn, gồm `objectId`,
 `objectPath`, bbox, origin, text và separator sau part. Vì vậy UI thao tác với
-một dòng, nhưng renderer vẫn tìm và ẩn được từng PDF page object gốc.
+một dòng, nhưng renderer vẫn tìm và ẩn được từng PDF page object gốc. Các dòng
+cùng style, cùng căn trái và có khoảng cách đều có thể tiếp tục được gom thành
+một candidate đoạn với ID `paragraph:<sha256-của-các-object-id-nguồn>`. Candidate
+đoạn giữ `\n` giữa các dòng và làm phẳng toàn bộ source parts. Text có source
+bounds chồng nhau được giữ riêng, không tham gia cả hai bước gom.
 
 ### 2.2 Glyph bbox
 
@@ -102,13 +107,13 @@ Geometry normalized theo page được tách giữa candidate nguồn và rich-t
 draft:
 
 - `Candidate.geometry.sourceRect`: bbox bất biến của nội dung PDF nguồn.
-  Candidate dòng dùng union
+  Candidate dòng/đoạn dùng union
   của các source part; mỗi `CandidatePart` vẫn giữ `sourceRect` riêng để mask và
   suppression chính xác.
 - `Draft.frameRect`: box layout của draft/editor. Với text PDF có baseline, seed
   ban đầu là union của `sourceRect` và chiều rộng mà `QFontMetricsF` cần để vẽ
-  chuỗi gốc từ origin, cộng 4 page point chống sai số làm tròn. Nhờ vậy candidate
-  gộp không wrap ngay khi vừa mở editor. QML selection, draft delegate và editor
+  dòng gốc dài nhất từ origin, cộng 4 page point chống sai số làm tròn. Nhờ vậy
+  candidate gộp không wrap ngay khi vừa mở editor. QML selection, draft delegate và editor
   đều đọc rectangle này; đây là geometry sẽ thay đổi khi có resize.
 - `Draft.contentBounds`: bbox của nội dung sau layout. Ban đầu bằng `frameRect`;
   rich-text editor đo chiều cao reflow trong QML và gọi
@@ -129,6 +134,8 @@ hoặc nhấn Esc đều phục hồi frame trước đó.
 Midpoint được tính từ initial/source frame bất biến nên mở sửa nhiều lần không
 làm cạnh phải bò dần sang cột kế. Với candidate cản đã có draft, thuật toán dùng
 frame draft hiện tại; draft đã xóa hết text không còn chiếm biên cột.
+Với candidate đoạn, tolerance ngoài source bounds tính theo chiều cao trung
+bình một dòng, không tăng theo chiều cao cả đoạn.
 
 `sourceRect` không thay đổi theo draft. `frameRect` và `contentBounds` nằm trong
 rich-text draft. `Command` lưu snapshot draft before/after nên cancel, undo và
@@ -261,11 +268,16 @@ T.f = P.b * L.e + P.d * L.f + P.f
 Text có render mode `UNKNOWN`, `INVISIBLE` hoặc chỉ `CLIP` không được tạo
 candidate.
 
-### 4.4 Gom candidate thành dòng
+### 4.4 Gom candidate thành dòng và đoạn
 
-`groupTextLineCandidates()` chỉ xét text candidate editable, có baseline, chưa
-phải Add Text và đang chứa đúng một source part. Candidate được phân vào cùng
-dòng khi chênh baseline không quá `0.25 em`.
+Trước khi gom, `groupTextLineCandidates()` kiểm tra source bounds của mọi text
+candidate hữu hình, kể cả text không editable. Khi hai bounds giao nhau, cả hai
+candidate bị loại khỏi việc gom dòng và đoạn; chúng vẫn giữ khả năng thao tác
+riêng vốn có. Text OCR chỉ dùng cho markup hit-test không tham gia kiểm tra này.
+
+Bước gom dòng chỉ xét text candidate editable, có baseline, chưa phải Add Text
+và đang chứa đúng một source part. Candidate được phân vào cùng dòng khi chênh
+baseline không quá `0.25 em`.
 
 Trong mỗi dòng, candidate được sắp từ trái sang phải rồi chỉ nối tiếp khi:
 
@@ -274,7 +286,7 @@ Trong mỗi dòng, candidate được sắp từ trái sang phải rồi chỉ n
 BaseFont identity đã bỏ subset prefix, fallback sang family đã resolve, giống nhau
 font size chênh không quá max(0.5 pt, 8%)
 font stretch chênh không quá 5
-bold và color giống nhau
+bold, italic, underline, color và các thuộc tính paint giống nhau
 ```
 
 Khoảng cách được đổi về page unit trước khi so sánh:
@@ -298,6 +310,37 @@ Candidate dòng nhận bbox union, baseline/origin và style của part đầu t
 `renderSuppressible` chỉ true khi mọi part đều suppress được. Candidate nguồn
 không còn xuất hiện độc lập trong cache trang, nhưng toàn bộ provenance vẫn nằm
 trong `parts`.
+
+Bước gom đoạn nối các candidate dòng hoàn chỉnh, editable và suppressible theo
+thứ tự từ trên xuống. Mỗi cặp dòng phải cùng style, font stretch bằng nhau,
+cỡ hiển thị chênh không quá `max(0.25 pt, 2%)`, origin trái lệch tối đa `0.4 em`,
+và khoảng cách baseline nằm trong `0.8–1.6 em` của dòng trên. Source bounds hai
+dòng không được đè nhau; phần chiều ngang chung phải ít nhất 65% chiều rộng
+dòng ngắn hơn. Chỉ nối hàng kế tiếp phù hợp gần nhất, không có nhánh nhập mơ hồ
+hoặc candidate nguồn khác chắn trong rectangle bao hai dòng. Nhờ vậy text trong
+cột kế bên hoặc bị ngăn bởi nội dung khác không bị nối xuyên qua.
+Trước mỗi lần nối thêm dòng, code kiểm tra lại union của cả đoạn đang gom với
+các candidate nguồn bên ngoài, tránh dòng đầu dài khiến box đoạn bao cả nội
+dung bên cạnh một dòng sau ngắn hơn.
+
+Các dòng sau tiếp tục phải khớp style và origin trái của dòng đầu; leading giữa
+hai cặp liên tiếp lệch tối đa `max(2 pt, 0.2 em)`. Mỗi đoạn tối đa 64 dòng,
+1.024 source parts và 32.768 UTF-16 code units, tính cả `\n` được thêm. Bước
+kiểm tra overlap, tìm liên kết và kiểm tra union đoạn dùng chung ngân sách
+200.000 phép so sánh:
+hết ngân sách khi kiểm tra overlap thì giữ source candidates; hết ở bước tìm
+liên kết hoặc mở rộng đoạn thì giữ kết quả gom dòng, không nhận một kết quả
+đoạn dở dang.
+
+Candidate đoạn dùng union source bounds, giữ origin/baseline và style của dòng
+đầu, ghép text bằng `\n`, đồng thời làm phẳng `parts` và giữ cả underline paths.
+Inline editor và Save dùng layout Qt hiện có để reflow sau khi sửa nội dung;
+leading riêng của PDF nguồn không được khôi phục thành paragraph formatting.
+Mỗi ranh giới dòng nguồn trở thành một ngắt dòng `\n` thật trong editor; thuật
+toán không tự phân biệt soft wrap với ngắt đoạn hoặc bỏ dấu gạch nối cuối dòng.
+Nội dung gõ thêm vẫn wrap trong frame, nhưng các ngắt dòng nguồn chỉ mất khi
+người dùng sửa hoặc thay thế phần text chứa chúng.
+Thao tác chỉ di chuyển đoạn vẫn tịnh tiến từng matrix nguồn, giữ bố cục dòng gốc.
 
 ## 5. Đổi tọa độ PDF sang tọa độ normalized
 
@@ -400,10 +443,13 @@ text không chứa '\r'
 - độ nghiêng baseline tối đa khoảng 5%;
 - trục dọc phải hướng lên trong PDF, tương ứng hướng Y âm trong device/QML;
 - độ xiên ngang của trục dọc tối đa khoảng 10%;
-- chỉ hỗ trợ một dòng.
+- mỗi source text object chỉ hỗ trợ một dòng; các object đạt điều kiện này có
+  thể được gom thành candidate đoạn ở bước sau.
 
-Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hiện nhưng có
-`editable = false` và kèm lý do không hỗ trợ inline editor.
+Do đó text xoay, lật, skew mạnh hoặc một source object tự chứa nhiều dòng vẫn
+được phát hiện nhưng có `editable = false` và kèm lý do không hỗ trợ inline
+editor. Giới hạn này không áp dụng cho candidate đoạn được gom từ nhiều object
+một dòng hợp lệ.
 
 ### 6.3 Các loại candidate hiện tại
 
@@ -411,10 +457,12 @@ Do đó text xoay, lật, skew mạnh hoặc multiline vẫn được phát hi�
 |---|---:|---:|---|
 | Text top-level một dòng, ngang, Fill/Stroke/Fill+Stroke | Có | Có nếu PDF cho phép sửa | — |
 | Nhiều text object cùng dòng và cùng style | Một candidate dòng | Có | Mỗi object gốc được giữ trong `parts` |
+| Nhiều dòng cùng style/căn trái, leading đều và không có vật cản | Một candidate đoạn | Có | Giữ `\n`, baseline đầu và toàn bộ `parts` nguồn |
+| Text có source bounds chồng nhau | Candidate riêng | Theo từng candidate | Không gom dòng hoặc đoạn |
 | Text cùng baseline nhưng khác style hoặc cách quá xa | Candidate riêng | Theo từng candidate | Không gom để tránh mất style/nối hai cột |
 | Text dùng render mode clipping | Có | Không | Chưa thể bảo toàn text clipping khi save |
 | Text nằm trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip khi save |
-| Text xoay/skew/multiline | Có | Không | Layout chưa được hỗ trợ |
+| Text xoay/skew hoặc một source object tự chứa nhiều dòng | Có | Không | Layout nguồn chưa được hỗ trợ |
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
 | Image top-level | Có | Di chuyển/xóa nếu PDF cho phép sửa; resize nếu `imageResizable` | Resize yêu cầu matrix hữu hạn, không suy biến, không custom clip và ảnh nằm trọn trong page; không mở text editor |
 | Image trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip/resource khi save |
@@ -578,10 +626,13 @@ draft sau đó được dựng lại theo zoom mới.
 Stretch bù cho scale ngang/dọc của text transform:
 
 ```text
-horizontalScale = baselineLength / verticalLength
+horizontalScale = hypot(matrix.a, matrix.b) / hypot(matrix.c, matrix.d)
 fontStretch = round(horizontalScale * 100)
 fontStretch = clamp(fontStretch, 50, 200)
 ```
+
+Tính trực tiếp từ hai trục của ma trận nguồn, không đo qua tọa độ device đã
+làm tròn; vị trí chữ có phần thập phân không được làm thay đổi stretch.
 
 `100` là `QFont::Unstretched`; `50` là UltraCondensed và `200` là
 UltraExpanded. `Candidate` giữ thêm `horizontalScale` dạng `qreal` không làm
@@ -833,7 +884,7 @@ draft mới cho đến khi text, spans, paragraph formats hoặc geometry thực
 đổi; nếu text và paragraph formats cuối cùng vẫn bằng snapshot và không resize,
 geometry tự mở rộng bị loại bỏ khi kết thúc edit.
 
-Candidate dòng vẫn dùng đúng một draft key `page|lineObjectId`. Rich-text spans
+Candidate dòng/đoạn vẫn dùng đúng một draft key `page|objectId`. Rich-text spans
 không được chia ngược về từng source part trong session; `CandidatePart` giữ
 toàn bộ nguồn để mask, suppression và để writer xóa đúng mọi object khi save.
 
@@ -1107,8 +1158,8 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
    character span UTF-16. Writer có thể tái sử dụng font PDF gốc khi
    family/style phù hợp và replacement run chỉ chứa các ký tự đã có trong text
    nguồn, kể cả dấu cách. Bộ ký tự nguồn lấy từ text thực của từng source part,
-   không tính separator được suy ra khi ghép các object cùng dòng. Chỉ LF được
-   bỏ qua vì layout xử lý xuống dòng riêng và không ghi nó thành glyph. Nhờ đó
+   không tính separator được suy ra khi ghép các object cùng dòng hoặc đoạn.
+   Chỉ LF được bỏ qua vì layout xử lý xuống dòng riêng và không ghi nó thành glyph. Nhờ đó
    dấu cách đầu tiên được thêm vào một font subset cũng buộc writer chọn font
    có đủ glyph, tránh ghi CID 0 và hiện ô vuông sau Save. Thao tác chỉ đổi
    màu/gạch chân trên text Unicode không thay font vẫn có thể tái sử dụng font
@@ -1294,13 +1345,20 @@ Text được edit
     + object text nằm trực tiếp ở page root, không nằm trong Form XObject
     + render mode là Fill, Stroke hoặc Fill+Stroke, không có clipping
     + transform gần như nằm ngang, không lật/skew mạnh
-    + text chỉ có một dòng
+    + mỗi source text object chỉ có một dòng
 
 Text được gom thành candidate dòng
   = các text candidate editable có baseline gần nhau trong 0.25 em
+    + source bounds không chồng nhau
     + gap liên tiếp nằm trong [-0.35 em, 1.25 em]
     + family/size/stretch/bold/color tương thích
     + giữ từng objectId, objectPath và sourceRect trong CandidatePart
+
+Text được gom thành candidate đoạn
+  = các dòng editable/suppressible cùng style, căn trái trong 0.4 em
+    + baseline gap 0.8–1.6 em, leading đều, không có vật cản
+    + giữ '\n', first-line origin/baseline và toàn bộ CandidatePart
+    + tối đa 64 dòng / 1.024 parts / 32.768 UTF-16 code units
 
 Text hiển thị khi edit
   = Unicode text do Qt layout lại

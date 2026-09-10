@@ -1511,9 +1511,13 @@ void PDFEditController::expandInitialTextFrame(Candidate &candidate,
         candidate.fontUnderline,
         fontPixelSize);
     const QFontMetricsF metrics(displayFont);
-    const qreal measuredWidth = qMax(
-        metrics.horizontalAdvance(candidate.text),
-        metrics.boundingRect(candidate.text).width());
+    qreal measuredWidth = 0.0;
+    const QStringList lines = candidate.text.split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        measuredWidth = qMax(
+            measuredWidth,
+            qMax(metrics.horizontalAdvance(line), metrics.boundingRect(line).width()));
+    }
     const qreal layoutLeft = qBound<qreal>(
         0.0,
         qMin(sourceRect.left(), candidate.origin.x()),
@@ -2050,6 +2054,12 @@ QRectF PDFEditController::expandedTextEditFrame(const Draft &draft)
     qreal inferredLeftMargin = 1.0;
     qreal observedRight = currentRight;
     qreal nearestRowObstacle = 2.0;
+    // Paragraph bounds span multiple rows. Keep the extra obstacle tolerance
+    // proportional to one row so nearby paragraphs do not act as column edges.
+    const auto rowHeight = [](const Candidate &candidate, const QRectF &rect) {
+        return rect.height() / (candidate.text.count(QLatin1Char('\n')) + 1);
+    };
+    const qreal selectedRowHeight = rowHeight(selectedCandidate, selectedSourceRect);
 
     const auto considerCandidate = [&](const Candidate &candidate) {
         if (candidate.textMarkupHitTestOnly
@@ -2082,7 +2092,7 @@ QRectF PDFEditController::expandedTextEditFrame(const Draft &draft)
         }
 
         const qreal rowTolerance = kTextEditRowToleranceRatio
-            * qMax(selectedSourceRect.height(), effectiveRect.height());
+            * qMax(selectedRowHeight, rowHeight(candidate, effectiveRect));
         const bool sharesVisualRow
             = effectiveRect.top() <= selectedSourceRect.bottom() + rowTolerance
             && effectiveRect.bottom() >= selectedSourceRect.top() - rowTolerance;
