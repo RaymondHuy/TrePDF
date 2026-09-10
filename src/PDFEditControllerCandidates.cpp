@@ -2539,6 +2539,49 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             ? QString(QLatin1Char(' '))
             : QString();
     };
+    const auto appendSourceText = [&](Candidate &grouped, const Candidate &source) {
+        const qsizetype offset = grouped.text.size();
+        QVector<CharacterSpan> spans = source.sourceCharacterSpans;
+        if (spans.isEmpty()) {
+            spans.append(CharacterSpan{0, source.text.size(),
+                characterFormatForCandidate(source)});
+        }
+        for (CharacterSpan span : std::as_const(spans)) {
+            span.start += offset;
+            if (!grouped.sourceCharacterSpans.isEmpty()) {
+                CharacterSpan &previous = grouped.sourceCharacterSpans.last();
+                if (previous.start + previous.length == span.start
+                    && sameCharacterFormat(previous.format, span.format)) {
+                    previous.length += span.length;
+                    continue;
+                }
+            }
+            grouped.sourceCharacterSpans.append(std::move(span));
+        }
+        grouped.text.append(source.text);
+    };
+    const auto appendSeparator = [&](Candidate &grouped, const QString &separator,
+                                     const Candidate *followingLine = nullptr) {
+        if (followingLine) {
+            // QTextDocument reports a paragraph separator using the following
+            // block's initial character format. Seed inferred breaks the same
+            // way so entering/leaving the editor does not create a style edit.
+            const CharacterFormat format = followingLine->sourceCharacterSpans.isEmpty()
+                ? characterFormatForCandidate(*followingLine)
+                : followingLine->sourceCharacterSpans.constFirst().format;
+            if (!grouped.sourceCharacterSpans.isEmpty()
+                && sameCharacterFormat(grouped.sourceCharacterSpans.constLast().format,
+                                       format)) {
+                grouped.sourceCharacterSpans.last().length += separator.size();
+            } else {
+                grouped.sourceCharacterSpans.append(CharacterSpan{
+                    grouped.text.size(), separator.size(), format});
+            }
+        } else if (!grouped.sourceCharacterSpans.isEmpty()) {
+            grouped.sourceCharacterSpans.last().length += separator.size();
+        }
+        grouped.text.append(separator);
+    };
 
     for (TextLine &line : lines) {
         std::stable_sort(
@@ -2569,6 +2612,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             grouped.objectPath.clear();
             grouped.parts.clear();
             grouped.text.clear();
+            grouped.sourceCharacterSpans.clear();
             grouped.textGlyphRects.clear();
             QRectF groupedSourceRect = run.front().candidate.geometry.sourceRect;
             grouped.renderSuppressible = true;
@@ -2589,13 +2633,13 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                         run[index - 1].candidate,
                         source);
                     grouped.parts.last().separatorAfter = separator;
-                    grouped.text.append(separator);
+                    appendSeparator(grouped, separator);
                 }
 
                 CandidatePart part = source.parts.constFirst();
                 part.separatorAfter.clear();
                 grouped.parts.append(std::move(part));
-                grouped.text.append(source.text);
+                appendSourceText(grouped, source);
                 grouped.textGlyphRects.append(source.textGlyphRects);
                 identity.append(source.objectId.toUtf8());
                 identity.append('\0');
@@ -2638,10 +2682,19 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             && emSize(candidate) > 0.0;
     };
     const auto paragraphStyleMatches = [&](const Candidate &left, const Candidate &right) {
-        return sameStyle(left, right)
+        // A paragraph can change emphasis without changing its typeface.
+        // Preserve each line's format instead of applying the first line's
+        // bold/italic/underline and calibrated stretch to the entire paragraph.
+        return !left.fontFamily.isEmpty()
+            && sameFontFamily(left.fontFamily, right.fontFamily)
             && qAbs(emSize(left) - emSize(right))
                 <= qMax<qreal>(0.25, 0.02 * qMax(emSize(left), emSize(right)))
-            && left.fontStretch == right.fontStretch;
+            && qAbs(left.fontStretch - right.fontStretch) <= 1
+            && left.color == right.color
+            && left.fillColor == right.fillColor
+            && left.strokeColor == right.strokeColor
+            && qFuzzyCompare(left.strokeWidth + 1.0, right.strokeWidth + 1.0)
+            && left.textRenderMode == right.textRenderMode;
     };
     const auto alignedLeft = [&](const Candidate &left, const Candidate &right) {
         return qAbs(left.origin.x() - right.origin.x()) * pageSize.width()
@@ -2776,6 +2829,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             grouped.objectPath.clear();
             grouped.parts.clear();
             grouped.text.clear();
+            grouped.sourceCharacterSpans.clear();
             grouped.textGlyphRects.clear();
             QRectF sourceRect = first.geometry.sourceRect;
             qsizetype firstOrder = output[index].order;
@@ -2784,10 +2838,10 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                 const Candidate &source = output[member].candidate;
                 if (!grouped.parts.isEmpty()) {
                     grouped.parts.last().separatorAfter = QStringLiteral("\n");
-                    grouped.text.append(QLatin1Char('\n'));
+                    appendSeparator(grouped, QStringLiteral("\n"), &source);
                 }
                 grouped.parts.append(source.parts);
-                grouped.text.append(source.text);
+                appendSourceText(grouped, source);
                 grouped.textGlyphRects.append(source.textGlyphRects);
                 grouped.limited = grouped.limited || source.limited;
                 sourceRect = sourceRect.united(source.geometry.sourceRect);

@@ -229,9 +229,12 @@ Current features:
   the normalized frame, reflow text live, and commit geometry through the same
   draft undo/redo snapshots as text and formatting.
 - Compatible same-line text objects are grouped, then matching nearby lines
-  become one paragraph draft when style, left origin (within 0.4 em), baseline
-  gaps (0.8–1.6 em), and regular leading agree. Source text with overlapping
-  bounds stays separate; grouping must not cross columns or source obstacles.
+  become one paragraph draft when font family/size, paint, left origin (within
+  0.4 em), baseline gaps (0.8–1.6 em), and regular leading agree. Bold, italic,
+  underline, and font-stretch differences of at most one percentage point are
+  preserved in source character spans; the initial frame measures those spans.
+  Source text with overlapping bounds stays separate; grouping must not cross
+  columns or source obstacles.
   Paragraphs retain `\n`, the first line's origin/baseline, and every flattened
   source part for rendering suppression and Save. Each paragraph is bounded to
   64 lines, 1,024 parts, and 32,768 UTF-16 code units; overlap and paragraph-link

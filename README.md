@@ -94,9 +94,11 @@ clears any existing query and highlights.
 In Edit mode, selecting editable text opens contextual Edit and Delete actions.
 Changes remain undoable session drafts until Save or Save As writes them into a
 PDF. Compatible text objects on the same visual line are grouped, then nearby
-lines with matching style, left alignment, and regular spacing form one editable
-paragraph. Source text with overlapping bounds stays separate, and grouping
-does not cross columns or intervening content. Paragraphs retain line breaks
+lines with matching font family and size, left alignment, and regular spacing
+form one editable paragraph. Each line retains its bold, italic, underline,
+and stretch in character spans; stretch may differ by one percentage point.
+Source text with overlapping bounds stays separate, and grouping does not cross
+columns or intervening content. Paragraphs retain line breaks
 and every source object path for draft rendering and persistence. Editing uses
 the existing Qt reflow; moving a paragraph alone preserves its original text
 matrices and line layout.

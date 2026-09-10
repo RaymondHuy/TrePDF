@@ -443,6 +443,23 @@ private:
         bool hasOrigin = false;
     };
 
+    struct CharacterFormat {
+        QString fontFamily;
+        qreal fontSizeRatio = 0.0;
+        qreal displayFontSizeRatio = 0.0;
+        int fontStretch = 100;
+        bool fontBold = false;
+        bool fontItalic = false;
+        bool fontUnderline = false;
+        QColor color = Qt::black;
+    };
+
+    struct CharacterSpan {
+        qsizetype start = 0;
+        qsizetype length = 0;
+        CharacterFormat format;
+    };
+
     struct CandidatePart {
         QString objectId;
         QVector<int> objectPath;
@@ -473,6 +490,7 @@ private:
         QPointF origin;
         QString text;
         QVector<QRectF> textGlyphRects;
+        QVector<CharacterSpan> sourceCharacterSpans;
         bool textMarkupHitTestOnly = false;
         QString sourceAnnotationName;
         bool sourceAnnotationHasName = false;
@@ -584,23 +602,6 @@ private:
         int scanIndex = -1;
         bool bold = false;
         bool italic = false;
-    };
-
-    struct CharacterFormat {
-        QString fontFamily;
-        qreal fontSizeRatio = 0.0;
-        qreal displayFontSizeRatio = 0.0;
-        int fontStretch = 100;
-        bool fontBold = false;
-        bool fontItalic = false;
-        bool fontUnderline = false;
-        QColor color = Qt::black;
-    };
-
-    struct CharacterSpan {
-        qsizetype start = 0;
-        qsizetype length = 0;
-        CharacterFormat format;
     };
 
     struct TextChange {

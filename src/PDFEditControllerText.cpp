@@ -35,6 +35,7 @@
 #include <QStringList>
 #include <QTextCharFormat>
 #include <QTextCursor>
+#include <QTextLayout>
 #include <QThreadPool>
 #include <QTimeZone>
 #include <QUuid>
@@ -1563,11 +1564,41 @@ void PDFEditController::expandInitialTextFrame(Candidate &candidate,
         fontPixelSize);
     const QFontMetricsF metrics(displayFont);
     qreal measuredWidth = 0.0;
+    qsizetype lineStart = 0;
     const QStringList lines = candidate.text.split(QLatin1Char('\n'));
     for (const QString &line : lines) {
-        measuredWidth = qMax(
-            measuredWidth,
-            qMax(metrics.horizontalAdvance(line), metrics.boundingRect(line).width()));
+        if (candidate.sourceCharacterSpans.isEmpty()) {
+            measuredWidth = qMax(measuredWidth,
+                qMax(metrics.horizontalAdvance(line), metrics.boundingRect(line).width()));
+        } else {
+            QTextLayout layout(line, displayFont);
+            QList<QTextLayout::FormatRange> formats;
+            for (const CharacterSpan &span : candidate.sourceCharacterSpans) {
+                const qsizetype start = qMax(lineStart, span.start);
+                const qsizetype end = qMin(lineStart + line.size(), span.start + span.length);
+                if (start >= end) {
+                    continue;
+                }
+                const CharacterFormat &format = span.format;
+                const qreal size = (format.displayFontSizeRatio > 0.0
+                    ? format.displayFontSizeRatio : format.fontSizeRatio) * pageSize.height();
+                QTextCharFormat textFormat;
+                textFormat.setFont(fontForDisplay(format.fontFamily, format.fontStretch,
+                    format.fontBold, format.fontItalic, format.fontUnderline, size));
+                formats.append(QTextLayout::FormatRange{
+                    int(start - lineStart), int(end - start), textFormat});
+            }
+            layout.setFormats(formats);
+            layout.beginLayout();
+            QTextLine textLine = layout.createLine();
+            if (textLine.isValid()) {
+                textLine.setNumColumns(line.size());
+                measuredWidth = qMax(measuredWidth,
+                    qMax(textLine.horizontalAdvance(), textLine.naturalTextWidth()));
+            }
+            layout.endLayout();
+        }
+        lineStart += line.size() + 1;
     }
     const qreal layoutLeft = qBound<qreal>(
         0.0,
@@ -1699,10 +1730,13 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
     draft.candidate = candidate;
     draft.commentProperties = candidate.commentProperties;
     draft.text = candidate.text;
-    draft.characterSpans.append(CharacterSpan{
-        0,
-        candidate.text.size(),
-        characterFormatForCandidate(candidate)});
+    draft.characterSpans = candidate.sourceCharacterSpans;
+    if (draft.characterSpans.isEmpty()) {
+        draft.characterSpans.append(CharacterSpan{
+            0,
+            candidate.text.size(),
+            characterFormatForCandidate(candidate)});
+    }
     draft.paragraphFormats = paragraphFormatsForText(candidate.text, ParagraphFormat());
     if (candidate.objectId.startsWith(QLatin1String("paragraph:"))) {
         for (qsizetype index = 0; index < candidate.text.size(); ++index) {

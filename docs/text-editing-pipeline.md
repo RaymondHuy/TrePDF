@@ -34,7 +34,7 @@ flowchart TD
     H -- Có --> I["editable = true"]
     H -- Không --> J["editable = false + reason"]
     I --> IA["Giữ riêng text chồng nhau; gom dòng cùng style"]
-    IA --> IB["Gom dòng cùng style/căn trái thành đoạn nếu không có vật cản"]
+    IA --> IB["Gom dòng cùng họ font/căn trái thành đoạn, giữ style riêng, không có vật cản"]
     IB --> K["Hover: khung cam"]
     J --> L["Hover: khung xám / forbidden cursor"]
     K --> M["Click chọn hoặc double-click/Edit"]
@@ -312,7 +312,8 @@ không còn xuất hiện độc lập trong cache trang, nhưng toàn bộ prov
 trong `parts`.
 
 Bước gom đoạn nối các candidate dòng hoàn chỉnh, editable và suppressible theo
-thứ tự từ trên xuống. Mỗi cặp dòng phải cùng style, font stretch bằng nhau,
+thứ tự từ trên xuống. Mỗi cặp dòng phải cùng họ font đã resolve và paint,
+font stretch lệch tối đa một điểm phần trăm; cho phép khác đậm/nghiêng/gạch chân,
 cỡ hiển thị chênh không quá `max(0.25 pt, 2%)`, origin trái lệch tối đa `0.4 em`,
 và khoảng cách baseline nằm trong `0.8–1.6 em` của dòng trên. Source bounds hai
 dòng không được đè nhau; phần chiều ngang chung phải ít nhất 65% chiều rộng
@@ -323,8 +324,8 @@ Trước mỗi lần nối thêm dòng, code kiểm tra lại union của cả �
 các candidate nguồn bên ngoài, tránh dòng đầu dài khiến box đoạn bao cả nội
 dung bên cạnh một dòng sau ngắn hơn.
 
-Các dòng sau tiếp tục phải khớp style và origin trái của dòng đầu; leading giữa
-hai cặp liên tiếp lệch tối đa `max(2 pt, 0.2 em)`. Mỗi đoạn tối đa 64 dòng,
+Các dòng sau tiếp tục phải khớp họ font/cỡ/paint/stretch và origin trái của dòng
+đầu; leading giữa hai cặp liên tiếp lệch tối đa `max(2 pt, 0.2 em)`. Mỗi đoạn tối đa 64 dòng,
 1.024 source parts và 32.768 UTF-16 code units, tính cả `\n` được thêm. Bước
 kiểm tra overlap, tìm liên kết và kiểm tra union đoạn dùng chung ngân sách
 200.000 phép so sánh:
@@ -332,8 +333,13 @@ hết ngân sách khi kiểm tra overlap thì giữ source candidates; hết ở
 liên kết hoặc mở rộng đoạn thì giữ kết quả gom dòng, không nhận một kết quả
 đoạn dở dang.
 
-Candidate đoạn dùng union source bounds, giữ origin/baseline và style của dòng
-đầu, ghép text bằng `\n`, đồng thời làm phẳng `parts` và giữ cả underline paths.
+Candidate đoạn dùng union source bounds, giữ origin/baseline của dòng đầu,
+ghép text bằng `\n`, đồng thời làm phẳng `parts` và giữ cả underline paths.
+`sourceCharacterSpans` giữ định dạng từng vùng chữ, kể cả bold/regular và stretch
+khác nhau giữa các dòng. Khoảng trắng ghép cùng dòng kế thừa format trước nó;
+ngắt dòng nguồn lấy format đầu dòng sau, khớp cách QTextDocument đọc separator
+và tránh tạo draft khi chỉ mở/đóng editor. Frame ban đầu đo từng dòng bằng chính
+các spans này để tránh dùng độ rộng font đậm cho dòng thường.
 Inline editor và Save dùng layout Qt hiện có để reflow sau khi sửa nội dung;
 leading riêng của PDF nguồn không được khôi phục thành paragraph formatting.
 Editor ban đầu giữ `\n` giữa các dòng nguồn. Draft đánh dấu riêng các vị trí
@@ -461,7 +467,7 @@ một dòng hợp lệ.
 |---|---:|---:|---|
 | Text top-level một dòng, ngang, Fill/Stroke/Fill+Stroke | Có | Có nếu PDF cho phép sửa | — |
 | Nhiều text object cùng dòng và cùng style | Một candidate dòng | Có | Mỗi object gốc được giữ trong `parts` |
-| Nhiều dòng cùng style/căn trái, leading đều và không có vật cản | Một candidate đoạn | Có | Giữ `\n`, baseline đầu và toàn bộ `parts` nguồn |
+| Nhiều dòng cùng họ font/cỡ/căn trái, leading đều và không có vật cản | Một candidate đoạn | Có | Giữ `\n`, baseline đầu và toàn bộ `parts` nguồn |
 | Text có source bounds chồng nhau | Candidate riêng | Theo từng candidate | Không gom dòng hoặc đoạn |
 | Text cùng baseline nhưng khác style hoặc cách quá xa | Candidate riêng | Theo từng candidate | Không gom để tránh mất style/nối hai cột |
 | Text dùng render mode clipping | Có | Không | Chưa thể bảo toàn text clipping khi save |
@@ -729,8 +735,8 @@ và format trong một lần. Format cho range bôi đen cũng được merge tr
 đọc lại B/I/U và semantic size ratio từ document vào character spans của controller, nên preview và dữ
 liệu Save không bị lệch nhau.
 
-Draft khởi tạo với một character span phủ toàn bộ text và một paragraph format
-cho mỗi đoạn phân tách bởi `\n`. Khi `TextEdit` gửi plain text mới, controller tìm
+Draft khởi tạo từ `sourceCharacterSpans` của candidate đã gom; candidate đơn
+lẻ dùng một span phủ toàn bộ text. Mỗi đoạn phân tách bởi `\n` có một paragraph format. Khi `TextEdit` gửi plain text mới, controller tìm
 prefix/suffix không đổi, giữ format của các ký tự đó, cho phần chèn kế thừa
 format liền kề rồi merge các span liên tiếp cùng style. Paragraph formats được
 tạo lại cho từng đoạn nên Enter tạo paragraph mới thay vì kết thúc editor.

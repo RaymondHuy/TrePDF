@@ -1347,6 +1347,40 @@ struct SourceParagraphTextPart {
     float fontSize = 24.0F;
 };
 
+QVector<SourceParagraphTextPart> mixedSourceParagraphParts()
+{
+    // Match the mixed face, small stretch differences, and baseline gaps on
+    // page 5 of the reported article. The 19-point gap starts a new paragraph.
+    return {
+        {QStringLiteral("a combination of economic and cultural activities that take place at night, mainly"),
+         72.0, 612.34, "Helvetica-Bold", 1.008, 12.0F},
+        {QStringLiteral("entertainment experiences (excluding the prostitution industry). In the US, the night-time"),
+         72.0, 598.53, "Helvetica", 1.008, 12.0F},
+        {QStringLiteral("economy includes 5 main areas including: Arts, bars, culinary services, sports and"),
+         72.0, 584.53, "Helvetica", 1.008, 12.0F},
+        {QStringLiteral("entertainment. Most European countries define the night-time economy in a narrow sense"),
+         72.0, 570.53, "Helvetica", 1.008, 12.0F},
+        {QStringLiteral("and define the night-time economic operating time frame from 6:00 p.m. the previous day"),
+         72.0, 556.53, "Helvetica", 1.008, 12.0F},
+        {QStringLiteral("to 6:00 a.m. the next morning (Field 2008; Le et al., 2022)."),
+         71.53, 543.75, "Helvetica", 1.0008, 12.0F},
+        {QStringLiteral("The concept of Night Economy is service activities that take place after 6:00 pm the"),
+         72.0, 524.73, "Helvetica", 1.0, 12.0F},
+        {QStringLiteral("previous night until 6:00 am the next morning, including: Shopping at night markets,"),
+         72.0, 510.73, "Helvetica", 1.0, 12.0F}};
+}
+
+QString sourceParagraphText(const QVector<SourceParagraphTextPart> &parts,
+                            qsizetype start,
+                            qsizetype count)
+{
+    QStringList lines;
+    for (qsizetype index = start; index < start + count; ++index) {
+        lines.append(parts.at(index).text);
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
 bool createSourceParagraphPdf(
     const QString &filePath,
     const QVector<SourceParagraphTextPart> &parts = {
@@ -5892,6 +5926,9 @@ private slots:
     void groupsCompatibleSourceTextLinesIntoParagraph();
     void groupsSourceParagraphWithFractionalTransforms_data();
     void groupsSourceParagraphWithFractionalTransforms();
+    void groupsMixedSourceParagraphWithStylesAndHistory();
+    void savesMixedSourceParagraphStylesRoundTrip();
+    void savesMovedMixedSourceParagraphWithoutReflow();
     void justifiesSourceParagraphThroughQmlOverlay();
     void preservesExplicitParagraphBreaksWhenJustifyingSource();
     void keepsUnsafeSourceTextLinesSeparate_data();
@@ -11677,6 +11714,7 @@ void PDFEditControllerTest::groupsSourceParagraphWithFractionalTransforms_data()
     QTest::addColumn<double>("secondScale");
     QTest::addColumn<bool>("grouped");
     QTest::newRow("same-stretch-at-fractional-origins") << 0.99999046 << true;
+    QTest::newRow("one-percent-stretch-difference") << 1.008 << true;
     QTest::newRow("different-source-stretch") << 1.03 << false;
 }
 
@@ -11718,6 +11756,211 @@ void PDFEditControllerTest::groupsSourceParagraphWithFractionalTransforms()
             QVERIFY(!candidate.isEmpty());
             QVERIFY(!candidate.value(QStringLiteral("grouped")).toBool());
         }
+    }
+}
+
+void PDFEditControllerTest::groupsMixedSourceParagraphWithStylesAndHistory()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-source-paragraph-history.pdf"));
+    const QVector<SourceParagraphTextPart> parts = mixedSourceParagraphParts();
+    const QString paragraph = sourceParagraphText(parts, 0, 6);
+    const QString nextParagraph = sourceParagraphText(parts, 6, 2);
+    QVERIFY(createSourceParagraphPdf(sourcePath, parts));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QCOMPARE(candidates.size(), 2);
+    const QVariantMap candidate = candidateForText(candidates, paragraph);
+    QVERIFY2(!candidate.isEmpty(), "The bold first line and shorter final line must join the body");
+    QCOMPARE(candidate.value(QStringLiteral("sourceRects")).toList().size(), 6);
+    const QVariantMap nextCandidate = candidateForText(candidates, nextParagraph);
+    QVERIFY2(!nextCandidate.isEmpty(), "The larger baseline gap must keep the next paragraph separate");
+    QCOMPARE(nextCandidate.value(QStringLiteral("sourceRects")).toList().size(), 2);
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
+    const auto formatAt = [&controller](qsizetype position) {
+        for (const QVariant &value : controller.selectedCharacterSpans()) {
+            const QVariantMap span = value.toMap();
+            const qsizetype start = span.value(QStringLiteral("start")).toLongLong();
+            const qsizetype length = span.value(QStringLiteral("length")).toLongLong();
+            if (position >= start && position < start + length) {
+                return span;
+            }
+        }
+        return QVariantMap();
+    };
+    qsizetype offset = 0;
+    for (qsizetype index = 0; index < 6; ++index) {
+        const QVariantMap format = formatAt(offset);
+        QVERIFY(!format.isEmpty());
+        QCOMPARE(format.value(QStringLiteral("fontBold")).toBool(), index == 0);
+        QCOMPARE(format.value(QStringLiteral("fontStretch")).toInt(), index < 5 ? 101 : 100);
+        QVERIFY(qAbs(format.value(QStringLiteral("fontSizeRatio")).toReal()
+                     * document.pageSize(0).height() - 12.0) < 0.01);
+        offset += parts.at(index).text.size() + 1;
+    }
+
+    const QRectF originalFrame = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(paragraph);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+
+    const QString edited = paragraph + QStringLiteral(" Revised.");
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(edited);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedText(), edited);
+    QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 6);
+    QVERIFY(formatAt(0).value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(!formatAt(edited.size() - 1).value(QStringLiteral("fontBold")).toBool());
+    QCOMPARE(formatAt(edited.size() - 1).value(QStringLiteral("fontStretch")).toInt(), 100);
+    const QVariantList editedSpans = controller.selectedCharacterSpans();
+    controller.undo();
+    QCOMPARE(controller.selectedText(), paragraph);
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.selectedText(), edited);
+    QCOMPARE(controller.selectedCharacterSpans(), editedSpans);
+    controller.discardDrafts();
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::savesMixedSourceParagraphStylesRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-source-paragraph-edit-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-source-paragraph-edit-saved.pdf"));
+    const QVector<SourceParagraphTextPart> parts = mixedSourceParagraphParts();
+    const QString paragraph = sourceParagraphText(parts, 0, 6);
+    QVERIFY(createSourceParagraphPdf(sourcePath, parts));
+    const QStringList originalObjects = topLevelTextObjects(sourcePath);
+    FS_MATRIX nextOriginal{};
+    QVERIFY(textObjectMatrix(sourcePath, parts.at(6).text, nextOriginal));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), paragraph);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QString edited = paragraph + QStringLiteral(" Revised.");
+    controller.commitSelectedText(edited);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    const QString savedText = normalizedPageText(outputPath);
+    QVERIFY2(savedText.contains(edited.simplified()), qPrintable(savedText));
+    QVERIFY(savedText.contains(sourceParagraphText(parts, 6, 2).simplified()));
+    const TextObjectFontInfo bold = textObjectFontInfo(outputPath, QStringLiteral("a combination"));
+    const TextObjectFontInfo regular = textObjectFontInfo(outputPath, QStringLiteral("entertainment experiences"));
+    const TextObjectFontInfo finalLine = textObjectFontInfo(outputPath, QStringLiteral("to 6:00 a.m."));
+    QVERIFY(bold.found);
+    QVERIFY(regular.found);
+    QVERIFY(finalLine.found);
+    QVERIFY(bold.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive));
+    QVERIFY(!regular.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive));
+    QVERIFY(!finalLine.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive));
+    FS_MATRIX nextSaved{};
+    QVERIFY(textObjectMatrix(outputPath, parts.at(6).text, nextSaved));
+    QCOMPARE(nextSaved.a, nextOriginal.a);
+    QCOMPARE(nextSaved.d, nextOriginal.d);
+    QCOMPARE(nextSaved.e, nextOriginal.e);
+    QCOMPARE(nextSaved.f, nextOriginal.f);
+    QCOMPARE(topLevelTextObjects(sourcePath), originalObjects);
+    const QVariantList reopened = waitForCandidates(controller, 0);
+    QVERIFY(!reopened.isEmpty());
+    bool foundBold = false;
+    bool foundRegular = false;
+    for (const QVariant &value : reopened) {
+        const QVariantMap reopenedCandidate = value.toMap();
+        const QString text = reopenedCandidate.value(QStringLiteral("text")).toString();
+        if (!text.contains(QStringLiteral("a combination"))
+            && !text.contains(QStringLiteral("entertainment experiences"))) {
+            continue;
+        }
+        QVERIFY(controller.selectCandidate(
+            0, reopenedCandidate.value(QStringLiteral("objectId")).toString()));
+        for (const QVariant &spanValue : controller.selectedCharacterSpans()) {
+            const QVariantMap span = spanValue.toMap();
+            const QString spanText = text.mid(
+                span.value(QStringLiteral("start")).toLongLong(),
+                span.value(QStringLiteral("length")).toLongLong());
+            if (spanText.contains(QStringLiteral("a combination"))) {
+                QVERIFY(span.value(QStringLiteral("fontBold")).toBool());
+                foundBold = true;
+            }
+            if (spanText.contains(QStringLiteral("entertainment experiences"))) {
+                QVERIFY(!span.value(QStringLiteral("fontBold")).toBool());
+                foundRegular = true;
+            }
+        }
+    }
+    QVERIFY(foundBold);
+    QVERIFY(foundRegular);
+}
+
+void PDFEditControllerTest::savesMovedMixedSourceParagraphWithoutReflow()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-source-paragraph-move-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-source-paragraph-move-saved.pdf"));
+    const QVector<SourceParagraphTextPart> parts = mixedSourceParagraphParts();
+    QVERIFY(createSourceParagraphPdf(sourcePath, parts));
+    const QStringList originalObjects = topLevelTextObjects(sourcePath);
+    QVector<FS_MATRIX> originalMatrices;
+    for (const SourceParagraphTextPart &part : parts) {
+        FS_MATRIX matrix{};
+        QVERIFY(textObjectMatrix(sourcePath, part.text, matrix));
+        originalMatrices.append(matrix);
+    }
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), sourceParagraphText(parts, 0, 6));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QPointF translation(0.02, -0.01);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(controller.selectedFrameRect().translated(translation));
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QVERIFY(controller.draftsForPage(0).constFirst().toMap()
+                .value(QStringLiteral("sourceTextMoveOnly")).toBool());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QCOMPARE(topLevelTextObjects(outputPath), originalObjects);
+    constexpr qreal tolerance = 1.0 / 64.0 + 0.001;
+    const QSizeF pageSize = document.pageSize(0);
+    for (qsizetype index = 0; index < parts.size(); ++index) {
+        FS_MATRIX matrix{};
+        QVERIFY(textObjectMatrix(outputPath, parts.at(index).text, matrix));
+        const FS_MATRIX &original = originalMatrices.at(index);
+        QCOMPARE(matrix.a, original.a);
+        QCOMPARE(matrix.b, original.b);
+        QCOMPARE(matrix.c, original.c);
+        QCOMPARE(matrix.d, original.d);
+        const qreal expectedX = index < 6 ? translation.x() * pageSize.width() : 0.0;
+        const qreal expectedY = index < 6 ? -translation.y() * pageSize.height() : 0.0;
+        QVERIFY(qAbs(matrix.e - original.e - expectedX) < tolerance);
+        QVERIFY(qAbs(matrix.f - original.f - expectedY) < tolerance);
+        QCOMPARE(textObjectFontInfo(outputPath, parts.at(index).text).baseName,
+                 textObjectFontInfo(sourcePath, parts.at(index).text).baseName);
     }
 }
 
@@ -11867,7 +12110,6 @@ void PDFEditControllerTest::keepsUnsafeSourceTextLinesSeparate_data()
     QTest::newRow("overprinted-text") << 72.0 << 740.0 << QByteArray("Helvetica");
     QTest::newRow("different-column") << 360.0 << 710.0 << QByteArray("Helvetica");
     QTest::newRow("large-paragraph-gap") << 72.0 << 680.0 << QByteArray("Helvetica");
-    QTest::newRow("different-style") << 72.0 << 710.0 << QByteArray("Helvetica-Bold");
     QTest::newRow("different-font") << 72.0 << 710.0 << QByteArray("Courier");
 }
 
@@ -12134,28 +12376,41 @@ void PDFEditControllerTest::editsSourceParagraphThroughQmlOverlay()
 void PDFEditControllerTest::keepsSourceParagraphLayoutStableAtFractionalZoom_data()
 {
     QTest::addColumn<qreal>("zoom");
-    QTest::newRow("75-percent") << 0.75;
-    QTest::newRow("100-percent") << 1.0;
-    QTest::newRow("124-percent") << 1.24;
-    QTest::newRow("155-percent") << 1.55;
-    QTest::newRow("200-percent") << 2.0;
+    QTest::addColumn<bool>("mixedStyles");
+    QTest::newRow("75-percent") << 0.75 << false;
+    QTest::newRow("100-percent") << 1.0 << false;
+    QTest::newRow("124-percent") << 1.24 << false;
+    QTest::newRow("155-percent") << 1.55 << false;
+    QTest::newRow("200-percent") << 2.0 << false;
+    QTest::newRow("mixed-styles-75-percent") << 0.75 << true;
+    QTest::newRow("mixed-styles-155-percent") << 1.55 << true;
+    QTest::newRow("mixed-styles-200-percent") << 2.0 << true;
 }
 
 void PDFEditControllerTest::keepsSourceParagraphLayoutStableAtFractionalZoom()
 {
     QFETCH(qreal, zoom);
-    const QStringList lines{
+    QFETCH(bool, mixedStyles);
+    QStringList lines{
         QStringLiteral("entertainment experiences (excluding the prostitution industry). In the US, the night-time "),
         QStringLiteral("economy includes 5 main areas including: Arts, bars, culinary services, sports and "),
         QStringLiteral("entertainment. Most European countries define the night-time economy in a narrow sense "),
         QStringLiteral("and define the night-time economic operating time frame from 6:00 p.m. the previous day "),
         QStringLiteral("to 6:00 a.m. the next morning (Field 2008; Le et al., 2022).")};
+    if (mixedStyles) {
+        lines.prepend(QStringLiteral(
+            "a combination of economic and cultural activities that take place at night, mainly"));
+    }
     QVector<SourceParagraphTextPart> parts;
     for (qsizetype index = 0; index < lines.size(); ++index) {
-        parts.append({lines.at(index), 72.0, 620.0 - index * 14.0, "Helvetica", 1.0, 12.0F});
+        const char *font = mixedStyles && index == 0 ? "Helvetica-Bold" : "Helvetica";
+        const double stretch = mixedStyles
+            ? (index < lines.size() - 1 ? 1.008 : 1.0008) : 1.0;
+        parts.append({lines.at(index), 72.0, 620.0 - index * 14.0, font, stretch, 12.0F});
     }
     const QString sourcePath = m_temporaryDirectory.filePath(
-        QStringLiteral("paragraph-zoom-%1.pdf").arg(zoom));
+        QStringLiteral("paragraph-zoom-%1.pdf")
+            .arg(QString::fromLatin1(QTest::currentDataTag())));
     QVERIFY(createSourceParagraphPdf(sourcePath, parts));
     PDFDocument document;
     PDFEditController controller;
@@ -12165,6 +12420,9 @@ void PDFEditControllerTest::keepsSourceParagraphLayoutStableAtFractionalZoom()
     controller.setTool(PDFEditController::SelectTool);
     const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), original);
     QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
     QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
     QQmlEngine engine;
     QQmlComponent themeComponent(&engine);
@@ -12209,17 +12467,21 @@ void PDFEditControllerTest::keepsSourceParagraphLayoutStableAtFractionalZoom()
     QTRY_COMPARE(editor->property("lineCount").toInt(), lines.size());
     for (QTextBlock block = textDocument->begin(); block.isValid(); block = block.next()) {
         QCOMPARE(block.layout()->lineCount(), 1);
+        QTextCursor lineCursor(block);
+        lineCursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+        QCOMPARE(lineCursor.charFormat().font().bold(), mixedStyles && block.blockNumber() == 0);
     }
     const qreal baseline = editorItem->mapToItem(overlayItem,
         QPointF(0.0, editor->property("baselineOffset").toReal())).y();
     QVERIFY(qAbs(baseline / zoom - controller.selectedBaselineY() * pageSize.height()) < 0.01);
     const qreal displayedHeight = editorItem->mapRectToItem(overlayItem,
         QRectF(0.0, 0.0, 1.0, editor->property("contentHeight").toReal())).height();
-    // All five source rows fit at the same physical height regardless of zoom.
-    QVERIFY(qAbs(displayedHeight / zoom - 70.0) < 0.1);
+    // Every source row fits at the same physical height regardless of zoom.
+    QVERIFY(qAbs(displayedHeight / zoom - 14.0 * lines.size()) < 0.1);
     const QRectF originalFrame = candidate.value(QStringLiteral("frameRect")).toRectF();
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
     QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
     QCOMPARE(controller.selectedFrameRect(), originalFrame);
 
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
@@ -12239,6 +12501,7 @@ void PDFEditControllerTest::keepsSourceParagraphLayoutStableAtFractionalZoom()
     QTRY_COMPARE(editor->property("lineCount").toInt(), lines.size());
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "cancelEditing"));
     QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
 }
 
 void PDFEditControllerTest::savesEditedSourceParagraphRoundTrip()
