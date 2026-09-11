@@ -27,6 +27,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMutexLocker>
@@ -1946,6 +1948,68 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
                     hasUsableUnicode = true;
                     whitespace = QChar::isSpace(codePoint);
                     objectLayout->text.append(QString::fromUcs4(&codePoint, 1));
+                    // Infer only uniform spacing in simple horizontal runs.
+                    // Origins and font advances are PDF geometry, so this does
+                    // not mistake font substitution or ink side bearings for
+                    // character spacing. Irregular TJ/complex shaping falls back.
+                    if (!objectLayout->spacingUnsupported) {
+                        FS_MATRIX matrix{};
+                        double x = 0.0;
+                        double y = 0.0;
+                        float advance = 0.0F;
+                        const qreal fontSize = FPDFText_GetFontSize(textPage, index);
+                        const QChar::Script script = QChar::script(codePoint);
+                        const bool simpleCharacter = codePoint == U' '
+                            || ((script == QChar::Script_Latin
+                                 || script == QChar::Script_Common)
+                                && QChar::isPrint(codePoint)
+                                && !QChar::isMark(codePoint)
+                                && !QChar::isSpace(codePoint));
+                        QPointF normalizedOrigin;
+                        QPointF normalizedAdvance;
+                        const bool usable = collectTextMarkupGlyphRects
+                            && simpleCharacter
+                            && objectLayout->spacingSamples.size() < 4096
+                            && FPDFText_HasUnicodeMapError(textPage, index) == 0
+                            && FPDFText_GetCharOrigin(textPage, index, &x, &y)
+                            && FPDFText_GetMatrix(textPage, index, &matrix)
+                            && qIsFinite(fontSize) && fontSize > 0.0
+                            && FPDFFont_GetGlyphWidth(FPDFTextObj_GetFont(textObject),
+                                unicode, fontSize, &advance)
+                            && qIsFinite(advance) && advance > 0.0
+                            && normalizedPagePoint(page, request.pageSize,
+                                QPointF(x, y), normalizedOrigin)
+                            && normalizedPagePoint(page, request.pageSize,
+                                QPointF(x + advance * matrix.a,
+                                        y + advance * matrix.b), normalizedAdvance);
+                        const qreal width = (normalizedAdvance.x() - normalizedOrigin.x())
+                            * request.pageSize.width();
+                        if (!usable || width <= 0.0
+                            || qAbs(normalizedAdvance.y() - normalizedOrigin.y())
+                                * request.pageSize.height() > 0.05) {
+                            objectLayout->spacingUnsupported = true;
+                            objectLayout->spacingSamples.clear();
+                        } else {
+                            const QPointF origin(normalizedOrigin.x() * request.pageSize.width(),
+                                                 normalizedOrigin.y() * request.pageSize.height());
+                            objectLayout->spacingEmSize = fontSize * std::hypot(matrix.c, matrix.d);
+                            if (objectLayout->hasSpacingOrigin) {
+                                const QPointF delta = origin - objectLayout->previousSpacingOrigin;
+                                if (delta.x() <= 0.0 || qAbs(delta.y()) > 0.05) {
+                                    objectLayout->spacingUnsupported = true;
+                                    objectLayout->spacingSamples.clear();
+                                } else {
+                                    objectLayout->spacingSamples.append(TextSpacingSample{
+                                        delta.x() - objectLayout->previousSpacingAdvance,
+                                        objectLayout->previousSpacingWasSpace});
+                                }
+                            }
+                            objectLayout->previousSpacingOrigin = origin;
+                            objectLayout->previousSpacingAdvance = width;
+                            objectLayout->previousSpacingWasSpace = codePoint == U' ';
+                            objectLayout->hasSpacingOrigin = true;
+                        }
+                    }
                 }
             }
 
@@ -2369,6 +2433,11 @@ void PDFEditController::appendPageObjectCandidates(
         candidate.reason = qtTrId("InlineEditorUnsupportedTextLayout");
     }
 
+    if (candidate.editable && textLayout != textObjectLayouts.cend()) {
+        inferSourceTextSpacing(candidate, *textLayout, pageSize);
+        readSourceTextSpacing(pageObject, candidate, pageSize);
+    }
+
     CandidatePart part;
     part.objectId = candidate.objectId;
     part.objectPath = candidate.objectPath;
@@ -2391,11 +2460,362 @@ void PDFEditController::appendPageObjectCandidates(
     candidates.append(candidate);
 }
 
+void PDFEditController::inferSourceTextSpacing(
+    Candidate &candidate, const TextObjectLayout &layout, const QSizeF &pageSize)
+{
+    if (layout.spacingUnsupported || pageSize.isEmpty()) {
+        return;
+    }
+    QVector<qreal> letters;
+    QVector<qreal> spaces;
+    for (const TextSpacingSample &sample : layout.spacingSamples) {
+        (sample.followsSpace ? spaces : letters).append(sample.residual);
+    }
+    // Short runs and irregular TJ positioning cannot establish a reliable
+    // uniform Tc/Tw value. Retain the existing layout fallback in those cases.
+    if (letters.size() < 4) {
+        return;
+    }
+    const auto median = [](QVector<qreal> values) {
+        std::sort(values.begin(), values.end());
+        const qsizetype middle = values.size() / 2;
+        return values.size() % 2 ? values[middle]
+            : (values[middle - 1] + values[middle]) / 2.0;
+    };
+    const qreal tolerance = qMax(0.05, layout.spacingEmSize * 0.004);
+    const auto uniform = [&](const QVector<qreal> &values, qreal expected) {
+        return std::all_of(values.cbegin(), values.cend(), [&](qreal value) {
+            return qIsFinite(value) && qAbs(value - expected) <= tolerance;
+        });
+    };
+    qreal letter = median(letters);
+    qreal word = spaces.size() >= 2 ? median(spaces) - letter : 0.0;
+    if (!uniform(letters, letter) || !uniform(spaces, letter + word)
+        || letter < -10.0 || letter > 50.0 || word < -10.0 || word > 50.0) {
+        return;
+    }
+    // The page/device conversion has finite precision. Do not materialize its
+    // rounding noise as a source style or a no-op editor change.
+    letter = qAbs(letter) < 0.02 ? 0.0 : qRound64(letter * 1000.0) / 1000.0;
+    word = qAbs(word) < 0.02 ? 0.0 : qRound64(word * 1000.0) / 1000.0;
+    candidate.letterSpacingRatio = letter / pageSize.height();
+    candidate.wordSpacingRatio = word / pageSize.height();
+}
+
+void PDFEditController::readSourceTextSpacing(
+    FPDF_PAGEOBJECT object, Candidate &candidate, const QSizeF &pageSize)
+{
+    assertPDFiumProcessLockHeld();
+    if (pageSize.isEmpty()) {
+        return;
+    }
+    const int count = FPDFPageObj_CountMarks(object);
+    if (count < 1 || count > 64) {
+        return;
+    }
+    FPDF_PAGEOBJECTMARK spacingMark = nullptr;
+    for (int index = 0; index < count; ++index) {
+        const auto mark = FPDFPageObj_GetMark(object, index);
+        FPDF_WCHAR name[64]{};
+        unsigned long size = 0;
+        if (!mark || !FPDFPageObjMark_GetName(mark, name, sizeof(name), &size)
+            || size < 2 || size > sizeof(name) || size % 2 != 0) {
+            continue;
+        }
+        const QString value = QString::fromUtf16(
+            reinterpret_cast<const char16_t *>(name), size / 2 - 1);
+        if (value != QLatin1String("TrePDFTextSpacing")) {
+            continue;
+        }
+        if (spacingMark) {
+            return;
+        }
+        spacingMark = mark;
+    }
+    if (!spacingMark) {
+        return;
+    }
+    int version = 0;
+    int index = -1;
+    int parts = 0;
+    int start = -1;
+    float letter = 0.0F;
+    float word = 0.0F;
+    FPDF_WCHAR group[64]{};
+    unsigned long groupSize = 0;
+    unsigned long textSize = 0;
+    if (!FPDFPageObjMark_GetParamIntValue(spacingMark, "Version", &version)
+        || version != 1
+        || !FPDFPageObjMark_GetParamIntValue(spacingMark, "Index", &index)
+        || !FPDFPageObjMark_GetParamIntValue(spacingMark, "Count", &parts)
+        || !FPDFPageObjMark_GetParamIntValue(spacingMark, "Start", &start)
+        || parts < 1 || parts > 1024 || index < 0 || index >= parts
+        || start < 0 || start >= 32768
+        || !FPDFPageObjMark_GetParamFloatValue(spacingMark, "LetterSpacing", &letter)
+        || !FPDFPageObjMark_GetParamFloatValue(spacingMark, "WordSpacing", &word)
+        || !qIsFinite(letter) || letter < -10.0F || letter > 50.0F
+        || !qIsFinite(word) || word < -10.0F || word > 50.0F
+        || !FPDFPageObjMark_GetParamStringValue(spacingMark, "Group", group,
+                                               sizeof(group), &groupSize)
+        || groupSize < 2 || groupSize > sizeof(group) || groupSize % 2 != 0
+        || !FPDFPageObjMark_GetParamBlobValue(spacingMark, "Text", nullptr, 0, &textSize)
+        || textSize == 0 || textSize > 131072) {
+        return;
+    }
+    const QString groupId = QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(group), groupSize / 2 - 1);
+    if (QUuid(groupId).isNull()) {
+        return;
+    }
+    QByteArray bytes(static_cast<qsizetype>(textSize), Qt::Uninitialized);
+    unsigned long actualSize = 0;
+    if (!FPDFPageObjMark_GetParamBlobValue(spacingMark, "Text",
+            reinterpret_cast<unsigned char *>(bytes.data()), textSize, &actualSize)
+        || actualSize != textSize) {
+        return;
+    }
+    const QString text = QString::fromUtf8(bytes);
+    // PDFium collapses repeated boundary spaces in extracted object text.
+    // The mark retains their exact count; all visible characters must match.
+    const auto visibleText = [](const QString &value) { return value.trimmed(); };
+    QString encodedText = text;
+    encodedText.remove(QLatin1Char('\t'));
+    if (text.toUtf8() != bytes || text.size() > 32768
+        || text.contains(QChar::Null) || text.contains(QLatin1Char('\n'))
+        || text.contains(QLatin1Char('\r'))
+        || visibleText(encodedText) != visibleText(candidate.text)) {
+        return;
+    }
+    float originOffset = 0.0F;
+    if (FPDFPageObjMark_GetParamFloatValue(spacingMark, "OriginOffset", &originOffset)
+        && (!qIsFinite(originOffset) || qAbs(originOffset) > pageSize.width())) {
+        return;
+    }
+    QVector<CharacterSpan> runs;
+    unsigned long runsSize = 0;
+    if (FPDFPageObjMark_GetParamBlobValue(spacingMark, "SpacingRuns", nullptr, 0, &runsSize)) {
+        if (!runsSize || runsSize > 131072) {
+            return;
+        }
+        QByteArray runBytes(runsSize, Qt::Uninitialized);
+        unsigned long actualRunsSize = 0;
+        if (!FPDFPageObjMark_GetParamBlobValue(spacingMark, "SpacingRuns",
+                reinterpret_cast<unsigned char *>(runBytes.data()), runsSize, &actualRunsSize)
+            || actualRunsSize != runsSize) {
+            return;
+        }
+        const QJsonDocument document = QJsonDocument::fromJson(runBytes);
+        const QJsonArray array = document.array();
+        if (!document.isArray() || array.isEmpty() || array.size() > 1024) {
+            return;
+        }
+        int end = 0;
+        for (const QJsonValue &value : array) {
+            const QJsonArray run = value.toArray();
+            if (run.size() != 4
+                || !run[0].isDouble() || !run[1].isDouble()
+                || !run[2].isDouble() || !run[3].isDouble()
+                || run[0].toDouble() != end
+                || run[1].toDouble() != run[1].toInt()
+                || run[1].toInt() <= 0 || run[1].toInt() > text.size() - end
+                || !qIsFinite(run[2].toDouble()) || !qIsFinite(run[3].toDouble())
+                || run[2].toDouble() < -10.0 || run[2].toDouble() > 50.0
+                || run[3].toDouble() < -10.0 || run[3].toDouble() > 50.0) {
+                return;
+            }
+            CharacterFormat format;
+            format.letterSpacingRatio = run[2].toDouble() / pageSize.height();
+            format.wordSpacingRatio = run[3].toDouble() / pageSize.height();
+            runs.append(CharacterSpan{end, run[1].toInt(), format});
+            end += run[1].toInt();
+        }
+        if (end != text.size()) {
+            return;
+        }
+    }
+    // Apply only after the complete marked line has passed group validation.
+    candidate.spacingGroup = groupId;
+    candidate.spacingText = text;
+    candidate.spacingIndex = index;
+    candidate.spacingCount = parts;
+    candidate.spacingStart = start;
+    candidate.spacingLetterPoints = letter;
+    candidate.spacingWordPoints = word;
+    candidate.spacingOriginOffset = originOffset;
+    candidate.spacingRuns = std::move(runs);
+}
+
 QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates(
     QVector<Candidate> candidates,
     const QSizeF &pageSize) const
 {
-    if (candidates.size() < 2 || pageSize.isEmpty()) {
+    if (pageSize.isEmpty()) {
+        return candidates;
+    }
+
+    // Spaced output is a sequence of individually positioned glyph clusters.
+    // Its bounded, validated line metadata restores exact text without guessing
+    // spaces from ink gaps (negative tracking can legitimately overlap ink).
+    QHash<QString, QVector<qsizetype>> spacingGroups;
+    QVector<qsizetype> obstacleOrder;
+    QVector<QRectF> obstacleRects;
+    for (qsizetype index = 0; index < candidates.size(); ++index) {
+        if (!candidates[index].spacingGroup.isEmpty()) {
+            spacingGroups[candidates[index].spacingGroup].append(index);
+        }
+    }
+    if (!spacingGroups.isEmpty()) {
+        obstacleRects.reserve(candidates.size());
+        for (qsizetype index = 0; index < candidates.size(); ++index) {
+            obstacleRects.append(candidates[index].geometry.sourceRect);
+            if (!candidates[index].textMarkupHitTestOnly) {
+                obstacleOrder.append(index);
+            }
+        }
+    }
+    std::stable_sort(obstacleOrder.begin(), obstacleOrder.end(),
+        [&](qsizetype left, qsizetype right) {
+            return obstacleRects[left].top() < obstacleRects[right].top();
+        });
+    QVector<qreal> maximumBottom;
+    maximumBottom.reserve(obstacleOrder.size());
+    qreal bottom = -std::numeric_limits<qreal>::infinity();
+    for (qsizetype index : std::as_const(obstacleOrder)) {
+        bottom = qMax(bottom, obstacleRects[index].bottom());
+        maximumBottom.append(bottom);
+    }
+    QSet<qsizetype> consumed;
+    qsizetype metadataComparisons = 0;
+    for (auto it = spacingGroups.cbegin(); it != spacingGroups.cend(); ++it) {
+        QVector<qsizetype> indices = it.value();
+        if (indices.isEmpty() || indices.size() > 1024) {
+            continue;
+        }
+        std::sort(indices.begin(), indices.end(), [&](qsizetype a, qsizetype b) {
+            return candidates[a].spacingIndex < candidates[b].spacingIndex;
+        });
+        const Candidate &first = candidates[indices.first()];
+        if (indices.size() != first.spacingCount) {
+            continue;
+        }
+        int length = 0;
+        QRectF rect;
+        bool valid = true;
+        for (qsizetype offset = 0; offset < indices.size(); ++offset) {
+            const Candidate &part = candidates[indices[offset]];
+            const Candidate &previous = candidates[indices[qMax<qsizetype>(0, offset - 1)]];
+            // Qt permits negative advances with tight tracking. Bound any
+            // backward step by the preceding cluster's declared spacing;
+            // ordinary unmarked overprints still follow the overlap guard.
+            const qreal backwardAllowance = qMax(0.0, -previous.spacingLetterPoints)
+                * previous.spacingText.size()
+                + qMax(0.0, -previous.spacingWordPoints)
+                    * previous.spacingText.count(QLatin1Char(' ')) + 0.02;
+            if (!part.editable || !part.hasBaseline || !part.renderSuppressible
+                || part.kind != QLatin1String("text") || part.parts.size() != 1
+                || part.spacingIndex != offset || part.spacingCount != indices.size()
+                || part.spacingStart != length || part.spacingText.isEmpty()
+                || qAbs(part.origin.y() - first.origin.y()) * pageSize.height() > 0.1
+                || (offset > 0 && part.origin.x() + backwardAllowance / pageSize.width()
+                    < previous.origin.x())) {
+                valid = false;
+                break;
+            }
+            length += part.spacingText.size();
+            rect = rect.isEmpty() ? part.geometry.sourceRect
+                : rect.united(part.geometry.sourceRect);
+        }
+        if (!valid || length > 32768) {
+            continue;
+        }
+        const QSet<qsizetype> members(indices.cbegin(), indices.cend());
+        // Query only overlapping vertical intervals. A spaced page can have
+        // thousands of clusters; unrelated rows must not exhaust the budget.
+        const qsizetype firstObstacle = std::upper_bound(
+            maximumBottom.cbegin(), maximumBottom.cend(), rect.top())
+            - maximumBottom.cbegin();
+        for (qsizetype position = firstObstacle; position < obstacleOrder.size(); ++position) {
+            const qsizetype index = obstacleOrder[position];
+            if (obstacleRects[index].top() >= rect.bottom()) {
+                break;
+            }
+            if (++metadataComparisons > kMaximumTextGroupingComparisons) {
+                valid = false;
+                break;
+            }
+            if (!members.contains(index) && !consumed.contains(index)
+                && !candidates[index].textMarkupHitTestOnly
+                && obstacleRects[index].intersects(rect)) {
+                valid = false;
+                break;
+            }
+        }
+        if (!valid) {
+            continue;
+        }
+        Candidate grouped = first;
+        grouped.objectPath.clear();
+        grouped.parts.clear();
+        grouped.text.clear();
+        grouped.sourceCharacterSpans.clear();
+        grouped.textGlyphRects.clear();
+        grouped.letterSpacingRatio = first.spacingLetterPoints / pageSize.height();
+        grouped.wordSpacingRatio = first.spacingWordPoints / pageSize.height();
+        QByteArray identity;
+        for (qsizetype index : std::as_const(indices)) {
+            Candidate part = candidates[index];
+            part.letterSpacingRatio = part.spacingLetterPoints / pageSize.height();
+            part.wordSpacingRatio = part.spacingWordPoints / pageSize.height();
+            const CharacterFormat baseFormat = characterFormatForCandidate(part);
+            QVector<CharacterSpan> runs = part.spacingRuns;
+            if (runs.isEmpty()) {
+                runs.append(CharacterSpan{0, part.spacingText.size(), baseFormat});
+            }
+            for (const CharacterSpan &run : std::as_const(runs)) {
+                CharacterFormat format = baseFormat;
+                format.letterSpacingRatio = run.format.letterSpacingRatio;
+                format.wordSpacingRatio = run.format.wordSpacingRatio;
+                if (!grouped.sourceCharacterSpans.isEmpty()
+                    && sameCharacterFormat(grouped.sourceCharacterSpans.last().format, format)) {
+                    grouped.sourceCharacterSpans.last().length += run.length;
+                } else {
+                    grouped.sourceCharacterSpans.append(CharacterSpan{
+                        grouped.text.size() + run.start, run.length, format});
+                }
+            }
+            grouped.text.append(part.spacingText);
+            grouped.parts.append(part.parts);
+            grouped.textGlyphRects.append(part.textGlyphRects);
+            identity.append(part.objectId.toUtf8());
+            identity.append('\0');
+        }
+        grouped.spacingGroup.clear();
+        grouped.spacingText.clear();
+        grouped.spacingRuns.clear();
+        grouped.origin.rx() -= first.spacingOriginOffset / pageSize.width();
+        grouped.objectId = QStringLiteral("line:") + QString::fromLatin1(
+            QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex());
+        setInitialGeometry(grouped, rect);
+        expandInitialTextFrame(grouped, pageSize);
+        const qsizetype outputIndex = *std::min_element(indices.cbegin(), indices.cend());
+        candidates[outputIndex] = std::move(grouped);
+        for (qsizetype index : std::as_const(indices)) {
+            if (index != outputIndex) {
+                consumed.insert(index);
+            }
+        }
+    }
+    if (!consumed.isEmpty()) {
+        QVector<Candidate> restored;
+        restored.reserve(candidates.size() - consumed.size());
+        for (qsizetype index = 0; index < candidates.size(); ++index) {
+            if (!consumed.contains(index)) {
+                restored.append(std::move(candidates[index]));
+            }
+        }
+        candidates = std::move(restored);
+    }
+    if (candidates.size() < 2) {
         return candidates;
     }
 

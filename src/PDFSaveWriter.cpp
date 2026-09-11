@@ -23,8 +23,11 @@
 #include <QDateTime>
 #include <QFont>
 #include <QFontMetricsF>
+#include <QGlyphRun>
 #include <QHash>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QRawFont>
 #include <QSaveFile>
 #include <QSet>
@@ -64,12 +67,17 @@ constexpr char kCommentReplyToKey[] = "TrePDFReplyTo";
 constexpr char kFreeTextAppearanceIdKey[]
     = "TrePDFFreeTextAppearanceId";
 constexpr int kAnnotationFlagLockedContents = 1 << 9;
+constexpr qsizetype kMaximumSpacingLineParts = 1024;
+constexpr qsizetype kMaximumSpacingDraftParts = 32768;
+constexpr char kTextSpacingMark[] = "TrePDFTextSpacing";
 struct SaveFormat {
     QString fontFamily;
     QString embeddableFontFamily;
     QByteArray embeddableFontData;
     qreal fontSizeRatio = 0.0;
     qreal displayFontSizeRatio = 0.0;
+    qreal letterSpacingRatio = 0.0;
+    qreal wordSpacingRatio = 0.0;
     int fontStretch = QFont::Unstretched;
     bool fontBold = false;
     bool fontItalic = false;
@@ -176,6 +184,14 @@ struct LayoutRun {
     qreal baselineFromTop = 0.0;
     qreal width = 0.0;
     bool positionedWord = false;
+    QByteArray spacingGroup;
+    QString spacingText;
+    int spacingIndex = 0;
+    int spacingCount = 0;
+    int spacingStart = 0;
+    QByteArray spacingRuns;
+    QString leadingWhitespace;
+    qreal leadingLayoutAdvance = 0.0;
 };
 
 struct SourceObject {
@@ -437,6 +453,8 @@ bool sameFormat(const SaveFormat &left, const SaveFormat &right)
         && sameFamily(left.embeddableFontFamily, right.embeddableFontFamily)
         && left.fontSizeRatio == right.fontSizeRatio
         && left.displayFontSizeRatio == right.displayFontSizeRatio
+        && left.letterSpacingRatio == right.letterSpacingRatio
+        && left.wordSpacingRatio == right.wordSpacingRatio
         && left.fontStretch == right.fontStretch
         && left.fontBold == right.fontBold
         && left.fontItalic == right.fontItalic
@@ -635,6 +653,9 @@ QFont displayFont(const SaveFormat &format, qreal pageHeight)
         format.fontBold,
         format.fontItalic,
         pixelSize));
+    font.setLetterSpacing(QFont::AbsoluteSpacing,
+                          format.letterSpacingRatio * pageHeight);
+    font.setWordSpacing(format.wordSpacingRatio * pageHeight);
     return font;
 }
 
@@ -820,10 +841,173 @@ QList<QTextLayout::FormatRange> layoutFormats(const SaveDraft &draft,
     return formats;
 }
 
+bool hasTextSpacing(const SaveFormat &format)
+{
+    return !qFuzzyIsNull(format.letterSpacingRatio)
+        || !qFuzzyIsNull(format.wordSpacingRatio);
+}
+
+bool lineHasTextSpacing(const SaveDraft &draft,
+                        qsizetype start,
+                        qsizetype end)
+{
+    if (draft.characterSpans.isEmpty()) {
+        return hasTextSpacing(draft.originalFormat);
+    }
+    return std::any_of(draft.characterSpans.cbegin(),
+                       draft.characterSpans.cend(),
+                       [start, end](const SaveSpan &span) {
+        return span.start < end && span.start + span.length > start
+            && hasTextSpacing(span.format);
+    });
+}
+
+bool appendSpacedLineRuns(const SaveDraft &draft,
+                          const QString &paragraphText,
+                          const QTextLine &line,
+                          qsizetype paragraphStart,
+                          qreal contentLeft,
+                          qreal baseline,
+                          qreal pageHeight,
+                          QVector<LayoutRun> &runs)
+{
+    const qsizetype lineStart = paragraphStart + line.textStart();
+    const qsizetype lineEnd = qMin(draft.text.size(), lineStart + line.textLength());
+    if (lineEnd - lineStart > kMaximumSpacingDraftParts) {
+        return false;
+    }
+    qsizetype firstVisible = lineStart;
+    while (firstVisible < lineEnd && draft.text.at(firstVisible).isSpace()) {
+        ++firstVisible;
+    }
+    if (firstVisible == lineEnd) {
+        return true;
+    }
+
+    // A grapheme boundary alone can fall inside a shaped ligature. Intersect
+    // it with Qt's glyph-cluster starts so a combining sequence or ligature
+    // remains in one PDF text object.
+    QSet<qsizetype> glyphStarts;
+    QSet<qsizetype> rightToLeftGlyphStarts;
+    const QList<QGlyphRun> glyphRuns = line.glyphRuns(
+        line.textStart(), line.textLength(), QTextLayout::RetrieveStringIndexes);
+    for (const QGlyphRun &glyphRun : glyphRuns) {
+        for (qsizetype position : glyphRun.stringIndexes()) {
+            glyphStarts.insert(paragraphStart + position);
+            if (glyphRun.isRightToLeft()) {
+                rightToLeftGlyphStarts.insert(paragraphStart + position);
+            }
+        }
+    }
+    QSet<qsizetype> graphemeStarts;
+    QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, paragraphText);
+    finder.setPosition(line.textStart());
+    for (qsizetype position = finder.toNextBoundary();
+         position >= 0 && paragraphStart + position < lineEnd;
+         position = finder.toNextBoundary()) {
+        graphemeStarts.insert(paragraphStart + position);
+    }
+
+    QVector<qsizetype> boundaries{lineStart, lineEnd};
+    for (qsizetype position : std::as_const(graphemeStarts)) {
+        if (position <= firstVisible || !glyphStarts.contains(position)
+            || draft.text.at(position).isSpace()) {
+            continue;
+        }
+        const SaveFormat &format = formatAt(draft, position);
+        if (!qFuzzyIsNull(format.letterSpacingRatio)
+            || draft.text.at(position - 1).isSpace()) {
+            boundaries.append(position);
+        }
+    }
+    for (const SaveSpan &span : draft.characterSpans) {
+        for (qsizetype position : {span.start, span.start + span.length}) {
+            if (position > firstVisible && position < lineEnd
+                && !draft.text.at(position).isSpace()
+                && graphemeStarts.contains(position)
+                && glyphStarts.contains(position)) {
+                boundaries.append(position);
+            }
+        }
+    }
+    std::sort(boundaries.begin(), boundaries.end());
+    boundaries.erase(std::unique(boundaries.begin(), boundaries.end()),
+                     boundaries.end());
+    const qsizetype count = boundaries.size() - 1;
+    if (count > kMaximumSpacingLineParts
+        || runs.size() + count > kMaximumSpacingDraftParts) {
+        return false;
+    }
+
+    const QByteArray group = QUuid::createUuid()
+        .toString(QUuid::WithoutBraces).toLatin1();
+    for (qsizetype index = 0; index < count; ++index) {
+        const qsizetype start = boundaries.at(index);
+        const qsizetype end = boundaries.at(index + 1);
+        const qreal startX = line.cursorToX(static_cast<int>(start - paragraphStart));
+        const qreal endX = line.cursorToX(static_cast<int>(end - paragraphStart));
+        LayoutRun run;
+        run.spacingGroup = group;
+        run.spacingText = draft.text.sliced(start, end - start);
+        // Whitespace belongs to the preceding visible cluster. It remains
+        // encoded for extraction; tabs contribute only their Qt layout advance.
+        run.text = run.spacingText;
+        run.text.remove(QLatin1Char('\t'));
+        run.spacingStart = static_cast<int>(start - lineStart);
+        run.spacingIndex = static_cast<int>(index);
+        run.spacingCount = static_cast<int>(count);
+        run.format = formatAt(draft, qMax(start, firstVisible));
+        if (start < firstVisible) {
+            run.leadingWhitespace = run.spacingText.first(firstVisible - start);
+            run.leadingWhitespace.remove(QLatin1Char('\t'));
+            run.leadingLayoutAdvance = line.cursorToX(
+                static_cast<int>(firstVisible - paragraphStart)) - startX;
+        }
+        QJsonArray spacingRanges;
+        qsizetype spacingStart = start;
+        while (spacingStart < end) {
+            const SaveFormat &spacingFormat = formatAt(draft, spacingStart);
+            qsizetype spacingEnd = spacingStart + 1;
+            while (spacingEnd < end) {
+                const SaveFormat &nextFormat = formatAt(draft, spacingEnd);
+                if (nextFormat.letterSpacingRatio != spacingFormat.letterSpacingRatio
+                    || nextFormat.wordSpacingRatio != spacingFormat.wordSpacingRatio) {
+                    break;
+                }
+                ++spacingEnd;
+            }
+            spacingRanges.append(QJsonArray{
+                static_cast<int>(spacingStart - start),
+                static_cast<int>(spacingEnd - spacingStart),
+                spacingFormat.letterSpacingRatio * pageHeight,
+                spacingFormat.wordSpacingRatio * pageHeight});
+            spacingStart = spacingEnd;
+        }
+        if (spacingRanges.size() > kMaximumSpacingLineParts) {
+            return false;
+        }
+        if (spacingRanges.size() > 1) {
+            run.spacingRuns = QJsonDocument(spacingRanges).toJson(QJsonDocument::Compact);
+        }
+        // Negative tracking can move the next LTR cursor left of this
+        // cluster. Its glyph still starts at startX; using the lesser cursor
+        // would shift the glyph itself and change its saved appearance.
+        run.x = contentLeft + (rightToLeftGlyphStarts.contains(qMax(start, firstVisible))
+            ? qMin(startX, endX) : startX);
+        run.baselineFromTop = baseline;
+        run.width = qMax(kMinimumObjectWidth, std::abs(endX - startX));
+        run.positionedWord = true;
+        runs.append(std::move(run));
+    }
+    return true;
+}
+
 QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
                               qreal pageWidth,
-                              qreal pageHeight)
+                              qreal pageHeight,
+                              bool &valid)
 {
+    valid = true;
     QVector<LayoutRun> runs;
     if (draft.text.isEmpty()) {
         return runs;
@@ -879,6 +1063,17 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
                 const qsizetype lineEnd = qMin(
                     paragraphEnd,
                     lineStart + line.textLength());
+                if (lineHasTextSpacing(draft, lineStart, lineEnd)) {
+                    if (!appendSpacedLineRuns(draft, paragraphText, line,
+                                             paragraphStart, contentLeft,
+                                             baseline, pageHeight, runs)) {
+                        layout.endLayout();
+                        valid = false;
+                        return {};
+                    }
+                    paragraphHeight = line.y() + line.height();
+                    continue;
+                }
                 QVector<qsizetype> boundaries{lineStart, lineEnd};
                 for (const SaveSpan &span : draft.characterSpans) {
                     const qsizetype spanStart = qBound(lineStart, span.start, lineEnd);
@@ -1952,6 +2147,51 @@ QVector<SourceObject> sourceUnderlineObjectsForDraft(
     return objects;
 }
 
+bool markTextSpacing(FPDF_DOCUMENT document,
+                     FPDF_PAGEOBJECT textObject,
+                     const LayoutRun &run,
+                     qreal pageHeight,
+                     qreal originOffset)
+{
+    if (run.spacingGroup.isEmpty()) {
+        return true;
+    }
+    const QByteArray text = run.spacingText.toUtf8();
+    FPDF_PAGEOBJECTMARK mark = FPDFPageObj_AddMark(textObject, kTextSpacingMark);
+    bool marked = mark
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Version", 1)
+        && FPDFPageObjMark_SetStringParam(document, textObject, mark, "Group",
+                                         run.spacingGroup.constData())
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Index",
+                                      run.spacingIndex)
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Count",
+                                      run.spacingCount)
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Start",
+                                      run.spacingStart)
+        && FPDFPageObjMark_SetBlobParam(
+            document, textObject, mark, "Text",
+            reinterpret_cast<const unsigned char *>(text.constData()),
+            static_cast<unsigned long>(text.size()))
+        && FPDFPageObjMark_SetFloatParam(
+            document, textObject, mark, "LetterSpacing",
+            static_cast<float>(run.format.letterSpacingRatio * pageHeight))
+        && FPDFPageObjMark_SetFloatParam(
+            document, textObject, mark, "WordSpacing",
+            static_cast<float>(run.format.wordSpacingRatio * pageHeight));
+    if (marked && !run.spacingRuns.isEmpty()) {
+        marked = FPDFPageObjMark_SetBlobParam(
+            document, textObject, mark, "SpacingRuns",
+            reinterpret_cast<const unsigned char *>(run.spacingRuns.constData()),
+            static_cast<unsigned long>(run.spacingRuns.size()));
+    }
+    if (marked && !qFuzzyIsNull(originOffset)) {
+        marked = FPDFPageObjMark_SetFloatParam(
+            document, textObject, mark, "OriginOffset",
+            static_cast<float>(originOffset));
+    }
+    return marked;
+}
+
 bool markUnderlinePair(FPDF_DOCUMENT document,
                        FPDF_PAGEOBJECT textObject,
                        FPDF_PAGEOBJECT underlineObject)
@@ -2298,10 +2538,16 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
         }
     }
 
+    bool validLayout = false;
     const QVector<LayoutRun> runs = layoutRuns(
         preparedDraft,
         pageWidth,
-        pageHeight);
+        pageHeight,
+        validLayout);
+    if (!validLayout) {
+        return failure(PDFSaveWriter::Error::TextObjectCreationFailed,
+                       draft.page, draft.objectId);
+    }
     for (const LayoutRun &run : runs) {
         const FontResolver::ResolvedFont resolvedFont = fontResolver.resolve(
             run.format,
@@ -2394,7 +2640,7 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                     : 1.0,
                 kMaximumScale);
         } else if (configured && run.positionedWord) {
-            // Word spacing is already represented by each run's origin. A
+            // Spacing is already represented by each run's Qt origin. A
             // glyph bounding box omits side bearings, so fitting it to the
             // word advance would stretch the glyphs themselves.
             horizontalScale = qBound(
@@ -2409,14 +2655,29 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 run.width / static_cast<qreal>(right - left),
                 kMaximumScale);
         }
+        qreal originOffset = run.leadingLayoutAdvance;
+        if (configured && (!run.leadingWhitespace.isEmpty()
+                           || !qFuzzyIsNull(originOffset))) {
+            for (uint character : run.leadingWhitespace.toUcs4()) {
+                float advance = 0.0F;
+                configured = FPDFFont_GetGlyphWidth(font, character,
+                    static_cast<float>(fontSize), &advance)
+                    && qIsFinite(advance) && advance >= 0.0F;
+                if (!configured) {
+                    break;
+                }
+                originOffset -= advance * horizontalScale;
+            }
+        }
         FS_MATRIX matrix{};
         configured = configured
             && coordinateMapper.textMatrix(
-                run.x,
+                run.x + originOffset,
                 run.baselineFromTop,
                 horizontalScale,
                 matrix)
-            && FPDFPageObj_SetMatrix(textObject, &matrix);
+            && FPDFPageObj_SetMatrix(textObject, &matrix)
+            && markTextSpacing(document, textObject, run, pageHeight, originOffset);
         if (!configured) {
             FPDFPageObj_Destroy(textObject);
             return failure(
@@ -5200,6 +5461,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         result.fontFamily = format.fontFamily;
         result.fontSizeRatio = format.fontSizeRatio;
         result.displayFontSizeRatio = format.displayFontSizeRatio;
+        result.letterSpacingRatio = format.letterSpacingRatio;
+        result.wordSpacingRatio = format.wordSpacingRatio;
         result.fontStretch = format.fontStretch;
         result.fontBold = format.fontBold;
         result.fontItalic = format.fontItalic;

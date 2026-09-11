@@ -13,6 +13,8 @@ Rectangle {
     required property var availableFontFamilies
     required property var fontFamiliesForFilter
     required property string selectedFontFamily
+    required property real selectedLetterSpacing
+    required property real selectedWordSpacing
     required property real selectedFontSize
     required property var formattingSession
     required property string formattingContextKey
@@ -23,6 +25,11 @@ Rectangle {
     required property int selectedParagraphAlignment
     property bool formattingEnabled: false
     readonly property bool fontSizeEditPending: fontSizeEditState.pending
+        || spacingEditState.letterPending || spacingEditState.wordPending
+    //% "Character spacing"
+    readonly property string letterSpacingLabel: qsTrId("LetterSpacing")
+    //% "Word spacing"
+    readonly property string wordSpacingLabel: qsTrId("WordSpacing")
 
     property var displayedFontFamilies: availableFontFamilies
     property int fontFamilyFilter: PDFEditController.VietnameseFonts
@@ -95,6 +102,7 @@ Rectangle {
 
     function commitPendingEdit() {
         fontSizeEditState.commitRequested()
+        spacingEditState.commitRequested()
         return true
     }
 
@@ -104,6 +112,8 @@ Rectangle {
     signal collapsedChangeRequested(bool collapsed)
     signal fontFamilyChangeRequested(string fontFamily)
     signal fontSizeChangeRequested(real fontSize)
+    signal letterSpacingChangeRequested(real points)
+    signal wordSpacingChangeRequested(real points)
     signal fontBoldChangeRequested(bool enabled)
     signal fontItalicChangeRequested(bool enabled)
     signal fontUnderlineChangeRequested(bool enabled)
@@ -118,6 +128,116 @@ Rectangle {
 
         property bool pending: false
         signal commitRequested()
+    }
+
+    QtObject {
+        id: spacingEditState
+
+        property bool letterPending: false
+        property bool wordPending: false
+        signal commitRequested()
+    }
+
+    component SpacingField: TextField {
+        id: spacingField
+
+        required property bool wordSpacing
+        required property real currentSpacing
+        property bool pending: false
+        property var pendingSession: null
+        property string pendingContextKey: ""
+
+        function syncValue() {
+            pending = false
+            text = Number.isFinite(currentSpacing)
+                ? Number(currentSpacing.toFixed(3)).toString() : ""
+        }
+
+        function beginEdit() {
+            if (pending)
+                return
+            pending = true
+            pendingSession = root.formattingSession
+            pendingContextKey = root.formattingContextKey
+        }
+
+        function commitValue() {
+            const entered = text.trim().replace(",", ".")
+            const points = Number(entered)
+            const apply = pending && root.formattingEnabled
+                && pendingSession === root.formattingSession
+                && pendingContextKey === root.formattingContextKey
+                && /^-?[0-9]+(?:\.[0-9]+)?$/.test(entered)
+                && Number.isFinite(points) && points >= -10 && points <= 50
+                && (!Number.isFinite(currentSpacing)
+                    || Math.abs(points - currentSpacing) > 0.000001)
+            pending = false
+            if (apply) {
+                if (wordSpacing)
+                    root.wordSpacingChangeRequested(points)
+                else
+                    root.letterSpacingChangeRequested(points)
+            }
+            syncValue()
+        }
+
+        selectByMouse: true
+        inputMethodHints: Qt.ImhFormattedNumbersOnly
+        Accessible.name: wordSpacing ? root.wordSpacingLabel : root.letterSpacingLabel
+        onCurrentSpacingChanged: syncValue()
+        onTextEdited: beginEdit()
+        onAccepted: commitValue()
+        onActiveFocusChanged: {
+            if (!activeFocus)
+                commitValue()
+        }
+        onPendingChanged: {
+            if (wordSpacing)
+                spacingEditState.wordPending = pending
+            else
+                spacingEditState.letterPending = pending
+        }
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
+                const entered = Number(text.trim().replace(",", "."))
+                const initial = Number.isFinite(entered) ? entered : 0
+                beginEdit()
+                text = Math.max(-10, Math.min(50,
+                    initial + (event.key === Qt.Key_Up ? 0.1 : -0.1))).toFixed(1)
+                commitValue()
+                event.accepted = true
+            } else if (event.key === Qt.Key_Escape) {
+                syncValue()
+                event.accepted = true
+            }
+        }
+        Component.onCompleted: syncValue()
+        Component.onDestruction: {
+            if (wordSpacing)
+                spacingEditState.wordPending = false
+            else
+                spacingEditState.letterPending = false
+        }
+
+        Connections {
+            target: spacingEditState
+
+            function onCommitRequested() { spacingField.commitValue() }
+        }
+        Connections {
+            target: root
+
+            function onFormattingSessionChanged() { spacingField.syncValue() }
+            function onFormattingContextKeyChanged() { spacingField.syncValue() }
+            function onFormattingEnabledChanged() { spacingField.syncValue() }
+        }
+        background: Rectangle {
+            radius: 6
+            color: spacingField.palette.base
+            border.width: spacingField.activeFocus ? 2 : 1
+            border.color: spacingField.activeFocus
+                ? root.theme.foxitBorderOrange : root.theme.ribbonBorder
+        }
     }
 
     ButtonGroup {
@@ -586,6 +706,52 @@ Rectangle {
                             validator: IntValidator {
                                 bottom: 1
                                 top: 512
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.topMargin: 4
+                            //% "Spacing (pt)"
+                            text: qsTrId("TextSpacingPoints")
+                            color: root.theme.ribbonTextColor
+                            font.pixelSize: 12
+                            font.weight: Font.Medium
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            columnSpacing: 8
+                            rowSpacing: 4
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.letterSpacingLabel
+                                color: root.theme.ribbonTextColor
+                                font.pixelSize: 11
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.wordSpacingLabel
+                                color: root.theme.ribbonTextColor
+                                font.pixelSize: 11
+                            }
+                            SpacingField {
+                                objectName: "letterSpacingInput"
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.preferredWidth: 1
+                                wordSpacing: false
+                                currentSpacing: root.selectedLetterSpacing
+                            }
+                            SpacingField {
+                                objectName: "wordSpacingInput"
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.preferredWidth: 1
+                                wordSpacing: true
+                                currentSpacing: root.selectedWordSpacing
                             }
                         }
 

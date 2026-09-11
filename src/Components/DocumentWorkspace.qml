@@ -819,6 +819,8 @@ Item {
                     selectedFontFamily:
                         root.session.editController.selectedFontFamily
                     selectedFontSize: root.session.editController.selectedFontSize
+                    selectedLetterSpacing: root.session.editController.selectedLetterSpacing
+                    selectedWordSpacing: root.session.editController.selectedWordSpacing
                     formattingSession: root.session
                     formattingContextKey: root.session.document.source + ":"
                         + root.session.editController.selectedPage + ":"
@@ -843,6 +845,12 @@ Item {
                     }
                     onFontSizeChangeRequested: fontSize => {
                         root.session.editController.setSelectedFontSize(fontSize)
+                    }
+                    onLetterSpacingChangeRequested: points => {
+                        root.session.editController.setSelectedLetterSpacing(points)
+                    }
+                    onWordSpacingChangeRequested: points => {
+                        root.session.editController.setSelectedWordSpacing(points)
                     }
                     onFontBoldChangeRequested: enabled => {
                         const editWasActive = root.session.editController.textEditActive
