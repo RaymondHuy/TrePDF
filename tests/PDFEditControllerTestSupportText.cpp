@@ -1,0 +1,1426 @@
+#include "PDFEditControllerTestSupport.h"
+
+namespace PDFEditControllerTestSupport {
+
+
+bool createArialSubsetCollisionSourcePdf(const QString &filePath)
+{
+    const QByteArray pageContent(
+        "BT\n"
+        "/F1 10 Tf\n"
+        "40 760 Td\n"
+        "(\\301) Tj\n"
+        "ET\n"
+        "BT\n"
+        "/F2 10 Tf\n"
+        "40 700 Td\n"
+        "(Wxyz) Tj\n"
+        "ET\n");
+    const QByteArray contentStream = QByteArray("<< /Length ")
+        + QByteArray::number(pageContent.size())
+        + QByteArray(" >>\nstream\n")
+        + pageContent
+        + QByteArray("endstream");
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                "/Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> "
+                "/Contents 6 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Courier "
+                "/Encoding /WinAnsiEncoding >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Arial "
+                "/Encoding /WinAnsiEncoding >>"),
+            contentStream,
+        });
+}
+
+bool createPatternPaintPdf(const QString &filePath, PatternPaintMode mode)
+{
+    const QByteArray paintContent = mode == PatternPaintMode::Fill
+        ? QByteArray(
+              "/Pattern cs\n"
+              "/P1 scn\n"
+              "20 20 160 80 re f\n")
+        : QByteArray(
+              "/Pattern CS\n"
+              "/P1 SCN\n"
+              "12 w\n"
+              "20 20 160 80 re S\n");
+    const QByteArray pageContent = QByteArray("q\n")
+        + paintContent
+        + QByteArray(
+              "Q\n"
+              "BT\n"
+              "/F1 20 Tf\n"
+              "20 160 Td\n"
+              "(Pattern edit text) Tj\n"
+              "ET\n");
+    const QByteArray patternContent(
+        "1 0 0 rg 0 0 10 10 re f\n"
+        "0 1 0 rg 10 0 10 10 re f\n"
+        "0 0 1 rg 0 10 10 10 re f\n"
+        "1 1 0 rg 10 10 10 10 re f\n");
+    const auto streamObject = [](const QByteArray &dictionary,
+                                 const QByteArray &stream) {
+        return dictionary + " /Length " + QByteArray::number(stream.size())
+            + " >>\nstream\n" + stream + "\nendstream";
+    };
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /F1 4 0 R >> "
+                "/Pattern << /P1 6 0 R >> >> /Contents 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+            streamObject("<<", pageContent),
+            streamObject(
+                "<< /Type /Pattern /PatternType 1 /PaintType 1 "
+                "/TilingType 1 /BBox [0 0 20 20] /XStep 20 /YStep 20 "
+                "/Resources << >>",
+                patternContent),
+        });
+}
+
+bool createPatternFillPdf(const QString &filePath)
+{
+    return createPatternPaintPdf(filePath, PatternPaintMode::Fill);
+}
+
+bool createPatternStrokePdf(const QString &filePath)
+{
+    return createPatternPaintPdf(filePath, PatternPaintMode::Stroke);
+}
+
+bool createGrayscaleWhiteFillPdf(const QString &filePath)
+{
+    const QByteArray pageContent(
+        "/P <</MCID 0>> BDC\n"
+        "1 g\n"
+        "20 20 160 80 re f*\n"
+        "EMC\n"
+        "0 g\n"
+        "BT\n"
+        "/F1 20 Tf\n"
+        "20 160 Td\n"
+        "(Grayscale white fill) Tj\n"
+        "ET\n");
+    const auto contentStream = [](const QByteArray &content) {
+        return QByteArray("<< /Length ")
+            + QByteArray::number(content.size())
+            + QByteArray(" >>\nstream\n")
+            + content
+            + QByteArray("endstream");
+    };
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /F1 4 0 R >> >> "
+                "/Contents 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+            contentStream(pageContent),
+        });
+}
+
+bool createIccBasedTextPdf(const QString &filePath)
+{
+    const QByteArray iccProfile = QColorSpace(QColorSpace::SRgb).iccProfile();
+    if (iccProfile.isEmpty()) {
+        return false;
+    }
+
+    const QByteArray pageContent(
+        "/CS1 cs\n"
+        "0 0.435294 0.752941 scn\n"
+        "BT\n"
+        "/F1 20 Tf\n"
+        "20 150 Td\n"
+        "(Untouched ICC blue) Tj\n"
+        "ET\n"
+        "0 g\n"
+        "BT\n"
+        "/F1 20 Tf\n"
+        "20 80 Td\n"
+        "(Editable sibling) Tj\n"
+        "ET\n");
+    const auto contentStream = [](const QByteArray &dictionary,
+                                  const QByteArray &content) {
+        return dictionary + " /Length " + QByteArray::number(content.size())
+            + " >>\nstream\n" + content + "\nendstream";
+    };
+
+    return writePdfObjects(
+        filePath,
+        {
+            QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArray(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                "/Resources << /Font << /F1 4 0 R >> "
+                "/ColorSpace << /CS1 [/ICCBased 6 0 R] >> >> "
+                "/Contents 5 0 R >>"),
+            QByteArray(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+            contentStream("<<", pageContent),
+            contentStream(
+                "<< /N 3 /Alternate /DeviceRGB",
+                iccProfile),
+        });
+}
+
+bool addTextObject(FPDF_DOCUMENT document,
+                   FPDF_PAGE page,
+                   const char *fontName,
+                   const QString &text,
+                   double x,
+                   double y,
+                   double horizontalScale,
+                   float fontSize)
+{
+    FPDF_PAGEOBJECT textObject = FPDFPageObj_NewTextObj(document, fontName, fontSize);
+    if (!textObject) {
+        return false;
+    }
+
+    const auto *wideText = reinterpret_cast<const FPDF_WCHAR *>(text.utf16());
+    if (!FPDFText_SetText(textObject, wideText)) {
+        FPDFPageObj_Destroy(textObject);
+        return false;
+    }
+
+    FPDFPageObj_Transform(
+        textObject,
+        horizontalScale,
+        0.0,
+        0.0,
+        1.0,
+        x,
+        y);
+    return FPDFPage_InsertObject(page, textObject);
+}
+
+bool addTransformedTextObject(FPDF_DOCUMENT document,
+                              FPDF_PAGE page,
+                              const QString &text,
+                              const FS_MATRIX &matrix)
+{
+    FPDF_PAGEOBJECT textObject = FPDFPageObj_NewTextObj(
+        document,
+        "Helvetica",
+        24.0F);
+    if (!textObject) {
+        return false;
+    }
+    const auto *wideText = reinterpret_cast<const FPDF_WCHAR *>(text.utf16());
+    if (!FPDFText_SetText(textObject, wideText)) {
+        FPDFPageObj_Destroy(textObject);
+        return false;
+    }
+    FPDFPageObj_Transform(
+        textObject,
+        matrix.a,
+        matrix.b,
+        matrix.c,
+        matrix.d,
+        matrix.e,
+        matrix.f);
+    return FPDFPage_InsertObject(page, textObject);
+}
+
+bool addTextObjectWithFont(FPDF_DOCUMENT document,
+                           FPDF_PAGE page,
+                           FPDF_FONT font,
+                           const QString &text,
+                           double x,
+                           double y)
+{
+    FPDF_PAGEOBJECT textObject = FPDFPageObj_CreateTextObj(
+        document,
+        font,
+        24.0F);
+    if (!textObject) {
+        return false;
+    }
+    const auto *wideText = reinterpret_cast<const FPDF_WCHAR *>(text.utf16());
+    if (!FPDFText_SetText(textObject, wideText)) {
+        FPDFPageObj_Destroy(textObject);
+        return false;
+    }
+    FPDFPageObj_Transform(textObject, 1.0, 0.0, 0.0, 1.0, x, y);
+    return FPDFPage_InsertObject(page, textObject);
+}
+
+bool addStyledTextObject(FPDF_DOCUMENT document,
+                         FPDF_PAGE page,
+                         const QString &text,
+                         FPDF_TEXT_RENDERMODE renderMode,
+                         const QColor &color,
+                         float strokeWidth,
+                         double x,
+                         double y)
+{
+    FPDF_PAGEOBJECT textObject = FPDFPageObj_NewTextObj(
+        document,
+        "Helvetica",
+        24.0F);
+    if (!textObject) {
+        return false;
+    }
+    const auto *wideText = reinterpret_cast<const FPDF_WCHAR *>(text.utf16());
+    const bool usesStroke = renderMode == FPDF_TEXTRENDERMODE_STROKE
+        || renderMode == FPDF_TEXTRENDERMODE_FILL_STROKE
+        || renderMode == FPDF_TEXTRENDERMODE_STROKE_CLIP
+        || renderMode == FPDF_TEXTRENDERMODE_FILL_STROKE_CLIP;
+    bool configured = FPDFText_SetText(textObject, wideText)
+        && FPDFTextObj_SetTextRenderMode(textObject, renderMode);
+    if (configured && usesStroke) {
+        configured = FPDFPageObj_SetStrokeColor(
+            textObject,
+            static_cast<unsigned int>(color.red()),
+            static_cast<unsigned int>(color.green()),
+            static_cast<unsigned int>(color.blue()),
+            static_cast<unsigned int>(color.alpha()))
+            && FPDFPageObj_SetStrokeWidth(textObject, strokeWidth);
+    } else if (configured) {
+        configured = FPDFPageObj_SetFillColor(
+            textObject,
+            static_cast<unsigned int>(color.red()),
+            static_cast<unsigned int>(color.green()),
+            static_cast<unsigned int>(color.blue()),
+            static_cast<unsigned int>(color.alpha()));
+    }
+    if (!configured) {
+        FPDFPageObj_Destroy(textObject);
+        return false;
+    }
+    FPDFPageObj_Transform(textObject, 1.0, 0.0, 0.0, 1.0, x, y);
+    return FPDFPage_InsertObject(page, textObject);
+}
+
+bool createFontStylePdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 595.0, 842.0);
+    bool succeeded = page
+        && addTextObject(document,
+                         page,
+                         "Helvetica",
+                         QString::fromLatin1(kRegularText),
+                         72.0,
+                         740.0)
+        && addTextObject(document,
+                         page,
+                         "Helvetica-Bold",
+                         QString::fromLatin1(kBoldText),
+                         72.0,
+                         680.0)
+        && addTextObject(document,
+                         page,
+                         "Helvetica",
+                         QStringLiteral("Hello"),
+                         72.0,
+                         620.0)
+        && addTextObject(document,
+                         page,
+                         "Helvetica",
+                         QStringLiteral("world"),
+                         140.0,
+                         620.0)
+        && addTextObject(document,
+                         page,
+                         "Helvetica",
+                         QString::fromLatin1(kMixedRegularText),
+                         72.0,
+                         560.0)
+        && addTextObject(document,
+                         page,
+                         "Helvetica-Bold",
+                         QString::fromLatin1(kMixedBoldText),
+                         140.0,
+                         560.0)
+        && addTextObject(document,
+                         page,
+                         "Helvetica",
+                         QString::fromLatin1(kLeftColumnText),
+                         72.0,
+                         500.0)
+        && addTextObject(document,
+                         page,
+                         "Helvetica",
+                         QString::fromLatin1(kRightColumnText),
+                         360.0,
+                         500.0)
+        && addTextObject(document,
+                         page,
+                         "Helvetica",
+                         QString::fromLatin1(kUprightText),
+                         72.0,
+                         440.0)
+        && addTextObject(document,
+                         page,
+                         "Helvetica-Oblique",
+                         QString::fromLatin1(kObliqueText),
+                         170.0,
+                         440.0)
+        && FPDFPage_GenerateContent(page);
+
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+QVector<SourceParagraphTextPart> mixedSourceParagraphParts()
+{
+    // Match the mixed face, small stretch differences, and baseline gaps on
+    // page 5 of the reported article. The 19-point gap starts a new paragraph.
+    return {
+        {QStringLiteral("a combination of economic and cultural activities that take place at night, mainly"),
+         72.0, 612.34, "Helvetica-Bold", 1.008, 12.0F},
+        {QStringLiteral("entertainment experiences (excluding the prostitution industry). In the US, the night-time"),
+         72.0, 598.53, "Helvetica", 1.008, 12.0F},
+        {QStringLiteral("economy includes 5 main areas including: Arts, bars, culinary services, sports and"),
+         72.0, 584.53, "Helvetica", 1.008, 12.0F},
+        {QStringLiteral("entertainment. Most European countries define the night-time economy in a narrow sense"),
+         72.0, 570.53, "Helvetica", 1.008, 12.0F},
+        {QStringLiteral("and define the night-time economic operating time frame from 6:00 p.m. the previous day"),
+         72.0, 556.53, "Helvetica", 1.008, 12.0F},
+        {QStringLiteral("to 6:00 a.m. the next morning (Field 2008; Le et al., 2022)."),
+         71.53, 543.75, "Helvetica", 1.0008, 12.0F},
+        {QStringLiteral("The concept of Night Economy is service activities that take place after 6:00 pm the"),
+         72.0, 524.73, "Helvetica", 1.0, 12.0F},
+        {QStringLiteral("previous night until 6:00 am the next morning, including: Shopping at night markets,"),
+         72.0, 510.73, "Helvetica", 1.0, 12.0F}};
+}
+
+QString sourceParagraphText(const QVector<SourceParagraphTextPart> &parts,
+                            qsizetype start,
+                            qsizetype count)
+{
+    QStringList lines;
+    for (qsizetype index = start; index < start + count; ++index) {
+        lines.append(parts.at(index).text);
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
+bool createSourceParagraphPdf(
+    const QString &filePath,
+    const QVector<SourceParagraphTextPart> &parts)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+    FPDF_PAGE page = FPDFPage_New(document, 0, 595.0, 842.0);
+    bool succeeded = page != nullptr;
+    for (const SourceParagraphTextPart &part : parts) {
+        if (!succeeded) {
+            break;
+        }
+        succeeded = addTextObject(
+            document, page, part.fontName, part.text, part.x, part.y,
+            part.horizontalScale, part.fontSize);
+    }
+    succeeded = succeeded && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createSourceSpacingPdf(const QString &filePath,
+                            qreal letterSpacing,
+                            qreal wordSpacing,
+                            qreal textMatrixScale,
+                            bool irregularAdjustments)
+{
+    const auto number = [](qreal value) { return QByteArray::number(value, 'f', 8); };
+    const QByteArray content = QByteArray("BT /F1 ") + number(12.0 / textMatrixScale)
+        + " Tf " + number(letterSpacing / textMatrixScale) + " Tc "
+        + number(wordSpacing / textMatrixScale) + " Tw "
+        + number(textMatrixScale) + " 0 0 " + number(textMatrixScale)
+        + " 72 740 Tm "
+        + (irregularAdjustments
+               ? QByteArray("[(Al) -180 (pha beta) 130 ( gamma del) -320 (ta)] TJ")
+               : QByteArray("(Alpha beta gamma delta) Tj"))
+        + " ET\n";
+    return writePdfObjects(filePath, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                   "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"),
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+                   "/Encoding /WinAnsiEncoding >>"),
+        QByteArray("<< /Length ") + QByteArray::number(content.size())
+            + " >>\nstream\n" + content + "endstream"});
+}
+
+bool createBottomEdgeTextPdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 200.0, 200.0);
+    bool succeeded = page
+        && addTextObject(
+            document,
+            page,
+            "Helvetica",
+            QString::fromLatin1(kBottomEdgeText),
+            20.0,
+            1.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createStretchedTextPdf(const QString &filePath,
+                            qreal horizontalScale)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    FPDF_PAGE page = FPDFPage_New(document, 0, 595.0, 842.0);
+    bool succeeded = page
+        && addTextObject(
+            document,
+            page,
+            "Courier",
+            QString::fromLatin1(kStretchedText),
+            72.0,
+            740.0,
+            horizontalScale)
+        && FPDFPage_GenerateContent(page);
+
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createEmbeddedArialPdf(const QString &filePath)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+
+    const QByteArray fontData = ApplicationFonts::bundledFontData(
+        QStringLiteral("Arial"),
+        false,
+        false);
+    FPDF_FONT font = fontData.isEmpty()
+        ? nullptr
+        : FPDFText_LoadFont(
+              document,
+              reinterpret_cast<const uint8_t *>(fontData.constData()),
+              static_cast<uint32_t>(fontData.size()),
+              FPDF_FONT_TRUETYPE,
+              true);
+    FPDF_PAGE page = font ? FPDFPage_New(document, 0, 595.0, 842.0) : nullptr;
+    bool succeeded = page
+        && addTextObjectWithFont(
+            document,
+            page,
+            font,
+            QStringLiteral("Tiếng Việt gốc"),
+            72.0,
+            740.0)
+        && addTextObjectWithFont(
+            document,
+            page,
+            font,
+            QStringLiteral("Không đổi"),
+            72.0,
+            680.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    if (font) {
+        FPDFFont_Close(font);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createEmbeddedFontPdf(const QString &filePath,
+                           const QByteArray &fontData,
+                           const QString &text)
+{
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document || fontData.isEmpty()) {
+        if (document) {
+            FPDF_CloseDocument(document);
+        }
+        return false;
+    }
+
+    FPDF_FONT font = FPDFText_LoadFont(
+        document,
+        reinterpret_cast<const uint8_t *>(fontData.constData()),
+        static_cast<uint32_t>(fontData.size()),
+        FPDF_FONT_TRUETYPE,
+        true);
+    FPDF_PAGE page = font ? FPDFPage_New(document, 0, 595.0, 842.0) : nullptr;
+    bool succeeded = page
+        && addTextObjectWithFont(document, page, font, text, 72.0, 740.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+    }
+    if (font) {
+        FPDFFont_Close(font);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+bool createGroupedSubsetFontPdf(const QString &filePath)
+{
+    const QByteArray fontData = ApplicationFonts::bundledFontData(
+        QStringLiteral("Arial"), false, false);
+    if (fontData.isEmpty()) {
+        return false;
+    }
+
+    PDFiumProcessLock pdfiumLock;
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document) {
+        return false;
+    }
+    FPDF_FONT font = FPDFText_LoadFont(
+        document,
+        reinterpret_cast<const uint8_t *>(fontData.constData()),
+        static_cast<uint32_t>(fontData.size()),
+        FPDF_FONT_TRUETYPE,
+        true);
+    FPDF_PAGE page = font ? FPDFPage_New(document, 0, 595.0, 842.0) : nullptr;
+    // The visible word gap comes entirely from object positions. Neither
+    // source object encodes a space, so the subset has no space mapping.
+    bool succeeded = page
+        && addTextObjectWithFont(
+            document, page, font, QStringLiteral("Hello"), 72.0, 740.0)
+        && addTextObjectWithFont(
+            document, page, font, QStringLiteral("world"), 140.0, 740.0)
+        && FPDFPage_GenerateContent(page);
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (succeeded) {
+        PdfFileWriter writer(filePath);
+        succeeded = writer.open()
+            && FPDF_SaveAsCopy(
+                document,
+                &writer,
+                FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS);
+    }
+    if (font) {
+        FPDFFont_Close(font);
+    }
+    FPDF_CloseDocument(document);
+    return succeeded;
+}
+
+QRectF normalizedGlyphBoundsForText(const QString &filePath,
+                                    const QString &text,
+                                    int pageIndex)
+{
+    PDFiumProcessLock pdfiumLock;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document
+        ? FPDF_LoadPage(document, pageIndex)
+        : nullptr;
+    FPDF_TEXTPAGE textPage = page
+        ? FPDFText_LoadPage(page)
+        : nullptr;
+
+    QRectF bounds;
+    if (textPage && !text.isEmpty()) {
+        const int characterCount = FPDFText_CountChars(textPage);
+        int textStart = -1;
+        for (int index = 0;
+             index + text.size() <= characterCount;
+             ++index) {
+            bool matches = true;
+            for (qsizetype offset = 0; offset < text.size(); ++offset) {
+                if (FPDFText_GetUnicode(
+                        textPage,
+                        index + static_cast<int>(offset))
+                    != text.at(offset).unicode()) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                textStart = index;
+                break;
+            }
+        }
+
+        const qreal pageWidth = FPDF_GetPageWidthF(page);
+        const qreal pageHeight = FPDF_GetPageHeightF(page);
+        if (textStart >= 0 && pageWidth > 0.0 && pageHeight > 0.0) {
+            for (qsizetype offset = 0; offset < text.size(); ++offset) {
+                if (text.at(offset).isSpace()) {
+                    continue;
+                }
+                double left = 0.0;
+                double right = 0.0;
+                double bottom = 0.0;
+                double top = 0.0;
+                if (!FPDFText_GetCharBox(
+                        textPage,
+                        textStart + static_cast<int>(offset),
+                        &left,
+                        &right,
+                        &bottom,
+                        &top)) {
+                    continue;
+                }
+                const QRectF glyphRect(
+                    left / pageWidth,
+                    (pageHeight - top) / pageHeight,
+                    (right - left) / pageWidth,
+                    (top - bottom) / pageHeight);
+                bounds = bounds.isEmpty()
+                    ? glyphRect
+                    : bounds.united(glyphRect);
+            }
+        }
+    }
+
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return bounds;
+}
+
+QString pageText(const QString &filePath, int pageIndex)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    if (!document) {
+        return {};
+    }
+    FPDF_PAGE page = FPDF_LoadPage(document, pageIndex);
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    QString text;
+    if (textPage) {
+        const int count = FPDFText_CountChars(textPage);
+        QVector<unsigned short> buffer(count + 1, 0);
+        const int written = FPDFText_GetText(textPage, 0, count, buffer.data());
+        if (written > 1) {
+            text = QString::fromUtf16(
+                reinterpret_cast<const char16_t *>(buffer.constData()),
+                written - 1);
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    FPDF_CloseDocument(document);
+    return text;
+}
+
+QString normalizedPageText(const QString &filePath, int pageIndex)
+{
+    QString text = pageText(filePath, pageIndex);
+    text.replace(QChar(0xfffe), QLatin1Char(' '));
+    text.replace(QChar(0xffff), QLatin1Char(' '));
+    return text.simplified();
+}
+
+QString pageObjectText(FPDF_PAGEOBJECT object, FPDF_TEXTPAGE textPage)
+{
+    const unsigned long byteLength = FPDFTextObj_GetText(object, textPage, nullptr, 0);
+    if (byteLength < sizeof(FPDF_WCHAR)) {
+        return {};
+    }
+
+    QVector<FPDF_WCHAR> buffer(
+        static_cast<qsizetype>((byteLength + sizeof(FPDF_WCHAR) - 1)
+                               / sizeof(FPDF_WCHAR)));
+    const unsigned long actualLength = FPDFTextObj_GetText(
+        object,
+        textPage,
+        buffer.data(),
+        byteLength);
+    qsizetype characterCount = static_cast<qsizetype>(
+        actualLength / sizeof(FPDF_WCHAR));
+    while (characterCount > 0 && buffer.at(characterCount - 1) == 0) {
+        --characterCount;
+    }
+    return QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(buffer.constData()),
+        characterCount);
+}
+
+TextPaintInspection inspectTopLevelTextPaint(const QString &filePath,
+                                             const QString &targetText)
+{
+    PDFiumProcessLock pdfiumLock;
+    TextPaintInspection inspection;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    inspection.readable = document && page && textPage;
+    if (inspection.readable) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (!object) {
+                continue;
+            }
+            const int objectType = FPDFPageObj_GetType(object);
+            if (objectType != FPDF_PAGEOBJ_TEXT
+                || !pageObjectText(object, textPage).contains(targetText)) {
+                continue;
+            }
+
+            inspection.found = true;
+            inspection.objectType = objectType;
+            inspection.renderMode = FPDFTextObj_GetTextRenderMode(object);
+            unsigned int red = 0;
+            unsigned int green = 0;
+            unsigned int blue = 0;
+            unsigned int alpha = 0;
+            inspection.hasFillColor = FPDFPageObj_GetFillColor(
+                object,
+                &red,
+                &green,
+                &blue,
+                &alpha);
+            if (inspection.hasFillColor) {
+                inspection.fillColor = QColor::fromRgb(
+                    red,
+                    green,
+                    blue,
+                    alpha);
+            }
+            break;
+        }
+    }
+
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return inspection;
+}
+
+QString baseFontName(FPDF_PAGEOBJECT textObject)
+{
+    const FPDF_FONT font = FPDFTextObj_GetFont(textObject);
+    const size_t byteLength = font
+        ? FPDFFont_GetBaseFontName(font, nullptr, 0)
+        : 0;
+    if (byteLength <= 1) {
+        return {};
+    }
+
+    QByteArray buffer(static_cast<qsizetype>(byteLength), Qt::Uninitialized);
+    if (FPDFFont_GetBaseFontName(
+            font,
+            buffer.data(),
+            static_cast<size_t>(buffer.size()))
+        != byteLength) {
+        return {};
+    }
+    buffer.chop(1);
+    return QString::fromUtf8(buffer);
+}
+
+QString fontFamilyName(FPDF_FONT font)
+{
+    const size_t byteLength = font
+        ? FPDFFont_GetFamilyName(font, nullptr, 0)
+        : 0;
+    if (byteLength <= 1) {
+        return {};
+    }
+
+    QByteArray buffer(static_cast<qsizetype>(byteLength), Qt::Uninitialized);
+    if (FPDFFont_GetFamilyName(
+            font,
+            buffer.data(),
+            static_cast<size_t>(buffer.size()))
+        != byteLength) {
+        return {};
+    }
+    buffer.chop(1);
+    return QString::fromUtf8(buffer);
+}
+
+bool hasSubsetFontPrefix(const QString &baseName)
+{
+    constexpr qsizetype prefixLength = 6;
+    if (baseName.size() <= prefixLength
+        || baseName.at(prefixLength) != QLatin1Char('+')) {
+        return false;
+    }
+    for (qsizetype index = 0; index < prefixLength; ++index) {
+        const QChar character = baseName.at(index);
+        if (character < QLatin1Char('A') || character > QLatin1Char('Z')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString compactFontName(const QString &name)
+{
+    QString result;
+    result.reserve(name.size());
+    for (const QChar character : name) {
+        if (character.isLetterOrNumber()) {
+            result.append(character.toLower());
+        }
+    }
+    return result;
+}
+
+TextObjectFontInfo textObjectFontInfo(const QString &filePath,
+                                      const QString &text)
+{
+    TextObjectFontInfo info;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT
+                || !pageObjectText(object, textPage).contains(text)) {
+                continue;
+            }
+
+            const FPDF_FONT font = FPDFTextObj_GetFont(object);
+            info.found = font;
+            info.baseName = baseFontName(object);
+            info.familyName = fontFamilyName(font);
+            if (font) {
+                FPDFFont_GetFontData(font, nullptr, 0, &info.dataSize);
+            }
+            int italicAngle = 0;
+            info.italic = font
+                && FPDFFont_GetItalicAngle(font, &italicAngle)
+                && italicAngle != 0;
+            info.embedded = font ? FPDFFont_GetIsEmbedded(font) : -1;
+            break;
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return info;
+}
+
+bool textObjectsShareFont(const QString &filePath,
+                          const QString &firstText,
+                          const QString &secondText)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    FPDF_FONT firstFont = nullptr;
+    FPDF_FONT secondFont = nullptr;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT) {
+                continue;
+            }
+            const QString text = pageObjectText(object, textPage);
+            if (!firstFont && text.contains(firstText)) {
+                firstFont = FPDFTextObj_GetFont(object);
+            }
+            if (!secondFont && text.contains(secondText)) {
+                secondFont = FPDFTextObj_GetFont(object);
+            }
+        }
+    }
+    const bool shareFont = firstFont && firstFont == secondFont;
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return shareFont;
+}
+
+int topLevelPageObjectCount(const QString &filePath, int pageIndex)
+{
+    PDFiumProcessLock pdfiumLock;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        encodedPath.constData(),
+        nullptr);
+    FPDF_PAGE page = document
+        ? FPDF_LoadPage(document, pageIndex)
+        : nullptr;
+    const int objectCount = page ? FPDFPage_CountObjects(page) : -1;
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return objectCount;
+}
+
+QStringList topLevelTextObjects(const QString &filePath)
+{
+    QStringList texts;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_TEXT) {
+                texts.append(pageObjectText(object, textPage));
+            }
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return texts;
+}
+
+bool textObjectOrigin(const QString &filePath,
+                      const QString &text,
+                      QPointF &origin)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    bool found = false;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT
+                || !pageObjectText(object, textPage).contains(text)) {
+                continue;
+            }
+            FS_MATRIX matrix{};
+            if (FPDFPageObj_GetMatrix(object, &matrix)) {
+                origin = QPointF(matrix.e, matrix.f);
+                found = true;
+                break;
+            }
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return found;
+}
+
+bool textObjectMatrix(const QString &filePath,
+                      const QString &text,
+                      FS_MATRIX &matrix)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    bool found = false;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_TEXT
+                && pageObjectText(object, textPage).contains(text)
+                && FPDFPageObj_GetMatrix(object, &matrix)) {
+                found = true;
+                break;
+            }
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return found;
+}
+
+qreal horizontalScale(const FS_MATRIX &matrix)
+{
+    const qreal verticalLength = std::hypot(matrix.c, matrix.d);
+    return verticalLength > 0.0
+        ? std::hypot(matrix.a, matrix.b) / verticalLength
+        : 0.0;
+}
+
+bool strokeTextAppearance(const QString &filePath,
+                          const QString &text,
+                          QColor &strokeColor,
+                          qreal &strokeWidth)
+{
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    bool found = false;
+    if (page && textPage) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT
+                || !pageObjectText(object, textPage).contains(text)
+                || FPDFTextObj_GetTextRenderMode(object) != FPDF_TEXTRENDERMODE_STROKE) {
+                continue;
+            }
+            unsigned int red = 0;
+            unsigned int green = 0;
+            unsigned int blue = 0;
+            unsigned int alpha = 0;
+            float width = 0.0F;
+            if (FPDFPageObj_GetStrokeColor(
+                    object,
+                    &red,
+                    &green,
+                    &blue,
+                    &alpha)
+                && FPDFPageObj_GetStrokeWidth(object, &width)) {
+                strokeColor = QColor::fromRgb(red, green, blue, alpha);
+                strokeWidth = width;
+                found = true;
+                break;
+            }
+        }
+    }
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return found;
+}
+
+bool createTextUnderlineSourcePdf(const QString &filePath,
+                                 const QByteArray &underlineCommands)
+{
+    const QByteArray content = QByteArray(
+        "BT /F1 24 Tf 1 0 0 1 72 640 Tm (Hello world) Tj ET\n")
+        + underlineCommands
+        + QByteArray("q 0 0 0 RG 1 w 72 740 m 300 740 l S Q\n");
+    return writePdfObjects(filePath, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                   "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"),
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+        QByteArray("<< /Length ") + QByteArray::number(content.size())
+            + QByteArray(" >>\nstream\n") + content + QByteArray("endstream"),
+    });
+}
+
+bool createSavedTextUnderlinePdf(const QString &filePath, bool legacy)
+{
+    if (legacy) {
+        // Previous TrePDF versions emitted an unmarked path immediately after
+        // the text. Helvetica's advance for "Hello world" at 24 pt is 118.68 pt.
+        return createTextUnderlineSourcePdf(filePath, QByteArray(
+            "q 0 0 0 RG 1.2 w 72 637.6 m 190.68 637.6 l S Q\n"));
+    }
+
+    const QString sourcePath = filePath + QStringLiteral(".source.pdf");
+    if (!createTextUnderlineSourcePdf(sourcePath)) {
+        return false;
+    }
+    PDFDocument document;
+    PDFEditController controller;
+    if (!document.open(QUrl::fromLocalFile(sourcePath))) {
+        return false;
+    }
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Hello world"));
+    if (!controller.selectCandidate(
+            0, candidate.value(QStringLiteral("objectId")).toString())) {
+        return false;
+    }
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(0, 11);
+    controller.setSelectedFontUnderline(true);
+    controller.finishSelectedTextEdit();
+    return controller.saveAs(QUrl::fromLocalFile(filePath));
+}
+
+TextUnderlineInspection inspectTextUnderlinePaths(const QString &filePath)
+{
+    PDFiumProcessLock pdfiumLock;
+    TextUnderlineInspection inspection;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    inspection.readable = page != nullptr;
+    if (page) {
+        for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            const int type = FPDFPageObj_GetType(object);
+            if (type == FPDF_PAGEOBJ_TEXT) {
+                inspection.textIndex = index;
+                ++inspection.textCount;
+                FS_MATRIX matrix{};
+                if (FPDFPageObj_GetMatrix(object, &matrix)) {
+                    inspection.textOrigin = QPointF(matrix.e, matrix.f);
+                }
+                continue;
+            }
+            if (type != FPDF_PAGEOBJ_PATH
+                || FPDFPath_CountSegments(object) != 2) {
+                continue;
+            }
+            FS_MATRIX matrix{};
+            float x1 = 0.0F;
+            float y1 = 0.0F;
+            float x2 = 0.0F;
+            float y2 = 0.0F;
+            if (!FPDFPageObj_GetMatrix(object, &matrix)
+                || !FPDFPathSegment_GetPoint(
+                    FPDFPath_GetPathSegment(object, 0), &x1, &y1)
+                || !FPDFPathSegment_GetPoint(
+                    FPDFPath_GetPathSegment(object, 1), &x2, &y2)) {
+                inspection.readable = false;
+                break;
+            }
+            const auto transform = [&matrix](qreal x, qreal y) {
+                return QPointF(matrix.a * x + matrix.c * y + matrix.e,
+                               matrix.b * x + matrix.d * y + matrix.f);
+            };
+            const QLineF line(transform(x1, y1), transform(x2, y2));
+            if (qAbs(line.y1() - 740.0) < 0.01) {
+                inspection.unrelatedLines.append(line);
+            } else {
+                inspection.underlineIndexes.append(index);
+                inspection.underlines.append(line);
+            }
+        }
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return inspection;
+}
+
+void addTextUnderlineFixtureRows()
+{
+    QTest::addColumn<bool>("legacy");
+    QTest::newRow("saved-marked-underline") << false;
+    QTest::newRow("legacy-unmarked-underline") << true;
+}
+
+RichSaveInspection inspectRichSave(const QString &filePath)
+{
+    RichSaveInspection inspection;
+    const QByteArray encodedPath = QFile::encodeName(filePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, 0) : nullptr;
+    FPDF_TEXTPAGE textPage = page ? FPDFText_LoadPage(page) : nullptr;
+    inspection.readable = document && page && textPage;
+
+    qreal redBaseline = 0.0;
+    qreal blueBaseline = 0.0;
+    qreal greenBaseline = 0.0;
+    bool foundRedBaseline = false;
+    bool foundBlueBaseline = false;
+    bool foundGreenBaseline = false;
+    if (inspection.readable) {
+        const int objectCount = FPDFPage_CountObjects(page);
+        for (int index = 0; index < objectCount; ++index) {
+            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+            const int type = FPDFPageObj_GetType(object);
+            if (type == FPDF_PAGEOBJ_PATH) {
+                inspection.underlinePath = true;
+                continue;
+            }
+            if (type != FPDF_PAGEOBJ_TEXT) {
+                continue;
+            }
+
+            const QString text = pageObjectText(object, textPage);
+            FS_MATRIX matrix{};
+            if (!FPDFPageObj_GetMatrix(object, &matrix)) {
+                continue;
+            }
+            if (text.contains(QStringLiteral("Red"))) {
+                unsigned int red = 0;
+                unsigned int green = 0;
+                unsigned int blue = 0;
+                unsigned int alpha = 0;
+                inspection.redRun = FPDFPageObj_GetFillColor(
+                    object,
+                    &red,
+                    &green,
+                    &blue,
+                    &alpha)
+                    && red == 0xc6
+                    && green == 0x28
+                    && blue == 0x28
+                    && alpha == 0xff;
+                const QString fontName = baseFontName(object).toLower();
+                inspection.boldItalicRun = fontName.contains(QStringLiteral("bold"))
+                    && (fontName.contains(QStringLiteral("italic"))
+                        || fontName.contains(QStringLiteral("oblique")));
+                redBaseline = matrix.f;
+                foundRedBaseline = true;
+            } else if (text.contains(QStringLiteral("blue"))) {
+                blueBaseline = matrix.f;
+                foundBlueBaseline = true;
+            } else if (text.contains(QStringLiteral("Green"))) {
+                greenBaseline = matrix.f;
+                foundGreenBaseline = true;
+            }
+        }
+    }
+
+    inspection.redAndBlueShareBaseline = foundRedBaseline
+        && foundBlueBaseline
+        && qAbs(redBaseline - blueBaseline) < 0.5;
+    inspection.greenIsNextLine = foundGreenBaseline
+        && foundBlueBaseline
+        && greenBaseline < blueBaseline - 1.0;
+
+    if (textPage) {
+        FPDFText_ClosePage(textPage);
+    }
+    if (page) {
+        FPDF_ClosePage(page);
+    }
+    if (document) {
+        FPDF_CloseDocument(document);
+    }
+    return inspection;
+}
+
+} // namespace PDFEditControllerTestSupport

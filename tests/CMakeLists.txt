@@ -1,5 +1,36 @@
 qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditController.cpp
+    PDFEditControllerTest.h
+    PDFEditControllerTestSupport.h
+    PDFEditControllerTestSupport.cpp
+    PDFEditControllerTestSupportAnnotations.cpp
+    PDFEditControllerTestSupportCommentFixtures.cpp
+    PDFEditControllerTestSupportForms.cpp
+    PDFEditControllerTestSupportPdfInspection.cpp
+    PDFEditControllerTestSupportText.cpp
+    tst_PDFEditControllerCommentPersistence.cpp
+    tst_PDFEditControllerCommentState.cpp
+    tst_PDFEditControllerCommentThreads.cpp
+    tst_PDFEditControllerComments.cpp
+    tst_PDFEditControllerDocument.cpp
+    tst_PDFEditControllerDocumentView.cpp
+    tst_PDFEditControllerDrawingComments.cpp
+    tst_PDFEditControllerFonts.cpp
+    tst_PDFEditControllerFormButtons.cpp
+    tst_PDFEditControllerFormChoices.cpp
+    tst_PDFEditControllerFormTextPersistence.cpp
+    tst_PDFEditControllerForms.cpp
+    tst_PDFEditControllerImages.cpp
+    tst_PDFEditControllerInk.cpp
+    tst_PDFEditControllerParagraphs.cpp
+    tst_PDFEditControllerRendering.cpp
+    tst_PDFEditControllerSearch.cpp
+    tst_PDFEditControllerSessions.cpp
+    tst_PDFEditControllerShapes.cpp
+    tst_PDFEditControllerTextFormatting.cpp
+    tst_PDFEditControllerTextMarkup.cpp
+    tst_PDFEditControllerTextPersistence.cpp
+    tst_PDFEditControllerTextSpacing.cpp
     ../src/ApplicationFonts.cpp
     ../src/ApplicationFonts.h
     ../src/DraftImageItem.cpp
