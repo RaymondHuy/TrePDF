@@ -69,6 +69,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(qreal selectedBaselineY READ selectedBaselineY NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedText READ selectedText NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QString selectedFontFamily READ selectedFontFamily NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(qreal selectedLetterSpacing READ selectedLetterSpacing NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(qreal selectedWordSpacing READ selectedWordSpacing NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(qreal selectedFontSize READ selectedFontSize NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(qreal selectedFontSizeRatio READ selectedFontSizeRatio NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(qreal selectedDisplayFontSizeRatio READ selectedDisplayFontSizeRatio NOTIFY textFormatStateChanged FINAL)
@@ -248,6 +250,8 @@ public:
     QString selectedText() const;
     QString selectedFontFamily() const;
     qreal selectedFontSize() const;
+    qreal selectedLetterSpacing() const;
+    qreal selectedWordSpacing() const;
     qreal selectedFontSizeRatio() const;
     qreal selectedDisplayFontSizeRatio() const;
     int selectedFontStretch() const;
@@ -327,7 +331,9 @@ public:
                                      bool fontBold,
                                      bool fontItalic,
                                      bool fontUnderline,
-                                     qreal pixelSize) const;
+                                     qreal pixelSize,
+                                     qreal letterSpacing = 0.0,
+                                     qreal wordSpacing = 0.0) const;
     Q_INVOKABLE int displayFontStretch(const QString &fontFamily,
                                        int fontStretch,
                                        bool fontBold,
@@ -349,6 +355,11 @@ public:
                                                     int length,
                                                     int style,
                                                     bool enabled) const;
+    Q_INVOKABLE bool applyTextSpacingToEditorDocument(QObject *textDocument,
+                                                       int start, int length,
+                                                       qreal letterSpacingRatio,
+                                                       qreal wordSpacingRatio,
+                                                       qreal displayedPageHeight) const;
     Q_INVOKABLE bool syncEditorFontStyles(QObject *textDocument);
     Q_INVOKABLE QStringList fontFamiliesForFilter(FontFilter filter) const;
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
@@ -374,6 +385,8 @@ public:
     Q_INVOKABLE void setSelectedTextRange(int start, int length);
     Q_INVOKABLE void setSelectedFontFamily(const QString &fontFamily);
     Q_INVOKABLE void setSelectedFontSize(qreal points);
+    Q_INVOKABLE void setSelectedLetterSpacing(qreal points);
+    Q_INVOKABLE void setSelectedWordSpacing(qreal points);
     Q_INVOKABLE void setSelectedFontBold(bool enabled);
     Q_INVOKABLE void setSelectedFontItalic(bool enabled);
     Q_INVOKABLE void setSelectedFontUnderline(bool enabled);
@@ -420,6 +433,8 @@ signals:
     void commentsChanged();
     void commentIndexStateChanged();
     void typingFormatApplied(int start, int length);
+    void selectionTextSpacingApplied(int start, int length,
+                                      qreal letterSpacingRatio, qreal wordSpacingRatio);
     void selectionFontSizeApplied(int start, int length, qreal fontSizeRatio);
     void selectionFontStyleApplied(int start,
                                    int length,
@@ -435,18 +450,32 @@ signals:
 private:
     friend class PDFSaveWriter;
 
+    struct TextSpacingSample {
+        qreal residual = 0.0;
+        bool followsSpace = false;
+    };
+
     struct TextObjectLayout {
         QRectF bounds;
         QVector<QRectF> glyphBounds;
         QPointF origin;
         QString text;
         bool hasOrigin = false;
+        QVector<TextSpacingSample> spacingSamples;
+        QPointF previousSpacingOrigin;
+        qreal previousSpacingAdvance = 0.0;
+        qreal spacingEmSize = 0.0;
+        bool previousSpacingWasSpace = false;
+        bool hasSpacingOrigin = false;
+        bool spacingUnsupported = false;
     };
 
     struct CharacterFormat {
         QString fontFamily;
         qreal fontSizeRatio = 0.0;
         qreal displayFontSizeRatio = 0.0;
+        qreal letterSpacingRatio = 0.0;
+        qreal wordSpacingRatio = 0.0;
         int fontStretch = 100;
         bool fontBold = false;
         bool fontItalic = false;
@@ -491,6 +520,15 @@ private:
         QString text;
         QVector<QRectF> textGlyphRects;
         QVector<CharacterSpan> sourceCharacterSpans;
+        QString spacingGroup;
+        QString spacingText;
+        int spacingIndex = -1;
+        int spacingCount = 0;
+        int spacingStart = -1;
+        qreal spacingLetterPoints = 0.0;
+        qreal spacingWordPoints = 0.0;
+        qreal spacingOriginOffset = 0.0;
+        QVector<CharacterSpan> spacingRuns;
         bool textMarkupHitTestOnly = false;
         QString sourceAnnotationName;
         bool sourceAnnotationHasName = false;
@@ -519,6 +557,8 @@ private:
         qreal fontSizeRatio = 0.0;
         qreal displayFontSizeRatio = 0.0;
         qreal horizontalScale = 1.0;
+        qreal letterSpacingRatio = 0.0;
+        qreal wordSpacingRatio = 0.0;
         int fontStretch = 100;
         bool fontBold = false;
         bool fontItalic = false;
@@ -799,12 +839,18 @@ private:
     bool removeCommentCandidate(const Candidate &candidate);
     static void setInitialGeometry(Candidate &candidate, const QRectF &sourceRect);
     void expandInitialTextFrame(Candidate &candidate, const QSizeF &pageSize) const;
+    static void inferSourceTextSpacing(Candidate &candidate,
+                                       const TextObjectLayout &layout,
+                                       const QSizeF &pageSize);
+    static void readSourceTextSpacing(FPDF_PAGEOBJECT object, Candidate &candidate,
+                                      const QSizeF &pageSize);
     static CharacterFormat characterFormatForCandidate(const Candidate &candidate);
     static CharacterFormat primaryCharacterFormat(const Draft &draft);
     static CharacterFormat characterFormatAtPosition(const Draft &draft,
                                                       qsizetype position,
                                                       bool preferPrevious);
     CharacterFormat selectedCharacterFormatForDisplay() const;
+    void setSelectedTextSpacing(qreal points, bool wordSpacing);
     static QVector<ParagraphFormat> paragraphFormatsForText(
         const QString &text,
         const ParagraphFormat &prototype);

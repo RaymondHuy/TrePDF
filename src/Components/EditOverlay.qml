@@ -512,6 +512,8 @@ Item {
             fontSizeRatio: primaryFormat.fontSizeRatio,
             displayFontSizeRatio: primaryFormat.displayFontSizeRatio,
             fontStretch: primaryFormat.fontStretch,
+            letterSpacingRatio: primaryFormat.letterSpacingRatio,
+            wordSpacingRatio: primaryFormat.wordSpacingRatio,
             fontBold: primaryFormat.fontBold,
             fontItalic: primaryFormat.fontItalic,
             fontUnderline: primaryFormat.fontUnderline,
@@ -570,7 +572,9 @@ Item {
             fontBold,
             fontItalic,
             fontUnderline,
-            displayPixelSize)
+            displayPixelSize,
+            Number(format.letterSpacingRatio || 0) * effectiveBasePixelSize / baseRatio,
+            Number(format.wordSpacingRatio || 0) * effectiveBasePixelSize / baseRatio)
         const family = String(displayFont.family || rawFamily)
             .replace(/\\/g, "\\\\")
             .replace(/'/g, "\\'")
@@ -582,6 +586,10 @@ Item {
             displayPixelSize)
         let style = "font-size:" + relativeSize.toFixed(6) + "em;"
             + "font-stretch:" + displayStretch + "%;"
+            + "letter-spacing:"
+            + (Number(format.letterSpacingRatio || 0) * effectiveBasePixelSize / baseRatio).toFixed(6) + "px;"
+            + "word-spacing:"
+            + (Number(format.wordSpacingRatio || 0) * effectiveBasePixelSize / baseRatio).toFixed(6) + "px;"
             + "font-weight:" + (fontBold ? "700" : "400") + ";"
             + "font-style:" + (fontItalic ? "italic" : "normal") + ";"
             + "text-decoration:"
@@ -694,6 +702,8 @@ Item {
             fontSizeRatio: controller.selectedFontSizeRatio,
             displayFontSizeRatio: controller.selectedDisplayFontSizeRatio,
             fontStretch: controller.selectedFontStretch,
+            letterSpacingRatio: Number(controller.selectedLetterSpacing || 0) / root.textLayoutPageHeight,
+            wordSpacingRatio: Number(controller.selectedWordSpacing || 0) / root.textLayoutPageHeight,
             fontBold: controller.selectedFontBold,
             fontItalic: controller.selectedFontItalic,
             fontUnderline: controller.selectedFontUnderline,
@@ -2325,6 +2335,20 @@ Item {
                 root.suppressNextEditorReload = false
         }
 
+        function onSelectionTextSpacingApplied(start, length, letterSpacingRatio, wordSpacingRatio) {
+            if (!root.editing)
+                return
+
+            root.suppressNextEditorReload = true
+            root.applyingEditorDocumentFormat = true
+            const applied = root.controller.applyTextSpacingToEditorDocument(
+                editor.textDocument, start, length,
+                letterSpacingRatio, wordSpacingRatio, root.textLayoutPageHeight)
+            root.applyingEditorDocumentFormat = false
+            if (!applied)
+                root.suppressNextEditorReload = false
+        }
+
         function onSelectionFontStyleApplied(start, length, style, enabled) {
             if (!root.editing)
                 return
@@ -2690,7 +2714,9 @@ Item {
                 root.frameResizePreview.fontBold === true,
                 root.frameResizePreview.fontItalic === true,
                 root.frameResizePreview.fontUnderline === true,
-                fontPixelSize)
+                fontPixelSize,
+                Number(root.frameResizePreview.letterSpacingRatio || 0) * root.height,
+                Number(root.frameResizePreview.wordSpacingRatio || 0) * root.height)
         readonly property real contentMargin: Math.min(
             Math.max(2, 4 * root.pagePointScale),
             Math.max(0, Math.min(width, height) / 4))
@@ -2812,7 +2838,9 @@ Item {
                     modelData.fontBold === true,
                     modelData.fontItalic === true,
                     modelData.fontUnderline === true,
-                    fontPixelSize)
+                    fontPixelSize,
+                    Number(modelData.letterSpacingRatio || 0) * root.height,
+                    Number(modelData.wordSpacingRatio || 0) * root.height)
             readonly property real contentMargin: Math.min(
                 Math.max(2, 4 * root.pagePointScale),
                 Math.max(0, Math.min(width, height) / 4))
@@ -2908,7 +2936,9 @@ Item {
                 modelData.fontBold,
                 modelData.fontItalic,
                 modelData.fontUnderline,
-                fontPixelSize)
+                fontPixelSize,
+                Number(modelData.letterSpacingRatio || 0) * root.textLayoutPageHeight,
+                Number(modelData.wordSpacingRatio || 0) * root.textLayoutPageHeight)
             readonly property real desiredTextPageY: usesBaseline
                 ? Math.min(
                     frameY - root.fallbackBleed,
@@ -3852,7 +3882,9 @@ Item {
             baseFormat.fontBold === true,
             baseFormat.fontItalic === true,
             baseFormat.fontUnderline === true,
-            baseFontPixelSize)
+            baseFontPixelSize,
+            Number(baseFormat.letterSpacingRatio || 0) * root.textLayoutPageHeight,
+            Number(baseFormat.wordSpacingRatio || 0) * root.textLayoutPageHeight)
         readonly property bool usesBaseline: !editsAddedText
             && root.controller.selectedHasBaseline
         readonly property real textOriginX: root.controller.selectedOriginX * root.width

@@ -55,6 +55,8 @@ namespace {
 constexpr int kEditorFontSizeRatio = QTextFormat::UserProperty + 1;
 
 constexpr int kEditorDisplayFontSizeRatio = QTextFormat::UserProperty + 2;
+constexpr int kEditorLetterSpacingRatio = QTextFormat::UserProperty + 3;
+constexpr int kEditorWordSpacingRatio = QTextFormat::UserProperty + 4;
 
 // Qt adds the insertion length and following format length when calculating
 // the redo cursor. A final custom item makes it use the changed text bounds
@@ -413,6 +415,50 @@ qreal PDFEditController::selectedFontSize() const
     return qRound(points);
 }
 
+qreal PDFEditController::selectedLetterSpacing() const
+{
+    if (!m_document || !m_hasSelection || !isTextCandidateKind(m_selectedCandidate.kind)) {
+        return 0.0;
+    }
+    const qreal pageHeight = m_document->pageSize(m_selectedCandidate.page).height();
+    const qreal points = selectedCharacterFormatForDisplay().letterSpacingRatio * pageHeight;
+    if (!m_textEditActive || m_selectedTextRangeLength > 0) {
+        const Draft draft = selectedDraftForDisplay();
+        qsizetype start = 0;
+        qsizetype length = 0;
+        selectedTextRangeForDraft(draft, start, length);
+        for (const CharacterSpan &span : draft.characterSpans) {
+            if (span.start < start + length && span.start + span.length > start
+                && qAbs(span.format.letterSpacingRatio * pageHeight - points) > 0.001) {
+                return std::numeric_limits<qreal>::quiet_NaN();
+            }
+        }
+    }
+    return points;
+}
+
+qreal PDFEditController::selectedWordSpacing() const
+{
+    if (!m_document || !m_hasSelection || !isTextCandidateKind(m_selectedCandidate.kind)) {
+        return 0.0;
+    }
+    const qreal pageHeight = m_document->pageSize(m_selectedCandidate.page).height();
+    const qreal points = selectedCharacterFormatForDisplay().wordSpacingRatio * pageHeight;
+    if (!m_textEditActive || m_selectedTextRangeLength > 0) {
+        const Draft draft = selectedDraftForDisplay();
+        qsizetype start = 0;
+        qsizetype length = 0;
+        selectedTextRangeForDraft(draft, start, length);
+        for (const CharacterSpan &span : draft.characterSpans) {
+            if (span.start < start + length && span.start + span.length > start
+                && qAbs(span.format.wordSpacingRatio * pageHeight - points) > 0.001) {
+                return std::numeric_limits<qreal>::quiet_NaN();
+            }
+        }
+    }
+    return points;
+}
+
 qreal PDFEditController::selectedDisplayFontSizeRatio() const
 {
     if (!m_hasSelection) {
@@ -481,7 +527,9 @@ QFont PDFEditController::fontForDisplay(const QString &fontFamily,
                                         bool fontBold,
                                         bool fontItalic,
                                         bool fontUnderline,
-                                        qreal pixelSize) const
+                                        qreal pixelSize,
+                                        qreal letterSpacing,
+                                        qreal wordSpacing) const
 {
     const int boundedPixelSize = qMax(1, qRound(pixelSize));
     QFont font;
@@ -498,6 +546,8 @@ QFont PDFEditController::fontForDisplay(const QString &fontFamily,
         fontBold,
         fontItalic,
         boundedPixelSize));
+    font.setLetterSpacing(QFont::AbsoluteSpacing, letterSpacing);
+    font.setWordSpacing(wordSpacing);
     return font;
 }
 
@@ -547,6 +597,8 @@ void PDFEditController::applyTypingFormatToEditorDocument(
     format.setProperty(kEditorFontSizeRatio, m_typingCharacterFormat.fontSizeRatio);
     format.setProperty(kEditorDisplayFontSizeRatio,
                        m_typingCharacterFormat.displayFontSizeRatio);
+    format.setProperty(kEditorLetterSpacingRatio, m_typingCharacterFormat.letterSpacingRatio);
+    format.setProperty(kEditorWordSpacingRatio, m_typingCharacterFormat.wordSpacingRatio);
     if (qIsFinite(displayedPageHeight) && displayedPageHeight > 0.0) {
         const qreal ratio = m_typingCharacterFormat.displayFontSizeRatio > 0.0
             ? m_typingCharacterFormat.displayFontSizeRatio
@@ -556,6 +608,9 @@ void PDFEditController::applyTypingFormatToEditorDocument(
         format.setFontStretch(displayFontStretch(
             m_typingCharacterFormat.fontFamily, m_typingCharacterFormat.fontStretch,
             m_typingCharacterFormat.fontBold, m_typingCharacterFormat.fontItalic, pixels));
+        format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+        format.setFontLetterSpacing(m_typingCharacterFormat.letterSpacingRatio * displayedPageHeight);
+        format.setFontWordSpacing(m_typingCharacterFormat.wordSpacingRatio * displayedPageHeight);
     }
 
     QTextCursor cursor(document);
@@ -618,6 +673,8 @@ void PDFEditController::initializeEditorFontSizes(
         QTextCharFormat format;
         format.setProperty(kEditorFontSizeRatio, span.format.fontSizeRatio);
         format.setProperty(kEditorDisplayFontSizeRatio, span.format.displayFontSizeRatio);
+        format.setProperty(kEditorLetterSpacingRatio, span.format.letterSpacingRatio);
+        format.setProperty(kEditorWordSpacingRatio, span.format.wordSpacingRatio);
         if (qIsFinite(displayedPageHeight) && displayedPageHeight > 0.0) {
             const qreal ratio = span.format.displayFontSizeRatio > 0.0
                 ? span.format.displayFontSizeRatio : span.format.fontSizeRatio;
@@ -626,6 +683,9 @@ void PDFEditController::initializeEditorFontSizes(
             format.setFontStretch(displayFontStretch(
                 span.format.fontFamily, span.format.fontStretch,
                 span.format.fontBold, span.format.fontItalic, pixels));
+            format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+            format.setFontLetterSpacing(span.format.letterSpacingRatio * displayedPageHeight);
+            format.setFontWordSpacing(span.format.wordSpacingRatio * displayedPageHeight);
         }
         cursor.setPosition(start);
         cursor.setPosition(end, QTextCursor::KeepAnchor);
@@ -676,6 +736,46 @@ bool PDFEditController::applyFontSizeToEditorDocument(
         cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
         cursor.mergeCharFormat(format);
     }
+    cursor.endEditBlock();
+    return true;
+}
+
+bool PDFEditController::applyTextSpacingToEditorDocument(
+    QObject *textDocument, int start, int length,
+    qreal letterSpacingRatio, qreal wordSpacingRatio, qreal displayedPageHeight) const
+{
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickDocument ? quickDocument->textDocument() : nullptr;
+    if (!document || !m_textEditActive || !m_hasSelection || length <= 0
+        || (!qIsFinite(letterSpacingRatio) && !qIsFinite(wordSpacingRatio))
+        || !qIsFinite(displayedPageHeight) || displayedPageHeight <= 0.0) {
+        return false;
+    }
+    if (document->toPlainText() != selectedDraftForDisplay().text) {
+        return false;
+    }
+    const int maximum = qMax(0, document->characterCount() - 1);
+    const int first = qBound(0, start, maximum);
+    const int last = static_cast<int>(qBound(qint64(first), qint64(start) + length,
+                                            qint64(maximum)));
+    if (last <= first) {
+        return false;
+    }
+    QTextCharFormat format;
+    if (qIsFinite(letterSpacingRatio)) {
+        format.setProperty(kEditorLetterSpacingRatio, letterSpacingRatio);
+        format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+        format.setFontLetterSpacing(letterSpacingRatio * displayedPageHeight);
+    }
+    if (qIsFinite(wordSpacingRatio)) {
+        format.setProperty(kEditorWordSpacingRatio, wordSpacingRatio);
+        format.setFontWordSpacing(wordSpacingRatio * displayedPageHeight);
+    }
+    QTextCursor cursor(document);
+    cursor.setPosition(first);
+    cursor.setPosition(last, QTextCursor::KeepAnchor);
+    cursor.beginEditBlock();
+    cursor.mergeCharFormat(format);
     cursor.endEditBlock();
     return true;
 }
@@ -767,6 +867,18 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
         format.fontBold = editorFormat.fontWeight() >= QFont::Bold;
         format.fontItalic = editorFormat.fontItalic();
         format.fontUnderline = editorFormat.fontUnderline();
+        if (editorFormat.hasProperty(kEditorLetterSpacingRatio)) {
+            const qreal ratio = editorFormat.doubleProperty(kEditorLetterSpacingRatio);
+            if (qIsFinite(ratio)) {
+                format.letterSpacingRatio = ratio;
+            }
+        }
+        if (editorFormat.hasProperty(kEditorWordSpacingRatio)) {
+            const qreal ratio = editorFormat.doubleProperty(kEditorWordSpacingRatio);
+            if (qIsFinite(ratio)) {
+                format.wordSpacingRatio = ratio;
+            }
+        }
         if (editorFormat.hasProperty(kEditorFontSizeRatio)
             && editorFormat.hasProperty(kEditorDisplayFontSizeRatio)) {
             const qreal ratio = editorFormat.doubleProperty(kEditorFontSizeRatio);
@@ -1084,6 +1196,78 @@ void PDFEditController::setSelectedFontSize(qreal points)
     }
 }
 
+void PDFEditController::setSelectedLetterSpacing(qreal points)
+{
+    setSelectedTextSpacing(points, false);
+}
+
+void PDFEditController::setSelectedWordSpacing(qreal points)
+{
+    setSelectedTextSpacing(points, true);
+}
+
+void PDFEditController::setSelectedTextSpacing(qreal points, bool wordSpacing)
+{
+    if (m_saving || !m_document || !m_hasSelection || !m_selectedCandidate.editable
+        || !isTextCandidateKind(m_selectedCandidate.kind)
+        || !qIsFinite(points) || points < -10.0 || points > 50.0) {
+        return;
+    }
+    const qreal pageHeight = m_document->pageSize(m_selectedCandidate.page).height();
+    if (!qIsFinite(pageHeight) || pageHeight <= 0.0) {
+        return;
+    }
+    const qreal ratio = points / pageHeight;
+    const auto changeSpacing = [ratio, wordSpacing](CharacterFormat &format) {
+        qreal &current = wordSpacing ? format.wordSpacingRatio : format.letterSpacingRatio;
+        if (!qFuzzyCompare(current + 1.0, ratio + 1.0)) {
+            current = ratio;
+        }
+    };
+    Draft draft = selectedDraftForDisplay();
+    if (m_textEditActive && m_selectedTextRangeLength == 0) {
+        const CharacterFormat current = selectedCharacterFormatForDisplay();
+        CharacterFormat typing = current;
+        changeSpacing(typing);
+        if (sameCharacterFormat(current, typing)) {
+            return;
+        }
+        const qsizetype caret = qBound<qsizetype>(0, m_selectedTextRangeStart, draft.text.size());
+        if (sameCharacterFormat(typing, characterFormatAtPosition(draft, caret, true))) {
+            resetTypingFormat();
+        } else {
+            m_typingCharacterFormat = typing;
+            m_typingCharacterFormatPosition = caret;
+            m_typingCharacterFormatActive = true;
+        }
+        emit textFormatStateChanged();
+        return;
+    }
+    qsizetype start = 0;
+    qsizetype length = 0;
+    selectedTextRangeForDraft(draft, start, length);
+    if (!updateCharacterFormats(draft, start, length, changeSpacing)) {
+        return;
+    }
+    const bool finishImmediately = !m_textEditActive;
+    if (finishImmediately) {
+        beginSelectedTextEditSession(false);
+    }
+    if (!m_textEditActive) {
+        return;
+    }
+    if (!finishImmediately && length > 0) {
+        const qreal unchanged = std::numeric_limits<qreal>::quiet_NaN();
+        emit selectionTextSpacingApplied(static_cast<int>(start), static_cast<int>(length),
+                                         wordSpacing ? unchanged : ratio,
+                                         wordSpacing ? ratio : unchanged);
+    }
+    updateSelectedDraft(draft);
+    if (finishImmediately) {
+        finishSelectedTextEdit();
+    }
+}
+
 void PDFEditController::setSelectedFontBold(bool enabled)
 {
     setSelectedFontStyle(FontStyle::Bold, enabled);
@@ -1375,7 +1559,7 @@ void PDFEditController::finishSelectedTextEdit()
 
     const Command baseline = m_textEditCommand;
     Draft finalizedDraft = selectedDraftForDisplay();
-    const auto fontSizesUnchanged = [&]() {
+    const auto textMetricsUnchanged = [&]() {
         qsizetype left = 0;
         qsizetype right = 0;
         while (left < finalizedDraft.characterSpans.size()
@@ -1384,7 +1568,9 @@ void PDFEditController::finishSelectedTextEdit()
             const CharacterSpan &previous = baseline.before.characterSpans.at(right);
             if (!qFuzzyCompare(current.format.fontSizeRatio, previous.format.fontSizeRatio)
                 || !qFuzzyCompare(current.format.displayFontSizeRatio,
-                                  previous.format.displayFontSizeRatio)) {
+                                  previous.format.displayFontSizeRatio)
+                || current.format.letterSpacingRatio != previous.format.letterSpacingRatio
+                || current.format.wordSpacingRatio != previous.format.wordSpacingRatio) {
                 return false;
             }
             const qsizetype currentEnd = current.start + current.length;
@@ -1402,7 +1588,7 @@ void PDFEditController::finishSelectedTextEdit()
     if (m_textEditFrameAutomaticallyExpanded
         && !m_textEditGeometryExplicitlyChanged
         && finalizedDraft.text == baseline.before.text
-        && fontSizesUnchanged()
+        && textMetricsUnchanged()
         && sameParagraphFormats(
             finalizedDraft.paragraphFormats,
             baseline.before.paragraphFormats)) {
@@ -1561,7 +1747,9 @@ void PDFEditController::expandInitialTextFrame(Candidate &candidate,
         candidate.fontBold,
         candidate.fontItalic,
         candidate.fontUnderline,
-        fontPixelSize);
+        fontPixelSize,
+        candidate.letterSpacingRatio * pageSize.height(),
+        candidate.wordSpacingRatio * pageSize.height());
     const QFontMetricsF metrics(displayFont);
     qreal measuredWidth = 0.0;
     qsizetype lineStart = 0;
@@ -1584,15 +1772,22 @@ void PDFEditController::expandInitialTextFrame(Candidate &candidate,
                     ? format.displayFontSizeRatio : format.fontSizeRatio) * pageSize.height();
                 QTextCharFormat textFormat;
                 textFormat.setFont(fontForDisplay(format.fontFamily, format.fontStretch,
-                    format.fontBold, format.fontItalic, format.fontUnderline, size));
+                    format.fontBold, format.fontItalic, format.fontUnderline, size,
+                    format.letterSpacingRatio * pageSize.height(),
+                    format.wordSpacingRatio * pageSize.height()));
                 formats.append(QTextLayout::FormatRange{
                     int(start - lineStart), int(end - start), textFormat});
             }
             layout.setFormats(formats);
+            QTextOption option;
+            option.setWrapMode(QTextOption::NoWrap);
+            layout.setTextOption(option);
             layout.beginLayout();
             QTextLine textLine = layout.createLine();
             if (textLine.isValid()) {
-                textLine.setNumColumns(line.size());
+                // Tabs occupy several columns: using the UTF-16 length as a
+                // column cap can measure only a prefix of the source line.
+                textLine.setLineWidth(pageSize.width());
                 measuredWidth = qMax(measuredWidth,
                     qMax(textLine.horizontalAdvance(), textLine.naturalTextWidth()));
             }
@@ -1625,6 +1820,8 @@ PDFEditController::CharacterFormat PDFEditController::characterFormatForCandidat
     format.fontSizeRatio = candidate.fontSizeRatio;
     format.displayFontSizeRatio = candidate.displayFontSizeRatio;
     format.fontStretch = candidate.fontStretch;
+    format.letterSpacingRatio = candidate.letterSpacingRatio;
+    format.wordSpacingRatio = candidate.wordSpacingRatio;
     format.fontBold = candidate.fontBold;
     format.fontItalic = candidate.fontItalic;
     format.fontUnderline = candidate.fontUnderline;
@@ -2359,6 +2556,8 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
     const bool fontUnderline = m_typingCharacterFormat.fontUnderline;
     const qreal fontSizeRatio = m_typingCharacterFormat.fontSizeRatio;
     const qreal displayFontSizeRatio = m_typingCharacterFormat.displayFontSizeRatio;
+    const qreal letterSpacingRatio = m_typingCharacterFormat.letterSpacingRatio;
+    const qreal wordSpacingRatio = m_typingCharacterFormat.wordSpacingRatio;
     m_typingCharacterFormat = characterFormatAtPosition(
         draft,
         m_typingCharacterFormatPosition,
@@ -2368,4 +2567,6 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
     m_typingCharacterFormat.fontUnderline = fontUnderline;
     m_typingCharacterFormat.fontSizeRatio = fontSizeRatio;
     m_typingCharacterFormat.displayFontSizeRatio = displayFontSizeRatio;
+    m_typingCharacterFormat.letterSpacingRatio = letterSpacingRatio;
+    m_typingCharacterFormat.wordSpacingRatio = wordSpacingRatio;
 }

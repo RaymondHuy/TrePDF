@@ -605,6 +605,8 @@ QVariantList PDFEditController::characterSpanMaps(
                 ? span.format.displayFontSizeRatio
                 : span.format.fontSizeRatio);
         map.insert(QStringLiteral("fontStretch"), span.format.fontStretch);
+        map.insert(QStringLiteral("letterSpacingRatio"), span.format.letterSpacingRatio);
+        map.insert(QStringLiteral("wordSpacingRatio"), span.format.wordSpacingRatio);
         map.insert(QStringLiteral("fontBold"), span.format.fontBold);
         map.insert(QStringLiteral("fontItalic"), span.format.fontItalic);
         map.insert(QStringLiteral("fontUnderline"), span.format.fontUnderline);
@@ -750,6 +752,8 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
             ? format.displayFontSizeRatio
             : format.fontSizeRatio);
     map.insert(QStringLiteral("fontStretch"), format.fontStretch);
+    map.insert(QStringLiteral("letterSpacingRatio"), format.letterSpacingRatio);
+    map.insert(QStringLiteral("wordSpacingRatio"), format.wordSpacingRatio);
     map.insert(QStringLiteral("fontBold"), format.fontBold);
     map.insert(QStringLiteral("fontItalic"), format.fontItalic);
     map.insert(QStringLiteral("fontUnderline"), format.fontUnderline);
@@ -916,6 +920,8 @@ bool PDFEditController::sameCharacterFormat(const CharacterFormat &left,
         && left.fontSizeRatio == right.fontSizeRatio
         && left.displayFontSizeRatio == right.displayFontSizeRatio
         && left.fontStretch == right.fontStretch
+        && left.letterSpacingRatio == right.letterSpacingRatio
+        && left.wordSpacingRatio == right.wordSpacingRatio
         && left.fontBold == right.fontBold
         && left.fontItalic == right.fontItalic
         && left.fontUnderline == right.fontUnderline

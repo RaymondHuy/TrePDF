@@ -127,8 +127,8 @@ từ draft hiện tại và chỉ nới cạnh phải. Mép trái, cạnh trên 
 trung điểm khoảng trắng trước candidate đó; nếu không có vật cản, biên edit đi
 đến lề phải suy ra từ lề trái/nội dung của page. Frame này không thay đổi
 `sourceRect`, vùng hit-test hoặc source masks. Nó chỉ được ghi vào draft khi
-text thật sự đổi, paragraph format thay đổi hoặc người dùng resize rõ ràng; mở
-rồi đóng editor không thay đổi gì, gửi lại đúng text và paragraph format cũ,
+text, cỡ chữ, spacing hoặc paragraph format thật sự đổi, hoặc người dùng resize
+rõ ràng; mở rồi đóng editor không thay đổi gì, gửi lại đúng text và định dạng cũ,
 hoặc nhấn Esc đều phục hồi frame trước đó.
 
 Midpoint được tính từ initial/source frame bất biến nên mở sửa nhiều lần không
@@ -691,6 +691,8 @@ italic = fontItalic
 underline = fontUnderline
 pixelSize = max(1, round(requestedPixelSize))
 stretch = calibratedFontStretch(family, fontStretch, bold, italic, pixelSize)
+letterSpacing = letterSpacingRatio * layoutPageHeight  // QFont::AbsoluteSpacing
+wordSpacing = wordSpacingRatio * layoutPageHeight
 ```
 
 HTML rich text không ghi trực tiếp tỷ lệ PDF vào CSS `font-stretch`; mỗi span
@@ -698,8 +700,12 @@ gọi cùng bộ hiệu chỉnh theo family/style/pixel size của chính span �
 caret, selection và wrap vẫn do `TextEdit` xử lý nhưng dùng cùng metric với
 layout khi save.
 
-Character spacing và word spacing chưa được lấy từ PDF. Underline nguồn được
-nhận diện cho cặp TEXT/PATH do TrePDF tạo theo quy tắc ở mục 7.4.
+Spacing được áp sau bước hiệu chỉnh stretch. HTML của từng span ghi
+`letter-spacing`/`word-spacing` theo pixel layout; editor merge trực tiếp cùng
+thuộc tính vào `QTextCharFormat`. Initial frame đo QFont/QTextLayout có spacing
+của từng source span, nên không bỏ mất khoảng giãn khi tính chiều rộng dòng.
+Underline nguồn được nhận diện cho cặp TEXT/PATH do TrePDF tạo theo quy tắc ở
+mục 7.4.
 
 ### 7.9 Rich-text draft
 
@@ -716,16 +722,20 @@ Draft
 ```
 
 `CharacterFormat` hiện chứa family, font size ratio, display size ratio,
-stretch, bold, italic, underline và color. `ParagraphFormat` chứa alignment,
+stretch, `letterSpacingRatio`, `wordSpacingRatio`, bold, italic, underline và
+color. Hai spacing ratio được chuẩn hóa theo chiều cao trang PDF, giống size
+ratio, và tham gia so sánh draft/undo/redo. `ParagraphFormat` chứa alignment,
 list style (`none`, `bullet`, `decimal`), list level và số bắt đầu.
 
 Controller giữ thêm typing format tạm khi selection có length bằng `0`. Bấm
-Bold/Italic/Underline hoặc cỡ chữ chỉ thay trạng thái này, không tạo draft hoặc undo command.
+Bold/Italic/Underline, cỡ chữ hoặc spacing chỉ thay trạng thái này, không tạo
+draft hoặc undo command.
 Khi text mới được chèn đúng caret, `setDraftText()` dùng typing format cho range
 vừa chèn; di chuyển caret hoặc tạo selection sẽ trở về format tại vị trí mới.
 QML truyền cả vị trí caret sau edit để controller neo delta quanh vị trí gõ,
-tránh suy sai range khi chuỗi có ký tự lặp. Range mới chèn được merge B/I/U và cỡ chữ trực
-tiếp vào `QQuickTextDocument` bằng `QTextCursor` và nối với edit block trước đó;
+tránh suy sai range khi chuỗi có ký tự lặp. Range mới chèn được merge B/I/U,
+cỡ chữ và spacing trực tiếp vào `QQuickTextDocument` bằng `QTextCursor` và nối
+với edit block trước đó;
 với phím gõ hoặc IME, event filter mở block trước khi Qt chèn text và đóng sau
 input event. QML đồng bộ text/format sau khi block đóng để đọc đúng nội dung và
 giữ cả ký tự lẫn định dạng trong cùng bước undo. Filter chỉ hoạt động khi có
@@ -748,6 +758,43 @@ QML nhận `characterSpans` và `paragraphFormats` trong candidate/draft map, đ
 thời có `selectedCharacterSpans` và `selectedParagraphFormats` trên controller.
 QML chuyển model semantic này thành rich HTML nội bộ cho `TextEdit`/`Text`, còn
 controller tiếp tục lưu plain text và range UTF-16 thay vì phụ thuộc HTML của Qt.
+
+### 7.10 Giãn ký tự, giãn từ và spacing nguồn
+
+Với text ngang có Unicode/metric nguồn hợp lệ, worker ước lượng phần giãn đều
+bằng khoảng cách giữa hai origin glyph trừ advance của glyph trước, sau khi áp
+ma trận PDF. Residual sau chữ thường xác định giãn ký tự; phần tăng thêm sau
+dấu cách U+0020 xác định giãn từ. Cách đo này nhận diện được hiệu ứng đều của
+`Tc`/`Tw`, kể cả khi font size được đưa vào ma trận, và không lấy chênh lệch
+metric giữa Qt với font PDF làm spacing.
+
+Chỉ chấp nhận khi có đủ mẫu, các residual nhất quán và nằm trong giới hạn
+−10…50 PDF point. Mỗi object giữ tối đa 4.096 mẫu; trang vượt giới hạn quét glyph
+50.000 ký tự không suy diễn spacing. Run ngắn, vị trí `TJ` không đều, Unicode
+mapping lỗi, dấu tổ hợp hoặc script cần shaping phức tạp dùng fallback layout
+hiện có. Giãn đều không thể mô tả chính xác mọi dịch chuyển riêng của PDF.
+
+Panel có hai trường **Giãn ký tự** và **Giãn từ**, đơn vị PDF point. Người dùng
+nhập số thập phân từ −10 đến 50, hoặc dùng phím lên/xuống theo bước 0,1. Giá trị
+0 dùng khoảng cách tự nhiên của font. Khi chưa mở editor, thay đổi áp cho text
+object đang chọn; trong editor, nó áp cho vùng bôi đen hoặc thành typing format
+tại caret. Vùng có nhiều giá trị hiện ô trống. Thay một loại spacing không làm
+phẳng loại spacing còn lại trong vùng có định dạng hỗn hợp.
+
+`QTextDocument` giữ cả hai semantic ratio trong custom character properties để
+local undo/redo khôi phục giá trị chính xác, độc lập zoom. Việc merge range không
+reload rich document hoặc xóa history của editor. Source paragraph separator
+được seed theo format của dòng tiếp theo, đúng quy ước của Qt, để mở rồi đóng
+editor không tự tạo một thay đổi spacing. Khi spacing thật sự đổi, frame tạm
+đã mở rộng được giữ để layout reflow; undo về giá trị nguồn rồi đóng editor
+không tạo draft nếu không còn thay đổi khác.
+
+Save ghi các cụm chữ/từ tại vị trí do Qt layout tính, thay vì kéo giãn hình dáng
+glyph. Mark `TrePDFTextSpacing` lưu spacing và đoạn text của từng part. Khi mở
+lại, scanner chỉ dùng mark có version, giá trị, độ dài, số part và nhóm hợp lệ,
+rồi ghép lại các part của cùng dòng; metadata lỗi hoặc vượt giới hạn không được
+coi là spacing tin cậy. Đây là dữ liệu hỗ trợ editor: PDF vẫn hiển thị bằng text
+object và vị trí chuẩn, không phụ thuộc TrePDF để render.
 
 ## 8. Hit test: con trỏ đang nằm trên text nào
 
@@ -1169,9 +1216,9 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
    object tree.
 3. Dùng `QTextLayout` để wrap/reflow theo `frameRect`, tách từng line/style run,
    rồi dùng `FPDF_DeviceToPage()` để đổi tọa độ editor sang page coordinates.
-   QFont của layout dùng cùng stretch đã hiệu chỉnh như overlay/editor, nên
-   điểm wrap và chiều rộng run không đổi chỉ vì save/reopen. Cách này giữ đúng
-   CropBox offset và page rotation.
+   QFont của layout dùng cùng stretch đã hiệu chỉnh và spacing từng span như
+   overlay/editor, nên điểm wrap và chiều rộng run dùng cùng metric khi save.
+   Cách này giữ đúng CropBox offset và page rotation.
 4. Chuẩn hóa text đã sửa về Unicode NFC theo grapheme cluster và remap lại các
    character span UTF-16. Writer có thể tái sử dụng font PDF gốc khi
    family/style phù hợp và replacement run chỉ chứa các ký tự đã có trong text
@@ -1206,6 +1253,13 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
    khoảng giãn nằm giữa các từ, không kéo rộng glyph. Font nguồn giữ scale
    nguồn, font mới dùng stretch semantic. Tab được thể hiện bằng khoảng dịch
    chuyển thay vì ghi thành glyph; dòng cuối đoạn không được giãn đều.
+   Với dòng có character/word spacing, writer chia tại giao điểm của grapheme
+   boundary và glyph-cluster boundary do Qt trả về. Dấu tổ hợp hoặc ligature
+   không bị tách rời chỉ để thêm khoảng cách. Giãn ký tự đặt từng cụm, giãn từ
+   đặt từng từ theo `cursorToX()`; whitespace được giữ cho text extraction,
+   riêng tab chỉ đóng góp advance. Mỗi dòng giới hạn 1.024 part, mỗi draft
+   32.768 part; vượt giới hạn làm save thất bại trước commit. Mỗi part mang mark
+   `TrePDFTextSpacing` để scanner có thể kiểm tra và phục hồi spacing khi reopen.
 5. Xóa mọi source object của draft, insert replacement tại z-order sớm nhất của
    các object nguồn nếu draft có nội dung thay thế, rồi gọi
    `FPDFPage_GenerateContent()` cho từng page đã đổi. Draft xóa image không tạo
@@ -1235,6 +1289,8 @@ TrePDF hiện đã lấy và áp dụng:
 - origin/baseline;
 - em-size;
 - transform stretch ngang/dọc;
+- character/word spacing đều của text ngang đủ điều kiện, và spacing người
+  dùng đặt trong draft;
 - embedded/installed font family nếu Qt dùng được;
 - bold và italic;
 - underline do người dùng áp dụng cho draft;
@@ -1244,9 +1300,10 @@ Nhưng PDF renderer và Qt text layout vẫn là hai hệ thống khác nhau. C�
 sau chưa được tái tạo đầy đủ trong `TextEdit`:
 
 - glyph ID gốc và glyph positioning từng ký tự;
-- character spacing (`Tc`);
-- word spacing (`Tw`);
-- kerning/position adjustment trong mảng `TJ`;
+- spacing nguồn không đủ mẫu hoặc không đáp ứng điều kiện suy diễn đều;
+- kerning/position adjustment không đều trong mảng `TJ`;
+- shaping phức tạp cần giữ glyph ID và vị trí riêng thay vì chỉ Unicode cùng
+  hai giá trị spacing;
 - horizontal scaling riêng của text state nếu không thể hiện đủ qua object
   transform;
 - italic angle chính xác, synthetic slant và underline path của PDF gốc;
