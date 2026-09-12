@@ -28,6 +28,7 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QRawFont>
 #include <QSaveFile>
 #include <QSet>
@@ -70,6 +71,9 @@ constexpr int kAnnotationFlagLockedContents = 1 << 9;
 constexpr qsizetype kMaximumSpacingLineParts = 1024;
 constexpr qsizetype kMaximumSpacingDraftParts = 32768;
 constexpr char kTextSpacingMark[] = "TrePDFTextSpacing";
+constexpr char kParagraphLayoutMark[] = "TrePDFParagraphLayout";
+constexpr qsizetype kMaximumLayoutParagraphs = 1024;
+constexpr qsizetype kMaximumParagraphModelBytes = 1024 * 1024;
 struct SaveFormat {
     QString fontFamily;
     QString embeddableFontFamily;
@@ -97,6 +101,9 @@ struct SaveParagraph {
     qsizetype start = 0;
     qsizetype length = 0;
     Qt::Alignment alignment = Qt::AlignLeft;
+    qreal lineSpacing = 1.0;
+    qreal spaceBeforeRatio = 0.0;
+    qreal spaceAfterRatio = 0.0;
 };
 
 struct SaveDraft {
@@ -122,6 +129,8 @@ struct SaveDraft {
     bool sourceAnnotationHasName = false;
     QVector<SaveSpan> characterSpans;
     QVector<SaveParagraph> paragraphFormats;
+    QVector<qsizetype> sourceLineBreaks;
+    bool sourceParagraphLayout = false;
     QRectF sourceRect;
     QRectF frameRect;
     QVector<QRectF> highlightRects;
@@ -192,6 +201,15 @@ struct LayoutRun {
     QByteArray spacingRuns;
     QString leadingWhitespace;
     qreal leadingLayoutAdvance = 0.0;
+    qsizetype textStart = 0;
+    qsizetype textLength = 0;
+    QByteArray paragraphGroup;
+    int paragraphIndex = 0;
+    int paragraphCount = 0;
+    QString paragraphText;
+    QJsonObject paragraphModel;
+    QPointF paragraphOrigin;
+    QRectF paragraphFrame;
 };
 
 struct SourceObject {
@@ -671,15 +689,15 @@ const SaveFormat &formatAt(const SaveDraft &draft, qsizetype position)
         : draft.characterSpans.constFirst().format;
 }
 
-Qt::Alignment paragraphAlignmentAt(const SaveDraft &draft, qsizetype position)
+SaveParagraph paragraphFormatAt(const SaveDraft &draft, qsizetype position)
 {
     for (const SaveParagraph &paragraph : draft.paragraphFormats) {
         if (position >= paragraph.start
             && position <= paragraph.start + paragraph.length) {
-            return paragraph.alignment;
+            return paragraph;
         }
     }
-    return Qt::AlignLeft;
+    return {};
 }
 
 void appendSpan(QVector<SaveSpan> &spans,
@@ -705,16 +723,18 @@ void normalizeDraftText(SaveDraft &draft)
         return;
     }
 
-    QVector<Qt::Alignment> paragraphAlignments;
+    QVector<SaveParagraph> originalParagraphs;
+    QVector<bool> originalSourceBreaks;
     qsizetype paragraphStart = 0;
     while (paragraphStart <= originalText.size()) {
-        paragraphAlignments.append(paragraphAlignmentAt(draft, paragraphStart));
+        originalParagraphs.append(paragraphFormatAt(draft, paragraphStart));
         const qsizetype newline = originalText.indexOf(
             QLatin1Char('\n'),
             paragraphStart);
         if (newline < 0) {
             break;
         }
+        originalSourceBreaks.append(draft.sourceLineBreaks.contains(newline));
         paragraphStart = newline + 1;
     }
 
@@ -757,6 +777,7 @@ void normalizeDraftText(SaveDraft &draft)
     }
 
     QVector<SaveParagraph> rebuiltParagraphs;
+    QVector<qsizetype> rebuiltSourceBreaks;
     paragraphStart = 0;
     qsizetype paragraphIndex = 0;
     while (paragraphStart <= rebuiltText.size()) {
@@ -766,15 +787,17 @@ void normalizeDraftText(SaveDraft &draft)
         const qsizetype paragraphEnd = newline < 0
             ? rebuiltText.size()
             : newline;
-        const Qt::Alignment alignment = paragraphIndex < paragraphAlignments.size()
-            ? paragraphAlignments.at(paragraphIndex)
-            : Qt::AlignLeft;
-        rebuiltParagraphs.append(SaveParagraph{
-            paragraphStart,
-            paragraphEnd - paragraphStart,
-            alignment});
+        SaveParagraph paragraph = paragraphIndex < originalParagraphs.size()
+            ? originalParagraphs.at(paragraphIndex) : SaveParagraph{};
+        paragraph.start = paragraphStart;
+        paragraph.length = paragraphEnd - paragraphStart;
+        rebuiltParagraphs.append(paragraph);
         if (newline < 0) {
             break;
+        }
+        if (paragraphIndex < originalSourceBreaks.size()
+            && originalSourceBreaks.at(paragraphIndex)) {
+            rebuiltSourceBreaks.append(newline);
         }
         paragraphStart = newline + 1;
         ++paragraphIndex;
@@ -783,6 +806,7 @@ void normalizeDraftText(SaveDraft &draft)
     draft.text = std::move(rebuiltText);
     draft.characterSpans = std::move(rebuiltSpans);
     draft.paragraphFormats = std::move(rebuiltParagraphs);
+    draft.sourceLineBreaks = std::move(rebuiltSourceBreaks);
 }
 
 bool requiresEmbeddedUnicodeFont(const QString &text)
@@ -860,6 +884,98 @@ bool lineHasTextSpacing(const SaveDraft &draft,
         return span.start < end && span.start + span.length > start
             && hasTextSpacing(span.format);
     });
+}
+
+bool hasParagraphLayout(const SaveDraft &draft)
+{
+    // Resetting the controls must not discard the source group's explicit
+    // paragraph boundaries or its original layout frame on the next save.
+    return draft.sourceParagraphLayout
+        || std::any_of(draft.paragraphFormats.cbegin(),
+                       draft.paragraphFormats.cend(),
+                       [](const SaveParagraph &paragraph) {
+        return !qFuzzyCompare(paragraph.lineSpacing, 1.0)
+            || !qFuzzyIsNull(paragraph.spaceBeforeRatio)
+            || !qFuzzyIsNull(paragraph.spaceAfterRatio);
+    });
+}
+
+qreal textLayoutDistance(qreal value)
+{
+    // QTextDocument stores proportional line advances and block margins in
+    // 26.6 fixed-point units. Quantize each advance, not the accumulated y,
+    // so fractional factors stay aligned over long paragraphs.
+    return std::floor(value * 64.0) / 64.0;
+}
+
+QJsonObject paragraphLayoutModel(const SaveDraft &draft, const QVector<LayoutRun> &runs)
+{
+    QJsonArray paragraphs;
+    for (const SaveParagraph &paragraph : draft.paragraphFormats) {
+        const QString alignment = paragraph.alignment.testFlag(Qt::AlignJustify)
+            ? QStringLiteral("justify")
+            : paragraph.alignment.testFlag(Qt::AlignHCenter)
+                ? QStringLiteral("center")
+                : paragraph.alignment.testFlag(Qt::AlignRight)
+                    ? QStringLiteral("right") : QStringLiteral("left");
+        paragraphs.append(QJsonObject{
+            {QStringLiteral("start"), paragraph.start},
+            {QStringLiteral("length"), paragraph.length},
+            {QStringLiteral("alignment"), alignment},
+            {QStringLiteral("lineSpacing"), paragraph.lineSpacing},
+            {QStringLiteral("spaceBeforeRatio"), paragraph.spaceBeforeRatio},
+            {QStringLiteral("spaceAfterRatio"), paragraph.spaceAfterRatio}});
+    }
+    QJsonArray sourceLineBreaks;
+    for (qsizetype position : draft.sourceLineBreaks) {
+        sourceLineBreaks.append(position);
+    }
+    // Blank paragraphs have no PDF text object from which to recover their
+    // font metrics. Retain only the unpainted intervals, leaving visible text
+    // style authoritative in the actual PDF objects.
+    QJsonArray whitespaceFormats;
+    qsizetype spanIndex = 0;
+    const auto appendWhitespace = [&](qsizetype start, qsizetype end) {
+        while (start < end) {
+            while (spanIndex + 1 < draft.characterSpans.size()
+                   && draft.characterSpans[spanIndex].start
+                       + draft.characterSpans[spanIndex].length <= start) {
+                ++spanIndex;
+            }
+            const SaveFormat &format = draft.characterSpans.isEmpty()
+                ? draft.originalFormat : draft.characterSpans[spanIndex].format;
+            const qsizetype next = draft.characterSpans.isEmpty() ? end
+                : qMin(end, draft.characterSpans[spanIndex].start
+                               + draft.characterSpans[spanIndex].length);
+            if (next <= start) {
+                break;
+            }
+            whitespaceFormats.append(QJsonObject{
+                {QStringLiteral("start"), start}, {QStringLiteral("length"), next - start},
+                {QStringLiteral("fontFamily"), format.fontFamily},
+                {QStringLiteral("fontSizeRatio"), format.fontSizeRatio},
+                {QStringLiteral("displayFontSizeRatio"), format.displayFontSizeRatio},
+                {QStringLiteral("fontStretch"), format.fontStretch},
+                {QStringLiteral("fontBold"), format.fontBold},
+                {QStringLiteral("fontItalic"), format.fontItalic},
+                {QStringLiteral("fontUnderline"), format.fontUnderline},
+                {QStringLiteral("letterSpacingRatio"), format.letterSpacingRatio},
+                {QStringLiteral("wordSpacingRatio"), format.wordSpacingRatio},
+                {QStringLiteral("color"), format.color.name(QColor::HexArgb)}});
+            start = next;
+        }
+    };
+    qsizetype previousEnd = 0;
+    for (const LayoutRun &run : runs) {
+        appendWhitespace(previousEnd, run.textStart);
+        previousEnd = run.textStart + run.textLength;
+    }
+    appendWhitespace(previousEnd, draft.text.size());
+    return QJsonObject{
+        {QStringLiteral("text"), draft.text},
+        {QStringLiteral("paragraphs"), paragraphs},
+        {QStringLiteral("sourceLineBreaks"), sourceLineBreaks},
+        {QStringLiteral("whitespaceFormats"), whitespaceFormats}};
 }
 
 bool appendSpacedLineRuns(const SaveDraft &draft,
@@ -947,6 +1063,8 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
         const qreal startX = line.cursorToX(static_cast<int>(start - paragraphStart));
         const qreal endX = line.cursorToX(static_cast<int>(end - paragraphStart));
         LayoutRun run;
+        run.textStart = start;
+        run.textLength = end - start;
         run.spacingGroup = group;
         run.spacingText = draft.text.sliced(start, end - start);
         // Whitespace belongs to the preceding visible cluster. It remains
@@ -1018,9 +1136,17 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
         : draft.frameRect.x() * pageWidth;
     const qreal frameRight = draft.frameRect.right() * pageWidth;
     const qreal layoutWidth = qMax(kMinimumLayoutWidth, frameRight - contentLeft);
+    const bool retainsParagraphLayout = hasParagraphLayout(draft);
+    if (retainsParagraphLayout
+        && (draft.text.size() > kMaximumSpacingDraftParts
+            || draft.paragraphFormats.size() > kMaximumLayoutParagraphs)) {
+        valid = false;
+        return {};
+    }
 
     qreal verticalOffset = 0.0;
     qreal firstBaseline = -1.0;
+    qreal previousSpaceAfter = 0.0;
     qsizetype paragraphStart = 0;
     while (paragraphStart <= draft.text.size()) {
         const qsizetype newline = draft.text.indexOf(QLatin1Char('\n'), paragraphStart);
@@ -1031,10 +1157,28 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
             ? QStringLiteral(" ")
             : draft.text.mid(paragraphStart, paragraphLength);
         const SaveFormat &baseFormat = formatAt(draft, paragraphStart);
+        const SaveParagraph paragraph = paragraphFormatAt(draft, paragraphStart);
+        if (!qIsFinite(paragraph.lineSpacing)
+            || paragraph.lineSpacing < 0.5 || paragraph.lineSpacing > 3.0
+            || !qIsFinite(paragraph.spaceBeforeRatio)
+            || paragraph.spaceBeforeRatio < 0.0
+            || paragraph.spaceBeforeRatio * pageHeight > 144.0 + 0.001
+            || !qIsFinite(paragraph.spaceAfterRatio)
+            || paragraph.spaceAfterRatio < 0.0
+            || paragraph.spaceAfterRatio * pageHeight > 144.0 + 0.001) {
+            valid = false;
+            return {};
+        }
+        // QTextDocument collapses adjacent paragraph margins to their maximum.
+        // It ignores the first top margin, which is applied to topOffset below.
+        if (paragraphStart > 0) {
+            verticalOffset += textLayoutDistance(qMax(
+                previousSpaceAfter, paragraph.spaceBeforeRatio * pageHeight));
+        }
         QTextLayout layout(paragraphText, displayFont(baseFormat, pageHeight));
         QTextOption option;
         option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-        option.setAlignment(paragraphAlignmentAt(draft, paragraphStart));
+        option.setAlignment(paragraph.alignment);
         layout.setTextOption(option);
         if (!emptyParagraph) {
             layout.setFormats(layoutFormats(
@@ -1063,7 +1207,11 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
                 const qsizetype lineEnd = qMin(
                     paragraphEnd,
                     lineStart + line.textLength());
-                if (lineHasTextSpacing(draft, lineStart, lineEnd)) {
+                // Retained paragraph layouts position words with Qt advances,
+                // even at zero character spacing. Fitting a whole line's glyph
+                // bounds would become a new font stretch after reopening and
+                // make repeated saves gradually change wrapping and spacing.
+                if (lineHasTextSpacing(draft, lineStart, lineEnd) || retainsParagraphLayout) {
                     if (!appendSpacedLineRuns(draft, paragraphText, line,
                                              paragraphStart, contentLeft,
                                              baseline, pageHeight, runs)) {
@@ -1071,7 +1219,8 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
                         valid = false;
                         return {};
                     }
-                    paragraphHeight = line.y() + line.height();
+                    paragraphHeight = line.y()
+                        + textLayoutDistance(line.height() * paragraph.lineSpacing);
                     continue;
                 }
                 QVector<qsizetype> boundaries{lineStart, lineEnd};
@@ -1125,6 +1274,8 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
                     const qreal startX = line.cursorToX(localStart);
                     const qreal endX = line.cursorToX(localEnd);
                     LayoutRun run;
+                    run.textStart = start;
+                    run.textLength = end - start;
                     run.text = text;
                     run.format = formatAt(draft, start);
                     run.x = contentLeft + qMin(startX, endX);
@@ -1134,7 +1285,8 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
                     runs.append(std::move(run));
                 }
             }
-            paragraphHeight = line.y() + line.height();
+            paragraphHeight = line.y()
+                + textLayoutDistance(line.height() * paragraph.lineSpacing);
         }
         layout.endLayout();
 
@@ -1143,9 +1295,10 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
             if (firstBaseline < 0.0) {
                 firstBaseline = verticalOffset + metrics.ascent();
             }
-            paragraphHeight = metrics.height();
+            paragraphHeight = textLayoutDistance(metrics.height() * paragraph.lineSpacing);
         }
         verticalOffset += paragraphHeight;
+        previousSpaceAfter = paragraph.spaceAfterRatio * pageHeight;
 
         if (newline < 0) {
             break;
@@ -1153,11 +1306,34 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
         paragraphStart = newline + 1;
     }
 
-    const qreal topOffset = draft.hasBaseline && !draft.added && firstBaseline >= 0.0
+    const qreal initialBefore = paragraphFormatAt(draft, 0).spaceBeforeRatio * pageHeight;
+    const qreal topOffset = (draft.hasBaseline && !draft.added && firstBaseline >= 0.0
         ? draft.layoutOrigin.y() * pageHeight - firstBaseline
-        : draft.frameRect.y() * pageHeight + 1.0;
+        : draft.frameRect.y() * pageHeight + 1.0) + initialBefore;
     for (LayoutRun &run : runs) {
         run.baselineFromTop += topOffset;
+    }
+    if (retainsParagraphLayout && !runs.isEmpty()) {
+        if (runs.size() > kMaximumSpacingDraftParts) {
+            valid = false;
+            return {};
+        }
+        const QByteArray group = QUuid::createUuid()
+            .toString(QUuid::WithoutBraces).toLatin1();
+        for (qsizetype index = 0; index < runs.size(); ++index) {
+            LayoutRun &run = runs[index];
+            run.paragraphGroup = group;
+            run.paragraphIndex = static_cast<int>(index);
+            run.paragraphCount = static_cast<int>(runs.size());
+            run.paragraphText = draft.text.sliced(run.textStart, run.textLength);
+        }
+        LayoutRun &first = runs.first();
+        first.paragraphModel = paragraphLayoutModel(draft, runs);
+        first.paragraphOrigin = draft.hasBaseline && !draft.added
+            ? draft.layoutOrigin
+            : QPointF(draft.frameRect.left(),
+                      draft.frameRect.top() + (1.0 + firstBaseline) / pageHeight);
+        first.paragraphFrame = draft.frameRect;
     }
     return runs;
 }
@@ -2192,6 +2368,57 @@ bool markTextSpacing(FPDF_DOCUMENT document,
     return marked;
 }
 
+bool markParagraphLayout(FPDF_DOCUMENT document,
+                         FPDF_PAGEOBJECT textObject,
+                         const LayoutRun &run,
+                         qreal pageWidth,
+                         qreal pageHeight,
+                         qreal originOffset)
+{
+    if (run.paragraphGroup.isEmpty()) {
+        return true;
+    }
+    const QByteArray text = run.paragraphText.toUtf8();
+    FPDF_PAGEOBJECTMARK mark = FPDFPageObj_AddMark(textObject, kParagraphLayoutMark);
+    bool marked = mark
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Version", 1)
+        && FPDFPageObjMark_SetStringParam(document, textObject, mark, "Group",
+                                         run.paragraphGroup.constData())
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Index",
+                                      run.paragraphIndex)
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Count",
+                                      run.paragraphCount)
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Start",
+                                      static_cast<int>(run.textStart))
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Length",
+                                      static_cast<int>(run.textLength))
+        && FPDFPageObjMark_SetBlobParam(
+            document, textObject, mark, "Text",
+            reinterpret_cast<const unsigned char *>(text.constData()),
+            static_cast<unsigned long>(text.size()));
+    if (marked && run.paragraphIndex == 0) {
+        // Relative geometry survives translating the original matrices during
+        // a move-only save, without rewriting the stored model.
+        const QPointF anchor((run.x + originOffset) / pageWidth,
+                             run.baselineFromTop / pageHeight);
+        const QPointF logicalOrigin = run.paragraphOrigin - anchor;
+        QJsonObject model = run.paragraphModel;
+        model.insert(QStringLiteral("originOffset"),
+                     QJsonArray{logicalOrigin.x(), logicalOrigin.y()});
+        model.insert(QStringLiteral("frameOffset"), QJsonArray{
+            run.paragraphFrame.x() - anchor.x(),
+            run.paragraphFrame.y() - anchor.y(),
+            run.paragraphFrame.width(), run.paragraphFrame.height()});
+        const QByteArray bytes = QJsonDocument(model).toJson(QJsonDocument::Compact);
+        marked = bytes.size() <= kMaximumParagraphModelBytes
+            && FPDFPageObjMark_SetBlobParam(
+                document, textObject, mark, "Model",
+                reinterpret_cast<const unsigned char *>(bytes.constData()),
+                static_cast<unsigned long>(bytes.size()));
+    }
+    return marked;
+}
+
 bool markUnderlinePair(FPDF_DOCUMENT document,
                        FPDF_PAGEOBJECT textObject,
                        FPDF_PAGEOBJECT underlineObject)
@@ -2677,7 +2904,9 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 horizontalScale,
                 matrix)
             && FPDFPageObj_SetMatrix(textObject, &matrix)
-            && markTextSpacing(document, textObject, run, pageHeight, originOffset);
+            && markTextSpacing(document, textObject, run, pageHeight, originOffset)
+            && markParagraphLayout(document, textObject, run,
+                                   pageWidth, pageHeight, originOffset);
         if (!configured) {
             FPDFPageObj_Destroy(textObject);
             return failure(
@@ -5691,8 +5920,13 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             saveDraft.paragraphFormats.append(SaveParagraph{
                 paragraph.start,
                 paragraph.length,
-                alignment});
+                alignment,
+                paragraph.lineSpacing,
+                paragraph.spaceBeforeRatio,
+                paragraph.spaceAfterRatio});
         }
+        saveDraft.sourceLineBreaks = draft->sourceLineBreaks;
+        saveDraft.sourceParagraphLayout = !draft->candidate.sourceParagraphFormats.isEmpty();
         data->drafts.append(std::move(saveDraft));
     }
 

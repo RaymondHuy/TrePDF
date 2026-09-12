@@ -3,6 +3,376 @@
 
 using namespace PDFEditControllerTestSupport;
 
+void PDFEditControllerTest::changesParagraphSpacingOutsideEditorWithHistory()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("paragraph-spacing-history.pdf"));
+    QVERIFY(createSourceSpacingPdf(path, 0.0, 0.0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Alpha beta gamma delta"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedLineSpacing(), 1.0);
+    controller.setSelectedLineSpacing(1.5);
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(controller.hasDrafts());
+    QCOMPARE(controller.selectedLineSpacing(), 1.5);
+    controller.undo();
+    QCOMPARE(controller.selectedLineSpacing(), 1.0);
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.selectedLineSpacing(), 1.5);
+    controller.setSelectedParagraphSpaceBefore(6.0);
+    controller.setSelectedParagraphSpaceAfter(10.0);
+    QCOMPARE(controller.selectedParagraphSpaceBefore(), 6.0);
+    QCOMPARE(controller.selectedParagraphSpaceAfter(), 10.0);
+    controller.undo();
+    QCOMPARE(controller.selectedParagraphSpaceAfter(), 0.0);
+    QCOMPARE(controller.selectedParagraphSpaceBefore(), 6.0);
+    controller.redo();
+    controller.setSelectedLineSpacing(0.49);
+    controller.setSelectedParagraphSpaceBefore(-1.0);
+    controller.setSelectedParagraphSpaceAfter(145.0);
+    QCOMPARE(controller.selectedLineSpacing(), 1.5);
+    QCOMPARE(controller.selectedParagraphSpaceBefore(), 6.0);
+    QCOMPARE(controller.selectedParagraphSpaceAfter(), 10.0);
+    controller.discardDrafts();
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedLineSpacing(), 1.0);
+    QCOMPARE(controller.selectedParagraphSpaceBefore(), 0.0);
+    QCOMPARE(controller.selectedParagraphSpaceAfter(), 0.0);
+
+    const QString groupedPath = m_temporaryDirectory.filePath(QStringLiteral("paragraph-spacing-grouped.pdf"));
+    QVERIFY(createSourceParagraphPdf(groupedPath, {
+        {QStringLiteral("First source line"), 72.0, 740.0},
+        {QStringLiteral("Second source line"), 72.0, 710.0}}));
+    QVERIFY(document.open(QUrl::fromLocalFile(groupedPath)));
+    const QString sourceText = QStringLiteral("First source line\nSecond source line");
+    const QVariantMap grouped = candidateForText(waitForCandidates(controller, 0), sourceText);
+    QVERIFY(!grouped.isEmpty());
+    QVERIFY(controller.selectCandidate(0, grouped.value(QStringLiteral("objectId")).toString()));
+    controller.setSelectedLineSpacing(1.0);
+    controller.setSelectedParagraphSpaceBefore(0.0);
+    QCOMPARE(controller.selectedText(), sourceText);
+    QVERIFY(!controller.hasDrafts());
+    controller.beginSelectedTextEdit();
+    // Source row breaks reflow together; a user's Enter remains a distinct paragraph.
+    const QString explicitText = sourceText + QStringLiteral("\nUser paragraph");
+    controller.updateSelectedTextPreview(explicitText);
+    controller.setSelectedTextRange(20, 0);
+    controller.setSelectedLineSpacing(1.5);
+    QCOMPARE(controller.selectedText(), QStringLiteral("First source line Second source line\nUser paragraph"));
+    const QVariantList formats = controller.selectedParagraphFormats();
+    QCOMPARE(formats.size(), 2);
+    QCOMPARE(formats[0].toMap().value(QStringLiteral("lineSpacing")).toReal(), 1.5);
+    QCOMPARE(formats[1].toMap().value(QStringLiteral("lineSpacing")).toReal(), 1.0);
+    controller.finishSelectedTextEdit();
+    controller.undo();
+    QCOMPARE(controller.selectedText(), sourceText);
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::savesBlankParagraphFontSizeThroughSpacingRoundTrip()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("blank-paragraph-font-source.pdf"));
+    const QString firstPath = m_temporaryDirectory.filePath(QStringLiteral("blank-paragraph-font-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(QStringLiteral("blank-paragraph-font-second.pdf"));
+    QVERIFY(createSourceSpacingPdf(sourcePath, 0.0, 0.0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap source = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Alpha beta gamma delta"));
+    QVERIFY(!source.isEmpty());
+    QVERIFY(controller.selectCandidate(0, source.value(QStringLiteral("objectId")).toString()));
+    const QString text = QStringLiteral("Alpha\n\nBeta");
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(text);
+    controller.setSelectedTextRange(0, text.size());
+    controller.setSelectedFontSize(12);
+    controller.setSelectedLineSpacing(1.5);
+    controller.setSelectedParagraphSpaceBefore(6.0);
+    // The blank paragraph has no painted glyph to carry its independent font
+    // size. Losing this separator's format changes the next paragraph's y.
+    controller.setSelectedTextRange(6, 1);
+    controller.setSelectedFontSize(32);
+    QCOMPARE(controller.selectedFontSize(), 32.0);
+    const QVariantList expectedParagraphs = controller.selectedParagraphFormats();
+    controller.finishSelectedTextEdit();
+
+    const auto readOrigins = [](const QString &path) {
+        QVector<QPointF> origins;
+        const QByteArray encodedPath = QFile::encodeName(path);
+        FPDF_DOCUMENT pdf = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+        if (!pdf) return origins;
+        const auto closePdf = qScopeGuard([&] { FPDF_CloseDocument(pdf); });
+        FPDF_PAGE page = FPDF_LoadPage(pdf, 0);
+        if (!page) return origins;
+        const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+        FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+        if (!textPage) return origins;
+        const auto closeText = qScopeGuard([&] { FPDFText_ClosePage(textPage); });
+        for (int index = 0; index < FPDFText_CountChars(textPage); ++index) {
+            const QChar character(static_cast<char16_t>(FPDFText_GetUnicode(textPage, index)));
+            if (FPDFText_IsGenerated(textPage, index) == 1 || character.isSpace()) continue;
+            double x = 0.0, y = 0.0;
+            if (!FPDFText_GetCharOrigin(textPage, index, &x, &y)) return QVector<QPointF>();
+            origins.append(QPointF(x, FPDF_GetPageHeightF(page) - y));
+        }
+        return origins;
+    };
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(firstPath)));
+    const QVector<QPointF> firstOrigins = readOrigins(firstPath);
+    QCOMPARE(firstOrigins.size(), 9);
+    for (int pass = 0; pass < 2; ++pass) {
+        const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), text);
+        QVERIFY2(!reopened.isEmpty(), "A blank paragraph must remain inside the saved text group");
+        QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+        QCOMPARE(controller.selectedText(), text);
+        QCOMPARE(controller.selectedParagraphFormats(), expectedParagraphs);
+        controller.beginSelectedTextEdit();
+        controller.setSelectedTextRange(0, 5);
+        QCOMPARE(controller.selectedFontSize(), 12.0);
+        controller.setSelectedTextRange(6, 1);
+        QCOMPARE(controller.selectedFontSize(), 32.0);
+        QCOMPARE(controller.selectedLineSpacing(), 1.5);
+        QVERIFY(qAbs(controller.selectedParagraphSpaceBefore() - 6.0) < 0.001);
+        controller.setSelectedTextRange(7, 4);
+        QCOMPARE(controller.selectedFontSize(), 12.0);
+        controller.cancelSelectedTextEdit();
+        QVERIFY(!controller.hasDrafts());
+        if (pass == 0) {
+            controller.setSelectedColor(Qt::blue);
+            QVERIFY(controller.saveAs(QUrl::fromLocalFile(secondPath)));
+            const QVector<QPointF> secondOrigins = readOrigins(secondPath);
+            QCOMPARE(secondOrigins.size(), firstOrigins.size());
+            for (int index = 0; index < secondOrigins.size(); ++index) {
+                QVERIFY2(QLineF(secondOrigins.at(index), firstOrigins.at(index)).length() < 0.08,
+                    qPrintable(QStringLiteral("Glyph %1 moved after color-only save: (%2,%3) -> (%4,%5)")
+                        .arg(index).arg(firstOrigins.at(index).x()).arg(firstOrigins.at(index).y())
+                        .arg(secondOrigins.at(index).x()).arg(secondOrigins.at(index).y())));
+            }
+        }
+    }
+}
+
+void PDFEditControllerTest::savesParagraphSpacingWithBlankLinesAndMovement_data()
+{
+    QTest::addColumn<bool>("added");
+    QTest::addColumn<qreal>("letterSpacing");
+    QTest::newRow("source-normal") << false << 0.0;
+    QTest::newRow("source-spaced") << false << 0.2;
+    QTest::newRow("added-normal") << true << 0.0;
+    QTest::newRow("added-spaced") << true << 0.2;
+}
+
+void PDFEditControllerTest::savesParagraphSpacingWithBlankLinesAndMovement()
+{
+    QFETCH(bool, added);
+    QFETCH(qreal, letterSpacing);
+    const qreal wordSpacing = letterSpacing > 0.0 ? 1.0 : 0.0;
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("paragraph-spacing-source.pdf"));
+    const QString firstPath = m_temporaryDirectory.filePath(QStringLiteral("paragraph-spacing-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(QStringLiteral("paragraph-spacing-second.pdf"));
+    const QString movedPath = m_temporaryDirectory.filePath(QStringLiteral("paragraph-spacing-moved.pdf"));
+    QVERIFY(createSourceSpacingPdf(sourcePath, 0.0, 0.0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Alpha beta gamma delta"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    if (added) {
+        controller.commitSelectedText(QString());
+        QVERIFY(!controller.addText(0, 0.2, 0.25).isEmpty());
+    }
+    const QString text = QStringLiteral("\nAlpha\tbeta gamma delta epsilon zeta eta theta iota kappa lambda mu.\n\nSecond paragraph with words that wrap onto another line.");
+    const std::array<qreal, 4> factors{1.0, 1.15, 0.75, 1.5};
+    const std::array<qreal, 4> before{8.0, 6.0, 4.0, 12.0};
+    const std::array<qreal, 4> after{2.0, 10.0, 3.0, 8.0};
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(text);
+    controller.setSelectedTextRange(0, text.size());
+    controller.setSelectedFontSize(12);
+    controller.setSelectedLetterSpacing(letterSpacing);
+    controller.setSelectedWordSpacing(wordSpacing);
+    const QStringList paragraphs = text.split(QLatin1Char('\n'));
+    int start = 0;
+    for (int index = 0; index < paragraphs.size(); ++index) {
+        controller.setSelectedTextRange(start, 0);
+        controller.setSelectedLineSpacing(factors.at(index));
+        controller.setSelectedParagraphSpaceBefore(before.at(index));
+        controller.setSelectedParagraphSpaceAfter(after.at(index));
+        start += paragraphs.at(index).size() + 1;
+    }
+    controller.setSelectedTextRange(0, text.size());
+    QVERIFY(qIsNaN(controller.selectedLineSpacing()));
+    QVERIFY(qIsNaN(controller.selectedParagraphSpaceBefore()));
+    const QSizeF pageSize = document.pageSize(0);
+    QRectF frame = controller.selectedFrameRect();
+    frame.setWidth(230.0 / pageSize.width());
+    frame.setHeight(20.0 / pageSize.height());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(frame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    const QPointF originalOrigin(controller.selectedOriginX(), controller.selectedBaselineY());
+    const QVariantList expectedParagraphs = controller.selectedParagraphFormats();
+    const QVariantList expectedCharacters = controller.selectedCharacterSpans();
+    QFont font = controller.fontForDisplay(controller.selectedFontFamily(),
+        controller.selectedFontStretch(), controller.selectedFontBold(),
+        controller.selectedFontItalic(), controller.selectedFontUnderline(),
+        controller.selectedDisplayFontSizeRatio() * pageSize.height(), letterSpacing, wordSpacing);
+    controller.finishSelectedTextEdit();
+
+    // Use QTextDocument's actual block layout as an independent baseline oracle,
+    // including its blank blocks, fractional advances and collapsed margins.
+    QTextDocument reference;
+    reference.setDocumentMargin(0.0);
+    reference.setDefaultFont(font);
+    reference.setPlainText(text);
+    reference.setTextWidth((frame.right() - (added ? frame.x() : originalOrigin.x())) * pageSize.width());
+    int paragraphIndex = 0;
+    for (QTextBlock block = reference.begin(); block.isValid(); block = block.next(), ++paragraphIndex) {
+        QTextBlockFormat format;
+        format.setLineHeight(factors.at(paragraphIndex) * 100.0, QTextBlockFormat::ProportionalHeight);
+        format.setTopMargin(before.at(paragraphIndex));
+        format.setBottomMargin(after.at(paragraphIndex));
+        QTextCursor(block).setBlockFormat(format);
+    }
+    reference.size();
+    const qreal firstAscent = reference.begin().layout()->lineAt(0).ascent();
+    const qreal textTop = added ? frame.y() * pageSize.height() + 1.0
+        : originalOrigin.y() * pageSize.height() - firstAscent;
+    QVector<qreal> expectedBaselines;
+    for (QTextBlock block = reference.begin(); block.isValid(); block = block.next()) {
+        for (int index = 0; index < block.text().size(); ++index) {
+            if (!block.text().at(index).isSpace()) {
+                const QTextLine line = block.layout()->lineForTextPosition(index);
+                expectedBaselines.append(textTop
+                    + before.front() + block.layout()->position().y() + line.y() + line.ascent());
+            }
+        }
+    }
+    const auto readOrigins = [](const QString &path, QVector<QPointF> &origins) {
+        const QByteArray encodedPath = QFile::encodeName(path);
+        FPDF_DOCUMENT pdf = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+        if (!pdf) return false;
+        const auto closePdf = qScopeGuard([&] { FPDF_CloseDocument(pdf); });
+        FPDF_PAGE page = FPDF_LoadPage(pdf, 0);
+        if (!page) return false;
+        const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+        FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+        if (!textPage) return false;
+        const auto closeText = qScopeGuard([&] { FPDFText_ClosePage(textPage); });
+        QHash<FPDF_PAGEOBJECT, int> order;
+        for (int index = 0; index < FPDFPage_CountObjects(page); ++index)
+            order.insert(FPDFPage_GetObject(page, index), index);
+        QVector<int> characters;
+        for (int index = 0; index < FPDFText_CountChars(textPage); ++index) {
+            const QChar character(static_cast<char16_t>(FPDFText_GetUnicode(textPage, index)));
+            if (FPDFText_IsGenerated(textPage, index) != 1 && !character.isSpace())
+                characters.append(index);
+        }
+        std::stable_sort(characters.begin(), characters.end(), [&](int a, int b) {
+            return order.value(FPDFText_GetTextObject(textPage, a))
+                < order.value(FPDFText_GetTextObject(textPage, b));
+        });
+        for (int index : characters) {
+            double x = 0.0, y = 0.0;
+            if (!FPDFText_GetCharOrigin(textPage, index, &x, &y)) return false;
+            origins.append(QPointF(x, FPDF_GetPageHeightF(page) - y));
+        }
+        return true;
+    };
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(firstPath)));
+    QVector<QPointF> firstOrigins;
+    QVERIFY(readOrigins(firstPath, firstOrigins));
+    QCOMPARE(firstOrigins.size(), expectedBaselines.size());
+    for (int index = 0; index < firstOrigins.size(); ++index)
+        QVERIFY2(qAbs(firstOrigins.at(index).y() - expectedBaselines.at(index)) < 0.08,
+                 qPrintable(QStringLiteral("Character %1: saved %2, Qt %3")
+                    .arg(index).arg(firstOrigins.at(index).y()).arg(expectedBaselines.at(index))));
+    const QPointF translation(0.02, 0.025);
+    for (int pass = 0; pass < 3; ++pass) {
+        const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), text.trimmed());
+        QVERIFY2(!reopened.isEmpty(), "Saved paragraph must rehydrate as one editable candidate");
+        QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+        QCOMPARE(controller.selectedText(), text);
+        QCOMPARE(controller.selectedParagraphFormats(), expectedParagraphs);
+        for (const QVariant &span : controller.selectedCharacterSpans()) {
+            QCOMPARE(span.toMap().value(QStringLiteral("fontStretch")),
+                     expectedCharacters.first().toMap().value(QStringLiteral("fontStretch")));
+        }
+        const QRectF expectedFrame = pass == 2 ? frame.translated(translation) : frame;
+        QVERIFY(QLineF(controller.selectedFrameRect().topLeft(), expectedFrame.topLeft()).length() < 0.0001);
+        QVERIFY(qAbs(controller.selectedFrameRect().width() - expectedFrame.width()) < 0.0001);
+        QVERIFY(controller.selectedContentBounds().bottom()
+            >= controller.selectedSourceRect().bottom() - 0.0001);
+        controller.beginSelectedTextEdit();
+        start = 0;
+        for (int index = 0; index < paragraphs.size(); ++index) {
+            controller.setSelectedTextRange(start, 0);
+            QCOMPARE(controller.selectedLineSpacing(), factors.at(index));
+            QVERIFY(qAbs(controller.selectedParagraphSpaceBefore() - before.at(index)) < 0.001);
+            QVERIFY(qAbs(controller.selectedParagraphSpaceAfter() - after.at(index)) < 0.001);
+            start += paragraphs.at(index).size() + 1;
+        }
+        controller.cancelSelectedTextEdit();
+        QVERIFY(!controller.hasDrafts());
+        if (pass == 0) {
+            controller.setSelectedColor(Qt::blue);
+            QVERIFY(controller.saveAs(QUrl::fromLocalFile(secondPath)));
+        } else if (pass == 1) {
+            controller.beginSelectedFrameResize();
+            controller.updateSelectedFrameRect(controller.selectedFrameRect().translated(translation));
+            controller.finishSelectedFrameResize();
+            QVERIFY(controller.draftsForPage(0).first().toMap().value(QStringLiteral("sourceTextMoveOnly")).toBool());
+            QVERIFY(controller.saveAs(QUrl::fromLocalFile(movedPath)));
+        }
+        if (pass < 2) {
+            QVector<QPointF> savedOrigins;
+            QVERIFY(readOrigins(pass == 0 ? secondPath : movedPath, savedOrigins));
+            QCOMPARE(savedOrigins.size(), firstOrigins.size());
+            const QPointF delta = pass == 0 ? QPointF()
+                : QPointF(translation.x() * pageSize.width(), translation.y() * pageSize.height());
+            for (int index = 0; index < savedOrigins.size(); ++index)
+                QVERIFY2(QLineF(savedOrigins.at(index), firstOrigins.at(index) + delta).length() < 0.08,
+                    qPrintable(QStringLiteral("Pass %1 char %2: (%3,%4) vs (%5,%6)")
+                        .arg(pass).arg(index).arg(savedOrigins.at(index).x()).arg(savedOrigins.at(index).y())
+                        .arg((firstOrigins.at(index) + delta).x()).arg((firstOrigins.at(index) + delta).y())));
+        }
+    }
+    // Resetting all spacing to the defaults still keeps the explicit blank
+    // paragraphs and frame instead of falling back to source-line heuristics.
+    controller.setSelectedLineSpacing(1.0);
+    controller.setSelectedParagraphSpaceBefore(0.0);
+    controller.setSelectedParagraphSpaceAfter(0.0);
+    const QVariantList resetParagraphs = controller.selectedParagraphFormats();
+    const QRectF resetFrame = controller.selectedFrameRect();
+    const QString resetPath = m_temporaryDirectory.filePath(
+        QStringLiteral("paragraph-spacing-reset.pdf"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(resetPath)));
+    const QVariantMap resetCandidate = candidateForText(
+        waitForCandidates(controller, 0), text.trimmed());
+    QVERIFY2(!resetCandidate.isEmpty(), "Reset spacing must retain the paragraph group");
+    QVERIFY(controller.selectCandidate(
+        0, resetCandidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedText(), text);
+    QCOMPARE(controller.selectedParagraphFormats(), resetParagraphs);
+    QCOMPARE(controller.selectedLineSpacing(), 1.0);
+    QCOMPARE(controller.selectedParagraphSpaceBefore(), 0.0);
+    QCOMPARE(controller.selectedParagraphSpaceAfter(), 0.0);
+    QVERIFY(QLineF(controller.selectedFrameRect().topLeft(), resetFrame.topLeft()).length() < 0.0001);
+    QVERIFY(qAbs(controller.selectedFrameRect().width() - resetFrame.width()) < 0.0001);
+}
+
 void PDFEditControllerTest::infersConstantSourceTextSpacing_data()
 {
     QTest::addColumn<qreal>("letterSpacing");

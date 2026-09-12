@@ -33,6 +33,8 @@
 #include <QRunnable>
 #include <QSet>
 #include <QStringList>
+#include <QTextBlock>
+#include <QTextBlockFormat>
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTextLayout>
@@ -57,6 +59,9 @@ constexpr int kEditorFontSizeRatio = QTextFormat::UserProperty + 1;
 constexpr int kEditorDisplayFontSizeRatio = QTextFormat::UserProperty + 2;
 constexpr int kEditorLetterSpacingRatio = QTextFormat::UserProperty + 3;
 constexpr int kEditorWordSpacingRatio = QTextFormat::UserProperty + 4;
+constexpr int kEditorLineSpacing = QTextFormat::UserProperty + 5;
+constexpr int kEditorParagraphSpaceBeforeRatio = QTextFormat::UserProperty + 6;
+constexpr int kEditorParagraphSpaceAfterRatio = QTextFormat::UserProperty + 7;
 
 // Qt adds the insertion length and following format length when calculating
 // the redo cursor. A final custom item makes it use the changed text bounds
@@ -66,6 +71,61 @@ class EditorTypingCursorBoundary final : public QAbstractUndoItem
 public:
     void undo() override {}
     void redo() override {}
+};
+
+// Qt places the undo cursor one code unit past a block-format command. That
+// skips an empty paragraph, and an edit block begun at position zero can jump
+// to the first paragraph. Restore the user's range after Qt finishes its own
+// cursor update, without replacing the document or creating another undo step.
+class EditorParagraphSelectionBoundary final : public QAbstractUndoItem
+{
+public:
+    EditorParagraphSelectionBoundary(QQuickTextDocument *document,
+                                     const PDFEditController *controller)
+        : m_document(document), m_controller(controller),
+          m_objectId(controller->selectedObjectId())
+    {
+        const QObject *editor = document->parent();
+        m_start = editor->property("selectionStart").toInt();
+        m_end = editor->property("selectionEnd").toInt();
+        if (editor->property("cursorPosition").toInt() == m_start) {
+            std::swap(m_start, m_end);
+        }
+    }
+
+    void undo() override { restore(); }
+    void redo() override { restore(); }
+
+private:
+    void restore()
+    {
+        if (!m_document || !m_document->parent()) {
+            return;
+        }
+        const QPointer<QQuickTextDocument> document = m_document;
+        const QPointer<const PDFEditController> controller = m_controller;
+        const QString objectId = m_objectId;
+        const int start = m_start;
+        const int end = m_end;
+        QMetaObject::invokeMethod(m_document->parent(),
+            [document, controller, objectId, start, end]() {
+                if (!document || !document->parent() || !document->textDocument()
+                    || !controller || !controller->textEditActive()
+                    || controller->selectedObjectId() != objectId) {
+                    return;
+                }
+                const int maximum = qMax(0, document->textDocument()->characterCount() - 1);
+                QMetaObject::invokeMethod(document->parent(), "select",
+                    Q_ARG(int, qBound(0, start, maximum)),
+                    Q_ARG(int, qBound(0, end, maximum)));
+            }, Qt::QueuedConnection);
+    }
+
+    QPointer<QQuickTextDocument> m_document;
+    QPointer<const PDFEditController> m_controller;
+    QString m_objectId;
+    int m_start = 0;
+    int m_end = 0;
 };
 
 // Native key insertion can be a single QTextDocument command, which
@@ -522,6 +582,51 @@ int PDFEditController::selectedParagraphAlignment() const
     return static_cast<int>(alignment);
 }
 
+qreal PDFEditController::selectedLineSpacing() const
+{
+    return selectedParagraphSpacing(ParagraphSpacing::Line);
+}
+
+qreal PDFEditController::selectedParagraphSpaceBefore() const
+{
+    return selectedParagraphSpacing(ParagraphSpacing::Before);
+}
+
+qreal PDFEditController::selectedParagraphSpaceAfter() const
+{
+    return selectedParagraphSpacing(ParagraphSpacing::After);
+}
+
+qreal PDFEditController::selectedParagraphSpacing(ParagraphSpacing spacing) const
+{
+    if (!m_document || !m_hasSelection || !isTextCandidateKind(m_selectedCandidate.kind)) {
+        return spacing == ParagraphSpacing::Line ? 1.0 : 0.0;
+    }
+    const Draft draft = selectedDraftForDisplay();
+    qsizetype first = -1;
+    qsizetype last = -1;
+    selectedParagraphRangeForDraft(draft, first, last);
+    expandSourceParagraphRange(draft, first, last);
+    if (first < 0 || last < first) {
+        return spacing == ParagraphSpacing::Line ? 1.0 : 0.0;
+    }
+    const qreal pageHeight = m_document->pageSize(m_selectedCandidate.page).height();
+    const auto valueFor = [spacing, pageHeight](const ParagraphFormat &format) {
+        if (spacing == ParagraphSpacing::Line) {
+            return format.lineSpacing;
+        }
+        return (spacing == ParagraphSpacing::Before
+                    ? format.spaceBeforeRatio : format.spaceAfterRatio) * pageHeight;
+    };
+    const qreal value = valueFor(draft.paragraphFormats.at(first));
+    for (qsizetype index = first + 1; index <= last; ++index) {
+        if (qAbs(valueFor(draft.paragraphFormats.at(index)) - value) > 0.00001) {
+            return std::numeric_limits<qreal>::quiet_NaN();
+        }
+    }
+    return value;
+}
+
 QFont PDFEditController::fontForDisplay(const QString &fontFamily,
                                         int fontStretch,
                                         bool fontBold,
@@ -829,6 +934,82 @@ bool PDFEditController::applyFontStyleToEditorDocument(
     return true;
 }
 
+void PDFEditController::initializeEditorParagraphFormats(
+    QObject *textDocument, qreal displayedPageHeight) const
+{
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickDocument ? quickDocument->textDocument() : nullptr;
+    if (!document || !m_textEditActive || !m_hasSelection
+        || document->toPlainText() != selectedDraftForDisplay().text) {
+        return;
+    }
+    // Initial metadata must be invisible to the editor's local undo history.
+    const bool undoEnabled = document->isUndoRedoEnabled();
+    document->setUndoRedoEnabled(false);
+    applyParagraphFormatsToEditorDocument(textDocument, displayedPageHeight);
+    document->setUndoRedoEnabled(undoEnabled);
+}
+
+bool PDFEditController::applyParagraphFormatsToEditorDocument(
+    QObject *textDocument, qreal displayedPageHeight) const
+{
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickDocument ? quickDocument->textDocument() : nullptr;
+    if (!document || !m_textEditActive || !m_hasSelection
+        || !qIsFinite(displayedPageHeight) || displayedPageHeight <= 0.0) {
+        return false;
+    }
+    const Draft draft = selectedDraftForDisplay();
+    if (document->toPlainText() != draft.text) {
+        return false;
+    }
+    QTextCursor cursor(document);
+    if (quickDocument->parent()) {
+        cursor.setPosition(qBound(0, quickDocument->parent()->property("cursorPosition").toInt(),
+                                 qMax(0, document->characterCount() - 1)));
+    }
+    cursor.beginEditBlock();
+    bool changed = false;
+    for (const ParagraphFormat &paragraph : draft.paragraphFormats) {
+        const QTextBlock block = document->findBlock(static_cast<int>(paragraph.start));
+        if (!block.isValid()) {
+            continue;
+        }
+        QTextBlockFormat format;
+        format.setProperty(kEditorLineSpacing, paragraph.lineSpacing);
+        format.setProperty(kEditorParagraphSpaceBeforeRatio, paragraph.spaceBeforeRatio);
+        format.setProperty(kEditorParagraphSpaceAfterRatio, paragraph.spaceAfterRatio);
+        format.setLineHeight(paragraph.lineSpacing * 100.0, QTextBlockFormat::ProportionalHeight);
+        format.setTopMargin(paragraph.spaceBeforeRatio * displayedPageHeight);
+        format.setBottomMargin(paragraph.spaceAfterRatio * displayedPageHeight);
+        switch (paragraph.alignment) {
+        case LeftAlignment: format.setAlignment(Qt::AlignLeft); break;
+        case RightAlignment: format.setAlignment(Qt::AlignRight); break;
+        case CenterAlignment: format.setAlignment(Qt::AlignHCenter); break;
+        case JustifyAlignment: format.setAlignment(Qt::AlignJustify); break;
+        }
+        const auto properties = format.properties();
+        const QTextBlockFormat current = block.blockFormat();
+        bool needsFormat = false;
+        for (auto property = properties.cbegin(); property != properties.cend(); ++property) {
+            if (current.property(property.key()) != property.value()) {
+                needsFormat = true;
+                break;
+            }
+        }
+        if (needsFormat) {
+            cursor.setPosition(block.position());
+            cursor.mergeBlockFormat(format);
+            changed = true;
+        }
+    }
+    if (changed && document->isUndoRedoEnabled() && quickDocument->parent()) {
+        document->appendUndoItem(new EditorParagraphSelectionBoundary(quickDocument, this));
+    }
+    cursor.endEditBlock();
+    return true;
+}
+
 bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
 {
     auto *quickTextDocument = qobject_cast<QQuickTextDocument *>(textDocument);
@@ -840,8 +1021,39 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
     }
 
     Draft draft = selectedDraftForDisplay();
-    if (document->toPlainText() != draft.text || draft.text.isEmpty()) {
+    if (document->toPlainText() != draft.text) {
         return false;
+    }
+    QVector<ParagraphFormat> paragraphs = draft.paragraphFormats;
+    for (ParagraphFormat &paragraph : paragraphs) {
+        const QTextBlock block = document->findBlock(static_cast<int>(paragraph.start));
+        const QTextBlockFormat format = block.blockFormat();
+        if (format.hasProperty(kEditorLineSpacing)) {
+            const qreal value = format.doubleProperty(kEditorLineSpacing);
+            if (qIsFinite(value) && value >= 0.5 && value <= 3.0) {
+                paragraph.lineSpacing = value;
+            }
+        }
+        if (format.hasProperty(kEditorParagraphSpaceBeforeRatio)) {
+            const qreal value = format.doubleProperty(kEditorParagraphSpaceBeforeRatio);
+            if (qIsFinite(value) && value >= 0.0) {
+                paragraph.spaceBeforeRatio = value;
+            }
+        }
+        if (format.hasProperty(kEditorParagraphSpaceAfterRatio)) {
+            const qreal value = format.doubleProperty(kEditorParagraphSpaceAfterRatio);
+            if (qIsFinite(value) && value >= 0.0) {
+                paragraph.spaceAfterRatio = value;
+            }
+        }
+    }
+    const bool paragraphsChanged = !sameParagraphFormats(draft.paragraphFormats, paragraphs);
+    draft.paragraphFormats = std::move(paragraphs);
+    if (draft.text.isEmpty()) {
+        if (paragraphsChanged) {
+            updateSelectedDraft(draft);
+        }
+        return paragraphsChanged;
     }
 
     const qsizetype textLength = draft.text.size();
@@ -908,7 +1120,7 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
             spanFormat = formats.at(position);
         }
     }
-    if (sameCharacterSpans(draft.characterSpans, spans)) {
+    if (sameCharacterSpans(draft.characterSpans, spans) && !paragraphsChanged) {
         return false;
     }
 
@@ -1323,6 +1535,143 @@ void PDFEditController::setSelectedColor(const QColor &color)
     }
 }
 
+void PDFEditController::expandSourceParagraphRange(
+    const Draft &draft, qsizetype &first, qsizetype &last)
+{
+    if (first < 0 || last < first || last >= draft.paragraphFormats.size()) {
+        return;
+    }
+    while (first > 0 && draft.sourceLineBreaks.contains(
+               draft.paragraphFormats.at(first).start - 1)) {
+        --first;
+    }
+    while (last + 1 < draft.paragraphFormats.size() && draft.sourceLineBreaks.contains(
+               draft.paragraphFormats.at(last + 1).start - 1)) {
+        ++last;
+    }
+}
+
+bool PDFEditController::normalizeSourceParagraphBreaks(
+    Draft &draft, qsizetype &first, qsizetype &last)
+{
+    if (first < 0 || last < first || draft.sourceLineBreaks.isEmpty()) {
+        return false;
+    }
+    expandSourceParagraphRange(draft, first, last);
+    const qsizetype start = draft.paragraphFormats.at(first).start;
+    const qsizetype end = draft.paragraphFormats.at(last).start
+        + draft.paragraphFormats.at(last).length;
+    bool changed = false;
+    for (qsizetype position : std::as_const(draft.sourceLineBreaks)) {
+        if (position >= start && position < end) {
+            // A same-length substitution retains source styles and selection.
+            // Explicit user paragraph breaks never occur in sourceLineBreaks.
+            draft.text[position] = QLatin1Char(' ');
+            changed = true;
+        }
+    }
+    if (!changed) {
+        return false;
+    }
+    draft.sourceLineBreaks.removeIf([start, end](qsizetype position) {
+        return position >= start && position < end;
+    });
+    const auto oldFormats = draft.paragraphFormats;
+    draft.paragraphFormats = paragraphFormatsForText(draft.text, ParagraphFormat());
+    qsizetype previous = 0;
+    for (qsizetype index = 0; index < draft.paragraphFormats.size(); ++index) {
+        ParagraphFormat &format = draft.paragraphFormats[index];
+        while (previous + 1 < oldFormats.size()
+               && oldFormats.at(previous + 1).start <= format.start) {
+            ++previous;
+        }
+        const qsizetype newStart = format.start;
+        const qsizetype newLength = format.length;
+        format = oldFormats.at(previous);
+        format.start = newStart;
+        format.length = newLength;
+        if (newStart == start) {
+            first = index;
+        }
+        if (newStart <= end) {
+            last = index;
+        }
+    }
+    return true;
+}
+
+void PDFEditController::setSelectedLineSpacing(qreal factor)
+{
+    setSelectedParagraphSpacing(factor, ParagraphSpacing::Line);
+}
+
+void PDFEditController::setSelectedParagraphSpaceBefore(qreal points)
+{
+    setSelectedParagraphSpacing(points, ParagraphSpacing::Before);
+}
+
+void PDFEditController::setSelectedParagraphSpaceAfter(qreal points)
+{
+    setSelectedParagraphSpacing(points, ParagraphSpacing::After);
+}
+
+void PDFEditController::setSelectedParagraphSpacing(qreal value, ParagraphSpacing spacing)
+{
+    if (m_saving || !m_document || !m_hasSelection || !m_selectedCandidate.editable
+        || !isTextCandidateKind(m_selectedCandidate.kind) || !qIsFinite(value)
+        || (spacing == ParagraphSpacing::Line ? value < 0.5 || value > 3.0
+                                             : value < 0.0 || value > 144.0)) {
+        return;
+    }
+    const qreal pageHeight = m_document->pageSize(m_selectedCandidate.page).height();
+    if (!qIsFinite(pageHeight) || pageHeight <= 0.0) {
+        return;
+    }
+    const qreal storedValue = spacing == ParagraphSpacing::Line ? value : value / pageHeight;
+    const auto metric = [spacing](ParagraphFormat &paragraph) -> qreal & {
+        if (spacing == ParagraphSpacing::Line) {
+            return paragraph.lineSpacing;
+        }
+        return spacing == ParagraphSpacing::Before
+            ? paragraph.spaceBeforeRatio : paragraph.spaceAfterRatio;
+    };
+    Draft draft = selectedDraftForDisplay();
+    qsizetype first = -1;
+    qsizetype last = -1;
+    selectedParagraphRangeForDraft(draft, first, last);
+    expandSourceParagraphRange(draft, first, last);
+    bool changed = false;
+    for (qsizetype index = first; index >= 0 && index <= last; ++index) {
+        changed |= !qFuzzyCompare(metric(draft.paragraphFormats[index]) + 1.0, storedValue + 1.0);
+    }
+    // A no-op never normalizes source rows or creates an expanded edit frame.
+    if (!changed) {
+        return;
+    }
+    normalizeSourceParagraphBreaks(draft, first, last);
+    for (qsizetype index = first; index >= 0 && index <= last; ++index) {
+        metric(draft.paragraphFormats[index]) = storedValue;
+    }
+    const bool finishImmediately = !m_textEditActive;
+    if (finishImmediately) {
+        beginSelectedTextEditSession(false);
+    }
+    if (!m_textEditActive) {
+        return;
+    }
+    if (!finishImmediately) {
+        // The merge callback reads the new paragraph formats. Expose the draft
+        // before notifying QML, then publish its normal state change afterwards.
+        m_textEditDisplayDraft = draft;
+        m_textEditDisplayDraftActive = true;
+        emit selectionParagraphSpacingApplied();
+    }
+    updateSelectedDraft(draft);
+    if (finishImmediately) {
+        finishSelectedTextEdit();
+    }
+}
+
 void PDFEditController::setSelectedParagraphAlignment(
     ParagraphAlignment alignment)
 {
@@ -1361,56 +1710,8 @@ void PDFEditController::setSelectedParagraphAlignment(
     }
 
     bool changed = false;
-    if (alignment == JustifyAlignment && first >= 0 && last >= first
-        && !draft.sourceLineBreaks.isEmpty()) {
-        // Source rows belong to one inferred paragraph. A user-entered newline
-        // remains a paragraph boundary, including when only the caret is active.
-        while (first > 0 && draft.sourceLineBreaks.contains(
-                   draft.paragraphFormats.at(first).start - 1)) {
-            --first;
-        }
-        while (last + 1 < draft.paragraphFormats.size()
-               && draft.sourceLineBreaks.contains(
-                   draft.paragraphFormats.at(last + 1).start - 1)) {
-            ++last;
-        }
-        const qsizetype start = draft.paragraphFormats.at(first).start;
-        const qsizetype end = draft.paragraphFormats.at(last).start
-            + draft.paragraphFormats.at(last).length;
-        for (qsizetype position : std::as_const(draft.sourceLineBreaks)) {
-            if (position >= start && position < end) {
-                // Keep UTF-16 positions stable for character styles and the
-                // live editor selection while enabling normal word wrapping.
-                draft.text[position] = QLatin1Char(' ');
-                changed = true;
-            }
-        }
-        if (changed) {
-            draft.sourceLineBreaks.removeIf([start, end](qsizetype position) {
-                return position >= start && position < end;
-            });
-            const auto oldFormats = draft.paragraphFormats;
-            draft.paragraphFormats = paragraphFormatsForText(draft.text, ParagraphFormat());
-            qsizetype previous = 0;
-            for (qsizetype index = 0; index < draft.paragraphFormats.size(); ++index) {
-                ParagraphFormat &format = draft.paragraphFormats[index];
-                while (previous + 1 < oldFormats.size()
-                       && oldFormats.at(previous + 1).start <= format.start) {
-                    ++previous;
-                }
-                const qsizetype newStart = format.start;
-                const qsizetype newLength = format.length;
-                format = oldFormats.at(previous);
-                format.start = newStart;
-                format.length = newLength;
-                if (format.start == start) {
-                    first = index;
-                }
-                if (format.start <= end) {
-                    last = index;
-                }
-            }
-        }
+    if (alignment == JustifyAlignment) {
+        changed = normalizeSourceParagraphBreaks(draft, first, last);
     }
     for (qsizetype index = first; index >= 0 && index <= last; ++index) {
         ParagraphFormat &format = draft.paragraphFormats[index];
@@ -1934,8 +2235,12 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
             candidate.text.size(),
             characterFormatForCandidate(candidate)});
     }
-    draft.paragraphFormats = paragraphFormatsForText(candidate.text, ParagraphFormat());
-    if (candidate.objectId.startsWith(QLatin1String("paragraph:"))) {
+    draft.paragraphFormats = candidate.sourceParagraphFormats.isEmpty()
+        ? paragraphFormatsForText(candidate.text, ParagraphFormat())
+        : candidate.sourceParagraphFormats;
+    draft.sourceLineBreaks = candidate.sourceParagraphLineBreaks;
+    if (candidate.sourceParagraphFormats.isEmpty()
+        && candidate.objectId.startsWith(QLatin1String("paragraph:"))) {
         for (qsizetype index = 0; index < candidate.text.size(); ++index) {
             if (candidate.text.at(index) == QLatin1Char('\n')) {
                 draft.sourceLineBreaks.append(index);
@@ -1946,6 +2251,15 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
         ? candidate.geometry.sourceRect
         : candidate.initialDraftFrameRect;
     draft.contentBounds = draft.frameRect;
+    if (!candidate.sourceParagraphFormats.isEmpty()) {
+        // A saved layout frame can be shorter than its laid-out paragraph.
+        // Retain the actual source glyph extent when reopening, including the
+        // final paragraph's trailing space, for hover, selection and movement.
+        QRectF sourceContentBounds = candidate.geometry.sourceRect;
+        sourceContentBounds.setBottom(qMin<qreal>(1.0, sourceContentBounds.bottom()
+            + candidate.sourceParagraphFormats.constLast().spaceAfterRatio));
+        draft.contentBounds = draft.contentBounds.united(sourceContentBounds);
+    }
     draft.commentStatus = candidate.commentStatus;
     draft.commentMarked = candidate.commentMarked;
     draft.commentStateAuthor = candidate.commentStateAuthor.trimmed().isEmpty()

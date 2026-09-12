@@ -85,6 +85,12 @@ private slots:
     void savesTextSpacingWithoutStretchingGlyphs_data();
     void savesTextSpacingWithoutStretchingGlyphs();
     void restoresSpacingOnDensePage();
+    void changesParagraphSpacingOutsideEditorWithHistory();
+    void savesParagraphSpacingWithBlankLinesAndMovement_data();
+    void savesParagraphSpacingWithBlankLinesAndMovement();
+    void savesBlankParagraphFontSizeThroughSpacingRoundTrip();
+    void keepsParagraphSpacingThroughQmlEditing_data();
+    void keepsParagraphSpacingThroughQmlEditing();
     void savesEditedSourceParagraphRoundTrip();
     void savesMovedSourceParagraphWithoutReflow();
     void seedsGroupedFrameFromQtTextWidth();
