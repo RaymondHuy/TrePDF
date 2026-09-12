@@ -45,6 +45,13 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFAnnotationUtils.h
     ../src/PDFDocument.cpp
     ../src/PDFDocument.h
+    ../src/LibxlsxwriterWorkbook.cpp
+    ../src/SpreadsheetWorkbook.h
+    ../src/PDFExcelExportController.cpp
+    ../src/PDFExcelExportController.h
+    ../src/PDFTableExtractor.cpp
+    ../src/PDFTableExtractor.h
+    ../src/PDFTableLayout.h
     ../src/PDFEditController.cpp
     ../src/PDFEditController.h
     ../src/PDFEditControllerCandidates.cpp
@@ -102,6 +109,7 @@ target_link_libraries(trepdf_edit_controller_tests
         Qt6::Quick
         Qt6::Test
         PDFium::PDFium
+        Libxlsxwriter::Libxlsxwriter
 )
 
 if(APPLE)
@@ -128,3 +136,43 @@ add_test(
     NAME PDFEditControllerTests
     COMMAND trepdf_edit_controller_tests
 )
+
+qt_add_executable(trepdf_excel_export_tests
+    tst_PDFExcelExport.cpp
+    ../src/PDFDocument.cpp
+    ../src/PDFDocument.h
+    ../src/PDFExcelExportController.cpp
+    ../src/PDFExcelExportController.h
+    ../src/PDFTableExtractor.cpp
+    ../src/PDFTableExtractor.h
+    ../src/PDFTableLayout.h
+    ../src/LibxlsxwriterWorkbook.cpp
+    ../src/SpreadsheetWorkbook.h
+)
+target_include_directories(trepdf_excel_export_tests PRIVATE ../src)
+target_link_libraries(trepdf_excel_export_tests PRIVATE
+    Qt6::Gui Qt6::Qml Qt6::Test PDFium::PDFium Libxlsxwriter::Libxlsxwriter
+)
+if(APPLE)
+    add_custom_command(TARGET trepdf_excel_export_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${TREPDF_TEST_PDFIUM_LIBRARY}"
+            "$<TARGET_FILE_DIR:trepdf_excel_export_tests>/libpdfium.dylib"
+        COMMAND install_name_tool -change ./libpdfium.dylib
+            @loader_path/libpdfium.dylib "$<TARGET_FILE:trepdf_excel_export_tests>"
+        VERBATIM
+    )
+endif()
+add_test(NAME PDFExcelExportTests COMMAND trepdf_excel_export_tests)
+set_tests_properties(PDFExcelExportTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+qt_add_executable(trepdf_spreadsheet_workbook_tests
+    tst_SpreadsheetWorkbook.cpp
+    ../src/LibxlsxwriterWorkbook.cpp
+    ../src/SpreadsheetWorkbook.h
+)
+target_include_directories(trepdf_spreadsheet_workbook_tests PRIVATE ../src)
+target_link_libraries(trepdf_spreadsheet_workbook_tests PRIVATE
+    Qt6::Core Qt6::Test Libxlsxwriter::Libxlsxwriter
+)
+add_test(NAME SpreadsheetWorkbookTests COMMAND trepdf_spreadsheet_workbook_tests)

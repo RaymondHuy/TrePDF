@@ -13,6 +13,7 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void exposesExcelExportTabAndDraftGuard();
     void storesTransientTextFieldsByPage();
     void limitsTransientTextFieldInputLength();
     void storesTransientRadioButtons();

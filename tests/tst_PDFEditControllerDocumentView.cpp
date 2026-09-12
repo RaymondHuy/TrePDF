@@ -3,6 +3,37 @@
 
 using namespace PDFEditControllerTestSupport;
 
+void PDFEditControllerTest::exposesExcelExportTabAndDraftGuard()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("export-ui.pdf"));
+    QVERIFY(createFontStylePdf(path));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> window(component.create());
+    QVERIFY2(window, qPrintable(component.errorString()));
+    window->setProperty("visible", false);
+    auto *model = window->findChild<PDFTabModel *>();
+    QVERIFY(model);
+    auto *session = model->open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    auto *tabs = window->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    QVERIFY(tabs);
+    QVERIFY(tabs->setProperty("currentIndex", 5));
+    QTRY_COMPARE(session->editController()->tool(), PDFEditController::BrowseTool);
+    QObject *button = nullptr;
+    QTRY_VERIFY((button = window->findChild<QObject *>(QStringLiteral("exportExcelButton"))));
+    QVERIFY(button->property("enabled").toBool());
+    QVERIFY(session->editController()->addBlankPage());
+    QTRY_VERIFY(!button->property("enabled").toBool());
+    const auto target = QUrl::fromLocalFile(m_temporaryDirectory.filePath(QStringLiteral("guard.xlsx")));
+    QVERIFY(!model->requestExcelExport(session, target));
+    QVERIFY(!session->excelExportController()->busy());
+    session->editController()->discardDrafts();
+    QTRY_VERIFY(button->property("enabled").toBool());
+    QVERIFY(window->setProperty("allowWindowClose", true));
+}
+
 void PDFEditControllerTest::defaultsCommentTabToCommentSelectTool()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
