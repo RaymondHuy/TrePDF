@@ -85,6 +85,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(qreal selectedParagraphSpaceAfter READ selectedParagraphSpaceAfter NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedImageResizable READ selectedImageResizable NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedImageRotatable READ selectedImageRotatable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDeletable READ selectedDeletable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingPropertiesEditable READ selectedDrawingPropertiesEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingSupportsFill READ selectedDrawingSupportsFill NOTIFY selectionChanged FINAL)
@@ -100,7 +101,7 @@ class PDFEditController : public QObject
 
 public:
     struct DraftObjectMove {
-        // Images may translate and scale; text and paths only translate.
+        // Images may translate, scale and rotate; text and paths only translate.
         enum class Kind {
             Text,
             Image,
@@ -111,6 +112,7 @@ public:
         QVector<int> objectPath;
         QRectF sourceRect;
         QRectF frameRect;
+        int imageQuarterTurns = 0;
     };
 
     struct DraftAnnotationDeletion {
@@ -268,6 +270,7 @@ public:
     qreal selectedParagraphSpaceAfter() const;
     bool selectedEditable() const;
     bool selectedImageResizable() const;
+    bool selectedImageRotatable() const;
     bool selectedDeletable() const;
     bool selectedDrawingPropertiesEditable() const;
     bool selectedDrawingSupportsFill() const;
@@ -392,6 +395,7 @@ public:
     Q_INVOKABLE void updateSelectedContentBounds(const QRectF &contentBounds);
     Q_INVOKABLE void finishSelectedFrameResize();
     Q_INVOKABLE void cancelSelectedFrameResize();
+    Q_INVOKABLE void rotateSelectedImage(int quarterTurns);
     Q_INVOKABLE void setSelectedTextRange(int start, int length);
     Q_INVOKABLE void setSelectedFontFamily(const QString &fontFamily);
     Q_INVOKABLE void setSelectedFontSize(qreal points);
@@ -701,6 +705,8 @@ private:
         QVector<qsizetype> sourceLineBreaks;
         QRectF frameRect;
         QRectF contentBounds;
+        // Clockwise turns relative to the source image, in displayed page coordinates.
+        int imageQuarterTurns = 0;
         CommentStatus commentStatus = NoCommentStatus;
         bool commentMarked = false;
         QString commentStateAuthor;
@@ -743,6 +749,7 @@ private:
     };
 
     void resetSession();
+    QRectF rotatedImageFrame(const Draft &draft, int quarterTurns) const;
     void setPendingDrawingCommentPage(int page);
     bool completeSave(const PDFSaveWriter::Result &result,
                       const QString &targetFilePath,

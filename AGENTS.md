@@ -208,6 +208,15 @@ Current features:
   remain protected. Source preview transforms run on the render worker, and
   Save/Save As composes the original matrix with the source-to-target frame
   mapping so pixels, original rotation/reflection, and z-order remain intact.
+  The panel also provides Rotate left/right 90° for
+  added images and eligible source images. Rotation preserves physical size,
+  swaps frame width/height, keeps the center when possible, and shifts the frame
+  within the page. Disable quarter turns when the rotated frame cannot fit
+  without scaling. `Draft.imageQuarterTurns` tracks clockwise rotation relative
+  to the source; each click participates in undo/redo/discard and Save/Save As.
+  The worker and writer share the source-matrix rotation mapping, while added
+  image preview rotates its snapshotted pixels through the painter. Rotation
+  requires the same source eligibility as resizing, even for square/180° cases.
 - Added text and editable top-level source text can be dragged by the selected
   bounding box or arrow keys. A move is one undoable geometry command. When
   source text is only moved, preview and Save/Save As translate every original
@@ -581,15 +590,17 @@ clipped or elided unintentionally.
   draft/font/geometry data on the GUI thread, then run `PDFSaveWriter::save()`
   on a worker; the worker request must not retain controller/document pointers.
 - Resolve every source object path before removing source objects. Only
-  top-level page text plus top-level image movement/resizing/deletion are currently
-  saveable; nested Form XObject content must remain non-editable until its
-  transform/clip/resource scope can be preserved. Keep moved/resized source
+  top-level page text plus top-level image movement/resizing/rotation/deletion
+  are currently saveable; nested Form XObject content must remain non-editable until its
+  transform/clip/resource scope can be preserved. Keep moved/resized/rotated source
   images in place and compose their existing matrix with the source-to-target
   normalized frame transform; never decode/recreate them. Use the shared
   `PDFSourceImageGeometry` mapping so CropBox offsets and intrinsic page rotation
-  agree between preview and save. Revalidate resize eligibility in the writer:
+  agree between preview and save. Revalidate resize/rotation eligibility in the
+  writer:
   custom clipping, singular/nonfinite matrices, and partially off-page source
-  images cannot be resized. Pure movement only translates the original matrix.
+  images cannot be resized or rotated. Pure movement only translates the original
+  matrix.
   Apply the same matrix-only path to editable
   top-level source text when position is its only change; any text, character
   format, paragraph format, or frame-size change must follow the existing

@@ -566,7 +566,7 @@ public:
             if (move.kind == PDFEditController::DraftObjectMove::Kind::Image) {
                 if (!PDFSourceImageGeometry::transformedMatrix(page, object,
                         move.sourceRect, move.frameRect,
-                        originalMatrix, movedMatrix)) {
+                        originalMatrix, movedMatrix, move.imageQuarterTurns)) {
                     restore();
                     return false;
                 }

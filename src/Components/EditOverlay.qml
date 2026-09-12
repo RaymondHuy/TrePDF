@@ -3135,6 +3135,7 @@ Item {
                 width: draftItem.frameWidth
                 height: draftItem.frameHeight
                 sourceImage: draftItem.modelData.image
+                imageQuarterTurns: draftItem.modelData.imageQuarterTurns ?? 0
                 smooth: true
                 visible: draftItem.isImage
                     && draftItem.modelData.deleted !== true

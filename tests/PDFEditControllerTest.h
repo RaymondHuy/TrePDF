@@ -307,6 +307,17 @@ private slots:
     void savesResizedTopLevelImageRoundTrip_data();
     void savesResizedTopLevelImageRoundTrip();
     void restoresSourceImagePreviewAfterResize();
+    void rotatesImagesWithHistory_data();
+    void rotatesImagesWithHistory();
+    void rotatesImageThroughPropertiesPanel();
+    void savesRotatedSourceImageRoundTrip_data();
+    void savesRotatedSourceImageRoundTrip();
+    void savesRotatedAddedImageRoundTrip_data();
+    void savesRotatedAddedImageRoundTrip();
+    void rejectsUnsupportedImageRotation_data();
+    void rejectsUnsupportedImageRotation();
+    void keepsRotatedImageInsidePage();
+    void restoresSourceImagePreviewAfterRotation();
     void deletesTopLevelImageWithUndoRedo();
     void savesAddedImageRoundTrip();
     void savesMovedTopLevelTextRoundTrip();

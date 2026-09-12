@@ -40,6 +40,22 @@ inline bool hasSizeChange(const QRectF &sourceRect, const QRectF &frameRect)
         || !qFuzzyCompare(sourceRect.height(), frameRect.height());
 }
 
+// Coordinates have their origin at the visible top-left, with y growing down.
+// Keep these quarter turns exact so four rotations cannot accumulate drift.
+inline QTransform unitQuarterTurnTransform(int imageQuarterTurns)
+{
+    switch ((imageQuarterTurns % 4 + 4) % 4) {
+    case 1:
+        return QTransform(0.0, 1.0, -1.0, 0.0, 1.0, 0.0);
+    case 2:
+        return QTransform(-1.0, 0.0, 0.0, -1.0, 1.0, 1.0);
+    case 3:
+        return QTransform(0.0, -1.0, 1.0, 0.0, 0.0, 1.0);
+    default:
+        return {};
+    }
+}
+
 // Call only while holding the process-wide PDFium lock. A valid object always
 // exposes a clip wrapper; CountPaths returns -1 for an absent clip reference.
 // A zero path count can still contain text clipping, so it is not resize-safe.
@@ -82,7 +98,8 @@ inline bool canResize(FPDF_PAGE page, FPDF_PAGEOBJECT object)
 }
 
 // Compose the existing image matrix with the normalized source-to-target
-// frame mapping. This retains the image's rotation, reflection, shear and
+// frame mapping and optional clockwise rotation. This retains the image's
+// original rotation, reflection, shear and
 // pixel stream. Deriving the page basis at exact device corners avoids raster
 // rounding, and accounts for an offset CropBox and intrinsic page rotation.
 inline bool transformedMatrix(FPDF_PAGE page,
@@ -90,11 +107,14 @@ inline bool transformedMatrix(FPDF_PAGE page,
                               const QRectF &sourceRect,
                               const QRectF &frameRect,
                               const FS_MATRIX &originalMatrix,
-                              FS_MATRIX &result)
+                              FS_MATRIX &result,
+                              int imageQuarterTurns = 0)
 {
+    const int quarterTurns = (imageQuarterTurns % 4 + 4) % 4;
     if (!page || !finiteRect(sourceRect) || !finiteRect(frameRect)
         || !finiteMatrix(originalMatrix)
-        || (hasSizeChange(sourceRect, frameRect) && !canResize(page, object))) {
+        || ((quarterTurns != 0 || hasSizeChange(sourceRect, frameRect))
+            && !canResize(page, object))) {
         return false;
     }
 
@@ -117,7 +137,7 @@ inline bool transformedMatrix(FPDF_PAGE page,
         return std::isfinite(value)
             && std::abs(value) <= std::numeric_limits<float>::max();
     };
-    if (!hasSizeChange(sourceRect, frameRect)) {
+    if (quarterTurns == 0 && !hasSizeChange(sourceRect, frameRect)) {
         const QPointF delta = frameRect.topLeft() - sourceRect.topLeft();
         const qreal translatedX = originalMatrix.e
             + delta.x() * normalizedToPage.m11()
@@ -140,9 +160,19 @@ inline bool transformedMatrix(FPDF_PAGE page,
     }
     const qreal scaleX = frameRect.width() / sourceRect.width();
     const qreal scaleY = frameRect.height() / sourceRect.height();
-    const QTransform frameMapping(scaleX, 0.0, 0.0, scaleY,
+    QTransform frameMapping(scaleX, 0.0, 0.0, scaleY,
         frameRect.x() - scaleX * sourceRect.x(),
         frameRect.y() - scaleY * sourceRect.y());
+    if (quarterTurns != 0) {
+        const QTransform sourceToUnit(1.0 / sourceRect.width(), 0.0,
+            0.0, 1.0 / sourceRect.height(),
+            -sourceRect.x() / sourceRect.width(),
+            -sourceRect.y() / sourceRect.height());
+        const QTransform unitToFrame(frameRect.width(), 0.0,
+            0.0, frameRect.height(), frameRect.x(), frameRect.y());
+        frameMapping = sourceToUnit * unitQuarterTurnTransform(quarterTurns)
+            * unitToFrame;
+    }
     const QTransform original(originalMatrix.a, originalMatrix.b,
                               originalMatrix.c, originalMatrix.d,
                               originalMatrix.e, originalMatrix.f);

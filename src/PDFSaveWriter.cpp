@@ -165,6 +165,7 @@ struct SaveDraft {
     QString commentStateAuthor;
     QDateTime commentStateModifiedDate;
     QImage image;
+    int imageQuarterTurns = 0;
     PDFEditController::ShapeType shapeType
         = PDFEditController::RectangleShape;
     QPointF shapeStartRatio;
@@ -229,6 +230,7 @@ struct PreparedDraft {
     bool movesSourceObjects = false;
     QRectF sourceRect;
     QRectF frameRect;
+    int imageQuarterTurns = 0;
 };
 
 class PdfDocumentHandle
@@ -410,14 +412,23 @@ public:
         return true;
     }
 
-    bool imageMatrix(const QRectF &rect, FS_MATRIX &matrix) const
+    bool imageMatrix(const QRectF &rect,
+                     FS_MATRIX &matrix,
+                     int imageQuarterTurns = 0) const
     {
+        const QTransform rotation
+            = PDFSourceImageGeometry::unitQuarterTurnTransform(imageQuarterTurns);
+        const auto imagePoint = [&](const QPointF &unitPoint, QPointF &point) {
+            const QPointF rotated = rotation.map(unitPoint);
+            return pagePoint(rect.left() + rotated.x() * rect.width(),
+                             rect.top() + rotated.y() * rect.height(), point);
+        };
         QPointF bottomLeft;
         QPointF bottomRight;
         QPointF topLeft;
-        if (!pagePoint(rect.left(), rect.bottom(), bottomLeft)
-            || !pagePoint(rect.right(), rect.bottom(), bottomRight)
-            || !pagePoint(rect.left(), rect.top(), topLeft)) {
+        if (!imagePoint(QPointF(0.0, 1.0), bottomLeft)
+            || !imagePoint(QPointF(1.0, 1.0), bottomRight)
+            || !imagePoint(QPointF(0.0, 0.0), topLeft)) {
             return false;
         }
 
@@ -2541,7 +2552,7 @@ PDFSaveWriter::Result createImageDraftObject(
     FPDF_PAGE loadedPages[] = {page};
     const bool configured = imageObject
         && FPDFImageObj_SetBitmap(loadedPages, 1, imageObject, bitmap)
-        && coordinateMapper.imageMatrix(frame, matrix)
+        && coordinateMapper.imageMatrix(frame, matrix, draft.imageQuarterTurns)
         && FPDFPageObj_SetMatrix(imageObject, &matrix);
     if (!configured) {
         if (imageObject) {
@@ -2616,7 +2627,8 @@ PDFSaveWriter::Result moveSourceObject(
         FS_MATRIX transformedMatrix{};
         if (!FPDFPageObj_GetMatrix(source.object, &originalMatrix)
             || !PDFSourceImageGeometry::transformedMatrix(page, source.object,
-                draft.sourceRect, draft.frameRect, originalMatrix, transformedMatrix)
+                draft.sourceRect, draft.frameRect, originalMatrix, transformedMatrix,
+                draft.imageQuarterTurns)
             || !FPDFPageObj_SetMatrix(source.object, &transformedMatrix)) {
             return failure(moveError, draft.page, draft.objectId);
         }
@@ -4867,6 +4879,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         prepared.movesSourceObjects = draft.movesSourceObjects;
         prepared.sourceRect = draft.sourceRect;
         prepared.frameRect = draft.frameRect;
+        prepared.imageQuarterTurns = draft.imageQuarterTurns;
         prepared.insertionIndex = prepared.append
             ? originalObjectCount
             : prepared.sources.constFirst().topLevelIndex;
@@ -4942,6 +4955,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         moveDraft.objectId = prepared.objectId;
         moveDraft.sourceRect = prepared.sourceRect;
         moveDraft.frameRect = prepared.frameRect;
+        moveDraft.imageQuarterTurns = prepared.imageQuarterTurns;
         for (const SourceObject &source : std::as_const(prepared.sources)) {
             const PDFSaveWriter::Result moveResult = moveSourceObject(
                 page.get(),
@@ -5861,6 +5875,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
                 && !saveDraft.added
                 && !saveDraft.deleted);
         saveDraft.image = draft->deleted ? QImage() : draft->candidate.image;
+        saveDraft.imageQuarterTurns = draft->imageQuarterTurns;
         if (saveDraft.kind == SaveDraft::Kind::TextMarkup
             || saveDraft.kind == SaveDraft::Kind::StickyNote
             || saveDraft.kind == SaveDraft::Kind::FreeText
