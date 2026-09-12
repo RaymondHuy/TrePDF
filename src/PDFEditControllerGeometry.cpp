@@ -769,6 +769,82 @@ int PDFEditController::deleteCurrentPage()
     return m_document->currentPage();
 }
 
+QRectF PDFEditController::rotatedImageFrame(const Draft &draft, int quarterTurns) const
+{
+    if (!m_document || draft.candidate.page < 0
+        || draft.candidate.page >= m_document->pageCount()) {
+        return {};
+    }
+
+    const QSizeF pageSize = m_document->pageSize(draft.candidate.page);
+    const QRectF frame = draft.frameRect;
+    if (!std::isfinite(pageSize.width()) || !std::isfinite(pageSize.height())
+        || pageSize.width() <= 0.0 || pageSize.height() <= 0.0
+        || !std::isfinite(frame.x()) || !std::isfinite(frame.y())
+        || !std::isfinite(frame.width()) || !std::isfinite(frame.height())
+        || frame.width() <= 0.0 || frame.height() <= 0.0) {
+        return {};
+    }
+
+    // Swap physical dimensions, not normalized ratios: PDF pages need not be square.
+    const bool swapsAxes = quarterTurns % 2 != 0;
+    const qreal width = swapsAxes
+        ? frame.height() * pageSize.height() / pageSize.width() : frame.width();
+    const qreal height = swapsAxes
+        ? frame.width() * pageSize.width() / pageSize.height() : frame.height();
+    if (!std::isfinite(width) || !std::isfinite(height)
+        || width > 1.0 || height > 1.0) {
+        return {};
+    }
+
+    // Keep the center when possible and shift away from page edges without scaling.
+    const QPointF center = frame.center();
+    return QRectF(qBound(0.0, center.x() - width / 2.0, 1.0 - width),
+                  qBound(0.0, center.y() - height / 2.0, 1.0 - height),
+                  width, height);
+}
+
+bool PDFEditController::selectedImageRotatable() const
+{
+    return selectedImageResizable()
+        && !rotatedImageFrame(selectedDraftForDisplay(), 1).isEmpty();
+}
+
+void PDFEditController::rotateSelectedImage(int quarterTurns)
+{
+    const int turns = (quarterTurns % 4 + 4) % 4;
+    if (m_saving || m_textEditActive || m_frameResizeActive
+        || turns == 0 || !selectedImageResizable()) {
+        return;
+    }
+
+    const QString key = draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId);
+    const auto existing = m_drafts.constFind(key);
+    const Draft before = existing == m_drafts.cend()
+        ? initialDraftForCandidate(m_selectedCandidate) : *existing;
+    const QRectF frame = rotatedImageFrame(before, turns);
+    if (before.deleted || frame.isEmpty()) {
+        return;
+    }
+
+    Command command;
+    command.key = key;
+    command.page = m_selectedCandidate.page;
+    command.objectId = m_selectedCandidate.objectId;
+    command.hadBefore = existing != m_drafts.cend();
+    command.before = before;
+    command.after = before;
+    command.after.imageQuarterTurns = (before.imageQuarterTurns + turns) % 4;
+    command.after.frameRect = frame;
+    command.after.contentBounds = frame;
+    command.hadAfter = m_selectedCandidate.added
+        || !sameDraftContent(command.after, initialDraftForCandidate(m_selectedCandidate));
+    m_undoStack.append(command);
+    m_redoStack.clear();
+    applyDraftState(command, true, true);
+    emit historyStateChanged();
+}
+
 void PDFEditController::beginSelectedFrameResize()
 {
     if (m_saving || m_frameResizeActive

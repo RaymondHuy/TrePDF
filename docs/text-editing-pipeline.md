@@ -716,7 +716,7 @@ Draft
   candidate            // provenance và sourceRect bất biến
   text                  // QString, range dùng UTF-16 index
   characterSpans[]      // start, length và CharacterFormat
-  paragraphFormats[]    // start, length, alignment và list metadata
+  paragraphFormats[]    // start, length, alignment, line/paragraph spacing và list metadata
   frameRect             // box layout normalized theo page
   contentBounds         // bbox kết quả layout normalized theo page
 ```
@@ -725,6 +725,7 @@ Draft
 stretch, `letterSpacingRatio`, `wordSpacingRatio`, bold, italic, underline và
 color. Hai spacing ratio được chuẩn hóa theo chiều cao trang PDF, giống size
 ratio, và tham gia so sánh draft/undo/redo. `ParagraphFormat` chứa alignment,
+`lineSpacing` (hệ số), `spaceBeforeRatio`/`spaceAfterRatio` (theo chiều cao trang),
 list style (`none`, `bullet`, `decimal`), list level và số bắt đầu.
 
 Controller giữ thêm typing format tạm khi selection có length bằng `0`. Bấm
@@ -795,6 +796,48 @@ lại, scanner chỉ dùng mark có version, giá trị, độ dài, số part v
 rồi ghép lại các part của cùng dòng; metadata lỗi hoặc vượt giới hạn không được
 coi là spacing tin cậy. Đây là dữ liệu hỗ trợ editor: PDF vẫn hiển thị bằng text
 object và vị trí chuẩn, không phụ thuộc TrePDF để render.
+
+### 7.11 Giãn dòng và khoảng cách đoạn
+
+Panel **Đoạn văn** có **Giãn dòng** từ 0,5 đến 3 lần, mặc định 1; hai trường
+**Trước đoạn (pt)** và **Sau đoạn (pt)** nhận 0…144 PDF point, mặc định 0. Phím
+lên/xuống đổi hệ số theo bước 0,1 và khoảng cách đoạn theo bước 1 pt. Vùng chọn
+có nhiều giá trị hiện ô trống; sửa một trường giữ nguyên hai trường còn lại.
+
+Khi editor chưa mở, thay đổi áp dụng cho toàn bộ đối tượng chữ đang chọn. Khi
+đang sửa, thay đổi áp dụng cho các đoạn giao với vùng bôi đen, hoặc đoạn chứa
+caret nếu không bôi đen. Đây là định dạng đoạn: caret trống vẫn cập nhật đoạn
+hiện tại. Xuống dòng do wrap thuộc cùng đoạn; Enter tạo đoạn mới và kế thừa
+định dạng đoạn tại vị trí chèn. Các ngắt dòng được suy ra khi gom chữ PDF được
+nối bằng dấu cách trong đoạn được đổi spacing để Qt reflow thành một đoạn
+logic; ngắt đoạn do người dùng nhập vẫn được giữ riêng.
+
+`QTextBlockFormat` dùng `ProportionalHeight` với `lineSpacing * 100`, nên hệ số
+1,5 tạo bước baseline bằng 1,5 lần chiều cao dòng tự nhiên. Khoảng trống giữa
+hai đoạn lấy giá trị lớn hơn giữa Sau đoạn trước và Trước đoạn sau, theo cách
+Qt gộp block margin. Qt bỏ qua top margin đầu document và bottom margin cuối
+document; overlay và writer bù riêng khoảng Trước đoạn đầu, còn content bounds
+tính thêm Sau đoạn cuối. Không nhân khoảng cách theo mức zoom: layout dùng PDF
+point rồi scale cả nội dung cùng trang.
+
+HTML preview chứa `line-height`, `margin-top` và `margin-bottom`; đoạn trống có
+`-qt-paragraph-type:empty` để Qt không bỏ mất dòng trống hoặc format của nó.
+Khi mở editor,
+`initializeEditorParagraphFormats()` gắn các giá trị semantic vào block format.
+Đổi spacing trong editor merge block format qua `QTextCursor`, giữ history local
+và các character span. Sau undo/redo, `syncEditorFontStyles()` đọc lại cả spacing
+đoạn từ document để panel, draft và Save đồng bộ. Trường hợp nối ngắt dòng nguồn
+cần nạp lại nội dung editor vì plain text cũng đã thay đổi.
+
+Save layout từng dòng theo cùng hệ số và block margin, đặt từng từ theo advance
+của Qt để tránh biến phép fit dòng thành font stretch sau nhiều lần lưu.
+Metadata đoạn giữ text, range định dạng, frame và định dạng chữ của phần trắng
+không có text object (kể cả đoạn trống có cỡ chữ riêng). Đưa spacing về mặc định
+vẫn giữ metadata của đoạn đã lưu. Scanner chỉ chấp nhận nhóm đầy đủ, nội dung
+khớp các text object, giá trị hữu hạn và giới hạn kích thước/toạ độ hợp lệ.
+PDF vẫn render từ vị trí text object chuẩn,
+không cần metadata này để hiển thị. PDF nguồn bên ngoài chưa tự suy diễn hệ số
+giãn dòng hoặc khoảng cách đoạn từ vị trí dòng.
 
 ## 8. Hit test: con trỏ đang nằm trên text nào
 
@@ -1218,7 +1261,9 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
    rồi dùng `FPDF_DeviceToPage()` để đổi tọa độ editor sang page coordinates.
    QFont của layout dùng cùng stretch đã hiệu chỉnh và spacing từng span như
    overlay/editor, nên điểm wrap và chiều rộng run dùng cùng metric khi save.
-   Cách này giữ đúng CropBox offset và page rotation.
+   Bước baseline áp `lineSpacing`; giữa các đoạn dùng giá trị lớn hơn của
+   `spaceAfterRatio` đoạn trước và `spaceBeforeRatio` đoạn sau, và cộng riêng
+   khoảng trước đoạn đầu như overlay. Cách này giữ đúng CropBox offset và page rotation.
 4. Chuẩn hóa text đã sửa về Unicode NFC theo grapheme cluster và remap lại các
    character span UTF-16. Writer có thể tái sử dụng font PDF gốc khi
    family/style phù hợp và replacement run chỉ chứa các ký tự đã có trong text
@@ -1291,6 +1336,7 @@ TrePDF hiện đã lấy và áp dụng:
 - transform stretch ngang/dọc;
 - character/word spacing đều của text ngang đủ điều kiện, và spacing người
   dùng đặt trong draft;
+- giãn dòng và khoảng trước/sau đoạn do người dùng đặt trong draft;
 - embedded/installed font family nếu Qt dùng được;
 - bold và italic;
 - underline do người dùng áp dụng cho draft;

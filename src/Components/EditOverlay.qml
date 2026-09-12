@@ -687,7 +687,19 @@ Item {
                 fallbackFormat,
                 baseRatio,
                 basePixelSize)
+            const layoutHeight = Number(basePixelSize) > 0
+                ? Number(basePixelSize) / baseRatio : root.height
+            const lineSpacing = Math.max(0.5, Math.min(3,
+                Number(paragraph.lineSpacing) || 1))
+            const before = Math.max(0, Number(paragraph.spaceBeforeRatio) || 0)
+                * layoutHeight
+            const after = Math.max(0, Number(paragraph.spaceAfterRatio) || 0)
+                * layoutHeight
             const paragraphStyle = "margin:0;white-space:pre-wrap;"
+                + (start === end ? "-qt-paragraph-type:empty;" : "")
+                + "line-height:" + (lineSpacing * 100).toFixed(6) + "%;"
+                + "margin-top:" + before.toFixed(6) + "px;"
+                + "margin-bottom:" + after.toFixed(6) + "px;"
             // Qt Rich Text supports block alignment through the align attribute.
             html += "<p align=\"" + escapeHtmlAttribute(alignment)
                 + "\" style=\"" + escapeHtmlAttribute(paragraphStyle) + "\">"
@@ -816,6 +828,7 @@ Item {
             selectedBaseFormat(),
             editorFrame.baseFontPixelSize)
         controller.initializeEditorFontSizes(editor.textDocument, root.textLayoutPageHeight)
+        controller.initializeEditorParagraphFormats(editor.textDocument, root.textLayoutPageHeight)
         const maximumPosition = editor.length
         const start = Math.max(0, Math.min(maximumPosition, selectionStart))
         const end = Math.max(0, Math.min(maximumPosition, selectionEnd))
@@ -2349,6 +2362,19 @@ Item {
                 root.suppressNextEditorReload = false
         }
 
+        function onSelectionParagraphSpacingApplied() {
+            if (!root.editing)
+                return
+
+            root.suppressNextEditorReload = true
+            root.applyingEditorDocumentFormat = true
+            const applied = root.controller.applyParagraphFormatsToEditorDocument(
+                editor.textDocument, root.textLayoutPageHeight)
+            root.applyingEditorDocumentFormat = false
+            if (!applied)
+                root.suppressNextEditorReload = false
+        }
+
         function onSelectionFontStyleApplied(start, length, style, enabled) {
             if (!root.editing)
                 return
@@ -2900,7 +2926,14 @@ Item {
             readonly property bool usesBaseline: modelData.hasBaseline === true
                 && modelData.added !== true
             readonly property real textOriginX: modelData.originX * root.width
+            readonly property var paragraphFormats: modelData.paragraphFormats || []
+            readonly property real firstParagraphSpaceBefore: paragraphFormats.length > 0
+                ? Number(paragraphFormats[0].spaceBeforeRatio || 0) * root.height : 0
+            readonly property real lastParagraphSpaceAfter: paragraphFormats.length > 0
+                ? Number(paragraphFormats[paragraphFormats.length - 1].spaceAfterRatio || 0)
+                    * root.height : 0
             readonly property real textBaselineY: modelData.baselineY * root.height
+                + firstParagraphSpaceBefore
             readonly property real contentLeftPageX: usesBaseline
                 ? textOriginX
                 : frameX
@@ -2949,13 +2982,14 @@ Item {
                 ? Math.max(
                     0,
                     textBaselineY - textPageY - draftText.baselineOffset * root.textLayoutScale)
-                : root.fallbackBleed
+                : root.fallbackBleed + firstParagraphSpaceBefore
             readonly property real frameBottom: frameY
                 + frameHeight
                 + root.fallbackBleed
                 - textPageY
             readonly property real contentBottom: textTop
-                + (isImage || isShape ? 0 : draftText.implicitHeight * root.textLayoutScale)
+                + (isImage || isShape ? 0 : draftText.implicitHeight * root.textLayoutScale
+                    + lastParagraphSpaceAfter)
                 + root.fallbackBleed
             readonly property real textHeight: Math.max(
                 1,
@@ -2995,6 +3029,7 @@ Item {
                     draftItem.textPageY
                         + draftItem.textTop
                         + draftText.implicitHeight * root.textLayoutScale
+                        + draftItem.lastParagraphSpaceAfter
                         + root.fallbackBleed)
                 const contentHeight = Math.min(
                     1 - selectedFrameRect.y,
@@ -3100,6 +3135,7 @@ Item {
                 width: draftItem.frameWidth
                 height: draftItem.frameHeight
                 sourceImage: draftItem.modelData.image
+                imageQuarterTurns: draftItem.modelData.imageQuarterTurns ?? 0
                 smooth: true
                 visible: draftItem.isImage
                     && draftItem.modelData.deleted !== true
@@ -3888,7 +3924,14 @@ Item {
         readonly property bool usesBaseline: !editsAddedText
             && root.controller.selectedHasBaseline
         readonly property real textOriginX: root.controller.selectedOriginX * root.width
+        readonly property var paragraphFormats: root.controller.selectedParagraphFormats
+        readonly property real firstParagraphSpaceBefore: paragraphFormats.length > 0
+            ? Number(paragraphFormats[0].spaceBeforeRatio || 0) * root.height : 0
+        readonly property real lastParagraphSpaceAfter: paragraphFormats.length > 0
+            ? Number(paragraphFormats[paragraphFormats.length - 1].spaceAfterRatio || 0)
+                * root.height : 0
         readonly property real textBaselineY: root.controller.selectedBaselineY * root.height
+            + firstParagraphSpaceBefore
         readonly property real contentLeftPageX: usesBaseline ? textOriginX : frameX
         readonly property real contentRightPageX: frameX + Math.max(1, frameWidth)
         readonly property real inputMargin: editsAddedText ? 1 : 2
@@ -3915,13 +3958,14 @@ Item {
             : frameY - verticalBleed
         readonly property real contentTop: usesBaseline
             ? Math.max(0, textBaselineY - y - editor.baselineOffset * root.textLayoutScale)
-            : inputMargin
+            : inputMargin + firstParagraphSpaceBefore
         readonly property real frameBottom: frameY
             + Math.max(1, frameHeight)
             + verticalBleed
             - y
         readonly property real editorBottom: contentTop
             + editor.contentHeight * root.textLayoutScale
+            + lastParagraphSpaceAfter
             + (usesBaseline ? verticalBleed : inputMargin)
         readonly property real desiredHeight: Math.max(
             editsAddedText ? 1 : 17,

@@ -3,6 +3,130 @@
 
 using namespace PDFEditControllerTestSupport;
 
+void PDFEditControllerTest::keepsParagraphSpacingThroughQmlEditing_data()
+{
+    QTest::addColumn<qreal>("zoom");
+    QTest::newRow("75-percent") << 0.75;
+    QTest::newRow("155-percent") << 1.55;
+}
+
+void PDFEditControllerTest::keepsParagraphSpacingThroughQmlEditing()
+{
+    QFETCH(qreal, zoom);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("paragraph-spacing-qml-%1.pdf").arg(zoom));
+    QVERIFY(createSourceSpacingPdf(sourcePath, 1.25, 2.5));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0),
+        QStringLiteral("Alpha beta gamma delta"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QString first = QStringLiteral("Alpha beta gamma delta and more words to wrap the first paragraph.");
+    const QString text = first + QStringLiteral("\n\nSecond paragraph keeps its own spacing.");
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(text);
+    controller.finishSelectedTextEdit();
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
+
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(
+        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    const QSizeF pageSize = document.pageSize(0);
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false},
+        {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), zoom},
+        {QStringLiteral("width"), pageSize.width() * zoom},
+        {QStringLiteral("height"), pageSize.height() * zoom}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    QQuickWindow window;
+    window.resize(qCeil(pageSize.width() * zoom), qCeil(pageSize.height() * zoom));
+    qobject_cast<QQuickItem *>(overlay.get())->setParentItem(window.contentItem());
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
+                                     Q_ARG(QVariant, QVariant(candidate))));
+    QObject *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = child;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QTRY_COMPARE(textDocument->toPlainText(), text);
+    QCOMPARE(textDocument->blockCount(), 3);
+    const auto select = [&](int start, int end) {
+        return QMetaObject::invokeMethod(editor, "select", Q_ARG(int, start), Q_ARG(int, end))
+            && QMetaObject::invokeMethod(overlay.get(), "syncEditorSelection");
+    };
+    // A selection ending at the next block's start formats only the first block.
+    QVERIFY(select(0, first.size() + 1));
+    controller.setSelectedLineSpacing(1.5);
+    controller.setSelectedParagraphSpaceBefore(6.0);
+    controller.setSelectedParagraphSpaceAfter(10.0);
+    auto firstFormat = textDocument->firstBlock().blockFormat();
+    QCOMPARE(firstFormat.lineHeightType(), int(QTextBlockFormat::ProportionalHeight));
+    QCOMPARE(firstFormat.lineHeight(), 150.0);
+    QCOMPARE(firstFormat.topMargin(), 6.0);
+    QCOMPARE(firstFormat.bottomMargin(), 10.0);
+    QCOMPARE(textDocument->findBlockByNumber(1).blockFormat().lineHeight(), 100.0);
+    QCOMPARE(textDocument->lastBlock().blockFormat().topMargin(), 0.0);
+
+    const int lastStart = first.size() + 2;
+    QVERIFY(select(lastStart + 1, lastStart + 1));
+    QCOMPARE(controller.selectedLineSpacing(), 1.0);
+    controller.setSelectedLineSpacing(2.0);
+    controller.setSelectedParagraphSpaceBefore(4.0);
+    controller.setSelectedParagraphSpaceAfter(8.0);
+    QCOMPARE(textDocument->lastBlock().blockFormat().lineHeight(), 200.0);
+    QCOMPARE(textDocument->lastBlock().blockFormat().topMargin(), 4.0);
+    QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+    QTRY_COMPARE(controller.selectedParagraphSpaceAfter(), 0.0);
+    QVERIFY(QMetaObject::invokeMethod(editor, "redo"));
+    QTRY_COMPARE(controller.selectedParagraphSpaceAfter(), 8.0);
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+
+    QVERIFY(select(first.size() + 1, first.size() + 1));
+    controller.setSelectedLineSpacing(1.25);
+    QCOMPARE(textDocument->findBlockByNumber(1).blockFormat().lineHeight(), 125.0);
+    QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+    QTRY_COMPARE(controller.selectedLineSpacing(), 1.0);
+    QVERIFY(QMetaObject::invokeMethod(editor, "redo"));
+    QTRY_COMPARE(controller.selectedLineSpacing(), 1.25);
+    QVERIFY(select(0, text.size()));
+    QVERIFY(qIsNaN(controller.selectedLineSpacing()));
+    QVERIFY(qIsNaN(controller.selectedParagraphSpaceBefore()));
+    const QVariantList formats = controller.selectedParagraphFormats();
+    controller.setSelectedLineSpacing(0.0);
+    controller.setSelectedParagraphSpaceBefore(-1.0);
+    controller.setSelectedParagraphSpaceAfter(145.0);
+    QCOMPARE(controller.selectedParagraphFormats(), formats);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QCOMPARE(controller.selectedText(), text);
+    controller.undo();
+    QCOMPARE(controller.selectedLineSpacing(), 1.0);
+    QCOMPARE(controller.selectedParagraphSpaceBefore(), 0.0);
+    controller.redo();
+    QCOMPARE(controller.selectedParagraphFormats(), formats);
+}
+
 void PDFEditControllerTest::hidesDeletedTextFromInteraction()
 {
     m_controller.discardDrafts();

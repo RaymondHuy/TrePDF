@@ -15,6 +15,9 @@ Rectangle {
     required property string selectedFontFamily
     required property real selectedLetterSpacing
     required property real selectedWordSpacing
+    property real selectedLineSpacing: 1
+    property real selectedParagraphSpaceBefore: 0
+    property real selectedParagraphSpaceAfter: 0
     required property real selectedFontSize
     required property var formattingSession
     required property string formattingContextKey
@@ -26,10 +29,18 @@ Rectangle {
     property bool formattingEnabled: false
     readonly property bool fontSizeEditPending: fontSizeEditState.pending
         || spacingEditState.letterPending || spacingEditState.wordPending
+        || spacingEditState.linePending || spacingEditState.beforePending
+        || spacingEditState.afterPending
     //% "Character spacing"
     readonly property string letterSpacingLabel: qsTrId("LetterSpacing")
     //% "Word spacing"
     readonly property string wordSpacingLabel: qsTrId("WordSpacing")
+    //% "Line spacing"
+    readonly property string lineSpacingLabel: qsTrId("LineSpacing")
+    //% "Before paragraph (pt)"
+    readonly property string paragraphSpaceBeforeLabel: qsTrId("ParagraphSpaceBeforePoints")
+    //% "After paragraph (pt)"
+    readonly property string paragraphSpaceAfterLabel: qsTrId("ParagraphSpaceAfterPoints")
 
     property var displayedFontFamilies: availableFontFamilies
     property int fontFamilyFilter: PDFEditController.VietnameseFonts
@@ -114,6 +125,9 @@ Rectangle {
     signal fontSizeChangeRequested(real fontSize)
     signal letterSpacingChangeRequested(real points)
     signal wordSpacingChangeRequested(real points)
+    signal lineSpacingChangeRequested(real factor)
+    signal paragraphSpaceBeforeChangeRequested(real points)
+    signal paragraphSpaceAfterChangeRequested(real points)
     signal fontBoldChangeRequested(bool enabled)
     signal fontItalicChangeRequested(bool enabled)
     signal fontUnderlineChangeRequested(bool enabled)
@@ -135,14 +149,22 @@ Rectangle {
 
         property bool letterPending: false
         property bool wordPending: false
+        property bool linePending: false
+        property bool beforePending: false
+        property bool afterPending: false
         signal commitRequested()
     }
 
     component SpacingField: TextField {
         id: spacingField
 
-        required property bool wordSpacing
+        required property string spacingKind
+        required property string label
         required property real currentSpacing
+        property real minimumValue: -10
+        property real maximumValue: 50
+        property real stepSize: 0.1
+        property real defaultValue: 0
         property bool pending: false
         property var pendingSession: null
         property string pendingContextKey: ""
@@ -168,22 +190,42 @@ Rectangle {
                 && pendingSession === root.formattingSession
                 && pendingContextKey === root.formattingContextKey
                 && /^-?[0-9]+(?:\.[0-9]+)?$/.test(entered)
-                && Number.isFinite(points) && points >= -10 && points <= 50
+                && Number.isFinite(points)
+                && points >= minimumValue && points <= maximumValue
                 && (!Number.isFinite(currentSpacing)
                     || Math.abs(points - currentSpacing) > 0.000001)
             pending = false
             if (apply) {
-                if (wordSpacing)
+                if (spacingKind === "word")
                     root.wordSpacingChangeRequested(points)
+                else if (spacingKind === "line")
+                    root.lineSpacingChangeRequested(points)
+                else if (spacingKind === "before")
+                    root.paragraphSpaceBeforeChangeRequested(points)
+                else if (spacingKind === "after")
+                    root.paragraphSpaceAfterChangeRequested(points)
                 else
                     root.letterSpacingChangeRequested(points)
             }
             syncValue()
         }
 
+        function updatePendingState(value) {
+            if (spacingKind === "word")
+                spacingEditState.wordPending = value
+            else if (spacingKind === "line")
+                spacingEditState.linePending = value
+            else if (spacingKind === "before")
+                spacingEditState.beforePending = value
+            else if (spacingKind === "after")
+                spacingEditState.afterPending = value
+            else
+                spacingEditState.letterPending = value
+        }
+
         selectByMouse: true
         inputMethodHints: Qt.ImhFormattedNumbersOnly
-        Accessible.name: wordSpacing ? root.wordSpacingLabel : root.letterSpacingLabel
+        Accessible.name: label
         onCurrentSpacingChanged: syncValue()
         onTextEdited: beginEdit()
         onAccepted: commitValue()
@@ -191,19 +233,15 @@ Rectangle {
             if (!activeFocus)
                 commitValue()
         }
-        onPendingChanged: {
-            if (wordSpacing)
-                spacingEditState.wordPending = pending
-            else
-                spacingEditState.letterPending = pending
-        }
+        onPendingChanged: updatePendingState(pending)
         Keys.onPressed: event => {
             if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
-                const entered = Number(text.trim().replace(",", "."))
-                const initial = Number.isFinite(entered) ? entered : 0
+                const entered = text.trim().replace(",", ".")
+                const initial = entered.length > 0 && Number.isFinite(Number(entered))
+                    ? Number(entered) : defaultValue
                 beginEdit()
-                text = Math.max(-10, Math.min(50,
-                    initial + (event.key === Qt.Key_Up ? 0.1 : -0.1))).toFixed(1)
+                text = Math.max(minimumValue, Math.min(maximumValue,
+                    initial + (event.key === Qt.Key_Up ? stepSize : -stepSize))).toFixed(1)
                 commitValue()
                 event.accepted = true
             } else if (event.key === Qt.Key_Escape) {
@@ -212,12 +250,7 @@ Rectangle {
             }
         }
         Component.onCompleted: syncValue()
-        Component.onDestruction: {
-            if (wordSpacing)
-                spacingEditState.wordPending = false
-            else
-                spacingEditState.letterPending = false
-        }
+        Component.onDestruction: updatePendingState(false)
 
         Connections {
             target: spacingEditState
@@ -742,7 +775,8 @@ Rectangle {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 Layout.preferredWidth: 1
-                                wordSpacing: false
+                                spacingKind: "letter"
+                                label: root.letterSpacingLabel
                                 currentSpacing: root.selectedLetterSpacing
                             }
                             SpacingField {
@@ -750,7 +784,8 @@ Rectangle {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 Layout.preferredWidth: 1
-                                wordSpacing: true
+                                spacingKind: "word"
+                                label: root.wordSpacingLabel
                                 currentSpacing: root.selectedWordSpacing
                             }
                         }
@@ -945,6 +980,82 @@ Rectangle {
                                 border.color: colorButton.enabled
                                     ? root.theme.ribbonBorder
                                     : "#ddd9d6"
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.topMargin: 4
+                            //% "Paragraph"
+                            text: qsTrId("ParagraphFormatting")
+                            color: root.theme.ribbonTextColor
+                            font.pixelSize: 12
+                            font.weight: Font.Medium
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.lineSpacingLabel
+                                color: root.theme.ribbonTextColor
+                                font.pixelSize: 11
+                            }
+                            SpacingField {
+                                objectName: "lineSpacingInput"
+                                Layout.preferredWidth: 88
+                                spacingKind: "line"
+                                label: root.lineSpacingLabel
+                                currentSpacing: root.selectedLineSpacing
+                                minimumValue: 0.5
+                                maximumValue: 3
+                                defaultValue: 1
+                            }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            columnSpacing: 8
+                            rowSpacing: 4
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.paragraphSpaceBeforeLabel
+                                color: root.theme.ribbonTextColor
+                                font.pixelSize: 11
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: root.paragraphSpaceAfterLabel
+                                color: root.theme.ribbonTextColor
+                                font.pixelSize: 11
+                            }
+                            SpacingField {
+                                objectName: "paragraphSpaceBeforeInput"
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.preferredWidth: 1
+                                spacingKind: "before"
+                                label: root.paragraphSpaceBeforeLabel
+                                currentSpacing: root.selectedParagraphSpaceBefore
+                                minimumValue: 0
+                                maximumValue: 144
+                                stepSize: 1
+                            }
+                            SpacingField {
+                                objectName: "paragraphSpaceAfterInput"
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.preferredWidth: 1
+                                spacingKind: "after"
+                                label: root.paragraphSpaceAfterLabel
+                                currentSpacing: root.selectedParagraphSpaceAfter
+                                minimumValue: 0
+                                maximumValue: 144
+                                stepSize: 1
                             }
                         }
 

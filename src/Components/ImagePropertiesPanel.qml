@@ -137,6 +137,77 @@ Rectangle {
                         Accessible.ignored: true
                     }
 
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        spacing: 8
+
+                        ToolButton {
+                            id: rotateImageLeftButton
+                            objectName: "rotateImageLeftButton"
+
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 54
+                            enabled: root.editController.selectedImageRotatable
+                                && !root.editController.saving
+                            //% "Rotate left 90°"
+                            text: qsTrId("RotateImageLeft90")
+                            icon.source: "../assets/icons/rotate-ccw.svg"
+                            icon.width: 18
+                            icon.height: 18
+                            icon.color: enabled
+                                ? root.theme.foxitDarkOrange : "#aaa8a6"
+                            display: AbstractButton.TextUnderIcon
+                            font.pixelSize: 11
+                            palette.buttonText: root.theme.ribbonTextColor
+                            focusPolicy: Qt.TabFocus
+                            onClicked: root.editController.rotateSelectedImage(-1)
+
+                            background: Rectangle {
+                                radius: 4
+                                color: rotateImageLeftButton.down
+                                    ? "#f5dfcf"
+                                    : rotateImageLeftButton.hovered
+                                        ? root.theme.foxitPaleOrange : "transparent"
+                                border.color: rotateImageLeftButton.visualFocus
+                                    ? root.theme.foxitDarkOrange : root.theme.ribbonBorder
+                            }
+                        }
+
+                        ToolButton {
+                            id: rotateImageRightButton
+                            objectName: "rotateImageRightButton"
+
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 54
+                            enabled: root.editController.selectedImageRotatable
+                                && !root.editController.saving
+                            //% "Rotate right 90°"
+                            text: qsTrId("RotateImageRight90")
+                            icon.source: "../assets/icons/rotate-cw.svg"
+                            icon.width: 18
+                            icon.height: 18
+                            icon.color: enabled
+                                ? root.theme.foxitDarkOrange : "#aaa8a6"
+                            display: AbstractButton.TextUnderIcon
+                            font.pixelSize: 11
+                            palette.buttonText: root.theme.ribbonTextColor
+                            focusPolicy: Qt.TabFocus
+                            onClicked: root.editController.rotateSelectedImage(1)
+
+                            background: Rectangle {
+                                radius: 4
+                                color: rotateImageRightButton.down
+                                    ? "#f5dfcf"
+                                    : rotateImageRightButton.hovered
+                                        ? root.theme.foxitPaleOrange : "transparent"
+                                border.color: rotateImageRightButton.visualFocus
+                                    ? root.theme.foxitDarkOrange : root.theme.ribbonBorder
+                            }
+                        }
+                    }
+
                     CheckBox {
                         id: imageAspectRatioLock
                         objectName: "imageAspectRatioLock"

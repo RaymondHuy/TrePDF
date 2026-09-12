@@ -29,6 +29,7 @@
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMutexLocker>
@@ -2148,6 +2149,7 @@ QVector<PDFEditController::Candidate> PDFEditController::finalizePageCandidates(
         }
         candidate.page = page;
     }
+    candidates = restoreSourceParagraphLayouts(std::move(candidates), pageSize);
     candidates = groupTextLineCandidates(std::move(candidates), pageSize);
     applyCommentThreadDeletionProtection(candidates);
     std::stable_sort(
@@ -2436,6 +2438,7 @@ void PDFEditController::appendPageObjectCandidates(
     if (candidate.editable && textLayout != textObjectLayouts.cend()) {
         inferSourceTextSpacing(candidate, *textLayout, pageSize);
         readSourceTextSpacing(pageObject, candidate, pageSize);
+        readSourceParagraphLayout(page, pageObject, candidate, pageSize);
     }
 
     CandidatePart part;
@@ -2643,6 +2646,362 @@ void PDFEditController::readSourceTextSpacing(
     candidate.spacingWordPoints = word;
     candidate.spacingOriginOffset = originOffset;
     candidate.spacingRuns = std::move(runs);
+}
+
+void PDFEditController::readSourceParagraphLayout(
+    FPDF_PAGE page, FPDF_PAGEOBJECT object, Candidate &candidate, const QSizeF &pageSize)
+{
+    assertPDFiumProcessLockHeld();
+    const int markCount = FPDFPageObj_CountMarks(object);
+    if (markCount < 1 || markCount > 64 || pageSize.isEmpty()) {
+        return;
+    }
+    FPDF_PAGEOBJECTMARK found = nullptr;
+    for (int index = 0; index < markCount; ++index) {
+        const auto mark = FPDFPageObj_GetMark(object, index);
+        FPDF_WCHAR name[64]{};
+        unsigned long size = 0;
+        if (mark && FPDFPageObjMark_GetName(mark, name, sizeof(name), &size)
+            && size >= 2 && size <= sizeof(name) && size % 2 == 0
+            && QString::fromUtf16(reinterpret_cast<const char16_t *>(name), size / 2 - 1)
+                == QLatin1String("TrePDFParagraphLayout")) {
+            if (found) {
+                return;
+            }
+            found = mark;
+        }
+    }
+    if (!found) {
+        return;
+    }
+    const auto readBlob = [&](const char *key, unsigned long maximum, QByteArray &value) {
+        unsigned long size = 0;
+        if (!FPDFPageObjMark_GetParamBlobValue(found, key, nullptr, 0, &size)
+            || !size || size > maximum) {
+            return false;
+        }
+        value.resize(size);
+        unsigned long actual = 0;
+        return FPDFPageObjMark_GetParamBlobValue(found, key,
+            reinterpret_cast<unsigned char *>(value.data()), size, &actual) && actual == size;
+    };
+    int version = 0, index = -1, count = 0, start = -1, length = 0;
+    FPDF_WCHAR group[64]{};
+    unsigned long groupSize = 0;
+    QByteArray bytes, model;
+    FS_MATRIX matrix{};
+    QPointF anchor;
+    if (!FPDFPageObjMark_GetParamIntValue(found, "Version", &version) || version != 1
+        || !FPDFPageObjMark_GetParamIntValue(found, "Index", &index)
+        || !FPDFPageObjMark_GetParamIntValue(found, "Count", &count)
+        || !FPDFPageObjMark_GetParamIntValue(found, "Start", &start)
+        || !FPDFPageObjMark_GetParamIntValue(found, "Length", &length)
+        || count < 1 || count > 32768 || index < 0 || index >= count
+        || start < 0 || start >= 32768 || length < 1 || length > 32768 - start
+        || !FPDFPageObjMark_GetParamStringValue(found, "Group", group, sizeof(group), &groupSize)
+        || groupSize < 2 || groupSize > sizeof(group) || groupSize % 2 != 0
+        || !readBlob("Text", 131072, bytes)
+        || (index == 0 && !readBlob("Model", 1024 * 1024, model))
+        || !FPDFPageObj_GetMatrix(object, &matrix)
+        || !normalizedPagePoint(page, pageSize, QPointF(matrix.e, matrix.f), anchor)) {
+        return;
+    }
+    const QString groupId = QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(group), groupSize / 2 - 1);
+    const QString text = QString::fromUtf8(bytes);
+    QString encoded = text;
+    encoded.remove(QLatin1Char('\t'));
+    if (QUuid(groupId).isNull() || text.toUtf8() != bytes || text.size() != length
+        || text.contains(QChar::Null) || text.contains(QLatin1Char('\n'))
+        || text.contains(QLatin1Char('\r'))
+        || encoded.simplified() != candidate.text.simplified()) {
+        return;
+    }
+    candidate.paragraphLayoutGroup = groupId;
+    candidate.paragraphLayoutIndex = index;
+    candidate.paragraphLayoutCount = count;
+    candidate.paragraphLayoutStart = start;
+    candidate.paragraphLayoutLength = length;
+    candidate.paragraphLayoutText = text;
+    candidate.paragraphLayoutModel = model;
+    candidate.paragraphLayoutAnchor = anchor;
+}
+
+QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphLayouts(
+    QVector<Candidate> candidates, const QSizeF &pageSize) const
+{
+    if (pageSize.isEmpty()) {
+        return candidates;
+    }
+    QHash<QString, QVector<qsizetype>> groups;
+    for (qsizetype index = 0; index < candidates.size(); ++index) {
+        if (!candidates[index].paragraphLayoutGroup.isEmpty()) {
+            groups[candidates[index].paragraphLayoutGroup].append(index);
+        }
+    }
+    QSet<qsizetype> consumed;
+    for (auto it = groups.cbegin(); it != groups.cend(); ++it) {
+        QVector<qsizetype> indices = it.value();
+        std::sort(indices.begin(), indices.end(), [&](qsizetype a, qsizetype b) {
+            return candidates[a].paragraphLayoutIndex < candidates[b].paragraphLayoutIndex;
+        });
+        const Candidate &first = candidates[indices.first()];
+        if (indices.size() != first.paragraphLayoutCount || first.paragraphLayoutIndex != 0) {
+            continue;
+        }
+        const QJsonDocument document = QJsonDocument::fromJson(first.paragraphLayoutModel);
+        if (!document.isObject()) {
+            continue;
+        }
+        const QJsonObject model = document.object();
+        const QString text = model.value(QStringLiteral("text")).toString();
+        const QJsonArray paragraphs = model.value(QStringLiteral("paragraphs")).toArray();
+        if (text.isEmpty() || text.size() > 32768 || text.contains(QChar::Null)
+            || text.contains(QLatin1Char('\r')) || paragraphs.isEmpty() || paragraphs.size() > 1024) {
+            continue;
+        }
+        const auto finiteArray = [&](const char *key, int count) {
+            const QJsonArray array = model.value(QLatin1String(key)).toArray();
+            if (array.size() != count) {
+                return QJsonArray();
+            }
+            for (const QJsonValue &value : array) {
+                if (!value.isDouble() || !qIsFinite(value.toDouble()) || qAbs(value.toDouble()) > 4.0) {
+                    return QJsonArray();
+                }
+            }
+            return array;
+        };
+        const QJsonArray originOffset = finiteArray("originOffset", 2);
+        const QJsonArray frameOffset = finiteArray("frameOffset", 4);
+        if (originOffset.isEmpty() || frameOffset.isEmpty()
+            || frameOffset[2].toDouble() <= 0.0 || frameOffset[3].toDouble() <= 0.0) {
+            continue;
+        }
+        QVector<ParagraphFormat> formats;
+        bool valid = true;
+        qsizetype expectedStart = 0;
+        for (const QJsonValue &value : paragraphs) {
+            const QJsonObject p = value.toObject();
+            const auto number = [&](const char *key) {
+                const QJsonValue value = p.value(QLatin1String(key));
+                return value.isDouble() ? value.toDouble() : std::numeric_limits<double>::quiet_NaN();
+            };
+            const qsizetype newline = text.indexOf(QLatin1Char('\n'), expectedStart);
+            const qsizetype end = newline < 0 ? text.size() : newline;
+            const qreal factor = number("lineSpacing");
+            const qreal before = number("spaceBeforeRatio");
+            const qreal after = number("spaceAfterRatio");
+            const QString alignment = p.value(QStringLiteral("alignment")).toString();
+            if (expectedStart > text.size() || number("start") != expectedStart
+                || number("length") != end - expectedStart
+                || !qIsFinite(factor) || factor < 0.5 || factor > 3.0
+                || !qIsFinite(before) || before < 0.0 || before * pageSize.height() > 144.001
+                || !qIsFinite(after) || after < 0.0 || after * pageSize.height() > 144.001
+                || (alignment != QLatin1String("left") && alignment != QLatin1String("center")
+                    && alignment != QLatin1String("right") && alignment != QLatin1String("justify"))) {
+                valid = false;
+                break;
+            }
+            ParagraphFormat format;
+            format.start = expectedStart;
+            format.length = end - expectedStart;
+            format.lineSpacing = factor;
+            format.spaceBeforeRatio = before;
+            format.spaceAfterRatio = after;
+            format.alignment = alignment == QLatin1String("center") ? CenterAlignment
+                : alignment == QLatin1String("right") ? RightAlignment
+                : alignment == QLatin1String("justify") ? JustifyAlignment : LeftAlignment;
+            formats.append(format);
+            expectedStart = end + 1;
+        }
+        if (!valid || expectedStart != text.size() + 1) {
+            continue;
+        }
+        QVector<qsizetype> sourceBreaks;
+        for (const QJsonValue &value : model.value(QStringLiteral("sourceLineBreaks")).toArray()) {
+            const int position = value.toInt(-1);
+            if (!value.isDouble() || value.toDouble() != position || position < 0
+                || position >= text.size() || text[position] != QLatin1Char('\n')
+                || (!sourceBreaks.isEmpty() && position <= sourceBreaks.last())) {
+                valid = false;
+                break;
+            }
+            sourceBreaks.append(position);
+        }
+        int previousEnd = 0;
+        QRectF bounds;
+        for (qsizetype order = 0; valid && order < indices.size(); ++order) {
+            const Candidate &part = candidates[indices[order]];
+            const int start = part.paragraphLayoutStart;
+            if (!part.editable || !part.hasBaseline || part.parts.size() != 1
+                || part.paragraphLayoutIndex != order || part.paragraphLayoutCount != indices.size()
+                || start < previousEnd || start > text.size()
+                || part.paragraphLayoutLength > text.size() - start
+                || !text.sliced(previousEnd, start - previousEnd).trimmed().isEmpty()
+                || text.sliced(start, part.paragraphLayoutLength) != part.paragraphLayoutText) {
+                valid = false;
+                break;
+            }
+            previousEnd = start + part.paragraphLayoutLength;
+            bounds = bounds.isEmpty() ? part.geometry.sourceRect : bounds.united(part.geometry.sourceRect);
+        }
+        if (!valid || !text.sliced(previousEnd).trimmed().isEmpty()) {
+            continue;
+        }
+        QVector<CharacterSpan> whitespaceFormats;
+        const QJsonValue whitespaceValue = model.value(QStringLiteral("whitespaceFormats"));
+        const QJsonArray whitespaceArray = whitespaceValue.toArray();
+        if ((!whitespaceValue.isUndefined() && !whitespaceValue.isArray())
+            || whitespaceArray.size() > 32768) {
+            continue;
+        }
+        qsizetype visibleIndex = 0;
+        qsizetype whitespaceEnd = 0;
+        for (const QJsonValue &value : whitespaceArray) {
+            const QJsonObject object = value.toObject();
+            const auto number = [&](const char *key) {
+                const QJsonValue value = object.value(QLatin1String(key));
+                return value.isDouble() ? value.toDouble() : std::numeric_limits<double>::quiet_NaN();
+            };
+            const int start = object.value(QStringLiteral("start")).toInt(-1);
+            const int length = object.value(QStringLiteral("length")).toInt(-1);
+            CharacterFormat format;
+            format.fontFamily = object.value(QStringLiteral("fontFamily")).toString();
+            format.fontSizeRatio = number("fontSizeRatio");
+            format.displayFontSizeRatio = number("displayFontSizeRatio");
+            format.fontStretch = object.value(QStringLiteral("fontStretch")).toInt(-1);
+            format.letterSpacingRatio = number("letterSpacingRatio");
+            format.wordSpacingRatio = number("wordSpacingRatio");
+            format.fontBold = object.value(QStringLiteral("fontBold")).toBool();
+            format.fontItalic = object.value(QStringLiteral("fontItalic")).toBool();
+            format.fontUnderline = object.value(QStringLiteral("fontUnderline")).toBool();
+            format.color = QColor(object.value(QStringLiteral("color")).toString());
+            const auto bounded = [](qreal value, qreal minimum, qreal maximum) {
+                return qIsFinite(value) && value >= minimum && value <= maximum;
+            };
+            if (start < whitespaceEnd || start > text.size() || length < 1
+                || length > text.size() - start || number("start") != start
+                || number("length") != length || !text.sliced(start, length).trimmed().isEmpty()
+                || format.fontFamily.isEmpty() || format.fontFamily.size() > 256
+                || format.fontFamily.contains(QChar::Null)
+                || !bounded(format.fontSizeRatio, 0.000001, 4.0)
+                || !bounded(format.displayFontSizeRatio, 0.0, 4.0)
+                || format.fontStretch < QFont::UltraCondensed || format.fontStretch > QFont::UltraExpanded
+                || number("fontStretch") != format.fontStretch
+                || !bounded(format.letterSpacingRatio * pageSize.height(), -10.001, 50.001)
+                || !bounded(format.wordSpacingRatio * pageSize.height(), -10.001, 50.001)
+                || !object.value(QStringLiteral("fontBold")).isBool()
+                || !object.value(QStringLiteral("fontItalic")).isBool()
+                || !object.value(QStringLiteral("fontUnderline")).isBool() || !format.color.isValid()) {
+                valid = false;
+                break;
+            }
+            while (visibleIndex < indices.size()
+                   && candidates[indices[visibleIndex]].paragraphLayoutStart
+                       + candidates[indices[visibleIndex]].paragraphLayoutLength <= start) {
+                ++visibleIndex;
+            }
+            if (visibleIndex < indices.size()
+                && candidates[indices[visibleIndex]].paragraphLayoutStart < start + length) {
+                valid = false;
+                break;
+            }
+            whitespaceFormats.append(CharacterSpan{start, length, format});
+            whitespaceEnd = start + length;
+        }
+        if (!valid) {
+            continue;
+        }
+        Candidate restored = first;
+        restored.objectPath.clear();
+        restored.parts.clear();
+        restored.sourceCharacterSpans.clear();
+        restored.textGlyphRects.clear();
+        restored.text = text;
+        restored.sourceParagraphFormats = formats;
+        restored.sourceParagraphLineBreaks = sourceBreaks;
+        const auto appendSpan = [&](qsizetype start, qsizetype length, const CharacterFormat &format) {
+            if (length <= 0) {
+                return;
+            }
+            if (!restored.sourceCharacterSpans.isEmpty()
+                && sameCharacterFormat(restored.sourceCharacterSpans.last().format, format)) {
+                restored.sourceCharacterSpans.last().length += length;
+            } else {
+                restored.sourceCharacterSpans.append(CharacterSpan{start, length, format});
+            }
+        };
+        qsizetype whitespaceIndex = 0;
+        const auto appendWhitespace = [&](qsizetype start, qsizetype end, const CharacterFormat &fallback) {
+            while (whitespaceIndex < whitespaceFormats.size()
+                   && whitespaceFormats[whitespaceIndex].start < end) {
+                const CharacterSpan &span = whitespaceFormats[whitespaceIndex++];
+                appendSpan(start, span.start - start, fallback);
+                appendSpan(span.start, span.length, span.format);
+                start = span.start + span.length;
+            }
+            appendSpan(start, end - start, fallback);
+        };
+        previousEnd = 0;
+        QByteArray identity;
+        for (qsizetype index : std::as_const(indices)) {
+            const Candidate &part = candidates[index];
+            CharacterFormat format = characterFormatForCandidate(part);
+            if (!part.spacingGroup.isEmpty()) {
+                format.letterSpacingRatio = part.spacingLetterPoints / pageSize.height();
+                format.wordSpacingRatio = part.spacingWordPoints / pageSize.height();
+            }
+            const int start = part.paragraphLayoutStart;
+            appendWhitespace(previousEnd, start, format);
+            if (part.spacingRuns.isEmpty()) {
+                appendSpan(start, part.paragraphLayoutLength, format);
+            } else {
+                for (const CharacterSpan &span : part.spacingRuns) {
+                    CharacterFormat runFormat = format;
+                    runFormat.letterSpacingRatio = span.format.letterSpacingRatio;
+                    runFormat.wordSpacingRatio = span.format.wordSpacingRatio;
+                    appendSpan(start + span.start, span.length, runFormat);
+                }
+            }
+            previousEnd = start + part.paragraphLayoutLength;
+            restored.parts.append(part.parts);
+            restored.textGlyphRects.append(part.textGlyphRects);
+            identity.append(part.objectId.toUtf8());
+            identity.append('\0');
+        }
+        const CharacterFormat trailingFormat = restored.sourceCharacterSpans.last().format;
+        appendWhitespace(previousEnd, text.size(), trailingFormat);
+        restored.objectId = QStringLiteral("paragraph-layout:") + QString::fromLatin1(
+            QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex());
+        restored.origin = first.paragraphLayoutAnchor + QPointF(
+            originOffset[0].toDouble(), originOffset[1].toDouble());
+        setInitialGeometry(restored, bounds);
+        restored.initialDraftFrameRect = QRectF(
+            first.paragraphLayoutAnchor + QPointF(frameOffset[0].toDouble(), frameOffset[1].toDouble()),
+            QSizeF(frameOffset[2].toDouble(), frameOffset[3].toDouble()));
+        restored.paragraphLayoutGroup.clear();
+        restored.paragraphLayoutModel.clear();
+        restored.paragraphLayoutText.clear();
+        restored.spacingGroup.clear();
+        restored.spacingText.clear();
+        restored.spacingRuns.clear();
+        const qsizetype outputIndex = *std::min_element(indices.cbegin(), indices.cend());
+        candidates[outputIndex] = std::move(restored);
+        for (qsizetype index : std::as_const(indices)) {
+            if (index != outputIndex) {
+                consumed.insert(index);
+            }
+        }
+    }
+    QVector<Candidate> output;
+    output.reserve(candidates.size() - consumed.size());
+    for (qsizetype index = 0; index < candidates.size(); ++index) {
+        if (!consumed.contains(index)) {
+            output.append(std::move(candidates[index]));
+        }
+    }
+    return output;
 }
 
 QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates(
@@ -2877,6 +3236,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             && !candidate.added
             && !overlappingText.contains(candidate.objectId)
             && candidate.parts.size() == 1
+            && candidate.sourceParagraphFormats.isEmpty()
             && emSize(candidate) > 0.0;
     };
 
@@ -3105,6 +3465,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             && candidate.editable && candidate.renderSuppressible
             && candidate.hasBaseline && !candidate.added
             && !candidate.parts.isEmpty()
+            && candidate.sourceParagraphFormats.isEmpty()
             && !overlappingText.contains(candidate.objectId)
             && !candidate.text.contains(QLatin1Char('\n'))
             && !candidate.text.contains(QLatin1Char('\r'))

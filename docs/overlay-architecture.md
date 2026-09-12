@@ -363,6 +363,16 @@ clip, matrix không hợp lệ hoặc nằm một phần ngoài page; move/delet
 vẫn theo capability hiện có. Image trong Form XObject được bảo vệ. Preview ảnh
 nguồn chạy trên render worker bằng phép affine từ source frame bất biến tới
 frame hiện tại; không dùng bitmap snapshot trên GUI như ảnh mới.
+Panel có hai nút **Xoay trái 90°** và **Xoay phải 90°**, gọi
+`rotateSelectedImage(-1/1)`. `selectedImageRotatable` yêu cầu ảnh đủ điều kiện
+resize và kích thước sau xoay vừa trang. Controller đổi chiều rộng/cao theo PDF
+point, giữ tâm nếu có thể hoặc dịch khung vào trang, không tự thu nhỏ ảnh.
+`Draft.imageQuarterTurns` lưu số lượt xoay thuận chiều kim đồng hồ trong tọa độ
+trang đang hiển thị; mỗi lần bấm là một history command, kể cả ảnh vuông hoặc
+xoay 180° có khung không đổi. Worker và Save cùng dùng `PDFSourceImageGeometry`
+để biến đổi ma trận gốc qua source frame, phép xoay và frame mới, giữ pixel và
+z-order. `DraftImageView` xoay bitmap snapshot khi preview ảnh mới; Save xoay ma
+trận ảnh và giữ nguyên bitmap. Move/resize sau xoay dùng khung hiện tại.
 
 Edit shape `addedShape`/`sourceShape` dùng tám resize handle cạnh/góc và
 `ShapeDraftView` cho draft preview; shape nguồn chưa có draft vẫn lấy hình từ

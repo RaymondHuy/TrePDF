@@ -152,12 +152,14 @@ PDFEditController::draftedObjectMovesForPage(int page) const
 
         if (candidate.kind == QLatin1String("image")
             && candidate.objectPath.size() == 1
-            && candidate.geometry.sourceRect != draft->frameRect) {
+            && (candidate.geometry.sourceRect != draft->frameRect
+                || draft->imageQuarterTurns != 0)) {
             moves.append(DraftObjectMove{
                 DraftObjectMove::Kind::Image,
                 candidate.objectPath,
                 candidate.geometry.sourceRect,
-                draft->frameRect});
+                draft->frameRect,
+                draft->imageQuarterTurns});
             continue;
         }
 
@@ -652,6 +654,9 @@ QVariantList PDFEditController::paragraphFormatMaps(
         map.insert(QStringLiteral("length"), format.length);
         map.insert(QStringLiteral("end"), format.start + format.length);
         map.insert(QStringLiteral("alignment"), alignmentName(format.alignment));
+        map.insert(QStringLiteral("lineSpacing"), format.lineSpacing);
+        map.insert(QStringLiteral("spaceBeforeRatio"), format.spaceBeforeRatio);
+        map.insert(QStringLiteral("spaceAfterRatio"), format.spaceAfterRatio);
         map.insert(QStringLiteral("listStyle"), listStyleName(format.listStyle));
         map.insert(QStringLiteral("listLevel"), format.listLevel);
         map.insert(QStringLiteral("listStart"), format.listStart);
@@ -676,13 +681,14 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("imageResizable"), candidate.editable
         && (candidate.kind == QLatin1String("addedImage")
             || (candidate.kind == QLatin1String("image") && candidate.imageResizable)));
+    map.insert(QStringLiteral("imageQuarterTurns"), draft.imageQuarterTurns);
     map.insert(QStringLiteral("label"), candidate.label);
     map.insert(QStringLiteral("sourceRect"), candidate.geometry.sourceRect);
     map.insert(QStringLiteral("frameRect"), draft.frameRect);
     map.insert(QStringLiteral("contentBounds"), draft.contentBounds);
     map.insert(
         QStringLiteral("geometryChanged"),
-        draft.frameRect != initialFrameRect);
+        draft.frameRect != initialFrameRect || draft.imageQuarterTurns != 0);
     map.insert(
         QStringLiteral("styleChanged"),
         isDrawingCommentCandidateKind(candidate.kind)
@@ -959,6 +965,9 @@ bool PDFEditController::sameParagraphFormats(
         if (leftFormat.start != rightFormat.start
             || leftFormat.length != rightFormat.length
             || leftFormat.alignment != rightFormat.alignment
+            || leftFormat.lineSpacing != rightFormat.lineSpacing
+            || leftFormat.spaceBeforeRatio != rightFormat.spaceBeforeRatio
+            || leftFormat.spaceAfterRatio != rightFormat.spaceAfterRatio
             || leftFormat.listStyle != rightFormat.listStyle
             || leftFormat.listLevel != rightFormat.listLevel
             || leftFormat.listStart != rightFormat.listStart) {
@@ -979,6 +988,7 @@ bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
         && left.sourceLineBreaks == right.sourceLineBreaks
         && left.frameRect == right.frameRect
         && left.contentBounds == right.contentBounds
+        && left.imageQuarterTurns == right.imageQuarterTurns
         && left.deleted == right.deleted;
 }
 

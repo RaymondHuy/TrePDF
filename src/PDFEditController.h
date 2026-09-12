@@ -80,8 +80,12 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool selectedFontUnderline READ selectedFontUnderline NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(QColor selectedColor READ selectedColor NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(int selectedParagraphAlignment READ selectedParagraphAlignment NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(qreal selectedLineSpacing READ selectedLineSpacing NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(qreal selectedParagraphSpaceBefore READ selectedParagraphSpaceBefore NOTIFY textFormatStateChanged FINAL)
+    Q_PROPERTY(qreal selectedParagraphSpaceAfter READ selectedParagraphSpaceAfter NOTIFY textFormatStateChanged FINAL)
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedImageResizable READ selectedImageResizable NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedImageRotatable READ selectedImageRotatable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDeletable READ selectedDeletable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingPropertiesEditable READ selectedDrawingPropertiesEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingSupportsFill READ selectedDrawingSupportsFill NOTIFY selectionChanged FINAL)
@@ -97,7 +101,7 @@ class PDFEditController : public QObject
 
 public:
     struct DraftObjectMove {
-        // Images may translate and scale; text and paths only translate.
+        // Images may translate, scale and rotate; text and paths only translate.
         enum class Kind {
             Text,
             Image,
@@ -108,6 +112,7 @@ public:
         QVector<int> objectPath;
         QRectF sourceRect;
         QRectF frameRect;
+        int imageQuarterTurns = 0;
     };
 
     struct DraftAnnotationDeletion {
@@ -260,8 +265,12 @@ public:
     bool selectedFontUnderline() const;
     QColor selectedColor() const;
     int selectedParagraphAlignment() const;
+    qreal selectedLineSpacing() const;
+    qreal selectedParagraphSpaceBefore() const;
+    qreal selectedParagraphSpaceAfter() const;
     bool selectedEditable() const;
     bool selectedImageResizable() const;
+    bool selectedImageRotatable() const;
     bool selectedDeletable() const;
     bool selectedDrawingPropertiesEditable() const;
     bool selectedDrawingSupportsFill() const;
@@ -360,6 +369,10 @@ public:
                                                        qreal letterSpacingRatio,
                                                        qreal wordSpacingRatio,
                                                        qreal displayedPageHeight) const;
+    Q_INVOKABLE void initializeEditorParagraphFormats(QObject *textDocument,
+                                                       qreal displayedPageHeight) const;
+    Q_INVOKABLE bool applyParagraphFormatsToEditorDocument(QObject *textDocument,
+                                                           qreal displayedPageHeight) const;
     Q_INVOKABLE bool syncEditorFontStyles(QObject *textDocument);
     Q_INVOKABLE QStringList fontFamiliesForFilter(FontFilter filter) const;
     Q_INVOKABLE bool selectCandidate(int page, const QString &objectId);
@@ -382,6 +395,7 @@ public:
     Q_INVOKABLE void updateSelectedContentBounds(const QRectF &contentBounds);
     Q_INVOKABLE void finishSelectedFrameResize();
     Q_INVOKABLE void cancelSelectedFrameResize();
+    Q_INVOKABLE void rotateSelectedImage(int quarterTurns);
     Q_INVOKABLE void setSelectedTextRange(int start, int length);
     Q_INVOKABLE void setSelectedFontFamily(const QString &fontFamily);
     Q_INVOKABLE void setSelectedFontSize(qreal points);
@@ -392,6 +406,9 @@ public:
     Q_INVOKABLE void setSelectedFontUnderline(bool enabled);
     Q_INVOKABLE void setSelectedColor(const QColor &color);
     Q_INVOKABLE void setSelectedParagraphAlignment(ParagraphAlignment alignment);
+    Q_INVOKABLE void setSelectedLineSpacing(qreal factor);
+    Q_INVOKABLE void setSelectedParagraphSpaceBefore(qreal points);
+    Q_INVOKABLE void setSelectedParagraphSpaceAfter(qreal points);
     Q_INVOKABLE void finishSelectedTextEdit();
     Q_INVOKABLE void cancelSelectedTextEdit();
     Q_INVOKABLE void commitSelectedText(const QString &text);
@@ -435,6 +452,7 @@ signals:
     void typingFormatApplied(int start, int length);
     void selectionTextSpacingApplied(int start, int length,
                                       qreal letterSpacingRatio, qreal wordSpacingRatio);
+    void selectionParagraphSpacingApplied();
     void selectionFontSizeApplied(int start, int length, qreal fontSizeRatio);
     void selectionFontStyleApplied(int start,
                                    int length,
@@ -505,6 +523,24 @@ private:
         QRectF sourceRect;
     };
 
+    enum class ParagraphListStyle {
+        None,
+        Bullet,
+        Decimal
+    };
+
+    struct ParagraphFormat {
+        qsizetype start = 0;
+        qsizetype length = 0;
+        ParagraphAlignment alignment = LeftAlignment;
+        qreal lineSpacing = 1.0;
+        qreal spaceBeforeRatio = 0.0;
+        qreal spaceAfterRatio = 0.0;
+        ParagraphListStyle listStyle = ParagraphListStyle::None;
+        int listLevel = 0;
+        int listStart = 1;
+    };
+
     struct Candidate {
         int page = -1;
         QString objectId;
@@ -520,6 +556,16 @@ private:
         QString text;
         QVector<QRectF> textGlyphRects;
         QVector<CharacterSpan> sourceCharacterSpans;
+        QVector<ParagraphFormat> sourceParagraphFormats;
+        QVector<qsizetype> sourceParagraphLineBreaks;
+        QString paragraphLayoutGroup;
+        int paragraphLayoutIndex = -1;
+        int paragraphLayoutCount = 0;
+        int paragraphLayoutStart = -1;
+        int paragraphLayoutLength = 0;
+        QString paragraphLayoutText;
+        QByteArray paragraphLayoutModel;
+        QPointF paragraphLayoutAnchor;
         QString spacingGroup;
         QString spacingText;
         int spacingIndex = -1;
@@ -650,21 +696,6 @@ private:
         qsizetype insertedLength = 0;
     };
 
-    enum class ParagraphListStyle {
-        None,
-        Bullet,
-        Decimal
-    };
-
-    struct ParagraphFormat {
-        qsizetype start = 0;
-        qsizetype length = 0;
-        ParagraphAlignment alignment = LeftAlignment;
-        ParagraphListStyle listStyle = ParagraphListStyle::None;
-        int listLevel = 0;
-        int listStart = 1;
-    };
-
     struct Draft {
         Candidate candidate;
         PDFCommentAnnotation::CommonProperties commentProperties;
@@ -674,6 +705,8 @@ private:
         QVector<qsizetype> sourceLineBreaks;
         QRectF frameRect;
         QRectF contentBounds;
+        // Clockwise turns relative to the source image, in displayed page coordinates.
+        int imageQuarterTurns = 0;
         CommentStatus commentStatus = NoCommentStatus;
         bool commentMarked = false;
         QString commentStateAuthor;
@@ -716,6 +749,7 @@ private:
     };
 
     void resetSession();
+    QRectF rotatedImageFrame(const Draft &draft, int quarterTurns) const;
     void setPendingDrawingCommentPage(int page);
     bool completeSave(const PDFSaveWriter::Result &result,
                       const QString &targetFilePath,
@@ -851,6 +885,17 @@ private:
                                                       bool preferPrevious);
     CharacterFormat selectedCharacterFormatForDisplay() const;
     void setSelectedTextSpacing(qreal points, bool wordSpacing);
+    enum class ParagraphSpacing { Line, Before, After };
+    qreal selectedParagraphSpacing(ParagraphSpacing spacing) const;
+    void setSelectedParagraphSpacing(qreal value, ParagraphSpacing spacing);
+    static void expandSourceParagraphRange(const Draft &draft,
+                                           qsizetype &first, qsizetype &last);
+    static bool normalizeSourceParagraphBreaks(Draft &draft,
+                                               qsizetype &first, qsizetype &last);
+    static void readSourceParagraphLayout(FPDF_PAGE page, FPDF_PAGEOBJECT object,
+                                          Candidate &candidate, const QSizeF &pageSize);
+    QVector<Candidate> restoreSourceParagraphLayouts(QVector<Candidate> candidates,
+                                                     const QSizeF &pageSize) const;
     static QVector<ParagraphFormat> paragraphFormatsForText(
         const QString &text,
         const ParagraphFormat &prototype);
