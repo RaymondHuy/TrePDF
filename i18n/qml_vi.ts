@@ -9,16 +9,16 @@
         <translation>TrePDF</translation>
     </message>
     <message id="FeatureComingSoon">
-        <location filename="../src/Main.qml" line="528"/>
+        <location filename="../src/Main.qml" line="570"/>
         <source>%1 is coming soon</source>
         <translation>Tính năng %1 sắp ra mắt</translation>
     </message>
     <message id="WaitForPdfSave">
-        <location filename="../src/Main.qml" line="205"/>
-        <location filename="../src/Main.qml" line="457"/>
-        <location filename="../src/Main.qml" line="512"/>
-        <location filename="../src/Main.qml" line="559"/>
-        <location filename="../src/PDFTabModel.cpp" line="531"/>
+        <location filename="../src/Main.qml" line="206"/>
+        <location filename="../src/Main.qml" line="499"/>
+        <location filename="../src/Main.qml" line="554"/>
+        <location filename="../src/Main.qml" line="601"/>
+        <location filename="../src/PDFTabModel.cpp" line="548"/>
         <source>Please wait for the PDF to finish saving.</source>
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
@@ -31,19 +31,19 @@
         <translation>Mở PDF</translation>
     </message>
     <message id="PdfFileFilter">
-        <location filename="../src/Main.qml" line="693"/>
-        <location filename="../src/Main.qml" line="716"/>
+        <location filename="../src/Main.qml" line="735"/>
+        <location filename="../src/Main.qml" line="758"/>
         <source>PDF files (*.pdf)</source>
         <translation>Tệp PDF (*.pdf)</translation>
     </message>
     <message id="SavePdfAs">
-        <location filename="../src/Main.qml" line="713"/>
+        <location filename="../src/Main.qml" line="755"/>
         <location filename="../src/Components/ViewRibbon.qml" line="86"/>
         <source>Save PDF As</source>
         <translation>Lưu PDF thành</translation>
     </message>
     <message id="OpenPdfs">
-        <location filename="../src/Main.qml" line="690"/>
+        <location filename="../src/Main.qml" line="732"/>
         <source>Open PDFs</source>
         <translation>Mở các tệp PDF</translation>
     </message>
@@ -64,70 +64,88 @@
         <translation type="vanished">Một số tính năng biểu mẫu tự động không khả dụng cho tệp PDF này.</translation>
     </message>
     <message id="SelectImage">
-        <location filename="../src/Main.qml" line="701"/>
+        <location filename="../src/Main.qml" line="743"/>
         <source>Select Image</source>
         <translation>Chọn hình ảnh</translation>
     </message>
     <message id="ImageFileFilter">
-        <location filename="../src/Main.qml" line="704"/>
+        <location filename="../src/Main.qml" line="746"/>
         <source>Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</source>
         <translation>Tệp hình ảnh (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</translation>
     </message>
     <message id="SaveChangesToDocumentQuestion">
-        <location filename="../src/Main.qml" line="870"/>
+        <location filename="../src/Main.qml" line="925"/>
         <source>Save changes to “%1”?</source>
         <translation>Lưu các thay đổi vào “%1”?</translation>
     </message>
     <message id="UnsavedEditsDescription">
-        <location filename="../src/Main.qml" line="881"/>
+        <location filename="../src/Main.qml" line="936"/>
         <source>Your edits exist only in this session and have not been saved to the PDF.</source>
         <translation>Các chỉnh sửa của bạn chỉ tồn tại trong phiên này và chưa được lưu vào tệp PDF.</translation>
     </message>
     <message id="Cancel">
-        <location filename="../src/Main.qml" line="829"/>
-        <location filename="../src/Main.qml" line="896"/>
-        <location filename="../src/Main.qml" line="971"/>
+        <location filename="../src/Main.qml" line="884"/>
+        <location filename="../src/Main.qml" line="951"/>
+        <location filename="../src/Main.qml" line="1026"/>
+        <location filename="../src/Components/ExportRibbon.qml" line="59"/>
         <source>Cancel</source>
         <translation>Hủy</translation>
     </message>
+    <message id="SaveBeforeExcelExport">
+        <location filename="../src/Main.qml" line="251"/>
+        <location filename="../src/Main.qml" line="277"/>
+        <source>Save the PDF changes before exporting to Excel.</source>
+        <translation>Lưu thay đổi trong PDF trước khi xuất Excel.</translation>
+    </message>
     <message id="ExternalLinkOpenFailed">
-        <location filename="../src/Main.qml" line="431"/>
+        <location filename="../src/Main.qml" line="473"/>
         <source>The link could not be opened in your default browser.</source>
         <translation>Không thể mở liên kết bằng trình duyệt mặc định.</translation>
     </message>
+    <message id="ExportExcel">
+        <location filename="../src/Main.qml" line="768"/>
+        <location filename="../src/Components/ExportRibbon.qml" line="47"/>
+        <source>Export to Excel</source>
+        <translation>Xuất Excel</translation>
+    </message>
+    <message id="ExcelFileFilter">
+        <location filename="../src/Main.qml" line="771"/>
+        <source>Excel workbooks (*.xlsx)</source>
+        <translation>Sổ làm việc Excel (*.xlsx)</translation>
+    </message>
     <message id="OpenExternalLinkQuestion">
-        <location filename="../src/Main.qml" line="753"/>
+        <location filename="../src/Main.qml" line="808"/>
         <source>Open link to %1?</source>
         <translation>Mở liên kết đến %1?</translation>
     </message>
     <message id="ExternalLinkDocumentWantsToOpen">
-        <location filename="../src/Main.qml" line="767"/>
+        <location filename="../src/Main.qml" line="822"/>
         <source>“%1” wants to open this address in your default browser.</source>
         <translation>“%1” muốn mở địa chỉ này bằng trình duyệt mặc định.</translation>
     </message>
     <message id="InsecureHttpLinkWarning">
-        <location filename="../src/Main.qml" line="810"/>
+        <location filename="../src/Main.qml" line="865"/>
         <source>This link uses HTTP, so the connection may not be secure.</source>
         <translation>Liên kết này dùng HTTP nên kết nối có thể không an toàn.</translation>
     </message>
     <message id="OpenInBrowser">
-        <location filename="../src/Main.qml" line="837"/>
+        <location filename="../src/Main.qml" line="892"/>
         <source>Open in Browser</source>
         <translation>Mở trong trình duyệt</translation>
     </message>
     <message id="Save">
-        <location filename="../src/Main.qml" line="904"/>
+        <location filename="../src/Main.qml" line="959"/>
         <location filename="../src/Components/ViewRibbon.qml" line="69"/>
         <source>Save</source>
         <translation>Lưu</translation>
     </message>
     <message id="Discard">
-        <location filename="../src/Main.qml" line="914"/>
+        <location filename="../src/Main.qml" line="969"/>
         <source>Discard</source>
         <translation>Bỏ thay đổi</translation>
     </message>
     <message id="ConfirmDeletePageQuestion">
-        <location filename="../src/Main.qml" line="953"/>
+        <location filename="../src/Main.qml" line="1008"/>
         <source>Do you want to delete page %1?</source>
         <translation>Bạn có muốn xóa trang %1 không?</translation>
     </message>
@@ -148,38 +166,48 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="365"/>
+        <location filename="../src/Components/AppRibbon.qml" line="381"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="371"/>
+        <location filename="../src/Components/AppRibbon.qml" line="387"/>
         <location filename="../src/Components/EditOverlay.qml" line="3675"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Comment">
-        <location filename="../src/Components/AppRibbon.qml" line="377"/>
+        <location filename="../src/Components/AppRibbon.qml" line="393"/>
         <source>Comment</source>
         <translation>Bình luận</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="383"/>
+        <location filename="../src/Components/AppRibbon.qml" line="399"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="389"/>
+        <location filename="../src/Components/AppRibbon.qml" line="405"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
+    <message id="ConvertTab">
+        <location filename="../src/Components/AppRibbon.qml" line="411"/>
+        <source>Convert</source>
+        <translation>Chuyển đổi</translation>
+    </message>
+    <message id="ExportTab">
+        <location filename="../src/Components/ExportRibbon.qml" line="38"/>
+        <source>Export</source>
+        <translation>Xuất</translation>
+    </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="414"/>
+        <location filename="../src/Components/AppRibbon.qml" line="436"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="418"/>
+        <location filename="../src/Components/AppRibbon.qml" line="440"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
@@ -202,7 +230,7 @@
         <translation type="vanished">Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo văn bản, hình ảnh hoặc hình dạng đã chọn để di chuyển, vẽ bằng công cụ Hình dạng hoặc đánh dấu văn bản, kéo hoặc bấm bằng công cụ Văn bản tự do, hoặc bấm bằng công cụ Ghi chú để thêm bình luận</translation>
     </message>
     <message id="Delete">
-        <location filename="../src/Main.qml" line="979"/>
+        <location filename="../src/Main.qml" line="1034"/>
         <location filename="../src/Components/EditOverlay.qml" line="3706"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
         <source>Delete</source>
@@ -1847,14 +1875,19 @@
         <translation>Đóng tab</translation>
     </message>
     <message id="AutomaticFormFeaturesUnavailableForDocument">
-        <location filename="../src/PDFTabModel.cpp" line="150"/>
+        <location filename="../src/PDFTabModel.cpp" line="162"/>
         <source>Some automatic form features are unavailable in “%1”.</source>
         <translation>Một số tính năng biểu mẫu tự động không khả dụng trong “%1”.</translation>
     </message>
     <message id="CannotSaveOverOpenPdf">
-        <location filename="../src/PDFTabModel.cpp" line="631"/>
+        <location filename="../src/PDFTabModel.cpp" line="649"/>
         <source>Another open tab is already using that PDF file.</source>
         <translation>Một tab đang mở khác đã sử dụng tệp PDF đó.</translation>
+    </message>
+    <message id="ExcelExportDestinationInUse">
+        <location filename="../src/PDFTabModel.cpp" line="667"/>
+        <source>Choose a destination that is not used by an open PDF.</source>
+        <translation>Chọn nơi lưu không trùng với PDF đang mở.</translation>
     </message>
     <message id="DropdownOption1">
         <location filename="../src/PDFFormDesignerController.cpp" line="89"/>
@@ -2303,6 +2336,99 @@
         <location filename="../src/Components/TextFormatPanel.qml" line="749"/>
         <source>Spacing (pt)</source>
         <translation>Khoảng cách (pt)</translation>
+    </message>
+    <message id="ExportExcelTableRequirement">
+        <source>Tables need a text layer and cell borders.</source>
+        <translation type="vanished">Bảng cần có lớp văn bản và đường kẻ ô.</translation>
+    </message>
+    <message id="ExportExcelDescription">
+        <source>Export detected tables to Excel.</source>
+        <translation type="vanished">Xuất các bảng nhận diện được sang Excel.</translation>
+    </message>
+    <message id="ExportExcelProgress">
+        <source>%1/%2 pages</source>
+        <translation type="vanished">%1/%2 trang</translation>
+    </message>
+    <message id="ExcelExportNeedsDocument">
+        <location filename="../src/PDFExcelExportController.cpp" line="120"/>
+        <source>Open a PDF before exporting.</source>
+        <translation>Mở PDF trước khi xuất.</translation>
+    </message>
+    <message id="ExcelExportNeedsSavedDocument">
+        <location filename="../src/PDFExcelExportController.cpp" line="124"/>
+        <source>Save your changes before exporting to Excel.</source>
+        <translation>Lưu các thay đổi trước khi xuất Excel.</translation>
+    </message>
+    <message id="ExcelExportInvalidDestination">
+        <location filename="../src/PDFExcelExportController.cpp" line="133"/>
+        <source>Choose an Excel (.xlsx) destination different from the source PDF.</source>
+        <translation>Chọn file Excel (.xlsx) khác với PDF nguồn.</translation>
+    </message>
+    <message id="ExcelExportSheetName">
+        <location filename="../src/PDFExcelExportController.cpp" line="142"/>
+        <source>Page %1 Table %2</source>
+        <translation>Trang %1 Bảng %2</translation>
+    </message>
+    <message id="ExcelExportScanning">
+        <location filename="../src/PDFExcelExportController.cpp" line="154"/>
+        <source>Looking for tables…</source>
+        <translation>Đang tìm bảng…</translation>
+    </message>
+    <message id="ExcelExportAlreadyRunning">
+        <location filename="../src/PDFExcelExportController.cpp" line="183"/>
+        <source>Another Excel export is running. Try again when it finishes.</source>
+        <translation>Đang có một tác vụ xuất Excel. Vui lòng thử lại khi hoàn tất.</translation>
+    </message>
+    <message id="ExcelExportSucceeded">
+        <location filename="../src/PDFExcelExportController.cpp" line="309"/>
+        <source>Exported %1 tables to %2.</source>
+        <translation>Đã xuất %1 bảng vào %2.</translation>
+    </message>
+    <message id="ExcelExportCancelled">
+        <location filename="../src/PDFExcelExportController.cpp" line="315"/>
+        <source>Excel export cancelled.</source>
+        <translation>Đã hủy xuất Excel.</translation>
+    </message>
+    <message id="ExcelExportNoTables">
+        <location filename="../src/PDFExcelExportController.cpp" line="318"/>
+        <source>No supported tables found. Tables need a text layer and a complete cell grid.</source>
+        <translation>Không tìm thấy bảng được hỗ trợ. Bảng cần có lớp văn bản và lưới ô đầy đủ.</translation>
+    </message>
+    <message id="ExcelExportFailed">
+        <location filename="../src/PDFExcelExportController.cpp" line="324"/>
+        <source>Could not export the tables. Check the table layout and destination, then try again.</source>
+        <translation>Không thể xuất bảng. Kiểm tra bố cục bảng và nơi lưu, rồi thử lại.</translation>
+    </message>
+    <message id="ExcelTableExtractionLimit">
+        <location filename="../src/PDFTableExtractor.cpp" line="37"/>
+        <source>This page exceeds the safe table extraction limits. No Excel file was written.</source>
+        <translation>Trang này vượt giới hạn trích xuất bảng. Chưa ghi file Excel.</translation>
+    </message>
+    <message id="ExcelTablePageReadFailed">
+        <location filename="../src/PDFTableExtractor.cpp" line="44"/>
+        <source>The PDF page could not be read for table extraction.</source>
+        <translation>Không thể đọc trang PDF để trích xuất bảng.</translation>
+    </message>
+    <message id="ExcelTableUnsupportedGrid">
+        <location filename="../src/PDFTableExtractor.cpp" line="110"/>
+        <source>A table has incomplete borders or a non-rectangular merged cell. This layout is not supported yet.</source>
+        <oldsource>A table has merged cells or incomplete borders. This layout is not supported yet.</oldsource>
+        <translation>Bảng có đường kẻ chưa đầy đủ hoặc vùng ô gộp không phải hình chữ nhật. Chưa hỗ trợ bố cục này.</translation>
+    </message>
+    <message id="ExcelTableUnsupportedText">
+        <location filename="../src/PDFTableExtractor.cpp" line="711"/>
+        <source>A detected table contains rotated or skewed text that cannot be exported safely.</source>
+        <translation>Bảng chứa chữ xoay hoặc nghiêng nên chưa thể xuất chính xác.</translation>
+    </message>
+    <message id="ExcelTableInvalidUnicode">
+        <location filename="../src/PDFTableExtractor.cpp" line="716"/>
+        <source>A detected table contains text without a reliable Unicode mapping.</source>
+        <translation>Văn bản trong bảng không có ánh xạ Unicode đáng tin cậy.</translation>
+    </message>
+    <message id="ExcelTableAmbiguousText">
+        <location filename="../src/PDFTableExtractor.cpp" line="734"/>
+        <source>Text crosses a detected table border. The cells cannot be assigned safely.</source>
+        <translation>Văn bản vượt qua đường kẻ bảng nên chưa thể xác định đúng ô.</translation>
     </message>
 </context>
 </TS>

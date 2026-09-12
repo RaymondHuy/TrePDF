@@ -23,6 +23,7 @@ ApplicationWindow {
     property bool openingFiles: false
     property PDFDocumentSession pendingSession: null
     property PDFDocumentSession saveAsSession: null
+    property PDFDocumentSession excelExportSession: null
     property PDFDocumentSession workspaceSession: null
     property PDFDocumentSession deletePageSession: null
     property int deletePageIndex: -1
@@ -236,6 +237,47 @@ ApplicationWindow {
         saveAsSession = activeSession
         saveAsDialog.selectedFile = saveAsSession.document.source
         saveAsDialog.open()
+    }
+
+    function requestExcelExport() {
+        if (!activeSession || tabModel.anySaving
+                || !activeDocument.loaded || !prepareActiveWorkspace()) {
+            return
+        }
+
+        const session = activeSession
+        if (session.hasDrafts) {
+            //% "Save the PDF changes before exporting to Excel."
+            showStatus(qsTrId("SaveBeforeExcelExport"))
+            return
+        }
+        if (session.excelExportController.busy)
+            return
+
+        excelExportSession = session
+        const source = session.document.source.toString()
+        excelExportDialog.selectedFile = /\.pdf$/i.test(source)
+            ? source.replace(/\.pdf$/i, ".xlsx")
+            : source + ".xlsx"
+        excelExportDialog.open()
+    }
+
+    function exportExcelTo(url) {
+        const session = excelExportSession
+        excelExportSession = null
+        if (!session || tabModel.indexOf(session) < 0
+                || !session.document.loaded || tabModel.anySaving
+                || session.saving || session.excelExportController.busy) {
+            return
+        }
+        if (session === activeSession && !prepareActiveWorkspace())
+            return
+        if (session.hasDrafts) {
+            //% "Save the PDF changes before exporting to Excel."
+            showStatus(qsTrId("SaveBeforeExcelExport"))
+            return
+        }
+        tabModel.requestExcelExport(session, url)
     }
 
     function commitActivePanelEdits() {
@@ -719,6 +761,19 @@ ApplicationWindow {
         onRejected: window.saveAsSession = null
     }
 
+    FileDialog {
+        id: excelExportDialog
+
+        //% "Export to Excel"
+        title: qsTrId("ExportExcel")
+        fileMode: FileDialog.SaveFile
+        //% "Excel workbooks (*.xlsx)"
+        nameFilters: [qsTrId("ExcelFileFilter")]
+        defaultSuffix: "xlsx"
+        onAccepted: window.exportExcelTo(selectedFile)
+        onRejected: window.excelExportSession = null
+    }
+
     Popup {
         id: externalLinkPopup
 
@@ -995,6 +1050,7 @@ ApplicationWindow {
             editController: window.activeEditController
             searchController: window.activeSearchController
             session: window.activeSession
+            anySaving: tabModel.anySaving
             hasPendingPanelEdits: window.activeWorkspaceHasPendingEdits
             viewNavigationPage: window.activeWorkspaceItem
                 ? window.activeWorkspaceItem.activePage
@@ -1007,10 +1063,10 @@ ApplicationWindow {
                 : window.activeDocument.loaded
                     && window.activeDocument.currentPage + 1
                         < window.activeDocument.pageCount
-            enabled: !tabModel.anySaving
             onOpenRequested: window.requestOpen()
             onSaveRequested: window.requestSave()
             onSaveAsRequested: window.requestSaveAs()
+            onExcelExportRequested: window.requestExcelExport()
             onPageRequested: page => window.goToPage(page)
             onPageStepRequested: direction => {
                 const workspace = window.activeWorkspace()

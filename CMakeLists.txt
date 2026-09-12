@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(TrePDF
     VERSION 0.1.0
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 17)
@@ -36,6 +36,28 @@ qt_standard_project_setup(
     I18N_TRANSLATED_LANGUAGES vi
 )
 
+# Keep third-party build options local and the backend free of extra runtime
+# libraries. The vendored 1.2.4 source makes first-time/offline builds identical.
+function(trepdf_add_spreadsheet_backend)
+    set(BUILD_SHARED_LIBS OFF)
+    set(BUILD_TESTS OFF)
+    set(BUILD_EXAMPLES OFF)
+    set(BUILD_FUZZERS OFF)
+    set(USE_SYSTEM_MINIZIP OFF)
+    set(USE_STANDARD_TMPFILE OFF)
+    set(USE_OPENSSL_MD5 OFF)
+    set(USE_MEM_FILE OFF)
+    set(USE_FMEMOPEN OFF)
+    set(USE_DTOA_LIBRARY ON)
+    add_subdirectory(third_party/libxlsxwriter EXCLUDE_FROM_ALL)
+    set_target_properties(xlsxwriter PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+    )
+    add_library(Libxlsxwriter::Libxlsxwriter ALIAS xlsxwriter)
+endfunction()
+trepdf_add_spreadsheet_backend()
+
 file(GLOB_RECURSE TREPDF_BUNDLED_FONT_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts/*.otf"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts/*.OTF"
@@ -58,6 +80,7 @@ qt_add_qml_module(trepdf
         src/DraftImageItem.h
         src/FormFieldLayer.cpp
         src/FormFieldLayer.h
+        src/LibxlsxwriterWorkbook.cpp
         src/PDFAcroFormCanonicalizer.cpp
         src/PDFAcroFormCanonicalizer.h
         src/PDFAcroFormWriter.cpp
@@ -78,6 +101,8 @@ qt_add_qml_module(trepdf
         src/PDFEditControllerSave.cpp
         src/PDFEditControllerSupport.cpp
         src/PDFEditController_p.h
+        src/PDFExcelExportController.cpp
+        src/PDFExcelExportController.h
         src/PDFFormController.cpp
         src/PDFFormController.h
         src/PDFFormAppearance.h
@@ -95,6 +120,10 @@ qt_add_qml_module(trepdf
         src/PDFSearchController.h
         src/PDFTabModel.cpp
         src/PDFTabModel.h
+        src/PDFTableExtractor.cpp
+        src/PDFTableExtractor.h
+        src/PDFTableLayout.h
+        src/PDFTableSymbolMapping.h
         src/PDFiumSynchronization.h
         src/PDFWidgetAnnotationSuppression.cpp
         src/PDFWidgetAnnotationSuppression.h
@@ -103,6 +132,7 @@ qt_add_qml_module(trepdf
         src/PDFRasterBudget.cpp
         src/PDFRasterBudget.h
         src/PDFRasterPlan.h
+        src/SpreadsheetWorkbook.h
     QML_FILES
         src/Main.qml
         src/Components/AppRibbon.qml
@@ -119,6 +149,7 @@ qt_add_qml_module(trepdf
         src/Components/DropdownOptionsPanel.qml
         src/Components/EditOverlay.qml
         src/Components/EditRibbon.qml
+        src/Components/ExportRibbon.qml
         src/Components/FormChoiceOverlay.qml
         src/Components/FormRibbon.qml
         src/Components/FormTextFieldOverlay.qml
@@ -198,6 +229,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/shield-check.svg
         src/assets/icons/signature.svg
         src/assets/icons/square-check-big.svg
+        src/assets/icons/spreadsheet.svg
         src/assets/icons/squiggly.svg
         src/assets/icons/stamp.svg
         src/assets/icons/strikethrough.svg
@@ -246,6 +278,7 @@ target_link_libraries(trepdf
         Qt6::Quick
         Qt6::QuickControls2
         PDFium::PDFium
+        Libxlsxwriter::Libxlsxwriter
 )
 
 set_target_properties(trepdf PROPERTIES

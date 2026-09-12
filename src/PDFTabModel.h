@@ -2,6 +2,7 @@
 
 #include "PDFDocument.h"
 #include "PDFEditController.h"
+#include "PDFExcelExportController.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
 #include "PDFSearchController.h"
@@ -66,6 +67,8 @@ class PDFDocumentSession : public QObject
                    READ formDesignerController CONSTANT FINAL)
     Q_PROPERTY(PDFSearchController *searchController READ searchController
                    CONSTANT FINAL)
+    Q_PROPERTY(PDFExcelExportController *excelExportController READ excelExportController
+                   CONSTANT FINAL)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged FINAL)
     Q_PROPERTY(QString filePath READ filePath NOTIFY filePathChanged FINAL)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
@@ -119,6 +122,7 @@ public:
     PDFFormController *formController() const;
     PDFFormDesignerController *formDesignerController() const;
     PDFSearchController *searchController() const;
+    PDFExcelExportController *excelExportController() const;
     QString title() const;
     QString filePath() const;
     qreal zoom() const;
@@ -188,6 +192,7 @@ private:
     PDFFormController *m_formController = nullptr;
     PDFFormDesignerController *m_formDesignerController = nullptr;
     PDFSearchController *m_searchController = nullptr;
+    PDFExcelExportController *m_excelExportController = nullptr;
     PDFViewState *m_secondaryViewState = nullptr;
     QString m_title;
     QString m_filePath;
@@ -238,6 +243,7 @@ public:
     Q_INVOKABLE bool closeSession(PDFDocumentSession *session);
     Q_INVOKABLE bool requestSave(PDFDocumentSession *session);
     Q_INVOKABLE bool requestSaveAs(PDFDocumentSession *session, const QUrl &target);
+    Q_INVOKABLE bool requestExcelExport(PDFDocumentSession *session, const QUrl &target);
     Q_INVOKABLE PDFDocumentSession *firstDraftSession() const;
     Q_INVOKABLE void finishAllEdits();
 

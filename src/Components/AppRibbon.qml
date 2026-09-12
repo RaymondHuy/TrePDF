@@ -13,6 +13,7 @@ Column {
     required property PDFEditController editController
     required property PDFSearchController searchController
     property PDFDocumentSession session: null
+    property bool anySaving: false
     property bool hasPendingPanelEdits: false
     property int viewNavigationPage: document.currentPage
     property bool viewCanNavigateBackward: viewNavigationPage > 0
@@ -31,6 +32,7 @@ Column {
     readonly property bool editTabActive: ribbonTabs.currentIndex === 1
     readonly property bool commentTabActive: ribbonTabs.currentIndex === 2
     readonly property bool formsTabActive: ribbonTabs.currentIndex === 3
+    readonly property bool exportTabActive: ribbonTabs.currentIndex === 5
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
         && document.loaded
@@ -53,6 +55,7 @@ Column {
     signal openRequested()
     signal saveRequested()
     signal saveAsRequested()
+    signal excelExportRequested()
     signal pageRequested(int page)
     signal pageStepRequested(int direction)
     signal searchResultRequested(int page,
@@ -330,6 +333,18 @@ Column {
         }
     }
 
+    Component {
+        id: exportRibbonComponent
+
+        ExportRibbon {
+            theme: root.theme
+            session: root.session
+            anySaving: root.anySaving
+            hasPendingPanelEdits: root.hasPendingPanelEdits
+            onExportRequested: root.excelExportRequested()
+        }
+    }
+
     Rectangle {
         width: parent.width
         height: 34
@@ -355,6 +370,7 @@ Column {
 
                 Layout.preferredWidth: 520
                 Layout.fillHeight: true
+                enabled: !root.anySaving
                 spacing: 0
                 background: Item {}
                 onCurrentIndexChanged: root.syncEditTool()
@@ -387,6 +403,12 @@ Column {
                     theme: root.theme
                     //% "E-Sign"
                     text: qsTrId("ESign")
+                }
+
+                RibbonTabButton {
+                    theme: root.theme
+                    //% "Convert"
+                    text: qsTrId("ConvertTab")
                 }
             }
 
@@ -445,6 +467,7 @@ Column {
 
         Loader {
             anchors.fill: parent
+            enabled: !root.anySaving || root.exportTabActive
             sourceComponent: ribbonTabs.currentIndex === 0
                 ? viewRibbonComponent
                 : ribbonTabs.currentIndex === 1
@@ -453,7 +476,9 @@ Column {
                         ? commentRibbonComponent
                         : ribbonTabs.currentIndex === 3
                             ? formRibbonComponent
-                            : signRibbonComponent
+                            : ribbonTabs.currentIndex === 4
+                                ? signRibbonComponent
+                                : exportRibbonComponent
         }
     }
 }

@@ -93,6 +93,7 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
     , m_formController(new PDFFormController(this))
     , m_formDesignerController(new PDFFormDesignerController(this))
     , m_searchController(new PDFSearchController(this))
+    , m_excelExportController(new PDFExcelExportController(this))
     , m_secondaryViewState(new PDFViewState(this))
 {
     m_formDesignerController->setDocument(m_document);
@@ -102,6 +103,17 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
     m_editController->setFormController(m_formController);
     m_editController->setFormDesignerController(m_formDesignerController);
     m_searchController->setDocument(m_document);
+    m_excelExportController->setDocument(m_document);
+    m_excelExportController->setExportGuard([this]() {
+        prepareForDeactivation();
+        return !hasDrafts() && !saving();
+    });
+    connect(m_editController, &PDFEditController::historyStateChanged,
+            m_excelExportController, &PDFExcelExportController::cancel);
+    connect(m_editController, &PDFEditController::savingChanged,
+            m_excelExportController, &PDFExcelExportController::cancel);
+    connect(m_excelExportController, &PDFExcelExportController::statusMessage,
+            this, &PDFDocumentSession::statusMessage);
     connect(
         m_editController,
         &PDFEditController::historyStateChanged,
@@ -183,6 +195,11 @@ PDFFormDesignerController *PDFDocumentSession::formDesignerController() const
 PDFSearchController *PDFDocumentSession::searchController() const
 {
     return m_searchController;
+}
+
+PDFExcelExportController *PDFDocumentSession::excelExportController() const
+{
+    return m_excelExportController;
 }
 
 QString PDFDocumentSession::title() const
@@ -582,6 +599,7 @@ bool PDFTabModel::closeSession(PDFDocumentSession *session)
     if (session->hasDrafts()) {
         return false;
     }
+    session->excelExportController()->cancel();
     const int oldCurrentIndex = m_currentIndex;
     const bool removingCurrentSession = index == oldCurrentIndex;
 
@@ -635,6 +653,22 @@ bool PDFTabModel::requestSaveAs(PDFDocumentSession *session, const QUrl &target)
     }
 
     return session->editController()->requestSaveAs(target);
+}
+
+bool PDFTabModel::requestExcelExport(PDFDocumentSession *session, const QUrl &target)
+{
+    if (!contains(session) || anySaving())
+        return false;
+    const QString targetIdentity = fileIdentity(target);
+    for (PDFDocumentSession *other : m_sessions) {
+        if (!targetIdentity.isEmpty()
+            && targetIdentity == fileIdentity(other->document()->source())) {
+            //% "Choose a destination that is not used by an open PDF."
+            emit statusMessage(qtTrId("ExcelExportDestinationInUse"));
+            return false;
+        }
+    }
+    return session->excelExportController()->exportTo(target);
 }
 
 PDFDocumentSession *PDFTabModel::firstDraftSession() const

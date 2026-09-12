@@ -352,7 +352,21 @@ editor it formats the selected range, or only subsequently typed text at a
 collapsed caret. Size changes preserve local editor undo/redo, reflow live,
 and persist through Save/Save As.
 
+The **Convert** tab exports detected tables to `.xlsx`, with one worksheet per
+table and per-document cancellation. The ribbon shows only action buttons;
+results use the app status message. Save PDF changes before exporting.
+Text-based tables need a closed ruled perimeter and at least two rows and two
+columns. Rectangular merged cells are preserved; scans without a text layer,
+borderless tables, malformed merged regions, and rotated text are unsupported.
+Cell values are written as
+text to preserve Unicode, leading zeros, and literal formula-like strings.
+Export uses a replaceable `SpreadsheetWorkbook` interface; libxlsxwriter 1.2.4
+is the initial, statically linked backend bundled under `third_party/`.
+
 ## Source documentation
+
+- [`docs/excel-export-pipeline.md`](docs/excel-export-pipeline.md): table detection,
+  export transactions, cancellation, limits, backend replacement, and tests.
 
 - [`docs/source-file-map.md`](docs/source-file-map.md): architecture, ownership,
   thread boundaries, main runtime flows, and an index of every current QML/C++

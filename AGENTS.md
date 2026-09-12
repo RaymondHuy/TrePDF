@@ -15,6 +15,16 @@ and Save/Save As persistence.
 
 Current features:
 
+- The Convert tab writes detected PDF tables to Excel, one worksheet per table.
+  Export requires saved source content and text-based ruled grids with closed
+  perimeters; rectangular merged cells are preserved. Borderless/scan tables
+  and malformed or nonrectangular merged regions remain unsupported. Values remain
+  literal text. `PDFExcelExportController` owns per-session state and uses a
+  separate single-worker PDFium document, bounded `PDFTableExtractor` geometry,
+  cancellation, staging, and atomic `QSaveFile` commit. `SpreadsheetWorkbook`
+  is the replaceable writer interface; only `LibxlsxwriterWorkbook.cpp` includes
+  libxlsxwriter. See `docs/excel-export-pipeline.md` for the complete contract.
+
 - Open multiple local PDF files in independent tabs and close them separately.
 - Insert a blank page immediately after the current page or delete the current
   page, with undo/redo/discard and Save/Save As persistence.
