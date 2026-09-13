@@ -33,6 +33,8 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerTextSpacing.cpp
     ../src/ApplicationFonts.cpp
     ../src/ApplicationFonts.h
+    ../src/FontDownloadService.cpp
+    ../src/FontDownloadService.h
     ../src/DraftImageItem.cpp
     ../src/DraftImageItem.h
     ../src/FormFieldLayer.cpp
@@ -105,6 +107,8 @@ target_include_directories(trepdf_edit_controller_tests
 target_link_libraries(trepdf_edit_controller_tests
     PRIVATE
         Qt6::Gui
+        Qt6::Network
+        trepdf_font_archive
         Qt6::Qml
         Qt6::Quick
         Qt6::Test

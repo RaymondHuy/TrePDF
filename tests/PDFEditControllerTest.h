@@ -53,6 +53,12 @@ private slots:
     void keepsArialLayoutStableAfterEmbeddedSubsetCollision();
     void preservesFirstSpaceAfterSubsetSave();
     void preservesInferredSpaceAfterGroupedSubsetEdit();
+    void reembedsUninstalledSourceSubsetForNewObjectGlyphs();
+    void preservesUnicodeAliasesWhenReembeddingSourceSubset();
+    void preservesSourceSubsetLayoutControls_data();
+    void preservesSourceSubsetLayoutControls();
+    void rejectsMissingSourceSubsetGlyphWithoutReplacingDestination();
+    void separatesSameFamilySourceSubsetCaches();
     void filtersUnsupportedSystemFonts();
     void filtersFontFamiliesByLanguage();
     void intersectsFontFiltersAcrossMixedStyles();
@@ -348,6 +354,11 @@ private slots:
     void keepsTabDraftsIndependent();
     void savesOnlyRequestedTab();
     void rejectsSaveAsOverAnotherOpenTab();
+    void cancelsMissingFontSaveWithoutLosingDrafts();
+    void rejectsUnsafeFontDownloads_data();
+    void rejectsUnsafeFontDownloads();
+    void cancelsFontDownloadBeforeInstallation();
+    void downloadsPrivateFontAndResumesOriginalSave();
 
 private:
     QTemporaryDir m_temporaryDirectory;

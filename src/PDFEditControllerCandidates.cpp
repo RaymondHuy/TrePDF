@@ -904,6 +904,11 @@ void PDFEditController::resolveCandidateFontFamily(
             candidate.fontItalic,
             candidate.text)) {
         candidate.fontFamily = candidate.pendingBundledFontFamily;
+    } else if (ApplicationFonts::downloadedFontFamilies().contains(
+                   candidate.pendingFontExpectedFamily, Qt::CaseInsensitive)
+               && ApplicationFonts::fontFaceSupportsText(candidate.pendingFontExpectedFamily,
+                   candidate.fontBold, candidate.fontItalic, candidate.text)) {
+        candidate.fontFamily = candidate.pendingFontExpectedFamily;
     } else if (ApplicationFonts::fontFaceSupportsText(
                    candidate.pendingSystemFontFamily,
                    candidate.fontBold,

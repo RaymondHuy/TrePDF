@@ -257,6 +257,7 @@ signals:
     void hasDraftsChanged();
     void statusMessage(const QString &message);
     void sessionSaveFinished(PDFDocumentSession *session, bool succeeded);
+    void fontDownloadRequested(PDFDocumentSession *session);
     void externalLinkRequested(PDFDocumentSession *session,
                                quint64 requestId,
                                const QString &authority,

@@ -18,6 +18,7 @@
 #include <utility>
 
 #include <QFile>
+#include <QCryptographicHash>
 #include <QFileInfo>
 #include <QDir>
 #include <QDateTime>
@@ -78,6 +79,9 @@ struct SaveFormat {
     QString fontFamily;
     QString embeddableFontFamily;
     QByteArray embeddableFontData;
+    // Distinguish separate PDF subsets that retain the same family/style name.
+    QByteArray sourceFontFingerprint;
+    QVector<char32_t> sourceFontCharacters;
     qreal fontSizeRatio = 0.0;
     qreal displayFontSizeRatio = 0.0;
     qreal letterSpacingRatio = 0.0;
@@ -480,6 +484,8 @@ bool sameFormat(const SaveFormat &left, const SaveFormat &right)
 {
     return sameFamily(left.fontFamily, right.fontFamily)
         && sameFamily(left.embeddableFontFamily, right.embeddableFontFamily)
+        && left.sourceFontFingerprint == right.sourceFontFingerprint
+        && left.sourceFontCharacters == right.sourceFontCharacters
         && left.fontSizeRatio == right.fontSizeRatio
         && left.displayFontSizeRatio == right.displayFontSizeRatio
         && left.letterSpacingRatio == right.letterSpacingRatio
@@ -1247,12 +1253,12 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
                 // A justified line distributes extra width between words.
                 // Preserve each word's Qt position instead of scaling one
                 // PDF text object across the entire justified line.
-                const bool positionedWords = option.alignment().testFlag(Qt::AlignJustify)
-                    && (lineEnd < paragraphEnd
-                        || paragraphText.mid(line.textStart(), line.textLength())
-                            .contains(QLatin1Char('\t')));
-                if (option.alignment().testFlag(Qt::AlignJustify)) {
-                    const bool justifiedLine = lineEnd < paragraphEnd;
+                const bool containsTab = paragraphText.mid(line.textStart(), line.textLength())
+                    .contains(QLatin1Char('\t'));
+                const bool justifiedLine = option.alignment().testFlag(Qt::AlignJustify)
+                    && lineEnd < paragraphEnd;
+                const bool positionedWords = justifiedLine || containsTab;
+                if (positionedWords) {
                     for (qsizetype position = lineStart; position < lineEnd; ++position) {
                         const QChar character = draft.text.at(position);
                         // Tabs are layout advances, never font glyphs, even
@@ -1413,6 +1419,52 @@ public:
         }
     }
 
+    void beginPage()
+    {
+        // Source handles belong to page objects and must not key caches after
+        // that page closes. Loaded replacement fonts remain document-owned.
+        m_sourceFaces.clear();
+    }
+
+    bool prepareSourceFace(SaveFormat &format, const QString &text,
+                           const QVector<FPDF_FONT> &sourceFonts,
+                           uint &unsupportedCodePoint)
+    {
+        for (FPDF_FONT font : sourceFonts) {
+            auto face = m_sourceFaces.constFind(font);
+            if (face == m_sourceFaces.cend()) {
+                if (m_sourceFaces.size() >= 128)
+                    continue;
+                face = m_sourceFaces.insert(font, readSourceFace(font));
+            }
+            if (face->data.isEmpty() || !sameFamily(format.fontFamily, face->rawFont.familyName())
+                || format.fontBold != (face->rawFont.weight() >= QFont::Bold)
+                || format.fontItalic != (face->rawFont.style() != QFont::StyleNormal))
+                continue;
+            uint missing = 0;
+            for (uint character : text.toUcs4()) {
+                // LF/tabs are layout controls; spaces need real cmap entries.
+                if (character != '\n' && character != '\t'
+                    && !face->rawFont.supportsCharacter(character)) {
+                    missing = character;
+                    break;
+                }
+            }
+            if (missing) {
+                if (!unsupportedCodePoint)
+                    unsupportedCodePoint = missing;
+                continue;
+            }
+            format.embeddableFontFamily = face->rawFont.familyName();
+            format.embeddableFontData = face->data;
+            format.sourceFontFingerprint = face->fingerprint;
+            format.forceEmbeddedFont = true;
+            unsupportedCodePoint = 0;
+            return true;
+        }
+        return false;
+    }
+
     QString embeddedFamilyForText(const SaveFormat &format,
                                   const QString &text,
                                   uint &unsupportedCodePoint)
@@ -1479,12 +1531,114 @@ public:
 
     Q_DISABLE_COPY_MOVE(FontResolver)
 
+    bool prepareSourceText(SaveFormat &format, const QString &text,
+                           uint &unsupportedCodePoint) const
+    {
+        if (format.sourceFontFingerprint.isEmpty())
+            return true;
+        const auto face = m_sourceData.constFind(format.sourceFontFingerprint);
+        if (face == m_sourceData.cend())
+            return false;
+        // Spaced layout can attach a differently styled space to a visible
+        // cluster. Validate and map the final run, not just the original span.
+        auto &characters = format.sourceFontCharacters;
+        characters.clear();
+        for (uint character : text.toUcs4()) {
+            if (!face->rawFont.supportsCharacter(character)) {
+                unsupportedCodePoint = character;
+                return false;
+            }
+            characters.append(static_cast<char32_t>(character));
+        }
+        std::sort(characters.begin(), characters.end());
+        characters.erase(std::unique(characters.begin(), characters.end()), characters.end());
+        return !characters.isEmpty() && characters.size() <= 65535;
+    }
+
+    static bool setText(FPDF_PAGEOBJECT object, const SaveFormat &format,
+                        const QString &text)
+    {
+        if (format.sourceFontCharacters.isEmpty())
+            return FPDFText_SetText(object,
+                reinterpret_cast<const FPDF_WCHAR *>(text.utf16()));
+        const auto &characters = format.sourceFontCharacters;
+        QVector<uint32_t> codes;
+        for (uint character : text.toUcs4()) {
+            const auto found = std::lower_bound(characters.cbegin(), characters.cend(), character);
+            if (found == characters.cend() || *found != character)
+                return false;
+            codes.append(static_cast<uint32_t>(found - characters.cbegin() + 1));
+        }
+        return FPDFText_SetCharcodes(object, codes.constData(), size_t(codes.size()));
+    }
+
 private:
+    struct SourceFace {
+        QByteArray data;
+        QByteArray fingerprint;
+        QRawFont rawFont;
+    };
+
+    SourceFace readSourceFace(FPDF_FONT font)
+    {
+        constexpr size_t maximumFaceBytes = 4 * 1024 * 1024;
+        constexpr qsizetype maximumSourceBytes = 32 * 1024 * 1024;
+        size_t size = 0;
+        // Never re-embed PDFium's substitute for an unembedded source font.
+        if (!font || FPDFFont_GetIsEmbedded(font) != 1
+            || !FPDFFont_GetFontData(font, nullptr, 0, &size)
+            || size == 0 || size > maximumFaceBytes)
+            return {};
+        SourceFace face;
+        face.data.resize(static_cast<qsizetype>(size));
+        size_t actualSize = 0;
+        if (!FPDFFont_GetFontData(font, reinterpret_cast<uint8_t *>(face.data.data()),
+                                  size, &actualSize) || actualSize != size)
+            return {};
+        face.fingerprint = QCryptographicHash::hash(face.data, QCryptographicHash::Sha256);
+        const auto existing = m_sourceData.constFind(face.fingerprint);
+        if (existing != m_sourceData.cend())
+            return existing.value();
+        if (face.data.size() > maximumSourceBytes - m_sourceBytes)
+            return {};
+        face.rawFont = QRawFont(face.data, 16.0, QFont::PreferNoHinting);
+        // The loader below accepts TrueType outlines. Limit this fallback to
+        // editable, subsettable static faces with a reliable Unicode cmap.
+        if (!face.rawFont.isValid() || face.rawFont.fontTable("glyf").isEmpty()
+            || face.rawFont.fontTable("loca").isEmpty()
+            || face.rawFont.fontTable("cmap").isEmpty()
+            || !face.rawFont.fontTable("fvar").isEmpty())
+            return {};
+        const QByteArray os2 = face.rawFont.fontTable("OS/2");
+        if (os2.size() < 10)
+            return {};
+        const auto u16 = [&os2](int offset) {
+            return (quint16(quint8(os2[offset])) << 8) | quint8(os2[offset + 1]);
+        };
+        const quint16 version = u16(0);
+        const quint16 flags = u16(8);
+        const quint16 permission = flags & 0x000fU;
+        if ((flags & 0x0301U) != 0 // no subsetting, bitmap-only, or reserved bit
+            || (version >= 2 && (flags & 0xfcf0U) != 0)
+            || (permission != 0 && (version <= 2 ? !(permission & 0x0008U)
+                                                    : permission != 0x0008U)))
+            return {};
+        m_sourceBytes += face.data.size();
+        m_sourceData.insert(face.fingerprint, face);
+        return face;
+    }
+
+    static QString embeddedFaceKey(const SaveFormat &format)
+    {
+        return fontFaceKey(format) + QLatin1Char('|')
+            + QString::fromLatin1(format.sourceFontFingerprint.toHex());
+    }
+
     bool embeddedFontSupportsText(const SaveFormat &format,
                                   const QString &text,
                                   uint &unsupportedCodePoint)
     {
-        const QString key = fontFaceKey(format);
+        const QString key = embeddedFaceKey(format);
         auto rawFont = m_rawFontCache.constFind(key);
         if (rawFont == m_rawFontCache.cend()) {
             const QByteArray &fontData = format.embeddableFontData;
@@ -1509,7 +1663,13 @@ private:
 
     FPDF_FONT loadEmbeddedFont(const SaveFormat &format)
     {
-        const QString key = QStringLiteral("embedded|") + fontFaceKey(format);
+        QString key = QStringLiteral("embedded|") + embeddedFaceKey(format);
+        if (!format.sourceFontCharacters.isEmpty()) {
+            key += QLatin1Char('|') + QString::fromLatin1(QCryptographicHash::hash(
+                QString::fromUcs4(format.sourceFontCharacters.constData(),
+                                 format.sourceFontCharacters.size()).toUtf8(),
+                QCryptographicHash::Sha256).toHex());
+        }
         const auto cached = m_fontCache.constFind(key);
         if (cached != m_fontCache.cend()) {
             return cached.value();
@@ -1519,12 +1679,11 @@ private:
         if (fontData.isEmpty()) {
             return nullptr;
         }
-        FPDF_FONT font = FPDFText_LoadFont(
-            m_document,
-            reinterpret_cast<const uint8_t *>(fontData.constData()),
-            static_cast<uint32_t>(fontData.size()),
-            FPDF_FONT_TRUETYPE,
-            true);
+        FPDF_FONT font = format.sourceFontCharacters.isEmpty()
+            ? FPDFText_LoadFont(m_document,
+                reinterpret_cast<const uint8_t *>(fontData.constData()),
+                static_cast<uint32_t>(fontData.size()), FPDF_FONT_TRUETYPE, true)
+            : loadSourceFont(format);
         if (font) {
             m_fontCache.insert(key, font);
             m_loadedFonts.append(font);
@@ -1532,9 +1691,61 @@ private:
         return font;
     }
 
+    FPDF_FONT loadSourceFont(const SaveFormat &format)
+    {
+        constexpr qsizetype maximumLoadedSourceBytes = 32 * 1024 * 1024;
+        const auto face = m_sourceData.constFind(format.sourceFontFingerprint);
+        if (face == m_sourceData.cend()
+            || face->data.size() > maximumLoadedSourceBytes - m_loadedSourceBytes)
+            return nullptr;
+
+        // PDFium's automatic mapping can omit the first cmap entry in a
+        // previously subsetted face. Give each Unicode character its own CID,
+        // including spaces and characters that share the same outline.
+        const auto &characters = format.sourceFontCharacters;
+        QByteArray glyphMap((characters.size() + 1) * 2, '\0');
+        QByteArray unicodeMap = QByteArrayLiteral(
+            "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+            "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+            "/CMapName /TrePDFSourceUnicode def\n/CMapType 2 def\n"
+            "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+        const auto hex = [](uint value) { return QByteArray::number(value, 16).rightJustified(4, '0'); };
+        for (qsizetype start = 0; start < characters.size(); start += 100) {
+            const qsizetype end = qMin(start + 100, characters.size());
+            unicodeMap += QByteArray::number(end - start) + " beginbfchar\n";
+            for (qsizetype index = start; index < end; ++index) {
+                const QString character = QString::fromUcs4(&characters[index], 1);
+                const auto glyphs = face->rawFont.glyphIndexesForString(character);
+                if (glyphs.size() != 1 || glyphs.front() == 0 || glyphs.front() > 65535)
+                    return nullptr;
+                const uint glyph = glyphs.front();
+                glyphMap[(index + 1) * 2] = char(glyph >> 8);
+                glyphMap[(index + 1) * 2 + 1] = char(glyph & 0xff);
+                unicodeMap += '<' + hex(uint(index + 1)) + "> <";
+                for (QChar unit : character)
+                    unicodeMap += hex(unit.unicode());
+                unicodeMap += ">\n";
+            }
+            unicodeMap += "endbfchar\n";
+        }
+        unicodeMap += "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
+        FPDF_FONT font = FPDFText_LoadCidType2Font(m_document,
+            reinterpret_cast<const uint8_t *>(face->data.constData()),
+            static_cast<uint32_t>(face->data.size()), unicodeMap.constData(),
+            reinterpret_cast<const uint8_t *>(glyphMap.constData()),
+            static_cast<uint32_t>(glyphMap.size()));
+        if (font)
+            m_loadedSourceBytes += face->data.size();
+        return font;
+    }
+
     FPDF_DOCUMENT m_document = nullptr;
     QHash<QString, QRawFont> m_rawFontCache;
     QHash<QString, FPDF_FONT> m_fontCache;
+    QHash<FPDF_FONT, SourceFace> m_sourceFaces;
+    QHash<QByteArray, SourceFace> m_sourceData;
+    qsizetype m_sourceBytes = 0;
+    qsizetype m_loadedSourceBytes = 0;
     QVector<FPDF_FONT> m_loadedFonts;
 };
 
@@ -1548,6 +1759,20 @@ PDFSaveWriter::Result failure(PDFSaveWriter::Error error,
     result.page = page;
     result.detail = detail;
     result.unsupportedCodePoint = unsupportedCodePoint;
+    return result;
+}
+
+PDFSaveWriter::Result fontFailure(const SaveFormat &format, int page,
+                                  uint unsupportedCodePoint = 0)
+{
+    auto result = failure(PDFSaveWriter::Error::FontUnavailable, page,
+                          format.fontFamily, unsupportedCodePoint);
+    result.fontBold = format.fontBold;
+    result.fontItalic = format.fontItalic;
+    // A complete face already checked and lacking the glyph will not be fixed
+    // by downloading that same face again.
+    result.fontDownloadSuggested = !format.fontFamily.trimmed().isEmpty()
+        && (format.embeddableFontData.isEmpty() || !format.sourceFontFingerprint.isEmpty());
     return result;
 }
 
@@ -2676,6 +2901,7 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                                          qreal pageWidth,
                                          qreal pageHeight,
                                          FPDF_FONT originalFont,
+                                         const QVector<FPDF_FONT> &sourceFonts,
                                          FontResolver &fontResolver,
                                          const PageCoordinateMapper &coordinateMapper,
                                          QVector<FPDF_PAGEOBJECT> &objects,
@@ -2717,7 +2943,9 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                                    const QString &text,
                                    uint &unsupportedCodePoint) {
         unsupportedCodePoint = 0;
-        if (text.isEmpty()) {
+        if (std::all_of(text.cbegin(), text.cend(), [](QChar character) {
+                return character == QLatin1Char('\n') || character == QLatin1Char('\t');
+            })) {
             return true;
         }
 
@@ -2739,6 +2967,11 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             format.forceEmbeddedFont = true;
             return true;
         }
+        if (!draft.added && fontResolver.prepareSourceFace(
+                format, text, sourceFonts, unsupportedCodePoint))
+            return true;
+        if (unsupportedCodePoint)
+            return false;
         return !requiresEmbeddedUnicodeFont(text)
             && format.embeddableFontFamily.isEmpty();
     };
@@ -2749,11 +2982,7 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 preparedDraft.originalFormat,
                 preparedDraft.text,
                 unsupportedCodePoint)) {
-            return failure(
-                PDFSaveWriter::Error::FontUnavailable,
-                draft.page,
-                preparedDraft.originalFormat.fontFamily,
-                unsupportedCodePoint);
+            return fontFailure(preparedDraft.originalFormat, draft.page, unsupportedCodePoint);
         }
     }
     for (SaveSpan &span : preparedDraft.characterSpans) {
@@ -2769,16 +2998,12 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 span.format,
                 preparedDraft.text.sliced(start, length),
                 unsupportedCodePoint)) {
-            return failure(
-                PDFSaveWriter::Error::FontUnavailable,
-                draft.page,
-                span.format.fontFamily,
-                unsupportedCodePoint);
+            return fontFailure(span.format, draft.page, unsupportedCodePoint);
         }
     }
 
     bool validLayout = false;
-    const QVector<LayoutRun> runs = layoutRuns(
+    QVector<LayoutRun> runs = layoutRuns(
         preparedDraft,
         pageWidth,
         pageHeight,
@@ -2787,17 +3012,31 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
         return failure(PDFSaveWriter::Error::TextObjectCreationFailed,
                        draft.page, draft.objectId);
     }
-    for (const LayoutRun &run : runs) {
+    QHash<QByteArray, QVector<char32_t>> sourceCharacters;
+    for (LayoutRun &run : runs) {
+        if (!fontResolver.prepareSourceText(run.format, run.text, unsupportedCodePoint)) {
+            return fontFailure(run.format, draft.page, unsupportedCodePoint);
+        }
+        if (!run.format.sourceFontFingerprint.isEmpty())
+            sourceCharacters[run.format.sourceFontFingerprint] += run.format.sourceFontCharacters;
+    }
+    for (auto &characters : sourceCharacters) {
+        std::sort(characters.begin(), characters.end());
+        characters.erase(std::unique(characters.begin(), characters.end()), characters.end());
+        if (characters.size() > 65535)
+            return failure(PDFSaveWriter::Error::FontUnavailable,
+                           draft.page, draft.originalFormat.fontFamily);
+    }
+    for (LayoutRun &run : runs) {
+        if (!run.format.sourceFontFingerprint.isEmpty())
+            run.format.sourceFontCharacters = sourceCharacters.value(run.format.sourceFontFingerprint);
         const FontResolver::ResolvedFont resolvedFont = fontResolver.resolve(
             run.format,
             draft.originalFormat,
             originalFont);
         FPDF_FONT font = resolvedFont.handle;
         if (!font) {
-            return failure(
-                PDFSaveWriter::Error::FontUnavailable,
-                draft.page,
-                run.format.fontFamily);
+            return fontFailure(run.format, draft.page);
         }
 
         const qreal sizeRatio = run.format.displayFontSizeRatio > 0.0
@@ -2815,7 +3054,6 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 draft.objectId);
         }
 
-        const auto *wideText = reinterpret_cast<const FPDF_WCHAR *>(run.text.utf16());
         const QColor color = run.format.color.toRgb();
         const FPDF_TEXT_RENDERMODE renderMode = draft.added
             ? FPDF_TEXTRENDERMODE_FILL
@@ -2841,7 +3079,7 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             || renderMode == FPDF_TEXTRENDERMODE_FILL_STROKE;
         const bool usesStroke = renderMode == FPDF_TEXTRENDERMODE_STROKE
             || renderMode == FPDF_TEXTRENDERMODE_FILL_STROKE;
-        bool configured = FPDFText_SetText(textObject, wideText)
+        bool configured = FontResolver::setText(textObject, run.format, run.text)
             && FPDFTextObj_SetTextRenderMode(textObject, renderMode);
         if (configured && usesFill) {
             configured = FPDFPageObj_SetFillColor(
@@ -4852,6 +5090,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 pageIndex);
         }
     }
+    fontResolver.beginPage();
     const int originalObjectCount = FPDFPage_CountObjects(page.get());
     QVector<PreparedDraft> preparedDrafts;
     preparedDrafts.reserve(drafts.size());
@@ -4893,11 +5132,14 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 && !prepared.sources.isEmpty()
             ? FPDFTextObj_GetFont(prepared.sources.constFirst().object)
             : nullptr;
+        QVector<FPDF_FONT> sourceFonts;
         if (prepared.kind == SaveDraft::Kind::Text) {
             for (const SourceObject &source : std::as_const(prepared.sources)) {
-                if (FPDFTextObj_GetFont(source.object) != originalFont) {
+                const FPDF_FONT font = FPDFTextObj_GetFont(source.object);
+                if (font && !sourceFonts.contains(font))
+                    sourceFonts.append(font);
+                if (font != originalFont) {
                     originalFont = nullptr;
-                    break;
                 }
             }
         }
@@ -4924,6 +5166,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
             pageWidth,
             pageHeight,
             originalFont,
+            sourceFonts,
             fontResolver,
             coordinateMapper,
             prepared.objects,
@@ -5640,9 +5883,11 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         });
     data->drafts.reserve(controller.m_drafts.size());
     QHash<QString, QByteArray> bundledFaceCache;
+    QHash<QString, ApplicationFonts::FontFaceData> downloadedFaceCache;
     QHash<QString, ApplicationFonts::FontFaceData> systemFaceCache;
     const auto snapshotEmbeddableFace = [
         &bundledFaceCache,
+        &downloadedFaceCache,
         &systemFaceCache](SaveFormat &format) {
         const auto snapshotBundledFace = [
             &bundledFaceCache,
@@ -5669,6 +5914,18 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             return;
         }
 
+        const QString downloadedKey = fontFaceKey(format);
+        auto downloaded = downloadedFaceCache.constFind(downloadedKey);
+        if (downloaded == downloadedFaceCache.cend()) {
+            downloaded = downloadedFaceCache.insert(downloadedKey,
+                ApplicationFonts::downloadedFontFace(
+                    format.fontFamily, format.fontBold, format.fontItalic));
+        }
+        if (downloaded->isValid()) {
+            format.embeddableFontFamily = downloaded->family;
+            format.embeddableFontData = downloaded->data;
+            return;
+        }
         family = matchingSystemFamily(format.fontFamily);
         if (!family.isEmpty()) {
             format.embeddableFontFamily = family;

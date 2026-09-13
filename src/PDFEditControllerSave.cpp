@@ -1,6 +1,7 @@
 #include "PDFEditController.h"
 #include "PDFEditController_p.h"
 #include "ApplicationFonts.h"
+#include "FontDownloadService.h"
 #include "PDFAnnotationUtils.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
@@ -30,6 +31,7 @@
 #include <QMutexLocker>
 #include <QPolygonF>
 #include <QQuickTextDocument>
+#include <QRawFont>
 #include <QRunnable>
 #include <QSet>
 #include <QStringList>
@@ -258,6 +260,8 @@ bool PDFEditController::requestSaveAs(const QUrl &target)
 
     finishSelectedTextEdit();
     const QString targetFilePath = QFileInfo(target.toLocalFile()).absoluteFilePath();
+    m_allowFontRecovery = true;
+    m_attemptedFontDownloads.clear();
     PDFDocument *const expectedDocument = m_document.data();
     const int expectedRevision = m_document->renderRevision();
     const QString expectedSourceFilePath = m_document->renderFilePath();
@@ -391,6 +395,27 @@ bool PDFEditController::completeSave(
     const QString &expectedSourceFilePath,
     const QString &temporarySourceFilePath)
 {
+    const bool documentUnchanged = m_document
+        && m_document == expectedDocument
+        && m_document->renderRevision() == expectedRevision
+        && m_document->renderFilePath() == expectedSourceFilePath;
+    const QString fontKey = result.detail.trimmed().toCaseFolded()
+        + QLatin1Char('|') + QString::number(result.fontBold)
+        + QLatin1Char('|') + QString::number(result.fontItalic);
+    if (m_allowFontRecovery && documentUnchanged
+        && result.error == PDFSaveWriter::Error::FontUnavailable
+        && result.fontDownloadSuggested && m_attemptedFontDownloads.size() < 8
+        && !m_attemptedFontDownloads.contains(fontKey)) {
+        m_attemptedFontDownloads.insert(fontKey);
+        m_pendingFontSave = std::make_unique<PendingFontSave>(PendingFontSave{
+            result, targetFilePath, expectedDocument, expectedRevision,
+            expectedSourceFilePath, temporarySourceFilePath});
+        emit fontDownloadStateChanged();
+        emit fontDownloadRequested();
+        return false;
+    }
+    m_allowFontRecovery = false;
+    m_attemptedFontDownloads.clear();
     if (!temporarySourceFilePath.isEmpty()) {
         QFile::remove(temporarySourceFilePath);
     }
@@ -402,10 +427,6 @@ bool PDFEditController::completeSave(
         return false;
     }
 
-    const bool documentUnchanged = m_document
-        && m_document == expectedDocument
-        && m_document->renderRevision() == expectedRevision
-        && m_document->renderFilePath() == expectedSourceFilePath;
     if (!documentUnchanged) {
         m_saving = false;
         emit savingChanged();
@@ -431,4 +452,103 @@ bool PDFEditController::completeSave(
     emit statusMessage(qtTrId("PdfSavedFile").arg(QFileInfo(targetFilePath).fileName()));
     emit saveFinished(true);
     return true;
+}
+
+QString PDFEditController::missingFontFamily() const
+{
+    return m_pendingFontSave ? m_pendingFontSave->failure.detail : QString();
+}
+
+void PDFEditController::clearFontRecovery()
+{
+    if (m_fontDownloadService) {
+        disconnect(m_fontDownloadService, nullptr, this, nullptr);
+        m_fontDownloadService->cancel();
+        m_fontDownloadService->deleteLater();
+        m_fontDownloadService = nullptr;
+    }
+    if (m_pendingFontSave && !m_pendingFontSave->temporarySourceFilePath.isEmpty())
+        QFile::remove(m_pendingFontSave->temporarySourceFilePath);
+    m_pendingFontSave.reset();
+    m_downloadingFont = false;
+    m_allowFontRecovery = false;
+    m_attemptedFontDownloads.clear();
+    emit fontDownloadStateChanged();
+}
+
+void PDFEditController::cancelFontDownload()
+{
+    if (!m_pendingFontSave)
+        return;
+    clearFontRecovery();
+    m_saving = false;
+    emit savingChanged();
+    //% "Font download cancelled. Your edits have been kept."
+    emit statusMessage(qtTrId("FontDownloadCancelled"));
+    emit saveFinished(false);
+}
+
+void PDFEditController::respondToFontDownload(bool accepted)
+{
+    if (!m_pendingFontSave || m_downloadingFont)
+        return;
+    if (!accepted) {
+        cancelFontDownload();
+        return;
+    }
+    if (!m_document || m_document != m_pendingFontSave->document
+        || m_document->renderRevision() != m_pendingFontSave->revision
+        || m_document->renderFilePath() != m_pendingFontSave->sourceFilePath) {
+        cancelFontDownload();
+        return;
+    }
+    m_downloadingFont = true;
+    emit fontDownloadStateChanged();
+    const auto &failure = m_pendingFontSave->failure;
+    const auto cached = ApplicationFonts::downloadedFontFace(
+        failure.detail, failure.fontBold, failure.fontItalic);
+    if (cached.isValid() && (!failure.unsupportedCodePoint
+        || QRawFont(cached.data, 16).supportsCharacter(failure.unsupportedCodePoint))) {
+        finishFontDownload(true, {});
+        return;
+    }
+    m_fontDownloadService = new FontDownloadService(this);
+    connect(m_fontDownloadService, &FontDownloadService::finished,
+            this, &PDFEditController::finishFontDownload);
+    m_fontDownloadService->start(failure.detail, failure.fontBold,
+                                failure.fontItalic, failure.unsupportedCodePoint);
+}
+
+void PDFEditController::finishFontDownload(bool succeeded, const QString &error)
+{
+    if (!m_pendingFontSave)
+        return;
+    if (!succeeded) {
+        clearFontRecovery();
+        m_saving = false;
+        emit savingChanged();
+        //% "The font could not be downloaded: %1. Your edits have been kept."
+        emit statusMessage(qtTrId("FontDownloadSaveFailed").arg(error));
+        emit saveFinished(false);
+        return;
+    }
+    if (!m_document || m_document != m_pendingFontSave->document
+        || m_document->renderRevision() != m_pendingFontSave->revision
+        || m_document->renderFilePath() != m_pendingFontSave->sourceFilePath) {
+        cancelFontDownload();
+        return;
+    }
+    if (m_fontDownloadService) {
+        m_fontDownloadService->deleteLater();
+        m_fontDownloadService = nullptr;
+    }
+    auto pending = std::move(m_pendingFontSave);
+    m_downloadingFont = false;
+    emit fontDownloadStateChanged();
+    emit textFormatStateChanged();
+    //% "Font downloaded. Continuing to save…"
+    emit statusMessage(qtTrId("FontDownloadContinuingSave"));
+    startAsyncSave(pending->targetFilePath, pending->document, pending->revision,
+                   pending->sourceFilePath, pending->temporarySourceFilePath,
+                   pending->temporarySourceFilePath);
 }

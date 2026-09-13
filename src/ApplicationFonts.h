@@ -52,5 +52,13 @@ int calibratedFontStretch(const QString &family,
                           int pixelSize);
 QByteArray bundledFontData(const QString &family, bool bold, bool italic);
 FontFaceData systemFontFace(const QString &family, bool bold, bool italic);
+QString downloadedFontDirectory();
+const QStringList &downloadedFontFamilies();
+FontFaceData downloadedFontFace(const QString &family, bool bold, bool italic);
+// Called on the GUI thread only, after the caller has obtained download consent.
+// Fonts are private to TrePDF and are never installed in the operating system.
+bool installDownloadedFont(const QByteArray &data, const QString &family,
+                           bool bold, bool italic, uint requiredCodePoint,
+                           QString &error);
 
 } // namespace ApplicationFonts

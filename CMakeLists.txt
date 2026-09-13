@@ -24,6 +24,7 @@ endif()
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS
     LinguistTools
+    Network
     Qml
     Quick
     QuickControls2
@@ -67,6 +68,17 @@ file(GLOB_RECURSE TREPDF_BUNDLED_FONT_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts/*.TTF"
 )
 
+find_package(ZLIB REQUIRED)
+qt_add_library(trepdf_font_archive STATIC
+    third_party/libxlsxwriter/third_party/minizip/unzip.c
+    third_party/libxlsxwriter/third_party/minizip/ioapi.c
+)
+set_target_properties(trepdf_font_archive PROPERTIES AUTOMOC OFF AUTOUIC OFF)
+target_include_directories(trepdf_font_archive PUBLIC
+    third_party/libxlsxwriter/third_party/minizip
+)
+target_link_libraries(trepdf_font_archive PRIVATE ZLIB::ZLIB)
+
 qt_add_executable(trepdf
     src/main.cpp
 )
@@ -76,6 +88,8 @@ qt_add_qml_module(trepdf
     SOURCES
         src/ApplicationFonts.cpp
         src/ApplicationFonts.h
+        src/FontDownloadService.cpp
+        src/FontDownloadService.h
         src/DraftImageItem.cpp
         src/DraftImageItem.h
         src/FormFieldLayer.cpp
@@ -274,6 +288,8 @@ target_include_directories(trepdf
 target_link_libraries(trepdf
     PRIVATE
         Qt6::Qml
+        Qt6::Network
+        trepdf_font_archive
         Qt6::QmlIntegration
         Qt6::Quick
         Qt6::QuickControls2

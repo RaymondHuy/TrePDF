@@ -276,6 +276,7 @@ PDFEditController::PDFEditController(QObject *parent)
 
 PDFEditController::~PDFEditController()
 {
+    clearFontRecovery();
     if (m_candidateScanCancellation) {
         m_candidateScanCancellation->store(true, std::memory_order_relaxed);
     }
@@ -798,6 +799,7 @@ void PDFEditController::clearSelection()
 
 void PDFEditController::resetSession()
 {
+    cancelFontDownload();
     setPendingDrawingCommentPage(-1);
     if (m_candidateScanCancellation) {
         m_candidateScanCancellation->store(true, std::memory_order_relaxed);
