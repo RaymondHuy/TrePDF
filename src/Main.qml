@@ -777,7 +777,7 @@ ApplicationWindow {
                 spacing: 16
                 Label {
                     Layout.fillWidth: true
-                    //% "Download missing font"
+                    //% "Download font family"
                     text: qsTrId("DownloadMissingFontTitle")
                     font.pixelSize: 18
                     font.weight: Font.DemiBold
@@ -787,10 +787,10 @@ ApplicationWindow {
                 Label {
                     Layout.fillWidth: true
                     text: fontDownloadPopup.downloading
-                        //% "Downloading the complete %1 font. Saving will continue automatically."
+                        //% "Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish."
                         ? qsTrId("FontDownloadInProgress").arg(
                             fontDownloadPopup.controller ? fontDownloadPopup.controller.missingFontFamily : "")
-                        //% "The application does not have the complete %1 font. Would you like it to download the font automatically and continue saving?"
+                        //% "The application does not have the complete %1 font. Would you like it to download all available regular, bold, italic and bold italic styles of this family and continue saving?"
                         : qsTrId("FontDownloadConfirmation").arg(
                             fontDownloadPopup.controller ? fontDownloadPopup.controller.missingFontFamily : "")
                     textFormat: Text.PlainText

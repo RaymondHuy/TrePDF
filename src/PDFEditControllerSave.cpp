@@ -505,10 +505,19 @@ void PDFEditController::respondToFontDownload(bool accepted)
     m_downloadingFont = true;
     emit fontDownloadStateChanged();
     const auto &failure = m_pendingFontSave->failure;
-    const auto cached = ApplicationFonts::downloadedFontFace(
-        failure.detail, failure.fontBold, failure.fontItalic);
-    if (cached.isValid() && (!failure.unsupportedCodePoint
-        || QRawFont(cached.data, 16).supportsCharacter(failure.unsupportedCodePoint))) {
+    bool familyCached = true;
+    for (int style = 0; style < 4; ++style) {
+        const bool bold = (style & 2) != 0;
+        const bool italic = (style & 1) != 0;
+        const auto cached = ApplicationFonts::downloadedFontFace(failure.detail, bold, italic);
+        if (!cached.isValid() || (bold == failure.fontBold && italic == failure.fontItalic
+            && failure.unsupportedCodePoint
+            && !QRawFont(cached.data, 16).supportsCharacter(failure.unsupportedCodePoint))) {
+            familyCached = false;
+            break;
+        }
+    }
+    if (familyCached) {
         finishFontDownload(true, {});
         return;
     }

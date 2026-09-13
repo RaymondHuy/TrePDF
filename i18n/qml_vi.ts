@@ -105,18 +105,18 @@
     </message>
     <message id="DownloadMissingFontTitle">
         <location filename="../src/Main.qml" line="781"/>
-        <source>Download missing font</source>
-        <translation>Tải font còn thiếu</translation>
+        <source>Download font family</source>
+        <translation>Tải bộ font</translation>
     </message>
     <message id="FontDownloadInProgress">
         <location filename="../src/Main.qml" line="791"/>
-        <source>Downloading the complete %1 font. Saving will continue automatically.</source>
-        <translation>Đang tải font %1 đầy đủ. Ứng dụng sẽ tự động tiếp tục lưu.</translation>
+        <source>Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish.</source>
+        <translation>Đang tải các kiểu thường, đậm, nghiêng và đậm nghiêng hiện có của font %1. Ứng dụng sẽ tự động tiếp tục lưu khi tải xong.</translation>
     </message>
     <message id="FontDownloadConfirmation">
         <location filename="../src/Main.qml" line="794"/>
-        <source>The application does not have the complete %1 font. Would you like it to download the font automatically and continue saving?</source>
-        <translation>Ứng dụng chưa có font %1 đầy đủ, bạn có muốn ứng dụng tự động tải về và tiếp tục lưu?</translation>
+        <source>The application does not have the complete %1 font. Would you like it to download all available regular, bold, italic and bold italic styles of this family and continue saving?</source>
+        <translation>Ứng dụng chưa có font %1 đầy đủ. Bạn có muốn ứng dụng tải tất cả kiểu thường, đậm, nghiêng và đậm nghiêng hiện có của bộ font này rồi tiếp tục lưu?</translation>
     </message>
     <message id="ConfirmFontDownload">
         <location filename="../src/Main.qml" line="822"/>
@@ -1558,12 +1558,12 @@
         <translation>Đã hủy tải font. Các chỉnh sửa vẫn được giữ lại.</translation>
     </message>
     <message id="FontDownloadSaveFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="531"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="540"/>
         <source>The font could not be downloaded: %1. Your edits have been kept.</source>
         <translation>Không thể tải font: %1 Các chỉnh sửa vẫn được giữ lại.</translation>
     </message>
     <message id="FontDownloadContinuingSave">
-        <location filename="../src/PDFEditControllerSave.cpp" line="550"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="559"/>
         <source>Font downloaded. Continuing to save…</source>
         <translation>Đã tải font. Đang tiếp tục lưu…</translation>
     </message>
@@ -2479,24 +2479,25 @@
         <translation>Quá thời gian chờ tải font.</translation>
     </message>
     <message id="FontDownloadTooLarge">
-        <location filename="../src/FontDownloadService.cpp" line="201"/>
+        <location filename="../src/FontDownloadService.cpp" line="204"/>
         <source>The font download exceeds the allowed size.</source>
         <oldsource>The font download exceeds the allowed size. Your changes are still kept.</oldsource>
         <translation>File font tải về vượt quá dung lượng cho phép.</translation>
     </message>
     <message id="FontDownloadNetworkFailed">
-        <location filename="../src/FontDownloadService.cpp" line="231"/>
+        <location filename="../src/FontDownloadService.cpp" line="234"/>
         <source>The font could not be downloaded. Check your connection and try again.</source>
         <oldsource>The font could not be downloaded. Check your connection and try again. Your changes are still kept.</oldsource>
         <translation>Không tải được font. Hãy kiểm tra kết nối mạng và thử lại.</translation>
     </message>
     <message id="FontDownloadInstallFailed">
-        <location filename="../src/FontDownloadService.cpp" line="414"/>
+        <location filename="../src/FontDownloadService.cpp" line="479"/>
+        <location filename="../src/FontDownloadService.cpp" line="535"/>
         <source>The downloaded font could not be validated or stored in TrePDF&apos;s font folder.</source>
         <translation>Không thể xác thực hoặc lưu font tải về vào thư mục font của TrePDF.</translation>
     </message>
     <message id="FontDownloadUnavailable">
-        <location filename="../src/FontDownloadService.cpp" line="422"/>
+        <location filename="../src/FontDownloadService.cpp" line="544"/>
         <source>A complete downloadable version of %1 in this style was not found.</source>
         <oldsource>A complete downloadable version of %1 in this style was not found. Your changes are still kept.</oldsource>
         <translation>Không tìm thấy bản font %1 đầy đủ với kiểu chữ này để tải xuống.</translation>

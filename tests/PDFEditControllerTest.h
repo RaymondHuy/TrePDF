@@ -358,7 +358,18 @@ private slots:
     void rejectsUnsafeFontDownloads_data();
     void rejectsUnsafeFontDownloads();
     void cancelsFontDownloadBeforeInstallation();
+    void downloadsEveryAvailableFontStyle();
+    void downloadsOnlyAdvertisedFontStyles();
+    void skipsCachedFontStylesWhenDownloadingFamily();
+    void keepsFontFamilyUninstalledWhenOptionalDownloadFails_data();
+    void keepsFontFamilyUninstalledWhenOptionalDownloadFails();
+    void cancelsFontFamilyDownloadAfterFirstFace();
+    void rejectsInvalidAptosFontArchives_data();
+    void rejectsInvalidAptosFontArchives();
+    void downloadsAllAptosStylesFromSingleArchive();
     void downloadsPrivateFontAndResumesOriginalSave();
+    void validatesFontFamilyBeforeInstallation();
+    void rollsBackFontFamilyWhenOptionalTargetBlocked();
 
 private:
     QTemporaryDir m_temporaryDirectory;

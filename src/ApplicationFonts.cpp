@@ -15,9 +15,11 @@
 #include <QMutexLocker>
 #include <QRawFont>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QSet>
 #include <QStandardPaths>
 #include <QThread>
+#include <QTemporaryFile>
 #include <QtGlobal>
 #include <QVector>
 
@@ -25,6 +27,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <utility>
 
 #ifdef Q_OS_MACOS
@@ -751,6 +754,27 @@ bool validateDownloadedFont(const QByteArray &data,
     return true;
 }
 
+bool validateRequestedDownloadedFont(const QByteArray &data, const QString &family,
+                                     bool bold, bool italic, uint requiredCodePoint,
+                                     ValidatedDownloadedFont &font, QString &error)
+{
+    if (!validateDownloadedFont(data, font, error))
+        return false;
+    if (font.family.compare(family, Qt::CaseInsensitive) != 0
+        || font.bold != bold || font.italic != italic) {
+        error = QStringLiteral("Downloaded font does not match the requested family and style.");
+        return false;
+    }
+    if (requiredCodePoint != 0
+        && (requiredCodePoint > 0x10ffffU
+            || (requiredCodePoint >= 0xd800U && requiredCodePoint <= 0xdfffU)
+            || !font.rawFont.supportsCharacter(requiredCodePoint))) {
+        error = QStringLiteral("Downloaded font does not contain the required character.");
+        return false;
+    }
+    return true;
+}
+
 void clearFontSelectionCaches(FontRegistry &registry)
 {
     for (auto &families : registry.availableFamilies)
@@ -1339,82 +1363,212 @@ FontFaceData downloadedFontFace(const QString &family, bool bold, bool italic)
     return result;
 }
 
-bool installDownloadedFont(const QByteArray &data, const QString &family,
-                           bool bold, bool italic, uint requiredCodePoint,
-                           QString &error)
+bool validateDownloadedFontData(const QByteArray &data, const QString &family,
+                                bool bold, bool italic, uint requiredCodePoint,
+                                QString &error)
+{
+    error.clear();
+    ValidatedDownloadedFont font;
+    return validateRequestedDownloadedFont(data, family, bold, italic,
+                                          requiredCodePoint, font, error);
+}
+
+bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &error)
 {
     error.clear();
     if (!fontRegistrationThread()) {
         error = QStringLiteral("Downloaded fonts must be registered on the application thread.");
         return false;
     }
+    if (fonts.isEmpty() || fonts.size() > 4) {
+        error = QStringLiteral("A downloaded font batch must contain between one and four faces.");
+        return false;
+    }
     registerBundledFonts();
-    ValidatedDownloadedFont font;
-    if (!validateDownloadedFont(data, font, error))
-        return false;
-    if (font.family.compare(family, Qt::CaseInsensitive) != 0
-        || font.bold != bold || font.italic != italic) {
-        error = QStringLiteral("Downloaded font does not match the requested family and style.");
-        return false;
-    }
-    if (requiredCodePoint != 0
-        && (requiredCodePoint > 0x10ffffU
-            || (requiredCodePoint >= 0xd800U && requiredCodePoint <= 0xdfffU)
-            || !font.rawFont.supportsCharacter(requiredCodePoint))) {
-        error = QStringLiteral("Downloaded font does not contain the required character.");
-        return false;
-    }
     FontRegistry &registry = fontRegistry();
-    const QByteArray digest = QCryptographicHash::hash(data, QCryptographicHash::Sha256);
-    const auto *existing = findDownloadedFont(registry, font.family, bold, italic);
-    if (existing) {
-        if (existing->digest == digest && downloadedFontFace(family, bold, italic).isValid())
-            return true;
-        if (existing->digest != digest) {
+    const QString directory = downloadedFontDirectory();
+    if (directory.isEmpty()) {
+        error = QStringLiteral("The private font directory is unavailable.");
+        return false;
+    }
+    struct PendingFont {
+        const DownloadedFontData *request = nullptr;
+        ValidatedDownloadedFont font;
+        QByteArray digest;
+        QString path;
+        std::unique_ptr<QSaveFile> output;
+        std::unique_ptr<QTemporaryFile> backup;
+        bool alreadyRegistered = false;
+        bool fileMatches = false;
+        bool hadFile = false;
+        bool backedUp = false;
+        bool committed = false;
+        int registrationId = -1;
+    };
+    std::array<PendingFont, 4> pending;
+    QSet<QString> faces;
+    qint64 totalBytes = 0;
+    qsizetype totalFaces = registry.downloadedFonts.size();
+    for (const auto &registered : std::as_const(registry.downloadedFonts))
+        totalBytes += registered.size;
+
+    // Validate the entire batch and its storage requirements before touching any
+    // file or registering a face. This also bounds rollback data and work.
+    for (qsizetype index = 0; index < fonts.size(); ++index) {
+        PendingFont &item = pending[size_t(index)];
+        const DownloadedFontData &request = fonts.at(index);
+        item.request = &request;
+        if (!validateRequestedDownloadedFont(request.data, request.family,
+                request.bold, request.italic, request.requiredCodePoint, item.font, error))
+            return false;
+        const QString key = fontFaceCacheKey(item.font.family, request.bold, request.italic);
+        if (faces.contains(key)) {
+            error = QStringLiteral("The downloaded font batch contains a duplicate face.");
+            return false;
+        }
+        faces.insert(key);
+        item.digest = QCryptographicHash::hash(request.data, QCryptographicHash::Sha256);
+        const auto *existing = findDownloadedFont(
+            registry, item.font.family, request.bold, request.italic);
+        if (existing && existing->digest != item.digest) {
             error = QStringLiteral("A different downloaded font already provides this exact face.");
             return false;
         }
+        item.alreadyRegistered = existing != nullptr;
+        item.path = existing ? existing->path : QDir(directory).filePath(
+            QString::fromLatin1(item.digest.toHex()) + QStringLiteral(".ttf"));
+        if (!existing) {
+            ++totalFaces;
+            totalBytes += request.data.size();
+        }
+        if (totalFaces > kMaximumDownloadedFonts || totalBytes > kMaximumDownloadedFontBytes) {
+            error = QStringLiteral("The private font storage limit has been reached.");
+            return false;
+        }
+        const QFileInfo previous(item.path);
+        item.hadFile = previous.exists();
+        if (previous.isSymLink() || (item.hadFile
+            && (!previous.isFile() || previous.size() > kMaximumSystemFontBytes))) {
+            error = QStringLiteral("The existing private font file cannot be safely replaced.");
+            return false;
+        }
+        if (item.hadFile) {
+            QFile input(item.path);
+            if (!input.open(QIODevice::ReadOnly)) {
+                error = input.errorString();
+                return false;
+            }
+            const QByteArray oldData = input.read(kMaximumSystemFontBytes + 1);
+            if (input.error() != QFileDevice::NoError || oldData.size() != previous.size()) {
+                error = QStringLiteral("The existing private font file could not be read completely.");
+                return false;
+            }
+            item.fileMatches = oldData == request.data;
+        }
     }
-    const bool alreadyRegistered = existing != nullptr;
-    qint64 totalBytes = alreadyRegistered ? 0 : data.size();
-    for (const auto &registered : registry.downloadedFonts)
-        totalBytes += registered.size;
-    if ((!alreadyRegistered && registry.downloadedFonts.size() >= kMaximumDownloadedFonts)
-        || totalBytes > kMaximumDownloadedFontBytes) {
-        error = QStringLiteral("The private font storage limit has been reached.");
-        return false;
-    }
-    const QString directory = downloadedFontDirectory();
-    if (directory.isEmpty() || !QDir().mkpath(directory)) {
+    if (!QDir().mkpath(directory)) {
         error = QStringLiteral("Could not create the private font directory.");
         return false;
     }
-    const QString path = QDir(directory).filePath(
-        QString::fromLatin1(digest.toHex()) + QStringLiteral(".ttf"));
-    QSaveFile output(path);
-    output.setDirectWriteFallback(false);
-    if (!output.open(QIODevice::WriteOnly) || output.write(data) != data.size()) {
-        error = output.errorString();
-        return false;
-    }
-    if (!alreadyRegistered && !registerDownloadedFont(registry, path, data, font)) {
-        error = QStringLiteral("Could not register the private font for this application.");
-        return false;
-    }
-    if (!output.commit()) {
-        if (!alreadyRegistered) {
-            const auto added = registry.downloadedFonts.takeLast();
-            QFontDatabase::removeApplicationFont(added.registrationId);
-            registry.downloadedRawFonts.remove(fontFaceCacheKey(font.family, bold, italic));
-            if (!std::any_of(registry.downloadedFonts.cbegin(), registry.downloadedFonts.cend(),
-                    [&font](const FontRegistry::DownloadedFont &item) { return item.family == font.family; }))
-                registry.downloadedFamilies.removeAll(font.family);
+    // Stage every write before committing any of them. Existing valid files are
+    // never replaced; a damaged same-hash cache file gets a rename-only backup.
+    for (qsizetype index = 0; index < fonts.size(); ++index) {
+        PendingFont &item = pending[size_t(index)];
+        if (item.fileMatches)
+            continue;
+        item.output = std::make_unique<QSaveFile>(item.path);
+        item.output->setDirectWriteFallback(false);
+        if (!item.output->open(QIODevice::WriteOnly)
+            || item.output->write(item.request->data) != item.request->data.size()) {
+            error = item.output->errorString();
+            return false;
         }
-        error = output.errorString();
-        return false;
+        if (item.hadFile) {
+            item.backup = std::make_unique<QTemporaryFile>(QDir(QFileInfo(item.path).absolutePath())
+                .filePath(QStringLiteral(".trepdf-font-backup-XXXXXX")));
+            if (!item.backup->open()) {
+                error = item.backup->errorString();
+                return false;
+            }
+            item.backup->close();
+        }
+    }
+    bool succeeded = false;
+    const auto rollback = qScopeGuard([&]() {
+        if (succeeded)
+            return;
+        for (qsizetype index = fonts.size(); index-- > 0;) {
+            PendingFont &item = pending[size_t(index)];
+            if (item.registrationId >= 0) {
+                const auto registered = std::find_if(registry.downloadedFonts.cbegin(),
+                    registry.downloadedFonts.cend(), [&item](const auto &font) {
+                        return font.registrationId == item.registrationId;
+                    });
+                if (registered != registry.downloadedFonts.cend())
+                    registry.downloadedFonts.erase(registered);
+                QFontDatabase::removeApplicationFont(item.registrationId);
+                registry.downloadedRawFonts.remove(fontFaceCacheKey(
+                    item.font.family, item.font.bold, item.font.italic));
+                if (!std::any_of(registry.downloadedFonts.cbegin(), registry.downloadedFonts.cend(),
+                        [&item](const auto &font) {
+                            return font.family.compare(item.font.family, Qt::CaseInsensitive) == 0;
+                        }))
+                    registry.downloadedFamilies.removeAll(item.font.family);
+            }
+            bool restored = true;
+            if (item.committed)
+                restored = QFile::remove(item.path);
+            if (item.backedUp && !QFile::rename(item.backup->fileName(), item.path)) {
+                // A filesystem failure during rollback must not delete the only
+                // remaining copy of the old file with the temporary-file owner.
+                item.backup->setAutoRemove(false);
+                restored = false;
+            }
+            if (!restored)
+                error += QStringLiteral(" The previous font storage state could not be fully restored.");
+        }
+        clearFontSelectionCaches(registry);
+    });
+    for (qsizetype index = 0; index < fonts.size(); ++index) {
+        PendingFont &item = pending[size_t(index)];
+        if (item.fileMatches)
+            continue;
+        if (item.backup) {
+            const QString backupPath = item.backup->fileName();
+            if (!QFile::remove(backupPath) || !QFile::rename(item.path, backupPath)) {
+                error = QStringLiteral("Could not preserve the previous private font file.");
+                return false;
+            }
+            item.backedUp = true;
+        }
+        if (!item.output->commit()) {
+            error = item.output->errorString();
+            return false;
+        }
+        item.committed = true;
+    }
+    // No new face is visible to Qt until every file has committed successfully.
+    for (qsizetype index = 0; index < fonts.size(); ++index) {
+        PendingFont &item = pending[size_t(index)];
+        if (item.alreadyRegistered)
+            continue;
+        if (!registerDownloadedFont(registry, item.path, item.request->data, item.font)) {
+            error = QStringLiteral("Could not register the private font for this application.");
+            return false;
+        }
+        item.registrationId = registry.downloadedFonts.constLast().registrationId;
     }
     clearFontSelectionCaches(registry);
+    succeeded = true;
     return true;
+}
+
+bool installDownloadedFont(const QByteArray &data, const QString &family,
+                           bool bold, bool italic, uint requiredCodePoint,
+                           QString &error)
+{
+    return installDownloadedFonts({DownloadedFontData{
+        data, family, bold, italic, requiredCodePoint}}, error);
 }
 
 } // namespace ApplicationFonts

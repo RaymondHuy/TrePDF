@@ -19,7 +19,7 @@
 #include <QScopeGuard>
 
 #include <array>
-#include <memory>
+#include <algorithm>
 
 namespace {
 constexpr qint64 maximumFontBytes = 16 * 1024 * 1024;
@@ -55,7 +55,7 @@ FontDownloadService::FontDownloadService(QObject *parent, QNetworkAccessManager 
     : QObject(parent), m_network(network ? network : new QNetworkAccessManager(this))
 {
     m_deadline.setSingleShot(true);
-    m_deadline.setInterval(60000);
+    m_deadline.setInterval(120000);
     connect(&m_deadline, &QTimer::timeout, this, [this]() {
         //% "Font download timed out."
         complete(false, qtTrId("FontDownloadTimedOut"));
@@ -87,6 +87,12 @@ void FontDownloadService::start(const QString &family, bool bold, bool italic,
         return;
     }
     m_deadline.start();
+    prepareFaces(true, true, true, true);
+    if (std::all_of(m_faces.cbegin(), m_faces.cend(),
+                    [this](const Face &face) { return hasCachedFace(face); })) {
+        complete(true, {});
+        return;
+    }
     const QStringList aptosFamilies{
         QStringLiteral("Aptos"), QStringLiteral("Aptos Display"),
         QStringLiteral("Aptos Narrow"), QStringLiteral("Aptos Mono"),
@@ -95,16 +101,9 @@ void FontDownloadService::start(const QString &family, bool bold, bool italic,
         if (m_family.compare(aptosFamily, Qt::CaseInsensitive) != 0)
             continue;
         m_family = aptosFamily;
-        m_archiveEntry = aptosFamily;
-        m_archiveEntry.replace(QLatin1Char(' '), QLatin1Char('-'));
-        if (bold)
-            m_archiveEntry += QStringLiteral("-Bold");
-        if (italic)
-            m_archiveEntry += QStringLiteral("-Italic");
-        m_archiveEntry += QStringLiteral(".ttf");
         m_requireVietnamese = true;
         // The published Microsoft Download Center package contains complete TTF
-        // faces. Read only the requested filename; archive paths are never extracted.
+        // faces. Fetch it once for all four styles; never extract archive paths.
         request(QUrl(QString::fromLatin1(aptosDownloadUrl)), Stage::AptosArchive);
         return;
     }
@@ -117,6 +116,7 @@ void FontDownloadService::start(const QString &family, bool bold, bool italic,
 
 void FontDownloadService::cancel()
 {
+    ++m_generation;
     m_active = false;
     m_deadline.stop();
     if (m_reply) {
@@ -127,6 +127,9 @@ void FontDownloadService::cancel()
         reply->deleteLater();
     }
     m_data.clear();
+    m_faces.clear();
+    m_faceIndex = 0;
+    m_subsets.clear();
 }
 
 qint64 FontDownloadService::maximumBytes(Stage stage)
@@ -235,7 +238,16 @@ void FontDownloadService::receiveFinished(QNetworkReply *reply)
     switch (m_stage) {
     case Stage::Metadata: processMetadata(data); break;
     case Stage::Stylesheet: processStylesheet(data); break;
-    case Stage::Font: installFont(data); break;
+    case Stage::Font:
+        if (m_faceIndex >= m_faces.size()) {
+            failUnavailable();
+            return;
+        }
+        if (stageFont(data, m_faces[m_faceIndex])) {
+            ++m_faceIndex;
+            requestNextFace();
+        }
+        break;
     case Stage::AptosArchive: processArchive(data); break;
     }
 }
@@ -274,20 +286,81 @@ void FontDownloadService::processMetadata(const QByteArray &data)
             }
             requestedSubsets.append(subset);
         }
-        QUrl url(QStringLiteral("https://fonts.googleapis.com/css"));
-        QUrlQuery query;
-        QString face = family + (m_bold ? QStringLiteral(":700") : QStringLiteral(":400"));
-        if (m_italic)
-            face += QStringLiteral("italic");
-        query.addQueryItem(QStringLiteral("family"), face);
-        query.addQueryItem(QStringLiteral("subset"), requestedSubsets.join(QLatin1Char(',')));
-        url.setQuery(query);
-        // A legacy UA requests a single complete static TTF, not disjoint WOFF2
-        // web subsets. Never send text=; downloaded coverage is checked below.
-        request(url, Stage::Stylesheet);
+        m_subsets = requestedSubsets.join(QLatin1Char(','));
+        const auto weights = font.value(QStringLiteral("weights")).toArray();
+        const auto styles = font.value(QStringLiteral("styles")).toArray();
+        const bool normal = styles.contains(QStringLiteral("normal"));
+        const bool italic = styles.contains(QStringLiteral("italic"));
+        prepareFaces(weights.contains(400) && normal, weights.contains(400) && italic,
+                     weights.contains(700) && normal, weights.contains(700) && italic);
+        requestNextFace();
         return;
     }
     failUnavailable();
+}
+
+void FontDownloadService::prepareFaces(bool regular, bool italic, bool bold, bool boldItalic)
+{
+    m_faces.clear();
+    m_faceIndex = 0;
+    const std::array<bool, 4> available{regular, italic, bold, boldItalic};
+    const int required = (m_bold ? 2 : 0) + (m_italic ? 1 : 0);
+    // Fail the save's required face early. The remaining family faces still
+    // finish downloading and validation before any new font is installed.
+    if (available[required])
+        m_faces.append({m_bold, m_italic, {}});
+    for (int index = 0; index < 4; ++index) {
+        if (index != required && available[index])
+            m_faces.append({bool(index & 2), bool(index & 1), {}});
+    }
+}
+
+uint FontDownloadService::requiredCharacter(const Face &face) const
+{
+    return face.bold == m_bold && face.italic == m_italic ? m_requiredCodePoint : 0;
+}
+
+bool FontDownloadService::hasCachedFace(const Face &face) const
+{
+    const auto cached = ApplicationFonts::downloadedFontFace(m_family, face.bold, face.italic);
+    return cached.isValid() && (!requiredCharacter(face)
+        || QRawFont(cached.data, 16).supportsCharacter(requiredCharacter(face)));
+}
+
+void FontDownloadService::requestNextFace()
+{
+    if (!m_active)
+        return;
+    while (m_faceIndex < m_faces.size() && hasCachedFace(m_faces.at(m_faceIndex)))
+        ++m_faceIndex;
+    if (m_faceIndex == m_faces.size()) {
+        // Yield before committing so an already queued Cancel can discard the
+        // staged family. There is no installation between network requests.
+        scheduleInstallation();
+        return;
+    }
+    const Face &face = m_faces.at(m_faceIndex);
+    QUrl url(QStringLiteral("https://fonts.googleapis.com/css"));
+    QUrlQuery query;
+    QString style = m_family + (face.bold ? QStringLiteral(":700") : QStringLiteral(":400"));
+    if (face.italic)
+        style += QStringLiteral("italic");
+    query.addQueryItem(QStringLiteral("family"), style);
+    query.addQueryItem(QStringLiteral("subset"), m_subsets);
+    url.setQuery(query);
+    // A legacy UA requests one complete static TTF per face, not disjoint
+    // web subsets. Never send text= or PDF contents to either endpoint.
+    m_redirects = 0;
+    request(url, Stage::Stylesheet);
+}
+
+void FontDownloadService::scheduleInstallation()
+{
+    const quint64 generation = m_generation;
+    QTimer::singleShot(0, this, [this, generation]() {
+        if (m_active && generation == m_generation)
+            installFamily();
+    });
 }
 
 void FontDownloadService::processStylesheet(const QByteArray &data)
@@ -329,6 +402,14 @@ void FontDownloadService::processArchive(const QByteArray &data)
         return;
     }
     qint64 total = 0;
+    QString baseName = m_family;
+    baseName.replace(QLatin1Char(' '), QLatin1Char('-'));
+    const QStringList names{baseName + QStringLiteral(".ttf"),
+                            baseName + QStringLiteral("-Italic.ttf"),
+                            baseName + QStringLiteral("-Bold.ttf"),
+                            baseName + QStringLiteral("-Bold-Italic.ttf")};
+    std::array<QByteArray, 4> fonts;
+    std::array<bool, 4> found{};
     int status = unzGoToFirstFile(input);
     for (quint64 index = 0; index < archiveInfo.number_entry && status == UNZ_OK;
          ++index, status = unzGoToNextFile(input)) {
@@ -343,9 +424,10 @@ void FontDownloadService::processArchive(const QByteArray &data)
             return;
         }
         total += qint64(entry.uncompressed_size);
-        if (QString::fromUtf8(name.data(), entry.size_filename) != m_archiveEntry)
+        const int faceIndex = names.indexOf(QString::fromUtf8(name.data(), entry.size_filename));
+        if (faceIndex < 0)
             continue;
-        if ((entry.flag & 1) || unzOpenCurrentFile(input) != UNZ_OK) {
+        if (found[faceIndex] || (entry.flag & 1) || unzOpenCurrentFile(input) != UNZ_OK) {
             failUnavailable();
             return;
         }
@@ -369,25 +451,43 @@ void FontDownloadService::processArchive(const QByteArray &data)
             failUnavailable();
             return;
         }
-        installFont(fontData);
+        fonts[faceIndex] = std::move(fontData);
+        found[faceIndex] = true;
+    }
+    const int required = (m_bold ? 2 : 0) + (m_italic ? 1 : 0);
+    if (status != UNZ_END_OF_LIST_OF_FILE || !found[required]) {
+        failUnavailable();
         return;
     }
-    failUnavailable();
+    prepareFaces(found[0], found[1], found[2], found[3]);
+    for (Face &face : m_faces) {
+        const int index = (face.bold ? 2 : 0) + (face.italic ? 1 : 0);
+        if (!hasCachedFace(face) && !stageFont(fonts[index], face))
+            return;
+    }
+    scheduleInstallation();
 }
 
-void FontDownloadService::installFont(const QByteArray &data)
+bool FontDownloadService::stageFont(const QByteArray &data, Face &face)
 {
     if (!m_active)
-        return;
+        return false;
+    QString error;
+    if (!ApplicationFonts::validateDownloadedFontData(
+            data, m_family, face.bold, face.italic, requiredCharacter(face), error)) {
+        //% "The downloaded font could not be validated or stored in TrePDF's font folder."
+        complete(false, qtTrId("FontDownloadInstallFailed"));
+        return false;
+    }
     const QRawFont font(data, 16.0, QFont::PreferNoHinting);
     if (!font.isValid()) {
         failUnavailable();
-        return;
+        return false;
     }
     for (uint character = 32; character <= 126; ++character) {
         if (!font.supportsCharacter(character)) {
             complete(false, incompleteFontMessage(m_family));
-            return;
+            return false;
         }
     }
     if (m_requireVietnamese) {
@@ -396,24 +496,46 @@ void FontDownloadService::installFont(const QByteArray &data)
         for (QChar character : accents) {
             if (!font.supportsCharacter(character.unicode())) {
                 complete(false, incompleteFontMessage(m_family));
-                return;
+                return false;
             }
         }
         for (uint character = 0x1ea0; character <= 0x1ef9; ++character) {
             if (!font.supportsCharacter(character)) {
                 complete(false, incompleteFontMessage(m_family));
-                return;
+                return false;
             }
         }
     }
-    QString error;
-    const bool success = ApplicationFonts::installDownloadedFont(
-        data, m_family, m_bold, m_italic, m_requiredCodePoint, error);
-    if (!success) {
-        //% "The downloaded font could not be validated or stored in TrePDF's font folder."
-        error = qtTrId("FontDownloadInstallFailed");
+    face.data = data;
+    return true;
+}
+
+void FontDownloadService::installFamily()
+{
+    if (!m_active)
+        return;
+    if (m_faces.isEmpty()) {
+        failUnavailable();
+        return;
     }
-    complete(success, error);
+    QList<ApplicationFonts::DownloadedFontData> pending;
+    for (const Face &face : std::as_const(m_faces)) {
+        if (face.data.isEmpty()) {
+            if (!hasCachedFace(face)) {
+                failUnavailable();
+                return;
+            }
+            continue;
+        }
+        pending.append({face.data, m_family, face.bold, face.italic, requiredCharacter(face)});
+    }
+    QString error;
+    if (!pending.isEmpty() && !ApplicationFonts::installDownloadedFonts(pending, error)) {
+        //% "The downloaded font could not be validated or stored in TrePDF's font folder."
+        complete(false, qtTrId("FontDownloadInstallFailed"));
+        return;
+    }
+    complete(true, {});
 }
 
 void FontDownloadService::failUnavailable()
