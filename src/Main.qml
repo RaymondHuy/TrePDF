@@ -22,6 +22,7 @@ ApplicationWindow {
     property string pendingDraftAction: ""
     property bool openingFiles: false
     property PDFDocumentSession pendingSession: null
+    property PDFEditController fontDownloadController: null
     property PDFDocumentSession saveAsSession: null
     property PDFDocumentSession excelExportSession: null
     property PDFDocumentSession workspaceSession: null
@@ -648,6 +649,9 @@ ApplicationWindow {
         onSessionSaveFinished: (session, succeeded) => {
             window.finishPendingDraftAction(session, succeeded)
         }
+        onFontDownloadRequested: session => {
+            window.fontDownloadController = session.editController
+        }
         onExternalLinkRequested:
             (session, requestId, authority, displayUrl, insecureHttp) => {
                 window.requestExternalLink(
@@ -734,6 +738,97 @@ ApplicationWindow {
         //% "PDF files (*.pdf)"
         nameFilters: [qsTrId("PdfFileFilter")]
         onAccepted: window.openFiles(selectedFiles)
+    }
+
+    Connections {
+        target: window.fontDownloadController
+        function onFontDownloadStateChanged() {
+            if (window.fontDownloadController
+                    && !window.fontDownloadController.fontDownloadPending)
+                window.fontDownloadController = null
+        }
+    }
+
+    Loader {
+        active: window.fontDownloadController !== null
+            && window.fontDownloadController.fontDownloadPending
+        sourceComponent: Popup {
+            id: fontDownloadPopup
+            objectName: "fontDownloadPopup"
+            parent: Overlay.overlay
+            x: Math.round((window.width - width) / 2)
+            y: Math.round((window.height - height) / 2)
+            width: Math.min(480, window.width - 32)
+            padding: 20
+            modal: true
+            focus: true
+            visible: true
+            z: 200
+            closePolicy: Popup.NoAutoClose
+            readonly property PDFEditController controller: window.fontDownloadController
+            readonly property bool downloading: controller ? controller.downloadingFont : false
+
+            background: Rectangle {
+                radius: 6
+                color: "#fffdfb"
+                border.color: appTheme.ribbonBorder
+            }
+            contentItem: ColumnLayout {
+                spacing: 16
+                Label {
+                    Layout.fillWidth: true
+                    //% "Download font family"
+                    text: qsTrId("DownloadMissingFontTitle")
+                    font.pixelSize: 18
+                    font.weight: Font.DemiBold
+                    color: appTheme.ribbonTextColor
+                    wrapMode: Text.Wrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: fontDownloadPopup.downloading
+                        //% "Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish."
+                        ? qsTrId("FontDownloadInProgress").arg(
+                            fontDownloadPopup.controller ? fontDownloadPopup.controller.missingFontFamily : "")
+                        //% "The application does not have the complete %1 font. Would you like it to download all available regular, bold, italic and bold italic styles of this family and continue saving?"
+                        : qsTrId("FontDownloadConfirmation").arg(
+                            fontDownloadPopup.controller ? fontDownloadPopup.controller.missingFontFamily : "")
+                    textFormat: Text.PlainText
+                    color: appTheme.ribbonTextColor
+                    wrapMode: Text.Wrap
+                }
+                ProgressBar {
+                    Layout.fillWidth: true
+                    visible: fontDownloadPopup.downloading
+                    indeterminate: fontDownloadPopup.downloading
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        objectName: "cancelFontDownloadButton"
+                        //% "Cancel"
+                        text: qsTrId("Cancel")
+                        onClicked: {
+                            if (fontDownloadPopup.controller)
+                                fontDownloadPopup.controller.cancelFontDownload()
+                        }
+                    }
+                    OrangeButton {
+                        objectName: "confirmFontDownloadButton"
+                        theme: appTheme
+                        //% "OK"
+                        text: qsTrId("ConfirmFontDownload")
+                        visible: !fontDownloadPopup.downloading
+                        onClicked: {
+                            if (fontDownloadPopup.controller)
+                                fontDownloadPopup.controller.respondToFontDownload(true)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     FileDialog {

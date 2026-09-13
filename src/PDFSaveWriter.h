@@ -54,6 +54,9 @@ public:
         QString detail;
         int page = -1;
         uint unsupportedCodePoint = 0;
+        bool fontBold = false;
+        bool fontItalic = false;
+        bool fontDownloadSuggested = false;
 
         bool succeeded() const
         {

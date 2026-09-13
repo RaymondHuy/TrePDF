@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QList>
 #include <QStringList>
 
 namespace ApplicationFonts {
@@ -52,5 +53,26 @@ int calibratedFontStretch(const QString &family,
                           int pixelSize);
 QByteArray bundledFontData(const QString &family, bool bold, bool italic);
 FontFaceData systemFontFace(const QString &family, bool bold, bool italic);
+QString downloadedFontDirectory();
+const QStringList &downloadedFontFamilies();
+FontFaceData downloadedFontFace(const QString &family, bool bold, bool italic);
+// Validates a complete face without registering it or writing to private storage.
+bool validateDownloadedFontData(const QByteArray &data, const QString &family,
+                                bool bold, bool italic, uint requiredCodePoint,
+                                QString &error);
+struct DownloadedFontData {
+    QByteArray data;
+    QString family;
+    bool bold = false;
+    bool italic = false;
+    uint requiredCodePoint = 0;
+};
+// Installs at most four validated faces together, rolling back a failed batch.
+bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &error);
+// Called on the GUI thread only, after the caller has obtained download consent.
+// Fonts are private to TrePDF and are never installed in the operating system.
+bool installDownloadedFont(const QByteArray &data, const QString &family,
+                           bool bold, bool italic, uint requiredCodePoint,
+                           QString &error);
 
 } // namespace ApplicationFonts

@@ -1,7 +1,606 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <fpdf_ppo.h>
+#include "FontDownloadService.h"
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QStandardPaths>
+#include <QTemporaryFile>
+#include <QUuid>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QUrlQuery>
+#include <QCryptographicHash>
+#include <zip.h>
+
 using namespace PDFEditControllerTestSupport;
+
+namespace {
+
+struct FontResponse {
+    QByteArray body;
+    int status = 200;
+    QUrl redirect;
+    qint64 contentLength = -1;
+    int delayMs = 0;
+};
+
+class FontReply final : public QNetworkReply
+{
+public:
+    FontReply(const QNetworkRequest &request, const FontResponse &response, QObject *parent)
+        : QNetworkReply(parent), m_body(response.body)
+    {
+        setRequest(request);
+        setUrl(request.url());
+        setOperation(QNetworkAccessManager::GetOperation);
+        setAttribute(QNetworkRequest::HttpStatusCodeAttribute, response.status);
+        if (!response.redirect.isEmpty())
+            setAttribute(QNetworkRequest::RedirectionTargetAttribute, response.redirect);
+        setHeader(QNetworkRequest::ContentLengthHeader,
+                  response.contentLength >= 0 ? response.contentLength : m_body.size());
+        open(QIODevice::ReadOnly);
+        QTimer::singleShot(response.delayMs, this, [this]() {
+            if (m_aborted)
+                return;
+            emit readyRead();
+            if (!m_aborted) {
+                setFinished(true);
+                emit finished();
+            }
+        });
+    }
+    void abort() override { m_aborted = true; }
+    qint64 bytesAvailable() const override
+    {
+        return m_body.size() - m_position + QNetworkReply::bytesAvailable();
+    }
+protected:
+    qint64 readData(char *destination, qint64 maximum) override
+    {
+        const qint64 count = qMin(maximum, m_body.size() - m_position);
+        if (!count)
+            return -1;
+        memcpy(destination, m_body.constData() + m_position, size_t(count));
+        m_position += count;
+        return count;
+    }
+private:
+    QByteArray m_body;
+    qint64 m_position = 0;
+    bool m_aborted = false;
+};
+
+class FontNetwork final : public QNetworkAccessManager
+{
+public:
+    QList<FontResponse> responses;
+    QList<QNetworkRequest> requests;
+protected:
+    QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *) override
+    {
+        requests.append(request);
+        return new FontReply(request, responses.isEmpty()
+            ? FontResponse{{}, 404, {}, -1} : responses.takeFirst(), this);
+    }
+};
+
+QByteArray fontMetadata(const QString &family, bool allStyles = false)
+{
+    return QJsonDocument(QJsonArray{QJsonObject{
+        {QStringLiteral("family"), family}, {QStringLiteral("type"), QStringLiteral("google")},
+        {QStringLiteral("weights"), allStyles ? QJsonArray{400, 700} : QJsonArray{400}},
+        {QStringLiteral("styles"), allStyles
+            ? QJsonArray{QStringLiteral("normal"), QStringLiteral("italic")}
+            : QJsonArray{QStringLiteral("normal")}},
+        {QStringLiteral("subsets"), QJsonArray{QStringLiteral("latin"), QStringLiteral("vietnamese")}}
+    }}).toJson(QJsonDocument::Compact);
+}
+
+const QByteArray fullFontStylesheet = QByteArrayLiteral(
+    "@font-face {src: url(https://fonts.gstatic.com/s/test/v1/complete.ttf) format('truetype');}");
+
+// Give each test its own standard application-data directory without touching
+// the user's real TrePDF font store or changing the process home directory.
+class IsolatedFontStore final
+{
+public:
+    IsolatedFontStore()
+        : m_name(QCoreApplication::applicationName()), m_testMode(QStandardPaths::isTestModeEnabled())
+    {
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName(QStringLiteral("TrePDF-font-test-")
+            + QUuid::createUuid().toString(QUuid::WithoutBraces));
+        path = ApplicationFonts::downloadedFontDirectory();
+        fresh = QFileInfo(QFileInfo(path).absolutePath()).fileName()
+            == QCoreApplication::applicationName()
+            && !QFileInfo::exists(QFileInfo(path).absolutePath());
+    }
+    ~IsolatedFontStore()
+    {
+        if (fresh)
+            QDir(QFileInfo(path).absolutePath()).removeRecursively();
+        QCoreApplication::setApplicationName(m_name);
+        QStandardPaths::setTestModeEnabled(m_testMode);
+    }
+    QString path;
+    bool fresh = false;
+private:
+    QString m_name;
+    bool m_testMode;
+};
+
+const QString kUninstalledSubsetFamily = QStringLiteral("QrZxy");
+
+quint16 sfntUInt16(const QByteArray &data, qsizetype offset)
+{
+    return (quint16(quint8(data.at(offset))) << 8)
+        | quint8(data.at(offset + 1));
+}
+
+quint32 sfntUInt32(const QByteArray &data, qsizetype offset)
+{
+    return (quint32(sfntUInt16(data, offset)) << 16)
+        | sfntUInt16(data, offset + 2);
+}
+
+void setSfntUInt32(QByteArray &data, qsizetype offset, quint32 value)
+{
+    for (int byte = 0; byte < 4; ++byte)
+        data[offset + byte] = char(value >> (24 - byte * 8));
+}
+
+quint32 sfntChecksum(const QByteArray &data, qsizetype offset, qsizetype length)
+{
+    quint32 sum = 0;
+    for (qsizetype start = 0; start < length; start += 4) {
+        quint32 word = 0;
+        for (int byte = 0; byte < 4; ++byte) {
+            word <<= 8;
+            if (start + byte < length)
+                word |= quint8(data.at(offset + start + byte));
+        }
+        sum += word;
+    }
+    return sum;
+}
+
+QByteArray uninstalledSubsetFontData(const QByteArray &alias = QByteArrayLiteral("QrZxy"),
+                                   bool bold = false, bool italic = false)
+{
+    if (alias.size() != 5)
+        return {};
+    QByteArray wideAlias;
+    for (char character : alias) {
+        wideAlias.append('\0');
+        wideAlias.append(character);
+    }
+    QByteArray data = ApplicationFonts::bundledFontData(
+        QStringLiteral("Arial"), bold, italic);
+    if (data.size() < 12)
+        return {};
+    const int tableCount = sfntUInt16(data, 4);
+    if (12 + tableCount * 16 > data.size())
+        return {};
+    qsizetype headOffset = -1;
+    bool renamed = false;
+    for (int table = 0; table < tableCount; ++table) {
+        const qsizetype entry = 12 + table * 16;
+        const qsizetype offset = sfntUInt32(data, entry + 8);
+        const qsizetype length = sfntUInt32(data, entry + 12);
+        if (offset > data.size() || length > data.size() - offset)
+            return {};
+        if (data.mid(entry, 4) == QByteArrayLiteral("head"))
+            headOffset = offset;
+        if (data.mid(entry, 4) != QByteArrayLiteral("name"))
+            continue;
+        QByteArray names = data.mid(offset, length);
+        // Equal-length replacements keep every name-record offset intact.
+        names.replace(QByteArrayLiteral("Arial"), alias);
+        names.replace(QByteArray("\0A\0r\0i\0a\0l", 10),
+                      wideAlias);
+        renamed = names != data.mid(offset, length);
+        data.replace(offset, length, names);
+    }
+    if (!renamed || headOffset < 0 || headOffset + 12 > data.size())
+        return {};
+    setSfntUInt32(data, headOffset + 8, 0);
+    for (int table = 0; table < tableCount; ++table) {
+        const qsizetype entry = 12 + table * 16;
+        setSfntUInt32(data, entry + 4,
+            sfntChecksum(data, sfntUInt32(data, entry + 8),
+                         sfntUInt32(data, entry + 12)));
+    }
+    setSfntUInt32(data, headOffset + 8,
+        quint32(0xb1b0afba) - sfntChecksum(data, 0, data.size()));
+    return data;
+}
+
+QByteArray fontArchive(const QList<QPair<QByteArray, QByteArray>> &entries)
+{
+    QTemporaryFile file;
+    if (!file.open())
+        return {};
+    file.close();
+    zipFile archive = zipOpen64(QFile::encodeName(file.fileName()).constData(), APPEND_STATUS_CREATE);
+    if (!archive)
+        return {};
+    const auto closeArchive = qScopeGuard([&]() {
+        if (archive)
+            zipClose(archive, nullptr);
+    });
+    for (const auto &entry : entries) {
+        if (zipOpenNewFileInZip64(archive, entry.first.constData(), nullptr,
+                                  nullptr, 0, nullptr, 0, nullptr, 0, 0, 0) != ZIP_OK)
+            return {};
+        const int written = zipWriteInFileInZip(archive, entry.second.constData(),
+                                                unsigned(entry.second.size()));
+        const int closed = zipCloseFileInZip(archive);
+        if (written != ZIP_OK || closed != ZIP_OK)
+            return {};
+    }
+    const int result = zipClose(archive, nullptr);
+    archive = nullptr;
+    QFile contents(file.fileName());
+    if (result != ZIP_OK || !contents.open(QIODevice::ReadOnly))
+        return {};
+    return contents.readAll();
+}
+
+QList<QPair<QByteArray, QByteArray>> aptosArchiveEntries()
+{
+    return {{QByteArrayLiteral("Aptos.ttf"), uninstalledSubsetFontData("Aptos")},
+            {QByteArrayLiteral("Aptos-Italic.ttf"), uninstalledSubsetFontData("Aptos", false, true)},
+            {QByteArrayLiteral("Aptos-Bold.ttf"), uninstalledSubsetFontData("Aptos", true, false)},
+            {QByteArrayLiteral("Aptos-Bold-Italic.ttf"), uninstalledSubsetFontData("Aptos", true, true)},
+            {QByteArrayLiteral("notes/readme.txt"), QByteArrayLiteral("Unrelated archive entry")}};
+}
+
+bool createUninstalledSubsetPdf(const QString &path,
+                               const QString &objectText = QStringLiteral("2017"),
+                               const QString &seedText = QStringLiteral("a "),
+                               const QByteArray &alias = QByteArrayLiteral("QrZxy"))
+{
+    const QByteArray fontData = uninstalledSubsetFontData(alias);
+    const QRawFont rawFont(fontData, 16.0, QFont::PreferNoHinting);
+    if (!rawFont.isValid() || rawFont.familyName() != QString::fromLatin1(alias))
+        return false;
+    PDFiumProcessLock lock;
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document)
+        return false;
+    const auto closeDocument = qScopeGuard([&]() { FPDF_CloseDocument(document); });
+    FPDF_FONT font = FPDFText_LoadFont(document,
+        reinterpret_cast<const uint8_t *>(fontData.constData()),
+        static_cast<uint32_t>(fontData.size()), FPDF_FONT_TRUETYPE, true);
+    if (!font)
+        return false;
+    const auto closeFont = qScopeGuard([&]() { FPDFFont_Close(font); });
+    FPDF_PAGE page = FPDFPage_New(document, 0, 595.0, 842.0);
+    if (!page)
+        return false;
+    const auto closePage = qScopeGuard([&]() { FPDF_ClosePage(page); });
+    if (!addTextObjectWithFont(document, page, font,
+                              objectText, 72.0, 740.0)
+        || !addTextObjectWithFont(document, page, font,
+                                 seedText, 72.0, 680.0))
+        return false;
+    if (!FPDFPage_GenerateContent(page))
+        return false;
+    PdfFileWriter writer(path);
+    return writer.open() && FPDF_SaveAsCopy(document, &writer,
+        FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS);
+}
+
+bool combineSubsetPages(const QString &firstPath, const QString &secondPath,
+                        const QString &outputPath)
+{
+    PDFiumProcessLock lock;
+    FPDF_DOCUMENT document = FPDF_CreateNewDocument();
+    if (!document)
+        return false;
+    const auto closeDocument = qScopeGuard([&]() { FPDF_CloseDocument(document); });
+    for (const QString &sourcePath : {firstPath, secondPath}) {
+        FPDF_DOCUMENT source = FPDF_LoadDocument(
+            QFile::encodeName(sourcePath).constData(), nullptr);
+        if (!source)
+            return false;
+        const auto closeSource = qScopeGuard([&]() { FPDF_CloseDocument(source); });
+        if (!FPDF_ImportPages(document, source, "1", FPDF_GetPageCount(document)))
+            return false;
+    }
+    PdfFileWriter writer(outputPath);
+    return writer.open() && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+}
+
+QByteArray embeddedSourceFontData(const QString &path, const QString &text,
+                                 int pageIndex = 0)
+{
+    PDFiumProcessLock lock;
+    FPDF_DOCUMENT document = FPDF_LoadDocument(
+        QFile::encodeName(path).constData(), nullptr);
+    if (!document)
+        return {};
+    const auto closeDocument = qScopeGuard([&]() { FPDF_CloseDocument(document); });
+    FPDF_PAGE page = FPDF_LoadPage(document, pageIndex);
+    if (!page)
+        return {};
+    const auto closePage = qScopeGuard([&]() { FPDF_ClosePage(page); });
+    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+    if (!textPage)
+        return {};
+    const auto closeTextPage = qScopeGuard([&]() { FPDFText_ClosePage(textPage); });
+    for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
+        FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
+        if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT
+            || pageObjectText(object, textPage).trimmed() != text)
+            continue;
+        FPDF_FONT font = FPDFTextObj_GetFont(object);
+        size_t size = 0;
+        if (!FPDFFont_GetFontData(font, nullptr, 0, &size) || size == 0)
+            return {};
+        QByteArray bytes(qsizetype(size), Qt::Uninitialized);
+        size_t actual = 0;
+        if (!FPDFFont_GetFontData(font,
+                reinterpret_cast<uint8_t *>(bytes.data()), size, &actual)
+            || actual != size)
+            return {};
+        return bytes;
+    }
+    return {};
+}
+
+} // namespace
+
+void PDFEditControllerTest::reembedsUninstalledSourceSubsetForNewObjectGlyphs()
+{
+    QVERIFY(!ApplicationFonts::systemFontFamilies().contains(kUninstalledSubsetFamily));
+    QVERIFY(!ApplicationFonts::bundledFontFamilies().contains(kUninstalledSubsetFamily));
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("uninstalled-subset-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("uninstalled-subset-output.pdf"));
+    QVERIFY(createUninstalledSubsetPdf(sourcePath));
+    const TextObjectFontInfo sourceInfo = textObjectFontInfo(
+        sourcePath, QStringLiteral("2017"));
+    QVERIFY(sourceInfo.found);
+    QCOMPARE(sourceInfo.familyName, kUninstalledSubsetFamily);
+    QVERIFY(hasSubsetFontPrefix(sourceInfo.baseName));
+    const QByteArray sourceData = embeddedSourceFontData(sourcePath, QStringLiteral("2017"));
+    QVERIFY(!sourceData.isEmpty());
+    QVERIFY(sourceData.size() < uninstalledSubsetFontData().size());
+    const QRawFont sourceFont(sourceData, 16.0, QFont::PreferNoHinting);
+    QVERIFY(sourceFont.isValid());
+    QVERIFY(sourceFont.supportsCharacter(uint('a')));
+    QVERIFY(!sourceFont.supportsCharacter(uint('z')));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("2017"));
+    QVERIFY(!candidate.isEmpty());
+    QCOMPARE(candidate.value(QStringLiteral("fontFamily")).toString(),
+             kUninstalledSubsetFamily);
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(QStringLiteral("2017 a"));
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY2(pageText(outputPath).contains(QStringLiteral("2017 a")),
+             qPrintable(pageText(outputPath)));
+    const TextObjectFontInfo outputInfo = textObjectFontInfo(
+        outputPath, QStringLiteral("2017 a"));
+    QVERIFY(outputInfo.found);
+    QCOMPARE(outputInfo.familyName, kUninstalledSubsetFamily);
+    QCOMPARE(outputInfo.embedded, 1);
+    QVERIFY(hasSubsetFontPrefix(outputInfo.baseName));
+}
+
+void PDFEditControllerTest::preservesUnicodeAliasesWhenReembeddingSourceSubset()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("source-subset-unicode-aliases.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("saved-subset-unicode-aliases.pdf"));
+    QVERIFY(createUninstalledSubsetPdf(sourcePath));
+    const QRawFont sourceFont(
+        embeddedSourceFontData(sourcePath, QStringLiteral("2017")),
+        16.0, QFont::PreferNoHinting);
+    QVERIFY(sourceFont.isValid());
+    QVERIFY(sourceFont.supportsCharacter(uint(' ')));
+    QVERIFY(sourceFont.supportsCharacter(0x00a0U));
+    const auto aliasGlyphs = sourceFont.glyphIndexesForString(QStringLiteral(" \u00a0"));
+    QCOMPARE(aliasGlyphs.size(), 2);
+    QVERIFY(aliasGlyphs.first() != 0);
+    QCOMPARE(aliasGlyphs.first(), aliasGlyphs.last());
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("2017"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    // The two spaces share an outline but must retain separate Unicode values.
+    const QString editedText = QStringLiteral("2017 a\u00a0a");
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(editedText);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedText(), editedText);
+    QCOMPARE(controller.selectedFontFamily(), kUninstalledSubsetFamily);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY2(topLevelTextObjects(outputPath).contains(editedText),
+             qPrintable(topLevelTextObjects(outputPath).join(QLatin1Char('|'))));
+    const TextObjectFontInfo outputInfo = textObjectFontInfo(outputPath, editedText);
+    QVERIFY(outputInfo.found);
+    QCOMPARE(outputInfo.familyName, kUninstalledSubsetFamily);
+    QCOMPARE(outputInfo.embedded, 1);
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::preservesSourceSubsetLayoutControls_data()
+{
+    QTest::addColumn<bool>("wordSpacing");
+    QTest::newRow("plain") << false;
+    QTest::newRow("spaced") << true;
+}
+
+void PDFEditControllerTest::preservesSourceSubsetLayoutControls()
+{
+    QFETCH(bool, wordSpacing);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("subset-layout-controls-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("subset-layout-controls-output.pdf"));
+    QVERIFY(createUninstalledSubsetPdf(sourcePath));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("2017"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(QStringLiteral("2017 a\na\t2017"));
+    if (wordSpacing) {
+        controller.setSelectedTextRange(0, 13);
+        controller.setSelectedWordSpacing(2.0);
+    }
+    // Each control has its own span; neither needs a font glyph. A styled
+    // ordinary space must still be encoded if layout attaches it to a cluster.
+    for (int position : {4, 6, 8}) {
+        controller.setSelectedTextRange(position, 1);
+        controller.setSelectedColor(QColor(QStringLiteral("#1565c0")));
+    }
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    const QStringList objects = topLevelTextObjects(outputPath);
+    QString joined = objects.join(QString());
+    joined.remove(QLatin1Char(' '));
+    // Includes the unchanged "a " seed object below the edited paragraph.
+    QCOMPARE(joined, QStringLiteral("2017aa2017a"));
+    for (const QString &text : objects) {
+        const auto info = textObjectFontInfo(outputPath, text.trimmed());
+        QVERIFY(info.found);
+        QCOMPARE(info.familyName, kUninstalledSubsetFamily);
+        QCOMPARE(info.embedded, 1);
+    }
+}
+
+void PDFEditControllerTest::rejectsMissingSourceSubsetGlyphWithoutReplacingDestination()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("missing-subset-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("missing-subset-output.pdf"));
+    QVERIFY(createUninstalledSubsetPdf(sourcePath));
+    const QRawFont sourceFont(
+        embeddedSourceFontData(sourcePath, QStringLiteral("2017")),
+        16.0, QFont::PreferNoHinting);
+    QVERIFY(sourceFont.isValid());
+    QVERIFY(!sourceFont.supportsCharacter(uint('z')));
+    const QByteArray existingBytes("existing destination must survive\n");
+    QFile output(outputPath);
+    QVERIFY(output.open(QIODevice::WriteOnly));
+    QCOMPARE(output.write(existingBytes), existingBytes.size());
+    output.close();
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("2017"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(
+        0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("2017 z"));
+    const int originalRevision = document.renderRevision();
+    const auto result = PDFSaveWriter::save(controller, outputPath);
+    QCOMPARE(result.error, PDFSaveWriter::Error::FontUnavailable);
+    QCOMPARE(result.unsupportedCodePoint, uint('z'));
+    QVERIFY(!controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(output.open(QIODevice::ReadOnly));
+    QCOMPARE(output.readAll(), existingBytes);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QCOMPARE(document.renderRevision(), originalRevision);
+    QCOMPARE(document.source().toLocalFile(), sourcePath);
+    QVERIFY(!pageText(sourcePath).contains(QStringLiteral("2017 z")));
+}
+
+void PDFEditControllerTest::separatesSameFamilySourceSubsetCaches()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("distinct-subsets-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("distinct-subsets-output.pdf"));
+    const QString firstPath = m_temporaryDirectory.filePath(
+        QStringLiteral("distinct-subsets-first.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("distinct-subsets-second.pdf"));
+    QVERIFY(createUninstalledSubsetPdf(firstPath));
+    QVERIFY(createUninstalledSubsetPdf(
+        secondPath, QStringLiteral("2018"), QStringLiteral("b ")));
+    QVERIFY(combineSubsetPages(firstPath, secondPath, sourcePath));
+    const QByteArray firstData = embeddedSourceFontData(sourcePath, QStringLiteral("2017"));
+    const QByteArray secondData = embeddedSourceFontData(
+        sourcePath, QStringLiteral("2018"), 1);
+    QVERIFY(!firstData.isEmpty());
+    QVERIFY(!secondData.isEmpty());
+    QVERIFY(firstData != secondData);
+    const QRawFont firstFont(firstData, 16.0, QFont::PreferNoHinting);
+    const QRawFont secondFont(secondData, 16.0, QFont::PreferNoHinting);
+    QCOMPARE(firstFont.familyName(), secondFont.familyName());
+    QVERIFY(firstFont.supportsCharacter(uint('a')));
+    QVERIFY(!firstFont.supportsCharacter(uint('b')));
+    QVERIFY(secondFont.supportsCharacter(uint('b')));
+    QVERIFY(!secondFont.supportsCharacter(uint('a')));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    int page = 0;
+    for (const auto &entry : {
+             std::pair{QStringLiteral("2017"), QStringLiteral("2017a")},
+             std::pair{QStringLiteral("2018"), QStringLiteral("2018b")}}) {
+        const QVariantMap candidate = candidateForText(
+            waitForCandidates(controller, page), entry.first);
+        QVERIFY(!candidate.isEmpty());
+        QVERIFY(controller.selectCandidate(
+            page, candidate.value(QStringLiteral("objectId")).toString()));
+        controller.beginSelectedTextEdit();
+        controller.updateSelectedTextPreview(entry.second);
+        controller.finishSelectedTextEdit();
+        ++page;
+    }
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(pageText(outputPath).contains(QStringLiteral("2017a")));
+    QVERIFY(pageText(outputPath, 1).contains(QStringLiteral("2018b")));
+    const QRawFont outputFirst(
+        embeddedSourceFontData(outputPath, QStringLiteral("2017a")),
+        16.0, QFont::PreferNoHinting);
+    const QRawFont outputSecond(
+        embeddedSourceFontData(outputPath, QStringLiteral("2018b"), 1),
+        16.0, QFont::PreferNoHinting);
+    QCOMPARE(outputFirst.familyName(), kUninstalledSubsetFamily);
+    QCOMPARE(outputSecond.familyName(), kUninstalledSubsetFamily);
+    QVERIFY(outputFirst.supportsCharacter(uint('a')));
+    QVERIFY(!outputFirst.supportsCharacter(uint('b')));
+    QVERIFY(outputSecond.supportsCharacter(uint('b')));
+    QVERIFY(!outputSecond.supportsCharacter(uint('a')));
+}
 
 void PDFEditControllerTest::registersBundledFonts()
 {
@@ -1492,4 +2091,447 @@ void PDFEditControllerTest::savesNormalizedVietnameseRichText()
     QVERIFY(textObjectMatrix(outputPath, QStringLiteral("Tiếng"), firstLine));
     QVERIFY(textObjectMatrix(outputPath, QStringLiteral("Việt"), secondLine));
     QVERIFY(secondLine.f < firstLine.f - 1.0F);
+}
+
+void PDFEditControllerTest::cancelsMissingFontSaveWithoutLosingDrafts()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("font-consent-source.pdf"));
+    const QString target = m_temporaryDirectory.filePath(QStringLiteral("font-consent-target.pdf"));
+    QVERIFY(createUninstalledSubsetPdf(source));
+    QFile destination(target);
+    QVERIFY(destination.open(QIODevice::WriteOnly));
+    const QByteArray original("keep existing destination");
+    QCOMPARE(destination.write(original), original.size());
+    destination.close();
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    const auto candidate = candidateForText(waitForCandidates(controller, 0), QStringLiteral("2017"));
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("2017 z"));
+    QSignalSpy requested(&controller, &PDFEditController::fontDownloadRequested);
+    QSignalSpy finished(&controller, &PDFEditController::saveFinished);
+    QVERIFY(controller.requestSaveAs(QUrl::fromLocalFile(target)));
+    QTRY_COMPARE_WITH_TIMEOUT(requested.size(), 1, 10000);
+    QVERIFY(controller.fontDownloadPending());
+    QVERIFY(controller.saving());
+    QVERIFY(!controller.downloadingFont());
+    QCOMPARE(controller.missingFontFamily(), kUninstalledSubsetFamily);
+    QCOMPARE(finished.size(), 0);
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), original);
+    destination.close();
+    controller.respondToFontDownload(false);
+    QCOMPARE(finished.size(), 1);
+    QCOMPARE(finished.first().first().toBool(), false);
+    QVERIFY(!controller.saving());
+    QVERIFY(!controller.fontDownloadPending());
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QCOMPARE(document.source().toLocalFile(), source);
+    // A new attempt may ask again, but changing the document invalidates it.
+    QVERIFY(controller.requestSaveAs(QUrl::fromLocalFile(target)));
+    QTRY_COMPARE_WITH_TIMEOUT(requested.size(), 2, 10000);
+    document.close();
+    QVERIFY(!controller.fontDownloadPending());
+    QVERIFY(!controller.saving());
+    controller.respondToFontDownload(true);
+    QCOMPARE(finished.size(), 2);
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), original);
+}
+
+void PDFEditControllerTest::rejectsUnsafeFontDownloads_data()
+{
+    QTest::addColumn<int>("scenario");
+    QTest::newRow("font-not-found") << 0;
+    QTest::newRow("network-error") << 1;
+    QTest::newRow("redirect-outside-allowlist") << 2;
+    QTest::newRow("oversized-response") << 3;
+    QTest::newRow("multiple-language-subsets") << 4;
+    QTest::newRow("untrusted-font-url") << 5;
+    QTest::newRow("malformed-font") << 6;
+    QTest::newRow("different-family") << 7;
+    QTest::newRow("different-style") << 8;
+    QTest::newRow("missing-required-glyph") << 9;
+}
+
+void PDFEditControllerTest::rejectsUnsafeFontDownloads()
+{
+    QFETCH(int, scenario);
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    FontNetwork network;
+    const QString family = QStringLiteral("DlBad");
+    network.responses = {{fontMetadata(family)}, {fullFontStylesheet}, {uninstalledSubsetFontData("DlBad")}};
+    switch (scenario) {
+    case 0: network.responses = {{QByteArrayLiteral("[]")}}; break;
+    case 1: network.responses = {{{}, 503}}; break;
+    case 2: network.responses = {{{}, 302, QUrl(QStringLiteral("https://example.com/font.ttf"))}}; break;
+    case 3: network.responses = {{{}, 200, {}, 2 * 1024 * 1024}}; break;
+    case 4: network.responses[1].body = fullFontStylesheet + fullFontStylesheet; break;
+    case 5: network.responses[1].body = QByteArrayLiteral("src: url(https://example.com/font.ttf)"); break;
+    case 6: network.responses[2].body = QByteArrayLiteral("not a font"); break;
+    case 7: network.responses[2].body = uninstalledSubsetFontData("Wrong"); break;
+    case 8: network.responses[0].body = fontMetadata(family, true); break;
+    default: break;
+    }
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family, scenario == 8, false, scenario == 9 ? 0x10fffd : uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY(!finished.first().at(0).toBool());
+    QVERIFY(!finished.first().at(1).toString().isEmpty());
+    QCOMPARE(network.requests.size(), scenario < 4 ? 1 : scenario < 6 ? 2 : 3);
+    QVERIFY(!QFileInfo::exists(store.path));
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+}
+
+void PDFEditControllerTest::cancelsFontDownloadBeforeInstallation()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    FontNetwork network;
+    network.responses = {{fontMetadata(QStringLiteral("DlCan"))}};
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(QStringLiteral("DlCan"), false, false, uint('z'));
+    service.cancel();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCoreApplication::processEvents();
+    QCOMPARE(network.requests.size(), 1);
+    QCOMPARE(finished.size(), 0);
+    QVERIFY(!QFileInfo::exists(store.path));
+}
+
+void PDFEditControllerTest::downloadsEveryAvailableFontStyle()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("DlAll");
+    FontNetwork network;
+    network.responses = {{fontMetadata(family, true)}};
+    // Start with the face needed for the pending save; then fetch every other
+    // advertised style, including faces that are not used by that document.
+    const QList<int> order{3, 0, 1, 2};
+    for (int style : order) {
+        const QByteArray font = uninstalledSubsetFontData("DlAll", style & 2, style & 1);
+        QVERIFY(!font.isEmpty());
+        network.responses.append(FontResponse{fullFontStylesheet});
+        network.responses.append(FontResponse{font});
+    }
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family, true, true, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY2(finished.first().first().toBool(), qPrintable(finished.first().at(1).toString()));
+    QCOMPARE(network.requests.size(), 9);
+    QCOMPARE(QDir(store.path).entryList({QStringLiteral("*.ttf")}, QDir::Files).size(), 4);
+    for (int index = 0; index < order.size(); ++index) {
+        const int style = order.at(index);
+        QString face = family + ((style & 2) ? QStringLiteral(":700") : QStringLiteral(":400"));
+        if (style & 1)
+            face += QStringLiteral("italic");
+        QCOMPARE(QUrlQuery(network.requests.at(1 + index * 2).url())
+            .queryItemValue(QStringLiteral("family")), face);
+        const auto installed = ApplicationFonts::downloadedFontFace(family, style & 2, style & 1);
+        QVERIFY(installed.isValid());
+        QCOMPARE(installed.data, uninstalledSubsetFontData("DlAll", style & 2, style & 1));
+        QVERIFY(ApplicationFonts::isFontFaceSelectable(family, style & 2, style & 1));
+    }
+}
+
+void PDFEditControllerTest::downloadsOnlyAdvertisedFontStyles()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("DlOne");
+    const QByteArray font = uninstalledSubsetFontData("DlOne");
+    FontNetwork network;
+    network.responses = {{fontMetadata(family)}, {fullFontStylesheet}, {font}};
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family, false, false, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY2(finished.first().first().toBool(), qPrintable(finished.first().at(1).toString()));
+    QCOMPARE(network.requests.size(), 3);
+    QCOMPARE(QDir(store.path).entryList({QStringLiteral("*.ttf")}, QDir::Files).size(), 1);
+    QCOMPARE(ApplicationFonts::downloadedFontFace(family, false, false).data, font);
+    for (int style = 1; style < 4; ++style)
+        QVERIFY(!ApplicationFonts::downloadedFontFace(family, style & 2, style & 1).isValid());
+}
+
+void PDFEditControllerTest::skipsCachedFontStylesWhenDownloadingFamily()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("DlCac");
+    const QByteArray cached = uninstalledSubsetFontData("DlCac", true, true);
+    QString error;
+    QVERIFY2(ApplicationFonts::installDownloadedFont(cached, family, true, true, uint('z'), error),
+             qPrintable(error));
+    FontNetwork network;
+    network.responses = {{fontMetadata(family, true)}};
+    for (int style = 0; style < 3; ++style) {
+        network.responses.append(FontResponse{fullFontStylesheet});
+        network.responses.append(FontResponse{uninstalledSubsetFontData("DlCac", style & 2, style & 1)});
+    }
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family, false, false, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY2(finished.first().first().toBool(), qPrintable(finished.first().at(1).toString()));
+    QCOMPARE(network.requests.size(), 7);
+    for (const auto &request : network.requests)
+        QVERIFY(!QUrlQuery(request.url()).queryItemValue(QStringLiteral("family"))
+            .endsWith(QStringLiteral(":700italic")));
+    QCOMPARE(ApplicationFonts::downloadedFontFace(family, true, true).data, cached);
+    QCOMPARE(QDir(store.path).entryList({QStringLiteral("*.ttf")}, QDir::Files).size(), 4);
+}
+
+void PDFEditControllerTest::keepsFontFamilyUninstalledWhenOptionalDownloadFails_data()
+{
+    QTest::addColumn<bool>("invalidFont");
+    QTest::newRow("optional-network-error") << false;
+    QTest::newRow("optional-wrong-family") << true;
+}
+
+void PDFEditControllerTest::keepsFontFamilyUninstalledWhenOptionalDownloadFails()
+{
+    QFETCH(bool, invalidFont);
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("DlFai");
+    FontNetwork network;
+    network.responses = {{fontMetadata(family, true)}, {fullFontStylesheet},
+                         {uninstalledSubsetFontData("DlFai")}};
+    if (invalidFont) {
+        network.responses.append(FontResponse{fullFontStylesheet});
+        network.responses.append(FontResponse{uninstalledSubsetFontData("Wrong", false, true)});
+    } else {
+        network.responses.append(FontResponse{{}, 503});
+    }
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family, false, false, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY(!finished.first().first().toBool());
+    QVERIFY(!finished.first().at(1).toString().isEmpty());
+    QCOMPARE(network.requests.size(), invalidFont ? 5 : 4);
+    QVERIFY(!QFileInfo::exists(store.path));
+    for (int style = 0; style < 4; ++style)
+        QVERIFY(!ApplicationFonts::downloadedFontFace(family, style & 2, style & 1).isValid());
+}
+
+void PDFEditControllerTest::cancelsFontFamilyDownloadAfterFirstFace()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("DlPar");
+    FontNetwork network;
+    network.responses = {{fontMetadata(family, true)}, {fullFontStylesheet},
+                         {uninstalledSubsetFontData("DlPar")},
+                         {fullFontStylesheet, 200, {}, -1, 200}};
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family, false, false, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(network.requests.size(), 4, 5000);
+    // The required regular face has arrived, but it must remain staged until
+    // the rest of the family is ready. Cancellation drops those staged bytes.
+    QVERIFY(!QFileInfo::exists(store.path));
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    service.cancel();
+    QTest::qWait(250);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCOMPARE(network.requests.size(), 4);
+    QCOMPARE(finished.size(), 0);
+    QVERIFY(!QFileInfo::exists(store.path));
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+}
+
+void PDFEditControllerTest::rejectsInvalidAptosFontArchives_data()
+{
+    QTest::addColumn<int>("scenario");
+    QTest::newRow("optional-face-has-wrong-style") << 0;
+    QTest::newRow("duplicate-face-entry") << 1;
+    QTest::newRow("required-face-is-missing") << 2;
+}
+
+void PDFEditControllerTest::rejectsInvalidAptosFontArchives()
+{
+    QFETCH(int, scenario);
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    auto entries = aptosArchiveEntries();
+    if (scenario == 0)
+        entries[1].second = entries.first().second;
+    else if (scenario == 1)
+        entries.append(entries.at(1));
+    else
+        entries.removeAt(3);
+    const QByteArray archive = fontArchive(entries);
+    QVERIFY(!archive.isEmpty());
+    FontNetwork network;
+    network.responses = {{archive}};
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(QStringLiteral("Aptos"), true, true, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY(!finished.first().first().toBool());
+    QVERIFY(!finished.first().at(1).toString().isEmpty());
+    QCOMPARE(network.requests.size(), 1);
+    QVERIFY(!QFileInfo::exists(store.path));
+    for (int style = 0; style < 4; ++style)
+        QVERIFY(!ApplicationFonts::downloadedFontFace(QStringLiteral("Aptos"), style & 2, style & 1).isValid());
+}
+
+void PDFEditControllerTest::downloadsAllAptosStylesFromSingleArchive()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("Aptos");
+    const auto entries = aptosArchiveEntries();
+    const QByteArray archive = fontArchive(entries);
+    QVERIFY(!archive.isEmpty());
+    FontNetwork network;
+    network.responses = {{archive}};
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family, true, true, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY2(finished.first().first().toBool(), qPrintable(finished.first().at(1).toString()));
+    QCOMPARE(network.requests.size(), 1);
+    QCOMPARE(network.requests.first().url().host(), QStringLiteral("download.microsoft.com"));
+    QCOMPARE(QDir(store.path).entryList({QStringLiteral("*.ttf")}, QDir::Files).size(), 4);
+    QVERIFY(!QFileInfo::exists(QDir(store.path).filePath(QStringLiteral("notes"))));
+    for (int style = 0; style < 4; ++style) {
+        const auto installed = ApplicationFonts::downloadedFontFace(family, style & 2, style & 1);
+        QVERIFY(installed.isValid());
+        QCOMPARE(installed.data, entries.at(style).second);
+    }
+}
+
+void PDFEditControllerTest::downloadsPrivateFontAndResumesOriginalSave()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("DlRet");
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("font-retry-source.pdf"));
+    const QString target = m_temporaryDirectory.filePath(QStringLiteral("font-retry-target.pdf"));
+    QVERIFY(createUninstalledSubsetPdf(source, QStringLiteral("2017"), QStringLiteral("a "), "DlRet"));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    const auto candidate = candidateForText(waitForCandidates(controller, 0), QStringLiteral("2017"));
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("2017 z"));
+    QSignalSpy requested(&controller, &PDFEditController::fontDownloadRequested);
+    QSignalSpy saved(&controller, &PDFEditController::saveFinished);
+    QVERIFY(controller.requestSaveAs(QUrl::fromLocalFile(target)));
+    QTRY_COMPARE_WITH_TIMEOUT(requested.size(), 1, 10000);
+    FontNetwork network;
+    const QByteArray font = uninstalledSubsetFontData("DlRet");
+    network.responses = {{fontMetadata(family, true)}};
+    for (int style = 0; style < 4; ++style) {
+        network.responses.append(FontResponse{fullFontStylesheet});
+        network.responses.append(FontResponse{uninstalledSubsetFontData("DlRet", style & 2, style & 1)});
+    }
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy downloaded(&service, &FontDownloadService::finished);
+    service.start(family, false, false, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(downloaded.size(), 1, 5000);
+    QVERIFY2(downloaded.first().first().toBool(), qPrintable(downloaded.first().at(1).toString()));
+    QCOMPARE(network.requests.size(), 9);
+    for (const auto &request : network.requests) {
+        QVERIFY(!request.url().toString().contains(source));
+        QVERIFY(!QUrlQuery(request.url()).hasQueryItem(QStringLiteral("text")));
+    }
+    QCOMPARE(QDir(store.path).entryList({QStringLiteral("*.ttf")}, QDir::Files).size(), 4);
+    QCOMPARE(ApplicationFonts::downloadedFontFace(family, false, false).data, font);
+    QVERIFY(ApplicationFonts::isFontFaceSelectable(family, false, false));
+    for (int style = 0; style < 4; ++style)
+        QVERIFY(ApplicationFonts::downloadedFontFace(family, style & 2, style & 1).isValid());
+    QVERIFY(!ApplicationFonts::systemFontFamilies().contains(family));
+    controller.respondToFontDownload(true);
+    QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 1, 15000);
+    QVERIFY(saved.first().first().toBool());
+    QCOMPARE(requested.size(), 1);
+    QVERIFY(!controller.saving());
+    QVERIFY(!controller.fontDownloadPending());
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(document.source().toLocalFile(), target);
+    QVERIFY(normalizedPageText(target).contains(QStringLiteral("2017 z")));
+    QVERIFY(!pageText(source).contains(QStringLiteral("2017 z")));
+    const auto savedFont = textObjectFontInfo(target, QStringLiteral("z"));
+    QVERIFY(savedFont.found);
+    QCOMPARE(savedFont.familyName, family);
+    QCOMPARE(savedFont.embedded, 1);
+    // A cache file altered after installation must never become save input.
+    QFile cached(QDir(store.path).filePath(QString::fromLatin1(
+        QCryptographicHash::hash(font, QCryptographicHash::Sha256).toHex()) + QStringLiteral(".ttf")));
+    QVERIFY(cached.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    cached.write("corrupted");
+    cached.close();
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    QString error;
+    QVERIFY2(ApplicationFonts::installDownloadedFont(font, family, false, false, uint('z'), error), qPrintable(error));
+    QCOMPARE(ApplicationFonts::downloadedFontFace(family, false, false).data, font);
+    QVERIFY2(ApplicationFonts::installDownloadedFont(font, family, false, false, uint('z'), error), qPrintable(error));
+    QCOMPARE(QDir(store.path).entryList({QStringLiteral("*.ttf")}, QDir::Files).size(), 4);
+}
+
+void PDFEditControllerTest::validatesFontFamilyBeforeInstallation()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("DlBat");
+    const QByteArray regular = uninstalledSubsetFontData("DlBat");
+    QVERIFY(!regular.isEmpty());
+    // Even though the first face is valid, the second face is regular data
+    // advertised as italic. The batch must not register or persist either one.
+    const QList<ApplicationFonts::DownloadedFontData> faces{
+        {regular, family, false, false, uint('z')},
+        {regular, family, false, true, 0}};
+    QString error;
+    QVERIFY(!ApplicationFonts::installDownloadedFonts(faces, error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(!QFileInfo::exists(store.path));
+    QVERIFY(!ApplicationFonts::downloadedFontFamilies().contains(family));
+    QVERIFY(!QFontDatabase::families().contains(family));
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, true).isValid());
+}
+
+void PDFEditControllerTest::rollsBackFontFamilyWhenOptionalTargetBlocked()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("DlBlk");
+    const QByteArray regular = uninstalledSubsetFontData("DlBlk");
+    const QByteArray italic = uninstalledSubsetFontData("DlBlk", false, true);
+    QVERIFY(!regular.isEmpty());
+    QVERIFY(!italic.isEmpty());
+    const QString blocked = QDir(store.path).filePath(QString::fromLatin1(
+        QCryptographicHash::hash(italic, QCryptographicHash::Sha256).toHex()) + QStringLiteral(".ttf"));
+    QVERIFY(QDir().mkpath(blocked));
+    QFile marker(QDir(blocked).filePath(QStringLiteral("preserve.txt")));
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    QCOMPARE(marker.write("existing directory"), 18);
+    marker.close();
+    const QList<ApplicationFonts::DownloadedFontData> faces{
+        {regular, family, false, false, uint('z')},
+        {italic, family, false, true, 0}};
+    QString error;
+    QVERIFY(!ApplicationFonts::installDownloadedFonts(faces, error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(QDir(store.path).entryList(QDir::Files).isEmpty());
+    QVERIFY(QFileInfo(blocked).isDir());
+    QVERIFY(marker.open(QIODevice::ReadOnly));
+    QCOMPARE(marker.readAll(), QByteArrayLiteral("existing directory"));
+    QVERIFY(!ApplicationFonts::downloadedFontFamilies().contains(family));
+    QVERIFY(!QFontDatabase::families().contains(family));
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, true).isValid());
 }

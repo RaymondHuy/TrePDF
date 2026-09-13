@@ -1253,6 +1253,50 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
 được render. Pending Close Tab/Quit của đúng session chỉ tiếp tục sau signal
 `saveFinished(true)`. Open tạo tab mới và không làm mất draft của tab hiện tại.
 
+Khi writer báo thiếu bản font đầy đủ để nhúng, luồng Save bất đồng bộ giữ
+`saving = true` và phát `fontDownloadRequested` cho đúng session. Hộp thoại hỏi
+người dùng trước khi gửi bất kỳ yêu cầu mạng nào. Một lần bấm OK cho phép
+`FontDownloadService` tải các kiểu thường, đậm, nghiêng và đậm nghiêng hiện có
+trong cùng family, gồm cả các kiểu chưa được dùng trong bản chỉnh sửa. Đây là
+bốn kiểu TrePDF hỗ trợ; không tự tải family liên quan như Display, Narrow hay
+Serif. Các face đã có trong kho riêng được dùng lại. Chỉ bỏ qua kiểu bổ sung
+khi nguồn không cung cấp; nếu kiểu cần để lưu không có, hoặc một lượt tải thực
+tế thất bại, luồng Save báo lỗi. Hủy hoặc tải thất bại giữ draft, undo/redo và
+file đích.
+Controller giữ nguyên đường dẫn Save/Save As, document/revision và snapshot
+AcroForm trong lúc chờ. Sau khi tải và đăng ký toàn bộ các kiểu khả dụng thành
+công, controller tạo save request mới rồi tiếp tục lưu vào đúng đường dẫn đó.
+Chỉ phát `saveFinished(true)` sau bước ghi file thành công; Close/Quit đang chờ vì vậy
+không chạy giữa lúc tải. Đổi document/revision hủy yêu cầu cũ. Mỗi face chỉ được
+thử tải một lần trong một lượt Save, tối đa tám face, để tránh vòng lặp retry.
+API Save đồng bộ vẫn trả lỗi trực tiếp.
+
+`ApplicationFonts` lưu font tải về trong
+`QStandardPaths::AppLocalDataLocation/fonts` (macOS:
+`~/Library/Application Support/TreOffice/TrePDF/fonts`), tên file là SHA-256 của
+nội dung. Không cài vào hệ điều hành. Khởi động sau nạp lại các file hợp lệ;
+writer ưu tiên face bundled, rồi face tải về, rồi face hệ thống và font nhúng
+nguồn. Bytes của mỗi face tải về được đọc, kiểm tra hash và snapshot một lần
+trong mỗi Save. Font được ghi atomically bằng `QSaveFile`, chỉ nhận TrueType
+tĩnh đúng family/đậm/nghiêng, cho phép Editable/Installable embedding và
+subsetting, có glyph yêu cầu. Kho riêng giới hạn 128 face và 256 MiB.
+Toàn bộ face tải mới được kiểm tra trước, kiểm tra quota cho cả bộ và stage
+mọi file trước khi commit. Đăng ký Qt chỉ diễn ra khi tất cả file đã ghi thành
+công. Nếu cài bộ font thất bại, rollback gỡ file/đăng ký mới và phục hồi cache
+cũ; không để một face mới cài dở làm lượt Save sau bỏ qua các kiểu còn thiếu.
+
+Nguồn tải hiện tại: gói Aptos chính thức từ Microsoft Download Center; các
+family Google Fonts dùng metadata Fontsource và stylesheet Google Fonts để
+lấy TTF tĩnh đầy đủ cho từng kiểu khả dụng từ `fonts.gstatic.com`. Không tải
+font ngẫu nhiên từ kết quả tìm kiếm, không thay family âm thầm, không dùng các
+WOFF2 hoặc file web chỉ chứa một language subset. Font ngoài các nguồn này hoặc không có
+đúng face hỗ trợ sẽ báo không tìm thấy bản tải phù hợp. Yêu cầu mạng chỉ gửi
+tên family/style, không gửi nội dung hay đường dẫn PDF. Downloader kiểm soát
+HTTPS/host, redirect, timeout và dung lượng; ZIP Aptos chỉ tải một lần và đọc
+các entry của bốn kiểu trong family đang yêu cầu, không giải nén đường dẫn từ
+archive ra filesystem. Sau tải kiểm tra
+ASCII và coverage tiếng Việt nếu nguồn công bố hỗ trợ.
+
 1. Mở lại file nguồn bằng một `FPDF_DOCUMENT` riêng, không sửa handle đang dùng
    để render trên GUI thread.
 2. Gom draft theo page và resolve toàn bộ `parts[].objectPath` trước khi thay đổi
@@ -1273,7 +1317,7 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
    dấu cách đầu tiên được thêm vào một font subset cũng buộc writer chọn font
    có đủ glyph, tránh ghi CID 0 và hiện ô vuông sau Save. Thao tác chỉ đổi
    màu/gạch chân trên text Unicode không thay font vẫn có thể tái sử dụng font
-   nguồn. Ký tự Unicode mới không dùng font nguồn vì đó có
+   nguồn. Ký tự Unicode mới không tái sử dụng trực tiếp resource nguồn vì đó có
    thể là subset thiếu glyph hoặc ToUnicode mapping. Family Arial/Helvetica kế
    thừa từ nguồn được chuyển sang đúng face Arial bundled, kiểm tra coverage rồi
    nhúng dạng CID Unicode. Với family hệ thống khác do người dùng chọn, prepare
@@ -1287,6 +1331,20 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
    sửa vẫn giữ font resource cũ. Khi serialize, PDFium subset mỗi font mới nhúng
    xuống tập glyph thực sự được các text object mới sử dụng; font resource gốc
    của PDF không bị subset lại. Underline được tạo thành path.
+   Nếu không có face bundled/hệ thống phù hợp cho text đã sửa, writer xét bytes
+   thực sự nhúng trong các source object của draft. Chỉ nhận TrueType tĩnh đúng
+   family/đậm/nghiêng, có Unicode cmap đủ mọi glyph cần ghi (kể cả dấu cách; LF/tab
+   do layout xử lý) và cho phép
+   Editable/Installable embedding cùng subsetting. Writer dựng ToUnicode và
+   CIDToGIDMap rõ ràng qua `FPDFText_LoadCidType2Font`, cấp CID riêng cho từng
+   ký tự rồi ghi bằng `FPDFText_SetCharcodes`; cách này giữ cả dấu cách và các
+   ký tự Unicode dùng chung glyph. Font thay thế do PDFium tự cung cấp cho
+   resource không nhúng không được dùng cho fallback này. Mỗi face tối đa 4 MiB,
+   tổng bytes nguồn và tổng bytes nhúng lại mỗi save đều tối đa 32 MiB; cache
+   phân biệt fingerprint font, style và tập ký tự. Handle nguồn chỉ cache trong
+   trang đang mở. Thiếu ký tự thực sự vẫn báo lỗi và giữ draft/file đích nguyên
+   vẹn. Nhờ đó tài liệu có thể sửa bằng phần Aptos sẵn trong PDF
+   mà không cần cài bản Aptos đầy đủ, khi subset còn đủ ký tự mới.
    Resolver đồng thời đánh dấu font của từng run là font PDF nguồn, font nhúng
    mới hay PDF standard. Nếu run thật sự tái sử dụng font nguồn và stretch chưa
    bị người dùng đổi, writer ghi lại đúng `horizontalScale` ban đầu. Với font

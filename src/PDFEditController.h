@@ -29,6 +29,7 @@
 
 class PDFFormController;
 class PDFFormDesignerController;
+class FontDownloadService;
 
 class PDFEditController : public QObject
 {
@@ -51,6 +52,9 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
+    Q_PROPERTY(bool fontDownloadPending READ fontDownloadPending NOTIFY fontDownloadStateChanged FINAL)
+    Q_PROPERTY(bool downloadingFont READ downloadingFont NOTIFY fontDownloadStateChanged FINAL)
+    Q_PROPERTY(QString missingFontFamily READ missingFontFamily NOTIFY fontDownloadStateChanged FINAL)
     Q_PROPERTY(bool textEditActive READ textEditActive NOTIFY textEditActiveChanged FINAL)
     Q_PROPERTY(QStringList bundledFontFamilies READ bundledFontFamilies CONSTANT FINAL)
     Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies NOTIFY textFormatStateChanged FINAL)
@@ -428,6 +432,11 @@ public:
     Q_INVOKABLE bool saveAs(const QUrl &target);
     Q_INVOKABLE bool requestSave();
     Q_INVOKABLE bool requestSaveAs(const QUrl &target);
+    Q_INVOKABLE void respondToFontDownload(bool accepted);
+    Q_INVOKABLE void cancelFontDownload();
+    bool fontDownloadPending() const { return bool(m_pendingFontSave); }
+    bool downloadingFont() const { return m_downloadingFont; }
+    QString missingFontFamily() const;
 
 signals:
     void documentChanged();
@@ -464,6 +473,8 @@ signals:
     void statusMessage(const QString &message);
     void imageFileRequested(int page, qreal x, qreal y);
     void saveFinished(bool succeeded);
+    void fontDownloadRequested();
+    void fontDownloadStateChanged();
 
 private:
     friend class PDFSaveWriter;
@@ -749,6 +760,8 @@ private:
     };
 
     void resetSession();
+    void clearFontRecovery();
+    void finishFontDownload(bool succeeded, const QString &error);
     QRectF rotatedImageFrame(const Draft &draft, int quarterTurns) const;
     void setPendingDrawingCommentPage(int page);
     bool completeSave(const PDFSaveWriter::Result &result,
@@ -1008,6 +1021,19 @@ private:
     Candidate m_selectedCandidate;
     bool m_hasSelection = false;
     bool m_saving = false;
+    struct PendingFontSave {
+        PDFSaveWriter::Result failure;
+        QString targetFilePath;
+        QPointer<PDFDocument> document;
+        int revision = -1;
+        QString sourceFilePath;
+        QString temporarySourceFilePath;
+    };
+    std::unique_ptr<PendingFontSave> m_pendingFontSave;
+    FontDownloadService *m_fontDownloadService = nullptr;
+    bool m_allowFontRecovery = false;
+    bool m_downloadingFont = false;
+    QSet<QString> m_attemptedFontDownloads;
     bool m_imageAspectRatioLocked = true;
     QString m_selectedText;
     bool m_textEditActive = false;
