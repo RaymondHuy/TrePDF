@@ -812,10 +812,16 @@ void PDFEditControllerTest::savesFontSizeRoundTrip()
     QVERIFY(!controller.hasDrafts());
     QVERIFY(!controller.canUndo());
     const QVariantList reopenedCandidates = waitForCandidates(controller, 0);
-    candidate = candidateForText(reopenedCandidates, QStringLiteral("PDF"));
+    candidate = candidateForText(reopenedCandidates, QString::fromLatin1(kRegularText));
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(8, 3);
     QCOMPARE(controller.selectedFontSize(), 30.0);
+    controller.setSelectedTextRange(0, 7);
+    QCOMPARE(controller.selectedFontSize(), 18.0);
+    controller.finishSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
 
     const QByteArray encodedPath = QFile::encodeName(outputPath);
     FPDF_DOCUMENT savedDocument = FPDF_LoadDocument(encodedPath.constData(), nullptr);

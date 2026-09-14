@@ -286,10 +286,10 @@ Trong mỗi dòng, candidate được sắp từ trái sang phải rồi chỉ n
 
 ```text
 -0.35 em <= horizontalGap <= 1.25 em
-BaseFont identity đã bỏ subset prefix, fallback sang family đã resolve, giống nhau
 font size chênh không quá max(0.5 pt, 8%)
-font stretch chênh không quá 5
-bold, italic, underline, color và các thuộc tính paint giống nhau
+color và các thuộc tính paint giống nhau
+không có source obstacle đã index trong khoảng nối hai part
+tối đa 1.024 part và 32.768 UTF-16 code unit trong một dòng
 ```
 
 Khoảng cách được đổi về page unit trước khi so sánh:
@@ -302,8 +302,11 @@ emSize = displayFontSizeRatio * pageHeight
 
 Nếu hai chuỗi chưa có whitespace ở ranh giới và gap lớn hơn `0.20 em`, code
 chèn một dấu cách. Gap lớn hơn giới hạn sẽ tách candidate để tránh nối nhầm hai
-cột. Khác style nguồn cũng tách candidate. Rich-text draft có thể lưu nhiều
-character span; `TextEdit` và draft overlay render từng span, còn các lệnh font,
+cột. Khác họ font, đậm, nghiêng, gạch chân hoặc stretch không tách dòng;
+`sourceCharacterSpans` giữ format riêng của từng part. Kiểm tra vật cản dùng
+chung budget 200.000 phép so sánh với kiểm tra overlap và gom đoạn; hết budget
+thì ngừng nối. Rich-text draft có thể lưu nhiều character span;
+`TextEdit` và draft overlay render từng span, còn các lệnh font,
 color, bold, italic và underline áp dụng vào range đang bôi đen. Khi selection
 collapse thành caret, Bold/Italic/Underline chỉ cập nhật typing format tạm để
 các ký tự gõ tiếp theo nhận style mới; text hiện có không đổi. Font family và
@@ -313,6 +316,13 @@ Candidate dòng nhận bbox union, baseline/origin và style của part đầu t
 `renderSuppressible` chỉ true khi mọi part đều suppress được. Candidate nguồn
 không còn xuất hiện độc lập trong cache trang, nhưng toàn bộ provenance vẫn nằm
 trong `parts`.
+
+Khi lưu draft có nhiều character format, writer ghi metadata
+`TrePDFParagraphLayout` cùng các text object và đặt vị trí theo word/cluster
+của Qt. Scan mở lại kiểm tra metadata có giới hạn rồi khôi phục text, frame,
+paragraph và format từ từng object, thay vì đoán nhóm bằng ink gap. Vì thế
+đoạn khác font/đậm/nghiêng vẫn là một vùng edit qua nhiều lần Save; move-only
+vẫn dịch ma trận object nguồn theo pipeline cũ.
 
 Bước gom đoạn nối các candidate dòng hoàn chỉnh, editable và suppressible theo
 thứ tự từ trên xuống. Mỗi cặp dòng phải cùng họ font đã resolve và paint,

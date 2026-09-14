@@ -20,6 +20,162 @@ void PDFEditControllerTest::groupsCompatibleTextObjectsOnSameLine()
     QCOMPARE(m_controller.selectedSourceRects().size(), 2);
 }
 
+void PDFEditControllerTest::groupsMixedFontLineWithHistoryAndSave_data()
+{
+    QTest::addColumn<bool>("differentFamilies");
+    QTest::newRow("same-family-emphasis-and-stretch") << false;
+    QTest::newRow("different-families-emphasis-and-stretch") << true;
+}
+
+void PDFEditControllerTest::groupsMixedFontLineWithHistoryAndSave()
+{
+    QFETCH(bool, differentFamilies);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("mixed-line-%1.pdf").arg(differentFamilies));
+    // Deliberately shuffled PDF object order. The ink bounds are disjoint, but
+    // all four fragments share one visual baseline like the reported title.
+    QVERIFY(createSourceParagraphPdf(sourcePath, {
+        {QStringLiteral("other "), 131.0, 740.0,
+         differentFamilies ? "Times-Italic" : "Helvetica-Oblique", 1.07, 12.0F},
+        {QStringLiteral("Job "), 72.0, 740.0, "Helvetica-Bold", 1.0, 12.0F},
+        {QStringLiteral("font"), 167.0, 740.0,
+         differentFamilies ? "Courier-Bold" : "Helvetica-Bold", 1.13, 12.0F},
+        {QStringLiteral("Title "), 98.0, 740.0, "Helvetica-BoldOblique", 1.06, 12.0F}}));
+    const QStringList originalObjects = topLevelTextObjects(sourcePath);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QString original = QStringLiteral("Job Title other font");
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QCOMPARE(candidates.size(), 1);
+    const QVariantMap candidate = candidateForText(candidates, original);
+    QVERIFY(!candidate.isEmpty());
+    QCOMPARE(candidate.value(QStringLiteral("sourceRects")).toList().size(), 4);
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    const auto formatAt = [&controller](qsizetype position) {
+        for (const QVariant &value : controller.selectedCharacterSpans()) {
+            const QVariantMap span = value.toMap();
+            const qsizetype start = span.value(QStringLiteral("start")).toLongLong();
+            const qsizetype end = start + span.value(QStringLiteral("length")).toLongLong();
+            if (position >= start && position < end) {
+                return span;
+            }
+        }
+        return QVariantMap();
+    };
+    QVector<QVariantMap> formats;
+    for (qsizetype position : {0, 4, 10, 16}) {
+        formats.append(formatAt(position));
+        QVERIFY(!formats.last().isEmpty());
+    }
+    QVERIFY(formats[0].value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(!formats[0].value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(formats[1].value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(formats[1].value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(!formats[2].value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(formats[2].value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(formats[3].value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(!formats[3].value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(formats[3].value(QStringLiteral("fontStretch")).toInt()
+            - formats[0].value(QStringLiteral("fontStretch")).toInt() > 5);
+    QCOMPARE(formats[0].value(QStringLiteral("fontFamily"))
+                 != formats[2].value(QStringLiteral("fontFamily")), differentFamilies);
+    QCOMPARE(formats[0].value(QStringLiteral("fontFamily"))
+                 != formats[3].value(QStringLiteral("fontFamily")), differentFamilies);
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
+    const QRectF originalFrame = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(original);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+
+    QString edited = original + QStringLiteral(" a");
+    controller.commitSelectedText(edited);
+    QCOMPARE(controller.draftedTextObjectPathsForPage(0).size(), 4);
+    const QVariantList editedSpans = controller.selectedCharacterSpans();
+    controller.undo();
+    QCOMPARE(controller.selectedText(), original);
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.selectedText(), edited);
+    QCOMPARE(controller.selectedCharacterSpans(), editedSpans);
+    for (int cycle = 0; cycle < 2; ++cycle) {
+        const QString savedPath = m_temporaryDirectory.filePath(
+            QStringLiteral("mixed-line-%1-saved-%2.pdf").arg(differentFamilies).arg(cycle));
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+        const QVariantList reopened = waitForCandidates(controller, 0);
+        QCOMPARE(reopened.size(), 1);
+        const QVariantMap restored = candidateForText(reopened, edited);
+        QVERIFY(!restored.isEmpty());
+        QVERIFY(restored.value(QStringLiteral("objectId")).toString()
+                    .startsWith(QStringLiteral("paragraph-layout:")));
+        QVERIFY(controller.selectCandidate(0, restored.value(QStringLiteral("objectId")).toString()));
+        for (int index = 0; index < 4; ++index) {
+            const QVariantMap format = formatAt(QVector<int>{0, 4, 10, 16}[index]);
+            for (const QString &key : {QStringLiteral("fontFamily"), QStringLiteral("fontBold"),
+                                       QStringLiteral("fontItalic"), QStringLiteral("fontStretch")}) {
+                QCOMPARE(format.value(key), formats[index].value(key));
+            }
+        }
+        const QVariantList restoredSpans = controller.selectedCharacterSpans();
+        const QRectF restoredFrame = controller.selectedFrameRect();
+        controller.beginSelectedTextEdit();
+        controller.updateSelectedTextPreview(edited);
+        controller.finishSelectedTextEdit();
+        QCOMPARE(controller.selectedCharacterSpans(), restoredSpans);
+        QCOMPARE(controller.selectedFrameRect(), restoredFrame);
+        QVERIFY(!controller.hasDrafts());
+        if (cycle == 0) {
+            edited += QStringLiteral(" a");
+            controller.commitSelectedText(edited);
+        }
+    }
+    QCOMPARE(topLevelTextObjects(sourcePath), originalObjects);
+}
+
+void PDFEditControllerTest::keepsUnsafeMixedFontLineSeparate_data()
+{
+    QTest::addColumn<QByteArray>("secondTransform");
+    QTest::addColumn<QByteArray>("extraContent");
+    QTest::newRow("overlap") << QByteArray("1 0 0 1 80 740") << QByteArray();
+    QTest::newRow("distant-column") << QByteArray("1 0 0 1 300 740") << QByteArray();
+    QTest::newRow("different-color") << QByteArray("1 0 0 1 98 740") << QByteArray("1 0 0 rg\n");
+    QTest::newRow("source-obstacle") << QByteArray("1 0 0 1 98 740")
+                                   << QByteArray("q 2 0 0 12 94 738 cm "
+                                                 "BI /W 1 /H 1 /CS /RGB /BPC 8 ID abc EI Q\n");
+}
+
+void PDFEditControllerTest::keepsUnsafeMixedFontLineSeparate()
+{
+    QFETCH(QByteArray, secondTransform);
+    QFETCH(QByteArray, extraContent);
+    const QString path = m_temporaryDirectory.filePath(
+        QStringLiteral("unsafe-mixed-line-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QByteArray content = QByteArray("BT /F1 12 Tf 1 0 0 1 72 740 Tm (Job) Tj ET\n")
+        + extraContent + "BT /F2 12 Tf " + secondTransform + " Tm (Title) Tj ET\n";
+    QVERIFY(writePdfObjects(path, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                   "/Resources << /Font << /F1 4 0 R /F2 6 0 R >> >> /Contents 5 0 R >>"),
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"),
+        QByteArray("<< /Length ") + QByteArray::number(content.size())
+            + " >>\nstream\n" + content + "endstream",
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic /Encoding /WinAnsiEncoding >>")}));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QVERIFY(!candidateForText(candidates, QStringLiteral("Job")).isEmpty());
+    QVERIFY(!candidateForText(candidates, QStringLiteral("Title")).isEmpty());
+}
+
 void PDFEditControllerTest::groupsCompatibleSourceTextLinesIntoParagraph()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -322,9 +478,9 @@ void PDFEditControllerTest::savesMixedSourceParagraphStylesRoundTrip()
     const QString savedText = normalizedPageText(outputPath);
     QVERIFY2(savedText.contains(edited.simplified()), qPrintable(savedText));
     QVERIFY(savedText.contains(sourceParagraphText(parts, 6, 2).simplified()));
-    const TextObjectFontInfo bold = textObjectFontInfo(outputPath, QStringLiteral("a combination"));
-    const TextObjectFontInfo regular = textObjectFontInfo(outputPath, QStringLiteral("entertainment experiences"));
-    const TextObjectFontInfo finalLine = textObjectFontInfo(outputPath, QStringLiteral("to 6:00 a.m."));
+    const TextObjectFontInfo bold = textObjectFontInfo(outputPath, QStringLiteral("combination"));
+    const TextObjectFontInfo regular = textObjectFontInfo(outputPath, QStringLiteral("experiences"));
+    const TextObjectFontInfo finalLine = textObjectFontInfo(outputPath, QStringLiteral("6:00"));
     QVERIFY(bold.found);
     QVERIFY(regular.found);
     QVERIFY(finalLine.found);
@@ -1360,7 +1516,7 @@ void PDFEditControllerTest::keepsStandaloneResizeFrameUnexpanded()
     QVERIFY(!m_controller.canUndo());
 }
 
-void PDFEditControllerTest::keepsMixedStylesAsSeparateCandidates()
+void PDFEditControllerTest::keepsDistantMixedStylesAsSeparateCandidates()
 {
     QCOMPARE(m_mixedRegularCandidate.value(QStringLiteral("grouped")).toBool(), false);
     QCOMPARE(m_mixedBoldCandidate.value(QStringLiteral("grouped")).toBool(), false);
@@ -1374,7 +1530,7 @@ void PDFEditControllerTest::keepsDistantColumnsAsSeparateCandidates()
     QCOMPARE(m_rightColumnCandidate.value(QStringLiteral("grouped")).toBool(), false);
 }
 
-void PDFEditControllerTest::keepsDifferentFontFacesAsSeparateCandidates()
+void PDFEditControllerTest::keepsDistantFontFacesAsSeparateCandidates()
 {
     QCOMPARE(m_uprightCandidate.value(QStringLiteral("grouped")).toBool(), false);
     QCOMPARE(m_obliqueCandidate.value(QStringLiteral("grouped")).toBool(), false);

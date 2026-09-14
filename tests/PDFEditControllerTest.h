@@ -65,6 +65,10 @@ private slots:
     void detectsPdfFontStyles();
     void propagatesSourceStylesThroughSelection();
     void groupsCompatibleTextObjectsOnSameLine();
+    void groupsMixedFontLineWithHistoryAndSave_data();
+    void groupsMixedFontLineWithHistoryAndSave();
+    void keepsUnsafeMixedFontLineSeparate_data();
+    void keepsUnsafeMixedFontLineSeparate();
     void groupsCompatibleSourceTextLinesIntoParagraph();
     void preservesSourceLineEndHyphens_data();
     void preservesSourceLineEndHyphens();
@@ -110,9 +114,9 @@ private slots:
     void persistsExpandedFrameForTextChanges();
     void persistsExpandedFrameForParagraphAlignment();
     void keepsStandaloneResizeFrameUnexpanded();
-    void keepsMixedStylesAsSeparateCandidates();
+    void keepsDistantMixedStylesAsSeparateCandidates();
     void keepsDistantColumnsAsSeparateCandidates();
-    void keepsDifferentFontFacesAsSeparateCandidates();
+    void keepsDistantFontFacesAsSeparateCandidates();
     void editsGroupedLineAsOneDraft();
     void resizesDraftFrameWithUndoRedo();
     void storesReflowedContentBoundsWithUndoRedo();

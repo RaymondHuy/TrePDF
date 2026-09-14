@@ -100,8 +100,6 @@ constexpr qreal kFullTurnRadians = 6.2831853071795864769;
 
 constexpr int kMaximumTextMarkupCharactersPerPage = 50000;
 
-constexpr int kLineFontStretchTolerance = 5;
-
 constexpr int kPdfFontFlagItalic = 1 << 6;
 
 constexpr int kPdfFontFlagForceBold = 1 << 18;
@@ -3216,6 +3214,54 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         }
     }
 
+    // Snapshot source obstacles before moving candidates into visual lines.
+    obstacleOrder.clear();
+    obstacleRects.clear();
+    maximumBottom.clear();
+    for (qsizetype index = 0; index < candidates.size(); ++index) {
+        const Candidate &candidate = candidates[index];
+        obstacleRects.append(candidate.geometry.sourceRect);
+        if (!candidate.textMarkupHitTestOnly
+            && (!candidate.objectPath.isEmpty() || !candidate.parts.isEmpty())) {
+            obstacleOrder.append(index);
+        }
+    }
+    std::stable_sort(obstacleOrder.begin(), obstacleOrder.end(),
+        [&](qsizetype left, qsizetype right) {
+            return obstacleRects[left].top() < obstacleRects[right].top();
+        });
+    bottom = -std::numeric_limits<qreal>::infinity();
+    for (qsizetype index : std::as_const(obstacleOrder)) {
+        bottom = qMax(bottom, obstacleRects[index].bottom());
+        maximumBottom.append(bottom);
+    }
+    const auto gapObstructed = [&](qsizetype left, qsizetype right) {
+        const QRectF &leftRect = obstacleRects[left];
+        const QRectF &rightRect = obstacleRects[right];
+        const QRectF gap(QPointF(leftRect.right(), qMin(leftRect.top(), rightRect.top())),
+                         QPointF(rightRect.left(), qMax(leftRect.bottom(), rightRect.bottom())));
+        if (gap.isEmpty()) {
+            return false;
+        }
+        const qsizetype first = std::upper_bound(
+            maximumBottom.cbegin(), maximumBottom.cend(), gap.top())
+            - maximumBottom.cbegin();
+        for (qsizetype position = first; position < obstacleOrder.size(); ++position) {
+            const qsizetype index = obstacleOrder[position];
+            const QRectF &rect = obstacleRects[index];
+            if (rect.top() >= gap.bottom()) {
+                break;
+            }
+            if (++comparisons > kMaximumTextGroupingComparisons) {
+                return true;
+            }
+            if (index != left && index != right && gap.intersects(rect)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     struct IndexedCandidate {
         Candidate candidate;
         qsizetype order = -1;
@@ -3286,25 +3332,17 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         bestLine->candidates.append(IndexedCandidate{std::move(candidate), index});
     }
 
-    const auto sameStyle = [&](const Candidate &left, const Candidate &right) {
+    const auto compatibleLineStyle = [&](const Candidate &left, const Candidate &right) {
         const qreal leftSize = emSize(left);
         const qreal rightSize = emSize(right);
         const qreal sizeTolerance = qMax(
             kLineFontSizeTolerancePoints,
             qMax(leftSize, rightSize) * kLineFontSizeToleranceRatio);
-        const QString &leftFont = left.fontIdentity.isEmpty()
-            ? left.fontFamily
-            : left.fontIdentity;
-        const QString &rightFont = right.fontIdentity.isEmpty()
-            ? right.fontFamily
-            : right.fontIdentity;
-        return !leftFont.isEmpty()
-            && leftFont.compare(rightFont, Qt::CaseInsensitive) == 0
+        // Typeface, emphasis and calibrated horizontal stretch belong to each
+        // character span. They do not define a new visual line. Keep paint and
+        // size checks because replacement still shares the source paint mode.
+        return !left.fontFamily.isEmpty() && !right.fontFamily.isEmpty()
             && qAbs(leftSize - rightSize) <= sizeTolerance
-            && qAbs(left.fontStretch - right.fontStretch) <= kLineFontStretchTolerance
-            && left.fontBold == right.fontBold
-            && left.fontItalic == right.fontItalic
-            && left.fontUnderline == right.fontUnderline
             && left.color == right.color
             && left.fillColor == right.fillColor
             && left.strokeColor == right.strokeColor
@@ -3392,7 +3430,9 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             });
 
         QVector<IndexedCandidate> run;
+        qsizetype runCharacters = 0;
         const auto flushRun = [&]() {
+            runCharacters = 0;
             if (run.isEmpty()) {
                 return;
             }
@@ -3452,11 +3492,16 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         for (IndexedCandidate &candidate : line.candidates) {
             if (!run.isEmpty()) {
                 const Candidate &previous = run.constLast().candidate;
-                if (!sameStyle(previous, candidate.candidate)
-                    || !areNeighbors(previous, candidate.candidate)) {
+                if (!compatibleLineStyle(run.constFirst().candidate, candidate.candidate)
+                    || !areNeighbors(previous, candidate.candidate)
+                    || run.size() >= kMaximumParagraphParts
+                    || runCharacters + 1 + candidate.candidate.text.size()
+                        > kMaximumParagraphCharacters
+                    || gapObstructed(run.constLast().order, candidate.order)) {
                     flushRun();
                 }
             }
+            runCharacters += candidate.candidate.text.size() + (run.isEmpty() ? 0 : 1);
             run.append(std::move(candidate));
         }
         flushRun();
