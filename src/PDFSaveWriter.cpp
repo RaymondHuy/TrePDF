@@ -908,6 +908,14 @@ bool hasParagraphLayout(const SaveDraft &draft)
     // Resetting the controls must not discard the source group's explicit
     // paragraph boundaries or its original layout frame on the next save.
     return draft.sourceParagraphLayout
+        // A rich-text edit can emit several faces with different ink bounds.
+        // Persist its logical group and layout so reopen does not have to
+        // infer joins or recalibrate each face from those bounds again.
+        || (!draft.characterSpans.isEmpty()
+            && std::any_of(draft.characterSpans.cbegin(), draft.characterSpans.cend(),
+                           [&](const SaveSpan &span) {
+                return !sameFormat(span.format, draft.characterSpans.constFirst().format);
+            }))
         || std::any_of(draft.paragraphFormats.cbegin(),
                        draft.paragraphFormats.cend(),
                        [](const SaveParagraph &paragraph) {

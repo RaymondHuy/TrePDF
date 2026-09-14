@@ -247,8 +247,15 @@ Current features:
   resize, so a no-op editor session does not create a draft. Four edge resize handles update
   the normalized frame, reflow text live, and commit geometry through the same
   draft undo/redo snapshots as text and formatting.
-- Compatible same-line text objects are grouped, then matching nearby lines
-  become one paragraph draft when font family/size, paint, left origin (within
+- Nearby same-line text objects are grouped across font families, bold, italic,
+  underline, and calibrated stretch differences. Comparable size and identical
+  paint are still required; every source character span retains its own format.
+  Same-line groups are bounded to 1,024 parts and 32,768 UTF-16 code units and
+  cannot bridge indexed source obstacles. Rich-text saves persist validated
+  `TrePDFParagraphLayout` metadata so mixed faces reopen as one editable group
+  without inferring joins or repeatedly recalibrating their stretch.
+  Matching nearby lines become one paragraph draft when font family/size,
+  paint, left origin (within
   0.4 em), baseline gaps (0.8–1.6 em), and regular leading agree. Bold, italic,
   underline, and font-stretch differences of at most one percentage point are
   preserved in source character spans; the initial frame measures those spans.

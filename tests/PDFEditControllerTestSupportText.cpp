@@ -357,7 +357,7 @@ bool createFontStylePdf(const QString &filePath)
                          page,
                          "Helvetica-Bold",
                          QString::fromLatin1(kMixedBoldText),
-                         140.0,
+                         260.0,
                          560.0)
         && addTextObject(document,
                          page,
@@ -381,7 +381,7 @@ bool createFontStylePdf(const QString &filePath)
                          page,
                          "Helvetica-Oblique",
                          QString::fromLatin1(kObliqueText),
-                         170.0,
+                         300.0,
                          440.0)
         && FPDFPage_GenerateContent(page);
 
