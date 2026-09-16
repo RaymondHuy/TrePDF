@@ -51,8 +51,14 @@ Current features:
   Ramer-Douglas-Peucker simplification at about 0.75 PDF point, and caps the
   result at 1,024 points. Source Ink scanning is bounded to 64 strokes, 4,096
   points per stroke, and 32,768 points total; malformed or oversized Ink stays
-  available as a generic read-only comment. Stamp provides Approved, Draft,
-  Final, Confidential, For Comment, and Not Approved presets. Added Stamp
+  available as a generic read-only comment. Stamp provides 24 presets in
+  Dynamic (5), Standard (12), Sign Here (5), and Additional (2) groups; the latter
+  retains For Comment and Not Approved. Dynamic Approved, Revised, Reviewed,
+  Received, and Confidential capture the current author and date/time at
+  placement and retain that snapshot through contents edits, history, and
+  Save/reopen. `PDFStampPresets.h` shares the colored background and white
+  icon/text vector artwork between QML and `/AP`, including Unicode outlines.
+  Added Stamp
   drafts support click/drag placement, move, eight-handle resize, delete,
   undo/redo/discard, and Save/Save As as `/Stamp` with `/Name`, `/Contents`,
   Print, and vector `/AP`. Eligible source Stamp supports drag/arrow-key move,
@@ -357,6 +363,8 @@ Current features:
   page content, and writes the PDF transactionally.
 - `src/PDFSourceImageGeometry.h`: shared source-image resize eligibility and
   affine frame mapping for the candidate scanner, render preview, and writer.
+- `src/PDFStampPresets.h`: shared 24-preset catalogue, dynamic author/date
+  formatting, and vector artwork for QML Stamp previews and saved appearances.
 - `src/PDFCommentAnnotation.h`: shared drawing-comment geometry/property
   contract used by controller snapshots, writer, and the `/AP` canonicalizer.
 - `src/PDFShapeUtils.h`: shared canonical Edit-shape path builder and bounded
@@ -652,9 +660,12 @@ clipped or elided unintentionally.
   line. Free Text
   must keep `/Contents`, `/DA`, comment metadata, and a wrapped Unicode-capable
   `/AP`; editing a source Free Text annotation must replace its stale
-  appearance. New Stamp annotations keep their standard preset `/Name`,
-  semantic `/Contents`, `/C`, Print flag, and vector `/AP`; editing source
-  Stamp contents must preserve its geometry and existing `/AP`. Square,
+  appearance. New Stamp annotations keep their preset `/Name`, semantic
+  `/Contents`, `/C`, Print flag, and vector `/AP` from `PDFStampPresets.h`.
+  Dynamic Stamp author/date artwork is fixed at placement, independent of
+  `/Contents`; source rehydration derives its detail from `/T` and
+  `/CreationDate`. Editing source Stamp contents must preserve its geometry
+  and existing `/AP`. Square,
   Circle, Line, Polygon, and PolyLine use `/L` or
   `/Vertices` where applicable plus a common
   `/C`, `/IC`, `/CA`, `/BS`, `/BE`, `/IT`, `/Name`, `/LE`, `/F`, and vector

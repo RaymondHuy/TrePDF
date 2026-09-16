@@ -58,13 +58,7 @@ qsizetype saturatedByteCountAdd(qsizetype left, qsizetype right)
 
 const StampPreset *stampPreset(const QString &name)
 {
-    const auto preset = std::find_if(
-        kStampPresets.cbegin(),
-        kStampPresets.cend(),
-        [&name](const StampPreset &candidate) {
-            return name == QLatin1String(candidate.name);
-        });
-    return preset == kStampPresets.cend() ? nullptr : &*preset;
+    return PDFStampPresets::find(name);
 }
 
 QString stampTextForName(const QString &name)

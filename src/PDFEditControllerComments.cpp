@@ -535,6 +535,41 @@ QColor PDFEditController::stampColor() const
     return stampColorForName(m_stampName);
 }
 
+QVariantList PDFEditController::stampPresets() const
+{
+    if (m_stampPresetItems.isEmpty()) {
+        const QString previewDetail = PDFStampPresets::detailText(
+            currentCommentAuthor(), QDateTime::currentDateTime());
+        m_stampPresetItems.reserve(PDFStampPresets::presets.size());
+        for (const auto &preset : PDFStampPresets::presets) {
+            const QString name = QString::fromLatin1(preset.name);
+            const QString text = QString::fromLatin1(preset.text);
+            const QString detail = preset.dynamic ? previewDetail : QString();
+            m_stampPresetItems.append(QVariantMap{
+                {QStringLiteral("name"), name},
+                {QStringLiteral("text"), text},
+                {QStringLiteral("category"), QString::fromLatin1(preset.category)},
+                {QStringLiteral("color"), QColor(preset.red, preset.green, preset.blue)},
+                {QStringLiteral("detail"), detail},
+                {QStringLiteral("artwork"), PDFStampPresets::svgPath(
+                    PDFStampPresets::artwork(name, text, detail))}});
+        }
+    }
+    return m_stampPresetItems;
+}
+
+QString PDFEditController::stampArtwork() const
+{
+    const QVariantList presets = stampPresets();
+    for (const QVariant &value : presets) {
+        const QVariantMap preset = value.toMap();
+        if (preset.value(QStringLiteral("name")).toString() == m_stampName) {
+            return preset.value(QStringLiteral("artwork")).toString();
+        }
+    }
+    return {};
+}
+
 bool PDFEditController::commentStateEditable(
     const Candidate &candidate) const
 {
@@ -1624,6 +1659,12 @@ QVariantMap PDFEditController::addStamp(int page,
     candidate.added = true;
     candidate.commentAuthor = currentCommentAuthor();
     candidate.commentCreationDate = QDateTime::currentDateTime();
+    if (stampPreset(m_stampName)->dynamic) {
+        candidate.stampDetail = PDFStampPresets::detailText(
+            candidate.commentAuthor, candidate.commentCreationDate);
+    }
+    candidate.stampArtwork = PDFStampPresets::svgPath(PDFStampPresets::artwork(
+        m_stampName, candidate.stampText, candidate.stampDetail));
     setInitialGeometry(candidate, stampRect);
 
     m_addedCandidates.append(std::move(candidate));

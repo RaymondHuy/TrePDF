@@ -811,6 +811,8 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
         QStringLiteral("stampName"),
         candidate.commentProperties.name);
     map.insert(QStringLiteral("stampText"), candidate.stampText);
+    map.insert(QStringLiteral("stampDetail"), candidate.stampDetail);
+    map.insert(QStringLiteral("stampArtwork"), candidate.stampArtwork);
     map.insert(QStringLiteral("stampColor"), candidate.highlightColor);
     const QVector<QPointF> displayedDrawingVertices
         = drawingVerticesForDraft(draft);

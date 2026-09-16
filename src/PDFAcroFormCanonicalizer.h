@@ -85,6 +85,7 @@ public:
         QString annotationId;
         QString stampName;
         QString displayText;
+        QString detailText;
         QColor color;
         QRectF pageRect;
     };

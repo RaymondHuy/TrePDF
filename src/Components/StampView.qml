@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 
 Item {
     id: root
@@ -6,7 +7,9 @@ Item {
     property string stampName: "Approved"
     property string stampText: stampName.toUpperCase()
     property color stampColor: "#2e7d32"
+    property string stampArtwork: ""
 
+    readonly property bool hasArtwork: stampArtwork.length > 0
     readonly property real shortestSide: Math.min(width, height)
     readonly property real outerBorderWidth: Math.max(
         1,
@@ -17,15 +20,38 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "transparent"
-        border.width: root.outerBorderWidth
+        color: root.hasArtwork ? root.stampColor : "transparent"
+        border.width: root.hasArtwork ? 0 : root.outerBorderWidth
         border.color: root.stampColor
+        Accessible.ignored: true
+    }
+
+    Shape {
+        width: 160
+        height: 50
+        visible: root.hasArtwork
+        preferredRendererType: Shape.CurveRenderer
+        transform: Scale {
+            xScale: root.width / 160
+            yScale: root.height / 50
+        }
+
+        ShapePath {
+            fillColor: "#ffffff"
+            strokeColor: "transparent"
+            strokeWidth: 0
+            fillRule: ShapePath.WindingFill
+
+            PathSvg { path: root.stampArtwork }
+        }
+
         Accessible.ignored: true
     }
 
     Rectangle {
         anchors.fill: parent
         anchors.margins: root.inset
+        visible: !root.hasArtwork
         color: "transparent"
         border.width: Math.max(1, root.outerBorderWidth * 0.55)
         border.color: root.stampColor
@@ -34,6 +60,7 @@ Item {
 
     Text {
         anchors.fill: parent
+        visible: !root.hasArtwork
         anchors.leftMargin: root.inset * 1.8
         anchors.rightMargin: root.inset * 1.8
         anchors.topMargin: root.inset * 1.15

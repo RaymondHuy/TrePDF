@@ -3,6 +3,7 @@
 // Implementation details shared only by the PDFEditController translation units.
 #include "PDFEditController.h"
 #include "PDFAnnotationUtils.h"
+#include "PDFStampPresets.h"
 
 #include <array>
 #include <limits>
@@ -47,22 +48,7 @@ constexpr int kAnnotationFlagLockedContents = 1 << 9;
 
 qsizetype saturatedByteCountAdd(qsizetype left, qsizetype right);
 
-struct StampPreset {
-    const char *name;
-    const char *text;
-    int red;
-    int green;
-    int blue;
-};
-
-constexpr std::array<StampPreset, 6> kStampPresets{{
-    {"Approved", "APPROVED", 46, 125, 50},
-    {"Draft", "DRAFT", 21, 101, 192},
-    {"Final", "FINAL", 40, 53, 147},
-    {"Confidential", "CONFIDENTIAL", 198, 40, 40},
-    {"ForComment", "FOR COMMENT", 239, 108, 0},
-    {"NotApproved", "NOT APPROVED", 198, 40, 40},
-}};
+using StampPreset = PDFStampPresets::Preset;
 
 const StampPreset *stampPreset(const QString &name);
 

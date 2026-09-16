@@ -294,7 +294,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml) | Renderer vector chung cho năm drawing-comment subtype. |
 | [`src/Components/InkDrawingView.qml`](../src/Components/InkDrawingView.qml) | Renderer Qt Quick Shapes dùng chung cho gesture Pencil và các stroke Ink draft. |
 | [`src/Components/SquigglyLine.qml`](../src/Components/SquigglyLine.qml) | Preview Squiggly theo đúng hình học 1pt/2pt của PDFium và scale trang. |
-| [`src/Components/StampView.qml`](../src/Components/StampView.qml) | Preview vector cho preset Stamp trong palette, gesture và draft đã đặt. |
+| [`src/Components/StampView.qml`](../src/Components/StampView.qml) | Preview nền màu/path trắng cho 24 Stamp trong palette, gesture và draft; Dynamic dùng snapshot tác giả/ngày giờ lúc đặt. |
 | [`src/Components/FormChoiceOverlay.qml`](../src/Components/FormChoiceOverlay.qml) | Combo/list overlay cho choice field an toàn. |
 | [`src/Components/FormTextFieldOverlay.qml`](../src/Components/FormTextFieldOverlay.qml) | Đặt và chỉnh field thiết kế. |
 | [`src/Components/TextFormatPanel.qml`](../src/Components/TextFormatPanel.qml) | Panel font/style/color/alignment. |
@@ -326,6 +326,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFEditController_p.h`](../src/PDFEditController_p.h) | Khai báo nội bộ dùng chung; API và state của controller vẫn ở `PDFEditController.h`. |
 | [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) | Ghi PDF giao dịch từ snapshot bất biến. |
 | [`src/PDFAnnotationUtils.cpp`](../src/PDFAnnotationUtils.cpp) | Đọc chuỗi, chuẩn hóa nội dung và phân loại comment annotation dùng chung cho index, render và save. |
+| [`src/PDFStampPresets.h`](../src/PDFStampPresets.h) | Catalogue 24 Stamp trong bốn nhóm, định dạng Dynamic detail và artwork icon/chữ Unicode dùng chung giữa preview và `/AP`. |
 | [`src/PDFCommentAnnotation.h`](../src/PDFCommentAnnotation.h) | Contract geometry/common properties cho drawing/Ink comment và `/AP`; Ink giữ từng stroke `/InkList` riêng. |
 | [`src/PDFShapeUtils.h`](../src/PDFShapeUtils.h) | Canonical builder và bounded validator cho geometry/style, metadata `TrePDFShape`; scanner và writer dùng chung để rehydrate/lưu Edit shape. |
 | [`src/PDFSourceImageGeometry.h`](../src/PDFSourceImageGeometry.h) | Kiểm tra source-image resize/xoay an toàn và affine frame mapping dùng chung cho scanner, preview và Save; giữ pixels/resource/drawing order và phép xoay/lật/nghiêng gốc. |

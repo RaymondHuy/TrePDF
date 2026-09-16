@@ -3,40 +3,198 @@
 
 using namespace PDFEditControllerTestSupport;
 
-void PDFEditControllerTest::savesStampPresetWithUndoRedo()
+void PDFEditControllerTest::showsGroupedStampPresetMenuUi()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
-        QStringLiteral("save-stamp-source.pdf"));
-    const QString outputPath = m_temporaryDirectory.filePath(
-        QStringLiteral("save-stamp-output.pdf"));
+        QStringLiteral("stamp-preset-menu-ui.pdf"));
     QVERIFY(createDifferentPageSizesPdf(sourcePath));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(
+        QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(root.get());
+    QVERIFY(window);
+    window->resize(1200, 720);
+    window->show();
+    auto *tabs = root->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    auto *model = root->findChild<PDFTabModel *>();
+    QVERIFY(tabs);
+    QVERIFY(model);
+    auto *session = model->open(QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+    PDFEditController &controller = *session->editController();
+    QVERIFY(tabs->setProperty("currentIndex", 2));
+    QTRY_COMPARE(controller.tool(), PDFEditController::CommentSelectTool);
+    QObject *stampButton = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT((stampButton = root->findChild<QObject *>(
+        QStringLiteral("stampRibbonButton"))), 1000);
+    QObject *popup = root->findChild<QObject *>(QStringLiteral("stampPresetPopup"));
+    QObject *loader = root->findChild<QObject *>(QStringLiteral("stampMenuLoader"));
+    QVERIFY(stampButton);
+    QVERIFY(popup);
+    QVERIFY(loader);
+    QVERIFY(stampButton->property("enabled").toBool());
+    QVERIFY(!popup->property("visible").toBool());
+    QVERIFY(!loader->property("active").toBool());
+    QVERIFY(!loader->property("item").value<QObject *>());
+
+    // Popup content is reparented into the window overlay. Follow visual items
+    // so the check also sees delegates created by the section Repeaters.
+    const auto findItem = [](auto &&self, QQuickItem *parent,
+                             const QString &name) -> QQuickItem * {
+        if (parent->objectName() == name) {
+            return parent;
+        }
+        for (QQuickItem *child : parent->childItems()) {
+            if (QQuickItem *match = self(self, child, name)) {
+                return match;
+            }
+        }
+        return nullptr;
+    };
+    const auto itemNamed = [&window, &findItem](const QString &name) {
+        return findItem(findItem, window->contentItem(), name);
+    };
+    QVERIFY(!itemNamed(QStringLiteral("stampPresetMenu")));
+    const QVariantList presets = controller.stampPresets();
+    QCOMPARE(presets.size(), 24);
+    const QMap<QString, int> expectedGroups{
+        {QStringLiteral("dynamic"), 5},
+        {QStringLiteral("standard"), 12},
+        {QStringLiteral("signHere"), 5},
+        {QStringLiteral("additional"), 2}};
+
+    for (const QString &selectedName : {
+             QStringLiteral("DynamicReceived"), QStringLiteral("SignHere")}) {
+        QVERIFY(QMetaObject::invokeMethod(stampButton, "menuRequested",
+                                          Qt::DirectConnection));
+        QTRY_VERIFY_WITH_TIMEOUT(popup->property("opened").toBool(), 1000);
+        QVERIFY(loader->property("active").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(itemNamed(QStringLiteral("stampPresetMenu")), 1000);
+        for (auto group = expectedGroups.cbegin(); group != expectedGroups.cend(); ++group) {
+            QQuickItem *section = itemNamed(QStringLiteral("stampSection_") + group.key());
+            QVERIFY2(section, qPrintable(group.key()));
+            QCOMPARE(section->property("optionCount").toInt(), group.value());
+            QVERIFY(!section->property("title").toString().isEmpty());
+        }
+        int checkedCount = 0;
+        for (const QVariant &entry : presets) {
+            const QString name = entry.toMap().value(QStringLiteral("name")).toString();
+            QQuickItem *option = itemNamed(QStringLiteral("stampOption_") + name);
+            QVERIFY2(option, qPrintable(name));
+            QCOMPARE(option->property("optionStampName").toString(), name);
+            QVERIFY(option->property("enabled").toBool());
+            QTRY_VERIFY_WITH_TIMEOUT(option->width() > 0, 1000);
+            QTRY_VERIFY_WITH_TIMEOUT(option->height() > 0, 1000);
+            if (option->property("checked").toBool()) {
+                ++checkedCount;
+                QCOMPARE(name, controller.stampName());
+            }
+        }
+        QCOMPARE(checkedCount, 1);
+        QQuickItem *selectedOption = itemNamed(QStringLiteral("stampOption_") + selectedName);
+        QVERIFY(selectedOption);
+        QVERIFY(QMetaObject::invokeMethod(selectedOption, "clicked", Qt::DirectConnection));
+        QCOMPARE(controller.stampName(), selectedName);
+        QCOMPARE(controller.tool(), PDFEditController::StampTool);
+        QTRY_VERIFY_WITH_TIMEOUT(!popup->property("visible").toBool(), 1000);
+        QTRY_VERIFY_WITH_TIMEOUT(!loader->property("active").toBool(), 1000);
+        QTRY_VERIFY_WITH_TIMEOUT(!loader->property("item").value<QObject *>(), 1000);
+        QVERIFY(!itemNamed(QStringLiteral("stampPresetMenu")));
+        QVERIFY(!controller.hasDrafts());
+        controller.setTool(PDFEditController::CommentSelectTool);
+    }
+    QVERIFY(root->setProperty("allowWindowClose", true));
+}
+
+void PDFEditControllerTest::savesStampPresetWithUndoRedo_data()
+{
+    QTest::addColumn<QString>("name");
+    QTest::addColumn<QString>("text");
+    QTest::addColumn<QString>("category");
+
+    const auto addPreset = [](const char *name,
+                              const char *text,
+                              const char *category) {
+        QTest::newRow(name) << QString::fromLatin1(name)
+                            << QString::fromLatin1(text)
+                            << QString::fromLatin1(category);
+    };
+    addPreset("DynamicApproved", "APPROVED", "dynamic");
+    addPreset("DynamicRevised", "REVISED", "dynamic");
+    addPreset("DynamicReviewed", "REVIEWED", "dynamic");
+    addPreset("DynamicReceived", "RECEIVED", "dynamic");
+    addPreset("DynamicConfidential", "CONFIDENTIAL", "dynamic");
+    addPreset("Approved", "APPROVED", "standard");
+    addPreset("Void", "VOID", "standard");
+    addPreset("Verified", "VERIFIED", "standard");
+    addPreset("Revised", "REVISED", "standard");
+    addPreset("Reviewed", "REVIEWED", "standard");
+    addPreset("Received", "RECEIVED", "standard");
+    addPreset("Final", "FINAL", "standard");
+    addPreset("Expired", "EXPIRED", "standard");
+    addPreset("Emergency", "EMERGENCY", "standard");
+    addPreset("Draft", "DRAFT", "standard");
+    addPreset("Confidential", "CONFIDENTIAL", "standard");
+    addPreset("Completed", "COMPLETED", "standard");
+    addPreset("Accepted", "ACCEPTED", "signHere");
+    addPreset("Witness", "WITNESS", "signHere");
+    addPreset("SignHere", "SIGN HERE", "signHere");
+    addPreset("Rejected", "REJECTED", "signHere");
+    addPreset("Initial", "INITIAL", "signHere");
+    addPreset("ForComment", "FOR COMMENT", "additional");
+    addPreset("NotApproved", "NOT APPROVED", "additional");
+}
+
+void PDFEditControllerTest::savesStampPresetWithUndoRedo()
+{
+    QFETCH(QString, name);
+    QFETCH(QString, text);
+    QFETCH(QString, category);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-stamp-%1-source.pdf").arg(name));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("save-stamp-%1-output.pdf").arg(name));
+    QVERIFY(createThreePageTextPdf(sourcePath));
     const int sourceObjectCount = topLevelPageObjectCount(sourcePath);
-    QVERIFY(sourceObjectCount >= 0);
+    QVERIFY(sourceObjectCount > 0);
+    const QString originalPageText = pageText(sourcePath);
+    QVERIFY(!originalPageText.isEmpty());
 
     PDFDocument document;
     PDFEditController controller;
     QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
     controller.setDocument(&document);
-    struct ExpectedStampPreset {
-        const char *name;
-        const char *text;
-        QColor color;
-    };
-    const std::array<ExpectedStampPreset, 6> expectedPresets{{
-        {"Approved", "APPROVED", QColor(46, 125, 50)},
-        {"Draft", "DRAFT", QColor(21, 101, 192)},
-        {"Final", "FINAL", QColor(40, 53, 147)},
-        {"Confidential", "CONFIDENTIAL", QColor(198, 40, 40)},
-        {"ForComment", "FOR COMMENT", QColor(239, 108, 0)},
-        {"NotApproved", "NOT APPROVED", QColor(198, 40, 40)},
-    }};
-    for (const ExpectedStampPreset &preset : expectedPresets) {
-        controller.setStampName(QString::fromLatin1(preset.name));
-        QCOMPARE(controller.stampName(), QString::fromLatin1(preset.name));
-        QCOMPARE(controller.stampText(), QString::fromLatin1(preset.text));
-        QCOMPARE(controller.stampColor(), preset.color);
+    const QVariantList presets = controller.stampPresets();
+    QCOMPARE(presets.size(), 24);
+    QSet<QString> presetNames;
+    QVariantMap matchingPreset;
+    for (const QVariant &entry : presets) {
+        const QVariantMap preset = entry.toMap();
+        const QString presetName = preset.value(QStringLiteral("name")).toString();
+        QVERIFY(!presetName.isEmpty());
+        QVERIFY(!presetNames.contains(presetName));
+        presetNames.insert(presetName);
+        if (presetName == name) {
+            matchingPreset = preset;
+        }
     }
-    controller.setStampName(QStringLiteral("Approved"));
+    QVERIFY(!matchingPreset.isEmpty());
+    QCOMPARE(matchingPreset.value(QStringLiteral("text")).toString(), text);
+    QCOMPARE(matchingPreset.value(QStringLiteral("category")).toString(), category);
+    controller.setStampName(name);
+    QCOMPARE(controller.stampName(), name);
+    QCOMPARE(controller.stampText(), text);
+    QCOMPARE(controller.stampColor(),
+             matchingPreset.value(QStringLiteral("color")).value<QColor>());
+    QVERIFY(controller.stampColor().isValid());
+    QVERIFY(!controller.stampArtwork().isEmpty());
+    QCOMPARE(controller.stampArtwork(),
+             matchingPreset.value(QStringLiteral("artwork")).toString());
+    controller.setStampName(QStringLiteral("UnknownStamp"));
+    QCOMPARE(controller.stampName(), name);
     controller.setTool(PDFEditController::StampTool);
 
     const QRectF placement(0.16, 0.18, 0.34, 0.12);
@@ -47,17 +205,22 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
         QStringLiteral("stamp"));
     QCOMPARE(
         addedStamp.value(QStringLiteral("stampName")).toString(),
-        QStringLiteral("Approved"));
+        name);
     QCOMPARE(
         addedStamp.value(QStringLiteral("stampText")).toString(),
-        QStringLiteral("APPROVED"));
+        text);
     QCOMPARE(
         addedStamp.value(QStringLiteral("text")).toString(),
-        QStringLiteral("APPROVED"));
+        text);
     const QColor stampColor = addedStamp
         .value(QStringLiteral("stampColor"))
         .value<QColor>();
     QVERIFY(stampColor.isValid());
+    const QString stampDetail = addedStamp
+        .value(QStringLiteral("stampDetail"))
+        .toString();
+    QCOMPARE(stampDetail.isEmpty(), category != QLatin1String("dynamic"));
+    QVERIFY(!addedStamp.value(QStringLiteral("stampArtwork")).toString().isEmpty());
     QVERIFY(addedStamp.value(QStringLiteral("editable")).toBool());
     QCOMPARE(controller.tool(), PDFEditController::CommentSelectTool);
     QCOMPARE(controller.selectedPage(), 0);
@@ -85,7 +248,9 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
         objectId);
     QCOMPARE(
         redoneStamp.value(QStringLiteral("stampName")).toString(),
-        QStringLiteral("Approved"));
+        name);
+    QCOMPARE(redoneStamp.value(QStringLiteral("stampDetail")).toString(),
+             stampDetail);
 
     const QRectF resizedPlacement(0.20, 0.22, 0.38, 0.15);
     QVERIFY(controller.selectCandidate(0, objectId));
@@ -109,14 +274,15 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
     QVERIFY(!controller.hasDrafts());
     QCOMPARE(document.source().toLocalFile(), outputPath);
     QCOMPARE(topLevelPageObjectCount(outputPath), sourceObjectCount);
+    QCOMPARE(pageText(outputPath), originalPageText);
 
     const CommentAnnotationInspection inspection
         = inspectCommentAnnotation(outputPath, objectId);
     QVERIFY(inspection.readable);
     QCOMPARE(inspection.annotationCount, 1);
     QCOMPARE(inspection.subtype, FPDF_ANNOT_STAMP);
-    QCOMPARE(inspection.appearanceName, QStringLiteral("Approved"));
-    QCOMPARE(inspection.contents, QStringLiteral("APPROVED"));
+    QCOMPARE(inspection.appearanceName, name);
+    QCOMPARE(inspection.contents, text);
     QVERIFY(inspection.flags & FPDF_ANNOT_FLAG_PRINT);
     QVERIFY(inspection.hasAppearance);
     QVERIFY(!inspection.appearance.isEmpty());
@@ -124,7 +290,7 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
         outputPath,
         objectId);
     QVERIFY(!dictionary.isEmpty());
-    QVERIFY(QRegularExpression(QStringLiteral(R"(/Name\s*/Approved\b)"))
+    QVERIFY(QRegularExpression(QStringLiteral(R"(/Name\s*/%1\b)").arg(name))
         .match(QString::fromLatin1(dictionary))
         .hasMatch());
 
@@ -134,16 +300,20 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
     QVERIFY(!rehydratedStamp.isEmpty());
     QCOMPARE(
         rehydratedStamp.value(QStringLiteral("stampName")).toString(),
-        QStringLiteral("Approved"));
+        name);
     QCOMPARE(
         rehydratedStamp.value(QStringLiteral("stampText")).toString(),
-        QStringLiteral("APPROVED"));
+        text);
     QCOMPARE(
         rehydratedStamp.value(QStringLiteral("stampColor")).value<QColor>(),
         stampColor);
+    QCOMPARE(rehydratedStamp.value(QStringLiteral("stampDetail")).toString(),
+             stampDetail);
+    QCOMPARE(rehydratedStamp.value(QStringLiteral("stampArtwork")).toString(),
+             addedStamp.value(QStringLiteral("stampArtwork")).toString());
     QCOMPARE(
         rehydratedStamp.value(QStringLiteral("text")).toString(),
-        QStringLiteral("APPROVED"));
+        text);
     const QRectF rehydratedFrame = rehydratedStamp
         .value(QStringLiteral("frameRect"))
         .toRectF();
@@ -167,16 +337,160 @@ void PDFEditControllerTest::savesStampPresetWithUndoRedo()
         QStringLiteral("stamp"));
     QCOMPARE(
         indexedStamp.value(QStringLiteral("stampName")).toString(),
-        QStringLiteral("Approved"));
+        name);
     QCOMPARE(
         indexedStamp.value(QStringLiteral("stampText")).toString(),
-        QStringLiteral("APPROVED"));
+        text);
     QCOMPARE(
         indexedStamp.value(QStringLiteral("stampColor")).value<QColor>(),
         stampColor);
+    QCOMPARE(indexedStamp.value(QStringLiteral("stampDetail")).toString(),
+             stampDetail);
     QVERIFY(indexedStamp
         .value(QStringLiteral("commentTextEditable"))
         .toBool());
+}
+
+void PDFEditControllerTest::preservesDynamicStampSnapshotAcrossEditsAndSave()
+{
+    const bool userWasSet = qEnvironmentVariableIsSet("USER");
+    const QByteArray originalUser = qgetenv("USER");
+    const auto restoreUser = qScopeGuard([userWasSet, originalUser]() {
+        if (userWasSet) {
+            qputenv("USER", originalUser);
+        } else {
+            qunsetenv("USER");
+        }
+    });
+    const QString author = QStringLiteral("Nguyễn Văn Huy");
+    QVERIFY(qputenv("USER", author.toUtf8()));
+
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("dynamic-stamp-source.pdf"));
+    const QString firstSavedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("dynamic-stamp-first-save.pdf"));
+    const QString secondSavedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("dynamic-stamp-second-save.pdf"));
+    QVERIFY(createThreePageTextPdf(sourcePath));
+    const int sourceObjectCount = topLevelPageObjectCount(sourcePath);
+    const QString originalPageText = pageText(sourcePath);
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setStampName(QStringLiteral("DynamicApproved"));
+    controller.setTool(PDFEditController::StampTool);
+    const QVariantMap added = controller.addStamp(0, QRectF(0.12, 0.24, 0.7, 0.16));
+    QVERIFY(!added.isEmpty());
+    const QString objectId = added.value(QStringLiteral("objectId")).toString();
+    const QString detail = added.value(QStringLiteral("stampDetail")).toString();
+    const QString artwork = added.value(QStringLiteral("stampArtwork")).toString();
+    const QDateTime creationDate = added.value(QStringLiteral("commentCreationDate"))
+        .toDateTime();
+    QVERIFY(!objectId.isEmpty());
+    QVERIFY(!detail.isEmpty());
+    QVERIFY(detail.contains(author, Qt::CaseInsensitive));
+    QVERIFY(!artwork.isEmpty());
+    QVERIFY(creationDate.isValid());
+    QVERIFY(detail.contains(creationDate.toString(QStringLiteral("dd/MM/yy"))));
+    QVERIFY(detail.contains(creationDate.toString(QStringLiteral("HH:mm:ss"))));
+    QCOMPARE(added.value(QStringLiteral("commentAuthor")).toString(), author);
+
+    // The reviewer and selected preset may change after placement. Neither may
+    // replace the author/date or title already captured by this annotation.
+    QVERIFY(qputenv("USER", "different-reviewer"));
+    controller.setStampName(QStringLiteral("DynamicReceived"));
+    const QString editedContents = QStringLiteral("Đã duyệt bản hợp đồng mới.");
+    QVERIFY(controller.setCommentText(0, objectId, editedContents));
+    const auto currentDraft = [&controller]() {
+        return controller.draftsForPage(0).constFirst().toMap();
+    };
+    QCOMPARE(currentDraft().value(QStringLiteral("text")).toString(), editedContents);
+    QCOMPARE(currentDraft().value(QStringLiteral("stampText")).toString(),
+             QStringLiteral("APPROVED"));
+    QCOMPARE(currentDraft().value(QStringLiteral("stampDetail")).toString(), detail);
+    QCOMPARE(currentDraft().value(QStringLiteral("stampArtwork")).toString(), artwork);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(currentDraft().value(QStringLiteral("text")).toString(),
+             QStringLiteral("APPROVED"));
+    QCOMPARE(currentDraft().value(QStringLiteral("stampDetail")).toString(), detail);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(currentDraft().value(QStringLiteral("text")).toString(), editedContents);
+    QCOMPARE(currentDraft().value(QStringLiteral("stampDetail")).toString(), detail);
+    QCOMPARE(currentDraft().value(QStringLiteral("stampArtwork")).toString(), artwork);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(firstSavedPath)));
+    QVERIFY(!controller.hasDrafts());
+
+    const CommentAnnotationInspection firstInspection
+        = inspectCommentAnnotation(firstSavedPath, objectId);
+    QVERIFY(firstInspection.readable);
+    QCOMPARE(firstInspection.appearanceName, QStringLiteral("DynamicApproved"));
+    QCOMPARE(firstInspection.author, author);
+    QCOMPARE(firstInspection.contents, editedContents);
+    QVERIFY(!firstInspection.creationDate.isEmpty());
+    QVERIFY(!firstInspection.appearance.isEmpty());
+    const AnnotationAppearanceStructureInspection firstAppearance
+        = inspectAnnotationAppearanceStructure(firstSavedPath, objectId);
+    QVERIFY(!firstAppearance.boundingBox.isEmpty());
+
+    const QVariantMap reopened = candidateForKind(
+        waitForCandidates(controller, 0), QStringLiteral("stamp"));
+    QVERIFY(!reopened.isEmpty());
+    QCOMPARE(reopened.value(QStringLiteral("stampName")).toString(),
+             QStringLiteral("DynamicApproved"));
+    QCOMPARE(reopened.value(QStringLiteral("stampText")).toString(),
+             QStringLiteral("APPROVED"));
+    QCOMPARE(reopened.value(QStringLiteral("stampDetail")).toString(), detail);
+    QCOMPARE(reopened.value(QStringLiteral("stampArtwork")).toString(), artwork);
+    QCOMPARE(reopened.value(QStringLiteral("commentAuthor")).toString(), author);
+    QCOMPARE(reopened.value(QStringLiteral("commentCreationDate")).toDateTime()
+                 .toSecsSinceEpoch(),
+             creationDate.toSecsSinceEpoch());
+    const QString sourceObjectId = reopened.value(QStringLiteral("objectId")).toString();
+    QVERIFY(controller.selectComment(0, sourceObjectId));
+    const QRectF originalFrame = controller.selectedFrameRect();
+    const QRectF resizedFrame(0.2, 0.4, 0.6, 0.2);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resizedFrame);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), resizedFrame);
+    QCOMPARE(controller.undo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QCOMPARE(controller.redo(), -1);
+    QCOMPARE(controller.selectedFrameRect(), resizedFrame);
+    const QString secondContents = QStringLiteral("Ghi chú bổ sung sau khi mở lại.");
+    QVERIFY(controller.setCommentText(0, sourceObjectId, secondContents));
+    QCOMPARE(currentDraft().value(QStringLiteral("stampDetail")).toString(), detail);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(secondSavedPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(topLevelPageObjectCount(secondSavedPath), sourceObjectCount);
+    QCOMPARE(pageText(secondSavedPath), originalPageText);
+
+    const CommentAnnotationInspection secondInspection
+        = inspectCommentAnnotation(secondSavedPath, objectId);
+    QVERIFY(secondInspection.readable);
+    QCOMPARE(secondInspection.contents, secondContents);
+    QCOMPARE(secondInspection.author, author);
+    QCOMPARE(secondInspection.creationDate, firstInspection.creationDate);
+    QCOMPARE(secondInspection.appearance, firstInspection.appearance);
+    const AnnotationAppearanceStructureInspection secondAppearance
+        = inspectAnnotationAppearanceStructure(secondSavedPath, objectId);
+    QCOMPARE(secondAppearance.boundingBox, firstAppearance.boundingBox);
+    const QSizeF pageSize = document.pageSize(0);
+    QVERIFY(qAbs(secondInspection.rect.left
+                 - resizedFrame.left() * pageSize.width()) < 0.05);
+    QVERIFY(qAbs(secondInspection.rect.right
+                 - resizedFrame.right() * pageSize.width()) < 0.05);
+    QVERIFY(qAbs(secondInspection.rect.top
+                 - (1.0 - resizedFrame.top()) * pageSize.height()) < 0.05);
+    QVERIFY(qAbs(secondInspection.rect.bottom
+                 - (1.0 - resizedFrame.bottom()) * pageSize.height()) < 0.05);
+    const QVariantMap savedAgain = candidateForKind(
+        waitForCandidates(controller, 0), QStringLiteral("stamp"));
+    QCOMPARE(savedAgain.value(QStringLiteral("stampDetail")).toString(), detail);
+    QCOMPARE(savedAgain.value(QStringLiteral("stampArtwork")).toString(), artwork);
+    QCOMPARE(savedAgain.value(QStringLiteral("text")).toString(), secondContents);
 }
 
 void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
@@ -220,6 +534,7 @@ void PDFEditControllerTest::editsAndDeletesSourceStampThreadRoundTrip()
         }
     }
     QVERIFY(!sourceStamp.isEmpty());
+    QVERIFY(sourceStamp.value(QStringLiteral("stampArtwork")).toString().isEmpty());
     QCOMPARE(
         sourceStamp.value(QStringLiteral("text")).toString(),
         QStringLiteral("unsupported-stamp"));

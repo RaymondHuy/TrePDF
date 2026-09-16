@@ -32,14 +32,6 @@ Flickable {
         "#0277bd", "#00838f", "#00695c", "#2e7d32", "#558b2f",
         "#9e9d24", "#f9a825", "#ef6c00", "#d84315", "#455a64"
     ]
-    readonly property var stampPresets: [
-        "Approved",
-        "Draft",
-        "Final",
-        "Confidential",
-        "ForComment",
-        "NotApproved"
-    ]
     readonly property var drawingCommentOptions: [
         {
             tool: PDFEditController.SquareTool,
@@ -197,7 +189,9 @@ Flickable {
     }
 
     function stampPresetLabel(stampName) {
-        switch (stampName) {
+        const baseName = stampName.startsWith("Dynamic")
+            ? stampName.slice(7) : stampName
+        switch (baseName) {
         case "Approved":
             //% "Approved"
             return qsTrId("StampApproved")
@@ -216,42 +210,45 @@ Flickable {
         case "NotApproved":
             //% "Not Approved"
             return qsTrId("StampNotApproved")
-        }
-        return ""
-    }
-
-    function stampPresetColor(stampName) {
-        switch (stampName) {
-        case "Approved":
-            return "#2e7d32"
-        case "Draft":
-            return "#1565c0"
-        case "Final":
-            return "#283593"
-        case "Confidential":
-            return "#c62828"
-        case "ForComment":
-            return "#ef6c00"
-        case "NotApproved":
-            return "#c62828"
-        }
-        return "#c62828"
-    }
-
-    function stampPresetArtworkText(stampName) {
-        switch (stampName) {
-        case "Approved":
-            return "APPROVED"
-        case "Draft":
-            return "DRAFT"
-        case "Final":
-            return "FINAL"
-        case "Confidential":
-            return "CONFIDENTIAL"
-        case "ForComment":
-            return "FOR COMMENT"
-        case "NotApproved":
-            return "NOT APPROVED"
+        case "Void":
+            //% "Void"
+            return qsTrId("StampVoid")
+        case "Verified":
+            //% "Verified"
+            return qsTrId("StampVerified")
+        case "Revised":
+            //% "Revised"
+            return qsTrId("StampRevised")
+        case "Reviewed":
+            //% "Reviewed"
+            return qsTrId("StampReviewed")
+        case "Received":
+            //% "Received"
+            return qsTrId("StampReceived")
+        case "Expired":
+            //% "Expired"
+            return qsTrId("StampExpired")
+        case "Emergency":
+            //% "Emergency"
+            return qsTrId("StampEmergency")
+        case "Completed":
+            //% "Completed"
+            return qsTrId("StampCompleted")
+        case "Accepted":
+            //% "Accepted"
+            return qsTrId("StampAccepted")
+        case "Witness":
+            //% "Witness"
+            return qsTrId("StampWitness")
+        case "SignHere":
+            //% "Sign Here"
+            return qsTrId("StampSignHere")
+        case "Rejected":
+            //% "Rejected"
+            return qsTrId("StampRejected")
+        case "Initial":
+            //% "Initial"
+            return qsTrId("StampInitial")
         }
         return ""
     }
@@ -521,12 +518,16 @@ Flickable {
     component StampOptionButton: ToolButton {
         id: stampOption
 
-        required property string optionStampName
-        required property color optionStampColor
+        required property var preset
+        readonly property string optionStampName: String(preset.name)
 
-        width: 146
-        height: 62
-        padding: 5
+        signal navigationRequested(int offset)
+        signal focusEntered()
+
+        objectName: "stampOption_" + optionStampName
+        implicitWidth: 158
+        implicitHeight: 52
+        padding: 4
         checkable: true
         checked: root.editController.stampName
             === stampOption.optionStampName
@@ -535,28 +536,20 @@ Flickable {
             stampOption.optionStampName)
         onClicked: root.selectStampPreset(
             stampOption.optionStampName)
+        onActiveFocusChanged: {
+            if (activeFocus)
+                focusEntered()
+        }
+        Keys.onLeftPressed: navigationRequested(-1)
+        Keys.onRightPressed: navigationRequested(1)
+        Keys.onUpPressed: navigationRequested(-4)
+        Keys.onDownPressed: navigationRequested(4)
 
-        contentItem: Column {
-            spacing: 2
-
-            StampView {
-                width: parent.width
-                height: 34
-                stampName: stampOption.optionStampName
-                stampText: root.stampPresetArtworkText(
-                    stampOption.optionStampName)
-                stampColor: stampOption.optionStampColor
-            }
-
-            Label {
-                width: parent.width
-                text: root.stampPresetLabel(
-                    stampOption.optionStampName)
-                color: root.theme.ribbonTextColor
-                font.pixelSize: 10
-                horizontalAlignment: Text.AlignHCenter
-                elide: Text.ElideRight
-            }
+        contentItem: StampView {
+            stampName: stampOption.optionStampName
+            stampText: String(stampOption.preset.text)
+            stampColor: stampOption.preset.color
+            stampArtwork: String(stampOption.preset.artwork)
         }
 
         background: Rectangle {
@@ -575,6 +568,169 @@ Flickable {
             border.color: stampOption.checked
                 ? root.theme.foxitDarkOrange
                 : root.theme.foxitBorderOrange
+        }
+
+        ToolTip.visible: stampOption.hovered
+        ToolTip.delay: 500
+        ToolTip.text: root.stampPresetLabel(stampOption.optionStampName)
+    }
+
+    component StampPresetSection: Column {
+        id: stampSection
+
+        required property string category
+        required property int sectionIndex
+        required property StampPresetMenu menu
+        readonly property int optionCount: stampOptions.count
+        readonly property var presets: root.editController.stampPresets.filter(
+            preset => preset.category === stampSection.category)
+        readonly property string title: {
+            switch (category) {
+            case "dynamic":
+                //% "Dynamic Stamps"
+                return qsTrId("StampDynamicStamps")
+            case "standard":
+                //% "Standard Stamps"
+                return qsTrId("StampStandardStamps")
+            case "signHere":
+                //% "Sign Here"
+                return qsTrId("StampSignHereStamps")
+            default:
+                //% "More Stamps"
+                return qsTrId("StampAdditionalStamps")
+            }
+        }
+
+        objectName: "stampSection_" + category
+        width: menu.width
+        spacing: 3
+
+        function optionAt(optionIndex: int): StampOptionButton {
+            return stampOptions.itemAt(optionIndex) as StampOptionButton
+        }
+
+        Label {
+            width: stampSection.width
+            padding: 4
+            text: stampSection.title
+            color: root.theme.ribbonTextColor
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+
+            background: Rectangle {
+                color: root.theme.ribbonBorder
+            }
+        }
+
+        Grid {
+            width: stampSection.width
+            columns: 4
+            columnSpacing: 4
+            rowSpacing: 3
+
+            Repeater {
+                id: stampOptions
+
+                model: stampSection.presets
+
+                delegate: StampOptionButton {
+                    id: presetButton
+
+                    required property var modelData
+                    required property int index
+
+                    width: (stampSection.width - 12) / 4
+                    height: (width - 8) * 50 / 160 + 8
+                    preset: modelData
+                    Accessible.description: stampSection.title
+                    onNavigationRequested: offset => stampSection.menu.navigate(
+                        stampSection.sectionIndex, presetButton.index, offset)
+                    onFocusEntered: stampSection.menu.revealButton(presetButton)
+                }
+            }
+        }
+    }
+
+    component StampPresetMenu: Flickable {
+        id: stampMenu
+
+        objectName: "stampPresetMenu"
+        implicitHeight: stampSections.implicitHeight
+        contentWidth: width
+        contentHeight: stampSections.implicitHeight
+        boundsBehavior: Flickable.StopAtBounds
+        flickableDirection: Flickable.VerticalFlick
+        clip: true
+
+        function revealButton(button: StampOptionButton) {
+            const top = button.mapToItem(stampSections, 0, 0).y
+            const bottom = top + button.height
+            if (top < contentY)
+                contentY = top
+            else if (bottom > contentY + height)
+                contentY = bottom - height
+        }
+
+        function focusCurrent() {
+            for (let group = 0; group < stampGroups.count; ++group) {
+                const section = stampGroups.itemAt(group) as StampPresetSection
+                for (let index = 0; index < section.optionCount; ++index) {
+                    const button = section.optionAt(index)
+                    if (button.checked) {
+                        button.forceActiveFocus(Qt.PopupFocusReason)
+                        return
+                    }
+                }
+            }
+        }
+
+        function navigate(group, index, offset) {
+            let targetGroup = group
+            let targetIndex = index + offset
+            const section = stampGroups.itemAt(group) as StampPresetSection
+            if (targetIndex < 0 && group > 0) {
+                targetGroup = group - 1
+                const previousCount = (stampGroups.itemAt(targetGroup) as StampPresetSection).optionCount
+                targetIndex = offset === -4
+                    ? Math.min(previousCount - 1,
+                        Math.floor((previousCount - 1) / 4) * 4 + index % 4)
+                    : previousCount - 1
+            } else if (targetIndex >= section.optionCount
+                       && group + 1 < stampGroups.count) {
+                targetGroup = group + 1
+                const nextCount = (stampGroups.itemAt(targetGroup) as StampPresetSection).optionCount
+                targetIndex = offset === 4
+                    ? Math.min(nextCount - 1, index % 4) : 0
+            }
+            const target = stampGroups.itemAt(targetGroup) as StampPresetSection
+            targetIndex = Math.max(0, Math.min(target.optionCount - 1, targetIndex))
+            target.optionAt(targetIndex).forceActiveFocus(Qt.TabFocusReason)
+        }
+
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+        }
+
+        Column {
+            id: stampSections
+
+            width: stampMenu.width
+            spacing: 6
+
+            Repeater {
+                id: stampGroups
+
+                model: ["dynamic", "standard", "signHere", "additional"]
+
+                delegate: StampPresetSection {
+                    required property string modelData
+                    required property int index
+
+                    menu: stampMenu
+                    category: modelData
+                    sectionIndex: index
+                }
+            }
         }
     }
 
@@ -874,6 +1030,8 @@ Flickable {
             RibbonButton {
                 id: stampButton
 
+                objectName: "stampRibbonButton"
+
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Stamp"
@@ -902,29 +1060,39 @@ Flickable {
                 Popup {
                     id: stampPresetPopup
 
+                    objectName: "stampPresetPopup"
+
                     x: 0
                     y: stampButton.height
-                    width: 308
+                    width: Math.min(636, root.Overlay.overlay
+                        ? root.Overlay.overlay.width - 16 : 636)
+                    height: Math.min(implicitHeight, root.Overlay.overlay
+                        ? Math.max(80, root.Overlay.overlay.height - 16) : 600)
+                    contentHeight: stampMenuLoader.status === Loader.Ready
+                        && stampMenuLoader.item
+                        ? (stampMenuLoader.item as StampPresetMenu).implicitHeight : 0
+                    margins: 8
                     padding: 6
                     focus: true
                     closePolicy: Popup.CloseOnEscape
                         | Popup.CloseOnPressOutsideParent
 
-                    contentItem: Grid {
-                        columns: 2
-                        columnSpacing: 4
-                        rowSpacing: 4
+                    onOpened: {
+                        if (stampMenuLoader.status === Loader.Ready
+                            && stampMenuLoader.item)
+                            (stampMenuLoader.item as StampPresetMenu).focusCurrent()
+                    }
 
-                        Repeater {
-                            model: root.stampPresets
+                    contentItem: Loader {
+                        id: stampMenuLoader
 
-                            delegate: StampOptionButton {
-                                required property var modelData
+                        objectName: "stampMenuLoader"
 
-                                optionStampName: String(modelData)
-                                optionStampColor: root.stampPresetColor(
-                                    String(modelData))
-                            }
+                        active: stampPresetPopup.visible
+                        sourceComponent: StampPresetMenu { }
+                        onLoaded: {
+                            if (stampPresetPopup.opened && item)
+                                (item as StampPresetMenu).focusCurrent()
                         }
                     }
 
