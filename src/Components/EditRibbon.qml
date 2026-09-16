@@ -272,8 +272,19 @@ Flickable {
                         }
 
                         Action {
-                            //% "Auto-create links from URLs"
-                            text: qsTrId("AutoCreateLinksFromUrls")
+                            text: root.editController.creatingWebLinks
+                                //% "Cancel creating links"
+                                ? qsTrId("CancelCreatingWebLinks")
+                                //% "Auto-create links from URLs"
+                                : qsTrId("AutoCreateLinksFromUrls")
+                            enabled: root.editController.creatingWebLinks
+                                || !root.hasPendingPanelEdits
+                            onTriggered: {
+                                if (root.editController.creatingWebLinks)
+                                    root.editController.cancelWebLinkCreation()
+                                else
+                                    root.editController.autoCreateWebLinks()
+                            }
                         }
 
                         Action {

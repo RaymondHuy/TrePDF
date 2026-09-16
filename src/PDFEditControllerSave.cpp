@@ -111,6 +111,13 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::CommentAnnotationCreationFailed:
         //% "The comment could not be created on page %1."
         return qtTrId("PdfSaveCommentCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::WebLinkCreationFailed:
+        if (result.page < 0) {
+            //% "Web links could not be saved."
+            return qtTrId("PdfSaveWebLinksFailed");
+        }
+        //% "Web links could not be created on page %1."
+        return qtTrId("PdfSaveWebLinkCreationFailed").arg(result.page + 1);
     case PDFSaveWriter::Error::CommentAnnotationUpdateFailed:
         //% "The comment could not be updated on page %1."
         return qtTrId("PdfSaveCommentUpdateFailed").arg(result.page + 1);
@@ -147,6 +154,7 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
 
 bool PDFEditController::save()
 {
+    cancelWebLinkCreation();
     if (!m_document || !m_document->isLoaded()) {
         //% "No PDF is open."
         emit statusMessage(qtTrId("NoPdfOpenForSaving"));
@@ -162,6 +170,7 @@ bool PDFEditController::save()
 
 bool PDFEditController::saveAs(const QUrl &target)
 {
+    cancelWebLinkCreation();
     if (m_saving) {
         return false;
     }
@@ -223,6 +232,7 @@ bool PDFEditController::saveAs(const QUrl &target)
 
 bool PDFEditController::requestSave()
 {
+    cancelWebLinkCreation();
     if (!m_document || !m_document->isLoaded()) {
         //% "No PDF is open."
         emit statusMessage(qtTrId("NoPdfOpenForSaving"));
@@ -239,6 +249,7 @@ bool PDFEditController::requestSave()
 
 bool PDFEditController::requestSaveAs(const QUrl &target)
 {
+    cancelWebLinkCreation();
     if (m_saving) {
         return false;
     }

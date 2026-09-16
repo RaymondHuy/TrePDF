@@ -40,6 +40,7 @@ public:
         CommentAnnotationCreationFailed,
         CommentAnnotationUpdateFailed,
         CommentAnnotationRemovalFailed,
+        WebLinkCreationFailed,
         PageCreationFailed,
         PageDeletionFailed,
         PageContentGenerationFailed,

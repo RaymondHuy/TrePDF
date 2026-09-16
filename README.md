@@ -92,6 +92,18 @@ unbounded data. Search reads the saved source text, so a new edit-history change
 clears any existing query and highlights.
 
 In Edit mode, selecting editable text opens contextual Edit and Delete actions.
+The Link menu's **Auto-create links from URLs** scans the saved text layer across
+the document on a background worker, recognizes HTTP/HTTPS and `www` addresses,
+and skips regions already covered by PDF links. Save other pending PDF changes
+before running it. Newly created links are one undoable batch; Discard removes
+them, and Save/Save As writes invisible standard `/Link` URI annotations without
+changing the page text or its appearance. Orange frames show the draft regions
+in Edit; switch to View to open a link through the existing confirmation dialog.
+The menu can cancel an active scan. Scans without a text layer are unsupported;
+bounded scans report a limited result when content exceeds the safety limits.
+Links remain independent page regions if text is subsequently edited or moved.
+The Add or edit a link and Remove web links menu entries remain UI-only.
+
 Changes remain undoable session drafts until Save or Save As writes them into a
 PDF. Compatible text objects on the same visual line are grouped, then nearby
 lines with matching font family and size, left alignment, and regular spacing

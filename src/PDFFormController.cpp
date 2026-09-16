@@ -612,6 +612,19 @@ bool PDFFormController::confirmExternalLink(quint64 requestId)
     return QDesktopServices::openUrl(url);
 }
 
+quint64 PDFFormController::requestExternalWebLink(const QString &url)
+{
+    if (!m_document || !m_document->isLoaded()
+        || m_pendingExternalLinkRequestId != 0
+        || validatedExternalUrl(url.toUtf8()).isEmpty()) {
+        return 0;
+    }
+    PDFFormWorker::InteractionResult result;
+    result.externalUri = url.toUtf8();
+    processHostActions(result, m_navigationEpoch);
+    return m_pendingExternalLinkRequestId;
+}
+
 void PDFFormController::cancelExternalLink(quint64 requestId)
 {
     if (requestId == 0

@@ -289,6 +289,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/PageLayoutDelegate.qml`](../src/Components/PageLayoutDelegate.qml) | Hàng một trang hoặc spread hai trang, mapping cover, visible-area helper và pooling child. |
 | [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, search highlight, coordinator interaction, rotation và layout của một trang. |
 | [`src/Components/SearchHighlightLayer.qml`](../src/Components/SearchHighlightLayer.qml) | Vẽ rect kết quả tìm kiếm normalized, không tương tác. |
+| [`src/Components/WebLinkDraftLayer.qml`](../src/Components/WebLinkDraftLayer.qml) | Khung liên kết tự động chưa lưu trong Edit và hit target mở liên kết qua xác nhận trong Browse. |
 | [`src/Components/PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml) | Gom mode, z-order, choice handshake và cleanup của runtime/edit/form designer. |
 | [`src/Components/EditOverlay.qml`](../src/Components/EditOverlay.qml) | Tương tác sửa nội dung trang, gesture và preview/draft comment; resize ảnh mới/nguồn đủ điều kiện với tám handle và tùy chọn khóa tỷ lệ. |
 | [`src/Components/CommentDrawingView.qml`](../src/Components/CommentDrawingView.qml) | Renderer vector chung cho năm drawing-comment subtype. |
@@ -322,6 +323,8 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFEditControllerGeometry.cpp`](../src/PDFEditControllerGeometry.cpp) | Thêm text/image/shape, thao tác trang, di chuyển/resize draft và xoay ảnh. |
 | [`src/PDFEditControllerDrafts.cpp`](../src/PDFEditControllerDrafts.cpp) | Snapshot, undo/redo/discard, dữ liệu trình bày và render draft. |
 | [`src/PDFEditControllerSave.cpp`](../src/PDFEditControllerSave.cpp) | Điều phối Save/Save As đồng bộ và bất đồng bộ. |
+| [`src/PDFEditControllerWebLinks.cpp`](../src/PDFEditControllerWebLinks.cpp) | Tự động tạo link theo tab, scan bất đồng bộ, batch history và click draft qua xác nhận. |
+| [`src/PDFWebLinkScanner.cpp`](../src/PDFWebLinkScanner.cpp) | Nhận diện HTTP(S) trong source text bằng PDFium, kiểm URL/geometry và tránh Link trùng dưới giới hạn quét. |
 | [`src/PDFEditControllerSupport.cpp`](../src/PDFEditControllerSupport.cpp) | Helper dùng chung giữa các phần triển khai controller. |
 | [`src/PDFEditController_p.h`](../src/PDFEditController_p.h) | Khai báo nội bộ dùng chung; API và state của controller vẫn ở `PDFEditController.h`. |
 | [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) | Ghi PDF giao dịch từ snapshot bất biến. |

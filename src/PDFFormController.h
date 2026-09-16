@@ -105,6 +105,7 @@ public:
                           const QString &expectedIdentityToken = {},
                           const ChoiceFocusCompletion &completion = {});
     Q_INVOKABLE bool confirmExternalLink(quint64 requestId);
+    quint64 requestExternalWebLink(const QString &url);
     Q_INVOKABLE void cancelExternalLink(quint64 requestId);
 
 signals:

@@ -3,6 +3,7 @@
 #include "PDFDocument.h"
 #include "PDFCommentAnnotation.h"
 #include "PDFSaveWriter.h"
+#include "PDFWebLinkScanner.h"
 
 #include <QByteArray>
 #include <QColor>
@@ -54,6 +55,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
+    Q_PROPERTY(bool creatingWebLinks READ creatingWebLinks NOTIFY creatingWebLinksChanged FINAL)
+    Q_PROPERTY(quint64 webLinksRevision READ webLinksRevision NOTIFY webLinksChanged FINAL)
     Q_PROPERTY(bool fontDownloadPending READ fontDownloadPending NOTIFY fontDownloadStateChanged FINAL)
     Q_PROPERTY(bool downloadingFont READ downloadingFont NOTIFY fontDownloadStateChanged FINAL)
     Q_PROPERTY(QString missingFontFamily READ missingFontFamily NOTIFY fontDownloadStateChanged FINAL)
@@ -300,6 +303,12 @@ public:
     bool allDraftedTextObjectsSuppressibleForPage(int page) const;
 
     Q_INVOKABLE QVariantList candidatesForPage(int page);
+    Q_INVOKABLE bool autoCreateWebLinks();
+    Q_INVOKABLE void cancelWebLinkCreation();
+    Q_INVOKABLE QVariantList webLinkDraftsForPage(int page) const;
+    Q_INVOKABLE bool activateWebLink(int page, int index, quint64 revision);
+    bool creatingWebLinks() const { return bool(m_webLinkCancellation); }
+    quint64 webLinksRevision() const { return m_webLinksRevision; }
     Q_INVOKABLE void requestCandidatesForPage(int page);
     Q_INVOKABLE QVariantList draftsForPage(int page) const;
     Q_INVOKABLE QVariantMap selectedDraftPreview() const;
@@ -456,6 +465,8 @@ signals:
     void pendingDrawingCommentPageChanged();
     void historyStateChanged();
     void savingChanged();
+    void creatingWebLinksChanged();
+    void webLinksChanged();
     void textEditActiveChanged();
     void selectionChanged();
     void selectedGeometryChanged();
@@ -744,7 +755,8 @@ private:
     struct Command {
         enum class Kind {
             ObjectDraft,
-            PageStructure
+            PageStructure,
+            WebLinks
         };
 
         Kind kind = Kind::ObjectDraft;
@@ -757,6 +769,8 @@ private:
         Draft after;
         PageState pageStateBefore;
         PageState pageStateAfter;
+        QVector<PDFWebLinks::Link> webLinksBefore;
+        QVector<PDFWebLinks::Link> webLinksAfter;
     };
 
     enum class FontStyle {
@@ -766,6 +780,8 @@ private:
     };
 
     void resetSession();
+    bool hasNonWebLinkDrafts() const;
+    void invalidateWebLinks();
     void clearFontRecovery();
     void finishFontDownload(bool succeeded, const QString &error);
     QRectF rotatedImageFrame(const Draft &draft, int quarterTurns) const;
@@ -1015,6 +1031,10 @@ private:
     QVector<PDFPageInsertion> m_pageInsertions;
     QSet<int> m_deletedSourcePages;
     QHash<QString, Draft> m_drafts;
+    QVector<PDFWebLinks::Link> m_autoWebLinks;
+    std::shared_ptr<std::atomic_bool> m_webLinkCancellation;
+    quint64 m_webLinksRevision = 0;
+    quint64 m_pendingWebLinkRequest = 0;
     QHash<int, quint64> m_pageDraftRevisions;
     quint64 m_nextDraftRevision = 0;
     quint64 m_nextAddedObjectId = 0;

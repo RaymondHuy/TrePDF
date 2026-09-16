@@ -612,6 +612,31 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   `PDFAcroFormWriter` nếu có field cần ghi/normalize.
 - Chỉ commit đích khi từng bước thành công; Save As không chạm source.
 
+## Tự động tạo liên kết web
+
+`PDFWebLinkScanner.h/.cpp` mở document riêng và quét text bằng
+`FPDFLink_LoadWebLinks()` dưới PDFium lock theo từng trang. URI chỉ nhận HTTP(S)
+không credentials; geometry được đổi thành normalized visible-page rect qua
+PDFium để giữ CropBox và rotation. Scan bỏ vùng giao Link có sẵn và giới hạn
+10.000 trang, 50.000 ký tự/trang, 5 triệu ký tự tổng, 5.000 link, 32 rect/link,
+512 rect/trang, 20.000 rect tổng, cùng ngân sách chuỗi và so sánh overlap. Chạm
+cap trả `limited`; lỗi hoặc hủy không materialize kết quả dở dang.
+
+`PDFEditControllerWebLinks.cpp` giữ link theo source-page trong `m_autoWebLinks`,
+tách khỏi comment/text. Scan yêu cầu source đã lưu; kết quả async phải còn khớp
+controller, document, path, revision và cancellation. Một đợt tạo là một command
+undo/redo; Discard, đổi source, chỉnh sửa mới hoặc Save hủy scan đang chạy.
+UI có thể hủy chủ động. Pending links mở qua `PDFFormController` và request id
+của hộp xác nhận hiện hữu; undo/reset/page remap vô hiệu hóa request cũ.
+
+`PDFSaveWriter` snapshot link, ánh xạ source-page qua chèn/xóa trang, kiểm tra
+lại URL/geometry/overlap rồi tạo `/Link` URI không viền cho từng line rect.
+Annotation-only save không gọi `FPDFPage_GenerateContent()`. Link không tự dời
+theo text sửa sau khi quét, tương tự annotation vị trí độc lập có sẵn.
+Sau khi mở lại, `PDFFormWorker` hit-test `/Link` trên page riêng của worker,
+ưu tiên widget ở phía trên và bỏ annotation ẩn. Chỉ nhấn/thả trên cùng link
+mới gửi URI đến hộp xác nhận trên GUI; worker không mở trình duyệt.
+
 ## Form runtime
 
 ### [`src/PDFFormController.cpp`](../src/PDFFormController.cpp) và

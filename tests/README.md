@@ -16,6 +16,12 @@ with `cmake-build-debug/tests/trepdf_spreadsheet_workbook_tests`.
 `PDFEditControllerTest` instance. Test names, registration order, fixtures, and
 shared state are unchanged by the file split.
 
+`tst_PDFEditControllerWebLinks.cpp` covers URL detection and duplicate rejection,
+batch undo/redo/discard, scan cancellation, source-page remapping, unchanged
+decoded content streams, and link activation through confirmation before and
+after Save. Geometry and saved-link clicks cover all four page rotations, with
+and without a CropBox.
+
 - `tst_PDFEditController.cpp`: suite initialization and `QTEST_MAIN`.
 - `PDFEditControllerTest.h`: shared test class, slots in execution order, and
   fixture members.

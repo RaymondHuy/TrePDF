@@ -29,6 +29,7 @@
 #include <utility>
 
 #include <fpdf_annot.h>
+#include <fpdf_doc.h>
 #include <fpdf_fwlevent.h>
 #include <fpdf_save.h>
 
@@ -2117,6 +2118,7 @@ public:
             = type != PDFFormWorker::PointerEventType::Move;
         switch (type) {
         case PDFFormWorker::PointerEventType::Move:
+            m_cursorType = FXCT_ARROW;
             result.handled = FORM_OnMouseMove(
                 m_formHandle,
                 eventPage,
@@ -2156,6 +2158,48 @@ public:
                 pageX,
                 pageY);
             break;
+        }
+        // PDFium's form callbacks handle Widgets, but do not activate ordinary
+        // Link annotations. Keep their hit testing on this worker-owned page.
+        FPDF_LINK webLink = nullptr;
+        const int linkZ = FPDFLink_GetLinkZOrderAtPoint(eventPage, pageX, pageY);
+        const int fieldZ = FPDFPage_FormFieldZOrderAtPoint(
+            m_formHandle, eventPage, pageX, pageY);
+        if (linkZ >= 0 && linkZ > fieldZ) {
+            FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(eventPage, linkZ);
+            if (annotation) {
+                const int flags = FPDFAnnot_GetFlags(annotation);
+                if (FPDFAnnot_GetSubtype(annotation) == FPDF_ANNOT_LINK
+                    && !(flags & (FPDF_ANNOT_FLAG_HIDDEN | FPDF_ANNOT_FLAG_INVISIBLE
+                                  | FPDF_ANNOT_FLAG_NOVIEW))) {
+                    FPDF_LINK link = FPDFAnnot_GetLink(annotation);
+                    if (link && FPDFAction_GetType(FPDFLink_GetAction(link)) == PDFACTION_URI)
+                        webLink = link;
+                }
+                FPDFPage_CloseAnnot(annotation);
+            }
+        }
+        if (type == PDFFormWorker::PointerEventType::Move && webLink)
+            m_cursorType = FXCT_HAND;
+        if (type == PDFFormWorker::PointerEventType::Press)
+            m_pressedWebLink = webLink;
+        if (type == PDFFormWorker::PointerEventType::Release) {
+            const FPDF_LINK pressed = std::exchange(m_pressedWebLink, nullptr);
+            if (webLink && webLink == pressed && m_eventExternalUri.isEmpty()) {
+                const FPDF_ACTION action = FPDFLink_GetAction(webLink);
+                const unsigned long length = FPDFAction_GetURIPath(m_document, action, nullptr, 0);
+                if (length > 1 && length <= 8193) {
+                    QByteArray uri(static_cast<qsizetype>(length), '\0');
+                    if (FPDFAction_GetURIPath(m_document, action, uri.data(), length) == length
+                        && uri.back() == '\0') {
+                        uri.chop(1);
+                        // The GUI controller validates the scheme/host and asks
+                        // for confirmation; the worker never opens a URL itself.
+                        m_eventExternalUri = std::move(uri);
+                        result.handled = true;
+                    }
+                }
+            }
         }
         finishEvent(result);
         if (temporaryEventPage) {
@@ -2667,6 +2711,7 @@ private:
     bool closeActivePageLocked(bool requireFocusCommit = false)
     {
         assertPDFiumProcessLockHeld();
+        m_pressedWebLink = nullptr;
         if (!m_activePage) {
             return true;
         }
@@ -2778,6 +2823,7 @@ private:
     FPDF_DOCUMENT m_previewDocument = nullptr;
     FPDF_FORMHANDLE m_formHandle = nullptr;
     FPDF_PAGE m_activePage = nullptr;
+    FPDF_LINK m_pressedWebLink = nullptr;
     QHash<int, FPDF_PAGE> m_javaScriptPages;
     QString m_filePath;
     int m_revision = -1;

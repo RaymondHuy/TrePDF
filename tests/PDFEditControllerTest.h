@@ -13,6 +13,17 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void autoCreatesOnlySafeWebLinks();
+    void autoWebLinksUseSingleHistoryCommand();
+    void savesAutoWebLinksWithoutChangingPageContent();
+    void mapsAutoWebLinksAcrossPageChanges();
+    void savesAutoWebLinksWithCropAndRotation_data();
+    void savesAutoWebLinksWithCropAndRotation();
+    void rejectsAutoWebLinksWithUnsavedContent();
+    void cancelsStaleAutoWebLinkScans();
+    void routesDraftWebLinksThroughConfirmation();
+    void routesSavedWebLinksThroughConfirmation_data();
+    void routesSavedWebLinksThroughConfirmation();
     void exposesExcelExportTabAndDraftGuard();
     void storesTransientTextFieldsByPage();
     void limitsTransientTextFieldInputLength();

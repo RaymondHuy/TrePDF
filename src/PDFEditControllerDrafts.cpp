@@ -419,6 +419,7 @@ void PDFEditController::deleteSelectedObject()
 
 int PDFEditController::undo()
 {
+    cancelWebLinkCreation();
     if (m_saving || m_textEditActive) {
         return -1;
     }
@@ -440,6 +441,7 @@ int PDFEditController::undo()
 
 int PDFEditController::redo()
 {
+    cancelWebLinkCreation();
     if (m_saving || m_textEditActive) {
         return -1;
     }
@@ -461,9 +463,11 @@ int PDFEditController::redo()
 
 void PDFEditController::discardDrafts()
 {
+    cancelWebLinkCreation();
     if (m_saving
         || (!m_textEditActive
             && m_drafts.isEmpty()
+            && m_autoWebLinks.isEmpty()
             && m_pendingTextMarkupCreations.isEmpty()
             && m_pageInsertions.isEmpty()
             && m_deletedSourcePages.isEmpty()
@@ -533,6 +537,8 @@ void PDFEditController::discardDrafts()
         }
     }
     m_drafts.clear();
+    m_autoWebLinks.clear();
+    invalidateWebLinks();
     m_undoStack.clear();
     m_redoStack.clear();
     if (m_formController) {
@@ -1083,6 +1089,11 @@ void PDFEditController::applyDraftState(const Command &command,
                                         bool useAfterState,
                                         bool immediate)
 {
+    if (command.kind == Command::Kind::WebLinks) {
+        m_autoWebLinks = useAfterState ? command.webLinksAfter : command.webLinksBefore;
+        invalidateWebLinks();
+        return;
+    }
     if (command.kind == Command::Kind::PageStructure) {
         applyPageState(
             useAfterState
