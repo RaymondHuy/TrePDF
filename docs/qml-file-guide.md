@@ -237,6 +237,8 @@ dialog, đổi tab hoặc ghi tệp.
 **Tool và command:**
 
 - Select, Add Text, Add Image.
+- Link mở menu gồm Thêm hoặc sửa liên kết, Tự động tạo liên kết từ URL và
+  Xóa liên kết web. Hiện chỉ có UI; chọn một mục đóng menu, chưa xử lý hyperlink.
 - Shapes dạng split button: Rectangle, Oval, Line, Arrow, Triangle, Diamond.
   Menu dùng `ShapeDraftView` để preview và cập nhật `shapeType` trước khi bật
   `AddShapeTool`.

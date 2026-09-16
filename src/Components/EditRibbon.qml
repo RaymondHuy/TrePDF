@@ -200,14 +200,95 @@ Flickable {
             }
 
             RibbonButton {
+                id: linkButton
+
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Link"
                 text: qsTrId("Link")
-                //% "Add Link"
-                toolTipText: qsTrId("AddLink")
                 iconSource: "../assets/icons/link-2.svg"
-                onClicked: root.toolRequested(text)
+                menuIndicatorVisible: true
+                menuToolTipText: text
+                enabled: root.document.loaded && !root.editController.saving
+                primary: linkMenuLoader.active
+                onClicked: linkMenuLoader.active = true
+                onMenuRequested: linkMenuLoader.active = true
+                onEnabledChanged: {
+                    if (!enabled)
+                        linkMenuLoader.active = false
+                }
+                onVisibleChanged: {
+                    if (!visible)
+                        linkMenuLoader.active = false
+                }
+
+                Connections {
+                    target: root
+                    function onDocumentChanged() {
+                        linkMenuLoader.active = false
+                    }
+                }
+
+                Loader {
+                    id: linkMenuLoader
+
+                    active: false
+                    onLoaded: {
+                        if (status === Loader.Ready && item)
+                            (item as Menu).open()
+                    }
+
+                    sourceComponent: Menu {
+                        parent: linkButton
+                        y: linkButton.height
+                        width: 280
+                        padding: 4
+                        popupType: Popup.Item
+                        focus: true
+                        closePolicy: Popup.CloseOnEscape
+                            | Popup.CloseOnPressOutsideParent
+                        onClosed: linkMenuLoader.active = false
+
+                        delegate: MenuItem {
+                            id: linkMenuItem
+
+                            implicitHeight: 32
+                            leftPadding: 12
+                            rightPadding: 12
+                            font.pixelSize: 12
+                            palette.text: root.theme.ribbonTextColor
+                            palette.highlightedText: root.theme.ribbonTextColor
+
+                            background: Rectangle {
+                                radius: 4
+                                color: linkMenuItem.highlighted
+                                    ? root.theme.foxitPaleOrange : "transparent"
+                            }
+                        }
+
+                        Action {
+                            //% "Add or edit a link"
+                            text: qsTrId("AddOrEditLink")
+                        }
+
+                        Action {
+                            //% "Auto-create links from URLs"
+                            text: qsTrId("AutoCreateLinksFromUrls")
+                        }
+
+                        Action {
+                            //% "Remove web links"
+                            text: qsTrId("RemoveWebLinks")
+                        }
+
+                        background: Rectangle {
+                            radius: 7
+                            color: root.theme.ribbonSurface
+                            border.width: 1
+                            border.color: root.theme.ribbonBorder
+                        }
+                    }
+                }
             }
 
             RibbonButton {
