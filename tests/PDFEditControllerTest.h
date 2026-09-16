@@ -180,7 +180,10 @@ private slots:
     void addsTextMarkupWithUndoRedoAndDelete();
     void addsStickyNoteWithPanelModelAndUndo();
     void addsFreeTextWithPanelModelAndUndo();
+    void showsGroupedStampPresetMenuUi();
+    void savesStampPresetWithUndoRedo_data();
     void savesStampPresetWithUndoRedo();
+    void preservesDynamicStampSnapshotAcrossEditsAndSave();
     void editsAndDeletesSourceStampThreadRoundTrip();
     void addsCommentReplyWithOneLevelModelAndUndo();
     void distinguishesCommentIndexLoadingAndFailureFromEmptyState();

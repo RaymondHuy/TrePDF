@@ -182,8 +182,18 @@ share the Qt Quick Shapes `InkDrawingView`; Save maps every normalized point
 through `FPDF_DeviceToPage()` and writes `/Subtype /Ink`, `/InkList`, `/BS`, `/C`,
 `/CA`, the Print flag, and a vector `/AP` with round caps and joins. Source Ink
 follows the same editable geometry lifecycle, affinely transforms every stroke,
-and patches `/Rect` plus `/InkList`. Stamp offers
-Approved, Draft, Final, Confidential, For Comment, and Not Approved presets.
+and patches `/Rect` plus `/InkList`. Stamp offers 24 presets in four groups:
+
+- Dynamic: Approved, Revised, Reviewed, Received, and Confidential.
+- Standard: Approved, Void, Verified, Revised, Reviewed, Received, Final,
+  Expired, Emergency, Draft, Confidential, and Completed.
+- Sign Here: Accepted, Witness, Sign Here, Rejected, and Initial.
+- Additional: For Comment and Not Approved.
+
+Dynamic stamps capture the current comment author and date/time when placed;
+contents edits, undo/redo, and Save/reopen keep that printed snapshot fixed.
+The shared `PDFStampPresets.h` builds the colored background and white vector
+artwork, including icons and Unicode text outlines, for preview and saved AP.
 A click uses a 160-by-50-point frame and a drag sets a custom frame; new Stamp
 drafts can be moved, resized with eight handles, deleted, undone/redone, and
 saved as standard `/Stamp` annotations with `/Name`, semantic `/Contents`, the

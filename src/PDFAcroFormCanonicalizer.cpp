@@ -1,6 +1,7 @@
 #include "PDFAcroFormCanonicalizer.h"
 
 #include "PDFFormAppearance.h"
+#include "PDFStampPresets.h"
 
 #include <QByteArray>
 #include <QFile>
@@ -4535,6 +4536,7 @@ bool stampAppearanceData(
 {
     constexpr qreal maximumCoordinateMagnitudePoints = 10'000'000.0;
     constexpr qsizetype maximumDisplayCharacters = 32;
+    constexpr qsizetype maximumDetailCharacters = 256;
     const QRectF bounds = annotation.pageRect.normalized();
     const auto finiteCoordinate = [](qreal value) {
         return std::isfinite(value)
@@ -4550,6 +4552,17 @@ bool stampAppearanceData(
                 return value == ' '
                     || (value >= 'A' && value <= 'Z');
             });
+    const bool detailTextIsSafe
+        = annotation.detailText.size() <= maximumDetailCharacters
+        && annotation.detailText.isValidUtf16()
+        && std::none_of(
+            annotation.detailText.cbegin(),
+            annotation.detailText.cend(),
+            [](QChar character) {
+                return character.category() == QChar::Other_Control
+                    || character.category() == QChar::Separator_Line
+                    || character.category() == QChar::Separator_Paragraph;
+            });
     if (!bounds.isValid()
         || bounds.width() <= 0.0
         || bounds.height() <= 0.0
@@ -4558,90 +4571,87 @@ bool stampAppearanceData(
         || !finiteCoordinate(bounds.right())
         || !finiteCoordinate(bounds.bottom())
         || !isSafePdfName(annotation.stampName)
+        || !PDFStampPresets::find(annotation.stampName)
         || !displayTextIsSafe
+        || !detailTextIsSafe
         || !annotation.color.isValid()) {
         error = QStringLiteral(
             "A Stamp annotation appearance request is invalid.");
         return false;
     }
 
-    const QColor color = annotation.color.toRgb();
-    const qreal lineWidth = std::clamp(
-        qMin(bounds.width(), bounds.height()) * 0.04,
-        1.0,
-        3.0);
-    const qreal fontSize = std::clamp(
-        bounds.height() * 0.44,
-        6.0,
-        36.0);
-    static constexpr std::array<int, 26> helveticaBoldWidths{{
-        722, 722, 722, 722, 667, 611, 778, 722, 278,
-        556, 722, 611, 833, 722, 778, 667, 778, 722,
-        667, 611, 722, 722, 944, 722, 722, 611,
-    }};
-    qreal naturalTextWidth = 0.0;
-    for (QChar character : annotation.displayText) {
-        const ushort value = character.unicode();
-        const qreal widthRatio = value == ' '
-            ? 0.278
-            : static_cast<qreal>(
-                  helveticaBoldWidths.at(value - 'A'))
-                / 1000.0;
-        naturalTextWidth += fontSize * widthRatio;
-    }
-    if (!std::isfinite(naturalTextWidth) || naturalTextWidth <= 0.0) {
+    // The palette, draft preview, and persisted annotation use identical
+    // outlines. Outlining also preserves Unicode author names without relying
+    // on a viewer's installed fonts or substituting a Latin-only PDF font.
+    const QPainterPath artwork = PDFStampPresets::artwork(
+        annotation.stampName,
+        annotation.displayText,
+        annotation.detailText);
+    if (artwork.isEmpty() || artwork.elementCount() > PDFStampPresets::kMaximumArtworkElements) {
         error = QStringLiteral(
-            "A Stamp annotation display text cannot be measured.");
+            "A Stamp annotation appearance path is invalid or too large.");
         return false;
     }
-
-    const qreal availableTextWidth = qMax(
-        1.0,
-        bounds.width() - lineWidth * 6.0);
-    const qreal horizontalScale = qMin(
-        1.0,
-        availableTextWidth / naturalTextWidth);
-    const qreal renderedTextWidth = naturalTextWidth * horizontalScale;
-    const qreal textX = bounds.left()
-        + (bounds.width() - renderedTextWidth) / 2.0;
-    const qreal capHeight = fontSize * 0.718;
-    const qreal baselineY = bounds.top()
-        + (bounds.height() - capHeight) / 2.0;
-    const QByteArray encodedText
-        = annotation.displayText.toLatin1().toHex().toUpper();
-
-    const qreal outerInset = lineWidth / 2.0;
-    content = QByteArrayLiteral("q\n/GS gs\n")
-        + pdfNumber(color.redF()) + ' '
-        + pdfNumber(color.greenF()) + ' '
-        + pdfNumber(color.blueF()) + QByteArrayLiteral(" RG\n")
-        + pdfNumber(lineWidth) + QByteArrayLiteral(" w\n")
-        + pdfNumber(bounds.left() + outerInset) + ' '
-        + pdfNumber(bounds.top() + outerInset) + ' '
-        + pdfNumber(bounds.width() - lineWidth) + ' '
-        + pdfNumber(bounds.height() - lineWidth)
-        + QByteArrayLiteral(" re S\n");
-    const qreal innerInset = lineWidth * 2.25;
-    if (bounds.width() > innerInset * 2.0
-        && bounds.height() > innerInset * 2.0) {
-        content += pdfNumber(lineWidth * 0.65)
-            + QByteArrayLiteral(" w\n")
-            + pdfNumber(bounds.left() + innerInset) + ' '
-            + pdfNumber(bounds.top() + innerInset) + ' '
-            + pdfNumber(bounds.width() - innerInset * 2.0) + ' '
-            + pdfNumber(bounds.height() - innerInset * 2.0)
-            + QByteArrayLiteral(" re S\n");
+    for (int index = 0; index < artwork.elementCount(); ++index) {
+        const QPainterPath::Element element = artwork.elementAt(index);
+        if (!finiteCoordinate(element.x) || !finiteCoordinate(element.y)) {
+            error = QStringLiteral(
+                "A Stamp annotation appearance path has invalid coordinates.");
+            return false;
+        }
     }
-    content += QByteArrayLiteral("BT\n/F0 ")
-        + pdfNumber(fontSize) + QByteArrayLiteral(" Tf\n")
-        + pdfNumber(horizontalScale * 100.0)
-        + QByteArrayLiteral(" Tz\n")
+
+    const QColor color = annotation.color.toRgb();
+    // QPainterPath uses top-left coordinates on a 160 x 50 stamp. PDF uses
+    // bottom-left coordinates; this matrix maps both axes into its /Rect.
+    content = QByteArray(PDFStampPresets::kAppearanceMarker)
+        + QByteArrayLiteral("q\n/GS gs\n")
+        + pdfNumber(bounds.width() / 160.0)
+        + QByteArrayLiteral(" 0 0 ")
+        + pdfNumber(-bounds.height() / 50.0) + ' '
+        + pdfNumber(bounds.left()) + ' ' + pdfNumber(bounds.bottom())
+        + QByteArrayLiteral(" cm\n")
         + pdfNumber(color.redF()) + ' '
         + pdfNumber(color.greenF()) + ' '
-        + pdfNumber(color.blueF()) + QByteArrayLiteral(" rg\n1 0 0 1 ")
-        + pdfNumber(textX) + ' ' + pdfNumber(baselineY)
-        + QByteArrayLiteral(" Tm\n<") + encodedText
-        + QByteArrayLiteral("> Tj\nET\nQ\n");
+        + pdfNumber(color.blueF())
+        + QByteArrayLiteral(" rg\n0 0 160 50 re f\n1 1 1 rg\n");
+    for (int index = 0; index < artwork.elementCount(); ++index) {
+        const QPainterPath::Element element = artwork.elementAt(index);
+        switch (element.type) {
+        case QPainterPath::MoveToElement:
+        case QPainterPath::LineToElement:
+            content += pdfNumber(element.x) + ' ' + pdfNumber(element.y)
+                + (element.type == QPainterPath::MoveToElement
+                       ? QByteArrayLiteral(" m\n")
+                       : QByteArrayLiteral(" l\n"));
+            break;
+        case QPainterPath::CurveToElement: {
+            if (index + 2 >= artwork.elementCount()
+                || artwork.elementAt(index + 1).type
+                    != QPainterPath::CurveToDataElement
+                || artwork.elementAt(index + 2).type
+                    != QPainterPath::CurveToDataElement) {
+                error = QStringLiteral(
+                    "A Stamp annotation appearance curve is incomplete.");
+                return false;
+            }
+            const QPainterPath::Element second = artwork.elementAt(++index);
+            const QPainterPath::Element end = artwork.elementAt(++index);
+            content += pdfNumber(element.x) + ' ' + pdfNumber(element.y) + ' '
+                + pdfNumber(second.x) + ' ' + pdfNumber(second.y) + ' '
+                + pdfNumber(end.x) + ' ' + pdfNumber(end.y)
+                + QByteArrayLiteral(" c\n");
+            break;
+        }
+        case QPainterPath::CurveToDataElement:
+            error = QStringLiteral(
+                "A Stamp annotation appearance curve has no starting point.");
+            return false;
+        }
+    }
+    content += artwork.fillRule() == Qt::WindingFill
+        ? QByteArrayLiteral("f\nQ\n")
+        : QByteArrayLiteral("f*\nQ\n");
     return true;
 }
 
@@ -4666,10 +4676,7 @@ QByteArray stampAppearanceObject(
         + pdfNumber(color.alphaF())
         + QByteArrayLiteral(" /ca ") + pdfNumber(color.alphaF())
         + QByteArrayLiteral(
-            " /AIS false /BM /Normal >> >> "
-            "/Font << /F0 << /Type /Font /Subtype /Type1 "
-            "/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >> >> >> "
-            "/Length ")
+            " /AIS false /BM /Normal >> >> >> /Length ")
         + QByteArray::number(content.size())
         + QByteArrayLiteral(" >>\nstream\n")
         + content

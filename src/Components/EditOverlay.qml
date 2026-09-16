@@ -2681,6 +2681,7 @@ Item {
         height: Math.max(1, frameRect.height * root.height)
         stampName: String(root.frameResizePreview.stampName || "")
         stampText: String(root.frameResizePreview.stampText || "")
+        stampArtwork: String(root.frameResizePreview.stampArtwork || "")
         stampColor: root.frameResizePreview.stampColor !== undefined
             ? root.frameResizePreview.stampColor
             : "#c62828"
@@ -2790,6 +2791,7 @@ Item {
             height: Math.max(1, frameRect.height * root.height)
             stampName: String(modelData.stampName || "")
             stampText: String(modelData.stampText || "")
+            stampArtwork: String(modelData.stampArtwork || "")
             stampColor: modelData.stampColor !== undefined
                 ? modelData.stampColor
                 : "#c62828"
@@ -3578,6 +3580,7 @@ Item {
         height: Math.max(1, root.activeStampRect.height)
         stampName: root.controller.stampName
         stampText: root.controller.stampText
+        stampArtwork: root.controller.stampArtwork
         stampColor: root.controller.stampColor
         visible: root.placingStamp
             && root.controller.tool === PDFEditController.StampTool

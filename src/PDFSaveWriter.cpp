@@ -150,6 +150,7 @@ struct SaveDraft {
     QByteArray sourceDrawingAppearanceFingerprint;
     QString stampName;
     QString stampText;
+    QString stampDetail;
     QColor stampColor;
     int sourceAnnotationIndex = -1;
     QString commentAuthor;
@@ -4238,6 +4239,7 @@ PDFSaveWriter::Result createStampAnnotation(
     appearanceRequest.annotationId = draft.objectId;
     appearanceRequest.stampName = draft.stampName;
     appearanceRequest.displayText = draft.stampText;
+    appearanceRequest.detailText = draft.stampDetail;
     appearanceRequest.color = color;
     appearanceRequest.pageRect = QRectF(
         QPointF(annotationRect.left, annotationRect.bottom),
@@ -6067,6 +6069,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             = draft->candidate.sourceDrawingAppearanceFingerprint;
         saveDraft.stampName = draft->commentProperties.name;
         saveDraft.stampText = draft->candidate.stampText;
+        saveDraft.stampDetail = draft->candidate.stampDetail;
         saveDraft.stampColor = draft->candidate.highlightColor;
         saveDraft.sourceAnnotationIndex
             = draft->candidate.sourceAnnotationIndex;

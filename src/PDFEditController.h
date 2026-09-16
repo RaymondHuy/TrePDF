@@ -47,6 +47,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(QString stampName READ stampName WRITE setStampName NOTIFY stampNameChanged FINAL)
     Q_PROPERTY(QString stampText READ stampText NOTIFY stampNameChanged FINAL)
     Q_PROPERTY(QColor stampColor READ stampColor NOTIFY stampNameChanged FINAL)
+    Q_PROPERTY(QString stampArtwork READ stampArtwork NOTIFY stampNameChanged FINAL)
+    Q_PROPERTY(QVariantList stampPresets READ stampPresets CONSTANT FINAL)
     Q_PROPERTY(int pendingDrawingCommentPage READ pendingDrawingCommentPage NOTIFY pendingDrawingCommentPageChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
@@ -232,6 +234,8 @@ public:
     void setStampName(const QString &name);
     QString stampText() const;
     QColor stampColor() const;
+    QString stampArtwork() const;
+    QVariantList stampPresets() const;
     bool imageAspectRatioLocked() const;
     void setImageAspectRatioLocked(bool locked);
 
@@ -649,6 +653,8 @@ private:
         QByteArray sourceDrawingAppearanceFingerprint;
         bool drawingPropertiesEditable = false;
         QString stampText;
+        QString stampDetail;
+        QString stampArtwork;
         QString reason;
         int pendingFontSnapshotIndex = -1;
         QString pendingFontExpectedFamily;
@@ -991,6 +997,7 @@ private:
     QColor m_strikeoutColor;
     QColor m_drawingCommentColor;
     QString m_stampName = QStringLiteral("Approved");
+    mutable QVariantList m_stampPresetItems;
     int m_pendingDrawingCommentPage = -1;
     int m_cachedRevision = -1;
     QHash<int, QVector<Candidate>> m_pageCandidates;

@@ -102,6 +102,7 @@ qt_add_qml_module(trepdf
         src/PDFAnnotationUtils.cpp
         src/PDFAnnotationUtils.h
         src/PDFCommentAnnotation.h
+        src/PDFStampPresets.h
         src/PDFDocument.cpp
         src/PDFDocument.h
         src/PDFEditController.cpp

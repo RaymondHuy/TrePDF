@@ -62,7 +62,7 @@ selection ngoài comment khi tool đang active.
 | Strikeout | `strikeout` | `/StrikeOut` | Giao gesture với glyph nguồn, snap thành rectangle/QuadPoints theo dòng. |
 | Sticky Note | `stickyNote` | `/Text` | Frame cố định 24 PDF point tại vị trí click. |
 | Free Text | `freeText` | `/FreeText` | Click dùng frame mặc định; drag dùng text box đã clamp trong page. |
-| Stamp | `stamp` | `/Stamp` | Sáu preset chuẩn; click dùng frame 160 × 50 point, drag dùng Rect đã clamp. |
+| Stamp | `stamp` | `/Stamp` | 24 preset thuộc Dynamic, Standard, Sign Here và Additional; click dùng frame 160 × 50 point, drag dùng Rect đã clamp. |
 | Rectangle | `square` | `/Square` | Drag tạo Rect. |
 | Oval | `circle` | `/Circle` | Drag tạo Rect, `/AP` dùng bốn cubic Bézier. |
 | Line | `line` | `/Line` | Drag tạo hai điểm `/L`. |
@@ -90,8 +90,8 @@ Với cả mười ba loại có kind riêng ở bảng trên, implementation hi
 
 Giới hạn hiện tại:
 
-- geometry nguồn chỉ move/resize được cho Square, Circle, Line, Polygon,
-  PolyLine và Ink có geometry hợp lệ, khi document cho phép sửa annotation và
+- geometry nguồn move/resize được cho Square, Circle, Line, Polygon,
+  PolyLine, Ink và Stamp có geometry hợp lệ, khi document cho phép sửa annotation và
   annotation không có ReadOnly, LockedContents hoặc Locked; các subtype nguồn
   khác chưa có mutation geometry an toàn theo subtype;
 - reply-to-reply không được tạo từ UI;
@@ -520,9 +520,10 @@ cần annotation permission, không có ReadOnly/LockedContents/Locked và write
 kiểm lại subtype, identity, geometry cùng các điều kiện đó trước Save. Move thuần
 giữ nguyên `/AP`; resize chỉ tái tạo `/AP` cho drawing comment TrePDF-managed có
 provenance, fingerprint và properties nằm trong capability an toàn, còn
-appearance ngoài/custom được giữ nguyên. Các annotation nguồn ngoài sáu subtype
-này vẫn không được move/resize nếu chưa có UI/writer mutation an toàn theo
-subtype.
+appearance ngoài/custom được giữ nguyên. Stamp nguồn hợp lệ cũng hỗ trợ
+move/resize theo cùng điều kiện permission/flags; Save vá `/Rect` và luôn giữ
+`/AP`/`BBox`. Các subtype nguồn còn lại chưa được move/resize nếu chưa có
+UI/writer mutation an toàn theo subtype.
 
 ## 9. Render và draft presentation
 
@@ -684,8 +685,22 @@ Bézier. Line và PolyLine giữ path mở, Polygon đóng path. `/BBox` bằng 
 matrix identity, và `/ExtGState` dùng cùng opacity cho stroke/fill. Annotation
 chỉ có comment vẫn không gọi `FPDFPage_GenerateContent()`.
 
+Stamp có 24 preset trong catalogue `PDFStampPresets.h`: 5 Dynamic, 12 Standard,
+5 Sign Here và 2 Additional (For Comment, Not Approved). Nhóm Dynamic gồm
+Approved, Revised, Reviewed, Received và Confidential; mỗi loại có `/Name`
+riêng mang tiền tố `Dynamic` để phân biệt với bản Standard.
+
 Stamp mới được canonicalizer ghi `/Subtype /Stamp`, preset `/Name`, `/C`, Print
-flag và normal `/AP` vector dùng Helvetica Bold, viền kép và màu preset.
+flag và normal `/AP` vector. Preview QML và AP dùng chung artwork gồm nền màu,
+viền trắng, icon và chữ được chuyển thành path; tên tác giả Unicode không phụ
+thuộc font resource trong PDF. Dynamic chụp tác giả và ngày/giờ lúc đặt vào
+`stampDetail` cùng artwork; sửa `/Contents`, đổi preset hiện tại hay undo/redo
+không cập nhật lại phần đã in. Save giữ `/T` và `/CreationDate`; scanner dùng hai
+trường này để dựng lại detail khi mở lại và tiếp tục render AP nguồn nguyên bản.
+Preview khi sửa Stamp nguồn chỉ dựng lại artwork nếu `/NM` khớp
+`TrePDFThreadId`, có tiền tố `stamp:` và AP bắt đầu bằng marker
+`%TrePDFStampArtworkV1`. AP được đọc có giới hạn; Stamp cũ hoặc custom vẫn dùng
+fallback hiện có. Việc dựng preview không thay đổi AP đã lưu.
 `/Contents` vẫn là semantic comment text. Stamp mới và Stamp nguồn hợp lệ dùng
 cùng frame draft, drag/phím mũi tên và tám handle cạnh/góc. Với Stamp nguồn,
 writer gắn marker tạm rồi canonicalizer vá trực tiếp `/Rect` sau serialization,
@@ -734,7 +749,10 @@ cần chiến lược `/AP` riêng và regression mở bằng reader ngoài PDFi
 
 ## 12. Kiểm thử
 
-Regression chính nằm trong `tests/tst_PDFEditController.cpp`. Fixture nên là PDF
+Test runner là `tests/tst_PDFEditController.cpp`; regression comment được tách
+trong `tst_PDFEditControllerComments.cpp`, `tst_PDFEditControllerCommentPersistence.cpp`,
+`tst_PDFEditControllerCommentThreads.cpp`, `tst_PDFEditControllerCommentState.cpp`
+và `tst_PDFEditControllerDrawingComments.cpp` dưới `tests/`. Fixture nên là PDF
 nhỏ nhất tự dựng được, sau đó kiểm cả state trước Save và file đã mở lại.
 
 Coverage comment hiện cần được duy trì cho:
@@ -757,9 +775,12 @@ Coverage comment hiện cần được duy trì cho:
   cùng round-trip contents/reply/delete/history;
 - source Ink malformed/oversized downgrade thành generic read-only theo giới hạn
   64 stroke, 4.096 điểm/stroke và 32.768 điểm tổng;
-- Stamp preset: add/move/resize/history, `/Name`/`Contents`/Print/vector `/AP`,
-  annotation-only Save và reopen; source move/resize/content/reply/delete,
-  undo/redo/discard, vá `/Rect` và giữ source `/AP`/`BBox`;
+- Stamp: `savesStampPresetWithUndoRedo` có 24 data row kiểm catalogue, category,
+  add/resize/history, `/Name`/`Contents`/Print/vector `/AP`, annotation-only Save
+  và reopen. `preservesDynamicStampSnapshotAcrossEditsAndSave` kiểm tác giả
+  Unicode, ngày/giờ cố định qua content edit/history và giữ source `/AP`/`BBox`
+  sau resize/Save. Cả hai nằm trong `tst_PDFEditControllerCommentPersistence.cpp`,
+  cùng regression source move/resize/content/reply/delete, undo/redo/discard;
 - read-only index cho 5 markup subtype chưa hỗ trợ mutation;
 - author, creation/modification date và 700 UTF-16 code-unit limit;
 - comment index xuyên trang, duplicate page-local `/NM` và navigation;

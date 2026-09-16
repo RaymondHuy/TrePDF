@@ -676,9 +676,10 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
                 annotationString(annotation, "CreationDate"));
             candidate.commentModifiedDate = pdfAnnotationDateTime(
                 annotationString(annotation, "M"));
-            candidate.commentThreadId = annotationString(
+            const QString storedThreadId = annotationString(
                 annotation,
-                kCommentThreadIdKey).trimmed();
+                kCommentThreadIdKey);
+            candidate.commentThreadId = storedThreadId.trimmed();
             candidate.replyToThreadId = annotationString(
                 annotation,
                 kCommentReplyToKey).trimmed();
@@ -708,6 +709,34 @@ bool PDFEditController::appendAnnotationCandidates(FPDF_PAGE page,
             if (stampSubtype) {
                 candidate.stampText = stampTextForName(
                     candidate.commentProperties.name);
+                const auto *preset = stampPreset(candidate.commentProperties.name);
+                if (preset && preset->dynamic
+                    && candidate.commentCreationDate.isValid()) {
+                    candidate.stampDetail = PDFStampPresets::detailText(
+                        candidate.commentAuthor, candidate.commentCreationDate);
+                }
+                const bool managedIdentity = preset
+                    && candidate.sourceAnnotationName.startsWith(QLatin1String("stamp:"))
+                    && candidate.sourceAnnotationName == storedThreadId
+                    && (!preset->dynamic || candidate.commentCreationDate.isValid());
+                if (managedIdentity && !candidateScanCancelled(cancellation)) {
+                    // This helper caps the decoded AP read at 1 MiB. The exact
+                    // leading marker excludes legacy/custom Stamp appearances;
+                    // their original AP remains authoritative and untouched.
+                    const QString appearance
+                        = PDFAnnotationUtils::annotationNormalAppearance(annotation);
+                    if (appearance.startsWith(QLatin1String(
+                            PDFStampPresets::kAppearanceMarker))) {
+                        const QPainterPath artwork = PDFStampPresets::artwork(
+                            candidate.commentProperties.name,
+                            candidate.stampText,
+                            candidate.stampDetail);
+                        if (artwork.elementCount()
+                            <= PDFStampPresets::kMaximumArtworkElements) {
+                            candidate.stampArtwork = PDFStampPresets::svgPath(artwork);
+                        }
+                    }
+                }
             }
             if (rootReplyIndex >= 0) {
                 candidate.replyToObjectId = QStringLiteral("annotation:")

@@ -286,9 +286,11 @@ ghi Save; mọi thay đổi vẫn là draft.
 - Pencil dùng màu drawing chung và một drag liên tục để tạo đúng một Ink
   annotation. Gesture/draft đều dùng `InkDrawingView`; model vẫn nhận nhiều
   stroke khi rehydrate `/InkList` nguồn.
-- Stamp là split button với sáu preset Approved, Draft, Final, Confidential,
-  For Comment và Not Approved. Menu dùng `StampView` để preview đúng artwork và
-  màu; phần chính giữ preset hiện tại rồi chuyển sang `StampTool`.
+- Stamp là split button với 24 preset từ `controller.stampPresets`, chia thành
+  Dynamic (5), Standard (12), Sign Here (5) và Additional (2). Nhóm Additional
+  giữ For Comment và Not Approved. Menu dùng `StampView` để preview artwork và
+  màu; phần chính giữ preset hiện tại rồi chuyển sang `StampTool`. Dynamic chụp
+  tác giả/ngày giờ lúc đặt; các lần sửa nội dung không đổi dòng thông tin này.
 - Cả sáu drawing subtype Square, Circle, Line, Polygon, PolyLine và Ink đã tạo
   hoặc source hợp lệ dùng cùng selection frame như Foxit: kéo toàn bounding box
   hoặc dùng phím mũi tên để di chuyển, kéo tám handle cạnh/góc để đổi kích thước.
@@ -645,8 +647,9 @@ data/candidate/history/selection đổi.
   suppression snapshot của texture đang được trình bày. Khi undo/discard,
   overlay giữ restoration preview đúng cho từng object cho tới khi texture sạch
   thay thế snapshot đó; content-only draft không bị vẽ chồng source appearance.
-- `StampView` vẽ viền kép, màu và artwork text dùng chung cho menu preset,
-  preview placement và draft Stamp mới.
+- `StampView` vẽ nền màu và artwork vector từ `PDFStampPresets.h` dùng chung
+  cho menu preset, preview placement và draft Stamp mới; artwork Dynamic đã đặt
+  giữ tác giả/ngày giờ từ snapshot của candidate.
 - Hiển thị bounding box, hover box, contextual Edit/Delete và resize handles.
 - Image mới và image nguồn đủ điều kiện có tám handle cạnh/góc. Popup khi chọn
   ảnh giữ Delete; checkbox **Khóa tỷ lệ ảnh** nằm trong `ImagePropertiesPanel`
@@ -702,10 +705,12 @@ kéo và draft đã tạo/rehydrate.
 **Vai trò:** renderer nhẹ dùng chung cho preset Stamp trong ribbon, preview khi
 click/drag và draft chưa Save.
 
-- Nhận `stampName`, artwork `stampText` và `stampColor`; tự fit một dòng chữ in
-  hoa vào viền kép mà không tạo layer/FBO riêng.
-- Chỉ vẽ presentation. Controller sở hữu preset/geometry/history và writer dựng
-  lại normal `/AP` vector tương ứng trong PDF.
+- Nhận `stampName`, `stampText`, `stampColor` và `stampArtwork`. Khi có artwork,
+  vẽ nền màu và path trắng bằng Qt Quick Shapes, scale từ frame chuẩn 160 × 50;
+  path gồm viền, icon và chữ Unicode đã outline, kể cả dòng tác giả/ngày giờ.
+- Chỉ vẽ presentation. `PDFStampPresets.h` tạo path chung cho QML và normal
+  `/AP`; controller sở hữu catalogue, snapshot Dynamic, geometry và history.
+  Stamp nguồn tiếp tục render AP gốc, giữ `/AP` và `/BBox` khi đổi frame.
 
 ### [`src/Components/ShapeDraftView.qml`](../src/Components/ShapeDraftView.qml)
 

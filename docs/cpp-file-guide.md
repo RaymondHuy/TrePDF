@@ -368,7 +368,7 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   annotation nguồn được sửa trong panel bằng draft riêng. Cả sáu drawing subtype
   Square, Circle, Line, Polygon, PolyLine và Ink nguồn hợp lệ cho move/resize trên
   canvas bằng cách transform endpoint, vertex hoặc toàn bộ stroke tương ứng.
-  Annotation nguồn ngoài sáu subtype này chưa cho move/resize;
+  Stamp nguồn hợp lệ cũng cho move/resize frame và giữ `/AP`/`BBox`;
   ReadOnly/LockedContents không nhận mutation và Locked chặn thay đổi geometry
   drawing comment.
   Xóa tạo tombstone draft theo annotation index và subtype.
@@ -550,8 +550,11 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 - Tạo bitmap object cho ảnh thêm mới, path object cho sáu shape, các standard
   Highlight/Squiggly/Underline/Strikeout annotation với quad/color/Print flag,
   Text annotation, FreeText annotation và Stamp với rect/`Contents`/`NM`/Print
-  flag. Stamp snapshot giữ preset `/Name`, artwork text và màu; canonicalizer
-  gắn normal `/AP` vector mà không regenerate page content.
+  flag. Stamp snapshot giữ preset `/Name`, màu và artwork path chung từ
+  `PDFStampPresets.h`; Dynamic giữ tác giả/ngày giờ đã chụp lúc đặt, độc lập với
+  `/Contents`. Canonicalizer gắn normal `/AP` vector gồm nền màu và path trắng
+  mà không regenerate page content; text Unicode đã outline nên AP không cần
+  font resource để vẽ tên tác giả.
   Cả bốn text-markup subtype ghi quad từ các rectangle dòng đã snap. Sau khi
   serialize staging file, canonicalizer thêm
   normal `/AP` vector cho text markup mới mà không regenerate page content.
@@ -922,6 +925,19 @@ designer, rồi phục hồi document và pixel nền an toàn.
 - Mọi patch kiểm format 32-bit, bounds và kích thước trước `memcpy`.
 
 ## Header hỗ trợ không có `.cpp`
+
+### [`src/PDFStampPresets.h`](../src/PDFStampPresets.h)
+
+**Vai trò:** catalogue và artwork dùng chung cho Stamp preview và PDF appearance.
+
+- Định nghĩa 24 preset theo `dynamic`, `standard`, `signHere`, `additional`,
+  gồm tên PDF, tiêu đề, màu và cờ Dynamic; Additional giữ hai preset cũ
+  For Comment và Not Approved.
+- Dựng path 160 × 50 cho viền, icon và chữ Unicode đã outline. QML nhận SVG
+  path; canonicalizer dùng cùng hình học để ghi `/AP` với nền màu và path trắng.
+- `detailText()` định dạng tác giả/ngày giờ. Controller chụp detail và artwork
+  khi đặt Dynamic; Save giữ `/T`/`CreationDate`, scanner dựng lại detail khi
+  reopen. Source artwork vẫn do AP gốc sở hữu và giữ nguyên khi move/resize.
 
 ### [`src/PDFShapeUtils.h`](../src/PDFShapeUtils.h)
 

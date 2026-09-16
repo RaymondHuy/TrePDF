@@ -1641,6 +1641,8 @@ qsizetype PDFEditController::estimatedCommentCandidateBytes(
     addString(candidate.fontFamily);
     addString(candidate.fontIdentity);
     addString(candidate.stampText);
+    addString(candidate.stampDetail);
+    addString(candidate.stampArtwork);
     addString(candidate.reason);
     addString(candidate.pendingFontExpectedFamily);
     addString(candidate.pendingBundledFontFamily);
