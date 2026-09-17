@@ -1,6 +1,7 @@
 #include "PDFSaveWriter.h"
 #include "PDFShapeUtils.h"
 #include "PDFSourceImageGeometry.h"
+#include "PDFWebLinkScanner.h"
 
 #include "ApplicationFonts.h"
 #include "PDFAcroFormCanonicalizer.h"
@@ -15,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <utility>
 
 #include <QFile>
@@ -30,6 +32,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMap>
 #include <QRawFont>
 #include <QSaveFile>
 #include <QSet>
@@ -42,6 +45,7 @@
 #include <QVector>
 
 #include <fpdf_annot.h>
+#include <fpdf_doc.h>
 #include <fpdf_edit.h>
 #include <fpdf_save.h>
 
@@ -5831,6 +5835,296 @@ PDFSaveWriter::Result prepareAcroFormFields(
     return {};
 }
 
+using WebLinkRemovals = QMap<int, QHash<QByteArray, int>>;
+
+PDFSaveWriter::Result validateWebLinkRemovals(
+    FPDF_DOCUMENT inspectionDocument,
+    int sourcePageCount,
+    const QVector<int> &deletedSourcePages,
+    const QVector<PDFPageInsertion> &pageInsertions,
+    const QVector<PDFWebLinks::SourceLink> &links,
+    WebLinkRemovals &removals)
+{
+    assertPDFiumProcessLockHeld();
+    using Error = PDFSaveWriter::Error;
+    if (links.size() > PDFWebLinks::MaximumLinks) {
+        return failure(Error::WebLinkRemovalFailed);
+    }
+    QMap<int, QVector<const PDFWebLinks::SourceLink *>> linksBySourcePage;
+    for (const PDFWebLinks::SourceLink &link : links) {
+        if (link.sourcePage < 0 || link.sourcePage >= sourcePageCount
+            || link.annotationIndex < 0 || link.fingerprint.size() != 32) {
+            return failure(Error::WebLinkRemovalFailed, link.sourcePage);
+        }
+        if (!std::binary_search(deletedSourcePages.cbegin(),
+                                deletedSourcePages.cend(), link.sourcePage)) {
+            linksBySourcePage[link.sourcePage].append(&link);
+        }
+    }
+    for (auto entry = linksBySourcePage.cbegin(); entry != linksBySourcePage.cend(); ++entry) {
+        const int sourcePage = entry.key();
+        PdfPageHandle page(FPDF_LoadPage(inspectionDocument, sourcePage));
+        if (!page.get()) {
+            return failure(Error::PageLoadFailed, sourcePage);
+        }
+        const PDFWebLinks::SourceScanResult inspected = PDFWebLinks::sourceLinksForPage(
+            inspectionDocument, page.get(), sourcePage);
+        if (inspected.failed) {
+            return failure(Error::WebLinkRemovalFailed, sourcePage);
+        }
+        QHash<int, QByteArray> sourceIdentities;
+        QHash<QByteArray, int> sourceCounts;
+        for (const PDFWebLinks::SourceLink &link : inspected.links) {
+            sourceIdentities.insert(link.annotationIndex, link.fingerprint);
+            ++sourceCounts[link.fingerprint];
+        }
+        QSet<int> requestedIndices;
+        QHash<QByteArray, int> requestedCounts;
+        for (const PDFWebLinks::SourceLink *link : entry.value()) {
+            if (requestedIndices.contains(link->annotationIndex)
+                || sourceIdentities.value(link->annotationIndex) != link->fingerprint) {
+                return failure(Error::WebLinkRemovalFailed, sourcePage);
+            }
+            requestedIndices.insert(link->annotationIndex);
+            ++requestedCounts[link->fingerprint];
+        }
+        for (auto identity = requestedCounts.cbegin(); identity != requestedCounts.cend();
+             ++identity) {
+            if (sourceCounts.value(identity.key()) != identity.value()) {
+                return failure(Error::WebLinkRemovalFailed, sourcePage);
+            }
+        }
+        const auto deleted = std::lower_bound(
+            deletedSourcePages.cbegin(), deletedSourcePages.cend(), sourcePage);
+        int outputPage = sourcePage - static_cast<int>(deleted - deletedSourcePages.cbegin());
+        for (const PDFPageInsertion &insertion : pageInsertions) {
+            if (insertion.page <= outputPage) {
+                ++outputPage;
+            }
+        }
+        removals.insert(outputPage, std::move(requestedCounts));
+    }
+    return {};
+}
+
+PDFSaveWriter::Result removeWebLinks(FPDF_DOCUMENT document,
+                                    const WebLinkRemovals &removals)
+{
+    assertPDFiumProcessLockHeld();
+    using Error = PDFSaveWriter::Error;
+    for (auto entry = removals.cbegin(); entry != removals.cend(); ++entry) {
+        const int pageIndex = entry.key();
+        PdfPageHandle page(FPDF_LoadPage(document, pageIndex));
+        if (!page.get()) {
+            return failure(Error::PageLoadFailed, pageIndex);
+        }
+        const PDFWebLinks::SourceScanResult inspected = PDFWebLinks::sourceLinksForPage(
+            document, page.get(), pageIndex);
+        if (inspected.failed) {
+            return failure(Error::WebLinkRemovalFailed, pageIndex);
+        }
+        QHash<QByteArray, int> actualCounts;
+        QVector<int> indices;
+        for (const PDFWebLinks::SourceLink &link : inspected.links) {
+            if (entry->contains(link.fingerprint)) {
+                ++actualCounts[link.fingerprint];
+                indices.append(link.annotationIndex);
+            }
+        }
+        if (actualCounts != entry.value()) {
+            return failure(Error::WebLinkRemovalFailed, pageIndex);
+        }
+        // Source indices were validated before draft application. Comments may
+        // have shifted them since then, so remove by revalidated identity in
+        // descending current index order, after all source-index-based edits.
+        std::sort(indices.begin(), indices.end(), std::greater<int>());
+        for (int index : std::as_const(indices)) {
+            if (!FPDFPage_RemoveAnnot(page.get(), index)) {
+                return failure(Error::WebLinkRemovalFailed, pageIndex);
+            }
+        }
+        // Annotation-only removal leaves the existing page content untouched.
+    }
+    return {};
+}
+
+PDFSaveWriter::Result addWebLinks(
+    FPDF_DOCUMENT document,
+    int sourcePageCount,
+    const QVector<int> &deletedSourcePages,
+    const QVector<PDFPageInsertion> &pageInsertions,
+    const QVector<PDFWebLinks::Link> &links)
+{
+    assertPDFiumProcessLockHeld();
+    using Error = PDFSaveWriter::Error;
+    if (links.size() > PDFWebLinks::MaximumLinks) {
+        return failure(Error::WebLinkCreationFailed);
+    }
+
+    QMap<int, QVector<const PDFWebLinks::Link *>> linksByPage;
+    qsizetype rectangleCount = 0;
+    for (const PDFWebLinks::Link &link : links) {
+        if (link.sourcePage < 0 || link.sourcePage >= sourcePageCount) {
+            return failure(Error::WebLinkCreationFailed, link.sourcePage);
+        }
+        const auto deleted = std::lower_bound(
+            deletedSourcePages.cbegin(), deletedSourcePages.cend(), link.sourcePage);
+        if (deleted != deletedSourcePages.cend() && *deleted == link.sourcePage) {
+            continue;
+        }
+        int page = link.sourcePage
+            - static_cast<int>(deleted - deletedSourcePages.cbegin());
+        for (const PDFPageInsertion &insertion : pageInsertions) {
+            if (insertion.page <= page) {
+                ++page;
+            }
+        }
+        if (link.rects.isEmpty()
+            || link.rects.size() > PDFWebLinks::MaximumRectanglesPerLink
+            || link.rects.size() > PDFWebLinks::MaximumRectangles - rectangleCount
+            || PDFWebLinks::validWebUrl(link.url).isEmpty()) {
+            return failure(Error::WebLinkCreationFailed, page);
+        }
+        rectangleCount += link.rects.size();
+        linksByPage[page].append(&link);
+    }
+
+    // Keep duplicate/overlap checks bounded even in annotation-heavy documents.
+    constexpr qsizetype maximumOverlapComparisons = 16 * 1024 * 1024;
+    qsizetype overlapComparisons = 0;
+    for (auto entry = linksByPage.cbegin(); entry != linksByPage.cend(); ++entry) {
+        const int pageIndex = entry.key();
+        PdfPageHandle page(FPDF_LoadPage(document, pageIndex));
+        if (!page.get()) {
+            return failure(Error::PageLoadFailed, pageIndex);
+        }
+        const qreal pageWidth = FPDF_GetPageWidthF(page.get());
+        const qreal pageHeight = FPDF_GetPageHeightF(page.get());
+        // PageCoordinateMapper uses integer device coordinates at a 64x scale.
+        if (!std::isfinite(pageWidth) || !std::isfinite(pageHeight)
+            || pageWidth <= 0.0 || pageHeight <= 0.0
+            || pageWidth > 1000000.0 || pageHeight > 1000000.0) {
+            return failure(Error::WebLinkCreationFailed, pageIndex);
+        }
+        const PageCoordinateMapper mapper(page.get(), pageWidth, pageHeight);
+        QVector<QRectF> occupiedRects;
+        const int annotationCount = FPDFPage_GetAnnotCount(page.get());
+        if (annotationCount < 0
+            || annotationCount > PDFWebLinks::MaximumAnnotationsPerPage) {
+            return failure(Error::WebLinkCreationFailed, pageIndex);
+        }
+        const auto appendOccupied = [&](const QRectF &rect) {
+            if (!std::isfinite(rect.x()) || !std::isfinite(rect.y())
+                || !std::isfinite(rect.width()) || !std::isfinite(rect.height())
+                || occupiedRects.size() >= PDFWebLinks::MaximumExistingRectanglesPerPage) {
+                return false;
+            }
+            if (!rect.isEmpty()) {
+                occupiedRects.append(rect);
+            }
+            return true;
+        };
+        for (int index = 0; index < annotationCount; ++index) {
+            PdfAnnotationHandle annotation(FPDFPage_GetAnnot(page.get(), index));
+            if (!annotation.get()) {
+                return failure(Error::WebLinkCreationFailed, pageIndex);
+            }
+            if (FPDFAnnot_GetSubtype(annotation.get()) != FPDF_ANNOT_LINK) {
+                continue;
+            }
+            FS_RECTF rect{};
+            if (!FPDFAnnot_GetRect(annotation.get(), &rect)
+                || !appendOccupied(QRectF(
+                    QPointF(rect.left, rect.bottom),
+                    QPointF(rect.right, rect.top)).normalized())) {
+                return failure(Error::WebLinkCreationFailed, pageIndex);
+            }
+            const FPDF_LINK existingLink = FPDFAnnot_GetLink(annotation.get());
+            const int quadCount = FPDFLink_CountQuadPoints(existingLink);
+            if (!existingLink || quadCount < 0
+                || quadCount > PDFWebLinks::MaximumExistingRectanglesPerPage
+                    - occupiedRects.size()) {
+                return failure(Error::WebLinkCreationFailed, pageIndex);
+            }
+            for (int quadIndex = 0; quadIndex < quadCount; ++quadIndex) {
+                FS_QUADPOINTSF quad{};
+                if (!FPDFLink_GetQuadPoints(existingLink, quadIndex, &quad)) {
+                    return failure(Error::WebLinkCreationFailed, pageIndex);
+                }
+                const std::array<QPointF, 4> points{
+                    QPointF(quad.x1, quad.y1), QPointF(quad.x2, quad.y2),
+                    QPointF(quad.x3, quad.y3), QPointF(quad.x4, quad.y4)};
+                qreal left = points.front().x();
+                qreal right = left;
+                qreal bottom = points.front().y();
+                qreal top = bottom;
+                for (const QPointF &point : points) {
+                    if (!std::isfinite(point.x()) || !std::isfinite(point.y())) {
+                        return failure(Error::WebLinkCreationFailed, pageIndex);
+                    }
+                    left = qMin(left, point.x());
+                    right = qMax(right, point.x());
+                    bottom = qMin(bottom, point.y());
+                    top = qMax(top, point.y());
+                }
+                if (!appendOccupied(QRectF(left, bottom, right - left, top - bottom))) {
+                    return failure(Error::WebLinkCreationFailed, pageIndex);
+                }
+            }
+        }
+
+        qsizetype pageRectangleCount = 0;
+        for (const PDFWebLinks::Link *link : entry.value()) {
+            const QByteArray uri = PDFWebLinks::validWebUrl(link->url).toLatin1();
+            for (const QRectF &rect : link->rects) {
+                if (++pageRectangleCount > PDFWebLinks::MaximumRectanglesPerPage
+                    || !std::isfinite(rect.x()) || !std::isfinite(rect.y())
+                    || !std::isfinite(rect.width()) || !std::isfinite(rect.height())
+                    || rect.isEmpty() || rect.left() < 0.0 || rect.top() < 0.0
+                    || rect.right() > 1.0 || rect.bottom() > 1.0) {
+                    return failure(Error::WebLinkCreationFailed, pageIndex);
+                }
+                FS_RECTF annotationRect{};
+                if (!annotationRectForFrame(
+                        rect, pageWidth, pageHeight, mapper, annotationRect)) {
+                    return failure(Error::WebLinkCreationFailed, pageIndex);
+                }
+                const QRectF pdfRect(
+                    QPointF(annotationRect.left, annotationRect.bottom),
+                    QPointF(annotationRect.right, annotationRect.top));
+                bool overlapsExisting = false;
+                for (const QRectF &occupied : std::as_const(occupiedRects)) {
+                    if (++overlapComparisons > maximumOverlapComparisons) {
+                        return failure(Error::WebLinkCreationFailed, pageIndex);
+                    }
+                    if (occupied.intersects(pdfRect)) {
+                        overlapsExisting = true;
+                        break;
+                    }
+                }
+                if (overlapsExisting) {
+                    continue;
+                }
+
+                // Each line of a wrapped URL is its own invisible hit target;
+                // a bounding union would turn unrelated intervening text into a link.
+                PdfAnnotationHandle annotation(
+                    FPDFPage_CreateAnnot(page.get(), FPDF_ANNOT_LINK));
+                if (!annotation.get()
+                    || !FPDFAnnot_SetRect(annotation.get(), &annotationRect)
+                    || !FPDFAnnot_SetBorder(annotation.get(), 0.0f, 0.0f, 0.0f)
+                    || !FPDFAnnot_SetURI(annotation.get(), uri.constData())) {
+                    return failure(Error::WebLinkCreationFailed, pageIndex);
+                }
+                occupiedRects.append(pdfRect);
+            }
+        }
+        // Link annotations do not modify page content streams, so this path
+        // deliberately never calls FPDFPage_GenerateContent().
+    }
+    return {};
+}
+
 } // namespace
 
 struct PDFSaveWriter::Request::Data {
@@ -5840,6 +6134,8 @@ struct PDFSaveWriter::Request::Data {
     QVector<PDFPageInsertion> pageInsertions;
     QVector<SaveDraft> drafts;
     QVector<PDFFormDesignerController::SaveField> formFields;
+    QVector<PDFWebLinks::Link> autoWebLinks;
+    QVector<PDFWebLinks::SourceLink> removedWebLinks;
 };
 
 PDFSaveWriter::Request PDFSaveWriter::prepare(
@@ -5859,6 +6155,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         ? controller.m_document->renderFilePath()
         : sourceFilePathOverride;
     data->targetFilePath = targetFilePath;
+    data->autoWebLinks = controller.m_autoWebLinks;
+    data->removedWebLinks = controller.m_removedWebLinks;
     if (controller.m_formDesignerController) {
         const bool normalizeSourceFieldAppearances
             = controller.m_formDesignerController->hasDrafts();
@@ -6256,6 +6554,14 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         || FPDF_GetPageCount(inspectionDocument.get()) != sourcePageCount) {
         return failure(Error::SourceOpenFailed);
     }
+    WebLinkRemovals webLinkRemovals;
+    const Result removalValidation = validateWebLinkRemovals(
+        inspectionDocument.get(), sourcePageCount,
+        request.m_data->deletedSourcePages, request.m_data->pageInsertions,
+        request.m_data->removedWebLinks, webLinkRemovals);
+    if (!removalValidation.succeeded()) {
+        return removalValidation;
+    }
     for (auto page = request.m_data->deletedSourcePages.crbegin();
          page != request.m_data->deletedSourcePages.crend();
          ++page) {
@@ -6340,6 +6646,20 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             return result;
         }
         start = end;
+    }
+
+    const Result removalResult = removeWebLinks(document.get(), webLinkRemovals);
+    if (!removalResult.succeeded()) {
+        return removalResult;
+    }
+    const Result webLinkResult = addWebLinks(
+        document.get(),
+        sourcePageCount,
+        request.m_data->deletedSourcePages,
+        request.m_data->pageInsertions,
+        request.m_data->autoWebLinks);
+    if (!webLinkResult.succeeded()) {
+        return webLinkResult;
     }
 
     QVector<PDFAcroFormCanonicalizer::FreeTextAnnotation>

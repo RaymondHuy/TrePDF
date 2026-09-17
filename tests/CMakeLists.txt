@@ -31,6 +31,7 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerTextMarkup.cpp
     tst_PDFEditControllerTextPersistence.cpp
     tst_PDFEditControllerTextSpacing.cpp
+    tst_PDFEditControllerWebLinks.cpp
     ../src/ApplicationFonts.cpp
     ../src/ApplicationFonts.h
     ../src/FontDownloadService.cpp
@@ -63,6 +64,7 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFEditControllerGeometry.cpp
     ../src/PDFEditControllerDrafts.cpp
     ../src/PDFEditControllerSave.cpp
+    ../src/PDFEditControllerWebLinks.cpp
     ../src/PDFEditControllerSupport.cpp
     ../src/PDFEditController_p.h
     ../src/PDFFormController.cpp
@@ -87,6 +89,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFTabModel.cpp
     ../src/PDFTabModel.h
     ../src/PDFiumSynchronization.h
+    ../src/PDFWebLinkScanner.cpp
+    ../src/PDFWebLinkScanner.h
     ../src/PDFWidgetAnnotationSuppression.cpp
     ../src/PDFWidgetAnnotationSuppression.h
 )

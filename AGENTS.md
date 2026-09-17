@@ -15,6 +15,23 @@ and Save/Save As persistence.
 
 Current features:
 
+- Edit > Link > Auto-create links from URLs scans saved source text on a separate,
+  bounded single worker through `PDFWebLinkScanner`. Only HTTP/HTTPS URLs are
+  accepted, including PDFium's `www` detection; existing Link regions are skipped.
+  Other unsaved edits must be saved first. The batch is held separately from
+  comments/text in `PDFEditControllerWebLinks.cpp` and participates in
+  undo/redo/discard and atomic Save/Save As. Source-page identities survive page
+  insertion/deletion. `WebLinkDraftLayer.qml` shows Edit frames and routes Browse
+  clicks through the existing external-link confirmation. Save adds borderless
+  `/Link` URI annotations, one per detected line rectangle, without regenerating
+  page content. Remove web links scans saved HTTP/HTTPS Link annotations,
+  skips protected or structurally unsafe annotations, and clears pending added
+  links in one undoable batch. Internal destinations, other URI schemes, and
+  comments remain unchanged. Draft removals suppress source appearances and
+  Browse clicks; Save revalidates source fingerprints before deleting links.
+  Manual link editing remains UI-only. New edits cancel
+  in-flight detection; completed links retain independent spatial geometry.
+
 - The Convert tab writes detected PDF tables to Excel, one worksheet per table.
   Export requires saved source content and text-based ruled grids with closed
   perimeters; rectangular merged cells are preserved. Borderless/scan tables

@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QPointF>
 #include <QRectF>
+#include <QSet>
 #include <QSize>
 #include <QString>
 #include <QStringList>
@@ -49,6 +50,9 @@ struct InteractionResult {
     QString selectedText;
     std::optional<GoToRequest> goTo;
     QByteArray externalUri;
+    // Set only for ordinary Link hover/activation, never for widget actions.
+    int webLinkSourcePage = -1;
+    int webLinkAnnotationIndex = -1;
 };
 
 struct SnapshotResult {
@@ -158,7 +162,8 @@ void submitPointerEvent(const DocumentKey &key,
                         int modifiers,
                         const QPointF &position,
                         const QSize &deviceSize,
-                        const InteractionCallback &callback);
+                        const InteractionCallback &callback,
+                        const QSet<int> &removedWebLinks = {});
 void submitKeyEvent(const DocumentKey &key,
                     int virtualKey,
                     int modifiers,

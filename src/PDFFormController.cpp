@@ -224,7 +224,8 @@ void PDFFormController::pointerEvent(
             generation,
             false,
             pendingMutation,
-            pendingFocusRequest));
+            pendingFocusRequest),
+        m_removedWebLinks.value(sourcePage));
 }
 
 void PDFFormController::keyEvent(
@@ -612,6 +613,33 @@ bool PDFFormController::confirmExternalLink(quint64 requestId)
     return QDesktopServices::openUrl(url);
 }
 
+quint64 PDFFormController::requestExternalWebLink(const QString &url)
+{
+    if (!m_document || !m_document->isLoaded()
+        || m_pendingExternalLinkRequestId != 0
+        || validatedExternalUrl(url.toUtf8()).isEmpty()) {
+        return 0;
+    }
+    PDFFormWorker::InteractionResult result;
+    result.externalUri = url.toUtf8();
+    processHostActions(result, m_navigationEpoch);
+    return m_pendingExternalLinkRequestId;
+}
+
+void PDFFormController::setRemovedWebLinks(
+    const QHash<int, QSet<int>> &removedWebLinks)
+{
+    if (m_removedWebLinks == removedWebLinks) {
+        return;
+    }
+    m_removedWebLinks = removedWebLinks;
+    clearPendingExternalLink(true);
+    if (m_cursorType == FXCT_HAND) {
+        m_cursorType = FXCT_ARROW;
+        emit inputStateChanged();
+    }
+}
+
 void PDFFormController::cancelExternalLink(quint64 requestId)
 {
     if (requestId == 0
@@ -628,6 +656,7 @@ void PDFFormController::refreshDocumentState()
     ++m_javascriptRequestSerial;
     ++m_pageChangeRequestSerial;
     clearPendingExternalLink(true);
+    m_removedWebLinks.clear();
     m_ignoreNextCurrentPageChange = false;
     PDFFormWorker::resetSession(m_sessionId);
 
@@ -933,7 +962,12 @@ void PDFFormController::processHostActions(
         return;
     }
 
+    const bool removedWebLink = result.webLinkSourcePage >= 0
+        && result.webLinkAnnotationIndex >= 0
+        && m_removedWebLinks.value(result.webLinkSourcePage)
+               .contains(result.webLinkAnnotationIndex);
     if (!result.externalUri.isEmpty()
+        && !removedWebLink
         && m_pendingExternalLinkRequestId == 0) {
         const QUrl url = validatedExternalUrl(result.externalUri);
         const PDFFormWorker::DocumentKey key = documentKey();
@@ -1020,7 +1054,12 @@ void PDFFormController::applyInteractionResult(
     m_focusedPage = result.hasFocus ? result.focusedPage : -1;
     m_focusedAnnotationIndex
         = result.hasFocus ? result.focusedAnnotationIndex : -1;
-    m_cursorType = result.cursorType;
+    const bool removedWebLink = result.webLinkSourcePage >= 0
+        && result.webLinkAnnotationIndex >= 0
+        && m_removedWebLinks.value(result.webLinkSourcePage)
+               .contains(result.webLinkAnnotationIndex);
+    m_cursorType = removedWebLink && result.cursorType == FXCT_HAND
+        ? FXCT_ARROW : result.cursorType;
 
     if (copyResultToClipboard && !result.selectedText.isEmpty()) {
         if (QClipboard *clipboard = QGuiApplication::clipboard()) {

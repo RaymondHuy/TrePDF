@@ -105,6 +105,8 @@ public:
                           const QString &expectedIdentityToken = {},
                           const ChoiceFocusCompletion &completion = {});
     Q_INVOKABLE bool confirmExternalLink(quint64 requestId);
+    quint64 requestExternalWebLink(const QString &url);
+    void setRemovedWebLinks(const QHash<int, QSet<int>> &removedWebLinks);
     Q_INVOKABLE void cancelExternalLink(quint64 requestId);
 
 signals:
@@ -181,6 +183,7 @@ private:
     quint64 m_pendingExternalLinkGeneration = 0;
     PDFFormWorker::DocumentKey m_pendingExternalLinkKey;
     QUrl m_pendingExternalLinkUrl;
+    QHash<int, QSet<int>> m_removedWebLinks;
     bool m_ignoreNextCurrentPageChange = false;
     bool m_javascriptEnabled = false;
     bool m_javascriptTransitionPending = false;

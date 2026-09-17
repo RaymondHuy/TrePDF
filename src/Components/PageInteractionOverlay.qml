@@ -156,6 +156,19 @@ Item {
         }
     }
 
+    WebLinkDraftLayer {
+        anchors.fill: parent
+        z: 2
+        theme: root.theme
+        controller: root.editController
+        page: root.page
+        pooled: root.pooled
+        interactive: !root.pooled && !root.formsTabActive
+            && !root.editController.saving
+            && root.editController.tool === PDFEditController.BrowseTool
+        showFrames: root.editTabActive
+    }
+
     FormTextFieldOverlay {
         id: formTextFieldOverlay
 

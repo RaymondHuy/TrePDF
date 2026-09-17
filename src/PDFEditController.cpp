@@ -262,6 +262,10 @@ PDFEditController::PDFEditController(QObject *parent)
           kDrawingCommentBlue,
           kDrawingCommentAlpha)
 {
+    connect(this, &PDFEditController::historyStateChanged,
+            this, &PDFEditController::cancelWebLinkCreation);
+    connect(this, &PDFEditController::textEditActiveChanged,
+            this, &PDFEditController::cancelWebLinkCreation);
     connect(
         this,
         &PDFEditController::selectionChanged,
@@ -276,6 +280,8 @@ PDFEditController::PDFEditController(QObject *parent)
 
 PDFEditController::~PDFEditController()
 {
+    if (m_webLinkCancellation)
+        m_webLinkCancellation->store(true, std::memory_order_relaxed);
     clearFontRecovery();
     if (m_candidateScanCancellation) {
         m_candidateScanCancellation->store(true, std::memory_order_relaxed);
@@ -303,6 +309,10 @@ void PDFEditController::setDocument(PDFDocument *document)
     if (m_document) {
         connect(m_document, &PDFDocument::sourceChanged, this, &PDFEditController::resetSession);
         connect(m_document, &PDFDocument::loadedChanged, this, &PDFEditController::resetSession);
+        connect(m_document, &PDFDocument::pageStructureChanged, this, [this]() {
+            cancelWebLinkCreation();
+            invalidateWebLinks();
+        });
         connect(m_document, &QObject::destroyed, this, [this]() {
             m_document = nullptr;
             resetSession();
@@ -325,10 +335,13 @@ void PDFEditController::setFormController(
     if (m_formController == formController) {
         return;
     }
+    invalidateWebLinks();
     if (m_formController) {
+        m_formController->setRemovedWebLinks({});
         disconnect(m_formController, nullptr, this, nullptr);
     }
     m_formController = formController;
+    invalidateWebLinks();
     if (m_formController) {
         connect(
             m_formController,
@@ -512,6 +525,8 @@ void PDFEditController::setImageAspectRatioLocked(bool locked)
 bool PDFEditController::hasDrafts() const
 {
     return !m_drafts.isEmpty()
+        || !m_autoWebLinks.isEmpty()
+        || !m_removedWebLinks.isEmpty()
         || !m_pendingTextMarkupCreations.isEmpty()
         || !m_pageInsertions.isEmpty()
         || !m_deletedSourcePages.isEmpty()
@@ -799,6 +814,10 @@ void PDFEditController::clearSelection()
 
 void PDFEditController::resetSession()
 {
+    cancelWebLinkCreation();
+    m_autoWebLinks.clear();
+    m_removedWebLinks.clear();
+    invalidateWebLinks();
     cancelFontDownload();
     setPendingDrawingCommentPage(-1);
     if (m_candidateScanCancellation) {

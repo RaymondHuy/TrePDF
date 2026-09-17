@@ -114,6 +114,9 @@ qt_add_qml_module(trepdf
         src/PDFEditControllerGeometry.cpp
         src/PDFEditControllerDrafts.cpp
         src/PDFEditControllerSave.cpp
+        src/PDFEditControllerWebLinks.cpp
+        src/PDFWebLinkScanner.cpp
+        src/PDFWebLinkScanner.h
         src/PDFEditControllerSupport.cpp
         src/PDFEditController_p.h
         src/PDFExcelExportController.cpp
@@ -173,6 +176,7 @@ qt_add_qml_module(trepdf
         src/Components/PageDisplayControl.qml
         src/Components/PageLayoutDelegate.qml
         src/Components/PageInteractionOverlay.qml
+        src/Components/WebLinkDraftLayer.qml
         src/Components/PdfPageDelegate.qml
         src/Components/RadioButtonOptionsPanel.qml
         src/Components/ReaderControlBar.qml

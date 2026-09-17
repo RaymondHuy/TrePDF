@@ -237,6 +237,11 @@ dialog, đổi tab hoặc ghi tệp.
 **Tool và command:**
 
 - Select, Add Text, Add Image.
+- Link mở menu gồm Thêm hoặc sửa liên kết, Tự động tạo liên kết từ URL và
+  Xóa liên kết web. Mục tự động gọi `autoCreateWebLinks()` và đổi thành Hủy tạo
+  liên kết khi đang quét. Xóa liên kết web gọi `removeWebLinks()` và đổi thành
+  Hủy xóa liên kết trong lúc quét; hai lệnh quét loại trừ nhau. Thêm hoặc sửa
+  liên kết hiện chỉ có UI.
 - Shapes dạng split button: Rectangle, Oval, Line, Arrow, Triangle, Diamond.
   Menu dùng `ShapeDraftView` để preview và cập nhật `shapeType` trước khi bật
   `AddShapeTool`.
@@ -250,6 +255,16 @@ cần cấp cao hơn.
 
 **Ràng buộc:** menu tool phải đóng sạch khi document/session thay đổi. Không tự
 ghi Save; mọi thay đổi vẫn là draft.
+
+### `src/Components/WebLinkDraftLayer.qml`
+
+Hiển thị vùng liên kết tự động chưa lưu trong cùng `pageSurface`: Edit có khung
+cam, Browse nhận click/bàn phím và hiện URL khi hover. Layer không mở URL trực
+tiếp mà gọi `activateWebLink(page, index, revision)` để xác thực lại draft và đi
+qua xác nhận HTTP/HTTPS. Dữ liệu đọc từ `webLinkDraftsForPage()` theo revision;
+delegate pooled không giữ link region. Mỗi trang tối đa 512 rectangle; Link
+không thuộc chỉ mục Comment hoặc candidate text. Sau Save, annotation đã lưu do
+PDFium xử lý. Link giữ vị trí độc lập khi text bên dưới được chỉnh sửa.
 
 ### [`src/Components/CommentRibbon.qml`](../src/Components/CommentRibbon.qml)
 
