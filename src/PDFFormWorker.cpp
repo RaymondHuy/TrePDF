@@ -2060,7 +2060,8 @@ public:
         PDFFormWorker::PointerEventType type,
         int modifiers,
         const QPointF &position,
-        const QSize &deviceSize)
+        const QSize &deviceSize,
+        const QSet<int> &removedWebLinks)
     {
         assertPDFiumProcessLockHeld();
         PDFFormWorker::InteractionResult result;
@@ -2165,7 +2166,7 @@ public:
         const int linkZ = FPDFLink_GetLinkZOrderAtPoint(eventPage, pageX, pageY);
         const int fieldZ = FPDFPage_FormFieldZOrderAtPoint(
             m_formHandle, eventPage, pageX, pageY);
-        if (linkZ >= 0 && linkZ > fieldZ) {
+        if (linkZ >= 0 && linkZ > fieldZ && !removedWebLinks.contains(linkZ)) {
             FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(eventPage, linkZ);
             if (annotation) {
                 const int flags = FPDFAnnot_GetFlags(annotation);
@@ -2179,8 +2180,11 @@ public:
                 FPDFPage_CloseAnnot(annotation);
             }
         }
-        if (type == PDFFormWorker::PointerEventType::Move && webLink)
+        if (type == PDFFormWorker::PointerEventType::Move && webLink) {
             m_cursorType = FXCT_HAND;
+            result.webLinkSourcePage = sourcePage;
+            result.webLinkAnnotationIndex = linkZ;
+        }
         if (type == PDFFormWorker::PointerEventType::Press)
             m_pressedWebLink = webLink;
         if (type == PDFFormWorker::PointerEventType::Release) {
@@ -2196,6 +2200,8 @@ public:
                         // The GUI controller validates the scheme/host and asks
                         // for confirmation; the worker never opens a URL itself.
                         m_eventExternalUri = std::move(uri);
+                        result.webLinkSourcePage = sourcePage;
+                        result.webLinkAnnotationIndex = linkZ;
                         result.handled = true;
                     }
                 }
@@ -3029,7 +3035,8 @@ void submitPointerEvent(const DocumentKey &key,
                         int modifiers,
                         const QPointF &position,
                         const QSize &deviceSize,
-                        const InteractionCallback &callback)
+                        const InteractionCallback &callback,
+                        const QSet<int> &removedWebLinks)
 {
     workQueue().submitCommand(
         key.sessionId,
@@ -3040,7 +3047,8 @@ void submitPointerEvent(const DocumentKey &key,
          modifiers,
          position,
          deviceSize,
-         callback]() {
+         callback,
+         removedWebLinks]() {
             InteractionResult result;
             {
                 PDFiumProcessLock pdfiumLock;
@@ -3053,7 +3061,8 @@ void submitPointerEvent(const DocumentKey &key,
                         type,
                         modifiers,
                         position,
-                        deviceSize);
+                        deviceSize,
+                        removedWebLinks);
                 }
             }
             postResult(std::move(result), callback);

@@ -239,7 +239,9 @@ dialog, đổi tab hoặc ghi tệp.
 - Select, Add Text, Add Image.
 - Link mở menu gồm Thêm hoặc sửa liên kết, Tự động tạo liên kết từ URL và
   Xóa liên kết web. Mục tự động gọi `autoCreateWebLinks()` và đổi thành Hủy tạo
-  liên kết khi đang quét; hai mục còn lại hiện chỉ có UI.
+  liên kết khi đang quét. Xóa liên kết web gọi `removeWebLinks()` và đổi thành
+  Hủy xóa liên kết trong lúc quét; hai lệnh quét loại trừ nhau. Thêm hoặc sửa
+  liên kết hiện chỉ có UI.
 - Shapes dạng split button: Rectangle, Oval, Line, Arrow, Triangle, Diamond.
   Menu dùng `ShapeDraftView` để preview và cập nhật `shapeType` trước khi bật
   `AddShapeTool`.

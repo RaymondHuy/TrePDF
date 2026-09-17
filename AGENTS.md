@@ -24,7 +24,12 @@ Current features:
   insertion/deletion. `WebLinkDraftLayer.qml` shows Edit frames and routes Browse
   clicks through the existing external-link confirmation. Save adds borderless
   `/Link` URI annotations, one per detected line rectangle, without regenerating
-  page content. Manual link editing/removal remain UI-only. New edits cancel
+  page content. Remove web links scans saved HTTP/HTTPS Link annotations,
+  skips protected or structurally unsafe annotations, and clears pending added
+  links in one undoable batch. Internal destinations, other URI schemes, and
+  comments remain unchanged. Draft removals suppress source appearances and
+  Browse clicks; Save revalidates source fingerprints before deleting links.
+  Manual link editing remains UI-only. New edits cancel
   in-flight detection; completed links retain independent spatial geometry.
 
 - The Convert tab writes detected PDF tables to Excel, one worksheet per table.

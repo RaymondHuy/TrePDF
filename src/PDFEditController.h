@@ -56,6 +56,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
     Q_PROPERTY(bool creatingWebLinks READ creatingWebLinks NOTIFY creatingWebLinksChanged FINAL)
+    Q_PROPERTY(bool removingWebLinks READ removingWebLinks NOTIFY creatingWebLinksChanged FINAL)
     Q_PROPERTY(quint64 webLinksRevision READ webLinksRevision NOTIFY webLinksChanged FINAL)
     Q_PROPERTY(bool fontDownloadPending READ fontDownloadPending NOTIFY fontDownloadStateChanged FINAL)
     Q_PROPERTY(bool downloadingFont READ downloadingFont NOTIFY fontDownloadStateChanged FINAL)
@@ -300,14 +301,17 @@ public:
     QVector<DraftObjectMove> draftedObjectMovesForPage(int page) const;
     QVector<DraftAnnotationDeletion> deletedSourceCommentAnnotationsForPage(
         int page) const;
+    QVector<DraftAnnotationDeletion> deletedSourceWebLinkAnnotationsForPage(int page) const;
     bool allDraftedTextObjectsSuppressibleForPage(int page) const;
 
     Q_INVOKABLE QVariantList candidatesForPage(int page);
     Q_INVOKABLE bool autoCreateWebLinks();
+    Q_INVOKABLE bool removeWebLinks();
     Q_INVOKABLE void cancelWebLinkCreation();
     Q_INVOKABLE QVariantList webLinkDraftsForPage(int page) const;
     Q_INVOKABLE bool activateWebLink(int page, int index, quint64 revision);
-    bool creatingWebLinks() const { return bool(m_webLinkCancellation); }
+    bool creatingWebLinks() const { return m_webLinkCancellation && !m_removingWebLinks; }
+    bool removingWebLinks() const { return m_webLinkCancellation && m_removingWebLinks; }
     quint64 webLinksRevision() const { return m_webLinksRevision; }
     Q_INVOKABLE void requestCandidatesForPage(int page);
     Q_INVOKABLE QVariantList draftsForPage(int page) const;
@@ -771,6 +775,8 @@ private:
         PageState pageStateAfter;
         QVector<PDFWebLinks::Link> webLinksBefore;
         QVector<PDFWebLinks::Link> webLinksAfter;
+        QVector<PDFWebLinks::SourceLink> removedWebLinksBefore;
+        QVector<PDFWebLinks::SourceLink> removedWebLinksAfter;
     };
 
     enum class FontStyle {
@@ -1032,6 +1038,9 @@ private:
     QSet<int> m_deletedSourcePages;
     QHash<QString, Draft> m_drafts;
     QVector<PDFWebLinks::Link> m_autoWebLinks;
+    QVector<PDFWebLinks::SourceLink> m_removedWebLinks;
+    QSet<int> m_removedWebLinkPreviewPages;
+    bool m_removingWebLinks = false;
     std::shared_ptr<std::atomic_bool> m_webLinkCancellation;
     quint64 m_webLinksRevision = 0;
     quint64 m_pendingWebLinkRequest = 0;

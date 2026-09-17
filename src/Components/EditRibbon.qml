@@ -278,7 +278,8 @@ Flickable {
                                 //% "Auto-create links from URLs"
                                 : qsTrId("AutoCreateLinksFromUrls")
                             enabled: root.editController.creatingWebLinks
-                                || !root.hasPendingPanelEdits
+                                || (!root.hasPendingPanelEdits
+                                    && !root.editController.removingWebLinks)
                             onTriggered: {
                                 if (root.editController.creatingWebLinks)
                                     root.editController.cancelWebLinkCreation()
@@ -288,8 +289,20 @@ Flickable {
                         }
 
                         Action {
-                            //% "Remove web links"
-                            text: qsTrId("RemoveWebLinks")
+                            text: root.editController.removingWebLinks
+                                //% "Cancel removing links"
+                                ? qsTrId("CancelRemovingWebLinks")
+                                //% "Remove web links"
+                                : qsTrId("RemoveWebLinks")
+                            enabled: root.editController.removingWebLinks
+                                || (!root.hasPendingPanelEdits
+                                    && !root.editController.creatingWebLinks)
+                            onTriggered: {
+                                if (root.editController.removingWebLinks)
+                                    root.editController.cancelWebLinkCreation()
+                                else
+                                    root.editController.removeWebLinks()
+                            }
                         }
 
                         background: Rectangle {

@@ -337,9 +337,11 @@ void PDFEditController::setFormController(
     }
     invalidateWebLinks();
     if (m_formController) {
+        m_formController->setRemovedWebLinks({});
         disconnect(m_formController, nullptr, this, nullptr);
     }
     m_formController = formController;
+    invalidateWebLinks();
     if (m_formController) {
         connect(
             m_formController,
@@ -524,6 +526,7 @@ bool PDFEditController::hasDrafts() const
 {
     return !m_drafts.isEmpty()
         || !m_autoWebLinks.isEmpty()
+        || !m_removedWebLinks.isEmpty()
         || !m_pendingTextMarkupCreations.isEmpty()
         || !m_pageInsertions.isEmpty()
         || !m_deletedSourcePages.isEmpty()
@@ -813,6 +816,7 @@ void PDFEditController::resetSession()
 {
     cancelWebLinkCreation();
     m_autoWebLinks.clear();
+    m_removedWebLinks.clear();
     invalidateWebLinks();
     cancelFontDownload();
     setPendingDrawingCommentPage(-1);

@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <utility>
 
 #include <QFile>
@@ -5834,6 +5835,119 @@ PDFSaveWriter::Result prepareAcroFormFields(
     return {};
 }
 
+using WebLinkRemovals = QMap<int, QHash<QByteArray, int>>;
+
+PDFSaveWriter::Result validateWebLinkRemovals(
+    FPDF_DOCUMENT inspectionDocument,
+    int sourcePageCount,
+    const QVector<int> &deletedSourcePages,
+    const QVector<PDFPageInsertion> &pageInsertions,
+    const QVector<PDFWebLinks::SourceLink> &links,
+    WebLinkRemovals &removals)
+{
+    assertPDFiumProcessLockHeld();
+    using Error = PDFSaveWriter::Error;
+    if (links.size() > PDFWebLinks::MaximumLinks) {
+        return failure(Error::WebLinkRemovalFailed);
+    }
+    QMap<int, QVector<const PDFWebLinks::SourceLink *>> linksBySourcePage;
+    for (const PDFWebLinks::SourceLink &link : links) {
+        if (link.sourcePage < 0 || link.sourcePage >= sourcePageCount
+            || link.annotationIndex < 0 || link.fingerprint.size() != 32) {
+            return failure(Error::WebLinkRemovalFailed, link.sourcePage);
+        }
+        if (!std::binary_search(deletedSourcePages.cbegin(),
+                                deletedSourcePages.cend(), link.sourcePage)) {
+            linksBySourcePage[link.sourcePage].append(&link);
+        }
+    }
+    for (auto entry = linksBySourcePage.cbegin(); entry != linksBySourcePage.cend(); ++entry) {
+        const int sourcePage = entry.key();
+        PdfPageHandle page(FPDF_LoadPage(inspectionDocument, sourcePage));
+        if (!page.get()) {
+            return failure(Error::PageLoadFailed, sourcePage);
+        }
+        const PDFWebLinks::SourceScanResult inspected = PDFWebLinks::sourceLinksForPage(
+            inspectionDocument, page.get(), sourcePage);
+        if (inspected.failed) {
+            return failure(Error::WebLinkRemovalFailed, sourcePage);
+        }
+        QHash<int, QByteArray> sourceIdentities;
+        QHash<QByteArray, int> sourceCounts;
+        for (const PDFWebLinks::SourceLink &link : inspected.links) {
+            sourceIdentities.insert(link.annotationIndex, link.fingerprint);
+            ++sourceCounts[link.fingerprint];
+        }
+        QSet<int> requestedIndices;
+        QHash<QByteArray, int> requestedCounts;
+        for (const PDFWebLinks::SourceLink *link : entry.value()) {
+            if (requestedIndices.contains(link->annotationIndex)
+                || sourceIdentities.value(link->annotationIndex) != link->fingerprint) {
+                return failure(Error::WebLinkRemovalFailed, sourcePage);
+            }
+            requestedIndices.insert(link->annotationIndex);
+            ++requestedCounts[link->fingerprint];
+        }
+        for (auto identity = requestedCounts.cbegin(); identity != requestedCounts.cend();
+             ++identity) {
+            if (sourceCounts.value(identity.key()) != identity.value()) {
+                return failure(Error::WebLinkRemovalFailed, sourcePage);
+            }
+        }
+        const auto deleted = std::lower_bound(
+            deletedSourcePages.cbegin(), deletedSourcePages.cend(), sourcePage);
+        int outputPage = sourcePage - static_cast<int>(deleted - deletedSourcePages.cbegin());
+        for (const PDFPageInsertion &insertion : pageInsertions) {
+            if (insertion.page <= outputPage) {
+                ++outputPage;
+            }
+        }
+        removals.insert(outputPage, std::move(requestedCounts));
+    }
+    return {};
+}
+
+PDFSaveWriter::Result removeWebLinks(FPDF_DOCUMENT document,
+                                    const WebLinkRemovals &removals)
+{
+    assertPDFiumProcessLockHeld();
+    using Error = PDFSaveWriter::Error;
+    for (auto entry = removals.cbegin(); entry != removals.cend(); ++entry) {
+        const int pageIndex = entry.key();
+        PdfPageHandle page(FPDF_LoadPage(document, pageIndex));
+        if (!page.get()) {
+            return failure(Error::PageLoadFailed, pageIndex);
+        }
+        const PDFWebLinks::SourceScanResult inspected = PDFWebLinks::sourceLinksForPage(
+            document, page.get(), pageIndex);
+        if (inspected.failed) {
+            return failure(Error::WebLinkRemovalFailed, pageIndex);
+        }
+        QHash<QByteArray, int> actualCounts;
+        QVector<int> indices;
+        for (const PDFWebLinks::SourceLink &link : inspected.links) {
+            if (entry->contains(link.fingerprint)) {
+                ++actualCounts[link.fingerprint];
+                indices.append(link.annotationIndex);
+            }
+        }
+        if (actualCounts != entry.value()) {
+            return failure(Error::WebLinkRemovalFailed, pageIndex);
+        }
+        // Source indices were validated before draft application. Comments may
+        // have shifted them since then, so remove by revalidated identity in
+        // descending current index order, after all source-index-based edits.
+        std::sort(indices.begin(), indices.end(), std::greater<int>());
+        for (int index : std::as_const(indices)) {
+            if (!FPDFPage_RemoveAnnot(page.get(), index)) {
+                return failure(Error::WebLinkRemovalFailed, pageIndex);
+            }
+        }
+        // Annotation-only removal leaves the existing page content untouched.
+    }
+    return {};
+}
+
 PDFSaveWriter::Result addWebLinks(
     FPDF_DOCUMENT document,
     int sourcePageCount,
@@ -6021,6 +6135,7 @@ struct PDFSaveWriter::Request::Data {
     QVector<SaveDraft> drafts;
     QVector<PDFFormDesignerController::SaveField> formFields;
     QVector<PDFWebLinks::Link> autoWebLinks;
+    QVector<PDFWebLinks::SourceLink> removedWebLinks;
 };
 
 PDFSaveWriter::Request PDFSaveWriter::prepare(
@@ -6041,6 +6156,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         : sourceFilePathOverride;
     data->targetFilePath = targetFilePath;
     data->autoWebLinks = controller.m_autoWebLinks;
+    data->removedWebLinks = controller.m_removedWebLinks;
     if (controller.m_formDesignerController) {
         const bool normalizeSourceFieldAppearances
             = controller.m_formDesignerController->hasDrafts();
@@ -6438,6 +6554,14 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         || FPDF_GetPageCount(inspectionDocument.get()) != sourcePageCount) {
         return failure(Error::SourceOpenFailed);
     }
+    WebLinkRemovals webLinkRemovals;
+    const Result removalValidation = validateWebLinkRemovals(
+        inspectionDocument.get(), sourcePageCount,
+        request.m_data->deletedSourcePages, request.m_data->pageInsertions,
+        request.m_data->removedWebLinks, webLinkRemovals);
+    if (!removalValidation.succeeded()) {
+        return removalValidation;
+    }
     for (auto page = request.m_data->deletedSourcePages.crbegin();
          page != request.m_data->deletedSourcePages.crend();
          ++page) {
@@ -6524,6 +6648,10 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         start = end;
     }
 
+    const Result removalResult = removeWebLinks(document.get(), webLinkRemovals);
+    if (!removalResult.succeeded()) {
+        return removalResult;
+    }
     const Result webLinkResult = addWebLinks(
         document.get(),
         sourcePageCount,

@@ -3,9 +3,14 @@
 #include "PDFiumSynchronization.h"
 
 #include <QFile>
+#include <QCryptographicHash>
+#include <QDataStream>
+#include <QIODevice>
+#include <QSet>
 #include <QUrl>
 
 #include <fpdf_annot.h>
+#include <fpdf_doc.h>
 #include <fpdf_text.h>
 #include <fpdfview.h>
 
@@ -26,6 +31,8 @@ constexpr int kMaximumTotalUrlCharacters = 2000000;
 constexpr int kMaximumOverlapComparisons = 2000000;
 constexpr int kMaximumExistingQuadsPerLink = 64;
 constexpr int kMappingExtent = 10000;
+constexpr int kMaximumSourceAnnotations = 200000;
+constexpr int kAnnotationFlagLockedContents = 1 << 9;
 
 bool cancelled(const std::shared_ptr<std::atomic_bool> &cancellation)
 {
@@ -251,6 +258,239 @@ QString validWebUrl(const QString &value)
     }
     const QByteArray encoded = url.toEncoded(QUrl::FullyEncoded);
     return encoded.size() <= MaximumUrlLength ? QString::fromLatin1(encoded) : QString();
+}
+
+SourceScanResult sourceLinksForPage(
+    FPDF_DOCUMENT document, FPDF_PAGE page, int sourcePage,
+    const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    assertPDFiumProcessLockHeld();
+    SourceScanResult result;
+    const int count = FPDFPage_GetAnnotCount(page);
+    if (!document || !page || count < 0) {
+        result.failed = true;
+        return result;
+    }
+    if (count > MaximumAnnotationsPerPage) {
+        result.limited = true;
+        return result;
+    }
+
+    // A link can be the target of a relation even without having that key in
+    // its own dictionary. Never leave a popup or reply with a removed parent.
+    QSet<int> relatedAnnotations;
+    constexpr std::array<const char *, 3> relationshipKeys{"Popup", "IRT", "Parent"};
+    for (int index = 0; index < count; ++index) {
+        if (cancelled(cancellation)) {
+            return {};
+        }
+        const Annotation annotation(FPDFPage_GetAnnot(page, index));
+        if (!annotation.get()) {
+            result.failed = true;
+            return result;
+        }
+        for (const char *key : relationshipKeys) {
+            if (!FPDFAnnot_HasKey(annotation.get(), key)) {
+                continue;
+            }
+            relatedAnnotations.insert(index);
+            const Annotation target(FPDFAnnot_GetLinkedAnnot(annotation.get(), key));
+            const int targetIndex = target.get()
+                ? FPDFPage_GetAnnotIndex(page, target.get()) : -1;
+            if (targetIndex < 0 || targetIndex >= count) {
+                // An unresolvable relation cannot prove which annotations are
+                // independent. Leave this page intact instead of guessing.
+                result.limited = true;
+                return result;
+            }
+            relatedAnnotations.insert(targetIndex);
+        }
+    }
+
+    for (int index = 0; index < count; ++index) {
+        if (cancelled(cancellation)) {
+            return {};
+        }
+        const Annotation annotation(FPDFPage_GetAnnot(page, index));
+        if (!annotation.get()) {
+            result.links.clear();
+            result.failed = true;
+            return result;
+        }
+        if (FPDFAnnot_GetSubtype(annotation.get()) != FPDF_ANNOT_LINK) {
+            continue;
+        }
+        const FPDF_LINK link = FPDFAnnot_GetLink(annotation.get());
+        const FPDF_ACTION action = link ? FPDFLink_GetAction(link) : nullptr;
+        if (!action || FPDFAction_GetType(action) != PDFACTION_URI) {
+            continue;
+        }
+        const unsigned long uriSize = FPDFAction_GetURIPath(document, action, nullptr, 0);
+        if (uriSize < 2 || uriSize > MaximumUrlLength + 1) {
+            result.limited = true;
+            continue;
+        }
+        QByteArray uri(static_cast<qsizetype>(uriSize), '\0');
+        if (FPDFAction_GetURIPath(document, action, uri.data(), uriSize) != uriSize
+            || uri.back() != '\0') {
+            result.limited = true;
+            continue;
+        }
+        uri.chop(1);
+        const QString decodedUri = QString::fromUtf8(uri);
+        const QUrl url(decodedUri, QUrl::StrictMode);
+        const QString scheme = url.scheme().toLower();
+        if (scheme != QLatin1String("http") && scheme != QLatin1String("https")) {
+            continue;
+        }
+        if (decodedUri.toUtf8() != uri || uri.contains('\0')
+            || !url.isValid() || url.isRelative() || url.host().isEmpty()
+            || std::any_of(uri.cbegin(), uri.cend(), [](char value) {
+                   const auto byte = static_cast<unsigned char>(value);
+                   return byte <= 0x20 || byte == 0x7f;
+               })) {
+            result.limited = true;
+            continue;
+        }
+        const int flags = FPDFAnnot_GetFlags(annotation.get());
+        const bool malformedFlags = FPDFAnnot_HasKey(annotation.get(), "F")
+            && FPDFAnnot_GetValueType(annotation.get(), "F") != FPDF_OBJECT_NUMBER;
+        if (flags < 0 || malformedFlags
+            || (flags & (FPDF_ANNOT_FLAG_READONLY | FPDF_ANNOT_FLAG_LOCKED
+                         | kAnnotationFlagLockedContents)) != 0
+            || relatedAnnotations.contains(index)
+            || FPDFAnnot_HasKey(annotation.get(), "Dest")
+            || FPDFAnnot_HasKey(annotation.get(), "AA")
+            || FPDFAnnot_HasKey(annotation.get(), "RT")
+            || FPDFAnnot_HasKey(annotation.get(), "StructParent")
+            || FPDFAnnot_HasKey(annotation.get(), "State")
+            || FPDFAnnot_HasKey(annotation.get(), "StateModel")) {
+            result.limited = true;
+            continue;
+        }
+
+        FS_RECTF rect{};
+        if (!FPDFAnnot_GetRect(annotation.get(), &rect)
+            || !std::isfinite(rect.left) || !std::isfinite(rect.right)
+            || !std::isfinite(rect.top) || !std::isfinite(rect.bottom)
+            || rect.left >= rect.right || rect.bottom >= rect.top) {
+            result.limited = true;
+            continue;
+        }
+        const int quadCount = FPDFLink_CountQuadPoints(link);
+        if (quadCount < 0 || quadCount > kMaximumExistingQuadsPerLink
+            || (FPDFAnnot_HasKey(annotation.get(), "QuadPoints")
+                && (FPDFAnnot_GetValueType(annotation.get(), "QuadPoints")
+                        != FPDF_OBJECT_ARRAY || quadCount == 0))) {
+            result.limited = true;
+            continue;
+        }
+        QByteArray identity;
+        QDataStream stream(&identity, QIODevice::WriteOnly);
+        stream.setVersion(QDataStream::Qt_6_0);
+        stream << uri << qint32(flags) << rect.left << rect.bottom
+               << rect.right << rect.top << qint32(quadCount);
+        bool valid = true;
+        for (int quadIndex = 0; quadIndex < quadCount; ++quadIndex) {
+            FS_QUADPOINTSF quad{};
+            if (!FPDFLink_GetQuadPoints(link, quadIndex, &quad)) {
+                valid = false;
+                break;
+            }
+            const std::array<float, 8> coordinates{
+                quad.x1, quad.y1, quad.x2, quad.y2,
+                quad.x3, quad.y3, quad.x4, quad.y4};
+            for (float value : coordinates) {
+                if (!std::isfinite(value)) {
+                    valid = false;
+                    break;
+                }
+                stream << value;
+            }
+        }
+        if (!valid || stream.status() != QDataStream::Ok) {
+            result.limited = true;
+            continue;
+        }
+        result.links.append(SourceLink{
+            sourcePage, index, QCryptographicHash::hash(identity, QCryptographicHash::Sha256)});
+    }
+    return result;
+}
+
+SourceScanResult scanSourceLinks(
+    const QString &filePath,
+    const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    assertPDFiumProcessLockNotHeld();
+    SourceScanResult result;
+    if (cancelled(cancellation)) {
+        return result;
+    }
+    const ScanDocument document(filePath, cancellation);
+    if (!document.get()) {
+        result.failed = !cancelled(cancellation);
+        return result;
+    }
+    int pageCount = 0;
+    {
+        PDFiumProcessLock lock;
+        if (cancelled(cancellation)) {
+            return {};
+        }
+        pageCount = FPDF_GetPageCount(document.get());
+    }
+    if (pageCount <= 0) {
+        result.failed = true;
+        return result;
+    }
+    result.limited = pageCount > kMaximumPages;
+    int totalAnnotations = 0;
+    for (int pageIndex = 0; pageIndex < qMin(pageCount, kMaximumPages); ++pageIndex) {
+        if (cancelled(cancellation)) {
+            return {};
+        }
+        PDFiumProcessLock lock;
+        if (cancelled(cancellation)) {
+            return {};
+        }
+        const Page page(FPDF_LoadPage(document.get(), pageIndex));
+        if (!page.get()) {
+            result.links.clear();
+            result.failed = true;
+            return result;
+        }
+        const int count = FPDFPage_GetAnnotCount(page.get());
+        if (count < 0) {
+            result.links.clear();
+            result.failed = true;
+            return result;
+        }
+        if (count > kMaximumSourceAnnotations - totalAnnotations) {
+            result.limited = true;
+            break;
+        }
+        totalAnnotations += count;
+        SourceScanResult pageResult = sourceLinksForPage(
+            document.get(), page.get(), pageIndex, cancellation);
+        if (cancelled(cancellation)) {
+            return {};
+        }
+        if (pageResult.failed) {
+            result.links.clear();
+            result.failed = true;
+            return result;
+        }
+        result.limited = result.limited || pageResult.limited;
+        // Keep a page's equivalent identities together. Save can then validate
+        // the exact multiplicity before deleting any matching annotations.
+        if (pageResult.links.size() > MaximumLinks - result.links.size()) {
+            result.limited = true;
+            break;
+        }
+        result.links += pageResult.links;
+    }
+    return result;
 }
 
 ScanResult scan(const QString &filePath,

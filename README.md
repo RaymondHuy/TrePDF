@@ -102,7 +102,13 @@ in Edit; switch to View to open a link through the existing confirmation dialog.
 The menu can cancel an active scan. Scans without a text layer are unsupported;
 bounded scans report a limited result when content exceeds the safety limits.
 Links remain independent page regions if text is subsequently edited or moved.
-The Add or edit a link and Remove web links menu entries remain UI-only.
+**Remove web links** removes editable HTTP/HTTPS link annotations across the
+document, including newly created unsaved links, as one undoable batch. Internal
+destinations, other URI schemes, comments, and protected links are preserved.
+Save other pending edits first. Removed links stop accepting clicks immediately;
+Save/Save As persists the removal without changing page text. The scan can be
+cancelled, and Undo or Discard restores removed links. Add or edit a link remains
+UI-only.
 
 Changes remain undoable session drafts until Save or Save As writes them into a
 PDF. Compatible text objects on the same visual line are grouped, then nearby

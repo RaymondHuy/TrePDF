@@ -24,6 +24,16 @@ private slots:
     void routesDraftWebLinksThroughConfirmation();
     void routesSavedWebLinksThroughConfirmation_data();
     void routesSavedWebLinksThroughConfirmation();
+    void removesOnlyEditableWebLinks();
+    void removeWebLinksUsesSingleHistoryCommand();
+    void removesPendingWebLinksWithoutCreatingSourceDrafts();
+    void savesRemovedWebLinksWithoutChangingPageContent();
+    void mapsRemovedWebLinksAcrossPageChanges();
+    void routesRemovedWebLinksThroughHistory();
+    void previewsRemovedWebLinkAppearancesThroughHistory();
+    void rejectsRemovalWithUnsavedContent();
+    void cancelsStaleWebLinkRemoval();
+    void savesWebLinkRemovalWithCommentDeletion();
     void exposesExcelExportTabAndDraftGuard();
     void storesTransientTextFieldsByPage();
     void limitsTransientTextFieldInputLength();

@@ -9,6 +9,8 @@
 #include <QThreadPool>
 #include <QtTranslation>
 
+#include <fpdf_annot.h>
+
 #include <utility>
 
 namespace {
@@ -49,13 +51,30 @@ void PDFEditController::invalidateWebLinks()
     if (m_formController && m_pendingWebLinkRequest)
         m_formController->cancelExternalLink(m_pendingWebLinkRequest);
     m_pendingWebLinkRequest = 0;
+    QHash<int, QSet<int>> removed;
+    QSet<int> previewPages;
+    for (const auto &link : std::as_const(m_removedWebLinks)) {
+        removed[link.sourcePage].insert(link.annotationIndex);
+        const int page = m_document
+            ? m_document->displayPageIndexForSourcePage(link.sourcePage) : -1;
+        if (page >= 0)
+            previewPages.insert(page);
+    }
+    if (m_formController)
+        m_formController->setRemovedWebLinks(removed);
+    const QSet<int> affectedPages = previewPages | m_removedWebLinkPreviewPages;
+    m_removedWebLinkPreviewPages = previewPages;
+    for (const int page : affectedPages) {
+        if (m_document && page >= 0 && page < m_document->pageCount())
+            markDraftStateChanged(page, true, false);
+    }
     ++m_webLinksRevision;
     emit webLinksChanged();
 }
 
 bool PDFEditController::autoCreateWebLinks()
 {
-    if (!m_document || !m_document->isLoaded() || m_saving || creatingWebLinks())
+    if (!m_document || !m_document->isLoaded() || m_saving || m_webLinkCancellation)
         return false;
     if (!documentAllowsAnnotations()) {
         //% "This PDF does not permit changing annotations."
@@ -64,7 +83,7 @@ bool PDFEditController::autoCreateWebLinks()
     }
     finishSelectedFrameResize();
     finishSelectedTextEdit();
-    if (hasNonWebLinkDrafts()) {
+    if (hasNonWebLinkDrafts() || !m_removedWebLinks.isEmpty()) {
         //% "Save your PDF changes before creating links from URLs."
         emit statusMessage(qtTrId("SaveBeforeCreatingWebLinks"));
         return false;
@@ -75,6 +94,7 @@ bool PDFEditController::autoCreateWebLinks()
     const QPointer<PDFDocument> document = m_document;
     const QPointer<PDFEditController> controller(this);
     const auto cancellation = std::make_shared<std::atomic_bool>(false);
+    m_removingWebLinks = false;
     m_webLinkCancellation = cancellation;
     auto *work = QRunnable::create([controller, document, path, revision, cancellation] {
         auto result = PDFWebLinks::scan(path, cancellation);
@@ -179,6 +199,120 @@ bool PDFEditController::autoCreateWebLinks()
     //% "Finding URLs in the document…"
     emit statusMessage(qtTrId("FindingWebLinks"));
     return true;
+}
+
+bool PDFEditController::removeWebLinks()
+{
+    if (!m_document || !m_document->isLoaded() || m_saving || m_webLinkCancellation)
+        return false;
+    if (!documentAllowsAnnotations()) {
+        //% "This PDF does not permit changing annotations."
+        emit statusMessage(qtTrId("PdfAnnotationsNotPermitted"));
+        return false;
+    }
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    if (hasNonWebLinkDrafts()) {
+        //% "Save your PDF changes before removing web links."
+        emit statusMessage(qtTrId("SaveBeforeRemovingWebLinks"));
+        return false;
+    }
+
+    const QString path = m_document->renderFilePath();
+    const int revision = m_document->renderRevision();
+    const QPointer<PDFDocument> document = m_document;
+    const QPointer<PDFEditController> controller(this);
+    const auto cancellation = std::make_shared<std::atomic_bool>(false);
+    m_removingWebLinks = true;
+    m_webLinkCancellation = cancellation;
+    auto *work = QRunnable::create([controller, document, path, revision, cancellation] {
+        auto result = PDFWebLinks::scanSourceLinks(path, cancellation);
+        if (cancellation->load(std::memory_order_relaxed))
+            return;
+        QMetaObject::invokeMethod(QCoreApplication::instance(),
+            [controller, document, path, revision, cancellation,
+             result = std::move(result)]() mutable {
+                if (!controller || controller->m_webLinkCancellation != cancellation
+                    || cancellation->load(std::memory_order_relaxed))
+                    return;
+                controller->m_webLinkCancellation.reset();
+                emit controller->creatingWebLinksChanged();
+                if (!document || controller->m_document != document
+                    || document->renderRevision() != revision
+                    || document->renderFilePath() != path
+                    || controller->m_saving || controller->m_textEditActive
+                    || controller->hasNonWebLinkDrafts())
+                    return;
+                if (result.failed) {
+                    //% "Web links could not be scanned for removal."
+                    emit controller->statusMessage(qtTrId("WebLinkRemovalScanFailed"));
+                    return;
+                }
+                Command command;
+                command.kind = Command::Kind::WebLinks;
+                command.webLinksBefore = controller->m_autoWebLinks;
+                command.removedWebLinksBefore = controller->m_removedWebLinks;
+                command.removedWebLinksAfter = command.removedWebLinksBefore;
+                QHash<int, QSet<int>> removed;
+                for (const auto &link : std::as_const(command.removedWebLinksBefore))
+                    removed[link.sourcePage].insert(link.annotationIndex);
+                qsizetype count = command.webLinksBefore.size();
+                for (const auto &link : std::as_const(result.links)) {
+                    if (removed[link.sourcePage].contains(link.annotationIndex))
+                        continue;
+                    if (command.removedWebLinksAfter.size() >= PDFWebLinks::MaximumLinks) {
+                        result.limited = true;
+                        break;
+                    }
+                    command.removedWebLinksAfter.append(link);
+                    removed[link.sourcePage].insert(link.annotationIndex);
+                    ++count;
+                }
+                if (count) {
+                    controller->m_autoWebLinks.clear();
+                    controller->m_removedWebLinks = command.removedWebLinksAfter;
+                    controller->m_undoStack.append(std::move(command));
+                    controller->m_redoStack.clear();
+                    controller->invalidateWebLinks();
+                    emit controller->historyStateChanged();
+                }
+                if (result.limited) {
+                    //% "Removed %1 web links. Protected links or content beyond the scan limits were kept. Save to keep the changes."
+                    emit controller->statusMessage(qtTrId("WebLinksRemovedLimited").arg(count));
+                } else if (count) {
+                    //% "Removed %1 web links. Save to keep the changes."
+                    emit controller->statusMessage(qtTrId("WebLinksRemoved").arg(count));
+                } else {
+                    //% "No removable web links were found."
+                    emit controller->statusMessage(qtTrId("NoRemovableWebLinksFound"));
+                }
+            }, Qt::QueuedConnection);
+    });
+    if (!webLinkThreadPool().tryStart(work)) {
+        delete work;
+        m_webLinkCancellation.reset();
+        //% "Another link scan is finishing. Please try again."
+        emit statusMessage(qtTrId("WebLinkScannerBusy"));
+        return false;
+    }
+    emit creatingWebLinksChanged();
+    //% "Finding web links to remove…"
+    emit statusMessage(qtTrId("FindingWebLinksToRemove"));
+    return true;
+}
+
+QVector<PDFEditController::DraftAnnotationDeletion>
+PDFEditController::deletedSourceWebLinkAnnotationsForPage(int page) const
+{
+    QVector<DraftAnnotationDeletion> deletions;
+    const int sourcePage = m_document ? m_document->sourcePageIndex(page) : -1;
+    if (sourcePage < 0)
+        return deletions;
+    for (const auto &link : m_removedWebLinks) {
+        if (link.sourcePage == sourcePage)
+            deletions.append({link.annotationIndex, FPDF_ANNOT_LINK});
+    }
+    return deletions;
 }
 
 QVariantList PDFEditController::webLinkDraftsForPage(int page) const

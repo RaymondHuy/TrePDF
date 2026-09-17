@@ -363,6 +363,12 @@ bool hiddenCommentAnnotationIndices(
             annotationIndices.clear();
             return false;
         }
+        // The web-link scanner excludes popup/reply relations. Avoid scanning
+        // the whole annotation array again for each removed link.
+        if (FPDFAnnot_GetSubtype(annotation) == FPDF_ANNOT_LINK) {
+            FPDFPage_CloseAnnot(annotation);
+            continue;
+        }
         bool popupValid = false;
         const int popupIndex = popupAnnotationIndexForComment(
             page,
@@ -1794,11 +1800,14 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             && editController->document() == document
         ? editController->draftedObjectMovesForPage(page)
         : QVector<PDFEditController::DraftObjectMove>();
-    const QVector<PDFEditController::DraftAnnotationDeletion>
+    QVector<PDFEditController::DraftAnnotationDeletion>
         deletedCommentAnnotations = editController
             && editController->document() == document
         ? editController->deletedSourceCommentAnnotationsForPage(page)
         : QVector<PDFEditController::DraftAnnotationDeletion>();
+    // Reuse annotation appearance suppression for removed web links as well.
+    if (editController && editController->document() == document)
+        deletedCommentAnnotations += editController->deletedSourceWebLinkAnnotationsForPage(page);
     QStringList suppressedCommentObjectIds;
     suppressedCommentObjectIds.reserve(deletedCommentAnnotations.size());
     for (const PDFEditController::DraftAnnotationDeletion &deletion

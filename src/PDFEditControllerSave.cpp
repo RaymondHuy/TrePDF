@@ -118,6 +118,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
         }
         //% "Web links could not be created on page %1."
         return qtTrId("PdfSaveWebLinkCreationFailed").arg(result.page + 1);
+    case PDFSaveWriter::Error::WebLinkRemovalFailed:
+        //% "Web links could not be removed safely. The PDF was not saved."
+        return qtTrId("PdfSaveWebLinkRemovalFailed");
     case PDFSaveWriter::Error::CommentAnnotationUpdateFailed:
         //% "The comment could not be updated on page %1."
         return qtTrId("PdfSaveCommentUpdateFailed").arg(result.page + 1);

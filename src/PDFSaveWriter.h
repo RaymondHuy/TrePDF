@@ -41,6 +41,7 @@ public:
         CommentAnnotationUpdateFailed,
         CommentAnnotationRemovalFailed,
         WebLinkCreationFailed,
+        WebLinkRemovalFailed,
         PageCreationFailed,
         PageDeletionFailed,
         PageContentGenerationFailed,

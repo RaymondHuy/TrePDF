@@ -1,11 +1,14 @@
 #pragma once
 
+#include <QByteArray>
 #include <QRectF>
 #include <QString>
 #include <QVector>
 
 #include <atomic>
 #include <memory>
+
+#include <fpdfview.h>
 
 namespace PDFWebLinks {
 
@@ -38,6 +41,25 @@ struct ScanResult {
     bool failed = false;
 };
 
+struct SourceLink {
+    int sourcePage = -1;
+    int annotationIndex = -1;
+    QByteArray fingerprint;
+
+    bool operator==(const SourceLink &other) const
+    {
+        return sourcePage == other.sourcePage
+            && annotationIndex == other.annotationIndex
+            && fingerprint == other.fingerprint;
+    }
+};
+
+struct SourceScanResult {
+    QVector<SourceLink> links;
+    bool limited = false;
+    bool failed = false;
+};
+
 // Returns an absolute, fully encoded HTTP(S) URL without credentials, or empty.
 // Both input UTF-16 length and encoded output length are bounded.
 QString validWebUrl(const QString &value);
@@ -48,5 +70,17 @@ QString validWebUrl(const QString &value);
 // contain complete, validated links from the bounded part of the scan.
 ScanResult scan(const QString &filePath,
                 const std::shared_ptr<std::atomic_bool> &cancellation);
+
+// Enumerates removable HTTP(S) URI annotations without loading page text.
+// Protected, malformed, or relationship-bearing annotations are retained.
+SourceScanResult scanSourceLinks(
+    const QString &filePath,
+    const std::shared_ptr<std::atomic_bool> &cancellation);
+
+// Shared with saving to revalidate source identity before and after unrelated
+// annotation edits. The caller owns the document/page and process lock.
+SourceScanResult sourceLinksForPage(
+    FPDF_DOCUMENT document, FPDF_PAGE page, int sourcePage,
+    const std::shared_ptr<std::atomic_bool> &cancellation = {});
 
 } // namespace PDFWebLinks

@@ -637,6 +637,15 @@ Sau khi mở lại, `PDFFormWorker` hit-test `/Link` trên page riêng của wor
 ưu tiên widget ở phía trên và bỏ annotation ẩn. Chỉ nhấn/thả trên cùng link
 mới gửi URI đến hộp xác nhận trên GUI; worker không mở trình duyệt.
 
+Xóa liên kết dùng `scanSourceLinks()` để tìm annotation HTTP(S) trong source,
+giữ nguyên link nội bộ, URI khác, annotation có cờ bảo vệ hoặc quan hệ không an
+toàn. `m_removedWebLinks` lưu source-page, annotation index và fingerprint;
+history snapshot cả link thêm lẫn link xóa. Preview dùng pipeline ẩn annotation
+hiện hữu; FormController kiểm tra cả pointer snapshot và kết quả trả về để link
+đã xóa không mở hộp xác nhận. Undo/Discard phục hồi appearance và tương tác.
+Writer kiểm tra lại fingerprint và ghi xóa theo transaction, không tái tạo
+content stream cho trang chỉ thay đổi liên kết.
+
 ## Form runtime
 
 ### [`src/PDFFormController.cpp`](../src/PDFFormController.cpp) và

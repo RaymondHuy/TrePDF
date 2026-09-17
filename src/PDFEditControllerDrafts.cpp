@@ -468,6 +468,7 @@ void PDFEditController::discardDrafts()
         || (!m_textEditActive
             && m_drafts.isEmpty()
             && m_autoWebLinks.isEmpty()
+            && m_removedWebLinks.isEmpty()
             && m_pendingTextMarkupCreations.isEmpty()
             && m_pageInsertions.isEmpty()
             && m_deletedSourcePages.isEmpty()
@@ -538,6 +539,7 @@ void PDFEditController::discardDrafts()
     }
     m_drafts.clear();
     m_autoWebLinks.clear();
+    m_removedWebLinks.clear();
     invalidateWebLinks();
     m_undoStack.clear();
     m_redoStack.clear();
@@ -1091,6 +1093,8 @@ void PDFEditController::applyDraftState(const Command &command,
 {
     if (command.kind == Command::Kind::WebLinks) {
         m_autoWebLinks = useAfterState ? command.webLinksAfter : command.webLinksBefore;
+        m_removedWebLinks = useAfterState ? command.removedWebLinksAfter
+                                         : command.removedWebLinksBefore;
         invalidateWebLinks();
         return;
     }
