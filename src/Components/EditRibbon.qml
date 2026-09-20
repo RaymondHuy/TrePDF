@@ -240,6 +240,11 @@ Flickable {
                     }
 
                     sourceComponent: Menu {
+                        id: linkMenu
+
+                        //% "Create a link: Choose this tool, then drag a rectangle around the text or area you want to make clickable. Enter a web address or choose a page in this PDF.\n\nEdit a link: Double-click an existing link to change its destination or appearance.\n\nMove or resize: Drag the link frame to move it, or drag an edge or corner handle to resize it.\n\nSave your changes, then switch to the View tab to try the link."
+                        readonly property string linkHelpText: qsTrId("AddOrEditLinkHelp")
+
                         parent: linkButton
                         y: linkButton.height
                         width: 280
@@ -259,6 +264,23 @@ Flickable {
                             font.pixelSize: 12
                             palette.text: root.theme.ribbonTextColor
                             palette.highlightedText: root.theme.ribbonTextColor
+                            Accessible.description: action === addOrEditLinkAction
+                                ? linkMenu.linkHelpText : ""
+
+                            Loader {
+                                active: linkMenu.opened
+                                    && linkMenuItem.action === addOrEditLinkAction
+
+                                sourceComponent: HelpToolTip {
+                                    theme: root.theme
+                                    parent: linkMenuItem
+                                    title: addOrEditLinkAction.text
+                                    visible: linkMenu.opened && linkMenuItem.enabled
+                                        && !linkMenuItem.down
+                                        && (linkMenuItem.hovered || linkMenuItem.visualFocus)
+                                    text: linkMenu.linkHelpText
+                                }
+                            }
 
                             background: Rectangle {
                                 radius: 4
@@ -268,6 +290,8 @@ Flickable {
                         }
 
                         Action {
+                            id: addOrEditLinkAction
+
                             //% "Add or edit a link"
                             text: qsTrId("AddOrEditLink")
                             enabled: !root.hasPendingPanelEdits

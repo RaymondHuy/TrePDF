@@ -536,28 +536,45 @@
         <source>Link</source>
         <translation>Liên kết</translation>
     </message>
+    <message id="AddOrEditLinkHelp">
+        <location filename="../src/Components/EditRibbon.qml" line="246"/>
+        <source>Create a link: Choose this tool, then drag a rectangle around the text or area you want to make clickable. Enter a web address or choose a page in this PDF.
+
+Edit a link: Double-click an existing link to change its destination or appearance.
+
+Move or resize: Drag the link frame to move it, or drag an edge or corner handle to resize it.
+
+Save your changes, then switch to the View tab to try the link.</source>
+        <translation>Tạo liên kết: Chọn công cụ này, rồi kéo khoanh vùng chữ hoặc khu vực muốn bấm vào. Nhập địa chỉ web hoặc chọn trang đích trong PDF.
+
+Sửa liên kết: Nhấp đúp vào liên kết có sẵn để đổi đích đến hoặc kiểu hiển thị.
+
+Di chuyển, đổi kích thước: Kéo khung liên kết để di chuyển, hoặc kéo nút ở cạnh hay góc để chỉnh kích thước.
+
+Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên kết.</translation>
+    </message>
     <message id="AddOrEditLink">
-        <location filename="../src/Components/EditRibbon.qml" line="272"/>
+        <location filename="../src/Components/EditRibbon.qml" line="296"/>
         <source>Add or edit a link</source>
         <translation>Thêm hoặc sửa liên kết</translation>
     </message>
     <message id="CancelCreatingWebLinks">
-        <location filename="../src/Components/EditRibbon.qml" line="283"/>
+        <location filename="../src/Components/EditRibbon.qml" line="307"/>
         <source>Cancel creating links</source>
         <translation>Hủy tạo liên kết</translation>
     </message>
     <message id="AutoCreateLinksFromUrls">
-        <location filename="../src/Components/EditRibbon.qml" line="285"/>
+        <location filename="../src/Components/EditRibbon.qml" line="309"/>
         <source>Auto-create links from URLs</source>
         <translation>Tự động tạo liên kết từ URL</translation>
     </message>
     <message id="CancelRemovingWebLinks">
-        <location filename="../src/Components/EditRibbon.qml" line="300"/>
+        <location filename="../src/Components/EditRibbon.qml" line="324"/>
         <source>Cancel removing links</source>
         <translation>Hủy xóa liên kết</translation>
     </message>
     <message id="RemoveWebLinks">
-        <location filename="../src/Components/EditRibbon.qml" line="302"/>
+        <location filename="../src/Components/EditRibbon.qml" line="326"/>
         <source>Remove web links</source>
         <translation>Xóa liên kết web</translation>
     </message>
@@ -567,24 +584,24 @@
     </message>
     <message id="Shapes">
         <location filename="../src/Components/CommentRibbon.qml" line="1136"/>
-        <location filename="../src/Components/EditRibbon.qml" line="330"/>
+        <location filename="../src/Components/EditRibbon.qml" line="354"/>
         <location filename="../src/PDFEditControllerCandidates.cpp" line="2230"/>
         <source>Shapes</source>
         <translation>Hình dạng</translation>
     </message>
     <message id="ChooseShape">
         <location filename="../src/Components/CommentRibbon.qml" line="1140"/>
-        <location filename="../src/Components/EditRibbon.qml" line="334"/>
+        <location filename="../src/Components/EditRibbon.qml" line="358"/>
         <source>Choose shape</source>
         <translation>Chọn hình dạng</translation>
     </message>
     <message id="DeletePage">
-        <location filename="../src/Components/EditRibbon.qml" line="411"/>
+        <location filename="../src/Components/EditRibbon.qml" line="435"/>
         <source>Delete Page</source>
         <translation>Xóa trang</translation>
     </message>
     <message id="DeleteCurrentPage">
-        <location filename="../src/Components/EditRibbon.qml" line="413"/>
+        <location filename="../src/Components/EditRibbon.qml" line="437"/>
         <source>Delete Current Page</source>
         <translation>Xóa trang hiện tại</translation>
     </message>
@@ -898,19 +915,19 @@
     </message>
     <message id="History">
         <location filename="../src/Components/CommentRibbon.qml" line="1212"/>
-        <location filename="../src/Components/EditRibbon.qml" line="426"/>
+        <location filename="../src/Components/EditRibbon.qml" line="450"/>
         <source>History</source>
         <translation>Lịch sử</translation>
     </message>
     <message id="Undo">
         <location filename="../src/Components/CommentRibbon.qml" line="1218"/>
-        <location filename="../src/Components/EditRibbon.qml" line="432"/>
+        <location filename="../src/Components/EditRibbon.qml" line="456"/>
         <source>Undo</source>
         <translation>Hoàn tác</translation>
     </message>
     <message id="Redo">
         <location filename="../src/Components/CommentRibbon.qml" line="1231"/>
-        <location filename="../src/Components/EditRibbon.qml" line="445"/>
+        <location filename="../src/Components/EditRibbon.qml" line="469"/>
         <source>Redo</source>
         <translation>Làm lại</translation>
     </message>
@@ -1439,19 +1456,19 @@
         <translation type="vanished">Tắt JavaScript cho tệp PDF này</translation>
     </message>
     <message id="Page">
-        <location filename="../src/Components/EditRibbon.qml" line="387"/>
+        <location filename="../src/Components/EditRibbon.qml" line="411"/>
         <location filename="../src/Components/ReaderControlBar.qml" line="553"/>
         <location filename="../src/Components/ViewRibbon.qml" line="161"/>
         <source>Page</source>
         <translation>Trang</translation>
     </message>
     <message id="AddPage">
-        <location filename="../src/Components/EditRibbon.qml" line="393"/>
+        <location filename="../src/Components/EditRibbon.qml" line="417"/>
         <source>Add Page</source>
         <translation>Thêm trang</translation>
     </message>
     <message id="AddBlankPage">
-        <location filename="../src/Components/EditRibbon.qml" line="395"/>
+        <location filename="../src/Components/EditRibbon.qml" line="419"/>
         <source>Add Blank Page</source>
         <translation>Thêm trang trắng</translation>
     </message>

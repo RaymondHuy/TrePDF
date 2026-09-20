@@ -174,6 +174,7 @@ qt_add_qml_module(trepdf
         src/Components/FormTextFieldOverlay.qml
         src/Components/InkDrawingView.qml
         src/Components/OrangeButton.qml
+        src/Components/HelpToolTip.qml
         src/Components/PageDisplayControl.qml
         src/Components/PageLayoutDelegate.qml
         src/Components/PageInteractionOverlay.qml
