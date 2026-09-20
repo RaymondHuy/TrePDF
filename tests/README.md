@@ -22,7 +22,13 @@ decoded content streams, and link activation through confirmation before and
 after Save. Geometry and saved-link clicks cover all four page rotations, with
 and without a CropBox. Removal tests cover mixed annotation types, protected
 links, pending additions, history, source-page remapping, Browse suppression,
-and source Link appearance restoration through undo/redo/discard.
+and source Link appearance restoration through undo/redo/discard. Manual-link
+tests cover URL and internal page destinations, source metadata preservation,
+editable appearance round-trips, geometry with CropBox/rotation, protected links,
+page remapping, atomic failure for deleted destinations/action chains, and native
+Browse routing. Saved border pixels cover solid/dashed/underline/invisible styles
+at all four page rotations with and without CropBox, followed by recolor/resave.
+The active link tool reloads its editable regions automatically after saving.
 
 - `tst_PDFEditController.cpp`: suite initialization and `QTEST_MAIN`.
 - `PDFEditControllerTest.h`: shared test class, slots in execution order, and

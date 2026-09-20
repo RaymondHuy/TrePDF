@@ -89,6 +89,7 @@
         <location filename="../src/Main.qml" line="1046"/>
         <location filename="../src/Main.qml" line="1121"/>
         <location filename="../src/Components/ExportRibbon.qml" line="59"/>
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="326"/>
         <source>Cancel</source>
         <translation>Hủy</translation>
     </message>
@@ -254,6 +255,8 @@
         <location filename="../src/Main.qml" line="1129"/>
         <location filename="../src/Components/EditOverlay.qml" line="3709"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
+        <location filename="../src/Components/ManualLinkLayer.qml" line="533"/>
+        <location filename="../src/Components/ManualLinkLayer.qml" line="579"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
@@ -534,27 +537,27 @@
         <translation>Liên kết</translation>
     </message>
     <message id="AddOrEditLink">
-        <location filename="../src/Components/EditRibbon.qml" line="271"/>
+        <location filename="../src/Components/EditRibbon.qml" line="272"/>
         <source>Add or edit a link</source>
         <translation>Thêm hoặc sửa liên kết</translation>
     </message>
     <message id="CancelCreatingWebLinks">
-        <location filename="../src/Components/EditRibbon.qml" line="277"/>
+        <location filename="../src/Components/EditRibbon.qml" line="283"/>
         <source>Cancel creating links</source>
         <translation>Hủy tạo liên kết</translation>
     </message>
     <message id="AutoCreateLinksFromUrls">
-        <location filename="../src/Components/EditRibbon.qml" line="279"/>
+        <location filename="../src/Components/EditRibbon.qml" line="285"/>
         <source>Auto-create links from URLs</source>
         <translation>Tự động tạo liên kết từ URL</translation>
     </message>
     <message id="CancelRemovingWebLinks">
-        <location filename="../src/Components/EditRibbon.qml" line="294"/>
+        <location filename="../src/Components/EditRibbon.qml" line="300"/>
         <source>Cancel removing links</source>
         <translation>Hủy xóa liên kết</translation>
     </message>
     <message id="RemoveWebLinks">
-        <location filename="../src/Components/EditRibbon.qml" line="296"/>
+        <location filename="../src/Components/EditRibbon.qml" line="302"/>
         <source>Remove web links</source>
         <translation>Xóa liên kết web</translation>
     </message>
@@ -564,24 +567,24 @@
     </message>
     <message id="Shapes">
         <location filename="../src/Components/CommentRibbon.qml" line="1136"/>
-        <location filename="../src/Components/EditRibbon.qml" line="324"/>
+        <location filename="../src/Components/EditRibbon.qml" line="330"/>
         <location filename="../src/PDFEditControllerCandidates.cpp" line="2230"/>
         <source>Shapes</source>
         <translation>Hình dạng</translation>
     </message>
     <message id="ChooseShape">
         <location filename="../src/Components/CommentRibbon.qml" line="1140"/>
-        <location filename="../src/Components/EditRibbon.qml" line="328"/>
+        <location filename="../src/Components/EditRibbon.qml" line="334"/>
         <source>Choose shape</source>
         <translation>Chọn hình dạng</translation>
     </message>
     <message id="DeletePage">
-        <location filename="../src/Components/EditRibbon.qml" line="405"/>
+        <location filename="../src/Components/EditRibbon.qml" line="411"/>
         <source>Delete Page</source>
         <translation>Xóa trang</translation>
     </message>
     <message id="DeleteCurrentPage">
-        <location filename="../src/Components/EditRibbon.qml" line="407"/>
+        <location filename="../src/Components/EditRibbon.qml" line="413"/>
         <source>Delete Current Page</source>
         <translation>Xóa trang hiện tại</translation>
     </message>
@@ -895,19 +898,19 @@
     </message>
     <message id="History">
         <location filename="../src/Components/CommentRibbon.qml" line="1212"/>
-        <location filename="../src/Components/EditRibbon.qml" line="420"/>
+        <location filename="../src/Components/EditRibbon.qml" line="426"/>
         <source>History</source>
         <translation>Lịch sử</translation>
     </message>
     <message id="Undo">
         <location filename="../src/Components/CommentRibbon.qml" line="1218"/>
-        <location filename="../src/Components/EditRibbon.qml" line="426"/>
+        <location filename="../src/Components/EditRibbon.qml" line="432"/>
         <source>Undo</source>
         <translation>Hoàn tác</translation>
     </message>
     <message id="Redo">
         <location filename="../src/Components/CommentRibbon.qml" line="1231"/>
-        <location filename="../src/Components/EditRibbon.qml" line="439"/>
+        <location filename="../src/Components/EditRibbon.qml" line="445"/>
         <source>Redo</source>
         <translation>Làm lại</translation>
     </message>
@@ -1436,19 +1439,19 @@
         <translation type="vanished">Tắt JavaScript cho tệp PDF này</translation>
     </message>
     <message id="Page">
-        <location filename="../src/Components/EditRibbon.qml" line="381"/>
+        <location filename="../src/Components/EditRibbon.qml" line="387"/>
         <location filename="../src/Components/ReaderControlBar.qml" line="553"/>
         <location filename="../src/Components/ViewRibbon.qml" line="161"/>
         <source>Page</source>
         <translation>Trang</translation>
     </message>
     <message id="AddPage">
-        <location filename="../src/Components/EditRibbon.qml" line="387"/>
+        <location filename="../src/Components/EditRibbon.qml" line="393"/>
         <source>Add Page</source>
         <translation>Thêm trang</translation>
     </message>
     <message id="AddBlankPage">
-        <location filename="../src/Components/EditRibbon.qml" line="389"/>
+        <location filename="../src/Components/EditRibbon.qml" line="395"/>
         <source>Add Blank Page</source>
         <translation>Thêm trang trắng</translation>
     </message>
@@ -1514,8 +1517,8 @@
     </message>
     <message id="LocalPdfFilesOnly">
         <location filename="../src/PDFDocument.cpp" line="138"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="192"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="271"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="195"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="274"/>
         <source>Only local PDF files are supported</source>
         <translation>Chỉ hỗ trợ tệp PDF trên máy</translation>
     </message>
@@ -1527,7 +1530,7 @@
         </translation>
     </message>
     <message id="AllDraftChangesDiscarded">
-        <location filename="../src/PDFEditControllerDrafts.cpp" line="566"/>
+        <location filename="../src/PDFEditControllerDrafts.cpp" line="568"/>
         <source>All draft changes were discarded.</source>
         <translation>Đã bỏ tất cả thay đổi nháp.</translation>
     </message>
@@ -1554,10 +1557,10 @@
     </message>
     <message id="NoPdfOpenForSaving">
         <location filename="../src/PDFEditControllerSave.cpp" line="61"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="163"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="182"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="241"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="261"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="166"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="185"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="244"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="264"/>
         <source>No PDF is open.</source>
         <translation>Chưa mở tệp PDF.</translation>
     </message>
@@ -1631,63 +1634,68 @@
         <source>Web links could not be removed safely. The PDF was not saved.</source>
         <translation>Không thể xóa liên kết web an toàn. Tệp PDF chưa được lưu.</translation>
     </message>
-    <message id="PdfSaveCommentUpdateFailed">
+    <message id="PdfSaveManualLinkFailed">
         <location filename="../src/PDFEditControllerSave.cpp" line="126"/>
+        <source>The links could not be saved. Check their destination pages and try again.</source>
+        <translation>Không thể lưu liên kết. Hãy kiểm tra trang đích rồi thử lại.</translation>
+    </message>
+    <message id="PdfSaveCommentUpdateFailed">
+        <location filename="../src/PDFEditControllerSave.cpp" line="129"/>
         <source>The comment could not be updated on page %1.</source>
         <translation>Không thể cập nhật bình luận trên trang %1.</translation>
     </message>
     <message id="PdfSaveCommentRemovalFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="129"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="132"/>
         <source>The comment could not be deleted on page %1.</source>
         <translation>Không thể xóa bình luận trên trang %1.</translation>
     </message>
     <message id="PdfSavePageCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="132"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="135"/>
         <source>Blank page %1 could not be created while saving.</source>
         <translation>Không thể tạo trang trắng %1 khi lưu.</translation>
     </message>
     <message id="PdfSavePageDeletionFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="135"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="138"/>
         <source>Page %1 could not be deleted while saving.</source>
         <translation>Không thể xóa trang %1 khi lưu.</translation>
     </message>
     <message id="PdfSavePageGenerationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="138"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="141"/>
         <source>Page %1 could not be finalized for saving.</source>
         <translation>Không thể hoàn tất trang %1 để lưu.</translation>
     </message>
     <message id="PdfSaveAcroFormCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="141"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="144"/>
         <source>The AcroForm fields could not be created: %1</source>
         <translation>Không thể tạo các trường AcroForm: %1</translation>
     </message>
     <message id="PdfSaveOutputOpenFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="144"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="147"/>
         <source>The destination file could not be opened: %1</source>
         <translation>Không thể mở tệp đích: %1</translation>
     </message>
     <message id="PdfSaveOutputWriteFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="147"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="150"/>
         <source>The PDF could not be written: %1</source>
         <translation>Không thể ghi tệp PDF: %1</translation>
     </message>
     <message id="PdfSaveOutputCommitFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="150"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="153"/>
         <source>The saved PDF could not replace the destination file: %1</source>
         <translation>Không thể thay thế tệp đích bằng tệp PDF đã lưu: %1</translation>
     </message>
     <message id="FontDownloadCancelled">
-        <location filename="../src/PDFEditControllerSave.cpp" line="501"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="508"/>
         <source>Font download cancelled. Your edits have been kept.</source>
         <translation>Đã hủy tải font. Các chỉnh sửa vẫn được giữ lại.</translation>
     </message>
     <message id="FontDownloadSaveFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="554"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="561"/>
         <source>The font could not be downloaded: %1. Your edits have been kept.</source>
         <translation>Không thể tải font: %1 Các chỉnh sửa vẫn được giữ lại.</translation>
     </message>
     <message id="FontDownloadContinuingSave">
-        <location filename="../src/PDFEditControllerSave.cpp" line="573"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="580"/>
         <source>Font downloaded. Continuing to save…</source>
         <translation>Đã tải font. Đang tiếp tục lưu…</translation>
     </message>
@@ -1699,14 +1707,14 @@
         <location filename="../src/PDFEditControllerComments.cpp" line="2292"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="2366"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="2542"/>
-        <location filename="../src/PDFEditControllerDrafts.cpp" line="743"/>
+        <location filename="../src/PDFEditControllerDrafts.cpp" line="745"/>
         <source>This comment is read-only.</source>
         <translation>Bình luận này chỉ có thể đọc.</translation>
     </message>
     <message id="TextGeometryStillLoading">
         <location filename="../src/PDFEditControllerComments.cpp" line="1136"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="187"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="266"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="190"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="269"/>
         <source>Text information is still loading. Please try again.</source>
         <translation>Thông tin văn bản vẫn đang tải. Vui lòng thử lại.</translation>
     </message>
@@ -1791,7 +1799,7 @@
     </message>
     <message id="PdfSaveFailed">
         <location filename="../src/PDFEditControllerSave.cpp" line="67"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="153"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="156"/>
         <source>The PDF could not be saved.</source>
         <translation>Không thể lưu tệp PDF.</translation>
     </message>
@@ -1819,7 +1827,7 @@
         <translation>Hình ảnh đã chọn quá lớn. Hãy chọn ảnh tối đa 40 megapixel và 64 MiB.</translation>
     </message>
     <message id="PdfAnnotationsNotPermitted">
-        <location filename="../src/PDFEditController.cpp" line="798"/>
+        <location filename="../src/PDFEditController.cpp" line="802"/>
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="1140"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="862"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="884"/>
@@ -1835,9 +1843,10 @@
         <location filename="../src/PDFEditControllerComments.cpp" line="2289"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="2363"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="2547"/>
-        <location filename="../src/PDFEditControllerDrafts.cpp" line="739"/>
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="81"/>
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="210"/>
+        <location filename="../src/PDFEditControllerDrafts.cpp" line="741"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="96"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="225"/>
+        <location filename="../src/PDFEditControllerManualLinks.cpp" line="48"/>
         <source>This PDF does not permit changing annotations.</source>
         <oldsource>This PDF does not permit adding or deleting annotations.</oldsource>
         <translation>Tệp PDF này không cho phép thay đổi chú thích.</translation>
@@ -1861,19 +1870,19 @@
         <translation>Bình luận và phản hồi chỉ được chứa tối đa %1 ký tự.</translation>
     </message>
     <message id="NoDraftChangesToSave">
-        <location filename="../src/PDFEditControllerSave.cpp" line="168"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="246"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="171"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="249"/>
         <source>There are no draft changes to save.</source>
         <translation>Không có thay đổi nháp nào để lưu.</translation>
     </message>
     <message id="PdfSavedButReopenFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="460"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="463"/>
         <source>The PDF was saved, but TrePDF could not reopen it.</source>
         <translation>Đã lưu tệp PDF nhưng TrePDF không thể mở lại tệp.</translation>
     </message>
     <message id="PdfSavedFile">
-        <location filename="../src/PDFEditControllerSave.cpp" line="448"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="466"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="451"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="473"/>
         <source>Saved %1</source>
         <translation>Đã lưu %1</translation>
     </message>
@@ -2629,70 +2638,255 @@
         <translation>Không tìm thấy bản font %1 đầy đủ với kiểu chữ này để tải xuống.</translation>
     </message>
     <message id="SaveBeforeCreatingWebLinks">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="88"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="103"/>
         <source>Save your PDF changes before creating links from URLs.</source>
         <translation>Lưu thay đổi trong PDF trước khi tạo liên kết từ URL.</translation>
     </message>
     <message id="WebLinkScanFailed">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="121"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="136"/>
         <source>The PDF could not be scanned for web links.</source>
         <translation>Không thể quét liên kết web trong PDF.</translation>
     </message>
     <message id="WebLinksCreatedLimited">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="181"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="195"/>
         <source>Created %1 web links. Some content exceeded the scan limits. Save to keep the links.</source>
         <translation>Đã tạo %1 liên kết web. Một số nội dung vượt giới hạn quét. Lưu để giữ các liên kết.</translation>
     </message>
     <message id="WebLinksCreated">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="184"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="198"/>
         <source>Created %1 web links. Switch to View to open them, or Save to keep them.</source>
         <translation>Đã tạo %1 liên kết web. Chuyển sang Xem để mở liên kết, hoặc Lưu để giữ lại.</translation>
     </message>
     <message id="NoNewWebLinksFound">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="187"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="201"/>
         <source>No new web links were found. URLs need a text layer and may already have links.</source>
         <translation>Không tìm thấy liên kết web mới. URL cần có lớp văn bản và có thể đã được gắn liên kết.</translation>
     </message>
     <message id="WebLinkScannerBusy">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="195"/>
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="295"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="209"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="326"/>
+        <location filename="../src/PDFEditControllerManualLinks.cpp" line="99"/>
         <source>Another link scan is finishing. Please try again.</source>
         <translation>Một lượt quét liên kết khác đang kết thúc. Vui lòng thử lại.</translation>
     </message>
     <message id="FindingWebLinks">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="200"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="214"/>
         <source>Finding URLs in the document…</source>
         <translation>Đang tìm URL trong tài liệu…</translation>
     </message>
     <message id="SaveBeforeRemovingWebLinks">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="217"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="232"/>
         <source>Save your PDF changes before removing web links.</source>
         <translation>Hãy lưu các thay đổi trong PDF trước khi xóa liên kết web.</translation>
     </message>
     <message id="WebLinkRemovalScanFailed">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="248"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="263"/>
         <source>Web links could not be scanned for removal.</source>
         <translation>Không thể quét liên kết web để xóa.</translation>
     </message>
     <message id="WebLinksRemovedLimited">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="281"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="312"/>
         <source>Removed %1 web links. Protected links or content beyond the scan limits were kept. Save to keep the changes.</source>
         <translation>Đã xóa %1 liên kết web. Các liên kết được bảo vệ hoặc nội dung vượt giới hạn quét được giữ lại. Hãy lưu để giữ thay đổi.</translation>
     </message>
     <message id="WebLinksRemoved">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="284"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="315"/>
         <source>Removed %1 web links. Save to keep the changes.</source>
         <translation>Đã xóa %1 liên kết web. Hãy lưu để giữ thay đổi.</translation>
     </message>
     <message id="NoRemovableWebLinksFound">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="287"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="318"/>
         <source>No removable web links were found.</source>
         <translation>Không tìm thấy liên kết web có thể xóa.</translation>
     </message>
     <message id="FindingWebLinksToRemove">
-        <location filename="../src/PDFEditControllerWebLinks.cpp" line="300"/>
+        <location filename="../src/PDFEditControllerWebLinks.cpp" line="331"/>
         <source>Finding web links to remove…</source>
         <translation>Đang tìm liên kết web để xóa…</translation>
+    </message>
+    <message id="ManualLinkGoToPageNumber">
+        <location filename="../src/Components/ManualLinkLayer.qml" line="298"/>
+        <source>Go to page %1</source>
+        <translation>Đến trang %1</translation>
+    </message>
+    <message id="ResizeManualLink">
+        <location filename="../src/Components/ManualLinkLayer.qml" line="476"/>
+        <source>Resize link</source>
+        <translation>Đổi kích thước liên kết</translation>
+    </message>
+    <message id="ManualLinkProperties">
+        <location filename="../src/Components/ManualLinkLayer.qml" line="528"/>
+        <location filename="../src/Components/ManualLinkLayer.qml" line="573"/>
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="46"/>
+        <source>Link properties</source>
+        <translation>Thuộc tính liên kết</translation>
+    </message>
+    <message id="LinkLineWidthPoints">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="27"/>
+        <source>%1 pt</source>
+        <translation>%1 pt</translation>
+    </message>
+    <message id="CreateManualLink">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="44"/>
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="333"/>
+        <source>Create link</source>
+        <translation>Tạo liên kết</translation>
+    </message>
+    <message id="ManualLinkUrlRequired">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="52"/>
+        <source>Enter a website URL.</source>
+        <translation>Hãy nhập địa chỉ trang web.</translation>
+    </message>
+    <message id="ManualLinkPropertiesInvalid">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="70"/>
+        <source>The link could not be applied. Check the URL or destination page and try again. Save newly inserted pages first.</source>
+        <translation>Không thể áp dụng liên kết. Hãy kiểm tra URL hoặc trang đích rồi thử lại. Trang mới thêm cần được lưu trước.</translation>
+    </message>
+    <message id="ManualLinkAppearance">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="119"/>
+        <source>Link appearance</source>
+        <translation>Hình thức liên kết</translation>
+    </message>
+    <message id="ManualLinkType">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="129"/>
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="143"/>
+        <source>Link type</source>
+        <translation>Kiểu liên kết</translation>
+    </message>
+    <message id="ManualLinkInvisibleRectangle">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="137"/>
+        <source>Invisible rectangle</source>
+        <translation>Vùng chữ nhật không viền</translation>
+    </message>
+    <message id="ManualLinkVisibleRectangle">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="139"/>
+        <source>Visible rectangle</source>
+        <translation>Vùng chữ nhật có viền</translation>
+    </message>
+    <message id="ManualLinkHighlightStyle">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="147"/>
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="165"/>
+        <source>Highlight style</source>
+        <translation>Hiệu ứng khi nhấn</translation>
+    </message>
+    <message id="ManualLinkHighlightNone">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="155"/>
+        <source>None</source>
+        <translation>Không có</translation>
+    </message>
+    <message id="ManualLinkHighlightInvert">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="157"/>
+        <source>Invert</source>
+        <translation>Đảo màu</translation>
+    </message>
+    <message id="ManualLinkHighlightOutline">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="159"/>
+        <source>Outline</source>
+        <translation>Viền</translation>
+    </message>
+    <message id="ManualLinkHighlightInset">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="161"/>
+        <source>Inset</source>
+        <translation>Nhấn chìm</translation>
+    </message>
+    <message id="ManualLinkLineThickness">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="169"/>
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="183"/>
+        <source>Line thickness</source>
+        <translation>Độ dày nét</translation>
+    </message>
+    <message id="ManualLinkLineStyle">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="187"/>
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="205"/>
+        <source>Line style</source>
+        <translation>Kiểu nét</translation>
+    </message>
+    <message id="ManualLinkSolid">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="197"/>
+        <source>Solid</source>
+        <translation>Nét liền</translation>
+    </message>
+    <message id="ManualLinkDashed">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="199"/>
+        <source>Dashed</source>
+        <translation>Nét đứt</translation>
+    </message>
+    <message id="ManualLinkUnderline">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="201"/>
+        <source>Underline</source>
+        <translation>Gạch dưới</translation>
+    </message>
+    <message id="ManualLinkColor">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="209"/>
+        <source>Color</source>
+        <translation>Màu</translation>
+    </message>
+    <message id="ManualLinkBorderColor">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="219"/>
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="348"/>
+        <source>Link border color</source>
+        <translation>Màu viền liên kết</translation>
+    </message>
+    <message id="ManualLinkAction">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="244"/>
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="263"/>
+        <source>Link action</source>
+        <translation>Hành động liên kết</translation>
+    </message>
+    <message id="ManualLinkOpenWebPage">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="256"/>
+        <source>Open a web page</source>
+        <translation>Mở trang web</translation>
+    </message>
+    <message id="ManualLinkGoToPage">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="258"/>
+        <source>Go to a page in this document</source>
+        <translation>Đến một trang trong tài liệu</translation>
+    </message>
+    <message id="ManualLinkUrlPlaceholder">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="272"/>
+        <source>https://example.com</source>
+        <translation>https://example.com</translation>
+    </message>
+    <message id="ManualLinkWebsiteUrl">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="274"/>
+        <source>Website URL</source>
+        <translation>Địa chỉ trang web</translation>
+    </message>
+    <message id="ManualLinkPage">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="287"/>
+        <source>Page</source>
+        <translation>Trang</translation>
+    </message>
+    <message id="ManualLinkDestinationPage">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="299"/>
+        <source>Destination page</source>
+        <translation>Trang đích</translation>
+    </message>
+    <message id="ManualLinkPageCount">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="303"/>
+        <source>of %1</source>
+        <translation>trên %1</translation>
+    </message>
+    <message id="ApplyManualLink">
+        <location filename="../src/Components/LinkPropertiesDialog.qml" line="335"/>
+        <source>Apply</source>
+        <translation>Áp dụng</translation>
+    </message>
+    <message id="EditableLinkScanFailed">
+        <location filename="../src/PDFEditControllerManualLinks.cpp" line="80"/>
+        <source>The PDF links could not be loaded. Select Add or edit a link to try again.</source>
+        <translation>Không thể tải liên kết trong PDF. Hãy chọn Thêm hoặc sửa liên kết để thử lại.</translation>
+    </message>
+    <message id="EditableLinkScanLimited">
+        <location filename="../src/PDFEditControllerManualLinks.cpp" line="88"/>
+        <source>Some links are read-only or exceed the scan limits. Drag a rectangle to create a link.</source>
+        <translation>Một số liên kết chỉ đọc hoặc vượt giới hạn quét. Kéo một vùng chữ nhật để tạo liên kết.</translation>
+    </message>
+    <message id="LinkEditingHint">
+        <location filename="../src/PDFEditControllerManualLinks.cpp" line="91"/>
+        <source>Drag a rectangle to create a link. Double-click an existing link to edit it.</source>
+        <translation>Kéo một vùng chữ nhật để tạo liên kết. Nhấp đúp vào liên kết có sẵn để sửa.</translation>
     </message>
 </context>
 </TS>

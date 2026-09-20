@@ -128,11 +128,68 @@ bool removeWebLinksAndWait(PDFEditController &controller)
     }, 5000) && QTest::qWaitFor([&]() { return !controller.removingWebLinks(); }, 5000);
 }
 
+bool beginLinkEditingAndWait(PDFEditController &controller)
+{
+    return controller.beginLinkEditing()
+        && QTest::qWaitFor([&]() { return !controller.loadingEditableLinks(); }, 5000);
+}
+
+QVariantMap manualWebProperties(const QString &url = QStringLiteral("https://manual.example/path"))
+{
+    return {
+        {QStringLiteral("url"), url},
+        {QStringLiteral("targetPage"), -1},
+        {QStringLiteral("visible"), false},
+        {QStringLiteral("color"), QColor(Qt::blue)},
+        {QStringLiteral("width"), 1.0},
+        {QStringLiteral("lineStyle"), 0},
+        {QStringLiteral("highlight"), 1},
+    };
+}
+
+QVariantMap editableLinkWithUrl(const PDFEditController &controller, int page, const QString &url)
+{
+    for (const QVariant &entry : controller.editableLinksForPage(page)) {
+        if (entry.toMap().value(QStringLiteral("url")).toString() == url)
+            return entry.toMap();
+    }
+    return {};
+}
+
+bool createManualSourcePdf(const QString &path, bool internalAction = false, bool chainedAction = false)
+{
+    const QByteArray content("% manual-link-source-content\nBT /F1 12 Tf 40 730 Td (Manual source link) Tj ET\n");
+    return writePdfObjects(path, {
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] "
+        "/Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R /Annots [8 0 R 9 0 R 10 0 R] >>",
+        "<< /Length " + QByteArray::number(content.size()) + " >>\nstream\n" + content + "endstream",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 7 0 R >>",
+        "<< /Length 0 >>\nstream\nendstream",
+        "<< /Type /Annot /Subtype /Link /Rect [38 728 350 744] /F 4 "
+        "/Border [0 0 1] /C [0 0 1] /H /I /NM (manual-source-web) "
+        "/TrePDFKeep (keep-unrelated-metadata) "
+        "/A << /S /URI /URI (https://original.example/) "
+        + QByteArray(chainedAction ? "/Next << /S /URI /URI (https://next.example/) >> " : "")
+        + ">> >>",
+        "<< /Type /Annot /Subtype /Link /Rect [38 680 350 700] /Border [0 0 0] "
+        + QByteArray(internalAction ? "/A << /S /GoTo /D [6 0 R /Fit] >> >>"
+                                    : "/Dest [6 0 R /Fit] >>"),
+        "<< /Type /Annot /Subtype /Link /Rect [38 640 350 660] /F 128 /Border [0 0 0] "
+        "/A << /S /URI /URI (https://protected.example/) >> >>",
+    });
+}
+
 struct SavedWebLink {
     int page = -1;
     QString uri;
     QRectF rect;
     float borderWidth = -1.0f;
+    int targetPage = -1;
+    unsigned long destinationView = 0;
+    QString marker;
 };
 
 struct WebLinkInspection {
@@ -206,6 +263,17 @@ WebLinkInspection inspectWebLinks(const QString &filePath)
                        QPointF(rect.right, rect.top)),
                 borderWidth,
             });
+            FPDF_DEST destination = link ? FPDFLink_GetDest(document, link) : nullptr;
+            if (!destination && action && FPDFAction_GetType(action) == PDFACTION_GOTO)
+                destination = FPDFAction_GetDest(document, action);
+            SavedWebLink &saved = result.links.last();
+            if (destination) {
+                saved.targetPage = FPDFDest_GetDestPageIndex(document, destination);
+                unsigned long parameterCount = 0;
+                FS_FLOAT parameters[4]{};
+                saved.destinationView = FPDFDest_GetView(destination, &parameterCount, parameters);
+            }
+            saved.marker = PDFAnnotationUtils::annotationString(annotation, "TrePDFKeep");
         }
     }
     result.readable = true;
@@ -1061,4 +1129,792 @@ void PDFEditControllerTest::savesWebLinkRemovalWithCommentDeletion()
     QCOMPARE(saved.comments, QStringList{QStringLiteral("Keep this comment")});
     QCOMPARE(saved.stampAppearances.size(), 1);
     QVERIFY(!saved.stampAppearances.constFirst().isEmpty());
+}
+
+void PDFEditControllerTest::addsManualWebAndPageLinks()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-add.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-add-saved.pdf"));
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("Page one")}, {QStringLiteral("Page two")}}));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    QCOMPARE(controller.tool(), PDFEditController::LinkTool);
+    // Opening and cancelling the properties dialog never creates a draft.
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    const QRectF webRect(0.1, 0.15, 0.25, 0.06);
+    const QString web = controller.addLink(0, webRect, manualWebProperties());
+    QVERIFY(!web.isEmpty());
+    QVariantMap pageProperties = manualWebProperties();
+    pageProperties[QStringLiteral("url")] = QString();
+    pageProperties[QStringLiteral("targetPage")] = 1;
+    const QString page = controller.addLink(0, QRectF(0.1, 0.3, 0.2, 0.05), pageProperties);
+    QVERIFY(!page.isEmpty());
+    QVERIFY(web != page);
+    QCOMPARE(controller.editableLinksForPage(0).size(), 2);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    QVERIFY(!controller.hasDrafts());
+    const WebLinkInspection saved = inspectWebLinks(output);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.links.size(), 2);
+    QVERIFY(std::any_of(saved.links.cbegin(), saved.links.cend(), [](const SavedWebLink &link) {
+        return link.uri == QStringLiteral("https://manual.example/path") && link.borderWidth == 0;
+    }));
+    QVERIFY(std::any_of(saved.links.cbegin(), saved.links.cend(), [](const SavedWebLink &link) {
+        return link.targetPage == 1 && link.destinationView == PDFDEST_VIEW_FIT;
+    }));
+    QVERIFY(inspectWebLinks(source).links.isEmpty());
+    QCOMPARE(fixtureContentStream(output), fixtureContentStream(source));
+    QVERIFY(beginLinkEditingAndWait(controller));
+    QCOMPARE(controller.editableLinksForPage(0).size(), 2);
+    const QVariantMap reopened = editableLinkWithUrl(controller, 0, QStringLiteral("https://manual.example/path"));
+    QVERIFY(!reopened.isEmpty());
+    QVERIFY(reopened.value(QStringLiteral("editable")).toBool());
+    QVERIFY(!reopened.value(QStringLiteral("draft")).toBool());
+    QVERIFY(!reopened.value(QStringLiteral("visible")).toBool());
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::reloadsManualLinksAfterSaving()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-reload.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-reload-saved.pdf"));
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("Save keeps link editing active")}}));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QRectF rect(0.1, 0.2, 0.3, 0.1);
+    QVERIFY(!controller.addLink(0, rect, manualWebProperties()).isEmpty());
+    QVERIFY(controller.requestSaveAs(QUrl::fromLocalFile(output)));
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.saving(), 5000);
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.tool(), PDFEditController::LinkTool);
+    // The active link tool reloads source regions without reselecting its menu.
+    QTRY_COMPARE_WITH_TIMEOUT(controller.editableLinksForPage(0).size(), 1, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.loadingEditableLinks(), 5000);
+    const QVariantMap saved = controller.editableLinksForPage(0).constFirst().toMap();
+    QVERIFY(!saved.value(QStringLiteral("draft")).toBool());
+    const QString editedUrl = QStringLiteral("https://reload.example/");
+    QVERIFY(controller.updateLink(0, saved.value(QStringLiteral("id")).toString(),
+                                  rect, manualWebProperties(editedUrl)));
+    QVERIFY(controller.save());
+    QCOMPARE(controller.tool(), PDFEditController::LinkTool);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.editableLinksForPage(0).size(), 1, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.loadingEditableLinks(), 5000);
+    const QVariantMap resaved = editableLinkWithUrl(controller, 0, editedUrl);
+    QVERIFY(!resaved.isEmpty());
+    QVERIFY(!resaved.value(QStringLiteral("draft")).toBool());
+    QVERIFY(resaved.value(QStringLiteral("editable")).toBool());
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::reopensFractionalManualLinkBorders()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-fractional.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-fractional-saved.pdf"));
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("Fractional drag geometry")}}));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    // A real drag at fractional zoom placed these PDF-point edges. Serializing
+    // their decimals, reading them as floats, and then subtracting the edges
+    // changes millipoint rounding at exactly .0005.
+    const QRectF rect(47.96875 / 600.0, 124.5 / 800.0,
+                      191.9375 / 600.0, 28.84375 / 800.0);
+    QVariantMap properties = manualWebProperties();
+    properties[QStringLiteral("visible")] = true;
+    properties[QStringLiteral("color")] = QColor(Qt::black);
+    QVERIFY(!controller.addLink(0, rect, properties).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    QVERIFY(beginLinkEditingAndWait(controller));
+    QVariantMap saved = editableLinkWithUrl(controller, 0, QStringLiteral("https://manual.example/path"));
+    QVERIFY(!saved.isEmpty());
+    QVERIFY(saved.value(QStringLiteral("editable")).toBool());
+    // Editing and resaving also uses the rounded source frame, so its own
+    // appearance must remain recognizable after another serialization.
+    for (int style = 1; style <= 2; ++style) {
+        properties[QStringLiteral("lineStyle")] = style;
+        QVERIFY(controller.updateLink(0, saved.value(QStringLiteral("id")).toString(),
+                                      saved.value(QStringLiteral("rect")).toRectF(), properties));
+        QVERIFY(controller.save());
+        QVERIFY(beginLinkEditingAndWait(controller));
+        saved = editableLinkWithUrl(controller, 0, QStringLiteral("https://manual.example/path"));
+        QVERIFY(!saved.isEmpty());
+        QVERIFY(saved.value(QStringLiteral("editable")).toBool());
+        QCOMPARE(saved.value(QStringLiteral("lineStyle")).toInt(), style);
+    }
+}
+
+void PDFEditControllerTest::rendersSavedManualLinkBorders_data()
+{
+    QTest::addColumn<int>("lineStyle");
+    QTest::addColumn<bool>("visible");
+    QTest::addColumn<int>("rotation");
+    QTest::addColumn<bool>("crop");
+    const QStringList styles{QStringLiteral("solid"), QStringLiteral("dashed"),
+                             QStringLiteral("underline"), QStringLiteral("invisible")};
+    for (int style = 0; style < styles.size(); ++style) {
+        for (const int rotation : {0, 90, 180, 270}) {
+            for (const bool crop : {false, true}) {
+                const QByteArray name = QStringLiteral("%1-%2-%3")
+                    .arg(styles.at(style)).arg(rotation).arg(crop ? "cropped" : "uncropped").toLatin1();
+                QTest::newRow(name.constData()) << (style == 3 ? 0 : style) << (style != 3)
+                                              << rotation << crop;
+            }
+        }
+    }
+}
+
+void PDFEditControllerTest::rendersSavedManualLinkBorders()
+{
+    QFETCH(int, lineStyle);
+    QFETCH(bool, visible);
+    QFETCH(int, rotation);
+    QFETCH(bool, crop);
+    const QString suffix = QStringLiteral("%1-%2-%3-%4.pdf").arg(lineStyle).arg(visible).arg(rotation).arg(crop);
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-link-border-") + suffix);
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-link-border-saved-") + suffix);
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("Keep this source text unchanged")}}, false, rotation, crop));
+    QSize pixelSize;
+    {
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(source)));
+        pixelSize = document.pageSize(0).toSize();
+        controller.setDocument(&document);
+        QVERIFY(beginLinkEditingAndWait(controller));
+        QVariantMap properties = manualWebProperties();
+        properties[QStringLiteral("visible")] = visible;
+        properties[QStringLiteral("color")] = QColor(Qt::red);
+        properties[QStringLiteral("width")] = 4.0;
+        properties[QStringLiteral("lineStyle")] = lineStyle;
+        // At one PDF point per pixel, the link occupies x=120..300, y=200..280.
+        const QRectF rect(120.0 / pixelSize.width(), 200.0 / pixelSize.height(),
+                          180.0 / pixelSize.width(), 80.0 / pixelSize.height());
+        QVERIFY(!controller.addLink(0, rect, properties).isEmpty());
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    }
+    const QImage original = renderFirstPage(source, pixelSize, FPDF_ANNOT);
+    QVERIFY(!original.isNull());
+    QCOMPARE(fixtureContentStream(output), fixtureContentStream(source));
+    QCOMPARE(renderFirstPage(output, pixelSize), original);
+    const QImage saved = renderFirstPage(output, pixelSize, FPDF_ANNOT);
+    QVERIFY(!saved.isNull());
+    const auto maximumColoredPixelsPerRow = [](const QImage &image, const QColor &expected, const QRect &area) {
+        int maximum = 0;
+        for (int y = area.top(); y <= area.bottom(); ++y) {
+            int matching = 0;
+            for (int x = area.left(); x <= area.right(); ++x) {
+                const QColor color = image.pixelColor(x, y);
+                matching += qAbs(color.red() - expected.red()) < 70
+                    && qAbs(color.green() - expected.green()) < 70
+                    && qAbs(color.blue() - expected.blue()) < 70;
+            }
+            maximum = std::max(maximum, matching);
+        }
+        return maximum;
+    };
+    const QRect topBand(135, 196, 150, 9);
+    const QRect bottomBand(135, 276, 150, 9);
+    const int top = maximumColoredPixelsPerRow(saved, Qt::red, topBand);
+    const int bottom = maximumColoredPixelsPerRow(saved, Qt::red, bottomBand);
+    if (!visible) {
+        QCOMPARE(saved, original);
+    } else if (lineStyle == 1) {
+        // The dashed appearance has both colored segments and genuine gaps.
+        QVERIFY2(top > 30 && top < 135, qPrintable(QString::number(top)));
+        QVERIFY2(bottom > 30 && bottom < 135, qPrintable(QString::number(bottom)));
+    } else {
+        QCOMPARE(top, lineStyle == 2 ? 0 : 150);
+        QCOMPARE(bottom, 150);
+    }
+    if (lineStyle == 2) {
+        QCOMPARE(maximumColoredPixelsPerRow(saved, Qt::red, QRect(116, 210, 9, 60)), 0);
+        QCOMPARE(maximumColoredPixelsPerRow(saved, Qt::red, QRect(296, 210, 9, 60)), 0);
+    }
+    QCOMPARE(saved.copy(QRect(130, 210, 160, 60)), original.copy(QRect(130, 210, 160, 60)));
+    QCOMPARE(saved.copy(QRect(0, 0, 600, 180)), original.copy(QRect(0, 0, 600, 180)));
+
+    PDFDocument reopenedDocument;
+    PDFEditController reopenedController;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(output)));
+    reopenedController.setDocument(&reopenedDocument);
+    QVERIFY(beginLinkEditingAndWait(reopenedController));
+    const QVariantMap reopened = editableLinkWithUrl(reopenedController, 0, QStringLiteral("https://manual.example/path"));
+    QVERIFY(!reopened.isEmpty());
+    QVERIFY(reopened.value(QStringLiteral("editable")).toBool());
+    QCOMPARE(reopened.value(QStringLiteral("visible")).toBool(), visible);
+    QCOMPARE(reopened.value(QStringLiteral("lineStyle")).toInt(), lineStyle);
+    QCOMPARE(reopened.value(QStringLiteral("color")).value<QColor>(), QColor(Qt::red));
+    QCOMPARE(reopened.value(QStringLiteral("width")).toDouble(), 4.0);
+    QVariantMap recolored = reopened;
+    recolored[QStringLiteral("color")] = QColor(Qt::blue);
+    QVERIFY(reopenedController.updateLink(0, reopened.value(QStringLiteral("id")).toString(),
+                                         reopened.value(QStringLiteral("rect")).toRectF(), recolored));
+    QVERIFY(reopenedController.save());
+    QCOMPARE(fixtureContentStream(output), fixtureContentStream(source));
+    const QImage resaved = renderFirstPage(output, pixelSize, FPDF_ANNOT);
+    QVERIFY(!resaved.isNull());
+    QCOMPARE(maximumColoredPixelsPerRow(resaved, Qt::blue, topBand), top);
+    QCOMPARE(maximumColoredPixelsPerRow(resaved, Qt::blue, bottomBand), bottom);
+    QCOMPARE(maximumColoredPixelsPerRow(resaved, Qt::red, QRect(110, 190, 200, 100)), 0);
+    QCOMPARE(resaved.copy(QRect(130, 210, 160, 60)), original.copy(QRect(130, 210, 160, 60)));
+    if (!visible)
+        QCOMPARE(resaved, original);
+    QVERIFY(beginLinkEditingAndWait(reopenedController));
+    const QVariantMap reloaded = editableLinkWithUrl(reopenedController, 0, QStringLiteral("https://manual.example/path"));
+    QVERIFY(reloaded.value(QStringLiteral("editable")).toBool());
+    QCOMPARE(reloaded.value(QStringLiteral("color")).value<QColor>(), QColor(Qt::blue));
+}
+
+void PDFEditControllerTest::editsManualSourceLinkAndKeepsMetadata()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-edit.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-edit-saved.pdf"));
+    QVERIFY(createManualSourcePdf(source));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QVariantMap original = editableLinkWithUrl(controller, 0, QStringLiteral("https://original.example/"));
+    QVERIFY(!original.isEmpty());
+    const QString id = original.value(QStringLiteral("id")).toString();
+    QVariantMap properties = controller.linkProperties(0, id);
+    QVERIFY(!properties.isEmpty());
+    properties[QStringLiteral("url")] = QStringLiteral("https://edited.example/new?value=1");
+    properties[QStringLiteral("visible")] = true;
+    properties[QStringLiteral("color")] = QColor(Qt::red);
+    properties[QStringLiteral("width")] = 3.0;
+    properties[QStringLiteral("lineStyle")] = 1;
+    properties[QStringLiteral("highlight")] = 2;
+    const QRectF moved(0.2, 0.25, 0.3, 0.1);
+    QVERIFY(controller.updateLink(0, id, moved, properties));
+    QCOMPARE(controller.deletedSourceWebLinkAnnotationsForPage(0).size(), 1);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const WebLinkInspection saved = inspectWebLinks(output);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.links.size(), 3);
+    const auto edited = std::find_if(saved.links.cbegin(), saved.links.cend(), [](const SavedWebLink &link) {
+        return link.uri == QStringLiteral("https://edited.example/new?value=1");
+    });
+    QVERIFY(edited != saved.links.cend());
+    QCOMPARE(edited->marker, QStringLiteral("keep-unrelated-metadata"));
+    QCOMPARE(fixtureContentStream(output), fixtureContentStream(source));
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QVariantMap reopened = editableLinkWithUrl(controller, 0, properties.value(QStringLiteral("url")).toString());
+    QVERIFY(!reopened.isEmpty());
+    QCOMPARE(reopened.value(QStringLiteral("color")).value<QColor>(), QColor(Qt::red));
+    QCOMPARE(reopened.value(QStringLiteral("width")).toDouble(), 3.0);
+    QCOMPARE(reopened.value(QStringLiteral("lineStyle")).toInt(), 1);
+    QCOMPARE(reopened.value(QStringLiteral("highlight")).toInt(), 2);
+    QVERIFY(reopened.value(QStringLiteral("visible")).toBool());
+    const QRectF actual = reopened.value(QStringLiteral("rect")).toRectF();
+    QVERIFY(QLineF(actual.topLeft(), moved.topLeft()).length() < 0.0001);
+    QVERIFY(QLineF(actual.bottomRight(), moved.bottomRight()).length() < 0.0001);
+}
+
+void PDFEditControllerTest::manualLinksUseHistoryAndDiscard()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-history.pdf"));
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("History")}}));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QRectF initial(0.1, 0.1, 0.2, 0.1);
+    const QRectF moved(0.3, 0.4, 0.4, 0.2);
+    const QString id = controller.addLink(0, initial, manualWebProperties());
+    QVERIFY(!id.isEmpty());
+    QVERIFY(controller.updateLink(0, id, moved, manualWebProperties(QStringLiteral("https://history.example/"))));
+    QVERIFY(controller.deleteLink(0, id));
+    QVERIFY(controller.editableLinksForPage(0).isEmpty());
+    controller.undo();
+    QCOMPARE(controller.linkProperties(0, id).value(QStringLiteral("rect")).toRectF(), moved);
+    controller.undo();
+    QCOMPARE(controller.linkProperties(0, id).value(QStringLiteral("rect")).toRectF(), initial);
+    controller.undo();
+    QVERIFY(controller.editableLinksForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    controller.redo();
+    controller.redo();
+    QCOMPARE(controller.linkProperties(0, id).value(QStringLiteral("url")).toString(), QStringLiteral("https://history.example/"));
+    controller.discardDrafts();
+    QVERIFY(controller.editableLinksForPage(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+}
+
+void PDFEditControllerTest::changesManualSourceLinkDestinationType_data()
+{
+    QTest::addColumn<bool>("webToPage");
+    QTest::newRow("web-to-page") << true;
+    QTest::newRow("page-to-web") << false;
+}
+
+void PDFEditControllerTest::changesManualSourceLinkDestinationType()
+{
+    QFETCH(bool, webToPage);
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-destination-type-%1.pdf").arg(webToPage));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-destination-type-%1-saved.pdf").arg(webToPage));
+    QVERIFY(createManualSourcePdf(source));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    QVariantMap selected;
+    for (const QVariant &entry : controller.editableLinksForPage(0)) {
+        const QVariantMap link = entry.toMap();
+        if ((webToPage && link.value(QStringLiteral("url")).toString() == QStringLiteral("https://original.example/"))
+            || (!webToPage && link.value(QStringLiteral("targetPage")).toInt() == 1)) {
+            selected = link;
+            break;
+        }
+    }
+    QVERIFY(!selected.isEmpty());
+    QVariantMap properties = manualWebProperties(QStringLiteral("https://converted.example/"));
+    if (webToPage) {
+        properties[QStringLiteral("url")] = QString();
+        properties[QStringLiteral("targetPage")] = 0;
+    }
+    const QRectF rect = selected.value(QStringLiteral("rect")).toRectF();
+    QVERIFY(controller.updateLink(0, selected.value(QStringLiteral("id")).toString(), rect, properties));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const WebLinkInspection saved = inspectWebLinks(output);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.links.size(), 3);
+    if (webToPage) {
+        const auto converted = std::find_if(saved.links.cbegin(), saved.links.cend(), [](const SavedWebLink &link) {
+            return link.targetPage == 0;
+        });
+        QVERIFY(converted != saved.links.cend());
+        QVERIFY(converted->uri.isEmpty());
+        QCOMPARE(converted->destinationView, static_cast<unsigned long>(PDFDEST_VIEW_FIT));
+        QCOMPARE(converted->marker, QStringLiteral("keep-unrelated-metadata"));
+    } else {
+        const auto converted = std::find_if(saved.links.cbegin(), saved.links.cend(), [](const SavedWebLink &link) {
+            return link.uri == QStringLiteral("https://converted.example/");
+        });
+        QVERIFY(converted != saved.links.cend());
+        QCOMPARE(converted->targetPage, -1);
+    }
+}
+
+void PDFEditControllerTest::deletesManualSourceLinksThroughHistory()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-delete.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-delete-saved.pdf"));
+    QVERIFY(createManualSourcePdf(source));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QString id = editableLinkWithUrl(controller, 0, QStringLiteral("https://original.example/"))
+                           .value(QStringLiteral("id")).toString();
+    QVERIFY(!id.isEmpty());
+    QVERIFY(controller.deleteLink(0, id));
+    QVERIFY(controller.linkProperties(0, id).isEmpty());
+    QCOMPARE(controller.deletedSourceWebLinkAnnotationsForPage(0).size(), 1);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.linkProperties(0, id).isEmpty());
+    QVERIFY(controller.deletedSourceWebLinkAnnotationsForPage(0).isEmpty());
+    controller.redo();
+    QVERIFY(controller.linkProperties(0, id).isEmpty());
+    controller.discardDrafts();
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QString restored = editableLinkWithUrl(controller, 0, QStringLiteral("https://original.example/"))
+                                 .value(QStringLiteral("id")).toString();
+    QVERIFY(controller.deleteLink(0, restored));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const WebLinkInspection saved = inspectWebLinks(output);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.links.size(), 2);
+    QVERIFY(std::any_of(saved.links.cbegin(), saved.links.cend(), [](const SavedWebLink &link) {
+        return link.uri == QStringLiteral("https://protected.example/");
+    }));
+    QVERIFY(std::any_of(saved.links.cbegin(), saved.links.cend(), [](const SavedWebLink &link) {
+        return link.targetPage == 1;
+    }));
+}
+
+void PDFEditControllerTest::rejectsProtectedManualSourceLinks()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-protected.pdf"));
+    QVERIFY(createRemovalWebLinkPdf(source, true));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    for (const QString &url : {QStringLiteral("https://readonly.example/"),
+                               QStringLiteral("https://locked.example/"),
+                               QStringLiteral("https://lockedcontents.example/")}) {
+        const QVariantMap link = editableLinkWithUrl(controller, 0, url);
+        QVERIFY2(!link.isEmpty(), qPrintable(url));
+        QVERIFY(!link.value(QStringLiteral("editable")).toBool());
+        const QString id = link.value(QStringLiteral("id")).toString();
+        QVERIFY(!controller.updateLink(0, id, QRectF(0.2, 0.2, 0.2, 0.1), manualWebProperties()));
+        QVERIFY(!controller.deleteLink(0, id));
+    }
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
+void PDFEditControllerTest::rejectsInvalidManualLinks_data()
+{
+    QTest::addColumn<QString>("url");
+    QTest::addColumn<QRectF>("rect");
+    QTest::addColumn<int>("targetPage");
+    const QRectF valid(0.1, 0.1, 0.2, 0.1);
+    for (const QString &url : {QString(), QStringLiteral("javascript:alert(1)"),
+                               QStringLiteral("file:///tmp/private"), QStringLiteral("ftp://example.org/a"),
+                               QStringLiteral("https://name:password@example.org/"),
+                               QStringLiteral("https://example.org/") + QString(4096, QLatin1Char('a'))}) {
+        QTest::newRow(qPrintable(QStringLiteral("url-%1").arg(url.left(45)))) << url << valid << -1;
+    }
+    QTest::newRow("empty-region") << QStringLiteral("https://example.org/") << QRectF() << -1;
+    QTest::newRow("negative-origin") << QStringLiteral("https://example.org/") << QRectF(-0.1, 0.1, 0.2, 0.1) << -1;
+    QTest::newRow("outside-page") << QStringLiteral("https://example.org/") << QRectF(0.9, 0.1, 0.2, 0.1) << -1;
+    QTest::newRow("nonfinite-region") << QStringLiteral("https://example.org/")
+                                     << QRectF(std::numeric_limits<double>::quiet_NaN(), 0.1, 0.2, 0.1) << -1;
+    QTest::newRow("missing-target") << QString() << valid << 10;
+    QTest::newRow("invalid-negative-target") << QString() << valid << -2;
+}
+
+void PDFEditControllerTest::rejectsInvalidManualLinks()
+{
+    QFETCH(QString, url);
+    QFETCH(QRectF, rect);
+    QFETCH(int, targetPage);
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-invalid.pdf"));
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("Invalid input")}}));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    QVariantMap properties = manualWebProperties(url);
+    properties[QStringLiteral("targetPage")] = targetPage;
+    QVERIFY(controller.addLink(0, rect, properties).isEmpty());
+    QVERIFY(controller.addLink(-1, QRectF(0.1, 0.1, 0.2, 0.1), manualWebProperties()).isEmpty());
+    QVERIFY(controller.addLink(1, QRectF(0.1, 0.1, 0.2, 0.1), manualWebProperties()).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
+void PDFEditControllerTest::savesManualLinksWithCropAndRotation_data()
+{
+    savesAutoWebLinksWithCropAndRotation_data();
+}
+
+void PDFEditControllerTest::savesManualLinksWithCropAndRotation()
+{
+    QFETCH(int, rotation);
+    QFETCH(bool, crop);
+    const QString suffix = QStringLiteral("%1-%2.pdf").arg(rotation).arg(crop);
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-geometry-") + suffix);
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-geometry-saved-") + suffix);
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("Geometry")}}, true, rotation, crop));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QVariantMap link = editableLinkWithUrl(controller, 0, QStringLiteral("https://existing-target.example/"));
+    QVERIFY(!link.isEmpty());
+    const QRectF moved(0.13, 0.27, 0.38, 0.11);
+    QVERIFY(controller.updateLink(0, link.value(QStringLiteral("id")).toString(), moved, manualWebProperties()));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QVariantMap reopened = editableLinkWithUrl(controller, 0, QStringLiteral("https://manual.example/path"));
+    QVERIFY(!reopened.isEmpty());
+    const QRectF actual = reopened.value(QStringLiteral("rect")).toRectF();
+    QVERIFY(QLineF(actual.topLeft(), moved.topLeft()).length() < 0.0001);
+    QVERIFY(QLineF(actual.bottomRight(), moved.bottomRight()).length() < 0.0001);
+    QCOMPARE(inspectWebLinks(output).links.size(), 1);
+}
+
+void PDFEditControllerTest::mapsManualTargetsAcrossPageChanges()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-pages.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-pages-saved.pdf"));
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("One")}, {QStringLiteral("Two")}, {QStringLiteral("Three")}}));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    QVariantMap target = manualWebProperties(QString());
+    target[QStringLiteral("targetPage")] = 2;
+    const QString internal = controller.addLink(0, QRectF(0.1, 0.1, 0.2, 0.1), target);
+    QVERIFY(!internal.isEmpty());
+    const QString web = controller.addLink(1, QRectF(0.2, 0.2, 0.2, 0.1), manualWebProperties());
+    QVERIFY(!web.isEmpty());
+    document.setCurrentPage(0);
+    QCOMPARE(controller.addBlankPage(), 1);
+    QCOMPARE(controller.linkProperties(0, internal).value(QStringLiteral("targetPage")).toInt(), 3);
+    QVERIFY(!controller.linkProperties(2, web).isEmpty());
+    QVERIFY(controller.addLink(1, QRectF(0.1, 0.1, 0.2, 0.1), manualWebProperties()).isEmpty());
+    target[QStringLiteral("targetPage")] = 1;
+    QVERIFY(controller.addLink(0, QRectF(0.1, 0.1, 0.2, 0.1), target).isEmpty());
+    document.setCurrentPage(2);
+    QVERIFY(controller.deleteCurrentPage() >= 0);
+    QCOMPARE(controller.linkProperties(0, internal).value(QStringLiteral("targetPage")).toInt(), 2);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const WebLinkInspection saved = inspectWebLinks(output);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.links.size(), 1);
+    QCOMPARE(saved.links.constFirst().page, 0);
+    QCOMPARE(saved.links.constFirst().targetPage, 2);
+    QCOMPARE(saved.links.constFirst().destinationView, static_cast<unsigned long>(PDFDEST_VIEW_FIT));
+}
+
+void PDFEditControllerTest::rejectsSavingDeletedManualTargetAtomically()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-deleted-target.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-deleted-target-saved.pdf"));
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("One")}, {QStringLiteral("Two")}}));
+    QVERIFY(createWebLinkPdf(output, {{QStringLiteral("Preserve existing destination")}}));
+    const QByteArray unchanged = readFileBytes(output);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    QVariantMap target = manualWebProperties(QString());
+    target[QStringLiteral("targetPage")] = 1;
+    QVERIFY(!controller.addLink(0, QRectF(0.1, 0.1, 0.2, 0.1), target).isEmpty());
+    document.setCurrentPage(1);
+    QVERIFY(controller.deleteCurrentPage() >= 0);
+    QVERIFY(!controller.saveAs(QUrl::fromLocalFile(output)));
+    QCOMPARE(readFileBytes(output), unchanged);
+    QVERIFY(controller.hasDrafts());
+    controller.undo();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const WebLinkInspection saved = inspectWebLinks(output);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.links.size(), 1);
+    QCOMPARE(saved.links.constFirst().targetPage, 1);
+}
+
+void PDFEditControllerTest::rejectsChainedManualLinkActionAtomically()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-chained-action.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-chained-action-saved.pdf"));
+    QVERIFY(createManualSourcePdf(source, false, true));
+    QVERIFY(createWebLinkPdf(output, {{QStringLiteral("Preserve existing destination")}}));
+    const QByteArray sourceBytes = readFileBytes(source);
+    const QByteArray outputBytes = readFileBytes(output);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QVariantMap original = editableLinkWithUrl(controller, 0, QStringLiteral("https://original.example/"));
+    QVERIFY(!original.isEmpty());
+    // PDFium exposes the primary URI but not its action chain. Save must reject
+    // replacing that chain instead of silently discarding secondary actions.
+    QVERIFY(controller.updateLink(0, original.value(QStringLiteral("id")).toString(),
+                                  original.value(QStringLiteral("rect")).toRectF(),
+                                  manualWebProperties(QStringLiteral("https://edited.example/"))));
+    QVERIFY(!controller.saveAs(QUrl::fromLocalFile(output)));
+    QCOMPARE(readFileBytes(output), outputBytes);
+    QCOMPARE(readFileBytes(source), sourceBytes);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(!controller.save());
+    QCOMPARE(readFileBytes(source), sourceBytes);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::integratesManualAndAutomaticLinks()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-automatic.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("manual-links-automatic-saved.pdf"));
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("https://auto-one.example/"), QStringLiteral("https://auto-two.example/")}}));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(controller.autoCreateWebLinks());
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.creatingWebLinks(), 5000);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QVariantMap first = editableLinkWithUrl(controller, 0, QStringLiteral("https://auto-one.example/"));
+    QVERIFY(!first.isEmpty());
+    QVERIFY(controller.updateLink(0, first.value(QStringLiteral("id")).toString(),
+                                  QRectF(0.2, 0.2, 0.3, 0.1), manualWebProperties()));
+    const QVariantMap second = editableLinkWithUrl(controller, 0, QStringLiteral("https://auto-two.example/"));
+    QVERIFY(!second.isEmpty());
+    QVERIFY(controller.deleteLink(0, second.value(QStringLiteral("id")).toString()));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const WebLinkInspection saved = inspectWebLinks(output);
+    QVERIFY(saved.readable);
+    QCOMPARE(saved.links.size(), 1);
+    QCOMPARE(saved.links.constFirst().uri, QStringLiteral("https://manual.example/path"));
+    QVERIFY(removeWebLinksAndWait(controller));
+    QVERIFY(controller.save());
+    QVERIFY(inspectWebLinks(output).links.isEmpty());
+}
+
+void PDFEditControllerTest::routesManualLinksThroughConfirmation()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-links-confirmation.pdf"));
+    QVERIFY(createWebLinkPdf(source, {{QStringLiteral("Confirm web destination")}}));
+    PDFDocument document;
+    PDFFormController forms;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    forms.setDocument(&document);
+    controller.setDocument(&document);
+    controller.setFormController(&forms);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QString id = controller.addLink(0, QRectF(0.1, 0.1, 0.2, 0.1), manualWebProperties());
+    QVERIFY(!id.isEmpty());
+    const quint64 revision = controller.webLinksRevision();
+    QSignalSpy confirmation(&forms, &PDFFormController::externalLinkRequested);
+    QSignalSpy cancellation(&forms, &PDFFormController::externalLinkRequestCancelled);
+    QVERIFY(!controller.activateManualLink(0, id, revision));
+    controller.setTool(PDFEditController::BrowseTool);
+    QVERIFY(controller.activateManualLink(0, id, revision));
+    QCOMPARE(confirmation.size(), 1);
+    QCOMPARE(confirmation.constFirst().at(2).toString(), QStringLiteral("https://manual.example/path"));
+    controller.setTool(PDFEditController::LinkTool);
+    QVERIFY(controller.deleteLink(0, id));
+    QCOMPARE(cancellation.size(), 1);
+    QVERIFY(!forms.confirmExternalLink(confirmation.constFirst().at(0).toULongLong()));
+    controller.setTool(PDFEditController::BrowseTool);
+    QVERIFY(!controller.activateManualLink(0, id, revision));
+    controller.undo();
+    QVERIFY(!controller.activateManualLink(0, id, revision));
+    QVERIFY(controller.activateManualLink(0, id, controller.webLinksRevision()));
+    QCOMPARE(confirmation.size(), 2);
+    forms.cancelExternalLink(confirmation.constLast().at(0).toULongLong());
+}
+
+void PDFEditControllerTest::routesSavedManualPageLinksThroughNavigation_data()
+{
+    QTest::addColumn<bool>("internalAction");
+    QTest::newRow("direct-destination") << false;
+    QTest::newRow("goto-action") << true;
+}
+
+void PDFEditControllerTest::routesSavedManualPageLinksThroughNavigation()
+{
+    QFETCH(bool, internalAction);
+    const QString source = m_temporaryDirectory.filePath(
+        QStringLiteral("manual-link-navigation-%1.pdf").arg(internalAction));
+    const QString output = m_temporaryDirectory.filePath(
+        QStringLiteral("manual-link-navigation-%1-saved.pdf").arg(internalAction));
+    QVERIFY(createManualSourcePdf(source, internalAction));
+    QPointF sourceCenter;
+    const QRectF addedRect(0.1, 0.3, 0.2, 0.08);
+    {
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(source)));
+        controller.setDocument(&document);
+        QVERIFY(beginLinkEditingAndWait(controller));
+        for (const QVariant &entry : controller.editableLinksForPage(0)) {
+            const QVariantMap link = entry.toMap();
+            if (link.value(QStringLiteral("targetPage")).toInt() == 1)
+                sourceCenter = link.value(QStringLiteral("rect")).toRectF().center();
+        }
+        QVERIFY(!sourceCenter.isNull());
+        QVariantMap properties = manualWebProperties(QString());
+        properties[QStringLiteral("targetPage")] = 1;
+        QVERIFY(!controller.addLink(0, addedRect, properties).isEmpty());
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    }
+
+    // Reopen with only the native form runtime, so draft overlays cannot navigate.
+    PDFDocument reopened;
+    PDFFormController forms;
+    QVERIFY(reopened.open(QUrl::fromLocalFile(output)));
+    forms.setDocument(&reopened);
+    QTRY_VERIFY_WITH_TIMEOUT(!forms.javascriptTransitionPending(), 5000);
+    QSignalSpy navigation(&forms, &PDFFormController::pageNavigationRequested);
+    QSignalSpy external(&forms, &PDFFormController::externalLinkRequested);
+    const QSize size(600, 800);
+    int navigationCount = 0;
+    for (const QPointF center : {sourceCenter, addedRect.center()}) {
+        reopened.setCurrentPage(0);
+        const QPointF point(center.x() * size.width(), center.y() * size.height());
+        forms.pointerEvent(0, PDFFormWorker::PointerEventType::Press, 0, point, size);
+        forms.pointerEvent(0, PDFFormWorker::PointerEventType::Release, 0, QPointF(10, 10), size);
+        QTRY_VERIFY_WITH_TIMEOUT(!forms.hasDrafts(), 5000);
+        QCOMPARE(navigation.size(), navigationCount);
+        QCOMPARE(reopened.currentPage(), 0);
+        forms.pointerEvent(0, PDFFormWorker::PointerEventType::Press, 0, point, size);
+        forms.pointerEvent(0, PDFFormWorker::PointerEventType::Release, 0, point, size);
+        ++navigationCount;
+        QTRY_COMPARE_WITH_TIMEOUT(navigation.size(), navigationCount, 5000);
+        QCOMPARE(navigation.constLast().at(0).toInt(), 1);
+        QCOMPARE(reopened.currentPage(), 1);
+    }
+    QCOMPARE(external.size(), 0);
+}
+
+void PDFEditControllerTest::suppressesOriginalDestinationWhileEditingSourceLink()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("manual-link-source-suppression.pdf"));
+    QVERIFY(createManualSourcePdf(source));
+    PDFDocument document;
+    PDFFormController forms;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    forms.setDocument(&document);
+    controller.setDocument(&document);
+    controller.setFormController(&forms);
+    QTRY_VERIFY_WITH_TIMEOUT(!forms.javascriptTransitionPending(), 5000);
+    QVERIFY(beginLinkEditingAndWait(controller));
+    const QVariantMap original = editableLinkWithUrl(controller, 0, QStringLiteral("https://original.example/"));
+    QVERIFY(!original.isEmpty());
+    const QString id = original.value(QStringLiteral("id")).toString();
+    const QPointF center = original.value(QStringLiteral("rect")).toRectF().center();
+    QVERIFY(controller.updateLink(0, id, QRectF(0.1, 0.3, 0.3, 0.1),
+                                  manualWebProperties(QStringLiteral("https://replacement.example/"))));
+    controller.setTool(PDFEditController::BrowseTool);
+    QSignalSpy confirmation(&forms, &PDFFormController::externalLinkRequested);
+    const QSize size(600, 800);
+    const QPointF point(center.x() * size.width(), center.y() * size.height());
+    const auto clickSource = [&]() {
+        forms.pointerEvent(0, PDFFormWorker::PointerEventType::Press, 0, point, size);
+        forms.pointerEvent(0, PDFFormWorker::PointerEventType::Release, 0, point, size);
+    };
+    clickSource();
+    QTRY_VERIFY_WITH_TIMEOUT(!forms.hasDrafts(), 5000);
+    QCOMPARE(confirmation.size(), 0);
+    QVERIFY(controller.activateManualLink(0, id, controller.webLinksRevision()));
+    QCOMPARE(confirmation.size(), 1);
+    QCOMPARE(confirmation.constLast().at(2).toString(), QStringLiteral("https://replacement.example/"));
+    forms.cancelExternalLink(confirmation.constLast().at(0).toULongLong());
+
+    controller.undo();
+    clickSource();
+    QTRY_COMPARE_WITH_TIMEOUT(confirmation.size(), 2, 5000);
+    QCOMPARE(confirmation.constLast().at(2).toString(), QStringLiteral("https://original.example/"));
+    forms.cancelExternalLink(confirmation.constLast().at(0).toULongLong());
+    controller.redo();
+    clickSource();
+    QTRY_VERIFY_WITH_TIMEOUT(!forms.hasDrafts(), 5000);
+    QCOMPARE(confirmation.size(), 2);
+    QVERIFY(controller.activateManualLink(0, id, controller.webLinksRevision()));
+    QCOMPARE(confirmation.size(), 3);
+    QCOMPARE(confirmation.constLast().at(2).toString(), QStringLiteral("https://replacement.example/"));
+    forms.cancelExternalLink(confirmation.constLast().at(0).toULongLong());
 }

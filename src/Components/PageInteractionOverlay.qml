@@ -49,6 +49,7 @@ Item {
 
     function prepareForSessionChange() {
         editOverlay.prepareForSessionChange()
+        manualLinkLayer.prepareForSessionChange()
         formTextFieldOverlay.prepareForSessionChange()
     }
 
@@ -145,6 +146,8 @@ Item {
         draftTextureReady: root.draftTextureReady
         displayedSuppressedCommentObjectIds:
             root.displayedSuppressedCommentObjectIds
+        enabled: interactionActive
+            && root.editController.tool !== PDFEditController.LinkTool
         z: 2
 
         onDeleteCommentRequested: (page, objectId) =>
@@ -163,10 +166,24 @@ Item {
         controller: root.editController
         page: root.page
         pooled: root.pooled
+        visible: root.editController.tool !== PDFEditController.LinkTool
         interactive: !root.pooled && !root.formsTabActive
             && !root.editController.saving
             && root.editController.tool === PDFEditController.BrowseTool
         showFrames: root.editTabActive
+    }
+
+    ManualLinkLayer {
+        id: manualLinkLayer
+
+        anchors.fill: parent
+        z: 2.5
+        theme: root.theme
+        controller: root.editController
+        page: root.page
+        pagePointScale: root.pagePointScale
+        pooled: root.pooled
+        interactive: !root.pooled && !root.formsTabActive
     }
 
     FormTextFieldOverlay {
@@ -182,6 +199,7 @@ Item {
         editActive: root.editTabActive
         fieldsVisible: root.formFieldsVisible
         fieldsInteractive: root.formFieldsInteractive
+            && root.editController.tool !== PDFEditController.LinkTool
         textFieldToolActive: root.textFieldToolActive
         checkboxToolActive: root.checkboxToolActive
         radioButtonToolActive: root.radioButtonToolActive

@@ -107,8 +107,18 @@ document, including newly created unsaved links, as one undoable batch. Internal
 destinations, other URI schemes, comments, and protected links are preserved.
 Save other pending edits first. Removed links stop accepting clicks immediately;
 Save/Save As persists the removal without changing page text. The scan can be
-cancelled, and Undo or Discard restores removed links. Add or edit a link remains
-UI-only.
+cancelled, and Undo or Discard restores removed links.
+
+**Add or edit a link** enables rectangle placement and displays existing link
+regions. Double-click a link or use its Properties action to change its HTTP/HTTPS
+URL or destination page in this PDF. Link properties include visible/invisible
+borders, color, thickness, solid/dashed/underline styles, and the PDF highlight
+mode. Links support dragging, eight resize handles, keyboard movement, deletion,
+undo/redo/discard, and Save/Save As. Internal destinations track source pages
+through insertion/deletion; saving fails safely if a surviving link targets a
+deleted page. Save newly inserted pages before using them as a link source or
+destination. Protected links and unsupported source actions/appearances remain
+read-only. Web links use the existing external-link confirmation.
 
 Changes remain undoable session drafts until Save or Save As writes them into a
 PDF. Compatible text objects on the same visual line are grouped, then nearby

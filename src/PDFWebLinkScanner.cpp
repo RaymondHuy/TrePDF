@@ -11,6 +11,7 @@
 
 #include <fpdf_annot.h>
 #include <fpdf_doc.h>
+#include <fpdf_edit.h>
 #include <fpdf_text.h>
 #include <fpdfview.h>
 
@@ -258,6 +259,336 @@ QString validWebUrl(const QString &value)
     }
     const QByteArray encoded = url.toEncoded(QUrl::FullyEncoded);
     return encoded.size() <= MaximumUrlLength ? QString::fromLatin1(encoded) : QString();
+}
+
+QString manualStyleMetadata(const ManualLink &link)
+{
+    return QStringLiteral("1;%1;%2;%3;%4;%5")
+        .arg(link.visible ? 1 : 0).arg(link.color.name(QColor::HexRgb))
+        .arg(link.width, 0, 'g', 12).arg(link.lineStyle).arg(link.highlight);
+}
+
+QByteArray manualLinkAppearance(const ManualLink &link, const QSizeF &size,
+                               int pageQuarterTurns)
+{
+    if (!link.visible || !std::isfinite(size.width()) || !std::isfinite(size.height())
+        || size.width() <= 0.0 || size.height() <= 0.0
+        || pageQuarterTurns < 0 || pageQuarterTurns > 3)
+        return {};
+    // Millipoint precision is sufficient for borders and remains stable after
+    // PDFium converts the serialized rectangle back to its float coordinates.
+    const auto number = [](qreal value) { return QByteArray::number(value, 'f', 3); };
+    const qreal stroke = qMin(link.width, qMin(size.width(), size.height()));
+    const qreal inset = stroke * 0.5;
+    QByteArray content = QByteArrayLiteral("%TrePDFLinkAppearance-v1\nq\n")
+        + number(link.color.redF()) + ' ' + number(link.color.greenF()) + ' '
+        + number(link.color.blueF()) + " RG\n" + number(stroke) + " w\n"
+        + (link.lineStyle == 1 ? QByteArrayLiteral("[3 3] 0 d\n")
+                              : QByteArrayLiteral("[] 0 d\n"));
+    if (link.lineStyle == 2) {
+        // The editing frame uses visible-page coordinates. Keep its underline
+        // at the visible bottom after the page's intrinsic /Rotate is applied.
+        const qreal right = size.width() - inset;
+        const qreal top = size.height() - inset;
+        const std::array<QPointF, 4> starts{
+            QPointF(inset, inset), QPointF(right, inset),
+            QPointF(right, top), QPointF(inset, top)};
+        const std::array<QPointF, 4> ends{
+            QPointF(right, inset), QPointF(right, top),
+            QPointF(inset, top), QPointF(inset, inset)};
+        const QPointF from = starts.at(pageQuarterTurns);
+        const QPointF to = ends.at(pageQuarterTurns);
+        content += number(from.x()) + ' ' + number(from.y()) + " m "
+            + number(to.x()) + ' ' + number(to.y()) + " l S\n";
+    } else {
+        content += number(inset) + ' ' + number(inset) + ' '
+            + number(qMax(0.0, size.width() - stroke)) + ' '
+            + number(qMax(0.0, size.height() - stroke)) + " re S\n";
+    }
+    return content + "Q\n";
+}
+
+bool validManualLink(const ManualLink &link)
+{
+    return link.sourcePage >= 0 && !link.id.isEmpty() && link.id.size() <= 256
+        && link.targetSourcePage >= -1
+        && (link.targetSourcePage >= 0 || !validWebUrl(link.url).isEmpty())
+        && std::isfinite(link.rect.x()) && std::isfinite(link.rect.y())
+        && std::isfinite(link.rect.width()) && std::isfinite(link.rect.height())
+        && link.rect.width() > 0.0 && link.rect.height() > 0.0
+        && link.rect.left() >= 0.0 && link.rect.top() >= 0.0
+        && link.rect.right() <= 1.0 && link.rect.bottom() <= 1.0
+        && link.color.isValid() && link.color.alpha() == 255
+        && std::isfinite(link.width) && link.width > 0.0 && link.width <= 12.0
+        && link.lineStyle >= 0 && link.lineStyle <= 2
+        && link.highlight >= 0 && link.highlight <= 3;
+}
+
+ManualScanResult editableLinksForPage(
+    FPDF_DOCUMENT document, FPDF_PAGE page, int sourcePage,
+    const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    assertPDFiumProcessLockHeld();
+    ManualScanResult result;
+    const int count = page ? FPDFPage_GetAnnotCount(page) : -1;
+    if (!document || !page || count < 0) {
+        result.failed = true;
+        return result;
+    }
+    const PageMapper mapper(page);
+    if (count > MaximumAnnotationsPerPage || !mapper.valid()) {
+        result.limited = true;
+        return result;
+    }
+    auto boundedString = [](FPDF_ANNOTATION annotation, const char *key) {
+        const unsigned long size = FPDFAnnot_GetStringValue(annotation, key, nullptr, 0);
+        if (size < 2 || size > 16384 || size % 2 != 0)
+            return QString();
+        QVector<FPDF_WCHAR> buffer(size / 2);
+        if (FPDFAnnot_GetStringValue(annotation, key, buffer.data(), size) != size)
+            return QString();
+        return QString::fromUtf16(reinterpret_cast<const char16_t *>(buffer.constData()),
+                                  buffer.size() - 1);
+    };
+    QSet<int> related;
+    bool unsafeRelations = false;
+    for (int index = 0; index < count; ++index) {
+        if (cancelled(cancellation))
+            return {};
+        const Annotation annotation(FPDFPage_GetAnnot(page, index));
+        if (!annotation.get()) {
+            result.failed = true;
+            return result;
+        }
+        for (const char *key : {"Popup", "IRT", "Parent"}) {
+            if (!FPDFAnnot_HasKey(annotation.get(), key))
+                continue;
+            related.insert(index);
+            const Annotation target(FPDFAnnot_GetLinkedAnnot(annotation.get(), key));
+            const int targetIndex = target.get() ? FPDFPage_GetAnnotIndex(page, target.get()) : -1;
+            if (targetIndex < 0 || targetIndex >= count)
+                unsafeRelations = true;
+            else
+                related.insert(targetIndex);
+        }
+    }
+    for (int index = 0; index < count; ++index) {
+        if (cancelled(cancellation))
+            return {};
+        const Annotation annotation(FPDFPage_GetAnnot(page, index));
+        if (!annotation.get()) {
+            result.links.clear();
+            result.failed = true;
+            return result;
+        }
+        if (FPDFAnnot_GetSubtype(annotation.get()) != FPDF_ANNOT_LINK)
+            continue;
+        FS_RECTF sourceRect{};
+        ManualLink item;
+        if (!FPDFAnnot_GetRect(annotation.get(), &sourceRect)
+            || !mapper.rectangle(sourceRect.left, sourceRect.top,
+                                  sourceRect.right, sourceRect.bottom, item.rect)
+            || item.rect.isEmpty()) {
+            result.limited = true;
+            continue;
+        }
+        item.sourcePage = sourcePage;
+        item.annotationIndex = index;
+        item.id = QStringLiteral("source-link:%1:%2").arg(sourcePage).arg(index);
+        const FPDF_LINK link = FPDFAnnot_GetLink(annotation.get());
+        const FPDF_ACTION action = link ? FPDFLink_GetAction(link) : nullptr;
+        FPDF_DEST destination = link ? FPDFLink_GetDest(document, link) : nullptr;
+        const unsigned long actionType = action ? FPDFAction_GetType(action) : 0;
+        QByteArray rawUri;
+        unsigned long view = PDFDEST_VIEW_UNKNOWN_MODE;
+        unsigned long parameterCount = 0;
+        std::array<FS_FLOAT, 4> parameters{};
+        bool actionSupported = false;
+        if (actionType == PDFACTION_URI && !destination) {
+            const unsigned long size = FPDFAction_GetURIPath(document, action, nullptr, 0);
+            if (size >= 2 && size <= MaximumUrlLength + 1) {
+                rawUri.resize(static_cast<qsizetype>(size));
+                if (FPDFAction_GetURIPath(document, action, rawUri.data(), size) == size
+                    && rawUri.back() == '\0') {
+                    rawUri.chop(1);
+                    const QString decoded = QString::fromUtf8(rawUri);
+                    if (decoded.toUtf8() == rawUri && !rawUri.contains('\0')) {
+                        item.url = decoded;
+                        actionSupported = !validWebUrl(decoded).isEmpty();
+                    }
+                }
+            }
+        } else if (!action || actionType == PDFACTION_GOTO) {
+            if (!destination && action)
+                destination = FPDFAction_GetDest(document, action);
+            if (destination) {
+                item.targetSourcePage = FPDFDest_GetDestPageIndex(document, destination);
+                view = FPDFDest_GetView(destination, &parameterCount, parameters.data());
+                actionSupported = item.targetSourcePage >= 0
+                    && item.targetSourcePage < FPDF_GetPageCount(document)
+                    && view == PDFDEST_VIEW_FIT && parameterCount == 0;
+            }
+        }
+        float horizontal = 0.0F;
+        float vertical = 0.0F;
+        float borderWidth = 1.0F;
+        const bool hasBorder = FPDFAnnot_GetBorder(annotation.get(), &horizontal, &vertical,
+                                                   &borderWidth);
+        const bool borderValid = std::isfinite(borderWidth) && borderWidth >= 0.0F
+            && borderWidth <= 12.0F && horizontal == 0.0F && vertical == 0.0F;
+        item.visible = borderWidth > 0.0F;
+        item.width = borderWidth > 0.0F ? borderWidth : 1.0F;
+        unsigned int red = 0, green = 0, blue = 0, alpha = 255;
+        const bool hasAppearance = FPDFAnnot_HasKey(annotation.get(), "AP");
+        const bool colorRead = FPDFAnnot_GetColor(annotation.get(), FPDFANNOT_COLORTYPE_Color,
+                               &red, &green, &blue, &alpha)
+            && red <= 255 && green <= 255 && blue <= 255 && alpha == 255;
+        if (colorRead) {
+            item.color = QColor(red, green, blue);
+        }
+        const QString highlight = boundedString(annotation.get(), "H");
+        const QStringList highlights{QStringLiteral("N"), QStringLiteral("I"),
+                                     QStringLiteral("O"), QStringLiteral("P")};
+        item.highlight = highlight.isEmpty() ? 1 : highlights.indexOf(highlight);
+        const QString style = boundedString(annotation.get(), ManualStyleKey);
+        bool ownStyle = false;
+        if (!style.isEmpty()) {
+            const QStringList parts = style.split(QLatin1Char(';'));
+            if (parts.size() == 6 && parts.at(0) == QLatin1String("1")) {
+                bool widthOk = false, styleOk = false, highlightOk = false;
+                const qreal width = parts.at(3).toDouble(&widthOk);
+                const int lineStyle = parts.at(4).toInt(&styleOk);
+                const int highlightValue = parts.at(5).toInt(&highlightOk);
+                const QColor color(parts.at(2));
+                ownStyle = (parts.at(1) == QLatin1String("0") || parts.at(1) == QLatin1String("1"))
+                    && widthOk && styleOk && highlightOk && color.isValid()
+                    && std::isfinite(width) && width > 0.0 && width <= 12.0
+                    && lineStyle >= 0 && lineStyle <= 2
+                    && highlightValue == item.highlight
+                    && (colorRead ? color == item.color : hasAppearance)
+                    && (!hasBorder || qAbs(borderWidth - (parts.at(1) == QLatin1String("1")
+                                                         ? width : 0.0)) < 0.001);
+                if (ownStyle) {
+                    // PDFium cannot read /C when an appearance exists. Accept
+                    // its metadata color only with the exact canonical /AP
+                    // validation below.
+                    item.color = color;
+                    item.visible = parts.at(1) == QLatin1String("1");
+                    item.width = width;
+                    item.lineStyle = lineStyle;
+                }
+            }
+        }
+        const int flags = FPDFAnnot_GetFlags(annotation.get());
+        const int quadCount = link ? FPDFLink_CountQuadPoints(link) : -1;
+        QByteArray appearance;
+        bool ownAppearance = false;
+        if (ownStyle && FPDFAnnot_HasKey(annotation.get(), "AP")) {
+            const unsigned long bytes = FPDFAnnot_GetAP(
+                annotation.get(), FPDF_ANNOT_APPEARANCEMODE_NORMAL, nullptr, 0);
+            if (bytes >= 2 && bytes <= 16384 && bytes % 2 == 0) {
+                QVector<FPDF_WCHAR> buffer(bytes / 2);
+                if (FPDFAnnot_GetAP(annotation.get(), FPDF_ANNOT_APPEARANCEMODE_NORMAL,
+                                    buffer.data(), bytes) == bytes) {
+                    appearance = QString::fromUtf16(
+                        reinterpret_cast<const char16_t *>(buffer.constData()),
+                        buffer.size() - 1).toLatin1();
+                    const QSizeF appearanceSize(qAbs(qreal(sourceRect.right) - sourceRect.left),
+                                                qAbs(qreal(sourceRect.top) - sourceRect.bottom));
+                    ownAppearance = item.visible && appearance == manualLinkAppearance(
+                        item, appearanceSize, FPDFPage_GetRotation(page));
+                }
+            }
+        }
+        item.editable = actionSupported && borderValid && item.highlight >= 0
+            && flags >= 0 && !(flags & (FPDF_ANNOT_FLAG_READONLY | FPDF_ANNOT_FLAG_LOCKED
+                                      | kAnnotationFlagLockedContents))
+            && !unsafeRelations && !related.contains(index) && quadCount == 0
+            && (!FPDFAnnot_HasKey(annotation.get(), "F")
+                || FPDFAnnot_GetValueType(annotation.get(), "F") == FPDF_OBJECT_NUMBER)
+            && (!FPDFAnnot_HasKey(annotation.get(), "BS") || ownStyle)
+            && (!FPDFAnnot_HasKey(annotation.get(), ManualStyleKey) || ownStyle)
+            && (!FPDFAnnot_HasKey(annotation.get(), "AP") || ownAppearance)
+            && !FPDFAnnot_HasKey(annotation.get(), "AA")
+            && !FPDFAnnot_HasKey(annotation.get(), "StructParent")
+            && !FPDFAnnot_HasKey(annotation.get(), "RT")
+            && !FPDFAnnot_HasKey(annotation.get(), ManualMarkerKey);
+        QByteArray identity;
+        QDataStream stream(&identity, QIODevice::WriteOnly);
+        stream.setVersion(QDataStream::Qt_6_0);
+        stream << rawUri << qint32(item.targetSourcePage) << quint64(view)
+               << quint64(parameterCount) << qint32(flags)
+               << sourceRect.left << sourceRect.bottom << sourceRect.right << sourceRect.top
+               << borderWidth << horizontal << vertical << item.color << highlight << style
+               << boundedString(annotation.get(), "NM") << qint32(quadCount) << appearance;
+        for (const auto parameter : parameters)
+            stream << parameter;
+        item.fingerprint = QCryptographicHash::hash(identity, QCryptographicHash::Sha256);
+        result.limited |= !item.editable;
+        result.links.append(std::move(item));
+    }
+    return result;
+}
+
+ManualScanResult scanEditableLinks(
+    const QString &filePath,
+    const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    assertPDFiumProcessLockNotHeld();
+    ManualScanResult result;
+    if (cancelled(cancellation))
+        return result;
+    const ScanDocument document(filePath, cancellation);
+    if (!document.get()) {
+        result.failed = !cancelled(cancellation);
+        return result;
+    }
+    int pageCount = 0;
+    {
+        PDFiumProcessLock lock;
+        if (cancelled(cancellation))
+            return {};
+        pageCount = FPDF_GetPageCount(document.get());
+    }
+    if (pageCount <= 0) {
+        result.failed = true;
+        return result;
+    }
+    result.limited = pageCount > kMaximumPages;
+    int totalAnnotations = 0;
+    for (int pageIndex = 0; pageIndex < qMin(pageCount, kMaximumPages); ++pageIndex) {
+        PDFiumProcessLock lock;
+        if (cancelled(cancellation))
+            return {};
+        const Page page(FPDF_LoadPage(document.get(), pageIndex));
+        if (!page.get()) {
+            result.links.clear();
+            result.failed = true;
+            return result;
+        }
+        const int count = FPDFPage_GetAnnotCount(page.get());
+        if (count < 0 || count > kMaximumSourceAnnotations - totalAnnotations) {
+            result.limited = true;
+            break;
+        }
+        totalAnnotations += count;
+        const ManualScanResult pageResult = editableLinksForPage(
+            document.get(), page.get(), pageIndex, cancellation);
+        if (cancelled(cancellation))
+            return {};
+        if (pageResult.failed) {
+            result.links.clear();
+            result.failed = true;
+            return result;
+        }
+        result.limited |= pageResult.limited;
+        if (pageResult.links.size() > MaximumLinks - result.links.size()) {
+            result.limited = true;
+            break;
+        }
+        result.links += pageResult.links;
+    }
+    return result;
 }
 
 SourceScanResult sourceLinksForPage(

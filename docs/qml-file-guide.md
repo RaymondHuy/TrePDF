@@ -240,8 +240,13 @@ dialog, đổi tab hoặc ghi tệp.
 - Link mở menu gồm Thêm hoặc sửa liên kết, Tự động tạo liên kết từ URL và
   Xóa liên kết web. Mục tự động gọi `autoCreateWebLinks()` và đổi thành Hủy tạo
   liên kết khi đang quét. Xóa liên kết web gọi `removeWebLinks()` và đổi thành
-  Hủy xóa liên kết trong lúc quét; hai lệnh quét loại trừ nhau. Thêm hoặc sửa
-  liên kết hiện chỉ có UI.
+  Hủy xóa liên kết trong lúc quét; các lệnh quét loại trừ nhau. Thêm hoặc sửa
+  liên kết gọi `beginLinkEditing()` để bật `LinkTool` và tải các vùng link nguồn.
+- `ManualLinkLayer.qml` nằm trên `EditOverlay`: kéo vùng trống để tạo, chọn/nhấp
+  đúp link để sửa, di chuyển và resize bằng 8 handle, Delete và menu chuột phải.
+  `LinkPropertiesDialog.qml` được tải lười, chỉ tạo draft khi người dùng áp dụng;
+  chọn URL hoặc trang trong PDF cùng viền, màu, độ dày, kiểu nét, highlight.
+  Link nguồn chưa sửa đi qua native Browse; link draft nhận click qua controller.
 - Shapes dạng split button: Rectangle, Oval, Line, Arrow, Triangle, Diamond.
   Menu dùng `ShapeDraftView` để preview và cập nhật `shapeType` trước khi bật
   `AddShapeTool`.

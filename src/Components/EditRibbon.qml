@@ -211,6 +211,7 @@ Flickable {
                 menuToolTipText: text
                 enabled: root.document.loaded && !root.editController.saving
                 primary: linkMenuLoader.active
+                    || root.editController.tool === PDFEditController.LinkTool
                 onClicked: linkMenuLoader.active = true
                 onMenuRequested: linkMenuLoader.active = true
                 onEnabledChanged: {
@@ -269,6 +270,11 @@ Flickable {
                         Action {
                             //% "Add or edit a link"
                             text: qsTrId("AddOrEditLink")
+                            enabled: !root.hasPendingPanelEdits
+                                && !root.editController.creatingWebLinks
+                                && !root.editController.removingWebLinks
+                                && !root.editController.loadingEditableLinks
+                            onTriggered: root.editController.beginLinkEditing()
                         }
 
                         Action {

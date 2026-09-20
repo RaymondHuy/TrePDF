@@ -646,6 +646,16 @@ hiện hữu; FormController kiểm tra cả pointer snapshot và kết quả tr
 Writer kiểm tra lại fingerprint và ghi xóa theo transaction, không tái tạo
 content stream cho trang chỉ thay đổi liên kết.
 
+`PDFEditControllerManualLinks.cpp` quản lý scan link nguồn bất đồng bộ,
+`m_sourceManualLinks` và draft `m_manualLinks`. Mỗi thay đổi thuộc tính, geometry
+hoặc xóa là một command WebLinks cùng snapshot với link tự tạo/xóa hàng loạt.
+Writer kiểm tra fingerprint nguồn, đánh dấu annotation trước các thay đổi chỉ số,
+và canonicalizer cập nhật dictionary bằng marker sau serialize. URL mới dùng
+HTTP/HTTPS; link nội bộ ghi `/GoTo /Fit` tới page object sau remapping. Các key
+không liên quan được giữ nguyên. Link có cờ bảo vệ hoặc cấu trúc không hỗ trợ
+chỉ đọc. Source và đích phải là trang đã lưu; xóa trang đích của link còn tồn tại
+sẽ làm Save thất bại an toàn.
+
 ## Form runtime
 
 ### [`src/PDFFormController.cpp`](../src/PDFFormController.cpp) và

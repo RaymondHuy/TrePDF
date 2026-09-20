@@ -36,6 +36,7 @@ flowchart TD
     SearchLayer["SearchHighlightLayer\nHighlight không tương tác"]
     Interaction["PageInteractionOverlay\nĐiều phối input theo trang"]
     EditOverlay["EditOverlay\nEdit text/image/shape/comment markup/drawing/Stamp"]
+    Links["ManualLinkLayer + LinkPropertiesDialog\nTạo, sửa và điều hướng liên kết"]
     FormView["PDFFormView + FormChoiceOverlay\nForm PDFium đang chạy"]
     Designer["FormTextFieldOverlay + FormFieldLayer\nThiết kế form"]
     Document["PDFDocument\nHandle PDF GUI thread + cấu trúc trang"]
@@ -59,6 +60,7 @@ flowchart TD
     Delegate --> SearchLayer
     Delegate --> Interaction
     Interaction --> EditOverlay
+    Interaction --> Links
     Interaction --> FormView
     Interaction --> Designer
     Session --> Document
@@ -71,6 +73,7 @@ flowchart TD
     SearchLayer --> Search
     Search --> Pdfium
     EditOverlay --> Edit
+    Links --> Edit
     FormView --> Form
     Form --> Worker
     Designer --> FormDesigner

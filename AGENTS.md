@@ -29,7 +29,15 @@ Current features:
   links in one undoable batch. Internal destinations, other URI schemes, and
   comments remain unchanged. Draft removals suppress source appearances and
   Browse clicks; Save revalidates source fingerprints before deleting links.
-  Manual link editing remains UI-only. New edits cancel
+  Add or edit a link uses `LinkTool`, `ManualLinkLayer.qml`, and
+  `LinkPropertiesDialog.qml` for rectangle placement, selection, move/resize,
+  deletion, HTTP/HTTPS destinations, and internal page destinations. Manual
+  drafts live in `m_manualLinks`, share link history, suppress edited source
+  appearances/clicks, and persist via marker-based canonicalizer patches.
+  Source page identities preserve destinations through page operations; a
+  deleted destination prevents Save. Newly inserted pages need Save before
+  becoming link sources/destinations. Protected or unsupported source links
+  remain read-only. New edits cancel
   in-flight detection; completed links retain independent spatial geometry.
 
 - The Convert tab writes detected PDF tables to Excel, one worksheet per table.
