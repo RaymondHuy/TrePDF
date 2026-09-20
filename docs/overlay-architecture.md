@@ -45,6 +45,7 @@ DocumentView (ListView, reuseItems: true)
     │   │       ├── PDFFormView      z 1: bridge input form PDFium
     │   │       │   └── FormChoiceOverlay
     │   │       ├── EditOverlay      z 2: draft và interaction Edit
+    │   │       ├── ManualLinkLayer z 2.5: link placement/editing and draft clicks
     │   │       └── FormTextFieldOverlay z 3: form designer
     │   └── page label               ngoài mặt phẳng trang
     └── PdfPageDelegate [trang thứ hai, tùy chọn]
@@ -696,3 +697,12 @@ Tài liệu ngắn theo từng file vẫn nằm ở [qml-file-guide.md](qml-file
 và [cpp-file-guide.md](cpp-file-guide.md); tài liệu này nên được cập nhật mỗi khi
 có thêm một nhánh trong `PageInteractionOverlay`, một mode mới, hoặc một đường
 pointer/focus mới.
+
+## Liên kết thủ công
+
+`ManualLinkLayer` cùng nằm trong page surface xoay và dùng normalized geometry.
+Khi `LinkTool` hoạt động, EditOverlay và form-designer hit testing nhường input
+cho layer này. Browse chỉ bắt click của link draft; source link chưa sửa vẫn do
+PDFFormWorker xử lý. Dialog thuộc tính được tạo bằng Loader, đóng khi đổi tool,
+trang, session hoặc delegate bị pool. Move/resize preview là state cục bộ trong
+gesture và chỉ commit một history command khi thả chuột.

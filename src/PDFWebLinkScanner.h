@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QColor>
 #include <QRectF>
 #include <QString>
 #include <QVector>
@@ -59,6 +60,58 @@ struct SourceScanResult {
     bool limited = false;
     bool failed = false;
 };
+
+struct ManualLink {
+    QString id;
+    int sourcePage = -1;
+    int annotationIndex = -1;
+    QByteArray fingerprint;
+    QRectF rect;
+    QString url;
+    int targetSourcePage = -1;
+    bool visible = false;
+    QColor color = Qt::black;
+    qreal width = 1.0;
+    int lineStyle = 0; // Solid, dashed, underline.
+    int highlight = 1; // None, invert, outline, push.
+    bool editable = true;
+    bool deleted = false;
+
+    bool operator==(const ManualLink &other) const
+    {
+        return id == other.id && sourcePage == other.sourcePage
+            && annotationIndex == other.annotationIndex
+            && fingerprint == other.fingerprint && rect == other.rect
+            && url == other.url && targetSourcePage == other.targetSourcePage
+            && visible == other.visible && color == other.color
+            && width == other.width && lineStyle == other.lineStyle
+            && highlight == other.highlight && editable == other.editable
+            && deleted == other.deleted;
+    }
+};
+
+struct ManualScanResult {
+    QVector<ManualLink> links;
+    bool limited = false;
+    bool failed = false;
+};
+
+inline constexpr char ManualStyleKey[] = "TrePDFLinkStyle";
+inline constexpr char ManualMarkerKey[] = "TrePDFLinkEditId";
+
+// Compact, versioned metadata supplements appearance values which PDFium's
+// public API cannot read (nested /BS); it never replaces the standard keys.
+QString manualStyleMetadata(const ManualLink &link);
+// Size is the unrotated PDF /Rect size; quarter turns match FPDFPage_GetRotation.
+QByteArray manualLinkAppearance(const ManualLink &link, const QSizeF &size,
+                               int pageQuarterTurns = 0);
+bool validManualLink(const ManualLink &link);
+ManualScanResult scanEditableLinks(
+    const QString &filePath,
+    const std::shared_ptr<std::atomic_bool> &cancellation);
+ManualScanResult editableLinksForPage(
+    FPDF_DOCUMENT document, FPDF_PAGE page, int sourcePage,
+    const std::shared_ptr<std::atomic_bool> &cancellation = {});
 
 // Returns an absolute, fully encoded HTTP(S) URL without credentials, or empty.
 // Both input UTF-16 length and encoded output length are bounded.

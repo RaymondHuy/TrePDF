@@ -230,6 +230,18 @@ dialog, đổi tab hoặc ghi tệp.
 - Chỉ phát intent. `Main.qml` và `DocumentWorkspace` quyết định pane nhận page/
   zoom, nên footer không giữ document hoặc controller và không can thiệp pooling.
 
+### [`src/Components/HelpToolTip.qml`](../src/Components/HelpToolTip.qml)
+
+**Vai trò:** tooltip hướng dẫn dùng chung, với tiêu đề tùy chọn và nội dung tự xuống dòng.
+
+- Nhận `theme`, `title` và `text`; nội dung được dịch tại nơi sử dụng.
+- Gán `parent` là control cần hướng dẫn và bind `visible` theo hover/focus.
+  Dùng `Loader` khi tooltip chỉ cần trong menu hoặc popup đang mở.
+- Mặc định hiện bên phải control, rộng 340 px, trễ 500 ms và không tự hết hạn.
+  Có thể ghi đè `x`, `y`, `width`, `delay`, `timeout` của `ToolTip` khi tái sử dụng.
+- Không phụ thuộc controller hay chức năng PDF. `EditRibbon` dùng component này
+  cho hướng dẫn Thêm hoặc sửa liên kết.
+
 ### [`src/Components/EditRibbon.qml`](../src/Components/EditRibbon.qml)
 
 **Vai trò:** toàn bộ command surface cho edit nội dung và page operation.
@@ -240,8 +252,13 @@ dialog, đổi tab hoặc ghi tệp.
 - Link mở menu gồm Thêm hoặc sửa liên kết, Tự động tạo liên kết từ URL và
   Xóa liên kết web. Mục tự động gọi `autoCreateWebLinks()` và đổi thành Hủy tạo
   liên kết khi đang quét. Xóa liên kết web gọi `removeWebLinks()` và đổi thành
-  Hủy xóa liên kết trong lúc quét; hai lệnh quét loại trừ nhau. Thêm hoặc sửa
-  liên kết hiện chỉ có UI.
+  Hủy xóa liên kết trong lúc quét; các lệnh quét loại trừ nhau. Thêm hoặc sửa
+  liên kết gọi `beginLinkEditing()` để bật `LinkTool` và tải các vùng link nguồn.
+- `ManualLinkLayer.qml` nằm trên `EditOverlay`: kéo vùng trống để tạo, chọn/nhấp
+  đúp link để sửa, di chuyển và resize bằng 8 handle, Delete và menu chuột phải.
+  `LinkPropertiesDialog.qml` được tải lười, chỉ tạo draft khi người dùng áp dụng;
+  chọn URL hoặc trang trong PDF cùng viền, màu, độ dày, kiểu nét, highlight.
+  Link nguồn chưa sửa đi qua native Browse; link draft nhận click qua controller.
 - Shapes dạng split button: Rectangle, Oval, Line, Arrow, Triangle, Diamond.
   Menu dùng `ShapeDraftView` để preview và cập nhật `shapeType` trước khi bật
   `AddShapeTool`.

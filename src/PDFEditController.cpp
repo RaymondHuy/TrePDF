@@ -282,6 +282,8 @@ PDFEditController::~PDFEditController()
 {
     if (m_webLinkCancellation)
         m_webLinkCancellation->store(true, std::memory_order_relaxed);
+    if (m_manualLinkCancellation)
+        m_manualLinkCancellation->store(true, std::memory_order_relaxed);
     clearFontRecovery();
     if (m_candidateScanCancellation) {
         m_candidateScanCancellation->store(true, std::memory_order_relaxed);
@@ -483,6 +485,7 @@ void PDFEditController::setTool(Tool tool)
          && m_hasSelection
          && !isCommentCandidateKind(m_selectedCandidate.kind))
         || m_tool == BrowseTool
+        || m_tool == LinkTool
         || m_tool == StickyNoteTool
         || m_tool == FreeTextTool
         || m_tool == StampTool
@@ -527,6 +530,7 @@ bool PDFEditController::hasDrafts() const
     return !m_drafts.isEmpty()
         || !m_autoWebLinks.isEmpty()
         || !m_removedWebLinks.isEmpty()
+        || !m_manualLinks.isEmpty()
         || !m_pendingTextMarkupCreations.isEmpty()
         || !m_pageInsertions.isEmpty()
         || !m_deletedSourcePages.isEmpty()
@@ -817,6 +821,9 @@ void PDFEditController::resetSession()
     cancelWebLinkCreation();
     m_autoWebLinks.clear();
     m_removedWebLinks.clear();
+    m_manualLinks.clear();
+    m_sourceManualLinks.clear();
+    m_manualSourceLinksReady = false;
     invalidateWebLinks();
     cancelFontDownload();
     setPendingDrawingCommentPage(-1);

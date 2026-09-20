@@ -2174,8 +2174,14 @@ public:
                     && !(flags & (FPDF_ANNOT_FLAG_HIDDEN | FPDF_ANNOT_FLAG_INVISIBLE
                                   | FPDF_ANNOT_FLAG_NOVIEW))) {
                     FPDF_LINK link = FPDFAnnot_GetLink(annotation);
-                    if (link && FPDFAction_GetType(FPDFLink_GetAction(link)) == PDFACTION_URI)
-                        webLink = link;
+                    if (link) {
+                        const FPDF_ACTION action = FPDFLink_GetAction(link);
+                        if (FPDFAction_GetType(action) == PDFACTION_URI
+                            || FPDFLink_GetDest(m_document, link)
+                            || (FPDFAction_GetType(action) == PDFACTION_GOTO
+                                && FPDFAction_GetDest(m_document, action)))
+                            webLink = link;
+                    }
                 }
                 FPDFPage_CloseAnnot(annotation);
             }
@@ -2191,6 +2197,20 @@ public:
             const FPDF_LINK pressed = std::exchange(m_pressedWebLink, nullptr);
             if (webLink && webLink == pressed && m_eventExternalUri.isEmpty()) {
                 const FPDF_ACTION action = FPDFLink_GetAction(webLink);
+                FPDF_DEST destination = FPDFLink_GetDest(m_document, webLink);
+                if (!destination && FPDFAction_GetType(action) == PDFACTION_GOTO)
+                    destination = FPDFAction_GetDest(m_document, action);
+                if (destination) {
+                    const int target = FPDFDest_GetDestPageIndex(m_document, destination);
+                    if (target >= 0 && target < FPDF_GetPageCount(m_document)) {
+                        PDFFormWorker::GoToRequest request;
+                        request.sourcePage = target;
+                        m_eventGoTo = request;
+                        result.webLinkSourcePage = sourcePage;
+                        result.webLinkAnnotationIndex = linkZ;
+                        result.handled = true;
+                    }
+                }
                 const unsigned long length = FPDFAction_GetURIPath(m_document, action, nullptr, 0);
                 if (length > 1 && length <= 8193) {
                     QByteArray uri(static_cast<qsizetype>(length), '\0');

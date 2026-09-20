@@ -992,7 +992,7 @@ void PDFFormController::processHostActions(
         }
     }
 
-    if (!result.goTo
+    if (!result.goTo || removedWebLink
         || m_navigationEpoch != navigationEpoch
         || !m_document
         || !m_document->isLoaded()) {

@@ -121,6 +121,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::WebLinkRemovalFailed:
         //% "Web links could not be removed safely. The PDF was not saved."
         return qtTrId("PdfSaveWebLinkRemovalFailed");
+    case PDFSaveWriter::Error::ManualLinkUpdateFailed:
+        //% "The links could not be saved. Check their destination pages and try again."
+        return qtTrId("PdfSaveManualLinkFailed");
     case PDFSaveWriter::Error::CommentAnnotationUpdateFailed:
         //% "The comment could not be updated on page %1."
         return qtTrId("PdfSaveCommentUpdateFailed").arg(result.page + 1);
@@ -460,6 +463,10 @@ bool PDFEditController::completeSave(
         emit statusMessage(qtTrId("PdfSavedButReopenFailed"));
         emit saveFinished(true);
         return true;
+    }
+
+    if (m_tool == LinkTool) {
+        beginLinkEditing();
     }
 
     //% "Saved %1"

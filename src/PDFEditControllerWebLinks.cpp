@@ -39,6 +39,11 @@ bool PDFEditController::hasNonWebLinkDrafts() const
 
 void PDFEditController::cancelWebLinkCreation()
 {
+    if (m_manualLinkCancellation) {
+        m_manualLinkCancellation->store(true, std::memory_order_relaxed);
+        m_manualLinkCancellation.reset();
+        emit editableLinksChanged();
+    }
     if (!m_webLinkCancellation)
         return;
     m_webLinkCancellation->store(true, std::memory_order_relaxed);
@@ -60,6 +65,15 @@ void PDFEditController::invalidateWebLinks()
         if (page >= 0)
             previewPages.insert(page);
     }
+    for (const auto &link : std::as_const(m_manualLinks)) {
+        if (link.annotationIndex < 0)
+            continue;
+        removed[link.sourcePage].insert(link.annotationIndex);
+        const int page = m_document
+            ? m_document->displayPageIndexForSourcePage(link.sourcePage) : -1;
+        if (page >= 0)
+            previewPages.insert(page);
+    }
     if (m_formController)
         m_formController->setRemovedWebLinks(removed);
     const QSet<int> affectedPages = previewPages | m_removedWebLinkPreviewPages;
@@ -74,7 +88,8 @@ void PDFEditController::invalidateWebLinks()
 
 bool PDFEditController::autoCreateWebLinks()
 {
-    if (!m_document || !m_document->isLoaded() || m_saving || m_webLinkCancellation)
+    if (!m_document || !m_document->isLoaded() || m_saving || m_webLinkCancellation
+        || m_manualLinkCancellation)
         return false;
     if (!documentAllowsAnnotations()) {
         //% "This PDF does not permit changing annotations."
@@ -83,7 +98,7 @@ bool PDFEditController::autoCreateWebLinks()
     }
     finishSelectedFrameResize();
     finishSelectedTextEdit();
-    if (hasNonWebLinkDrafts() || !m_removedWebLinks.isEmpty()) {
+    if (hasNonWebLinkDrafts() || !m_removedWebLinks.isEmpty() || !m_manualLinks.isEmpty()) {
         //% "Save your PDF changes before creating links from URLs."
         emit statusMessage(qtTrId("SaveBeforeCreatingWebLinks"));
         return false;
@@ -122,8 +137,7 @@ bool PDFEditController::autoCreateWebLinks()
                     return;
                 }
 
-                Command command;
-                command.kind = Command::Kind::WebLinks;
+                Command command = controller->captureLinkCommand();
                 command.webLinksBefore = controller->m_autoWebLinks;
                 command.webLinksAfter = command.webLinksBefore;
                 QHash<int, QVector<QRectF>> occupied;
@@ -203,7 +217,8 @@ bool PDFEditController::autoCreateWebLinks()
 
 bool PDFEditController::removeWebLinks()
 {
-    if (!m_document || !m_document->isLoaded() || m_saving || m_webLinkCancellation)
+    if (!m_document || !m_document->isLoaded() || m_saving || m_webLinkCancellation
+        || m_manualLinkCancellation)
         return false;
     if (!documentAllowsAnnotations()) {
         //% "This PDF does not permit changing annotations."
@@ -248,8 +263,7 @@ bool PDFEditController::removeWebLinks()
                     emit controller->statusMessage(qtTrId("WebLinkRemovalScanFailed"));
                     return;
                 }
-                Command command;
-                command.kind = Command::Kind::WebLinks;
+                Command command = controller->captureLinkCommand();
                 command.webLinksBefore = controller->m_autoWebLinks;
                 command.removedWebLinksBefore = controller->m_removedWebLinks;
                 command.removedWebLinksAfter = command.removedWebLinksBefore;
@@ -257,7 +271,22 @@ bool PDFEditController::removeWebLinks()
                 for (const auto &link : std::as_const(command.removedWebLinksBefore))
                     removed[link.sourcePage].insert(link.annotationIndex);
                 qsizetype count = command.webLinksBefore.size();
+                command.manualLinksAfter.clear();
+                QHash<int, QSet<int>> manuallyEdited;
+                for (auto link : std::as_const(command.manualLinksBefore)) {
+                    if (link.annotationIndex >= 0)
+                        manuallyEdited[link.sourcePage].insert(link.annotationIndex);
+                    if (!link.deleted && link.targetSourcePage < 0) {
+                        ++count;
+                        if (link.annotationIndex < 0)
+                            continue;
+                        link.deleted = true;
+                    }
+                    command.manualLinksAfter.append(link);
+                }
                 for (const auto &link : std::as_const(result.links)) {
+                    if (manuallyEdited.value(link.sourcePage).contains(link.annotationIndex))
+                        continue;
                     if (removed[link.sourcePage].contains(link.annotationIndex))
                         continue;
                     if (command.removedWebLinksAfter.size() >= PDFWebLinks::MaximumLinks) {
@@ -271,6 +300,8 @@ bool PDFEditController::removeWebLinks()
                 if (count) {
                     controller->m_autoWebLinks.clear();
                     controller->m_removedWebLinks = command.removedWebLinksAfter;
+                    controller->m_manualLinks = command.manualLinksAfter;
+                    command.webLinksAfter.clear();
                     controller->m_undoStack.append(std::move(command));
                     controller->m_redoStack.clear();
                     controller->invalidateWebLinks();
@@ -310,6 +341,13 @@ PDFEditController::deletedSourceWebLinkAnnotationsForPage(int page) const
         return deletions;
     for (const auto &link : m_removedWebLinks) {
         if (link.sourcePage == sourcePage)
+            deletions.append({link.annotationIndex, FPDF_ANNOT_LINK});
+    }
+    for (const auto &link : m_manualLinks) {
+        if (link.sourcePage == sourcePage && link.annotationIndex >= 0
+            && std::none_of(deletions.cbegin(), deletions.cend(), [&](const auto &item) {
+                return item.annotationIndex == link.annotationIndex;
+            }))
             deletions.append({link.annotationIndex, FPDF_ANNOT_LINK});
     }
     return deletions;

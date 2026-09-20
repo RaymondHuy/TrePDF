@@ -57,6 +57,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
     Q_PROPERTY(bool creatingWebLinks READ creatingWebLinks NOTIFY creatingWebLinksChanged FINAL)
     Q_PROPERTY(bool removingWebLinks READ removingWebLinks NOTIFY creatingWebLinksChanged FINAL)
+    Q_PROPERTY(bool loadingEditableLinks READ loadingEditableLinks NOTIFY editableLinksChanged FINAL)
     Q_PROPERTY(quint64 webLinksRevision READ webLinksRevision NOTIFY webLinksChanged FINAL)
     Q_PROPERTY(bool fontDownloadPending READ fontDownloadPending NOTIFY fontDownloadStateChanged FINAL)
     Q_PROPERTY(bool downloadingFont READ downloadingFont NOTIFY fontDownloadStateChanged FINAL)
@@ -171,6 +172,7 @@ public:
         InkTool,
         StampTool,
         CommentSelectTool,
+        LinkTool,
         // Compatibility aliases for QML/tests written during the initial
         // drawing-comment implementation.
         SquareCommentTool = SquareTool,
@@ -307,6 +309,15 @@ public:
     Q_INVOKABLE QVariantList candidatesForPage(int page);
     Q_INVOKABLE bool autoCreateWebLinks();
     Q_INVOKABLE bool removeWebLinks();
+    Q_INVOKABLE bool beginLinkEditing();
+    Q_INVOKABLE QVariantList editableLinksForPage(int page) const;
+    Q_INVOKABLE QVariantMap linkProperties(int page, const QString &id) const;
+    Q_INVOKABLE QString addLink(int page, const QRectF &rect, const QVariantMap &properties);
+    Q_INVOKABLE bool updateLink(int page, const QString &id, const QRectF &rect,
+                                const QVariantMap &properties);
+    Q_INVOKABLE bool deleteLink(int page, const QString &id);
+    Q_INVOKABLE bool activateManualLink(int page, const QString &id, quint64 revision);
+    bool loadingEditableLinks() const { return bool(m_manualLinkCancellation); }
     Q_INVOKABLE void cancelWebLinkCreation();
     Q_INVOKABLE QVariantList webLinkDraftsForPage(int page) const;
     Q_INVOKABLE bool activateWebLink(int page, int index, quint64 revision);
@@ -470,6 +481,7 @@ signals:
     void historyStateChanged();
     void savingChanged();
     void creatingWebLinksChanged();
+    void editableLinksChanged();
     void webLinksChanged();
     void textEditActiveChanged();
     void selectionChanged();
@@ -777,6 +789,8 @@ private:
         QVector<PDFWebLinks::Link> webLinksAfter;
         QVector<PDFWebLinks::SourceLink> removedWebLinksBefore;
         QVector<PDFWebLinks::SourceLink> removedWebLinksAfter;
+        QVector<PDFWebLinks::ManualLink> manualLinksBefore;
+        QVector<PDFWebLinks::ManualLink> manualLinksAfter;
     };
 
     enum class FontStyle {
@@ -788,6 +802,14 @@ private:
     void resetSession();
     bool hasNonWebLinkDrafts() const;
     void invalidateWebLinks();
+    bool resolveManualLink(int page, const QString &id, PDFWebLinks::ManualLink &link) const;
+    QVariantMap manualLinkProperties(const PDFWebLinks::ManualLink &link,
+                                     bool draft, bool automatic) const;
+    bool validateManualLink(int page, const QRectF &rect, const QVariantMap &properties,
+                            PDFWebLinks::ManualLink &link) const;
+    Command captureLinkCommand() const;
+    void commitLinkCommand(Command command);
+    bool removeAutoLinkRegion(const QString &id);
     void clearFontRecovery();
     void finishFontDownload(bool succeeded, const QString &error);
     QRectF rotatedImageFrame(const Draft &draft, int quarterTurns) const;
@@ -1038,6 +1060,10 @@ private:
     QSet<int> m_deletedSourcePages;
     QHash<QString, Draft> m_drafts;
     QVector<PDFWebLinks::Link> m_autoWebLinks;
+    QVector<PDFWebLinks::ManualLink> m_manualLinks;
+    QVector<PDFWebLinks::ManualLink> m_sourceManualLinks;
+    bool m_manualSourceLinksReady = false;
+    std::shared_ptr<std::atomic_bool> m_manualLinkCancellation;
     QVector<PDFWebLinks::SourceLink> m_removedWebLinks;
     QSet<int> m_removedWebLinkPreviewPages;
     bool m_removingWebLinks = false;

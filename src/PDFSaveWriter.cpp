@@ -5948,6 +5948,180 @@ PDFSaveWriter::Result removeWebLinks(FPDF_DOCUMENT document,
     return {};
 }
 
+struct ManualLinkEdit {
+    PDFWebLinks::ManualLink link;
+    QString markerId;
+    int page = -1;
+    int destinationPage = -1;
+};
+
+int outputPageForSource(int sourcePage, int sourcePageCount,
+                        const QVector<int> &deletedSourcePages,
+                        const QVector<PDFPageInsertion> &pageInsertions)
+{
+    if (sourcePage < 0 || sourcePage >= sourcePageCount)
+        return -1;
+    const auto deleted = std::lower_bound(
+        deletedSourcePages.cbegin(), deletedSourcePages.cend(), sourcePage);
+    if (deleted != deletedSourcePages.cend() && *deleted == sourcePage)
+        return -1;
+    int page = sourcePage - static_cast<int>(deleted - deletedSourcePages.cbegin());
+    for (const PDFPageInsertion &insertion : pageInsertions) {
+        if (insertion.page <= page)
+            ++page;
+    }
+    return page;
+}
+
+PDFSaveWriter::Result prepareManualLinkEdits(
+    FPDF_DOCUMENT document, FPDF_DOCUMENT inspectionDocument, int sourcePageCount,
+    const QVector<int> &deletedSourcePages,
+    const QVector<PDFPageInsertion> &pageInsertions,
+    const QVector<PDFWebLinks::ManualLink> &links,
+    const QVector<PDFWebLinks::SourceLink> &batchRemovals,
+    QVector<ManualLinkEdit> &edits)
+{
+    using Error = PDFSaveWriter::Error;
+    assertPDFiumProcessLockHeld();
+    if (links.size() > PDFWebLinks::MaximumLinks)
+        return failure(Error::ManualLinkUpdateFailed);
+    QHash<int, QSet<int>> removed;
+    for (const auto &link : batchRemovals)
+        removed[link.sourcePage].insert(link.annotationIndex);
+    QMap<int, QVector<const PDFWebLinks::ManualLink *>> bySourcePage;
+    QSet<QString> ids;
+    for (const auto &link : links) {
+        if (ids.contains(link.id) || link.sourcePage < 0 || link.sourcePage >= sourcePageCount
+            || link.annotationIndex < -1 || !link.editable)
+            return failure(Error::ManualLinkUpdateFailed, link.sourcePage);
+        ids.insert(link.id);
+        if (std::binary_search(deletedSourcePages.cbegin(), deletedSourcePages.cend(), link.sourcePage)
+            || (link.deleted && link.annotationIndex < 0)
+            || (link.annotationIndex >= 0 && removed.value(link.sourcePage).contains(link.annotationIndex)))
+            continue;
+        if (!PDFWebLinks::validManualLink(link))
+            return failure(Error::ManualLinkUpdateFailed, link.sourcePage);
+        bySourcePage[link.sourcePage].append(&link);
+    }
+    for (auto entry = bySourcePage.cbegin(); entry != bySourcePage.cend(); ++entry) {
+        const int sourcePage = entry.key();
+        PdfPageHandle inspectionPage(FPDF_LoadPage(inspectionDocument, sourcePage));
+        PdfPageHandle page(FPDF_LoadPage(document, sourcePage));
+        if (!inspectionPage.get() || !page.get())
+            return failure(Error::PageLoadFailed, sourcePage);
+        const auto inspected = PDFWebLinks::editableLinksForPage(
+            inspectionDocument, inspectionPage.get(), sourcePage);
+        if (inspected.failed)
+            return failure(Error::ManualLinkUpdateFailed, sourcePage);
+        QHash<int, PDFWebLinks::ManualLink> originals;
+        for (const auto &original : inspected.links)
+            originals.insert(original.annotationIndex, original);
+        QSet<int> sourceIndices;
+        for (const auto *link : entry.value()) {
+            ManualLinkEdit edit;
+            edit.link = *link;
+            edit.page = outputPageForSource(sourcePage, sourcePageCount, deletedSourcePages, pageInsertions);
+            if (!link->deleted && link->targetSourcePage >= 0) {
+                edit.destinationPage = outputPageForSource(
+                    link->targetSourcePage, sourcePageCount, deletedSourcePages, pageInsertions);
+                if (edit.destinationPage < 0)
+                    return failure(Error::ManualLinkUpdateFailed, edit.page);
+            }
+            edit.markerId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            if (link->annotationIndex >= 0) {
+                const auto original = originals.constFind(link->annotationIndex);
+                if (sourceIndices.contains(link->annotationIndex) || original == originals.cend()
+                    || !original->editable || link->fingerprint.size() != 32
+                    || original->fingerprint != link->fingerprint)
+                    return failure(Error::ManualLinkUpdateFailed, sourcePage);
+                sourceIndices.insert(link->annotationIndex);
+                PdfAnnotationHandle annotation(FPDFPage_GetAnnot(page.get(), link->annotationIndex));
+                if (!annotation.get()
+                    || FPDFAnnot_HasKey(annotation.get(), PDFWebLinks::ManualMarkerKey)
+                    || !FPDFAnnot_SetStringValue(annotation.get(), PDFWebLinks::ManualMarkerKey,
+                            reinterpret_cast<const FPDF_WCHAR *>(edit.markerId.utf16())))
+                    return failure(Error::ManualLinkUpdateFailed, sourcePage);
+            }
+            edits.append(std::move(edit));
+        }
+    }
+    return {};
+}
+
+PDFSaveWriter::Result applyManualLinkEdits(
+    FPDF_DOCUMENT document, const QVector<ManualLinkEdit> &edits,
+    QVector<PDFAcroFormCanonicalizer::LinkAnnotation> &annotations)
+{
+    using Error = PDFSaveWriter::Error;
+    assertPDFiumProcessLockHeld();
+    QMap<int, QVector<const ManualLinkEdit *>> byPage;
+    for (const auto &edit : edits)
+        byPage[edit.page].append(&edit);
+    for (auto entry = byPage.cbegin(); entry != byPage.cend(); ++entry) {
+        const int pageIndex = entry.key();
+        PdfPageHandle page(FPDF_LoadPage(document, pageIndex));
+        if (!page.get())
+            return failure(Error::PageLoadFailed, pageIndex);
+        const qreal width = FPDF_GetPageWidthF(page.get());
+        const qreal height = FPDF_GetPageHeightF(page.get());
+        if (!std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0
+            || width > 1e6 || height > 1e6)
+            return failure(Error::ManualLinkUpdateFailed, pageIndex);
+        const PageCoordinateMapper mapper(page.get(), width, height);
+        QHash<QString, int> markers;
+        const int count = FPDFPage_GetAnnotCount(page.get());
+        if (count < 0 || count > PDFWebLinks::MaximumAnnotationsPerPage + PDFWebLinks::MaximumLinks)
+            return failure(Error::ManualLinkUpdateFailed, pageIndex);
+        for (int index = 0; index < count; ++index) {
+            PdfAnnotationHandle annotation(FPDFPage_GetAnnot(page.get(), index));
+            if (!annotation.get())
+                return failure(Error::ManualLinkUpdateFailed, pageIndex);
+            if (!FPDFAnnot_HasKey(annotation.get(), PDFWebLinks::ManualMarkerKey))
+                continue;
+            const QString marker = PDFAnnotationUtils::annotationString(
+                annotation.get(), PDFWebLinks::ManualMarkerKey);
+            if (marker.isEmpty() || markers.contains(marker)
+                || FPDFAnnot_GetSubtype(annotation.get()) != FPDF_ANNOT_LINK)
+                return failure(Error::ManualLinkUpdateFailed, pageIndex);
+            markers.insert(marker, index);
+        }
+        QVector<int> deletions;
+        for (const ManualLinkEdit *edit : entry.value()) {
+            if (edit->link.annotationIndex >= 0 && !markers.contains(edit->markerId))
+                return failure(Error::ManualLinkUpdateFailed, pageIndex);
+            if (edit->link.deleted) {
+                deletions.append(markers.value(edit->markerId));
+                continue;
+            }
+            FS_RECTF rect{};
+            if (!annotationRectForFrame(edit->link.rect, width, height, mapper, rect))
+                return failure(Error::ManualLinkUpdateFailed, pageIndex);
+            if (edit->link.annotationIndex < 0) {
+                PdfAnnotationHandle annotation(FPDFPage_CreateAnnot(page.get(), FPDF_ANNOT_LINK));
+                if (!annotation.get() || !FPDFAnnot_SetRect(annotation.get(), &rect)
+                    || !FPDFAnnot_SetBorder(annotation.get(), 0.0F, 0.0F, 0.0F)
+                    || !FPDFAnnot_SetStringValue(annotation.get(), PDFWebLinks::ManualMarkerKey,
+                            reinterpret_cast<const FPDF_WCHAR *>(edit->markerId.utf16())))
+                    return failure(Error::ManualLinkUpdateFailed, pageIndex);
+            }
+            PDFAcroFormCanonicalizer::LinkAnnotation annotation;
+            annotation.markerId = edit->markerId;
+            annotation.page = pageIndex;
+            annotation.pageRect = QRectF(QPointF(rect.left, rect.bottom), QPointF(rect.right, rect.top));
+            annotation.pageQuarterTurns = FPDFPage_GetRotation(page.get());
+            annotation.destinationPage = edit->destinationPage;
+            annotation.link = edit->link;
+            annotations.append(std::move(annotation));
+        }
+        std::sort(deletions.begin(), deletions.end(), std::greater<int>());
+        for (const int index : deletions) {
+            if (!FPDFPage_RemoveAnnot(page.get(), index))
+                return failure(Error::ManualLinkUpdateFailed, pageIndex);
+        }
+    }
+    return {};
+}
+
 PDFSaveWriter::Result addWebLinks(
     FPDF_DOCUMENT document,
     int sourcePageCount,
@@ -6136,6 +6310,7 @@ struct PDFSaveWriter::Request::Data {
     QVector<PDFFormDesignerController::SaveField> formFields;
     QVector<PDFWebLinks::Link> autoWebLinks;
     QVector<PDFWebLinks::SourceLink> removedWebLinks;
+    QVector<PDFWebLinks::ManualLink> manualLinks;
 };
 
 PDFSaveWriter::Request PDFSaveWriter::prepare(
@@ -6157,6 +6332,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
     data->targetFilePath = targetFilePath;
     data->autoWebLinks = controller.m_autoWebLinks;
     data->removedWebLinks = controller.m_removedWebLinks;
+    data->manualLinks = controller.m_manualLinks;
     if (controller.m_formDesignerController) {
         const bool normalizeSourceFieldAppearances
             = controller.m_formDesignerController->hasDrafts();
@@ -6562,6 +6738,14 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     if (!removalValidation.succeeded()) {
         return removalValidation;
     }
+    QVector<ManualLinkEdit> manualLinkEdits;
+    const Result manualValidation = prepareManualLinkEdits(
+        document.get(), inspectionDocument.get(), sourcePageCount,
+        request.m_data->deletedSourcePages, request.m_data->pageInsertions,
+        request.m_data->manualLinks, request.m_data->removedWebLinks, manualLinkEdits);
+    if (!manualValidation.succeeded()) {
+        return manualValidation;
+    }
     for (auto page = request.m_data->deletedSourcePages.crbegin();
          page != request.m_data->deletedSourcePages.crend();
          ++page) {
@@ -6651,6 +6835,12 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     const Result removalResult = removeWebLinks(document.get(), webLinkRemovals);
     if (!removalResult.succeeded()) {
         return removalResult;
+    }
+    QVector<PDFAcroFormCanonicalizer::LinkAnnotation> manualLinkAnnotations;
+    const Result manualResult = applyManualLinkEdits(
+        document.get(), manualLinkEdits, manualLinkAnnotations);
+    if (!manualResult.succeeded()) {
+        return manualResult;
     }
     const Result webLinkResult = addWebLinks(
         document.get(),
@@ -6742,7 +6932,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         && stampAnnotations.isEmpty()
         && drawingAnnotations.isEmpty()
         && sourceDrawingGeometryUpdates.isEmpty()
-        && sourceCommentGeometryUpdates.isEmpty()) {
+        && sourceCommentGeometryUpdates.isEmpty()
+        && manualLinkAnnotations.isEmpty()) {
         return writeDocument(document.get(), request.m_data->targetFilePath);
     }
 
@@ -6774,6 +6965,14 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         contentFilePath);
     if (!contentResult.succeeded()) {
         return contentResult;
+    }
+
+    if (!manualLinkAnnotations.isEmpty()) {
+        QString linkError;
+        if (!PDFAcroFormCanonicalizer::finalizeLinkAnnotations(
+                contentFilePath, manualLinkAnnotations, linkError)) {
+            return failure(Error::ManualLinkUpdateFailed, -1, linkError);
+        }
     }
 
     if (!annotationRelationships.isEmpty()) {

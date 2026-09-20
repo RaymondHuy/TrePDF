@@ -8748,6 +8748,373 @@ bool PDFAcroFormCanonicalizer::finalizeSourceCommentGeometryUpdates(
         error);
 }
 
+bool PDFAcroFormCanonicalizer::finalizeLinkAnnotations(
+    const QString &filePath,
+    const QVector<LinkAnnotation> &updates,
+    QString &error)
+{
+    if (updates.isEmpty())
+        return true;
+    if (updates.size() > PDFWebLinks::MaximumLinks) {
+        error = QStringLiteral("Too many link updates were requested.");
+        return false;
+    }
+    QSet<QString> markerIds;
+    for (const LinkAnnotation &update : updates) {
+        const QRectF rect = update.pageRect;
+        if (update.markerId.isEmpty() || markerIds.contains(update.markerId)
+            || update.page < 0 || update.pageQuarterTurns < 0 || update.pageQuarterTurns > 3
+            || !PDFWebLinks::validManualLink(update.link)
+            || !std::isfinite(rect.x()) || !std::isfinite(rect.y())
+            || !std::isfinite(rect.width()) || !std::isfinite(rect.height())
+            || rect.isEmpty() || qAbs(rect.x()) > 1e7 || qAbs(rect.y()) > 1e7
+            || rect.width() > 1e7 || rect.height() > 1e7
+            || ((update.destinationPage >= 0) != (update.link.targetSourcePage >= 0))) {
+            error = QStringLiteral("A link update is invalid or duplicated.");
+            return false;
+        }
+        markerIds.insert(update.markerId);
+    }
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0) {
+        error = file.errorString();
+        return false;
+    }
+    const qint64 fileSize = file.size();
+    uchar *mapped = file.map(0, fileSize);
+    if (!mapped) {
+        error = file.errorString();
+        return false;
+    }
+
+    ParsedPdf pdf;
+    if (!parseXref(
+            reinterpret_cast<const char *>(mapped),
+            fileSize,
+            pdf,
+            error)) {
+        file.unmap(mapped);
+        return false;
+    }
+    const auto fail = [&file, mapped, &error](const QString &message) {
+        error = message;
+        file.unmap(mapped);
+        return false;
+    };
+
+    // Resolve the final page tree, including inserted and deleted pages. Link
+    // destinations use indirect page references, never a positional integer.
+    QVector<ObjectReference> pageReferences;
+    const QByteArray catalog = completeObject(pdf, pdf.root.number, error);
+    qsizetype pagesStart = -1, pagesEnd = -1;
+    ObjectReference pagesRoot;
+    if (catalog.isEmpty()
+        || !topLevelDictionaryValueRange(catalog, "/Pages", pagesStart, pagesEnd, error)
+        || pagesStart < 0
+        || !parseReference(catalog.constData(), catalog.size(), pagesStart, pagesRoot)) {
+        return fail(QStringLiteral("The PDF page tree could not be resolved."));
+    }
+    QVector<QPair<ObjectReference, int>> pending{{pagesRoot, 0}};
+    QSet<int> visitedPages;
+    while (!pending.isEmpty()) {
+        const auto node = pending.takeLast();
+        if (node.second > 64 || visitedPages.contains(node.first.number)
+            || visitedPages.size() >= 200000) {
+            return fail(QStringLiteral("The PDF page tree exceeds the supported limits."));
+        }
+        visitedPages.insert(node.first.number);
+        QByteArray object;
+        if (!objectForReference(pdf, node.first, {}, object, error))
+            return fail(error);
+        qsizetype typeStart = -1, typeEnd = -1;
+        if (!topLevelDictionaryValueRange(object, "/Type", typeStart, typeEnd, error)
+            || typeStart < 0)
+            return fail(QStringLiteral("A PDF page tree node has no type."));
+        const QByteArray type = object.mid(typeStart, typeEnd - typeStart);
+        if (type == "/Page") {
+            pageReferences.append(node.first);
+        } else if (type == "/Pages") {
+            QList<ObjectReference> children;
+            if (!kidReferences(pdf, object, children, error) || children.isEmpty()
+                || children.size() > 200000 - pending.size())
+                return fail(QStringLiteral("A PDF page tree node is malformed."));
+            for (auto child = children.crbegin(); child != children.crend(); ++child)
+                pending.append({*child, node.second + 1});
+        } else {
+            return fail(QStringLiteral("A PDF page tree node has an unsupported type."));
+        }
+    }
+    int highestObject = 0;
+    for (auto entry = pdf.entries.cbegin(); entry != pdf.entries.cend(); ++entry) {
+        highestObject = (std::max)(highestObject, entry.key());
+    }
+    int nextObjectNumber = (std::max)(
+        pdf.declaredSize,
+        highestObject + 1);
+
+    struct DictionaryReplacement {
+        qsizetype start = -1;
+        qsizetype end = -1;
+        QByteArray value;
+    };
+    QHash<int, QVector<DictionaryReplacement>> replacementsByContainer;
+    QHash<int, ObjectReference> containerReferences;
+    QHash<int, QByteArray> rewrittenObjects;
+    QHash<int, ObjectReference> rewrittenReferences;
+    QList<IncrementalObject> incrementalObjects;
+    incrementalObjects.reserve(updates.size() * 2);
+    const QByteArray markerDictionaryKey
+        = QByteArrayLiteral("/") + PDFWebLinks::ManualMarkerKey;
+    const auto dictionaryValueRange = [&](const QByteArray &dictionary,
+                                           QByteArrayView key,
+                                           qsizetype &start, qsizetype &end) {
+        // The shared range reader expects an indirect-object header; these
+        // slices contain only a dictionary. Keep its offsets local to the slice.
+        const QByteArray prefix = QByteArrayLiteral("0 0 obj\n");
+        if (!topLevelDictionaryValueRange(prefix + dictionary, key, start, end, error))
+            return false;
+        if (start >= 0) {
+            start -= prefix.size();
+            end -= prefix.size();
+        }
+        return true;
+    };
+
+    for (const LinkAnnotation &update : updates) {
+        const PlaceholderLocation placeholder = annotationForStringId(
+            pdf,
+            QByteArrayView(markerDictionaryKey),
+            update.markerId,
+            QByteArrayView("/Link"));
+        const bool located = placeholder.widget.number >= 0
+            || (placeholder.container.number >= 0
+                && placeholder.dictionaryStart >= 0
+                && placeholder.dictionaryEnd > placeholder.dictionaryStart);
+        if (!located) {
+            return fail(QStringLiteral(
+                "A marked link annotation could not be located."));
+        }
+
+        QByteArray object;
+        qsizetype dictionaryStart = -1;
+        qsizetype dictionaryEnd = -1;
+        if (placeholder.isDirect()) {
+            object = completeObject(pdf, placeholder.container.number, error);
+            dictionaryStart = placeholder.dictionaryStart;
+            dictionaryEnd = placeholder.dictionaryEnd;
+        } else {
+            object = completeObject(pdf, placeholder.widget.number, error);
+            dictionaryStart = object.indexOf("<<");
+            if (dictionaryStart >= 0
+                && !matchingDictionaryEnd(
+                    object.constData(),
+                    object.size(),
+                    dictionaryStart,
+                    dictionaryEnd)) {
+                dictionaryEnd = -1;
+            }
+        }
+        if (object.isEmpty()
+            || dictionaryStart < 0
+            || dictionaryEnd <= dictionaryStart
+            || dictionaryEnd > object.size()) {
+            return fail(error.isEmpty()
+                    ? QStringLiteral(
+                        "A link annotation dictionary is malformed.")
+                    : error);
+        }
+
+        QByteArray dictionary = object.mid(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart);
+        if (update.page >= pageReferences.size()
+            || update.destinationPage >= pageReferences.size()) {
+            return fail(QStringLiteral("A link destination page is unavailable."));
+        }
+        const QRectF bounds = update.pageRect.normalized();
+        const QByteArray rect = QByteArrayLiteral("[")
+            + pdfNumber(bounds.left()) + ' ' + pdfNumber(bounds.top()) + ' '
+            + pdfNumber(bounds.right()) + ' ' + pdfNumber(bounds.bottom()) + ']';
+        QByteArray action = QByteArrayLiteral("<< >>");
+        if (update.link.annotationIndex >= 0) {
+            qsizetype actionStart = -1, actionEnd = -1;
+            if (!dictionaryValueRange(dictionary, "/A", actionStart, actionEnd))
+                return fail(error);
+            if (actionStart >= 0) {
+                action = dictionary.mid(actionStart, actionEnd - actionStart);
+                if (!action.startsWith("<<")) {
+                    ObjectReference reference;
+                    QByteArray actionObject;
+                    if (!parseReference(action.constData(), action.size(), 0, reference)
+                        || !objectForReference(pdf, reference, {}, actionObject, error))
+                        return fail(QStringLiteral("A source link action cannot be resolved safely."));
+                    const qsizetype start = actionObject.indexOf("<<");
+                    qsizetype end = -1;
+                    if (start < 0 || !matchingDictionaryEnd(actionObject.constData(), actionObject.size(), start, end))
+                        return fail(QStringLiteral("A source link action is not a dictionary."));
+                    action = actionObject.mid(start, end - start);
+                }
+                for (const QByteArrayView key : {QByteArrayView("/Next"), QByteArrayView("/IsMap")}) {
+                    qsizetype start = -1, end = -1;
+                    if (!dictionaryValueRange(action, key, start, end) || start >= 0)
+                        return fail(QStringLiteral("A source link has a complex action which cannot be edited safely."));
+                }
+            }
+        }
+        if (update.destinationPage >= 0) {
+            const auto destination = pageReferences.at(update.destinationPage);
+            const QByteArray target = QByteArrayLiteral("[")
+                + QByteArray::number(destination.number) + ' '
+                + QByteArray::number(destination.generation) + " R /Fit]";
+            if (!replaceTopLevelDictionaryValue(action, "/S", QByteArrayLiteral("/GoTo"), true, error)
+                || !replaceTopLevelDictionaryValue(action, "/D", target, true, error)
+                || !removeTopLevelDictionaryValue(action, "/URI", error))
+                return fail(error);
+        } else {
+            const QByteArray uri = PDFWebLinks::validWebUrl(update.link.url).toLatin1();
+            if (!replaceTopLevelDictionaryValue(action, "/S", QByteArrayLiteral("/URI"), true, error)
+                || !replaceTopLevelDictionaryValue(action, "/URI", QByteArrayLiteral("<") + uri.toHex() + '>', true, error)
+                || !removeTopLevelDictionaryValue(action, "/D", error))
+                return fail(error);
+        }
+        const PDFWebLinks::ManualLink &link = update.link;
+        const QByteArray width = pdfNumber(link.visible ? link.width : 0.0);
+        const QByteArray color = QByteArrayLiteral("[")
+            + pdfNumber(link.color.redF()) + ' ' + pdfNumber(link.color.greenF()) + ' '
+            + pdfNumber(link.color.blueF()) + ']';
+        const std::array<QByteArray, 3> styles{"/S", "/D", "/U"};
+        const std::array<QByteArray, 4> highlights{"/N", "/I", "/O", "/P"};
+        QByteArray borderStyle = QByteArrayLiteral("<< /Type /Border /W ")
+            + width + " /S " + styles.at(link.lineStyle);
+        if (link.lineStyle == 1)
+            borderStyle += " /D [3 3]";
+        borderStyle += " >>";
+        const auto put = [&](QByteArrayView key, const QByteArray &value) {
+            return replaceTopLevelDictionaryValue(dictionary, key, value, true, error);
+        };
+        if (!put("/Rect", rect) || !put("/A", action)
+            || !put("/Border", QByteArrayLiteral("[0 0 ") + width + ']')
+            || !put("/BS", borderStyle) || !put("/C", color)
+            || !put("/H", highlights.at(link.highlight))
+            || !put("/TrePDFLinkStyle", encodedPdfString(PDFWebLinks::manualStyleMetadata(link)))
+            || !removeTopLevelDictionaryValue(dictionary, "/Dest", error)
+            || !removeTopLevelDictionaryValue(dictionary, "/QuadPoints", error)
+            || !removeTopLevelDictionaryValue(dictionary, QByteArrayView(markerDictionaryKey), error)) {
+            return fail(error);
+        }
+        if (link.visible) {
+            if (nextObjectNumber >= std::numeric_limits<int>::max())
+                return fail(QStringLiteral("The PDF has no available object number for a link appearance."));
+            const int appearanceNumber = nextObjectNumber++;
+            // Use the same float coordinates PDFium will read from /Rect.
+            // Rounding the serialized rectangle may otherwise change a border
+            // operand by a millipoint and reject our own appearance on reopen.
+            const QSizeF appearanceSize(
+                qreal(pdfNumber(bounds.right()).toFloat()) - pdfNumber(bounds.left()).toFloat(),
+                qreal(pdfNumber(bounds.bottom()).toFloat()) - pdfNumber(bounds.top()).toFloat());
+            const QByteArray content = PDFWebLinks::manualLinkAppearance(
+                link, appearanceSize, update.pageQuarterTurns);
+            if (content.isEmpty()
+                || !put("/AP", QByteArrayLiteral("<< /N ") + QByteArray::number(appearanceNumber) + " 0 R >>"))
+                return fail(error);
+            const QByteArray appearance = QByteArray::number(appearanceNumber)
+                + " 0 obj\n<< /Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 "
+                + pdfNumber(appearanceSize.width()) + ' ' + pdfNumber(appearanceSize.height())
+                + "] /Matrix [1 0 0 1 0 0] /Resources << >> /Length "
+                + QByteArray::number(content.size()) + " >>\nstream\n"
+                + content + "endstream\nendobj";
+            incrementalObjects.append({ObjectReference{appearanceNumber, 0}, appearance});
+        } else if (!removeTopLevelDictionaryValue(dictionary, "/AP", error)) {
+            return fail(error);
+        }
+
+        if (placeholder.isDirect()) {
+            replacementsByContainer[placeholder.container.number].append({
+                dictionaryStart,
+                dictionaryEnd,
+                dictionary});
+            containerReferences.insert(
+                placeholder.container.number,
+                placeholder.container);
+            continue;
+        }
+        if (rewrittenObjects.contains(placeholder.widget.number)) {
+            return fail(QStringLiteral(
+                "Two link updates resolved to the same annotation."));
+        }
+        object.replace(
+            dictionaryStart,
+            dictionaryEnd - dictionaryStart,
+            dictionary);
+        rewrittenObjects.insert(placeholder.widget.number, std::move(object));
+        rewrittenReferences.insert(
+            placeholder.widget.number,
+            placeholder.widget);
+    }
+
+    for (auto container = replacementsByContainer.begin();
+         container != replacementsByContainer.end();
+         ++container) {
+        if (rewrittenObjects.contains(container.key())) {
+            return fail(QStringLiteral(
+                "A link annotation container cannot be rewritten safely."));
+        }
+        QByteArray object = completeObject(pdf, container.key(), error);
+        if (object.isEmpty()) {
+            return fail(error);
+        }
+        std::sort(
+            container->begin(),
+            container->end(),
+            [](const DictionaryReplacement &left,
+               const DictionaryReplacement &right) {
+                return left.start > right.start;
+            });
+        qsizetype previousStart = object.size();
+        for (const DictionaryReplacement &replacement
+             : std::as_const(*container)) {
+            if (replacement.start < 0
+                || replacement.end <= replacement.start
+                || replacement.end > previousStart
+                || replacement.end > object.size()) {
+                return fail(QStringLiteral(
+                    "Overlapping link annotation rewrites are not supported."));
+            }
+            object.replace(
+                replacement.start,
+                replacement.end - replacement.start,
+                replacement.value);
+            previousStart = replacement.start;
+        }
+        rewrittenObjects.insert(container.key(), std::move(object));
+        rewrittenReferences.insert(
+            container.key(),
+            containerReferences.value(container.key()));
+    }
+    for (auto rewritten = rewrittenObjects.begin();
+         rewritten != rewrittenObjects.end();
+         ++rewritten) {
+        incrementalObjects.append({
+            rewrittenReferences.value(rewritten.key()),
+            std::move(rewritten.value())});
+    }
+
+    const bool sourceEndsWithNewline = fileSize > 0
+        && reinterpret_cast<const char *>(mapped)[fileSize - 1] == '\n';
+    const ObjectReference root = pdf.root;
+    const qint64 previousXref = pdf.startXref;
+    file.unmap(mapped);
+    file.close();
+    return appendIncrementalUpdate(
+        filePath,
+        root,
+        previousXref,
+        nextObjectNumber,
+        sourceEndsWithNewline,
+        std::move(incrementalObjects),
+        error);
+}
+
 bool PDFAcroFormCanonicalizer::finalizeAnnotationRelationships(
     const QString &filePath,
     const QVector<AnnotationRelationship> &relationships,

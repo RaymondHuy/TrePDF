@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PDFCommentAnnotation.h"
+#include "PDFWebLinkScanner.h"
 
 #include <QColor>
 #include <QPointF>
@@ -110,6 +111,20 @@ public:
 
     inline static constexpr char kSourceCommentGeometryMarkerKey[]
         = "TrePDFSourceCommentGeometryId";
+
+    struct LinkAnnotation {
+        QString markerId;
+        int page = -1;
+        QRectF pageRect;
+        int pageQuarterTurns = 0;
+        int destinationPage = -1;
+        PDFWebLinks::ManualLink link;
+    };
+
+    static bool finalizeLinkAnnotations(
+        const QString &filePath,
+        const QVector<LinkAnnotation> &annotations,
+        QString &error);
 
     static bool finalizeFields(const QString &filePath,
                                const QVector<Field> &fields,
