@@ -271,6 +271,9 @@ budget recovery, comment suppression và zoom settling pass trên native Metal.
 - PDFium render trực tiếp vào `QImage::bits()` bằng `FPDFBitmap_CreateEx`.
   Tile dùng offset âm của `renderRect`, nhưng scale vẫn dùng kích thước raster
   toàn trang; `FPDF_FFLDraw` và widget patch dùng cùng phép đổi tọa độ.
+- `FPDF_FFLDraw` chỉ vẽ widget biểu mẫu, không bật `FPDF_ANNOT`, để ẩn popup
+  vàng khi hover Stamp/comment. Stamp và annotation trên trang vẫn được vẽ bởi
+  `FPDF_RenderPageBitmap`; nội dung bình luận vẫn có trong panel.
 - `ScopedPageObjectSuppression` ẩn source object đã bị draft thay/xóa.
 - `ScopedPageObjectMoves` áp ma trận preview cho source text chỉ-move và source
   image move/resize rồi phục hồi chính xác matrix gốc. Source image dùng shared

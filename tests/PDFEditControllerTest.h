@@ -88,6 +88,7 @@ private slots:
     void routesPushButtonActions();
     void blocksUnsupportedFormUriSchemes();
     void forwardsExternalLinkRequestsThroughTabModel();
+    void hidesStampHoverPopupWhileKeepingFormsAndLinksInteractive();
     void serializesPdfiumAcrossThreads();
     void discoversUncachedHoverOffGuiThread();
     void reschedulesCancelledHoverForSamePage();

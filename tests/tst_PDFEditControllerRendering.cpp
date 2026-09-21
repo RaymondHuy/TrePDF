@@ -3,6 +3,114 @@
 
 using namespace PDFEditControllerTestSupport;
 
+void PDFEditControllerTest::hidesStampHoverPopupWhileKeepingFormsAndLinksInteractive()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("stamp-hover.pdf"));
+    const auto appearance = [](const QByteArray &commands) {
+        return QByteArray("<< /Type /XObject /Subtype /Form /BBox [0 0 20 20] "
+                          "/Resources << >> /Length ")
+            + QByteArray::number(commands.size()) + " >>\nstream\n"
+            + commands + "\nendstream";
+    };
+    QVERIFY(writePdfObjects(path, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R "
+                   "/AcroForm << /Fields [7 0 R] >> >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+                   "/Resources << >> /Annots [4 0 R 5 0 R 7 0 R 10 0 R] >>"),
+        QByteArray("<< /Type /Annot /Subtype /Stamp /P 3 0 R "
+                   "/Rect [20 140 100 180] /Name /Approved /F 4 "
+                   "/T (Reviewer) /Contents (Approved) /Popup 5 0 R "
+                   "/AP << /N 6 0 R >> >>"),
+        QByteArray("<< /Type /Annot /Subtype /Popup /P 3 0 R "
+                   "/Rect [20 40 180 140] /Parent 4 0 R /Open false >>"),
+        appearance("0 0.7 0.5 rg 0 0 20 20 re f"),
+        QByteArray("<< /Type /Annot /Subtype /Widget /P 3 0 R "
+                   "/FT /Btn /T (Check) /Rect [20 10 40 30] /F 4 "
+                   "/V /Off /AS /Off /AP << /N << /Off 8 0 R /Yes 9 0 R >> >> >>"),
+        appearance("1 1 1 rg 0 0 20 20 re f 0 0 0 RG 1 w 1 1 18 18 re S"),
+        appearance("0 0 1 rg 0 0 20 20 re f"),
+        QByteArray("<< /Type /Annot /Subtype /Link /Rect [120 10 180 30] "
+                   "/Border [0 0 0] /A << /S /URI /URI (https://example.com/) >> >>"),
+    }));
+
+    PDFDocument document;
+    PDFFormController forms;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    forms.setDocument(&document);
+    QTRY_VERIFY_WITH_TIMEOUT(!forms.javascriptTransitionPending(), 5000);
+    QSignalSpy inputSpy(&forms, &PDFFormController::inputStateChanged);
+    // Retain the worker's active form page so hover state survives until the
+    // asynchronous render; hovering a temporary page would miss the bug.
+    forms.pointerEvent(0, PDFFormWorker::PointerEventType::Press, 0,
+                       QPointF(380, 380), QSize(400, 400));
+    forms.pointerEvent(0, PDFFormWorker::PointerEventType::Release, 0,
+                       QPointF(380, 380), QSize(400, 400));
+    QTRY_COMPARE_WITH_TIMEOUT(inputSpy.count(), 2, 5000);
+    inputSpy.clear();
+    QQuickWindow window;
+    window.setColor(Qt::white);
+    window.resize(400, 400);
+    TestablePDFPageItem item(window.contentItem());
+    item.setSize(QSizeF(400, 400));
+    item.setFormController(&forms);
+    item.setDocument(&document);
+    item.completeForTest();
+    window.show();
+    QTRY_VERIFY_WITH_TIMEOUT(window.isExposed() && item.draftTextureCurrent()
+                                && item.draftTextureReady(), 5000);
+    const auto grabPage = [&]() -> QImage {
+        const auto grab = item.grabToImage(QSize(400, 400));
+        if (!grab || !QTest::qWaitFor([&]() { return !grab->image().isNull(); }, 5000))
+            return {};
+        return grab->image();
+    };
+    const QImage original = grabPage();
+    QVERIFY(!original.isNull());
+    QVERIFY(original.pixelColor(120, 80).green() > 150);
+    QVERIFY(original.pixelColor(42, 360).red() < 100);
+
+    QSignalSpy renderSpy(&forms, &PDFFormController::formRenderStateChanged);
+    forms.pointerEvent(0, PDFFormWorker::PointerEventType::Move, 0,
+                       QPointF(120, 80), QSize(400, 400));
+    QTRY_VERIFY_WITH_TIMEOUT(!inputSpy.isEmpty(), 5000);
+    // The real form session enters the annotation and requests a repaint;
+    // only its native popup appearance should be absent from the viewer.
+    QVERIFY(!renderSpy.isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(item.draftTextureCurrent() && !item.m_renderPending, 5000);
+    const QImage hovered = grabPage();
+    QVERIFY(!hovered.isNull());
+    QCOMPARE(changedPixelCount(original, hovered, original.rect()), 0);
+    QVERIFY(!forms.hasDrafts());
+
+    inputSpy.clear();
+    for (const auto type : {PDFFormWorker::PointerEventType::Move,
+                            PDFFormWorker::PointerEventType::Press,
+                            PDFFormWorker::PointerEventType::Release}) {
+        forms.pointerEvent(0, type, 0, QPointF(60, 360), QSize(400, 400));
+    }
+    QTRY_COMPARE_WITH_TIMEOUT(inputSpy.count(), 3, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(forms.hasDrafts(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(item.draftTextureCurrent() && !item.m_renderPending, 5000);
+    QImage checked;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !(checked = grabPage()).isNull()
+            && changedPixelCount(original, checked, QRect(40, 340, 40, 40)) > 100,
+        5000);
+    QVERIFY(!checked.isNull());
+    QCOMPARE(changedPixelCount(original, checked, QRect(40, 40, 160, 80)), 0);
+
+    QSignalSpy linkSpy(&forms, &PDFFormController::externalLinkRequested);
+    for (const auto type : {PDFFormWorker::PointerEventType::Move,
+                            PDFFormWorker::PointerEventType::Press,
+                            PDFFormWorker::PointerEventType::Release}) {
+        forms.pointerEvent(0, type, 0, QPointF(300, 360), QSize(400, 400));
+    }
+    QTRY_COMPARE_WITH_TIMEOUT(linkSpy.count(), 1, 5000);
+    QCOMPARE(linkSpy.constFirst().at(2).toString(), QStringLiteral("https://example.com/"));
+    forms.cancelExternalLink(linkSpy.constFirst().at(0).toULongLong());
+}
+
 void PDFEditControllerTest::serializesPdfiumAcrossThreads()
 {
     const auto workerStarted = std::make_shared<QSemaphore>();
