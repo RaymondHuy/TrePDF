@@ -7,8 +7,19 @@ Flickable {
 
     required property AppTheme theme
     required property PDFDocument document
+    required property PDFEditController editController
+    property bool hasPendingPanelEdits: false
+    readonly property bool ready: document.loaded && !editController.saving
 
-    signal toolRequested(string toolName)
+    signal signatureRequested()
+    signal initialsRequested()
+    signal dateRequested()
+    signal checkRequested()
+    signal selectRequested()
+    signal undoRequested()
+    signal redoRequested()
+    signal saveRequested()
+    signal saveAsRequested()
 
     clip: true
     contentWidth: ribbonRow.implicitWidth + 16
@@ -28,17 +39,19 @@ Flickable {
             title: qsTrId("Sign")
 
             RibbonButton {
+                objectName: "signSelectButton"
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                //% "Fill && Sign"
-                text: qsTrId("FillAndSign")
-                iconSource: "../assets/icons/pen-line.svg"
+                //% "Select"
+                text: qsTrId("Select")
+                iconSource: "../assets/icons/mouse-pointer-2.svg"
                 signing: true
-                primary: true
-                onClicked: root.toolRequested(text)
+                enabled: root.ready
+                primary: root.editController.tool === PDFEditController.SelectTool
+                onClicked: root.selectRequested()
             }
-
             RibbonButton {
+                objectName: "signSignatureButton"
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Signature"
@@ -47,10 +60,11 @@ Flickable {
                 toolTipText: qsTrId("AddSignature")
                 iconSource: "../assets/icons/signature.svg"
                 signing: true
-                onClicked: root.toolRequested(text)
+                enabled: root.ready
+                onClicked: root.signatureRequested()
             }
-
             RibbonButton {
+                objectName: "signInitialsButton"
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Initials"
@@ -59,7 +73,8 @@ Flickable {
                 toolTipText: qsTrId("AddInitials")
                 iconSource: "../assets/icons/signature.svg"
                 signing: true
-                onClicked: root.toolRequested(text)
+                enabled: root.ready
+                onClicked: root.initialsRequested()
             }
         }
 
@@ -69,6 +84,7 @@ Flickable {
             title: qsTrId("Fields")
 
             RibbonButton {
+                objectName: "signDateButton"
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Date"
@@ -77,10 +93,11 @@ Flickable {
                 toolTipText: qsTrId("AddDate")
                 iconSource: "../assets/icons/calendar-days.svg"
                 signing: true
-                onClicked: root.toolRequested(text)
+                enabled: root.ready
+                onClicked: root.dateRequested()
             }
-
             RibbonButton {
+                objectName: "signCheckButton"
                 theme: root.theme
                 documentLoaded: root.document.loaded
                 //% "Check"
@@ -89,37 +106,62 @@ Flickable {
                 toolTipText: qsTrId("AddCheckMark")
                 iconSource: "../assets/icons/square-check-big.svg"
                 signing: true
-                onClicked: root.toolRequested(text)
+                enabled: root.ready
+                onClicked: root.checkRequested()
             }
         }
 
         RibbonGroup {
             theme: root.theme
-            //% "Workflow"
-            title: qsTrId("Workflow")
+            //% "History"
+            title: qsTrId("History")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                //% "Request"
-                text: qsTrId("Request")
-                //% "Request Signatures"
-                toolTipText: qsTrId("RequestSignatures")
-                iconSource: "../assets/icons/send.svg"
-                signing: true
-                onClicked: root.toolRequested(text)
+                //% "Undo"
+                text: qsTrId("Undo")
+                iconSource: "../assets/icons/undo-2.svg"
+                enabled: root.ready && root.editController.canUndo
+                    && !root.editController.textEditActive
+                onClicked: root.undoRequested()
             }
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Redo"
+                text: qsTrId("Redo")
+                iconSource: "../assets/icons/redo-2.svg"
+                enabled: root.ready && root.editController.canRedo
+                    && !root.hasPendingPanelEdits
+                    && !root.editController.textEditActive
+                onClicked: root.redoRequested()
+            }
+        }
+
+        RibbonGroup {
+            theme: root.theme
+            //% "File"
+            title: qsTrId("File")
 
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                //% "Validate"
-                text: qsTrId("Validate")
-                //% "Validate Signatures"
-                toolTipText: qsTrId("ValidateSignatures")
-                iconSource: "../assets/icons/shield-check.svg"
-                signing: true
-                onClicked: root.toolRequested(text)
+                //% "Save"
+                text: qsTrId("Save")
+                iconSource: "../assets/icons/save.svg"
+                enabled: root.ready
+                    && (root.editController.hasDrafts || root.hasPendingPanelEdits)
+                onClicked: root.saveRequested()
+            }
+            RibbonButton {
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Save As"
+                text: qsTrId("SaveAs")
+                iconSource: "../assets/icons/save.svg"
+                enabled: root.ready
+                onClicked: root.saveAsRequested()
             }
         }
     }

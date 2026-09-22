@@ -15,6 +15,19 @@ and Save/Save As persistence.
 
 Current features:
 
+- The Sign tab creates visible signatures/initials from bounded freehand strokes,
+  typed text, or a local image with optional white removal; it also places dates
+  and check/cross marks. `SignatureDialog.qml` prepares the preview through the
+  GUI-thread `SignatureLibrary`, which stores up to 32 named signature/initial
+  PNG snapshots atomically in `AppDataLocation/signatures.json`. The library is
+  independent of PDF draft history. `Main.qml` binds pending placement to the
+  active session and cancels it on tab/session/document/save/history/tool changes
+  or Escape. Placement uses `PDFEditController::addImageData()` and the existing
+  added-image pipeline for move/resize/rotate/delete, undo/redo/discard and
+  Save/Save As; reopened items are ordinary PDF images. Sign enables the shared
+  image properties panel. This does not create certificate signatures, verify
+  existing signatures, or send online signing requests.
+
 - Edit > Link > Auto-create links from URLs scans saved source text on a separate,
   bounded single worker through `PDFWebLinkScanner`. Only HTTP/HTTPS URLs are
   accepted, including PDFium's `www` detection; existing Link regions are skipped.
@@ -349,6 +362,10 @@ Current features:
   bundled/system family catalogs used by draft font resolution.
 - `src/DraftImageItem.h/.cpp`: QML item that draws the snapshotted pixels of an
   inserted-image draft without reopening the selected file path.
+- `src/SignatureLibrary.h/.cpp`: bounded transparent signature/initial/date/mark
+  snapshots, local atomic library storage, and placement through added-image drafts.
+- `src/Components/SignatureDialog.qml`: draw/type/import/saved-library signature
+  creation plus date and check/cross previews; `SignRibbon.qml` exposes these actions.
 - `src/Main.qml`: multi-tab coordination, menus, toolbar, and active workspace.
 - `src/PDFTabModel.h/.cpp`: per-tab document/edit sessions, active-tab state,
   duplicate-path protection, and cross-tab save guards.

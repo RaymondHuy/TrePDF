@@ -37,6 +37,10 @@ ApplicationWindow {
     property int imageInsertPage: -1
     property real imageInsertX: 0
     property real imageInsertY: 0
+    property PDFDocumentSession signatureSession: null
+    property string signatureMode: "signature"
+    property bool signaturePlacementPending: false
+    property real signatureWidthPoints: 140
     property PDFDocumentSession pendingSearchNavigationSession: null
     property int pendingSearchNavigationPage: -1
     property real pendingSearchNavigationX: 0.5
@@ -336,11 +340,61 @@ ApplicationWindow {
     }
 
     function requestImageFile(controller, page, x, y) {
+        if (appRibbon.signTabActive) {
+            if (signaturePlacementPending && signatureSession === activeSession
+                    && controller === activeEditController && !tabModel.anySaving) {
+                signaturePlacementPending = false
+                const placed = signatureLibrary.place(controller, page, x, y,
+                                                      signatureWidthPoints)
+                if (!placed.objectId && signatureLibrary.error.length > 0)
+                    showStatus(signatureLibrary.error)
+                cancelSignature()
+            }
+            return
+        }
         imageInsertController = controller
         imageInsertPage = page
         imageInsertX = x
         imageInsertY = y
         imageDialog.open()
+    }
+
+    function requestSignature(mode) {
+        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
+                || !appRibbon.signTabActive || !prepareActiveWorkspace())
+            return
+        cancelSignature()
+        activeEditController.tool = PDFEditController.SelectTool
+        signatureSession = activeSession
+        signatureMode = mode
+        signatureDialogLoader.active = true
+    }
+
+    function armSignaturePlacement(widthPoints) {
+        if (signatureSession !== activeSession || !activeDocument.loaded
+                || tabModel.anySaving || !appRibbon.signTabActive
+                || !signatureLibrary.hasPreview) {
+            cancelSignature()
+            return
+        }
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.activePaneIndex = 0
+        signatureWidthPoints = widthPoints
+        signaturePlacementPending = true
+        activeEditController.tool = PDFEditController.AddImageTool
+        //% "Click the page to place your signature or mark. Press Escape to cancel."
+        showStatus(qsTrId("ESignClickToPlace"))
+    }
+
+    function cancelSignature() {
+        const session = signatureSession
+        signaturePlacementPending = false
+        signatureSession = null
+        signatureDialogLoader.active = false
+        if (session && session.editController.tool === PDFEditController.AddImageTool)
+            session.editController.tool = PDFEditController.SelectTool
+        signatureLibrary.clearPreview()
     }
 
     function clearImageInsertRequest() {
@@ -577,6 +631,7 @@ ApplicationWindow {
     }
 
     onActiveSessionChanged: {
+        cancelSignature()
         if (pendingSearchNavigationSession
                 && pendingSearchNavigationSession !== activeSession) {
             clearPendingSearchNavigation()
@@ -669,6 +724,22 @@ ApplicationWindow {
     Connections {
         target: window.activeEditController
 
+        function onToolChanged() {
+            if (window.signaturePlacementPending
+                    && window.activeEditController.tool !== PDFEditController.AddImageTool)
+                window.cancelSignature()
+        }
+
+        function onHistoryStateChanged() {
+            if (window.signaturePlacementPending)
+                window.cancelSignature()
+        }
+
+        function onSavingChanged() {
+            if (window.activeEditController.saving)
+                window.cancelSignature()
+        }
+
         function onImageFileRequested(page, x, y) {
             window.requestImageFile(
                 window.activeEditController,
@@ -676,6 +747,51 @@ ApplicationWindow {
                 x,
                 y)
         }
+    }
+
+    SignatureLibrary {
+        id: signatureLibrary
+        objectName: "signatureLibrary"
+    }
+
+    Connections {
+        target: window.signatureSession ? window.signatureSession.document : null
+        function onSourceChanged() { window.cancelSignature() }
+        function onPageStructureChanged() { window.cancelSignature() }
+        function onLoadedChanged() { window.cancelSignature() }
+    }
+
+    Loader {
+        id: signatureDialogLoader
+        objectName: "signatureDialogLoader"
+        active: false
+        sourceComponent: SignatureDialog {
+            id: signatureDialog
+            theme: appTheme
+            library: signatureLibrary
+            mode: window.signatureMode
+            parent: Overlay.overlay
+            onPlacementRequested: widthPoints => window.armSignaturePlacement(widthPoints)
+            onRejected: window.cancelSignature()
+            onClosed: {
+                if (signatureDialogLoader.item !== signatureDialog)
+                    return
+                signatureDialogLoader.active = false
+                if (!window.signaturePlacementPending)
+                    window.cancelSignature()
+            }
+        }
+        onLoaded: {
+            const dialog = item as SignatureDialog
+            if (dialog)
+                dialog.open()
+        }
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        enabled: window.signaturePlacementPending
+        onActivated: window.cancelSignature()
     }
 
     Shortcut {
@@ -1223,6 +1339,11 @@ ApplicationWindow {
                 }
             }
             onToolRequested: toolName => window.showComingSoon(toolName)
+            onSignatureRequested: mode => window.requestSignature(mode)
+            onSignTabActiveChanged: {
+                if (!signTabActive)
+                    window.cancelSignature()
+            }
             onUndoRequested: window.requestUndo()
             onRedoRequested: window.requestRedo()
         }
@@ -1367,6 +1488,7 @@ ApplicationWindow {
                 viewTabActive: appRibbon.viewTabActive
                 formsTabActive: appRibbon.formsTabActive
                 editTabActive: appRibbon.editTabActive
+                signTabActive: appRibbon.signTabActive
                 commentTabActive: appRibbon.commentTabActive
                 commentsPanelVisible: appRibbon.commentsPanelVisible
                 formFieldsVisible: window.activeDocument.loaded

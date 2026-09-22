@@ -13,6 +13,7 @@ Item {
     property bool viewTabActive: false
     property bool formsTabActive: false
     property bool editTabActive: false
+    property bool signTabActive: false
     property bool commentTabActive: false
     property bool commentsPanelVisible: false
     property bool formFieldsVisible: false
@@ -75,7 +76,7 @@ Item {
             || session.editController.selectedKind === "addedShape"
             || session.editController.selectedKind === "sourceShape")
     readonly property bool imagePropertiesPanelActive:
-        editTabActive && session.editController.selectedObjectId.length > 0
+        (editTabActive || signTabActive) && session.editController.selectedObjectId.length > 0
             && (session.editController.selectedKind === "image"
                 || session.editController.selectedKind === "addedImage")
     readonly property DocumentView splitDocumentView:

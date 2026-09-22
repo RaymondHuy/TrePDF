@@ -6,6 +6,16 @@ asynchronous rendering, per-tab whole-document text search and left/right view
 rotation, rich-text content edits, image insertion, Save/Save As, and an
 ID-based localization system with Vietnamese enabled by default.
 
+The Sign tab adds visible signatures and initials drawn with a mouse/trackpad,
+typed in a chosen style, or imported from a local image with optional white
+background removal. It also places formatted dates and check/cross marks.
+Signatures and initials can be saved in a local library for reuse. Click the
+page to place the prepared item, then move, resize, rotate, or delete it using
+the existing image controls. These edits support Undo/Redo, Discard, Save and
+Save As; saved items reopen as ordinary PDF images. The library stores up to
+32 entries separately from document history. This is visual signing; certificate
+signing, signature verification, and online signing requests are not implemented.
+
 Standard AcroForm widgets are rendered and interactive in Browse mode. Text
 fields support focus, selection, typing, IME commits, clipboard shortcuts, and
 field-local undo/redo. Eligible fixed-choice combo boxes and list boxes use a

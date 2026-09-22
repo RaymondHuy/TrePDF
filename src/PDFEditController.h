@@ -334,6 +334,10 @@ public:
                                      qreal x,
                                      qreal y,
                                      const QUrl &source);
+    // Inserts snapshotted pixels through the normal image draft/history path.
+    // A zero width keeps Add Image's default sizing; positive widths are PDF points.
+    QVariantMap addImageData(int page, qreal x, qreal y, QImage image,
+                            qreal widthPoints = 0.0);
     Q_INVOKABLE QVariantMap addShape(int page,
                                      const QPointF &startPoint,
                                      const QPointF &endPoint);

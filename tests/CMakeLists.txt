@@ -26,6 +26,7 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerRendering.cpp
     tst_PDFEditControllerSearch.cpp
     tst_PDFEditControllerSessions.cpp
+    tst_PDFEditControllerSignatures.cpp
     tst_PDFEditControllerShapes.cpp
     tst_PDFEditControllerTextFormatting.cpp
     tst_PDFEditControllerTextMarkup.cpp
@@ -50,6 +51,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFDocument.h
     ../src/LibxlsxwriterWorkbook.cpp
     ../src/SpreadsheetWorkbook.h
+    ../src/SignatureLibrary.cpp
+    ../src/SignatureLibrary.h
     ../src/PDFExcelExportController.cpp
     ../src/PDFExcelExportController.h
     ../src/PDFTableExtractor.cpp

@@ -9,15 +9,15 @@
         <translation>TrePDF</translation>
     </message>
     <message id="FeatureComingSoon">
-        <location filename="../src/Main.qml" line="571"/>
+        <location filename="../src/Main.qml" line="625"/>
         <source>%1 is coming soon</source>
         <translation>Tính năng %1 sắp ra mắt</translation>
     </message>
     <message id="WaitForPdfSave">
-        <location filename="../src/Main.qml" line="207"/>
-        <location filename="../src/Main.qml" line="500"/>
-        <location filename="../src/Main.qml" line="555"/>
-        <location filename="../src/Main.qml" line="602"/>
+        <location filename="../src/Main.qml" line="211"/>
+        <location filename="../src/Main.qml" line="554"/>
+        <location filename="../src/Main.qml" line="609"/>
+        <location filename="../src/Main.qml" line="657"/>
         <location filename="../src/PDFTabModel.cpp" line="548"/>
         <source>Please wait for the PDF to finish saving.</source>
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
@@ -31,19 +31,19 @@
         <translation>Mở PDF</translation>
     </message>
     <message id="PdfFileFilter">
-        <location filename="../src/Main.qml" line="739"/>
-        <location filename="../src/Main.qml" line="853"/>
+        <location filename="../src/Main.qml" line="855"/>
+        <location filename="../src/Main.qml" line="969"/>
         <source>PDF files (*.pdf)</source>
         <translation>Tệp PDF (*.pdf)</translation>
     </message>
     <message id="SavePdfAs">
-        <location filename="../src/Main.qml" line="850"/>
+        <location filename="../src/Main.qml" line="966"/>
         <location filename="../src/Components/ViewRibbon.qml" line="86"/>
         <source>Save PDF As</source>
         <translation>Lưu PDF thành</translation>
     </message>
     <message id="OpenPdfs">
-        <location filename="../src/Main.qml" line="736"/>
+        <location filename="../src/Main.qml" line="852"/>
         <source>Open PDFs</source>
         <translation>Mở các tệp PDF</translation>
     </message>
@@ -64,110 +64,117 @@
         <translation type="vanished">Một số tính năng biểu mẫu tự động không khả dụng cho tệp PDF này.</translation>
     </message>
     <message id="SelectImage">
-        <location filename="../src/Main.qml" line="838"/>
+        <location filename="../src/Main.qml" line="954"/>
         <source>Select Image</source>
         <translation>Chọn hình ảnh</translation>
     </message>
     <message id="ImageFileFilter">
-        <location filename="../src/Main.qml" line="841"/>
+        <location filename="../src/Main.qml" line="957"/>
         <source>Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</source>
         <translation>Tệp hình ảnh (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</translation>
     </message>
     <message id="SaveChangesToDocumentQuestion">
-        <location filename="../src/Main.qml" line="1020"/>
+        <location filename="../src/Main.qml" line="1136"/>
         <source>Save changes to “%1”?</source>
         <translation>Lưu các thay đổi vào “%1”?</translation>
     </message>
     <message id="UnsavedEditsDescription">
-        <location filename="../src/Main.qml" line="1031"/>
+        <location filename="../src/Main.qml" line="1147"/>
         <source>Your edits exist only in this session and have not been saved to the PDF.</source>
         <translation>Các chỉnh sửa của bạn chỉ tồn tại trong phiên này và chưa được lưu vào tệp PDF.</translation>
     </message>
     <message id="Cancel">
-        <location filename="../src/Main.qml" line="812"/>
-        <location filename="../src/Main.qml" line="979"/>
-        <location filename="../src/Main.qml" line="1046"/>
-        <location filename="../src/Main.qml" line="1121"/>
+        <location filename="../src/Main.qml" line="928"/>
+        <location filename="../src/Main.qml" line="1095"/>
+        <location filename="../src/Main.qml" line="1162"/>
+        <location filename="../src/Main.qml" line="1237"/>
         <location filename="../src/Components/ExportRibbon.qml" line="59"/>
         <location filename="../src/Components/LinkPropertiesDialog.qml" line="326"/>
+        <location filename="../src/Components/SignatureDialog.qml" line="695"/>
         <source>Cancel</source>
         <translation>Hủy</translation>
     </message>
     <message id="SaveBeforeExcelExport">
-        <location filename="../src/Main.qml" line="252"/>
-        <location filename="../src/Main.qml" line="278"/>
+        <location filename="../src/Main.qml" line="256"/>
+        <location filename="../src/Main.qml" line="282"/>
         <source>Save the PDF changes before exporting to Excel.</source>
         <translation>Lưu thay đổi trong PDF trước khi xuất Excel.</translation>
     </message>
+    <message id="ESignClickToPlace">
+        <location filename="../src/Main.qml" line="387"/>
+        <source>Click the page to place your signature or mark. Press Escape to cancel.</source>
+        <translation>Nhấp vào trang để đặt chữ ký hoặc dấu. Nhấn Esc để hủy.</translation>
+    </message>
     <message id="ExternalLinkOpenFailed">
-        <location filename="../src/Main.qml" line="474"/>
+        <location filename="../src/Main.qml" line="528"/>
         <source>The link could not be opened in your default browser.</source>
         <translation>Không thể mở liên kết bằng trình duyệt mặc định.</translation>
     </message>
     <message id="DownloadMissingFontTitle">
-        <location filename="../src/Main.qml" line="781"/>
+        <location filename="../src/Main.qml" line="897"/>
         <source>Download font family</source>
         <translation>Tải bộ font</translation>
     </message>
     <message id="FontDownloadInProgress">
-        <location filename="../src/Main.qml" line="791"/>
+        <location filename="../src/Main.qml" line="907"/>
         <source>Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish.</source>
         <translation>Đang tải các kiểu thường, đậm, nghiêng và đậm nghiêng hiện có của font %1. Ứng dụng sẽ tự động tiếp tục lưu khi tải xong.</translation>
     </message>
     <message id="FontDownloadConfirmation">
-        <location filename="../src/Main.qml" line="794"/>
+        <location filename="../src/Main.qml" line="910"/>
         <source>The application does not have the complete %1 font. Would you like it to download all available regular, bold, italic and bold italic styles of this family and continue saving?</source>
         <translation>Ứng dụng chưa có font %1 đầy đủ. Bạn có muốn ứng dụng tải tất cả kiểu thường, đậm, nghiêng và đậm nghiêng hiện có của bộ font này rồi tiếp tục lưu?</translation>
     </message>
     <message id="ConfirmFontDownload">
-        <location filename="../src/Main.qml" line="822"/>
+        <location filename="../src/Main.qml" line="938"/>
         <source>OK</source>
         <translation>OK</translation>
     </message>
     <message id="ExportExcel">
-        <location filename="../src/Main.qml" line="863"/>
+        <location filename="../src/Main.qml" line="979"/>
         <location filename="../src/Components/ExportRibbon.qml" line="47"/>
         <source>Export to Excel</source>
         <translation>Xuất Excel</translation>
     </message>
     <message id="ExcelFileFilter">
-        <location filename="../src/Main.qml" line="866"/>
+        <location filename="../src/Main.qml" line="982"/>
         <source>Excel workbooks (*.xlsx)</source>
         <translation>Sổ làm việc Excel (*.xlsx)</translation>
     </message>
     <message id="OpenExternalLinkQuestion">
-        <location filename="../src/Main.qml" line="903"/>
+        <location filename="../src/Main.qml" line="1019"/>
         <source>Open link to %1?</source>
         <translation>Mở liên kết đến %1?</translation>
     </message>
     <message id="ExternalLinkDocumentWantsToOpen">
-        <location filename="../src/Main.qml" line="917"/>
+        <location filename="../src/Main.qml" line="1033"/>
         <source>“%1” wants to open this address in your default browser.</source>
         <translation>“%1” muốn mở địa chỉ này bằng trình duyệt mặc định.</translation>
     </message>
     <message id="InsecureHttpLinkWarning">
-        <location filename="../src/Main.qml" line="960"/>
+        <location filename="../src/Main.qml" line="1076"/>
         <source>This link uses HTTP, so the connection may not be secure.</source>
         <translation>Liên kết này dùng HTTP nên kết nối có thể không an toàn.</translation>
     </message>
     <message id="OpenInBrowser">
-        <location filename="../src/Main.qml" line="987"/>
+        <location filename="../src/Main.qml" line="1103"/>
         <source>Open in Browser</source>
         <translation>Mở trong trình duyệt</translation>
     </message>
     <message id="Save">
-        <location filename="../src/Main.qml" line="1054"/>
+        <location filename="../src/Main.qml" line="1170"/>
+        <location filename="../src/Components/SignRibbon.qml" line="151"/>
         <location filename="../src/Components/ViewRibbon.qml" line="69"/>
         <source>Save</source>
         <translation>Lưu</translation>
     </message>
     <message id="Discard">
-        <location filename="../src/Main.qml" line="1064"/>
+        <location filename="../src/Main.qml" line="1180"/>
         <source>Discard</source>
         <translation>Bỏ thay đổi</translation>
     </message>
     <message id="ConfirmDeletePageQuestion">
-        <location filename="../src/Main.qml" line="1103"/>
+        <location filename="../src/Main.qml" line="1219"/>
         <source>Do you want to delete page %1?</source>
         <translation>Bạn có muốn xóa trang %1 không?</translation>
     </message>
@@ -188,33 +195,33 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="381"/>
+        <location filename="../src/Components/AppRibbon.qml" line="396"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="387"/>
+        <location filename="../src/Components/AppRibbon.qml" line="402"/>
         <location filename="../src/Components/EditOverlay.qml" line="3678"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Comment">
-        <location filename="../src/Components/AppRibbon.qml" line="393"/>
+        <location filename="../src/Components/AppRibbon.qml" line="408"/>
         <source>Comment</source>
         <translation>Bình luận</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="399"/>
+        <location filename="../src/Components/AppRibbon.qml" line="414"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="405"/>
+        <location filename="../src/Components/AppRibbon.qml" line="420"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="ConvertTab">
-        <location filename="../src/Components/AppRibbon.qml" line="411"/>
+        <location filename="../src/Components/AppRibbon.qml" line="426"/>
         <source>Convert</source>
         <translation>Chuyển đổi</translation>
     </message>
@@ -224,12 +231,12 @@
         <translation>Xuất</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="436"/>
+        <location filename="../src/Components/AppRibbon.qml" line="451"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="440"/>
+        <location filename="../src/Components/AppRibbon.qml" line="455"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
@@ -252,11 +259,12 @@
         <translation type="vanished">Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo văn bản, hình ảnh hoặc hình dạng đã chọn để di chuyển, vẽ bằng công cụ Hình dạng hoặc đánh dấu văn bản, kéo hoặc bấm bằng công cụ Văn bản tự do, hoặc bấm bằng công cụ Ghi chú để thêm bình luận</translation>
     </message>
     <message id="Delete">
-        <location filename="../src/Main.qml" line="1129"/>
+        <location filename="../src/Main.qml" line="1245"/>
         <location filename="../src/Components/EditOverlay.qml" line="3709"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
         <location filename="../src/Components/ManualLinkLayer.qml" line="533"/>
         <location filename="../src/Components/ManualLinkLayer.qml" line="579"/>
+        <location filename="../src/Components/SignatureDialog.qml" line="511"/>
         <source>Delete</source>
         <translation>Xóa</translation>
     </message>
@@ -500,6 +508,7 @@
     <message id="Select">
         <location filename="../src/Components/CommentRibbon.qml" line="753"/>
         <location filename="../src/Components/EditRibbon.qml" line="158"/>
+        <location filename="../src/Components/SignRibbon.qml" line="46"/>
         <source>Select</source>
         <translation>Chọn</translation>
     </message>
@@ -522,7 +531,7 @@
     <message id="Image">
         <location filename="../src/Components/EditRibbon.qml" line="194"/>
         <location filename="../src/PDFEditControllerCandidates.cpp" line="2353"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="293"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="326"/>
         <source>Image</source>
         <translation>Hình ảnh</translation>
     </message>
@@ -916,18 +925,21 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
     <message id="History">
         <location filename="../src/Components/CommentRibbon.qml" line="1212"/>
         <location filename="../src/Components/EditRibbon.qml" line="450"/>
+        <location filename="../src/Components/SignRibbon.qml" line="117"/>
         <source>History</source>
         <translation>Lịch sử</translation>
     </message>
     <message id="Undo">
         <location filename="../src/Components/CommentRibbon.qml" line="1218"/>
         <location filename="../src/Components/EditRibbon.qml" line="456"/>
+        <location filename="../src/Components/SignRibbon.qml" line="123"/>
         <source>Undo</source>
         <translation>Hoàn tác</translation>
     </message>
     <message id="Redo">
         <location filename="../src/Components/CommentRibbon.qml" line="1231"/>
         <location filename="../src/Components/EditRibbon.qml" line="469"/>
+        <location filename="../src/Components/SignRibbon.qml" line="133"/>
         <source>Redo</source>
         <translation>Làm lại</translation>
     </message>
@@ -1186,38 +1198,37 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Thử lại</translation>
     </message>
     <message id="Sign">
-        <location filename="../src/Components/SignRibbon.qml" line="28"/>
+        <location filename="../src/Components/SignRibbon.qml" line="39"/>
         <source>Sign</source>
         <translation>Ký</translation>
     </message>
     <message id="FillAndSign">
-        <location filename="../src/Components/SignRibbon.qml" line="34"/>
         <source>Fill &amp;&amp; Sign</source>
-        <translation>Điền &amp;&amp; Ký</translation>
+        <translation type="vanished">Điền &amp;&amp; Ký</translation>
     </message>
     <message id="Signature">
-        <location filename="../src/Components/SignRibbon.qml" line="45"/>
+        <location filename="../src/Components/SignRibbon.qml" line="58"/>
         <source>Signature</source>
         <translation>Chữ ký</translation>
     </message>
     <message id="AddSignature">
-        <location filename="../src/Components/SignRibbon.qml" line="47"/>
+        <location filename="../src/Components/SignRibbon.qml" line="60"/>
         <source>Add Signature</source>
         <translation>Thêm chữ ký</translation>
     </message>
     <message id="Initials">
-        <location filename="../src/Components/SignRibbon.qml" line="57"/>
+        <location filename="../src/Components/SignRibbon.qml" line="71"/>
         <source>Initials</source>
         <translation>Ký tắt</translation>
     </message>
     <message id="AddInitials">
-        <location filename="../src/Components/SignRibbon.qml" line="59"/>
+        <location filename="../src/Components/SignRibbon.qml" line="73"/>
         <source>Add Initials</source>
         <translation>Thêm ký tắt</translation>
     </message>
     <message id="Fields">
         <location filename="../src/Components/FormRibbon.qml" line="41"/>
-        <location filename="../src/Components/SignRibbon.qml" line="69"/>
+        <location filename="../src/Components/SignRibbon.qml" line="84"/>
         <source>Fields</source>
         <translation>Trường</translation>
     </message>
@@ -1298,51 +1309,47 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Nhập văn bản</translation>
     </message>
     <message id="Date">
-        <location filename="../src/Components/SignRibbon.qml" line="75"/>
+        <location filename="../src/Components/SignRibbon.qml" line="91"/>
         <source>Date</source>
         <translation>Ngày</translation>
     </message>
     <message id="AddDate">
-        <location filename="../src/Components/SignRibbon.qml" line="77"/>
+        <location filename="../src/Components/SignRibbon.qml" line="93"/>
         <source>Add Date</source>
         <translation>Thêm ngày</translation>
     </message>
     <message id="CheckMark">
-        <location filename="../src/Components/SignRibbon.qml" line="87"/>
+        <location filename="../src/Components/SignRibbon.qml" line="104"/>
         <source>Check</source>
         <translation>Dấu kiểm</translation>
     </message>
     <message id="AddCheckMark">
-        <location filename="../src/Components/SignRibbon.qml" line="89"/>
+        <location filename="../src/Components/SignRibbon.qml" line="106"/>
         <source>Add Check Mark</source>
         <translation>Thêm dấu kiểm</translation>
     </message>
     <message id="Workflow">
-        <location filename="../src/Components/SignRibbon.qml" line="99"/>
         <source>Workflow</source>
-        <translation>Quy trình</translation>
+        <translation type="vanished">Quy trình</translation>
     </message>
     <message id="Request">
-        <location filename="../src/Components/SignRibbon.qml" line="105"/>
         <source>Request</source>
-        <translation>Yêu cầu</translation>
+        <translation type="vanished">Yêu cầu</translation>
     </message>
     <message id="RequestSignatures">
-        <location filename="../src/Components/SignRibbon.qml" line="107"/>
         <source>Request Signatures</source>
-        <translation>Yêu cầu chữ ký</translation>
+        <translation type="vanished">Yêu cầu chữ ký</translation>
     </message>
     <message id="Validate">
-        <location filename="../src/Components/SignRibbon.qml" line="117"/>
         <source>Validate</source>
-        <translation>Xác thực</translation>
+        <translation type="vanished">Xác thực</translation>
     </message>
     <message id="ValidateSignatures">
-        <location filename="../src/Components/SignRibbon.qml" line="119"/>
         <source>Validate Signatures</source>
-        <translation>Xác thực chữ ký</translation>
+        <translation type="vanished">Xác thực chữ ký</translation>
     </message>
     <message id="File">
+        <location filename="../src/Components/SignRibbon.qml" line="145"/>
         <location filename="../src/Components/ViewRibbon.qml" line="50"/>
         <source>File</source>
         <translation>Tệp</translation>
@@ -1358,6 +1365,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Lưu PDF</translation>
     </message>
     <message id="SaveAs">
+        <location filename="../src/Components/SignRibbon.qml" line="161"/>
         <location filename="../src/Components/ViewRibbon.qml" line="84"/>
         <source>Save As</source>
         <translation>Lưu thành</translation>
@@ -1567,8 +1575,9 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="1212"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="120"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="185"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="208"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="338"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="209"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="272"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="371"/>
         <source>This PDF does not permit content editing.</source>
         <translation>Tệp PDF này không cho phép chỉnh sửa nội dung.</translation>
     </message>
@@ -1826,20 +1835,21 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Không thể tạo đánh dấu văn bản trên trang %1.</translation>
     </message>
     <message id="LocalImageFilesOnly">
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="213"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="214"/>
         <source>Only local image files are supported.</source>
         <translation>Chỉ hỗ trợ tệp hình ảnh trên máy.</translation>
     </message>
     <message id="SelectedImageOpenFailed">
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="222"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="248"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="223"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="249"/>
         <source>The selected image could not be opened.</source>
         <translation>Không thể mở hình ảnh đã chọn.</translation>
     </message>
     <message id="SelectedImageTooLarge">
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="227"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="241"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="253"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="228"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="242"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="254"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="277"/>
         <source>The selected image is too large. Choose an image up to 40 megapixels and 64 MiB.</source>
         <translation>Hình ảnh đã chọn quá lớn. Hãy chọn ảnh tối đa 40 megapixel và 64 MiB.</translation>
     </message>
@@ -1869,13 +1879,13 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Tệp PDF này không cho phép thay đổi chú thích.</translation>
     </message>
     <message id="PdfPageAssemblyNotPermitted">
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="604"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="679"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="637"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="712"/>
         <source>This PDF does not permit adding or deleting pages.</source>
         <translation>Tệp PDF này không cho phép thêm hoặc xóa trang.</translation>
     </message>
     <message id="CannotDeleteOnlyPage">
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="684"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="717"/>
         <source>A PDF must contain at least one page.</source>
         <translation>Tệp PDF phải có ít nhất một trang.</translation>
     </message>
@@ -2904,6 +2914,315 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <location filename="../src/PDFEditControllerManualLinks.cpp" line="91"/>
         <source>Drag a rectangle to create a link. Double-click an existing link to edit it.</source>
         <translation>Kéo một vùng chữ nhật để tạo liên kết. Nhấp đúp vào liên kết có sẵn để sửa.</translation>
+    </message>
+    <message id="ESignAddInitials">
+        <location filename="../src/Components/SignatureDialog.qml" line="51"/>
+        <source>Add initials</source>
+        <translation>Thêm chữ ký tắt</translation>
+    </message>
+    <message id="ESignAddDate">
+        <location filename="../src/Components/SignatureDialog.qml" line="54"/>
+        <source>Add date</source>
+        <translation>Thêm ngày</translation>
+    </message>
+    <message id="ESignAddCheck">
+        <location filename="../src/Components/SignatureDialog.qml" line="57"/>
+        <source>Add a check or cross</source>
+        <translation>Thêm dấu tích hoặc dấu chéo</translation>
+    </message>
+    <message id="ESignCreateSignature">
+        <location filename="../src/Components/SignatureDialog.qml" line="60"/>
+        <source>Create a signature</source>
+        <translation>Tạo chữ ký</translation>
+    </message>
+    <message id="ESignPreviewFailed">
+        <location filename="../src/Components/SignatureDialog.qml" line="194"/>
+        <source>The preview could not be displayed.</source>
+        <translation>Không thể hiển thị bản xem trước.</translation>
+    </message>
+    <message id="ESignPreview">
+        <location filename="../src/Components/SignatureDialog.qml" line="196"/>
+        <source>Preview</source>
+        <translation>Xem trước</translation>
+    </message>
+    <message id="ESignDraw">
+        <location filename="../src/Components/SignatureDialog.qml" line="221"/>
+        <source>Draw</source>
+        <translation>Vẽ</translation>
+    </message>
+    <message id="ESignType">
+        <location filename="../src/Components/SignatureDialog.qml" line="225"/>
+        <source>Type</source>
+        <translation>Nhập tên</translation>
+    </message>
+    <message id="ESignImage">
+        <location filename="../src/Components/SignatureDialog.qml" line="229"/>
+        <source>Image</source>
+        <translation>Hình ảnh</translation>
+    </message>
+    <message id="ESignSaved">
+        <location filename="../src/Components/SignatureDialog.qml" line="233"/>
+        <source>Saved</source>
+        <translation>Đã lưu</translation>
+    </message>
+    <message id="ESignDrawInstruction">
+        <location filename="../src/Components/SignatureDialog.qml" line="259"/>
+        <source>Draw your signature with the mouse or trackpad</source>
+        <translation>Vẽ chữ ký bằng chuột hoặc bàn di chuột</translation>
+    </message>
+    <message id="ESignDrawPlaceholder">
+        <location filename="../src/Components/SignatureDialog.qml" line="274"/>
+        <source>Draw your signature here</source>
+        <translation>Vẽ chữ ký tại đây</translation>
+    </message>
+    <message id="ESignBlackInk">
+        <location filename="../src/Components/SignatureDialog.qml" line="340"/>
+        <source>Black ink</source>
+        <translation>Mực đen</translation>
+    </message>
+    <message id="ESignBlueInk">
+        <location filename="../src/Components/SignatureDialog.qml" line="342"/>
+        <source>Blue ink</source>
+        <translation>Mực xanh</translation>
+    </message>
+    <message id="ESignInkColor">
+        <location filename="../src/Components/SignatureDialog.qml" line="345"/>
+        <location filename="../src/Components/SignatureDialog.qml" line="415"/>
+        <source>Ink color</source>
+        <translation>Màu mực</translation>
+    </message>
+    <message id="ESignUndoStroke">
+        <location filename="../src/Components/SignatureDialog.qml" line="355"/>
+        <source>Undo stroke</source>
+        <translation>Hoàn tác nét</translation>
+    </message>
+    <message id="ESignClear">
+        <location filename="../src/Components/SignatureDialog.qml" line="364"/>
+        <source>Clear</source>
+        <translation>Xóa hết</translation>
+    </message>
+    <message id="ESignNamePlaceholder">
+        <location filename="../src/Components/SignatureDialog.qml" line="385"/>
+        <source>Enter your name or initials</source>
+        <translation>Nhập tên hoặc chữ ký tắt</translation>
+    </message>
+    <message id="ESignSignatureText">
+        <location filename="../src/Components/SignatureDialog.qml" line="387"/>
+        <source>Signature text</source>
+        <translation>Nội dung chữ ký</translation>
+    </message>
+    <message id="ESignHandwriting">
+        <location filename="../src/Components/SignatureDialog.qml" line="400"/>
+        <source>Handwriting</source>
+        <translation>Viết tay</translation>
+    </message>
+    <message id="ESignSerifItalic">
+        <location filename="../src/Components/SignatureDialog.qml" line="402"/>
+        <source>Serif italic</source>
+        <translation>Chữ có chân nghiêng</translation>
+    </message>
+    <message id="ESignPlain">
+        <location filename="../src/Components/SignatureDialog.qml" line="404"/>
+        <source>Plain</source>
+        <translation>Chữ thường</translation>
+    </message>
+    <message id="ESignStyle">
+        <location filename="../src/Components/SignatureDialog.qml" line="407"/>
+        <source>Signature style</source>
+        <translation>Kiểu chữ ký</translation>
+    </message>
+    <message id="ESignChooseImage">
+        <location filename="../src/Components/SignatureDialog.qml" line="437"/>
+        <source>Choose image…</source>
+        <translation>Chọn ảnh…</translation>
+    </message>
+    <message id="ESignRemoveWhite">
+        <location filename="../src/Components/SignatureDialog.qml" line="445"/>
+        <source>Remove white background</source>
+        <translation>Xóa nền trắng</translation>
+    </message>
+    <message id="ESignImageHint">
+        <location filename="../src/Components/SignatureDialog.qml" line="456"/>
+        <source>Use a PNG, JPEG or WebP image of your signature.</source>
+        <translation>Chọn ảnh chữ ký định dạng PNG, JPEG hoặc WebP.</translation>
+    </message>
+    <message id="ESignDeleteSaved">
+        <location filename="../src/Components/SignatureDialog.qml" line="513"/>
+        <source>Delete saved signature %1</source>
+        <translation>Xóa chữ ký đã lưu %1</translation>
+    </message>
+    <message id="ESignLibraryEmpty">
+        <location filename="../src/Components/SignatureDialog.qml" line="532"/>
+        <source>No saved signatures. Create one and choose to save it on this Mac.</source>
+        <translation>Chưa có chữ ký đã lưu. Hãy tạo chữ ký và chọn lưu trên máy Mac này.</translation>
+    </message>
+    <message id="ESignDatePlaceholder">
+        <location filename="../src/Components/SignatureDialog.qml" line="562"/>
+        <location filename="../src/Components/SignatureDialog.qml" line="564"/>
+        <source>Date (YYYY-MM-DD)</source>
+        <translation>Ngày (YYYY-MM-DD)</translation>
+    </message>
+    <message id="ESignDayFirstFormat">
+        <location filename="../src/Components/SignatureDialog.qml" line="575"/>
+        <source>dd/MM/yyyy</source>
+        <translation>dd/MM/yyyy</translation>
+    </message>
+    <message id="ESignMonthFirstFormat">
+        <location filename="../src/Components/SignatureDialog.qml" line="577"/>
+        <source>MM/dd/yyyy</source>
+        <translation>MM/dd/yyyy</translation>
+    </message>
+    <message id="ESignIsoFormat">
+        <location filename="../src/Components/SignatureDialog.qml" line="579"/>
+        <source>yyyy-MM-dd</source>
+        <translation>yyyy-MM-dd</translation>
+    </message>
+    <message id="ESignDateFormat">
+        <location filename="../src/Components/SignatureDialog.qml" line="582"/>
+        <source>Date format</source>
+        <translation>Định dạng ngày</translation>
+    </message>
+    <message id="ESignCheckMark">
+        <location filename="../src/Components/SignatureDialog.qml" line="610"/>
+        <source>Check mark</source>
+        <translation>Dấu tích</translation>
+    </message>
+    <message id="ESignCrossMark">
+        <location filename="../src/Components/SignatureDialog.qml" line="625"/>
+        <source>Cross mark</source>
+        <translation>Dấu chéo</translation>
+    </message>
+    <message id="ESignSaveOnMac">
+        <location filename="../src/Components/SignatureDialog.qml" line="648"/>
+        <source>Save on this Mac</source>
+        <translation>Lưu trên máy Mac này</translation>
+    </message>
+    <message id="ESignSavedName">
+        <location filename="../src/Components/SignatureDialog.qml" line="660"/>
+        <location filename="../src/Components/SignatureDialog.qml" line="662"/>
+        <source>Name for the saved signature</source>
+        <translation>Tên chữ ký đã lưu</translation>
+    </message>
+    <message id="ESignPlacementHint">
+        <location filename="../src/Components/SignatureDialog.qml" line="674"/>
+        <source>Choose Place, then click a page. You can move or resize it before saving the PDF.</source>
+        <translation>Chọn Đặt, rồi nhấp vào trang. Bạn có thể di chuyển hoặc đổi kích thước trước khi lưu PDF.</translation>
+    </message>
+    <message id="ESignPlace">
+        <location filename="../src/Components/SignatureDialog.qml" line="702"/>
+        <source>Place</source>
+        <translation>Đặt</translation>
+    </message>
+    <message id="ESignChooseImageTitle">
+        <location filename="../src/Components/SignatureDialog.qml" line="725"/>
+        <source>Choose a signature image</source>
+        <translation>Chọn ảnh chữ ký</translation>
+    </message>
+    <message id="ESignImageFilter">
+        <location filename="../src/Components/SignatureDialog.qml" line="728"/>
+        <source>Signature images (*.png *.jpg *.jpeg *.webp)</source>
+        <translation>Ảnh chữ ký (*.png *.jpg *.jpeg *.webp)</translation>
+    </message>
+    <message id="ESignPreviewRequired">
+        <location filename="../src/SignatureLibrary.cpp" line="203"/>
+        <location filename="../src/SignatureLibrary.cpp" line="482"/>
+        <location filename="../src/SignatureLibrary.cpp" line="542"/>
+        <source>Create or choose a signature before placing it.</source>
+        <translation>Tạo hoặc chọn chữ ký trước khi đặt.</translation>
+    </message>
+    <message id="ESignEmptySignature">
+        <location filename="../src/SignatureLibrary.cpp" line="223"/>
+        <source>The signature is empty. Add text, draw a stroke, or choose another image.</source>
+        <translation>Chữ ký còn trống. Hãy nhập tên, vẽ nét hoặc chọn ảnh khác.</translation>
+    </message>
+    <message id="ESignImageTooComplex">
+        <location filename="../src/SignatureLibrary.cpp" line="241"/>
+        <source>The signature image is too complex. Choose a smaller image.</source>
+        <translation>Ảnh chữ ký quá phức tạp. Hãy chọn ảnh nhỏ hơn.</translation>
+    </message>
+    <message id="ESignInvalidText">
+        <location filename="../src/SignatureLibrary.cpp" line="259"/>
+        <source>Enter a signature of 1 to 128 characters and choose a visible color.</source>
+        <translation>Nhập chữ ký từ 1 đến 128 ký tự và chọn màu có thể nhìn thấy.</translation>
+    </message>
+    <message id="ESignTextRenderFailed">
+        <location filename="../src/SignatureLibrary.cpp" line="295"/>
+        <source>The selected text could not be drawn. Try another signature style.</source>
+        <translation>Không thể vẽ nội dung đã nhập. Hãy thử kiểu chữ ký khác.</translation>
+    </message>
+    <message id="ESignInvalidDrawing">
+        <location filename="../src/SignatureLibrary.cpp" line="317"/>
+        <source>Draw a signature with at most 64 strokes and 32,768 points.</source>
+        <translation>Vẽ chữ ký với tối đa 64 nét và 32.768 điểm.</translation>
+    </message>
+    <message id="ESignDrawingTooComplex">
+        <location filename="../src/SignatureLibrary.cpp" line="373"/>
+        <source>This drawing is too complex. Remove a few strokes or use a signature image.</source>
+        <translation>Nét vẽ quá phức tạp. Hãy xóa bớt nét hoặc dùng ảnh chữ ký.</translation>
+    </message>
+    <message id="ESignLocalImageOnly">
+        <location filename="../src/SignatureLibrary.cpp" line="404"/>
+        <source>Choose a local signature image.</source>
+        <translation>Chọn ảnh chữ ký trên máy.</translation>
+    </message>
+    <message id="ESignImageOpenFailed">
+        <location filename="../src/SignatureLibrary.cpp" line="409"/>
+        <location filename="../src/SignatureLibrary.cpp" line="420"/>
+        <source>The signature image could not be opened.</source>
+        <translation>Không thể mở ảnh chữ ký.</translation>
+    </message>
+    <message id="ESignImageTooLarge">
+        <location filename="../src/SignatureLibrary.cpp" line="415"/>
+        <location filename="../src/SignatureLibrary.cpp" line="424"/>
+        <source>Choose a signature image up to 16 megapixels and 32 MiB.</source>
+        <translation>Chọn ảnh chữ ký tối đa 16 megapixel và 32 MiB.</translation>
+    </message>
+    <message id="ESignInvalidDate">
+        <location filename="../src/SignatureLibrary.cpp" line="450"/>
+        <source>Enter a valid date in YYYY-MM-DD format.</source>
+        <translation>Nhập ngày hợp lệ theo định dạng YYYY-MM-DD.</translation>
+    </message>
+    <message id="ESignInvalidName">
+        <location filename="../src/SignatureLibrary.cpp" line="488"/>
+        <source>Give the signature a name of 1 to 80 characters.</source>
+        <translation>Đặt tên chữ ký từ 1 đến 80 ký tự.</translation>
+    </message>
+    <message id="ESignLibraryFull">
+        <location filename="../src/SignatureLibrary.cpp" line="492"/>
+        <source>Your signature library is full. Remove an entry before adding another (maximum 32).</source>
+        <translation>Thư viện chữ ký đã đầy. Hãy xóa một mục trước khi thêm (tối đa 32).</translation>
+    </message>
+    <message id="ESignEntryMissing">
+        <location filename="../src/SignatureLibrary.cpp" line="514"/>
+        <location filename="../src/SignatureLibrary.cpp" line="525"/>
+        <source>This saved signature is no longer available.</source>
+        <translation>Chữ ký đã lưu này không còn khả dụng.</translation>
+    </message>
+    <message id="ESignInvalidWidth">
+        <location filename="../src/SignatureLibrary.cpp" line="547"/>
+        <source>Choose a signature width between 1 and 2,000 PDF points.</source>
+        <translation>Chọn chiều rộng chữ ký từ 1 đến 2.000 point PDF.</translation>
+    </message>
+    <message id="ESignPlacementFailed">
+        <location filename="../src/SignatureLibrary.cpp" line="553"/>
+        <source>The signature could not be placed. Check that this PDF permits editing and is not being saved.</source>
+        <translation>Không thể đặt chữ ký. Hãy kiểm tra PDF cho phép chỉnh sửa và hiện không được lưu.</translation>
+    </message>
+    <message id="ESignLibraryReadFailed">
+        <location filename="../src/SignatureLibrary.cpp" line="569"/>
+        <location filename="../src/SignatureLibrary.cpp" line="626"/>
+        <source>The saved signature library could not be read. Its file has been left unchanged.</source>
+        <translation>Không thể đọc thư viện chữ ký đã lưu. Tệp thư viện được giữ nguyên.</translation>
+    </message>
+    <message id="ESignLibraryTooLarge">
+        <location filename="../src/SignatureLibrary.cpp" line="640"/>
+        <source>The signature library is too large. Remove an entry or choose a simpler image.</source>
+        <translation>Thư viện chữ ký quá lớn. Hãy xóa một mục hoặc chọn ảnh đơn giản hơn.</translation>
+    </message>
+    <message id="ESignLibraryWriteFailed">
+        <location filename="../src/SignatureLibrary.cpp" line="644"/>
+        <source>The signature library could not be saved. Check the available disk space and folder permissions.</source>
+        <translation>Không thể lưu thư viện chữ ký. Hãy kiểm tra dung lượng trống và quyền ghi thư mục.</translation>
     </message>
 </context>
 </TS>
