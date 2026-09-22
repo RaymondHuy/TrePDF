@@ -32,6 +32,7 @@ Column {
     readonly property bool editTabActive: ribbonTabs.currentIndex === 1
     readonly property bool commentTabActive: ribbonTabs.currentIndex === 2
     readonly property bool formsTabActive: ribbonTabs.currentIndex === 3
+    readonly property bool signTabActive: ribbonTabs.currentIndex === 4
     readonly property bool exportTabActive: ribbonTabs.currentIndex === 5
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
@@ -72,6 +73,7 @@ Column {
     signal splitViewModeRequested(int mode)
     signal splitViewToggleRequested()
     signal toolRequested(string toolName)
+    signal signatureRequested(string mode)
     signal undoRequested()
     signal redoRequested()
 
@@ -112,6 +114,7 @@ Column {
     function syncEditTool() {
         const activeTabIndex = ribbonTabs.currentIndex
         const editActive = activeTabIndex === 1
+        const signActive = activeTabIndex === 4
         const commentActive = activeTabIndex === 2
         const formsActive = activeTabIndex === 3
 
@@ -129,6 +132,8 @@ Column {
         } else if (commentActive) {
             editController.tool = PDFEditController.CommentSelectTool
             editController.requestCommentIndex()
+        } else if (signActive) {
+            editController.tool = PDFEditController.SelectTool
         } else if (editActive
                    && (editController.tool === PDFEditController.BrowseTool
                        || isCommentTool(editController.tool))) {
@@ -329,7 +334,17 @@ Column {
         SignRibbon {
             theme: root.theme
             document: root.document
-            onToolRequested: toolName => root.toolRequested(toolName)
+            editController: root.editController
+            hasPendingPanelEdits: root.hasPendingPanelEdits
+            onSignatureRequested: root.signatureRequested("signature")
+            onInitialsRequested: root.signatureRequested("initials")
+            onDateRequested: root.signatureRequested("date")
+            onCheckRequested: root.signatureRequested("check")
+            onSelectRequested: root.editController.tool = PDFEditController.SelectTool
+            onUndoRequested: root.undoRequested()
+            onRedoRequested: root.redoRequested()
+            onSaveRequested: root.saveRequested()
+            onSaveAsRequested: root.saveAsRequested()
         }
     }
 

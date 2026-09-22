@@ -1,8 +1,8 @@
 # Hướng dẫn toàn bộ tệp C++
 
-Tài liệu này mô tả 26 tệp triển khai C++ trong `src/`, 22 header và một tệp kiểm
-thử C++ trong `tests/`. Trong số header, 17 tệp API đi cùng phần triển khai,
-`PDFEditController_p.h` dùng nội bộ và bốn tệp hỗ trợ không có `.cpp` riêng.
+Tài liệu này mô tả các tệp triển khai C++ và header trong `src/`, cùng bộ kiểm
+thử C++ trong `tests/`. `PDFEditController_p.h` dùng nội bộ; một số header hỗ trợ
+không có `.cpp` riêng.
 Nội dung tập trung vào trách nhiệm thật của mỗi
 tệp, ownership, thread, dữ liệu trao đổi và ranh giới không nên phá khi sửa code.
 
@@ -85,6 +85,24 @@ font bytes, glyph/face probe và helper stretch. Không giữ handle PDFium.
 - Không mở file ảnh, không sở hữu draft history và không nhúng ảnh vào PDF. Mục
   đích là bảo đảm preview/save dùng cùng pixel snapshot kể cả file nguồn bị đổi
   hoặc xóa sau khi người dùng chọn.
+
+### [`src/SignatureLibrary.cpp`](../src/SignatureLibrary.cpp) và
+[`src/SignatureLibrary.h`](../src/SignatureLibrary.h)
+
+**Vai trò:** QObject/QML element trên GUI thread tạo preview và quản lý thư viện
+chữ ký hiển thị, không giữ handle PDFium.
+
+- Tạo PNG trong suốt từ text, nét vẽ chuẩn hóa, ảnh cục bộ, ngày và check/cross.
+  Kiểm input, giới hạn kích thước/điểm/pixel/byte, cắt vùng alpha và giữ pixel
+  snapshot độc lập với ảnh nguồn. Preview dùng data URL.
+- Thư viện tối đa 32 mẫu chữ ký/ký tắt, lưu tên/loại/PNG trong JSON có version tại
+  `QStandardPaths::AppDataLocation/signatures.json`. `QSaveFile` commit trước khi
+  cập nhật model; file lỗi không bị ghi đè. Thư viện không tham gia PDF undo.
+- `place()` chuyển snapshot và chiều rộng PDF point sang
+  `PDFEditController::addImageData()`. API này dùng cùng pipeline added-image
+  với `addImage()`: đặt/chọn, move/resize/rotate/delete, history và save.
+- Mở lại PDF nhận ảnh nguồn thông thường; không ghi field ký số, chứng thư hoặc
+  yêu cầu ký qua mạng.
 
 ## Tài liệu, tab và render
 
@@ -271,6 +289,9 @@ budget recovery, comment suppression và zoom settling pass trên native Metal.
 - PDFium render trực tiếp vào `QImage::bits()` bằng `FPDFBitmap_CreateEx`.
   Tile dùng offset âm của `renderRect`, nhưng scale vẫn dùng kích thước raster
   toàn trang; `FPDF_FFLDraw` và widget patch dùng cùng phép đổi tọa độ.
+- `FPDF_FFLDraw` chỉ vẽ widget biểu mẫu, không bật `FPDF_ANNOT`, để ẩn popup
+  vàng khi hover Stamp/comment. Stamp và annotation trên trang vẫn được vẽ bởi
+  `FPDF_RenderPageBitmap`; nội dung bình luận vẫn có trong panel.
 - `ScopedPageObjectSuppression` ẩn source object đã bị draft thay/xóa.
 - `ScopedPageObjectMoves` áp ma trận preview cho source text chỉ-move và source
   image move/resize rồi phục hồi chính xác matrix gốc. Source image dùng shared
@@ -1077,6 +1098,7 @@ thay thế kiểm thử native Metal thủ công.
 |---|---|
 | `ApplicationFonts.cpp` | `ApplicationFonts.h` |
 | `DraftImageItem.cpp` | `DraftImageItem.h` |
+| `SignatureLibrary.cpp` | `SignatureLibrary.h` |
 | `FormFieldLayer.cpp` | `FormFieldLayer.h` |
 | `PDFAcroFormCanonicalizer.cpp` | `PDFAcroFormCanonicalizer.h` |
 | `PDFAcroFormWriter.cpp` | `PDFAcroFormWriter.h` |

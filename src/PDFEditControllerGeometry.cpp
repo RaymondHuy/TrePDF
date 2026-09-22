@@ -197,7 +197,8 @@ QVariantMap PDFEditController::addImage(int page,
                                         qreal y,
                                         const QUrl &source)
 {
-    if (!m_document
+    if (m_saving || !std::isfinite(x) || !std::isfinite(y)
+        || !m_document
         || !m_document->isLoaded()
         || page < 0
         || page >= m_document->pageCount()) {
@@ -253,20 +254,51 @@ QVariantMap PDFEditController::addImage(int page,
         emit statusMessage(qtTrId("SelectedImageTooLarge"));
         return {};
     }
-    image = image.convertToFormat(QImage::Format_ARGB32);
+    return addImageData(page, x, y, std::move(image));
+}
 
-    const QSizeF pageSize = m_document->pageSize(page);
-    if (pageSize.isEmpty()) {
+QVariantMap PDFEditController::addImageData(int page, qreal x, qreal y,
+                                         QImage image, qreal widthPoints)
+{
+    if (m_saving || !m_document || !m_document->isLoaded()
+        || page < 0 || page >= m_document->pageCount()
+        || !std::isfinite(x) || !std::isfinite(y)
+        || !std::isfinite(widthPoints) || widthPoints < 0.0
+        || image.isNull()) {
         return {};
     }
-    qreal frameWidth = kAddedImageMaximumDimensionRatio;
+    if (!documentAllowsEditing()) {
+        //% "This PDF does not permit content editing."
+        emit statusMessage(qtTrId("PdfEditingNotPermitted"));
+        return {};
+    }
+    if (qint64(image.width()) * image.height() > kMaximumAddedImagePixels) {
+        //% "The selected image is too large. Choose an image up to 40 megapixels and 64 MiB."
+        emit statusMessage(qtTrId("SelectedImageTooLarge"));
+        return {};
+    }
+    image = image.convertToFormat(QImage::Format_ARGB32);
+    image.setDevicePixelRatio(1.0);
+
+    const QSizeF pageSize = m_document->pageSize(page);
+    if (!std::isfinite(pageSize.width()) || !std::isfinite(pageSize.height())
+        || pageSize.width() <= 0.0 || pageSize.height() <= 0.0 || image.isNull()) {
+        return {};
+    }
+    qreal frameWidth = widthPoints > 0.0
+        ? qMin<qreal>(1.0, widthPoints / pageSize.width())
+        : kAddedImageMaximumDimensionRatio;
     qreal frameHeight = frameWidth
         * pageSize.width()
         / pageSize.height()
         * static_cast<qreal>(image.height())
         / image.width();
-    if (frameHeight > kAddedImageMaximumDimensionRatio) {
-        const qreal scale = kAddedImageMaximumDimensionRatio / frameHeight;
+    const qreal maximumHeight = widthPoints > 0.0 ? 1.0 : kAddedImageMaximumDimensionRatio;
+    if (!std::isfinite(frameHeight) || frameWidth <= 0.0 || frameHeight <= 0.0) {
+        return {};
+    }
+    if (frameHeight > maximumHeight) {
+        const qreal scale = maximumHeight / frameHeight;
         frameWidth *= scale;
         frameHeight *= scale;
     }
@@ -282,6 +314,7 @@ QVariantMap PDFEditController::addImage(int page,
         normalizedY - frameHeight / 2.0,
         1.0 - frameHeight);
 
+    finishSelectedFrameResize();
     finishSelectedTextEdit();
     Candidate candidate;
     candidate.page = page;

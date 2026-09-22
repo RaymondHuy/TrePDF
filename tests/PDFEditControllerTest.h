@@ -13,6 +13,19 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void preparesVisualSignatureText_data();
+    void preparesVisualSignatureText();
+    void preparesVisualSignatureDrawing();
+    void rejectsInvalidVisualSignatureInput();
+    void preparesSignatureDateAndCheck();
+    void persistsLocalSignatureLibraryAtomically();
+    void preservesUnreadableSignatureLibrary();
+    void savesVisualSignatureSnapshotThroughHistory();
+    void discardsVisualSignatureWithoutChangingLibrary();
+    void routesSignRibbonActionsAndGuardsEmptyDocuments();
+    void preparesTypedAndDrawnSignaturesThroughDialog();
+    void placesAndSavesSignatureFromMainWindow();
+    void cancelsPendingSignaturesAcrossUiChanges();
     void autoCreatesOnlySafeWebLinks();
     void autoWebLinksUseSingleHistoryCommand();
     void savesAutoWebLinksWithoutChangingPageContent();
@@ -88,6 +101,7 @@ private slots:
     void routesPushButtonActions();
     void blocksUnsupportedFormUriSchemes();
     void forwardsExternalLinkRequestsThroughTabModel();
+    void hidesStampHoverPopupWhileKeepingFormsAndLinksInteractive();
     void serializesPdfiumAcrossThreads();
     void discoversUncachedHoverOffGuiThread();
     void reschedulesCancelledHoverForSamePage();

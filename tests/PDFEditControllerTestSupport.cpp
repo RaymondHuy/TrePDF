@@ -1,4 +1,5 @@
 #include "PDFEditControllerTestSupport.h"
+#include "SignatureLibrary.h"
 
 namespace PDFEditControllerTestSupport {
 
@@ -818,7 +819,8 @@ bool registerQmlTestTypes(const QString &themePath)
     if (registered) {
         return true;
     }
-    if (themePath.isEmpty()) {
+    const QString canonicalThemePath = QFileInfo(themePath).canonicalFilePath();
+    if (canonicalThemePath.isEmpty()) {
         return false;
     }
 
@@ -832,6 +834,8 @@ bool registerQmlTestTypes(const QString &themePath)
                1,
                0,
                "PDFEditController") >= 0
+        && qmlRegisterType<SignatureLibrary>(
+               "TrePDF", 1, 0, "SignatureLibrary") >= 0
         && qmlRegisterType<PDFSearchController>(
                "TrePDF",
                1,
@@ -882,7 +886,7 @@ bool registerQmlTestTypes(const QString &themePath)
                0,
                "PDFTabModel") >= 0
         && qmlRegisterType(
-               QUrl::fromLocalFile(themePath),
+               QUrl::fromLocalFile(canonicalThemePath),
                "TrePDF",
                1,
                0,
@@ -891,7 +895,7 @@ bool registerQmlTestTypes(const QString &themePath)
         return false;
     }
 
-    const QDir componentsDirectory(QFileInfo(themePath).absolutePath());
+    const QDir componentsDirectory(QFileInfo(canonicalThemePath).absolutePath());
     const QStringList qmlFiles = componentsDirectory.entryList(
         {QStringLiteral("*.qml")},
         QDir::Files,

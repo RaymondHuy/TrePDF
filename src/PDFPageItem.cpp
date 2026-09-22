@@ -411,7 +411,6 @@ public:
                 annotationIndices)) {
             return false;
         }
-        m_hasTargetAnnotations = !annotationIndices.isEmpty();
         m_states.reserve(annotationIndices.size());
         for (int annotationIndex : std::as_const(annotationIndices)) {
             FPDF_ANNOTATION annotation = FPDFPage_GetAnnot(
@@ -467,11 +466,6 @@ public:
         return m_restoreSucceeded;
     }
 
-    bool hasTargetAnnotations() const
-    {
-        return m_hasTargetAnnotations;
-    }
-
 private:
     struct State {
         int annotationIndex = -1;
@@ -482,7 +476,6 @@ private:
     QVector<State> m_states;
     bool m_restored = false;
     bool m_restoreSucceeded = true;
-    bool m_hasTargetAnnotations = false;
 };
 
 struct PreviewAnnotationRemovalResult {
@@ -747,7 +740,6 @@ PageRenderResult renderPageFromFile(
                     PDFWidgetAnnotationSuppression widgetSuppression;
                     QVector<PDFWidgetRenderPatch> widgetPatches;
                     bool omitSourceAnnotations = false;
-                    bool omitFormAnnotations = false;
                     if (!draftObjectPaths.isEmpty()) {
                         suppressionApplied = suppression.suppress(
                             previewPage,
@@ -763,8 +755,6 @@ PageRenderResult renderPageFromFile(
                         = annotationSuppression.suppress(
                             previewPage,
                             deletedCommentAnnotations);
-                    omitFormAnnotations
-                        = annotationSuppression.hasTargetAnnotations();
                     if (!annotationSuppressionApplied
                         && annotationSuppression.restorationSucceeded()) {
                         const PreviewAnnotationRemovalResult removal
@@ -780,7 +770,6 @@ PageRenderResult renderPageFromFile(
                         // omit the page annotation pass and let FPDF_FFLDraw
                         // render form widgets separately.
                         omitSourceAnnotations = true;
-                        omitFormAnnotations = true;
                         annotationSuppressionApplied = true;
                     }
                     if (!suppressedFormWidgetIds.isEmpty()) {
@@ -823,6 +812,9 @@ PageRenderResult renderPageFromFile(
                         const bool widgetRestoreSucceeded
                             = widgetSuppression.restore();
                         if (formHandle) {
+                            // Keep native form widgets, but do not draw PDFium's
+                            // yellow annotation popups on hover. The page pass
+                            // above still renders stamps and other comments.
                             FPDF_FFLDraw(
                                 formHandle,
                                 bitmap,
@@ -832,7 +824,7 @@ PageRenderResult renderPageFromFile(
                                 pixelSize.width(),
                                 pixelSize.height(),
                                 0,
-                                omitFormAnnotations ? 0 : FPDF_ANNOT);
+                                0);
                         }
                         if (widgetSuppressionApplied) {
                             widgetSuppressionApplied

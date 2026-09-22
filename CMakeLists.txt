@@ -152,6 +152,8 @@ qt_add_qml_module(trepdf
         src/PDFRasterBudget.h
         src/PDFRasterPlan.h
         src/SpreadsheetWorkbook.h
+        src/SignatureLibrary.cpp
+        src/SignatureLibrary.h
     QML_FILES
         src/Main.qml
         src/Components/AppRibbon.qml
@@ -189,6 +191,7 @@ qt_add_qml_module(trepdf
         src/Components/RibbonTabButton.qml
         src/Components/ShapeDraftView.qml
         src/Components/SignRibbon.qml
+        src/Components/SignatureDialog.qml
         src/Components/SearchHighlightLayer.qml
         src/Components/SearchRibbonControl.qml
         src/Components/SquigglyLine.qml

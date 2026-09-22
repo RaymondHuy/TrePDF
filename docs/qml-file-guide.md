@@ -1,6 +1,6 @@
 # Hướng dẫn toàn bộ tệp QML
 
-Tài liệu này mô tả 37 tệp QML đang được đăng ký trong QML module `TrePDF`.
+Tài liệu này mô tả các tệp QML đang được đăng ký trong QML module `TrePDF`.
 Mỗi mục tập trung vào trách nhiệm, dữ liệu đi vào/đi ra, quan hệ với C++ và các
 ràng buộc vòng đời cần giữ khi sửa code.
 
@@ -30,6 +30,7 @@ Main.qml
 │   ├── CommentRibbon.qml
 │   ├── FormRibbon.qml
 │   └── SignRibbon.qml
+├── SignatureDialog.qml (Loader khi tạo chữ ký/ngày/dấu)
 ├── DocumentTabBar.qml
 ├── ReaderControlBar.qml (footer cố định)
 └── DocumentWorkspace.qml
@@ -101,6 +102,10 @@ phạm vi toàn ứng dụng.
   người dùng Save, Discard hoặc Cancel.
 - Hộp chọn ảnh lưu controller, page và điểm đặt tại thời điểm request; sau khi
   chọn file mới gọi `addImage()` để tránh áp ảnh vào tab khác nếu UI đổi state.
+- Sở hữu `SignatureLibrary` dùng chung và tạo `SignatureDialog` bằng Loader.
+  Preview chữ ký/ngày/dấu được giữ đến khi click đặt ảnh vào pane chính. Pending
+  placement gắn với session và bị hủy khi đổi tab/session/document, lưu, đổi
+  history/tool hoặc nhấn Escape; không đặt ảnh vào session khác.
 - Xác nhận xóa trang và kiểm tra đúng session/page trước khi thực hiện.
 - Xác nhận liên kết HTTP/HTTPS do form/JavaScript yêu cầu; hiển thị authority,
   URL và cảnh báo HTTP không mã hóa trước khi gọi controller xác nhận.
@@ -139,10 +144,10 @@ của Forms.
 **Việc chính:**
 
 - Vẽ hàng tab ribbon, vùng lệnh tương ứng và trạng thái tên tài liệu/draft/save.
-- Tính `viewTabActive`, `editTabActive`, `commentTabActive`, `formsTabActive` và
+- Tính `viewTabActive`, `editTabActive`, `commentTabActive`, `formsTabActive`, `signTabActive` và
   các cờ tool form để workspace biết overlay nào được phép hiện/tương tác.
-- Khi vào Edit, mặc định về `SelectTool`; khi vào Comment, bật
-  `CommentSelectTool`; rời cả hai tab đưa `PDFEditController.tool` về Browse để
+- Khi vào Edit hoặc Sign, mặc định về `SelectTool`; khi vào Comment, bật
+  `CommentSelectTool`; rời các tab này đưa `PDFEditController.tool` về Browse để
   không giữ một tool tương tác từ phiên trước.
 - Khi Comment active, yêu cầu annotation-only comment index cho toàn tài liệu,
   kể cả khi panel danh sách đang được ẩn.
@@ -438,11 +443,27 @@ trong tab Edit; không lập chỉ mục, hiển thị hay sửa nội dung comm
 
 ### [`src/Components/SignRibbon.qml`](../src/Components/SignRibbon.qml)
 
-**Vai trò:** presentation của tab Sign và điểm mở rộng cho tính năng ký.
+**Vai trò:** ribbon cho chữ ký hiển thị trên trang PDF.
 
-- Nhận theme/document, dùng biến thể màu xanh của reusable ribbon controls.
-- Phát `toolRequested(toolName)` cho các nút chưa có backend hoàn chỉnh.
-- Không tạo chữ ký, không sửa PDF và không giữ credential/chứng thư.
+- Nhận theme/document/edit controller, dùng biến thể màu xanh cho nhóm ký.
+- Phát intent Chọn, Chữ ký, Ký tắt, Ngày và Dấu kiểm; nhóm history/file có
+  Undo/Redo và Save/Save As theo trạng thái controller.
+- `AppRibbon` chuyển intent tạo chữ ký/ngày/dấu tới `Main.qml`; ribbon không
+  trực tiếp tạo ảnh, mở dialog hoặc lưu PDF.
+
+### [`src/Components/SignatureDialog.qml`](../src/Components/SignatureDialog.qml)
+
+**Vai trò:** chuẩn bị chữ ký/ký tắt hoặc ngày/dấu trước khi đặt lên trang.
+
+- Bốn tab chữ ký: vẽ các nét rời, nhập tên với kiểu chữ/màu, chọn ảnh cục bộ với
+  tùy chọn bỏ nền trắng, hoặc chọn mẫu đã lưu theo loại chữ ký/ký tắt.
+- Giữ gesture có giới hạn và debounce preview; `SignatureLibrary` kiểm tra dữ
+  liệu và tạo PNG nền trong suốt. Thay đổi đầu vào xóa preview cũ trong lúc chờ.
+- Mẫu có thể được đặt tên, lưu hoặc xóa trong thư viện cục bộ. Ngày dùng ngày
+  ISO đã kiểm tra với ba định dạng; dấu có lựa chọn check hoặc cross.
+- Chỉ phát `placementRequested(widthPoints)` khi preview hợp lệ. Main chuyển
+  sang cursor đặt ảnh; Cancel/Escape và unload dọn timer/file dialog.
+- Tạo ảnh chữ ký hiển thị, không tạo field ký số hay quản lý chứng thư.
 
 ## Tab và workspace
 
@@ -481,7 +502,7 @@ trong tab Edit; không lập chỉ mục, hiển thị hay sửa nội dung comm
 - Load đúng một panel ở cạnh phải: `CommentPanel` khi Comment active và danh
   sách được bật; `DrawingCommentPropertiesPanel` khi tab Edit đang active và
   chọn `addedShape`/`sourceShape` hoặc Square/Circle/Line/Polygon/PolyLine/Ink;
-  `ImagePropertiesPanel` khi tab Edit active và chọn `image`/`addedImage`;
+  `ImagePropertiesPanel` khi tab Edit hoặc Sign active và chọn `image`/`addedImage`;
   `TextFormatPanel` cho các trạng
   thái Edit còn lại; hoặc panel Text Field, Comb Field, Dropdown/List Box và
   Radio Button tương ứng trong Forms. Panel thuộc tính ảnh/shape/comment có ưu
