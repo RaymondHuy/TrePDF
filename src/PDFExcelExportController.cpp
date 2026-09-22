@@ -47,6 +47,7 @@ struct ExportDocument {
 
 struct PDFExcelExportController::Work {
     QString sourcePath;
+    QByteArray password;
     QUrl target;
     QVector<int> sourcePages;
     int revision = 0;
@@ -134,6 +135,7 @@ bool PDFExcelExportController::exportTo(const QUrl &target)
     }
     auto work = std::make_shared<Work>();
     work->sourcePath = source.absoluteFilePath();
+    work->password = m_document->documentPassword();
     work->target = QUrl::fromLocalFile(destination.absoluteFilePath());
     work->revision = m_document->renderRevision();
     work->sourceSize = source.size();
@@ -216,7 +218,9 @@ PDFExcelExportController::Result PDFExcelExportController::performExport(
     {
         PDFiumProcessLock lock;
         if (!cancelled())
-            document.handle = FPDF_LoadDocument(QFile::encodeName(work->sourcePath).constData(), nullptr);
+            document.handle = FPDF_LoadDocument(
+                QFile::encodeName(work->sourcePath).constData(),
+                work->password.constData());
     }
     if (!document.handle)
         return result;

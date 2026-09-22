@@ -127,7 +127,10 @@ flowchart TD
 2. Model chuẩn hóa đường dẫn; nếu tệp đã mở thì chuyển sang tab đó, nếu chưa thì
    tạo `PDFDocumentSession` mới.
 3. `PDFDocument::open()` mở handle GUI-thread, đọc metadata/kích thước trang và
-   tăng revision.
+   tăng revision. Nếu PDFium yêu cầu mật khẩu, model phát `passwordRequested`
+   để `Main.qml` mở popup nhập mật khẩu; tab chỉ được thêm sau khi mở thành công.
+   Mật khẩu được giữ trong bộ nhớ document và chụp vào request worker để các
+   handle độc lập mở cùng tài liệu được bảo vệ.
 4. `DocumentView` tạo `PdfPageDelegate` theo vùng nhìn.
 5. `PDFPageItem` chụp render key gồm document, revision, trang nguồn, zoom, DPR,
    kích thước pixel, revision draft/form rồi đưa việc render sang worker.

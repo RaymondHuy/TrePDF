@@ -214,19 +214,22 @@ public:
         closeLocked();
     }
 
-    FPDF_DOCUMENT documentLocked(const QString &filePath, int revision)
+    FPDF_DOCUMENT documentLocked(const QString &filePath, int revision,
+                                 const QByteArray &password)
     {
         assertPDFiumProcessLockHeld();
-        if (m_document && m_filePath == filePath && m_revision == revision) {
+        if (m_document && m_filePath == filePath && m_revision == revision
+            && m_password == password) {
             return m_document;
         }
 
         closeLocked();
         const QByteArray encodedPath = QFile::encodeName(filePath);
-        m_document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+        m_document = FPDF_LoadDocument(encodedPath.constData(), password.constData());
         if (m_document) {
             m_filePath = filePath;
             m_revision = revision;
+            m_password = password;
         }
         return m_document;
     }
@@ -242,11 +245,13 @@ private:
         }
         m_document = nullptr;
         m_filePath.clear();
+        m_password.clear();
         m_revision = -1;
     }
 
     FPDF_DOCUMENT m_document = nullptr;
     QString m_filePath;
+    QByteArray m_password;
     int m_revision = -1;
 };
 
@@ -1049,6 +1054,7 @@ void PDFEditController::requestCommentIndex()
     for (int page = 0; page < m_document->pageCount(); ++page) {
         CandidateScanRequest request;
         request.filePath = filePath;
+        request.password = m_document->documentPassword();
         request.revision = revision;
         request.page = page;
         request.sourcePage = m_document->sourcePageIndex(page);
@@ -1145,7 +1151,8 @@ void PDFEditController::requestCommentIndex()
                     PDFiumProcessLock pdfiumLock;
                     FPDF_DOCUMENT document = commentDocument.documentLocked(
                         filePath,
-                        revision);
+                        revision,
+                        request.password);
                     scanResult = PDFEditController::scanCommentPageLocked(
                         document,
                         budgetedRequest,
@@ -1769,6 +1776,7 @@ PDFEditController::CandidateScanRequest PDFEditController::candidateScanRequest(
     }
 
     request.filePath = m_document->renderFilePath();
+    request.password = m_document->documentPassword();
     request.revision = m_document->renderRevision();
     request.page = page;
     request.sourcePage = m_document->sourcePageIndex(page);
@@ -1807,7 +1815,8 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageFromFile(
     thread_local CandidateScanDocument candidateDocument;
     FPDF_DOCUMENT document = candidateDocument.documentLocked(
         request.filePath,
-        request.revision);
+        request.revision,
+        request.password);
     if (document) {
         candidates = scanPageLocked(document, request, cancellation);
     }

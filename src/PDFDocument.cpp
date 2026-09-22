@@ -131,8 +131,9 @@ qreal PDFDocument::maximumPageHeight() const
     return m_maximumPageHeight;
 }
 
-bool PDFDocument::open(const QUrl &source)
+bool PDFDocument::open(const QUrl &source, const QString &password)
 {
+    m_passwordRequired = false;
     if (!source.isLocalFile()) {
         //% "Only local PDF files are supported"
         setStatusText(qtTrId("LocalPdfFilesOnly"));
@@ -141,13 +142,15 @@ bool PDFDocument::open(const QUrl &source)
 
     const QString filePath = source.toLocalFile();
     const QByteArray encodedPath = QFile::encodeName(filePath);
+    const QByteArray encodedPassword = password.toUtf8();
     unsigned long error = FPDF_ERR_SUCCESS;
     bool opened = false;
     {
         // This is the sole owner of the PDFium open/metadata/old-document-close
         // transaction. QObject signals are emitted only after the lock is gone.
         PDFiumProcessLock pdfiumLock;
-        FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+        FPDF_DOCUMENT document = FPDF_LoadDocument(
+            encodedPath.constData(), encodedPassword.constData());
         if (!document) {
             error = FPDF_GetLastError();
         } else {
@@ -177,6 +180,7 @@ bool PDFDocument::open(const QUrl &source)
             m_document = document;
             m_source = source;
             m_filePath = filePath;
+            m_documentPassword = encodedPassword;
             m_sourcePageCount = pageCount;
             m_pageCount = pageCount;
             m_currentPage = 0;
@@ -208,6 +212,7 @@ bool PDFDocument::open(const QUrl &source)
     }
 
     if (!opened) {
+        m_passwordRequired = error == FPDF_ERR_PASSWORD;
         setStatusText(pdfiumErrorText(error));
         return false;
     }
@@ -220,6 +225,7 @@ bool PDFDocument::open(const QUrl &source)
 
 void PDFDocument::close()
 {
+    m_passwordRequired = false;
     if (!m_document && m_source.isEmpty() && m_filePath.isEmpty()) {
         return;
     }
@@ -271,6 +277,16 @@ QSizeF PDFDocument::pageSize(int page) const
 QString PDFDocument::renderFilePath() const
 {
     return m_filePath;
+}
+
+QByteArray PDFDocument::documentPassword() const
+{
+    return m_documentPassword;
+}
+
+bool PDFDocument::passwordRequired() const
+{
+    return m_passwordRequired;
 }
 
 int PDFDocument::renderRevision() const
@@ -326,6 +342,8 @@ void PDFDocument::closeDocumentLocked()
     m_document = nullptr;
     m_source = QUrl();
     m_filePath.clear();
+    m_documentPassword.clear();
+    m_passwordRequired = false;
     m_sourcePageSizes.clear();
     m_pageSizes.clear();
     m_displaySourcePages.clear();

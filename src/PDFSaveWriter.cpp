@@ -5548,7 +5548,8 @@ PDFSaveWriter::Result commitDocumentFile(const QString &sourceFilePath,
 PDFSaveWriter::Result validateAnnotationRelationships(
     const QString &filePath,
     const QVector<PDFAcroFormCanonicalizer::AnnotationRelationship>
-        &relationships)
+        &relationships,
+    const QByteArray &password)
 {
     assertPDFiumProcessLockHeld();
     if (relationships.isEmpty()) {
@@ -5556,7 +5557,8 @@ PDFSaveWriter::Result validateAnnotationRelationships(
     }
 
     const QByteArray encodedPath = QFile::encodeName(filePath);
-    PdfDocumentHandle document(FPDF_LoadDocument(encodedPath.constData(), nullptr));
+    PdfDocumentHandle document(FPDF_LoadDocument(
+        encodedPath.constData(), password.constData()));
     if (!document.get()) {
         return failure(PDFSaveWriter::Error::CommentAnnotationCreationFailed);
     }
@@ -6303,6 +6305,7 @@ PDFSaveWriter::Result addWebLinks(
 
 struct PDFSaveWriter::Request::Data {
     QString sourceFilePath;
+    QByteArray documentPassword;
     QString targetFilePath;
     QVector<int> deletedSourcePages;
     QVector<PDFPageInsertion> pageInsertions;
@@ -6330,6 +6333,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         ? controller.m_document->renderFilePath()
         : sourceFilePathOverride;
     data->targetFilePath = targetFilePath;
+    data->documentPassword = controller.m_document->documentPassword();
     data->autoWebLinks = controller.m_autoWebLinks;
     data->removedWebLinks = controller.m_removedWebLinks;
     data->manualLinks = controller.m_manualLinks;
@@ -6713,14 +6717,16 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     // an immutable GUI-thread snapshot, and completion is posted only after
     // this function returns and releases the process lock.
     PDFiumProcessLock pdfiumLock;
-    PdfDocumentHandle document(FPDF_LoadDocument(encodedSourcePath.constData(), nullptr));
+    PdfDocumentHandle document(FPDF_LoadDocument(
+        encodedSourcePath.constData(), request.m_data->documentPassword.constData()));
     if (!document.get()) {
         return failure(Error::SourceOpenFailed);
     }
     // Render-only inspection happens on a second worker-owned handle so that
     // temporary page-object activation changes never dirty the writer page.
     PdfDocumentHandle inspectionDocument(
-        FPDF_LoadDocument(encodedSourcePath.constData(), nullptr));
+        FPDF_LoadDocument(encodedSourcePath.constData(),
+                          request.m_data->documentPassword.constData()));
     if (!inspectionDocument.get()) {
         return failure(Error::SourceOpenFailed);
     }
@@ -7062,7 +7068,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         }
         const Result relationshipValidation = validateAnnotationRelationships(
             contentFilePath,
-            annotationRelationships);
+            annotationRelationships,
+            request.m_data->documentPassword);
         if (!relationshipValidation.succeeded()) {
             return relationshipValidation;
         }
@@ -7086,7 +7093,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         = PDFAcroFormWriter::write(
             contentFilePath,
             formFilePath,
-            acroFormFields);
+            acroFormFields,
+            request.m_data->documentPassword);
     if (!acroFormResult.succeeded) {
         return failure(
             Error::AcroFormCreationFailed,
@@ -7167,7 +7175,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     }
     const Result relationshipValidation = validateAnnotationRelationships(
         formFilePath,
-        annotationRelationships);
+        annotationRelationships,
+        request.m_data->documentPassword);
     if (!relationshipValidation.succeeded()) {
         return relationshipValidation;
     }

@@ -180,6 +180,7 @@ PDFFormWorker::DocumentKey PDFFormController::documentKey() const
     if (m_document && m_document->isLoaded()) {
         key.filePath = m_document->renderFilePath();
         key.revision = m_document->renderRevision();
+        key.password = m_document->documentPassword();
     }
     return key;
 }
@@ -1138,7 +1139,8 @@ bool PDFFormController::sameDocumentKey(
 {
     return left.sessionId == right.sessionId
         && left.filePath == right.filePath
-        && left.revision == right.revision;
+        && left.revision == right.revision
+        && left.password == right.password;
 }
 
 QString PDFFormController::createSnapshotPath(QString &error) const

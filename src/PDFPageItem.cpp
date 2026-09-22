@@ -1783,6 +1783,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
     } else {
         formDocument.filePath = filePath;
         formDocument.revision = revision;
+        formDocument.password = document->documentPassword();
     }
     const QVector<QVector<int>> draftObjectPaths = editController
             && editController->document() == document

@@ -108,7 +108,8 @@ QByteArray manualLinkAppearance(const ManualLink &link, const QSizeF &size,
 bool validManualLink(const ManualLink &link);
 ManualScanResult scanEditableLinks(
     const QString &filePath,
-    const std::shared_ptr<std::atomic_bool> &cancellation);
+    const std::shared_ptr<std::atomic_bool> &cancellation,
+    const QByteArray &password = {});
 ManualScanResult editableLinksForPage(
     FPDF_DOCUMENT document, FPDF_PAGE page, int sourcePage,
     const std::shared_ptr<std::atomic_bool> &cancellation = {});
@@ -122,13 +123,15 @@ QString validWebUrl(const QString &value);
 // the process lock. Failure/cancellation returns no links; limited results may
 // contain complete, validated links from the bounded part of the scan.
 ScanResult scan(const QString &filePath,
-                const std::shared_ptr<std::atomic_bool> &cancellation);
+                const std::shared_ptr<std::atomic_bool> &cancellation,
+                const QByteArray &password = {});
 
 // Enumerates removable HTTP(S) URI annotations without loading page text.
 // Protected, malformed, or relationship-bearing annotations are retained.
 SourceScanResult scanSourceLinks(
     const QString &filePath,
-    const std::shared_ptr<std::atomic_bool> &cancellation);
+    const std::shared_ptr<std::atomic_bool> &cancellation,
+    const QByteArray &password = {});
 
 // Shared with saving to revalidate source identity before and after unrelated
 // annotation edits. The caller owns the document/page and process lock.

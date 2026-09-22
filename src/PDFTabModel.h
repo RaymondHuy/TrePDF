@@ -156,7 +156,7 @@ public:
     void setPanelCollapsed(bool collapsed);
     void setInitialFitPending(bool pending);
 
-    bool open(const QUrl &source);
+    bool open(const QUrl &source, const QString &password = QString());
     Q_INVOKABLE void rotateView(int quarterTurns);
     Q_INVOKABLE void prepareForDeactivation();
 
@@ -237,7 +237,8 @@ public:
     bool anySaving() const;
     bool hasDrafts() const;
 
-    Q_INVOKABLE PDFDocumentSession *open(const QUrl &source);
+    Q_INVOKABLE PDFDocumentSession *open(const QUrl &source,
+                                       const QString &password = QString());
     Q_INVOKABLE PDFDocumentSession *sessionAt(int index) const;
     Q_INVOKABLE int indexOf(PDFDocumentSession *session) const;
     Q_INVOKABLE bool closeSession(PDFDocumentSession *session);
@@ -257,6 +258,7 @@ signals:
     void hasDraftsChanged();
     void statusMessage(const QString &message);
     void sessionSaveFinished(PDFDocumentSession *session, bool succeeded);
+    void passwordRequested(const QUrl &source, bool incorrectPassword);
     void fontDownloadRequested(PDFDocumentSession *session);
     void externalLinkRequested(PDFDocumentSession *session,
                                quint64 requestId,

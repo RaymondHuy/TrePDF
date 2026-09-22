@@ -413,6 +413,12 @@ private slots:
     void savesAsynchronously();
     void keepsDraftsWhenSaveFails();
     void opensDocumentsInIndependentTabs();
+    void requiresPasswordForProtectedDocuments();
+    void requestsPasswordsBeforeAddingTabs();
+    void opensPasswordProtectedWorkerSessions();
+    void promptsForProtectedPdfPasswords();
+    void preservesQueuedPdfPasswordPrompts();
+    void savesPasswordProtectedContentAsynchronously();
     void keepsViewRotationIndependentAcrossTabs();
     void keepsPageDisplayStateIndependentAcrossTabs();
     void clearsTabIdentityWhenDocumentCloses();

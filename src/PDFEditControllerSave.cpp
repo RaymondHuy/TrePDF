@@ -454,7 +454,9 @@ bool PDFEditController::completeSave(
         return true;
     }
 
-    const bool reopened = m_document->open(QUrl::fromLocalFile(targetFilePath));
+    const QString documentPassword = QString::fromUtf8(m_document->documentPassword());
+    const bool reopened = m_document->open(
+        QUrl::fromLocalFile(targetFilePath), documentPassword);
     m_saving = false;
     emit savingChanged();
     if (!reopened) {

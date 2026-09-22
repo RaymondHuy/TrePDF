@@ -120,6 +120,369 @@ void PDFEditControllerTest::opensDocumentsInIndependentTabs()
     QCOMPARE(firstSession->scrollY(), 420.0);
 }
 
+void PDFEditControllerTest::requiresPasswordForProtectedDocuments()
+{
+    const QString protectedPath = QFINDTESTDATA("fixtures/password-1.pdf");
+    QVERIFY(!protectedPath.isEmpty());
+    const QUrl protectedSource = QUrl::fromLocalFile(protectedPath);
+    const QString password = QStringLiteral("fixture-open-1");
+    PDFDocument document;
+
+    QVERIFY(!document.open(protectedSource));
+    QVERIFY(document.passwordRequired());
+    QVERIFY(!document.isLoaded());
+    QVERIFY(document.documentPassword().isEmpty());
+    QVERIFY(!document.open(protectedSource, QStringLiteral("incorrect")));
+    QVERIFY(document.passwordRequired());
+    QVERIFY(!document.isLoaded());
+    QVERIFY(document.documentPassword().isEmpty());
+
+    QVERIFY(document.open(protectedSource, password));
+    QVERIFY(!document.passwordRequired());
+    QVERIFY(document.isLoaded());
+    QCOMPARE(document.pageCount(), 1);
+    QCOMPARE(document.pageSize(0), QSizeF(300, 400));
+    QCOMPARE(document.documentPassword(), password.toUtf8());
+    const int revision = document.renderRevision();
+
+    // A failed retry must leave the existing session and its credentials usable.
+    QVERIFY(!document.open(protectedSource, QStringLiteral("incorrect")));
+    QVERIFY(document.passwordRequired());
+    QVERIFY(document.isLoaded());
+    QCOMPARE(document.source(), protectedSource);
+    QCOMPARE(document.renderRevision(), revision);
+    QCOMPARE(document.documentPassword(), password.toUtf8());
+
+    const QString malformedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("password-malformed.pdf"));
+    QFile malformed(malformedPath);
+    QVERIFY(malformed.open(QIODevice::WriteOnly));
+    QVERIFY(malformed.write("This is not a PDF.") > 0);
+    malformed.close();
+    QVERIFY(!document.open(QUrl::fromLocalFile(malformedPath)));
+    QVERIFY(!document.passwordRequired());
+    QCOMPARE(document.source(), protectedSource);
+    QCOMPARE(document.renderRevision(), revision);
+    QCOMPARE(document.documentPassword(), password.toUtf8());
+
+    const QString plainPath = m_temporaryDirectory.filePath(
+        QStringLiteral("password-plain.pdf"));
+    QVERIFY(createFontStylePdf(plainPath));
+    QVERIFY(document.open(QUrl::fromLocalFile(plainPath)));
+    QVERIFY(!document.passwordRequired());
+    QVERIFY(document.documentPassword().isEmpty());
+    QVERIFY(document.open(protectedSource, password));
+    document.close();
+    QVERIFY(!document.isLoaded());
+    QVERIFY(!document.passwordRequired());
+    QVERIFY(document.documentPassword().isEmpty());
+}
+
+void PDFEditControllerTest::requestsPasswordsBeforeAddingTabs()
+{
+    const QString firstPath = QFINDTESTDATA("fixtures/password-1.pdf");
+    const QString secondPath = QFINDTESTDATA("fixtures/password-2.pdf");
+    QVERIFY(!firstPath.isEmpty());
+    QVERIFY(!secondPath.isEmpty());
+    const QUrl firstSource = QUrl::fromLocalFile(firstPath);
+    const QUrl secondSource = QUrl::fromLocalFile(secondPath);
+    PDFTabModel tabs;
+    QSignalSpy passwordSpy(&tabs, &PDFTabModel::passwordRequested);
+    QSignalSpy countSpy(&tabs, &PDFTabModel::countChanged);
+
+    QVERIFY(!tabs.open(firstSource));
+    QCOMPARE(tabs.count(), 0);
+    QCOMPARE(tabs.currentIndex(), -1);
+    QCOMPARE(passwordSpy.size(), 1);
+    QCOMPARE(passwordSpy.constLast().at(0).toUrl(), firstSource);
+    QCOMPARE(passwordSpy.constLast().at(1).toBool(), false);
+    QCOMPARE(countSpy.size(), 0);
+    QVERIFY(!tabs.open(firstSource, QStringLiteral("incorrect")));
+    QCOMPARE(passwordSpy.size(), 2);
+    QCOMPARE(passwordSpy.constLast().at(1).toBool(), true);
+    QCOMPARE(tabs.count(), 0);
+
+    PDFDocumentSession *first = tabs.open(
+        firstSource, QStringLiteral("fixture-open-1"));
+    QVERIFY(first);
+    QCOMPARE(tabs.count(), 1);
+    QCOMPARE(passwordSpy.size(), 2);
+    first->setZoom(1.75);
+    first->setScrollY(123.0);
+
+    // Dismissing a request needs no rollback: no provisional tab is inserted.
+    QVERIFY(!tabs.open(secondSource));
+    QCOMPARE(passwordSpy.size(), 3);
+    QCOMPARE(passwordSpy.constLast().at(0).toUrl(), secondSource);
+    QCOMPARE(passwordSpy.constLast().at(1).toBool(), false);
+    QCOMPARE(tabs.count(), 1);
+    QCOMPARE(tabs.currentSession(), first);
+    QCOMPARE(first->zoom(), 1.75);
+    QCOMPARE(first->scrollY(), 123.0);
+
+    PDFDocumentSession *second = tabs.open(
+        secondSource, QStringLiteral("fixture-open-2"));
+    QVERIFY(second);
+    QVERIFY(second != first);
+    QCOMPARE(tabs.count(), 2);
+    QCOMPARE(first->document()->documentPassword(), QByteArray("fixture-open-1"));
+    QCOMPARE(second->document()->documentPassword(), QByteArray("fixture-open-2"));
+    QCOMPARE(tabs.currentSession(), second);
+    QCOMPARE(tabs.open(firstSource), first);
+    QCOMPARE(tabs.currentSession(), first);
+    QCOMPARE(passwordSpy.size(), 3);
+    QCOMPARE(tabs.count(), 2);
+    QCOMPARE(countSpy.size(), 2);
+
+    const QString malformedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("password-tabs-malformed.pdf"));
+    QFile malformed(malformedPath);
+    QVERIFY(malformed.open(QIODevice::WriteOnly));
+    QVERIFY(malformed.write("Not a PDF.") > 0);
+    malformed.close();
+    QVERIFY(!tabs.open(QUrl::fromLocalFile(malformedPath)));
+    QCOMPARE(passwordSpy.size(), 3);
+    QCOMPARE(tabs.count(), 2);
+    QCOMPARE(tabs.currentSession(), first);
+}
+
+void PDFEditControllerTest::opensPasswordProtectedWorkerSessions()
+{
+    PDFTabModel tabs;
+    PDFDocumentSession *first = tabs.open(
+        QUrl::fromLocalFile(QFINDTESTDATA("fixtures/password-1.pdf")),
+        QStringLiteral("fixture-open-1"));
+    PDFDocumentSession *second = tabs.open(
+        QUrl::fromLocalFile(QFINDTESTDATA("fixtures/password-2.pdf")),
+        QStringLiteral("fixture-open-2"));
+    QVERIFY(first);
+    QVERIFY(second);
+    for (PDFDocumentSession *session : {first, second}) {
+        session->searchController()->search(QStringLiteral("Protected fixture"));
+    }
+    for (PDFDocumentSession *session : {first, second}) {
+        QTRY_COMPARE_WITH_TIMEOUT(session->searchController()->state(),
+                                  PDFSearchController::Ready, 5000);
+        QCOMPARE(session->searchController()->resultCount(), 1);
+        const QString text = session == first
+            ? QStringLiteral("Protected fixture 1")
+            : QStringLiteral("Protected fixture 2");
+        QVERIFY(!candidateForText(waitForCandidates(*session->editController(), 0),
+                                  text).isEmpty());
+        const auto cancellation = std::make_shared<std::atomic_bool>(false);
+        const QString path = session->document()->renderFilePath();
+        const QByteArray password = session->document()->documentPassword();
+        QVERIFY(!PDFWebLinks::scan(path, cancellation, password).failed);
+        QVERIFY(!PDFWebLinks::scanSourceLinks(path, cancellation, password).failed);
+        QVERIFY(!PDFWebLinks::scanEditableLinks(path, cancellation, password).failed);
+        QVERIFY(PDFWebLinks::scan(path, cancellation).failed);
+    }
+
+    QQuickWindow window;
+    window.setColor(Qt::white);
+    window.resize(300, 400);
+    TestablePDFPageItem item(window.contentItem());
+    item.setSize(QSizeF(300, 400));
+    item.setDocument(first->document());
+    item.completeForTest();
+    window.show();
+    QTRY_VERIFY_WITH_TIMEOUT(window.isExposed() && item.draftTextureReady()
+                                && item.draftTextureCurrent(), 5000);
+    const auto grab = item.grabToImage(QSize(300, 400));
+    QVERIFY(grab);
+    QTRY_VERIFY_WITH_TIMEOUT(!grab->image().isNull(), 5000);
+    const QColor marker = grab->image().pixelColor(50, 100);
+    QVERIFY(marker.red() > 220 && marker.green() < 40 && marker.blue() < 40);
+
+    PDFFormController *forms = first->formController();
+    QTRY_VERIFY_WITH_TIMEOUT(!forms->javascriptTransitionPending(), 5000);
+    item.setFormController(forms);
+    QTRY_VERIFY_WITH_TIMEOUT(item.draftTextureReady()
+                                && item.draftTextureCurrent(), 5000);
+    QSignalSpy inputSpy(forms, &PDFFormController::inputStateChanged);
+    forms->pointerEvent(0, PDFFormWorker::PointerEventType::Press, 0,
+                        QPointF(40, 190), QSize(300, 400));
+    forms->pointerEvent(0, PDFFormWorker::PointerEventType::Release, 0,
+                        QPointF(40, 190), QSize(300, 400));
+    QTRY_COMPARE_WITH_TIMEOUT(inputSpy.size(), 2, 5000);
+    QVERIFY(forms->hasDrafts());
+    QVERIFY(!second->formController()->hasDrafts());
+    forms->discardChanges();
+    QTRY_VERIFY_WITH_TIMEOUT(!forms->hasDrafts(), 5000);
+}
+
+void PDFEditControllerTest::promptsForProtectedPdfPasswords()
+{
+    const QString plainPath = m_temporaryDirectory.filePath(
+        QStringLiteral("password-popup-original.pdf"));
+    QVERIFY(createFontStylePdf(plainPath));
+    const QUrl protectedSource = QUrl::fromLocalFile(
+        QFINDTESTDATA("fixtures/password-1.pdf"));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(root.get());
+    QVERIFY(window);
+    window->show();
+    QTRY_VERIFY_WITH_TIMEOUT(window->isExposed(), 5000);
+    auto *tabs = window->findChild<PDFTabModel *>();
+    QVERIFY(tabs);
+    PDFDocumentSession *original = tabs->open(QUrl::fromLocalFile(plainPath));
+    QVERIFY(original);
+
+    QVERIFY(!tabs->open(protectedSource));
+    QObject *popup = nullptr;
+    QTRY_VERIFY((popup = window->findChild<QObject *>(QStringLiteral("pdfPasswordPopup"))));
+    QTRY_VERIFY(popup->property("opened").toBool());
+    auto *input = window->findChild<QQuickItem *>(QStringLiteral("pdfPasswordInput"));
+    auto *error = window->findChild<QQuickItem *>(QStringLiteral("pdfPasswordError"));
+    QObject *openButton = window->findChild<QObject *>(QStringLiteral("openPasswordPdfButton"));
+    QVERIFY(input);
+    QVERIFY(error);
+    QVERIFY(openButton);
+    QCOMPARE(input->property("echoMode").toInt(), 2); // TextInput.Password
+    QVERIFY(!error->isVisible());
+    QVERIFY(!openButton->property("enabled").toBool());
+    QCOMPARE(tabs->count(), 1);
+    QCOMPARE(tabs->currentSession(), original);
+
+    QVERIFY(input->setProperty("text", QStringLiteral("incorrect")));
+    QVERIFY(openButton->property("enabled").toBool());
+    QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
+    QTRY_VERIFY(error->isVisible());
+    QVERIFY(popup->property("opened").toBool());
+    QVERIFY(input->property("text").toString().isEmpty());
+    QVERIFY(!openButton->property("enabled").toBool());
+    QCOMPARE(tabs->count(), 1);
+    QCOMPARE(tabs->currentSession(), original);
+
+    QVERIFY(input->setProperty("text", QStringLiteral("fixture-open-1")));
+    input->forceActiveFocus();
+    QTRY_VERIFY(input->hasActiveFocus());
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->currentSession()->document()->source(), protectedSource);
+    QTRY_VERIFY(!window->findChild<QObject *>(QStringLiteral("pdfPasswordPopup")));
+    QVERIFY(window->setProperty("allowWindowClose", true));
+}
+
+void PDFEditControllerTest::preservesQueuedPdfPasswordPrompts()
+{
+    const QString plainPath = m_temporaryDirectory.filePath(
+        QStringLiteral("password-queue-original.pdf"));
+    QVERIFY(createFontStylePdf(plainPath));
+    const QUrl firstSource = QUrl::fromLocalFile(QFINDTESTDATA("fixtures/password-1.pdf"));
+    const QUrl secondSource = QUrl::fromLocalFile(QFINDTESTDATA("fixtures/password-2.pdf"));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(root.get());
+    QVERIFY(window);
+    window->show();
+    QTRY_VERIFY_WITH_TIMEOUT(window->isExposed(), 5000);
+    auto *tabs = window->findChild<PDFTabModel *>();
+    QVERIFY(tabs);
+    PDFDocumentSession *original = tabs->open(QUrl::fromLocalFile(plainPath));
+    QVERIFY(original);
+    const QVariant files = QVariantList{firstSource, secondSource};
+    const auto findPopup = [&]() {
+        return window->findChild<QObject *>(QStringLiteral("pdfPasswordPopup"));
+    };
+
+    QVERIFY(QMetaObject::invokeMethod(window, "openFiles", Q_ARG(QVariant, files)));
+    QTRY_VERIFY(findPopup());
+    QTRY_VERIFY(findPopup()->property("opened").toBool());
+    QCOMPARE(findPopup()->property("fileName").toString(), QStringLiteral("password-1.pdf"));
+    QObject *cancel = window->findChild<QObject *>(QStringLiteral("cancelPdfPasswordButton"));
+    QVERIFY(cancel);
+    QVERIFY(QMetaObject::invokeMethod(cancel, "clicked"));
+    QTRY_VERIFY(findPopup() && findPopup()->property("opened").toBool()
+                && findPopup()->property("fileName").toString() == QStringLiteral("password-2.pdf"));
+    QCOMPARE(tabs->count(), 1);
+    QCOMPARE(tabs->currentSession(), original);
+
+    auto *input = window->findChild<QQuickItem *>(QStringLiteral("pdfPasswordInput"));
+    QVERIFY(input);
+    QVERIFY(input->property("text").toString().isEmpty());
+    input->forceActiveFocus();
+    QTRY_VERIFY(input->hasActiveFocus());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!findPopup());
+    QCOMPARE(tabs->count(), 1);
+    QCOMPARE(tabs->currentSession(), original);
+
+    // Completing one request must preserve the next file from the same selection.
+    QVERIFY(QMetaObject::invokeMethod(window, "openFiles", Q_ARG(QVariant, files)));
+    QTRY_VERIFY(findPopup());
+    for (int index = 1; index <= 2; ++index) {
+        QTRY_VERIFY(findPopup() && findPopup()->property("opened").toBool());
+        QCOMPARE(findPopup()->property("fileName").toString(),
+                 QStringLiteral("password-%1.pdf").arg(index));
+        input = window->findChild<QQuickItem *>(QStringLiteral("pdfPasswordInput"));
+        QVERIFY(input);
+        QVERIFY(input->property("text").toString().isEmpty());
+        QVERIFY(input->setProperty("text", QStringLiteral("fixture-open-%1").arg(index)));
+        QObject *open = window->findChild<QObject *>(QStringLiteral("openPasswordPdfButton"));
+        QVERIFY(open);
+        QVERIFY(QMetaObject::invokeMethod(open, "clicked"));
+        QTRY_COMPARE(tabs->count(), index + 1);
+    }
+    QTRY_VERIFY(!findPopup());
+    QCOMPARE(tabs->currentSession()->document()->source(), secondSource);
+    QVERIFY(window->setProperty("allowWindowClose", true));
+}
+
+void PDFEditControllerTest::savesPasswordProtectedContentAsynchronously()
+{
+    const QString sourcePath = QFINDTESTDATA("fixtures/password-1.pdf");
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("password-content-saved.pdf"));
+    const QString password = QStringLiteral("fixture-open-1");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = source.readAll();
+    source.close();
+    PDFTabModel tabs;
+    PDFDocumentSession *session = tabs.open(QUrl::fromLocalFile(sourcePath), password);
+    QVERIFY(session);
+    PDFEditController *controller = session->editController();
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(*controller, 0), QStringLiteral("Protected fixture 1"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller->selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QString editedText = QStringLiteral("Changed fixture 1");
+    controller->commitSelectedText(editedText);
+    QVERIFY(controller->hasDrafts());
+    QSignalSpy saved(controller, &PDFEditController::saveFinished);
+    QSignalSpy status(controller, &PDFEditController::statusMessage);
+    QVERIFY(controller->requestSaveAs(QUrl::fromLocalFile(outputPath)));
+    QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 10000);
+    QVERIFY2(saved.constFirst().constFirst().toBool(),
+             status.isEmpty() ? "Save failed without a status message"
+                              : qPrintable(status.constLast().constFirst().toString()));
+    QVERIFY(!controller->hasDrafts());
+    QVERIFY(!controller->canUndo());
+    QCOMPARE(session->document()->source(), QUrl::fromLocalFile(outputPath));
+    QCOMPARE(session->document()->documentPassword(), password.toUtf8());
+    session->searchController()->search(editedText);
+    QTRY_COMPARE_WITH_TIMEOUT(session->searchController()->state(), PDFSearchController::Ready, 5000);
+    QCOMPARE(session->searchController()->resultCount(), 1);
+
+    PDFDocument reopened;
+    QVERIFY(!reopened.open(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(reopened.passwordRequired());
+    QVERIFY(reopened.open(QUrl::fromLocalFile(outputPath), password));
+    PDFEditController reopenedController;
+    reopenedController.setDocument(&reopened);
+    QVERIFY(!candidateForText(waitForCandidates(reopenedController, 0), editedText).isEmpty());
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QCOMPARE(source.readAll(), originalBytes);
+}
+
 void PDFEditControllerTest::keepsViewRotationIndependentAcrossTabs()
 {
     const QString firstPath = m_temporaryDirectory.filePath(

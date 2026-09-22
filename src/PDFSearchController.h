@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QHash>
 #include <QObject>
 #include <QPointer>
@@ -90,6 +91,7 @@ private:
 
     struct PendingWork {
         QString filePath;
+        QByteArray password;
         int revision = -1;
         QString query;
         QVector<PageRequest> requests;
@@ -98,6 +100,7 @@ private:
 
     static WorkResult performSearch(
         const QString &filePath,
+        const QByteArray &password,
         const QString &query,
         const QVector<PageRequest> &requests,
         const std::shared_ptr<std::atomic_bool> &cancellation);

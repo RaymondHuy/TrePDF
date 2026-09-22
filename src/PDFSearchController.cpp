@@ -68,6 +68,7 @@ class SearchDocument final
 public:
     SearchDocument(
         const QString &filePath,
+        const QByteArray &password,
         const std::shared_ptr<std::atomic_bool> &cancellation)
     {
         PDFiumProcessLock pdfiumLock;
@@ -75,7 +76,7 @@ public:
             return;
         }
         const QByteArray encodedPath = QFile::encodeName(filePath);
-        m_document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+        m_document = FPDF_LoadDocument(encodedPath.constData(), password.constData());
     }
 
     ~SearchDocument()
@@ -371,6 +372,7 @@ void PDFSearchController::startPreparedSearch()
     m_cancellation = std::make_shared<std::atomic_bool>(false);
     m_pendingWork = std::make_shared<PendingWork>(PendingWork{
         filePath,
+        m_document->documentPassword(),
         revision,
         m_query,
         std::move(requests),
@@ -392,6 +394,7 @@ void PDFSearchController::dispatchPendingWork()
         [controller, work]() mutable {
             WorkResult result = performSearch(
                 work->filePath,
+                work->password,
                 work->query,
                 work->requests,
                 work->cancellation);
@@ -543,6 +546,7 @@ QVariantList PDFSearchController::highlightsForPage(int page) const
 
 PDFSearchController::WorkResult PDFSearchController::performSearch(
     const QString &filePath,
+    const QByteArray &password,
     const QString &query,
     const QVector<PageRequest> &requests,
     const std::shared_ptr<std::atomic_bool> &cancellation)
@@ -551,7 +555,7 @@ PDFSearchController::WorkResult PDFSearchController::performSearch(
     if (cancelled(cancellation)) {
         return result;
     }
-    SearchDocument document(filePath, cancellation);
+    SearchDocument document(filePath, password, cancellation);
     if (cancelled(cancellation)) {
         return result;
     }
