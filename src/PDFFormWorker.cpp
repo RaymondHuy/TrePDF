@@ -947,7 +947,8 @@ public:
         if (m_document
             && m_formHandle
             && m_filePath == key.filePath
-            && m_revision == key.revision) {
+            && m_revision == key.revision
+            && m_password == key.password) {
             return m_document;
         }
 
@@ -957,7 +958,7 @@ public:
         }
 
         const QByteArray encodedPath = QFile::encodeName(key.filePath);
-        m_document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
+        m_document = FPDF_LoadDocument(encodedPath.constData(), key.password.constData());
         if (!m_document) {
             return nullptr;
         }
@@ -971,6 +972,7 @@ public:
         }
         m_filePath = key.filePath;
         m_revision = key.revision;
+        m_password = key.password;
         m_javascriptEnabled = false;
         return m_document;
     }
@@ -1454,6 +1456,7 @@ public:
             || !m_formHandle
             || m_filePath != key.filePath
             || m_revision != key.revision
+            || m_password != key.password
             || sourcePage < 0
             || sourcePage >= FPDF_GetPageCount(m_document)) {
             return false;
@@ -2498,6 +2501,7 @@ public:
         m_formHandle = nullptr;
         m_document = nullptr;
         m_filePath.clear();
+        m_password.clear();
         m_revision = -1;
         m_cursorType = FXCT_ARROW;
         m_textInputFocused = false;
@@ -2586,7 +2590,7 @@ private:
             const QByteArray encodedPath = QFile::encodeName(m_filePath);
             m_previewDocument = FPDF_LoadDocument(
                 encodedPath.constData(),
-                nullptr);
+                m_password.constData());
         }
         if (!m_previewDocument) {
             return false;
@@ -2852,6 +2856,7 @@ private:
     FPDF_LINK m_pressedWebLink = nullptr;
     QHash<int, FPDF_PAGE> m_javaScriptPages;
     QString m_filePath;
+    QByteArray m_password;
     int m_revision = -1;
     int m_activeSourcePage = -1;
     int m_activePageIndex = -1;

@@ -434,9 +434,9 @@ void PDFDocumentSession::setInitialFitPending(bool pending)
     emit initialFitPendingChanged();
 }
 
-bool PDFDocumentSession::open(const QUrl &source)
+bool PDFDocumentSession::open(const QUrl &source, const QString &password)
 {
-    if (!m_document->open(source)) {
+    if (!m_document->open(source, password)) {
         return false;
     }
 
@@ -541,7 +541,7 @@ bool PDFTabModel::hasDrafts() const
     return firstDraftSession() != nullptr;
 }
 
-PDFDocumentSession *PDFTabModel::open(const QUrl &source)
+PDFDocumentSession *PDFTabModel::open(const QUrl &source, const QString &password)
 {
     if (anySaving()) {
         //% "Please wait for the PDF to finish saving."
@@ -560,9 +560,14 @@ PDFDocumentSession *PDFTabModel::open(const QUrl &source)
     }
 
     auto *session = new PDFDocumentSession(this);
-    if (!session->open(source)) {
-        emit statusMessage(session->document()->statusText());
+    if (!session->open(source, password)) {
+        const bool requiresPassword = session->document()->passwordRequired();
+        const QString status = session->document()->statusText();
         delete session;
+        if (requiresPassword)
+            emit passwordRequested(source, !password.isEmpty());
+        else
+            emit statusMessage(status);
         return nullptr;
     }
 

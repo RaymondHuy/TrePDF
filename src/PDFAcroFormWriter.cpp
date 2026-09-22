@@ -4,6 +4,7 @@
 #include "PDFFormAppearance.h"
 #include "PDFiumSynchronization.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QHash>
 #include <QSaveFile>
@@ -622,13 +623,14 @@ bool resolveUnchangedUpdateValues(
 bool validateWrittenFields(
     const QString &filePath,
     const QVector<PDFAcroFormWriter::Field> &fields,
-    QString &error)
+    QString &error,
+    const QByteArray &password)
 {
     assertPDFiumProcessLockHeld();
     const QByteArray encodedPath = QFile::encodeName(filePath);
     PdfDocumentHandle document(FPDF_LoadDocument(
         encodedPath.constData(),
-        nullptr));
+        password.constData()));
     if (!document.get()) {
         error = QStringLiteral(
             "PDFium could not reopen the written AcroForm PDF.");
@@ -997,16 +999,23 @@ bool validateWrittenFields(
 PDFAcroFormWriter::Result PDFAcroFormWriter::write(
     const QString &sourceFilePath,
     const QString &targetFilePath,
-    const QVector<Field> &fields)
+    const QVector<Field> &fields,
+    const QByteArray &password)
 {
     assertPDFiumProcessLockHeld();
     const QByteArray encodedSourcePath = QFile::encodeName(sourceFilePath);
     PdfDocumentHandle document(FPDF_LoadDocument(
         encodedSourcePath.constData(),
-        nullptr));
+        password.constData()));
     if (!document.get()) {
         return failure(QStringLiteral(
             "PDFium could not open the intermediate PDF."));
+    }
+    if (!fields.isEmpty() && FPDF_GetSecurityHandlerRevision(document.get()) >= 0) {
+        // The byte-level canonicalizer cannot encrypt the field objects it adds.
+        // Reject before writing instead of removing the source protection.
+        //% "Creating fields in password-protected PDFs is not supported yet."
+        return failure(qtTrId("EncryptedPdfFormCreationUnsupported"));
     }
 
     for (const Field &field : fields) {
@@ -1272,7 +1281,8 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
     if (!validateWrittenFields(
             targetFilePath,
             resolvedFields,
-            finalizeError)) {
+            finalizeError,
+            password)) {
         QFile::remove(targetFilePath);
         return failure(finalizeError);
     }

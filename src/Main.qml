@@ -21,6 +21,8 @@ ApplicationWindow {
     property bool allowWindowClose: false
     property string pendingDraftAction: ""
     property bool openingFiles: false
+    property var passwordRequests: []
+    property bool passwordRetryRequested: false
     property PDFDocumentSession pendingSession: null
     property PDFEditController fontDownloadController: null
     property PDFDocumentSession saveAsSession: null
@@ -206,6 +208,8 @@ ApplicationWindow {
     }
 
     function requestOpen() {
+        if (passwordRequests.length > 0)
+            return
         if (tabModel.anySaving) {
             //% "Please wait for the PDF to finish saving."
             showStatus(qsTrId("WaitForPdfSave"))
@@ -223,6 +227,37 @@ ApplicationWindow {
             tabModel.open(urls[index])
         openingFiles = false
         rebuildWorkspace()
+    }
+
+    function requestPassword(source, incorrectPassword) {
+        const requests = passwordRequests.slice()
+        const sourceString = source.toString()
+        for (let index = 0; index < requests.length; ++index) {
+            if (requests[index].source.toString() === sourceString) {
+                requests[index] = { source: source, incorrect: incorrectPassword }
+                passwordRequests = requests
+                if (index === 0)
+                    passwordRetryRequested = true
+                return
+            }
+        }
+        requests.push({ source: source, incorrect: incorrectPassword })
+        passwordRequests = requests
+    }
+
+    function finishPasswordRequest() {
+        passwordRequests = passwordRequests.slice(1)
+    }
+
+    function submitPassword(password) {
+        if (passwordRequests.length === 0 || tabModel.anySaving)
+            return
+        if (!prepareActiveWorkspace())
+            return
+        passwordRetryRequested = false
+        tabModel.open(passwordRequests[0].source, password)
+        if (!passwordRetryRequested)
+            finishPasswordRequest()
     }
 
     function requestSave() {
@@ -701,6 +736,9 @@ ApplicationWindow {
         id: tabModel
 
         onStatusMessage: message => window.showStatus(message)
+        onPasswordRequested: (source, incorrectPassword) => {
+            window.requestPassword(source, incorrectPassword)
+        }
         onSessionSaveFinished: (session, succeeded) => {
             window.finishPendingDraftAction(session, succeeded)
         }
@@ -854,6 +892,121 @@ ApplicationWindow {
         //% "PDF files (*.pdf)"
         nameFilters: [qsTrId("PdfFileFilter")]
         onAccepted: window.openFiles(selectedFiles)
+    }
+
+    Loader {
+        id: passwordPromptLoader
+        active: window.passwordRequests.length > 0
+        sourceComponent: Popup {
+            id: passwordPopup
+            objectName: "pdfPasswordPopup"
+            parent: Overlay.overlay
+            x: Math.round((window.width - width) / 2)
+            y: Math.round((window.height - height) / 2)
+            width: Math.min(440, window.width - 32)
+            padding: 20
+            modal: true
+            focus: true
+            visible: true
+            z: 200
+            closePolicy: Popup.CloseOnEscape
+            readonly property var request: window.passwordRequests.length > 0
+                ? window.passwordRequests[0] : null
+            readonly property string fileName: request
+                ? decodeURIComponent(request.source.toString().split("/").pop()) : ""
+
+            function submit() {
+                if (passwordInput.text.length === 0 || tabModel.anySaving)
+                    return
+                const password = passwordInput.text
+                passwordInput.clear()
+                window.submitPassword(password)
+            }
+
+            onOpened: passwordInput.forceActiveFocus()
+            onRequestChanged: {
+                passwordInput.clear()
+                passwordInput.forceActiveFocus()
+            }
+            onClosed: {
+                if (window.passwordRequests.length > 0) {
+                    window.finishPasswordRequest()
+                    if (window.passwordRequests.length > 0)
+                        open()
+                }
+            }
+
+            background: Rectangle {
+                radius: 6
+                color: "#fffdfb"
+                border.color: appTheme.ribbonBorder
+            }
+
+            contentItem: ColumnLayout {
+                spacing: 16
+                Label {
+                    Layout.fillWidth: true
+                    //% "Enter PDF password"
+                    text: qsTrId("EnterPdfPasswordTitle")
+                    font.pixelSize: 18
+                    font.weight: Font.DemiBold
+                    color: appTheme.ribbonTextColor
+                    wrapMode: Text.Wrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    //% "Enter the password to open “%1”."
+                    text: qsTrId("EnterPdfPasswordForFile").arg(passwordPopup.fileName)
+                    textFormat: Text.PlainText
+                    color: appTheme.ribbonTextColor
+                    wrapMode: Text.WrapAnywhere
+                }
+                TextField {
+                    id: passwordInput
+                    objectName: "pdfPasswordInput"
+                    Layout.fillWidth: true
+                    echoMode: TextInput.Password
+                    inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
+                        | Qt.ImhNoAutoUppercase
+                    selectByMouse: true
+                    maximumLength: 1024
+                    //% "Password"
+                    placeholderText: qsTrId("PdfPasswordPlaceholder")
+                    Accessible.name: placeholderText
+                    onAccepted: passwordPopup.submit()
+                }
+                Label {
+                    objectName: "pdfPasswordError"
+                    Layout.fillWidth: true
+                    visible: passwordPopup.request !== null
+                        && passwordPopup.request.incorrect
+                    //% "Incorrect password. Please try again."
+                    text: qsTrId("IncorrectPdfPassword")
+                    textFormat: Text.PlainText
+                    color: "#b3261e"
+                    wrapMode: Text.Wrap
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        objectName: "cancelPdfPasswordButton"
+                        //% "Cancel"
+                        text: qsTrId("Cancel")
+                        onClicked: passwordPopup.close()
+                    }
+                    OrangeButton {
+                        objectName: "openPasswordPdfButton"
+                        theme: appTheme
+                        //% "Open"
+                        text: qsTrId("OpenPasswordPdf")
+                        enabled: passwordInput.text.length > 0 && !tabModel.anySaving
+                        onClicked: passwordPopup.submit()
+                    }
+                }
+            }
+        }
     }
 
     Connections {

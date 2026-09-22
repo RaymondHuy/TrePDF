@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QRectF>
 #include <QString>
 #include <QStringList>
@@ -53,5 +54,6 @@ public:
 
     static Result write(const QString &sourceFilePath,
                         const QString &targetFilePath,
-                        const QVector<Field> &fields);
+                        const QVector<Field> &fields,
+                        const QByteArray &password = {});
 };

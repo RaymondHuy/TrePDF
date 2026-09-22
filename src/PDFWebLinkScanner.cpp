@@ -46,7 +46,8 @@ class ScanDocument final
 {
 public:
     ScanDocument(const QString &filePath,
-                 const std::shared_ptr<std::atomic_bool> &cancellation)
+                 const std::shared_ptr<std::atomic_bool> &cancellation,
+                 const QByteArray &password)
     {
         if (cancelled(cancellation)) {
             return;
@@ -54,7 +55,7 @@ public:
         PDFiumProcessLock lock;
         if (!cancelled(cancellation)) {
             const QByteArray path = QFile::encodeName(filePath);
-            m_document = FPDF_LoadDocument(path.constData(), nullptr);
+            m_document = FPDF_LoadDocument(path.constData(), password.constData());
         }
     }
 
@@ -532,13 +533,14 @@ ManualScanResult editableLinksForPage(
 
 ManualScanResult scanEditableLinks(
     const QString &filePath,
-    const std::shared_ptr<std::atomic_bool> &cancellation)
+    const std::shared_ptr<std::atomic_bool> &cancellation,
+    const QByteArray &password)
 {
     assertPDFiumProcessLockNotHeld();
     ManualScanResult result;
     if (cancelled(cancellation))
         return result;
-    const ScanDocument document(filePath, cancellation);
+    const ScanDocument document(filePath, cancellation, password);
     if (!document.get()) {
         result.failed = !cancelled(cancellation);
         return result;
@@ -751,14 +753,15 @@ SourceScanResult sourceLinksForPage(
 
 SourceScanResult scanSourceLinks(
     const QString &filePath,
-    const std::shared_ptr<std::atomic_bool> &cancellation)
+    const std::shared_ptr<std::atomic_bool> &cancellation,
+    const QByteArray &password)
 {
     assertPDFiumProcessLockNotHeld();
     SourceScanResult result;
     if (cancelled(cancellation)) {
         return result;
     }
-    const ScanDocument document(filePath, cancellation);
+    const ScanDocument document(filePath, cancellation, password);
     if (!document.get()) {
         result.failed = !cancelled(cancellation);
         return result;
@@ -825,14 +828,15 @@ SourceScanResult scanSourceLinks(
 }
 
 ScanResult scan(const QString &filePath,
-                const std::shared_ptr<std::atomic_bool> &cancellation)
+                const std::shared_ptr<std::atomic_bool> &cancellation,
+                const QByteArray &password)
 {
     assertPDFiumProcessLockNotHeld();
     ScanResult result;
     if (cancelled(cancellation)) {
         return result;
     }
-    const ScanDocument document(filePath, cancellation);
+    const ScanDocument document(filePath, cancellation, password);
     if (!document.get()) {
         result.failed = !cancelled(cancellation);
         return result;

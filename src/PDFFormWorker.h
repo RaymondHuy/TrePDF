@@ -21,6 +21,7 @@ struct DocumentKey {
     quint64 sessionId = 0;
     QString filePath;
     int revision = -1;
+    QByteArray password;
 
     bool isValid() const
     {

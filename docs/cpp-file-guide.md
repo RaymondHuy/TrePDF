@@ -117,6 +117,10 @@ chữ ký hiển thị, không giữ handle PDFium.
 - Mở local file bằng `FPDF_LoadDocument()` từ path, không đọc toàn bộ PDF vào RAM.
 - Quản lý PDFium process lifetime, password/error status và đóng handle đúng
   thread.
+- `open(source, password)` chỉ giữ mật khẩu UTF-8 sau khi mở thành công;
+  `passwordRequired()` phân biệt lỗi mật khẩu với lỗi file. Mật khẩu chỉ có API
+  C++ `documentPassword()`, không expose thành QML property hay ghi ra đĩa.
+  Các worker nhận snapshot mật khẩu riêng; đóng document xóa mật khẩu của nó.
 - Cache kích thước mọi source page để QML gọi `pageSize()` nóng mà không chạm
   PDFium lặp lại.
 - Expose source URL, loaded/status, page count/current page, current/max page size.
@@ -170,6 +174,8 @@ Tệp định nghĩa ba lớp có ownership khác nhau.
   `DocumentTabBar`.
 - `open()` chuẩn hóa canonical path và tái kích hoạt tab hiện có thay vì mở cùng
   tệp hai lần.
+- Lỗi mật khẩu phát `passwordRequested(source, incorrectPassword)` và không thêm
+  tab rỗng. `Main.qml` giữ hàng đợi prompt theo file, nhập lại hoặc hủy từng file.
 - Quản lý current index/session, đóng session, Save/Save As đúng tab và tìm tab
   đầu tiên còn draft cho workflow Quit.
 - Chặn Save As ghi đè đường dẫn đang được tab khác dùng; xóa identity khi

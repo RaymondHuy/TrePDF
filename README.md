@@ -87,6 +87,13 @@ page or zoom changes initiated by ribbon commands, search navigation, and page
 scrolling after the initial fit completes.
 Opening an already-open canonical path activates its existing tab, and Save As
 cannot overwrite a PDF used by another open tab.
+Password-protected PDFs prompt for a masked password before adding a tab. A wrong
+password leaves the prompt open for another attempt; Cancel or Escape skips that
+file, including when opening several PDFs. Accepted passwords stay in memory and
+are passed to the independent render, search, form, scan, export and save workers.
+Save/reopen retains the password and source protection. Encrypted operations that
+require the byte-level annotation/AcroForm canonicalizer remain unsupported and
+fail before replacing the destination file.
 
 The View tab searches the current PDF text asynchronously across its source
 pages. Typing is debounced, a newer query cancels the older scan, and stale

@@ -105,14 +105,15 @@ bool PDFEditController::autoCreateWebLinks()
     }
 
     const QString path = m_document->renderFilePath();
+    const QByteArray password = m_document->documentPassword();
     const int revision = m_document->renderRevision();
     const QPointer<PDFDocument> document = m_document;
     const QPointer<PDFEditController> controller(this);
     const auto cancellation = std::make_shared<std::atomic_bool>(false);
     m_removingWebLinks = false;
     m_webLinkCancellation = cancellation;
-    auto *work = QRunnable::create([controller, document, path, revision, cancellation] {
-        auto result = PDFWebLinks::scan(path, cancellation);
+    auto *work = QRunnable::create([controller, document, path, password, revision, cancellation] {
+        auto result = PDFWebLinks::scan(path, cancellation, password);
         if (cancellation->load(std::memory_order_relaxed))
             return;
         // Only inspect QObject guards on the GUI thread. The worker owns no
@@ -234,14 +235,15 @@ bool PDFEditController::removeWebLinks()
     }
 
     const QString path = m_document->renderFilePath();
+    const QByteArray password = m_document->documentPassword();
     const int revision = m_document->renderRevision();
     const QPointer<PDFDocument> document = m_document;
     const QPointer<PDFEditController> controller(this);
     const auto cancellation = std::make_shared<std::atomic_bool>(false);
     m_removingWebLinks = true;
     m_webLinkCancellation = cancellation;
-    auto *work = QRunnable::create([controller, document, path, revision, cancellation] {
-        auto result = PDFWebLinks::scanSourceLinks(path, cancellation);
+    auto *work = QRunnable::create([controller, document, path, password, revision, cancellation] {
+        auto result = PDFWebLinks::scanSourceLinks(path, cancellation, password);
         if (cancellation->load(std::memory_order_relaxed))
             return;
         QMetaObject::invokeMethod(QCoreApplication::instance(),

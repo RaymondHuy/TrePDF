@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QSet>
 #include <QSize>
@@ -52,7 +53,7 @@ public:
     qreal maximumPageWidth() const;
     qreal maximumPageHeight() const;
 
-    Q_INVOKABLE bool open(const QUrl &source);
+    Q_INVOKABLE bool open(const QUrl &source, const QString &password = QString());
     Q_INVOKABLE void close();
     Q_INVOKABLE void setCurrentPage(int page);
     Q_INVOKABLE void nextPage();
@@ -60,6 +61,8 @@ public:
     Q_INVOKABLE QSizeF pageSize(int page) const;
 
     QString renderFilePath() const;
+    QByteArray documentPassword() const;
+    bool passwordRequired() const;
     int renderRevision() const;
     int sourcePageCount() const;
     int sourcePageIndex(int page) const;
@@ -90,6 +93,8 @@ private:
     FPDF_DOCUMENT m_document = nullptr;
     QUrl m_source;
     QString m_filePath;
+    QByteArray m_documentPassword;
+    bool m_passwordRequired = false;
     QVector<QSizeF> m_sourcePageSizes;
     QVector<QSizeF> m_pageSizes;
     QVector<int> m_displaySourcePages;

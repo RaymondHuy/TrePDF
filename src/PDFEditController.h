@@ -696,6 +696,7 @@ private:
 
     struct CandidateScanRequest {
         QString filePath;
+        QByteArray password;
         int revision = -1;
         int page = -1;
         int sourcePage = -1;
