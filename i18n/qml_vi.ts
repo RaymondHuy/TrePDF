@@ -91,7 +91,7 @@
         <location filename="../src/Main.qml" line="1435"/>
         <location filename="../src/Components/ExportRibbon.qml" line="59"/>
         <location filename="../src/Components/LinkPropertiesDialog.qml" line="326"/>
-        <location filename="../src/Components/SetPasswordDialog.qml" line="142"/>
+        <location filename="../src/Components/SetPasswordDialog.qml" line="150"/>
         <location filename="../src/Components/SignatureDialog.qml" line="695"/>
         <source>Cancel</source>
         <translation>Hủy</translation>
@@ -191,7 +191,7 @@
     <message id="Save">
         <location filename="../src/Main.qml" line="1368"/>
         <location filename="../src/Components/SignRibbon.qml" line="151"/>
-        <location filename="../src/Components/ProtectRibbon.qml" line="60"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="63"/>
         <location filename="../src/Components/ViewRibbon.qml" line="69"/>
         <source>Save</source>
         <translation>Lưu</translation>
@@ -278,7 +278,7 @@
     <message id="NoDocumentOpen">
         <location filename="../src/Components/DocumentView.qml" line="729"/>
         <location filename="../src/PDFDocument.cpp" line="80"/>
-        <location filename="../src/PDFDocument.cpp" line="239"/>
+        <location filename="../src/PDFDocument.cpp" line="244"/>
         <source>No document open</source>
         <translation>Chưa mở tài liệu</translation>
     </message>
@@ -387,7 +387,7 @@
         <translation>Di chuyển văn bản</translation>
     </message>
     <message id="PdfImageResizeUnsupported">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2378"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2424"/>
         <source>Images with clipping, unsupported transforms or bounds outside the page cannot be resized.</source>
         <translation>Ảnh có vùng cắt, phép biến đổi không hỗ trợ hoặc vượt mép trang chưa thể đổi kích thước.</translation>
     </message>
@@ -564,7 +564,7 @@
     </message>
     <message id="Image">
         <location filename="../src/Components/EditRibbon.qml" line="194"/>
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2362"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2408"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="326"/>
         <source>Image</source>
         <translation>Hình ảnh</translation>
@@ -628,7 +628,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
     <message id="Shapes">
         <location filename="../src/Components/CommentRibbon.qml" line="1136"/>
         <location filename="../src/Components/EditRibbon.qml" line="354"/>
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2239"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2285"/>
         <source>Shapes</source>
         <translation>Hình dạng</translation>
     </message>
@@ -1384,7 +1384,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
     </message>
     <message id="File">
         <location filename="../src/Components/SignRibbon.qml" line="145"/>
-        <location filename="../src/Components/ProtectRibbon.qml" line="53"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="56"/>
         <location filename="../src/Components/ViewRibbon.qml" line="50"/>
         <source>File</source>
         <translation>Tệp</translation>
@@ -1401,7 +1401,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
     </message>
     <message id="SaveAs">
         <location filename="../src/Components/SignRibbon.qml" line="161"/>
-        <location filename="../src/Components/ProtectRibbon.qml" line="71"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="74"/>
         <location filename="../src/Components/ViewRibbon.qml" line="84"/>
         <source>Save As</source>
         <translation>Lưu thành</translation>
@@ -1584,7 +1584,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Chỉ hỗ trợ tệp PDF trên máy</translation>
     </message>
     <message id="LoadedPageCount" numerus="yes">
-        <location filename="../src/PDFDocument.cpp" line="221"/>
+        <location filename="../src/PDFDocument.cpp" line="226"/>
         <source>Loaded %n page(s)</source>
         <translation>
             <numerusform>Đã tải %n trang</numerusform>
@@ -1600,14 +1600,14 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation type="vanished">Nội dung này là hình ảnh. Cần OCR để chỉnh sửa văn bản.</translation>
     </message>
     <message id="Text">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2405"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2451"/>
         <source>Text</source>
         <translation>Văn bản</translation>
     </message>
     <message id="PdfEditingNotPermitted">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2256"/>
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2372"/>
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2440"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2302"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2418"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2486"/>
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="1212"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="120"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="185"/>
@@ -1960,22 +1960,22 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Đã lưu %1</translation>
     </message>
     <message id="PdfFormImageDeleteUnsupported">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2375"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2421"/>
         <source>Images inside a PDF form object cannot be deleted safely yet.</source>
         <translation>Chưa thể xóa an toàn hình ảnh nằm trong đối tượng biểu mẫu PDF.</translation>
     </message>
     <message id="PdfTextClippingEditUnsupported">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2443"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2489"/>
         <source>Text clipping render modes cannot be edited safely yet.</source>
         <translation>Chưa thể chỉnh sửa an toàn văn bản dùng chế độ cắt xén.</translation>
     </message>
     <message id="PdfFormTextSaveUnsupported">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2446"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2492"/>
         <source>Text inside a PDF form object cannot be saved safely yet.</source>
         <translation>Chưa thể lưu an toàn văn bản nằm trong đối tượng biểu mẫu PDF.</translation>
     </message>
     <message id="InlineEditorUnsupportedTextLayout">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2449"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2495"/>
         <source>Rotated, transformed, or multiline text is not supported by the inline draft editor yet.</source>
         <translation>Trình chỉnh sửa bản nháp tại chỗ chưa hỗ trợ văn bản xoay, biến đổi hoặc nhiều dòng.</translation>
     </message>
@@ -3275,58 +3275,78 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <source>Creating fields in password-protected PDFs is not supported yet.</source>
         <translation>Chưa hỗ trợ tạo trường biểu mẫu trong PDF được bảo vệ bằng mật khẩu.</translation>
     </message>
+    <message id="ChangePdfPassword">
+        <location filename="../src/Components/ProtectRibbon.qml" line="44"/>
+        <source>Change password</source>
+        <translation>Đổi mật khẩu</translation>
+    </message>
     <message id="SetPdfPassword">
-        <location filename="../src/Components/ProtectRibbon.qml" line="43"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="46"/>
         <source>Set password</source>
         <translation>Đặt mật khẩu</translation>
     </message>
     <message id="PdfPasswordPending">
-        <location filename="../src/Components/ProtectRibbon.qml" line="89"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="92"/>
         <source>Password pending. Save the PDF to apply it.</source>
         <translation>Mật khẩu đang chờ áp dụng. Hãy lưu PDF để hoàn tất.</translation>
     </message>
+    <message id="PdfPasswordChangeRestricted">
+        <location filename="../src/Components/ProtectRibbon.qml" line="95"/>
+        <source>Changing the password is not supported for PDFs with permission restrictions.</source>
+        <translation>Chưa hỗ trợ đổi mật khẩu cho PDF có giới hạn quyền.</translation>
+    </message>
     <message id="PdfPasswordProtected">
-        <location filename="../src/Components/ProtectRibbon.qml" line="92"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="98"/>
         <source>This PDF already has password protection.</source>
         <translation>PDF này đã được bảo vệ bằng mật khẩu.</translation>
     </message>
     <message id="PdfPasswordNotProtected">
-        <location filename="../src/Components/ProtectRibbon.qml" line="94"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="100"/>
         <source>This PDF has no password protection.</source>
         <translation>PDF này chưa được bảo vệ bằng mật khẩu.</translation>
     </message>
+    <message id="ChangePdfPasswordTitle">
+        <location filename="../src/Components/SetPasswordDialog.qml" line="31"/>
+        <source>Change PDF password</source>
+        <translation>Đổi mật khẩu PDF</translation>
+    </message>
     <message id="SetPdfPasswordTitle">
-        <location filename="../src/Components/SetPasswordDialog.qml" line="28"/>
+        <location filename="../src/Components/SetPasswordDialog.qml" line="33"/>
         <source>Set PDF password</source>
         <translation>Đặt mật khẩu cho PDF</translation>
     </message>
     <message id="PdfPasswordsDoNotMatch">
-        <location filename="../src/Components/SetPasswordDialog.qml" line="35"/>
+        <location filename="../src/Components/SetPasswordDialog.qml" line="40"/>
         <source>The passwords do not match. Please try again.</source>
         <translation>Hai mật khẩu không khớp. Vui lòng thử lại.</translation>
     </message>
+    <message id="ChangePdfPasswordSaveHint">
+        <location filename="../src/Components/SetPasswordDialog.qml" line="87"/>
+        <source>The new password will replace the current opening password after you Save or Save As.</source>
+        <translation>Mật khẩu mới sẽ thay thế mật khẩu mở hiện tại sau khi bạn Lưu hoặc Lưu thành.</translation>
+    </message>
     <message id="SetPdfPasswordSaveHint">
-        <location filename="../src/Components/SetPasswordDialog.qml" line="81"/>
+        <location filename="../src/Components/SetPasswordDialog.qml" line="89"/>
         <source>A password will be required to open this PDF after you Save or Save As.</source>
         <translation>Sau khi Lưu hoặc Lưu thành, bạn cần nhập mật khẩu để mở PDF này.</translation>
     </message>
     <message id="NewPdfPassword">
-        <location filename="../src/Components/SetPasswordDialog.qml" line="97"/>
+        <location filename="../src/Components/SetPasswordDialog.qml" line="105"/>
         <source>New password</source>
         <translation>Mật khẩu mới</translation>
     </message>
     <message id="ConfirmPdfPassword">
-        <location filename="../src/Components/SetPasswordDialog.qml" line="112"/>
+        <location filename="../src/Components/SetPasswordDialog.qml" line="120"/>
         <source>Confirm password</source>
         <translation>Nhập lại mật khẩu</translation>
     </message>
     <message id="ShowPdfPassword">
-        <location filename="../src/Components/SetPasswordDialog.qml" line="121"/>
+        <location filename="../src/Components/SetPasswordDialog.qml" line="129"/>
         <source>Show password</source>
         <translation>Hiện mật khẩu</translation>
     </message>
     <message id="ApplyPdfPassword">
-        <location filename="../src/Components/SetPasswordDialog.qml" line="150"/>
+        <location filename="../src/Components/SetPasswordDialog.qml" line="158"/>
         <source>Apply</source>
         <translation>Áp dụng</translation>
     </message>

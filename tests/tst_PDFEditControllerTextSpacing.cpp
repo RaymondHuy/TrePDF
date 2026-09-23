@@ -3,6 +3,112 @@
 
 using namespace PDFEditControllerTestSupport;
 
+namespace {
+
+bool createPositionedTextPdf(const QString &path, const QByteArray &content)
+{
+    return writePdfObjects(path, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                   "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"),
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman "
+                   "/Encoding /WinAnsiEncoding >>"),
+        QByteArray("<< /Length ") + QByteArray::number(content.size())
+            + " >>\nstream\n" + content + "endstream"});
+}
+
+} // namespace
+
+void PDFEditControllerTest::recoversPositionedSourceWordSpaces()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("positioned-word-spaces-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("positioned-word-spaces-edited.pdf"));
+    // TeX-style word gaps are TJ displacements, without any encoded space.
+    // The WinAnsi em dash stays adjacent to both words, unlike these gaps.
+    QVERIFY(createPositionedTextPdf(sourcePath, QByteArray(
+        "BT /F1 12 Tf 1 0 0 1 72 740 Tm "
+        "[(to) -250 (Share\227to) -250 (copy,) -250 (distribute) "
+        "-250 (and) -250 (transmit) -250 (the) -250 (work)] TJ ET\n")));
+    const QString original = QStringLiteral(
+        "to Share\u2014to copy, distribute and transmit the work");
+    QCOMPARE(normalizedPageText(sourcePath), original);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY2(!candidate.isEmpty(), "Positioned word gaps must reach the editable source text");
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedText(), original);
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
+    const QRectF originalFrame = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    QCOMPARE(controller.selectedText(), original);
+    controller.cancelSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(original);
+    controller.finishSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+
+    const QString edited = original + QStringLiteral(" freely");
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(edited);
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QCOMPARE(normalizedPageText(outputPath), edited);
+    const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), edited);
+    QVERIFY2(!reopened.isEmpty(), "Save/reopen must preserve all recovered word boundaries");
+    QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedText(), edited);
+    controller.beginSelectedTextEdit();
+    QCOMPARE(controller.selectedText(), edited);
+    controller.cancelSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::keepsGeneratedSeparatorsWithinSourceObjects()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("positioned-source-object-boundaries.pdf"));
+    QVERIFY(createPositionedTextPdf(sourcePath, QByteArray(
+        "BT /F1 12 Tf 1 0 0 1 72 740 Tm (left) Tj ET\n"
+        "BT /F1 12 Tf 1 0 0 1 92 740 Tm (part) Tj ET\n"
+        "BT /F1 12 Tf 1 0 0 1 72 726 Tm (next) Tj ET\n"
+        "BT /F1 12 Tf 1 0 0 1 96 726 Tm (row) Tj ET\n"
+        "BT /F1 12 Tf 6 Tc 1 0 0 1 72 600 Tm (ABCDE) Tj ET\n")));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    const QString paragraph = QStringLiteral("left part\nnext row");
+    const QVariantMap grouped = candidateForText(candidates, paragraph);
+    QVERIFY2(!grouped.isEmpty(), "Object and line grouping must insert each separator exactly once");
+    QVERIFY(controller.selectCandidate(0, grouped.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedText(), paragraph);
+    controller.beginSelectedTextEdit();
+    QCOMPARE(controller.selectedText(), paragraph);
+    controller.cancelSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+
+    // Large character spacing is not evidence that individual letters are words.
+    const QVariantMap tracked = candidateForText(candidates, QStringLiteral("ABCDE"));
+    QVERIFY(!tracked.isEmpty());
+    QVERIFY(controller.selectCandidate(0, tracked.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedText(), QStringLiteral("ABCDE"));
+    QVERIFY(qAbs(controller.selectedLetterSpacing() - 6.0) < 0.02);
+    QCOMPARE(controller.selectedWordSpacing(), 0.0);
+}
+
 void PDFEditControllerTest::changesParagraphSpacingOutsideEditorWithHistory()
 {
     const QString path = m_temporaryDirectory.filePath(QStringLiteral("paragraph-spacing-history.pdf"));

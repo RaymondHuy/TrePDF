@@ -211,6 +211,11 @@ Với mỗi ký tự:
 
 - `FPDFText_GetTextObject()` xác định text object sở hữu ký tự;
 - ký tự không phải generated character được nối vào chuỗi Unicode;
+- dấu cách `U+0020` do PDFium sinh từ khoảng dịch `TJ` được giữ khi hai ký tự
+  thực liền kề thuộc cùng text object. Không lấy separator giữa hai object hoặc
+  ngắt dòng do PDFium sinh; phần gom dòng/đoạn xử lý chúng riêng. Chuỗi ký tự thực
+  vẫn được giữ trong `CandidatePart.text` để Save không nhầm dấu cách suy ra là
+  glyph mà font subset nguồn đã mã hóa được;
 - dấu nối cuối dòng mà PDFium trả dưới dạng `U+0002` được khôi phục thành `-`
   chỉ khi `FPDFText_IsHyphen()` xác nhận đó là hyphen; không đưa marker nội bộ
   vào editor hoặc font encoder khi Save, tránh ghi thành ký tự lỗi/ô vuông;
@@ -509,15 +514,18 @@ vào rich-text editor của page content. Hộp được đặt bằng click/dra
 
 TrePDF ưu tiên theo thứ tự:
 
-1. Nếu font được embed, lấy bytes bằng `FPDFFont_GetFontData()`.
-2. Đăng ký bytes bằng `QFontDatabase::addApplicationFontFromData()`.
-3. Nếu embedded font không đủ glyph, tìm family tương ứng trong các font được
-   bundle từ `src/assets/fonts`.
-4. Chỉ khi không có bundled font phù hợp mới tìm trong danh sách font hệ thống
-   được chụp trước lúc bundled fonts được đăng ký.
-5. Kiểm tra từng family có đủ glyph cho toàn bộ text bằng `QFontMetricsF` với
-   `QFont::NoFontMerging`.
-6. Nếu tất cả đều thất bại, trả family rỗng để Qt dùng font mặc định/fallback.
+1. Tìm exact family/style có đủ glyph trong bundled font, font tải về rồi font
+   hệ thống. Xét các face đầy đủ trước để subset nhúng không che mất face đó.
+2. Nếu chưa có face phù hợp, dùng bytes do worker lấy bằng
+   `FPDFFont_GetFontData()` để đăng ký qua
+   `QFontDatabase::addApplicationFontFromData()` trên GUI thread. Kiểm tra glyph
+   Unicode bằng `QFontMetricsF` với `QFont::NoFontMerging`.
+3. Khi font TeX Gyre Termes không dùng được cho toàn bộ chuỗi (ví dụ subset
+   Type 1 với custom encoding thiếu ánh xạ dấu em dash), thử Times New Roman,
+   Liberation Serif rồi Nimbus Roman. Chỉ chọn exact face đủ style/glyph và hỗ
+   trợ Save; giữ nguyên identity của font PDF nguồn. Đây là danh sách tương
+   thích cụ thể, không suy đoán family từ tên gần giống hoặc cờ serif.
+4. Nếu tất cả đều thất bại, trả family rỗng để Qt dùng font mặc định/fallback.
 
 Các file `.ttf`, `.otf` và `.ttc` dưới `src/assets/fonts` được đóng gói thành
 resource và đăng ký lúc khởi động. Khi bundled font và system font có cùng
@@ -784,6 +792,8 @@ Chỉ chấp nhận khi có đủ mẫu, các residual nhất quán và nằm tr
 50.000 ký tự không suy diễn spacing. Run ngắn, vị trí `TJ` không đều, Unicode
 mapping lỗi, dấu tổ hợp hoặc script cần shaping phức tạp dùng fallback layout
 hiện có. Giãn đều không thể mô tả chính xác mọi dịch chuyển riêng của PDF.
+Các dấu cách sinh từ `TJ` vẫn được giữ trong nội dung editor, nhưng không dùng
+origin giả của chúng để suy diễn giãn ký tự: origin đó trùng với glyph kế tiếp.
 
 Panel có hai trường **Giãn ký tự** và **Giãn từ**, đơn vị PDF point. Người dùng
 nhập số thập phân từ −10 đến 50, hoặc dùng phím lên/xuống theo bước 0,1. Giá trị

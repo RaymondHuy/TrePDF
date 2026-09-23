@@ -545,7 +545,7 @@ bool PDFEditController::hasDrafts() const
 bool PDFEditController::canSetOpenPassword() const
 {
     return m_document && m_document->isLoaded()
-        && !m_document->passwordProtected() && !m_saving;
+        && m_document->allowsPasswordChange() && !m_saving;
 }
 
 bool PDFEditController::passwordChangePending() const

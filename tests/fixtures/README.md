@@ -8,6 +8,10 @@ The opening passwords are `fixture-open-1` and `fixture-open-2`; the respective
 owner passwords are `fixture-owner-1` and `fixture-owner-2`. The distinct passwords
 exercise independent document and worker sessions.
 
+`password-3.pdf` uses `fixture-open-3` / `fixture-owner-3` and permits only
+extraction. It verifies that changing an opening password does not silently
+remove permission restrictions, even when opened with the owner password.
+
 The C++ tests use these checked-in files and require no Python packages. To
 regenerate them with `reportlab` and `pypdf` installed, run:
 

@@ -38,6 +38,13 @@ offline rebuild, set `TREPDF_QPDF_ARCHIVE` to the downloaded release archive;
 the script still verifies its SHA-256 before using it.
 
 `PDFPasswordWriter` applies AES-256 (revision 6), encrypts metadata, and permits
-all document operations after opening. It only accepts unencrypted input and
-writes a separate staging path. TrePDF validates that output with PDFium before
-atomically replacing the destination. Passwords never appear on a command line.
+all document operations after opening. It accepts plaintext staging or an
+authenticated encrypted source without permission restrictions and writes a
+separate staging path. Password-only changes go directly through qpdf to retain
+saved content, annotations, and forms. If content/form edits accompany the new
+password, TrePDF removes encryption only from temporary serialization, completes
+canonicalization, and then applies the replacement password. TrePDF validates
+the output with PDFium before atomically replacing the destination. Ordinary
+encrypted saves without a password change retain their existing behavior.
+Password removal and permission controls are unsupported. Passwords never
+appear on a command line.

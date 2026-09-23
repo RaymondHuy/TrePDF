@@ -9,11 +9,12 @@ from io import BytesIO
 from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
+from pypdf.constants import UserAccessPermissions
 from pypdf.generic import ArrayObject, ByteStringObject
 from reportlab.pdfgen import canvas
 
 
-def generate(index: int) -> None:
+def generate(index: int, restricted: bool = False) -> None:
     source = BytesIO()
     page = canvas.Canvas(source, pagesize=(300, 400), invariant=True)
     page.setFont("Helvetica", 14)
@@ -28,8 +29,9 @@ def generate(index: int) -> None:
     writer = PdfWriter(clone_from=PdfReader(source))
     identifier = ByteStringObject(f"TrePDF fixture {index}".encode("ascii"))
     writer._ID = ArrayObject([identifier, identifier])
+    permissions = {"permissions_flag": UserAccessPermissions.EXTRACT} if restricted else {}
     writer.encrypt(f"fixture-open-{index}", f"fixture-owner-{index}",
-                   algorithm="RC4-128")
+                   algorithm="RC4-128", **permissions)
     with Path(__file__).with_name(f"password-{index}.pdf").open("wb") as output:
         writer.write(output)
 
@@ -37,3 +39,4 @@ def generate(index: int) -> None:
 if __name__ == "__main__":
     for fixture_index in (1, 2):
         generate(fixture_index)
+    generate(3, restricted=True)
