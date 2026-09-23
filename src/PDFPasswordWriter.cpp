@@ -21,7 +21,8 @@ struct QPdfDocument {
 
 bool PDFPasswordWriter::encryptFile(const QString &sourcePath,
                                     const QString &stagingPath,
-                                    const QByteArray &password) try
+                                    const QByteArray &password,
+                                    const QByteArray &sourcePassword) try
 {
     if (password.isEmpty() || password.size() > 127 || password.contains('\0')
         || QFileInfo(sourcePath).absoluteFilePath()
@@ -37,8 +38,18 @@ bool PDFPasswordWriter::encryptFile(const QString &sourcePath,
     qpdf_set_attempt_recovery(document.handle, QPDF_FALSE);
     const QByteArray source = QFile::encodeName(sourcePath);
     const QByteArray target = QFile::encodeName(stagingPath);
-    if (qpdf_read(document.handle, source.constData(), nullptr) != QPDF_SUCCESS
-        || qpdf_is_encrypted(document.handle)) {
+    if (qpdf_read(document.handle, source.constData(), sourcePassword.constData())
+        != QPDF_SUCCESS) {
+        return false;
+    }
+    // Replacing the owner password with the opening password is safe only when
+    // the source has no user restrictions. Never silently grant owner rights on
+    // a restricted document, even if the caller opened it as its owner.
+    if (qpdf_is_encrypted(document.handle)
+        && (!qpdf_allow_accessibility(document.handle)
+            || !qpdf_allow_extract_all(document.handle)
+            || !qpdf_allow_print_high_res(document.handle)
+            || !qpdf_allow_modify_all(document.handle))) {
         return false;
     }
     if (qpdf_init_write(document.handle, target.constData()) != QPDF_SUCCESS)

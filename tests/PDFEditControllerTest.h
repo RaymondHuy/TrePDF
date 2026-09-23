@@ -22,6 +22,10 @@ private slots:
     void savesOpenPasswordWithCommentsAndForms();
     void keepsPendingPasswordsIndependentAcrossTabs();
     void promptsToSetOpenPassword();
+    void changesOpenPassword_data();
+    void changesOpenPassword();
+    void keepsExistingPasswordWhenChangeFails();
+    void rejectsPasswordChangesOnRestrictedDocuments();
     void preparesVisualSignatureText_data();
     void preparesVisualSignatureText();
     void preparesVisualSignatureDrawing();
@@ -155,6 +159,10 @@ private slots:
     void keepsSourceParagraphLayoutStableAtFractionalZoom_data();
     void keepsSourceParagraphLayoutStableAtFractionalZoom();
     void infersConstantSourceTextSpacing_data();
+    void recoversPositionedSourceWordSpaces();
+    void keepsGeneratedSeparatorsWithinSourceObjects();
+    void usesCompatibleFontForUnreadableType1Glyphs_data();
+    void usesCompatibleFontForUnreadableType1Glyphs();
     void infersConstantSourceTextSpacing();
     void rejectsIrregularSourceTextSpacing();
     void editsSpacingInSelectedRangeAndAtCaret();

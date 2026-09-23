@@ -5470,7 +5470,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
 }
 
 PDFSaveWriter::Result writeDocument(FPDF_DOCUMENT document,
-                                    const QString &targetFilePath)
+                                    const QString &targetFilePath,
+                                    bool removeSecurity = false)
 {
     assertPDFiumProcessLockHeld();
     SaveFileWriter writer(targetFilePath);
@@ -5480,8 +5481,8 @@ PDFSaveWriter::Result writeDocument(FPDF_DOCUMENT document,
             -1,
             writer.errorString());
     }
-    constexpr FPDF_DWORD saveFlags =
-        FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS;
+    const FPDF_DWORD saveFlags = FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS
+        | (removeSecurity ? FPDF_REMOVE_SECURITY : 0);
     if (!FPDF_SaveAsCopy(document, &writer, saveFlags)) {
         return failure(
             PDFSaveWriter::Error::OutputWriteFailed,
@@ -5550,7 +5551,8 @@ PDFSaveWriter::Result protectAndCommitDocumentFile(
     const QString &sourceFilePath,
     const QString &targetFilePath,
     const QByteArray &openPassword,
-    int expectedPageCount)
+    int expectedPageCount,
+    const QByteArray &sourcePassword = {})
 {
     assertPDFiumProcessLockHeld();
     if (openPassword.isEmpty()) {
@@ -5568,7 +5570,7 @@ PDFSaveWriter::Result protectAndCommitDocumentFile(
     const QString encryptedFilePath = encryptedFile.fileName();
     encryptedFile.close();
     if (!PDFPasswordWriter::encryptFile(sourceFilePath, encryptedFilePath,
-                                        openPassword)) {
+                                        openPassword, sourcePassword)) {
         return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
     }
 
@@ -5585,6 +5587,14 @@ PDFSaveWriter::Result protectAndCommitDocumentFile(
             encodedPath.constData(), nullptr));
         if (unprotectedDocument.get() || FPDF_GetLastError() != FPDF_ERR_PASSWORD) {
             return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
+        }
+        if (!sourcePassword.isEmpty() && sourcePassword != openPassword) {
+            PdfDocumentHandle oldPasswordDocument(FPDF_LoadDocument(
+                encodedPath.constData(), sourcePassword.constData()));
+            if (oldPasswordDocument.get()
+                || FPDF_GetLastError() != FPDF_ERR_PASSWORD) {
+                return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
+            }
         }
     }
     return commitDocumentFile(encryptedFilePath, targetFilePath);
@@ -6769,9 +6779,38 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     if (!document.get()) {
         return failure(Error::SourceOpenFailed);
     }
-    if (!request.m_data->pendingOpenPassword.isEmpty()
-        && FPDF_GetSecurityHandlerRevision(document.get()) >= 0) {
-        return failure(Error::PasswordProtectionFailed);
+    const bool replacingPassword = !request.m_data->pendingOpenPassword.isEmpty();
+    const int securityRevision = FPDF_GetSecurityHandlerRevision(document.get());
+    if (replacingPassword && securityRevision >= 0) {
+        // Recheck the on-disk permissions, including when a native form save
+        // supplied a temporary snapshot. Opening as owner must not bypass this.
+        const unsigned long requiredPermissions = securityRevision < 3
+            ? 0x3cUL : 0xf3cUL;
+        if ((FPDF_GetDocUserPermissions(document.get()) & requiredPermissions)
+            != requiredPermissions) {
+            return failure(Error::PasswordProtectionFailed);
+        }
+    }
+    const int sourcePageCount = FPDF_GetPageCount(document.get());
+    if (sourcePageCount < 0) {
+        return failure(Error::SourceOpenFailed);
+    }
+    if (replacingPassword
+        && request.m_data->drafts.isEmpty()
+        && request.m_data->formFields.isEmpty()
+        && request.m_data->deletedSourcePages.isEmpty()
+        && request.m_data->pageInsertions.isEmpty()
+        && request.m_data->autoWebLinks.isEmpty()
+        && request.m_data->removedWebLinks.isEmpty()
+        && request.m_data->manualLinks.isEmpty()) {
+        // Password-only saves preserve source annotations, forms and appearances
+        // directly through qpdf, without rewriting any page content in PDFium.
+        return protectAndCommitDocumentFile(
+            request.m_data->sourceFilePath,
+            request.m_data->targetFilePath,
+            request.m_data->pendingOpenPassword,
+            sourcePageCount,
+            request.m_data->documentPassword);
     }
     // Render-only inspection happens on a second worker-owned handle so that
     // temporary page-object activation changes never dirty the writer page.
@@ -6782,9 +6821,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         return failure(Error::SourceOpenFailed);
     }
 
-    const int sourcePageCount = FPDF_GetPageCount(document.get());
-    if (sourcePageCount < 0
-        || FPDF_GetPageCount(inspectionDocument.get()) != sourcePageCount) {
+    if (FPDF_GetPageCount(inspectionDocument.get()) != sourcePageCount) {
         return failure(Error::SourceOpenFailed);
     }
     WebLinkRemovals webLinkRemovals;
@@ -7018,9 +7055,14 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     }
     const QString contentFilePath = contentFile.fileName();
     contentFile.close();
+    // Canonicalizers need plaintext PDF dictionaries. Remove security only in
+    // this private stage of a password replacement; commit always re-encrypts.
+    const QByteArray stagingPassword = replacingPassword
+        ? QByteArray() : request.m_data->documentPassword;
     const Result contentResult = writeDocument(
         document.get(),
-        contentFilePath);
+        contentFilePath,
+        replacingPassword);
     if (!contentResult.succeeded()) {
         return contentResult;
     }
@@ -7121,7 +7163,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         const Result relationshipValidation = validateAnnotationRelationships(
             contentFilePath,
             annotationRelationships,
-            request.m_data->documentPassword);
+            stagingPassword);
         if (!relationshipValidation.succeeded()) {
             return relationshipValidation;
         }
@@ -7129,7 +7171,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             contentFilePath,
             request.m_data->targetFilePath,
             request.m_data->pendingOpenPassword,
-            FPDF_GetPageCount(document.get()));
+            FPDF_GetPageCount(document.get()),
+            request.m_data->documentPassword);
     }
 
     QTemporaryFile formFile(
@@ -7148,7 +7191,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             contentFilePath,
             formFilePath,
             acroFormFields,
-            request.m_data->documentPassword);
+            stagingPassword);
     if (!acroFormResult.succeeded) {
         return failure(
             Error::AcroFormCreationFailed,
@@ -7230,7 +7273,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     const Result relationshipValidation = validateAnnotationRelationships(
         formFilePath,
         annotationRelationships,
-        request.m_data->documentPassword);
+        stagingPassword);
     if (!relationshipValidation.succeeded()) {
         return relationshipValidation;
     }
@@ -7238,7 +7281,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         formFilePath,
         request.m_data->targetFilePath,
         request.m_data->pendingOpenPassword,
-        FPDF_GetPageCount(document.get()));
+        FPDF_GetPageCount(document.get()),
+        request.m_data->documentPassword);
 }
 
 PDFSaveWriter::Result PDFSaveWriter::save(const PDFEditController &controller,

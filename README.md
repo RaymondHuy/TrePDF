@@ -91,17 +91,24 @@ Password-protected PDFs prompt for a masked password before adding a tab. A wron
 password leaves the prompt open for another attempt; Cancel or Escape skips that
 file, including when opening several PDFs. Accepted passwords stay in memory and
 are passed to the independent render, search, form, scan, export and save workers.
-Save/reopen retains the password and source protection. Encrypted operations that
-require the byte-level annotation/AcroForm canonicalizer remain unsupported and
-fail before replacing the destination file.
+Without a pending password change, Save/reopen retains the password and source
+protection. Encrypted operations that require the byte-level annotation/AcroForm
+canonicalizer remain unsupported on that path and fail before replacing the
+destination file.
 
 The **Protect** tab, between Sign and Convert, adds an opening password to an
-unencrypted PDF. **Set password** asks for a new password and confirmation, with
-an option to show the entries. Apply stages the password for the current tab;
-Save or Save As writes it with AES-256 encryption. Discard clears the pending
-password, while undoing content edits retains it. A failed save preserves the
-pending change and the destination file. Changing/removing an existing password
-and configuring printing or editing restrictions are not implemented.
+unencrypted PDF and changes the password of an unlocked PDF without permission
+restrictions. **Set password** or **Change password** asks for a new password
+and confirmation, with an option to show the entries. The current session has
+already authenticated an encrypted PDF, so it does not ask for the old password
+again. Apply stages the password for the current tab; Save or Save As writes it
+with AES-256 encryption. The new password takes effect only after a successful
+save, and Save As leaves the source file's password unchanged. Discard clears
+the pending change and keeps the original password, while undoing content edits
+retains the pending change. A failed save preserves both the pending change and
+the destination file. Password-only changes preserve saved content, annotations,
+and forms. Changing passwords on PDFs with permission restrictions, removing a
+password, and configuring printing or editing restrictions are not implemented.
 
 The View tab searches the current PDF text asynchronously across its source
 pages. Typing is debounced, a newer query cancels the older scan, and stale

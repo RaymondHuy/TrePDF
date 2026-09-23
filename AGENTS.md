@@ -16,16 +16,22 @@ and Save/Save As persistence.
 Current features:
 
 - The Protect tab, between Sign and Convert, sets an opening password on an
-  unencrypted PDF. `SetPasswordDialog.qml` provides masked new/confirmation
-  inputs and a show-password toggle. Apply stores a per-session pending change;
-  Save/Save As applies it, Discard clears it, and content undo retains it. A
-  failed save keeps the pending password and destination intact. The writer
-  finishes content/form canonicalization before `PDFPasswordWriter` applies
-  AES-256 revision 6 through bundled qpdf 12.4.1. PDFium validates the password,
-  encryption and page count and rejects passwordless opening before atomic
-  `QSaveFile` commit. Passwords stay in memory, never in settings, logs or CLI
-  arguments. Changing/removing existing passwords and permission controls are
-  deferred; encrypted annotation/AcroForm canonicalizer limitations remain.
+  unencrypted PDF or changes it on an unlocked PDF without permission
+  restrictions. `SetPasswordDialog.qml` provides masked new/confirmation inputs
+  and a show-password toggle; the session supplies the authenticated source
+  password. Apply stores a per-session pending change; successful Save/Save As
+  applies it, Discard retains the original password, and content undo retains
+  the pending change. A failed save keeps the pending password and destination
+  intact. Password-only changes pass the source directly through qpdf to
+  preserve content, annotations and forms. When content/form changes are also
+  pending, `FPDF_REMOVE_SECURITY` creates plaintext staging for canonicalization
+  before `PDFPasswordWriter` applies AES-256 revision 6 through bundled qpdf
+  12.4.1. PDFium validates the password, encryption and page count and rejects
+  passwordless opening before atomic `QSaveFile` commit. Passwords stay in
+  memory, never in settings, logs or CLI arguments. Password changes on
+  permission-restricted PDFs, password removal and permission controls are
+  unsupported. Ordinary encrypted saves without a pending replacement keep
+  their existing annotation/AcroForm canonicalizer limitations.
 
 - The Sign tab creates visible signatures/initials from bounded freehand strokes,
   typed text, or a local image with optional white removal; it also places dates
@@ -420,7 +426,8 @@ Current features:
   runs, embeds/reuses fonts, creates added image objects, regenerates changed
   page content, and writes the PDF transactionally.
 - `src/PDFPasswordWriter.h/.cpp`: C++17 adapter to qpdf's C API; encrypts a
-  completed unencrypted staging PDF with an opening password. The prebuilt qpdf
+  completed plaintext staging PDF or replaces an unrestricted source PDF's
+  opening password using its authenticated session password. The prebuilt qpdf
   dylib uses native crypto with OS secure randomness and contains its static
   JPEG dependency; its runtime dependencies are system libraries only. No qpdf
   executable is invoked.
@@ -723,11 +730,15 @@ clipped or elided unintentionally.
   any earlier error must leave the destination and in-memory drafts untouched.
 - Keep a pending opening password outside content undo snapshots but inside
   the draft/close guard. Snapshot it into the worker request without exposing a
-  password getter to QML. For first-time protection, recheck that the source is
-  unencrypted, complete all plaintext staging/canonicalization, then encrypt a
-  separate temporary file. Validate it with PDFium using the new password and
-  expected page count, and confirm passwordless opening fails before committing.
-  Reopen with the new password; only successful reopen clears pending state.
+  password getter to QML. Revalidate that encrypted sources have no permission
+  restrictions before replacing their password. Password-only changes use qpdf
+  directly on the source with the authenticated session password. When edits
+  accompany a replacement password, add `FPDF_REMOVE_SECURITY` only to staging
+  serialization, complete plaintext canonicalization, then encrypt a separate
+  temporary file. Ordinary encrypted saves must retain source encryption.
+  Validate the replacement with PDFium using the new password and expected page
+  count, and confirm passwordless opening fails before committing. Reopen with
+  the new password; only successful reopen clears pending state.
 - Persist Highlight, Squiggly, Underline, Strikeout, Free Text, and Stamp drafts as
   their matching `FPDF_ANNOT_*` annotations; persist Square, Circle, Line,
   Polygon, PolyLine, and Ink through the subtype-safe drawing placeholder

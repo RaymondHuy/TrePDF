@@ -175,6 +175,7 @@ bool PDFDocument::open(const QUrl &source, const QString &password)
             }
             const unsigned long permissions = FPDF_GetDocPermissions(document);
             const int securityRevision = FPDF_GetSecurityHandlerRevision(document);
+            const unsigned long userPermissions = FPDF_GetDocUserPermissions(document);
 
             closeDocumentLocked();
             m_document = document;
@@ -182,6 +183,10 @@ bool PDFDocument::open(const QUrl &source, const QString &password)
             m_filePath = filePath;
             m_documentPassword = encodedPassword;
             m_passwordProtected = securityRevision >= 0;
+            // Replacing opening protection must not remove separate owner restrictions.
+            const unsigned long permissionMask = securityRevision < 3 ? 0x3CUL : 0xF3CUL;
+            m_allowsPasswordChange = !m_passwordProtected
+                || (userPermissions & permissionMask) == permissionMask;
             m_sourcePageCount = pageCount;
             m_pageCount = pageCount;
             m_currentPage = 0;
@@ -295,6 +300,11 @@ bool PDFDocument::passwordProtected() const
     return m_passwordProtected;
 }
 
+bool PDFDocument::allowsPasswordChange() const
+{
+    return m_document && m_allowsPasswordChange;
+}
+
 int PDFDocument::renderRevision() const
 {
     return m_revision;
@@ -351,6 +361,7 @@ void PDFDocument::closeDocumentLocked()
     m_documentPassword.clear();
     m_passwordRequired = false;
     m_passwordProtected = false;
+    m_allowsPasswordChange = false;
     m_sourcePageSizes.clear();
     m_pageSizes.clear();
     m_displaySourcePages.clear();

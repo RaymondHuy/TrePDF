@@ -581,6 +581,27 @@ bool fontSupportsText(const QString &family, const QString &text)
     return true;
 }
 
+QString compatibleSourceFontFamily(const QString &identity, bool bold, bool italic,
+                                   const QString &text)
+{
+    // A Type 1 subset may register in Qt while its custom encoding cannot map
+    // punctuation back from Unicode. Termes uses Times-compatible metrics;
+    // prefer a complete compatible face over dropping the whole run to the
+    // application default. Keep this allowlist explicit: a similar family name
+    // or the PDF Serif flag alone does not establish compatible metrics.
+    if (fontFamilyMatchKey(identity) != QLatin1String("texgyretermes")) {
+        return {};
+    }
+    for (const QString &family : {QStringLiteral("Times New Roman"),
+                                  QStringLiteral("Liberation Serif"),
+                                  QStringLiteral("Nimbus Roman")}) {
+        if (ApplicationFonts::fontFaceSupportsText(family, bold, italic, text)) {
+            return family;
+        }
+    }
+    return {};
+}
+
 QColor pageObjectColor(FPDF_PAGEOBJECT object, bool stroke)
 {
     unsigned int red = 0;
@@ -936,6 +957,11 @@ void PDFEditController::resolveCandidateFontFamily(
         candidate.fontFamily = fontSupportsText(embeddedFamily, candidate.text)
             ? embeddedFamily
             : QString();
+    }
+
+    if (candidate.fontFamily.isEmpty()) {
+        candidate.fontFamily = compatibleSourceFontFamily(candidate.fontIdentity,
+            candidate.fontBold, candidate.fontItalic, candidate.text);
     }
 
     candidate.pendingFontSnapshotIndex = -1;
@@ -1936,6 +1962,25 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
             const bool generated = FPDFText_IsGenerated(textPage, index) == 1;
             bool hasUsableUnicode = false;
             bool whitespace = false;
+            // A TJ displacement can represent a word separator without a
+            // literal space glyph. PDFium exposes that separator as generated
+            // text. Keep it only inside the same object: generated row/object
+            // separators belong to the grouping stage, not to either run.
+            if (generated && FPDFText_GetUnicode(textPage, index) == ' '
+                && index > 0 && index + 1 < characterCount
+                && FPDFText_IsGenerated(textPage, index - 1) == 0
+                && FPDFText_IsGenerated(textPage, index + 1) == 0
+                && FPDFText_GetTextObject(textPage, index - 1) == textObject
+                && FPDFText_GetTextObject(textPage, index + 1) == textObject
+                && !objectLayout->text.isEmpty()
+                && !objectLayout->text.back().isSpace()
+                && !QChar::isSpace(static_cast<char32_t>(
+                    FPDFText_GetUnicode(textPage, index + 1)))) {
+                objectLayout->text.append(QLatin1Char(' '));
+                // Its reported origin is the next glyph's origin, not a real
+                // space advance. Do not treat the TJ word gap as letter spacing.
+                objectLayout->hasSpacingOrigin = false;
+            }
             if (!generated) {
                 if (!objectLayout->hasOrigin) {
                     double originX = 0.0;
@@ -1963,6 +2008,7 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
                     hasUsableUnicode = true;
                     whitespace = QChar::isSpace(codePoint);
                     objectLayout->text.append(QString::fromUcs4(&codePoint, 1));
+                    objectLayout->encodedText.append(QString::fromUcs4(&codePoint, 1));
                     // Infer only uniform spacing in simple horizontal runs.
                     // Origins and font advances are PDF geometry, so this does
                     // not mistake font substitution or ink side bearings for
@@ -2460,7 +2506,10 @@ void PDFEditController::appendPageObjectCandidates(
     part.objectPath = candidate.objectPath;
     part.sourceRect = candidate.geometry.sourceRect;
     part.origin = candidate.origin;
-    part.text = candidate.text;
+    // Generated word separators are editable text, but they do not prove
+    // that the original subset font can encode a space during Save.
+    part.text = textLayout != textObjectLayouts.cend() && !textLayout->text.isEmpty()
+        ? textLayout->encodedText : candidate.text;
     part.hasBaseline = candidate.hasBaseline;
     if (candidate.editable && objectPath.size() == 1) {
         const int underlineIndex = objectPath.constFirst() + 1;

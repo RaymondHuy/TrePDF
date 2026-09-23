@@ -39,8 +39,11 @@ Flickable {
                 objectName: "protectSetPasswordButton"
                 theme: root.theme
                 documentLoaded: root.document.loaded
-                //% "Set password"
-                text: qsTrId("SetPdfPassword")
+                text: root.document.passwordProtected
+                    //% "Change password"
+                    ? qsTrId("ChangePdfPassword")
+                    //% "Set password"
+                    : qsTrId("SetPdfPassword")
                 iconSource: "../assets/icons/shield-check.svg"
                 enabled: root.ready && root.editController.canSetOpenPassword
                 onClicked: root.setPasswordRequested()
@@ -87,11 +90,14 @@ Flickable {
             text: root.editController.passwordChangePending
                 //% "Password pending. Save the PDF to apply it."
                 ? qsTrId("PdfPasswordPending")
-                : root.document.passwordProtected
-                    //% "This PDF already has password protection."
-                    ? qsTrId("PdfPasswordProtected")
-                    //% "This PDF has no password protection."
-                    : qsTrId("PdfPasswordNotProtected")
+                : root.document.loaded && !root.document.allowsPasswordChange
+                    //% "Changing the password is not supported for PDFs with permission restrictions."
+                    ? qsTrId("PdfPasswordChangeRestricted")
+                    : root.document.passwordProtected
+                        //% "This PDF already has password protection."
+                        ? qsTrId("PdfPasswordProtected")
+                        //% "This PDF has no password protection."
+                        : qsTrId("PdfPasswordNotProtected")
         }
     }
 

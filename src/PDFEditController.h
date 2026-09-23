@@ -530,6 +530,7 @@ private:
         QVector<QRectF> glyphBounds;
         QPointF origin;
         QString text;
+        QString encodedText;
         bool hasOrigin = false;
         QVector<TextSpacingSample> spacingSamples;
         QPointF previousSpacingOrigin;

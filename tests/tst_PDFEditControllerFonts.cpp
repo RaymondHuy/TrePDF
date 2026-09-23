@@ -352,7 +352,81 @@ QByteArray embeddedSourceFontData(const QString &path, const QString &text,
     return {};
 }
 
+bool createUnavailableType1FontPdf(const QString &path, const QByteArray &fontName)
+{
+    const QByteArray content("BT /F1 12 Tf 40 760 Td "
+                             "(to Share\\227to copy, distribute the work) Tj ET\n");
+    return writePdfObjects(path, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                   "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"),
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /") + fontName
+            + QByteArray(" /Encoding /WinAnsiEncoding >>"),
+        QByteArray("<< /Length ") + QByteArray::number(content.size())
+            + QByteArray(" >>\nstream\n") + content + QByteArray("endstream")
+    });
+}
+
 } // namespace
+
+void PDFEditControllerTest::usesCompatibleFontForUnreadableType1Glyphs_data()
+{
+    QTest::addColumn<QByteArray>("fontName");
+    QTest::addColumn<bool>("compatible");
+    QTest::addColumn<bool>("bold");
+    QTest::addColumn<bool>("italic");
+    QTest::newRow("termes-regular")
+        << QByteArray("TeXGyreTermes-Regular") << true << false << false;
+    QTest::newRow("termes-bold-italic")
+        << QByteArray("TeXGyreTermes-BoldItalic") << true << true << true;
+    QTest::newRow("unrelated-family")
+        << QByteArray("OtherTeXGyreTermes-Regular") << false << false << false;
+}
+
+void PDFEditControllerTest::usesCompatibleFontForUnreadableType1Glyphs()
+{
+    QFETCH(QByteArray, fontName);
+    QFETCH(bool, compatible);
+    QFETCH(bool, bold);
+    QFETCH(bool, italic);
+    const QString expectedText = QStringLiteral("to Share\u2014to copy, distribute the work");
+    const QString fallback = QStringLiteral("Times New Roman");
+    if (!ApplicationFonts::fontFaceSupportsText(fallback, bold, italic, expectedText)) {
+        QSKIP("Times New Roman exact face is unavailable");
+    }
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("unavailable-type1-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("compatible-type1-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(createUnavailableType1FontPdf(sourcePath, fontName));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), expectedText);
+    QVERIFY(!candidate.isEmpty());
+    QCOMPARE(candidate.value(QStringLiteral("fontFamily")).toString(),
+             compatible ? fallback : QString());
+    if (!compatible) {
+        return;
+    }
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedFontBold(), bold);
+    QCOMPARE(controller.selectedFontItalic(), italic);
+    controller.beginSelectedTextEdit();
+    controller.finishSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+    const QString editedText = expectedText + QStringLiteral(" again");
+    controller.commitSelectedText(editedText);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY2(pageText(outputPath).contains(editedText), qPrintable(pageText(outputPath)));
+    const TextObjectFontInfo savedFont = textObjectFontInfo(outputPath, QStringLiteral("to Share"));
+    QVERIFY(savedFont.found);
+    QCOMPARE(compactFontName(savedFont.familyName), compactFontName(fallback));
+    QCOMPARE(savedFont.italic, italic);
+    QCOMPARE(savedFont.embedded, 1);
+}
 
 void PDFEditControllerTest::reembedsUninstalledSourceSubsetForNewObjectGlyphs()
 {

@@ -121,8 +121,9 @@ chữ ký hiển thị, không giữ handle PDFium.
   `passwordRequired()` phân biệt lỗi mật khẩu với lỗi file. Mật khẩu chỉ có API
   C++ `documentPassword()`, không expose thành QML property hay ghi ra đĩa.
   Các worker nhận snapshot mật khẩu riêng; đóng document xóa mật khẩu của nó.
-- `passwordProtected` chỉ expose trạng thái mã hóa từ security-handler revision,
-  dùng để chặn đặt mật khẩu mới trên PDF đã mã hóa.
+- `passwordProtected` chỉ expose trạng thái mã hóa từ security-handler revision.
+  `allowsPasswordChange` cache điều kiện tài liệu không có giới hạn quyền khi
+  mở, để Protect bật đổi mật khẩu cho PDF đã được mở khóa.
 - Cache kích thước mọi source page để QML gọi `pageSize()` nóng mà không chạm
   PDFium lặp lại.
 - Expose source URL, loaded/status, page count/current page, current/max page size.
@@ -531,9 +532,11 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 
 **Save orchestration:**
 
-- `setOpenPassword()` chỉ nhận PDF chưa mã hóa và mật khẩu UTF-8 hợp lệ dài
-  1–127 byte, không chứa NUL. `passwordChangePending` thuộc draft guard của từng
-  session nhưng nằm ngoài content undo; Discard hoặc reset session xóa nó.
+- `setOpenPassword()` nhận PDF chưa mã hóa hoặc PDF đã mở khóa không có giới hạn
+  quyền; mật khẩu UTF-8 phải dài 1–127 byte, không chứa NUL.
+  `passwordChangePending` thuộc draft guard của từng session nhưng nằm ngoài
+  content undo. Discard hoặc reset session xóa thay đổi pending; mật khẩu gốc
+  chỉ được thay thế sau khi lưu thành công.
 - Kết thúc editor, lấy form snapshot, gọi `PDFSaveWriter::prepare()` trên GUI
   thread rồi chạy `save(request)` trên worker.
 - Đặt `saving` để khóa edit/tab operations, chuyển error thành status dịch được.
@@ -645,21 +648,28 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   `FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS`.
 - Chuyển normalized designer field sang page coordinates và gọi
   `PDFAcroFormWriter` nếu có field cần ghi/normalize.
-- Khi có mật khẩu mới, hoàn tất content/form canonicalization trước, mã hóa sang
-  file tạm riêng, rồi dùng PDFium kiểm mở bằng mật khẩu mới, trạng thái mã hóa,
-  số trang và lỗi password khi mở không mật khẩu. Chỉ sau đó commit bằng
-  `QSaveFile`; các file tạm được dọn khi transaction kết thúc.
+- Nếu chỉ đổi mật khẩu, đưa source PDF và mật khẩu phiên hiện tại trực tiếp qua
+  qpdf để giữ nội dung, annotation và AcroForm đã lưu. Kiểm lại giới hạn quyền
+  trước khi thay mật khẩu của nguồn đã mã hóa.
+- Khi mật khẩu mới đi kèm content/form edits, thêm `FPDF_REMOVE_SECURITY` vào
+  bước serialize staging, hoàn tất canonicalization trên plaintext rồi mã hóa
+  sang file tạm riêng. PDFium kiểm mở bằng mật khẩu mới, trạng thái mã hóa,
+  số trang và lỗi password khi mở không mật khẩu trước khi commit bằng
+  `QSaveFile`; các file tạm được dọn khi transaction kết thúc. Save thông thường
+  không có mật khẩu mới vẫn giữ mã hóa nguồn và giới hạn canonicalizer cũ.
 - Chỉ commit đích khi từng bước thành công; Save As không chạm source.
 
 ### [`src/PDFPasswordWriter.cpp`](../src/PDFPasswordWriter.cpp) và
 [`src/PDFPasswordWriter.h`](../src/PDFPasswordWriter.h)
 
 **Vai trò:** adapter C++17 cho C API của qpdf 12.4.1 được bundle trong
-`third_party/qpdf`, chỉ mã hóa một staging PDF chưa được bảo vệ.
+`third_party/qpdf`, mã hóa staging plaintext hoặc thay mật khẩu mở của source
+PDF đã xác thực và không có giới hạn quyền.
 
 - `encryptFile()` ghi AES-256 security revision 6, dùng cùng mật khẩu user/owner
-  và cho phép mọi quyền in, trích xuất, chú thích, sửa nội dung. Phiên bản này
-  chỉ yêu cầu mật khẩu mở; chưa đổi/gỡ mật khẩu hoặc cấu hình quyền.
+  và cho phép mọi quyền in, trích xuất, chú thích, sửa nội dung. Khi input đã
+  mã hóa, adapter dùng mật khẩu phiên để mở và từ chối nguồn có giới hạn quyền;
+  chưa hỗ trợ gỡ mật khẩu hoặc cấu hình quyền.
 - qpdf được bundle dưới dạng dylib Release đã build sẵn cho macOS arm64 (macOS
   13 trở lên), dùng native crypto với OS secure randomness và chứa JPEG tĩnh;
   runtime chỉ phụ thuộc thư viện hệ thống. CMake dùng imported target
@@ -668,9 +678,9 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   nâng cấp mới cần C++20 và JPEG tĩnh của Qt SDK.
 - Ứng dụng không gọi CLI, không lưu mật khẩu vào settings/file và không đưa
   mật khẩu vào log hay thông báo lỗi backend.
-- Adapter từ chối nguồn đã mã hóa và không ghi đè nguồn. Kiểm chứng PDFium và
+- Adapter luôn ghi file tạm riêng, không ghi đè nguồn. Kiểm chứng PDFium và
   atomic commit thuộc `PDFSaveWriter`; giới hạn canonicalizer trên PDF vốn đã
-  mã hóa vẫn giữ nguyên.
+  mã hóa vẫn giữ nguyên khi không có thay đổi mật khẩu pending.
 
 ## Tự động tạo liên kết web
 

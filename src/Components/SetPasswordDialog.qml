@@ -12,6 +12,8 @@ Dialog {
     required property AppTheme theme
     required property PDFEditController editController
     property string errorText: ""
+    readonly property bool changingPassword: editController && editController.document
+        && editController.document.passwordProtected
     readonly property bool canSubmit: editController
         && editController.canSetOpenPassword && !editController.saving
         && passwordInput.text.length > 0 && confirmationInput.text.length > 0
@@ -24,8 +26,11 @@ Dialog {
     focus: true
     popupType: Popup.Item
     closePolicy: Popup.CloseOnEscape
-    //% "Set PDF password"
-    title: qsTrId("SetPdfPasswordTitle")
+    title: changingPassword
+        //% "Change PDF password"
+        ? qsTrId("ChangePdfPasswordTitle")
+        //% "Set PDF password"
+        : qsTrId("SetPdfPasswordTitle")
 
     function submit() {
         if (!canSubmit)
@@ -77,8 +82,11 @@ Dialog {
 
         Label {
             Layout.fillWidth: true
-            //% "A password will be required to open this PDF after you Save or Save As."
-            text: qsTrId("SetPdfPasswordSaveHint")
+            text: root.changingPassword
+                //% "The new password will replace the current opening password after you Save or Save As."
+                ? qsTrId("ChangePdfPasswordSaveHint")
+                //% "A password will be required to open this PDF after you Save or Save As."
+                : qsTrId("SetPdfPasswordSaveHint")
             color: root.theme.ribbonTextColor
             wrapMode: Text.Wrap
         }
