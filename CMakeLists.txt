@@ -22,6 +22,15 @@ if((NOT PDFium_ROOT OR PDFium_ROOT MATCHES "-NOTFOUND$") AND EXISTS "${TREPDF_LO
     set(PDFium_ROOT "${TREPDF_LOCAL_PDFIUM_ROOT}" CACHE PATH "PDFium installation prefix" FORCE)
 endif()
 
+set(TREPDF_LOCAL_QPDF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/qpdf")
+if(NOT QPDF_ROOT OR QPDF_ROOT MATCHES "-NOTFOUND$")
+    if(DEFINED ENV{QPDF_ROOT} AND NOT "$ENV{QPDF_ROOT}" STREQUAL "")
+        set(QPDF_ROOT "$ENV{QPDF_ROOT}" CACHE PATH "Prebuilt qpdf installation prefix" FORCE)
+    else()
+        set(QPDF_ROOT "${TREPDF_LOCAL_QPDF_ROOT}" CACHE PATH "Prebuilt qpdf installation prefix" FORCE)
+    endif()
+endif()
+
 find_package(Qt6 6.8 REQUIRED COMPONENTS
     LinguistTools
     Network
@@ -30,6 +39,7 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
     QuickControls2
 )
 find_package(PDFium REQUIRED)
+find_package(QPDF REQUIRED)
 
 qt_standard_project_setup(
     REQUIRES 6.8
@@ -69,17 +79,6 @@ file(GLOB_RECURSE TREPDF_BUNDLED_FONT_FILES CONFIGURE_DEPENDS
 )
 
 find_package(ZLIB REQUIRED)
-# qpdf uses the static JPEG library shipped with the selected Qt SDK.
-# Keep the security backend self-contained without a Homebrew runtime dependency.
-get_filename_component(TREPDF_QT_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
-find_package(Qt6BundledLibjpeg CONFIG REQUIRED
-    HINTS "${TREPDF_QT_PREFIX}/lib/cmake/Qt6BundledLibjpeg"
-)
-find_path(TREPDF_JPEG_INCLUDE_DIR jpeglib.h
-    HINTS "${TREPDF_QT_PREFIX}/include/QtJpeg"
-    REQUIRED
-)
-add_subdirectory(third_party/qpdf EXCLUDE_FROM_ALL)
 qt_add_library(trepdf_password_writer STATIC
     src/PDFPasswordWriter.cpp
     src/PDFPasswordWriter.h
@@ -344,6 +343,7 @@ if(APPLE)
     )
 
     get_target_property(TREPDF_PDFIUM_LIBRARY PDFium::PDFium IMPORTED_LOCATION)
+    get_target_property(TREPDF_QPDF_LIBRARY QPDF::QPDF IMPORTED_LOCATION)
     set_target_properties(trepdf PROPERTIES
         BUILD_RPATH "@executable_path/../Frameworks"
     )
@@ -352,6 +352,9 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${TREPDF_PDFIUM_LIBRARY}"
             "$<TARGET_BUNDLE_DIR:trepdf>/Contents/Frameworks/libpdfium.dylib"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${TREPDF_QPDF_LIBRARY}"
+            "$<TARGET_BUNDLE_DIR:trepdf>/Contents/Frameworks/libqpdf.dylib"
         COMMAND install_name_tool -change ./libpdfium.dylib @rpath/libpdfium.dylib "$<TARGET_FILE:trepdf>"
         VERBATIM
     )

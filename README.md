@@ -453,10 +453,18 @@ is the initial, statically linked backend bundled under `third_party/`.
 ## Build
 
 Install Qt 6.8 or newer and provide a PDFium build that contains `fpdfview.h`
-and the `pdfium` library. The password writer bundles qpdf 12.4.1 as a static
-library, using the selected Qt SDK's bundled JPEG library and zlib. A C++20-capable
-compiler is required for qpdf; the application remains C++17 and calls its C API.
-No qpdf command-line installation is required.
+and the `pdfium` library. Like PDFium, qpdf 12.4.1 is bundled as a prebuilt macOS
+arm64 library with public headers under `third_party/qpdf` (macOS 13 or newer).
+CMake imports it as `QPDF::QPDF` and copies the library into the app bundle.
+Normal configure/build steps download no dependencies and require neither qpdf
+sources nor a qpdf CLI installation; the application remains C++17. Use
+`-DQPDF_ROOT=/path/to/qpdf` to select another compatible package.
+
+To rebuild qpdf when upgrading the dependency, run
+`scripts/build-qpdf-macos.sh <Qt-prefix> [output-directory]`. Only this separate
+step needs C++20 and the Qt SDK's static JPEG library. See
+[`third_party/qpdf/README.trepdf.md`](third_party/qpdf/README.trepdf.md) for
+provenance, checksums, and offline rebuild instructions.
 
 ```sh
 cmake -S . -B build \
@@ -481,10 +489,10 @@ Qt is already configured for this local SDK:
 /Users/luongvanhuy/Qt/6.11.0/macos
 ```
 
-PDFium is configured from `third_party/pdfium`.
+PDFium is configured from `third_party/pdfium` and qpdf from `third_party/qpdf`.
 
 Open the repository folder in CLion and use the default `Debug` CMake profile.
-The project configures Qt and PDFium from the local paths above, then creates
+The project configures Qt, PDFium, and qpdf from the local paths above, then creates
 the `trepdf` target.
 
 ## Localization

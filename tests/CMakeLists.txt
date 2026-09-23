@@ -134,6 +134,7 @@ if(APPLE)
     )
 
     get_target_property(TREPDF_TEST_PDFIUM_LIBRARY PDFium::PDFium IMPORTED_LOCATION)
+    get_target_property(TREPDF_TEST_QPDF_LIBRARY QPDF::QPDF IMPORTED_LOCATION)
     add_custom_command(TARGET trepdf_edit_controller_tests POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${TREPDF_TEST_PDFIUM_LIBRARY}"
@@ -141,6 +142,13 @@ if(APPLE)
         COMMAND install_name_tool -change
             ./libpdfium.dylib
             @loader_path/libpdfium.dylib
+            "$<TARGET_FILE:trepdf_edit_controller_tests>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${TREPDF_TEST_QPDF_LIBRARY}"
+            "$<TARGET_FILE_DIR:trepdf_edit_controller_tests>/libqpdf.dylib"
+        COMMAND install_name_tool -change
+            @rpath/libqpdf.dylib
+            @loader_path/libqpdf.dylib
             "$<TARGET_FILE:trepdf_edit_controller_tests>"
         VERBATIM
     )
