@@ -33,7 +33,8 @@ Column {
     readonly property bool commentTabActive: ribbonTabs.currentIndex === 2
     readonly property bool formsTabActive: ribbonTabs.currentIndex === 3
     readonly property bool signTabActive: ribbonTabs.currentIndex === 4
-    readonly property bool exportTabActive: ribbonTabs.currentIndex === 5
+    readonly property bool protectTabActive: ribbonTabs.currentIndex === 5
+    readonly property bool exportTabActive: ribbonTabs.currentIndex === 6
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
         && document.loaded
@@ -74,6 +75,7 @@ Column {
     signal splitViewToggleRequested()
     signal toolRequested(string toolName)
     signal signatureRequested(string mode)
+    signal setPasswordRequested()
     signal undoRequested()
     signal redoRequested()
 
@@ -349,6 +351,20 @@ Column {
     }
 
     Component {
+        id: protectRibbonComponent
+
+        ProtectRibbon {
+            theme: root.theme
+            document: root.document
+            editController: root.editController
+            hasPendingPanelEdits: root.hasPendingPanelEdits
+            onSetPasswordRequested: root.setPasswordRequested()
+            onSaveRequested: root.saveRequested()
+            onSaveAsRequested: root.saveAsRequested()
+        }
+    }
+
+    Component {
         id: exportRibbonComponent
 
         ExportRibbon {
@@ -383,7 +399,7 @@ Column {
                 id: ribbonTabs
                 objectName: "ribbonTabs"
 
-                Layout.preferredWidth: 520
+                Layout.preferredWidth: 590
                 Layout.fillHeight: true
                 enabled: !root.anySaving
                 spacing: 0
@@ -418,6 +434,13 @@ Column {
                     theme: root.theme
                     //% "E-Sign"
                     text: qsTrId("ESign")
+                }
+
+                RibbonTabButton {
+                    objectName: "protectTabButton"
+                    theme: root.theme
+                    //% "Protect"
+                    text: qsTrId("ProtectTab")
                 }
 
                 RibbonTabButton {
@@ -493,7 +516,9 @@ Column {
                             ? formRibbonComponent
                             : ribbonTabs.currentIndex === 4
                                 ? signRibbonComponent
-                                : exportRibbonComponent
+                                : ribbonTabs.currentIndex === 5
+                                    ? protectRibbonComponent
+                                    : exportRibbonComponent
         }
     }
 }

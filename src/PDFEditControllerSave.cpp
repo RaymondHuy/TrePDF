@@ -142,6 +142,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::AcroFormCreationFailed:
         //% "The AcroForm fields could not be created: %1"
         return qtTrId("PdfSaveAcroFormCreationFailed").arg(result.detail);
+    case PDFSaveWriter::Error::PasswordProtectionFailed:
+        //% "Password protection could not be applied. The PDF was not saved."
+        return qtTrId("PdfSavePasswordProtectionFailed");
     case PDFSaveWriter::Error::OutputOpenFailed:
         //% "The destination file could not be opened: %1"
         return qtTrId("PdfSaveOutputOpenFailed").arg(result.detail);
@@ -454,7 +457,10 @@ bool PDFEditController::completeSave(
         return true;
     }
 
-    const QString documentPassword = QString::fromUtf8(m_document->documentPassword());
+    // Opening the saved document resets the session and clears the pending setting.
+    const QString documentPassword = QString::fromUtf8(
+        m_pendingOpenPassword.isEmpty()
+            ? m_document->documentPassword() : m_pendingOpenPassword);
     const bool reopened = m_document->open(
         QUrl::fromLocalFile(targetFilePath), documentPassword);
     m_saving = false;

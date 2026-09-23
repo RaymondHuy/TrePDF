@@ -40,6 +40,7 @@ ApplicationWindow {
     property real imageInsertX: 0
     property real imageInsertY: 0
     property PDFDocumentSession signatureSession: null
+    property PDFDocumentSession passwordSetupSession: null
     property string signatureMode: "signature"
     property bool signaturePlacementPending: false
     property real signatureWidthPoints: 140
@@ -394,6 +395,20 @@ ApplicationWindow {
         imageDialog.open()
     }
 
+    function requestSetPassword() {
+        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
+                || !appRibbon.protectTabActive || !activeEditController.canSetOpenPassword
+                || !prepareActiveWorkspace())
+            return
+        passwordSetupSession = activeSession
+        setPasswordDialogLoader.active = true
+    }
+
+    function cancelPasswordSetup() {
+        setPasswordDialogLoader.active = false
+        passwordSetupSession = null
+    }
+
     function requestSignature(mode) {
         if (!activeSession || !activeDocument.loaded || tabModel.anySaving
                 || !appRibbon.signTabActive || !prepareActiveWorkspace())
@@ -667,6 +682,7 @@ ApplicationWindow {
 
     onActiveSessionChanged: {
         cancelSignature()
+        cancelPasswordSetup()
         if (pendingSearchNavigationSession
                 && pendingSearchNavigationSession !== activeSession) {
             clearPendingSearchNavigation()
@@ -736,6 +752,10 @@ ApplicationWindow {
         id: tabModel
 
         onStatusMessage: message => window.showStatus(message)
+        onAnySavingChanged: {
+            if (anySaving)
+                window.cancelPasswordSetup()
+        }
         onPasswordRequested: (source, incorrectPassword) => {
             window.requestPassword(source, incorrectPassword)
         }
@@ -823,6 +843,31 @@ ApplicationWindow {
             const dialog = item as SignatureDialog
             if (dialog)
                 dialog.open()
+        }
+    }
+
+    Connections {
+        target: window.passwordSetupSession ? window.passwordSetupSession.document : null
+        function onSourceChanged() { window.cancelPasswordSetup() }
+        function onLoadedChanged() { window.cancelPasswordSetup() }
+    }
+
+    Loader {
+        id: setPasswordDialogLoader
+        objectName: "setPasswordDialogLoader"
+        active: false
+        sourceComponent: SetPasswordDialog {
+            theme: appTheme
+            editController: window.passwordSetupSession
+                ? window.passwordSetupSession.editController : null
+            onClosed: window.cancelPasswordSetup()
+        }
+        onLoaded: {
+            if (status === Loader.Ready) {
+                const dialog = item as SetPasswordDialog
+                if (dialog)
+                    dialog.open()
+            }
         }
     }
 
@@ -1493,6 +1538,11 @@ ApplicationWindow {
             }
             onToolRequested: toolName => window.showComingSoon(toolName)
             onSignatureRequested: mode => window.requestSignature(mode)
+            onSetPasswordRequested: window.requestSetPassword()
+            onProtectTabActiveChanged: {
+                if (!protectTabActive)
+                    window.cancelPasswordSetup()
+            }
             onSignTabActiveChanged: {
                 if (!signTabActive)
                     window.cancelSignature()

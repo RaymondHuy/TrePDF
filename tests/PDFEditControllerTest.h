@@ -13,6 +13,15 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void stagesOpenPasswordUntilSave();
+    void savesNewOpenPasswordAsynchronously_data();
+    void savesNewOpenPasswordAsynchronously();
+    void savesOpenPasswordOnSamePathWithTextChanges();
+    void keepsPendingOpenPasswordWhenSaveFails();
+    void keepsPendingOpenPasswordWhenEncryptionFails();
+    void savesOpenPasswordWithCommentsAndForms();
+    void keepsPendingPasswordsIndependentAcrossTabs();
+    void promptsToSetOpenPassword();
     void preparesVisualSignatureText_data();
     void preparesVisualSignatureText();
     void preparesVisualSignatureDrawing();

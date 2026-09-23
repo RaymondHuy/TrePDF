@@ -466,6 +466,7 @@ void PDFEditController::discardDrafts()
     cancelWebLinkCreation();
     if (m_saving
         || (!m_textEditActive
+            && m_pendingOpenPassword.isEmpty()
             && m_drafts.isEmpty()
             && m_autoWebLinks.isEmpty()
             && m_removedWebLinks.isEmpty()
@@ -484,6 +485,8 @@ void PDFEditController::discardDrafts()
         return;
     }
 
+    m_pendingOpenPassword.clear();
+    emit passwordProtectionChanged();
     QSet<int> affectedPages;
     for (auto revision = m_pageDraftRevisions.cbegin();
          revision != m_pageDraftRevisions.cend();

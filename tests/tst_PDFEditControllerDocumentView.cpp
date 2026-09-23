@@ -19,7 +19,7 @@ void PDFEditControllerTest::exposesExcelExportTabAndDraftGuard()
     QVERIFY(session);
     auto *tabs = window->findChild<QObject *>(QStringLiteral("ribbonTabs"));
     QVERIFY(tabs);
-    QVERIFY(tabs->setProperty("currentIndex", 5));
+    QVERIFY(tabs->setProperty("currentIndex", 6));
     QTRY_COMPARE(session->editController()->tool(), PDFEditController::BrowseTool);
     QObject *button = nullptr;
     QTRY_VERIFY((button = window->findChild<QObject *>(QStringLiteral("exportExcelButton"))));

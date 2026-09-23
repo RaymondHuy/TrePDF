@@ -69,6 +69,23 @@ file(GLOB_RECURSE TREPDF_BUNDLED_FONT_FILES CONFIGURE_DEPENDS
 )
 
 find_package(ZLIB REQUIRED)
+# qpdf uses the static JPEG library shipped with the selected Qt SDK.
+# Keep the security backend self-contained without a Homebrew runtime dependency.
+get_filename_component(TREPDF_QT_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
+find_package(Qt6BundledLibjpeg CONFIG REQUIRED
+    HINTS "${TREPDF_QT_PREFIX}/lib/cmake/Qt6BundledLibjpeg"
+)
+find_path(TREPDF_JPEG_INCLUDE_DIR jpeglib.h
+    HINTS "${TREPDF_QT_PREFIX}/include/QtJpeg"
+    REQUIRED
+)
+add_subdirectory(third_party/qpdf EXCLUDE_FROM_ALL)
+qt_add_library(trepdf_password_writer STATIC
+    src/PDFPasswordWriter.cpp
+    src/PDFPasswordWriter.h
+)
+target_link_libraries(trepdf_password_writer PRIVATE QPDF::QPDF Qt6::Core)
+
 qt_add_library(trepdf_font_archive STATIC
     third_party/libxlsxwriter/third_party/minizip/unzip.c
     third_party/libxlsxwriter/third_party/minizip/ioapi.c
@@ -191,6 +208,8 @@ qt_add_qml_module(trepdf
         src/Components/RibbonTabButton.qml
         src/Components/ShapeDraftView.qml
         src/Components/SignRibbon.qml
+        src/Components/ProtectRibbon.qml
+        src/Components/SetPasswordDialog.qml
         src/Components/SignatureDialog.qml
         src/Components/SearchHighlightLayer.qml
         src/Components/SearchRibbonControl.qml
@@ -302,6 +321,7 @@ target_link_libraries(trepdf
         Qt6::Qml
         Qt6::Network
         trepdf_font_archive
+        trepdf_password_writer
         Qt6::QmlIntegration
         Qt6::Quick
         Qt6::QuickControls2

@@ -15,6 +15,18 @@ and Save/Save As persistence.
 
 Current features:
 
+- The Protect tab, between Sign and Convert, sets an opening password on an
+  unencrypted PDF. `SetPasswordDialog.qml` provides masked new/confirmation
+  inputs and a show-password toggle. Apply stores a per-session pending change;
+  Save/Save As applies it, Discard clears it, and content undo retains it. A
+  failed save keeps the pending password and destination intact. The writer
+  finishes content/form canonicalization before `PDFPasswordWriter` applies
+  AES-256 revision 6 through bundled qpdf 12.4.1. PDFium validates the password,
+  encryption and page count and rejects passwordless opening before atomic
+  `QSaveFile` commit. Passwords stay in memory, never in settings, logs or CLI
+  arguments. Changing/removing existing passwords and permission controls are
+  deferred; encrypted annotation/AcroForm canonicalizer limitations remain.
+
 - The Sign tab creates visible signatures/initials from bounded freehand strokes,
   typed text, or a local image with optional white removal; it also places dates
   and check/cross marks. `SignatureDialog.qml` prepares the preview through the
@@ -366,6 +378,8 @@ Current features:
   snapshots, local atomic library storage, and placement through added-image drafts.
 - `src/Components/SignatureDialog.qml`: draw/type/import/saved-library signature
   creation plus date and check/cross previews; `SignRibbon.qml` exposes these actions.
+- `src/Components/ProtectRibbon.qml` and `SetPasswordDialog.qml`: document
+  protection state, pending password entry and Save/Save As actions.
 - `src/Main.qml`: multi-tab coordination, menus, toolbar, and active workspace.
 - `src/PDFTabModel.h/.cpp`: per-tab document/edit sessions, active-tab state,
   duplicate-path protection, and cross-tab save guards.
@@ -403,6 +417,10 @@ Current features:
 - `src/PDFSaveWriter.h/.cpp`: resolves source object paths, reflows rich-text
   runs, embeds/reuses fonts, creates added image objects, regenerates changed
   page content, and writes the PDF transactionally.
+- `src/PDFPasswordWriter.h/.cpp`: C++17 adapter to qpdf's C API; encrypts a
+  completed unencrypted staging PDF with an opening password. The bundled qpdf
+  target alone uses C++20, native crypto with OS secure randomness, the Qt SDK's
+  static JPEG library and zlib; no qpdf executable is invoked.
 - `src/PDFSourceImageGeometry.h`: shared source-image resize eligibility and
   affine frame mapping for the candidate scanner, render preview, and writer.
 - `src/PDFStampPresets.h`: shared 24-preset catalogue, dynamic author/date
@@ -692,6 +710,13 @@ clipped or elided unintentionally.
   embedded font programs to glyphs used by new text objects while leaving
   original PDF font resources unchanged. Commit only after PDFium succeeds;
   any earlier error must leave the destination and in-memory drafts untouched.
+- Keep a pending opening password outside content undo snapshots but inside
+  the draft/close guard. Snapshot it into the worker request without exposing a
+  password getter to QML. For first-time protection, recheck that the source is
+  unencrypted, complete all plaintext staging/canonicalization, then encrypt a
+  separate temporary file. Validate it with PDFium using the new password and
+  expected page count, and confirm passwordless opening fails before committing.
+  Reopen with the new password; only successful reopen clears pending state.
 - Persist Highlight, Squiggly, Underline, Strikeout, Free Text, and Stamp drafts as
   their matching `FPDF_ANNOT_*` annotations; persist Square, Circle, Line,
   Polygon, PolyLine, and Ink through the subtype-safe drawing placeholder

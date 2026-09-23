@@ -47,6 +47,7 @@ public:
         PageDeletionFailed,
         PageContentGenerationFailed,
         AcroFormCreationFailed,
+        PasswordProtectionFailed,
         OutputOpenFailed,
         OutputWriteFailed,
         OutputCommitFailed

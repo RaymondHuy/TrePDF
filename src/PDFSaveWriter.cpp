@@ -10,6 +10,7 @@
 #include "PDFEditController.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
+#include "PDFPasswordWriter.h"
 #include "PDFiumSynchronization.h"
 
 #include <algorithm>
@@ -5545,6 +5546,50 @@ PDFSaveWriter::Result commitDocumentFile(const QString &sourceFilePath,
     return {};
 }
 
+PDFSaveWriter::Result protectAndCommitDocumentFile(
+    const QString &sourceFilePath,
+    const QString &targetFilePath,
+    const QByteArray &openPassword,
+    int expectedPageCount)
+{
+    assertPDFiumProcessLockHeld();
+    if (openPassword.isEmpty()) {
+        return commitDocumentFile(sourceFilePath, targetFilePath);
+    }
+
+    // All PDFium and canonicalizer changes are complete before encryption.
+    // Keep both stages private until validation and the final atomic commit.
+    QTemporaryFile encryptedFile(QFileInfo(targetFilePath).absoluteDir().filePath(
+        QStringLiteral(".trepdf-protected-XXXXXX.pdf")));
+    if (!encryptedFile.open()) {
+        return failure(PDFSaveWriter::Error::OutputOpenFailed,
+                       -1, encryptedFile.errorString());
+    }
+    const QString encryptedFilePath = encryptedFile.fileName();
+    encryptedFile.close();
+    if (!PDFPasswordWriter::encryptFile(sourceFilePath, encryptedFilePath,
+                                        openPassword)) {
+        return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
+    }
+
+    const QByteArray encodedPath = QFile::encodeName(encryptedFilePath);
+    {
+        PdfDocumentHandle protectedDocument(FPDF_LoadDocument(
+            encodedPath.constData(), openPassword.constData()));
+        if (!protectedDocument.get()
+            || FPDF_GetSecurityHandlerRevision(protectedDocument.get()) < 0
+            || FPDF_GetPageCount(protectedDocument.get()) != expectedPageCount) {
+            return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
+        }
+        PdfDocumentHandle unprotectedDocument(FPDF_LoadDocument(
+            encodedPath.constData(), nullptr));
+        if (unprotectedDocument.get() || FPDF_GetLastError() != FPDF_ERR_PASSWORD) {
+            return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
+        }
+    }
+    return commitDocumentFile(encryptedFilePath, targetFilePath);
+}
+
 PDFSaveWriter::Result validateAnnotationRelationships(
     const QString &filePath,
     const QVector<PDFAcroFormCanonicalizer::AnnotationRelationship>
@@ -6306,6 +6351,7 @@ PDFSaveWriter::Result addWebLinks(
 struct PDFSaveWriter::Request::Data {
     QString sourceFilePath;
     QByteArray documentPassword;
+    QByteArray pendingOpenPassword;
     QString targetFilePath;
     QVector<int> deletedSourcePages;
     QVector<PDFPageInsertion> pageInsertions;
@@ -6334,6 +6380,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         : sourceFilePathOverride;
     data->targetFilePath = targetFilePath;
     data->documentPassword = controller.m_document->documentPassword();
+    data->pendingOpenPassword = controller.m_pendingOpenPassword;
     data->autoWebLinks = controller.m_autoWebLinks;
     data->removedWebLinks = controller.m_removedWebLinks;
     data->manualLinks = controller.m_manualLinks;
@@ -6722,6 +6769,10 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     if (!document.get()) {
         return failure(Error::SourceOpenFailed);
     }
+    if (!request.m_data->pendingOpenPassword.isEmpty()
+        && FPDF_GetSecurityHandlerRevision(document.get()) >= 0) {
+        return failure(Error::PasswordProtectionFailed);
+    }
     // Render-only inspection happens on a second worker-owned handle so that
     // temporary page-object activation changes never dirty the writer page.
     PdfDocumentHandle inspectionDocument(
@@ -6931,7 +6982,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         annotationRelationships.append(std::move(relationship));
     }
 
-    if (request.m_data->formFields.isEmpty()
+    if (request.m_data->pendingOpenPassword.isEmpty()
+        && request.m_data->formFields.isEmpty()
         && annotationRelationships.isEmpty()
         && freeTextAnnotations.isEmpty()
         && textMarkupAnnotations.isEmpty()
@@ -7073,9 +7125,11 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         if (!relationshipValidation.succeeded()) {
             return relationshipValidation;
         }
-        return commitDocumentFile(
+        return protectAndCommitDocumentFile(
             contentFilePath,
-            request.m_data->targetFilePath);
+            request.m_data->targetFilePath,
+            request.m_data->pendingOpenPassword,
+            FPDF_GetPageCount(document.get()));
     }
 
     QTemporaryFile formFile(
@@ -7180,9 +7234,11 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     if (!relationshipValidation.succeeded()) {
         return relationshipValidation;
     }
-    return commitDocumentFile(
+    return protectAndCommitDocumentFile(
         formFilePath,
-        request.m_data->targetFilePath);
+        request.m_data->targetFilePath,
+        request.m_data->pendingOpenPassword,
+        FPDF_GetPageCount(document.get()));
 }
 
 PDFSaveWriter::Result PDFSaveWriter::save(const PDFEditController &controller,

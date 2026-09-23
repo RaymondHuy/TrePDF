@@ -55,6 +55,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyStateChanged FINAL)
     Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
+    Q_PROPERTY(bool canSetOpenPassword READ canSetOpenPassword NOTIFY passwordProtectionChanged FINAL)
+    Q_PROPERTY(bool passwordChangePending READ passwordChangePending NOTIFY passwordProtectionChanged FINAL)
     Q_PROPERTY(bool creatingWebLinks READ creatingWebLinks NOTIFY creatingWebLinksChanged FINAL)
     Q_PROPERTY(bool removingWebLinks READ removingWebLinks NOTIFY creatingWebLinksChanged FINAL)
     Q_PROPERTY(bool loadingEditableLinks READ loadingEditableLinks NOTIFY editableLinksChanged FINAL)
@@ -249,6 +251,9 @@ public:
     bool canUndo() const;
     bool canRedo() const;
     bool saving() const;
+    bool canSetOpenPassword() const;
+    bool passwordChangePending() const;
+    Q_INVOKABLE bool setOpenPassword(const QString &password);
     bool textEditActive() const;
     QStringList bundledFontFamilies() const;
     QStringList availableFontFamilies() const;
@@ -484,6 +489,7 @@ signals:
     void pendingDrawingCommentPageChanged();
     void historyStateChanged();
     void savingChanged();
+    void passwordProtectionChanged();
     void creatingWebLinksChanged();
     void editableLinksChanged();
     void webLinksChanged();
@@ -1088,6 +1094,8 @@ private:
     Candidate m_selectedCandidate;
     bool m_hasSelection = false;
     bool m_saving = false;
+    // Session-only save setting; never copied into content history or exposed to QML.
+    QByteArray m_pendingOpenPassword;
     struct PendingFontSave {
         PDFSaveWriter::Result failure;
         QString targetFilePath;
