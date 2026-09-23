@@ -361,6 +361,11 @@ if(APPLE)
 endif()
 
 include(CTest)
+if(WIN32)
+    include(TrePDFWindowsRuntime)
+    trepdf_deploy_windows_runtime(trepdf)
+endif()
+
 if(BUILD_TESTING)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
     add_subdirectory(tests)
