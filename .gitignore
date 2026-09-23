@@ -23,6 +23,9 @@ mono_crash.*
 [Rr]elease/
 [Rr]eleases/
 
+# Required upstream CMake template inside the vendored dependency.
+!third_party/libxlsxwriter/dev/release/
+
 [Dd]ebug/x64/
 [Dd]ebugPublic/x64/
 [Rr]elease/x64/

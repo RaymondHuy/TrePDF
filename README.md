@@ -483,6 +483,10 @@ On non-macOS desktop builds, the binary is typically at `./build/trepdf`.
 
 ## CLion
 
+For a separate Windows Qt/MinGW profile, see
+[`docs/windows-clion.md`](docs/windows-clion.md). Windows SDK paths and downloaded
+libraries stay in ignored local files; the macOS setup below is unchanged.
+
 Qt is already configured for this local SDK:
 
 ```sh

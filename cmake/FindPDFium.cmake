@@ -17,10 +17,14 @@ find_path(PDFium_INCLUDE_DIR
         include/pdfium
 )
 
+set(_PDFium_LIBRARY_NAMES pdfium libpdfium)
+if(WIN32)
+    list(PREPEND _PDFium_LIBRARY_NAMES pdfium.dll)
+endif()
+
 find_library(PDFium_LIBRARY
     NAMES
-        pdfium
-        libpdfium
+        ${_PDFium_LIBRARY_NAMES}
     HINTS
         "${PDFium_ROOT}"
         "${PDFium_ROOT}/lib"
@@ -33,18 +37,43 @@ find_library(PDFium_LIBRARY
         "$ENV{PDFIUM_DIR}/bin"
 )
 
+set(_PDFium_REQUIRED_VARS PDFium_LIBRARY PDFium_INCLUDE_DIR)
+if(WIN32)
+    get_filename_component(_PDFium_LIBRARY_DIR "${PDFium_LIBRARY}" DIRECTORY)
+    find_file(PDFium_RUNTIME_LIBRARY
+        NAMES pdfium.dll
+        HINTS
+            "${PDFium_ROOT}"
+            "$ENV{PDFIUM_ROOT}"
+            "$ENV{PDFIUM_DIR}"
+            "${_PDFium_LIBRARY_DIR}/.."
+        PATH_SUFFIXES bin lib
+    )
+    list(APPEND _PDFium_REQUIRED_VARS PDFium_RUNTIME_LIBRARY)
+endif()
+
 find_package_handle_standard_args(PDFium
-    REQUIRED_VARS
-        PDFium_LIBRARY
-        PDFium_INCLUDE_DIR
+    REQUIRED_VARS ${_PDFium_REQUIRED_VARS}
 )
 
 if(PDFium_FOUND AND NOT TARGET PDFium::PDFium)
-    add_library(PDFium::PDFium UNKNOWN IMPORTED)
-    set_target_properties(PDFium::PDFium PROPERTIES
-        IMPORTED_LOCATION "${PDFium_LIBRARY}"
-        INTERFACE_INCLUDE_DIRECTORIES "${PDFium_INCLUDE_DIR}"
-    )
+    if(WIN32)
+        add_library(PDFium::PDFium SHARED IMPORTED)
+        set_target_properties(PDFium::PDFium PROPERTIES
+            IMPORTED_IMPLIB "${PDFium_LIBRARY}"
+            IMPORTED_LOCATION "${PDFium_RUNTIME_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${PDFium_INCLUDE_DIR}"
+        )
+    else()
+        add_library(PDFium::PDFium UNKNOWN IMPORTED)
+        set_target_properties(PDFium::PDFium PROPERTIES
+            IMPORTED_LOCATION "${PDFium_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${PDFium_INCLUDE_DIR}"
+        )
+    endif()
 endif()
 
 mark_as_advanced(PDFium_INCLUDE_DIR PDFium_LIBRARY)
+if(WIN32)
+    mark_as_advanced(PDFium_RUNTIME_LIBRARY)
+endif()
