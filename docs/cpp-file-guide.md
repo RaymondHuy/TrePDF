@@ -660,9 +660,14 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 - `encryptFile()` ghi AES-256 security revision 6, dùng cùng mật khẩu user/owner
   và cho phép mọi quyền in, trích xuất, chú thích, sửa nội dung. Phiên bản này
   chỉ yêu cầu mật khẩu mở; chưa đổi/gỡ mật khẩu hoặc cấu hình quyền.
-- qpdf là static target C++20 riêng, dùng native crypto với OS secure randomness,
-  JPEG tĩnh của Qt SDK và zlib. Ứng dụng không gọi CLI, không lưu mật khẩu vào
-  settings/file và không đưa mật khẩu vào log hay thông báo lỗi backend.
+- qpdf được bundle dưới dạng dylib Release đã build sẵn cho macOS arm64 (macOS
+  13 trở lên), dùng native crypto với OS secure randomness và chứa JPEG tĩnh;
+  runtime chỉ phụ thuộc thư viện hệ thống. CMake dùng imported target
+  `QPDF::QPDF`, cho phép đổi package qua `QPDF_ROOT`. Build ứng dụng vẫn dùng
+  C++17, không tải hay biên dịch source qpdf; chỉ script rebuild dependency khi
+  nâng cấp mới cần C++20 và JPEG tĩnh của Qt SDK.
+- Ứng dụng không gọi CLI, không lưu mật khẩu vào settings/file và không đưa
+  mật khẩu vào log hay thông báo lỗi backend.
 - Adapter từ chối nguồn đã mã hóa và không ghi đè nguồn. Kiểm chứng PDFium và
   atomic commit thuộc `PDFSaveWriter`; giới hạn canonicalizer trên PDF vốn đã
   mã hóa vẫn giữ nguyên.

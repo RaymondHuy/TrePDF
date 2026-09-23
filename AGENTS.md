@@ -367,6 +367,8 @@ Current features:
 - `CMakeLists.txt`: application target, QML module, translation pipeline,
   Qt/PDFium discovery, and macOS PDFium bundling.
 - `cmake/FindPDFium.cmake`: creates the `PDFium::PDFium` imported target.
+- `cmake/FindQPDF.cmake`: creates the `QPDF::QPDF` imported target from the
+  prebuilt package, with an optional `QPDF_ROOT` override.
 - `i18n/qml_vi.ts`: Vietnamese ID-based translation catalog.
 - `src/main.cpp`: Qt application startup, default UI language, and QML engine
   loading.
@@ -418,9 +420,10 @@ Current features:
   runs, embeds/reuses fonts, creates added image objects, regenerates changed
   page content, and writes the PDF transactionally.
 - `src/PDFPasswordWriter.h/.cpp`: C++17 adapter to qpdf's C API; encrypts a
-  completed unencrypted staging PDF with an opening password. The bundled qpdf
-  target alone uses C++20, native crypto with OS secure randomness, the Qt SDK's
-  static JPEG library and zlib; no qpdf executable is invoked.
+  completed unencrypted staging PDF with an opening password. The prebuilt qpdf
+  dylib uses native crypto with OS secure randomness and contains its static
+  JPEG dependency; its runtime dependencies are system libraries only. No qpdf
+  executable is invoked.
 - `src/PDFSourceImageGeometry.h`: shared source-image resize eligibility and
   affine frame mapping for the candidate scanner, render preview, and writer.
 - `src/PDFStampPresets.h`: shared 24-preset catalogue, dynamic author/date
@@ -455,6 +458,13 @@ Current features:
   draft editing overlay.
 - `third_party/pdfium`: prebuilt arm64 PDFium headers and library. Treat this as
   third-party code and do not modify it for normal feature work.
+- `third_party/qpdf`: prebuilt Release macOS arm64 qpdf 12.4.1 dylib, public
+  headers, version, checksums, and upstream notices; requires macOS 13 or newer.
+  Normal builds use this package without compiling or downloading qpdf sources.
+- `scripts/build-qpdf-macos.sh`: separate dependency rebuild script for upgrades;
+  accepts a Qt prefix and optional output directory. Only this step requires
+  C++20 and the Qt SDK's static JPEG library. See the package README for tool
+  overrides and verified offline source archives.
 
 ## Local Toolchain
 
@@ -464,12 +474,13 @@ This project is configured for the following local SDK:
 - `Qt6_DIR`: `/Users/luongvanhuy/Qt/6.11.0/macos/lib/cmake/Qt6`
 - `qmake`: `/Users/luongvanhuy/Qt/6.11.0/macos/bin/qmake`
 - PDFium root: `<repo>/third_party/pdfium`
+- qpdf root: `<repo>/third_party/qpdf` (override with `QPDF_ROOT`)
 - CLion: `/Applications/CLion.app`
 - Default build directory: `<repo>/cmake-build-debug`
 
 There is intentionally no `CMakePresets.json`. Do not add one unless the user
 explicitly requests it. `CMakeLists.txt` already contains local fallback paths
-for Qt and PDFium.
+for Qt, PDFium, and qpdf.
 
 ## CLion
 
