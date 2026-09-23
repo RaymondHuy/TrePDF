@@ -95,6 +95,14 @@ Save/reopen retains the password and source protection. Encrypted operations tha
 require the byte-level annotation/AcroForm canonicalizer remain unsupported and
 fail before replacing the destination file.
 
+The **Protect** tab, between Sign and Convert, adds an opening password to an
+unencrypted PDF. **Set password** asks for a new password and confirmation, with
+an option to show the entries. Apply stages the password for the current tab;
+Save or Save As writes it with AES-256 encryption. Discard clears the pending
+password, while undoing content edits retains it. A failed save preserves the
+pending change and the destination file. Changing/removing an existing password
+and configuring printing or editing restrictions are not implemented.
+
 The View tab searches the current PDF text asynchronously across its source
 pages. Typing is debounced, a newer query cancels the older scan, and stale
 results are rejected after a document or page-structure revision. Matches on
@@ -445,7 +453,10 @@ is the initial, statically linked backend bundled under `third_party/`.
 ## Build
 
 Install Qt 6.8 or newer and provide a PDFium build that contains `fpdfview.h`
-and the `pdfium` library.
+and the `pdfium` library. The password writer bundles qpdf 12.4.1 as a static
+library, using the selected Qt SDK's bundled JPEG library and zlib. A C++20-capable
+compiler is required for qpdf; the application remains C++17 and calls its C API.
+No qpdf command-line installation is required.
 
 ```sh
 cmake -S . -B build \

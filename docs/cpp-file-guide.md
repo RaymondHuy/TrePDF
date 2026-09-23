@@ -121,6 +121,8 @@ chữ ký hiển thị, không giữ handle PDFium.
   `passwordRequired()` phân biệt lỗi mật khẩu với lỗi file. Mật khẩu chỉ có API
   C++ `documentPassword()`, không expose thành QML property hay ghi ra đĩa.
   Các worker nhận snapshot mật khẩu riêng; đóng document xóa mật khẩu của nó.
+- `passwordProtected` chỉ expose trạng thái mã hóa từ security-handler revision,
+  dùng để chặn đặt mật khẩu mới trên PDF đã mã hóa.
 - Cache kích thước mọi source page để QML gọi `pageSize()` nóng mà không chạm
   PDFium lặp lại.
 - Expose source URL, loaded/status, page count/current page, current/max page size.
@@ -529,11 +531,15 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 
 **Save orchestration:**
 
+- `setOpenPassword()` chỉ nhận PDF chưa mã hóa và mật khẩu UTF-8 hợp lệ dài
+  1–127 byte, không chứa NUL. `passwordChangePending` thuộc draft guard của từng
+  session nhưng nằm ngoài content undo; Discard hoặc reset session xóa nó.
 - Kết thúc editor, lấy form snapshot, gọi `PDFSaveWriter::prepare()` trên GUI
   thread rồi chạy `save(request)` trên worker.
 - Đặt `saving` để khóa edit/tab operations, chuyển error thành status dịch được.
 - Sau commit thành công, mở lại path; chỉ khi reopen thành công mới xóa draft và
   history. Nếu reopen thất bại, đóng document stale vì object path không còn khớp.
+  Nếu đang đặt mật khẩu, dùng mật khẩu mới để reopen; lỗi ghi giữ pending state.
 
 ### [`src/PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp) và
 [`src/PDFSaveWriter.h`](../src/PDFSaveWriter.h)
@@ -552,6 +558,8 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 
 - Sao chép source/target path, deleted pages, page insertions, mọi draft và form
   designer save fields.
+- Snapshot mật khẩu nguồn và mật khẩu mở mới đang chờ lưu; worker không đọc lại
+  controller và kiểm lại source chưa mã hóa trước khi áp mật khẩu mới.
 - Snapshot `QImage`, font bytes và rich-text format; worker không mở lại đường dẫn
   ảnh hay gọi CoreText/QML object.
 
@@ -637,7 +645,27 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   `FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS`.
 - Chuyển normalized designer field sang page coordinates và gọi
   `PDFAcroFormWriter` nếu có field cần ghi/normalize.
+- Khi có mật khẩu mới, hoàn tất content/form canonicalization trước, mã hóa sang
+  file tạm riêng, rồi dùng PDFium kiểm mở bằng mật khẩu mới, trạng thái mã hóa,
+  số trang và lỗi password khi mở không mật khẩu. Chỉ sau đó commit bằng
+  `QSaveFile`; các file tạm được dọn khi transaction kết thúc.
 - Chỉ commit đích khi từng bước thành công; Save As không chạm source.
+
+### [`src/PDFPasswordWriter.cpp`](../src/PDFPasswordWriter.cpp) và
+[`src/PDFPasswordWriter.h`](../src/PDFPasswordWriter.h)
+
+**Vai trò:** adapter C++17 cho C API của qpdf 12.4.1 được bundle trong
+`third_party/qpdf`, chỉ mã hóa một staging PDF chưa được bảo vệ.
+
+- `encryptFile()` ghi AES-256 security revision 6, dùng cùng mật khẩu user/owner
+  và cho phép mọi quyền in, trích xuất, chú thích, sửa nội dung. Phiên bản này
+  chỉ yêu cầu mật khẩu mở; chưa đổi/gỡ mật khẩu hoặc cấu hình quyền.
+- qpdf là static target C++20 riêng, dùng native crypto với OS secure randomness,
+  JPEG tĩnh của Qt SDK và zlib. Ứng dụng không gọi CLI, không lưu mật khẩu vào
+  settings/file và không đưa mật khẩu vào log hay thông báo lỗi backend.
+- Adapter từ chối nguồn đã mã hóa và không ghi đè nguồn. Kiểm chứng PDFium và
+  atomic commit thuộc `PDFSaveWriter`; giới hạn canonicalizer trên PDF vốn đã
+  mã hóa vẫn giữ nguyên.
 
 ## Tự động tạo liên kết web
 
@@ -1088,6 +1116,9 @@ kiểm round-trip bằng PDFium thay vì phụ thuộc tài liệu ngoài reposi
   cap/join.
 - Page operation: insert/delete, undo/redo/discard, source page mapping và save.
 - Save lifecycle: async save, failure giữ draft, Save/Save As và reopen.
+- Password protection (`tst_PDFEditControllerProtection.cpp`): pending/discard/
+  content undo, mật khẩu ASCII/Unicode/giới hạn UTF-8, Save/Save As rồi mở lại,
+  giữ pending khi ghi lỗi, lưu cùng text/comment/form và cách ly giữa các tab.
 - Multi-tab: document/session độc lập, rotation/Page Display/split/draft riêng,
   state zoom/scroll/page của từng pane không rò tab, save đúng tab và chặn Save
   As đè tab khác.
@@ -1124,6 +1155,7 @@ thay thế kiểm thử native Metal thủ công.
 | `PDFFormView.cpp` | `PDFFormView.h` |
 | `PDFFormWorker.cpp` | `PDFFormWorker.h` |
 | `PDFPageItem.cpp` | `PDFPageItem.h` |
+| `PDFPasswordWriter.cpp` | `PDFPasswordWriter.h` |
 | `PDFSearchController.cpp` | `PDFSearchController.h` |
 | `PDFSaveWriter.cpp` | `PDFSaveWriter.h` |
 | `PDFTabModel.cpp` | `PDFTabModel.h` |

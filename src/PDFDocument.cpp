@@ -181,6 +181,7 @@ bool PDFDocument::open(const QUrl &source, const QString &password)
             m_source = source;
             m_filePath = filePath;
             m_documentPassword = encodedPassword;
+            m_passwordProtected = securityRevision >= 0;
             m_sourcePageCount = pageCount;
             m_pageCount = pageCount;
             m_currentPage = 0;
@@ -289,6 +290,11 @@ bool PDFDocument::passwordRequired() const
     return m_passwordRequired;
 }
 
+bool PDFDocument::passwordProtected() const
+{
+    return m_passwordProtected;
+}
+
 int PDFDocument::renderRevision() const
 {
     return m_revision;
@@ -344,6 +350,7 @@ void PDFDocument::closeDocumentLocked()
     m_filePath.clear();
     m_documentPassword.clear();
     m_passwordRequired = false;
+    m_passwordProtected = false;
     m_sourcePageSizes.clear();
     m_pageSizes.clear();
     m_displaySourcePages.clear();

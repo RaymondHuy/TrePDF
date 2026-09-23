@@ -262,6 +262,8 @@ PDFEditController::PDFEditController(QObject *parent)
           kDrawingCommentBlue,
           kDrawingCommentAlpha)
 {
+    connect(this, &PDFEditController::savingChanged,
+            this, &PDFEditController::passwordProtectionChanged);
     connect(this, &PDFEditController::historyStateChanged,
             this, &PDFEditController::cancelWebLinkCreation);
     connect(this, &PDFEditController::textEditActiveChanged,
@@ -527,7 +529,8 @@ void PDFEditController::setImageAspectRatioLocked(bool locked)
 
 bool PDFEditController::hasDrafts() const
 {
-    return !m_drafts.isEmpty()
+    return !m_pendingOpenPassword.isEmpty()
+        || !m_drafts.isEmpty()
         || !m_autoWebLinks.isEmpty()
         || !m_removedWebLinks.isEmpty()
         || !m_manualLinks.isEmpty()
@@ -537,6 +540,38 @@ bool PDFEditController::hasDrafts() const
         || (m_formController && m_formController->hasDrafts())
         || (m_formDesignerController
             && m_formDesignerController->hasDrafts());
+}
+
+bool PDFEditController::canSetOpenPassword() const
+{
+    return m_document && m_document->isLoaded()
+        && !m_document->passwordProtected() && !m_saving;
+}
+
+bool PDFEditController::passwordChangePending() const
+{
+    return !m_pendingOpenPassword.isEmpty();
+}
+
+bool PDFEditController::setOpenPassword(const QString &password)
+{
+    if (!canSetOpenPassword()) {
+        return false;
+    }
+    const QByteArray encoded = password.toUtf8();
+    if (encoded.isEmpty() || encoded.size() > 127
+        || encoded.contains('\0') || QString::fromUtf8(encoded) != password) {
+        //% "Enter a password containing 1 to 127 UTF-8 bytes and no null characters."
+        emit statusMessage(qtTrId("PdfOpenPasswordInvalid"));
+        return false;
+    }
+    if (m_pendingOpenPassword == encoded) {
+        return true;
+    }
+    m_pendingOpenPassword = encoded;
+    emit passwordProtectionChanged();
+    emit historyStateChanged();
+    return true;
 }
 
 bool PDFEditController::canUndo() const
@@ -818,6 +853,7 @@ void PDFEditController::clearSelection()
 
 void PDFEditController::resetSession()
 {
+    m_pendingOpenPassword.clear();
     cancelWebLinkCreation();
     m_autoWebLinks.clear();
     m_removedWebLinks.clear();
@@ -872,6 +908,7 @@ void PDFEditController::resetSession()
 
     emit pageDataChanged(-1);
     emit historyStateChanged();
+    emit passwordProtectionChanged();
     emit selectionChanged();
     emit commentsChanged();
 }

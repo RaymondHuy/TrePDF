@@ -23,6 +23,7 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerImages.cpp
     tst_PDFEditControllerInk.cpp
     tst_PDFEditControllerParagraphs.cpp
+    tst_PDFEditControllerProtection.cpp
     tst_PDFEditControllerRendering.cpp
     tst_PDFEditControllerSearch.cpp
     tst_PDFEditControllerSessions.cpp
@@ -117,6 +118,7 @@ target_link_libraries(trepdf_edit_controller_tests
         Qt6::Gui
         Qt6::Network
         trepdf_font_archive
+        trepdf_password_writer
         Qt6::Qml
         Qt6::Quick
         Qt6::Test

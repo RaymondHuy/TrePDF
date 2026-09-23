@@ -33,6 +33,7 @@ class PDFDocument : public QObject
     Q_PROPERTY(int pageCount READ pageCount NOTIFY pageCountChanged FINAL)
     Q_PROPERTY(int currentPage READ currentPage WRITE setCurrentPage NOTIFY currentPageChanged FINAL)
     Q_PROPERTY(bool loaded READ isLoaded NOTIFY loadedChanged FINAL)
+    Q_PROPERTY(bool passwordProtected READ passwordProtected NOTIFY sourceChanged FINAL)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged FINAL)
     Q_PROPERTY(qreal currentPageWidth READ currentPageWidth NOTIFY currentPageSizeChanged FINAL)
     Q_PROPERTY(qreal currentPageHeight READ currentPageHeight NOTIFY currentPageSizeChanged FINAL)
@@ -63,6 +64,7 @@ public:
     QString renderFilePath() const;
     QByteArray documentPassword() const;
     bool passwordRequired() const;
+    bool passwordProtected() const;
     int renderRevision() const;
     int sourcePageCount() const;
     int sourcePageIndex(int page) const;
@@ -95,6 +97,7 @@ private:
     QString m_filePath;
     QByteArray m_documentPassword;
     bool m_passwordRequired = false;
+    bool m_passwordProtected = false;
     QVector<QSizeF> m_sourcePageSizes;
     QVector<QSizeF> m_pageSizes;
     QVector<int> m_displaySourcePages;
