@@ -14,6 +14,13 @@ enum class FontLanguage {
     Korean
 };
 
+enum class FontSource {
+    Any,
+    System,
+    Downloaded,
+    Bundled
+};
+
 struct FontFaceData {
     enum class Error {
         None,
@@ -42,10 +49,13 @@ const QStringList &fontFamiliesForLanguage(FontLanguage language,
                                            bool bold = false,
                                            bool italic = false);
 bool isFontFaceSelectable(const QString &family, bool bold, bool italic);
+// Select a source when resolving one exact face; Any checks system, cache, then
+// bundled fonts without treating another source's coverage as that face's own.
 bool fontFaceSupportsText(const QString &family,
                           bool bold,
                           bool italic,
-                          const QString &text);
+                          const QString &text,
+                          FontSource source = FontSource::Any);
 int calibratedFontStretch(const QString &family,
                           int targetStretch,
                           bool bold,

@@ -1,4 +1,5 @@
 #include "ApplicationFonts.h"
+#include "ReviewedCtanFonts.h"
 
 #include <QByteArrayView>
 #include <QCoreApplication>
@@ -685,8 +686,9 @@ bool validateDownloadedFont(const QByteArray &data,
         return (quint32(readBigEndian16(bytes, offset)) << 16)
             | readBigEndian16(bytes, offset + 2);
     };
-    if (read32(0) != 0x00010000U) {
-        error = QStringLiteral("Downloaded font must be a static TrueType font.");
+    const bool openTypeCff = read32(0) == 0x4f54544fU;
+    if (read32(0) != 0x00010000U && !openTypeCff) {
+        error = QStringLiteral("Downloaded font must be a static TrueType or OpenType/CFF font.");
         return false;
     }
     const quint16 count = readBigEndian16(bytes, 4);
@@ -708,14 +710,27 @@ bool validateDownloadedFont(const QByteArray &data,
         tables.insert(tag, bytes.sliced(offset, length));
     }
     for (const QByteArray &required : {QByteArray("head"), QByteArray("OS/2"),
-             QByteArray("glyf"), QByteArray("loca"), QByteArray("cmap"),
+             QByteArray("cmap"),
              QByteArray("name"), QByteArray("maxp"), QByteArray("hhea"), QByteArray("hmtx")}) {
         if (!tables.contains(required)) {
-            error = QStringLiteral("Downloaded font is missing a required TrueType table.");
+            error = QStringLiteral("Downloaded font is missing a required OpenType table.");
             return false;
         }
     }
-    for (const QByteArray &unsupported : {QByteArray("fvar"), QByteArray("CFF "),
+    if (openTypeCff ? (!tables.contains("CFF ") || tables.contains("glyf") || tables.contains("loca"))
+                    : (!tables.contains("glyf") || !tables.contains("loca") || tables.contains("CFF "))) {
+        error = QStringLiteral("Downloaded font outline tables do not match its format.");
+        return false;
+    }
+    if (openTypeCff) {
+        const auto cff = tables.value(QByteArrayLiteral("CFF "));
+        if (cff.size() < 4 || quint8(cff.at(0)) != 1 || quint8(cff.at(2)) < 4
+            || quint8(cff.at(2)) > cff.size() || quint8(cff.at(3)) < 1 || quint8(cff.at(3)) > 4) {
+            error = QStringLiteral("Downloaded font CFF header is invalid.");
+            return false;
+        }
+    }
+    for (const QByteArray &unsupported : {QByteArray("fvar"),
              QByteArray("CFF2"), QByteArray("COLR"), QByteArray("SVG "), QByteArray("CBDT")}) {
         if (tables.contains(unsupported)) {
             error = QStringLiteral("Downloaded font uses an unsupported outline format.");
@@ -723,7 +738,11 @@ bool validateDownloadedFont(const QByteArray &data,
         }
     }
     const QByteArrayView os2 = tables.value(QByteArrayLiteral("OS/2"));
-    if (!permitsEditableEmbedding(os2) || (readBigEndian16(os2, 8) & 0x0300U) != 0) {
+    const bool reviewedEmbedding = os2.size() >= 10
+        && ReviewedCtanFonts::permitsEditableEmbedding(
+            data, readBigEndian16(os2, 0), readBigEndian16(os2, 8));
+    if ((!permitsEditableEmbedding(os2) && !reviewedEmbedding)
+        || (readBigEndian16(os2, 8) & 0x0300U) != 0) {
         error = QStringLiteral("Downloaded font does not permit editable embedding.");
         return false;
     }
@@ -803,7 +822,7 @@ bool registerDownloadedFont(FontRegistry &registry, const QString &path,
 {
     if (findDownloadedFont(registry, font.family, font.bold, font.italic))
         return true;
-    const int registration = QFontDatabase::addApplicationFontFromData(data);
+    const int registration = QFontDatabase::addApplicationFont(path);
     if (registration < 0)
         return false;
     registry.downloadedFonts.append({path, font.family,
@@ -822,7 +841,7 @@ void loadDownloadedFonts(FontRegistry &registry)
     const QString directory = ApplicationFonts::downloadedFontDirectory();
     if (directory.isEmpty())
         return;
-    QDirIterator files(directory, QStringList{QStringLiteral("*.ttf")},
+    QDirIterator files(directory, QStringList{QStringLiteral("*.ttf"), QStringLiteral("*.otf")},
                        QDir::Files | QDir::NoSymLinks);
     qint64 scannedBytes = 0;
     int scannedFiles = 0;
@@ -905,41 +924,46 @@ bool systemFaceIsSelectable(FontRegistry &registry,
     return selectable;
 }
 
-bool fontFaceSupportsCharacters(FontRegistry &registry,
-                                const QString &family,
-                                bool bold,
-                                bool italic,
-                                const QVector<uint> &characters)
+bool bundledFaceSupportsCharacters(FontRegistry &registry,
+                                   const QString &family,
+                                   bool bold,
+                                   bool italic,
+                                   const QVector<uint> &characters)
+{
+    if (!bundledFaceIsSelectable(registry, family, bold, italic))
+        return false;
+    const QString key = fontFaceCacheKey(family, bold, italic);
+    auto rawFont = registry.bundledRawFonts.constFind(key);
+    if (rawFont == registry.bundledRawFonts.cend()) {
+        const QByteArray fontData = ApplicationFonts::bundledFontData(family, bold, italic);
+        rawFont = registry.bundledRawFonts.insert(
+            key, QRawFont(fontData, 16.0, QFont::PreferNoHinting));
+    }
+    return rawFont->isValid()
+        && std::all_of(characters.cbegin(), characters.cend(),
+            [&rawFont](uint character) { return rawFont->supportsCharacter(character); });
+}
+
+bool downloadedFaceSupportsCharacters(const FontRegistry &registry,
+                                      const QString &family,
+                                      bool bold,
+                                      bool italic,
+                                      const QVector<uint> &characters)
 {
     const QString key = fontFaceCacheKey(family, bold, italic);
-    if (bundledFaceIsSelectable(registry, family, bold, italic)) {
-        auto rawFont = registry.bundledRawFonts.constFind(key);
-        if (rawFont == registry.bundledRawFonts.cend()) {
-            const QByteArray fontData = ApplicationFonts::bundledFontData(
-                family,
-                bold,
-                italic);
-            rawFont = registry.bundledRawFonts.insert(
-                key,
-                QRawFont(fontData, 16.0, QFont::PreferNoHinting));
-        }
-        if (!rawFont->isValid()) {
-            return false;
-        }
-        return std::all_of(
-            characters.cbegin(),
-            characters.cend(),
-            [&rawFont](uint character) {
-                return rawFont->supportsCharacter(character);
-            });
-    }
-
     const auto downloaded = registry.downloadedRawFonts.constFind(key);
-    if (downloaded != registry.downloadedRawFonts.cend()) {
-        return std::all_of(characters.cbegin(), characters.cend(),
+    return downloaded != registry.downloadedRawFonts.cend() && downloaded->isValid()
+        && ApplicationFonts::downloadedFontFace(family, bold, italic).isValid()
+        && std::all_of(characters.cbegin(), characters.cend(),
             [&downloaded](uint character) { return downloaded->supportsCharacter(character); });
-    }
+}
 
+bool systemFaceSupportsCharacters(FontRegistry &registry,
+                                  const QString &family,
+                                  bool bold,
+                                  bool italic,
+                                  const QVector<uint> &characters)
+{
     const auto systemFamily = registry.systemFamilyByKey.constFind(
         family.toCaseFolded());
     if (systemFamily == registry.systemFamilyByKey.cend()
@@ -951,6 +975,7 @@ bool fontFaceSupportsCharacters(FontRegistry &registry,
         return false;
     }
 #ifdef Q_OS_MACOS
+    const QString key = fontFaceCacheKey(family, bold, italic);
     auto characterSet = registry.systemCharacterSets.constFind(key);
     if (characterSet == registry.systemCharacterSets.cend()) {
         CFCharacterSetRef createdCharacterSet = copyExactSystemFontCharacterSet(
@@ -973,8 +998,27 @@ bool fontFaceSupportsCharacters(FontRegistry &registry,
                 static_cast<UTF32Char>(character));
         });
 #else
+    Q_UNUSED(characters);
     return false;
 #endif
+}
+
+bool fontFaceSupportsCharacters(FontRegistry &registry,
+                                const QString &family,
+                                bool bold,
+                                bool italic,
+                                const QVector<uint> &characters,
+                                ApplicationFonts::FontSource source)
+{
+    using Source = ApplicationFonts::FontSource;
+    if ((source == Source::Any || source == Source::System)
+        && systemFaceSupportsCharacters(registry, family, bold, italic, characters))
+        return true;
+    if ((source == Source::Any || source == Source::Downloaded)
+        && downloadedFaceSupportsCharacters(registry, family, bold, italic, characters))
+        return true;
+    return (source == Source::Any || source == Source::Bundled)
+        && bundledFaceSupportsCharacters(registry, family, bold, italic, characters);
 }
 
 } // namespace
@@ -1072,7 +1116,8 @@ bool isFontFaceSelectable(const QString &family, bool bold, bool italic)
 bool fontFaceSupportsText(const QString &family,
                           bool bold,
                           bool italic,
-                          const QString &text)
+                          const QString &text,
+                          FontSource source)
 {
     registerBundledFonts();
     FontRegistry &registry = fontRegistry();
@@ -1081,7 +1126,8 @@ bool fontFaceSupportsText(const QString &family,
         family,
         bold,
         italic,
-        visibleCodePoints(text));
+        visibleCodePoints(text),
+        source);
 }
 
 int calibratedFontStretch(const QString &family,
@@ -1436,7 +1482,8 @@ bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &err
         }
         item.alreadyRegistered = existing != nullptr;
         item.path = existing ? existing->path : QDir(directory).filePath(
-            QString::fromLatin1(item.digest.toHex()) + QStringLiteral(".ttf"));
+            QString::fromLatin1(item.digest.toHex())
+                + (request.data.startsWith("OTTO") ? QStringLiteral(".otf") : QStringLiteral(".ttf")));
         if (!existing) {
             ++totalFaces;
             totalBytes += request.data.size();

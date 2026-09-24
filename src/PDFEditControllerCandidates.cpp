@@ -1,6 +1,7 @@
 #include "PDFEditController.h"
 #include "PDFEditController_p.h"
 #include "ApplicationFonts.h"
+#include "PDFFontAliases.h"
 #include "PDFAnnotationUtils.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
@@ -24,6 +25,7 @@
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QFontMetricsF>
+#include <QRawFont>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
@@ -563,18 +565,24 @@ QString matchingFontFamily(FPDF_FONT font, const QStringList &availableFamilies)
     return {};
 }
 
-bool fontSupportsText(const QString &family, const QString &text)
+bool fontSupportsText(const QString &family, bool bold, bool italic, const QString &text)
 {
     if (family.isEmpty()) {
         return false;
     }
 
     QFont font(family);
+    font.setBold(bold);
+    font.setItalic(italic);
     font.setStyleStrategy(QFont::NoFontMerging);
-    const QFontMetricsF metrics(font);
+    const QRawFont raw = QRawFont::fromFont(font);
+    if (!raw.isValid() || raw.familyName() != family
+        || (raw.weight() >= QFont::Bold) != bold
+        || (raw.style() != QFont::StyleNormal) != italic)
+        return false;
     for (uint character : text.toUcs4()) {
         if (!QChar::isSpace(static_cast<char32_t>(character))
-            && !metrics.inFontUcs4(character)) {
+            && !raw.supportsCharacter(character)) {
             return false;
         }
     }
@@ -917,51 +925,96 @@ void PDFEditController::resolveCandidateFontFamily(
     QHash<int, QString> &resolvedEmbeddedFamilies)
 {
     assertPDFiumProcessLockNotHeld();
-    // Resolve known exact faces before registering a PDF-embedded face.
-    // Embedded fonts are commonly subsetted but retain their original family
-    // name. Registering such a subset first can make QFontDatabase select it
-    // instead of the complete bundled/system face for every later object with
-    // that family.
-    if (ApplicationFonts::fontFaceSupportsText(
-            candidate.pendingBundledFontFamily,
-            candidate.fontBold,
-            candidate.fontItalic,
-            candidate.text)) {
-        candidate.fontFamily = candidate.pendingBundledFontFamily;
-    } else if (ApplicationFonts::downloadedFontFamilies().contains(
-                   candidate.pendingFontExpectedFamily, Qt::CaseInsensitive)
-               && ApplicationFonts::fontFaceSupportsText(candidate.pendingFontExpectedFamily,
-                   candidate.fontBold, candidate.fontItalic, candidate.text)) {
-        candidate.fontFamily = candidate.pendingFontExpectedFamily;
+    // Every embedded face gets a private family name: a PDF subset must not
+    // shadow the complete same-name system or cached font in Qt's registry.
+    QString embeddedFamily;
+    const auto resolvedFamily = resolvedEmbeddedFamilies.constFind(
+        candidate.pendingFontSnapshotIndex);
+    if (resolvedFamily != resolvedEmbeddedFamilies.cend()) {
+        embeddedFamily = resolvedFamily.value();
+    } else {
+        embeddedFamily = registerEmbeddedFont(candidate.pendingEmbeddedFontData,
+                                             candidate.pendingFontExpectedFamily);
+        resolvedEmbeddedFamilies.insert(candidate.pendingFontSnapshotIndex, embeddedFamily);
+    }
+    QString cachedFamily;
+    const QString expectedKey = fontFamilyMatchKey(candidate.pendingFontExpectedFamily);
+    const QString identityKey = fontFamilyMatchKey(candidate.fontIdentity);
+    for (const QString &family : ApplicationFonts::downloadedFontFamilies()) {
+        const QString key = fontFamilyMatchKey(family);
+        if ((!expectedKey.isEmpty() && key == expectedKey)
+            || (!identityKey.isEmpty() && key == identityKey)) {
+            cachedFamily = family;
+            break;
+        }
+    }
+    if (fontSupportsText(embeddedFamily, candidate.fontBold, candidate.fontItalic, candidate.text)) {
+        candidate.fontFamily = embeddedFamily;
     } else if (ApplicationFonts::fontFaceSupportsText(
                    candidate.pendingSystemFontFamily,
                    candidate.fontBold,
                    candidate.fontItalic,
-                   candidate.text)) {
+                   candidate.text, ApplicationFonts::FontSource::System)) {
         candidate.fontFamily = candidate.pendingSystemFontFamily;
+    } else if (!cachedFamily.isEmpty()
+               && ApplicationFonts::fontFaceSupportsText(cachedFamily,
+                   candidate.fontBold, candidate.fontItalic, candidate.text,
+                   ApplicationFonts::FontSource::Downloaded)) {
+        candidate.fontFamily = cachedFamily;
+    } else if (ApplicationFonts::fontFaceSupportsText(
+                   candidate.pendingBundledFontFamily,
+                   candidate.fontBold,
+                   candidate.fontItalic,
+                   candidate.text, ApplicationFonts::FontSource::Bundled)) {
+        candidate.fontFamily = candidate.pendingBundledFontFamily;
     } else {
-        QString embeddedFamily;
-        const auto resolvedFamily = resolvedEmbeddedFamilies.constFind(
-            candidate.pendingFontSnapshotIndex);
-        if (resolvedFamily != resolvedEmbeddedFamilies.cend()) {
-            embeddedFamily = resolvedFamily.value();
-        } else {
-            embeddedFamily = registerEmbeddedFont(
-                candidate.pendingEmbeddedFontData,
-                candidate.pendingFontExpectedFamily);
-            resolvedEmbeddedFamilies.insert(
-                candidate.pendingFontSnapshotIndex,
-                embeddedFamily);
-        }
-
-        candidate.fontFamily = fontSupportsText(embeddedFamily, candidate.text)
-            ? embeddedFamily
-            : QString();
+        candidate.fontFamily.clear();
     }
 
     if (candidate.fontFamily.isEmpty()) {
-        candidate.fontFamily = compatibleSourceFontFamily(candidate.fontIdentity,
+        const QString fallbackFamily = compatibleSourceFontFamily(candidate.fontIdentity,
             candidate.fontBold, candidate.fontItalic, candidate.text);
+        if (!fallbackFamily.isEmpty()) {
+            QByteArray bytes = ApplicationFonts::systemFontFace(fallbackFamily,
+                candidate.fontBold, candidate.fontItalic).data;
+            if (bytes.isEmpty()) {
+                bytes = ApplicationFonts::bundledFontData(fallbackFamily,
+                    candidate.fontBold, candidate.fontItalic);
+            }
+            // This compatibility preview must not turn a missing TeX font
+            // into a Times request. Save still resolves/downloads the actual
+            // source family before accepting any final substitution.
+            candidate.fontFamily = registerEmbeddedFont(bytes,
+                QStringLiteral("TeX Gyre Termes"), true);
+        }
+    }
+
+    if (candidate.fontFamily.isEmpty()) {
+        // Qt already uses its ordinary display fallback for an unknown family.
+        // Retain the requested source name so Save can try reviewed providers
+        // instead of losing it when the embedded program cannot be registered.
+        candidate.fontFamily = candidate.pendingFontExpectedFamily;
+        if (!candidate.fontIdentity.isEmpty()
+            && (candidate.fontFamily.isEmpty() || identityKey != expectedKey)) {
+            // PDFium can report a generic substitute (e.g. Chrome Sans MM) as
+            // the family when no usable program exists. Preserve /BaseFont.
+            candidate.fontFamily = candidate.fontIdentity;
+            static const QRegularExpression styleSuffix(QStringLiteral(
+                "[-,](Regular|BoldItalic|BoldOblique|Bold|Italic|Oblique)$"),
+                QRegularExpression::CaseInsensitiveOption);
+            candidate.fontFamily.remove(styleSuffix);
+        }
+        static const QStringList texFamilies{
+            QStringLiteral("TeX Gyre Termes"), QStringLiteral("TeX Gyre Heros"),
+            QStringLiteral("TeX Gyre Pagella"), QStringLiteral("TeX Gyre Schola"),
+            QStringLiteral("TeX Gyre Cursor")};
+        for (const QString &family : texFamilies) {
+            const QString key = fontFamilyMatchKey(family);
+            if (key == expectedKey || key == identityKey) {
+                candidate.fontFamily = family;
+                break;
+            }
+        }
     }
 
     candidate.pendingFontSnapshotIndex = -1;
@@ -973,16 +1026,21 @@ void PDFEditController::resolveCandidateFontFamily(
 
 QString PDFEditController::registerEmbeddedFont(
     const QByteArray &fontData,
-    const QString &expectedFamily)
+    const QString &expectedFamily,
+    bool substitute)
 {
     assertPDFiumProcessLockNotHeld();
     if (fontData.isEmpty()) {
         return {};
     }
 
-    const QByteArray fingerprint = QCryptographicHash::hash(
+    QByteArray fingerprint = QCryptographicHash::hash(
         fontData,
         QCryptographicHash::Sha256);
+    if (substitute) {
+        fingerprint = QCryptographicHash::hash(fingerprint + '\0' + expectedFamily.toUtf8(),
+            QCryptographicHash::Sha256);
+    }
     const auto registeredFamily = m_registeredFontFamilies.constFind(fingerprint);
     if (registeredFamily != m_registeredFontFamilies.cend()) {
         return registeredFamily.value();
@@ -1001,27 +1059,28 @@ QString PDFEditController::registerEmbeddedFont(
     // must not try to register the same bytes recursively.
     rememberRejectedFontFingerprint(fingerprint);
 
-    const int fontId = QFontDatabase::addApplicationFontFromData(fontData);
+    const PDFFontAliases::AliasData alias = PDFFontAliases::isolate(fontData, expectedFamily, substitute);
+    if (alias.data.isEmpty()
+        || alias.data.size() > kMaximumRegisteredFontBytes - m_registeredFontBytes
+        || !PDFFontAliases::retain(alias)) {
+        return {};
+    }
+    const int fontId = QFontDatabase::addApplicationFontFromData(alias.data);
     if (fontId < 0) {
+        PDFFontAliases::release(alias.family);
         return {};
     }
 
     const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
-    if (families.isEmpty()) {
+    if (!families.contains(alias.family)) {
         QFontDatabase::removeApplicationFont(fontId);
+        PDFFontAliases::release(alias.family);
         return {};
     }
-
-    QString family = families.constFirst();
-    for (const QString &candidateFamily : families) {
-        if (candidateFamily.compare(expectedFamily, Qt::CaseInsensitive) == 0) {
-            family = candidateFamily;
-            break;
-        }
-    }
+    const QString family = alias.family;
 
     m_registeredFontIds.append(fontId);
-    m_registeredFontBytes += fontData.size();
+    m_registeredFontBytes += alias.data.size();
     m_rejectedFontFingerprints.remove(fingerprint);
     m_rejectedFontFingerprintLru.removeAll(fingerprint);
     m_registeredFontFamilies.insert(fingerprint, family);
@@ -1050,6 +1109,8 @@ void PDFEditController::clearRegisteredFonts()
         QFontDatabase::removeApplicationFont(*fontId);
     }
     m_registeredFontIds.clear();
+    for (const QString &family : std::as_const(m_registeredFontFamilies))
+        PDFFontAliases::release(family);
     m_registeredFontFamilies.clear();
     m_rejectedFontFingerprints.clear();
     m_rejectedFontFingerprintLru.clear();
@@ -2921,6 +2982,16 @@ QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphL
         }
         qsizetype visibleIndex = 0;
         qsizetype whitespaceEnd = 0;
+        const auto familyStyleKey = [](const QString &family, bool bold, bool italic) {
+            return PDFFontAliases::semanticFamily(family).toCaseFolded()
+                + QLatin1Char('|') + QString::number(bold) + QString::number(italic);
+        };
+        QHash<QString, QString> paragraphDisplayFamilies;
+        for (qsizetype index : indices) {
+            const Candidate &part = candidates[index];
+            paragraphDisplayFamilies.insert(
+                familyStyleKey(part.fontFamily, part.fontBold, part.fontItalic), part.fontFamily);
+        }
         for (const QJsonValue &value : whitespaceArray) {
             const QJsonObject object = value.toObject();
             const auto number = [&](const char *key) {
@@ -2970,6 +3041,12 @@ QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphL
                 valid = false;
                 break;
             }
+            // Metadata stores public names, while the newly reopened PDF's
+            // embedded subsets have fresh private display aliases. Recover
+            // those aliases for blank-line metrics without persisting them.
+            format.fontFamily = paragraphDisplayFamilies.value(
+                familyStyleKey(format.fontFamily, format.fontBold, format.fontItalic),
+                format.fontFamily);
             whitespaceFormats.append(CharacterSpan{start, length, format});
             whitespaceEnd = start + length;
         }
@@ -3586,7 +3663,8 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         // Preserve each line's format instead of applying the first line's
         // bold/italic/underline and calibrated stretch to the entire paragraph.
         return !left.fontFamily.isEmpty()
-            && sameFontFamily(left.fontFamily, right.fontFamily)
+            && sameFontFamily(PDFFontAliases::semanticFamily(left.fontFamily),
+                              PDFFontAliases::semanticFamily(right.fontFamily))
             && qAbs(emSize(left) - emSize(right))
                 <= qMax<qreal>(0.25, 0.02 * qMax(emSize(left), emSize(right)))
             && qAbs(left.fontStretch - right.fontStretch) <= 1

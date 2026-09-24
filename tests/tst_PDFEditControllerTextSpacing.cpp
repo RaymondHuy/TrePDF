@@ -901,8 +901,8 @@ void PDFEditControllerTest::savesTextSpacingWithoutStretchingGlyphs()
         QCOMPARE(origins.size(), expectedOrigins.size());
         for (qsizetype index = 0; index < origins.size(); ++index) {
             QVERIFY2(qAbs(origins.at(index) - expectedOrigins.at(index)) < 0.15,
-                     qPrintable(QStringLiteral("Character %1: expected x=%2, saved x=%3")
-                         .arg(index).arg(expectedOrigins.at(index)).arg(origins.at(index))));
+                     qPrintable(QStringLiteral("%1 character %2: expected x=%3, saved x=%4")
+                         .arg(path).arg(index).arg(expectedOrigins.at(index)).arg(origins.at(index))));
         }
         // Text spacing changes advances between glyphs, not their outlines.
         for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {

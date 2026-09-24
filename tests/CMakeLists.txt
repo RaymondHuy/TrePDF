@@ -38,6 +38,14 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/ApplicationFonts.h
     ../src/FontDownloadService.cpp
     ../src/FontDownloadService.h
+    ../src/IFontProvider.h
+    ../src/ReviewedCtanFonts.h
+    ../src/PDFFontAliases.cpp
+    ../src/PDFFontAliases.h
+    ../src/GoogleFontsProvider.cpp
+    ../src/GoogleFontsProvider.h
+    ../src/CtanFontProvider.cpp
+    ../src/CtanFontProvider.h
     ../src/DraftImageItem.cpp
     ../src/DraftImageItem.h
     ../src/FormFieldLayer.cpp

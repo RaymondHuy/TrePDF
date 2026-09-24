@@ -1,5 +1,6 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
+#include "PDFFontAliases.h"
 
 using namespace PDFEditControllerTestSupport;
 
@@ -117,7 +118,9 @@ void PDFEditControllerTest::groupsMixedFontLineWithHistoryAndSave()
         QVERIFY(controller.selectCandidate(0, restored.value(QStringLiteral("objectId")).toString()));
         for (int index = 0; index < 4; ++index) {
             const QVariantMap format = formatAt(QVector<int>{0, 4, 10, 16}[index]);
-            for (const QString &key : {QStringLiteral("fontFamily"), QStringLiteral("fontBold"),
+            QCOMPARE(PDFFontAliases::semanticFamily(format.value(QStringLiteral("fontFamily")).toString()),
+                     PDFFontAliases::semanticFamily(formats[index].value(QStringLiteral("fontFamily")).toString()));
+            for (const QString &key : {QStringLiteral("fontBold"),
                                        QStringLiteral("fontItalic"), QStringLiteral("fontStretch")}) {
                 QCOMPARE(format.value(key), formats[index].value(key));
             }
@@ -484,9 +487,9 @@ void PDFEditControllerTest::savesMixedSourceParagraphStylesRoundTrip()
     QVERIFY(bold.found);
     QVERIFY(regular.found);
     QVERIFY(finalLine.found);
-    QVERIFY(bold.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive));
-    QVERIFY(!regular.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive));
-    QVERIFY(!finalLine.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive));
+    QVERIFY(bold.weight >= 700);
+    QVERIFY(regular.weight > 0 && regular.weight < 700);
+    QVERIFY(finalLine.weight > 0 && finalLine.weight < 700);
     FS_MATRIX nextSaved{};
     QVERIFY(textObjectMatrix(outputPath, parts.at(6).text, nextSaved));
     QCOMPARE(nextSaved.a, nextOriginal.a);

@@ -347,18 +347,20 @@ draft. The inline rich-text editor supports multiple lines, wraps/reflows inside
 the layout frame, renders mixed character styles, and applies formatting to the
 selected text range.
 
-Fonts placed under `src/assets/fonts` are bundled with the application and
-preferred over matching system-installed families for draft display and PDF
-embedding. The save writer can reuse the original PDF font when a replacement
+Font resolution prefers a usable embedded PDF face, then an exact system
+face, the app's font cache, Google Fonts, CTAN, and the existing fallback.
+Fonts under `src/assets/fonts` remain bundled for the fallback paths.
+The save writer can reuse the original PDF font when a replacement
 run only uses characters already present in its source text, and can use a
 compatible PDF standard font for ASCII. Edited non-ASCII text is normalized to
 NFC; newly introduced Vietnamese text inheriting an Arial/Helvetica face is
-written with the matching bundled Arial Unicode font instead of reusing a
-potentially incomplete PDF subset. Eligible newly selected macOS system fonts
+written with an exact complete local face if the embedded subset lacks glyphs.
+Eligible newly selected macOS system fonts
 whose exact regular/bold/italic face is available are resolved with CoreText,
 snapshotted before the save worker starts, and embedded as CID Unicode TrueType
-fonts. On serialization, PDFium subsets each newly embedded face to the glyphs
-used by the new text objects; original PDF font resources remain untouched. TTC
+fonts. New font programs retain their shaping and kerning tables so editing
+after reopen preserves advances; this can produce larger files than subsetting.
+Original PDF font resources remain untouched. TTC
 faces are materialized individually so PDFium does not select the wrong face.
 The font picker probes the exact active style and excludes known
 incompatible system faces such as color, CFF/CFF2, variable, bitmap-only, or
@@ -367,6 +369,20 @@ the current PDF font without being offered in the popup. Unedited objects keep
 their original font resources. Missing glyphs, system faces larger than 64 MiB,
 and other failures discovered by the final content-specific check stop the
 save with an error and keep the draft intact.
+
+The download service keeps Google Fonts first and checks CTAN only when the
+family is absent from that catalogue. Its reviewed CTAN catalogue includes
+TeX Gyre Termes, Heros, Pagella, Schola and Cursor in four styles, downloaded
+through `https://mirror.ctan.org/` under the GUST Font License. If the selected
+mirror is blocked or unavailable, bounded retries use two explicitly listed
+official CTAN HTTPS mirrors. Validated fonts
+are saved atomically in the app cache and registered with
+`QFontDatabase::addApplicationFont()`; subsequent uses reuse that cache.
+Static CTAN OpenType/CFF fonts use a dedicated PDF staging step that writes
+`FontFile3 /OpenType` without changing the font bytes. Unknown families keep
+the existing fallback; no arbitrary font websites are searched. See
+[font providers](docs/font-providers.md) for the provider interface, cache,
+licensing and supported formats.
 
 The same font dropdown provides Vietnamese, English, Chinese, Japanese, and
 Korean filters. Vietnamese uses full precomposed Vietnamese coverage; English
