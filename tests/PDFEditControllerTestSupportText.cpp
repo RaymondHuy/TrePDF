@@ -966,6 +966,46 @@ QString compactFontName(const QString &name)
     return result;
 }
 
+static TextObjectFontInfo readTextObjectFontInfo(FPDF_PAGEOBJECT object)
+{
+    TextObjectFontInfo info;
+    const FPDF_FONT font = FPDFTextObj_GetFont(object);
+    if (!font)
+        return info;
+    info.found = true;
+    info.baseName = baseFontName(object);
+    info.familyName = fontFamilyName(font);
+    info.embedded = FPDFFont_GetIsEmbedded(font);
+    FPDFFont_GetFontData(font, nullptr, 0, &info.dataSize);
+    if (info.embedded == 1) {
+        if (info.dataSize == 0 || info.dataSize > 64 * 1024 * 1024)
+            return info;
+        QByteArray data(qsizetype(info.dataSize), Qt::Uninitialized);
+        size_t actual = 0;
+        if (!FPDFFont_GetFontData(font, reinterpret_cast<uint8_t *>(data.data()),
+                                  info.dataSize, &actual) || actual != info.dataSize)
+            return info;
+        const QRawFont rawFont(data, 16.0, QFont::PreferNoHinting);
+        if (rawFont.isValid()) {
+            // PDFium may report a default descriptor weight even when the
+            // embedded program's OS/2 table identifies the correct bold face.
+            info.weight = rawFont.weight();
+            info.italic = rawFont.style() != QFont::StyleNormal;
+        }
+        return info;
+    }
+    info.weight = FPDFFont_GetWeight(font);
+    if (info.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive))
+        info.weight = qMax(info.weight, 700);
+    int angle = 0;
+    const int flags = FPDFFont_GetFlags(font);
+    info.italic = (FPDFFont_GetItalicAngle(font, &angle) && angle != 0)
+        || (flags >= 0 && (flags & (1 << 6)))
+        || info.baseName.contains(QStringLiteral("Italic"), Qt::CaseInsensitive)
+        || info.baseName.contains(QStringLiteral("Oblique"), Qt::CaseInsensitive);
+    return info;
+}
+
 TextObjectFontInfo textObjectFontInfo(const QString &filePath,
                                       const QString &text)
 {
@@ -983,18 +1023,7 @@ TextObjectFontInfo textObjectFontInfo(const QString &filePath,
                 continue;
             }
 
-            const FPDF_FONT font = FPDFTextObj_GetFont(object);
-            info.found = font;
-            info.baseName = baseFontName(object);
-            info.familyName = fontFamilyName(font);
-            if (font) {
-                FPDFFont_GetFontData(font, nullptr, 0, &info.dataSize);
-            }
-            int italicAngle = 0;
-            info.italic = font
-                && FPDFFont_GetItalicAngle(font, &italicAngle)
-                && italicAngle != 0;
-            info.embedded = font ? FPDFFont_GetIsEmbedded(font) : -1;
+            info = readTextObjectFontInfo(object);
             break;
         }
     }
@@ -1388,10 +1417,8 @@ RichSaveInspection inspectRichSave(const QString &filePath)
                     && green == 0x28
                     && blue == 0x28
                     && alpha == 0xff;
-                const QString fontName = baseFontName(object).toLower();
-                inspection.boldItalicRun = fontName.contains(QStringLiteral("bold"))
-                    && (fontName.contains(QStringLiteral("italic"))
-                        || fontName.contains(QStringLiteral("oblique")));
+                const TextObjectFontInfo font = readTextObjectFontInfo(object);
+                inspection.boldItalicRun = font.weight >= 700 && font.italic;
                 redBaseline = matrix.f;
                 foundRedBaseline = true;
             } else if (text.contains(QStringLiteral("blue"))) {

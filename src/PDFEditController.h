@@ -1036,7 +1036,8 @@ private:
         QHash<int, QString> &resolvedEmbeddedFamilies);
     QString registerEmbeddedFont(
         const QByteArray &fontData,
-        const QString &expectedFamily);
+        const QString &expectedFamily,
+        bool substitute = false);
     void rememberRejectedFontFingerprint(const QByteArray &fingerprint);
     void clearRegisteredFonts();
     bool isDesignerManagedSourceWidget(const Candidate &candidate) const;
@@ -1090,7 +1091,6 @@ private:
     QHash<QByteArray, QString> m_registeredFontFamilies;
     QSet<QByteArray> m_rejectedFontFingerprints;
     QVector<QByteArray> m_rejectedFontFingerprintLru;
-    QVector<int> m_registeredFontIds;
     qsizetype m_registeredFontBytes = 0;
     Candidate m_selectedCandidate;
     bool m_hasSelection = false;

@@ -1,12 +1,25 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <QStandardPaths>
+#include <QUuid>
+
 using namespace PDFEditControllerTestSupport;
 
 void PDFEditControllerTest::initTestCase()
 {
     QVERIFY2(m_temporaryDirectory.isValid(), "Could not create the test directory");
+    const QString cacheProbeApp = qEnvironmentVariable("TREPDF_FONT_CACHE_PROBE_APP");
+    if (!cacheProbeApp.isEmpty()) {
+        const QString prefix = QStringLiteral("TrePDF-font-test-");
+        QVERIFY(cacheProbeApp.startsWith(prefix));
+        QVERIFY(!QUuid(cacheProbeApp.mid(prefix.size())).isNull());
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName(cacheProbeApp);
+    }
     ApplicationFonts::registerBundledFonts();
+    if (!cacheProbeApp.isEmpty())
+        return;
 
     const QString pdfPath = m_temporaryDirectory.filePath(QStringLiteral("font-styles.pdf"));
     QVERIFY2(createFontStylePdf(pdfPath), "Could not create the PDF test fixture");

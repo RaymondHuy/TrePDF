@@ -82,8 +82,10 @@ find_package(ZLIB REQUIRED)
 qt_add_library(trepdf_password_writer STATIC
     src/PDFPasswordWriter.cpp
     src/PDFPasswordWriter.h
+    src/PDFOpenTypeFontWriter.cpp
+    src/PDFOpenTypeFontWriter.h
 )
-target_link_libraries(trepdf_password_writer PRIVATE QPDF::QPDF Qt6::Core)
+target_link_libraries(trepdf_password_writer PRIVATE QPDF::QPDF Qt6::Core ZLIB::ZLIB)
 
 qt_add_library(trepdf_font_archive STATIC
     third_party/libxlsxwriter/third_party/minizip/unzip.c
@@ -106,6 +108,14 @@ qt_add_qml_module(trepdf
         src/ApplicationFonts.h
         src/FontDownloadService.cpp
         src/FontDownloadService.h
+        src/IFontProvider.h
+        src/ReviewedCtanFonts.h
+        src/PDFFontAliases.cpp
+        src/PDFFontAliases.h
+        src/GoogleFontsProvider.cpp
+        src/GoogleFontsProvider.h
+        src/CtanFontProvider.cpp
+        src/CtanFontProvider.h
         src/DraftImageItem.cpp
         src/DraftImageItem.h
         src/FormFieldLayer.cpp

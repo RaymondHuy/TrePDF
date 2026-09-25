@@ -488,6 +488,7 @@ struct TextObjectFontInfo {
     QString baseName;
     QString familyName;
     size_t dataSize = 0;
+    int weight = -1;
     bool italic = false;
     int embedded = -1;
 };

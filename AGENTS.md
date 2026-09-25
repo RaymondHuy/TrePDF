@@ -334,8 +334,9 @@ Current features:
   paragraph breaks remain separate. Source-break positions follow text edits
   and draft snapshots. Saving justified lines positions words independently
   to retain their spacing without stretching glyphs; the final line stays left aligned.
-- Fonts under `src/assets/fonts` are bundled and preferred over matching system
-  families when resolving draft text fonts.
+- Draft fonts resolve through embedded PDF faces, system fonts, the private app
+  cache, Google Fonts, then the reviewed CTAN TeX Gyre catalogue. Fonts under
+  `src/assets/fonts` remain available as local fallback. See `docs/font-providers.md`.
 - Contextual Edit/Delete actions when selecting editable text; deletion remains
   an undoable draft until Save writes it into the PDF.
 - Transactional PDF persistence through a separate PDFium document handle.
@@ -724,9 +725,10 @@ clipped or elided unintentionally.
 - Keep loaded font handles alive until all changed pages have called
   `FPDFPage_GenerateContent()` and the document has been serialized.
 - Write through `QSaveFile` and call `FPDF_SaveAsCopy()` with
-  `FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS`. The subset flag trims newly
-  embedded font programs to glyphs used by new text objects while leaving
-  original PDF font resources unchanged. Commit only after PDFium succeeds;
+  `FPDF_NO_INCREMENTAL`. Preserve shaping/kerning tables in newly embedded
+  programs: PDFium's subset flag strips these and changes layout after reopen
+  with embedded-first resolution. Original PDF font resources stay unchanged.
+  Commit only after PDFium succeeds;
   any earlier error must leave the destination and in-memory drafts untouched.
 - Keep a pending opening password outside content undo snapshots but inside
   the draft/close guard. Snapshot it into the worker request without exposing a

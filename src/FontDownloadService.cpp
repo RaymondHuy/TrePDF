@@ -1,18 +1,16 @@
 #include "FontDownloadService.h"
 
 #include "ApplicationFonts.h"
+#include "GoogleFontsProvider.h"
+#include "CtanFontProvider.h"
 
 #include <QCoreApplication>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRawFont>
 #include <QRegularExpression>
 #include <QThread>
-#include <QUrlQuery>
 
 #include <unzip.h>
 #include <QTemporaryFile>
@@ -54,6 +52,8 @@ QString incompleteFontMessage(const QString &family)
 FontDownloadService::FontDownloadService(QObject *parent, QNetworkAccessManager *network)
     : QObject(parent), m_network(network ? network : new QNetworkAccessManager(this))
 {
+    m_providers.emplace_back(std::make_unique<GoogleFontsProvider>());
+    m_providers.emplace_back(std::make_unique<CtanFontProvider>());
     m_deadline.setSingleShot(true);
     m_deadline.setInterval(120000);
     connect(&m_deadline, &QTimer::timeout, this, [this]() {
@@ -88,8 +88,7 @@ void FontDownloadService::start(const QString &family, bool bold, bool italic,
     }
     m_deadline.start();
     prepareFaces(true, true, true, true);
-    if (std::all_of(m_faces.cbegin(), m_faces.cend(),
-                    [this](const Face &face) { return hasCachedFace(face); })) {
+    if (hasCachedFace(Face{m_bold, m_italic, {}})) {
         complete(true, {});
         return;
     }
@@ -107,11 +106,7 @@ void FontDownloadService::start(const QString &family, bool bold, bool italic,
         request(QUrl(QString::fromLatin1(aptosDownloadUrl)), Stage::AptosArchive);
         return;
     }
-    QUrl metadata(QStringLiteral("https://api.fontsource.org/v1/fonts"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("family"), m_family);
-    metadata.setQuery(query);
-    request(metadata, Stage::Metadata);
+    nextProvider();
 }
 
 void FontDownloadService::cancel()
@@ -129,7 +124,9 @@ void FontDownloadService::cancel()
     m_data.clear();
     m_faces.clear();
     m_faceIndex = 0;
-    m_subsets.clear();
+    m_providerIndex = -1;
+    m_providerFamily = {};
+    m_fontSourceIndex = 0;
 }
 
 qint64 FontDownloadService::maximumBytes(Stage stage)
@@ -143,35 +140,52 @@ qint64 FontDownloadService::maximumBytes(Stage stage)
     return 0;
 }
 
-bool FontDownloadService::allowedUrl(const QUrl &url, Stage stage)
+IFontProvider::Resource FontDownloadService::resourceForStage(Stage stage)
 {
-    if (!url.isValid() || url.scheme() != QLatin1String("https")
-        || !url.userInfo().isEmpty() || url.port(-1) != -1 || url.hasFragment())
-        return false;
     switch (stage) {
-    case Stage::Metadata:
-        return url.host() == QLatin1String("api.fontsource.org")
-            && url.path() == QLatin1String("/v1/fonts");
-    case Stage::Stylesheet:
-        return url.host() == QLatin1String("fonts.googleapis.com")
-            && url.path() == QLatin1String("/css");
-    case Stage::Font:
-        return url.host() == QLatin1String("fonts.gstatic.com")
-            && url.path().startsWith(QLatin1String("/s/"))
-            && url.path().endsWith(QLatin1String(".ttf")) && !url.hasQuery();
-    case Stage::AptosArchive:
+    case Stage::Metadata: return IFontProvider::Resource::Metadata;
+    case Stage::Stylesheet: return IFontProvider::Resource::Stylesheet;
+    default: return IFontProvider::Resource::Font;
+    }
+}
+
+bool FontDownloadService::allowedUrl(const QUrl &url, Stage stage) const
+{
+    if (!IFontProvider::isSecureUrl(url))
+        return false;
+    if (stage == Stage::AptosArchive) {
         return url.host() == QLatin1String("download.microsoft.com")
             && url.path().startsWith(QLatin1String("/download/"))
             && url.path().endsWith(QLatin1String(".zip")) && !url.hasQuery();
     }
-    return false;
+    return m_providerIndex >= 0 && size_t(m_providerIndex) < m_providers.size()
+        && m_providers[size_t(m_providerIndex)]->allowsUrl(url, resourceForStage(stage));
 }
 
-void FontDownloadService::request(const QUrl &url, Stage stage)
+void FontDownloadService::nextProvider()
 {
     if (!m_active)
         return;
-    if (!m_network || !allowedUrl(url, stage)) {
+    ++m_providerIndex;
+    m_redirects = 0;
+    m_fontSourceIndex = 0;
+    if (size_t(m_providerIndex) >= m_providers.size()) {
+        // Leave the caller's existing display fallback and save draft intact.
+        failUnavailable();
+        return;
+    }
+    const auto url = m_providers[size_t(m_providerIndex)]->metadataUrl(m_family);
+    if (url.isEmpty())
+        processMetadata({});
+    else
+        request(url, Stage::Metadata);
+}
+
+void FontDownloadService::request(const QUrl &url, Stage stage, bool approvedRedirect)
+{
+    if (!m_active)
+        return;
+    if (!m_network || (!approvedRedirect && !allowedUrl(url, stage))) {
         failUnavailable();
         return;
     }
@@ -215,21 +229,37 @@ void FontDownloadService::receiveFinished(QNetworkReply *reply)
     if (!m_active || reply != m_reply)
         return;
     const QUrl redirect = reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
-    const QUrl resolvedRedirect = reply->url().resolved(redirect);
+    const QUrl replyUrl = reply->url();
+    const QUrl resolvedRedirect = replyUrl.resolved(redirect);
     const auto error = reply->error();
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     m_reply.clear();
     disconnect(reply, nullptr, this, nullptr);
     reply->deleteLater();
     if (!redirect.isEmpty()) {
-        if (++m_redirects > 3 || !allowedUrl(resolvedRedirect, m_stage)) {
+        // Inspect the original Location before QUrl::resolved normalizes away
+        // dot segments. Approved providers never need parent traversal.
+        const QStringList segments = redirect.path().split(QLatin1Char('/'));
+        const bool permitted = m_stage == Stage::AptosArchive
+            ? allowedUrl(resolvedRedirect, m_stage)
+            : m_providerIndex >= 0 && m_providers[size_t(m_providerIndex)]->allowsRedirect(
+                replyUrl, resolvedRedirect, resourceForStage(m_stage));
+        if (++m_redirects > 3 || status < 300 || status >= 400 || !permitted
+            || segments.contains(QStringLiteral("."))
+            || segments.contains(QStringLiteral(".."))) {
             failUnavailable();
             return;
         }
-        request(resolvedRedirect, m_stage);
+        request(resolvedRedirect, m_stage, true);
         return;
     }
     if (error != QNetworkReply::NoError || status != 200) {
+        const bool transportFailure = error > QNetworkReply::NoError
+            && error < QNetworkReply::ContentAccessDenied;
+        const bool retryable = transportFailure || status == 0 || status == 403 || status == 404
+            || status == 408 || status == 429 || (status >= 500 && status <= 599);
+        if (retryable && retryFontFromMirror())
+            return;
         //% "The font could not be downloaded. Check your connection and try again."
         complete(false, qtTrId("FontDownloadNetworkFailed"));
         return;
@@ -254,49 +284,26 @@ void FontDownloadService::receiveFinished(QNetworkReply *reply)
 
 void FontDownloadService::processMetadata(const QByteArray &data)
 {
-    const QJsonDocument document = QJsonDocument::fromJson(data);
-    const QJsonArray fonts = document.array();
-    if (!document.isArray() || fonts.size() > 32) {
+    if (m_providerIndex < 0 || size_t(m_providerIndex) >= m_providers.size()) {
         failUnavailable();
         return;
     }
-    for (const QJsonValue &value : fonts) {
-        const QJsonObject font = value.toObject();
-        const QString family = font.value(QStringLiteral("family")).toString();
-        if (family.compare(m_family, Qt::CaseInsensitive) != 0
-            || font.value(QStringLiteral("type")).toString() != QLatin1String("google")
-            || !font.value(QStringLiteral("weights")).toArray().contains(m_bold ? 700 : 400)
-            || !font.value(QStringLiteral("styles")).toArray().contains(
-                m_italic ? QStringLiteral("italic") : QStringLiteral("normal")))
-            continue;
-        m_family = family;
-        const QJsonArray subsets = font.value(QStringLiteral("subsets")).toArray();
-        m_requireVietnamese = subsets.contains(QStringLiteral("vietnamese"));
-        QStringList requestedSubsets;
-        if (subsets.size() > 32) {
-            failUnavailable();
-            return;
-        }
-        for (const auto &subsetValue : subsets) {
-            const QString subset = subsetValue.toString();
-            if (!QRegularExpression(QStringLiteral("^[a-z][a-z0-9-]{0,39}$"))
-                     .match(subset).hasMatch()) {
-                failUnavailable();
-                return;
-            }
-            requestedSubsets.append(subset);
-        }
-        m_subsets = requestedSubsets.join(QLatin1Char(','));
-        const auto weights = font.value(QStringLiteral("weights")).toArray();
-        const auto styles = font.value(QStringLiteral("styles")).toArray();
-        const bool normal = styles.contains(QStringLiteral("normal"));
-        const bool italic = styles.contains(QStringLiteral("italic"));
-        prepareFaces(weights.contains(400) && normal, weights.contains(400) && italic,
-                     weights.contains(700) && normal, weights.contains(700) && italic);
-        requestNextFace();
+    m_providerFamily = m_providers[size_t(m_providerIndex)]->resolve(m_family, data);
+    if (m_providerFamily.availability == IFontProvider::Availability::NotFound) {
+        nextProvider();
         return;
     }
-    failUnavailable();
+    const int required = (m_bold ? 2 : 0) + (m_italic ? 1 : 0);
+    if (m_providerFamily.availability != IFontProvider::Availability::Found
+        || m_providerFamily.license.isEmpty() || !m_providerFamily.styles[required]) {
+        failUnavailable();
+        return;
+    }
+    m_family = m_providerFamily.name;
+    m_requireVietnamese = m_providerFamily.vietnamese;
+    const auto &styles = m_providerFamily.styles;
+    prepareFaces(styles[0], styles[1], styles[2], styles[3]);
+    requestNextFace();
 }
 
 void FontDownloadService::prepareFaces(bool regular, bool italic, bool bold, bool boldItalic)
@@ -340,18 +347,34 @@ void FontDownloadService::requestNextFace()
         return;
     }
     const Face &face = m_faces.at(m_faceIndex);
-    QUrl url(QStringLiteral("https://fonts.googleapis.com/css"));
-    QUrlQuery query;
-    QString style = m_family + (face.bold ? QStringLiteral(":700") : QStringLiteral(":400"));
-    if (face.italic)
-        style += QStringLiteral("italic");
-    query.addQueryItem(QStringLiteral("family"), style);
-    query.addQueryItem(QStringLiteral("subset"), m_subsets);
-    url.setQuery(query);
-    // A legacy UA requests one complete static TTF per face, not disjoint
-    // web subsets. Never send text= or PDF contents to either endpoint.
+    const auto &provider = m_providers[size_t(m_providerIndex)];
+    const QUrl url = m_fontSourceIndex == 0
+        ? provider->faceUrl(m_providerFamily, face.bold, face.italic)
+        : provider->fallbackFaceUrls(m_providerFamily, face.bold, face.italic)
+              .value(m_fontSourceIndex - 1);
     m_redirects = 0;
-    request(url, Stage::Stylesheet);
+    request(url, provider->faceResource() == IFontProvider::Resource::Stylesheet
+                     ? Stage::Stylesheet : Stage::Font);
+}
+
+bool FontDownloadService::retryFontFromMirror()
+{
+    if (!m_active || m_stage != Stage::Font || m_providerIndex < 0
+        || size_t(m_providerIndex) >= m_providers.size() || m_faceIndex >= m_faces.size())
+        return false;
+    const auto &provider = m_providers[size_t(m_providerIndex)];
+    if (provider->faceResource() != IFontProvider::Resource::Font)
+        return false;
+    const Face &face = m_faces.at(m_faceIndex);
+    const auto mirrors = provider->fallbackFaceUrls(m_providerFamily, face.bold, face.italic);
+    // At most two alternatives for the entire family, inside the original
+    // deadline. A working mirror also serves the remaining styles. Nothing is
+    // installed until all faces pass the normal validation and atomic commit.
+    if (m_fontSourceIndex >= qMin(2, mirrors.size()))
+        return false;
+    ++m_fontSourceIndex;
+    requestNextFace();
+    return true;
 }
 
 void FontDownloadService::scheduleInstallation()
@@ -365,20 +388,12 @@ void FontDownloadService::scheduleInstallation()
 
 void FontDownloadService::processStylesheet(const QByteArray &data)
 {
-    const QString css = QString::fromUtf8(data);
-    const QRegularExpression fontUrl(QStringLiteral("url\\(\\s*['\"]?(https://[^\\s)'\"]+)['\"]?\\s*\\)"));
-    auto matches = fontUrl.globalMatch(css);
-    if (!matches.hasNext()) {
+    const QUrl url = m_providers[size_t(m_providerIndex)]->fontUrl(data);
+    if (url.isEmpty()) {
         failUnavailable();
         return;
     }
-    const QUrl url(matches.next().captured(1));
-    // Multiple files are language subsets. Refuse to install just one subset.
-    if (matches.hasNext() || css.contains(QLatin1String("unicode-range"), Qt::CaseInsensitive)
-        || !allowedUrl(url, Stage::Font)) {
-        failUnavailable();
-        return;
-    }
+    m_redirects = 0;
     request(url, Stage::Font);
 }
 

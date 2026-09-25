@@ -1,4 +1,5 @@
 #include "PDFEditController.h"
+#include "PDFFontAliases.h"
 #include "PDFEditController_p.h"
 #include "ApplicationFonts.h"
 #include "PDFAnnotationUtils.h"
@@ -30,6 +31,7 @@
 #include <QMutexLocker>
 #include <QPolygonF>
 #include <QQuickTextDocument>
+#include <QRawFont>
 #include <QRunnable>
 #include <QSet>
 #include <QStringList>
@@ -434,7 +436,7 @@ QString PDFEditController::selectedText() const
 QString PDFEditController::selectedFontFamily() const
 {
     return m_hasSelection
-        ? selectedCharacterFormatForDisplay().fontFamily
+        ? PDFFontAliases::semanticFamily(selectedCharacterFormatForDisplay().fontFamily)
         : QString();
 }
 
@@ -2514,7 +2516,7 @@ PDFEditController::TextChange PDFEditController::setDraftText(
 
 void PDFEditController::applyUnicodeFontFallback(Draft &draft)
 {
-    if (draft.text == draft.candidate.text || !containsNonAscii(draft.text)) {
+    if (draft.text == draft.candidate.text) {
         return;
     }
 
@@ -2531,25 +2533,62 @@ void PDFEditController::applyUnicodeFontFallback(Draft &draft)
             0,
             span.length,
             draft.text.size() - start);
-        if (!containsNonAscii(draft.text.sliced(start, length))) {
+        const QString semanticFamily = PDFFontAliases::semanticFamily(span.format.fontFamily);
+        const QString spanText = draft.text.sliced(start, length);
+        if (!containsNonAscii(spanText) && semanticFamily == span.format.fontFamily) {
             continue;
         }
 
-        const QString bundledFamily = matchingBundledFamilyName(
-            span.format.fontFamily);
+        // Keep a usable embedded face and its original metrics. When an edit
+        // introduces a missing glyph, resolve the complete local face through
+        // the public family; private PDF aliases are never provider names.
+        if (!PDFFontAliases::sourceFingerprint(span.format.fontFamily).isEmpty()) {
+            QFont font(span.format.fontFamily);
+            font.setBold(span.format.fontBold);
+            font.setItalic(span.format.fontItalic);
+            font.setPixelSize(16);
+            font.setStyleStrategy(QFont::NoFontMerging);
+            const QRawFont raw = QRawFont::fromFont(font);
+            bool supportsText = raw.isValid()
+                && raw.familyName() == span.format.fontFamily
+                && (raw.weight() >= QFont::Bold) == span.format.fontBold
+                && (raw.style() != QFont::StyleNormal) == span.format.fontItalic;
+            for (uint character : spanText.toUcs4()) {
+                if (!QChar::isSpace(static_cast<char32_t>(character))
+                    && !raw.supportsCharacter(character)) {
+                    supportsText = false;
+                    break;
+                }
+            }
+            if (supportsText)
+                continue;
+        }
+        const QString bundledFamily = matchingBundledFamilyName(semanticFamily);
         const QString systemFamily = matchingSystemFamilyName(
-            span.format.fontFamily);
-        if (!bundledFamily.isEmpty()) {
+            semanticFamily);
+        const QString downloadedFamily = matchingKnownFontFamilyName(
+            semanticFamily, ApplicationFonts::downloadedFontFamilies());
+        if (!systemFamily.isEmpty()
+            && ApplicationFonts::fontFaceSupportsText(systemFamily,
+                span.format.fontBold, span.format.fontItalic, spanText,
+                ApplicationFonts::FontSource::System)) {
+            span.format.fontFamily = systemFamily;
+        } else if (!downloadedFamily.isEmpty()
+            && ApplicationFonts::fontFaceSupportsText(downloadedFamily,
+                span.format.fontBold, span.format.fontItalic, spanText,
+                ApplicationFonts::FontSource::Downloaded)) {
+            span.format.fontFamily = downloadedFamily;
+        } else if (!bundledFamily.isEmpty()) {
             span.format.fontFamily = bundledFamily;
         } else if (!systemFamily.isEmpty()
                    && !isGenericArialCompatibleFontFamily(
-                       span.format.fontFamily)) {
+                       semanticFamily)) {
             span.format.fontFamily = systemFamily;
         } else if (!bundledArial.isEmpty()
                    && equivalentFontFamilyName(
-                       span.format.fontFamily,
-                       originalFormat.fontFamily)
-                   && isArialCompatibleFontFamily(span.format.fontFamily)) {
+                       semanticFamily,
+                       PDFFontAliases::semanticFamily(originalFormat.fontFamily))
+                   && isArialCompatibleFontFamily(semanticFamily)) {
             span.format.fontFamily = bundledArial;
         } else if (!systemFamily.isEmpty()) {
             span.format.fontFamily = systemFamily;

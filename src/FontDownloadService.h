@@ -7,6 +7,9 @@
 #include <QString>
 #include <QTimer>
 #include <QUrl>
+#include "IFontProvider.h"
+#include <memory>
+#include <vector>
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -39,7 +42,9 @@ private:
         bool italic = false;
         QByteArray data;
     };
-    void request(const QUrl &url, Stage stage);
+    void request(const QUrl &url, Stage stage, bool approvedRedirect = false);
+    void nextProvider();
+    static IFontProvider::Resource resourceForStage(Stage stage);
     void receiveData(QNetworkReply *reply);
     void receiveFinished(QNetworkReply *reply);
     void processMetadata(const QByteArray &data);
@@ -47,6 +52,7 @@ private:
     void processArchive(const QByteArray &data);
     void prepareFaces(bool regular, bool italic, bool bold, bool boldItalic);
     void requestNextFace();
+    bool retryFontFromMirror();
     bool stageFont(const QByteArray &data, Face &face);
     bool hasCachedFace(const Face &face) const;
     void scheduleInstallation();
@@ -54,7 +60,7 @@ private:
     uint requiredCharacter(const Face &face) const;
     void failUnavailable();
     void complete(bool success, const QString &error);
-    static bool allowedUrl(const QUrl &url, Stage stage);
+    bool allowedUrl(const QUrl &url, Stage stage) const;
     static qint64 maximumBytes(Stage stage);
 
     QPointer<QNetworkAccessManager> m_network;
@@ -62,13 +68,16 @@ private:
     QTimer m_deadline;
     QByteArray m_data;
     QString m_family;
-    QString m_subsets;
+    std::vector<std::unique_ptr<IFontProvider>> m_providers;
+    qsizetype m_providerIndex = -1;
+    IFontProvider::Family m_providerFamily;
     QList<Face> m_faces;
     qsizetype m_faceIndex = 0;
     quint64 m_generation = 0;
     Stage m_stage = Stage::Metadata;
     uint m_requiredCodePoint = 0;
     int m_redirects = 0;
+    int m_fontSourceIndex = 0;
     bool m_bold = false;
     bool m_italic = false;
     bool m_requireVietnamese = false;
