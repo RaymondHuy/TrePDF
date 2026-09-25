@@ -1,4 +1,5 @@
 #include "ApplicationFonts.h"
+#include "PDFFontAliases.h"
 #include "ReviewedCtanFonts.h"
 
 #include <QByteArrayView>
@@ -608,6 +609,7 @@ struct FontRegistry {
         bool bold = false;
         bool italic = false;
         int registrationId = -1;
+        QString layoutFamily;
     };
 
     QStringList bundledFamilies;
@@ -825,9 +827,17 @@ bool registerDownloadedFont(FontRegistry &registry, const QString &path,
     const int registration = QFontDatabase::addApplicationFont(path);
     if (registration < 0)
         return false;
+    // Qt can retain a missing-family fallback in another thread's font cache
+    // after GUI-thread registration. A digest-named face has never been queried
+    // before it exists, so Save lays out with the same metrics as the editor.
+    const auto alias = PDFFontAliases::isolate(data, font.family);
+    if (alias.data.isEmpty() || !PDFFontAliases::retain(alias)) {
+        QFontDatabase::removeApplicationFont(registration);
+        return false;
+    }
     registry.downloadedFonts.append({path, font.family,
         QCryptographicHash::hash(data, QCryptographicHash::Sha256), data.size(),
-        font.bold, font.italic, registration});
+        font.bold, font.italic, registration, alias.family});
     registry.downloadedRawFonts.insert(fontFaceCacheKey(font.family, font.bold, font.italic), font.rawFont);
     if (!registry.downloadedFamilies.contains(font.family, Qt::CaseInsensitive)) {
         registry.downloadedFamilies.append(font.family);
@@ -1405,6 +1415,7 @@ FontFaceData downloadedFontFace(const QString &family, bool bold, bool italic)
         return result;
     result.data = data;
     result.family = font->family;
+    result.layoutFamily = font->layoutFamily;
     result.error = FontFaceData::Error::None;
     return result;
 }
@@ -1551,8 +1562,11 @@ bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &err
                     registry.downloadedFonts.cend(), [&item](const auto &font) {
                         return font.registrationId == item.registrationId;
                     });
-                if (registered != registry.downloadedFonts.cend())
+                if (registered != registry.downloadedFonts.cend()) {
+                    const QString layoutFamily = registered->layoutFamily;
                     registry.downloadedFonts.erase(registered);
+                    PDFFontAliases::release(layoutFamily);
+                }
                 QFontDatabase::removeApplicationFont(item.registrationId);
                 registry.downloadedRawFonts.remove(fontFaceCacheKey(
                     item.font.family, item.font.bold, item.font.italic));

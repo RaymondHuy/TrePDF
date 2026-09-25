@@ -454,6 +454,7 @@ private slots:
     void isolatesEmbeddedSubsetFromCachedCompleteFace();
     void fallsBackToCtanAndReusesCachedFamily();
     void loadsCachedFontInFreshProcess();
+    void preservesDownloadedFontSpacingOnReusedSaveWorker();
     void prefersGoogleForCtanFamily();
     void doesNotProbeCtanForUnreviewedFamily();
     void doesNotFallBackToCtanAfterGoogleFailure_data();

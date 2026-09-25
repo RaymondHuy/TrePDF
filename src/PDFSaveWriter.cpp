@@ -90,6 +90,7 @@ struct SaveFormat {
     QString semanticFontFamily;
     QByteArray displaySourceFingerprint;
     QString embeddableFontFamily;
+    QString embeddableLayoutFamily;
     QByteArray embeddableFontData;
     // Distinguish separate PDF subsets that retain the same family/style name.
     QByteArray sourceFontFingerprint;
@@ -687,16 +688,22 @@ QFont displayFont(const SaveFormat &format, qreal pageHeight)
         ? format.displayFontSizeRatio
         : format.fontSizeRatio;
     const int pixelSize = qMax(1, qRound(sizeRatio * pageHeight));
+    // Also cover original-font reuse, which does not pass through the
+    // replacement-font branch. Keep fontFamily unchanged for PDF identity and
+    // reuse checks; only Qt layout uses the downloaded face's private name.
+    const QString layoutFamily = !format.embeddableLayoutFamily.isEmpty()
+            && sameFamily(format.fontFamily, format.embeddableFontFamily)
+        ? format.embeddableLayoutFamily : format.fontFamily;
     QFont font;
-    if (!format.fontFamily.isEmpty()) {
-        font.setFamily(format.fontFamily);
+    if (!layoutFamily.isEmpty()) {
+        font.setFamily(layoutFamily);
     }
     font.setBold(format.fontBold);
     font.setItalic(format.fontItalic);
     font.setUnderline(format.fontUnderline);
     font.setPixelSize(pixelSize);
     font.setStretch(ApplicationFonts::calibratedFontStretch(
-        format.fontFamily,
+        layoutFamily,
         format.fontStretch,
         format.fontBold,
         format.fontItalic,
@@ -6528,11 +6535,13 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         // recovery/error path, while allowing the next exact local source to
         // satisfy a missing style or glyph.
         const auto consider = [&format, &supportsText](const QString &family,
-                                                       const QByteArray &bytes) {
+                                                       const QByteArray &bytes,
+                                                       const QString &layoutFamily = QString()) {
             const bool usable = !bytes.isEmpty() && supportsText(bytes);
             if (usable || format.embeddableFontFamily.isEmpty()) {
                 format.embeddableFontFamily = family;
                 format.embeddableFontData = bytes;
+                format.embeddableLayoutFamily = layoutFamily;
             }
             return usable;
         };
@@ -6561,7 +6570,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
                 face = downloadedFaceCache.insert(key, ApplicationFonts::downloadedFontFace(
                     downloadedFamily, format.fontBold, format.fontItalic));
             }
-            if (consider(face->isValid() ? face->family : downloadedFamily, face->data))
+            if (consider(face->isValid() ? face->family : downloadedFamily,
+                         face->data, face->layoutFamily))
                 return;
         }
 

@@ -1091,7 +1091,6 @@ private:
     QHash<QByteArray, QString> m_registeredFontFamilies;
     QSet<QByteArray> m_rejectedFontFingerprints;
     QVector<QByteArray> m_rejectedFontFingerprintLru;
-    QVector<int> m_registeredFontIds;
     qsizetype m_registeredFontBytes = 0;
     Candidate m_selectedCandidate;
     bool m_hasSelection = false;

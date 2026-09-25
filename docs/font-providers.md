@@ -34,8 +34,22 @@ với catalogue Google Fonts/CTAN và không mở rộng việc tìm kiếm ngu�
 Cache nằm tại `QStandardPaths::AppLocalDataLocation/fonts`; tên file là
 SHA-256 của bytes font với đuôi `.ttf` hoặc `.otf` tương ứng. Ứng dụng đọc lại
 cache khi khởi tạo registry, kiểm tra digest và cấu trúc trước khi đăng ký
-bằng `QFontDatabase::addApplicationFont()` trên GUI thread. File tải từ CTAN
-được giữ nguyên bytes, không chuyển đổi outline trong cache.
+bằng `QFontDatabase::addApplicationFont()` trên GUI thread. Mỗi face còn có tên
+Qt riêng theo digest để worker Save tính layout. Qt có thể giữ font dự phòng
+trong cache của worker nếu family công khai từng được hỏi trước khi download;
+đăng ký font trên GUI thread không xóa cache đó. Tên riêng giúp vị trí từ khi
+Save dùng đúng metrics của font vừa tải. Picker và metadata vẫn dùng family
+công khai, còn PDF nhúng nguyên font program đã xác thực.
+
+Font trong cache và font nhúng trùng bytes dùng chung một registration Qt
+theo số chủ sở hữu. Reopen sau Save hoặc đóng một tab chỉ nhả quyền giữ font
+của tài liệu đó. Không đăng ký rồi gỡ bản trùng: trên macOS việc này làm
+worker dùng sai metrics ở lần Save tiếp theo dù tên family vẫn đúng.
+Khi chủ sở hữu cuối cùng nhả font, lần đăng ký sau dùng tên riêng mới để tránh
+tái sử dụng font engine cũ của worker. Digest font nguồn và family công khai
+vẫn giữ nguyên; tên riêng này không được ghi vào PDF.
+
+File tải từ CTAN được giữ nguyên bytes, không chuyển đổi outline trong cache.
 
 Mỗi face phải đúng family/style, có glyph yêu cầu, font table hợp lệ và
 quyền nhúng/chỉnh sửa cho phép theo `OS/2.fsType`. Service còn kiểm tra ASCII

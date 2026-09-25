@@ -17,6 +17,9 @@
 #include <QCryptographicHash>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QFontInfo>
+#include <QSemaphore>
+#include <QThreadPool>
 #include <zip.h>
 
 using namespace PDFEditControllerTestSupport;
@@ -2906,6 +2909,301 @@ void PDFEditControllerTest::loadsCachedFontInFreshProcess()
     QCOMPARE(finished.size(), 1);
     QVERIFY2(finished.first().first().toBool(), qPrintable(finished.first().at(1).toString()));
     QVERIFY(network.requests.isEmpty());
+}
+
+void PDFEditControllerTest::preservesDownloadedFontSpacingOnReusedSaveWorker()
+{
+    // Font registrations and Qt's per-thread font caches live for the process
+    // lifetime. Start with no cached Termes, independently of test order.
+    if (!qEnvironmentVariableIsSet("TREPDF_FONT_WORKER_SPACING_PROBE")) {
+        QProcess probe;
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("TREPDF_FONT_WORKER_SPACING_PROBE"), QStringLiteral("1"));
+        environment.insert(QStringLiteral("TREPDF_FONT_CACHE_PROBE_APP"),
+            QStringLiteral("TrePDF-font-test-")
+                + QUuid::createUuid().toString(QUuid::WithoutBraces));
+        probe.setProcessEnvironment(environment);
+        probe.setProcessChannelMode(QProcess::MergedChannels);
+        probe.start(QCoreApplication::applicationFilePath(),
+                    {QStringLiteral("preservesDownloadedFontSpacingOnReusedSaveWorker")});
+        QVERIFY2(probe.waitForStarted(10000), qPrintable(probe.errorString()));
+        QVERIFY2(probe.waitForFinished(30000), qPrintable(probe.errorString()));
+        const QByteArray output = probe.readAll();
+        QVERIFY2(probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0,
+                 output.constData());
+        return;
+    }
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TeX Gyre Termes");
+    QVERIFY(!QFontDatabase::families().contains(family));
+    const auto faceFont = [&family](int style) {
+        QFont font(family);
+        font.setPixelSize(9);
+        font.setBold(style & 2);
+        font.setItalic(style & 1);
+        font.setStretch(100);
+        font.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
+        font.setWordSpacing(0.0);
+        return font;
+    };
+    // Match the application's save executor: a pooled thread with no event
+    // loop, retained across all source-font unregister/re-register cycles.
+    QThreadPool workerPool;
+    workerPool.setMaxThreadCount(1);
+    workerPool.setExpiryTimeout(-1);
+    const auto runOnWorker = [&workerPool](const std::function<void()> &task) {
+        QSemaphore finished;
+        workerPool.start([&] {
+            task();
+            finished.release();
+        });
+        finished.acquire();
+        return true;
+    };
+    bool warmedFallbacks = true;
+    QVERIFY(runOnWorker([&] {
+        for (int style = 0; style < 4; ++style) {
+            const QFont font = faceFont(style);
+            warmedFallbacks &= QFontInfo(font).family() != family;
+            warmedFallbacks &= QFontMetricsF(font).horizontalAdvance(
+                QStringLiteral("under the following conditions: ")) > 0.0;
+        }
+    }));
+    QVERIFY(warmedFallbacks);
+
+    const QStringList segments{QStringLiteral("under the following conditions: "),
+                               QStringLiteral("slanted words "), QStringLiteral("bold words "),
+                               QStringLiteral("both styles")};
+    const QString text = segments.join(QString());
+    PDFSaveWriter::Result result;
+    const auto verifyWordOrigins = [&](const QString &path, const QString &expectedText,
+                                       QTextDocument &editor, qreal frameOrigin) {
+        editor.size();
+        QCOMPARE(editor.begin().layout()->lineCount(), 1);
+        const QTextLine editorLine = editor.begin().layout()->lineAt(0);
+        PDFiumProcessLock lock;
+        FPDF_DOCUMENT saved = FPDF_LoadDocument(path.toUtf8().constData(), nullptr);
+        QVERIFY(saved);
+        const auto closeDocument = qScopeGuard([saved] { FPDF_CloseDocument(saved); });
+        FPDF_PAGE page = FPDF_LoadPage(saved, 0);
+        QVERIFY(page);
+        const auto closePage = qScopeGuard([page] { FPDF_ClosePage(page); });
+        FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+        QVERIFY(textPage);
+        const auto closeText = qScopeGuard([textPage] { FPDFText_ClosePage(textPage); });
+        // PDFium can synthesize whitespace at a font-span boundary. Match the
+        // actual characters, retaining their indices for the geometry check.
+        QString extracted;
+        QVector<int> characterIndices;
+        for (int index = 0; index < FPDFText_CountChars(textPage); ++index) {
+            const QChar character(static_cast<char16_t>(FPDFText_GetUnicode(textPage, index)));
+            if (!character.isSpace()) {
+                extracted.append(character);
+                characterIndices.append(index);
+            }
+        }
+        QString expectedCharacters;
+        for (const QChar character : expectedText) {
+            if (!character.isSpace())
+                expectedCharacters.append(character);
+        }
+        const qsizetype offset = extracted.indexOf(expectedCharacters);
+        QVERIFY2(offset >= 0, qPrintable(extracted));
+        qsizetype characterOffset = 0;
+        for (qsizetype index = 0; index < expectedText.size(); ++index) {
+            if (expectedText.at(index).isSpace())
+                continue;
+            const int pdfIndex = characterIndices.at(offset + characterOffset++);
+            if (index != 0 && !expectedText.at(index - 1).isSpace())
+                continue;
+            double x = 0.0;
+            double y = 0.0;
+            QVERIFY(FPDFText_GetCharOrigin(textPage, pdfIndex, &x, &y));
+            const qreal expected = frameOrigin + editorLine.cursorToX(index);
+            QVERIFY2(qAbs(x - expected) < 0.15,
+                qPrintable(QStringLiteral("%1: word at %2: editor x=%3, saved x=%4")
+                    .arg(QFileInfo(path).fileName()).arg(index).arg(expected).arg(x)));
+        }
+    };
+    const auto repeatSaves = [&](const QString &savedPath) {
+        PDFDocument reopened;
+        PDFEditController restored;
+        QVERIFY(reopened.open(QUrl::fromLocalFile(savedPath)));
+        restored.setDocument(&reopened);
+        const auto candidate = candidateForText(waitForCandidates(restored, 0), text);
+        QVERIFY(!candidate.isEmpty());
+        QVERIFY(restored.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+        QCOMPARE(restored.selectedFontFamily(), family);
+        QCOMPARE(restored.selectedLetterSpacing(), 0.0);
+        QCOMPARE(restored.selectedWordSpacing(), 0.0);
+        restored.beginSelectedTextEdit();
+        restored.finishSelectedTextEdit();
+        QVERIFY(!restored.hasDrafts());
+
+        // Reopening replaces the controller's application-font registrations. Save
+        // on the same worker again: its source-alias metrics must still match the
+        // GUI editor, both for existing glyphs and a new glyph from the full face.
+        const QSizeF pageSize = reopened.pageSize(0);
+        QTextDocument reference;
+        reference.setDocumentMargin(0.0);
+        QTextOption option = reference.defaultTextOption();
+        option.setUseDesignMetrics(true);
+        reference.setDefaultTextOption(option);
+        QString editedText = text;
+        const QStringList suffixes{QStringLiteral(" words"), QStringLiteral(" z"),
+                                   QStringLiteral(" words"), QStringLiteral(" y")};
+        for (int round = 0; round < suffixes.size(); ++round) {
+            const auto sourceCandidate = candidateForText(waitForCandidates(restored, 0), editedText);
+            QVERIFY(!sourceCandidate.isEmpty());
+            QVERIFY(restored.selectCandidate(
+                0, sourceCandidate.value(QStringLiteral("objectId")).toString()));
+            const QString suffix = suffixes.at(round);
+            editedText += suffix;
+            restored.beginSelectedTextEdit();
+            restored.updateSelectedTextPreview(editedText);
+            if (round % 2 == 0) {
+                // Blur before Save commits the draft and leaves its correct GUI
+                // preview visible; it must not change the worker's saved spacing.
+                restored.finishSelectedTextEdit();
+                QVERIFY(restored.hasDrafts());
+            }
+            // Save also commits an editor that is still active.
+            restored.finishSelectedTextEdit();
+            // Rebuild from the current editor spans: reloading releases the old
+            // private families, and this round must measure the newly registered
+            // source faces rather than retain the previous GUI font engine.
+            reference.setPlainText(editedText);
+            reference.setTextWidth(restored.selectedFrameRect().width() * pageSize.width());
+            for (const QVariant &value : restored.selectedCharacterSpans()) {
+                const QVariantMap span = value.toMap();
+                QFont font(span.value(QStringLiteral("fontFamily")).toString());
+                font.setPixelSize(qRound(span.value(QStringLiteral("fontSizeRatio")).toDouble()
+                                        * pageSize.height()));
+                font.setBold(span.value(QStringLiteral("fontBold")).toBool());
+                font.setItalic(span.value(QStringLiteral("fontItalic")).toBool());
+                font.setStretch(span.value(QStringLiteral("fontStretch"), 100).toInt());
+                font.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
+                font.setWordSpacing(0.0);
+                QTextCursor cursor(&reference);
+                cursor.setPosition(span.value(QStringLiteral("start")).toInt());
+                cursor.setPosition(cursor.position() + span.value(QStringLiteral("length")).toInt(),
+                                   QTextCursor::KeepAnchor);
+                QTextCharFormat format;
+                format.setFont(font);
+                cursor.setCharFormat(format);
+            }
+            const qreal restoredOrigin = restored.selectedFrameRect().x() * pageSize.width();
+            const QString resaved = m_temporaryDirectory.filePath(
+                QStringLiteral("font-worker-resaved-%1.pdf").arg(round));
+            const auto repeatedRequest = PDFSaveWriter::prepare(restored, resaved);
+            QVERIFY(repeatedRequest.isValid());
+            QVERIFY(runOnWorker([&] {
+                result = PDFSaveWriter::save(repeatedRequest);
+            }));
+            QVERIFY2(result.succeeded(), qPrintable(result.detail));
+            verifyWordOrigins(resaved, editedText, reference, restoredOrigin);
+            QVERIFY(!QTest::currentTestFailed());
+            QVERIFY(reopened.open(QUrl::fromLocalFile(resaved)));
+        }
+    };
+
+    const QString embeddedSource = qEnvironmentVariable("TREPDF_FONT_SOURCE_SPACING_PROBE");
+    if (!embeddedSource.isEmpty()) {
+        QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+        repeatSaves(embeddedSource);
+        return;
+    }
+
+    QList<ApplicationFonts::DownloadedFontData> faces;
+    for (int style = 0; style < 4; ++style)
+        faces.append({ctanTermesFontData(style), family, bool(style & 2), bool(style & 1), uint('z')});
+    QString error;
+    QVERIFY2(ApplicationFonts::installDownloadedFonts(faces, error), qPrintable(error));
+
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("font-worker-source.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("font-worker-saved.pdf"));
+    QVERIFY(createFontStylePdf(source));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.addText(0, 0.1, 0.65).isEmpty());
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(text);
+    controller.setSelectedTextRange(0, text.size());
+    controller.setSelectedFontFamily(family);
+    controller.setSelectedFontSize(9);
+    controller.setSelectedFontBold(false);
+    controller.setSelectedFontItalic(false);
+    qsizetype start = 0;
+    for (int style = 0; style < 4; ++style) {
+        controller.setSelectedTextRange(start, segments.at(style).size());
+        controller.setSelectedFontBold(style & 2);
+        controller.setSelectedFontItalic(style & 1);
+        start += segments.at(style).size();
+    }
+    const QSizeF pageSize = document.pageSize(0);
+    QRectF frame = controller.selectedFrameRect();
+    frame.setWidth(0.85);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(frame);
+    controller.finishSelectedFrameResize();
+    controller.finishSelectedTextEdit();
+    const qreal origin = controller.selectedFrameRect().x() * pageSize.width();
+
+    // QTextDocument is the inline editor's layout engine. Its GUI-thread
+    // font lookup sees the newly installed face; the old worker must too.
+    QTextDocument reference;
+    reference.setDocumentMargin(0.0);
+    reference.setDefaultFont(faceFont(0));
+    reference.setPlainText(text);
+    reference.setTextWidth(0.85 * pageSize.width());
+    QTextOption option = reference.defaultTextOption();
+    option.setUseDesignMetrics(true);
+    reference.setDefaultTextOption(option);
+    start = 0;
+    for (int style = 0; style < 4; ++style) {
+        QCOMPARE(QFontInfo(faceFont(style)).family(), family);
+        QTextCursor cursor(&reference);
+        cursor.setPosition(start);
+        start += segments.at(style).size();
+        cursor.setPosition(start, QTextCursor::KeepAnchor);
+        QTextCharFormat format;
+        format.setFont(faceFont(style));
+        cursor.setCharFormat(format);
+    }
+    reference.size();
+    QCOMPARE(reference.begin().layout()->lineCount(), 1);
+    const auto request = PDFSaveWriter::prepare(controller, output);
+    QVERIFY(request.isValid());
+    QVERIFY(runOnWorker([&] {
+        result = PDFSaveWriter::save(request);
+    }));
+    QVERIFY2(result.succeeded(), qPrintable(result.detail));
+
+    verifyWordOrigins(output, text, reference, origin);
+    QVERIFY(!QTest::currentTestFailed());
+    repeatSaves(output);
+    QVERIFY(!QTest::currentTestFailed());
+
+    // Open the same fully embedded fixture in a clean process without the
+    // downloaded font cache. The source controller is then the sole owner of
+    // the private Qt registrations, so every Save/reopen retires those names.
+    QProcess sourceProbe;
+    auto sourceEnvironment = QProcessEnvironment::systemEnvironment();
+    sourceEnvironment.insert(QStringLiteral("TREPDF_FONT_SOURCE_SPACING_PROBE"), output);
+    sourceEnvironment.insert(QStringLiteral("TREPDF_FONT_CACHE_PROBE_APP"),
+        QStringLiteral("TrePDF-font-test-") + QUuid::createUuid().toString(QUuid::WithoutBraces));
+    sourceProbe.setProcessEnvironment(sourceEnvironment);
+    sourceProbe.setProcessChannelMode(QProcess::MergedChannels);
+    sourceProbe.start(QCoreApplication::applicationFilePath(),
+                     {QStringLiteral("preservesDownloadedFontSpacingOnReusedSaveWorker")});
+    QVERIFY2(sourceProbe.waitForStarted(10000), qPrintable(sourceProbe.errorString()));
+    QVERIFY2(sourceProbe.waitForFinished(30000), qPrintable(sourceProbe.errorString()));
+    const QByteArray sourceOutput = sourceProbe.readAll();
+    QVERIFY2(sourceProbe.exitStatus() == QProcess::NormalExit && sourceProbe.exitCode() == 0,
+             sourceOutput.constData());
 }
 
 void PDFEditControllerTest::prefersGoogleForCtanFamily()

@@ -1,16 +1,21 @@
 #include "PDFFontAliases.h"
 
 #include <QCryptographicHash>
+#include <QFontDatabase>
+#include <QGuiApplication>
 #include <QHash>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QRawFont>
+#include <QThread>
 #include <QVector>
 
 #include <algorithm>
 
 namespace {
-constexpr qsizetype maximumDisplayBytes = 32 * 1024 * 1024;
+// Downloaded faces use the same alias mechanism as embedded PDF faces. The
+// controller keeps its own tighter 32 MiB source-font registration budget.
+constexpr qsizetype maximumDisplayBytes = 64 * 1024 * 1024;
 constexpr qsizetype maximumSaveBytes = 64 * 1024 * 1024;
 constexpr qsizetype maximumAliases = 2048;
 
@@ -62,11 +67,13 @@ struct AliasRecord {
     QByteArray fingerprint;
     int references = 0;
     bool source = true;
+    int registrationId = -1;
 };
 
 struct AliasRegistry {
     QMutex mutex;
     QHash<QString, AliasRecord> aliases;
+    quint64 generation = 0;
 };
 
 AliasRegistry &registry()
@@ -148,13 +155,32 @@ static AliasData renamedFont(const QByteArray &data, const QString &expectedFami
         ? QCryptographicHash::hash(result.fingerprint + '\0' + expectedFamily.toUtf8(),
                                   QCryptographicHash::Sha256)
         : result.fingerprint;
-    result.family = QStringLiteral("TrePDFE")
-        + QString::fromLatin1(aliasFingerprint.toHex().left(48));
     result.semanticFamily = withoutSubsetPrefix(substitute || raw.familyName().isEmpty()
         ? expectedFamily : raw.familyName());
     if (result.semanticFamily.isEmpty() || result.semanticFamily.size() > 256
         || result.semanticFamily.contains(QChar::Null))
         return {};
+    if (saveIdentity.isEmpty()) {
+        auto &state = registry();
+        QMutexLocker lock(&state.mutex);
+        for (auto entry = state.aliases.cbegin(); entry != state.aliases.cend(); ++entry) {
+            if (entry->fingerprint == result.fingerprint
+                && entry->semanticFamily == result.semanticFamily
+                && entry->source == result.source) {
+                result.family = entry.key();
+                break;
+            }
+        }
+        if (result.family.isEmpty()) {
+            // A pooled Save thread has no event loop to invalidate its old Qt
+            // font engine after the last owner unregisters a source face. A
+            // new registration must never reuse that engine's family key.
+            const QByteArray identity = aliasFingerprint + ':'
+                + QByteArray::number(++state.generation);
+            result.family = QStringLiteral("TrePDFE") + QString::fromLatin1(
+                QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(48));
+        }
+    }
     const bool bold = raw.weight() >= QFont::Bold;
     const bool italic = raw.style() != QFont::StyleNormal;
     const QString style = bold ? (italic ? QStringLiteral("Bold Italic") : QStringLiteral("Bold"))
@@ -378,13 +404,15 @@ QByteArray withSaveResourceName(const QByteArray &data, const QByteArray &identi
 
 bool retain(const AliasData &alias)
 {
+    Q_ASSERT(QThread::currentThread() == qGuiApp->thread());
     auto &state = registry();
     QMutexLocker lock(&state.mutex);
     auto found = state.aliases.find(alias.family);
     if (found != state.aliases.end()) {
         if (found->fingerprint != alias.fingerprint
             || found->semanticFamily != alias.semanticFamily
-            || found->source != alias.source)
+            || found->source != alias.source
+            || found->registrationId < 0)
             return false;
         ++found->references;
         return true;
@@ -393,16 +421,38 @@ bool retain(const AliasData &alias)
         || alias.fingerprint.size() != 32)
         return false;
     state.aliases.insert(alias.family, {alias.semanticFamily, alias.fingerprint, 1, alias.source});
-    return true;
+    // Qt registration emits fontDatabaseChanged synchronously. Publish the
+    // identity first, but refuse reentrant retains until registration finishes.
+    // Never hold the metadata mutex while Qt calls back into the controllers.
+    lock.unlock();
+    const int id = QFontDatabase::addApplicationFontFromData(alias.data);
+    const bool valid = id >= 0
+        && QFontDatabase::applicationFontFamilies(id).contains(alias.family);
+    lock.relock();
+    if (valid) {
+        state.aliases[alias.family].registrationId = id;
+    } else {
+        state.aliases.remove(alias.family);
+    }
+    lock.unlock();
+    if (!valid && id >= 0)
+        QFontDatabase::removeApplicationFont(id);
+    return valid;
 }
 
 void release(const QString &family)
 {
+    Q_ASSERT(QThread::currentThread() == qGuiApp->thread());
     auto &state = registry();
     QMutexLocker lock(&state.mutex);
     auto found = state.aliases.find(family);
-    if (found != state.aliases.end() && --found->references == 0)
-        state.aliases.erase(found);
+    if (found == state.aliases.end() || --found->references != 0)
+        return;
+    const int id = found->registrationId;
+    state.aliases.erase(found);
+    lock.unlock();
+    if (id >= 0)
+        QFontDatabase::removeApplicationFont(id);
 }
 
 QString semanticFamily(const QString &family)

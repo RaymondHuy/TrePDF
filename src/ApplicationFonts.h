@@ -32,6 +32,9 @@ struct FontFaceData {
 
     QByteArray data;
     QString family;
+    // Immutable private Qt name for layout on workers that may have cached a
+    // fallback for the public family before this face was downloaded.
+    QString layoutFamily;
     Error error = Error::Unavailable;
 
     bool isValid() const

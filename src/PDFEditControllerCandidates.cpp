@@ -1048,7 +1048,7 @@ QString PDFEditController::registerEmbeddedFont(
     if (m_rejectedFontFingerprints.contains(fingerprint)) {
         return {};
     }
-    if (m_registeredFontIds.size() >= kMaximumRegisteredFontCount
+    if (m_registeredFontFamilies.size() >= kMaximumRegisteredFontCount
         || fontData.size() > kMaximumRegisteredFontBytes - m_registeredFontBytes) {
         rememberRejectedFontFingerprint(fingerprint);
         return {};
@@ -1065,21 +1065,8 @@ QString PDFEditController::registerEmbeddedFont(
         || !PDFFontAliases::retain(alias)) {
         return {};
     }
-    const int fontId = QFontDatabase::addApplicationFontFromData(alias.data);
-    if (fontId < 0) {
-        PDFFontAliases::release(alias.family);
-        return {};
-    }
-
-    const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
-    if (!families.contains(alias.family)) {
-        QFontDatabase::removeApplicationFont(fontId);
-        PDFFontAliases::release(alias.family);
-        return {};
-    }
     const QString family = alias.family;
 
-    m_registeredFontIds.append(fontId);
     m_registeredFontBytes += alias.data.size();
     m_rejectedFontFingerprints.remove(fingerprint);
     m_rejectedFontFingerprintLru.removeAll(fingerprint);
@@ -1103,18 +1090,15 @@ void PDFEditController::rememberRejectedFontFingerprint(
 void PDFEditController::clearRegisteredFonts()
 {
     assertPDFiumProcessLockNotHeld();
-    for (auto fontId = m_registeredFontIds.crbegin();
-         fontId != m_registeredFontIds.crend();
-         ++fontId) {
-        QFontDatabase::removeApplicationFont(*fontId);
-    }
-    m_registeredFontIds.clear();
-    for (const QString &family : std::as_const(m_registeredFontFamilies))
-        PDFFontAliases::release(family);
-    m_registeredFontFamilies.clear();
+    QHash<QByteArray, QString> families;
+    families.swap(m_registeredFontFamilies);
     m_rejectedFontFingerprints.clear();
     m_rejectedFontFingerprintLru.clear();
     m_registeredFontBytes = 0;
+    // Removing the last owner can synchronously emit fontDatabaseChanged.
+    // Detach our ownership before a callback can reset the controller again.
+    for (const QString &family : std::as_const(families))
+        PDFFontAliases::release(family);
 }
 
 void PDFEditController::requestCommentIndex()
