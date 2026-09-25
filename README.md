@@ -110,6 +110,15 @@ the destination file. Password-only changes preserve saved content, annotations,
 and forms. Changing passwords on PDFs with permission restrictions, removing a
 password, and configuring printing or editing restrictions are not implemented.
 
+The Protect tab also provides **Watermark → Add / Update / Remove**. Watermarks
+can use Unicode vector text or a snapshotted local image, with opacity, rotation,
+nine positions, front/behind placement and page ranges. Changes support
+Undo/Redo, Discard and Save/Save As; valid TrePDF watermarks remain manageable
+after reopening. Other applications' watermarks are preserved. Save other page
+edits before managing watermarks, and save/discard pending watermarks before
+editing page content. See [watermark pipeline](docs/watermark-pipeline.md) for
+the persistence contract and limits.
+
 The View tab searches the current PDF text asynchronously across its source
 pages. Typing is debounced, a newer query cancels the older scan, and stale
 results are rejected after a document or page-structure revision. Matches on

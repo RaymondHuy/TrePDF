@@ -6456,6 +6456,7 @@ struct PDFSaveWriter::Request::Data {
     QVector<PDFWebLinks::Link> autoWebLinks;
     QVector<PDFWebLinks::SourceLink> removedWebLinks;
     QVector<PDFWebLinks::ManualLink> manualLinks;
+    QMap<int, QVector<PDFWatermarks::PageChange>> watermarks;
 };
 
 PDFSaveWriter::Request PDFSaveWriter::prepare(
@@ -6480,6 +6481,13 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
     data->autoWebLinks = controller.m_autoWebLinks;
     data->removedWebLinks = controller.m_removedWebLinks;
     data->manualLinks = controller.m_manualLinks;
+    if (controller.watermarkChangesPending()) {
+        for (int page = 0; page < controller.m_document->pageCount(); ++page) {
+            auto changes = controller.watermarkChangesForPage(page);
+            if (!changes.isEmpty())
+                data->watermarks.insert(page, std::move(changes));
+        }
+    }
     if (controller.m_formDesignerController) {
         const bool normalizeSourceFieldAppearances
             = controller.m_formDesignerController->hasDrafts();
@@ -6900,7 +6908,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         && request.m_data->pageInsertions.isEmpty()
         && request.m_data->autoWebLinks.isEmpty()
         && request.m_data->removedWebLinks.isEmpty()
-        && request.m_data->manualLinks.isEmpty()) {
+        && request.m_data->manualLinks.isEmpty()
+        && request.m_data->watermarks.isEmpty()) {
         // Password-only saves preserve source annotations, forms and appearances
         // directly through qpdf, without rewriting any page content in PDFium.
         return protectAndCommitDocumentFile(
@@ -7022,6 +7031,20 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             return result;
         }
         start = end;
+    }
+
+    if (!request.m_data->watermarks.isEmpty()) {
+        if (!(FPDF_GetDocPermissions(document.get()) & (1UL << 3)))
+            return failure(Error::WatermarkUpdateFailed);
+        for (auto it = request.m_data->watermarks.cbegin(); it != request.m_data->watermarks.cend(); ++it) {
+            PdfPageHandle page(FPDF_LoadPage(document.get(), it.key()));
+            QString error;
+            if (!page.get() || !PDFWatermarks::apply(document.get(), page.get(), it.value(), false, error))
+                return failure(Error::WatermarkUpdateFailed, it.key(), error);
+        }
+        QString validationError;
+        if (!PDFWatermarks::validateDocument(document.get(), validationError))
+            return failure(Error::WatermarkUpdateFailed, -1, validationError);
     }
 
     const Result removalResult = removeWebLinks(document.get(), webLinkRemovals);

@@ -41,6 +41,8 @@ ApplicationWindow {
     property real imageInsertY: 0
     property PDFDocumentSession signatureSession: null
     property PDFDocumentSession passwordSetupSession: null
+    property PDFDocumentSession watermarkSession: null
+    property string watermarkMode: "add"
     property string signatureMode: "signature"
     property bool signaturePlacementPending: false
     property real signatureWidthPoints: 140
@@ -409,6 +411,23 @@ ApplicationWindow {
         passwordSetupSession = null
     }
 
+    function requestWatermark(mode) {
+        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
+                || !appRibbon.protectTabActive
+                || !prepareActiveWorkspace())
+            return
+        cancelWatermark()
+        watermarkSession = activeSession
+        watermarkMode = mode
+        watermarkDialogLoader.active = true
+        watermarkSession.editController.loadWatermarks()
+    }
+
+    function cancelWatermark() {
+        watermarkDialogLoader.active = false
+        watermarkSession = null
+    }
+
     function requestSignature(mode) {
         if (!activeSession || !activeDocument.loaded || tabModel.anySaving
                 || !appRibbon.signTabActive || !prepareActiveWorkspace())
@@ -683,6 +702,7 @@ ApplicationWindow {
     onActiveSessionChanged: {
         cancelSignature()
         cancelPasswordSetup()
+        cancelWatermark()
         if (pendingSearchNavigationSession
                 && pendingSearchNavigationSession !== activeSession) {
             clearPendingSearchNavigation()
@@ -753,8 +773,10 @@ ApplicationWindow {
 
         onStatusMessage: message => window.showStatus(message)
         onAnySavingChanged: {
-            if (anySaving)
+            if (anySaving) {
                 window.cancelPasswordSetup()
+                window.cancelWatermark()
+            }
         }
         onPasswordRequested: (source, incorrectPassword) => {
             window.requestPassword(source, incorrectPassword)
@@ -865,6 +887,39 @@ ApplicationWindow {
         onLoaded: {
             if (status === Loader.Ready) {
                 const dialog = item as SetPasswordDialog
+                if (dialog)
+                    dialog.open()
+            }
+        }
+    }
+
+    Connections {
+        target: window.watermarkSession ? window.watermarkSession.document : null
+        function onSourceChanged() { window.cancelWatermark() }
+        function onLoadedChanged() { window.cancelWatermark() }
+        function onPageStructureChanged() { window.cancelWatermark() }
+    }
+
+    Loader {
+        id: watermarkDialogLoader
+        objectName: "watermarkDialogLoader"
+        active: false
+        sourceComponent: WatermarkDialog {
+            theme: appTheme
+            editController: window.watermarkSession
+                ? window.watermarkSession.editController : null
+            mode: window.watermarkMode
+            operationAllowed: window.watermarkSession !== null
+                && window.watermarkSession === window.activeSession
+                && tabModel.indexOf(window.watermarkSession) >= 0
+                && window.watermarkSession.document.loaded
+                && !window.watermarkSession.saving
+                && !tabModel.anySaving && appRibbon.protectTabActive
+            onClosed: window.cancelWatermark()
+        }
+        onLoaded: {
+            if (status === Loader.Ready) {
+                const dialog = item as WatermarkDialog
                 if (dialog)
                     dialog.open()
             }
@@ -1539,9 +1594,12 @@ ApplicationWindow {
             onToolRequested: toolName => window.showComingSoon(toolName)
             onSignatureRequested: mode => window.requestSignature(mode)
             onSetPasswordRequested: window.requestSetPassword()
+            onWatermarkRequested: mode => window.requestWatermark(mode)
             onProtectTabActiveChanged: {
-                if (!protectTabActive)
+                if (!protectTabActive) {
                     window.cancelPasswordSetup()
+                    window.cancelWatermark()
+                }
             }
             onSignTabActiveChanged: {
                 if (!signTabActive)

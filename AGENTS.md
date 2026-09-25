@@ -15,6 +15,18 @@ and Save/Save As persistence.
 
 Current features:
 
+- Protect > Watermark adds, updates and removes managed text/image watermarks
+  across selected source pages. `PDFWatermark.h/.cpp` shares bounded versioned
+  metadata, vector text/image snapshots, placement and PDFium mutation between
+  scanning, preview and Save. `PDFEditControllerWatermarks.cpp` owns per-session
+  groups and undoable changes; `WatermarkDialog.qml` is a lazy session-bound UI.
+  Watermarks persist as marked page objects, survive reopen and stay excluded
+  from ordinary Edit candidates. Other page drafts must be saved/discarded
+  before managing watermarks; pending watermarks block page-content/page-structure
+  edits until Save/Discard to keep preview layer order consistent. Password
+  changes may be saved together. See `docs/watermark-pipeline.md` for limits,
+  fingerprint validation, source protection, and preview-document ownership.
+
 - The Protect tab, between Sign and Convert, sets an opening password on an
   unencrypted PDF or changes it on an unlocked PDF without permission
   restrictions. `SetPasswordDialog.qml` provides masked new/confirmation inputs

@@ -26,6 +26,18 @@ private slots:
     void changesOpenPassword();
     void keepsExistingPasswordWhenChangeFails();
     void rejectsPasswordChangesOnRestrictedDocuments();
+    void watermarkDraftsUseHistoryAndRemainPerSession();
+    void savesUpdatesAndRemovesWatermarkGroups();
+    void snapshotsImageWatermarksWithTransparency();
+    void keepsWatermarkDraftsOnSaveFailure();
+    void previewsWatermarksOnCroppedRotatedPages_data();
+    void previewsWatermarksOnCroppedRotatedPages();
+    void savesWatermarksWithPendingPassword();
+    void guardsWatermarksAndPageContentDrafts();
+    void initializesWatermarkDialogAfterAsyncReopen();
+    void preservesWatermarksThroughContentAndPageSaves();
+    void rejectsStaleWatermarkFingerprintAtomically();
+    void preservesForeignAndMalformedWatermarkObjects();
     void preparesVisualSignatureText_data();
     void preparesVisualSignatureText();
     void preparesVisualSignatureDrawing();

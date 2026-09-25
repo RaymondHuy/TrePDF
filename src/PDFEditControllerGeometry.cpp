@@ -629,6 +629,11 @@ qreal PDFEditController::shapeHitToleranceRatio(
 
 int PDFEditController::addBlankPage()
 {
+    if (watermarkChangesPending()) {
+        //% "Save or discard watermark changes before editing page content."
+        emit statusMessage(qtTrId("SaveWatermarkBeforeEditing"));
+        return -1;
+    }
     if (!m_document || !m_document->isLoaded() || m_saving) {
         return -1;
     }
@@ -704,6 +709,11 @@ int PDFEditController::addBlankPage()
 
 int PDFEditController::deleteCurrentPage()
 {
+    if (watermarkChangesPending()) {
+        //% "Save or discard watermark changes before editing page content."
+        emit statusMessage(qtTrId("SaveWatermarkBeforeEditing"));
+        return -1;
+    }
     if (!m_document || !m_document->isLoaded() || m_saving) {
         return -1;
     }

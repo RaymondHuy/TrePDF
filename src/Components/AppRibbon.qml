@@ -76,6 +76,7 @@ Column {
     signal toolRequested(string toolName)
     signal signatureRequested(string mode)
     signal setPasswordRequested()
+    signal watermarkRequested(string mode)
     signal undoRequested()
     signal redoRequested()
 
@@ -236,6 +237,7 @@ Column {
         id: editRibbonComponent
 
         EditRibbon {
+            enabled: !root.editController.watermarkChangesPending
             theme: root.theme
             document: root.document
             editController: root.editController
@@ -358,7 +360,9 @@ Column {
             document: root.document
             editController: root.editController
             hasPendingPanelEdits: root.hasPendingPanelEdits
+            anySaving: root.anySaving
             onSetPasswordRequested: root.setPasswordRequested()
+            onWatermarkRequested: mode => root.watermarkRequested(mode)
             onSaveRequested: root.saveRequested()
             onSaveAsRequested: root.saveAsRequested()
         }

@@ -282,6 +282,8 @@ PDFEditController::PDFEditController(QObject *parent)
 
 PDFEditController::~PDFEditController()
 {
+    if (m_watermarkCancellation)
+        m_watermarkCancellation->store(true, std::memory_order_relaxed);
     if (m_webLinkCancellation)
         m_webLinkCancellation->store(true, std::memory_order_relaxed);
     if (m_manualLinkCancellation)
@@ -316,6 +318,7 @@ void PDFEditController::setDocument(PDFDocument *document)
         connect(m_document, &PDFDocument::pageStructureChanged, this, [this]() {
             cancelWebLinkCreation();
             invalidateWebLinks();
+            invalidateWatermarks();
         });
         connect(m_document, &QObject::destroyed, this, [this]() {
             m_document = nullptr;
@@ -476,6 +479,13 @@ void PDFEditController::releaseDrawingCommentInteraction(int page)
 
 void PDFEditController::setTool(Tool tool)
 {
+    if (watermarkChangesPending()
+        && (tool == SelectTool || tool == EditTextTool || tool == AddTextTool
+            || tool == AddImageTool || tool == AddShapeTool)) {
+        //% "Save or discard watermark changes before editing page content."
+        emit statusMessage(qtTrId("SaveWatermarkBeforeEditing"));
+        return;
+    }
     if (m_tool == tool) {
         return;
     }
@@ -530,6 +540,7 @@ void PDFEditController::setImageAspectRatioLocked(bool locked)
 bool PDFEditController::hasDrafts() const
 {
     return !m_pendingOpenPassword.isEmpty()
+        || watermarkChangesPending()
         || !m_drafts.isEmpty()
         || !m_autoWebLinks.isEmpty()
         || !m_removedWebLinks.isEmpty()
@@ -853,6 +864,7 @@ void PDFEditController::clearSelection()
 
 void PDFEditController::resetSession()
 {
+    resetWatermarks();
     m_pendingOpenPassword.clear();
     cancelWebLinkCreation();
     m_autoWebLinks.clear();
@@ -968,6 +980,7 @@ bool PDFEditController::documentAllowsEditing() const
     // transaction, so GUI actions never need a nested or standalone API call.
     return m_document
         && m_document->m_document
+        && !watermarkChangesPending()
         && m_document->m_allowsContentEditing;
 }
 

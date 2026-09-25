@@ -2,6 +2,7 @@
 #include "PDFAnnotationUtils.h"
 #include "PDFFormWorker.h"
 #include "PDFSourceImageGeometry.h"
+#include "PDFWatermark.h"
 #include "PDFWidgetAnnotationSuppression.h"
 #include "PDFiumSynchronization.h"
 
@@ -664,6 +665,7 @@ PageRenderResult renderPageFromFile(
     const QVector<PDFEditController::DraftObjectMove> &draftObjectMoves,
     const QVector<PDFEditController::DraftAnnotationDeletion>
         &deletedCommentAnnotations,
+    const QVector<PDFWatermarks::PageChange> &watermarkChanges,
     const QStringList &suppressedFormWidgetIds,
     const CancellationFlag &cancellation)
 {
@@ -707,7 +709,7 @@ PageRenderResult renderPageFromFile(
         PDFFormWorker::withPageLocked(
             formDocument,
             sourcePage,
-            [&](FPDF_DOCUMENT,
+            [&](FPDF_DOCUMENT previewDocument,
                 FPDF_FORMHANDLE formHandle,
                 FPDF_PAGE previewPage,
                 FPDF_PAGE formPage) {
@@ -732,7 +734,10 @@ PageRenderResult renderPageFromFile(
                     image.height(),
                     pdfiumColor(background));
 
-                bool renderDocumentReusable = true;
+                // Watermark mutations affect the preview document only. Discard
+                // that document after this tile so the next request starts from
+                // the saved source, while the native form session stays intact.
+                bool renderDocumentReusable = watermarkChanges.isEmpty();
                 {
                     ScopedPageObjectSuppression suppression;
                     ScopedPageObjectMoves objectMoves;
@@ -762,7 +767,8 @@ PageRenderResult renderPageFromFile(
                                 previewPage,
                                 deletedCommentAnnotations);
                         annotationSuppressionApplied = removal.removedAll;
-                        renderDocumentReusable = removal.documentReusable;
+                        renderDocumentReusable = renderDocumentReusable
+                            && removal.documentReusable;
                     }
                     if (!annotationSuppressionApplied) {
                         // A deleted annotation or reply must never leak back
@@ -779,7 +785,17 @@ PageRenderResult renderPageFromFile(
                                 suppressedFormWidgetIds);
                     }
 
+                    // Resolve source object paths before inserting a background
+                    // watermark, which can shift the page's object indexes.
+                    QString watermarkError;
+                    const bool watermarksApplied = watermarkChanges.isEmpty()
+                        || (!isCancelled(cancellation)
+                            && PDFWatermarks::apply(
+                                previewDocument, previewPage, watermarkChanges,
+                                true, watermarkError));
+
                     if (!isCancelled(cancellation)
+                        && watermarksApplied
                         && (suppressionApplied
                             || suppression.restorationSucceeded())
                         && (objectMovesApplied
@@ -1793,6 +1809,10 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
             && editController->document() == document
         ? editController->draftedObjectMovesForPage(page)
         : QVector<PDFEditController::DraftObjectMove>();
+    const QVector<PDFWatermarks::PageChange> watermarkChanges = editController
+            && editController->document() == document
+        ? editController->watermarkChangesForPage(page)
+        : QVector<PDFWatermarks::PageChange>();
     QVector<PDFEditController::DraftAnnotationDeletion>
         deletedCommentAnnotations = editController
             && editController->document() == document
@@ -1847,6 +1867,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                     formRevision,
                     draftObjectPaths,
                     draftObjectMoves,
+                    watermarkChanges,
                     deletedCommentAnnotations,
                     suppressedCommentObjectIds,
                     suppressedFormWidgetIds,
@@ -1878,6 +1899,7 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                         draftObjectPaths,
                         draftObjectMoves,
                         deletedCommentAnnotations,
+                        watermarkChanges,
                         suppressedFormWidgetIds,
                         cancellation);
                 }

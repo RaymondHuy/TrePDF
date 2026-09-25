@@ -4,6 +4,7 @@
 #include "PDFCommentAnnotation.h"
 #include "PDFSaveWriter.h"
 #include "PDFWebLinkScanner.h"
+#include "PDFWatermark.h"
 
 #include <QByteArray>
 #include <QColor>
@@ -57,6 +58,10 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool saving READ saving NOTIFY savingChanged FINAL)
     Q_PROPERTY(bool canSetOpenPassword READ canSetOpenPassword NOTIFY passwordProtectionChanged FINAL)
     Q_PROPERTY(bool passwordChangePending READ passwordChangePending NOTIFY passwordProtectionChanged FINAL)
+    Q_PROPERTY(bool watermarksReady READ watermarksReady NOTIFY watermarksChanged FINAL)
+    Q_PROPERTY(bool loadingWatermarks READ loadingWatermarks NOTIFY watermarksChanged FINAL)
+    Q_PROPERTY(bool watermarkChangesPending READ watermarkChangesPending NOTIFY watermarksChanged FINAL)
+    Q_PROPERTY(QVariantList watermarks READ watermarks NOTIFY watermarksChanged FINAL)
     Q_PROPERTY(bool creatingWebLinks READ creatingWebLinks NOTIFY creatingWebLinksChanged FINAL)
     Q_PROPERTY(bool removingWebLinks READ removingWebLinks NOTIFY creatingWebLinksChanged FINAL)
     Q_PROPERTY(bool loadingEditableLinks READ loadingEditableLinks NOTIFY editableLinksChanged FINAL)
@@ -254,6 +259,16 @@ public:
     bool canSetOpenPassword() const;
     bool passwordChangePending() const;
     Q_INVOKABLE bool setOpenPassword(const QString &password);
+    bool watermarksReady() const { return m_watermarksReady; }
+    bool loadingWatermarks() const { return bool(m_watermarkCancellation); }
+    bool watermarkChangesPending() const { return !m_watermarkChanges.isEmpty(); }
+    QVariantList watermarks() const;
+    Q_INVOKABLE void loadWatermarks();
+    Q_INVOKABLE bool applyWatermark(const QVariantMap &settings, const QString &id = QString());
+    Q_INVOKABLE bool removeWatermark(const QString &id);
+    Q_INVOKABLE QVariantMap loadWatermarkImage(const QUrl &url);
+    Q_INVOKABLE QString watermarkPreview(const QVariantMap &settings, const QString &id = QString());
+    QVector<PDFWatermarks::PageChange> watermarkChangesForPage(int page) const;
     bool textEditActive() const;
     QStringList bundledFontFamilies() const;
     QStringList availableFontFamilies() const;
@@ -490,6 +505,7 @@ signals:
     void historyStateChanged();
     void savingChanged();
     void passwordProtectionChanged();
+    void watermarksChanged();
     void creatingWebLinksChanged();
     void editableLinksChanged();
     void webLinksChanged();
@@ -784,7 +800,8 @@ private:
         enum class Kind {
             ObjectDraft,
             PageStructure,
-            WebLinks
+            WebLinks,
+            Watermarks
         };
 
         Kind kind = Kind::ObjectDraft;
@@ -803,6 +820,8 @@ private:
         QVector<PDFWebLinks::SourceLink> removedWebLinksAfter;
         QVector<PDFWebLinks::ManualLink> manualLinksBefore;
         QVector<PDFWebLinks::ManualLink> manualLinksAfter;
+        QVector<PDFWatermarks::Change> watermarksBefore;
+        QVector<PDFWatermarks::Change> watermarksAfter;
     };
 
     enum class FontStyle {
@@ -812,6 +831,13 @@ private:
     };
 
     void resetSession();
+    void resetWatermarks();
+    void invalidateWatermarks();
+    bool canChangeWatermarks();
+    bool prepareWatermarkSpec(const QVariantMap &settings, const QString &id,
+                              PDFWatermarks::Spec &spec) const;
+    QVector<PDFWatermarks::Group> effectiveWatermarks() const;
+    void commitWatermarkChanges(QVector<PDFWatermarks::Change> changes);
     bool hasNonWebLinkDrafts() const;
     void invalidateWebLinks();
     bool resolveManualLink(int page, const QString &id, PDFWebLinks::ManualLink &link) const;
@@ -1097,6 +1123,13 @@ private:
     bool m_saving = false;
     // Session-only save setting; never copied into content history or exposed to QML.
     QByteArray m_pendingOpenPassword;
+    bool m_watermarksReady = false;
+    std::shared_ptr<std::atomic_bool> m_watermarkCancellation;
+    QVector<PDFWatermarks::Group> m_sourceWatermarks;
+    QVector<PDFWatermarks::Change> m_watermarkChanges;
+    QSet<int> m_watermarkPreviewPages;
+    QString m_watermarkImageToken;
+    QImage m_watermarkDialogImage;
     struct PendingFontSave {
         PDFSaveWriter::Result failure;
         QString targetFilePath;
