@@ -124,6 +124,9 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
     case PDFSaveWriter::Error::ManualLinkUpdateFailed:
         //% "The links could not be saved. Check their destination pages and try again."
         return qtTrId("PdfSaveManualLinkFailed");
+    case PDFSaveWriter::Error::WatermarkUpdateFailed:
+        //% "Watermarks could not be saved safely. The destination file was not changed."
+        return qtTrId("PdfSaveWatermarkFailed");
     case PDFSaveWriter::Error::CommentAnnotationUpdateFailed:
         //% "The comment could not be updated on page %1."
         return qtTrId("PdfSaveCommentUpdateFailed").arg(result.page + 1);

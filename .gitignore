@@ -444,3 +444,4 @@ FodyWeavers.xsd
 *.msm
 *.msp
 coverage
+tmp

@@ -2603,7 +2603,7 @@ private:
             return false;
         }
         const bool previewReusable = callback(
-            m_document,
+            m_previewDocument,
             m_formHandle,
             previewPage,
             formPage);

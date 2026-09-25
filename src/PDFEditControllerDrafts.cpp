@@ -467,6 +467,7 @@ void PDFEditController::discardDrafts()
     if (m_saving
         || (!m_textEditActive
             && m_pendingOpenPassword.isEmpty()
+            && m_watermarkChanges.isEmpty()
             && m_drafts.isEmpty()
             && m_autoWebLinks.isEmpty()
             && m_removedWebLinks.isEmpty()
@@ -487,6 +488,8 @@ void PDFEditController::discardDrafts()
 
     m_pendingOpenPassword.clear();
     emit passwordProtectionChanged();
+    m_watermarkChanges.clear();
+    invalidateWatermarks();
     QSet<int> affectedPages;
     for (auto revision = m_pageDraftRevisions.cbegin();
          revision != m_pageDraftRevisions.cend();
@@ -1096,6 +1099,15 @@ void PDFEditController::applyDraftState(const Command &command,
                                         bool useAfterState,
                                         bool immediate)
 {
+    if (command.kind == Command::Kind::Watermarks) {
+        m_watermarkChanges = useAfterState ? command.watermarksAfter : command.watermarksBefore;
+        if (watermarkChangesPending()) {
+            clearSelection();
+            setTool(BrowseTool);
+        }
+        invalidateWatermarks();
+        return;
+    }
     if (command.kind == Command::Kind::WebLinks) {
         m_autoWebLinks = useAfterState ? command.webLinksAfter : command.webLinksBefore;
         m_removedWebLinks = useAfterState ? command.removedWebLinksAfter

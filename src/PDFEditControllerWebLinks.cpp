@@ -31,7 +31,7 @@ QThreadPool &webLinkThreadPool()
 
 bool PDFEditController::hasNonWebLinkDrafts() const
 {
-    return !m_drafts.isEmpty() || !m_pendingTextMarkupCreations.isEmpty()
+    return watermarkChangesPending() || !m_drafts.isEmpty() || !m_pendingTextMarkupCreations.isEmpty()
         || !m_pageInsertions.isEmpty() || !m_deletedSourcePages.isEmpty()
         || (m_formController && m_formController->hasDrafts())
         || (m_formDesignerController && m_formDesignerController->hasDrafts());

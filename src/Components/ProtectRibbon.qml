@@ -11,9 +11,11 @@ Flickable {
     required property PDFDocument document
     required property PDFEditController editController
     property bool hasPendingPanelEdits: false
-    readonly property bool ready: document.loaded && !editController.saving
+    property bool anySaving: false
+    readonly property bool ready: document.loaded && !editController.saving && !anySaving
 
     signal setPasswordRequested()
+    signal watermarkRequested(string mode)
     signal saveRequested()
     signal saveAsRequested()
 
@@ -52,6 +54,98 @@ Flickable {
 
         RibbonGroup {
             theme: root.theme
+            //% "Watermark"
+            title: qsTrId("Watermark")
+
+            RibbonButton {
+                id: watermarkButton
+                objectName: "protectWatermarkButton"
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Watermark"
+                text: qsTrId("Watermark")
+                iconSource: "../assets/icons/stamp.svg"
+                menuIndicatorVisible: true
+                menuToolTipText: text
+                enabled: root.ready
+                primary: watermarkMenuLoader.active
+                onClicked: watermarkMenuLoader.active = true
+                onMenuRequested: watermarkMenuLoader.active = true
+                onEnabledChanged: {
+                    if (!enabled)
+                        watermarkMenuLoader.active = false
+                }
+                onVisibleChanged: {
+                    if (!visible)
+                        watermarkMenuLoader.active = false
+                }
+
+                Connections {
+                    target: root
+                    function onDocumentChanged() { watermarkMenuLoader.active = false }
+                }
+
+                Loader {
+                    id: watermarkMenuLoader
+                    active: false
+                    onLoaded: {
+                        if (status === Loader.Ready && item)
+                            (item as Menu).open()
+                    }
+                    sourceComponent: Menu {
+                        parent: watermarkButton
+                        y: watermarkButton.height
+                        width: 230
+                        padding: 4
+                        popupType: Popup.Item
+                        focus: true
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        onClosed: watermarkMenuLoader.active = false
+
+                        delegate: MenuItem {
+                            id: watermarkMenuItem
+                            implicitHeight: 32
+                            leftPadding: 12
+                            rightPadding: 12
+                            font.pixelSize: 12
+                            palette.text: root.theme.ribbonTextColor
+                            palette.highlightedText: root.theme.ribbonTextColor
+                            background: Rectangle {
+                                radius: 4
+                                color: watermarkMenuItem.highlighted
+                                    ? root.theme.foxitPaleOrange : "transparent"
+                            }
+                        }
+
+                        background: Rectangle {
+                            radius: 7
+                            color: root.theme.ribbonSurface
+                            border.width: 1
+                            border.color: root.theme.ribbonBorder
+                        }
+
+                        Action {
+                            //% "Add watermark"
+                            text: qsTrId("AddWatermark")
+                            onTriggered: root.watermarkRequested("add")
+                        }
+                        Action {
+                            //% "Update watermark"
+                            text: qsTrId("UpdateWatermark")
+                            onTriggered: root.watermarkRequested("update")
+                        }
+                        Action {
+                            //% "Remove watermark"
+                            text: qsTrId("RemoveWatermark")
+                            onTriggered: root.watermarkRequested("remove")
+                        }
+                    }
+                }
+            }
+        }
+
+        RibbonGroup {
+            theme: root.theme
             //% "File"
             title: qsTrId("File")
 
@@ -76,6 +170,18 @@ Flickable {
                 enabled: root.ready
                 onClicked: root.saveAsRequested()
             }
+        }
+
+        Label {
+            objectName: "protectWatermarkStatus"
+            width: 260
+            height: ribbonRow.height
+            visible: root.document.loaded && root.editController.watermarkChangesPending
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.Wrap
+            color: root.theme.foxitDarkOrange
+            //% "Save or discard watermark changes before editing page content."
+            text: qsTrId("WatermarkPendingSaveHint")
         }
 
         Label {

@@ -142,6 +142,9 @@ qt_add_qml_module(trepdf
         src/PDFEditControllerSave.cpp
         src/PDFEditControllerWebLinks.cpp
         src/PDFEditControllerManualLinks.cpp
+        src/PDFEditControllerWatermarks.cpp
+        src/PDFWatermark.cpp
+        src/PDFWatermark.h
         src/PDFWebLinkScanner.cpp
         src/PDFWebLinkScanner.h
         src/PDFEditControllerSupport.cpp
@@ -219,6 +222,7 @@ qt_add_qml_module(trepdf
         src/Components/SignRibbon.qml
         src/Components/ProtectRibbon.qml
         src/Components/SetPasswordDialog.qml
+        src/Components/WatermarkDialog.qml
         src/Components/SignatureDialog.qml
         src/Components/SearchHighlightLayer.qml
         src/Components/SearchRibbonControl.qml

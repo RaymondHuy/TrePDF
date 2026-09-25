@@ -43,6 +43,7 @@ public:
         WebLinkCreationFailed,
         WebLinkRemovalFailed,
         ManualLinkUpdateFailed,
+        WatermarkUpdateFailed,
         PageCreationFailed,
         PageDeletionFailed,
         PageContentGenerationFailed,

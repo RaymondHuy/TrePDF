@@ -2280,7 +2280,8 @@ void PDFEditController::appendPageObjectCandidates(
     const std::shared_ptr<std::atomic_bool> &cancellation)
 {
     assertPDFiumProcessLockHeld();
-    if (!pageObject || candidateScanCancelled(cancellation)) {
+    if (!pageObject || candidateScanCancelled(cancellation)
+        || PDFWatermarks::hasMark(pageObject)) {
         return;
     }
     const QSizeF &pageSize = request.pageSize;
