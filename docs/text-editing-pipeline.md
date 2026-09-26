@@ -714,7 +714,8 @@ italic = fontItalic
 underline = fontUnderline
 pixelSize = max(1, round(requestedPixelSize))
 stretch = calibratedFontStretch(family, fontStretch, bold, italic, pixelSize)
-letterSpacing = letterSpacingRatio * layoutPageHeight  // QFont::AbsoluteSpacing
+letterSpacing = (letterSpacingRatio + sourceAdvanceRatio) * layoutPageHeight
+                                                      // QFont::AbsoluteSpacing
 wordSpacing = wordSpacingRatio * layoutPageHeight
 ```
 
@@ -745,9 +746,11 @@ Draft
 ```
 
 `CharacterFormat` hiện chứa family, font size ratio, display size ratio,
-stretch, `letterSpacingRatio`, `wordSpacingRatio`, bold, italic, underline và
-color. Hai spacing ratio được chuẩn hóa theo chiều cao trang PDF, giống size
-ratio, và tham gia so sánh draft/undo/redo. `ParagraphFormat` chứa alignment,
+stretch, `letterSpacingRatio`, `wordSpacingRatio`, `sourceAdvanceRatio`, bold,
+italic, underline và color. Ba ratio khoảng cách được chuẩn hóa theo chiều cao
+trang PDF, giống size ratio, và tham gia so sánh draft/undo/redo.
+`sourceAdvanceRatio` là hiệu chỉnh advance của cụm chữ nguồn, tách biệt với hai
+giá trị spacing người dùng điều khiển. `ParagraphFormat` chứa alignment,
 `lineSpacing` (hệ số), `spaceBeforeRatio`/`spaceAfterRatio` (theo chiều cao trang),
 list style (`none`, `bullet`, `decimal`), list level và số bắt đầu.
 
@@ -762,8 +765,8 @@ cỡ chữ và spacing trực tiếp vào `QQuickTextDocument` bằng `QTextCurs
 với edit block trước đó;
 với phím gõ hoặc IME, event filter mở block trước khi Qt chèn text và đóng sau
 input event. QML đồng bộ text/format sau khi block đóng để đọc đúng nội dung và
-giữ cả ký tự lẫn định dạng trong cùng bước undo. Filter chỉ hoạt động khi có
-typing format tạm.
+giữ cả ký tự lẫn định dạng trong cùng bước undo. Filter mở edit block khi có
+typing format tạm hoặc có hiệu chỉnh advance nguồn cần cập nhật theo text mới.
 Block kết thúc bằng một custom undo item không đổi nội dung để Qt khôi phục
 caret theo vùng text thay đổi, tránh cộng đôi độ dài insertion và format khi redo.
 Không reload toàn bộ rich HTML nên undo nội bộ của `TextEdit` vẫn xóa thao tác gõ
@@ -792,17 +795,56 @@ dấu cách U+0020 xác định giãn từ. Cách đo này nhận diện đượ
 `Tc`/`Tw`, kể cả khi font size được đưa vào ma trận, và không lấy chênh lệch
 metric giữa Qt với font PDF làm spacing.
 
-Chỉ chấp nhận khi có đủ mẫu, các residual nhất quán và nằm trong giới hạn
-−10…50 PDF point. Mỗi object giữ tối đa 4.096 mẫu; trang vượt giới hạn quét glyph
-50.000 ký tự không suy diễn spacing. Run ngắn, vị trí `TJ` không đều, Unicode
-mapping lỗi, dấu tổ hợp hoặc script cần shaping phức tạp dùng fallback layout
-hiện có. Giãn đều không thể mô tả chính xác mọi dịch chuyển riêng của PDF.
+Giãn đều chỉ được chấp nhận khi có đủ mẫu, các residual nhất quán và nằm trong
+giới hạn −10…50 PDF point. Mỗi object giữ tối đa 4.096 mẫu; trang vượt giới hạn
+quét glyph 50.000 ký tự không suy diễn spacing. Giãn đều không thể mô tả chính
+xác mọi dịch chuyển riêng của PDF.
 Các dấu cách sinh từ `TJ` vẫn được giữ trong nội dung editor, nhưng không dùng
 origin giả của chúng để suy diễn giãn ký tự: origin đó trùng với glyph kế tiếp.
 
+Khi hai giá trị giãn đều không biểu diễn được vị trí nguồn, scanner còn giữ
+origin/advance để hiệu chỉnh từng cụm chữ bằng `sourceAdvanceRatio`. Nhánh này
+xét mọi run đủ điều kiện sau khi resolve font và trước khi đo initial frame,
+so sánh vị trí tích lũy thay vì chỉ xét từng khoảng dịch chuyển. Vì vậy TJ nhỏ
+cộng dồn hoặc khác biệt kerning của `Tj` vẫn được phát hiện. Khi sai lệch không
+vượt 0,08 point, không thêm hiệu chỉnh hay chia format không cần thiết.
+Chỉ nhận text ngang, origin tăng dần,
+Unicode/advance hợp lệ thuộc Latin hoặc Common, không chứa dấu tổ hợp; tiếng
+Việt dùng ký tự dựng sẵn có thể đi qua cùng nhánh. Mọi vị trí phải trùng cả
+grapheme boundary lẫn glyph-cluster boundary của Qt. Không tách một ligature
+thành các ký tự để ép khoảng cách.
+
+Mỗi lần hiệu chỉnh giới hạn 1.024 vị trí và 4.096 UTF-16 code unit, tối đa ba
+vòng đo Qt, với residual hữu hạn không vượt ±512 PDF point. Chỉ dùng kết quả
+nếu các glyph-cluster boundary giữ nguyên và sai lệch origin không quá 0,08
+point. Khi điều kiện không đạt, giữ layout trước đó; không gán hiệu chỉnh nguồn
+phỏng đoán. Các group có metadata spacing/paragraph hợp lệ được phục hồi từ
+metadata thay vì hiệu chỉnh lại qua mỗi lần Save/mở lại.
+
+Khi ghép các object Latin/Common cùng dòng, kể cả các object đặt rời bằng `Tm`
+chưa cần hiệu chỉnh nội bộ, layout giữ origin của từng object bằng cách hiệu
+chỉnh ranh giới trước object kế tiếp. Sau đó kiểm tra lại
+glyph, font và vị trí; nếu không khớp thì giữ các object riêng. Dòng ghép theo
+nhánh này giới hạn 1.024 UTF-16 code unit. Baseline của glyph nguồn phải nằm
+trong sai số 0,05 point; không ép các vị trí chữ cao/thấp khác nhau vào một dòng.
+
+`sourceAdvanceRatio` không hiện thành giãn ký tự trong panel. Editor, draft
+preview và writer cộng nó với `letterSpacingRatio` khi đo/vẽ Qt, còn caret,
+selection và wrap dùng chính layout đó. Khi chèn/xóa, giữ hiệu chỉnh của phần
+prefix/suffix không bị tác động, xóa hiệu chỉnh ở cụm thay đổi và ranh giới ngay
+trước chỗ sửa; ký tự mới dùng spacing semantic của typing format. Đổi family,
+cỡ chữ, đậm/nghiêng hoặc spacing xóa hiệu chỉnh trong vùng được đổi, vì advance
+nguồn không còn tương ứng với metric mới. Đổi màu hoặc gạch chân vẫn giữ nó.
+Custom character property của `QTextDocument` lưu hiệu chỉnh này cùng undo/redo;
+không hiệu chỉnh lại document khi undo đang phục hồi dữ liệu cũ. Việc đóng
+edit block của IME không được xem là một lần gõ mới. Các span có hiệu chỉnh
+nguồn tắt kerning tự động của Qt vì hiệu chỉnh đã chứa khoảng dịch này;
+nhờ vậy việc gộp span sau Save/reopen không áp kerning lần thứ hai.
+
 Panel có hai trường **Giãn ký tự** và **Giãn từ**, đơn vị PDF point. Người dùng
 nhập số thập phân từ −10 đến 50, hoặc dùng phím lên/xuống theo bước 0,1. Giá trị
-0 dùng khoảng cách tự nhiên của font. Khi chưa mở editor, thay đổi áp cho text
+0 không thêm giãn đều của người dùng; một span còn hiệu chỉnh nguồn vẫn giữ
+khoảng cách đã đo từ PDF. Khi chưa mở editor, thay đổi áp cho text
 object đang chọn; trong editor, nó áp cho vùng bôi đen hoặc thành typing format
 tại caret. Vùng có nhiều giá trị hiện ô trống. Thay một loại spacing không làm
 phẳng loại spacing còn lại trong vùng có định dạng hỗn hợp.
@@ -816,11 +858,28 @@ editor không tự tạo một thay đổi spacing. Khi spacing thật sự đ�
 không tạo draft nếu không còn thay đổi khác.
 
 Save ghi các cụm chữ/từ tại vị trí do Qt layout tính, thay vì kéo giãn hình dáng
-glyph. Mark `TrePDFTextSpacing` lưu spacing và đoạn text của từng part. Khi mở
+glyph. Mark `TrePDFTextSpacing` version 2 lưu spacing, residual `SourceAdvance`
+và đoạn text của từng part; `SpacingRuns` giữ residual theo từng range. Reader
+vẫn nhận version 1 với residual bằng 0. `TrePDFParagraphLayout` giữ nhóm logical
+và frame, bao gồm format của whitespace không có text object riêng hoặc được
+ghi cùng glyph trước nhưng có font/cỡ chữ/spacing khác. Metadata whitespace
+chỉ được áp lên ký tự trắng đã xác thực, không được thay format của chữ hiện
+trên trang. Khi mở
 lại, scanner chỉ dùng mark có version, giá trị, độ dài, số part và nhóm hợp lệ,
 rồi ghép lại các part của cùng dòng; metadata lỗi hoặc vượt giới hạn không được
 coi là spacing tin cậy. Đây là dữ liệu hỗ trợ editor: PDF vẫn hiển thị bằng text
 object và vị trí chuẩn, không phụ thuộc TrePDF để render.
+
+Trong nhánh layout có spacing hoặc paragraph metadata, text Latin/Common chạy
+trái sang phải giữ vị trí từng cụm kể cả khi spacing bằng 0. Các ký tự đơn giản
+cùng font/style được gom vào một text object và dùng `FPDFText_SetPositions()`
+để ghi vị trí dưới dạng `TJ`. Cách này giữ kerning và vị trí editor khi advance
+của font PDF khác font Qt, đồng thời tránh để PDFium hiểu nhầm các object một
+ký tự thành các dòng dọc khi trích xuất text. Không tách bên trong grapheme
+hoặc ligature. Giới hạn 1.024 cụm/dòng và 32.768 part/draft vẫn áp dụng, vượt
+giới hạn sẽ hủy Save trước khi
+ghi đè đích. Metadata spacing lỗi ở bất kỳ part nào cũng ngăn phục hồi paragraph
+từ nhóm đó, tránh âm thầm thay residual hỏng bằng 0.
 
 ### 7.11 Giãn dòng và khoảng cách đoạn
 
@@ -1401,13 +1460,17 @@ ASCII và coverage tiếng Việt nếu nguồn công bố hỗ trợ.
    khoảng giãn nằm giữa các từ, không kéo rộng glyph. Font nguồn giữ scale
    nguồn, font mới dùng stretch semantic. Tab được thể hiện bằng khoảng dịch
    chuyển thay vì ghi thành glyph; dòng cuối đoạn không được giãn đều.
-   Với dòng có character/word spacing, writer chia tại giao điểm của grapheme
+   Với dòng có character/word spacing hoặc hiệu chỉnh advance nguồn, writer
+   chia tại giao điểm của grapheme
    boundary và glyph-cluster boundary do Qt trả về. Dấu tổ hợp hoặc ligature
-   không bị tách rời chỉ để thêm khoảng cách. Giãn ký tự đặt từng cụm, giãn từ
-   đặt từng từ theo `cursorToX()`; whitespace được giữ cho text extraction,
-   riêng tab chỉ đóng góp advance. Mỗi dòng giới hạn 1.024 part, mỗi draft
+   không bị tách rời chỉ để thêm khoảng cách. Latin/Common trong layout được
+   giữ lại cũng đặt từng cụm để bảo toàn kerning và advance. Ký tự đơn giản cùng
+   font/style dùng chung text object với `FPDFText_SetPositions()`; whitespace
+   được giữ cho text extraction, riêng tab chỉ đóng góp advance. Mỗi dòng
+   giới hạn 1.024 cụm trước khi gộp, mỗi draft
    32.768 part; vượt giới hạn làm save thất bại trước commit. Mỗi part mang mark
-   `TrePDFTextSpacing` để scanner có thể kiểm tra và phục hồi spacing khi reopen.
+   `TrePDFTextSpacing` version 2 để scanner có thể kiểm tra và phục hồi spacing
+   semantic cùng hiệu chỉnh nguồn khi reopen; reader vẫn hỗ trợ version 1.
 5. Xóa mọi source object của draft, insert replacement tại z-order sớm nhất của
    các object nguồn nếu draft có nội dung thay thế, rồi gọi
    `FPDFPage_GenerateContent()` cho từng page đã đổi. Draft xóa image không tạo
@@ -1439,6 +1502,8 @@ TrePDF hiện đã lấy và áp dụng:
 - transform stretch ngang/dọc;
 - character/word spacing đều của text ngang đủ điều kiện, và spacing người
   dùng đặt trong draft;
+- advance từng cụm nguồn đủ điều kiện, gồm một phần vị trí `TJ` không đều,
+  dùng chung trong editor, preview và Save;
 - giãn dòng và khoảng trước/sau đoạn do người dùng đặt trong draft;
 - embedded/installed font family nếu Qt dùng được;
 - bold và italic;
@@ -1448,11 +1513,16 @@ TrePDF hiện đã lấy và áp dụng:
 Nhưng PDF renderer và Qt text layout vẫn là hai hệ thống khác nhau. Các dữ liệu
 sau chưa được tái tạo đầy đủ trong `TextEdit`:
 
-- glyph ID gốc và glyph positioning từng ký tự;
-- spacing nguồn không đủ mẫu hoặc không đáp ứng điều kiện suy diễn đều;
-- kerning/position adjustment không đều trong mảng `TJ`;
+- glyph ID gốc và glyph positioning tổng quát của mọi PDF;
+- spacing nguồn không đáp ứng cả nhánh suy diễn đều lẫn nhánh hiệu chỉnh cụm
+  có giới hạn ở mục 7.10;
+- kerning/position adjustment `TJ` vượt giới hạn, có origin không đơn điệu,
+  hoặc không khớp ranh giới cụm của Qt;
+- dấu tổ hợp/tiếng Việt dạng decomposed, ligature có nhiều Unicode character
+  trong cùng glyph, text dọc/xoay và script ngoài phạm vi Latin/Common của
+  nhánh hiệu chỉnh nguồn;
 - shaping phức tạp cần giữ glyph ID và vị trí riêng thay vì chỉ Unicode cùng
-  hai giá trị spacing;
+  spacing/advance đã hiệu chỉnh;
 - horizontal scaling riêng của text state nếu không thể hiện đủ qua object
   transform;
 - italic angle chính xác, synthetic slant và underline path của PDF gốc;

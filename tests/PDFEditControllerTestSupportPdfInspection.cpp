@@ -2,6 +2,82 @@
 
 namespace PDFEditControllerTestSupport {
 
+QVector<TextCharacterInfo> textCharacterRangeInfo(const QString &filePath,
+                                                const QString &text)
+{
+    if (text.isEmpty())
+        return {};
+    PDFiumProcessLock lock;
+    FPDF_DOCUMENT document = FPDF_LoadDocument(QFile::encodeName(filePath).constData(), nullptr);
+    if (!document)
+        return {};
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    FPDF_PAGE page = FPDF_LoadPage(document, 0);
+    if (!page)
+        return {};
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+    if (!textPage)
+        return {};
+    const auto closeTextPage = qScopeGuard([&] { FPDFText_ClosePage(textPage); });
+    FPDF_SCHHANDLE search = FPDFText_FindStart(textPage,
+        reinterpret_cast<FPDF_WIDESTRING>(text.utf16()), FPDF_MATCHCASE, 0);
+    if (!search)
+        return {};
+    const auto closeSearch = qScopeGuard([&] { FPDFText_FindClose(search); });
+    if (!FPDFText_FindNext(search))
+        return {};
+    const int start = FPDFText_GetSchResultIndex(search);
+    const int count = FPDFText_GetSchCount(search);
+    QVector<TextCharacterInfo> result;
+    QString recovered;
+    for (int index = start; index < start + count; ++index) {
+        FPDF_PAGEOBJECT object = FPDFText_GetTextObject(textPage, index);
+        FPDF_FONT font = object ? FPDFTextObj_GetFont(object) : nullptr;
+        if (!font)
+            return {};
+        const char32_t unicode = FPDFText_GetUnicode(textPage, index);
+        TextCharacterInfo character;
+        character.text = QString::fromUcs4(&unicode, 1);
+        character.font.found = true;
+        character.font.baseName = baseFontName(object);
+        character.font.familyName = fontFamilyName(font);
+        character.font.embedded = FPDFFont_GetIsEmbedded(font);
+        character.font.weight = FPDFFont_GetWeight(font);
+        if (character.font.baseName.contains(QStringLiteral("Bold"), Qt::CaseInsensitive))
+            character.font.weight = qMax(character.font.weight, 700);
+        int angle = 0;
+        const int flags = FPDFFont_GetFlags(font);
+        character.font.italic = (FPDFFont_GetItalicAngle(font, &angle) && angle != 0)
+            || (flags >= 0 && (flags & (1 << 6)))
+            || character.font.baseName.contains(QStringLiteral("Italic"), Qt::CaseInsensitive)
+            || character.font.baseName.contains(QStringLiteral("Oblique"), Qt::CaseInsensitive);
+        unsigned int red = 0, green = 0, blue = 0, alpha = 0;
+        if (!FPDFTextObj_GetFontSize(object, &character.pointSize)
+            || !FPDFPageObj_GetMatrix(object, &character.matrix)
+            || !FPDFPageObj_GetFillColor(object, &red, &green, &blue, &alpha))
+            return {};
+        character.color = QColor(red, green, blue, alpha);
+        FPDFFont_GetFontData(font, nullptr, 0, &character.font.dataSize);
+        if (character.font.embedded == 1 && character.font.dataSize > 0
+            && character.font.dataSize <= 64 * 1024 * 1024) {
+            character.fontData.resize(qsizetype(character.font.dataSize));
+            size_t actual = 0;
+            if (!FPDFFont_GetFontData(font,
+                    reinterpret_cast<uint8_t *>(character.fontData.data()),
+                    character.font.dataSize, &actual) || actual != character.font.dataSize)
+                return {};
+            const QRawFont rawFont(character.fontData, 16.0, QFont::PreferNoHinting);
+            if (!rawFont.isValid())
+                return {};
+            character.font.weight = rawFont.weight();
+            character.font.italic = rawFont.style() != QFont::StyleNormal;
+        }
+        recovered.append(character.text);
+        result.append(std::move(character));
+    }
+    return recovered == text ? result : QVector<TextCharacterInfo>();
+}
 
 qsizetype skipPdfLiteralString(const QByteArray &data, qsizetype offset)
 {

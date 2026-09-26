@@ -773,6 +773,11 @@ QRectF normalizedGlyphBoundsForText(const QString &filePath,
 
 QString pageText(const QString &filePath, int pageIndex)
 {
+    // Save/reopen can start an asynchronous candidate scan immediately. Text
+    // assertions must serialize with that worker just like the application.
+    std::unique_ptr<PDFiumProcessLock> lock;
+    if (!pdfiumProcessLockOwnedByCurrentThread())
+        lock = std::make_unique<PDFiumProcessLock>();
     const QByteArray encodedPath = QFile::encodeName(filePath);
     FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), nullptr);
     if (!document) {
@@ -1385,50 +1390,45 @@ RichSaveInspection inspectRichSave(const QString &filePath)
     bool foundBlueBaseline = false;
     bool foundGreenBaseline = false;
     if (inspection.readable) {
-        const int objectCount = FPDFPage_CountObjects(page);
-        for (int index = 0; index < objectCount; ++index) {
-            FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
-            const int type = FPDFPageObj_GetType(object);
-            if (type == FPDF_PAGEOBJ_PATH) {
+        for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
+            if (FPDFPageObj_GetType(FPDFPage_GetObject(page, index)) == FPDF_PAGEOBJ_PATH)
                 inspection.underlinePath = true;
-                continue;
-            }
-            if (type != FPDF_PAGEOBJ_TEXT) {
-                continue;
-            }
-
-            const QString text = pageObjectText(object, textPage);
-            FS_MATRIX matrix{};
-            if (!FPDFPageObj_GetMatrix(object, &matrix)) {
-                continue;
-            }
-            if (text.contains(QStringLiteral("Red"))) {
-                unsigned int red = 0;
-                unsigned int green = 0;
-                unsigned int blue = 0;
-                unsigned int alpha = 0;
-                inspection.redRun = FPDFPageObj_GetFillColor(
-                    object,
-                    &red,
-                    &green,
-                    &blue,
-                    &alpha)
-                    && red == 0xc6
-                    && green == 0x28
-                    && blue == 0x28
-                    && alpha == 0xff;
-                const TextObjectFontInfo font = readTextObjectFontInfo(object);
-                inspection.boldItalicRun = font.weight >= 700 && font.italic;
-                redBaseline = matrix.f;
-                foundRedBaseline = true;
-            } else if (text.contains(QStringLiteral("blue"))) {
-                blueBaseline = matrix.f;
-                foundBlueBaseline = true;
-            } else if (text.contains(QStringLiteral("Green"))) {
-                greenBaseline = matrix.f;
-                foundGreenBaseline = true;
-            }
         }
+        QString text;
+        for (int index = 0; index < FPDFText_CountChars(textPage); ++index)
+            text.append(QChar(static_cast<char16_t>(FPDFText_GetUnicode(textPage, index))));
+        const auto inspectWord = [&](const QString &word, qreal &baseline, bool checkRed) {
+            const int start = text.indexOf(word);
+            if (start < 0)
+                return false;
+            bool redRun = true;
+            bool boldItalic = true;
+            for (int index = start; index < start + word.size(); ++index) {
+                const auto object = FPDFText_GetTextObject(textPage, index);
+                FS_MATRIX matrix{};
+                if (!object || !FPDFPageObj_GetMatrix(object, &matrix))
+                    return false;
+                if (index == start)
+                    baseline = matrix.f;
+                else if (qAbs(baseline - matrix.f) >= 0.5)
+                    return false;
+                if (checkRed) {
+                    unsigned int r = 0, g = 0, b = 0, a = 0;
+                    redRun = redRun && FPDFPageObj_GetFillColor(object, &r, &g, &b, &a)
+                        && r == 0xc6 && g == 0x28 && b == 0x28 && a == 0xff;
+                    const auto font = readTextObjectFontInfo(object);
+                    boldItalic = boldItalic && font.weight >= 700 && font.italic;
+                }
+            }
+            if (checkRed) {
+                inspection.redRun = redRun;
+                inspection.boldItalicRun = boldItalic;
+            }
+            return true;
+        };
+        foundRedBaseline = inspectWord(QStringLiteral("Red"), redBaseline, true);
+        foundBlueBaseline = inspectWord(QStringLiteral("blue"), blueBaseline, false);
+        foundGreenBaseline = inspectWord(QStringLiteral("Green"), greenBaseline, false);
     }
 
     inspection.redAndBlueShareBaseline = foundRedBaseline

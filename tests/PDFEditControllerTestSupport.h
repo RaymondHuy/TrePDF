@@ -496,6 +496,18 @@ struct TextObjectFontInfo {
 TextObjectFontInfo textObjectFontInfo(const QString &filePath,
                                       const QString &text);
 
+struct TextCharacterInfo {
+    QString text;
+    TextObjectFontInfo font;
+    QByteArray fontData;
+    float pointSize = 0.0F;
+    FS_MATRIX matrix{};
+    QColor color;
+};
+
+QVector<TextCharacterInfo> textCharacterRangeInfo(const QString &filePath,
+                                                const QString &text);
+
 bool textObjectsShareFont(const QString &filePath,
                           const QString &firstText,
                           const QString &secondText);

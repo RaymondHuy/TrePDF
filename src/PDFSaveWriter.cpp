@@ -99,6 +99,9 @@ struct SaveFormat {
     qreal displayFontSizeRatio = 0.0;
     qreal letterSpacingRatio = 0.0;
     qreal wordSpacingRatio = 0.0;
+    // A source cluster's residual advance is independent of the spacing the
+    // user chose. Keep it in layout and metadata without stretching glyphs.
+    qreal sourceAdvanceRatio = 0.0;
     int fontStretch = QFont::Unstretched;
     bool fontBold = false;
     bool fontItalic = false;
@@ -220,6 +223,10 @@ struct LayoutRun {
     QByteArray spacingRuns;
     QString leadingWhitespace;
     qreal leadingLayoutAdvance = 0.0;
+    // Absolute Qt advances from the first encoded character, before the PDF
+    // text matrix's horizontal scale. Tabs remain layout-only characters.
+    QVector<qreal> characterPositions;
+    bool hasCharacterPositions = false;
     qsizetype textStart = 0;
     qsizetype textLength = 0;
     QByteArray paragraphGroup;
@@ -504,12 +511,26 @@ bool sameFormat(const SaveFormat &left, const SaveFormat &right)
         && left.displayFontSizeRatio == right.displayFontSizeRatio
         && left.letterSpacingRatio == right.letterSpacingRatio
         && left.wordSpacingRatio == right.wordSpacingRatio
+        && left.sourceAdvanceRatio == right.sourceAdvanceRatio
         && left.fontStretch == right.fontStretch
         && left.fontBold == right.fontBold
         && left.fontItalic == right.fontItalic
         && left.fontUnderline == right.fontUnderline
         && left.forceEmbeddedFont == right.forceEmbeddedFont
         && left.color == right.color;
+}
+
+bool samePositionedFormat(SaveFormat left, SaveFormat right)
+{
+    // Explicit character positions carry spacing independently from the font
+    // and paint shared by the actual PDF text object.
+    left.letterSpacingRatio = right.letterSpacingRatio = 0.0;
+    left.wordSpacingRatio = right.wordSpacingRatio = 0.0;
+    left.sourceAdvanceRatio = right.sourceAdvanceRatio = 0.0;
+    return sameFormat(left, right)
+        && left.displaySourceFingerprint == right.displaySourceFingerprint
+        && left.embeddableLayoutFamily == right.embeddableLayoutFamily
+        && left.allowOriginalFontReuse == right.allowOriginalFontReuse;
 }
 
 bool canReuseOriginalFont(const SaveFormat &format,
@@ -709,8 +730,9 @@ QFont displayFont(const SaveFormat &format, qreal pageHeight)
         format.fontItalic,
         pixelSize));
     font.setLetterSpacing(QFont::AbsoluteSpacing,
-                          format.letterSpacingRatio * pageHeight);
+                          (format.letterSpacingRatio + format.sourceAdvanceRatio) * pageHeight);
     font.setWordSpacing(format.wordSpacingRatio * pageHeight);
+    font.setKerning(qFuzzyIsNull(format.sourceAdvanceRatio));
     return font;
 }
 
@@ -905,7 +927,8 @@ QList<QTextLayout::FormatRange> layoutFormats(const SaveDraft &draft,
 bool hasTextSpacing(const SaveFormat &format)
 {
     return !qFuzzyIsNull(format.letterSpacingRatio)
-        || !qFuzzyIsNull(format.wordSpacingRatio);
+        || !qFuzzyIsNull(format.wordSpacingRatio)
+        || !qFuzzyIsNull(format.sourceAdvanceRatio);
 }
 
 bool lineHasTextSpacing(const SaveDraft &draft,
@@ -928,6 +951,10 @@ bool hasParagraphLayout(const SaveDraft &draft)
     // Resetting the controls must not discard the source group's explicit
     // paragraph boundaries or its original layout frame on the next save.
     return draft.sourceParagraphLayout
+        || std::any_of(draft.characterSpans.cbegin(), draft.characterSpans.cend(),
+                       [](const SaveSpan &span) {
+            return !qFuzzyIsNull(span.format.sourceAdvanceRatio);
+        })
         // A rich-text edit can emit several faces with different ink bounds.
         // Persist its logical group and layout so reopen does not have to
         // infer joins or recalibrate each face from those bounds again.
@@ -953,7 +980,7 @@ qreal textLayoutDistance(qreal value)
     return std::floor(value * 64.0) / 64.0;
 }
 
-QJsonObject paragraphLayoutModel(const SaveDraft &draft, const QVector<LayoutRun> &runs)
+QJsonObject paragraphLayoutModel(const SaveDraft &draft)
 {
     QJsonArray paragraphs;
     for (const SaveParagraph &paragraph : draft.paragraphFormats) {
@@ -975,9 +1002,9 @@ QJsonObject paragraphLayoutModel(const SaveDraft &draft, const QVector<LayoutRun
     for (qsizetype position : draft.sourceLineBreaks) {
         sourceLineBreaks.append(position);
     }
-    // Blank paragraphs have no PDF text object from which to recover their
-    // font metrics. Retain only the unpainted intervals, leaving visible text
-    // style authoritative in the actual PDF objects.
+    // A space may be encoded with the preceding glyph even when its semantic
+    // format differs. Keep all whitespace formats, including blank paragraphs;
+    // visible text style remains authoritative in the actual PDF objects.
     QJsonArray whitespaceFormats;
     qsizetype spanIndex = 0;
     const auto appendWhitespace = [&](qsizetype start, qsizetype end) {
@@ -1006,16 +1033,22 @@ QJsonObject paragraphLayoutModel(const SaveDraft &draft, const QVector<LayoutRun
                 {QStringLiteral("fontUnderline"), format.fontUnderline},
                 {QStringLiteral("letterSpacingRatio"), format.letterSpacingRatio},
                 {QStringLiteral("wordSpacingRatio"), format.wordSpacingRatio},
+                {QStringLiteral("sourceAdvanceRatio"), format.sourceAdvanceRatio},
                 {QStringLiteral("color"), format.color.name(QColor::HexArgb)}});
             start = next;
         }
     };
-    qsizetype previousEnd = 0;
-    for (const LayoutRun &run : runs) {
-        appendWhitespace(previousEnd, run.textStart);
-        previousEnd = run.textStart + run.textLength;
+    for (qsizetype position = 0; position < draft.text.size();) {
+        if (!draft.text.at(position).isSpace()) {
+            ++position;
+            continue;
+        }
+        const qsizetype start = position++;
+        while (position < draft.text.size() && draft.text.at(position).isSpace()) {
+            ++position;
+        }
+        appendWhitespace(start, position);
     }
-    appendWhitespace(previousEnd, draft.text.size());
     return QJsonObject{
         {QStringLiteral("text"), draft.text},
         {QStringLiteral("paragraphs"), paragraphs},
@@ -1050,13 +1083,23 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
     // remains in one PDF text object.
     QSet<qsizetype> glyphStarts;
     QSet<qsizetype> rightToLeftGlyphStarts;
+    QSet<qsizetype> adjustedGlyphStarts;
     const QList<QGlyphRun> glyphRuns = line.glyphRuns(
         line.textStart(), line.textLength(), QTextLayout::RetrieveStringIndexes);
     for (const QGlyphRun &glyphRun : glyphRuns) {
-        for (qsizetype position : glyphRun.stringIndexes()) {
+        const auto indexes = glyphRun.stringIndexes();
+        for (qsizetype position : indexes) {
             glyphStarts.insert(paragraphStart + position);
             if (glyphRun.isRightToLeft()) {
                 rightToLeftGlyphStarts.insert(paragraphStart + position);
+            } else if (position >= 0 && position < paragraphText.size()) {
+                const auto script = paragraphText.at(position).script();
+                // Retained Latin layouts also need explicit origins when Qt's
+                // replacement face has different advances from the PDF font.
+                // The grapheme/cluster intersection below keeps shaping units
+                // intact and the existing part budgets bound the output.
+                if (script == QChar::Script_Latin || script == QChar::Script_Common)
+                    adjustedGlyphStarts.insert(paragraphStart + position);
             }
         }
     }
@@ -1077,6 +1120,9 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
         }
         const SaveFormat &format = formatAt(draft, position);
         if (!qFuzzyIsNull(format.letterSpacingRatio)
+            || adjustedGlyphStarts.contains(position)
+            || !qFuzzyIsNull(format.sourceAdvanceRatio)
+            || !qFuzzyIsNull(formatAt(draft, position - 1).sourceAdvanceRatio)
             || draft.text.at(position - 1).isSpace()) {
             boundaries.append(position);
         }
@@ -1094,11 +1140,59 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
     std::sort(boundaries.begin(), boundaries.end());
     boundaries.erase(std::unique(boundaries.begin(), boundaries.end()),
                      boundaries.end());
-    const qsizetype count = boundaries.size() - 1;
-    if (count > kMaximumSpacingLineParts
-        || runs.size() + count > kMaximumSpacingDraftParts) {
+    const qsizetype clusterCount = boundaries.size() - 1;
+    if (clusterCount > kMaximumSpacingLineParts
+        || runs.size() + clusterCount > kMaximumSpacingDraftParts) {
         return false;
     }
+
+    const auto canPositionCharacters = [&](qsizetype start, qsizetype end) {
+        for (qsizetype position = start; position < end; ++position) {
+            const QChar character = draft.text.at(position);
+            if (character == QLatin1Char('\t')) {
+                continue;
+            }
+            if (!character.isPrint() || character.isSurrogate() || character.isMark()
+                || (character.script() != QChar::Script_Latin
+                    && character.script() != QChar::Script_Common)
+                || rightToLeftGlyphStarts.contains(position)) {
+                return false;
+            }
+            // Keep ligatures, combining sequences and shaped scripts on the
+            // existing whole-cluster path. Simple spaces need no glyph mapping.
+            if (!character.isSpace()
+                && (!glyphStarts.contains(position)
+                    || (position != lineStart && !graphemeStarts.contains(position))
+                    || (position + 1 != lineEnd && !graphemeStarts.contains(position + 1)))) {
+                return false;
+            }
+        }
+        return true;
+    };
+    QVector<qsizetype> positionedBoundaries{lineStart};
+    QVector<bool> positionedRuns;
+    for (qsizetype index = 0; index < clusterCount; ++index) {
+        const qsizetype start = boundaries.at(index);
+        const qsizetype end = boundaries.at(index + 1);
+        const bool positioned = canPositionCharacters(start, end);
+        // Leave separators at the end of a word object. PDFium may collapse
+        // repeated internal spaces or synthesize a space for an internal tab;
+        // keeping this boundary preserves exact marked-text validation while
+        // each multi-character word still establishes horizontal text flow.
+        const bool merge = !positionedRuns.isEmpty() && positioned && positionedRuns.last()
+            && !draft.text.at(start - 1).isSpace()
+            && samePositionedFormat(
+                formatAt(draft, qMax(positionedBoundaries[positionedBoundaries.size() - 2], firstVisible)),
+                formatAt(draft, qMax(start, firstVisible)));
+        if (merge) {
+            positionedBoundaries.last() = end;
+        } else {
+            positionedBoundaries.append(end);
+            positionedRuns.append(positioned);
+        }
+    }
+    boundaries = std::move(positionedBoundaries);
+    const qsizetype count = boundaries.size() - 1;
 
     const QByteArray group = QUuid::createUuid()
         .toString(QUuid::WithoutBraces).toLatin1();
@@ -1120,7 +1214,33 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
         run.spacingIndex = static_cast<int>(index);
         run.spacingCount = static_cast<int>(count);
         run.format = formatAt(draft, qMax(start, firstVisible));
-        if (start < firstVisible) {
+        run.hasCharacterPositions = positionedRuns.at(index);
+        if (run.hasCharacterPositions) {
+            // Keep same-face characters in one TJ object. Singleton objects
+            // otherwise make PDFium infer vertical text flow on sparse pages,
+            // inserting spurious line breaks between horizontally laid out glyphs.
+            bool firstEncoded = true;
+            qreal encodedOrigin = 0.0;
+            for (qsizetype position = start; position < end; ++position) {
+                if (draft.text.at(position) == QLatin1Char('\t')) {
+                    continue;
+                }
+                const qreal x = line.cursorToX(static_cast<int>(position - paragraphStart));
+                if (!qIsFinite(x)) {
+                    return false;
+                }
+                if (firstEncoded) {
+                    encodedOrigin = x;
+                    run.leadingLayoutAdvance = x - startX;
+                    firstEncoded = false;
+                } else {
+                    run.characterPositions.append(x - encodedOrigin);
+                }
+            }
+            if (firstEncoded || run.characterPositions.size() != run.text.size() - 1) {
+                return false;
+            }
+        } else if (start < firstVisible) {
             run.leadingWhitespace = run.spacingText.first(firstVisible - start);
             run.leadingWhitespace.remove(QLatin1Char('\t'));
             run.leadingLayoutAdvance = line.cursorToX(
@@ -1134,7 +1254,8 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
             while (spacingEnd < end) {
                 const SaveFormat &nextFormat = formatAt(draft, spacingEnd);
                 if (nextFormat.letterSpacingRatio != spacingFormat.letterSpacingRatio
-                    || nextFormat.wordSpacingRatio != spacingFormat.wordSpacingRatio) {
+                    || nextFormat.wordSpacingRatio != spacingFormat.wordSpacingRatio
+                    || nextFormat.sourceAdvanceRatio != spacingFormat.sourceAdvanceRatio) {
                     break;
                 }
                 ++spacingEnd;
@@ -1143,7 +1264,8 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
                 static_cast<int>(spacingStart - start),
                 static_cast<int>(spacingEnd - spacingStart),
                 spacingFormat.letterSpacingRatio * pageHeight,
-                spacingFormat.wordSpacingRatio * pageHeight});
+                spacingFormat.wordSpacingRatio * pageHeight,
+                spacingFormat.sourceAdvanceRatio * pageHeight});
             spacingStart = spacingEnd;
         }
         if (spacingRanges.size() > kMaximumSpacingLineParts) {
@@ -1174,6 +1296,16 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
     QVector<LayoutRun> runs;
     if (draft.text.isEmpty()) {
         return runs;
+    }
+    const auto validSourceAdvance = [pageHeight](const SaveFormat &format) {
+        const qreal points = format.sourceAdvanceRatio * pageHeight;
+        return qIsFinite(points) && qAbs(points) <= 512.0;
+    };
+    if (!validSourceAdvance(draft.originalFormat)
+        || std::any_of(draft.characterSpans.cbegin(), draft.characterSpans.cend(),
+                       [&](const SaveSpan &span) { return !validSourceAdvance(span.format); })) {
+        valid = false;
+        return {};
     }
 
     const qreal contentLeft = draft.hasBaseline && !draft.added
@@ -1373,7 +1505,7 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
             run.paragraphText = draft.text.sliced(run.textStart, run.textLength);
         }
         LayoutRun &first = runs.first();
-        first.paragraphModel = paragraphLayoutModel(draft, runs);
+        first.paragraphModel = paragraphLayoutModel(draft);
         first.paragraphOrigin = draft.hasBaseline && !draft.added
             ? draft.layoutOrigin
             : QPointF(draft.frameRect.left(),
@@ -2638,7 +2770,7 @@ bool markTextSpacing(FPDF_DOCUMENT document,
     const QByteArray text = run.spacingText.toUtf8();
     FPDF_PAGEOBJECTMARK mark = FPDFPageObj_AddMark(textObject, kTextSpacingMark);
     bool marked = mark
-        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Version", 1)
+        && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Version", 2)
         && FPDFPageObjMark_SetStringParam(document, textObject, mark, "Group",
                                          run.spacingGroup.constData())
         && FPDFPageObjMark_SetIntParam(document, textObject, mark, "Index",
@@ -2656,7 +2788,10 @@ bool markTextSpacing(FPDF_DOCUMENT document,
             static_cast<float>(run.format.letterSpacingRatio * pageHeight))
         && FPDFPageObjMark_SetFloatParam(
             document, textObject, mark, "WordSpacing",
-            static_cast<float>(run.format.wordSpacingRatio * pageHeight));
+            static_cast<float>(run.format.wordSpacingRatio * pageHeight))
+        && FPDFPageObjMark_SetFloatParam(
+            document, textObject, mark, "SourceAdvance",
+            static_cast<float>(run.format.sourceAdvanceRatio * pageHeight));
     if (marked && !run.spacingRuns.isEmpty()) {
         marked = FPDFPageObjMark_SetBlobParam(
             document, textObject, mark, "SpacingRuns",
@@ -3089,6 +3224,15 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
     }
     QHash<QByteArray, QVector<char32_t>> sourceCharacters;
     for (LayoutRun &run : runs) {
+        // Layout can attach an inferred separator with its own complete face
+        // to a preceding source-font run. Recheck the final encoded text before
+        // reusing that source font: preparing only the original visible span
+        // would silently map an absent subset space to .notdef.
+        if (run.format.allowOriginalFontReuse
+            && !originalTextContainsCharacters(draft.originalText, run.text)
+            && !prepareFormat(run.format, run.text, unsupportedCodePoint)) {
+            return fontFailure(run.format, draft.page, unsupportedCodePoint);
+        }
         if (!fontResolver.prepareSourceText(run.format, run.text, unsupportedCodePoint)) {
             return fontFailure(run.format, draft.page, unsupportedCodePoint);
         }
@@ -3208,7 +3352,22 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 kMaximumScale);
         }
         qreal originOffset = run.leadingLayoutAdvance;
-        if (configured && (!run.leadingWhitespace.isEmpty()
+        if (configured && run.hasCharacterPositions && !run.characterPositions.isEmpty()) {
+            QVector<float> positions;
+            positions.reserve(run.characterPositions.size());
+            for (qreal position : run.characterPositions) {
+                const qreal localPosition = position / horizontalScale;
+                if (!qIsFinite(localPosition)
+                    || qAbs(localPosition) > std::numeric_limits<float>::max()) {
+                    configured = false;
+                    break;
+                }
+                positions.append(static_cast<float>(localPosition));
+            }
+            configured = configured && FPDFText_SetPositions(
+                textObject, positions.constData(), size_t(positions.size()));
+        }
+        if (configured && !run.hasCharacterPositions && (!run.leadingWhitespace.isEmpty()
                            || !qFuzzyIsNull(originOffset))) {
             for (uint character : run.leadingWhitespace.toUcs4()) {
                 float advance = 0.0F;
@@ -6614,6 +6773,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         result.displayFontSizeRatio = format.displayFontSizeRatio;
         result.letterSpacingRatio = format.letterSpacingRatio;
         result.wordSpacingRatio = format.wordSpacingRatio;
+        result.sourceAdvanceRatio = format.sourceAdvanceRatio;
         result.fontStretch = format.fontStretch;
         result.fontBold = format.fontBold;
         result.fontItalic = format.fontItalic;

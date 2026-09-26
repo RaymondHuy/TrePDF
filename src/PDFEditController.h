@@ -398,7 +398,8 @@ public:
                                      bool fontUnderline,
                                      qreal pixelSize,
                                      qreal letterSpacing = 0.0,
-                                     qreal wordSpacing = 0.0) const;
+                                     qreal wordSpacing = 0.0,
+                                     bool sourceSpacing = false) const;
     Q_INVOKABLE int displayFontStretch(const QString &fontFamily,
                                        int fontStretch,
                                        bool fontBold,
@@ -444,6 +445,8 @@ public:
     Q_INVOKABLE int selectRelativeComment(int direction);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void beginSelectedTextEdit();
+    Q_INVOKABLE void normalizeEditorSourceSpacing(QObject *textDocument,
+                                                  qreal displayedPageHeight) const;
     Q_INVOKABLE void updateSelectedTextPreview(const QString &text,
                                                int cursorPosition = -1);
     Q_INVOKABLE void beginSelectedFrameResize();
@@ -541,6 +544,14 @@ private:
         bool followsSpace = false;
     };
 
+    struct SourceTextPosition {
+        qsizetype start = 0;
+        qsizetype length = 0;
+        qreal x = 0.0;
+        qreal advance = 0.0;
+        qreal y = 0.0;
+    };
+
     struct TextObjectLayout {
         QRectF bounds;
         QVector<QRectF> glyphBounds;
@@ -555,6 +566,8 @@ private:
         bool previousSpacingWasSpace = false;
         bool hasSpacingOrigin = false;
         bool spacingUnsupported = false;
+        QVector<SourceTextPosition> sourcePositions;
+        bool positionsUnsupported = false;
     };
 
     struct CharacterFormat {
@@ -563,6 +576,8 @@ private:
         qreal displayFontSizeRatio = 0.0;
         qreal letterSpacingRatio = 0.0;
         qreal wordSpacingRatio = 0.0;
+        // Per-cluster source adjustment, separate from user tracking controls.
+        qreal sourceAdvanceRatio = 0.0;
         int fontStretch = 100;
         bool fontBold = false;
         bool fontItalic = false;
@@ -625,6 +640,7 @@ private:
         QString text;
         QVector<QRectF> textGlyphRects;
         QVector<CharacterSpan> sourceCharacterSpans;
+        QVector<SourceTextPosition> pendingSourcePositions;
         QVector<ParagraphFormat> sourceParagraphFormats;
         QVector<qsizetype> sourceParagraphLineBreaks;
         QString paragraphLayoutGroup;
@@ -636,12 +652,14 @@ private:
         QByteArray paragraphLayoutModel;
         QPointF paragraphLayoutAnchor;
         QString spacingGroup;
+        bool invalidSpacingMetadata = false;
         QString spacingText;
         int spacingIndex = -1;
         int spacingCount = 0;
         int spacingStart = -1;
         qreal spacingLetterPoints = 0.0;
         qreal spacingWordPoints = 0.0;
+        qreal spacingSourceAdvancePoints = 0.0;
         qreal spacingOriginOffset = 0.0;
         QVector<CharacterSpan> spacingRuns;
         bool textMarkupHitTestOnly = false;
@@ -974,6 +992,7 @@ private:
     bool removeCommentCandidate(const Candidate &candidate);
     static void setInitialGeometry(Candidate &candidate, const QRectF &sourceRect);
     void expandInitialTextFrame(Candidate &candidate, const QSizeF &pageSize) const;
+    void preserveSourceTextPositions(Candidate &candidate, const QSizeF &pageSize) const;
     static void inferSourceTextSpacing(Candidate &candidate,
                                        const TextObjectLayout &layout,
                                        const QSizeF &pageSize);

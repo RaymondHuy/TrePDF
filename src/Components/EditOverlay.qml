@@ -514,6 +514,7 @@ Item {
             fontStretch: primaryFormat.fontStretch,
             letterSpacingRatio: primaryFormat.letterSpacingRatio,
             wordSpacingRatio: primaryFormat.wordSpacingRatio,
+            sourceAdvanceRatio: primaryFormat.sourceAdvanceRatio,
             fontBold: primaryFormat.fontBold,
             fontItalic: primaryFormat.fontItalic,
             fontUnderline: primaryFormat.fontUnderline,
@@ -573,8 +574,9 @@ Item {
             fontItalic,
             fontUnderline,
             displayPixelSize,
-            Number(format.letterSpacingRatio || 0) * effectiveBasePixelSize / baseRatio,
-            Number(format.wordSpacingRatio || 0) * effectiveBasePixelSize / baseRatio)
+            (Number(format.letterSpacingRatio || 0) + Number(format.sourceAdvanceRatio || 0)) * effectiveBasePixelSize / baseRatio,
+            Number(format.wordSpacingRatio || 0) * effectiveBasePixelSize / baseRatio,
+            Math.abs(Number(format.sourceAdvanceRatio || 0)) > 1e-12)
         const family = String(displayFont.family || rawFamily)
             .replace(/\\/g, "\\\\")
             .replace(/'/g, "\\'")
@@ -585,9 +587,10 @@ Item {
             fontItalic,
             displayPixelSize)
         let style = "font-size:" + relativeSize.toFixed(6) + "em;"
+            + "font-kerning:" + (Math.abs(Number(format.sourceAdvanceRatio || 0)) > 1e-12 ? "none" : "normal") + ";"
             + "font-stretch:" + displayStretch + "%;"
             + "letter-spacing:"
-            + (Number(format.letterSpacingRatio || 0) * effectiveBasePixelSize / baseRatio).toFixed(6) + "px;"
+            + ((Number(format.letterSpacingRatio || 0) + Number(format.sourceAdvanceRatio || 0)) * effectiveBasePixelSize / baseRatio).toFixed(6) + "px;"
             + "word-spacing:"
             + (Number(format.wordSpacingRatio || 0) * effectiveBasePixelSize / baseRatio).toFixed(6) + "px;"
             + "font-weight:" + (fontBold ? "700" : "400") + ";"
@@ -796,6 +799,7 @@ Item {
             return
 
         syncingEditorPreview = true
+        controller.normalizeEditorSourceSpacing(editor.textDocument, root.textLayoutPageHeight)
         controller.updateSelectedTextPreview(
             editorPlainText(), editor.cursorPosition)
         syncingEditorPreview = false
@@ -2037,9 +2041,11 @@ Item {
         }
 
         syncingEditorPreview = true
+        controller.normalizeEditorSourceSpacing(editor.textDocument, root.textLayoutPageHeight)
         controller.updateSelectedTextPreview(
             editorPlainText(),
             editor.cursorPosition)
+        controller.syncEditorFontStyles(editor.textDocument)
         syncingEditorPreview = false
         editing = false
         editingObjectId = ""
@@ -2742,8 +2748,9 @@ Item {
                 root.frameResizePreview.fontItalic === true,
                 root.frameResizePreview.fontUnderline === true,
                 fontPixelSize,
-                Number(root.frameResizePreview.letterSpacingRatio || 0) * root.height,
-                Number(root.frameResizePreview.wordSpacingRatio || 0) * root.height)
+                (Number(root.frameResizePreview.letterSpacingRatio || 0) + Number(root.frameResizePreview.sourceAdvanceRatio || 0)) * root.height,
+                Number(root.frameResizePreview.wordSpacingRatio || 0) * root.height,
+                Math.abs(Number(root.frameResizePreview.sourceAdvanceRatio || 0)) > 1e-12)
         readonly property real contentMargin: Math.min(
             Math.max(2, 4 * root.pagePointScale),
             Math.max(0, Math.min(width, height) / 4))
@@ -2867,8 +2874,9 @@ Item {
                     modelData.fontItalic === true,
                     modelData.fontUnderline === true,
                     fontPixelSize,
-                    Number(modelData.letterSpacingRatio || 0) * root.height,
-                    Number(modelData.wordSpacingRatio || 0) * root.height)
+                    (Number(modelData.letterSpacingRatio || 0) + Number(modelData.sourceAdvanceRatio || 0)) * root.height,
+                    Number(modelData.wordSpacingRatio || 0) * root.height,
+                    Math.abs(Number(modelData.sourceAdvanceRatio || 0)) > 1e-12)
             readonly property real contentMargin: Math.min(
                 Math.max(2, 4 * root.pagePointScale),
                 Math.max(0, Math.min(width, height) / 4))
@@ -2972,8 +2980,9 @@ Item {
                 modelData.fontItalic,
                 modelData.fontUnderline,
                 fontPixelSize,
-                Number(modelData.letterSpacingRatio || 0) * root.textLayoutPageHeight,
-                Number(modelData.wordSpacingRatio || 0) * root.textLayoutPageHeight)
+                (Number(modelData.letterSpacingRatio || 0) + Number(modelData.sourceAdvanceRatio || 0)) * root.textLayoutPageHeight,
+                Number(modelData.wordSpacingRatio || 0) * root.textLayoutPageHeight,
+                Math.abs(Number(modelData.sourceAdvanceRatio || 0)) > 1e-12)
             readonly property real desiredTextPageY: usesBaseline
                 ? Math.min(
                     frameY - root.fallbackBleed,
@@ -3922,8 +3931,9 @@ Item {
             baseFormat.fontItalic === true,
             baseFormat.fontUnderline === true,
             baseFontPixelSize,
-            Number(baseFormat.letterSpacingRatio || 0) * root.textLayoutPageHeight,
-            Number(baseFormat.wordSpacingRatio || 0) * root.textLayoutPageHeight)
+            (Number(baseFormat.letterSpacingRatio || 0) + Number(baseFormat.sourceAdvanceRatio || 0)) * root.textLayoutPageHeight,
+            Number(baseFormat.wordSpacingRatio || 0) * root.textLayoutPageHeight,
+            Math.abs(Number(baseFormat.sourceAdvanceRatio || 0)) > 1e-12)
         readonly property bool usesBaseline: !editsAddedText
             && root.controller.selectedHasBaseline
         readonly property real textOriginX: root.controller.selectedOriginX * root.width

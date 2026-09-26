@@ -168,6 +168,8 @@ private slots:
     void keepsSourceParagraphFrameClearOfOtherText();
     void editsSourceParagraphWithNoOpCancelAndHistory();
     void editsSourceParagraphThroughQmlOverlay();
+    void preservesMultilineSourceClusterSpacingThroughQmlEditing();
+    void rejectsOversizedRetainedGlyphLineTransactionally();
     void keepsSourceParagraphLayoutStableAtFractionalZoom_data();
     void keepsSourceParagraphLayoutStableAtFractionalZoom();
     void infersConstantSourceTextSpacing_data();
@@ -177,6 +179,10 @@ private slots:
     void usesCompatibleFontForUnreadableType1Glyphs();
     void infersConstantSourceTextSpacing();
     void rejectsIrregularSourceTextSpacing();
+    void preservesSourceClusterPositionsThroughEditorAndSave_data();
+    void preservesSourceClusterPositionsThroughEditorAndSave();
+    void editsSourceClusterSpacingWithUndo();
+    void rejectsDamagedSourceClusterMetadata();
     void editsSpacingInSelectedRangeAndAtCaret();
     void keepsSourceSpacingThroughQmlEditing_data();
     void keepsSourceSpacingThroughQmlEditing();
@@ -216,6 +222,8 @@ private slots:
     void joinsNativeFontSizeTypingUndo();
     void preservesEditorUndoWhenChangingFontSize();
     void savesFontSizeRoundTrip();
+    void rejectsDamagedParagraphWhitespaceFormats_data();
+    void rejectsDamagedParagraphWhitespaceFormats();
     void resetsStretchWhenChangingFontFamily();
     void normalizesSourceStretchWhenReselectingFontFamily();
     void preservesSourceHorizontalScaleWhenResizing_data();
