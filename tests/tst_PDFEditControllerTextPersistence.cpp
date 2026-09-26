@@ -577,15 +577,23 @@ void PDFEditControllerTest::savesJustifiedWordPositions()
                  qPrintable(QStringLiteral("Word at %1: expected x=%2, saved x=%3")
                      .arg(index).arg(expectedX).arg(origins.at(index).x())));
     }
-    if (!added) {
-        FS_MATRIX matrix{};
-        QVERIFY(textObjectMatrix(outputPath, QStringLiteral("Alpha"), matrix));
-        QVERIFY(qAbs(horizontalScale(matrix) - 1.0) < 0.0001);
-    } else {
-        FS_MATRIX matrix{};
-        QVERIFY(textObjectMatrix(outputPath, QStringLiteral("iota"), matrix));
-        QVERIFY(qAbs(horizontalScale(matrix) - 1.0) < 0.0001);
+    const QString scaleWord = added ? QStringLiteral("iota") : QStringLiteral("Alpha");
+    const int scaleStart = denseText.indexOf(scaleWord);
+    QVERIFY(scaleStart >= 0);
+    int visibleIndex = 0;
+    int checked = 0;
+    for (int index = 0; index < FPDFText_CountChars(textPage); ++index) {
+        if (QChar::isSpace(static_cast<char32_t>(FPDFText_GetUnicode(textPage, index))))
+            continue;
+        if (visibleIndex >= scaleStart && visibleIndex < scaleStart + scaleWord.size()) {
+            FS_MATRIX matrix{};
+            QVERIFY(FPDFPageObj_GetMatrix(FPDFText_GetTextObject(textPage, index), &matrix));
+            QVERIFY(qAbs(horizontalScale(matrix) - 1.0) < 0.0001);
+            ++checked;
+        }
+        ++visibleIndex;
     }
+    QCOMPARE(checked, scaleWord.size());
 }
 
 void PDFEditControllerTest::savesDeletedTextRoundTrip()
@@ -1095,12 +1103,14 @@ void PDFEditControllerTest::savesOffsetCropCoordinates()
     controller.commitSelectedText(QStringLiteral("Offset crop saved"));
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
-    QPointF origin;
-    QVERIFY2(
-        textObjectOrigin(outputPath, QStringLiteral("Offset crop"), origin),
-        qPrintable(topLevelTextObjects(outputPath).join(QLatin1Char('|'))));
-    QVERIFY(qAbs(origin.x() - 100.0) < 1.0);
-    QVERIFY(qAbs(origin.y() - 600.0) < 1.0);
+    const QString savedText = QStringLiteral("Offset crop saved");
+    QCOMPARE(normalizedPageText(outputPath), savedText);
+    const QString firstLine = QStringLiteral("Offset crop");
+    const auto characters = textCharacterRangeInfo(outputPath, firstLine);
+    QCOMPARE(characters.size(), firstLine.size());
+    QVERIFY(qAbs(characters.first().matrix.e - 100.0) < 1.0);
+    for (const auto &character : characters)
+        QVERIFY(qAbs(character.matrix.f - 600.0) < 1.0);
 }
 
 void PDFEditControllerTest::savesAddedTextOnRotatedPage()

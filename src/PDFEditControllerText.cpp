@@ -33,10 +33,12 @@
 #include <QQuickTextDocument>
 #include <QRawFont>
 #include <QRunnable>
+#include <QScopedValueRollback>
 #include <QSet>
 #include <QStringList>
 #include <QTextBlock>
 #include <QTextBlockFormat>
+#include <QTextBoundaryFinder>
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTextLayout>
@@ -64,6 +66,7 @@ constexpr int kEditorWordSpacingRatio = QTextFormat::UserProperty + 4;
 constexpr int kEditorLineSpacing = QTextFormat::UserProperty + 5;
 constexpr int kEditorParagraphSpaceBeforeRatio = QTextFormat::UserProperty + 6;
 constexpr int kEditorParagraphSpaceAfterRatio = QTextFormat::UserProperty + 7;
+constexpr int kEditorSourceAdvanceRatio = QTextFormat::UserProperty + 8;
 
 // Qt adds the insertion length and following format length when calculating
 // the redo cursor. A final custom item makes it use the changed text bounds
@@ -140,6 +143,11 @@ public:
         : QObject(document), m_document(document), m_enabled(std::move(enabled))
     {
         setObjectName(QStringLiteral("trepdfTypingEditBlock"));
+        connect(document->textDocument(), &QTextDocument::undoCommandAdded, this, [this]() {
+            if (!m_closingNativeBlock) {
+                m_newCommand = true;
+            }
+        });
         if (document->parent()) {
             document->parent()->installEventFilter(this);
         }
@@ -150,16 +158,38 @@ public:
         finish();
     }
 
+    bool takePendingTextEdit()
+    {
+        const bool pending = m_nativeEdit || m_newCommand;
+        m_nativeEdit = false;
+        m_newCommand = false;
+        return pending;
+    }
+
 protected:
     bool eventFilter(QObject *editor, QEvent *event) override
     {
+        if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease
+            || event->type() == QEvent::InputMethod) {
+            finish();
+        }
         bool insertsText = false;
         if (event->type() == QEvent::KeyPress) {
             const auto *key = static_cast<QKeyEvent *>(event);
-            insertsText = !key->text().isEmpty()
-                && !(key->modifiers() & (Qt::ControlModifier | Qt::MetaModifier));
+            insertsText = (!key->text().isEmpty()
+                && !(key->modifiers() & (Qt::ControlModifier | Qt::MetaModifier)))
+                || key->key() == Qt::Key_Backspace || key->key() == Qt::Key_Delete
+                || key->matches(QKeySequence::Paste) || key->matches(QKeySequence::Cut);
         } else if (event->type() == QEvent::InputMethod) {
-            insertsText = !static_cast<QInputMethodEvent *>(event)->commitString().isEmpty();
+            const auto *input = static_cast<QInputMethodEvent *>(event);
+            insertsText = !input->commitString().isEmpty() || input->replacementLength() > 0;
+        }
+        if (insertsText) {
+            m_nativeEdit = true;
+            m_nativeEventPending = true;
+            m_nativeTextBefore = m_document->textDocument()
+                ? m_document->textDocument()->toPlainText() : QString();
+            QMetaObject::invokeMethod(this, [this]() { finish(); }, Qt::QueuedConnection);
         }
         if (insertsText && m_enabled() && m_cursor.isNull()
             && m_document->textDocument()) {
@@ -167,7 +197,6 @@ protected:
             m_cursor.setPosition(qBound(0, editor->property("cursorPosition").toInt(),
                                          m_document->textDocument()->characterCount() - 1));
             m_cursor.beginEditBlock();
-            QMetaObject::invokeMethod(this, [this]() { finish(); }, Qt::QueuedConnection);
         }
         return false;
     }
@@ -177,13 +206,33 @@ private:
     {
         if (!m_cursor.isNull()) {
             QTextCursor cursor = std::exchange(m_cursor, QTextCursor());
+            // Preedit can queue QML synchronization before the native block
+            // closes. Its final undoCommandAdded is not another text edit:
+            // otherwise the next undo would invalidate restored spacing again.
+            QScopedValueRollback<bool> closing(m_closingNativeBlock, true);
             cursor.endEditBlock();
+        }
+        if (m_nativeEventPending) {
+            // Boundary Delete/Backspace and empty paste produce no textChanged
+            // signal. Do not let their pending flag invalidate the next undo.
+            if (m_document->textDocument()
+                && m_document->textDocument()->toPlainText() == m_nativeTextBefore) {
+                m_nativeEdit = false;
+                m_newCommand = false;
+            }
+            m_nativeEventPending = false;
+            m_nativeTextBefore.clear();
         }
     }
 
     QQuickTextDocument *m_document;
     std::function<bool()> m_enabled;
     QTextCursor m_cursor;
+    bool m_nativeEdit = false;
+    bool m_newCommand = false;
+    bool m_closingNativeBlock = false;
+    bool m_nativeEventPending = false;
+    QString m_nativeTextBefore;
 };
 
 constexpr qreal kInitialTextFrameSafetyPoints = 4.0;
@@ -636,7 +685,8 @@ QFont PDFEditController::fontForDisplay(const QString &fontFamily,
                                         bool fontUnderline,
                                         qreal pixelSize,
                                         qreal letterSpacing,
-                                        qreal wordSpacing) const
+                                        qreal wordSpacing,
+                                        bool sourceSpacing) const
 {
     const int boundedPixelSize = qMax(1, qRound(pixelSize));
     QFont font;
@@ -655,6 +705,7 @@ QFont PDFEditController::fontForDisplay(const QString &fontFamily,
         boundedPixelSize));
     font.setLetterSpacing(QFont::AbsoluteSpacing, letterSpacing);
     font.setWordSpacing(wordSpacing);
+    font.setKerning(!sourceSpacing);
     return font;
 }
 
@@ -706,6 +757,8 @@ void PDFEditController::applyTypingFormatToEditorDocument(
                        m_typingCharacterFormat.displayFontSizeRatio);
     format.setProperty(kEditorLetterSpacingRatio, m_typingCharacterFormat.letterSpacingRatio);
     format.setProperty(kEditorWordSpacingRatio, m_typingCharacterFormat.wordSpacingRatio);
+    format.setProperty(kEditorSourceAdvanceRatio, 0.0);
+    format.setFontKerning(true);
     if (qIsFinite(displayedPageHeight) && displayedPageHeight > 0.0) {
         const qreal ratio = m_typingCharacterFormat.displayFontSizeRatio > 0.0
             ? m_typingCharacterFormat.displayFontSizeRatio
@@ -762,8 +815,15 @@ void PDFEditController::initializeEditorFontSizes(
     if (!quickDocument->findChild<QObject *>(QStringLiteral("trepdfTypingEditBlock"),
                                             Qt::FindDirectChildrenOnly)) {
         new EditorTypingEditBlock(quickDocument, [controller = QPointer<const PDFEditController>(this)]() {
-            return controller && controller->m_textEditActive
-                && controller->m_typingCharacterFormatActive;
+            if (!controller || !controller->m_textEditActive) {
+                return false;
+            }
+            const Draft current = controller->selectedDraftForDisplay();
+            return controller->m_typingCharacterFormatActive
+                || std::any_of(current.characterSpans.cbegin(), current.characterSpans.cend(),
+                               [](const CharacterSpan &span) {
+                    return !qFuzzyIsNull(span.format.sourceAdvanceRatio);
+                });
         });
     }
     // Called only immediately after loading a new rich document, before user
@@ -782,6 +842,8 @@ void PDFEditController::initializeEditorFontSizes(
         format.setProperty(kEditorDisplayFontSizeRatio, span.format.displayFontSizeRatio);
         format.setProperty(kEditorLetterSpacingRatio, span.format.letterSpacingRatio);
         format.setProperty(kEditorWordSpacingRatio, span.format.wordSpacingRatio);
+        format.setProperty(kEditorSourceAdvanceRatio, span.format.sourceAdvanceRatio);
+        format.setFontKerning(qFuzzyIsNull(span.format.sourceAdvanceRatio));
         if (qIsFinite(displayedPageHeight) && displayedPageHeight > 0.0) {
             const qreal ratio = span.format.displayFontSizeRatio > 0.0
                 ? span.format.displayFontSizeRatio : span.format.fontSizeRatio;
@@ -791,7 +853,8 @@ void PDFEditController::initializeEditorFontSizes(
                 span.format.fontFamily, span.format.fontStretch,
                 span.format.fontBold, span.format.fontItalic, pixels));
             format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
-            format.setFontLetterSpacing(span.format.letterSpacingRatio * displayedPageHeight);
+            format.setFontLetterSpacing((span.format.letterSpacingRatio
+                                         + span.format.sourceAdvanceRatio) * displayedPageHeight);
             format.setFontWordSpacing(span.format.wordSpacingRatio * displayedPageHeight);
         }
         cursor.setPosition(start);
@@ -799,6 +862,62 @@ void PDFEditController::initializeEditorFontSizes(
         cursor.mergeCharFormat(format);
     }
     document->setUndoRedoEnabled(undoEnabled);
+}
+
+void PDFEditController::normalizeEditorSourceSpacing(
+    QObject *textDocument, qreal displayedPageHeight) const
+{
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickDocument ? quickDocument->textDocument() : nullptr;
+    if (!document || !m_textEditActive || !m_hasSelection
+        || !qIsFinite(displayedPageHeight) || displayedPageHeight <= 0.0) {
+        return;
+    }
+    auto *block = static_cast<EditorTypingEditBlock *>(quickDocument->findChild<QObject *>(
+        QStringLiteral("trepdfTypingEditBlock"), Qt::FindDirectChildrenOnly));
+    // Undo and redo restore their own custom properties. Reapplying the edit
+    // invalidation there would erase the source spacing that undo just restored.
+    if (!block || !block->takePendingTextEdit()) {
+        return;
+    }
+    Draft draft = selectedDraftForDisplay();
+    const QString text = document->toPlainText();
+    if (draft.text == text) {
+        return;
+    }
+    const int position = quickDocument->parent()
+        ? quickDocument->parent()->property("cursorPosition").toInt() : -1;
+    setDraftText(draft, text, nullptr, -1, position);
+    QTextCursor cursor(document);
+    bool merging = false;
+    for (const CharacterSpan &span : std::as_const(draft.characterSpans)) {
+        for (int index = int(span.start); index < span.start + span.length; ++index) {
+            cursor.setPosition(index);
+            cursor.setPosition(index + 1, QTextCursor::KeepAnchor);
+            const QTextCharFormat previous = cursor.charFormat();
+            if (previous.doubleProperty(kEditorSourceAdvanceRatio) == span.format.sourceAdvanceRatio) {
+                continue;
+            }
+            if (!merging) {
+                cursor.joinPreviousEditBlock();
+                merging = true;
+            }
+            QTextCharFormat format;
+            format.setProperty(kEditorSourceAdvanceRatio, span.format.sourceAdvanceRatio);
+            format.setFontKerning(qFuzzyIsNull(span.format.sourceAdvanceRatio));
+            const qreal letterSpacing = previous.hasProperty(kEditorLetterSpacingRatio)
+                ? previous.doubleProperty(kEditorLetterSpacingRatio) : span.format.letterSpacingRatio;
+            format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+            format.setFontLetterSpacing(
+                (letterSpacing + span.format.sourceAdvanceRatio) * displayedPageHeight);
+            cursor.mergeCharFormat(format);
+        }
+    }
+    if (merging) {
+        document->appendUndoItem(new EditorTypingCursorBoundary);
+        cursor.endEditBlock();
+    }
+    block->takePendingTextEdit();
 }
 
 bool PDFEditController::applyFontSizeToEditorDocument(
@@ -835,6 +954,10 @@ bool PDFEditController::applyFontSizeToEditorDocument(
         QTextCharFormat format;
         format.setProperty(kEditorFontSizeRatio, fontSizeRatio);
         format.setProperty(kEditorDisplayFontSizeRatio, fontSizeRatio);
+        format.setProperty(kEditorSourceAdvanceRatio, 0.0);
+        format.setFontKerning(true);
+        format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+        format.setFontLetterSpacing(span.format.letterSpacingRatio * displayedPageHeight);
         format.setProperty(QTextFormat::FontPixelSize, pixels);
         format.setFontStretch(displayFontStretch(
             span.format.fontFamily, span.format.fontStretch,
@@ -868,21 +991,28 @@ bool PDFEditController::applyTextSpacingToEditorDocument(
     if (last <= first) {
         return false;
     }
-    QTextCharFormat format;
-    if (qIsFinite(letterSpacingRatio)) {
-        format.setProperty(kEditorLetterSpacingRatio, letterSpacingRatio);
-        format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
-        format.setFontLetterSpacing(letterSpacingRatio * displayedPageHeight);
-    }
-    if (qIsFinite(wordSpacingRatio)) {
-        format.setProperty(kEditorWordSpacingRatio, wordSpacingRatio);
-        format.setFontWordSpacing(wordSpacingRatio * displayedPageHeight);
-    }
     QTextCursor cursor(document);
-    cursor.setPosition(first);
-    cursor.setPosition(last, QTextCursor::KeepAnchor);
     cursor.beginEditBlock();
-    cursor.mergeCharFormat(format);
+    for (int position = first; position < last; ++position) {
+        cursor.setPosition(position);
+        cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+        const QTextCharFormat previous = cursor.charFormat();
+        QTextCharFormat format;
+        format.setProperty(kEditorSourceAdvanceRatio, 0.0);
+        format.setFontKerning(true);
+        const qreal effectiveLetterSpacing = qIsFinite(letterSpacingRatio)
+            ? letterSpacingRatio : previous.doubleProperty(kEditorLetterSpacingRatio);
+        format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+        format.setFontLetterSpacing(effectiveLetterSpacing * displayedPageHeight);
+        if (qIsFinite(letterSpacingRatio)) {
+            format.setProperty(kEditorLetterSpacingRatio, letterSpacingRatio);
+        }
+        if (qIsFinite(wordSpacingRatio)) {
+            format.setProperty(kEditorWordSpacingRatio, wordSpacingRatio);
+            format.setFontWordSpacing(wordSpacingRatio * displayedPageHeight);
+        }
+        cursor.mergeCharFormat(format);
+    }
     cursor.endEditBlock();
     return true;
 }
@@ -928,10 +1058,26 @@ bool PDFEditController::applyFontStyleToEditorDocument(
     }
 
     QTextCursor cursor(document);
-    cursor.setPosition(rangeStart);
-    cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
     cursor.beginEditBlock();
-    cursor.mergeCharFormat(format);
+    if (style == static_cast<int>(FontStyle::Underline)) {
+        cursor.setPosition(rangeStart);
+        cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
+        cursor.mergeCharFormat(format);
+    } else {
+        const qreal pageHeight = m_document
+            ? m_document->pageSize(m_selectedCandidate.page).height() : 0.0;
+        for (int position = rangeStart; position < rangeEnd; ++position) {
+            cursor.setPosition(position);
+            cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+            const QTextCharFormat previous = cursor.charFormat();
+            QTextCharFormat updated = format;
+            updated.setProperty(kEditorSourceAdvanceRatio, 0.0);
+            updated.setFontKerning(true);
+            updated.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+            updated.setFontLetterSpacing(previous.doubleProperty(kEditorLetterSpacingRatio) * pageHeight);
+            cursor.mergeCharFormat(updated);
+        }
+    }
     cursor.endEditBlock();
     return true;
 }
@@ -1091,6 +1237,12 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
             const qreal ratio = editorFormat.doubleProperty(kEditorWordSpacingRatio);
             if (qIsFinite(ratio)) {
                 format.wordSpacingRatio = ratio;
+            }
+        }
+        if (editorFormat.hasProperty(kEditorSourceAdvanceRatio)) {
+            const qreal ratio = editorFormat.doubleProperty(kEditorSourceAdvanceRatio);
+            if (qIsFinite(ratio)) {
+                format.sourceAdvanceRatio = ratio;
             }
         }
         if (editorFormat.hasProperty(kEditorFontSizeRatio)
@@ -1329,6 +1481,7 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
             }
             format.fontFamily = fontFamily;
             format.fontStretch = QFont::Unstretched;
+            format.sourceAdvanceRatio = 0.0;
         });
     if (!changed) {
         if (finishImmediately) {
@@ -1367,6 +1520,7 @@ void PDFEditController::setSelectedFontSize(qreal points)
         }
         format.fontSizeRatio = ratio;
         format.displayFontSizeRatio = ratio;
+        format.sourceAdvanceRatio = 0.0;
     };
     Draft draft = selectedDraftForDisplay();
     if (m_textEditActive && m_selectedTextRangeLength == 0) {
@@ -1436,6 +1590,7 @@ void PDFEditController::setSelectedTextSpacing(qreal points, bool wordSpacing)
         qreal &current = wordSpacing ? format.wordSpacingRatio : format.letterSpacingRatio;
         if (!qFuzzyCompare(current + 1.0, ratio + 1.0)) {
             current = ratio;
+            format.sourceAdvanceRatio = 0.0;
         }
     };
     Draft draft = selectedDraftForDisplay();
@@ -1740,9 +1895,15 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
     const auto updatedStyle = [style, enabled](CharacterFormat format) {
         switch (style) {
         case FontStyle::Bold:
+            if (format.fontBold != enabled) {
+                format.sourceAdvanceRatio = 0.0;
+            }
             format.fontBold = enabled;
             break;
         case FontStyle::Italic:
+            if (format.fontItalic != enabled) {
+                format.sourceAdvanceRatio = 0.0;
+            }
             format.fontItalic = enabled;
             break;
         case FontStyle::Underline:
@@ -1873,7 +2034,8 @@ void PDFEditController::finishSelectedTextEdit()
                 || !qFuzzyCompare(current.format.displayFontSizeRatio,
                                   previous.format.displayFontSizeRatio)
                 || current.format.letterSpacingRatio != previous.format.letterSpacingRatio
-                || current.format.wordSpacingRatio != previous.format.wordSpacingRatio) {
+                || current.format.wordSpacingRatio != previous.format.wordSpacingRatio
+                || current.format.sourceAdvanceRatio != previous.format.sourceAdvanceRatio) {
                 return false;
             }
             const qsizetype currentEnd = current.start + current.length;
@@ -2076,8 +2238,9 @@ void PDFEditController::expandInitialTextFrame(Candidate &candidate,
                 QTextCharFormat textFormat;
                 textFormat.setFont(fontForDisplay(format.fontFamily, format.fontStretch,
                     format.fontBold, format.fontItalic, format.fontUnderline, size,
-                    format.letterSpacingRatio * pageSize.height(),
-                    format.wordSpacingRatio * pageSize.height()));
+                    (format.letterSpacingRatio + format.sourceAdvanceRatio) * pageSize.height(),
+                    format.wordSpacingRatio * pageSize.height(),
+                    !qFuzzyIsNull(format.sourceAdvanceRatio)));
                 formats.append(QTextLayout::FormatRange{
                     int(start - lineStart), int(end - start), textFormat});
             }
@@ -2447,6 +2610,9 @@ PDFEditController::TextChange PDFEditController::setDraftText(
         insertedFormat = *typingFormat;
     }
 
+    // A source advance describes one original cluster boundary. New text must
+    // never inherit that boundary's adjustment from the preceding character.
+    insertedFormat.sourceAdvanceRatio = 0.0;
     QVector<CharacterFormat> newFormats;
     newFormats.reserve(newLength);
     for (qsizetype index = 0; index < commonPrefix; ++index) {
@@ -2458,6 +2624,24 @@ PDFEditController::TextChange PDFEditController::setDraftText(
     const qsizetype oldSuffixStart = oldLength - commonSuffix;
     for (qsizetype index = oldSuffixStart; index < oldLength; ++index) {
         newFormats.append(oldFormats.at(index));
+    }
+
+    // Invalidate the changed graphemes and the boundary immediately before the
+    // edit. A combining-mark insertion may change a cluster on either side.
+    QTextBoundaryFinder boundaries(QTextBoundaryFinder::Grapheme, text);
+    boundaries.setPosition(change.start);
+    qsizetype invalidStart = boundaries.toPreviousBoundary();
+    if (invalidStart < 0) {
+        invalidStart = 0;
+    }
+    boundaries.setPosition(change.start + change.insertedLength);
+    qsizetype invalidEnd = boundaries.isAtBoundary()
+        ? change.start + change.insertedLength : boundaries.toNextBoundary();
+    if (invalidEnd < 0) {
+        invalidEnd = newLength;
+    }
+    for (qsizetype index = invalidStart; index < invalidEnd; ++index) {
+        newFormats[index].sourceAdvanceRatio = 0.0;
     }
 
     QVector<CharacterSpan> newSpans;
@@ -2534,6 +2718,7 @@ void PDFEditController::applyUnicodeFontFallback(Draft &draft)
             span.length,
             draft.text.size() - start);
         const QString semanticFamily = PDFFontAliases::semanticFamily(span.format.fontFamily);
+        const QString previousFamily = span.format.fontFamily;
         const QString spanText = draft.text.sliced(start, length);
         if (!containsNonAscii(spanText) && semanticFamily == span.format.fontFamily) {
             continue;
@@ -2592,6 +2777,9 @@ void PDFEditController::applyUnicodeFontFallback(Draft &draft)
             span.format.fontFamily = bundledArial;
         } else if (!systemFamily.isEmpty()) {
             span.format.fontFamily = systemFamily;
+        }
+        if (span.format.fontFamily != previousFamily) {
+            span.format.sourceAdvanceRatio = 0.0;
         }
     }
 }

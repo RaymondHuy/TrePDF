@@ -26,6 +26,48 @@ using namespace PDFEditControllerTestSupport;
 
 namespace {
 
+bool textRangesShareFont(const QString &path, const QStringList &texts)
+{
+    PDFiumProcessLock lock;
+    FPDF_DOCUMENT document = FPDF_LoadDocument(QFile::encodeName(path).constData(), nullptr);
+    if (!document)
+        return false;
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    FPDF_PAGE page = FPDF_LoadPage(document, 0);
+    if (!page)
+        return false;
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+    if (!textPage)
+        return false;
+    const auto closeTextPage = qScopeGuard([&] { FPDFText_ClosePage(textPage); });
+    FPDF_FONT sharedFont = nullptr;
+    for (const QString &text : texts) {
+        FPDF_SCHHANDLE search = FPDFText_FindStart(textPage,
+            reinterpret_cast<FPDF_WIDESTRING>(text.utf16()), FPDF_MATCHCASE, 0);
+        if (!search)
+            return false;
+        const auto closeSearch = qScopeGuard([&] { FPDFText_FindClose(search); });
+        if (!FPDFText_FindNext(search))
+            return false;
+        const int start = FPDFText_GetSchResultIndex(search);
+        const int count = FPDFText_GetSchCount(search);
+        QString recovered;
+        for (int index = start; index < start + count; ++index) {
+            const auto object = FPDFText_GetTextObject(textPage, index);
+            const auto font = object ? FPDFTextObj_GetFont(object) : nullptr;
+            if (!font || (sharedFont && sharedFont != font))
+                return false;
+            sharedFont = font;
+            const char32_t unicode = FPDFText_GetUnicode(textPage, index);
+            recovered.append(QString::fromUcs4(&unicode, 1));
+        }
+        if (recovered != text)
+            return false;
+    }
+    return sharedFont != nullptr;
+}
+
 struct FontResponse {
     QByteArray body;
     int status = 200;
@@ -1138,10 +1180,10 @@ void PDFEditControllerTest::preservesFirstSpaceAfterSubsetSave()
         QFile::remove(verificationPath);
         QVERIFY(QFile::copy(outputPath, verificationPath));
     }
-    const QStringList savedObjects = topLevelTextObjects(outputPath);
-    QVERIFY2(savedObjects.contains(editedText),
-             qPrintable(QStringLiteral("Saved text objects: %1")
-                            .arg(savedObjects.join(QLatin1Char('|')))));
+    // Retained spacing may split the text into glyph-cluster objects. Every
+    // character, including the new space, must still have a real text object
+    // and font; a space merely inferred by PDFium would fail this inspection.
+    QCOMPARE(textCharacterRangeInfo(outputPath, editedText).size(), editedText.size());
     QVERIFY(pageText(outputPath).contains(editedText));
 
     const QVariantMap reopenedCandidate = candidateForText(
@@ -1153,7 +1195,7 @@ void PDFEditControllerTest::preservesFirstSpaceAfterSubsetSave()
     controller.beginSelectedTextEdit();
     controller.commitSelectedText(repeatedText);
     QVERIFY(controller.save());
-    QVERIFY(topLevelTextObjects(outputPath).contains(repeatedText));
+    QCOMPARE(textCharacterRangeInfo(outputPath, repeatedText).size(), repeatedText.size());
     QVERIFY(pageText(outputPath).contains(repeatedText));
     QVERIFY(!candidateForText(
         waitForCandidates(controller, 0), repeatedText).isEmpty());
@@ -1196,9 +1238,12 @@ void PDFEditControllerTest::preservesInferredSpaceAfterGroupedSubsetEdit()
     // has not introduced any new character into the displayed candidate.
     controller.setSelectedColor(QColor(QStringLiteral("#c62828")));
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
-    const QStringList savedObjects = topLevelTextObjects(outputPath);
-    QCOMPARE(savedObjects, QStringList({groupedText}));
-    QVERIFY(pageText(outputPath).contains(groupedText));
+    QCOMPARE(normalizedPageText(outputPath), groupedText);
+    const auto characters = textCharacterRangeInfo(outputPath, groupedText);
+    QCOMPARE(characters.size(), groupedText.size());
+    QCOMPARE(characters.at(5).text, QStringLiteral(" "));
+    for (const auto &character : characters)
+        QCOMPARE(character.color, QColor(QStringLiteral("#c62828")));
     QVERIFY(!candidateForText(
         waitForCandidates(controller, 0), groupedText).isEmpty());
 }
@@ -1627,16 +1672,18 @@ void PDFEditControllerTest::preservesSourceHorizontalScaleWhenResizing()
                 .arg(round));
         QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
 
-        FS_MATRIX matrix{};
-        QVERIFY(textObjectMatrix(outputPath, text, matrix));
-        const qreal savedScale = horizontalScale(matrix);
-        QVERIFY2(
-            qAbs(savedScale - expectedScale) <= 0.01,
-            qPrintable(QStringLiteral(
-                "Round %1 expected source scale %2, got %3")
-                           .arg(round)
-                           .arg(expectedScale, 0, 'f', 6)
-                           .arg(savedScale, 0, 'f', 6)));
+        const auto characters = textCharacterRangeInfo(outputPath, text);
+        QCOMPARE(characters.size(), text.size());
+        for (qsizetype index = 0; index < characters.size(); ++index) {
+            const qreal savedScale = horizontalScale(characters[index].matrix);
+            QVERIFY2(
+                qAbs(savedScale - expectedScale) <= 0.01,
+                qPrintable(QStringLiteral(
+                    "Round %1 character %2 expected source scale %3, got %4")
+                               .arg(round).arg(index)
+                               .arg(expectedScale, 0, 'f', 6)
+                               .arg(savedScale, 0, 'f', 6)));
+        }
     }
 }
 
@@ -1667,27 +1714,20 @@ void PDFEditControllerTest::preservesSourceScaleForUnchangedRichTextRuns()
     controller.finishSelectedTextEdit();
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
 
-    FS_MATRIX prefixMatrix{};
-    FS_MATRIX changedMatrix{};
-    FS_MATRIX suffixMatrix{};
-    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("S"), prefixMatrix));
-    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("cal"), changedMatrix));
-    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("e"), suffixMatrix));
-    const qreal prefixScale = horizontalScale(prefixMatrix);
-    const qreal changedScale = horizontalScale(changedMatrix);
-    const qreal suffixScale = horizontalScale(suffixMatrix);
-    QVERIFY2(
-        qAbs(prefixScale - 2.0) <= 0.01,
-        qPrintable(QStringLiteral("Prefix source scale changed to %1")
-                       .arg(prefixScale, 0, 'f', 6)));
-    QVERIFY2(
-        changedScale >= 0.85 && changedScale <= 1.20,
-        qPrintable(QStringLiteral("Changed Arial scale is %1")
-                       .arg(changedScale, 0, 'f', 6)));
-    QVERIFY2(
-        qAbs(suffixScale - 2.0) <= 0.01,
-        qPrintable(QStringLiteral("Suffix source scale changed to %1")
-                       .arg(suffixScale, 0, 'f', 6)));
+    const auto characters = textCharacterRangeInfo(outputPath, text);
+    QCOMPARE(characters.size(), text.size());
+    for (qsizetype index = 0; index < characters.size(); ++index) {
+        const qreal scale = horizontalScale(characters[index].matrix);
+        if (index >= 1 && index < 4) {
+            QVERIFY2(scale >= 0.85 && scale <= 1.20,
+                qPrintable(QStringLiteral("Changed Arial character %1 scale is %2")
+                    .arg(index).arg(scale, 0, 'f', 6)));
+        } else {
+            QVERIFY2(qAbs(scale - 2.0) <= 0.01,
+                qPrintable(QStringLiteral("Unchanged source character %1 scale is %2")
+                    .arg(index).arg(scale, 0, 'f', 6)));
+        }
+    }
 }
 
 void PDFEditControllerTest::keepsAddedDidotScaleStableAcrossRepeatedSaves()
@@ -1750,9 +1790,14 @@ void PDFEditControllerTest::keepsAddedDidotScaleStableAcrossRepeatedSaves()
             QStringLiteral("didot-scale-round-%1.pdf").arg(round));
         QVERIFY(controller.saveAs(QUrl::fromLocalFile(finalOutputPath)));
 
-        FS_MATRIX matrix{};
-        QVERIFY(textObjectMatrix(finalOutputPath, text, matrix));
-        const qreal savedScale = horizontalScale(matrix);
+        const auto characters = textCharacterRangeInfo(finalOutputPath, text);
+        QCOMPARE(characters.size(), text.size());
+        const qreal savedScale = horizontalScale(characters.constFirst().matrix);
+        for (qsizetype index = 0; index < characters.size(); ++index) {
+            QVERIFY2(qAbs(horizontalScale(characters[index].matrix) - savedScale) <= 0.01,
+                qPrintable(QStringLiteral("Round %1 character %2 has a different Didot scale")
+                               .arg(round).arg(index)));
+        }
         const QVariantMap savedCandidate = candidateForText(
             waitForCandidates(controller, 0),
             text);
@@ -1959,23 +2004,45 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial()
         savedText,
         savedText.normalized(QString::NormalizationForm_C));
 
-    const TextObjectFontInfo editedFont = textObjectFontInfo(
-        outputPath,
-        expectedText);
-    QVERIFY(editedFont.found);
-    QCOMPARE(editedFont.familyName, QStringLiteral("Arial"));
-    QCOMPARE(editedFont.embedded, 1);
-    const QByteArray savedFontData = embeddedSourceFontData(outputPath, expectedText);
-    const QRawFont savedFont(savedFontData, 16.0, QFont::PreferNoHinting);
-    QVERIFY(savedFont.isValid());
-    QCOMPARE(savedFont.weight() >= QFont::Bold, expectedBold);
     const auto systemFace = ApplicationFonts::systemFontFace(
         QStringLiteral("Arial"), expectedBold, false);
     const QByteArray fullFontData = systemFace.isValid() ? systemFace.data
         : ApplicationFonts::bundledFontData(QStringLiteral("Arial"), expectedBold, false);
     QVERIFY(!fullFontData.isEmpty());
-    QVERIFY(editedFont.dataSize > 0);
-    QVERIFY(preservesFontProgram(savedFontData, fullFontData));
+    const auto sourceCharacters = textCharacterRangeInfo(sourcePath, sourceText);
+    QCOMPARE(sourceCharacters.size(), sourceText.size());
+    const auto editedCharacters = textCharacterRangeInfo(outputPath, expectedText);
+    QCOMPARE(editedCharacters.size(), expectedText.size());
+    for (qsizetype index = 0; index < editedCharacters.size(); ++index) {
+        const auto &character = editedCharacters[index];
+        if (expectedBold && index == editedCharacters.size() - 1) {
+            // The unchanged final 't' retains its source correction/span, so
+            // it can reuse Helvetica-Bold independently of the new Unicode run.
+            const auto &sourceCharacter = sourceCharacters.constLast();
+            QCOMPARE(character.text, QStringLiteral("t"));
+            QCOMPARE(character.text, sourceCharacter.text);
+            QCOMPARE(character.font.baseName, sourceCharacter.font.baseName);
+            QCOMPARE(character.font.familyName, sourceCharacter.font.familyName);
+            QCOMPARE(character.font.embedded, sourceCharacter.font.embedded);
+            QCOMPARE(character.font.dataSize, sourceCharacter.font.dataSize);
+            QCOMPARE(character.font.weight, sourceCharacter.font.weight);
+            QCOMPARE(character.font.italic, sourceCharacter.font.italic);
+            QCOMPARE(character.pointSize, sourceCharacter.pointSize);
+            QVERIFY(qAbs(horizontalScale(character.matrix)
+                         - horizontalScale(sourceCharacter.matrix)) < 0.01);
+            continue;
+        }
+        QCOMPARE(character.font.familyName, QStringLiteral("Arial"));
+        QVERIFY2(character.font.embedded == 1,
+            qPrintable(QStringLiteral("Character '%1' uses %2 / %3 (embedded=%4)")
+                           .arg(character.text, character.font.familyName, character.font.baseName)
+                           .arg(character.font.embedded)));
+        QVERIFY(character.font.dataSize > 0);
+        const QRawFont savedFont(character.fontData, 16.0, QFont::PreferNoHinting);
+        QVERIFY(savedFont.isValid());
+        QCOMPARE(savedFont.weight() >= QFont::Bold, expectedBold);
+        QVERIFY(preservesFontProgram(character.fontData, fullFontData));
+    }
 
     const TextObjectFontInfo untouchedFont = textObjectFontInfo(
         outputPath,
@@ -2173,19 +2240,18 @@ void PDFEditControllerTest::preservesInheritedSystemFontForVietnamese()
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     QVERIFY(normalizedPageText(outputPath).contains(expectedText));
-    const TextObjectFontInfo editedFont = textObjectFontInfo(
-        outputPath,
-        expectedText);
-    QVERIFY(editedFont.found);
+    const auto editedCharacters = textCharacterRangeInfo(outputPath, expectedText);
+    QCOMPARE(editedCharacters.size(), expectedText.size());
     const QString compactExpectedFamily = compactFontName(fontFamily);
-    QVERIFY2(
-        compactFontName(editedFont.familyName).contains(compactExpectedFamily),
-        qPrintable(QStringLiteral("Saved font: %1 / %2")
-                       .arg(editedFont.familyName, editedFont.baseName)));
-    QCOMPARE(editedFont.embedded, 1);
-    QVERIFY(editedFont.dataSize > 0);
-    QVERIFY(preservesFontProgram(
-        embeddedSourceFontData(outputPath, expectedText), systemFace.data));
+    for (const auto &character : editedCharacters) {
+        QVERIFY2(
+            compactFontName(character.font.familyName).contains(compactExpectedFamily),
+            qPrintable(QStringLiteral("Saved font: %1 / %2")
+                           .arg(character.font.familyName, character.font.baseName)));
+        QCOMPARE(character.font.embedded, 1);
+        QVERIFY(character.font.dataSize > 0);
+        QVERIFY(preservesFontProgram(character.fontData, systemFace.data));
+    }
 }
 
 void PDFEditControllerTest::rejectsUnsupportedSystemFontForVietnamese_data()
@@ -2361,13 +2427,21 @@ void PDFEditControllerTest::preservesEmbeddedFontForFormatOnlyVietnameseEdit()
     const QString savedText = pageText(outputPath);
     QVERIFY(savedText.contains(editedText));
     QVERIFY(savedText.contains(untouchedText));
-    QVERIFY(textObjectsShareFont(outputPath, editedText, untouchedText));
-
-    const TextObjectFontInfo fontInfo = textObjectFontInfo(
-        outputPath,
-        editedText);
-    QVERIFY(fontInfo.found);
-    QCOMPARE(fontInfo.embedded, 1);
+    // A color-only edit must reuse the source font resource for every cluster,
+    // including spaces, even when retained spacing splits the original object.
+    QVERIFY(textRangesShareFont(outputPath, {editedText, untouchedText}));
+    const auto editedCharacters = textCharacterRangeInfo(outputPath, editedText);
+    const auto untouchedCharacters = textCharacterRangeInfo(outputPath, untouchedText);
+    QCOMPARE(editedCharacters.size(), editedText.size());
+    QCOMPARE(untouchedCharacters.size(), untouchedText.size());
+    for (const auto &character : editedCharacters) {
+        QCOMPARE(character.font.embedded, 1);
+        QCOMPARE(character.color, QColor(QStringLiteral("#c62828")));
+    }
+    for (const auto &character : untouchedCharacters) {
+        QCOMPARE(character.font.embedded, 1);
+        QCOMPARE(character.color, QColor(Qt::black));
+    }
 }
 
 void PDFEditControllerTest::savesNormalizedVietnameseRichText()
@@ -2407,30 +2481,25 @@ void PDFEditControllerTest::savesNormalizedVietnameseRichText()
         savedText,
         savedText.normalized(QString::NormalizationForm_C));
 
-    const TextObjectFontInfo boldFont = textObjectFontInfo(
-        outputPath,
-        QStringLiteral("Tiếng"));
-    const TextObjectFontInfo regularFont = textObjectFontInfo(
-        outputPath,
-        QStringLiteral("thường"));
-    QVERIFY(boldFont.found);
-    QVERIFY(regularFont.found);
-    const QRawFont boldRawFont(embeddedSourceFontData(outputPath, QStringLiteral("Tiếng")),
-                               16.0, QFont::PreferNoHinting);
-    const QRawFont regularRawFont(embeddedSourceFontData(outputPath, QStringLiteral("thường")),
-                                  16.0, QFont::PreferNoHinting);
-    QVERIFY(boldRawFont.isValid());
-    QVERIFY(regularRawFont.isValid());
-    QVERIFY(boldRawFont.weight() >= QFont::Bold);
-    QVERIFY(regularRawFont.weight() < QFont::Bold);
-    QCOMPARE(boldFont.embedded, 1);
-    QCOMPARE(regularFont.embedded, 1);
-
-    FS_MATRIX firstLine = {};
-    FS_MATRIX secondLine = {};
-    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("Tiếng"), firstLine));
-    QVERIFY(textObjectMatrix(outputPath, QStringLiteral("Việt"), secondLine));
-    QVERIFY(secondLine.f < firstLine.f - 1.0F);
+    const auto bold = textCharacterRangeInfo(outputPath, QStringLiteral("Tiếng"));
+    const auto regular = textCharacterRangeInfo(outputPath, QStringLiteral("thường"));
+    const auto secondLine = textCharacterRangeInfo(outputPath, QStringLiteral("Việt"));
+    QCOMPARE(bold.size(), QStringLiteral("Tiếng").size());
+    QCOMPARE(regular.size(), QStringLiteral("thường").size());
+    QCOMPARE(secondLine.size(), QStringLiteral("Việt").size());
+    for (const auto &characters : {bold, regular, secondLine}) {
+        const bool expectedBold = characters.first().text == QStringLiteral("T");
+        for (const TextCharacterInfo &character : characters) {
+            QCOMPARE(character.font.embedded, 1);
+            const QRawFont rawFont(character.fontData, 16.0, QFont::PreferNoHinting);
+            QVERIFY(rawFont.isValid());
+            QCOMPARE(rawFont.weight() >= QFont::Bold, expectedBold);
+        }
+    }
+    for (const TextCharacterInfo &character : secondLine) {
+        for (const TextCharacterInfo &firstLineCharacter : bold)
+            QVERIFY(character.matrix.f < firstLineCharacter.matrix.f - 1.0F);
+    }
 }
 
 void PDFEditControllerTest::cancelsMissingFontSaveWithoutLosingDrafts()

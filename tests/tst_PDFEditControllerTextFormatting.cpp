@@ -1,6 +1,10 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+
 using namespace PDFEditControllerTestSupport;
 
 void PDFEditControllerTest::keepsParagraphSpacingThroughQmlEditing_data()
@@ -820,41 +824,160 @@ void PDFEditControllerTest::savesFontSizeRoundTrip()
     QCOMPARE(controller.selectedFontSize(), 30.0);
     controller.setSelectedTextRange(0, 7);
     QCOMPARE(controller.selectedFontSize(), 18.0);
+    // The space following the resized word is encoded with that word's final
+    // glyph, but must retain its own semantic format in the editable paragraph.
+    controller.setSelectedTextRange(11, 1);
+    QCOMPARE(controller.selectedFontSize(), 18.0);
     controller.finishSelectedTextEdit();
     QVERIFY(!controller.hasDrafts());
 
-    const QByteArray encodedPath = QFile::encodeName(outputPath);
-    FPDF_DOCUMENT savedDocument = FPDF_LoadDocument(encodedPath.constData(), nullptr);
-    QVERIFY(savedDocument);
-    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(savedDocument); });
-    FPDF_PAGE page = FPDF_LoadPage(savedDocument, 0);
-    QVERIFY(page);
-    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
-    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
-    QVERIFY(textPage);
-    const auto closeTextPage = qScopeGuard([&] { FPDFText_ClosePage(textPage); });
-    bool foundResizedRange = false;
-    bool foundUnchangedRange = false;
-    for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
-        FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
-        if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT) {
+    const QString savedRange = QString::fromLatin1(kRegularText);
+    const auto characters = textCharacterRangeInfo(outputPath, savedRange);
+    QCOMPARE(characters.size(), savedRange.size());
+    for (qsizetype index = 0; index < characters.size(); ++index) {
+        if (savedRange.at(index).isSpace())
             continue;
-        }
-        const QString text = pageObjectText(object, textPage);
-        float pointSize = 0.0F;
-        if (text.trimmed() == QStringLiteral("PDF")) {
-            QVERIFY(FPDFTextObj_GetFontSize(object, &pointSize));
-            QCOMPARE(pointSize, 30.0F);
-            foundResizedRange = true;
-        } else if (text.contains(QStringLiteral("Regular"))) {
-            QVERIFY(FPDFTextObj_GetFontSize(object, &pointSize));
-            QCOMPARE(pointSize, 18.0F);
-            foundUnchangedRange = true;
-        }
+        QCOMPARE(characters[index].pointSize, index >= 8 && index < 11 ? 30.0F : 18.0F);
     }
-    QVERIFY(foundResizedRange);
-    QVERIFY(foundUnchangedRange);
+
+    // A second replacement must use the restored semantic space widths, not
+    // the size of the visible glyph with which each space was encoded.
+    controller.setSelectedColor(Qt::blue);
+    QVERIFY(controller.save());
+    const auto recoloredCharacters = textCharacterRangeInfo(outputPath, savedRange);
+    QCOMPARE(recoloredCharacters.size(), characters.size());
+    for (qsizetype index = 0; index < characters.size(); ++index) {
+        if (savedRange.at(index).isSpace())
+            continue;
+        QCOMPARE(recoloredCharacters[index].pointSize, characters[index].pointSize);
+        QCOMPARE(recoloredCharacters[index].color, QColor(Qt::blue));
+        QVERIFY2(qAbs(recoloredCharacters[index].matrix.e - characters[index].matrix.e) < 0.15F
+                     && qAbs(recoloredCharacters[index].matrix.f - characters[index].matrix.f) < 0.15F,
+                 qPrintable(QStringLiteral("Visible character %1 moved after recoloring").arg(index)));
+    }
+    candidate = candidateForText(waitForCandidates(controller, 0), savedRange);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    for (qsizetype index = 0; index < savedRange.size(); ++index) {
+        if (!savedRange.at(index).isSpace())
+            continue;
+        controller.setSelectedTextRange(index, 1);
+        QCOMPARE(controller.selectedFontSize(), 18.0);
+    }
+    controller.finishSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
     QVERIFY(normalizedPageText(sourcePath).contains(QString::fromLatin1(kRegularText)));
+}
+
+void PDFEditControllerTest::rejectsDamagedParagraphWhitespaceFormats_data()
+{
+    QTest::addColumn<QString>("mutation");
+    QTest::newRow("visible-character") << QStringLiteral("visible-character");
+    QTest::newRow("overlap") << QStringLiteral("overlap");
+    QTest::newRow("invalid-advance") << QStringLiteral("invalid-advance");
+}
+
+void PDFEditControllerTest::rejectsDamagedParagraphWhitespaceFormats()
+{
+    QFETCH(QString, mutation);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("whitespace-metadata-%1-source.pdf").arg(mutation));
+    const QString savedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("whitespace-metadata-%1-valid.pdf").arg(mutation));
+    const QString damagedPath = m_temporaryDirectory.filePath(
+        QStringLiteral("whitespace-metadata-%1-damaged.pdf").arg(mutation));
+    QVERIFY(createFontStylePdf(sourcePath));
+    const QString text = QString::fromLatin1(kRegularText);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), text);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.setSelectedFontSize(18.0);
+    controller.beginSelectedTextEdit();
+    controller.setSelectedTextRange(8, 3);
+    controller.setSelectedFontSize(30.0);
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+    candidate = candidateForText(waitForCandidates(controller, 0), text);
+    QVERIFY(candidate.value(QStringLiteral("objectId")).toString()
+                .startsWith(QLatin1String("paragraph-layout:")));
+
+    {
+        PDFiumProcessLock lock;
+        FPDF_DOCUMENT pdf = FPDF_LoadDocument(QFile::encodeName(savedPath).constData(), nullptr);
+        QVERIFY(pdf);
+        const auto closePdf = qScopeGuard([&] { FPDF_CloseDocument(pdf); });
+        FPDF_PAGE page = FPDF_LoadPage(pdf, 0);
+        QVERIFY(page);
+        const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+        bool changed = false;
+        for (int index = 0; index < FPDFPage_CountObjects(page) && !changed; ++index) {
+            const auto object = FPDFPage_GetObject(page, index);
+            for (int markIndex = 0; markIndex < FPDFPageObj_CountMarks(object); ++markIndex) {
+                const auto mark = FPDFPageObj_GetMark(object, markIndex);
+                FPDF_WCHAR name[64]{};
+                unsigned long nameSize = 0;
+                if (!FPDFPageObjMark_GetName(mark, name, sizeof(name), &nameSize)
+                    || nameSize < 2 || nameSize > sizeof(name) || nameSize % 2 != 0
+                    || QString::fromUtf16(reinterpret_cast<const char16_t *>(name), nameSize / 2 - 1)
+                        != QLatin1String("TrePDFParagraphLayout")) {
+                    continue;
+                }
+                int partIndex = -1;
+                if (!FPDFPageObjMark_GetParamIntValue(mark, "Index", &partIndex) || partIndex != 0)
+                    continue;
+                unsigned long size = 0;
+                QVERIFY(FPDFPageObjMark_GetParamBlobValue(mark, "Model", nullptr, 0, &size));
+                QVERIFY(size > 0 && size <= 1024 * 1024);
+                QByteArray bytes(qsizetype(size), Qt::Uninitialized);
+                unsigned long actual = 0;
+                QVERIFY(FPDFPageObjMark_GetParamBlobValue(mark, "Model",
+                    reinterpret_cast<unsigned char *>(bytes.data()), size, &actual));
+                QCOMPARE(actual, size);
+                const QJsonDocument modelDocument = QJsonDocument::fromJson(bytes);
+                QVERIFY(modelDocument.isObject());
+                QJsonObject model = modelDocument.object();
+                QJsonArray formats = model.value(QStringLiteral("whitespaceFormats")).toArray();
+                QVERIFY(!formats.isEmpty());
+                QJsonObject format = formats.first().toObject();
+                if (mutation == QLatin1String("visible-character")) {
+                    format.insert(QStringLiteral("start"), 0);
+                    format.insert(QStringLiteral("length"), 1);
+                    formats[0] = format;
+                } else if (mutation == QLatin1String("overlap")) {
+                    formats.insert(1, format);
+                } else {
+                    QCOMPARE(mutation, QStringLiteral("invalid-advance"));
+                    format.insert(QStringLiteral("sourceAdvanceRatio"), 513.0 / FPDF_GetPageHeightF(page));
+                    formats[0] = format;
+                }
+                model.insert(QStringLiteral("whitespaceFormats"), formats);
+                const QByteArray damagedBytes = QJsonDocument(model).toJson(QJsonDocument::Compact);
+                QVERIFY(FPDFPageObjMark_SetBlobParam(pdf, object, mark, "Model",
+                    reinterpret_cast<const unsigned char *>(damagedBytes.constData()),
+                    static_cast<unsigned long>(damagedBytes.size())));
+                changed = true;
+                break;
+            }
+        }
+        QVERIFY(changed);
+        QVERIFY(FPDFPage_GenerateContent(page));
+        PdfFileWriter writer(damagedPath);
+        QVERIFY(writer.open());
+        QVERIFY(FPDF_SaveAsCopy(pdf, &writer, FPDF_NO_INCREMENTAL));
+    }
+    QVERIFY(document.open(QUrl::fromLocalFile(damagedPath)));
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QVERIFY(!candidates.isEmpty());
+    for (const QVariant &value : candidates) {
+        QVERIFY(!value.toMap().value(QStringLiteral("objectId")).toString()
+                     .startsWith(QLatin1String("paragraph-layout:")));
+    }
+    QVERIFY(normalizedPageText(damagedPath).contains(text));
 }
 
 void PDFEditControllerTest::appliesFontStylesToTypingAtCaret()

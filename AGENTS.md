@@ -346,6 +346,28 @@ Current features:
   paragraph breaks remain separate. Source-break positions follow text edits
   and draft snapshots. Saving justified lines positions words independently
   to retain their spacing without stretching glyphs; the final line stays left aligned.
+  Eligible horizontal Latin/Common source runs also retain per-cluster advance
+  corrections when uniform character/word spacing cannot represent their PDF
+  positions. Precomposed Vietnamese can qualify; combining marks, multi-character
+  ligatures, complex shaping, and mismatched Qt cluster boundaries use the
+  existing layout fallback. Calibration is bounded to 1,024 positions, three
+  passes, finite corrections within 512 PDF points, and 0.08-point origin error.
+  Keep `sourceAdvanceRatio` separate from user character/word spacing; editor,
+  preview, and writer use the same effective advances. Text edits clear it for
+  changed clusters and the preceding boundary while retaining unaffected spans.
+  Font family/size, bold/italic, and spacing changes clear it in the changed
+  range; color/underline retain it. QTextDocument custom properties preserve
+  it through local undo/redo. `TrePDFTextSpacing` version 2 persists the
+  correction, reads version 1 as zero, and combines with paragraph metadata to
+  avoid recalibration after reopen. Retained Latin/Common paragraph layouts
+  position whole glyph/grapheme clusters even at zero tracking to preserve Qt
+  kerning and font advances. Simple same-face characters share one text object
+  with `FPDFText_SetPositions()` to preserve extraction without singleton-object
+  line-break heuristics; limits remain 1,024 clusters per line and 32,768 parts per
+  draft. A failed save retains both the destination and drafts. Joined source
+  objects keep their original origins, or remain separate if validation fails.
+  This is bounded source-layout preservation,
+  not a general PDF glyph-positioning engine. See `docs/text-editing-pipeline.md`.
 - Draft fonts resolve through embedded PDF faces, system fonts, the private app
   cache, Google Fonts, then the reviewed CTAN TeX Gyre catalogue. Fonts under
   `src/assets/fonts` remain available as local fallback. See `docs/font-providers.md`.
