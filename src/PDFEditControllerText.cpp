@@ -67,6 +67,11 @@ constexpr int kEditorLineSpacing = QTextFormat::UserProperty + 5;
 constexpr int kEditorParagraphSpaceBeforeRatio = QTextFormat::UserProperty + 6;
 constexpr int kEditorParagraphSpaceAfterRatio = QTextFormat::UserProperty + 7;
 constexpr int kEditorSourceAdvanceRatio = QTextFormat::UserProperty + 8;
+// The rendered face may change when a private, single-face PDF family is
+// restyled. Retain the model family/stretch so toggling back restores its face
+// and metrics, including through local undo/redo.
+constexpr int kEditorFontFamily = QTextFormat::UserProperty + 9;
+constexpr int kEditorFontStretch = QTextFormat::UserProperty + 10;
 
 // Qt adds the insertion length and following format length when calculating
 // the redo cursor. A final custom item makes it use the changed text bounds
@@ -689,9 +694,11 @@ QFont PDFEditController::fontForDisplay(const QString &fontFamily,
                                         bool sourceSpacing) const
 {
     const int boundedPixelSize = qMax(1, qRound(pixelSize));
+    const QString displayFamily = ApplicationFonts::displayFamilyForStyle(
+        fontFamily, fontBold, fontItalic);
     QFont font;
-    if (!fontFamily.isEmpty()) {
-        font.setFamily(fontFamily);
+    if (!displayFamily.isEmpty()) {
+        font.setFamily(displayFamily);
     }
     font.setBold(fontBold);
     font.setItalic(fontItalic);
@@ -716,7 +723,7 @@ int PDFEditController::displayFontStretch(const QString &fontFamily,
                                           qreal pixelSize) const
 {
     return ApplicationFonts::calibratedFontStretch(
-        fontFamily,
+        ApplicationFonts::displayFamilyForStyle(fontFamily, fontBold, fontItalic),
         fontStretch,
         fontBold,
         fontItalic,
@@ -747,7 +754,16 @@ void PDFEditController::applyTypingFormatToEditorDocument(
         return;
     }
 
+    const QString displayFamily = ApplicationFonts::displayFamilyForStyle(
+        m_typingCharacterFormat.fontFamily, m_typingCharacterFormat.fontBold,
+        m_typingCharacterFormat.fontItalic,
+        document->toPlainText().sliced(rangeStart, rangeEnd - rangeStart));
     QTextCharFormat format;
+    if (!displayFamily.isEmpty()) {
+        format.setFontFamilies({displayFamily});
+    }
+    format.setProperty(kEditorFontFamily, m_typingCharacterFormat.fontFamily);
+    format.setProperty(kEditorFontStretch, m_typingCharacterFormat.fontStretch);
     format.setFontWeight(
         m_typingCharacterFormat.fontBold ? QFont::Bold : QFont::Normal);
     format.setFontItalic(m_typingCharacterFormat.fontItalic);
@@ -766,7 +782,7 @@ void PDFEditController::applyTypingFormatToEditorDocument(
         const int pixels = qMax(1, qRound(ratio * displayedPageHeight));
         format.setProperty(QTextFormat::FontPixelSize, pixels);
         format.setFontStretch(displayFontStretch(
-            m_typingCharacterFormat.fontFamily, m_typingCharacterFormat.fontStretch,
+            displayFamily, m_typingCharacterFormat.fontStretch,
             m_typingCharacterFormat.fontBold, m_typingCharacterFormat.fontItalic, pixels));
         format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
         format.setFontLetterSpacing(m_typingCharacterFormat.letterSpacingRatio * displayedPageHeight);
@@ -838,6 +854,8 @@ void PDFEditController::initializeEditorFontSizes(
             continue;
         }
         QTextCharFormat format;
+        format.setProperty(kEditorFontFamily, span.format.fontFamily);
+        format.setProperty(kEditorFontStretch, span.format.fontStretch);
         format.setProperty(kEditorFontSizeRatio, span.format.fontSizeRatio);
         format.setProperty(kEditorDisplayFontSizeRatio, span.format.displayFontSizeRatio);
         format.setProperty(kEditorLetterSpacingRatio, span.format.letterSpacingRatio);
@@ -1071,6 +1089,27 @@ bool PDFEditController::applyFontStyleToEditorDocument(
             cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
             const QTextCharFormat previous = cursor.charFormat();
             QTextCharFormat updated = format;
+            QTextCharFormat styled = previous;
+            styled.merge(format);
+            const QString family = previous.hasProperty(kEditorFontFamily)
+                ? previous.stringProperty(kEditorFontFamily)
+                : previous.font().family();
+            const int stretch = previous.hasProperty(kEditorFontStretch)
+                ? previous.intProperty(kEditorFontStretch)
+                : (previous.fontStretch() > 0 ? previous.fontStretch() : 100);
+            const QString displayFamily = ApplicationFonts::displayFamilyForStyle(
+                family, styled.fontWeight() >= QFont::Bold, styled.fontItalic(),
+                cursor.selectedText());
+            if (!displayFamily.isEmpty()) {
+                updated.setFontFamilies({displayFamily});
+            }
+            updated.setProperty(kEditorFontFamily, family);
+            updated.setProperty(kEditorFontStretch, stretch);
+            if (previous.hasProperty(QTextFormat::FontPixelSize)) {
+                updated.setFontStretch(displayFontStretch(
+                    displayFamily, stretch, styled.fontWeight() >= QFont::Bold,
+                    styled.fontItalic(), previous.intProperty(QTextFormat::FontPixelSize)));
+            }
             updated.setProperty(kEditorSourceAdvanceRatio, 0.0);
             updated.setFontKerning(true);
             updated.setFontLetterSpacingType(QFont::AbsoluteSpacing);

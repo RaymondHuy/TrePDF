@@ -68,6 +68,8 @@ struct AliasRecord {
     int references = 0;
     bool source = true;
     int registrationId = -1;
+    bool bold = false;
+    bool italic = false;
 };
 
 struct AliasRegistry {
@@ -420,7 +422,12 @@ bool retain(const AliasData &alias)
     if (state.aliases.size() >= maximumAliases || alias.family.isEmpty()
         || alias.fingerprint.size() != 32)
         return false;
-    state.aliases.insert(alias.family, {alias.semanticFamily, alias.fingerprint, 1, alias.source});
+    const QRawFont raw(alias.data, 16.0, QFont::PreferNoHinting);
+    if (!raw.isValid())
+        return false;
+    state.aliases.insert(alias.family, {alias.semanticFamily, alias.fingerprint, 1, alias.source,
+                                      -1, raw.weight() >= QFont::Bold,
+                                      raw.style() != QFont::StyleNormal});
     // Qt registration emits fontDatabaseChanged synchronously. Publish the
     // identity first, but refuse reentrant retains until registration finishes.
     // Never hold the metadata mutex while Qt calls back into the controllers.
@@ -469,5 +476,14 @@ QByteArray sourceFingerprint(const QString &family)
     QMutexLocker lock(&state.mutex);
     const auto found = state.aliases.constFind(family);
     return found == state.aliases.cend() || !found->source ? QByteArray() : found->fingerprint;
+}
+
+bool matchesStyle(const QString &family, bool bold, bool italic)
+{
+    auto &state = registry();
+    QMutexLocker lock(&state.mutex);
+    const auto found = state.aliases.constFind(family);
+    return found != state.aliases.cend() && found->registrationId >= 0
+        && found->bold == bold && found->italic == italic;
 }
 } // namespace PDFFontAliases

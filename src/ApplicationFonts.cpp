@@ -1140,6 +1140,72 @@ bool fontFaceSupportsText(const QString &family,
         source);
 }
 
+QString displayFamilyForStyle(const QString &family, bool bold, bool italic,
+                              const QString &text)
+{
+    if (family.isEmpty())
+        return family;
+    const QString semanticFamily = PDFFontAliases::semanticFamily(family);
+    if (semanticFamily == family)
+        return family;
+    registerBundledFonts();
+    FontRegistry &registry = fontRegistry();
+    const QVector<uint> characters = visibleCodePoints(text);
+    const auto matchesDisplayFace = [&](const QString &displayFamily) {
+        QFont font(displayFamily);
+        font.setBold(bold);
+        font.setItalic(italic);
+        font.setPixelSize(16);
+        font.setStyleStrategy(QFont::NoFontMerging);
+        const QRawFont raw = QRawFont::fromFont(font);
+        // Even QRawFont::fromFont() can report a synthesized requested weight.
+        // For private aliases, check the original registered program's style.
+        const bool privateFamily = PDFFontAliases::semanticFamily(displayFamily) != displayFamily;
+        const bool matchesStyle = privateFamily
+            ? PDFFontAliases::matchesStyle(displayFamily, bold, italic)
+            : (raw.weight() >= QFont::Bold) == bold
+                && (raw.style() != QFont::StyleNormal) == italic;
+        return raw.isValid()
+            && raw.familyName().compare(displayFamily, Qt::CaseInsensitive) == 0
+            && matchesStyle
+            && std::all_of(characters.cbegin(), characters.cend(),
+                [&raw](uint character) { return raw.supportsCharacter(character); });
+    };
+    if (matchesDisplayFace(family))
+        return family;
+
+    // Match Save's local resolution order. Coverage/probe caches avoid
+    // materializing complete system fonts during typing and repainting.
+    const QString systemFamily = registry.systemFamilyByKey.value(semanticFamily.toCaseFolded());
+    if (!systemFamily.isEmpty()
+        && systemFaceSupportsCharacters(registry, systemFamily, bold, italic, characters)
+        && matchesDisplayFace(systemFamily))
+        return systemFamily;
+
+    const auto *downloaded = findDownloadedFont(registry, semanticFamily, bold, italic);
+    if (downloaded && !downloaded->layoutFamily.isEmpty()) {
+        const auto raw = registry.downloadedRawFonts.constFind(
+            fontFaceCacheKey(downloaded->family, bold, italic));
+        // The validated program is already registered. Use its immutable alias
+        // without rereading the on-disk font for every inserted character.
+        if (raw != registry.downloadedRawFonts.cend() && raw->isValid()
+            && std::all_of(characters.cbegin(), characters.cend(),
+                [&raw](uint character) { return raw->supportsCharacter(character); })
+            && matchesDisplayFace(downloaded->layoutFamily))
+            return downloaded->layoutFamily;
+    }
+
+    const auto bundled = std::find_if(registry.bundledFamilies.cbegin(),
+        registry.bundledFamilies.cend(), [&](const QString &candidate) {
+            return candidate.compare(semanticFamily, Qt::CaseInsensitive) == 0;
+        });
+    if (bundled != registry.bundledFamilies.cend()
+        && bundledFaceSupportsCharacters(registry, *bundled, bold, italic, characters)
+        && matchesDisplayFace(*bundled))
+        return *bundled;
+    return family;
+}
+
 int calibratedFontStretch(const QString &family,
                           int targetStretch,
                           bool bold,

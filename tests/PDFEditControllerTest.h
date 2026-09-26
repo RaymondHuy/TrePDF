@@ -231,6 +231,8 @@ private slots:
     void preservesSourceScaleForUnchangedRichTextRuns();
     void keepsAddedDidotScaleStableAcrossRepeatedSaves();
     void appliesFontStylesToTypingAtCaret();
+    void rendersEmbeddedFontStylesBeforeSave_data();
+    void rendersEmbeddedFontStylesBeforeSave();
     void appliesTypingFormatBetweenRepeatedCharacters();
     void preservesEditorUndoWhenFormattingSelection();
     void formatsSelectedRangeInMultilineDraft();

@@ -759,6 +759,11 @@ Bold/Italic/Underline, cỡ chữ hoặc spacing chỉ thay trạng thái này, 
 draft hoặc undo command.
 Khi text mới được chèn đúng caret, `setDraftText()` dùng typing format cho range
 vừa chèn; di chuyển caret hoặc tạo selection sẽ trở về format tại vị trí mới.
+Font nhúng dùng private family riêng cho mỗi face. Khi đổi Bold/Italic, editor
+resolve face đúng kiểu chữ và glyph coverage ngay lúc gõ hoặc format selection,
+rồi merge cả display family vào document; chỉ đổi weight trên alias Regular
+không đủ để Qt hiển thị Bold. Family/stretch của model được giữ riêng trong
+custom properties để tắt kiểu chữ hoặc undo/redo khôi phục face nguồn và metrics.
 QML truyền cả vị trí caret sau edit để controller neo delta quanh vị trí gõ,
 tránh suy sai range khi chuỗi có ký tự lặp. Range mới chèn được merge B/I/U,
 cỡ chữ và spacing trực tiếp vào `QQuickTextDocument` bằng `QTextCursor` và nối

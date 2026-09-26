@@ -30,5 +30,8 @@ bool retain(const AliasData &alias);
 void release(const QString &family);
 QString semanticFamily(const QString &family);
 QByteArray sourceFingerprint(const QString &family);
+// Intrinsic style from the registered font program, independent of Qt's
+// synthetic weight/slant for a requested QFont.
+bool matchesStyle(const QString &family, bool bold, bool italic);
 
 } // namespace PDFFontAliases

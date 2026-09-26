@@ -1,9 +1,13 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
+#include "PDFFontAliases.h"
 
+#include <QGlyphRun>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
+#include <QUuid>
 
 using namespace PDFEditControllerTestSupport;
 
@@ -1095,6 +1099,249 @@ void PDFEditControllerTest::appliesFontStylesToTypingAtCaret()
         3);
 
     m_controller.discardDrafts();
+}
+
+void PDFEditControllerTest::rendersEmbeddedFontStylesBeforeSave_data()
+{
+    QTest::addColumn<bool>("bold");
+    QTest::addColumn<bool>("italic");
+    QTest::addColumn<bool>("formatSelection");
+    QTest::addColumn<bool>("inputMethod");
+    QTest::newRow("bold-keyboard") << true << false << false << false;
+    QTest::newRow("italic-keyboard") << false << true << false << false;
+    QTest::newRow("bold-italic-ime") << true << true << false << true;
+    QTest::newRow("bold-selection") << true << false << true << false;
+    QTest::newRow("italic-selection") << false << true << true << false;
+}
+
+void PDFEditControllerTest::rendersEmbeddedFontStylesBeforeSave()
+{
+    QFETCH(bool, bold);
+    QFETCH(bool, italic);
+    QFETCH(bool, formatSelection);
+    QFETCH(bool, inputMethod);
+    const QString probePath = qEnvironmentVariable("TREPDF_TEST_STYLE_PDF");
+    const QString originalApplicationName = QCoreApplication::applicationName();
+    const bool originalTestMode = QStandardPaths::isTestModeEnabled();
+    QString probeFontStoreRoot;
+    const auto restoreFontStore = qScopeGuard([&]() {
+        if (!probeFontStoreRoot.isEmpty())
+            QDir(probeFontStoreRoot).removeRecursively();
+        if (!probePath.isEmpty()) {
+            QCoreApplication::setApplicationName(originalApplicationName);
+            QStandardPaths::setTestModeEnabled(originalTestMode);
+        }
+    });
+    if (!probePath.isEmpty()) {
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName(QStringLiteral("TrePDF-style-probe-")
+            + QUuid::createUuid().toString(QUuid::WithoutBraces));
+        const QString root = QFileInfo(ApplicationFonts::downloadedFontDirectory()).absolutePath();
+        QCOMPARE(QFileInfo(root).fileName(), QCoreApplication::applicationName());
+        QVERIFY(!QFileInfo::exists(root));
+        probeFontStoreRoot = root;
+        const char *const paths[] = {
+            "fixtures/fonts/tex-gyre/texgyretermes-regular.otf",
+            "fixtures/fonts/tex-gyre/texgyretermes-italic.otf",
+            "fixtures/fonts/tex-gyre/texgyretermes-bold.otf",
+            "fixtures/fonts/tex-gyre/texgyretermes-bolditalic.otf"};
+        QList<ApplicationFonts::DownloadedFontData> faces;
+        for (int style = 0; style < 4; ++style) {
+            QFile font(QFINDTESTDATA(paths[style]));
+            QVERIFY(font.open(QIODevice::ReadOnly));
+            faces.append({font.readAll(), QStringLiteral("TeX Gyre Termes"),
+                          bool(style & 2), bool(style & 1), uint('x')});
+        }
+        QString error;
+        QVERIFY2(ApplicationFonts::installDownloadedFonts(faces, error), qPrintable(error));
+    }
+    const QString sourcePath = probePath.isEmpty() ? m_temporaryDirectory.filePath(
+        QStringLiteral("embedded-live-style-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())))
+        : probePath;
+    if (probePath.isEmpty()) {
+        PDFiumProcessLock lock;
+        QVERIFY(createEmbeddedArialPdf(sourcePath));
+    }
+    PDFDocument pdf;
+    PDFEditController controller;
+    QVERIFY(pdf.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&pdf);
+    controller.setTool(PDFEditController::SelectTool);
+    const int page = probePath.isEmpty() ? 0 : qEnvironmentVariableIntValue("TREPDF_TEST_STYLE_PAGE");
+    const QString originalText = probePath.isEmpty() ? QStringLiteral("Tiếng Việt gốc")
+        : qEnvironmentVariable("TREPDF_TEST_STYLE_TEXT");
+    QVERIFY(originalText.size() > 4);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, page), originalText);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(page, candidate.value(QStringLiteral("objectId")).toString()));
+    const QString sourceFamily = controller.selectedCharacterSpans().constFirst().toMap()
+        .value(QStringLiteral("fontFamily")).toString();
+    QVERIFY(!PDFFontAliases::sourceFingerprint(sourceFamily).isEmpty());
+
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQuickWindow window;
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(
+        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    const qreal zoom = 1.5;
+    const QSizeF pageSize = pdf.pageSize(page);
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), page}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false},
+        {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), zoom},
+        {QStringLiteral("width"), pageSize.width() * zoom},
+        {QStringLiteral("height"), pageSize.height() * zoom}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    auto *overlayItem = qobject_cast<QQuickItem *>(overlay.get());
+    QVERIFY(overlayItem);
+    overlayItem->setParentItem(window.contentItem());
+    window.resize(qCeil(pageSize.width() * zoom), 600);
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    QObject *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = child;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *editorItem = qobject_cast<QQuickItem *>(editor);
+    QVERIFY(editorItem);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *document = quickDocument->textDocument();
+    QVERIFY(document);
+    QTRY_COMPARE(document->toPlainText(), originalText);
+
+    QString fontError;
+    const auto hasRenderedStyle = [&](int start, int length, bool expectedBold, bool expectedItalic) {
+        document->size();
+        const QTextBlock block = document->findBlock(start);
+        const auto runs = block.layout()->glyphRuns(start - block.position(), length);
+        if (runs.isEmpty()) {
+            fontError = QStringLiteral("No glyph runs for range %1:%2").arg(start).arg(length);
+            return false;
+        }
+        for (const QGlyphRun &run : runs) {
+            const QRawFont raw = run.rawFont();
+            // A font engine may report the requested synthetic weight/style in
+            // QRawFont too. Inspect the actual font program backing its glyphs.
+            const QByteArray os2 = raw.fontTable("OS/2");
+            const int weight = os2.size() >= 64
+                ? (quint8(os2[4]) << 8) | quint8(os2[5]) : -1;
+            const bool italicFace = os2.size() >= 64 && (quint8(os2[63]) & 1);
+            if (!raw.isValid() || weight < 0 || (weight >= 700) != expectedBold
+                || italicFace != expectedItalic) {
+                fontError = QStringLiteral("Range %1:%2 rendered with %3 / %4 (intrinsic weight %5, italic %6)")
+                    .arg(start).arg(length).arg(raw.familyName(), raw.styleName())
+                    .arg(weight).arg(italicFace);
+                return false;
+            }
+        }
+        return true;
+    };
+    QVERIFY2(hasRenderedStyle(0, originalText.size(), false, false), qPrintable(fontError));
+    const int rangeStart = formatSelection ? originalText.size() - 4 : originalText.size();
+    const QString insertion = inputMethod ? QStringLiteral("ế") : QStringLiteral("x");
+    const int rangeLength = formatSelection ? 4 : insertion.size();
+    QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, rangeStart),
+                                     Q_ARG(int, rangeStart + (formatSelection ? rangeLength : 0))));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "syncEditorSelection"));
+    if (bold)
+        controller.setSelectedFontBold(true);
+    if (italic)
+        controller.setSelectedFontItalic(true);
+    if (!formatSelection) {
+        QVERIFY(!controller.hasDrafts());
+        editorItem->forceActiveFocus();
+        if (inputMethod) {
+            QInputMethodEvent event;
+            event.setCommitString(insertion);
+            QCoreApplication::sendEvent(editorItem, &event);
+        } else {
+            QTest::keyClick(&window, Qt::Key_X);
+        }
+    }
+    const QString editedText = formatSelection ? originalText : originalText + insertion;
+    QTRY_COMPARE(controller.selectedText(), editedText);
+    // Semantic fontWeight alone misses an embedded Regular alias still drawing
+    // Regular outlines after the editor has accepted a Bold/Italic command.
+    QTRY_VERIFY2(hasRenderedStyle(rangeStart, rangeLength, bold, italic), qPrintable(fontError));
+    QVERIFY2(hasRenderedStyle(0, rangeStart, false, false), qPrintable(fontError));
+    QTextCursor prefix(document);
+    prefix.setPosition(0);
+    prefix.setPosition(1, QTextCursor::KeepAnchor);
+    QCOMPARE(prefix.charFormat().fontFamilies().toStringList().constFirst(), sourceFamily);
+
+    QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+    QTRY_COMPARE(controller.selectedText(), originalText);
+    QTRY_VERIFY2(hasRenderedStyle(0, originalText.size(), false, false), qPrintable(fontError));
+    QVERIFY(!document->isUndoAvailable());
+    QVERIFY(QMetaObject::invokeMethod(editor, "redo"));
+    QTRY_COMPARE(controller.selectedText(), editedText);
+    QTRY_VERIFY2(hasRenderedStyle(rangeStart, rangeLength, bold, italic), qPrintable(fontError));
+    QVERIFY2(hasRenderedStyle(0, rangeStart, false, false), qPrintable(fontError));
+    QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, rangeStart),
+                                     Q_ARG(int, rangeStart + rangeLength)));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "syncEditorSelection"));
+    if (bold) {
+        controller.setSelectedFontBold(false);
+        QTRY_VERIFY2(hasRenderedStyle(rangeStart, rangeLength, false, italic), qPrintable(fontError));
+    }
+    if (italic) {
+        controller.setSelectedFontItalic(false);
+        QTRY_VERIFY2(hasRenderedStyle(rangeStart, rangeLength, false, false), qPrintable(fontError));
+    }
+    QTextCursor restored(document);
+    restored.setPosition(rangeStart);
+    restored.setPosition(rangeStart + rangeLength, QTextCursor::KeepAnchor);
+    QCOMPARE(restored.charFormat().fontFamilies().toStringList().constFirst(), sourceFamily);
+    if (!probePath.isEmpty()) {
+        if (bold)
+            controller.setSelectedFontBold(true);
+        if (italic)
+            controller.setSelectedFontItalic(true);
+        QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+        const QString output = m_temporaryDirectory.filePath(
+            QStringLiteral("live-style-probe-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+        QVERIFY(pageText(output, page).contains(editedText));
+        const QVariantMap reopened = candidateForText(waitForCandidates(controller, page), editedText);
+        QVERIFY(!reopened.isEmpty());
+        QVERIFY(controller.selectCandidate(page, reopened.value(QStringLiteral("objectId")).toString()));
+        bool inspectedStyledSpan = false;
+        for (const QVariant &value : controller.selectedCharacterSpans()) {
+            const QVariantMap span = value.toMap();
+            const int start = span.value(QStringLiteral("start")).toInt();
+            const int end = start + span.value(QStringLiteral("length")).toInt();
+            if (start >= rangeStart + rangeLength || end <= rangeStart)
+                continue;
+            inspectedStyledSpan = true;
+            QCOMPARE(span.value(QStringLiteral("fontBold")).toBool(), bold);
+            QCOMPARE(span.value(QStringLiteral("fontItalic")).toBool(), italic);
+        }
+        QVERIFY(inspectedStyledSpan);
+        QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+        document = quickDocument->textDocument();
+        QTRY_COMPARE(document->toPlainText(), editedText);
+        QTRY_VERIFY2(hasRenderedStyle(rangeStart, rangeLength, bold, italic), qPrintable(fontError));
+        QVERIFY2(hasRenderedStyle(0, rangeStart, false, false), qPrintable(fontError));
+        QVERIFY(QMetaObject::invokeMethod(overlay.get(), "cancelEditing"));
+        QVERIFY(!controller.hasDrafts());
+        return;
+    }
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "cancelEditing"));
+    QVERIFY(!controller.hasDrafts());
 }
 
 void PDFEditControllerTest::appliesTypingFormatBetweenRepeatedCharacters()
