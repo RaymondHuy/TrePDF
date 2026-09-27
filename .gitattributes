@@ -1,0 +1,3 @@
+# Preserve the exact vendored package bytes verified by qpdf/SHA256SUMS.
+# Windows core.autocrlf must not rewrite headers or notices during checkout.
+third_party/qpdf/** -text

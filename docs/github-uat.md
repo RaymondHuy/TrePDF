@@ -53,6 +53,11 @@ each platform. qpdf 12.4.1 uses the checked-in macOS ARM64 package, the official
 MSVC package on Windows, and a source build on Linux. Windows also builds
 static zlib 1.3.1. libxlsxwriter is built from the vendored source.
 
+The root `.gitattributes` preserves the exact bytes under `third_party/qpdf/`.
+This prevents Windows Git's `core.autocrlf` from converting headers to CRLF and
+breaking the checked-in `SHA256SUMS` verification. Keep this rule when updating
+the dependency; checksums are verified without newline normalization.
+
 UAT enables `TREPDF_DEPLOY_RUNTIME` and uses `cmake --install` to deploy Qt,
 QML imports, plugins and PDF libraries into an isolated staging directory.
 The Linux launcher supplies its bundled library directory for transitive
