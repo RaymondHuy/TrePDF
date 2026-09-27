@@ -108,6 +108,11 @@ qt_add_executable(trepdf
     src/main.cpp
 )
 target_compile_definitions(trepdf PRIVATE TREPDF_VERSION="${PROJECT_VERSION}")
+if(WIN32)
+    # Windows min/max macros conflict with standard C++ calls, including in
+    # generated QML type registration and MOC sources.
+    target_compile_definitions(trepdf PRIVATE NOMINMAX)
+endif()
 
 qt_add_resources(trepdf "trepdf_app_icon"
     PREFIX "/trepdf/branding"
@@ -129,6 +134,13 @@ elseif(WIN32)
         "${CMAKE_CURRENT_BINARY_DIR}/TrePDF.rc"
         @ONLY
     )
+    if(MINGW AND CMAKE_HOST_WIN32)
+        # windres' default pipe invokes a shell that splits compiler paths
+        # containing spaces (for example, CLion's bundled MinGW directory).
+        set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/TrePDF.rc" PROPERTIES
+            COMPILE_OPTIONS "--use-temp-file"
+        )
+    endif()
     target_sources(trepdf PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/TrePDF.rc")
 endif()
 

@@ -77,6 +77,11 @@ runtime beside the executable. It uses the compiler runtime selected by Qt,
 avoiding the extra runtime copies shipped in qpdf's portable package.
 Application translations remain embedded.
 
+The Windows application target defines `NOMINMAX` to prevent Windows headers
+from interfering with standard C++ `min`/`max` calls. On Windows-hosted MinGW,
+the icon/version resource uses `windres --use-temp-file` so compiler paths
+containing spaces, such as the CLion installation above, work during preprocessing.
+
 In CLion:
 
 1. Open this repository and reload the CMake project.
