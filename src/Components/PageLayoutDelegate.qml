@@ -160,10 +160,14 @@ Item {
     }
 
     function beginSelectedEditing() {
+        beginSelectedEditingWithStyle("")
+    }
+
+    function beginSelectedEditingWithStyle(styleAction) {
         const selectedPage = editController.selectedPage
         const pageDelegate = delegateForPage(selectedPage)
         if (pageDelegate)
-            pageDelegate.beginSelectedEditing()
+            pageDelegate.beginSelectedEditingWithStyle(styleAction)
     }
 
     onSessionChangeGenerationChanged: prepareForSessionChange()

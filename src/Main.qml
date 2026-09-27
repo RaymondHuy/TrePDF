@@ -1136,6 +1136,18 @@ ApplicationWindow {
             closePolicy: Popup.NoAutoClose
             readonly property PDFEditController controller: window.fontDownloadController
             readonly property bool downloading: controller ? controller.downloadingFont : false
+            readonly property bool forEdit: controller ? controller.fontDownloadForEdit : false
+            readonly property string fontFamilies: controller
+                ? controller.missingFontFamilies.join("\n") : ""
+
+            Shortcut {
+                sequence: "Escape"
+                enabled: fontDownloadPopup.visible && fontDownloadPopup.forEdit
+                onActivated: {
+                    if (fontDownloadPopup.controller)
+                        fontDownloadPopup.controller.cancelTextEditPreparation()
+                }
+            }
 
             background: Rectangle {
                 radius: 6
@@ -1146,25 +1158,47 @@ ApplicationWindow {
                 spacing: 16
                 Label {
                     Layout.fillWidth: true
-                    //% "Download font family"
-                    text: qsTrId("DownloadMissingFontTitle")
+                    text: fontDownloadPopup.forEdit
+                        //% "Prepare fonts for editing"
+                        ? qsTrId("DownloadEditFontsTitle")
+                        //% "Download font family"
+                        : qsTrId("DownloadMissingFontTitle")
                     font.pixelSize: 18
                     font.weight: Font.DemiBold
                     color: appTheme.ribbonTextColor
                     wrapMode: Text.Wrap
                 }
-                Label {
+                ScrollView {
+                    id: fontDownloadMessageScroll
                     Layout.fillWidth: true
-                    text: fontDownloadPopup.downloading
-                        //% "Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish."
-                        ? qsTrId("FontDownloadInProgress").arg(
-                            fontDownloadPopup.controller ? fontDownloadPopup.controller.missingFontFamily : "")
-                        //% "The application does not have the complete %1 font. Would you like it to download all available regular, bold, italic and bold italic styles of this family and continue saving?"
-                        : qsTrId("FontDownloadConfirmation").arg(
-                            fontDownloadPopup.controller ? fontDownloadPopup.controller.missingFontFamily : "")
-                    textFormat: Text.PlainText
-                    color: appTheme.ribbonTextColor
-                    wrapMode: Text.Wrap
+                    Layout.preferredHeight: Math.min(
+                        fontDownloadMessage.implicitHeight,
+                        Math.max(64, window.height - 260))
+                    contentWidth: availableWidth
+                    clip: true
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                    Label {
+                        id: fontDownloadMessage
+                        width: fontDownloadMessageScroll.availableWidth
+                        text: fontDownloadPopup.forEdit
+                            ? (fontDownloadPopup.downloading
+                                //% "Downloading fonts. Text editing will open automatically when the downloads finish."
+                                ? qsTrId("EditFontDownloadInProgress")
+                                //% "Download the following font families before editing this text?"
+                                : qsTrId("EditFontDownloadConfirmation"))
+                                + "\n\n" + fontDownloadPopup.fontFamilies
+                            : fontDownloadPopup.downloading
+                                //% "Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish."
+                                ? qsTrId("FontDownloadInProgress").arg(
+                                    fontDownloadPopup.controller ? fontDownloadPopup.controller.missingFontFamily : "")
+                                //% "The application does not have the complete %1 font. Would you like it to download all available regular, bold, italic and bold italic styles of this family and continue saving?"
+                                : qsTrId("FontDownloadConfirmation").arg(
+                                    fontDownloadPopup.controller ? fontDownloadPopup.controller.missingFontFamily : "")
+                        textFormat: Text.PlainText
+                        color: appTheme.ribbonTextColor
+                        wrapMode: Text.Wrap
+                    }
                 }
                 ProgressBar {
                     Layout.fillWidth: true

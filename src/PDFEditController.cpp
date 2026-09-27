@@ -266,6 +266,22 @@ PDFEditController::PDFEditController(QObject *parent)
             this, &PDFEditController::passwordProtectionChanged);
     connect(this, &PDFEditController::historyStateChanged,
             this, &PDFEditController::cancelWebLinkCreation);
+    connect(this, &PDFEditController::historyStateChanged,
+            this, &PDFEditController::cancelTextEditPreparation);
+    connect(this, &PDFEditController::toolChanged,
+            this, &PDFEditController::cancelTextEditPreparation);
+    connect(this, &PDFEditController::selectionChanged, this, [this]() {
+        if (m_pendingFontEdit && !textEditPreparationIsCurrent())
+            cancelTextEditPreparation();
+    });
+    connect(this, &PDFEditController::textEditActiveChanged, this, [this]() {
+        if (m_textEditActive)
+            cancelTextEditPreparation();
+    });
+    connect(this, &PDFEditController::savingChanged, this, [this]() {
+        if (m_saving)
+            cancelTextEditPreparation();
+    });
     connect(this, &PDFEditController::textEditActiveChanged,
             this, &PDFEditController::cancelWebLinkCreation);
     connect(
@@ -316,6 +332,7 @@ void PDFEditController::setDocument(PDFDocument *document)
         connect(m_document, &PDFDocument::sourceChanged, this, &PDFEditController::resetSession);
         connect(m_document, &PDFDocument::loadedChanged, this, &PDFEditController::resetSession);
         connect(m_document, &PDFDocument::pageStructureChanged, this, [this]() {
+            cancelTextEditPreparation();
             cancelWebLinkCreation();
             invalidateWebLinks();
             invalidateWatermarks();

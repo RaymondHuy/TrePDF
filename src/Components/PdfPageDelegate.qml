@@ -83,7 +83,11 @@ Item {
     }
 
     function beginSelectedEditing() {
-        pageInteractionOverlay.beginSelectedEditing()
+        beginSelectedEditingWithStyle("")
+    }
+
+    function beginSelectedEditingWithStyle(styleAction) {
+        pageInteractionOverlay.beginSelectedEditingWithStyle(styleAction)
     }
 
     function searchResultPoint(normalizedX, normalizedY) {

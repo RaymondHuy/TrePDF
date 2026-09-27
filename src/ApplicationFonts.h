@@ -60,8 +60,9 @@ bool fontFaceSupportsText(const QString &family,
                           const QString &text,
                           FontSource source = FontSource::Any);
 // Resolve a private display alias for live Qt layout without changing its
-// semantic source family. Public families are unchanged. Private aliases have
-// one face; another style needs an exact local face of the same semantic family.
+// semantic source family. Downloaded faces can replace stale public-family
+// fallbacks. Private aliases have one face; another style needs an exact local
+// face of the same semantic family.
 // Returns the original family when no safe local match exists.
 QString displayFamilyForStyle(const QString &family, bool bold, bool italic,
                               const QString &text = {});

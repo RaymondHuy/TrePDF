@@ -32,6 +32,10 @@ Item {
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
+    property int editFocusGeneration: 0
+    property PDFEditController textEditPreparationController: null
+    property int textEditPreparationPage: -1
+    property string textEditPreparationObjectId: ""
     property bool loadingEditorText: false
     property bool syncingEditorPreview: false
     property bool syncingEditorGeometry: false
@@ -1991,8 +1995,27 @@ Item {
         selectionActions.openAt(x, y)
     }
 
+    function clearTextEditPreparation(cancelRequest) {
+        const pendingController = textEditPreparationController
+        const pendingPage = textEditPreparationPage
+        const pendingObjectId = textEditPreparationObjectId
+        textEditPreparationController = null
+        textEditPreparationPage = -1
+        textEditPreparationObjectId = ""
+        if (cancelRequest && pendingController
+                && pendingController.selectedPage === pendingPage
+                && pendingController.selectedObjectId === pendingObjectId) {
+            pendingController.cancelTextEditPreparation()
+        }
+    }
+
     function beginEditing(candidate) {
-        if (!isTextBoxCandidate(candidate)
+        beginEditingWithStyle(candidate, "")
+    }
+
+    function beginEditingWithStyle(candidate, styleAction) {
+        if (pooled || !interactionActive
+                || !isTextBoxCandidate(candidate)
                 || !candidate.editable
                 || (controller.tool !== PDFEditController.EditTextTool
                     && controller.tool !== PDFEditController.SelectTool)) {
@@ -2002,7 +2025,27 @@ Item {
         if (!controller.selectCandidate(page, candidate.objectId))
             return
 
-        const currentDraft = activeDraft(candidate.objectId)
+        const action = String(styleAction || "")
+        textEditPreparationController = controller
+        textEditPreparationPage = page
+        textEditPreparationObjectId = candidate.objectId
+        if (controller.requestSelectedTextEdit(action))
+            activatePreparedTextEdit(page, candidate.objectId, action)
+    }
+
+    function activatePreparedTextEdit(expectedPage, objectId, styleAction) {
+        if (pooled || !interactionActive || editing
+                || page !== expectedPage
+                || controller.selectedPage !== expectedPage
+                || controller.selectedObjectId !== objectId
+                || !controller.selectedEditable
+                || (controller.tool !== PDFEditController.EditTextTool
+                    && controller.tool !== PDFEditController.SelectTool)) {
+            return
+        }
+
+        clearTextEditPreparation(false)
+        const currentDraft = activeDraft(objectId)
         editingSourceTextMoveOnly
             = currentDraft.sourceTextMoveOnly === true
         if (editingSourceTextMoveOnly
@@ -2017,21 +2060,40 @@ Item {
         }
         hideSelectCursor()
         controller.beginSelectedTextEdit()
-        editingObjectId = candidate.objectId
+        if (!controller.textEditActive)
+            return
+        editingObjectId = objectId
         editorLayoutDirty = false
         editing = true
         loadEditorRichText(-1, 0, 0)
+        if (styleAction === "bold")
+            controller.setSelectedFontBold(!controller.selectedFontBold)
+        else if (styleAction === "italic")
+            controller.setSelectedFontItalic(!controller.selectedFontItalic)
+        else if (styleAction === "underline")
+            controller.setSelectedFontUnderline(!controller.selectedFontUnderline)
+        const focusGeneration = ++editFocusGeneration
+        const expectedController = controller
         Qt.callLater(function() {
+            if (root.editFocusGeneration !== focusGeneration
+                    || root.controller !== expectedController
+                    || root.pooled || !root.interactionActive || !root.editing
+                    || root.page !== expectedPage
+                    || root.editingObjectId !== objectId
+                    || !expectedController.textEditActive
+                    || expectedController.selectedPage !== expectedPage
+                    || expectedController.selectedObjectId !== objectId) {
+                return
+            }
             editor.forceActiveFocus()
-            editor.deselect()
-            editor.cursorPosition = editor.length
-            root.syncEditorSelection()
         })
     }
 
     function commitEditing() {
         if (!editing)
             return
+
+        ++editFocusGeneration
 
         if (resizingFrame) {
             controller.finishSelectedFrameResize()
@@ -2058,6 +2120,8 @@ Item {
     }
 
     function cancelEditing() {
+        ++editFocusGeneration
+        clearTextEditPreparation(true)
         editing = false
         editingObjectId = ""
         editingSourceTextMoveOnly = false
@@ -2069,6 +2133,8 @@ Item {
     }
 
     function prepareForSessionChange() {
+        ++editFocusGeneration
+        clearTextEditPreparation(true)
         selectionActions.close()
         cancelHighlight()
         cancelShape()
@@ -2089,15 +2155,19 @@ Item {
     }
 
     function beginSelectedEditing() {
+        beginSelectedEditingWithStyle("")
+    }
+
+    function beginSelectedEditingWithStyle(styleAction) {
         if (controller.selectedPage !== page || !controller.selectedEditable)
             return
 
         selectionActions.close()
-        beginEditing({
+        beginEditingWithStyle({
             objectId: controller.selectedObjectId,
             kind: controller.selectedKind,
             editable: controller.selectedEditable
-        })
+        }, styleAction)
     }
 
     function deleteSelectedObject() {
@@ -2169,6 +2239,8 @@ Item {
     }
 
     onPageChanged: {
+        ++editFocusGeneration
+        clearTextEditPreparation(true)
         selectionActions.close()
         cancelHighlight()
         cancelShape()
@@ -2183,6 +2255,10 @@ Item {
     }
 
     onPooledChanged: {
+        if (pooled) {
+            ++editFocusGeneration
+            clearTextEditPreparation(true)
+        }
         selectionActions.close()
         cancelHighlight()
         cancelShape()
@@ -2199,6 +2275,8 @@ Item {
 
     onInteractionActiveChanged: {
         if (!interactionActive) {
+            ++editFocusGeneration
+            clearTextEditPreparation(true)
             cancelHighlight()
             cancelShape()
             cancelFreeTextPlacement()
@@ -2215,6 +2293,7 @@ Item {
     }
     onDisplayedSuppressedCommentObjectIdsChanged: reloadData()
     Component.onCompleted: reloadData()
+    Component.onDestruction: clearTextEditPreparation(true)
 
     FrameAnimation {
         running: root.textMarkupPreviewUpdatePending
@@ -2232,6 +2311,15 @@ Item {
 
     Connections {
         target: root.controller
+
+        function onTextEditPreparationReady(readyPage, objectId, styleAction) {
+            if (root.textEditPreparationController !== root.controller
+                    || root.textEditPreparationPage !== readyPage
+                    || root.textEditPreparationObjectId !== objectId) {
+                return
+            }
+            root.activatePreparedTextEdit(readyPage, objectId, styleAction)
+        }
 
         function onPageDataChanged(changedPage) {
             if (changedPage < 0 || changedPage === root.page)
@@ -2252,6 +2340,8 @@ Item {
         }
 
         function onToolChanged() {
+            ++root.editFocusGeneration
+            root.clearTextEditPreparation(true)
             selectionActions.close()
             root.cancelHighlight()
             root.cancelShape()

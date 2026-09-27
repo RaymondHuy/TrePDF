@@ -467,6 +467,12 @@ private slots:
     void savesOnlyRequestedTab();
     void rejectsSaveAsOverAnotherOpenTab();
     void cancelsMissingFontSaveWithoutLosingDrafts();
+    void checksAllFontsBeforeInlineEditing();
+    void skipsInlineFontDownloadForEmbeddedAndCachedFaces();
+    void cancelsStaleInlineFontPreparation_data();
+    void cancelsStaleInlineFontPreparation();
+    void opensInlineEditorAfterFontPreparation_data();
+    void opensInlineEditorAfterFontPreparation();
     void rejectsUnsafeFontDownloads_data();
     void rejectsUnsafeFontDownloads();
     void cancelsFontDownloadBeforeInstallation();
