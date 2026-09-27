@@ -16,6 +16,7 @@ Flickable {
     required property bool listBoxToolSelected
     required property bool combFieldToolSelected
 
+    signal selectRequested()
     signal textFieldToolRequested()
     signal checkboxToolRequested()
     signal radioButtonToolRequested()
@@ -39,6 +40,19 @@ Flickable {
             theme: root.theme
             //% "Fields"
             title: qsTrId("Fields")
+
+            RibbonButton {
+                objectName: "formSelectButton"
+                theme: root.theme
+                documentLoaded: root.document.loaded
+                //% "Select"
+                text: qsTrId("Select")
+                iconSource: "../assets/icons/mouse-pointer-2.svg"
+                primary: !root.textFieldToolSelected && !root.checkboxToolSelected
+                    && !root.radioButtonToolSelected && !root.dropdownToolSelected
+                    && !root.listBoxToolSelected && !root.combFieldToolSelected
+                onClicked: root.selectRequested()
+            }
 
             RibbonButton {
                 theme: root.theme

@@ -476,6 +476,9 @@ private slots:
     void limitsCtanCatalogueToReviewedFamilies();
     void limitsGoogleCatalogueToOpenSourceFonts();
     void isolatesEmbeddedSubsetFromCachedCompleteFace();
+    void isolatesType1FontNames();
+    void preservesType1UrlThroughInlineEditing_data();
+    void preservesType1UrlThroughInlineEditing();
     void fallsBackToCtanAndReusesCachedFamily();
     void loadsCachedFontInFreshProcess();
     void preservesDownloadedFontSpacingOnReusedSaveWorker();

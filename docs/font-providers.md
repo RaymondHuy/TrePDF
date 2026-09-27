@@ -49,6 +49,20 @@ Khi chủ sở hữu cuối cùng nhả font, lần đăng ký sau dùng tên ri
 tái sử dụng font engine cũ của worker. Digest font nguồn và family công khai
 vẫn giữ nguyên; tên riêng này không được ghi vào PDF.
 
+Font Type 1 nhúng dạng PFA cũng có tên hiển thị riêng khi Qt đọc được glyph
+Unicode của run. `PDFFontAliases` chỉ đổi ba khai báo literal `FontName`,
+`FamilyName`, `FullName` trong header ASCII trước `currentfile eexec`; giữ
+nguyên encoding, metrics và phần mã hóa chứa outlines. Header giới hạn 64 KiB,
+16.384 token, độ sâu 16; dạng PFB hoặc khai báo tên động/không hợp lệ dùng
+fallback hiện có. Cách này giữ hình chữ monospace như Inconsolata khi vào
+editor, thay vì dùng font hệ thống rồi bù khoảng cách trên hình chữ sai.
+Khi Save dòng có nhiều font, writer có thể dùng lại từng handle Type 1 nguồn
+khi fingerprint và style khớp, đồng thời mọi ký tự đã xuất hiện với đúng handle
+đó trong các object nguồn. Không gộp coverage của hai font hoặc hai encoding
+khác nhau; kiểm lại cả whitespace sau layout. Đây không phải nhánh tái nhúng
+Type 1: ký tự chưa có mapping cần font đầy đủ hợp lệ hoặc Save báo thiếu font,
+không âm thầm thay bằng Courier. Handle chỉ sống trên page của writer.
+
 File tải từ CTAN được giữ nguyên bytes, không chuyển đổi outline trong cache.
 
 Mỗi face phải đúng family/style, có glyph yêu cầu, font table hợp lệ và

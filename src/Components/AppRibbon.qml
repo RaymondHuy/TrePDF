@@ -281,6 +281,14 @@ Column {
             dropdownToolSelected: root.dropdownToolSelected
             listBoxToolSelected: root.listBoxToolSelected
             combFieldToolSelected: root.combFieldToolSelected
+            onSelectRequested: {
+                root.textFieldToolSelected = false
+                root.checkboxToolSelected = false
+                root.radioButtonToolSelected = false
+                root.dropdownToolSelected = false
+                root.listBoxToolSelected = false
+                root.combFieldToolSelected = false
+            }
             onTextFieldToolRequested: {
                 root.textFieldToolSelected = !root.textFieldToolSelected
                 root.checkboxToolSelected = false
@@ -347,7 +355,6 @@ Column {
             onSelectRequested: root.editController.tool = PDFEditController.SelectTool
             onUndoRequested: root.undoRequested()
             onRedoRequested: root.redoRequested()
-            onSaveRequested: root.saveRequested()
             onSaveAsRequested: root.saveAsRequested()
         }
     }

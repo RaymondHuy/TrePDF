@@ -2,6 +2,8 @@
 #include "PDFEditControllerTestSupport.h"
 
 #include <fpdf_ppo.h>
+#include <QGlyphRun>
+#include <QPainterPath>
 #include "FontDownloadService.h"
 #include "CtanFontProvider.h"
 #include "GoogleFontsProvider.h"
@@ -3886,4 +3888,257 @@ void PDFEditControllerTest::rollsBackFontFamilyWhenOptionalTargetBlocked()
     QVERIFY(!QFontDatabase::families().contains(family));
     QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
     QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, true).isValid());
+}
+
+void PDFEditControllerTest::preservesType1UrlThroughInlineEditing_data()
+{
+    QTest::addColumn<qreal>("zoom");
+    QTest::addColumn<QString>("probePath");
+    QTest::newRow("mixed-font-75-percent") << 0.75 << QString();
+    QTest::newRow("mixed-font-155-percent") << 1.55 << QString();
+    const QString probe = qEnvironmentVariable("TREPDF_TEST_MIXED_FONT_PDF");
+    if (!probe.isEmpty())
+        QTest::newRow("external-page-four") << 1.55 << probe;
+}
+
+void PDFEditControllerTest::preservesType1UrlThroughInlineEditing()
+{
+    QFETCH(qreal, zoom);
+    QFETCH(QString, probePath);
+    // Downloaded registrations live for the process lifetime. Keep this
+    // optional probe's temporary Termes store out of subsequent font tests.
+    if (!probePath.isEmpty() && !qEnvironmentVariableIsSet("TREPDF_TYPE1_URL_PROBE")) {
+        QProcess probe;
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("TREPDF_TYPE1_URL_PROBE"), QStringLiteral("1"));
+        probe.setProcessEnvironment(environment);
+        probe.setProcessChannelMode(QProcess::MergedChannels);
+        probe.start(QCoreApplication::applicationFilePath(),
+                    {QStringLiteral("preservesType1UrlThroughInlineEditing:external-page-four")});
+        QVERIFY2(probe.waitForStarted(10000), qPrintable(probe.errorString()));
+        QVERIFY2(probe.waitForFinished(30000), qPrintable(probe.errorString()));
+        const QByteArray output = probe.readAll();
+        QVERIFY2(probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0,
+                 output.constData());
+        return;
+    }
+    IsolatedFontStore fontStore;
+    QVERIFY(fontStore.fresh);
+    if (!probePath.isEmpty()) {
+        // Match the application's complete body face without touching its cache.
+        // The URL must still use the embedded Type 1 face from the PDF.
+        QList<ApplicationFonts::DownloadedFontData> faces;
+        for (int style = 0; style < 4; ++style) {
+            const QByteArray bytes = ctanTermesFontData(style);
+            QVERIFY(!bytes.isEmpty());
+            faces.append({bytes, QStringLiteral("TeX Gyre Termes"),
+                          bool(style & 2), bool(style & 1), uint('e')});
+        }
+        QString error;
+        QVERIFY2(ApplicationFonts::installDownloadedFonts(faces, error), qPrintable(error));
+    }
+    const QString url = QStringLiteral("http://creativecommons.org/licenses/by/3.0/.");
+    const QString prefix = QStringLiteral("best way to do this is with a link to ");
+    const int pageIndex = probePath.isEmpty() ? 0 : 3;
+    const QString sourcePath = probePath.isEmpty()
+        ? m_temporaryDirectory.filePath(QStringLiteral("type1-inline-%1.pdf").arg(zoom)) : probePath;
+    if (probePath.isEmpty()) {
+        QFile fixture(QFINDTESTDATA("fixtures/fonts/type1/trepdf-test-mono.pfa"));
+        QVERIFY(fixture.open(QIODevice::ReadOnly));
+        const QByteArray font = fixture.readAll();
+        const auto stream = [](const QByteArray &bytes, const QByteArray &extra = {}) {
+            return "<< /Length " + QByteArray::number(bytes.size()) + extra
+                + " >>\nstream\n" + bytes + "\nendstream";
+        };
+        const QByteArray content = "BT /F1 9 Tf 72 740 Td (" + prefix.toLatin1()
+            + ") Tj /F2 9 Tf (" + url.toLatin1() + ") Tj ET\n";
+        QByteArray widths;
+        for (int c = 32; c <= 126; ++c)
+            widths += "500 ";
+        QVERIFY(writePdfObjects(sourcePath, {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                "/Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /TrePDFTestMono-Regular "
+                "/Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 126 /Widths [" + widths
+                + "] /FontDescriptor 7 0 R >>",
+            stream(content),
+            "<< /Type /FontDescriptor /FontName /TrePDFTestMono-Regular /Flags 33 "
+                "/FontBBox [0 0 500 700] /ItalicAngle 0 /Ascent 700 /Descent 0 "
+                "/CapHeight 700 /StemV 80 /FontFile 8 0 R >>",
+            stream(font, " /Length1 " + QByteArray::number(font.indexOf("currentfile eexec") + 18))}));
+    }
+    PDFDocument pdf;
+    PDFEditController controller;
+    QVERIFY(pdf.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&pdf);
+    controller.setTool(PDFEditController::SelectTool);
+    QVariantMap candidate;
+    for (const QVariant &value : waitForCandidates(controller, pageIndex)) {
+        const QVariantMap item = value.toMap();
+        if (item.value(QStringLiteral("text")).toString().contains(prefix.trimmed())) {
+            candidate = item;
+            break;
+        }
+    }
+    QVERIFY2(!candidate.isEmpty(), "The mixed serif/monospace line must remain one candidate");
+    QVERIFY(controller.selectCandidate(pageIndex, candidate.value(QStringLiteral("objectId")).toString()));
+    const QString original = controller.selectedText();
+    const int urlStart = original.indexOf(url);
+    QVERIFY2(urlStart >= prefix.size() - 1, qPrintable(original));
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
+    const QRectF originalFrame = controller.selectedFrameRect();
+    QVector<qreal> sourceOrigins;
+    QByteArray sourceFont;
+    {
+        PDFiumProcessLock lock;
+        FPDF_DOCUMENT doc = FPDF_LoadDocument(QFile::encodeName(sourcePath).constData(), nullptr);
+        QVERIFY(doc);
+        const auto closeDoc = qScopeGuard([&] { FPDF_CloseDocument(doc); });
+        FPDF_PAGE page = FPDF_LoadPage(doc, pageIndex);
+        QVERIFY(page);
+        const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+        FPDF_TEXTPAGE text = FPDFText_LoadPage(page);
+        QVERIFY(text);
+        const auto closeText = qScopeGuard([&] { FPDFText_ClosePage(text); });
+        FPDF_SCHHANDLE search = FPDFText_FindStart(text,
+            reinterpret_cast<FPDF_WIDESTRING>(original.utf16()), FPDF_MATCHCASE, 0);
+        QVERIFY(search);
+        const auto closeSearch = qScopeGuard([&] { FPDFText_FindClose(search); });
+        QVERIFY(FPDFText_FindNext(search));
+        const int start = FPDFText_GetSchResultIndex(search) + urlStart;
+        for (int i = 0; i < url.size(); ++i) {
+            double x = 0.0, y = 0.0;
+            QVERIFY(FPDFText_GetCharOrigin(text, start + i, &x, &y));
+            sourceOrigins.append(x);
+        }
+        FPDF_FONT font = FPDFTextObj_GetFont(FPDFText_GetTextObject(text, start));
+        size_t size = 0;
+        QVERIFY(FPDFFont_GetFontData(font, nullptr, 0, &size));
+        QVERIFY(size > 0 && size < 1024 * 1024);
+        sourceFont.resize(qsizetype(size));
+        QVERIFY(FPDFFont_GetFontData(font, reinterpret_cast<uint8_t *>(sourceFont.data()), size, &size));
+        QVERIFY(sourceFont.startsWith("%!"));
+    }
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQuickWindow window;
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    const QSizeF pageSize = pdf.pageSize(pageIndex);
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), pageIndex}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false}, {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), zoom},
+        {QStringLiteral("width"), pageSize.width() * zoom},
+        {QStringLiteral("height"), pageSize.height() * zoom}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    auto *overlayItem = qobject_cast<QQuickItem *>(overlay.get());
+    overlayItem->setParentItem(window.contentItem());
+    window.resize(qCeil(pageSize.width() * zoom), qCeil(pageSize.height() * zoom));
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    QObject *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = child;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *editorItem = qobject_cast<QQuickItem *>(editor);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *document = quickDocument->textDocument();
+    QTRY_COMPARE(document->toPlainText(), original);
+    QString error;
+    const auto keepsUrl = [&]() {
+        document->size();
+        const QTextBlock block = document->findBlock(urlStart);
+        const QTextLine line = block.layout()->lineForTextPosition(urlStart - block.position());
+        if (!line.isValid()) return false;
+        int checked = 0;
+        for (const QGlyphRun &run : block.layout()->glyphRuns(urlStart - block.position(), url.size(),
+                  QTextLayout::RetrieveGlyphIndexes | QTextLayout::RetrieveStringIndexes
+                      | QTextLayout::RetrieveGlyphPositions)) {
+            const QRawFont raw = run.rawFont();
+            const QRawFont expected(sourceFont, raw.pixelSize(), QFont::PreferNoHinting);
+            const auto glyphs = expected.glyphIndexesForString(url);
+            for (int i = 0; i < run.glyphIndexes().size(); ++i) {
+                const int index = run.stringIndexes()[i] + block.position() - urlStart;
+                // The punctuation after the URL belongs to the surrounding serif run.
+                if (index < 0 || index >= url.size() - 1) continue;
+                if (run.glyphIndexes()[i] != glyphs[index]
+                    || raw.pathForGlyph(run.glyphIndexes()[i]) != expected.pathForGlyph(glyphs[index])) {
+                    error = QStringLiteral("URL character %1 uses %2 instead of the original Type 1 outlines")
+                        .arg(index).arg(raw.familyName());
+                    return false;
+                }
+                const qreal x = editorItem->mapToItem(overlayItem,
+                    QPointF(editor->property("leftPadding").toReal()
+                        + block.layout()->position().x() + run.positions()[i].x(), 0)).x() / zoom;
+                if (qAbs(x - sourceOrigins[index]) > 0.15) {
+                    error = QStringLiteral("URL character %1: editor x=%2, PDF x=%3")
+                        .arg(index).arg(x).arg(sourceOrigins[index]);
+                    return false;
+                }
+                ++checked;
+            }
+        }
+        return checked == url.size() - 1;
+    };
+    QTRY_VERIFY2(keepsUrl(), qPrintable(error));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    editor->setProperty("cursorPosition", original.size());
+    editorItem->forceActiveFocus();
+    QTest::keyClick(&window, Qt::Key_E);
+    QTRY_COMPARE(controller.selectedText(), original + QLatin1Char('e'));
+    QTRY_VERIFY2(keepsUrl(), qPrintable(error));
+    QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+    QTRY_COMPARE(controller.selectedText(), original);
+    QTRY_VERIFY2(keepsUrl(), qPrintable(error));
+    QVERIFY(QMetaObject::invokeMethod(editor, "redo"));
+    QTRY_COMPARE(controller.selectedText(), original + QLatin1Char('e'));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("type1-inline-saved-%1.pdf").arg(zoom));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const QVariantMap reopened = candidateForText(waitForCandidates(controller, pageIndex), original + QLatin1Char('e'));
+    QVERIFY(!reopened.isEmpty());
+    QVERIFY(controller.selectCandidate(pageIndex, reopened.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    QTRY_VERIFY2(keepsUrl(), qPrintable(error));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QVERIFY(!controller.hasDrafts());
+    if (probePath.isEmpty()) {
+        // 'w' occurs in the serif prefix and in the Type 1 program, but not
+        // among the URL font's observed PDF character mappings. Coverage from
+        // the other font must not authorize reuse or a silent Courier fallback.
+        const QString edited = controller.selectedText() + QLatin1Char('w');
+        controller.commitSelectedText(edited);
+        const QString protectedPath = m_temporaryDirectory.filePath(
+            QStringLiteral("type1-unsupported-%1.pdf").arg(zoom));
+        const QByteArray sentinel("Existing destination must remain unchanged.");
+        QFile destination(protectedPath);
+        QVERIFY(destination.open(QIODevice::WriteOnly));
+        QCOMPARE(destination.write(sentinel), sentinel.size());
+        destination.close();
+        QVERIFY(!controller.saveAs(QUrl::fromLocalFile(protectedPath)));
+        QVERIFY(controller.hasDrafts());
+        QCOMPARE(controller.selectedText(), edited);
+        QVERIFY(destination.open(QIODevice::ReadOnly));
+        QCOMPARE(destination.readAll(), sentinel);
+    }
 }
