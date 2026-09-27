@@ -18,7 +18,6 @@ Flickable {
     signal selectRequested()
     signal undoRequested()
     signal redoRequested()
-    signal saveRequested()
     signal saveAsRequested()
 
     clip: true
@@ -144,16 +143,6 @@ Flickable {
             //% "File"
             title: qsTrId("File")
 
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Save"
-                text: qsTrId("Save")
-                iconSource: "../assets/icons/save.svg"
-                enabled: root.ready
-                    && (root.editController.hasDrafts || root.hasPendingPanelEdits)
-                onClicked: root.saveRequested()
-            }
             RibbonButton {
                 theme: root.theme
                 documentLoaded: root.document.loaded

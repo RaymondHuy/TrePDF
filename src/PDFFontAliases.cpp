@@ -98,6 +98,199 @@ QString withoutSubsetPrefix(QString family)
 
 namespace PDFFontAliases {
 
+static AliasData aliasIdentity(const QByteArray &data, const QString &expectedFamily,
+                               bool substitute, const QRawFont &raw,
+                               bool displayAlias = true)
+{
+    AliasData result;
+    result.fingerprint = QCryptographicHash::hash(data, QCryptographicHash::Sha256);
+    result.source = !substitute;
+    const QByteArray aliasFingerprint = substitute
+        ? QCryptographicHash::hash(result.fingerprint + '\0' + expectedFamily.toUtf8(),
+                                  QCryptographicHash::Sha256)
+        : result.fingerprint;
+    result.semanticFamily = withoutSubsetPrefix(substitute || raw.familyName().isEmpty()
+        ? expectedFamily : raw.familyName());
+    if (result.semanticFamily.isEmpty() || result.semanticFamily.size() > 256
+        || result.semanticFamily.contains(QChar::Null))
+        return {};
+    if (displayAlias) {
+        auto &state = registry();
+        QMutexLocker lock(&state.mutex);
+        for (auto entry = state.aliases.cbegin(); entry != state.aliases.cend(); ++entry) {
+            if (entry->fingerprint == result.fingerprint
+                && entry->semanticFamily == result.semanticFamily
+                && entry->source == result.source) {
+                result.family = entry.key();
+                break;
+            }
+        }
+        if (result.family.isEmpty()) {
+            // A pooled Save thread has no event loop to invalidate its old Qt
+            // font engine after the last owner unregisters a source face. A
+            // new registration must never reuse that engine's family key.
+            const QByteArray identity = aliasFingerprint + ':'
+                + QByteArray::number(++state.generation);
+            result.family = QStringLiteral("TrePDFE") + QString::fromLatin1(
+                QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(48));
+        }
+    }
+    return result;
+}
+
+static AliasData renamedType1Font(const QByteArray &data, const QString &expectedFamily,
+                                  bool substitute)
+{
+    // PFA has no sfnt name table. Tokenize only its bounded cleartext header;
+    // leave encoding, metrics, charstrings and the encrypted tail byte-exact.
+    // PFB and unusual executable name definitions keep the existing fallback.
+    if (!data.startsWith("%!PS-AdobeFont-1.") && !data.startsWith("%!FontType1-"))
+        return {};
+    struct Token { qsizetype start; qsizetype length; int depth; };
+    QVector<Token> tokens;
+    constexpr qsizetype maximumHeader = 64 * 1024;
+    const qsizetype limit = qMin(data.size(), maximumHeader);
+    const auto whitespace = [](char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f';
+    };
+    const auto delimiter = [&](char c) {
+        return whitespace(c) || c == '(' || c == ')' || c == '<' || c == '>'
+            || c == '[' || c == ']' || c == '{' || c == '}' || c == '/' || c == '%';
+    };
+    const auto ascii = [&](char c) {
+        return (quint8(c) >= 32 && quint8(c) <= 126) || whitespace(c);
+    };
+    const auto value = [&](const Token &token) {
+        return data.mid(token.start, token.length);
+    };
+    bool foundProgram = false;
+    QByteArray containers;
+    for (qsizetype offset = 0; offset < limit && tokens.size() < 16384;) {
+        const char c = data[offset];
+        if (whitespace(c)) { ++offset; continue; }
+        if (c == '%') {
+            while (offset < limit && data[offset] != '\n' && data[offset] != '\r') {
+                if (!ascii(data[offset]))
+                    return {};
+                ++offset;
+            }
+            continue;
+        }
+        if (quint8(c) < 32 || quint8(c) > 126)
+            return {};
+        const qsizetype start = offset++;
+        const int containerDepth = containers.size();
+        if (c == '(') {
+            int depth = 1;
+            while (offset < limit && depth > 0) {
+                const char next = data[offset++];
+                if (!ascii(next))
+                    return {};
+                if (next == '\\') {
+                    if (offset >= limit || !ascii(data[offset]))
+                        return {};
+                    ++offset;
+                } else if (next == '(') {
+                    if (++depth > 16)
+                        return {};
+                } else if (next == ')') {
+                    --depth;
+                }
+            }
+            if (depth != 0)
+                return {};
+        } else if (c == '[' || c == '{') {
+            if (containers.size() >= 16)
+                return {};
+            containers.append(c);
+        } else if (c == ']' || c == '}') {
+            if (containers.isEmpty() || containers.back() != (c == ']' ? '[' : '{'))
+                return {};
+            containers.chop(1);
+        } else if (c == '/' || !delimiter(c)) {
+            while (offset < limit && !delimiter(data[offset])) {
+                if (!ascii(data[offset]))
+                    return {};
+                ++offset;
+            }
+            if (c == '/' && offset == start + 1)
+                return {};
+        } else {
+            // Hex strings/dictionaries and unmatched string delimiters are
+            // outside the supported declarative PFA header form.
+            return {};
+        }
+        tokens.append({start, offset - start, containerDepth});
+        const QByteArray tokenValue = value(tokens.last());
+        // Supporting references or computed identity values would require
+        // evaluating PostScript. Accept only the literal declarations below.
+        if (tokenValue == "FontName" || tokenValue == "FamilyName" || tokenValue == "FullName")
+            return {};
+        if (tokenValue == "eexec") {
+            if (!containers.isEmpty() || tokens.size() < 2
+                || value(tokens[tokens.size() - 2]) != "currentfile"
+                || offset >= data.size() || !whitespace(data[offset]))
+                return {};
+            foundProgram = true;
+            break;
+        }
+    }
+    if (!foundProgram)
+        return {};
+    QVector<Token> replacements;
+    for (const QByteArray &key : {QByteArray("/FontName"), QByteArray("/FamilyName"),
+                                 QByteArray("/FullName"), QByteArray("/FontType")}) {
+        bool found = false;
+        for (qsizetype i = 0; i < tokens.size(); ++i) {
+            if (value(tokens[i]) != key)
+                continue;
+            if (found || tokens[i].depth != 0 || i + 2 >= tokens.size())
+                return {};
+            const Token name = tokens[i + 1];
+            const QByteArray text = value(name);
+            const bool fontType = key == "/FontType";
+            if (fontType ? text != "1"
+                : text.size() < 3 || (key == "/FontName" ? !text.startsWith('/')
+                    : !(text.startsWith('(') && text.endsWith(')'))))
+                return {};
+            qsizetype end = i + 2;
+            if (value(tokens[end]) == "readonly")
+                ++end;
+            if (end >= tokens.size() || value(tokens[end]) != "def")
+                return {};
+            if (!fontType)
+                replacements.append(name);
+            found = true;
+        }
+        if (!found)
+            return {};
+    }
+    const QRawFont raw(data, 16.0, QFont::PreferNoHinting);
+    if (!raw.isValid())
+        return {};
+    AliasData result = aliasIdentity(data, expectedFamily, substitute, raw);
+    if (result.family.isEmpty())
+        return {};
+    std::sort(replacements.begin(), replacements.end(), [](const Token &a, const Token &b) {
+        return a.start > b.start;
+    });
+    QByteArray renamed = data;
+    const QByteArray family = result.family.toLatin1();
+    for (const Token &name : replacements) {
+        const QByteArray replacement = data[name.start] == '/' ? '/' + family
+                                                              : '(' + family + ')';
+        renamed.replace(name.start, name.length, replacement);
+    }
+    if (renamed.size() > maximumDisplayBytes)
+        return {};
+    const QRawFont check(renamed, 16.0, QFont::PreferNoHinting);
+    if (!check.isValid() || check.familyName() != result.family
+        || check.weight() != raw.weight() || check.style() != raw.style())
+        return {};
+    result.data = std::move(renamed);
+    return result;
+}
+
 static AliasData renamedFont(const QByteArray &data, const QString &expectedFamily,
                              bool substitute, const QByteArray &saveIdentity = {})
 {
@@ -106,9 +299,9 @@ static AliasData renamedFont(const QByteArray &data, const QString &expectedFami
     if (data.size() < 12 || data.size() > maximumBytes)
         return {};
     const quint32 scaler = read32(data, 0);
-    // A Type 1 program/collection cannot be renamed through an sfnt name table.
     if (scaler != 0x00010000U && scaler != 0x74727565U && scaler != 0x4f54544fU)
-        return {};
+        return saveIdentity.isEmpty() ? renamedType1Font(data, expectedFamily, substitute)
+                                      : AliasData();
     if (!saveIdentity.isEmpty() && scaler == 0x4f54544fU)
         return {}; // CFF has a separate internal name; leave its program intact.
     const quint16 count = read16(data, 4);
@@ -150,39 +343,10 @@ static AliasData renamedFont(const QByteArray &data, const QString &expectedFami
     const QRawFont raw(data, 16.0, QFont::PreferNoHinting);
     if (!raw.isValid())
         return {};
-    AliasData result;
-    result.fingerprint = QCryptographicHash::hash(data, QCryptographicHash::Sha256);
-    result.source = !substitute;
-    const QByteArray aliasFingerprint = substitute
-        ? QCryptographicHash::hash(result.fingerprint + '\0' + expectedFamily.toUtf8(),
-                                  QCryptographicHash::Sha256)
-        : result.fingerprint;
-    result.semanticFamily = withoutSubsetPrefix(substitute || raw.familyName().isEmpty()
-        ? expectedFamily : raw.familyName());
-    if (result.semanticFamily.isEmpty() || result.semanticFamily.size() > 256
-        || result.semanticFamily.contains(QChar::Null))
+    AliasData result = aliasIdentity(data, expectedFamily, substitute, raw,
+                                     saveIdentity.isEmpty());
+    if (result.semanticFamily.isEmpty())
         return {};
-    if (saveIdentity.isEmpty()) {
-        auto &state = registry();
-        QMutexLocker lock(&state.mutex);
-        for (auto entry = state.aliases.cbegin(); entry != state.aliases.cend(); ++entry) {
-            if (entry->fingerprint == result.fingerprint
-                && entry->semanticFamily == result.semanticFamily
-                && entry->source == result.source) {
-                result.family = entry.key();
-                break;
-            }
-        }
-        if (result.family.isEmpty()) {
-            // A pooled Save thread has no event loop to invalidate its old Qt
-            // font engine after the last owner unregisters a source face. A
-            // new registration must never reuse that engine's family key.
-            const QByteArray identity = aliasFingerprint + ':'
-                + QByteArray::number(++state.generation);
-            result.family = QStringLiteral("TrePDFE") + QString::fromLatin1(
-                QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(48));
-        }
-    }
     const bool bold = raw.weight() >= QFont::Bold;
     const bool italic = raw.style() != QFont::StyleNormal;
     const QString style = bold ? (italic ? QStringLiteral("Bold Italic") : QStringLiteral("Bold"))

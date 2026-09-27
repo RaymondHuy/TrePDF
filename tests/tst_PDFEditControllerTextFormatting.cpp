@@ -2,6 +2,7 @@
 #include "PDFEditControllerTestSupport.h"
 #include "PDFFontAliases.h"
 
+#include <QCryptographicHash>
 #include <QGlyphRun>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -10,6 +11,112 @@
 #include <QUuid>
 
 using namespace PDFEditControllerTestSupport;
+
+void PDFEditControllerTest::isolatesType1FontNames()
+{
+    QFile fixture(QFINDTESTDATA("fixtures/fonts/type1/trepdf-test-mono.pfa"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    const QByteArray source = fixture.readAll();
+    const QString semanticFamily = QStringLiteral("TrePDF Test Mono");
+    const QRawFont original(source, 16.0, QFont::PreferNoHinting);
+    QVERIFY(original.isValid());
+    QCOMPARE(original.familyName(), semanticFamily);
+    const auto alias = PDFFontAliases::isolate(source, semanticFamily);
+    QVERIFY(!alias.data.isEmpty());
+    QVERIFY(alias.family.startsWith(QLatin1String("TrePDFE")));
+    QCOMPARE(alias.semanticFamily, semanticFamily);
+    QVERIFY(alias.source);
+    QCOMPARE(alias.fingerprint, QCryptographicHash::hash(source, QCryptographicHash::Sha256));
+    const qsizetype encryptedStart = source.indexOf("currentfile eexec\n");
+    QVERIFY(encryptedStart > 0);
+    QCOMPARE(alias.data.mid(alias.data.indexOf("currentfile eexec\n")),
+             source.mid(encryptedStart));
+    QVERIFY(alias.data.contains("/FontName /" + alias.family.toLatin1() + " def"));
+    QVERIFY(alias.data.contains("/FamilyName (" + alias.family.toLatin1() + ") readonly def"));
+    QVERIFY(alias.data.contains("/FullName (" + alias.family.toLatin1() + ") readonly def"));
+    const QRawFont renamed(alias.data, 16.0, QFont::PreferNoHinting);
+    QVERIFY(renamed.isValid());
+    QCOMPARE(renamed.familyName(), alias.family);
+    const QString text = QStringLiteral("http://creativecommons.org/licenses/by/3.0/.");
+    const auto originalGlyphs = original.glyphIndexesForString(text);
+    QCOMPARE(renamed.glyphIndexesForString(text), originalGlyphs);
+    QCOMPARE(renamed.advancesForGlyphIndexes(originalGlyphs),
+             original.advancesForGlyphIndexes(originalGlyphs));
+    for (quint32 glyph : originalGlyphs) {
+        QVERIFY(glyph != 0);
+        QCOMPARE(renamed.pathForGlyph(glyph), original.pathForGlyph(glyph));
+    }
+
+    QStringList retained;
+    const auto releaseFonts = qScopeGuard([&] {
+        for (const QString &family : std::as_const(retained))
+            PDFFontAliases::release(family);
+    });
+    QVERIFY(PDFFontAliases::retain(alias));
+    retained.append(alias.family);
+    QVERIFY(PDFFontAliases::retain(alias));
+    retained.append(alias.family);
+    QCOMPARE(PDFFontAliases::semanticFamily(alias.family), semanticFamily);
+    QCOMPARE(PDFFontAliases::sourceFingerprint(alias.family), alias.fingerprint);
+    QVERIFY(PDFFontAliases::matchesStyle(alias.family, false, false));
+    QCOMPARE(PDFFontAliases::isolate(source, semanticFamily).family, alias.family);
+    PDFFontAliases::release(retained.takeLast());
+    QCOMPARE(PDFFontAliases::sourceFingerprint(alias.family), alias.fingerprint);
+    QCOMPARE(PDFFontAliases::isolate(source, semanticFamily).family, alias.family);
+
+    QByteArray widerProgram = source;
+    widerProgram.replace("/FontMatrix [0.001 0 0 0.001 0 0]",
+                         "/FontMatrix [0.002 0 0 0.001 0 0]");
+    QVERIFY(widerProgram != source);
+    const QRawFont wider(widerProgram, 16.0, QFont::PreferNoHinting);
+    QVERIFY(wider.isValid());
+    QCOMPARE(wider.familyName(), semanticFamily);
+    const auto widerAlias = PDFFontAliases::isolate(widerProgram, semanticFamily);
+    QVERIFY(!widerAlias.data.isEmpty());
+    QVERIFY(widerAlias.family != alias.family);
+    QVERIFY(widerAlias.fingerprint != alias.fingerprint);
+    QVERIFY(PDFFontAliases::retain(widerAlias));
+    retained.append(widerAlias.family);
+    QCOMPARE(PDFFontAliases::sourceFingerprint(alias.family), alias.fingerprint);
+    QCOMPARE(PDFFontAliases::sourceFingerprint(widerAlias.family), widerAlias.fingerprint);
+    PDFFontAliases::release(retained.takeFirst());
+    QVERIFY(PDFFontAliases::sourceFingerprint(alias.family).isEmpty());
+    const auto reloaded = PDFFontAliases::isolate(source, semanticFamily);
+    QVERIFY(!reloaded.data.isEmpty());
+    QVERIFY(reloaded.family != alias.family);
+    QCOMPARE(reloaded.fingerprint, alias.fingerprint);
+
+    // Tokens inside comments/strings must not be treated as executable names
+    // or as the boundary of the encrypted Type 1 program.
+    QByteArray decoys = source;
+    decoys.replace("10 dict begin\n", "10 dict begin\n"
+        "% /FontName /Fake def /FamilyName (Fake) def currentfile eexec\n");
+    decoys.replace("(Synthetic TrePDF regression font)",
+        "(/FontName /Fake def /FamilyName (Fake) def currentfile eexec)");
+    QVERIFY(!PDFFontAliases::isolate(decoys, semanticFamily).data.isEmpty());
+
+    const QList<QPair<QByteArray, QByteArray>> invalidHeaders{
+        {"/FontName /TrePDFTestMono-Regular def", ""},
+        {"/FontName /TrePDFTestMono-Regular def", "/FontName /First def /FontName /Second def"},
+        {"/FontName /TrePDFTestMono-Regular def", "/FontName (TrePDFTestMono-Regular) cvn def"},
+        {"/FamilyName (TrePDF Test Mono) readonly def", "/FamilyName FamilyName def"},
+        {"/Weight (Regular) readonly def", "/Weight (Regular) readonly def /SavedName FontName def"},
+        {"/FullName (TrePDF Test Mono Regular) readonly def", "/FullName (unterminated"},
+        {"/FontType 1 def", "/FontType 42 def"},
+        {"/FontName /TrePDFTestMono-Regular def", "{/FontName /TrePDFTestMono-Regular def} exec"},
+        {"/FontMatrix [0.001 0 0 0.001 0 0]", "/FontMatrix [0.001 0 0 0.001 0 0}"},
+        {"currentfile eexec\n", "currentfile\n"}};
+    for (const auto &replacement : invalidHeaders) {
+        QByteArray malformed = source;
+        malformed.replace(replacement.first, replacement.second);
+        QVERIFY(malformed != source);
+        QVERIFY2(PDFFontAliases::isolate(malformed, semanticFamily).data.isEmpty(),
+                 replacement.second.constData());
+    }
+    QByteArray oversized = source;
+    oversized.insert(source.indexOf("10 dict begin"), '%' + QByteArray(64 * 1024, 'x') + '\n');
+    QVERIFY(PDFFontAliases::isolate(oversized, semanticFamily).data.isEmpty());
+}
 
 void PDFEditControllerTest::keepsParagraphSpacingThroughQmlEditing_data()
 {
