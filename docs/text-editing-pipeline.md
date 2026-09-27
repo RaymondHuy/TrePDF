@@ -1348,7 +1348,13 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
 được render. Pending Close Tab/Quit của đúng session chỉ tiếp tục sau signal
 `saveFinished(true)`. Open tạo tab mới và không làm mất draft của tab hiện tại.
 
-Khi writer báo thiếu bản font đầy đủ để nhúng, luồng Save bất đồng bộ giữ
+Trước khi mở inline editor, ứng dụng kiểm tra tất cả font/kiểu chữ trong
+đoạn được chọn và hỏi tải các font còn thiếu. Editor chỉ mở sau khi kiểm tra
+đạt; hủy hoặc đổi đoạn/tab không tạo bản nháp. Xem
+[kiểm tra font trước khi chỉnh sửa](font-providers.md#kiểm-tra-font-trước-khi-chỉnh-sửa)
+về font nhúng, danh sách tải và phạm vi yêu cầu chờ.
+
+Khi writer vẫn báo thiếu bản font đầy đủ để nhúng (ví dụ ký tự mới được gõ), luồng Save bất đồng bộ giữ
 `saving = true` và phát `fontDownloadRequested` cho đúng session. Hộp thoại hỏi
 người dùng trước khi gửi bất kỳ yêu cầu mạng nào. Một lần bấm OK cho phép
 `FontDownloadService` tải các kiểu thường, đậm, nghiêng và đậm nghiêng hiện có
@@ -1367,9 +1373,11 @@ thử tải một lần trong một lượt Save, tối đa tám face, để tr�
 API Save đồng bộ vẫn trả lỗi trực tiếp.
 
 `ApplicationFonts` lưu font tải về trong
-`QStandardPaths::AppLocalDataLocation/fonts` (macOS:
-`~/Library/Application Support/TreOffice/TrePDF/fonts`), tên file là SHA-256 của
-nội dung, đuôi `.ttf` hoặc `.otf` theo format thật. Không cài vào hệ điều hành.
+`QStandardPaths::AppLocalDataLocation/fonts`; xem
+[thư mục trên macOS, Windows và Linux](font-providers.md#cache-và-xác-thực)
+cho đường dẫn mặc định và quy tắc `XDG_DATA_HOME`. Google Fonts, CTAN và Aptos
+dùng chung kho này. Tên file là SHA-256 của nội dung, đuôi `.ttf` hoặc `.otf`
+theo format thật. Không cài vào hệ điều hành.
 Khởi động sau nạp lại các file hợp lệ qua `QFontDatabase::addApplicationFont()`;
 resolver ưu tiên font nhúng dùng được, font hệ thống rồi cache, trước các
 nguồn tải và fallback. Bytes của mỗi face tải về được đọc, kiểm tra hash và

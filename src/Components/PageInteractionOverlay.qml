@@ -54,7 +54,11 @@ Item {
     }
 
     function beginSelectedEditing() {
-        editOverlay.beginSelectedEditing()
+        beginSelectedEditingWithStyle("")
+    }
+
+    function beginSelectedEditingWithStyle(styleAction) {
+        editOverlay.beginSelectedEditingWithStyle(styleAction)
     }
 
     PDFFormView {

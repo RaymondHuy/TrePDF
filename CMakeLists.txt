@@ -101,6 +101,29 @@ qt_add_executable(trepdf
     src/main.cpp
 )
 
+qt_add_resources(trepdf "trepdf_app_icon"
+    PREFIX "/trepdf/branding"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/branding"
+    FILES src/assets/branding/TrePDF-logo.png
+)
+
+if(APPLE)
+    set(TREPDF_MACOS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/branding/TrePDF.icns")
+    set_source_files_properties("${TREPDF_MACOS_ICON}" PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources"
+    )
+    target_sources(trepdf PRIVATE "${TREPDF_MACOS_ICON}")
+    set_target_properties(trepdf PROPERTIES MACOSX_BUNDLE_ICON_FILE "TrePDF.icns")
+elseif(WIN32)
+    enable_language(RC)
+    configure_file(
+        src/assets/branding/TrePDF.rc.in
+        "${CMAKE_CURRENT_BINARY_DIR}/TrePDF.rc"
+        @ONLY
+    )
+    target_sources(trepdf PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/TrePDF.rc")
+endif()
+
 qt_add_qml_module(trepdf
     URI TrePDF
     SOURCES

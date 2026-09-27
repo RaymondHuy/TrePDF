@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 
@@ -10,6 +11,7 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("TrePDF"));
     QCoreApplication::setOrganizationName(QStringLiteral("TreOffice"));
+    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/trepdf/branding/TrePDF-logo.png")));
 
     ApplicationFonts::registerBundledFonts();
     QQuickStyle::setStyle(QStringLiteral("Basic"));

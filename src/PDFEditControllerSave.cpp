@@ -2,6 +2,7 @@
 #include "PDFEditController_p.h"
 #include "ApplicationFonts.h"
 #include "FontDownloadService.h"
+#include "PDFFontAliases.h"
 #include "PDFAnnotationUtils.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
@@ -50,6 +51,33 @@
 using namespace PDFEditControllerPrivate;
 
 namespace {
+
+QString editFontKey(const QString &family, bool bold, bool italic)
+{
+    return family.trimmed().toCaseFolded() + QLatin1Char('|')
+        + QString::number(bold) + QLatin1Char('|') + QString::number(italic);
+}
+
+bool sourceFaceSupportsEdit(const QString &family, bool bold, bool italic,
+                            const QString &text)
+{
+    if (PDFFontAliases::sourceFingerprint(family).isEmpty()
+        || !PDFFontAliases::matchesStyle(family, bold, italic))
+        return false;
+    QFont font(family);
+    font.setBold(bold);
+    font.setItalic(italic);
+    font.setPixelSize(16);
+    font.setStyleStrategy(QFont::NoFontMerging);
+    const QRawFont raw = QRawFont::fromFont(font);
+    if (!raw.isValid() || raw.familyName().compare(family, Qt::CaseInsensitive) != 0)
+        return false;
+    const auto characters = text.toUcs4();
+    return std::all_of(characters.cbegin(), characters.cend(), [&raw](char32_t character) {
+        // PDFium may infer separators that are not encoded in the subset.
+        return QChar::isSpace(character) || raw.supportsCharacter(character);
+    });
+}
 
 QString saveFailureText(const PDFSaveWriter::Result &result)
 {
@@ -166,6 +194,7 @@ QString saveFailureText(const PDFSaveWriter::Result &result)
 
 bool PDFEditController::save()
 {
+    cancelTextEditPreparation();
     cancelWebLinkCreation();
     if (!m_document || !m_document->isLoaded()) {
         //% "No PDF is open."
@@ -182,6 +211,7 @@ bool PDFEditController::save()
 
 bool PDFEditController::saveAs(const QUrl &target)
 {
+    cancelTextEditPreparation();
     cancelWebLinkCreation();
     if (m_saving) {
         return false;
@@ -244,6 +274,7 @@ bool PDFEditController::saveAs(const QUrl &target)
 
 bool PDFEditController::requestSave()
 {
+    cancelTextEditPreparation();
     cancelWebLinkCreation();
     if (!m_document || !m_document->isLoaded()) {
         //% "No PDF is open."
@@ -261,6 +292,7 @@ bool PDFEditController::requestSave()
 
 bool PDFEditController::requestSaveAs(const QUrl &target)
 {
+    cancelTextEditPreparation();
     cancelWebLinkCreation();
     if (m_saving) {
         return false;
@@ -488,11 +520,273 @@ bool PDFEditController::completeSave(
 
 QString PDFEditController::missingFontFamily() const
 {
+    if (m_pendingFontEdit)
+        return m_pendingFontEdit->missingFamilies.value(0);
     return m_pendingFontSave ? m_pendingFontSave->failure.detail : QString();
+}
+
+QStringList PDFEditController::missingFontFamilies() const
+{
+    if (m_pendingFontEdit)
+        return m_pendingFontEdit->missingFamilies;
+    return m_pendingFontSave ? QStringList{m_pendingFontSave->failure.detail} : QStringList{};
+}
+
+bool PDFEditController::requestSelectedTextEdit(const QString &styleAction)
+{
+    if (!m_document || !m_document->isLoaded() || m_saving || m_pendingFontSave
+        || !m_hasSelection || !m_selectedCandidate.editable
+        || !isTextCandidateKind(m_selectedCandidate.kind)
+        || (styleAction != QString() && styleAction != QLatin1String("bold")
+            && styleAction != QLatin1String("italic") && styleAction != QLatin1String("underline")))
+        return false;
+    if (m_textEditActive)
+        return true;
+    if (m_pendingFontEdit && textEditPreparationIsCurrent()
+        && m_pendingFontEdit->styleAction == styleAction)
+        return false;
+    const QPointer<PDFDocument> selectedDocument = m_document;
+    const quint64 selectedRevision = m_document->renderRevision();
+    const QString selectedPath = m_document->renderFilePath();
+    const int selectedPage = m_selectedCandidate.page;
+    const QString selectedId = m_selectedCandidate.objectId;
+    const Tool selectedTool = m_tool;
+    const auto selectedDraftRevision = m_pageDraftRevisions.value(selectedPage);
+    const quint64 expectedGeneration = m_textEditPreparationGeneration + (m_pendingFontEdit ? 1 : 0);
+    cancelTextEditPreparation();
+    // Closing the previous prompt can synchronously change the active session.
+    if (m_textEditPreparationGeneration != expectedGeneration || m_pendingFontEdit
+        || m_pendingFontSave || m_saving || m_textEditActive || !m_hasSelection
+        || !m_document || m_document != selectedDocument || !m_document->isLoaded()
+        || m_document->renderRevision() != selectedRevision
+        || m_document->renderFilePath() != selectedPath
+        || m_selectedCandidate.page != selectedPage || m_selectedCandidate.objectId != selectedId
+        || m_tool != selectedTool || m_pageDraftRevisions.value(selectedPage) != selectedDraftRevision)
+        return false;
+
+    const Draft draft = selectedDraftForDisplay();
+    // Bound both the scan and the number of network attempts, independently
+    // from PDF source grouping limits and malformed span ranges.
+    constexpr qsizetype maximumTextLength = 32768;
+    constexpr qsizetype maximumFaces = 64;
+    if (draft.text.size() > maximumTextLength || draft.characterSpans.size() > maximumTextLength) {
+        //% "This text contains too many font runs to prepare for editing."
+        emit statusMessage(qtTrId("TextEditFontPreparationTooLarge"));
+        return false;
+    }
+    QVector<TextEditFontRequirement> displayRuns;
+    QHash<QString, qsizetype> displayIndices;
+    const auto addRun = [&](const CharacterFormat &format, const QString &text) {
+        const QString key = editFontKey(format.fontFamily, format.fontBold, format.fontItalic);
+        auto found = displayIndices.constFind(key);
+        if (found == displayIndices.cend()) {
+            if (displayRuns.size() >= maximumFaces)
+                return false;
+            const qsizetype index = displayRuns.size();
+            displayRuns.append({format.fontFamily, text, format.fontBold, format.fontItalic});
+            displayIndices.insert(key, index);
+        } else {
+            displayRuns[*found].text += text;
+        }
+        return true;
+    };
+    const CharacterFormat base = primaryCharacterFormat(draft);
+    qsizetype position = 0;
+    bool valid = true;
+    for (const CharacterSpan &span : draft.characterSpans) {
+        if (span.start < position || span.length < 0 || span.start > draft.text.size()
+            || span.length > draft.text.size() - span.start) {
+            valid = false;
+            break;
+        }
+        if (span.start > position)
+            valid = addRun(base, draft.text.mid(position, span.start - position));
+        if (valid && span.length > 0)
+            valid = addRun(span.format, draft.text.mid(span.start, span.length));
+        if (!valid)
+            break;
+        position = span.start + span.length;
+    }
+    if (valid && (position < draft.text.size() || draft.text.isEmpty()))
+        valid = addRun(base, draft.text.mid(position));
+    if (valid && (styleAction == QLatin1String("bold") || styleAction == QLatin1String("italic"))) {
+        CharacterFormat typing = characterFormatAtPosition(draft, draft.text.size(), true);
+        if (styleAction == QLatin1String("bold"))
+            typing.fontBold = !typing.fontBold;
+        else
+            typing.fontItalic = !typing.fontItalic;
+        valid = addRun(typing, {});
+    }
+    if (!valid) {
+        //% "This text contains too many font runs to prepare for editing."
+        emit statusMessage(qtTrId("TextEditFontPreparationTooLarge"));
+        return false;
+    }
+
+    auto pending = std::make_unique<PendingFontEdit>();
+    QHash<QString, qsizetype> semanticIndices;
+    for (const auto &run : std::as_const(displayRuns)) {
+        if (sourceFaceSupportsEdit(run.family, run.bold, run.italic, run.text))
+            continue;
+        const QString family = PDFFontAliases::semanticFamily(run.family).trimmed();
+        const QString key = editFontKey(family, run.bold, run.italic);
+        const auto found = semanticIndices.constFind(key);
+        if (found == semanticIndices.cend()) {
+            semanticIndices.insert(key, pending->requirements.size());
+            pending->requirements.append({family, run.text, run.bold, run.italic});
+        } else {
+            pending->requirements[*found].text += run.text;
+        }
+    }
+    for (const auto &required : std::as_const(pending->requirements)) {
+        if (!ApplicationFonts::fontFaceSupportsText(required.family, required.bold,
+                                                    required.italic, required.text)
+            && !pending->missingFamilies.contains(required.family, Qt::CaseInsensitive))
+            pending->missingFamilies.append(required.family);
+    }
+    if (pending->missingFamilies.isEmpty())
+        return true;
+    pending->document = m_document;
+    pending->revision = m_document->renderRevision();
+    pending->sourceFilePath = m_document->renderFilePath();
+    pending->page = m_selectedCandidate.page;
+    pending->objectId = m_selectedCandidate.objectId;
+    pending->tool = m_tool;
+    pending->draftRevision = m_pageDraftRevisions.value(pending->page);
+    pending->styleAction = styleAction;
+    m_pendingFontEdit = std::move(pending);
+    const quint64 generation = ++m_textEditPreparationGeneration;
+    emit fontDownloadStateChanged();
+    if (generation == m_textEditPreparationGeneration && textEditPreparationIsCurrent())
+        emit fontDownloadRequested();
+    return false;
+}
+
+bool PDFEditController::textEditPreparationIsCurrent() const
+{
+    return m_pendingFontEdit && m_document && m_document == m_pendingFontEdit->document
+        && m_document->renderRevision() == m_pendingFontEdit->revision
+        && m_document->renderFilePath() == m_pendingFontEdit->sourceFilePath
+        && m_hasSelection && m_selectedCandidate.editable && !m_textEditActive && !m_saving
+        && m_selectedCandidate.page == m_pendingFontEdit->page
+        && m_selectedCandidate.objectId == m_pendingFontEdit->objectId
+        && m_tool == m_pendingFontEdit->tool
+        && m_pageDraftRevisions.value(m_pendingFontEdit->page) == m_pendingFontEdit->draftRevision;
+}
+
+void PDFEditController::cancelTextEditPreparation()
+{
+    if (!m_pendingFontEdit)
+        return;
+    ++m_textEditPreparationGeneration;
+    if (m_fontDownloadService) {
+        disconnect(m_fontDownloadService, nullptr, this, nullptr);
+        m_fontDownloadService->cancel();
+        m_fontDownloadService->deleteLater();
+        m_fontDownloadService = nullptr;
+    }
+    m_pendingFontEdit.reset();
+    m_downloadingFont = false;
+    emit fontDownloadStateChanged();
+}
+
+void PDFEditController::continueTextEditPreparation()
+{
+    if (!textEditPreparationIsCurrent()) {
+        cancelTextEditPreparation();
+        return;
+    }
+    if (!m_pendingFontEdit->accepted)
+        return;
+    // Recheck every exact face and its complete run after each installation.
+    // A provider can offer only some styles, or a cached face can lack a glyph.
+    const TextEditFontRequirement *next = nullptr;
+    QStringList missing;
+    for (const auto &required : std::as_const(m_pendingFontEdit->requirements)) {
+        if (ApplicationFonts::fontFaceSupportsText(required.family, required.bold,
+                                                   required.italic, required.text))
+            continue;
+        if (!next)
+            next = &required;
+        if (!missing.contains(required.family, Qt::CaseInsensitive))
+            missing.append(required.family);
+    }
+    m_pendingFontEdit->missingFamilies = missing;
+    if (!next) {
+        const auto pending = std::move(m_pendingFontEdit);
+        m_downloadingFont = false;
+        const quint64 generation = ++m_textEditPreparationGeneration;
+        const auto stillCurrent = [&]() {
+            return generation == m_textEditPreparationGeneration && !m_pendingFontEdit
+                && !m_pendingFontSave && !m_saving && !m_textEditActive && m_hasSelection
+                && m_document && m_document == pending->document
+                && m_document->renderRevision() == pending->revision
+                && m_document->renderFilePath() == pending->sourceFilePath
+                && m_selectedCandidate.page == pending->page
+                && m_selectedCandidate.objectId == pending->objectId && m_tool == pending->tool
+                && m_pageDraftRevisions.value(pending->page) == pending->draftRevision;
+        };
+        emit fontDownloadStateChanged();
+        if (!stillCurrent())
+            return;
+        emit textFormatStateChanged();
+        if (stillCurrent())
+            emit textEditPreparationReady(pending->page, pending->objectId, pending->styleAction);
+        return;
+    }
+    const QString key = editFontKey(next->family, next->bold, next->italic);
+    if (m_pendingFontEdit->attemptedFaces.contains(key)) {
+        //% "The downloaded font does not contain every face and character required by this text."
+        finishTextEditFontDownload(false, qtTrId("TextEditDownloadedFontIncomplete"));
+        return;
+    }
+    m_pendingFontEdit->attemptedFaces.insert(key);
+    uint requiredCharacter = 0;
+    const auto cached = ApplicationFonts::downloadedFontFace(next->family, next->bold, next->italic);
+    const QRawFont raw(cached.data, 16, QFont::PreferNoHinting);
+    for (char32_t character : next->text.normalized(QString::NormalizationForm_C).toUcs4()) {
+        if (!QChar::isSpace(character) && (!raw.isValid() || !raw.supportsCharacter(character))) {
+            requiredCharacter = character;
+            break;
+        }
+    }
+    const TextEditFontRequirement nextFace = *next;
+    const quint64 generation = m_textEditPreparationGeneration;
+    m_downloadingFont = true;
+    emit fontDownloadStateChanged();
+    if (generation != m_textEditPreparationGeneration || !textEditPreparationIsCurrent())
+        return;
+    m_fontDownloadService = new FontDownloadService(this);
+    connect(m_fontDownloadService, &FontDownloadService::finished,
+            this, &PDFEditController::finishTextEditFontDownload);
+    m_fontDownloadService->start(nextFace.family, nextFace.bold, nextFace.italic, requiredCharacter);
+}
+
+void PDFEditController::finishTextEditFontDownload(bool succeeded, const QString &error)
+{
+    if (!m_pendingFontEdit)
+        return;
+    if (!textEditPreparationIsCurrent()) {
+        cancelTextEditPreparation();
+        return;
+    }
+    if (m_fontDownloadService) {
+        disconnect(m_fontDownloadService, nullptr, this, nullptr);
+        m_fontDownloadService->deleteLater();
+        m_fontDownloadService = nullptr;
+    }
+    if (!succeeded) {
+        cancelTextEditPreparation();
+        //% "The font could not be downloaded: %1. Text editing has not started."
+        emit statusMessage(qtTrId("FontDownloadEditFailed").arg(error));
+        return;
+    }
+    continueTextEditPreparation();
 }
 
 void PDFEditController::clearFontRecovery()
 {
+    cancelTextEditPreparation();
     if (m_fontDownloadService) {
         disconnect(m_fontDownloadService, nullptr, this, nullptr);
         m_fontDownloadService->cancel();
@@ -510,6 +804,10 @@ void PDFEditController::clearFontRecovery()
 
 void PDFEditController::cancelFontDownload()
 {
+    if (m_pendingFontEdit) {
+        cancelTextEditPreparation();
+        return;
+    }
     if (!m_pendingFontSave)
         return;
     clearFontRecovery();
@@ -522,6 +820,17 @@ void PDFEditController::cancelFontDownload()
 
 void PDFEditController::respondToFontDownload(bool accepted)
 {
+    if (m_pendingFontEdit) {
+        if (m_downloadingFont)
+            return;
+        if (!accepted) {
+            cancelTextEditPreparation();
+            return;
+        }
+        m_pendingFontEdit->accepted = true;
+        continueTextEditPreparation();
+        return;
+    }
     if (!m_pendingFontSave || m_downloadingFont)
         return;
     if (!accepted) {

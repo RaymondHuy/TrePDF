@@ -1146,10 +1146,14 @@ QString displayFamilyForStyle(const QString &family, bool bold, bool italic,
     if (family.isEmpty())
         return family;
     const QString semanticFamily = PDFFontAliases::semanticFamily(family);
-    if (semanticFamily == family)
-        return family;
     registerBundledFonts();
     FontRegistry &registry = fontRegistry();
+    // A public family that was unavailable before a download may still have a
+    // cached Qt fallback. Use the installed face's immutable alias in that case.
+    // Keep public-family selection unchanged when no downloaded face exists.
+    const bool publicFamily = semanticFamily == family;
+    if (publicFamily && !findDownloadedFont(registry, family, bold, italic))
+        return family;
     const QVector<uint> characters = visibleCodePoints(text);
     const auto matchesDisplayFace = [&](const QString &displayFamily) {
         QFont font(displayFamily);
@@ -1171,7 +1175,10 @@ QString displayFamilyForStyle(const QString &family, bool bold, bool italic,
             && std::all_of(characters.cbegin(), characters.cend(),
                 [&raw](uint character) { return raw.supportsCharacter(character); });
     };
-    if (matchesDisplayFace(family))
+    // Genuine source subsets retain their outlines and calibrated advances.
+    // Substitute aliases must yield to an exact local face after installation.
+    if (!publicFamily && !PDFFontAliases::sourceFingerprint(family).isEmpty()
+        && matchesDisplayFace(family))
         return family;
 
     // Match Save's local resolution order. Coverage/probe caches avoid

@@ -102,7 +102,7 @@ Rectangle {
             : viewCurrentPage + 1 < document.pageCount
 
     signal openRequested()
-    signal beginSelectedEditingRequested()
+    signal beginSelectedEditingRequested(string styleAction)
     signal deleteCommentRequested(int page, string objectId)
     signal navigationSettled(int generation)
     signal currentPageChangeRequested(int page)
@@ -439,10 +439,14 @@ Rectangle {
     }
 
     function beginSelectedEditing() {
+        return beginSelectedEditingWithStyle("")
+    }
+
+    function beginSelectedEditingWithStyle(styleAction) {
         if (editController.selectedPage < 0)
             return false
 
-        beginSelectedEditingRequested()
+        beginSelectedEditingRequested(String(styleAction || ""))
         return editController.textEditActive
     }
 
@@ -702,9 +706,9 @@ Rectangle {
             Connections {
                 target: root
 
-                function onBeginSelectedEditingRequested() {
+                function onBeginSelectedEditingRequested(styleAction) {
                     if (!layoutDelegate.pooled)
-                        layoutDelegate.beginSelectedEditing()
+                        layoutDelegate.beginSelectedEditingWithStyle(styleAction)
                 }
             }
         }

@@ -456,6 +456,7 @@ void PDFDocumentSession::rotateView(int quarterTurns)
 
 void PDFDocumentSession::prepareForDeactivation()
 {
+    m_editController->cancelTextEditPreparation();
     m_editController->finishSelectedFrameResize();
     m_editController->finishSelectedTextEdit();
     m_formDesignerController->clearTextFieldFocus();

@@ -29,10 +29,59 @@ Mỗi provider phải phân biệt `NotFound` với dữ liệu `Invalid` và ch
 Luồng Aptos có sẵn vẫn dùng package chính thức của Microsoft; nó độc lập
 với catalogue Google Fonts/CTAN và không mở rộng việc tìm kiếm nguồn tải.
 
+## Kiểm tra font trước khi chỉnh sửa
+
+Khi người dùng mở editor cho một đoạn text, `requestSelectedTextEdit()` kiểm
+tra mọi character span của đoạn, gồm family, kiểu đậm/nghiêng và các ký tự
+hiện có. Các yêu cầu trùng family/style được gộp lại. Font nhúng nguồn chỉ
+được xem là có sẵn khi đúng face và đọc được các ký tự của run; tên font
+hoặc một font thay thế đang hiển thị được không đủ để vượt qua kiểm tra.
+Font hệ thống, font đã tải và font bundled được kiểm tra theo đúng face.
+
+Nếu còn thiếu font, editor chưa mở và popup liệt kê các family cần tải.
+Chỉ sau khi người dùng đồng ý, ứng dụng mới tải tuần tự qua
+`FontDownloadService`, dùng chung kho font và các kiểm tra của luồng Save.
+Một lượt tải family lấy các kiểu thường, đậm, nghiêng và đậm nghiêng mà
+provider cung cấp. Sau đó ứng dụng kiểm lại tất cả face/ký tự cần cho đoạn;
+chỉ khi đủ mới tiếp tục mở editor. Bấm đậm/nghiêng/gạch chân để bắt đầu edit
+cũng đi qua bước này và giữ thao tác định dạng cho caret cuối đoạn.
+
+Yêu cầu chờ gắn với document, revision và đoạn đang chọn. Hủy, đổi đoạn,
+đổi công cụ/tab, đóng tài liệu, thay đổi lịch sử hoặc bắt đầu Save hủy việc
+mở editor đang chờ. Lỗi tải giữ nguyên nội dung và bản nháp; tải font không
+tạo thao tác undo hoặc tự lưu PDF. Font đã được cài thành công vẫn có trong
+kho riêng. Luồng khôi phục font lúc Save tiếp tục xử lý ký tự hoặc kiểu chữ
+mới được thêm sau bước kiểm tra ban đầu.
+
 ## Cache và xác thực
 
-Cache nằm tại `QStandardPaths::AppLocalDataLocation/fonts`; tên file là
-SHA-256 của bytes font với đuôi `.ttf` hoặc `.otf` tương ứng. Ứng dụng đọc lại
+`ApplicationFonts::downloadedFontDirectory()` lấy thư mục từ
+`QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)` rồi
+thêm `fonts`. Với organization `TreOffice` và application `TrePDF` được đặt
+trong `src/main.cpp`, đường dẫn mặc định theo từng hệ điều hành là:
+
+| Hệ điều hành | Thư mục font tải về |
+| --- | --- |
+| macOS | `~/Library/Application Support/TreOffice/TrePDF/fonts/` |
+| Windows | `%LOCALAPPDATA%\TreOffice\TrePDF\fonts\` |
+| Linux | `~/.local/share/TreOffice/TrePDF/fonts/` |
+
+`~` là thư mục người dùng; `%LOCALAPPDATA%` thường là
+`C:\Users\<user>\AppData\Local`. Trên Linux, nếu `XDG_DATA_HOME` là đường dẫn
+tuyệt đối, thư mục sẽ là `$XDG_DATA_HOME/TreOffice/TrePDF/fonts/`; nếu biến
+rỗng hoặc là đường dẫn tương đối thì dùng mặc định trong bảng.
+
+Đường dẫn thực tế luôn do [QStandardPaths](https://doc.qt.io/qt-6/qstandardpaths.html)
+trả về, có thể khác khi chạy trong sandbox hoặc chế độ kiểm thử; không hard-code
+các đường dẫn trên trong ứng dụng. Nếu không xác định, tạo hoặc ghi được thư mục,
+cài font báo lỗi, không chuyển sang thư mục khác.
+
+Google Fonts, CTAN và Aptos dùng chung kho font riêng này cho từng người dùng.
+Font được giữ trên đĩa qua các lần mở ứng dụng và chỉ đăng ký cho TrePDF,
+không cài vào kho font hệ điều hành. ZIP Aptos chỉ là file tải tạm; các face
+đã xác thực được lưu vào cùng kho này.
+
+Tên file là SHA-256 của bytes font với đuôi `.ttf` hoặc `.otf` tương ứng. Ứng dụng đọc lại
 cache khi khởi tạo registry, kiểm tra digest và cấu trúc trước khi đăng ký
 bằng `QFontDatabase::addApplicationFont()` trên GUI thread. Mỗi face còn có tên
 Qt riêng theo digest để worker Save tính layout. Qt có thể giữ font dự phòng

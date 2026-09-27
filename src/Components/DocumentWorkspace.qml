@@ -449,9 +449,17 @@ Item {
         })
     }
 
-    function prepareInlineStyleChange() {
-        return session.editController.textEditActive
-            || documentView.beginSelectedEditing()
+    function applyInlineStyleChange(styleAction, enabled) {
+        if (!session.editController.textEditActive) {
+            documentView.beginSelectedEditingWithStyle(styleAction)
+            return
+        }
+        if (styleAction === "bold")
+            session.editController.setSelectedFontBold(enabled)
+        else if (styleAction === "italic")
+            session.editController.setSelectedFontItalic(enabled)
+        else if (styleAction === "underline")
+            session.editController.setSelectedFontUnderline(enabled)
     }
 
     function initializeView() {
@@ -553,6 +561,11 @@ Item {
     onViewTabActiveChanged: {
         if (!viewTabActive)
             clearPendingSearchNavigation()
+    }
+
+    onEditTabActiveChanged: {
+        if (!editTabActive)
+            session.editController.cancelTextEditPreparation()
     }
 
     Timer {
@@ -868,31 +881,13 @@ Item {
                         root.session.editController.setSelectedParagraphSpaceAfter(points)
                     }
                     onFontBoldChangeRequested: enabled => {
-                        const editWasActive = root.session.editController.textEditActive
-                        if (root.prepareInlineStyleChange()) {
-                            root.session.editController.setSelectedFontBold(
-                                editWasActive
-                                    ? enabled
-                                    : !root.session.editController.selectedFontBold)
-                        }
+                        root.applyInlineStyleChange("bold", enabled)
                     }
                     onFontItalicChangeRequested: enabled => {
-                        const editWasActive = root.session.editController.textEditActive
-                        if (root.prepareInlineStyleChange()) {
-                            root.session.editController.setSelectedFontItalic(
-                                editWasActive
-                                    ? enabled
-                                    : !root.session.editController.selectedFontItalic)
-                        }
+                        root.applyInlineStyleChange("italic", enabled)
                     }
                     onFontUnderlineChangeRequested: enabled => {
-                        const editWasActive = root.session.editController.textEditActive
-                        if (root.prepareInlineStyleChange()) {
-                            root.session.editController.setSelectedFontUnderline(
-                                editWasActive
-                                    ? enabled
-                                    : !root.session.editController.selectedFontUnderline)
-                        }
+                        root.applyInlineStyleChange("underline", enabled)
                     }
                     onFontColorChangeRequested: color => {
                         root.session.editController.setSelectedColor(color)

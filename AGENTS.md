@@ -370,7 +370,13 @@ Current features:
   not a general PDF glyph-positioning engine. See `docs/text-editing-pipeline.md`.
 - Draft fonts resolve through embedded PDF faces, system fonts, the private app
   cache, Google Fonts, then the reviewed CTAN TeX Gyre catalogue. Fonts under
-  `src/assets/fonts` remain available as local fallback. See `docs/font-providers.md`.
+  `src/assets/fonts` remain available as local fallback. Opening the inline
+  editor first checks every selected text span's family/style/glyph coverage.
+  Missing faces use a single consent popup and sequential downloads before
+  resuming the same selection; cancellation or session changes abandon the
+  pending editor without creating drafts. Usable source faces remain preferred,
+  while substitute previews require an exact local face. Save retains its font
+  recovery for newly entered glyphs/styles. See `docs/font-providers.md`.
 - Contextual Edit/Delete actions when selecting editable text; deletion remains
   an undoable draft until Save writes it into the PDF.
 - Transactional PDF persistence through a separate PDFium document handle.

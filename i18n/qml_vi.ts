@@ -18,12 +18,12 @@
         <location filename="../src/Main.qml" line="623"/>
         <location filename="../src/Main.qml" line="678"/>
         <location filename="../src/Main.qml" line="728"/>
-        <location filename="../src/PDFTabModel.cpp" line="548"/>
+        <location filename="../src/PDFTabModel.cpp" line="549"/>
         <source>Please wait for the PDF to finish saving.</source>
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
     <message id="OpenPdf">
-        <location filename="../src/Components/DocumentView.qml" line="738"/>
+        <location filename="../src/Components/DocumentView.qml" line="742"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="58"/>
@@ -32,12 +32,12 @@
     </message>
     <message id="PdfFileFilter">
         <location filename="../src/Main.qml" line="993"/>
-        <location filename="../src/Main.qml" line="1222"/>
+        <location filename="../src/Main.qml" line="1256"/>
         <source>PDF files (*.pdf)</source>
         <translation>Tệp PDF (*.pdf)</translation>
     </message>
     <message id="SavePdfAs">
-        <location filename="../src/Main.qml" line="1219"/>
+        <location filename="../src/Main.qml" line="1253"/>
         <location filename="../src/Components/ViewRibbon.qml" line="86"/>
         <source>Save PDF As</source>
         <translation>Lưu PDF thành</translation>
@@ -64,31 +64,31 @@
         <translation type="vanished">Một số tính năng biểu mẫu tự động không khả dụng cho tệp PDF này.</translation>
     </message>
     <message id="SelectImage">
-        <location filename="../src/Main.qml" line="1207"/>
+        <location filename="../src/Main.qml" line="1241"/>
         <source>Select Image</source>
         <translation>Chọn hình ảnh</translation>
     </message>
     <message id="ImageFileFilter">
-        <location filename="../src/Main.qml" line="1210"/>
+        <location filename="../src/Main.qml" line="1244"/>
         <source>Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</source>
         <translation>Tệp hình ảnh (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</translation>
     </message>
     <message id="SaveChangesToDocumentQuestion">
-        <location filename="../src/Main.qml" line="1389"/>
+        <location filename="../src/Main.qml" line="1423"/>
         <source>Save changes to “%1”?</source>
         <translation>Lưu các thay đổi vào “%1”?</translation>
     </message>
     <message id="UnsavedEditsDescription">
-        <location filename="../src/Main.qml" line="1400"/>
+        <location filename="../src/Main.qml" line="1434"/>
         <source>Your edits exist only in this session and have not been saved to the PDF.</source>
         <translation>Các chỉnh sửa của bạn chỉ tồn tại trong phiên này và chưa được lưu vào tệp PDF.</translation>
     </message>
     <message id="Cancel">
         <location filename="../src/Main.qml" line="1096"/>
-        <location filename="../src/Main.qml" line="1181"/>
-        <location filename="../src/Main.qml" line="1348"/>
-        <location filename="../src/Main.qml" line="1415"/>
-        <location filename="../src/Main.qml" line="1490"/>
+        <location filename="../src/Main.qml" line="1215"/>
+        <location filename="../src/Main.qml" line="1382"/>
+        <location filename="../src/Main.qml" line="1449"/>
+        <location filename="../src/Main.qml" line="1524"/>
         <location filename="../src/Components/ExportRibbon.qml" line="59"/>
         <location filename="../src/Components/LinkPropertiesDialog.qml" line="326"/>
         <location filename="../src/Components/SetPasswordDialog.qml" line="150"/>
@@ -138,72 +138,86 @@
         <source>Open</source>
         <translation>Mở</translation>
     </message>
+    <message id="DownloadEditFontsTitle">
+        <location filename="../src/Main.qml" line="1163"/>
+        <source>Prepare fonts for editing</source>
+        <translation>Chuẩn bị phông chữ để chỉnh sửa</translation>
+    </message>
     <message id="DownloadMissingFontTitle">
-        <location filename="../src/Main.qml" line="1150"/>
+        <location filename="../src/Main.qml" line="1165"/>
         <source>Download font family</source>
         <translation>Tải bộ font</translation>
     </message>
+    <message id="EditFontDownloadInProgress">
+        <location filename="../src/Main.qml" line="1187"/>
+        <source>Downloading fonts. Text editing will open automatically when the downloads finish.</source>
+        <translation>Đang tải phông chữ. Trình chỉnh sửa sẽ tự mở khi tải xong.</translation>
+    </message>
+    <message id="EditFontDownloadConfirmation">
+        <location filename="../src/Main.qml" line="1189"/>
+        <source>Download the following font families before editing this text?</source>
+        <translation>Tải các phông chữ sau trước khi chỉnh sửa đoạn văn bản này?</translation>
+    </message>
     <message id="FontDownloadInProgress">
-        <location filename="../src/Main.qml" line="1160"/>
+        <location filename="../src/Main.qml" line="1193"/>
         <source>Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish.</source>
         <translation>Đang tải các kiểu thường, đậm, nghiêng và đậm nghiêng hiện có của font %1. Ứng dụng sẽ tự động tiếp tục lưu khi tải xong.</translation>
     </message>
     <message id="FontDownloadConfirmation">
-        <location filename="../src/Main.qml" line="1163"/>
+        <location filename="../src/Main.qml" line="1196"/>
         <source>The application does not have the complete %1 font. Would you like it to download all available regular, bold, italic and bold italic styles of this family and continue saving?</source>
         <translation>Ứng dụng chưa có font %1 đầy đủ. Bạn có muốn ứng dụng tải tất cả kiểu thường, đậm, nghiêng và đậm nghiêng hiện có của bộ font này rồi tiếp tục lưu?</translation>
     </message>
     <message id="ConfirmFontDownload">
-        <location filename="../src/Main.qml" line="1191"/>
+        <location filename="../src/Main.qml" line="1225"/>
         <source>OK</source>
         <translation>OK</translation>
     </message>
     <message id="ExportExcel">
-        <location filename="../src/Main.qml" line="1232"/>
+        <location filename="../src/Main.qml" line="1266"/>
         <location filename="../src/Components/ExportRibbon.qml" line="47"/>
         <source>Export to Excel</source>
         <translation>Xuất Excel</translation>
     </message>
     <message id="ExcelFileFilter">
-        <location filename="../src/Main.qml" line="1235"/>
+        <location filename="../src/Main.qml" line="1269"/>
         <source>Excel workbooks (*.xlsx)</source>
         <translation>Sổ làm việc Excel (*.xlsx)</translation>
     </message>
     <message id="OpenExternalLinkQuestion">
-        <location filename="../src/Main.qml" line="1272"/>
+        <location filename="../src/Main.qml" line="1306"/>
         <source>Open link to %1?</source>
         <translation>Mở liên kết đến %1?</translation>
     </message>
     <message id="ExternalLinkDocumentWantsToOpen">
-        <location filename="../src/Main.qml" line="1286"/>
+        <location filename="../src/Main.qml" line="1320"/>
         <source>“%1” wants to open this address in your default browser.</source>
         <translation>“%1” muốn mở địa chỉ này bằng trình duyệt mặc định.</translation>
     </message>
     <message id="InsecureHttpLinkWarning">
-        <location filename="../src/Main.qml" line="1329"/>
+        <location filename="../src/Main.qml" line="1363"/>
         <source>This link uses HTTP, so the connection may not be secure.</source>
         <translation>Liên kết này dùng HTTP nên kết nối có thể không an toàn.</translation>
     </message>
     <message id="OpenInBrowser">
-        <location filename="../src/Main.qml" line="1356"/>
+        <location filename="../src/Main.qml" line="1390"/>
         <source>Open in Browser</source>
         <translation>Mở trong trình duyệt</translation>
     </message>
     <message id="Save">
-        <location filename="../src/Main.qml" line="1423"/>
-        <location filename="../src/Components/SignRibbon.qml" line="151"/>
-        <location filename="../src/Components/ProtectRibbon.qml" line="135"/>
+        <location filename="../src/Main.qml" line="1457"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="157"/>
         <location filename="../src/Components/ViewRibbon.qml" line="69"/>
         <source>Save</source>
         <translation>Lưu</translation>
     </message>
     <message id="Discard">
-        <location filename="../src/Main.qml" line="1433"/>
+        <location filename="../src/Main.qml" line="1467"/>
         <source>Discard</source>
         <translation>Bỏ thay đổi</translation>
     </message>
     <message id="ConfirmDeletePageQuestion">
-        <location filename="../src/Main.qml" line="1472"/>
+        <location filename="../src/Main.qml" line="1506"/>
         <source>Do you want to delete page %1?</source>
         <translation>Bạn có muốn xóa trang %1 không?</translation>
     </message>
@@ -224,39 +238,39 @@
         <translation type="vanished">Bật</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="416"/>
+        <location filename="../src/Components/AppRibbon.qml" line="423"/>
         <source>View</source>
         <translation>Xem</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="422"/>
-        <location filename="../src/Components/EditOverlay.qml" line="3678"/>
+        <location filename="../src/Components/AppRibbon.qml" line="429"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3773"/>
         <source>Edit</source>
         <translation>Chỉnh sửa</translation>
     </message>
     <message id="Comment">
-        <location filename="../src/Components/AppRibbon.qml" line="428"/>
+        <location filename="../src/Components/AppRibbon.qml" line="435"/>
         <source>Comment</source>
         <translation>Bình luận</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="434"/>
+        <location filename="../src/Components/AppRibbon.qml" line="441"/>
         <source>Forms</source>
         <translation>Biểu mẫu</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="440"/>
+        <location filename="../src/Components/AppRibbon.qml" line="447"/>
         <source>E-Sign</source>
         <translation>Ký điện tử</translation>
     </message>
     <message id="ProtectTab">
-        <location filename="../src/Components/AppRibbon.qml" line="447"/>
+        <location filename="../src/Components/AppRibbon.qml" line="454"/>
         <location filename="../src/Components/ProtectRibbon.qml" line="38"/>
         <source>Protect</source>
         <translation>Bảo vệ</translation>
     </message>
     <message id="ConvertTab">
-        <location filename="../src/Components/AppRibbon.qml" line="453"/>
+        <location filename="../src/Components/AppRibbon.qml" line="460"/>
         <source>Convert</source>
         <translation>Chuyển đổi</translation>
     </message>
@@ -266,25 +280,25 @@
         <translation>Xuất</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="478"/>
+        <location filename="../src/Components/AppRibbon.qml" line="485"/>
         <source>Saving PDF…</source>
         <translation>Đang lưu PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="482"/>
+        <location filename="../src/Components/AppRibbon.qml" line="489"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="729"/>
+        <location filename="../src/Components/DocumentView.qml" line="733"/>
         <location filename="../src/PDFDocument.cpp" line="80"/>
         <location filename="../src/PDFDocument.cpp" line="244"/>
         <source>No document open</source>
         <translation>Chưa mở tài liệu</translation>
     </message>
     <message id="PdfEditSurface">
-        <location filename="../src/Components/EditOverlay.qml" line="3301"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3396"/>
         <source>PDF edit surface</source>
         <translation>Vùng chỉnh sửa PDF</translation>
     </message>
@@ -294,8 +308,8 @@
         <translation type="vanished">Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo văn bản, hình ảnh hoặc hình dạng đã chọn để di chuyển, vẽ bằng công cụ Hình dạng hoặc đánh dấu văn bản, kéo hoặc bấm bằng công cụ Văn bản tự do, hoặc bấm bằng công cụ Ghi chú để thêm bình luận</translation>
     </message>
     <message id="Delete">
-        <location filename="../src/Main.qml" line="1498"/>
-        <location filename="../src/Components/EditOverlay.qml" line="3709"/>
+        <location filename="../src/Main.qml" line="1532"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3804"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1062"/>
         <location filename="../src/Components/ManualLinkLayer.qml" line="533"/>
         <location filename="../src/Components/ManualLinkLayer.qml" line="579"/>
@@ -308,87 +322,87 @@
         <translation type="vanished">Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo văn bản, hình ảnh hoặc hình dạng đã chọn để di chuyển, vẽ bằng công cụ Hình dạng hoặc đánh dấu văn bản, kéo hoặc bấm bằng công cụ Văn bản tự do, hoặc bấm bằng công cụ Ghi chú để thêm bình luận</translation>
     </message>
     <message id="ResizeFromTopLeft">
-        <location filename="../src/Components/EditOverlay.qml" line="932"/>
+        <location filename="../src/Components/EditOverlay.qml" line="940"/>
         <source>%1 from top-left</source>
         <translation>%1 từ góc trên bên trái</translation>
     </message>
     <message id="ResizeFromTop">
-        <location filename="../src/Components/EditOverlay.qml" line="937"/>
+        <location filename="../src/Components/EditOverlay.qml" line="945"/>
         <source>%1 from top</source>
         <translation>%1 từ cạnh trên</translation>
     </message>
     <message id="ResizeFromTopRight">
-        <location filename="../src/Components/EditOverlay.qml" line="942"/>
+        <location filename="../src/Components/EditOverlay.qml" line="950"/>
         <source>%1 from top-right</source>
         <translation>%1 từ góc trên bên phải</translation>
     </message>
     <message id="ResizeFromRight">
-        <location filename="../src/Components/EditOverlay.qml" line="947"/>
+        <location filename="../src/Components/EditOverlay.qml" line="955"/>
         <source>%1 from right</source>
         <translation>%1 từ cạnh phải</translation>
     </message>
     <message id="ResizeFromBottomRight">
-        <location filename="../src/Components/EditOverlay.qml" line="952"/>
+        <location filename="../src/Components/EditOverlay.qml" line="960"/>
         <source>%1 from bottom-right</source>
         <translation>%1 từ góc dưới bên phải</translation>
     </message>
     <message id="ResizeFromBottom">
-        <location filename="../src/Components/EditOverlay.qml" line="957"/>
+        <location filename="../src/Components/EditOverlay.qml" line="965"/>
         <source>%1 from bottom</source>
         <translation>%1 từ cạnh dưới</translation>
     </message>
     <message id="ResizeFromBottomLeft">
-        <location filename="../src/Components/EditOverlay.qml" line="962"/>
+        <location filename="../src/Components/EditOverlay.qml" line="970"/>
         <source>%1 from bottom-left</source>
         <translation>%1 từ góc dưới bên trái</translation>
     </message>
     <message id="ResizeFromLeft">
-        <location filename="../src/Components/EditOverlay.qml" line="967"/>
+        <location filename="../src/Components/EditOverlay.qml" line="975"/>
         <source>%1 from left</source>
         <translation>%1 từ cạnh trái</translation>
     </message>
     <message id="PdfEditSurfaceDescriptionWithDrawingComments">
-        <location filename="../src/Components/EditOverlay.qml" line="3303"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3398"/>
         <source>Use Tab or arrow keys to select content, Enter to edit text, drag selected content to move it, draw with Shapes, markup, or drawing comment tools, and use Enter or double-click to finish polygon comments</source>
         <translation>Dùng Tab hoặc phím mũi tên để chọn nội dung, Enter để sửa văn bản, kéo nội dung đã chọn để di chuyển, vẽ bằng công cụ Hình dạng, đánh dấu hoặc nhận xét hình vẽ, và dùng Enter hoặc nhấp đúp để hoàn tất nhận xét đa giác</translation>
     </message>
     <message id="MoveImage">
-        <location filename="../src/Components/EditOverlay.qml" line="4145"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4241"/>
         <source>Move image</source>
         <translation>Di chuyển hình ảnh</translation>
     </message>
     <message id="MoveShape">
-        <location filename="../src/Components/EditOverlay.qml" line="4149"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4245"/>
         <source>Move shape</source>
         <translation>Di chuyển hình dạng</translation>
     </message>
     <message id="MoveDrawingComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4154"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4250"/>
         <source>Move drawing comment</source>
         <translation>Di chuyển chú thích hình vẽ</translation>
     </message>
     <message id="MoveInkComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4158"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4254"/>
         <source>Move ink comment</source>
         <translation>Di chuyển chú thích nét mực</translation>
     </message>
     <message id="MoveStampComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4162"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4258"/>
         <source>Move stamp comment</source>
         <translation>Di chuyển chú thích con dấu</translation>
     </message>
     <message id="MoveComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4167"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4263"/>
         <source>Move comment</source>
         <translation>Di chuyển chú thích</translation>
     </message>
     <message id="MoveText">
-        <location filename="../src/Components/EditOverlay.qml" line="4170"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4266"/>
         <source>Move text</source>
         <translation>Di chuyển văn bản</translation>
     </message>
     <message id="PdfImageResizeUnsupported">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2470"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2519"/>
         <source>Images with clipping, unsupported transforms or bounds outside the page cannot be resized.</source>
         <translation>Ảnh có vùng cắt, phép biến đổi không hỗ trợ hoặc vượt mép trang chưa thể đổi kích thước.</translation>
     </message>
@@ -423,42 +437,42 @@
         <translation>Giữ tỷ lệ ảnh</translation>
     </message>
     <message id="ResizeImage">
-        <location filename="../src/Components/EditOverlay.qml" line="4290"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4386"/>
         <source>Resize image</source>
         <translation>Đổi kích thước hình ảnh</translation>
     </message>
     <message id="ResizeShape">
-        <location filename="../src/Components/EditOverlay.qml" line="4294"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4390"/>
         <source>Resize shape</source>
         <translation>Đổi kích thước hình dạng</translation>
     </message>
     <message id="ResizeDrawingComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4299"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4395"/>
         <source>Resize drawing comment</source>
         <translation>Đổi kích thước chú thích hình vẽ</translation>
     </message>
     <message id="ResizeInkComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4303"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4399"/>
         <source>Resize ink comment</source>
         <translation>Đổi kích thước chú thích nét mực</translation>
     </message>
     <message id="ResizeStampComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4307"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4403"/>
         <source>Resize stamp comment</source>
         <translation>Đổi kích thước chú thích con dấu</translation>
     </message>
     <message id="ResizeComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4312"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4408"/>
         <source>Resize comment</source>
         <translation>Đổi kích thước chú thích</translation>
     </message>
     <message id="ResizeTextBox">
-        <location filename="../src/Components/EditOverlay.qml" line="4315"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4411"/>
         <source>Resize text box</source>
         <translation>Đổi kích thước hộp văn bản</translation>
     </message>
     <message id="ApplyOrCancelEditHint">
-        <location filename="../src/Components/EditOverlay.qml" line="4474"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4570"/>
         <source>Ctrl/Cmd+Enter to apply · Esc to cancel</source>
         <oldsource>Enter to apply · Esc to cancel</oldsource>
         <translation>Ctrl/Cmd+Enter để áp dụng · Esc để hủy</translation>
@@ -543,7 +557,8 @@
     <message id="Select">
         <location filename="../src/Components/CommentRibbon.qml" line="753"/>
         <location filename="../src/Components/EditRibbon.qml" line="158"/>
-        <location filename="../src/Components/SignRibbon.qml" line="46"/>
+        <location filename="../src/Components/FormRibbon.qml" line="49"/>
+        <location filename="../src/Components/SignRibbon.qml" line="45"/>
         <source>Select</source>
         <translation>Chọn</translation>
     </message>
@@ -567,7 +582,7 @@
         <location filename="../src/Components/EditRibbon.qml" line="194"/>
         <location filename="../src/Components/WatermarkDialog.qml" line="308"/>
         <location filename="../src/Components/WatermarkDialog.qml" line="335"/>
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2454"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2503"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="326"/>
         <source>Image</source>
         <translation>Hình ảnh</translation>
@@ -631,7 +646,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
     <message id="Shapes">
         <location filename="../src/Components/CommentRibbon.qml" line="1136"/>
         <location filename="../src/Components/EditRibbon.qml" line="354"/>
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2331"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2380"/>
         <source>Shapes</source>
         <translation>Hình dạng</translation>
     </message>
@@ -962,21 +977,21 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
     <message id="History">
         <location filename="../src/Components/CommentRibbon.qml" line="1212"/>
         <location filename="../src/Components/EditRibbon.qml" line="450"/>
-        <location filename="../src/Components/SignRibbon.qml" line="117"/>
+        <location filename="../src/Components/SignRibbon.qml" line="116"/>
         <source>History</source>
         <translation>Lịch sử</translation>
     </message>
     <message id="Undo">
         <location filename="../src/Components/CommentRibbon.qml" line="1218"/>
         <location filename="../src/Components/EditRibbon.qml" line="456"/>
-        <location filename="../src/Components/SignRibbon.qml" line="123"/>
+        <location filename="../src/Components/SignRibbon.qml" line="122"/>
         <source>Undo</source>
         <translation>Hoàn tác</translation>
     </message>
     <message id="Redo">
         <location filename="../src/Components/CommentRibbon.qml" line="1231"/>
         <location filename="../src/Components/EditRibbon.qml" line="469"/>
-        <location filename="../src/Components/SignRibbon.qml" line="133"/>
+        <location filename="../src/Components/SignRibbon.qml" line="132"/>
         <source>Redo</source>
         <translation>Làm lại</translation>
     </message>
@@ -1148,7 +1163,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
     </message>
     <message id="PageNumber">
         <location filename="../src/Components/CommentPanel.qml" line="1087"/>
-        <location filename="../src/Components/PdfPageDelegate.qml" line="215"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="219"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -1235,7 +1250,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Thử lại</translation>
     </message>
     <message id="Sign">
-        <location filename="../src/Components/SignRibbon.qml" line="39"/>
+        <location filename="../src/Components/SignRibbon.qml" line="38"/>
         <source>Sign</source>
         <translation>Ký</translation>
     </message>
@@ -1244,88 +1259,88 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation type="vanished">Điền &amp;&amp; Ký</translation>
     </message>
     <message id="Signature">
-        <location filename="../src/Components/SignRibbon.qml" line="58"/>
+        <location filename="../src/Components/SignRibbon.qml" line="57"/>
         <source>Signature</source>
         <translation>Chữ ký</translation>
     </message>
     <message id="AddSignature">
-        <location filename="../src/Components/SignRibbon.qml" line="60"/>
+        <location filename="../src/Components/SignRibbon.qml" line="59"/>
         <source>Add Signature</source>
         <translation>Thêm chữ ký</translation>
     </message>
     <message id="Initials">
-        <location filename="../src/Components/SignRibbon.qml" line="71"/>
+        <location filename="../src/Components/SignRibbon.qml" line="70"/>
         <source>Initials</source>
         <translation>Ký tắt</translation>
     </message>
     <message id="AddInitials">
-        <location filename="../src/Components/SignRibbon.qml" line="73"/>
+        <location filename="../src/Components/SignRibbon.qml" line="72"/>
         <source>Add Initials</source>
         <translation>Thêm ký tắt</translation>
     </message>
     <message id="Fields">
-        <location filename="../src/Components/FormRibbon.qml" line="41"/>
-        <location filename="../src/Components/SignRibbon.qml" line="84"/>
+        <location filename="../src/Components/FormRibbon.qml" line="42"/>
+        <location filename="../src/Components/SignRibbon.qml" line="83"/>
         <source>Fields</source>
         <translation>Trường</translation>
     </message>
     <message id="TextFieldTool">
-        <location filename="../src/Components/FormRibbon.qml" line="47"/>
+        <location filename="../src/Components/FormRibbon.qml" line="61"/>
         <source>Text Field</source>
         <translation>Ô văn bản</translation>
     </message>
     <message id="DragToAddTextField">
-        <location filename="../src/Components/FormRibbon.qml" line="49"/>
+        <location filename="../src/Components/FormRibbon.qml" line="63"/>
         <source>Drag on the page to add a text field</source>
         <translation>Kéo trên trang để thêm ô văn bản</translation>
     </message>
     <message id="CheckboxTool">
-        <location filename="../src/Components/FormRibbon.qml" line="62"/>
+        <location filename="../src/Components/FormRibbon.qml" line="76"/>
         <source>Check Box</source>
         <translation>Hộp kiểm</translation>
     </message>
     <message id="ClickOrDragToAddCheckbox">
-        <location filename="../src/Components/FormRibbon.qml" line="64"/>
+        <location filename="../src/Components/FormRibbon.qml" line="78"/>
         <source>Click or drag on the page to add a check box</source>
         <translation>Nhấp hoặc kéo trên trang để thêm hộp kiểm</translation>
     </message>
     <message id="RadioButtonTool">
-        <location filename="../src/Components/FormRibbon.qml" line="77"/>
+        <location filename="../src/Components/FormRibbon.qml" line="91"/>
         <source>Radio Button</source>
         <translation>Nút chọn</translation>
     </message>
     <message id="ClickOrDragToAddRadioButton">
-        <location filename="../src/Components/FormRibbon.qml" line="79"/>
+        <location filename="../src/Components/FormRibbon.qml" line="93"/>
         <source>Click or drag on the page to add a radio button</source>
         <translation>Nhấp hoặc kéo trên trang để thêm nút chọn</translation>
     </message>
     <message id="DropdownTool">
-        <location filename="../src/Components/FormRibbon.qml" line="92"/>
+        <location filename="../src/Components/FormRibbon.qml" line="106"/>
         <source>Dropdown</source>
         <translation>Danh sách thả xuống</translation>
     </message>
     <message id="ClickOrDragToAddDropdown">
-        <location filename="../src/Components/FormRibbon.qml" line="94"/>
+        <location filename="../src/Components/FormRibbon.qml" line="108"/>
         <source>Click or drag on the page to add a dropdown</source>
         <translation>Nhấp hoặc kéo trên trang để thêm danh sách thả xuống</translation>
     </message>
     <message id="ListBoxTool">
-        <location filename="../src/Components/FormRibbon.qml" line="107"/>
+        <location filename="../src/Components/FormRibbon.qml" line="121"/>
         <source>List Box</source>
         <translation>Hộp danh sách</translation>
     </message>
     <message id="ClickOrDragToAddListBox">
-        <location filename="../src/Components/FormRibbon.qml" line="109"/>
+        <location filename="../src/Components/FormRibbon.qml" line="123"/>
         <source>Click or drag on the page to add a list box</source>
         <translation>Nhấp hoặc kéo trên trang để thêm hộp danh sách</translation>
     </message>
     <message id="CombFieldTool">
-        <location filename="../src/Components/FormRibbon.qml" line="122"/>
+        <location filename="../src/Components/FormRibbon.qml" line="136"/>
         <source>Comb Field</source>
         <translation>Trường chia ô</translation>
     </message>
     <message id="ClickOrDragToAddCombField">
-        <location filename="../src/Components/FormRibbon.qml" line="124"/>
+        <location filename="../src/Components/FormRibbon.qml" line="138"/>
         <source>Click or drag on the page to add a comb field</source>
         <translation>Nhấp hoặc kéo trên trang để thêm trường chia ô</translation>
     </message>
@@ -1346,22 +1361,22 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Nhập văn bản</translation>
     </message>
     <message id="Date">
-        <location filename="../src/Components/SignRibbon.qml" line="91"/>
+        <location filename="../src/Components/SignRibbon.qml" line="90"/>
         <source>Date</source>
         <translation>Ngày</translation>
     </message>
     <message id="AddDate">
-        <location filename="../src/Components/SignRibbon.qml" line="93"/>
+        <location filename="../src/Components/SignRibbon.qml" line="92"/>
         <source>Add Date</source>
         <translation>Thêm ngày</translation>
     </message>
     <message id="CheckMark">
-        <location filename="../src/Components/SignRibbon.qml" line="104"/>
+        <location filename="../src/Components/SignRibbon.qml" line="103"/>
         <source>Check</source>
         <translation>Dấu kiểm</translation>
     </message>
     <message id="AddCheckMark">
-        <location filename="../src/Components/SignRibbon.qml" line="106"/>
+        <location filename="../src/Components/SignRibbon.qml" line="105"/>
         <source>Add Check Mark</source>
         <translation>Thêm dấu kiểm</translation>
     </message>
@@ -1386,8 +1401,8 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation type="vanished">Xác thực chữ ký</translation>
     </message>
     <message id="File">
-        <location filename="../src/Components/SignRibbon.qml" line="145"/>
-        <location filename="../src/Components/ProtectRibbon.qml" line="128"/>
+        <location filename="../src/Components/SignRibbon.qml" line="144"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="150"/>
         <location filename="../src/Components/ViewRibbon.qml" line="50"/>
         <source>File</source>
         <translation>Tệp</translation>
@@ -1403,8 +1418,8 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Lưu PDF</translation>
     </message>
     <message id="SaveAs">
-        <location filename="../src/Components/SignRibbon.qml" line="161"/>
-        <location filename="../src/Components/ProtectRibbon.qml" line="146"/>
+        <location filename="../src/Components/SignRibbon.qml" line="150"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="168"/>
         <location filename="../src/Components/ViewRibbon.qml" line="84"/>
         <source>Save As</source>
         <translation>Lưu thành</translation>
@@ -1581,8 +1596,8 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
     </message>
     <message id="LocalPdfFilesOnly">
         <location filename="../src/PDFDocument.cpp" line="139"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="201"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="280"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="231"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="312"/>
         <source>Only local PDF files are supported</source>
         <translation>Chỉ hỗ trợ tệp PDF trên máy</translation>
     </message>
@@ -1603,14 +1618,14 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation type="vanished">Nội dung này là hình ảnh. Cần OCR để chỉnh sửa văn bản.</translation>
     </message>
     <message id="Text">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2497"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2546"/>
         <source>Text</source>
         <translation>Văn bản</translation>
     </message>
     <message id="PdfEditingNotPermitted">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2348"/>
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2464"/>
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2532"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2397"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2513"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2581"/>
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="1212"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="120"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="185"/>
@@ -1621,156 +1636,172 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Tệp PDF này không cho phép chỉnh sửa nội dung.</translation>
     </message>
     <message id="NoPdfOpenForSaving">
-        <location filename="../src/PDFEditControllerSave.cpp" line="61"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="172"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="191"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="250"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="270"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="89"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="201"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="221"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="281"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="302"/>
         <source>No PDF is open.</source>
         <translation>Chưa mở tệp PDF.</translation>
     </message>
     <message id="PdfSaveSourceOpenFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="64"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="92"/>
         <source>The source PDF could not be opened for saving.</source>
         <translation>Không thể mở tệp PDF nguồn để lưu.</translation>
     </message>
     <message id="PdfSavePageLoadFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="70"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="98"/>
         <source>Page %1 could not be loaded while saving.</source>
         <translation>Không thể tải trang %1 trong khi lưu.</translation>
     </message>
     <message id="PdfSaveUnsupportedSourceObject">
-        <location filename="../src/PDFEditControllerSave.cpp" line="73"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="101"/>
         <source>Page %1 contains edited text that cannot be saved safely yet.</source>
         <translation>Trang %1 chứa văn bản đã sửa chưa thể lưu an toàn.</translation>
     </message>
     <message id="PdfSaveSourceObjectMissing">
-        <location filename="../src/PDFEditControllerSave.cpp" line="76"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="104"/>
         <source>An edited object could not be found on page %1.</source>
         <translation>Không tìm thấy đối tượng đã chỉnh sửa trên trang %1.</translation>
     </message>
     <message id="PdfSaveObjectRemovalFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="79"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="107"/>
         <source>An original object could not be removed or replaced on page %1.</source>
         <translation>Không thể xóa hoặc thay thế đối tượng gốc trên trang %1.</translation>
     </message>
     <message id="PdfSaveFontMissingCharacter">
-        <location filename="../src/PDFEditControllerSave.cpp" line="93"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="121"/>
         <source>The font “%1” does not support the character “%2” (%3). Choose a different font.</source>
         <translation>Phông chữ “%1” không hỗ trợ ký tự “%2” (%3). Hãy chọn phông chữ khác.</translation>
     </message>
     <message id="PdfSaveFontUnavailable">
-        <location filename="../src/PDFEditControllerSave.cpp" line="97"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="125"/>
         <source>The font %1 cannot be embedded in the saved PDF.</source>
         <translation>Không thể nhúng phông chữ %1 vào tệp PDF đã lưu.</translation>
     </message>
     <message id="PdfSaveTextCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="101"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="129"/>
         <source>Saved text could not be created on page %1.</source>
         <translation>Không thể tạo văn bản đã lưu trên trang %1.</translation>
     </message>
     <message id="PdfSaveImageCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="104"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="132"/>
         <source>The image could not be created on page %1.</source>
         <translation>Không thể tạo hình ảnh trên trang %1.</translation>
     </message>
     <message id="PdfSaveShapeCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="107"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="135"/>
         <source>The shape could not be created on page %1.</source>
         <translation>Không thể tạo hình dạng trên trang %1.</translation>
     </message>
     <message id="PdfSaveCommentCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="113"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="141"/>
         <source>The comment could not be created on page %1.</source>
         <translation>Không thể tạo bình luận trên trang %1.</translation>
     </message>
     <message id="PdfSaveWebLinksFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="117"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="145"/>
         <source>Web links could not be saved.</source>
         <translation>Không thể lưu các liên kết web.</translation>
     </message>
     <message id="PdfSaveWebLinkCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="120"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="148"/>
         <source>Web links could not be created on page %1.</source>
         <translation>Không thể tạo liên kết web trên trang %1.</translation>
     </message>
     <message id="PdfSaveWebLinkRemovalFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="123"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="151"/>
         <source>Web links could not be removed safely. The PDF was not saved.</source>
         <translation>Không thể xóa liên kết web an toàn. Tệp PDF chưa được lưu.</translation>
     </message>
     <message id="PdfSaveManualLinkFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="126"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="154"/>
         <source>The links could not be saved. Check their destination pages and try again.</source>
         <translation>Không thể lưu liên kết. Hãy kiểm tra trang đích rồi thử lại.</translation>
     </message>
     <message id="PdfSaveWatermarkFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="129"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="157"/>
         <source>Watermarks could not be saved safely. The destination file was not changed.</source>
         <translation>Không thể lưu hình mờ an toàn. Tệp đích chưa bị thay đổi.</translation>
     </message>
     <message id="PdfSaveCommentUpdateFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="132"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="160"/>
         <source>The comment could not be updated on page %1.</source>
         <translation>Không thể cập nhật bình luận trên trang %1.</translation>
     </message>
     <message id="PdfSaveCommentRemovalFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="135"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="163"/>
         <source>The comment could not be deleted on page %1.</source>
         <translation>Không thể xóa bình luận trên trang %1.</translation>
     </message>
     <message id="PdfSavePageCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="138"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="166"/>
         <source>Blank page %1 could not be created while saving.</source>
         <translation>Không thể tạo trang trắng %1 khi lưu.</translation>
     </message>
     <message id="PdfSavePageDeletionFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="141"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="169"/>
         <source>Page %1 could not be deleted while saving.</source>
         <translation>Không thể xóa trang %1 khi lưu.</translation>
     </message>
     <message id="PdfSavePageGenerationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="144"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="172"/>
         <source>Page %1 could not be finalized for saving.</source>
         <translation>Không thể hoàn tất trang %1 để lưu.</translation>
     </message>
     <message id="PdfSaveAcroFormCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="147"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="175"/>
         <source>The AcroForm fields could not be created: %1</source>
         <translation>Không thể tạo các trường AcroForm: %1</translation>
     </message>
     <message id="PdfSavePasswordProtectionFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="150"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="178"/>
         <source>Password protection could not be applied. The PDF was not saved.</source>
         <translation>Không thể đặt mật khẩu. PDF chưa được lưu.</translation>
     </message>
     <message id="PdfSaveOutputOpenFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="153"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="181"/>
         <source>The destination file could not be opened: %1</source>
         <translation>Không thể mở tệp đích: %1</translation>
     </message>
     <message id="PdfSaveOutputWriteFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="156"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="184"/>
         <source>The PDF could not be written: %1</source>
         <translation>Không thể ghi tệp PDF: %1</translation>
     </message>
     <message id="PdfSaveOutputCommitFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="159"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="187"/>
         <source>The saved PDF could not replace the destination file: %1</source>
         <translation>Không thể thay thế tệp đích bằng tệp PDF đã lưu: %1</translation>
     </message>
+    <message id="TextEditFontPreparationTooLarge">
+        <location filename="../src/PDFEditControllerSave.cpp" line="557"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="597"/>
+        <source>This text contains too many font runs to prepare for editing.</source>
+        <translation>Đoạn văn bản có quá nhiều kiểu phông chữ để chuẩn bị chỉnh sửa.</translation>
+    </message>
+    <message id="TextEditDownloadedFontIncomplete">
+        <location filename="../src/PDFEditControllerSave.cpp" line="699"/>
+        <source>The downloaded font does not contain every face and character required by this text.</source>
+        <translation>Phông chữ đã tải chưa có đủ kiểu chữ và ký tự cần cho đoạn văn bản này.</translation>
+    </message>
+    <message id="FontDownloadEditFailed">
+        <location filename="../src/PDFEditControllerSave.cpp" line="736"/>
+        <source>The font could not be downloaded: %1. Text editing has not started.</source>
+        <translation>Không thể tải phông chữ: %1. Chưa bắt đầu chỉnh sửa văn bản.</translation>
+    </message>
     <message id="FontDownloadCancelled">
-        <location filename="../src/PDFEditControllerSave.cpp" line="519"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="772"/>
         <source>Font download cancelled. Your edits have been kept.</source>
         <translation>Đã hủy tải font. Các chỉnh sửa vẫn được giữ lại.</translation>
     </message>
     <message id="FontDownloadSaveFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="572"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="836"/>
         <source>The font could not be downloaded: %1. Your edits have been kept.</source>
         <translation>Không thể tải font: %1 Các chỉnh sửa vẫn được giữ lại.</translation>
     </message>
     <message id="FontDownloadContinuingSave">
-        <location filename="../src/PDFEditControllerSave.cpp" line="591"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="855"/>
         <source>Font downloaded. Continuing to save…</source>
         <translation>Đã tải font. Đang tiếp tục lưu…</translation>
     </message>
@@ -1782,14 +1813,14 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <location filename="../src/PDFEditControllerComments.cpp" line="2292"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="2366"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="2542"/>
-        <location filename="../src/PDFEditControllerDrafts.cpp" line="751"/>
+        <location filename="../src/PDFEditControllerDrafts.cpp" line="752"/>
         <source>This comment is read-only.</source>
         <translation>Bình luận này chỉ có thể đọc.</translation>
     </message>
     <message id="TextGeometryStillLoading">
         <location filename="../src/PDFEditControllerComments.cpp" line="1136"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="196"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="275"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="226"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="307"/>
         <source>Text information is still loading. Please try again.</source>
         <translation>Thông tin văn bản vẫn đang tải. Vui lòng thử lại.</translation>
     </message>
@@ -1873,13 +1904,13 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Sửa nội dung bình luận trong bảng Bình luận. Hiện chưa thể di chuyển hoặc thay đổi kích thước bình luận có sẵn.</translation>
     </message>
     <message id="PdfSaveFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="67"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="162"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="95"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="190"/>
         <source>The PDF could not be saved.</source>
         <translation>Không thể lưu tệp PDF.</translation>
     </message>
     <message id="PdfSaveTextMarkupCreationFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="110"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="138"/>
         <source>The text markup could not be created on page %1.</source>
         <translation>Không thể tạo đánh dấu văn bản trên trang %1.</translation>
     </message>
@@ -1903,19 +1934,19 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Hình ảnh đã chọn quá lớn. Hãy chọn ảnh tối đa 40 megapixel và 64 MiB.</translation>
     </message>
     <message id="SaveWatermarkBeforeEditing">
-        <location filename="../src/PDFEditController.cpp" line="486"/>
+        <location filename="../src/PDFEditController.cpp" line="503"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="634"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="714"/>
         <source>Save or discard watermark changes before editing page content.</source>
         <translation>Lưu hoặc hủy thay đổi hình mờ trước khi chỉnh sửa nội dung trang.</translation>
     </message>
     <message id="PdfOpenPasswordInvalid">
-        <location filename="../src/PDFEditController.cpp" line="576"/>
+        <location filename="../src/PDFEditController.cpp" line="593"/>
         <source>Enter a password containing 1 to 127 UTF-8 bytes and no null characters.</source>
         <translation>Mật khẩu phải dài từ 1 đến 127 byte UTF-8 và không chứa ký tự rỗng.</translation>
     </message>
     <message id="PdfAnnotationsNotPermitted">
-        <location filename="../src/PDFEditController.cpp" line="848"/>
+        <location filename="../src/PDFEditController.cpp" line="865"/>
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="1140"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="862"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="884"/>
@@ -1931,7 +1962,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <location filename="../src/PDFEditControllerComments.cpp" line="2289"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="2363"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="2547"/>
-        <location filename="../src/PDFEditControllerDrafts.cpp" line="747"/>
+        <location filename="../src/PDFEditControllerDrafts.cpp" line="748"/>
         <location filename="../src/PDFEditControllerWebLinks.cpp" line="96"/>
         <location filename="../src/PDFEditControllerWebLinks.cpp" line="226"/>
         <location filename="../src/PDFEditControllerManualLinks.cpp" line="48"/>
@@ -1958,39 +1989,39 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Bình luận và phản hồi chỉ được chứa tối đa %1 ký tự.</translation>
     </message>
     <message id="NoDraftChangesToSave">
-        <location filename="../src/PDFEditControllerSave.cpp" line="177"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="255"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="206"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="286"/>
         <source>There are no draft changes to save.</source>
         <translation>Không có thay đổi nháp nào để lưu.</translation>
     </message>
     <message id="PdfSavedButReopenFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="474"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="506"/>
         <source>The PDF was saved, but TrePDF could not reopen it.</source>
         <translation>Đã lưu tệp PDF nhưng TrePDF không thể mở lại tệp.</translation>
     </message>
     <message id="PdfSavedFile">
-        <location filename="../src/PDFEditControllerSave.cpp" line="457"/>
-        <location filename="../src/PDFEditControllerSave.cpp" line="484"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="489"/>
+        <location filename="../src/PDFEditControllerSave.cpp" line="516"/>
         <source>Saved %1</source>
         <translation>Đã lưu %1</translation>
     </message>
     <message id="PdfFormImageDeleteUnsupported">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2467"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2516"/>
         <source>Images inside a PDF form object cannot be deleted safely yet.</source>
         <translation>Chưa thể xóa an toàn hình ảnh nằm trong đối tượng biểu mẫu PDF.</translation>
     </message>
     <message id="PdfTextClippingEditUnsupported">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2535"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2584"/>
         <source>Text clipping render modes cannot be edited safely yet.</source>
         <translation>Chưa thể chỉnh sửa an toàn văn bản dùng chế độ cắt xén.</translation>
     </message>
     <message id="PdfFormTextSaveUnsupported">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2538"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2587"/>
         <source>Text inside a PDF form object cannot be saved safely yet.</source>
         <translation>Chưa thể lưu an toàn văn bản nằm trong đối tượng biểu mẫu PDF.</translation>
     </message>
     <message id="InlineEditorUnsupportedTextLayout">
-        <location filename="../src/PDFEditControllerCandidates.cpp" line="2541"/>
+        <location filename="../src/PDFEditControllerCandidates.cpp" line="2590"/>
         <source>Rotated, transformed, or multiline text is not supported by the inline draft editor yet.</source>
         <translation>Trình chỉnh sửa bản nháp tại chỗ chưa hỗ trợ văn bản xoay, biến đổi hoặc nhiều dòng.</translation>
     </message>
@@ -2139,12 +2170,12 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Một số tính năng biểu mẫu tự động không khả dụng trong “%1”.</translation>
     </message>
     <message id="CannotSaveOverOpenPdf">
-        <location filename="../src/PDFTabModel.cpp" line="654"/>
+        <location filename="../src/PDFTabModel.cpp" line="655"/>
         <source>Another open tab is already using that PDF file.</source>
         <translation>Một tab đang mở khác đã sử dụng tệp PDF đó.</translation>
     </message>
     <message id="ExcelExportDestinationInUse">
-        <location filename="../src/PDFTabModel.cpp" line="672"/>
+        <location filename="../src/PDFTabModel.cpp" line="673"/>
         <source>Choose a destination that is not used by an open PDF.</source>
         <translation>Chọn nơi lưu không trùng với PDF đang mở.</translation>
     </message>
@@ -3309,45 +3340,45 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Hình nền mờ</translation>
     </message>
     <message id="AddWatermark">
-        <location filename="../src/Components/ProtectRibbon.qml" line="107"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="129"/>
         <location filename="../src/Components/WatermarkDialog.qml" line="57"/>
         <source>Add watermark</source>
         <translation>Thêm hình nền mờ</translation>
     </message>
     <message id="UpdateWatermark">
-        <location filename="../src/Components/ProtectRibbon.qml" line="112"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="134"/>
         <location filename="../src/Components/WatermarkDialog.qml" line="55"/>
         <source>Update watermark</source>
         <translation>Cập nhật hình nền mờ</translation>
     </message>
     <message id="RemoveWatermark">
-        <location filename="../src/Components/ProtectRibbon.qml" line="117"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="139"/>
         <location filename="../src/Components/WatermarkDialog.qml" line="52"/>
         <source>Remove watermark</source>
         <translation>Xóa hình nền mờ</translation>
     </message>
     <message id="WatermarkPendingSaveHint">
-        <location filename="../src/Components/ProtectRibbon.qml" line="162"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="184"/>
         <source>Save or discard watermark changes before editing page content.</source>
         <translation>Lưu hoặc hủy thay đổi hình mờ trước khi chỉnh sửa nội dung trang.</translation>
     </message>
     <message id="PdfPasswordPending">
-        <location filename="../src/Components/ProtectRibbon.qml" line="176"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="198"/>
         <source>Password pending. Save the PDF to apply it.</source>
         <translation>Mật khẩu đang chờ áp dụng. Hãy lưu PDF để hoàn tất.</translation>
     </message>
     <message id="PdfPasswordChangeRestricted">
-        <location filename="../src/Components/ProtectRibbon.qml" line="179"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="201"/>
         <source>Changing the password is not supported for PDFs with permission restrictions.</source>
         <translation>Chưa hỗ trợ đổi mật khẩu cho PDF có giới hạn quyền.</translation>
     </message>
     <message id="PdfPasswordProtected">
-        <location filename="../src/Components/ProtectRibbon.qml" line="182"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="204"/>
         <source>This PDF already has password protection.</source>
         <translation>PDF này đã được bảo vệ bằng mật khẩu.</translation>
     </message>
     <message id="PdfPasswordNotProtected">
-        <location filename="../src/Components/ProtectRibbon.qml" line="184"/>
+        <location filename="../src/Components/ProtectRibbon.qml" line="206"/>
         <source>This PDF has no password protection.</source>
         <translation>PDF này chưa được bảo vệ bằng mật khẩu.</translation>
     </message>
