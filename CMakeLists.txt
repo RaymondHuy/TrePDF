@@ -1,9 +1,16 @@
 cmake_minimum_required(VERSION 3.21)
 
+set(TREPDF_VERSION "0.1.0" CACHE STRING "TrePDF application version (major.minor.patch)")
+if(NOT TREPDF_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "TREPDF_VERSION must use the numeric major.minor.patch format")
+endif()
+
 project(TrePDF
-    VERSION 0.1.0
+    VERSION ${TREPDF_VERSION}
     LANGUAGES C CXX
 )
+
+option(TREPDF_DEPLOY_RUNTIME "Install Qt, QML and PDF runtime dependencies for distribution" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -100,6 +107,7 @@ target_link_libraries(trepdf_font_archive PRIVATE ZLIB::ZLIB)
 qt_add_executable(trepdf
     src/main.cpp
 )
+target_compile_definitions(trepdf PRIVATE TREPDF_VERSION="${PROJECT_VERSION}")
 
 qt_add_resources(trepdf "trepdf_app_icon"
     PREFIX "/trepdf/branding"
@@ -367,6 +375,8 @@ target_link_libraries(trepdf
 
 set_target_properties(trepdf PROPERTIES
     MACOSX_BUNDLE TRUE
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     WIN32_EXECUTABLE TRUE
 )
 
@@ -383,6 +393,7 @@ if(APPLE)
     get_target_property(TREPDF_QPDF_LIBRARY QPDF::QPDF IMPORTED_LOCATION)
     set_target_properties(trepdf PROPERTIES
         BUILD_RPATH "@executable_path/../Frameworks"
+        INSTALL_RPATH "@executable_path/../Frameworks"
     )
     add_custom_command(TARGET trepdf POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:trepdf>/Contents/Frameworks"
@@ -398,7 +409,7 @@ if(APPLE)
 endif()
 
 include(CTest)
-if(WIN32)
+if(WIN32 AND NOT TREPDF_DEPLOY_RUNTIME)
     include(TrePDFWindowsRuntime)
     trepdf_deploy_windows_runtime(trepdf)
 endif()
@@ -413,3 +424,41 @@ install(TARGETS trepdf
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+if(TREPDF_DEPLOY_RUNTIME)
+    # The QML ribbon uses SVG icons. Linking the module also makes macdeployqt
+    # include its image-format plugin in the installed app bundle.
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Svg)
+    target_link_libraries(trepdf PRIVATE Qt6::Svg)
+
+    if(WIN32)
+        # windeployqt only handles Qt dependencies. Copy the PDF packages' DLLs
+        # alongside the executable, keeping Qt's matching compiler runtime.
+        set(TREPDF_PDF_RUNTIME_LIBRARIES)
+        foreach(TREPDF_PDF_DEPENDENCY IN ITEMS PDFium::PDFium QPDF::QPDF)
+            get_target_property(TREPDF_PDF_RUNTIME_LIBRARY ${TREPDF_PDF_DEPENDENCY} IMPORTED_LOCATION)
+            get_filename_component(TREPDF_PDF_RUNTIME_DIRECTORY "${TREPDF_PDF_RUNTIME_LIBRARY}" DIRECTORY)
+            file(GLOB TREPDF_PDF_PACKAGE_LIBRARIES "${TREPDF_PDF_RUNTIME_DIRECTORY}/*.dll")
+            list(APPEND TREPDF_PDF_RUNTIME_LIBRARIES
+                "${TREPDF_PDF_RUNTIME_LIBRARY}" ${TREPDF_PDF_PACKAGE_LIBRARIES})
+        endforeach()
+        list(REMOVE_DUPLICATES TREPDF_PDF_RUNTIME_LIBRARIES)
+        list(FILTER TREPDF_PDF_RUNTIME_LIBRARIES EXCLUDE REGEX
+            "/(libgcc_s_[^/]+|libstdc\\+\\+-6|libwinpthread-1)\\.dll$")
+        install(FILES ${TREPDF_PDF_RUNTIME_LIBRARIES} DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
+
+    set(TREPDF_DEPLOY_PLUGIN_OPTIONS)
+    if(NOT APPLE AND Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
+        # Keep SVG readers and the headless CI smoke-test platform even when
+        # the linker removes unused direct QtSvg references.
+        list(APPEND TREPDF_DEPLOY_PLUGIN_OPTIONS
+            INCLUDE_PLUGINS qsvg qsvgicon qoffscreen)
+    endif()
+    qt_generate_deploy_qml_app_script(
+        TARGET trepdf
+        OUTPUT_SCRIPT TREPDF_DEPLOY_SCRIPT
+        ${TREPDF_DEPLOY_PLUGIN_OPTIONS}
+    )
+    install(SCRIPT ${TREPDF_DEPLOY_SCRIPT})
+endif()
