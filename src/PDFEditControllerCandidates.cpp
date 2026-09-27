@@ -4182,6 +4182,65 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             if (run.size() < 2) {
                 continue;
             }
+            // Source baselines are independent of the font's default leading.
+            // Measure the same point-sized, mixed-format lines as the editor
+            // and writer before translating those gaps into paragraph factors.
+            QVector<QPair<qreal, qreal>> lineMetrics;
+            for (qsizetype member : std::as_const(run)) {
+                const Candidate &source = output[member].candidate;
+                const auto face = [&](const CharacterFormat &format) {
+                    const qreal ratio = format.displayFontSizeRatio > 0.0
+                        ? format.displayFontSizeRatio : format.fontSizeRatio;
+                    return fontForDisplay(format.fontFamily, format.fontStretch,
+                        format.fontBold, format.fontItalic, format.fontUnderline,
+                        ratio * pageSize.height());
+                };
+                QTextLayout layout(source.text, face(characterFormatForCandidate(source)));
+                QList<QTextLayout::FormatRange> formats;
+                for (const CharacterSpan &span : source.sourceCharacterSpans) {
+                    QTextCharFormat format;
+                    format.setFont(face(span.format));
+                    formats.append({int(span.start), int(span.length), format});
+                }
+                layout.setFormats(formats);
+                layout.beginLayout();
+                QTextLine line = layout.createLine();
+                if (!line.isValid()) {
+                    layout.endLayout();
+                    break;
+                }
+                line.setLineWidth(1000000.0);
+                lineMetrics.append({line.height(), line.ascent()});
+                layout.endLayout();
+            }
+            if (lineMetrics.size() != run.size()) {
+                continue;
+            }
+            QVector<qreal> lineSpacing;
+            qreal previousTop = 0.0;
+            for (qsizetype line = 0; line + 1 < run.size(); ++line) {
+                const qreal sourceOffset = (output[run[line + 1]].candidate.origin.y()
+                    - first.origin.y()) * pageSize.height();
+                // QTextDocument advances in 26.6 fixed-point units. Quantize
+                // absolute tops so rounding does not accumulate over 64 rows.
+                const qreal nextTop = qRound64((sourceOffset + lineMetrics.first().second
+                    - lineMetrics[line + 1].second) * 64.0) / 64.0;
+                const qreal advance = nextTop - previousTop;
+                qreal factor = advance / lineMetrics[line].first;
+                if (std::floor(lineMetrics[line].first * factor * 64.0)
+                    < qRound64(advance * 64.0)) {
+                    factor = std::nextafter(factor, std::numeric_limits<qreal>::infinity());
+                }
+                if (!qIsFinite(factor) || factor < 0.5 || factor > 3.0) {
+                    break;
+                }
+                lineSpacing.append(factor);
+                previousTop = nextTop;
+            }
+            if (lineSpacing.size() + 1 != run.size()) {
+                continue;
+            }
+            lineSpacing.append(lineSpacing.constLast());
             Candidate grouped = first;
             grouped.objectPath.clear();
             grouped.parts.clear();
@@ -4195,8 +4254,14 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                 const Candidate &source = output[member].candidate;
                 if (!grouped.parts.isEmpty()) {
                     grouped.parts.last().separatorAfter = QStringLiteral("\n");
+                    grouped.sourceParagraphLineBreaks.append(grouped.text.size());
                     appendSeparator(grouped, QStringLiteral("\n"), &source);
                 }
+                ParagraphFormat paragraph;
+                paragraph.start = grouped.text.size();
+                paragraph.length = source.text.size();
+                paragraph.lineSpacing = lineSpacing[grouped.sourceParagraphFormats.size()];
+                grouped.sourceParagraphFormats.append(paragraph);
                 grouped.parts.append(source.parts);
                 appendSourceText(grouped, source);
                 grouped.textGlyphRects.append(source.textGlyphRects);

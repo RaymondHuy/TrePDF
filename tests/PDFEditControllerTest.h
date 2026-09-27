@@ -172,6 +172,8 @@ private slots:
     void rejectsOversizedRetainedGlyphLineTransactionally();
     void keepsSourceParagraphLayoutStableAtFractionalZoom_data();
     void keepsSourceParagraphLayoutStableAtFractionalZoom();
+    void preservesSourceLineBaselinesThroughEditing_data();
+    void preservesSourceLineBaselinesThroughEditing();
     void infersConstantSourceTextSpacing_data();
     void recoversPositionedSourceWordSpaces();
     void keepsGeneratedSeparatorsWithinSourceObjects();

@@ -358,8 +358,14 @@ khác nhau giữa các dòng. Khoảng trắng ghép cùng dòng kế thừa for
 ngắt dòng nguồn lấy format đầu dòng sau, khớp cách QTextDocument đọc separator
 và tránh tạo draft khi chỉ mở/đóng editor. Frame ban đầu đo từng dòng bằng chính
 các spans này để tránh dùng độ rộng font đậm cho dòng thường.
-Inline editor và Save dùng layout Qt hiện có để reflow sau khi sửa nội dung;
-leading riêng của PDF nguồn không được khôi phục thành paragraph formatting.
+Khoảng cách baseline nguồn được chuyển thành `sourceParagraphFormats.lineSpacing`
+theo chiều cao/ascent Qt của từng dòng với đầy đủ character spans ở đơn vị PDF
+point. Vị trí dọc tích lũy được làm tròn theo 1/64 point của QTextDocument để sai
+số không cộng dồn qua nhiều dòng. Nếu factor không hữu hạn hoặc ngoài `0.5–3`,
+giữ các dòng riêng thay vì ghép đoạn có leading sai. Editor, preview và Save dùng
+chung paragraph formats này; khi đổi font/cỡ chữ hoặc wrap, Qt vẫn reflow theo
+factor đã giữ. Chỉ mở/đóng editor không tạo draft. Sau Save, metadata paragraph
+giữ leading để mở lại không suy đoán lần nữa.
 Editor ban đầu giữ `\n` giữa các dòng nguồn. Draft đánh dấu riêng các vị trí
 này trong `sourceLineBreaks`, dịch chuyển dấu khi sửa text và loại dấu nếu ký
 tự nguồn bị thay thế. Bấm Justify nối những dòng nguồn trong đoạn đang chọn

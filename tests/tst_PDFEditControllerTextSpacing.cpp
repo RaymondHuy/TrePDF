@@ -309,7 +309,9 @@ void PDFEditControllerTest::changesParagraphSpacingOutsideEditorWithHistory()
     const QVariantMap grouped = candidateForText(waitForCandidates(controller, 0), sourceText);
     QVERIFY(!grouped.isEmpty());
     QVERIFY(controller.selectCandidate(0, grouped.value(QStringLiteral("objectId")).toString()));
-    controller.setSelectedLineSpacing(1.0);
+    const qreal sourceLineSpacing = controller.selectedLineSpacing();
+    QVERIFY(qIsFinite(sourceLineSpacing));
+    controller.setSelectedLineSpacing(sourceLineSpacing);
     controller.setSelectedParagraphSpaceBefore(0.0);
     QCOMPARE(controller.selectedText(), sourceText);
     QVERIFY(!controller.hasDrafts());
@@ -323,7 +325,7 @@ void PDFEditControllerTest::changesParagraphSpacingOutsideEditorWithHistory()
     const QVariantList formats = controller.selectedParagraphFormats();
     QCOMPARE(formats.size(), 2);
     QCOMPARE(formats[0].toMap().value(QStringLiteral("lineSpacing")).toReal(), 1.5);
-    QCOMPARE(formats[1].toMap().value(QStringLiteral("lineSpacing")).toReal(), 1.0);
+    QCOMPARE(formats[1].toMap().value(QStringLiteral("lineSpacing")).toReal(), sourceLineSpacing);
     controller.finishSelectedTextEdit();
     controller.undo();
     QCOMPARE(controller.selectedText(), sourceText);
