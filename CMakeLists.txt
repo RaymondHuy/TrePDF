@@ -102,7 +102,8 @@ set_target_properties(trepdf_font_archive PROPERTIES AUTOMOC OFF AUTOUIC OFF)
 target_include_directories(trepdf_font_archive PUBLIC
     third_party/libxlsxwriter/third_party/minizip
 )
-target_link_libraries(trepdf_font_archive PRIVATE ZLIB::ZLIB)
+# The public minizip headers include zlib.h, so consumers need its include path.
+target_link_libraries(trepdf_font_archive PUBLIC ZLIB::ZLIB)
 
 qt_add_executable(trepdf
     src/main.cpp
