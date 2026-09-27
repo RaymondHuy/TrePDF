@@ -2,6 +2,9 @@
 #include "PDFEditControllerTestSupport.h"
 #include "PDFFontAliases.h"
 
+#include <QStandardPaths>
+#include <QUuid>
+
 using namespace PDFEditControllerTestSupport;
 
 void PDFEditControllerTest::groupsCompatibleTextObjectsOnSameLine()
@@ -1241,6 +1244,224 @@ void PDFEditControllerTest::keepsSourceParagraphLayoutStableAtFractionalZoom()
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "cancelEditing"));
     QVERIFY(!controller.hasDrafts());
     QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+}
+
+void PDFEditControllerTest::preservesSourceLineBaselinesThroughEditing_data()
+{
+    QTest::addColumn<qreal>("gap");
+    QTest::addColumn<qreal>("zoom");
+    QTest::addColumn<bool>("mixed");
+    QTest::addColumn<QString>("probePath");
+    QTest::newRow("tight-75-percent") << 12.25 << 0.75 << false << QString();
+    QTest::newRow("loose-155-percent") << 16.75 << 1.55 << false << QString();
+    QTest::newRow("mixed-faces") << 14.375 << 1.2 << true << QString();
+    const QString probe = qEnvironmentVariable("TREPDF_TEST_LINE_SPACING_PDF");
+    if (!probe.isEmpty())
+        QTest::newRow("external-page-four") << 0.0 << 1.25 << false << probe;
+}
+
+void PDFEditControllerTest::preservesSourceLineBaselinesThroughEditing()
+{
+    QFETCH(qreal, gap);
+    QFETCH(qreal, zoom);
+    QFETCH(bool, mixed);
+    QFETCH(QString, probePath);
+    const QString sourcePath = probePath.isEmpty() ? m_temporaryDirectory.filePath(
+        QStringLiteral("leading-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())))
+        : probePath;
+    const int pageIndex = probePath.isEmpty() ? 0 : 3;
+    const QString originalApplicationName = QCoreApplication::applicationName();
+    const bool originalTestMode = QStandardPaths::isTestModeEnabled();
+    QString fontStore;
+    const auto restoreFontStore = qScopeGuard([&]() {
+        if (!fontStore.isEmpty())
+            QDir(fontStore).removeRecursively();
+        QCoreApplication::setApplicationName(originalApplicationName);
+        QStandardPaths::setTestModeEnabled(originalTestMode);
+    });
+    if (probePath.isEmpty()) {
+        PDFiumProcessLock lock;
+        QVERIFY(createSourceParagraphPdf(sourcePath, {
+            {QStringLiteral("First source row has its own baseline."), 72.0, 700.0,
+             "Times-Roman", 1.0, 12.0F},
+            {QStringLiteral("Second row keeps the original leading."), 72.0, 700.0 - gap,
+             mixed ? "Times-Bold" : "Times-Roman", 1.0, 12.0F},
+            {QStringLiteral("Third row stays clear of the text below."), 72.0, 700.0 - 2 * gap,
+             mixed ? "Times-Italic" : "Times-Roman", 1.0, 12.0F}}));
+    } else {
+        // The application has this downloaded face; give the standalone probe
+        // its own local fixture store without modifying the user's font cache.
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName(QStringLiteral("TrePDF-leading-test-")
+            + QUuid::createUuid().toString(QUuid::WithoutBraces));
+        const QString root = QFileInfo(ApplicationFonts::downloadedFontDirectory()).absolutePath();
+        QVERIFY(!QFileInfo::exists(root));
+        fontStore = root;
+        const char *const paths[] = {
+            "fixtures/fonts/tex-gyre/texgyretermes-regular.otf",
+            "fixtures/fonts/tex-gyre/texgyretermes-italic.otf",
+            "fixtures/fonts/tex-gyre/texgyretermes-bold.otf",
+            "fixtures/fonts/tex-gyre/texgyretermes-bolditalic.otf"};
+        QList<ApplicationFonts::DownloadedFontData> faces;
+        for (int style = 0; style < 4; ++style) {
+            QFile font(QFINDTESTDATA(paths[style]));
+            QVERIFY(font.open(QIODevice::ReadOnly));
+            faces.append({font.readAll(), QStringLiteral("TeX Gyre Termes"),
+                          bool(style & 2), bool(style & 1), uint('x')});
+        }
+        QString error;
+        QVERIFY2(ApplicationFonts::installDownloadedFonts(faces, error), qPrintable(error));
+    }
+    PDFDocument pdf;
+    PDFEditController controller;
+    QVERIFY(pdf.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&pdf);
+    controller.setTool(PDFEditController::SelectTool);
+    QVariantMap candidate;
+    for (const QVariant &value : waitForCandidates(controller, pageIndex)) {
+        const QVariantMap item = value.toMap();
+        if (item.value(QStringLiteral("text")).toString().contains(probePath.isEmpty()
+                ? QStringLiteral("First source row") : QStringLiteral("Your fair dealing"))) {
+            candidate = item;
+            break;
+        }
+    }
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(pageIndex, candidate.value(QStringLiteral("objectId")).toString()));
+    const QString original = controller.selectedText();
+    const QStringList lines = original.split(QLatin1Char('\n'));
+    QCOMPARE(lines.size(), 3);
+    const auto sourceBaselines = [&](const QString &path, const QStringList &needles) {
+        PDFiumProcessLock lock;
+        QVector<qreal> result;
+        FPDF_DOCUMENT doc = FPDF_LoadDocument(QFile::encodeName(path).constData(), nullptr);
+        if (!doc)
+            return result;
+        const auto closeDoc = qScopeGuard([&]() { FPDF_CloseDocument(doc); });
+        FPDF_PAGE page = FPDF_LoadPage(doc, pageIndex);
+        if (!page)
+            return result;
+        const auto closePage = qScopeGuard([&]() { FPDF_ClosePage(page); });
+        FPDF_TEXTPAGE text = FPDFText_LoadPage(page);
+        if (!text)
+            return result;
+        const auto closeText = qScopeGuard([&]() { FPDFText_ClosePage(text); });
+        const int count = FPDFText_CountChars(text);
+        if (count <= 0 || count > 50000)
+            return result;
+        QVector<FPDF_WCHAR> chars(count + 1);
+        FPDFText_GetText(text, 0, count, chars.data());
+        const QString plain = QString::fromUtf16(reinterpret_cast<const char16_t *>(chars.constData()));
+        for (const QString &needle : needles) {
+            const int offset = plain.indexOf(needle.trimmed().left(20));
+            double x = 0.0, y = 0.0;
+            if (offset < 0 || !FPDFText_GetCharOrigin(text, offset, &x, &y))
+                return QVector<qreal>();
+            result.append(FPDF_GetPageHeightF(page) - y);
+        }
+        return result;
+    };
+    const QVector<qreal> expected = sourceBaselines(sourcePath, lines);
+    QCOMPARE(expected.size(), lines.size());
+    const QVariantList originalFormats = controller.selectedParagraphFormats();
+    const QRectF originalFrame = controller.selectedFrameRect();
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQuickWindow window;
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    const QSizeF pageSize = pdf.pageSize(pageIndex);
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), pageIndex}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false}, {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), zoom},
+        {QStringLiteral("width"), pageSize.width() * zoom},
+        {QStringLiteral("height"), pageSize.height() * zoom}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    auto *overlayItem = qobject_cast<QQuickItem *>(overlay.get());
+    overlayItem->setParentItem(window.contentItem());
+    window.resize(qCeil(pageSize.width() * zoom), qCeil(pageSize.height() * zoom));
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    QObject *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = child;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *editorItem = qobject_cast<QQuickItem *>(editor);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *document = quickDocument->textDocument();
+    QString baselineError;
+    const auto keepsBaselines = [&]() {
+        document->size();
+        int row = 0;
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next(), ++row) {
+            if (row >= expected.size() || block.layout()->lineCount() != 1) {
+                baselineError = QStringLiteral("Unexpected wrap in source row %1 (%2 visual lines)")
+                    .arg(row).arg(block.layout()->lineCount());
+                return false;
+            }
+            const QTextLine line = block.layout()->lineAt(0);
+            const qreal y = block.layout()->position().y() + line.y() + line.ascent();
+            const qreal actual = editorItem->mapToItem(overlayItem, QPointF(0, y)).y() / zoom;
+            if (qAbs(actual - expected[row]) > 0.08) {
+                baselineError = QStringLiteral("Row %1: editor %2 pt, PDF %3 pt")
+                    .arg(row).arg(actual).arg(expected[row]);
+                return false;
+            }
+        }
+        return row == expected.size();
+    };
+    QTRY_COMPARE(document->toPlainText(), original);
+    QTRY_VERIFY2(keepsBaselines(), qPrintable(baselineError));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedParagraphFormats(), originalFormats);
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    // The third source line can already fill its frame. Edit the shorter
+    // middle row so this measures preserved leading, not intentional wrapping.
+    const int insertionPosition = lines[0].size() + 1 + lines[1].size();
+    QString edited = original;
+    edited.insert(insertionPosition, QLatin1Char('x'));
+    editor->setProperty("cursorPosition", insertionPosition);
+    editorItem->forceActiveFocus();
+    QTest::keyClick(&window, Qt::Key_X);
+    QTRY_COMPARE(controller.selectedText(), edited);
+    QTRY_VERIFY2(keepsBaselines(), qPrintable(baselineError));
+    QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+    QTRY_COMPARE(controller.selectedText(), original);
+    QTRY_VERIFY2(keepsBaselines(), qPrintable(baselineError));
+    QVERIFY(QMetaObject::invokeMethod(editor, "redo"));
+    QTRY_COMPARE(controller.selectedText(), edited);
+    QTRY_VERIFY2(keepsBaselines(), qPrintable(baselineError));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    const QString output = m_temporaryDirectory.filePath(
+        QStringLiteral("leading-saved-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const QVector<qreal> saved = sourceBaselines(output, lines);
+    QCOMPARE(saved.size(), expected.size());
+    for (int row = 0; row < saved.size(); ++row)
+        QVERIFY2(qAbs(saved[row] - expected[row]) < 0.08,
+            qPrintable(QStringLiteral("Row %1: saved %2 pt, source %3 pt").arg(row).arg(saved[row]).arg(expected[row])));
+    const QVariantMap reopened = candidateForText(waitForCandidates(controller, pageIndex), edited);
+    QVERIFY(!reopened.isEmpty());
+    QVERIFY(controller.selectCandidate(pageIndex, reopened.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    QTRY_VERIFY2(keepsBaselines(), qPrintable(baselineError));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "cancelEditing"));
+    QVERIFY(!controller.hasDrafts());
 }
 
 void PDFEditControllerTest::savesEditedSourceParagraphRoundTrip()
