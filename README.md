@@ -484,6 +484,10 @@ is the initial, statically linked backend bundled under `third_party/`.
 
 ## Build
 
+For manual Windows, macOS Apple Silicon and Linux packages from GitHub Actions,
+see [the UAT workflow guide](docs/github-uat.md). The `uat` workflow assigns
+versions `0.0.1`, `0.0.2`, and so on to new manual runs.
+
 Install Qt 6.8 or newer and provide a PDFium build that contains `fpdfview.h`
 and the `pdfium` library. Like PDFium, qpdf 12.4.1 is bundled as a prebuilt macOS
 arm64 library with public headers under `third_party/qpdf` (macOS 13 or newer).

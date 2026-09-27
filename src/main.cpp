@@ -10,6 +10,7 @@ int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("TrePDF"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(TREPDF_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("TreOffice"));
     QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/trepdf/branding/TrePDF-logo.png")));
 
