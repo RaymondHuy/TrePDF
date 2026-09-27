@@ -14,6 +14,36 @@ import subprocess
 import tempfile
 
 
+def verify_macos_bundle(app: Path) -> None:
+    subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+
+
+def sign_macos_bundle(app: Path) -> None:
+    # Deployment changes Mach-O load commands and adds bundle resources after
+    # linking. Seal nested code first, then its containing bundles, then the app.
+    # Ad-hoc signing preserves integrity for UAT; it is not Developer ID/notarization.
+    mach_o_magic = {
+        b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+        b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+        b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+    }
+    code = []
+    for path in app.rglob("*"):
+        if path.is_symlink():
+            continue
+        if path.is_dir() and path.suffix in {".framework", ".app", ".xpc", ".bundle"}:
+            code.append(path)
+        elif path.is_file():
+            with path.open("rb") as stream:
+                if stream.read(4) in mach_o_magic:
+                    code.append(path)
+    for path in sorted(code, key=lambda item: (-len(item.parts), str(item))) + [app]:
+        subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none", str(path)],
+                       check=True)
+    verify_macos_bundle(app)
+
+
 def smoke_test(executable: Path, target: str) -> None:
     # Do not let a runner's Qt/dependency paths hide missing deployed libraries.
     environment = os.environ.copy()
@@ -93,7 +123,20 @@ def main() -> None:
         launcher.chmod(0o755)
         executable = launcher
 
-    smoke_test(executable, args.platform)
+    if args.platform == "macos-arm64":
+        sign_macos_bundle(stage / "trepdf.app")
+        (stage / "START-HERE.txt").write_text(
+            "TrePDF UAT for macOS (Apple Silicon)\n\n"
+            "This build has an ad-hoc integrity signature, without Apple notarization.\n"
+            "After verifying the archive SHA-256, extract it and open trepdf.app.\n"
+            "If macOS blocks it as an unidentified developer, approve this app in\n"
+            "System Settings > Privacy & Security > Open Anyway.\n"
+            "If signature verification fails or it is reported as damaged, do not\n"
+            "override that warning; download a newly built package.\n\n"
+            "Verify the extracted app: codesign --verify --deep --strict trepdf.app\n"
+            "https://support.apple.com/en-us/102445\n", encoding="utf-8")
+    else:
+        smoke_test(executable, args.platform)
     (stage / "VERSION").write_text(args.version + "\n", encoding="utf-8")
     metadata = {
         "version": args.version,
@@ -104,6 +147,8 @@ def main() -> None:
         "qt": os.environ.get("QT_VERSION", "local"),
         "dependencies": manifest["versions"],
     }
+    if args.platform == "macos-arm64":
+        metadata["macos_signing"] = "ad-hoc; not notarized"
     (stage / "build-info.json").write_text(
         json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     shutil.copytree(args.dependencies / "licenses", stage / "licenses", dirs_exist_ok=True)
@@ -122,6 +167,12 @@ def main() -> None:
         # Preserve .app permissions and framework symlinks inside the ZIP.
         subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent",
                         str(stage), str(archive)], check=True)
+        # Test what a recipient extracts, including the resource seal and symlinks.
+        with tempfile.TemporaryDirectory(prefix="trepdf-archive-check-") as temporary:
+            subprocess.run(["ditto", "-x", "-k", str(archive), temporary], check=True)
+            restored_app = Path(temporary) / stage.name / "trepdf.app"
+            verify_macos_bundle(restored_app)
+            smoke_test(restored_app / "Contents/MacOS/trepdf", args.platform)
     else:
         archive = Path(shutil.make_archive(str(archive_base),
                        "zip" if args.platform == "windows-x64" else "gztar",

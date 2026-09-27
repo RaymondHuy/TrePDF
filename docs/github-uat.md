@@ -65,6 +65,13 @@ dependencies. The archives include dependency notices and build metadata;
 macOS uses `ditto` and Linux uses tar to preserve permissions and symlinks.
 The workflow pins third-party Actions to commit SHAs.
 
+After macOS deployment, packaging signs nested Mach-O files and frameworks from
+the inside out, then signs the complete app with an ad-hoc signature. It verifies
+the complete resource seal with `codesign --verify --deep --strict`, creates the
+ZIP, extracts it again, and repeats verification and startup on the extracted
+app. This catches incomplete linker signatures and signatures invalidated by
+library deployment before uploading an artifact.
+
 [`package_uat.py`](../scripts/ci/package_uat.py) launches the staged app from a
 temporary working directory with external Qt/library paths cleared and the
 software backend enabled (Cocoa on macOS, offscreen on Windows/Linux).
@@ -73,9 +80,16 @@ QML/plugin loading failures before archiving. This is a startup smoke check;
 `BUILD_TESTING=OFF` means the full feature test suite is not run. It does not
 replace native rendering or manual UAT.
 
-These are UAT archives, without a distribution signing certificate or Apple
-notarization. They are not installers. The workflow does not publish a GitHub
-Release.
+These are UAT archives, without a Developer ID distribution certificate or Apple
+notarization. The macOS ad-hoc signature verifies integrity but does not establish
+Gatekeeper trust. For a trusted UAT download, verify its checksum and app signature,
+then use **System Settings → Privacy & Security → Open Anyway** if macOS blocks
+the unidentified developer. See [Apple's instructions](https://support.apple.com/en-us/102445).
+Do not override a damaged/invalid signature warning; rebuild or download the
+fixed package. Each macOS archive includes `START-HERE.txt` with these instructions.
+Public distribution without this manual approval needs Developer ID signing and
+Apple notarization. The workflow does not change Gatekeeper settings or publish
+a GitHub Release. The archives are not installers.
 
 For deployment API details, see Qt's
 [QML application deployment documentation](https://doc.qt.io/qt-6/qt-generate-deploy-qml-app-script.html).
