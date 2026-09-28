@@ -1,4 +1,5 @@
 #include "PDFSaveWriter.h"
+#include "PDFAtomicSaveFile.h"
 #include "PDFShapeUtils.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFWebLinkScanner.h"
@@ -14,6 +15,7 @@
 #include "PDFPasswordWriter.h"
 #include "PDFOpenTypeFontWriter.h"
 #include "PDFiumSynchronization.h"
+#include "PDFiumDocument.h"
 
 #include <algorithm>
 #include <array>
@@ -37,14 +39,13 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QRawFont>
-#include <QSaveFile>
 #include <QScopeGuard>
 #include <QSet>
 #include <QTextBoundaryFinder>
 #include <QTextCharFormat>
 #include <QTextLayout>
 #include <QTextOption>
-#include <QTemporaryFile>
+#include <QTemporaryDir>
 #include <QUuid>
 #include <QVector>
 
@@ -262,32 +263,7 @@ struct PreparedDraft {
     int imageQuarterTurns = 0;
 };
 
-class PdfDocumentHandle
-{
-public:
-    explicit PdfDocumentHandle(FPDF_DOCUMENT document = nullptr)
-        : m_document(document)
-    {
-    }
-
-    ~PdfDocumentHandle()
-    {
-        if (m_document) {
-            assertPDFiumProcessLockHeld();
-            FPDF_CloseDocument(m_document);
-        }
-    }
-
-    FPDF_DOCUMENT get() const
-    {
-        return m_document;
-    }
-
-    Q_DISABLE_COPY_MOVE(PdfDocumentHandle)
-
-private:
-    FPDF_DOCUMENT m_document = nullptr;
-};
+using PdfDocumentHandle = PDFiumDocument;
 
 class PdfPageHandle
 {
@@ -381,7 +357,7 @@ private:
             : 0;
     }
 
-    QSaveFile m_file;
+    PDFAtomicSaveFile m_file;
 };
 
 class PageCoordinateMapper
@@ -5896,7 +5872,7 @@ PDFSaveWriter::Result commitDocumentFile(const QString &sourceFilePath,
             source.errorString());
     }
 
-    QSaveFile target(targetFilePath);
+    PDFAtomicSaveFile target(targetFilePath);
     if (!target.open(QIODevice::WriteOnly)) {
         return failure(
             PDFSaveWriter::Error::OutputOpenFailed,
@@ -5947,18 +5923,16 @@ PDFSaveWriter::Result protectAndCommitDocumentFile(
     // only this save's exact font programs, after all PDFium serialization, so
     // form persistence cannot undo the correction. Keep the target untouched.
     if (!openTypeFonts.isEmpty()) {
-        QTemporaryFile corrected(QFileInfo(targetFilePath).absoluteDir().filePath(
-            QStringLiteral(".trepdf-opentype-XXXXXX.pdf")));
-        if (!corrected.open())
+        QTemporaryDir corrected(QFileInfo(targetFilePath).absoluteDir().filePath(
+            QStringLiteral(".trepdf-opentype-XXXXXX")));
+        if (!corrected.isValid())
             return failure(PDFSaveWriter::Error::OutputOpenFailed, -1, corrected.errorString());
-        const QString correctedPath = corrected.fileName();
-        corrected.close();
+        const QString correctedPath = corrected.filePath(QStringLiteral("corrected.pdf"));
         const QByteArray stagingPassword = openPassword.isEmpty() ? sourcePassword : QByteArray();
         if (!PDFOpenTypeFontWriter::finalize(sourceFilePath, correctedPath,
                                             openTypeFonts, stagingPassword))
             return failure(PDFSaveWriter::Error::OutputWriteFailed);
-        const QByteArray path = QFile::encodeName(correctedPath);
-        PdfDocumentHandle validation(FPDF_LoadDocument(path.constData(), stagingPassword.constData()));
+        PdfDocumentHandle validation = PDFiumDocument::open(correctedPath, stagingPassword);
         if (!validation.get() || FPDF_GetPageCount(validation.get()) != expectedPageCount)
             return failure(PDFSaveWriter::Error::OutputWriteFailed);
         return protectAndCommitDocumentFile(correctedPath, targetFilePath, openPassword,
@@ -5970,38 +5944,33 @@ PDFSaveWriter::Result protectAndCommitDocumentFile(
 
     // All PDFium and canonicalizer changes are complete before encryption.
     // Keep both stages private until validation and the final atomic commit.
-    QTemporaryFile encryptedFile(QFileInfo(targetFilePath).absoluteDir().filePath(
-        QStringLiteral(".trepdf-protected-XXXXXX.pdf")));
-    if (!encryptedFile.open()) {
+    QTemporaryDir encryptedFile(QFileInfo(targetFilePath).absoluteDir().filePath(
+        QStringLiteral(".trepdf-protected-XXXXXX")));
+    if (!encryptedFile.isValid()) {
         return failure(PDFSaveWriter::Error::OutputOpenFailed,
                        -1, encryptedFile.errorString());
     }
-    const QString encryptedFilePath = encryptedFile.fileName();
-    encryptedFile.close();
+    const QString encryptedFilePath = encryptedFile.filePath(QStringLiteral("protected.pdf"));
     if (!PDFPasswordWriter::encryptFile(sourceFilePath, encryptedFilePath,
                                         openPassword, sourcePassword)) {
         return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
     }
 
-    const QByteArray encodedPath = QFile::encodeName(encryptedFilePath);
     {
-        PdfDocumentHandle protectedDocument(FPDF_LoadDocument(
-            encodedPath.constData(), openPassword.constData()));
+        PdfDocumentHandle protectedDocument = PDFiumDocument::open(encryptedFilePath, openPassword);
         if (!protectedDocument.get()
             || FPDF_GetSecurityHandlerRevision(protectedDocument.get()) < 0
             || FPDF_GetPageCount(protectedDocument.get()) != expectedPageCount) {
             return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
         }
-        PdfDocumentHandle unprotectedDocument(FPDF_LoadDocument(
-            encodedPath.constData(), nullptr));
-        if (unprotectedDocument.get() || FPDF_GetLastError() != FPDF_ERR_PASSWORD) {
+        PdfDocumentHandle unprotectedDocument = PDFiumDocument::open(encryptedFilePath);
+        if (unprotectedDocument.get() || unprotectedDocument.error() != FPDF_ERR_PASSWORD) {
             return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
         }
         if (!sourcePassword.isEmpty() && sourcePassword != openPassword) {
-            PdfDocumentHandle oldPasswordDocument(FPDF_LoadDocument(
-                encodedPath.constData(), sourcePassword.constData()));
+            PdfDocumentHandle oldPasswordDocument = PDFiumDocument::open(encryptedFilePath, sourcePassword);
             if (oldPasswordDocument.get()
-                || FPDF_GetLastError() != FPDF_ERR_PASSWORD) {
+                || oldPasswordDocument.error() != FPDF_ERR_PASSWORD) {
                 return failure(PDFSaveWriter::Error::PasswordProtectionFailed);
             }
         }
@@ -6020,9 +5989,7 @@ PDFSaveWriter::Result validateAnnotationRelationships(
         return {};
     }
 
-    const QByteArray encodedPath = QFile::encodeName(filePath);
-    PdfDocumentHandle document(FPDF_LoadDocument(
-        encodedPath.constData(), password.constData()));
+    PdfDocumentHandle document = PDFiumDocument::open(filePath, password);
     if (!document.get()) {
         return failure(PDFSaveWriter::Error::CommentAnnotationCreationFailed);
     }
@@ -7198,14 +7165,12 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         return failure(Error::SourceUnavailable);
     }
 
-    const QByteArray encodedSourcePath = QFile::encodeName(
-        request.m_data->sourceFilePath);
     // This is the sole owner of the writer PDFium transaction. The request is
     // an immutable GUI-thread snapshot, and completion is posted only after
     // this function returns and releases the process lock.
     PDFiumProcessLock pdfiumLock;
-    PdfDocumentHandle document(FPDF_LoadDocument(
-        encodedSourcePath.constData(), request.m_data->documentPassword.constData()));
+    PdfDocumentHandle document = PDFiumDocument::open(
+        request.m_data->sourceFilePath, request.m_data->documentPassword);
     if (!document.get()) {
         return failure(Error::SourceOpenFailed);
     }
@@ -7245,9 +7210,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     }
     // Render-only inspection happens on a second worker-owned handle so that
     // temporary page-object activation changes never dirty the writer page.
-    PdfDocumentHandle inspectionDocument(
-        FPDF_LoadDocument(encodedSourcePath.constData(),
-                          request.m_data->documentPassword.constData()));
+    PdfDocumentHandle inspectionDocument = PDFiumDocument::open(
+        request.m_data->sourceFilePath, request.m_data->documentPassword);
     if (!inspectionDocument.get()) {
         return failure(Error::SourceOpenFailed);
     }
@@ -7490,17 +7454,16 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     }
 
     const QFileInfo targetInfo(request.m_data->targetFilePath);
-    QTemporaryFile contentFile(
+    QTemporaryDir contentFile(
         targetInfo.absoluteDir().filePath(
-            QStringLiteral(".trepdf-content-XXXXXX.pdf")));
-    if (!contentFile.open()) {
+            QStringLiteral(".trepdf-content-XXXXXX")));
+    if (!contentFile.isValid()) {
         return failure(
             Error::OutputOpenFailed,
             -1,
             contentFile.errorString());
     }
-    const QString contentFilePath = contentFile.fileName();
-    contentFile.close();
+    const QString contentFilePath = contentFile.filePath(QStringLiteral("content.pdf"));
     // Canonicalizers need plaintext PDF dictionaries. Remove security only in
     // this private stage of a password replacement; commit always re-encrypts.
     const QByteArray stagingPassword = replacingPassword
@@ -7622,17 +7585,16 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             fontResolver.openTypeFonts());
     }
 
-    QTemporaryFile formFile(
+    QTemporaryDir formFile(
         targetInfo.absoluteDir().filePath(
-            QStringLiteral(".trepdf-acroform-XXXXXX.pdf")));
-    if (!formFile.open()) {
+            QStringLiteral(".trepdf-acroform-XXXXXX")));
+    if (!formFile.isValid()) {
         return failure(
             Error::OutputOpenFailed,
             -1,
             formFile.errorString());
     }
-    const QString formFilePath = formFile.fileName();
-    formFile.close();
+    const QString formFilePath = formFile.filePath(QStringLiteral("acroform.pdf"));
     const PDFAcroFormWriter::Result acroFormResult
         = PDFAcroFormWriter::write(
             contentFilePath,

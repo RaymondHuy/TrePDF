@@ -3911,6 +3911,82 @@ void PDFEditControllerTest::rollsBackFontFamilyWhenOptionalTargetBlocked()
     QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, true).isValid());
 }
 
+void PDFEditControllerTest::savesExternalPageFourOnSamePath()
+{
+    const QString external = qEnvironmentVariable("TREPDF_TEST_MIXED_FONT_PDF");
+    if (external.isEmpty())
+        QSKIP("Set TREPDF_TEST_MIXED_FONT_PDF to the 500 Lines or Less PDF for this probe");
+    // Font registration outlives IsolatedFontStore. Keep this opt-in probe in
+    // its own process so a full suite run does not inherit stale registrations.
+    if (!qEnvironmentVariableIsSet("TREPDF_EXTERNAL_SAVE_PROBE")) {
+        QProcess probe;
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("TREPDF_EXTERNAL_SAVE_PROBE"), QStringLiteral("1"));
+        probe.setProcessEnvironment(environment);
+        probe.setProcessChannelMode(QProcess::MergedChannels);
+        const QString logPath = m_temporaryDirectory.filePath(QStringLiteral("external-save.txt"));
+        probe.start(QCoreApplication::applicationFilePath(),
+                    {QStringLiteral("savesExternalPageFourOnSamePath"),
+                     QStringLiteral("-o"), logPath + QStringLiteral(",txt")});
+        QVERIFY2(probe.waitForStarted(10000), qPrintable(probe.errorString()));
+        QVERIFY2(probe.waitForFinished(60000), qPrintable(probe.errorString()));
+        QFile log(logPath);
+        QVERIFY(log.open(QIODevice::ReadOnly));
+        const QByteArray output = log.readAll();
+        QVERIFY2(probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0,
+                 output.constData());
+        return;
+    }
+    QFile original(external);
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = original.readAll();
+    original.close();
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("page-four-save-copy.pdf"));
+    QVERIFY(QFile::copy(external, path));
+
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    QList<ApplicationFonts::DownloadedFontData> faces;
+    for (int style = 0; style < 4; ++style)
+        faces.append({ctanTermesFontData(style), QStringLiteral("TeX Gyre Termes"),
+                      bool(style & 2), bool(style & 1), uint('e')});
+    QString error;
+    QVERIFY2(ApplicationFonts::installDownloadedFonts(faces, error), qPrintable(error));
+
+    PDFTabModel tabs;
+    PDFDocumentSession *session = tabs.open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    const int pageCount = session->document()->pageCount();
+    QVERIFY(pageCount >= 4);
+    auto *controller = session->editController();
+    QSignalSpy saved(controller, &PDFEditController::saveFinished);
+    for (int pass = 1; pass <= 2; ++pass) {
+        QVariantMap candidate;
+        for (const QVariant &value : waitForCandidates(*controller, 3)) {
+            const QVariantMap item = value.toMap();
+            if (item.value(QStringLiteral("text")).toString().contains(QStringLiteral("to Share"))) {
+                candidate = item;
+                break;
+            }
+        }
+        QVERIFY2(!candidate.isEmpty(), "Page-four Share paragraph was not discovered");
+        QVERIFY(controller->selectCandidate(3, candidate.value(QStringLiteral("objectId")).toString()));
+        const QString marker = QStringLiteral(" save verification %1").arg(pass);
+        controller->commitSelectedText(controller->selectedText() + marker);
+        QVERIFY(controller->hasDrafts());
+        QVERIFY(tabs.requestSave(session));
+        QTRY_COMPARE_WITH_TIMEOUT(saved.count(), pass, 30000);
+        QVERIFY(saved.constLast().constFirst().toBool());
+        QVERIFY(!controller->hasDrafts());
+        QVERIFY(!controller->canUndo());
+        QCOMPARE(session->document()->source(), QUrl::fromLocalFile(path));
+        QCOMPARE(session->document()->pageCount(), pageCount);
+        QVERIFY(normalizedPageText(path, 3).contains(marker.trimmed()));
+    }
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    QCOMPARE(original.readAll(), originalBytes);
+}
+
 void PDFEditControllerTest::preservesType1UrlThroughInlineEditing_data()
 {
     QTest::addColumn<qreal>("zoom");

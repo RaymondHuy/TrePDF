@@ -1,6 +1,7 @@
 #include "PDFWebLinkScanner.h"
 
 #include "PDFiumSynchronization.h"
+#include "PDFiumDocument.h"
 
 #include <QFile>
 #include <QCryptographicHash>
@@ -54,8 +55,7 @@ public:
         }
         PDFiumProcessLock lock;
         if (!cancelled(cancellation)) {
-            const QByteArray path = QFile::encodeName(filePath);
-            m_document = FPDF_LoadDocument(path.constData(), password.constData());
+            m_document = PDFiumDocument::open(filePath, password);
         }
     }
 
@@ -63,7 +63,7 @@ public:
     {
         if (m_document) {
             PDFiumProcessLock lock;
-            FPDF_CloseDocument(m_document);
+            m_document.reset();
         }
     }
 
@@ -71,7 +71,7 @@ public:
     Q_DISABLE_COPY_MOVE(ScanDocument)
 
 private:
-    FPDF_DOCUMENT m_document = nullptr;
+    PDFiumDocument m_document;
 };
 
 template<typename Handle, void (*Close)(Handle)>

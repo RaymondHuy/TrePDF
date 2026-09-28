@@ -135,6 +135,10 @@ elseif(WIN32)
         "${CMAKE_CURRENT_BINARY_DIR}/TrePDF.rc"
         @ONLY
     )
+    # Keep C++ dependency include paths/definitions away from windres: its
+    # preprocessor can split include paths containing spaces even with temp files.
+    add_library(trepdf_windows_resources OBJECT "${CMAKE_CURRENT_BINARY_DIR}/TrePDF.rc")
+    set_target_properties(trepdf_windows_resources PROPERTIES AUTOMOC OFF AUTOUIC OFF)
     if(MINGW AND CMAKE_HOST_WIN32)
         # windres' default pipe invokes a shell that splits compiler paths
         # containing spaces (for example, CLion's bundled MinGW directory).
@@ -142,7 +146,7 @@ elseif(WIN32)
             COMPILE_OPTIONS "--use-temp-file"
         )
     endif()
-    target_sources(trepdf PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/TrePDF.rc")
+    target_sources(trepdf PRIVATE $<TARGET_OBJECTS:trepdf_windows_resources>)
 endif()
 
 qt_add_qml_module(trepdf
@@ -150,6 +154,8 @@ qt_add_qml_module(trepdf
     SOURCES
         src/ApplicationFonts.cpp
         src/ApplicationFonts.h
+        src/WindowsSystemFonts.cpp
+        src/WindowsSystemFonts.h
         src/FontDownloadService.cpp
         src/FontDownloadService.h
         src/IFontProvider.h
@@ -206,6 +212,8 @@ qt_add_qml_module(trepdf
         src/PDFFormWorker.h
         src/PDFSaveWriter.cpp
         src/PDFSaveWriter.h
+        src/PDFAtomicSaveFile.cpp
+        src/PDFAtomicSaveFile.h
         src/PDFShapeUtils.h
         src/PDFSourceImageGeometry.h
         src/PDFSearchController.cpp
@@ -217,6 +225,8 @@ qt_add_qml_module(trepdf
         src/PDFTableLayout.h
         src/PDFTableSymbolMapping.h
         src/PDFiumSynchronization.h
+        src/PDFiumDocument.cpp
+        src/PDFiumDocument.h
         src/PDFWidgetAnnotationSuppression.cpp
         src/PDFWidgetAnnotationSuppression.h
         src/PDFPageItem.cpp
@@ -392,6 +402,10 @@ set_target_properties(trepdf PROPERTIES
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     WIN32_EXECUTABLE TRUE
 )
+
+if(WIN32)
+    target_link_libraries(trepdf PRIVATE dwrite)
+endif()
 
 if(APPLE)
     find_library(TREPDF_CORE_FOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
