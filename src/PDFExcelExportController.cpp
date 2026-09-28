@@ -3,6 +3,7 @@
 #include "PDFDocument.h"
 #include "PDFTableExtractor.h"
 #include "PDFiumSynchronization.h"
+#include "PDFiumDocument.h"
 #include "SpreadsheetWorkbook.h"
 
 #include <QCoreApplication>
@@ -34,12 +35,12 @@ QThreadPool &exportPool()
 }
 
 struct ExportDocument {
-    FPDF_DOCUMENT handle = nullptr;
+    PDFiumDocument handle;
     ~ExportDocument()
     {
         if (handle) {
             PDFiumProcessLock lock;
-            FPDF_CloseDocument(handle);
+            handle.reset();
         }
     }
 };
@@ -218,9 +219,7 @@ PDFExcelExportController::Result PDFExcelExportController::performExport(
     {
         PDFiumProcessLock lock;
         if (!cancelled())
-            document.handle = FPDF_LoadDocument(
-                QFile::encodeName(work->sourcePath).constData(),
-                work->password.constData());
+            document.handle = PDFiumDocument::open(work->sourcePath, work->password);
     }
     if (!document.handle)
         return result;

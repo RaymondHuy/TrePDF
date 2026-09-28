@@ -10,7 +10,7 @@
 #include <QVector>
 #include <QtQml/qqmlregistration.h>
 
-#include <fpdfview.h>
+#include "PDFiumDocument.h"
 
 class PDFEditController;
 
@@ -94,7 +94,7 @@ private:
                                    int currentPage = -1);
     void updatePageMetrics();
 
-    FPDF_DOCUMENT m_document = nullptr;
+    PDFiumDocument m_document;
     QUrl m_source;
     QString m_filePath;
     QByteArray m_documentPassword;

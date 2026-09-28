@@ -1,13 +1,14 @@
 #include "PDFAcroFormWriter.h"
+#include "PDFAtomicSaveFile.h"
 
 #include "PDFAcroFormCanonicalizer.h"
 #include "PDFFormAppearance.h"
 #include "PDFiumSynchronization.h"
+#include "PDFiumDocument.h"
 
 #include <QCoreApplication>
 #include <QFile>
 #include <QHash>
-#include <QSaveFile>
 #include <QSet>
 #include <QUuid>
 
@@ -116,32 +117,7 @@ bool isTrePDFRadioButtonWidgetId(const QString &widgetId)
             == 0;
 }
 
-class PdfDocumentHandle
-{
-public:
-    explicit PdfDocumentHandle(FPDF_DOCUMENT document = nullptr)
-        : m_document(document)
-    {
-    }
-
-    ~PdfDocumentHandle()
-    {
-        if (m_document) {
-            assertPDFiumProcessLockHeld();
-            FPDF_CloseDocument(m_document);
-        }
-    }
-
-    FPDF_DOCUMENT get() const
-    {
-        return m_document;
-    }
-
-    Q_DISABLE_COPY_MOVE(PdfDocumentHandle)
-
-private:
-    FPDF_DOCUMENT m_document = nullptr;
-};
+using PdfDocumentHandle = PDFiumDocument;
 
 class PdfPageHandle
 {
@@ -264,7 +240,7 @@ private:
             : 0;
     }
 
-    QSaveFile m_file;
+    PDFAtomicSaveFile m_file;
 };
 
 int widgetFieldFlags(const PDFAcroFormWriter::Field &field)
@@ -627,10 +603,7 @@ bool validateWrittenFields(
     const QByteArray &password)
 {
     assertPDFiumProcessLockHeld();
-    const QByteArray encodedPath = QFile::encodeName(filePath);
-    PdfDocumentHandle document(FPDF_LoadDocument(
-        encodedPath.constData(),
-        password.constData()));
+    PdfDocumentHandle document = PDFiumDocument::open(filePath, password);
     if (!document.get()) {
         error = QStringLiteral(
             "PDFium could not reopen the written AcroForm PDF.");
@@ -1003,10 +976,7 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
     const QByteArray &password)
 {
     assertPDFiumProcessLockHeld();
-    const QByteArray encodedSourcePath = QFile::encodeName(sourceFilePath);
-    PdfDocumentHandle document(FPDF_LoadDocument(
-        encodedSourcePath.constData(),
-        password.constData()));
+    PdfDocumentHandle document = PDFiumDocument::open(sourceFilePath, password);
     if (!document.get()) {
         return failure(QStringLiteral(
             "PDFium could not open the intermediate PDF."));

@@ -29,7 +29,37 @@ Mỗi provider phải phân biệt `NotFound` với dữ liệu `Invalid` và ch
 Luồng Aptos có sẵn vẫn dùng package chính thức của Microsoft; nó độc lập
 với catalogue Google Fonts/CTAN và không mở rộng việc tìm kiếm nguồn tải.
 
+## Font hệ thống trên Windows và macOS
+
+`ApplicationFonts` dùng CoreText trên macOS và `WindowsSystemFonts` dùng
+DirectWrite trên Windows để lấy đúng family và face thường/đậm/nghiêng/đậm
+nghiêng đã cài. Windows từ chối face mô phỏng đậm/nghiêng và face gần nhất có
+cờ style khác yêu cầu. Picker, bộ lọc ngôn ngữ và kiểm tra trước khi mở editor
+dùng cùng face thật; coverage Windows được xác nhận bằng glyph index của
+DirectWrite, không nhờ font fallback của Qt.
+
+Nhánh font hệ thống chỉ nhận static TrueType có `glyf/loca`, tối đa 64 MiB
+cho một face và quyền Installable hoặc Editable theo `OS/2.fsType`. CFF/CFF2,
+variable, font màu/bitmap-only, Restricted và Preview & Print-only bị loại.
+Thiếu style hoặc glyph tiếp tục dùng thứ tự resolve và luồng khôi phục font
+hiện có; không tạo style giả hoặc đổi thứ tự provider.
+
+Các bảng của face được chọn, kể cả face trong TTC, đi qua bộ dựng sfnt dùng
+chung với macOS trong `ApplicationFonts`; PDFium nhận snapshot TrueType
+đơn-face thay vì tự chọn face đầu tiên của collection. Save request giữ bytes
+font, không giữ handle DirectWrite. Probe picker không dựng cả sfnt; lúc chuẩn
+bị và ghi Save vẫn kiểm tra bytes và coverage đầy đủ theo nội dung cần ghi.
+
 ## Kiểm tra font trước khi chỉnh sửa
+
+Khi xác thực font tải về, tên family legacy của Windows (OpenType name ID 1)
+được đối chiếu với tên typographic (ID 16) trong cùng nhóm platform/encoding/
+language của bảng `name`. Ví dụ `TeXGyreTermes` và `TeX Gyre Termes` là hai tên
+được font khai báo cho cùng family. Chỉ nhận cặp có subfamily tương đương; không
+bỏ khoảng trắng tùy ý hoặc gộp các face như Arial Narrow vào Arial. Cache và alias
+layout giữ tên typographic để editor tìm lại đủ bốn style sau tải. Font bytes,
+kiểm tra style, glyph và quyền nhúng giữ nguyên. Lỗi xác thực/cài cache ghi nguyên
+nhân cụ thể trong log ứng dụng.
 
 Khi người dùng mở editor cho một đoạn text, `requestSelectedTextEdit()` kiểm
 tra mọi character span của đoạn, gồm family, kiểu đậm/nghiêng và các ký tự

@@ -81,6 +81,8 @@ The Windows application target defines `NOMINMAX` to prevent Windows headers
 from interfering with standard C++ `min`/`max` calls. On Windows-hosted MinGW,
 the icon/version resource uses `windres --use-temp-file` so compiler paths
 containing spaces, such as the CLion installation above, work during preprocessing.
+The resource is built in a separate object target so C++ dependency include paths
+(including the zlib sysroot) do not reach windres's argument parser.
 
 In CLion:
 
@@ -92,6 +94,31 @@ In CLion:
 
 If local installation paths change, update `CMakeUserPresets.json` and reload
 CMake. No global PATH or shared Mac Qt path needs to change.
+
+## Saving an open PDF on Windows
+
+`PDFiumDocument` owns the PDFium handle together with a custom Windows reader
+opened with `FILE_SHARE_DELETE`. Main, form/preview, scan, export, and save
+documents use this owner under their existing PDFium process lock. Replacing
+the path leaves each old reader attached to the original file until its owner
+closes it; reopening reads the new saved file.
+
+`PDFAtomicSaveFile` retains `QSaveFile` staging and cancellation checks. On
+Windows it commits that stage to the final path with `FileRenameInfoEx`
+(`REPLACE_IF_EXISTS | POSIX_SEMANTICS`), because Qt's `MoveFileEx` replacement
+still fails for live readers even when they share deletion. Unsupported
+filesystems fall back to the ordinary atomic rename; there is no delete-first
+or direct-write fallback. External readers that deny delete sharing and
+read-only destinations still fail safely, leaving drafts available for retry.
+PDF content/form/encryption stages use temporary directories rather than
+retained `QTemporaryFile` handles that would also prevent replacement.
+
+The custom PDFium access length is 32 bits on Windows. Files larger than 4 GiB
+keep the native reader and its same-path save limitation. Non-Windows readers
+keep PDFium's native loader and saves delegate directly to `QSaveFile`.
+
+See `tests/windows-save/README.md` for the standalone reader/writer regressions
+and the application-level Save/Save As, form, password, and page-four probes.
 
 ## macOS isolation
 

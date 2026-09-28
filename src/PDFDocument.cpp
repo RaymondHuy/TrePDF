@@ -141,7 +141,6 @@ bool PDFDocument::open(const QUrl &source, const QString &password)
     }
 
     const QString filePath = source.toLocalFile();
-    const QByteArray encodedPath = QFile::encodeName(filePath);
     const QByteArray encodedPassword = password.toUtf8();
     unsigned long error = FPDF_ERR_SUCCESS;
     bool opened = false;
@@ -149,10 +148,9 @@ bool PDFDocument::open(const QUrl &source, const QString &password)
         // This is the sole owner of the PDFium open/metadata/old-document-close
         // transaction. QObject signals are emitted only after the lock is gone.
         PDFiumProcessLock pdfiumLock;
-        FPDF_DOCUMENT document = FPDF_LoadDocument(
-            encodedPath.constData(), encodedPassword.constData());
+        PDFiumDocument document = PDFiumDocument::open(filePath, encodedPassword);
         if (!document) {
-            error = FPDF_GetLastError();
+            error = document.error();
         } else {
             const int pageCount = FPDF_GetPageCount(document);
             QVector<QSizeF> pageSizes;
@@ -178,7 +176,7 @@ bool PDFDocument::open(const QUrl &source, const QString &password)
             const unsigned long userPermissions = FPDF_GetDocUserPermissions(document);
 
             closeDocumentLocked();
-            m_document = document;
+            m_document = std::move(document);
             m_source = source;
             m_filePath = filePath;
             m_documentPassword = encodedPassword;
@@ -351,11 +349,7 @@ bool PDFDocument::allowsFormFilling() const
 void PDFDocument::closeDocumentLocked()
 {
     assertPDFiumProcessLockHeld();
-    if (m_document) {
-        FPDF_CloseDocument(m_document);
-    }
-
-    m_document = nullptr;
+    m_document.reset();
     m_source = QUrl();
     m_filePath.clear();
     m_documentPassword.clear();

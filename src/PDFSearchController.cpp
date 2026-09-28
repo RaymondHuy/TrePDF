@@ -2,6 +2,7 @@
 
 #include "PDFDocument.h"
 #include "PDFiumSynchronization.h"
+#include "PDFiumDocument.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -75,8 +76,7 @@ public:
         if (cancelled(cancellation)) {
             return;
         }
-        const QByteArray encodedPath = QFile::encodeName(filePath);
-        m_document = FPDF_LoadDocument(encodedPath.constData(), password.constData());
+        m_document = PDFiumDocument::open(filePath, password);
     }
 
     ~SearchDocument()
@@ -85,7 +85,7 @@ public:
             return;
         }
         PDFiumProcessLock pdfiumLock;
-        FPDF_CloseDocument(m_document);
+        m_document.reset();
     }
 
     FPDF_DOCUMENT get() const
@@ -96,7 +96,7 @@ public:
     Q_DISABLE_COPY_MOVE(SearchDocument)
 
 private:
-    FPDF_DOCUMENT m_document = nullptr;
+    PDFiumDocument m_document;
 };
 
 QSize mappingDeviceSize(const QSizeF &pageSize)

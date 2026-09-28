@@ -256,8 +256,13 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 1. `PDFEditController` kết thúc editor đang mở và yêu cầu snapshot form.
 2. `PDFSaveWriter::prepare()` sao chép toàn bộ dữ liệu cần thiết trên GUI thread:
    draft, page map, ảnh, font bytes, form snapshot và đường dẫn đích.
+   System face dùng CoreText trên macOS hoặc `WindowsSystemFonts`/DirectWrite
+   trên Windows; bộ dựng sfnt chung tạo bytes đơn-face kể cả nguồn TTC, không
+   đưa handle nền tảng vào request. Windows chỉ nhận style thật, đủ glyph,
+   static `glyf/loca` tối đa 64 MiB và quyền embedding Installable/Editable.
 3. Worker mở bản nguồn riêng, áp dụng page operation, content object,
-   annotation và form; ghi qua `QSaveFile`.
+   annotation và form; ghi qua `PDFAtomicSaveFile`. `PDFiumDocument` giữ ownership
+   reader, cho phép thay file đang mở trên Windows; xem `docs/windows-clion.md`.
 4. Chỉ sau commit thành công, controller mở lại tệp đích. Mọi request render/form
    cũ bị loại bằng revision/generation mới.
 5. Nếu bất kỳ bước nào thất bại, tệp đích không được thay nửa chừng và draft vẫn
@@ -314,6 +319,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 |---|---|
 | [`src/main.cpp`](../src/main.cpp) | Khởi động Qt/QML, style, font và ngôn ngữ mặc định. |
 | [`src/ApplicationFonts.cpp`](../src/ApplicationFonts.cpp) | Danh mục, kiểm tra, hiệu chuẩn và snapshot font. |
+| [`src/WindowsSystemFonts.h`](../src/WindowsSystemFonts.h), [`src/WindowsSystemFonts.cpp`](../src/WindowsSystemFonts.cpp) | Adapter DirectWrite: chọn face hệ thống Windows thật, kiểm glyph và đọc bảng sfnt/TTC có giới hạn; `ApplicationFonts` kiểm quyền nhúng và dựng snapshot. |
 | [`src/PDFTabModel.cpp`](../src/PDFTabModel.cpp) | Session mỗi tab và model nhiều tab. |
 | [`src/PDFDocument.cpp`](../src/PDFDocument.cpp) | Document GUI-thread, kích thước và page map transient. |
 | [`src/PDFPageItem.cpp`](../src/PDFPageItem.cpp) | Render trang bất đồng bộ và upload texture. |
@@ -359,7 +365,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | Tìm text tài liệu | `SearchRibbonControl.qml`, `PDFSearchController.cpp` | `SearchHighlightLayer.qml`, navigation trong `AppRibbon.qml`, translation và test async/stale |
 | Chọn hoặc sửa text/image/shape/comment | `EditOverlay.qml` | `EditRibbon.qml` hoặc `CommentRibbon.qml`, `CommentPanel.qml`, `DrawingCommentPropertiesPanel.qml`, `PDFEditController.cpp`, `PDFSaveWriter.cpp`, test round-trip |
 | Resize/xoay ảnh và khóa tỷ lệ | `EditOverlay.qml`, `ImagePropertiesPanel.qml`, `PDFEditControllerGeometry.cpp` | Điều kiện hiện panel trong `DocumentWorkspace.qml`, capability trong `PDFEditControllerCandidates.cpp`, `PDFSourceImageGeometry.h`, preview trong `PDFPageItem.cpp`, `PDFSaveWriter.cpp`, test geometry/history/round-trip |
-| Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp` | `PDFEditControllerText.cpp`, `PDFEditControllerCandidates.cpp`, `PDFSaveWriter.cpp` |
+| Font hiển thị hoặc nhúng | `TextFormatPanel.qml`, `ApplicationFonts.cpp`, `WindowsSystemFonts.cpp` | `PDFEditControllerText.cpp`, `PDFEditControllerCandidates.cpp`, `PDFSaveWriter.cpp` |
 | Form PDF đang chạy | `PDFFormView.cpp`, `PDFFormController.cpp` | `PDFFormWorker.cpp`, `FormChoiceOverlay.qml` |
 | Form designer | `FormTextFieldOverlay.qml`, `FormFieldLayer.cpp` | `PDFFormDesignerController.cpp`, AcroForm writer/canonicalizer |
 | Lỗi render/texture | `PDFPageItem.cpp` | cancellation, revision, PDFium lock, delegate pooling |

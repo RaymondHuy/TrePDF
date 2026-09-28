@@ -47,14 +47,15 @@ tệp, ownership, thread, dữ liệu trao đổi và ranh giới không nên ph
   nguồn system với resource app dù tên family trùng nhau.
 - Đăng ký font dưới `src/assets/fonts`, ghi nhận exact face theo family, bold và
   italic; bundled face được ưu tiên khi giải quyết font draft.
-- Cache danh sách family đã lọc để font picker không chạy probe CoreText nặng cho
-  mỗi lần mở menu.
+- Cache danh sách family đã lọc để font picker không lặp probe CoreText/DirectWrite
+  cho mỗi lần mở menu.
 
-**Kiểm tra font dùng khi Save:**
+**Kiểm tra font hệ thống dùng khi Save:**
 
-- Trên macOS, dùng CoreText lấy đúng face bytes thay vì suy đoán từ family name.
-- Nếu nguồn là TTC/collection, trích face cần dùng thành sfnt độc lập để PDFium
-  không chọn nhầm face.
+- Trên macOS dùng CoreText; trên Windows dùng `WindowsSystemFonts`/DirectWrite
+  để lấy đúng family/style thật, không nhận kiểu đậm/nghiêng mô phỏng.
+- Hai nền tảng dùng chung bộ dựng sfnt từ bảng font. Nếu nguồn là TTC/collection,
+  trích face cần dùng thành sfnt độc lập để PDFium không chọn nhầm face.
 - Chỉ chấp nhận static TrueType `glyf/loca`, kích thước tối đa 64 MiB và quyền
   embedding Installable hoặc Editable theo OS/2.
 - Loại CFF/CFF2, variable, color/bitmap-only, face thiếu glyph, Restricted và
@@ -71,6 +72,22 @@ tệp, ownership, thread, dữ liệu trao đổi và ranh giới không nên ph
 
 **API dữ liệu:** `FontLanguage`, `FontFaceData`, danh sách bundled/system family,
 font bytes, glyph/face probe và helper stretch. Không giữ handle PDFium.
+
+### [`src/WindowsSystemFonts.cpp`](../src/WindowsSystemFonts.cpp) và
+[`src/WindowsSystemFonts.h`](../src/WindowsSystemFonts.h)
+
+**Vai trò:** adapter DirectWrite cho face hệ thống Windows, dùng bởi
+`ApplicationFonts`; không thay đổi thứ tự nguồn font hoặc tải font qua mạng.
+
+- Resolve family và cờ bold/italic thật, từ chối simulation hoặc style gần nhất
+  không khớp. Kiểm coverage Unicode bằng `GetGlyphIndices()` trên đúng face.
+- Giấu Windows header và COM handle sau `Face`; giải phóng handle/table fragment
+  bằng RAII. Save request chỉ nhận bytes, không giữ các handle này.
+- Đọc directory sfnt hoặc đúng index TTC có kiểm tra offset/size, tối đa 4.095
+  bảng và 4.096 face trong collection; tổng snapshot face không quá 64 MiB.
+- Trả table tags/bytes cho `ApplicationFonts` kiểm `glyf/loca`, format và quyền
+  `OS/2`, rồi dựng sfnt độc lập bằng serializer dùng chung với macOS. Trên nền
+  tảng khác, helper trả face không hợp lệ.
 
 ### [`src/DraftImageItem.cpp`](../src/DraftImageItem.cpp) và
 [`src/DraftImageItem.h`](../src/DraftImageItem.h)
@@ -563,8 +580,9 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   designer save fields.
 - Snapshot mật khẩu nguồn và mật khẩu mở mới đang chờ lưu; worker không đọc lại
   controller và kiểm lại source chưa mã hóa trước khi áp mật khẩu mới.
-- Snapshot `QImage`, font bytes và rich-text format; worker không mở lại đường dẫn
-  ảnh hay gọi CoreText/QML object.
+- Snapshot `QImage`, font bytes và rich-text format; system face đến từ CoreText
+  hoặc DirectWrite và được dựng thành sfnt độc lập. Worker dùng bytes trong
+  request, không mở lại đường dẫn ảnh hay truy cập QML object.
 
 **Áp nội dung:**
 
@@ -644,8 +662,8 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 
 **Commit và form:**
 
-- Ghi intermediate/content document qua `QSaveFile` với
-  `FPDF_NO_INCREMENTAL | FPDF_SUBSET_NEW_FONTS`.
+- Ghi intermediate/content document qua `PDFAtomicSaveFile` với
+  `FPDF_NO_INCREMENTAL`; giữ các bảng font để không mất shaping/kerning.
 - Chuyển normalized designer field sang page coordinates và gọi
   `PDFAcroFormWriter` nếu có field cần ghi/normalize.
 - Nếu chỉ đổi mật khẩu, đưa source PDF và mật khẩu phiên hiện tại trực tiếp qua
@@ -655,9 +673,16 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   bước serialize staging, hoàn tất canonicalization trên plaintext rồi mã hóa
   sang file tạm riêng. PDFium kiểm mở bằng mật khẩu mới, trạng thái mã hóa,
   số trang và lỗi password khi mở không mật khẩu trước khi commit bằng
-  `QSaveFile`; các file tạm được dọn khi transaction kết thúc. Save thông thường
+  `PDFAtomicSaveFile`; các file tạm được dọn khi transaction kết thúc. Save thông thường
   không có mật khẩu mới vẫn giữ mã hóa nguồn và giới hạn canonicalizer cũ.
 - Chỉ commit đích khi từng bước thành công; Save As không chạm source.
+
+`PDFiumDocument.h/.cpp` sở hữu PDFium handle và backing reader. Windows dùng
+custom reader chia sẻ quyền xóa để old document vẫn đọc được snapshot nguồn
+qua một lần Save. `PDFAtomicSaveFile.h/.cpp` giữ staging của `QSaveFile` rồi
+atomic rename theo POSIX semantics trên Windows; nền tảng khác dùng commit
+thường của Qt. Các stage content/form/encryption dùng `QTemporaryDir` để không
+giữ handle khóa đầu ra. Xem `windows-clion.md` và `tests/windows-save/README.md`.
 
 ### [`src/PDFPasswordWriter.cpp`](../src/PDFPasswordWriter.cpp) và
 [`src/PDFPasswordWriter.h`](../src/PDFPasswordWriter.h)
@@ -1149,6 +1174,7 @@ thay thế kiểm thử native Metal thủ công.
 | Triển khai | Header/API công khai |
 |---|---|
 | `ApplicationFonts.cpp` | `ApplicationFonts.h` |
+| `WindowsSystemFonts.cpp` | `WindowsSystemFonts.h` |
 | `DraftImageItem.cpp` | `DraftImageItem.h` |
 | `SignatureLibrary.cpp` | `SignatureLibrary.h` |
 | `FormFieldLayer.cpp` | `FormFieldLayer.h` |

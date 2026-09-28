@@ -2,6 +2,7 @@
 
 #include "PDFFormAppearance.h"
 #include "PDFiumSynchronization.h"
+#include "PDFiumDocument.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -957,8 +958,7 @@ public:
             return nullptr;
         }
 
-        const QByteArray encodedPath = QFile::encodeName(key.filePath);
-        m_document = FPDF_LoadDocument(encodedPath.constData(), key.password.constData());
+        m_document = PDFiumDocument::open(key.filePath, key.password);
         if (!m_document) {
             return nullptr;
         }
@@ -966,8 +966,7 @@ public:
             m_document,
             &m_formFillInfo.api);
         if (!m_formHandle) {
-            FPDF_CloseDocument(m_document);
-            m_document = nullptr;
+            m_document.reset();
             return nullptr;
         }
         m_filePath = key.filePath;
@@ -2496,10 +2495,9 @@ public:
             FPDFDOC_ExitFormFillEnvironment(m_formHandle);
         }
         if (m_document) {
-            FPDF_CloseDocument(m_document);
+            m_document.reset();
         }
         m_formHandle = nullptr;
-        m_document = nullptr;
         m_filePath.clear();
         m_password.clear();
         m_revision = -1;
@@ -2587,10 +2585,7 @@ private:
     {
         assertPDFiumProcessLockHeld();
         if (!m_previewDocument) {
-            const QByteArray encodedPath = QFile::encodeName(m_filePath);
-            m_previewDocument = FPDF_LoadDocument(
-                encodedPath.constData(),
-                m_password.constData());
+            m_previewDocument = PDFiumDocument::open(m_filePath, m_password);
         }
         if (!m_previewDocument) {
             return false;
@@ -2618,8 +2613,7 @@ private:
     {
         assertPDFiumProcessLockHeld();
         if (m_previewDocument) {
-            FPDF_CloseDocument(m_previewDocument);
-            m_previewDocument = nullptr;
+            m_previewDocument.reset();
         }
     }
 
@@ -2849,8 +2843,8 @@ private:
 
     FormFillInfo m_formFillInfo;
     JavaScriptPlatform m_javaScriptPlatform;
-    FPDF_DOCUMENT m_document = nullptr;
-    FPDF_DOCUMENT m_previewDocument = nullptr;
+    PDFiumDocument m_document;
+    PDFiumDocument m_previewDocument;
     FPDF_FORMHANDLE m_formHandle = nullptr;
     FPDF_PAGE m_activePage = nullptr;
     FPDF_LINK m_pressedWebLink = nullptr;

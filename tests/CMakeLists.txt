@@ -37,6 +37,8 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerWatermarks.cpp
     ../src/ApplicationFonts.cpp
     ../src/ApplicationFonts.h
+    ../src/WindowsSystemFonts.cpp
+    ../src/WindowsSystemFonts.h
     ../src/FontDownloadService.cpp
     ../src/FontDownloadService.h
     ../src/IFontProvider.h
@@ -98,12 +100,16 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFRasterPlan.h
     ../src/PDFSaveWriter.cpp
     ../src/PDFSaveWriter.h
+    ../src/PDFAtomicSaveFile.cpp
+    ../src/PDFAtomicSaveFile.h
     ../src/PDFShapeUtils.h
     ../src/PDFSearchController.cpp
     ../src/PDFSearchController.h
     ../src/PDFTabModel.cpp
     ../src/PDFTabModel.h
     ../src/PDFiumSynchronization.h
+    ../src/PDFiumDocument.cpp
+    ../src/PDFiumDocument.h
     ../src/PDFWebLinkScanner.cpp
     ../src/PDFWebLinkScanner.h
     ../src/PDFWatermark.cpp
@@ -137,6 +143,11 @@ target_link_libraries(trepdf_edit_controller_tests
         PDFium::PDFium
         Libxlsxwriter::Libxlsxwriter
 )
+
+if(WIN32)
+    target_compile_definitions(trepdf_edit_controller_tests PRIVATE NOMINMAX)
+    target_link_libraries(trepdf_edit_controller_tests PRIVATE dwrite)
+endif()
 
 if(APPLE)
     target_link_libraries(trepdf_edit_controller_tests
@@ -173,6 +184,8 @@ add_test(
 
 qt_add_executable(trepdf_excel_export_tests
     tst_PDFExcelExport.cpp
+    ../src/PDFiumDocument.cpp
+    ../src/PDFiumDocument.h
     ../src/PDFDocument.cpp
     ../src/PDFDocument.h
     ../src/PDFExcelExportController.cpp

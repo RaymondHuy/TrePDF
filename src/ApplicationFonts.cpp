@@ -1,6 +1,9 @@
 #include "ApplicationFonts.h"
 #include "PDFFontAliases.h"
 #include "ReviewedCtanFonts.h"
+#ifdef Q_OS_WIN
+#include "WindowsSystemFonts.h"
+#endif
 
 #include <QByteArrayView>
 #include <QCoreApplication>
@@ -198,7 +201,7 @@ bool permitsEditableEmbedding(QByteArrayView os2Table)
     return permission == 0x0008U;
 }
 
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
 
 constexpr quint32 kFontChecksumMagic = 0xB1B0AFBAU;
 constexpr quint32 kTrueTypeScaler = 0x00010000U;
@@ -211,6 +214,14 @@ constexpr quint32 kTagHead = 0x68656164U;
 constexpr quint32 kTagLoca = 0x6C6F6361U;
 constexpr quint32 kTagOs2 = 0x4F532F32U;
 
+struct FontTable {
+    quint32 tag = 0;
+    quint32 checksum = 0;
+    quint32 offset = 0;
+    QByteArray data;
+};
+
+#ifdef Q_OS_MACOS
 template<typename T>
 class CfHandle
 {
@@ -258,13 +269,6 @@ public:
 
 private:
     T m_value = nullptr;
-};
-
-struct FontTable {
-    quint32 tag = 0;
-    quint32 checksum = 0;
-    quint32 offset = 0;
-    QByteArray data;
 };
 
 QString fromCfString(CFStringRef value)
@@ -344,6 +348,7 @@ CFCharacterSetRef copyExactSystemFontCharacterSet(const QString &family,
     const CfHandle<CTFontRef> font = exactSystemFont(family, bold, italic);
     return font ? CTFontCopyCharacterSet(font.get()) : nullptr;
 }
+#endif
 
 void appendBigEndian16(QByteArray &data, quint16 value)
 {
@@ -400,6 +405,11 @@ const FontTable *findTable(const QVector<FontTable> &tables, quint32 tag)
     return table == tables.cend() ? nullptr : &*table;
 }
 
+QByteArray materializeTrueTypeTables(QVector<FontTable> tables,
+                                    qsizetype totalTableBytes,
+                                    ApplicationFonts::FontFaceData::Error &error);
+
+#ifdef Q_OS_MACOS
 bool isPotentiallyEmbeddableSystemFont(
     CTFontRef font,
     ApplicationFonts::FontFaceData::Error &error)
@@ -516,6 +526,15 @@ QByteArray materializeTrueTypeFont(
         tables.append(FontTable{tag, 0, 0, std::move(bytes)});
     }
 
+    return materializeTrueTypeTables(std::move(tables), totalTableBytes, error);
+}
+#endif
+
+QByteArray materializeTrueTypeTables(QVector<FontTable> tables,
+                                    qsizetype totalTableBytes,
+                                    ApplicationFonts::FontFaceData::Error &error)
+{
+    error = ApplicationFonts::FontFaceData::Error::UnsupportedFormat;
     if (!containsTable(tables, kTagGlyf)
         || !containsTable(tables, kTagLoca)
         || !containsTable(tables, kTagHead)) {
@@ -528,7 +547,7 @@ QByteArray materializeTrueTypeFont(
         [](const FontTable &left, const FontTable &right) {
             return left.tag < right.tag;
         });
-    if (tables.isEmpty() || tables.size() > 0xffff) {
+    if (tables.isEmpty() || tables.size() > 4095) {
         return {};
     }
 
@@ -591,6 +610,77 @@ QByteArray materializeTrueTypeFont(
     return result;
 }
 
+#ifdef Q_OS_WIN
+bool isPotentiallyEmbeddableSystemFont(
+    const WindowsSystemFonts::Face &font,
+    ApplicationFonts::FontFaceData::Error &error)
+{
+    const QVector<quint32> availableTags = font.tableTags(error);
+    if (availableTags.isEmpty())
+        return false;
+    const QSet<quint32> tags(availableTags.cbegin(), availableTags.cend());
+    error = ApplicationFonts::FontFaceData::Error::UnsupportedFormat;
+    // Match the static TrueType system-font contract. Color/variable outlines
+    // require a different PDF embedding path even if Qt can display them.
+    constexpr quint32 unsupportedTags[] = {
+        kTagFvar, kTagCff, kTagCff2,
+        0x434f4c52U, // COLR
+        0x4350414cU, // CPAL
+        0x43424454U, // CBDT
+        0x43424c43U, // CBLC
+        0x73626978U, // sbix
+        0x53564720U  // SVG
+    };
+    for (quint32 tag : unsupportedTags) {
+        if (tags.contains(tag))
+            return false;
+    }
+    if (!tags.contains(kTagGlyf) || !tags.contains(kTagLoca)
+        || !tags.contains(kTagHead) || !tags.contains(kTagOs2)
+        || font.table(kTagHead).size() < 12)
+        return false;
+    if (!permitsEditableEmbedding(font.table(kTagOs2))) {
+        error = ApplicationFonts::FontFaceData::Error::EmbeddingRestricted;
+        return false;
+    }
+    error = ApplicationFonts::FontFaceData::Error::None;
+    return true;
+}
+
+QByteArray materializeTrueTypeFont(
+    const WindowsSystemFonts::Face &font,
+    ApplicationFonts::FontFaceData::Error &error)
+{
+    if (!isPotentiallyEmbeddableSystemFont(font, error))
+        return {};
+    const QVector<quint32> tags = font.tableTags(error);
+    if (tags.isEmpty())
+        return {};
+    error = ApplicationFonts::FontFaceData::Error::UnsupportedFormat;
+    QVector<FontTable> tables;
+    qsizetype totalTableBytes = 0;
+    for (quint32 tag : tags) {
+        if (tag == kTagDsig)
+            continue;
+        QByteArray bytes = font.table(tag);
+        if (bytes.isEmpty())
+            return {};
+        if (bytes.size() > kMaximumSystemFontBytes - totalTableBytes) {
+            error = ApplicationFonts::FontFaceData::Error::TooLarge;
+            return {};
+        }
+        if (tag == kTagHead) {
+            if (bytes.size() < 12)
+                return {};
+            writeBigEndian32(bytes, 8, 0);
+        }
+        totalTableBytes += bytes.size();
+        tables.append(FontTable{tag, 0, 0, std::move(bytes)});
+    }
+    return materializeTrueTypeTables(std::move(tables), totalTableBytes, error);
+}
+#endif
+
 #endif
 
 struct FontRegistry {
@@ -625,6 +715,10 @@ struct FontRegistry {
     QHash<QString, QRawFont> downloadedRawFonts;
 #ifdef Q_OS_MACOS
     QHash<QString, CFCharacterSetRef> systemCharacterSets;
+#endif
+#ifdef Q_OS_WIN
+    QMutex systemFacesMutex;
+    QHash<QString, WindowsSystemFonts::Face> systemFaces;
 #endif
     QVector<BundledFont> bundledFonts;
     QVector<DownloadedFont> downloadedFonts;
@@ -674,6 +768,57 @@ struct ValidatedDownloadedFont {
     bool italic = false;
     QRawFont rawFont;
 };
+
+QString downloadedFontFamily(QByteArrayView names, const QString &platformFamily)
+{
+    // Windows can expose the legacy name (ID 1), while CTAN and macOS use
+    // the typographic name (ID 16): TeXGyreTermes vs TeX Gyre Termes. Only
+    // follow an explicit pair in the same Unicode/language name records.
+    if (names.size() < 6 || readBigEndian16(names, 0) > 1)
+        return platformFamily;
+    const quint16 count = readBigEndian16(names, 2);
+    const quint16 strings = readBigEndian16(names, 4);
+    if (count > 4096 || strings < 6 + count * 12 || strings > names.size())
+        return platformFamily;
+    QHash<quint64, QHash<quint16, QString>> groups;
+    for (quint16 index = 0; index < count; ++index) {
+        const qsizetype entry = 6 + index * 12;
+        const quint16 platform = readBigEndian16(names, entry);
+        const quint16 encoding = readBigEndian16(names, entry + 2);
+        const quint16 language = readBigEndian16(names, entry + 4);
+        const quint16 id = readBigEndian16(names, entry + 6);
+        if ((platform != 0 && !(platform == 3 && (encoding == 1 || encoding == 10)))
+            || (id != 1 && id != 2 && id != 16 && id != 17))
+            continue;
+        const quint16 length = readBigEndian16(names, entry + 8);
+        const qsizetype offset = strings + readBigEndian16(names, entry + 10);
+        if (length == 0 || length > 512 || length % 2 || offset + length > names.size())
+            return platformFamily;
+        QString value;
+        for (qsizetype byte = offset; byte < offset + length; byte += 2)
+            value.append(QChar(readBigEndian16(names, byte)));
+        if (value.contains(QChar::Null))
+            return platformFamily;
+        auto &group = groups[(quint64(platform) << 32) | (quint64(encoding) << 16) | language];
+        if (group.contains(id))
+            return platformFamily;
+        group.insert(id, value);
+    }
+    QString canonical;
+    for (const auto &group : std::as_const(groups)) {
+        if (group.value(1).compare(platformFamily, Qt::CaseInsensitive) != 0
+            || !group.contains(16) || !group.contains(2))
+            continue;
+        // Do not turn a distinct legacy face such as Arial Narrow into Arial.
+        // An extended subfamily must retain the same style-linking group.
+        if (group.contains(17) && group.value(17).compare(group.value(2), Qt::CaseInsensitive) != 0)
+            continue;
+        if (!canonical.isEmpty() && canonical.compare(group.value(16), Qt::CaseInsensitive) != 0)
+            return platformFamily;
+        canonical = group.value(16);
+    }
+    return canonical.isEmpty() ? platformFamily : canonical;
+}
 
 bool validateDownloadedFont(const QByteArray &data,
                             ValidatedDownloadedFont &result,
@@ -756,7 +901,8 @@ bool validateDownloadedFont(const QByteArray &data,
     result.bold = (selection & 0x0020U) != 0;
     result.italic = (selection & 0x0001U) != 0;
     result.rawFont = QRawFont(data, 16.0, QFont::PreferNoHinting);
-    result.family = result.rawFont.familyName();
+    result.family = downloadedFontFamily(tables.value(QByteArrayLiteral("name")),
+                                         result.rawFont.familyName());
     // PDF subset names are never promoted to a downloadable complete face.
     const auto subsetName = [](const QString &name) {
         if (name.size() <= 7 || name.at(6) != QLatin1Char('+'))
@@ -781,7 +927,8 @@ bool validateRequestedDownloadedFont(const QByteArray &data, const QString &fami
 {
     if (!validateDownloadedFont(data, font, error))
         return false;
-    if (font.family.compare(family, Qt::CaseInsensitive) != 0
+    if ((font.family.compare(family, Qt::CaseInsensitive) != 0
+            && font.rawFont.familyName().compare(family, Qt::CaseInsensitive) != 0)
         || font.bold != bold || font.italic != italic) {
         error = QStringLiteral("Downloaded font does not match the requested family and style.");
         return false;
@@ -830,7 +977,10 @@ bool registerDownloadedFont(FontRegistry &registry, const QString &path,
     // Qt can retain a missing-family fallback in another thread's font cache
     // after GUI-thread registration. A digest-named face has never been queried
     // before it exists, so Save lays out with the same metrics as the editor.
-    const auto alias = PDFFontAliases::isolate(data, font.family);
+    auto alias = PDFFontAliases::isolate(data, font.family);
+    // Retain the validated typographic family even when Qt reports its legacy
+    // Windows spelling, so editor style changes find the same downloaded batch.
+    alias.semanticFamily = font.family;
     if (alias.data.isEmpty() || !PDFFontAliases::retain(alias)) {
         QFontDatabase::removeApplicationFont(registration);
         return false;
@@ -908,6 +1058,23 @@ bool bundledFaceIsSelectable(const FontRegistry &registry,
         });
 }
 
+#ifdef Q_OS_WIN
+WindowsSystemFonts::Face exactWindowsSystemFont(FontRegistry &registry,
+                                                const QString &family,
+                                                bool bold, bool italic)
+{
+    // Save may snapshot a face on its worker while the GUI probes the picker.
+    QMutexLocker lock(&registry.systemFacesMutex);
+    const QString key = fontFaceCacheKey(family, bold, italic);
+    auto face = registry.systemFaces.constFind(key);
+    if (face == registry.systemFaces.cend()) {
+        face = registry.systemFaces.insert(
+            key, WindowsSystemFonts::Face::resolve(family, bold, italic));
+    }
+    return face.value();
+}
+#endif
+
 bool systemFaceIsSelectable(FontRegistry &registry,
                             const QString &family,
                             bool bold,
@@ -925,6 +1092,11 @@ bool systemFaceIsSelectable(FontRegistry &registry,
     ApplicationFonts::FontFaceData::Error error;
     selectable = font
         && isPotentiallyEmbeddableSystemFont(font.get(), error);
+#elif defined(Q_OS_WIN)
+    const auto font = exactWindowsSystemFont(registry, family, bold, italic);
+    ApplicationFonts::FontFaceData::Error error;
+    selectable = font.isValid()
+        && isPotentiallyEmbeddableSystemFont(font, error);
 #else
     Q_UNUSED(family);
     Q_UNUSED(bold);
@@ -1007,6 +1179,9 @@ bool systemFaceSupportsCharacters(FontRegistry &registry,
                 characterSet.value(),
                 static_cast<UTF32Char>(character));
         });
+#elif defined(Q_OS_WIN)
+    return exactWindowsSystemFont(registry, systemFamily.value(), bold, italic)
+        .supportsCharacters(characters);
 #else
     Q_UNUSED(characters);
     return false;
@@ -1453,6 +1628,10 @@ FontFaceData systemFontFace(const QString &family, bool bold, bool italic)
     }
 
     result.data = materializeTrueTypeFont(font.get(), result.error);
+#elif defined(Q_OS_WIN)
+    const auto font = exactWindowsSystemFont(fontRegistry(), result.family, bold, italic);
+    if (font.isValid())
+        result.data = materializeTrueTypeFont(font, result.error);
 #else
     Q_UNUSED(bold);
     Q_UNUSED(italic);

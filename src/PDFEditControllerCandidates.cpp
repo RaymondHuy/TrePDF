@@ -9,6 +9,7 @@
 #include "PDFShapeUtils.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFiumSynchronization.h"
+#include "PDFiumDocument.h"
 
 #include <algorithm>
 #include <array>
@@ -229,8 +230,7 @@ public:
         }
 
         closeLocked();
-        const QByteArray encodedPath = QFile::encodeName(filePath);
-        m_document = FPDF_LoadDocument(encodedPath.constData(), password.constData());
+        m_document = PDFiumDocument::open(filePath, password);
         if (m_document) {
             m_filePath = filePath;
             m_revision = revision;
@@ -246,15 +246,14 @@ private:
     {
         assertPDFiumProcessLockHeld();
         if (m_document) {
-            FPDF_CloseDocument(m_document);
+            m_document.reset();
         }
-        m_document = nullptr;
         m_filePath.clear();
         m_password.clear();
         m_revision = -1;
     }
 
-    FPDF_DOCUMENT m_document = nullptr;
+    PDFiumDocument m_document;
     QString m_filePath;
     QByteArray m_password;
     int m_revision = -1;

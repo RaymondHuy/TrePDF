@@ -1,5 +1,6 @@
 #include "PDFWatermark.h"
 #include "PDFiumSynchronization.h"
+#include "PDFiumDocument.h"
 
 #include <QBuffer>
 #include <QCryptographicHash>
@@ -543,19 +544,18 @@ public:
     explicit ScanDocument(const QString &path, const QByteArray &password)
     {
         PDFiumProcessLock lock;
-        m_document = FPDF_LoadDocument(QFile::encodeName(path).constData(),
-            password.isEmpty() ? nullptr : password.constData());
+        m_document = PDFiumDocument::open(path, password);
     }
     ~ScanDocument()
     {
         if (m_document) {
             PDFiumProcessLock lock;
-            FPDF_CloseDocument(m_document);
+            m_document.reset();
         }
     }
     FPDF_DOCUMENT get() const { return m_document; }
 private:
-    FPDF_DOCUMENT m_document = nullptr;
+    PDFiumDocument m_document;
 };
 
 class PageHandle {

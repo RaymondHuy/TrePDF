@@ -5,6 +5,7 @@
 #include "CtanFontProvider.h"
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -490,6 +491,7 @@ bool FontDownloadService::stageFont(const QByteArray &data, Face &face)
     QString error;
     if (!ApplicationFonts::validateDownloadedFontData(
             data, m_family, face.bold, face.italic, requiredCharacter(face), error)) {
+        qWarning().noquote() << "Font download validation failed for" << m_family << ':' << error;
         //% "The downloaded font could not be validated or stored in TrePDF's font folder."
         complete(false, qtTrId("FontDownloadInstallFailed"));
         return false;
@@ -546,6 +548,7 @@ void FontDownloadService::installFamily()
     }
     QString error;
     if (!pending.isEmpty() && !ApplicationFonts::installDownloadedFonts(pending, error)) {
+        qWarning().noquote() << "Font download installation failed for" << m_family << ':' << error;
         //% "The downloaded font could not be validated or stored in TrePDF's font folder."
         complete(false, qtTrId("FontDownloadInstallFailed"));
         return;

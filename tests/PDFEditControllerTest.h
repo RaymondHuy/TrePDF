@@ -384,6 +384,7 @@ private slots:
     void savesEditAfterDeletingEarlierPage();
     void savesBlankAfterDeletingAllSourcePages();
     void savesCurrentFileRoundTrip();
+    void savesExternalPageFourOnSamePath();
     void savesUnchangedCopyRoundTrip();
     void savesMultipleDraftsOnSamePage();
     void savesExpandedFrameBeforeRightColumn();

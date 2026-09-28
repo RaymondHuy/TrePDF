@@ -16,6 +16,11 @@ Các file chính:
   object gốc khi đã có draft.
 - [`PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp): thay object nguồn bằng các
   text run đã layout và ghi PDF theo transaction.
+- [`ApplicationFonts.cpp`](../src/ApplicationFonts.cpp) và
+  [`WindowsSystemFonts.h`](../src/WindowsSystemFonts.h)/
+  [`WindowsSystemFonts.cpp`](../src/WindowsSystemFonts.cpp): kiểm exact face,
+  glyph và quyền nhúng; adapter DirectWrite cung cấp bảng font Windows cho bộ
+  dựng sfnt dùng chung với macOS.
 - [`PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) và
   [`PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml):
   đặt `EditOverlay` trùng chính xác lên `PDFPageView`.
@@ -543,12 +548,14 @@ resource và đăng ký lúc khởi động để phục vụ fallback; không l
 tiên font nhúng → hệ thống → cache của resolver.
 
 Dropdown font family hiển thị bundled faces phù hợp với style hiện tại trước,
-sau đó các system face vượt qua probe CoreText nhẹ: đúng family/style, không
+sau đó các system face vượt qua probe CoreText trên macOS hoặc DirectWrite trên
+Windows: đúng family/style thật, không dùng đậm/nghiêng mô phỏng, không
 phải color/composite, dùng outline `glyf/loca`, không phải CFF/CFF2 hoặc
 variable, và `OS/2.fsType` cho phép Installable hoặc Editable embedding. Kết
 quả được cache theo `(family, bold, italic)`; probe không dựng sfnt và không giữ
-font bytes. Font nguồn PDF bị lọc vẫn được hiển thị trong ô hiện tại nhưng không
-được chèn vào popup. API đổi family kiểm tra lại mọi style span trong range để
+toàn bộ font bytes. Windows kiểm coverage bằng glyph index của đúng DirectWrite
+face, không để Qt tự bổ sung glyph từ font khác. Font nguồn PDF bị lọc vẫn được
+hiển thị trong ô hiện tại nhưng không được chèn vào popup. API đổi family kiểm tra lại mọi style span trong range để
 caller ngoài QML không bypass bộ lọc. Coverage theo text và giới hạn 64 MiB của
 system face được writer kiểm tra chính xác lúc Save.
 
@@ -1433,12 +1440,14 @@ ASCII và coverage tiếng Việt nếu nguồn công bố hỗ trợ.
    thể là subset thiếu glyph hoặc ToUnicode mapping. Sau khi xét bytes embedded,
    writer tìm đúng face có đủ glyph theo thứ tự hệ thống → cache app → bundled,
    kể cả với family Arial/Helvetica kế thừa từ nguồn, rồi nhúng dạng CID Unicode.
-   Với font hệ thống, prepare resolve đúng face Regular/Bold/Italic bằng CoreText
-   trên GUI thread, lấy từng
-   bảng của face đó và dựng một sfnt TrueType đơn-face. Cách này hỗ trợ cả font
-   nằm trong TTC mà không để PDFium mặc định lấy face 0; bytes được snapshot vào
-   save request trước khi worker chạy. Nhánh font hệ thống chỉ chấp nhận outline `glyf/loca`,
-   đủ glyph, không quá 64 MiB và `OS/2.fsType` cho phép Installable hoặc Editable
+   Với font hệ thống, `prepare()` resolve đúng family và face Regular/Bold/Italic/
+   Bold Italic bằng CoreText trên macOS hoặc DirectWrite trên Windows. Windows
+   từ chối face mô phỏng và style gần nhất không khớp. Các bảng của face đi qua
+   bộ dựng sfnt chung trong `ApplicationFonts` để tạo một TrueType đơn-face,
+   kể cả nguồn TTC, không để PDFium mặc định lấy face 0. Luồng Save từ UI chụp
+   bytes vào request ở bước chuẩn bị trên GUI thread; worker dùng snapshot,
+   không giữ handle DirectWrite. Nhánh font hệ thống chỉ chấp nhận outline
+   `glyf/loca`, đủ glyph, không quá 64 MiB và `OS/2.fsType` cho phép Installable hoặc Editable
    embedding. Font hệ thống CFF/CFF2, variable, color hoặc bitmap-only, Preview & Print-only hoặc
    Restricted sẽ làm save thất bại thay vì bị thay thế âm thầm. Các object không
    sửa vẫn giữ font resource cũ. Font mới nhúng giữ bảng shaping/kerning để
@@ -1495,10 +1504,18 @@ ASCII và coverage tiếng Việt nếu nguồn công bố hỗ trợ.
    `FPDFPage_GenerateContent()` cho từng page đã đổi. Draft xóa image không tạo
    replacement object.
 6. Serialize bằng `FPDF_SaveAsCopy()` với
-   `FPDF_NO_INCREMENTAL` qua `QSaveFile`; chỉ commit file
+   `FPDF_NO_INCREMENTAL` qua `PDFAtomicSaveFile`; chỉ commit file
    đích khi toàn bộ quá trình thành công.
 7. Mở lại file đã lưu bằng `PDFDocument::open()`. Các signal đổi document/revision
    reset draft và undo/redo chỉ sau khi reopen thành công.
+
+Trên Windows, `PDFiumDocument` mở reader với `FILE_SHARE_DELETE`, còn
+`PDFAtomicSaveFile` giữ staging/check lỗi của `QSaveFile` và dùng atomic rename
+`FileRenameInfoEx` với POSIX semantics để thay file vẫn còn reader. Reader cũ
+tiếp tục đọc bản cũ đến khi đóng; mở lại path lấy bản đã lưu. Các stage PDF dùng
+`QTemporaryDir` để không giữ handle khóa file đích. Nền tảng khác giữ native
+PDFium loader và `QSaveFile` commit. Xem `windows-clion.md` về giới hạn file
+trên 4 GiB và filesystem không hỗ trợ extended rename.
 
 FreeText không đi qua các bước thay page object ở trên. Writer tạo/cập nhật
 `FPDF_ANNOT_FREETEXT`, giữ geometry và metadata comment, rồi canonicalizer dựng
