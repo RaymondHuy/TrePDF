@@ -118,6 +118,12 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFWidgetAnnotationSuppression.h
 )
 
+qt_add_resources(trepdf_edit_controller_tests "trepdf_test_font_catalog"
+    PREFIX "/trepdf/font-catalog"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/../src/assets/fonts"
+    FILES ../src/assets/fonts/ctan-catalog.json
+)
+
 if(TREPDF_BUNDLED_FONT_FILES)
     qt_add_resources(trepdf_edit_controller_tests "trepdf_test_fonts"
         PREFIX "/trepdf/fonts"

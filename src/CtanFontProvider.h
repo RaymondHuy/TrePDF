@@ -2,8 +2,8 @@
 
 #include "IFontProvider.h"
 
-// Only the reviewed TeX Gyre text families below are offered. The service owns
-// the redirect count, byte limits, font validation and installation transaction.
+// The bundled JSON catalogue lists exact families and upstream font paths.
+// The service owns transport limits, font validation and atomic installation.
 class CtanFontProvider final : public IFontProvider
 {
 public:

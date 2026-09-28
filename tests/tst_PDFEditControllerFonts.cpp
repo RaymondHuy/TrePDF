@@ -2769,7 +2769,7 @@ void PDFEditControllerTest::limitsCtanCatalogueToReviewedFamilies()
                 QVERIFY(provider.allowsUrl(backup, IFontProvider::Resource::Font));
         }
     }
-    for (const QString &name : {QStringLiteral("TeX Gyre Adventor"),
+    for (const QString &name : {QStringLiteral("TrePDF Uncatalogued Font"),
                                QStringLiteral("TeX Gyre Termes Extra"),
                                QStringLiteral("texgyretermes"), QStringLiteral("Arial")}) {
         const auto family = provider.resolve(name, {});
@@ -2777,6 +2777,298 @@ void PDFEditControllerTest::limitsCtanCatalogueToReviewedFamilies()
         QVERIFY(family.license.isEmpty());
         QVERIFY(provider.faceUrl(family, false, false).isEmpty());
         QVERIFY(provider.fallbackFaceUrls(family, false, false).isEmpty());
+    }
+}
+
+void PDFEditControllerTest::loadsEveryCtanCatalogueEntry()
+{
+    QFile catalogue(QStringLiteral(":/trepdf/font-catalog/ctan-catalog.json"));
+    QVERIFY(catalogue.open(QIODevice::ReadOnly));
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(catalogue.readAll(), &error);
+    QCOMPARE(error.error, QJsonParseError::NoError);
+    const QJsonObject root = document.object();
+    QCOMPARE(root.value(QStringLiteral("version")).toInt(), 1);
+    const QJsonArray entries = root.value(QStringLiteral("families")).toArray();
+    QVERIFY(entries.size() > 5);
+    const QStringList styles{QStringLiteral("regular"), QStringLiteral("italic"),
+                             QStringLiteral("bold"), QStringLiteral("bolditalic")};
+    QSet<QString> familyNames;
+    QSet<QString> fontPaths;
+    CtanFontProvider provider;
+    for (const QJsonValue &value : entries) {
+        const QJsonObject entry = value.toObject();
+        const QString name = entry.value(QStringLiteral("name")).toString();
+        QVERIFY(!name.isEmpty());
+        QVERIFY2(!familyNames.contains(name.toCaseFolded()), qPrintable(name));
+        familyNames.insert(name.toCaseFolded());
+        const auto family = provider.resolve(QStringLiteral(" ") + name.toLower()
+                                                 + QStringLiteral(" "), {});
+        QCOMPARE(family.availability, IFontProvider::Availability::Found);
+        QCOMPARE(family.name, name);
+        QCOMPARE(family.license, entry.value(QStringLiteral("license")).toString());
+        QVERIFY(!family.license.isEmpty());
+        QCOMPARE(family.source, QUrl(entry.value(QStringLiteral("source")).toString()));
+        QStringList subsets;
+        for (const QJsonValue &subset : entry.value(QStringLiteral("subsets")).toArray())
+            subsets.append(subset.toString());
+        QCOMPARE(family.subsets, subsets.join(QLatin1Char(',')));
+        QCOMPARE(family.vietnamese, subsets.contains(QStringLiteral("vietnamese")));
+        const QJsonObject faces = entry.value(QStringLiteral("faces")).toObject();
+        QVERIFY(!faces.isEmpty());
+        for (int style = 0; style < styles.size(); ++style) {
+            const QString path = faces.value(styles.at(style)).toString();
+            QCOMPARE(family.styles[style], !path.isEmpty());
+            const QUrl url = provider.faceUrl(family, style & 2, style & 1);
+            const QList<QUrl> backups = provider.fallbackFaceUrls(family, style & 2, style & 1);
+            if (path.isEmpty()) {
+                QVERIFY(url.isEmpty());
+                QVERIFY(backups.isEmpty());
+                continue;
+            }
+            QVERIFY2(!fontPaths.contains(path), qPrintable(path));
+            fontPaths.insert(path);
+            QCOMPARE(url, QUrl(QStringLiteral("https://mirror.ctan.org") + path));
+            QVERIFY(provider.allowsUrl(url, IFontProvider::Resource::Font));
+            QVERIFY(!provider.allowsUrl(url, IFontProvider::Resource::Metadata));
+            QVERIFY(!provider.allowsUrl(url, IFontProvider::Resource::Stylesheet));
+            QCOMPARE(backups.size(), 2);
+            for (const QUrl &backup : backups)
+                QVERIFY(provider.allowsUrl(backup, IFontProvider::Resource::Font));
+            const QUrl mirror(QStringLiteral("https://mirror.example.org/tex-archive") + path);
+            QVERIFY(provider.allowsRedirect(url, mirror, IFontProvider::Resource::Font));
+            QVERIFY(!provider.allowsUrl(mirror, IFontProvider::Resource::Font));
+            QVERIFY(!provider.allowsRedirect(backups.first(), mirror, IFontProvider::Resource::Font));
+            for (const QString &unsafe : {
+                     QStringLiteral("http://mirror.ctan.org") + path,
+                     QStringLiteral("https://mirror.ctan.org") + path + QStringLiteral("?download=1"),
+                     QStringLiteral("https://mirror.ctan.org") + path + QStringLiteral("#font"),
+                     QStringLiteral("https://mirror.ctan.org/../") + path.mid(1),
+                     QStringLiteral("https://mirror.ctan.org/%2e%2e") + path,
+                     QStringLiteral("https://127.0.0.1") + path}) {
+                const QUrl unsafeUrl(unsafe);
+                QVERIFY2(!provider.allowsUrl(unsafeUrl, IFontProvider::Resource::Font),
+                         qPrintable(unsafe));
+                QVERIFY2(!provider.allowsRedirect(url, unsafeUrl, IFontProvider::Resource::Font),
+                         qPrintable(unsafe));
+            }
+        }
+    }
+    const auto inconsolata = provider.resolve(QStringLiteral("Inconsolatazi4"), {});
+    QCOMPARE(inconsolata.availability, IFontProvider::Availability::Found);
+    QVERIFY(inconsolata.styles[0]);
+    QVERIFY(!inconsolata.styles[1]);
+    QVERIFY(inconsolata.styles[2]);
+    QVERIFY(!inconsolata.styles[3]);
+    GoogleFontsProvider google;
+    QCOMPARE(google.resolve(inconsolata.name, fontMetadata(QStringLiteral("Inconsolata")))
+                 .availability, IFontProvider::Availability::NotFound);
+}
+
+void PDFEditControllerTest::validatesExternalCtanCatalogFaces()
+{
+    const QString cachePath = qEnvironmentVariable("TREPDF_TEST_CTAN_CACHE");
+    if (cachePath.isEmpty())
+        QSKIP("Set TREPDF_TEST_CTAN_CACHE to the generated CTAN catalogue's download cache.");
+    QVERIFY(QFileInfo(cachePath).isDir());
+    QFile catalogue(QStringLiteral(":/trepdf/font-catalog/ctan-catalog.json"));
+    QVERIFY(catalogue.open(QIODevice::ReadOnly));
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(catalogue.readAll(), &parseError);
+    QCOMPARE(parseError.error, QJsonParseError::NoError);
+    const QJsonArray entries = document.object().value(QStringLiteral("families")).toArray();
+    QVERIFY(!entries.isEmpty());
+    const QDir files(cachePath);
+    const QStringList styles{QStringLiteral("regular"), QStringLiteral("italic"),
+                             QStringLiteral("bold"), QStringLiteral("bolditalic")};
+    const QString accents = QStringLiteral(
+        "\u00c0\u00c1\u00c2\u00c3\u00c8\u00c9\u00ca\u00cc\u00cd\u00d2\u00d3\u00d4\u00d5\u00d9\u00da\u00dd"
+        "\u00e0\u00e1\u00e2\u00e3\u00e8\u00e9\u00ea\u00ec\u00ed\u00f2\u00f3\u00f4\u00f5\u00f9\u00fa\u00fd"
+        "\u0102\u0103\u0110\u0111\u0128\u0129\u0168\u0169\u01a0\u01a1\u01af\u01b0");
+    QStringList failures;
+    int faceCount = 0;
+    CtanFontProvider provider;
+    for (const QJsonValue &value : entries) {
+        const QJsonObject entry = value.toObject();
+        const QString name = entry.value(QStringLiteral("name")).toString();
+        const auto family = provider.resolve(name, {});
+        if (family.availability != IFontProvider::Availability::Found) {
+            failures.append(name + QStringLiteral(": provider did not resolve catalogued family"));
+            continue;
+        }
+        const QJsonObject faces = entry.value(QStringLiteral("faces")).toObject();
+        for (int style = 0; style < styles.size(); ++style) {
+            const QString path = faces.value(styles.at(style)).toString();
+            if (path.isEmpty())
+                continue;
+            ++faceCount;
+            const QString label = name + QLatin1Char('/') + styles.at(style);
+            QStringList faceErrors;
+            const auto record = qScopeGuard([&] {
+                if (!faceErrors.isEmpty())
+                    failures.append(label + QStringLiteral(": ") + faceErrors.join(QStringLiteral("; ")));
+            });
+            QFile fontFile(files.filePath(path.mid(1)));
+            if (!fontFile.open(QIODevice::ReadOnly)) {
+                faceErrors.append(QStringLiteral("cannot read cached ") + path);
+                continue;
+            }
+            if (fontFile.size() <= 0 || fontFile.size() > 16 * 1024 * 1024) {
+                faceErrors.append(QStringLiteral("cached font is empty or exceeds the 16 MiB limit"));
+                continue;
+            }
+            const QByteArray bytes = fontFile.readAll();
+            const QRawFont font(bytes, 16.0, QFont::PreferNoHinting);
+            QString error;
+            if (!ApplicationFonts::validateDownloadedFontData(
+                    bytes, name, style & 2, style & 1, uint('z'), error)) {
+                faceErrors.append(error + QStringLiteral(" [Qt family='%1', style='%2', weight=%3, italic=%4]")
+                                             .arg(font.familyName(), font.styleName())
+                                             .arg(int(font.weight())).arg(int(font.style())));
+            }
+            if (!font.isValid()) {
+                faceErrors.append(QStringLiteral("invalid Qt raw font"));
+                continue;
+            }
+            uint missing = 0;
+            for (uint character = 32; character <= 126 && !missing; ++character) {
+                if (!font.supportsCharacter(character))
+                    missing = character;
+            }
+            if (family.vietnamese) {
+                for (QChar character : accents) {
+                    if (!missing && !font.supportsCharacter(character.unicode()))
+                        missing = character.unicode();
+                }
+                for (uint character = 0x1ea0; character <= 0x1ef9 && !missing; ++character) {
+                    if (!font.supportsCharacter(character))
+                        missing = character;
+                }
+            }
+            if (missing)
+                faceErrors.append(QStringLiteral("missing advertised glyph U+")
+                                      + QString::number(missing, 16).toUpper());
+        }
+    }
+    qInfo().noquote() << QStringLiteral("CTAN validation: %1 families, %2 faces, %3 failures")
+                            .arg(entries.size()).arg(faceCount).arg(failures.size());
+    for (const QString &failure : failures)
+        qWarning().noquote() << failure;
+    QVERIFY2(failures.isEmpty(), qPrintable(failures.mid(0, 50).join(QLatin1Char('\n'))));
+}
+
+void PDFEditControllerTest::downloadsInconsolataCtanStyles()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("Inconsolatazi4");
+    const QStringList filenames{QStringLiteral("Inconsolatazi4-Bold.otf"),
+                                QStringLiteral("Inconsolatazi4-Regular.otf")};
+    const QList<int> order{2, 0};
+    const QList<QByteArray> digests{
+        QByteArrayLiteral("515b21ca6b972d929b7362dda30548764f7541eb31cba0dabbb666433cd6552f"),
+        QByteArrayLiteral("fa4d0728e461e228e4c3b706cc0836f72cb146852a757127c92647d8c405b638")};
+    FontNetwork network;
+    network.responses = {{QByteArrayLiteral("[]")}};
+    QList<QByteArray> fonts;
+    for (int index = 0; index < filenames.size(); ++index) {
+        const QString path = QStringLiteral("assets/inconsolata/") + filenames.at(index);
+        QFile file(QFINDTESTDATA(path));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray bytes = file.readAll();
+        QVERIFY(bytes.startsWith("OTTO"));
+        QCOMPARE(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex(),
+                 digests.at(index));
+        QString error;
+        QVERIFY2(ApplicationFonts::validateDownloadedFontData(
+                     bytes, family, order.at(index) & 2, false, uint('t'), error),
+                 qPrintable(error));
+        fonts.append(bytes);
+        network.responses.append(FontResponse{bytes});
+    }
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family, true, false, uint('t'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY2(finished.first().first().toBool(), qPrintable(finished.first().at(1).toString()));
+    QCOMPARE(network.requests.size(), 3);
+    QCOMPARE(network.requests.first().url().host(), QStringLiteral("api.fontsource.org"));
+    for (int index = 0; index < filenames.size(); ++index) {
+        QCOMPARE(network.requests.at(index + 1).url(),
+                 QUrl(QStringLiteral("https://mirror.ctan.org/fonts/inconsolata/opentype/")
+                      + filenames.at(index)));
+        const auto installed = ApplicationFonts::downloadedFontFace(family, order.at(index) & 2, false);
+        QVERIFY(installed.isValid());
+        QCOMPARE(installed.data, fonts.at(index));
+    }
+    QCOMPARE(QDir(store.path).entryList({QStringLiteral("*.otf")}, QDir::Files).size(), 2);
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, true).isValid());
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, true, true).isValid());
+
+    FontNetwork cachedNetwork;
+    FontDownloadService cachedService(nullptr, &cachedNetwork);
+    QSignalSpy cachedFinished(&cachedService, &FontDownloadService::finished);
+    cachedService.start(family, false, false, uint('t'));
+    QTRY_COMPARE_WITH_TIMEOUT(cachedFinished.size(), 1, 5000);
+    QVERIFY2(cachedFinished.first().first().toBool(),
+             qPrintable(cachedFinished.first().at(1).toString()));
+    QVERIFY(cachedNetwork.requests.isEmpty());
+
+    FontNetwork italicNetwork;
+    italicNetwork.responses = {{QByteArrayLiteral("[]")}};
+    FontDownloadService italicService(nullptr, &italicNetwork);
+    QSignalSpy italicFinished(&italicService, &FontDownloadService::finished);
+    italicService.start(family, false, true, uint('t'));
+    QTRY_COMPARE_WITH_TIMEOUT(italicFinished.size(), 1, 5000);
+    QVERIFY(!italicFinished.first().first().toBool());
+    QCOMPARE(italicNetwork.requests.size(), 1);
+
+    const QString editedText = QStringLiteral("http://amyrbrown.ca tt");
+    for (int style : order) {
+        const QString source = m_temporaryDirectory.filePath(
+            QStringLiteral("inconsolata-%1-source.pdf").arg(style));
+        const QString output = m_temporaryDirectory.filePath(
+            QStringLiteral("inconsolata-%1-output.pdf").arg(style));
+        QVERIFY(createFontStylePdf(source));
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(source)));
+        controller.setDocument(&document);
+        const auto candidate = candidateForText(waitForCandidates(controller, 0),
+                                               QString::fromLatin1(kRegularText));
+        QVERIFY(!candidate.isEmpty());
+        QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+        controller.beginSelectedTextEdit();
+        controller.updateSelectedTextPreview(editedText);
+        controller.setSelectedTextRange(0, editedText.size());
+        controller.setSelectedFontFamily(family);
+        controller.setSelectedFontBold(style & 2);
+        controller.finishSelectedTextEdit();
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+        QVERIFY2(normalizedPageText(output).contains(editedText), qPrintable(pageText(output)));
+        const auto savedFont = textObjectFontInfo(output, QStringLiteral("http://"));
+        QVERIFY(savedFont.found);
+        QCOMPARE(savedFont.embedded, 1);
+        QCOMPARE(compactFontName(savedFont.familyName), compactFontName(family));
+        const auto reopened = candidateForText(waitForCandidates(controller, 0), editedText);
+        QVERIFY(!reopened.isEmpty());
+        QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+        QCOMPARE(controller.selectedFontFamily(), family);
+        const QImage rendered = renderFirstPage(output, QSize(595, 842));
+        QVERIFY(!rendered.isNull());
+        const QRectF frame = controller.selectedFrameRect();
+        const QRect region = QRectF(frame.x() * rendered.width(), frame.y() * rendered.height(),
+                                     frame.width() * rendered.width(), frame.height() * rendered.height())
+                                  .toAlignedRect().intersected(rendered.rect());
+        QVERIFY(!region.isEmpty());
+        qsizetype inkPixels = 0;
+        for (int y = region.top(); y <= region.bottom(); ++y) {
+            for (int x = region.left(); x <= region.right(); ++x) {
+                if (qGray(rendered.pixel(x, y)) < 128)
+                    ++inkPixels;
+            }
+        }
+        QVERIFY2(inkPixels > 50, "Downloaded Inconsolata must render visible glyphs after Save/reopen.");
     }
 }
 
@@ -3327,7 +3619,7 @@ void PDFEditControllerTest::doesNotProbeCtanForUnreviewedFamily()
     network.responses = {{QByteArrayLiteral("[]")}};
     FontDownloadService service(nullptr, &network);
     QSignalSpy finished(&service, &FontDownloadService::finished);
-    service.start(QStringLiteral("TeX Gyre Adventor"), false, false, uint('z'));
+    service.start(QStringLiteral("TrePDF Uncatalogued Font"), false, false, uint('z'));
     QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
     QVERIFY(!finished.first().first().toBool());
     QVERIFY(!finished.first().at(1).toString().isEmpty());

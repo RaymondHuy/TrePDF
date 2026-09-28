@@ -481,6 +481,9 @@ private slots:
     void downloadsOnlyAdvertisedFontStyles();
     void skipsCachedFontStylesWhenDownloadingFamily();
     void limitsCtanCatalogueToReviewedFamilies();
+    void loadsEveryCtanCatalogueEntry();
+    void validatesExternalCtanCatalogFaces();
+    void downloadsInconsolataCtanStyles();
     void limitsGoogleCatalogueToOpenSourceFonts();
     void isolatesEmbeddedSubsetFromCachedCompleteFace();
     void isolatesType1FontNames();
