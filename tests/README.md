@@ -54,3 +54,22 @@ To run one test, append its unchanged method name:
 ```sh
 QT_QPA_PLATFORM=offscreen cmake-build-debug/tests/trepdf_edit_controller_tests savesTextSpacingWithoutStretchingGlyphs
 ```
+
+## CTAN Font Catalogue
+
+`loadsEveryCtanCatalogueEntry` checks the packaged JSON and exact URL/style
+contracts for every entry. `downloadsInconsolataCtanStyles` uses unmodified
+upstream fixtures and a fake network to verify downloads, cache reuse, missing
+styles and PDF Save/reopen without an external network dependency.
+
+After regenerating the catalogue, validate every selected font against Qt and
+the application's runtime validator using the generator's download cache:
+
+```sh
+TREPDF_TEST_CTAN_CACHE=/tmp/trepdf-ctan-cache/files QT_QPA_PLATFORM=offscreen \
+  cmake-build-debug/tests/trepdf_edit_controller_tests validatesExternalCtanCatalogFaces
+```
+
+This optional test does not install the inspected files; it skips when the
+environment variable is unset. The normal download tests use an isolated test
+font store and never modify the user's TrePDF font cache.

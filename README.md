@@ -380,9 +380,12 @@ and other failures discovered by the final content-specific check stop the
 save with an error and keep the draft intact.
 
 The download service keeps Google Fonts first and checks CTAN only when the
-family is absent from that catalogue. Its reviewed CTAN catalogue includes
-TeX Gyre Termes, Heros, Pagella, Schola and Cursor in four styles, downloaded
-through `https://mirror.ctan.org/` under the GUST Font License. If the selected
+family is absent from that catalogue. Its CTAN catalogue is stored in
+`src/assets/fonts/ctan-catalog.json`, with exact family names, available styles,
+archive paths and upstream license metadata, rather than a C++ family list.
+The maintenance script inventories CTAN's directly published static OTF/TTF
+files and reports exclusions; it does not treat every TeX font as save-compatible.
+Font files are downloaded on demand through `https://mirror.ctan.org/`. If the selected
 mirror is blocked or unavailable, bounded retries use two explicitly listed
 official CTAN HTTPS mirrors. Validated fonts
 are saved atomically in the app cache and registered with

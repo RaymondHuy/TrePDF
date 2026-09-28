@@ -7,13 +7,13 @@ endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTOMOC ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../cmake")
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Test)
+qt_standard_project_setup()
 find_package(PDFium REQUIRED)
 find_package(ZLIB REQUIRED)
 
-add_executable(trepdf_windows_font_tests
+qt_add_executable(trepdf_windows_font_tests
     tst_WindowsSystemFonts.cpp
     ../../src/ApplicationFonts.cpp
     ../../src/PDFFontAliases.cpp
@@ -23,6 +23,11 @@ add_executable(trepdf_windows_font_tests
     ../../src/CtanFontProvider.cpp
     ../../third_party/libxlsxwriter/third_party/minizip/unzip.c
     ../../third_party/libxlsxwriter/third_party/minizip/ioapi.c
+)
+qt_add_resources(trepdf_windows_font_tests "trepdf_windows_font_catalog"
+    PREFIX "/trepdf/font-catalog"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/../../src/assets/fonts"
+    FILES ../../src/assets/fonts/ctan-catalog.json
 )
 target_include_directories(trepdf_windows_font_tests PRIVATE ../../src
     ../../third_party/libxlsxwriter/third_party/minizip)

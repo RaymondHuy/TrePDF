@@ -161,12 +161,66 @@ trong cache và đủ glyph, lượt gọi hoàn tất trước khi gửi reques
 thiếu face cần dùng, chỉ tải phần thiếu sau khi tra catalogue. Mọi face mới được xác thực trước khi
 cài đặt cả batch bằng `QSaveFile`; lỗi hoặc hủy không cài một phần family.
 
-## CTAN / TeX Gyre
+## Catalogue CTAN
 
-Catalogue cục bộ chỉ gồm TeX Gyre Termes, Heros, Pagella, Schola và Cursor,
-mỗi family có bốn face regular, italic, bold và bold italic. Đây là năm family
-thật; không ánh xạ tên font thương mại sang font thay thế. Upstream có glyph
-tiếng Việt. Kiểm tra glyph thực tế vẫn thuộc bước xác thực font tải về.
+Danh mục nằm trong `src/assets/fonts/ctan-catalog.json`, được đóng gói thành
+resource `:/trepdf/font-catalog/ctan-catalog.json` cho app và các test target.
+`CtanFontProvider` đọc một lần, tra family và đường dẫn bằng index; không còn
+danh sách family hay quy tắc ghép tên file TeX Gyre trong C++.
+
+Snapshot ngày 2026-09-28 duyệt 3.725 file OTF/TTF trực tiếp trên CTAN, chọn
+545 family / 1.123 face; 150 family đủ coverage tiếng Việt ở mọi face được
+cung cấp. Toàn bộ 1.123 face đã qua validator thực tế với Qt 6.11 trên macOS.
+Số liệu và lý do loại chi tiết nằm trong `docs/ctan-catalog-audit.json`.
+
+Mỗi entry ghi đúng `name`, `license`, `source`, `subsets` và `faces`.
+`faces` ánh xạ `regular`, `italic`, `bold`, `bolditalic` sang đường dẫn file
+trên archive CTAN. Key không có nghĩa là style đó không được cung cấp; không
+tạo nghiêng/đậm giả, không ánh xạ tên font thương mại sang font thay thế.
+Ví dụ `Inconsolatazi4` có regular và bold, không có italic/bolditalic;
+đây không phải alias của Google Fonts `Inconsolata`.
+
+Parser giới hạn dung lượng, số family, độ dài chuỗi và đường dẫn; catalogue
+hỏng hoặc trùng tên/path bị từ chối thay vì mở rộng nguồn tải. Thay đổi JSON
+cần build lại ứng dụng, không lấy URL hoặc danh mục tùy ý từ PDF/người dùng.
+Kiểm tra bytes, style, family, glyph và quyền nhúng lúc tải vẫn giữ nguyên.
+
+Danh mục được tạo từ các OTF/TTF xuất bản trực tiếp trong chỉ mục CTAN,
+không phải cam kết mọi font/gói TeX đều dùng được trong TrePDF. Font chỉ có
+Metafont/Type 1, file chỉ nằm trong archive, variable/CFF2, font màu hoặc
+face không thỏa điều kiện nhúng/nhận diện không tự động được đưa vào.
+Các face có tên legacy/typographic và style khác nhóm cũng bị loại để tránh
+backend Qt nhận nhầm family, chẳng hạn biến thể Light/Condensed được gộp
+vào tên typographic chung. Bộ lọc này không sửa hay tự tạo alias cho font.
+
+### Cập nhật danh mục
+
+Chạy từ repository root bằng Python có `fontTools` (chỉ dùng lúc bảo trì,
+không phải dependency runtime của app):
+
+```sh
+python3 scripts/fonts/update_ctan_catalog.py --cache-dir /tmp/trepdf-ctan-cache
+python3 scripts/fonts/test_update_ctan_catalog.py
+```
+
+Script tải chỉ mục `FILES.byname.gz`, danh sách package/license từ CTAN JSON
+API và bytes font vào cache bên ngoài repository. Nó đối chiếu đường dẫn
+package, metadata giấy phép do CTAN khai báo, family/style trong sfnt, quyền
+nhúng, outline tĩnh và đủ ASCII 32..126. Một face tối đa 16 MiB theo giới hạn
+download service. Không tự mở rộng ngoại lệ `ReviewedCtanFonts`.
+
+Kết quả gồm JSON dùng trong app và `docs/ctan-catalog-audit.json` ghi nguồn,
+checksum, các file được chọn và lý do loại. Lỗi tải mặc định giữ catalogue cũ;
+không âm thầm xuất bản danh mục thiếu do mạng. `--allow-partial` và `--package`
+chỉ dùng khi điều tra, có đánh dấu `provenance.partial`; không dùng kết quả đó
+để khẳng định đã quét toàn bộ. `--offline` tái tạo từ cache đã có; muốn lấy
+snapshot mới từ upstream, dùng cache directory mới để không tái sử dụng bytes cũ.
+
+Sau khi tạo, build lại app/test rồi chạy `loadsEveryCtanCatalogueEntry` và
+`validatesExternalCtanCatalogFaces` với `TREPDF_TEST_CTAN_CACHE` trỏ tới
+`<cache-dir>/files` (xem `tests/README.md`). Kiểm tra Qt thực tế là bắt buộc
+trước khi nhận danh mục mới, vì metadata sfnt không đảm bảo mọi backend Qt
+nhận cùng family/style. Không đưa thư mục cache tải font vào Git hay bundle app.
 
 Nguồn chính thức:
 
@@ -175,11 +229,10 @@ Nguồn chính thức:
 - [GUST Font License](https://ctan.org/license/gfl).
 - [LPPL 1.3c](https://www.latex-project.org/lppl/lppl-1-3c/).
 - [Danh sách và quy tắc mirror CTAN](https://ctan.org/mirrors).
+- [CTAN JSON API](https://ctan.org/help/json).
 
-Đường dẫn có dạng
-`https://mirror.ctan.org/fonts/tex-gyre/opentype/texgyre<family>-<style>.otf`.
-`<family>` chỉ nhận `termes`, `heros`, `pagella`, `schola`, `cursor`; `<style>`
-chỉ nhận `regular`, `italic`, `bold`, `bolditalic`.
+URL chính ghép `https://mirror.ctan.org` với đường dẫn chính xác từ JSON.
+Các family có thể thuộc nhiều package, không bị giới hạn vào thư mục TeX Gyre.
 
 URL ban đầu phải đúng endpoint và file trong catalogue. CTAN multiplexor có
 thể trả HTTPS redirect sang mirror khác với prefix thư mục như `/CTAN`,
@@ -203,7 +256,8 @@ không an toàn hoặc font không hợp lệ không được thử lại qua mi
 
 ### Format và lưu PDF
 
-Các file upstream là **static OpenType với CFF outlines**, không phải TTF.
+Catalogue có thể chứa static TrueType hoặc **OpenType với CFF outlines**.
+Các face TeX Gyre và Inconsolatazi4 dùng OpenType/CFF, không phải TTF.
 Không đổi đuôi hoặc giả định một font Qt hiển thị được thì writer sẽ nhúng đúng.
 `FPDFText_LoadFont` chỉ công bố Type1/TrueType; implementation PDFium gán
 `FontFile` hoặc `FontFile2` theo flag caller, không tự tạo `FontFile3` cho OTF.
@@ -232,7 +286,12 @@ hoặc gửi tới provider.
 
 ### Giấy phép và provenance
 
-GFL cho phép sử dụng, phân phối và sửa theo LPPL 1.3c hoặc mới hơn. GFL đề nghị
+Giấy phép và trang nguồn được ghi riêng cho từng family trong JSON; không
+áp dụng GFL cho toàn bộ CTAN. Metadata package có thể liệt kê nhiều giấy phép
+cho font và phần hỗ trợ TeX; khi phân phối lại phải giữ thông báo upstream
+của những file thực sự được chọn.
+
+Riêng TeX Gyre: GFL cho phép sử dụng, phân phối và sửa theo LPPL 1.3c hoặc mới hơn. GFL đề nghị
 đổi tên font/file của bản dẫn xuất, nhưng nói rõ đề nghị đổi tên này không phải
 yêu cầu pháp lý. Các nghĩa vụ LPPL về thông báo thay đổi và nguồn của bản dẫn
 xuất vẫn áp dụng. Việc gộp font với một ứng dụng độc lập không đổi giấy phép
@@ -264,3 +323,8 @@ Fixture giúp kiểm thử OpenType/CFF thật mà không phụ thuộc mạng h
 cài trên máy. `NOTICE.md` cùng thư mục ghi nguồn, checksum, phạm vi chọn
 file và cách lấy package đầy đủ; GFL, LPPL, README và manifest upstream
 được giữ nguyên. Fixture chỉ phục vụ test, không thêm vào bundle của app.
+
+`tests/assets/inconsolata/` chứa Regular/Bold nguyên bản của Inconsolatazi4
+cùng thông báo nguồn và giấy phép upstream. Regression dùng network giả để
+kiểm tra tải đúng hai style, cache, từ chối italic không có và Save/reopen
+chuỗi URL có ký tự mới; không cần truy cập CTAN khi chạy suite thông thường.
