@@ -1295,6 +1295,14 @@ Nếu render mode không suppress được hoặc suppression thất bại,
 
 ### 15.0 Resize frame
 
+Vùng bắt chuột di chuyển chỉ nằm trong khung chọn; click ra ngoài được chuyển
+đến hit-test của page để chọn đối tượng khác hoặc bỏ chọn. Nhấn chuột lên
+khung/handle chưa mở transaction geometry. Chỉ khi con trỏ vượt
+ngưỡng hệ thống `MouseArea.drag.threshold` (đo trong tọa độ scene), thao tác kéo mới gọi
+`beginSelectedFrameResize()`. Click hoặc rung chuột nhẹ không đồng bộ lại
+content bounds, tạo draft hay thêm Undo. Escape hủy cả thao tác đang chờ vượt
+ngưỡng lẫn thao tác kéo đã bắt đầu; phím mũi tên vẫn áp dụng trực tiếp.
+
 Box text đang chọn có bốn resize handle ở giữa các cạnh. Khi bắt đầu kéo,
 `beginSelectedFrameResize()` chụp `Draft` hiện tại. Trong lúc kéo, QML chuẩn hóa
 delta theo kích thước page, giới hạn frame trong `[0, 1]`, giữ kích thước tối

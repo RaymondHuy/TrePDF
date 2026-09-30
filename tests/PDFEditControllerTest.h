@@ -490,6 +490,8 @@ private slots:
     void isolatesType1FontNames();
     void preservesType1UrlThroughInlineEditing_data();
     void preservesType1UrlThroughInlineEditing();
+    void selectsSourceTextWithoutDrafting_data();
+    void selectsSourceTextWithoutDrafting();
     void fallsBackToCtanAndReusesCachedFamily();
     void loadsCachedFontInFreshProcess();
     void preservesDownloadedFontSpacingOnReusedSaveWorker();
