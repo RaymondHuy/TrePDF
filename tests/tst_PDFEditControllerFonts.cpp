@@ -1956,6 +1956,39 @@ void PDFEditControllerTest::calibratesDisplayStretchToPdfScale()
                        .arg(actualRatio, 0, 'f', 6)));
 }
 
+void PDFEditControllerTest::preservesSmallOpenTypeFontAdvances()
+{
+    // Register the fixture in memory only. PDF advances are outline units,
+    // independent of Windows' pixel-grid rounding at the editor's small size.
+    const QByteArray bytes = ctanTermesFontData(0);
+    QVERIFY(!bytes.isEmpty());
+    const int registration = QFontDatabase::addApplicationFontFromData(bytes);
+    QVERIFY(registration >= 0);
+    const auto removeFont = qScopeGuard([&] {
+        QFontDatabase::removeApplicationFont(registration);
+    });
+    const auto families = QFontDatabase::applicationFontFamilies(registration);
+    QVERIFY(!families.isEmpty());
+    const QString text = QStringLiteral(
+        "Attribution—you must attribute the work in the manner speciﬁed by the author or licensor (but not in any");
+    const QRawFont reference(bytes, 1000.0, QFont::PreferNoHinting);
+    QVERIFY(reference.isValid());
+    const auto glyphs = reference.glyphIndexesForString(text);
+    QVERIFY(!glyphs.contains(0));
+    qreal outlineWidth = 0.0;
+    for (const QPointF &advance : reference.advancesForGlyphIndexes(glyphs))
+        outlineWidth += advance.x();
+    for (const int stretch : {98, 100, 125}) {
+        const QFont font = m_controller.fontForDisplay(
+            families.first(), stretch, false, false, false, 9.0, 0.0, 0.0, true);
+        const qreal expectedWidth = outlineWidth * 9.0 / 1000.0 * stretch / 100.0;
+        const qreal width = QFontMetricsF(font).horizontalAdvance(text);
+        QVERIFY2(qAbs(width - expectedWidth) < 1.0,
+            qPrintable(QStringLiteral("Stretch %1: editor width %2, outline width %3")
+                .arg(stretch).arg(width).arg(expectedWidth)));
+    }
+}
+
 void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial_data()
 {
     QTest::addColumn<QString>("editedText");

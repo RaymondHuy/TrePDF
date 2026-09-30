@@ -702,6 +702,11 @@ PDF đích nhất. Kết quả được cache theo family, bold/italic, pixel si
 QML và `QTextLayout` của writer; giá trị logic trong draft và matrix PDF vẫn là
 `fontStretch`/`horizontalScale` ban đầu, không phải giá trị Qt đã hiệu chỉnh.
 
+Trên Windows, probe hiệu chỉnh, QFont của editor/preview và QFont của writer
+cùng dùng `PreferNoHinting`. Layout tính bằng điểm PDF rồi mới scale theo zoom;
+làm tròn advance theo pixel màn hình ở cỡ nhỏ có thể khiến font OTF giãn sai
+và nhiều giá trị stretch cho cùng chiều rộng. Không đổi chế độ hinting của macOS.
+
 Khi người dùng chọn một family khác, stretch của range được đổi về `100` để
 không mang scale của font nguồn sang font mới. Chọn lại chính family hiện tại
 khi stretch khác `100` cũng là thao tác normalize rõ ràng; cách này cho phép

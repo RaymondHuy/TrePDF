@@ -241,6 +241,7 @@ private slots:
     void alignsSelectedParagraphsWithUndoRedo();
     void calibratesDisplayStretchToPdfScale_data();
     void calibratesDisplayStretchToPdfScale();
+    void preservesSmallOpenTypeFontAdvances();
     void appliesFontStylesToDisplayFont_data();
     void appliesFontStylesToDisplayFont();
     void savesEditedTextRoundTrip();

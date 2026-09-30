@@ -157,6 +157,11 @@ qreal fontAdvanceForStretch(const QString &family,
     font.setItalic(italic);
     font.setPixelSize(pixelSize);
     font.setStretch(stretch);
+#ifdef Q_OS_WIN
+    // Match PDF-point editor/save layout. GDI's pixel-rounded advances can
+    // collapse different stretch values at small sizes, especially for OTF.
+    font.setHintingPreference(QFont::PreferNoHinting);
+#endif
     return QFontMetricsF(font).horizontalAdvance(fontStretchProbe());
 }
 
