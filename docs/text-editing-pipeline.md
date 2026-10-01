@@ -10,8 +10,9 @@ Các file chính:
   geometry/font, quyết định `editable`, selection và draft.
 - [`PDFEditController.h`](../src/PDFEditController.h): cấu trúc `Candidate` và
   các property đưa sang QML.
-- [`EditOverlay.qml`](../src/Components/EditOverlay.qml): hit test, hover box,
-  selection box và rich `TextEdit` khi edit.
+- [`EditOverlay.qml`](../src/Components/EditOverlay.qml) (macOS và nền tảng khác)
+  và [`Windows/EditOverlay.qml`](../src/Components/Windows/EditOverlay.qml)
+  (Windows): hit test, hover box, selection box và rich `TextEdit` khi edit.
 - [`PDFPageItem.cpp`](../src/PDFPageItem.cpp): render lại page mà tạm ẩn text
   object gốc khi đã có draft.
 - [`PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp): thay object nguồn bằng các
@@ -24,6 +25,12 @@ Các file chính:
 - [`PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) và
   [`PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml):
   đặt `EditOverlay` trùng chính xác lên `PDFPageView`.
+
+CMake chọn đúng file overlay theo OS đích của bản build (`WIN32`) và chỉ đăng ký
+một type `TrePDF.EditOverlay`. `PageInteractionOverlay` dùng type có namespace
+này để tránh nạp nhầm file gốc từ cùng thư mục. Các test dùng chung helper chọn
+file theo OS và đăng ký cùng type; bản Windows giữ đường dẫn icon tương đối
+tới `src/assets` từ thư mục con `Windows`.
 
 ## 1. Tổng quan luồng xử lý
 
@@ -1295,8 +1302,8 @@ Nếu render mode không suppress được hoặc suppression thất bại,
 
 ### 15.0 Resize frame
 
-Vùng bắt chuột di chuyển chỉ nằm trong khung chọn; click ra ngoài được chuyển
-đến hit-test của page để chọn đối tượng khác hoặc bỏ chọn. Nhấn chuột lên
+Trên Windows, vùng bắt chuột di chuyển chỉ nằm trong khung chọn; click ra ngoài
+được chuyển đến hit-test của page để chọn đối tượng khác hoặc bỏ chọn. Nhấn chuột lên
 khung/handle chưa mở transaction geometry. Chỉ khi con trỏ vượt
 ngưỡng hệ thống `MouseArea.drag.threshold` (đo trong tọa độ scene), thao tác kéo mới gọi
 `beginSelectedFrameResize()`. Click hoặc rung chuột nhẹ không đồng bộ lại

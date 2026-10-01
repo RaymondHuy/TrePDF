@@ -794,7 +794,7 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
     QQmlComponent component(&engine, QUrl::fromLocalFile(
-        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+        editOverlayQmlPath()));
     const QSizeF pageSize = document.pageSize(0);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
@@ -1219,7 +1219,7 @@ void PDFEditControllerTest::keepsSourceSpacingThroughQmlEditing()
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
     QQmlComponent component(&engine, QUrl::fromLocalFile(
-        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+        editOverlayQmlPath()));
     const QSizeF pageSize = document.pageSize(0);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},

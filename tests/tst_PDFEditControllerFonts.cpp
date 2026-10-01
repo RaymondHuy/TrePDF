@@ -3184,6 +3184,8 @@ void PDFEditControllerTest::fallsBackToCtanAndReusesCachedFamily()
         const auto installed = ApplicationFonts::downloadedFontFace(family, style & 2, style & 1);
         QVERIFY(installed.isValid());
         QCOMPARE(installed.data, ctanTermesFontData(style));
+        QVERIFY2(installed.data.capacity() <= 2 * installed.data.size(),
+                 "Reading a cached font must not allocate the maximum allowed font size.");
         QVERIFY(ApplicationFonts::isFontFaceSelectable(family, style & 2, style & 1));
     }
     // Every style is the original reviewed OpenType/CFF program from CTAN.
@@ -3317,6 +3319,9 @@ void PDFEditControllerTest::loadsCachedFontInFreshProcess()
     QVERIFY(cached.data.startsWith("OTTO"));
     QCOMPARE(QCryptographicHash::hash(cached.data, QCryptographicHash::Sha256).toHex(),
              QByteArrayLiteral("cc3fe7c707b81428d23d54df3eadd9228a2bf6a4d43125d94df56f5f63134659"));
+    // Native font engines can retain this buffer for the lifetime of the face.
+    QVERIFY2(cached.data.capacity() <= 2 * cached.data.size(),
+             "A small cached font must not retain a buffer sized for the font safety limit.");
     QCOMPARE(QRawFont(cached.data, 16.0, QFont::PreferNoHinting).familyName(), family);
     QVERIFY(ApplicationFonts::fontFaceSupportsText(
         family, false, false, QStringLiteral("tiếng Việt z"), ApplicationFonts::FontSource::Downloaded));
@@ -4380,7 +4385,9 @@ void PDFEditControllerTest::selectsSourceTextWithoutDrafting()
     themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
-    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral(
+        "import TrePDF as PlatformComponents\nPlatformComponents.EditOverlay {}"), QUrl());
     const QSizeF pageSize = pdf.pageSize(pageIndex);
     const qreal pageWidth = pageSize.width() * zoom;
     const qreal pageHeight = pageSize.height() * zoom;
@@ -4676,7 +4683,7 @@ void PDFEditControllerTest::preservesType1UrlThroughInlineEditing()
     themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
-    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
     const QSizeF pageSize = pdf.pageSize(pageIndex);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), pageIndex}, {QStringLiteral("pooled"), false},
@@ -5021,7 +5028,7 @@ void PDFEditControllerTest::opensInlineEditorAfterFontPreparation()
     themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
-    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
     const QSizeF size = pdf.pageSize(0);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},

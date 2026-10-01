@@ -813,6 +813,15 @@ QRectF boundingRectForCoordinateMaps(const QVariantList &values)
     return bounds;
 }
 
+QString editOverlayQmlPath()
+{
+#ifdef Q_OS_WIN
+    return QFINDTESTDATA("../src/Components/Windows/EditOverlay.qml");
+#else
+    return QFINDTESTDATA("../src/Components/EditOverlay.qml");
+#endif
+}
+
 bool registerQmlTestTypes(const QString &themePath)
 {
     static bool registered = false;
@@ -905,10 +914,15 @@ bool registerQmlTestTypes(const QString &themePath)
         if (typeName == QLatin1String("AppTheme")) {
             continue;
         }
+        const QString qmlPath = typeName == QLatin1String("EditOverlay")
+            ? editOverlayQmlPath()
+            : componentsDirectory.absoluteFilePath(fileName);
+        if (qmlPath.isEmpty()) {
+            return false;
+        }
         const QByteArray encodedTypeName = typeName.toUtf8();
         if (qmlRegisterType(
-                QUrl::fromLocalFile(
-                    componentsDirectory.absoluteFilePath(fileName)),
+                QUrl::fromLocalFile(qmlPath),
                 "TrePDF",
                 1,
                 0,

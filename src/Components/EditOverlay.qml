@@ -42,7 +42,6 @@ Item {
     property bool applyingEditorDocumentFormat: false
     property bool suppressNextEditorReload: false
     property bool editorLayoutDirty: false
-    property Item pendingFrameDrag: null
     property bool resizingFrame: false
     property string resizingObjectId: ""
     property var frameResizePreview: ({})
@@ -919,12 +918,6 @@ Item {
             Math.max(2, (Number(overlayExtent) - 8) / 2))
     }
 
-    function dragThresholdReached(startPosition, currentPosition, threshold) {
-        return Math.abs(currentPosition.x - startPosition.x)
-            + Math.abs(currentPosition.y - startPosition.y)
-                >= threshold
-    }
-
     function resizeCursorForHandle(horizontal, vertical) {
         const rotation = ((viewRotation % 360) + 360) % 360
         const quarterTurn = rotation === 90 || rotation === 270
@@ -1404,7 +1397,6 @@ Item {
     }
 
     function startFrameResize() {
-        pendingFrameDrag = null
         controller.beginSelectedFrameResize()
         resizingFrame = true
         resizingObjectId = controller.selectedObjectId
@@ -1415,7 +1407,6 @@ Item {
     }
 
     function finishFrameResize() {
-        pendingFrameDrag = null
         if (!resizingFrame)
             return
 
@@ -1427,7 +1418,6 @@ Item {
     }
 
     function cancelFrameResize() {
-        pendingFrameDrag = null
         if (!resizingFrame)
             return
 
@@ -2381,7 +2371,6 @@ Item {
         }
 
         function onSelectionChanged() {
-            root.pendingFrameDrag = null
             if (root.resizingFrame
                     && (root.controller.selectedPage !== root.page
                         || root.controller.selectedObjectId
@@ -4220,20 +4209,12 @@ Item {
 
             property rect dragStartFrameRect: Qt.rect(0, 0, 0, 0)
             property point dragStartPosition: Qt.point(0, 0)
-            property point dragStartScenePosition: Qt.point(0, 0)
-            readonly property bool dragPending: root.pendingFrameDrag === moveObjectMouse
 
             anchors.fill: parent
             enabled: !root.editing
                 && root.isMovableKind(root.controller.selectedKind)
             containmentMask: QtObject {
                 function contains(point: point): bool {
-                    // A containment mask replaces the item's rectangular hit test.
-                    if (point.x < 0 || point.y < 0
-                            || point.x >= moveObjectMouse.width
-                            || point.y >= moveObjectMouse.height) {
-                        return false
-                    }
                     if (!root.isShapeKind(root.controller.selectedKind))
                         return true
 
@@ -4303,23 +4284,13 @@ Item {
                 selectionActions.close()
                 dragStartFrameRect = resizeOverlay.layoutFrameRect
                 dragStartPosition = mapToItem(root, mouse.x, mouse.y)
-                dragStartScenePosition = mapToItem(null, mouse.x, mouse.y)
-                root.pendingFrameDrag = moveObjectMouse
+                root.startFrameResize()
                 mouse.accepted = true
             }
             onPositionChanged: mouse => {
-                if (!pressed || (!dragPending && !root.resizingFrame))
+                if (!pressed || !root.resizingFrame)
                     return
 
-                if (dragPending) {
-                    if (!root.dragThresholdReached(
-                            dragStartScenePosition,
-                            mapToItem(null, mouse.x, mouse.y),
-                            drag.threshold)) {
-                        return
-                    }
-                    root.startFrameResize()
-                }
                 const currentPosition = mapToItem(root, mouse.x, mouse.y)
                 root.controller.updateSelectedFrameRect(root.movedFrameRect(
                     dragStartFrameRect,
@@ -4327,7 +4298,6 @@ Item {
                     currentPosition.y - dragStartPosition.y))
             }
             onReleased: {
-                root.pendingFrameDrag = null
                 if (!root.resizingFrame)
                     return
 
@@ -4477,9 +4447,6 @@ Item {
                 MouseArea {
                     id: resizeMouse
 
-                    property point dragStartScenePosition: Qt.point(0, 0)
-                    readonly property bool dragPending: root.pendingFrameDrag === resizeMouse
-
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton
                     hoverEnabled: true
@@ -4497,29 +4464,19 @@ Item {
                         selectionActions.close()
                         resizeHandle.dragStartFrameRect
                             = resizeOverlay.frameRect
+                        if (root.editing)
+                            root.editorLayoutDirty = true
                         resizeHandle.dragStartPosition = mapToItem(
                             root,
                             mouse.x,
                             mouse.y)
-                        dragStartScenePosition = mapToItem(null, mouse.x, mouse.y)
-                        root.pendingFrameDrag = resizeMouse
+                        root.startFrameResize()
                         mouse.accepted = true
                     }
                     onPositionChanged: mouse => {
-                        if (!pressed || (!dragPending && !root.resizingFrame))
+                        if (!pressed || !root.resizingFrame)
                             return
 
-                        if (dragPending) {
-                            if (!root.dragThresholdReached(
-                                    dragStartScenePosition,
-                                    mapToItem(null, mouse.x, mouse.y),
-                                    drag.threshold)) {
-                                return
-                            }
-                            if (root.editing)
-                                root.editorLayoutDirty = true
-                            root.startFrameResize()
-                        }
                         const currentPosition = mapToItem(root, mouse.x, mouse.y)
                         root.controller.updateSelectedFrameRect(
                             root.resizedFrameRect(
@@ -4536,7 +4493,6 @@ Item {
                             Qt.callLater(root.syncSelectedDraftContentBounds)
                     }
                     onReleased: {
-                        root.pendingFrameDrag = null
                         if (!root.resizingFrame)
                             return
 

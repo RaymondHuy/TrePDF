@@ -17,8 +17,7 @@ void PDFEditControllerTest::coalescesInkPreviewUpdates()
 
     const QString themePath = QFINDTESTDATA(
         "../src/Components/AppTheme.qml");
-    const QString overlayPath = QFINDTESTDATA(
-        "../src/Components/EditOverlay.qml");
+    const QString overlayPath = editOverlayQmlPath();
     QVERIFY(!themePath.isEmpty());
     QVERIFY(!overlayPath.isEmpty());
     QVERIFY(registerQmlTestTypes(themePath));

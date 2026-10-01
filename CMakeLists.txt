@@ -149,6 +149,12 @@ elseif(WIN32)
     target_sources(trepdf PRIVATE $<TARGET_OBJECTS:trepdf_windows_resources>)
 endif()
 
+if(WIN32)
+    set(TREPDF_EDIT_OVERLAY_QML src/Components/Windows/EditOverlay.qml)
+else()
+    set(TREPDF_EDIT_OVERLAY_QML src/Components/EditOverlay.qml)
+endif()
+
 qt_add_qml_module(trepdf
     URI TrePDF
     SOURCES
@@ -251,7 +257,7 @@ qt_add_qml_module(trepdf
         src/Components/DrawingCommentPropertiesPanel.qml
         src/Components/ImagePropertiesPanel.qml
         src/Components/DropdownOptionsPanel.qml
-        src/Components/EditOverlay.qml
+        ${TREPDF_EDIT_OVERLAY_QML}
         src/Components/EditRibbon.qml
         src/Components/ExportRibbon.qml
         src/Components/FormChoiceOverlay.qml

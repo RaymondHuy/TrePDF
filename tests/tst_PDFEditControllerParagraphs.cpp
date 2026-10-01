@@ -618,7 +618,7 @@ void PDFEditControllerTest::justifiesSourceParagraphThroughQmlOverlay()
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
     QQmlComponent component(&engine, QUrl::fromLocalFile(
-        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+        editOverlayQmlPath()));
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
         {QStringLiteral("draftTextureCurrent"), false},
@@ -915,7 +915,7 @@ void PDFEditControllerTest::editsSourceParagraphThroughQmlOverlay()
     QVERIFY(!candidate.isEmpty());
     const QRectF originalFrame = candidate.value(QStringLiteral("frameRect")).toRectF();
     const QString themePath = QFINDTESTDATA("../src/Components/AppTheme.qml");
-    const QString overlayPath = QFINDTESTDATA("../src/Components/EditOverlay.qml");
+    const QString overlayPath = editOverlayQmlPath();
     QVERIFY(registerQmlTestTypes(themePath));
     QQuickWindow window;
     window.resize(595, 842);
@@ -1052,7 +1052,7 @@ void PDFEditControllerTest::preservesMultilineSourceClusterSpacingThroughQmlEdit
     themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
-    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
     const QSizeF pageSize = document.pageSize(0);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
@@ -1172,7 +1172,7 @@ void PDFEditControllerTest::keepsSourceParagraphLayoutStableAtFractionalZoom()
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
     QQmlComponent component(&engine, QUrl::fromLocalFile(
-        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+        editOverlayQmlPath()));
     const QSizeF pageSize = document.pageSize(0);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
@@ -1372,7 +1372,7 @@ void PDFEditControllerTest::preservesSourceLineBaselinesThroughEditing()
     themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
-    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
     const QSizeF pageSize = pdf.pageSize(pageIndex);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), pageIndex}, {QStringLiteral("pooled"), false},
