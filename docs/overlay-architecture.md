@@ -361,7 +361,11 @@ controller riêng của từng tab; toggle không tạo draft/history và không
 PDF. Checkbox bị vô hiệu hóa khi đang lưu hoặc ảnh không hỗ trợ resize.
 QML dùng `selectedImageResizable` để tắt resize khi source image có custom
 clip, matrix không hợp lệ hoặc nằm một phần ngoài page; move/delete top-level
-vẫn theo capability hiện có. Image trong Form XObject được bảo vệ. Preview ảnh
+vẫn theo capability hiện có. Form top-level chỉ chứa một ảnh qua chuỗi Form đơn
+đủ điều kiện dùng cùng panel, gesture và history như image. Cả preview và Save
+chỉ biến đổi occurrence ngoài cùng để giữ nguyên ảnh, mask, clip nội bộ và các
+trang dùng chung Form. Form có nội dung khác, mark, clip ngoài, transparency
+ngoài hoặc fill ngoài khác đen đục vẫn chỉ đọc. Preview ảnh
 nguồn chạy trên render worker bằng phép affine từ source frame bất biến tới
 frame hiện tại; không dùng bitmap snapshot trên GUI như ảnh mới.
 Panel có hai nút **Xoay trái 90°** và **Xoay phải 90°**, gọi

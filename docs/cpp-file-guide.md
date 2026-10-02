@@ -543,8 +543,13 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   Redact/Projection dùng kind `comment` chỉ đọc. Mọi đường sửa, xóa và reply
   đều kiểm `commentTextReadOnly` trước khi tạo draft.
 - Move/delete top-level source text/image và resize source image đủ điều kiện;
-  bảo vệ object lồng trong Form XObject. Image top-level không đủ điều kiện
-  resize giữ move/delete hiện có.
+  Form top-level chỉ chứa một ảnh qua tối đa 16 lớp Form đơn được nhận diện như
+  một image candidate. Move/resize/rotate/delete tác động vào occurrence ngoài
+  cùng, không sửa shared stream nên các occurrence/trang khác giữ nguyên.
+  Form có nhiều object, content mark, clip ngoài, transparency ngoài hoặc màu
+  fill ngoài khác đen đục vẫn
+  được bảo vệ; image mask và clip nội bộ được giữ nguyên. Image top-level không
+  đủ điều kiện resize giữ move/delete hiện có.
 - Insert/delete page transient với điều kiện tài liệu luôn còn ít nhất một trang.
 
 **Save orchestration:**

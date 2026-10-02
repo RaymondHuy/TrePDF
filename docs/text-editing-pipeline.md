@@ -269,11 +269,13 @@ trong worker scan dưới PDFium lock; QML/GUI chỉ đọc geometry normalized 
 
 TrePDF xử lý đệ quy:
 
-- `FPDF_PAGEOBJ_FORM`: ghép ma trận của form rồi duyệt các child;
+- `FPDF_PAGEOBJ_FORM`: Form top-level chỉ chứa một ảnh qua tối đa 16 lớp
+  single-child Form đủ điều kiện trở thành một image candidate tại path ngoài
+  cùng; các Form khác ghép ma trận rồi duyệt child;
 - `FPDF_PAGEOBJ_TEXT`: có thể trở thành text candidate;
 - `FPDF_PAGEOBJ_IMAGE`: tạo candidate hỗ trợ di chuyển/xóa; image top-level
   editable nếu PDF cho phép sửa nội dung và có thêm `imageResizable` khi đủ
-  điều kiện đổi kích thước. Image trong Form XObject không editable;
+  điều kiện đổi kích thước. Image trong Form không đủ điều kiện vẫn chỉ đọc;
 - các loại path/shading khác: bỏ qua.
 
 Ma trận parent `P` và ma trận local `L` được ghép thành `T = P × L`:
@@ -513,7 +515,8 @@ một dòng hợp lệ.
 | Text xoay/skew hoặc một source object tự chứa nhiều dòng | Có | Không | Layout nguồn chưa được hỗ trợ |
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
 | Image top-level | Có | Di chuyển/xóa nếu PDF cho phép sửa; resize nếu `imageResizable` | Resize yêu cầu matrix hữu hạn, không suy biến, không custom clip và ảnh nằm trọn trong page; không mở text editor |
-| Image trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip/resource khi save |
+| Form top-level chỉ chứa một image | Có | Di chuyển/xóa; resize/xoay khi đủ điều kiện | Chỉ sửa occurrence ngoài cùng; giữ nguyên shared stream, mask và clip nội bộ |
+| Image trong Form XObject khác | Có | Không | Nội dung hỗn hợp, mark hoặc graphics state ngoài chưa hỗ trợ |
 | FreeText annotation | Có | Không trong page `TextEdit`; `/Contents` sửa được trong CommentPanel | Là comment annotation, không phải page-content text |
 | Widget/form field | Có | Không | Draft editor chưa hỗ trợ form field |
 | Add Text do TrePDF tạo | Có | Có nếu PDF cho phép sửa | Không phải object gốc trong PDF |
@@ -1793,8 +1796,27 @@ và hỗ trợ kéo đổi vị trí mà không đổi kích thước. Scanner k
 `imageResizable`: matrix phải hữu hạn, không suy biến, không có custom clip và
 toàn bộ ảnh phải nằm trong vùng page hiển thị. Ảnh mới hoặc ảnh nguồn đủ điều
 kiện expose `selectedImageResizable` để QML hiện tám handle cạnh/góc và bật tùy
-chọn khóa tỷ lệ. Ảnh trong Form XObject vẫn không được chỉnh sửa. Ảnh top-level
+chọn khóa tỷ lệ. Ảnh top-level
 không đủ điều kiện resize giữ khả năng move/delete hiện có.
+
+Form top-level chứa duy nhất một image qua tối đa 16 lớp Form đơn cũng có
+`kind = "image"` và path chỉ tới occurrence ngoài cùng. Mọi matrix trong chuỗi
+phải hữu hạn, không suy biến và mọi object không có content mark. Outer Form
+không được có clip ngoài hoặc transparency ngoài; fill ngoài phải là đen đục
+để tránh mất màu kế thừa của stencil image khi PDFium ghi lại. Các Form khác giữ trạng thái
+chỉ đọc. Các kiểm tra được dùng chung ở scanner, preview và Save.
+Chỉ ma trận occurrence ngoài cùng được thay đổi hoặc occurrence đó bị xóa;
+không sửa child object hay tạo lại shared Form stream. Vì vậy mask ảnh, clip
+nội bộ, tài nguyên gốc và các lần sử dụng Form khác trên cùng/khác trang được
+giữ nguyên. Không decode thêm ảnh để xác định capability.
+
+Khi sửa nội dung trang có image-only Form (kể cả chỉ sửa/thêm object bên cạnh),
+Save dùng staging và `PDFImageFormResources` để
+khôi phục các mục resource gốc bị PDFium dọn khỏi trang. Form đời cũ có thể lấy
+image/font/color space từ resource trang thay vì khai báo riêng. Bước qpdf này
+chỉ bổ sung tên bị mất, không ghi đè resource mới, và tách dictionary riêng cho
+trang đã sửa để không thay đổi resource dùng chung. Map source/output page tính
+cả thêm/xóa trang; password staging được giữ đúng trước bước commit nguyên tử.
 
 Trong lúc kéo hoặc resize, draft cập nhật
 `frameRect` còn source rect bất biến để fallback mask vẫn che đúng vị trí gốc.
@@ -1829,7 +1851,7 @@ Khi Save/Save As, writer resolve toàn bộ source path trước khi thay đổi
 gọi `FPDFPage_RemoveObject()` rồi destroy image object, không tạo replacement,
 và chạy `FPDFPage_GenerateContent()`. File chỉ được commit qua `QSaveFile` sau
 khi toàn bộ page thành công; draft/history chỉ clear sau khi file kết quả mở
-lại được. Image trong Form XObject không được đánh dấu editable.
+lại được. Xóa image-only Form cũng dùng đúng luồng này với occurrence ngoài cùng.
 
 ## 22. Luồng vẽ hình dạng
 
