@@ -430,9 +430,13 @@ in the document. These page operations participate in undo, redo, and discard
 like other session drafts. Save and Save As persist the resulting page order
 without changing the source file during Save As.
 
-Editable source text is currently limited to top-level page objects with Fill,
-Stroke, or Fill+Stroke rendering. Text used as a clipping path or nested inside
-a Form XObject remains viewable but is not offered as safely editable content.
+Editable source text includes top-level page objects with Fill, Stroke, or
+Fill+Stroke rendering, and horizontal fill-only text inside a validated chain
+of single-child Form XObjects. For those Forms, move preserves the original
+stream, while text/style/frame edits replace only the selected page occurrence
+at its original drawing order. Shared occurrences stay unchanged. Mixed-content,
+marked, transparent, or clipped Forms and text used as a clipping path remain
+read-only. Existing font availability and glyph-coverage checks still apply.
 Top-level image objects support movement, eligible resizing and rotation, and
 deletion; images inside a Form XObject remain protected.
 

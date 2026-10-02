@@ -2,6 +2,7 @@
 #include "PDFAnnotationUtils.h"
 #include "PDFFormWorker.h"
 #include "PDFSourceImageGeometry.h"
+#include "PDFSourceTextGeometry.h"
 #include "PDFWatermark.h"
 #include "PDFWidgetAnnotationSuppression.h"
 #include "PDFiumSynchronization.h"
@@ -545,7 +546,9 @@ public:
                     : FPDF_PAGEOBJ_IMAGE;
             const bool matchesType = move.kind == PDFEditController::DraftObjectMove::Kind::Image
                 ? PDFSourceImageGeometry::isImageObject(object)
-                : object && FPDFPageObj_GetType(object) == expectedType;
+                : move.kind == PDFEditController::DraftObjectMove::Kind::Text
+                    ? PDFSourceTextGeometry::textObject(object) != nullptr
+                    : object && FPDFPageObj_GetType(object) == expectedType;
             if (!matchesType) {
                 restore();
                 return false;

@@ -208,6 +208,12 @@ flowchart TD
    và fingerprint vẫn an toàn.
 5. `PDFSaveWriter` phân biệt thay đổi chỉ dịch chuyển với thay đổi cần thay object
    để giữ font, ma trận, resource và z-order khi có thể.
+   Form XObject top-level chứa đúng một text qua chuỗi tối đa 16 Form đơn có
+   thể được sửa khi `PDFSourceTextGeometry` xác nhận an toàn. Scanner đọc font
+   và geometry từ text con; preview/Save chỉ ẩn, dịch chuyển hoặc thay occurrence
+   ngoài cùng, giữ nguyên các nơi dùng chung stream. Editor vẫn yêu cầu font
+   khả dụng; raw CFF subset chưa được đăng ký trực tiếp, nên cần font tương ứng
+   hoặc chủ động chọn font khác từ panel.
    Edit shape nguồn được xác thực rồi rebuild tại z-order cũ; style semantic
    dùng `Draft.commentProperties` với opacity riêng. Chúng vẫn là page-content
    path, không đi qua pipeline annotation `/AP` của drawing comment.
@@ -342,6 +348,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFCommentAnnotation.h`](../src/PDFCommentAnnotation.h) | Contract geometry/common properties cho drawing/Ink comment và `/AP`; Ink giữ từng stroke `/InkList` riêng. |
 | [`src/PDFShapeUtils.h`](../src/PDFShapeUtils.h) | Canonical builder và bounded validator cho geometry/style, metadata `TrePDFShape`; scanner và writer dùng chung để rehydrate/lưu Edit shape. |
 | [`src/PDFSourceImageGeometry.h`](../src/PDFSourceImageGeometry.h) | Kiểm tra source-image resize/xoay an toàn và affine frame mapping dùng chung cho scanner, preview và Save; giữ pixels/resource/drawing order và phép xoay/lật/nghiêng gốc. |
+| [`src/PDFSourceTextGeometry.h`](../src/PDFSourceTextGeometry.h) | Xác thực chuỗi Form đơn chỉ chứa một text, trả text con để đọc font nhưng giữ root occurrence làm đích sửa; dùng chung cho scanner, preview và Save. |
 | [`src/DraftImageItem.cpp`](../src/DraftImageItem.cpp) | Vẽ snapshot ảnh draft trong QML với góc xoay. |
 | [`src/SignatureLibrary.cpp`](../src/SignatureLibrary.cpp) | Tạo PNG chữ ký/ngày/dấu có giới hạn, lưu thư viện cục bộ atomically và đặt qua added-image draft. |
 | [`src/PDFFormController.cpp`](../src/PDFFormController.cpp) | Facade GUI-thread của form runtime. |

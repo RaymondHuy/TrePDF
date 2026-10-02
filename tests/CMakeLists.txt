@@ -30,6 +30,7 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerSignatures.cpp
     tst_PDFEditControllerShapes.cpp
     tst_PDFEditControllerTextFormatting.cpp
+    tst_PDFEditControllerTextForms.cpp
     tst_PDFEditControllerTextMarkup.cpp
     tst_PDFEditControllerTextPersistence.cpp
     tst_PDFEditControllerTextSpacing.cpp

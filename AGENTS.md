@@ -267,6 +267,14 @@ Current features:
   limited to top-level, single-widget TrePDF fields; Radio removal rebuilds the
   remaining TrePDF-created group. Source-backed Check Box and arbitrary
   AcroForm structures remain protected.
+- Horizontal fill-only text inside a top-level Form with at most 16 single-child
+  Form levels is editable when every node has finite nonsingular geometry, no
+  marks, transparency or clipping, and safe inherited Form paint.
+  `PDFSourceTextGeometry.h` validates the same structure in scan, preview and
+  Save. Candidates retain leaf font/text/composed geometry but own the outer
+  occurrence: move translates its matrix, delete removes it, and content/style/
+  frame changes replace it at the same z-order with page-level text. Never
+  mutate the shared Form stream. Other nested text remains read-only.
 - Text draft editing with selection, undo, redo, discard, Save, and Save As.
   Drafts stay session-only until a save succeeds.
 - Add Image uses the same placement cursor and draft history as Add Text. After
@@ -744,8 +752,11 @@ clipped or elided unintentionally.
   on a worker; the worker request must not retain controller/document pointers.
 - Resolve every source object path before removing source objects. Only
   top-level page text plus top-level image movement/resizing/rotation/deletion
-  are currently saveable, including validated image-only Form occurrences.
-  Revalidate those wrappers with `PDFSourceImageGeometry::isImageOnlyForm()`;
+  are currently saveable, including validated image-only and single-text Form
+  occurrences. Revalidate wrappers with `PDFSourceImageGeometry::isImageOnlyForm()`
+  or `PDFSourceTextGeometry::textObject()`; text font lookup uses the leaf while
+  mutation retains the outer root path. Restore missing inherited page resources
+  for retained image/text Forms after PDFium serialization;
   transform/remove only the top-level occurrence, never its child objects or
   shared Form stream. Arbitrary nested Form content remains non-editable.
   Keep moved/resized/rotated source

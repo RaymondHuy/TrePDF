@@ -278,6 +278,16 @@ TrePDF xử lý đệ quy:
   điều kiện đổi kích thước. Image trong Form không đủ điều kiện vẫn chỉ đọc;
 - các loại path/shading khác: bỏ qua.
 
+Text trong chuỗi tối đa 16 Form single-child được chỉnh khi leaf là text Fill
+nằm ngang, mọi node không có mark/transparency/clip, matrix hữu hạn không suy
+biến, và paint kế thừa của Form là đen opaque. `PDFSourceTextGeometry.h` kiểm
+cùng contract ở scanner, preview và writer; clip từ Form BBox cũng bị loại.
+Scanner giữ font, glyph và matrix ghép của leaf nhưng đổi `objectId`,
+`objectPath` và `CandidatePart` sang occurrence ngoài cùng. Move chỉ dịch matrix
+ngoài; delete hoặc reflow thay cả occurrence tại z-order cũ, không sửa stream
+dùng chung. Writer lấy font từ leaf và khôi phục inherited page resources cho
+Form còn giữ sau serialize. Font vẫn đi qua kiểm coverage/availability hiện có.
+
 Ma trận parent `P` và ma trận local `L` được ghép thành `T = P × L`:
 
 ```text
@@ -511,7 +521,8 @@ một dòng hợp lệ.
 | Text có source bounds chồng nhau | Candidate riêng | Theo từng candidate | Không gom dòng hoặc đoạn |
 | Text cùng baseline nhưng khác style hoặc cách quá xa | Candidate riêng | Theo từng candidate | Không gom để tránh mất style/nối hai cột |
 | Text dùng render mode clipping | Có | Không | Chưa thể bảo toàn text clipping khi save |
-| Text nằm trong Form XObject | Có | Không | Chưa thể bảo toàn scope transform/clip khi save |
+| Form chỉ chứa một text Fill ngang qua chuỗi single-child an toàn | Có | Có | Candidate sở hữu occurrence ngoài; font và geometry lấy từ leaf |
+| Text trong Form hỗn hợp, có mark/transparency/clip hoặc geometry không an toàn | Có | Không | Không thể thay cả occurrence mà vẫn bảo toàn nội dung/paint |
 | Text xoay/skew hoặc một source object tự chứa nhiều dòng | Có | Không | Layout nguồn chưa được hỗ trợ |
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
 | Image top-level | Có | Di chuyển/xóa nếu PDF cho phép sửa; resize nếu `imageResizable` | Resize yêu cầu matrix hữu hạn, không suy biến, không custom clip và ảnh nằm trọn trong page; không mở text editor |
@@ -1549,9 +1560,9 @@ appearance Unicode có wrap trong file staging. Page chỉ đổi FreeText annot
 không gọi `FPDFPage_GenerateContent()`.
 
 Nếu bất kỳ bước nào trước commit lỗi, document đang mở, file nguồn, draft và
-lịch sử undo/redo vẫn được giữ nguyên. Save As không sửa file nguồn. Text nằm
-trong Form XObject hoặc dùng render mode clipping không được đánh dấu editable,
-vì writer chưa thể bảo toàn scope transform/clip của chúng một cách an toàn.
+lịch sử undo/redo vẫn được giữ nguyên. Save As không sửa file nguồn. Text trong
+Form ngoài tập single-child an toàn ở mục 4.3 hoặc dùng render mode clipping
+không được đánh dấu editable.
 
 ## 16. Vì sao text Qt vẫn có thể lệch text PDF
 
@@ -1702,7 +1713,7 @@ Text được phát hiện
 Text được edit
   = text được phát hiện
     + PDF cho phép modify contents
-    + object text nằm trực tiếp ở page root, không nằm trong Form XObject
+    + object text ở page root hoặc trong single-text Form an toàn (mục 4.3)
     + render mode là Fill, Stroke hoặc Fill+Stroke, không có clipping
     + transform gần như nằm ngang, không lật/skew mạnh
     + mỗi source text object chỉ có một dòng

@@ -224,6 +224,7 @@ qt_add_qml_module(trepdf
         src/PDFAtomicSaveFile.h
         src/PDFShapeUtils.h
         src/PDFSourceImageGeometry.h
+        src/PDFSourceTextGeometry.h
         src/PDFSearchController.cpp
         src/PDFSearchController.h
         src/PDFTabModel.cpp
