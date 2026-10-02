@@ -414,6 +414,14 @@ private slots:
     void rejectsTamperedSourceShapeProvenance();
     void movesTopLevelTextWithUndoRedo();
     void movesTopLevelImageWithUndoRedo();
+    void editsSharedNestedImagesRoundTrip_data();
+    void editsSharedNestedImagesRoundTrip();
+    void keepsUnsafeNestedImagesReadOnly_data();
+    void keepsUnsafeNestedImagesReadOnly();
+    void previewsSharedNestedImageChanges();
+    void preservesNestedImageResourcesWithPageChangesAndPasswords();
+    void preservesNestedImageResourcesWhenAddingImage();
+    void editsExternalNestedImageWithoutChangingSharedPage();
     void resizesTopLevelImageWithHistoryAndDiscard();
     void keepsClippedSourceImagesMoveOnly();
     void keepsOffPageSourceImagesMoveOnly();

@@ -2335,7 +2335,9 @@ void PDFEditController::appendPageObjectCandidates(
     const QSizeF &pageSize = request.pageSize;
 
     const int type = FPDFPageObj_GetType(pageObject);
-    if (type == FPDF_PAGEOBJ_FORM) {
+    const bool imageOnlyForm = objectPath.size() == 1
+        && PDFSourceImageGeometry::isImageOnlyForm(pageObject);
+    if (type == FPDF_PAGEOBJ_FORM && !imageOnlyForm) {
         FS_MATRIX formTransform = kIdentityMatrix;
         if (!FPDFPageObj_GetMatrix(pageObject, &formTransform)) {
             formTransform = kIdentityMatrix;
@@ -2399,7 +2401,7 @@ void PDFEditController::appendPageObjectCandidates(
         return;
     }
 
-    if (type != FPDF_PAGEOBJ_TEXT && type != FPDF_PAGEOBJ_IMAGE) {
+    if (type != FPDF_PAGEOBJ_TEXT && type != FPDF_PAGEOBJ_IMAGE && !imageOnlyForm) {
         return;
     }
     if (type == FPDF_PAGEOBJ_IMAGE
@@ -2496,7 +2498,7 @@ void PDFEditController::appendPageObjectCandidates(
         return;
     }
 
-    if (type == FPDF_PAGEOBJ_IMAGE) {
+    if (type == FPDF_PAGEOBJ_IMAGE || imageOnlyForm) {
         candidate.kind = QStringLiteral("image");
         //% "Image"
         candidate.label = qtTrId("Image");

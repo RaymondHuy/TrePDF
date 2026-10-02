@@ -3,6 +3,548 @@
 
 using namespace PDFEditControllerTestSupport;
 
+namespace {
+
+QByteArray imageFixtureStream(const QByteArray &dictionary, const QByteArray &content)
+{
+    return QByteArray("<< ") + dictionary + " /Length "
+        + QByteArray::number(content.size()) + " >>\nstream\n" + content + "\nendstream";
+}
+
+bool createSharedNestedImagePdf(const QString &path, bool nested, int rotation,
+                               bool offsetCrop, bool internalClip = false,
+                               bool inheritedResources = false)
+{
+    const QByteArray geometry = QByteArray("/MediaBox [0 0 400 400] /Rotate ")
+        + QByteArray::number(rotation * 90)
+        + (offsetCrop ? " /CropBox [20 20 380 380] " : " ");
+    const QByteArray firstContent(
+        "q 1 0 0 1 50 270 cm /Fm0 Do Q\n"
+        "q 1 0 0 1 230 270 cm /Fm0 Do Q\n");
+    const QByteArray secondContent("q 1 0 0 1 90 150 cm /Fm0 Do Q\n");
+    const QByteArray imageContent = QByteArray("q ")
+        + (internalClip ? "0 0 60 45 re W n " : "")
+        + "90 0 0 50 0 0 cm /Im0 Do Q\n";
+    const QByteArray pageResources = QByteArray("/Resources << /XObject << /Fm0 9 0 R ")
+        + (inheritedResources ? "/Im0 7 0 R " : "") + ">> >> ";
+    QVector<QByteArray> objects{
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        QByteArray("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 ")
+            + (inheritedResources ? pageResources : QByteArray()) + ">>",
+        QByteArray("<< /Type /Page /Parent 2 0 R ") + geometry
+            + (inheritedResources ? QByteArray() : pageResources) + "/Contents 5 0 R >>",
+        QByteArray("<< /Type /Page /Parent 2 0 R ") + geometry
+            + (inheritedResources ? QByteArray() : pageResources) + "/Contents 6 0 R >>",
+        imageFixtureStream({}, firstContent),
+        imageFixtureStream({}, secondContent),
+        imageFixtureStream(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 2 "
+            "/ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask 8 0 R",
+            QByteArray::fromHex("ff000000ff000000ffffff00")),
+        imageFixtureStream(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 2 "
+            "/ColorSpace /DeviceGray /BitsPerComponent 8",
+            QByteArray::fromHex("ffb060ff")),
+        imageFixtureStream(
+            QByteArray("/Type /XObject /Subtype /Form /BBox [0 0 100 70] ")
+                + "/Matrix [1 0.05 0.1 1 0 0] "
+                + (inheritedResources ? QByteArray()
+                    : QByteArray("/Resources << /XObject << ")
+                        + (nested ? "/Inner 10 0 R" : "/Im0 7 0 R") + " >> >>"),
+            nested ? QByteArray("q /Inner Do Q\n") : imageContent),
+    };
+    if (nested) {
+        objects.append(imageFixtureStream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 100 70] "
+            "/Matrix [1 0 0 1 2 3] /Resources << /XObject << /Im0 7 0 R >> >>",
+            imageContent));
+    }
+    return writePdfObjects(path, objects);
+}
+
+QImage renderNestedImagePage(const QString &path, int pageIndex,
+                            const QSize &size = QSize(800, 800), const QByteArray &password = {})
+{
+    PDFiumProcessLock pdfiumLock;
+    const QByteArray encodedPath = QFile::encodeName(path);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(encodedPath.constData(), password.constData());
+    FPDF_PAGE page = document ? FPDF_LoadPage(document, pageIndex) : nullptr;
+    QImage result(size, QImage::Format_ARGB32);
+    result.fill(Qt::white);
+    FPDF_BITMAP bitmap = page ? FPDFBitmap_CreateEx(
+        size.width(), size.height(), FPDFBitmap_BGRA,
+        result.bits(), result.bytesPerLine()) : nullptr;
+    if (bitmap) {
+        FPDF_RenderPageBitmap(bitmap, page, 0, 0, size.width(), size.height(), 0, FPDF_ANNOT);
+        FPDFBitmap_Destroy(bitmap);
+    } else {
+        result = {};
+    }
+    if (page)
+        FPDF_ClosePage(page);
+    if (document)
+        FPDF_CloseDocument(document);
+    return result;
+}
+
+QVariantList imageCandidates(const QVariantList &candidates)
+{
+    QVariantList images;
+    for (const QVariant &value : candidates) {
+        if (value.toMap().value(QStringLiteral("kind")).toString() == QLatin1String("image"))
+            images.append(value);
+    }
+    return images;
+}
+
+QRect imagePixelRect(const QRectF &frame, const QSize &size)
+{
+    return QRectF(frame.x() * size.width(), frame.y() * size.height(),
+                  frame.width() * size.width(), frame.height() * size.height())
+        .toAlignedRect().adjusted(-2, -2, 2, 2).intersected(QRect(QPoint(), size));
+}
+
+} // namespace
+
+void PDFEditControllerTest::editsSharedNestedImagesRoundTrip_data()
+{
+    QTest::addColumn<bool>("nested");
+    QTest::addColumn<int>("rotation");
+    QTest::addColumn<bool>("offsetCrop");
+    QTest::addColumn<bool>("internalClip");
+    QTest::addColumn<bool>("inheritedResources");
+    QTest::newRow("single-form") << false << 0 << false << false << false;
+    QTest::newRow("form-chain") << true << 0 << false << false << false;
+    QTest::newRow("chain-cropped-90") << true << 1 << true << false << false;
+    QTest::newRow("chain-cropped-270") << true << 3 << true << false << false;
+    QTest::newRow("chain-internal-clip") << true << 0 << false << true << false;
+    QTest::newRow("inherited-resources") << false << 0 << false << false << true;
+}
+
+void PDFEditControllerTest::editsSharedNestedImagesRoundTrip()
+{
+    QFETCH(bool, nested);
+    QFETCH(int, rotation);
+    QFETCH(bool, offsetCrop);
+    QFETCH(bool, internalClip);
+    QFETCH(bool, inheritedResources);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("shared-nested-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(createSharedNestedImagePdf(sourcePath, nested, rotation, offsetCrop,
+                                       internalClip, inheritedResources));
+    QFile sourceFile(sourcePath);
+    QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = sourceFile.readAll();
+    sourceFile.close();
+    const QImage original = renderNestedImagePage(sourcePath, 0);
+    const QImage originalPeerPage = renderNestedImagePage(sourcePath, 1);
+    QVERIFY(!original.isNull());
+    QVERIFY(!originalPeerPage.isNull());
+
+    for (const QString &operation : {QStringLiteral("move"), QStringLiteral("resize"),
+                                     QStringLiteral("rotate"), QStringLiteral("delete")}) {
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+        controller.setDocument(&document);
+        const QVariantList images = imageCandidates(waitForCandidates(controller, 0));
+        QCOMPARE(images.size(), 2);
+        const QVariantMap candidate = images.constFirst().toMap();
+        const QString objectId = candidate.value(QStringLiteral("objectId")).toString();
+        QVERIFY(controller.selectCandidate(0, objectId));
+        QVERIFY(controller.selectedEditable());
+        QVERIFY(controller.selectedImageResizable());
+        QVERIFY(controller.selectedImageRotatable());
+        QVERIFY(controller.selectedDeletable());
+        const QRectF sourceFrame = controller.selectedFrameRect();
+        const QRectF peerFrame = images.at(1).toMap().value(QStringLiteral("sourceRect")).toRectF();
+        const QRect peerPixels = imagePixelRect(peerFrame, original.size());
+        const auto apply = [&]() {
+            if (operation == QLatin1String("delete")) {
+                controller.deleteSelectedObject();
+            } else if (operation == QLatin1String("rotate")) {
+                controller.rotateSelectedImage(1);
+            } else {
+                const QSizeF size = operation == QLatin1String("resize")
+                    ? QSizeF(sourceFrame.width() * 0.7, sourceFrame.height() * 1.2)
+                    : sourceFrame.size();
+                controller.beginSelectedFrameResize();
+                controller.updateSelectedFrameRect(QRectF(QPointF(0.4, 0.4), size));
+                controller.finishSelectedFrameResize();
+            }
+        };
+        apply();
+        QVERIFY(controller.hasDrafts());
+        const QRectF expectedFrame = controller.selectedFrameRect();
+        if (operation != QLatin1String("delete")) {
+            const auto moves = controller.draftedObjectMovesForPage(0);
+            QCOMPARE(moves.size(), 1);
+            QCOMPARE(moves.constFirst().objectPath.size(), 1);
+            QVERIFY(!expectedFrame.intersects(peerFrame));
+        }
+        controller.undo();
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(controller.selectCandidate(0, objectId));
+        QCOMPARE(controller.selectedFrameRect(), sourceFrame);
+        controller.redo();
+        QVERIFY(controller.hasDrafts());
+        controller.discardDrafts();
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(controller.selectCandidate(0, objectId));
+        apply();
+        const QString outputPath = sourcePath + QLatin1Char('.') + operation + QStringLiteral(".pdf");
+        QVERIFY2(controller.saveAs(QUrl::fromLocalFile(outputPath)), qPrintable(operation));
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(!controller.canUndo());
+        const QImage saved = renderNestedImagePage(outputPath, 0);
+        QVERIFY(!saved.isNull());
+        QVERIFY(changedPixelCount(original, saved, original.rect()) > 100);
+        QCOMPARE(saved.copy(peerPixels), original.copy(peerPixels));
+        QCOMPARE(renderNestedImagePage(outputPath, 1), originalPeerPage);
+        const QVariantList reopened = imageCandidates(waitForCandidates(controller, 0));
+        QCOMPARE(reopened.size(), operation == QLatin1String("delete") ? 1 : 2);
+        if (operation != QLatin1String("delete")) {
+            const QVariantMap edited = reopened.constFirst().toMap();
+            const QRectF reopenedFrame = edited.value(QStringLiteral("sourceRect")).toRectF();
+            QVERIFY(QLineF(reopenedFrame.topLeft(), expectedFrame.topLeft()).length() < 0.003);
+            QVERIFY(QLineF(reopenedFrame.bottomRight(), expectedFrame.bottomRight()).length() < 0.003);
+            QVERIFY(edited.value(QStringLiteral("imageResizable")).toBool());
+        }
+    }
+    QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+    QCOMPARE(sourceFile.readAll(), originalBytes);
+}
+
+void PDFEditControllerTest::keepsUnsafeNestedImagesReadOnly_data()
+{
+    QTest::addColumn<QString>("fixture");
+    for (const char *fixture : {"outer-clip", "transparency-group", "marked-wrapper",
+                                "marked-image", "deep-chain", "mixed-siblings", "stencil-paint"})
+        QTest::newRow(fixture) << QString::fromLatin1(fixture);
+}
+
+void PDFEditControllerTest::keepsUnsafeNestedImagesReadOnly()
+{
+    QFETCH(QString, fixture);
+    const QString path = m_temporaryDirectory.filePath(
+        QStringLiteral("unsafe-nested-%1.pdf").arg(fixture));
+    const int depth = fixture == QLatin1String("deep-chain") ? 17 : 1;
+    const QByteArray pageContent = fixture == QLatin1String("outer-clip")
+        ? QByteArray("q 110 120 80 30 re W n /Fm0 Do Q\n")
+        : fixture == QLatin1String("marked-wrapper")
+            ? QByteArray("/Span BMC /Fm0 Do EMC\n")
+            : fixture == QLatin1String("stencil-paint")
+                ? QByteArray("0 1 1 0 k /Fm0 Do\n") : QByteArray("/Fm0 Do\n");
+    QVector<QByteArray> objects{
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] "
+        "/Resources << /XObject << /Fm0 6 0 R >> >> /Contents 4 0 R >>",
+        imageFixtureStream({}, pageContent),
+        imageFixtureStream(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 2 "
+            "/ColorSpace /DeviceRGB /BitsPerComponent 8",
+            QByteArray::fromHex("ff000000ff000000ffffff00")),
+    };
+    if (fixture == QLatin1String("stencil-paint")) {
+        objects[4] = imageFixtureStream(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 2 "
+            "/ImageMask true /BitsPerComponent 1", QByteArray::fromHex("4080"));
+    }
+    for (int index = 0; index < depth; ++index) {
+        const bool leaf = index == depth - 1;
+        QByteArray content = leaf ? QByteArray("q 120 0 0 60 100 100 cm /Im0 Do Q\n")
+                                  : QByteArray("/Fm0 Do\n");
+        if (leaf && fixture == QLatin1String("marked-image"))
+            content = "/Span BMC " + content + " EMC\n";
+        if (leaf && fixture == QLatin1String("mixed-siblings"))
+            content += "0 0 20 20 re f\n";
+        QByteArray dictionary("/Type /XObject /Subtype /Form /BBox [0 0 400 400] ");
+        if (fixture == QLatin1String("transparency-group"))
+            dictionary += "/Group << /S /Transparency /I true >> ";
+        dictionary += "/Resources << /XObject << ";
+        dictionary += leaf ? QByteArray("/Im0 5 0 R")
+            : QByteArray("/Fm0 ") + QByteArray::number(7 + index) + " 0 R";
+        dictionary += " >> >>";
+        objects.append(imageFixtureStream(dictionary, content));
+    }
+    QVERIFY(writePdfObjects(path, objects));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("image"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(!controller.selectedEditable());
+    QVERIFY(!controller.selectedDeletable());
+    QVERIFY(!controller.selectedImageResizable());
+    QVERIFY(!controller.selectedImageRotatable());
+    const QRectF original = controller.selectedFrameRect();
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(QRectF(0.2, 0.2, 0.3, 0.3));
+    controller.finishSelectedFrameResize();
+    controller.rotateSelectedImage(1);
+    controller.deleteSelectedObject();
+    QCOMPARE(controller.selectedFrameRect(), original);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
+void PDFEditControllerTest::previewsSharedNestedImageChanges()
+{
+    if (QGuiApplication::screens().isEmpty())
+        QSKIP("The nested image preview test needs a Qt Quick render screen.");
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("shared-nested-preview.pdf"));
+    QVERIFY(createSharedNestedImagePdf(sourcePath, true, 0, false));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("image"));
+    const QString objectId = candidate.value(QStringLiteral("objectId")).toString();
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QQuickWindow window;
+    window.setColor(Qt::white);
+    window.resize(800, 800);
+    TestablePDFPageItem pageItem(window.contentItem());
+    pageItem.setSize(window.size());
+    pageItem.setEditController(&controller);
+    pageItem.setDocument(&document);
+    pageItem.setPage(0);
+    pageItem.completeForTest();
+    window.show();
+    QTRY_VERIFY_WITH_TIMEOUT(window.isExposed(), 5000);
+    const auto grabPage = [&]() {
+        QElapsedTimer timer;
+        timer.start();
+        while ((!pageItem.draftTextureCurrent() || pageItem.m_renderPending)
+               && timer.elapsed() < 5000)
+            QTest::qWait(10);
+        return pageItem.draftTextureCurrent() && !pageItem.m_renderPending
+            ? window.grabWindow() : QImage();
+    };
+    const QImage original = grabPage();
+    QVERIFY(!original.isNull());
+    const QImage peerPage = renderNestedImagePage(sourcePath, 1);
+    for (const QString &operation : {QStringLiteral("move"), QStringLiteral("resize"),
+                                     QStringLiteral("rotate"), QStringLiteral("delete")}) {
+        QVERIFY(controller.selectCandidate(0, objectId));
+        if (operation == QLatin1String("delete")) {
+            controller.deleteSelectedObject();
+        } else if (operation == QLatin1String("rotate")) {
+            controller.rotateSelectedImage(1);
+        } else {
+            const QRectF frame = controller.selectedFrameRect();
+            controller.beginSelectedFrameResize();
+            controller.updateSelectedFrameRect(QRectF(QPointF(0.4, 0.4),
+                operation == QLatin1String("resize") ? frame.size() * 0.7 : frame.size()));
+            controller.finishSelectedFrameResize();
+        }
+        const QImage preview = grabPage();
+        QVERIFY(!preview.isNull());
+        QVERIFY(changedPixelCount(original, preview, original.rect()) > 100);
+        const QString outputPath = sourcePath + QLatin1Char('.') + operation + QStringLiteral(".pdf");
+        const auto result = PDFSaveWriter::save(controller, outputPath);
+        QVERIFY2(result.succeeded(), qPrintable(result.detail));
+        const QImage saved = renderNestedImagePage(outputPath, 0, preview.size());
+        QVERIFY(changedPixelCount(saved, preview, saved.rect()) < saved.width() * saved.height() / 200);
+        QCOMPARE(renderNestedImagePage(outputPath, 1), peerPage);
+        controller.undo();
+        QCOMPARE(grabPage(), original);
+        controller.redo();
+        QCOMPARE(grabPage(), preview);
+        controller.discardDrafts();
+        QCOMPARE(grabPage(), original);
+    }
+}
+
+void PDFEditControllerTest::preservesNestedImageResourcesWithPageChangesAndPasswords()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("nested-resources-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(QStringLiteral("nested-resources-protected.pdf"));
+    QVERIFY(createSharedNestedImagePdf(sourcePath, false, 0, false, false, true));
+    const QImage original = renderNestedImagePage(sourcePath, 1);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForKind(waitForCandidates(controller, 1), QStringLiteral("image"));
+    const QRectF originalFrame = candidate.value(QStringLiteral("sourceRect")).toRectF();
+    QVERIFY(controller.selectCandidate(1, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.rotateSelectedImage(1);
+    QVERIFY(controller.hasDrafts());
+    // Source page 1 becomes output page 1 via an insertion followed by deletion
+    // of a different source page. The blank output page must stay blank.
+    document.setCurrentPage(0);
+    QCOMPARE(controller.addBlankPage(), 1);
+    document.setCurrentPage(0);
+    QCOMPARE(controller.deleteCurrentPage(), 0);
+    const QString password = QStringLiteral("image-form-test-password");
+    QVERIFY(controller.setOpenPassword(password));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QCOMPARE(document.pageCount(), 2);
+    QCOMPARE(document.documentPassword(), password.toUtf8());
+    QVERIFY(renderNestedImagePage(outputPath, 1).isNull());
+    const QImage rotated = renderNestedImagePage(outputPath, 1, QSize(800, 800), password.toUtf8());
+    QVERIFY(!rotated.isNull());
+    QVERIFY(changedPixelCount(original, rotated, original.rect()) > 100);
+    QImage white(800, 800, QImage::Format_ARGB32);
+    white.fill(Qt::white);
+    QCOMPARE(renderNestedImagePage(outputPath, 0, white.size(), password.toUtf8()), white);
+    QVERIFY(waitForCandidates(controller, 0).isEmpty());
+    const QVariantMap reopened = candidateForKind(waitForCandidates(controller, 1), QStringLiteral("image"));
+    QVERIFY(controller.selectCandidate(1, reopened.value(QStringLiteral("objectId")).toString()));
+    controller.rotateSelectedImage(-1);
+    // Ordinary encrypted Save must also preserve the resource fallback.
+    QVERIFY(controller.save());
+    const QImage restored = renderNestedImagePage(outputPath, 1, original.size(), password.toUtf8());
+    QVERIFY(!restored.isNull());
+    QCOMPARE(restored.size(), original.size());
+    // Two inverse matrix round-trips can change subpixel antialiasing slightly.
+    // Require both tight geometry and bounded edge-only raster differences.
+    int maxDifference = 0;
+    int differentPixels = 0;
+    for (int y = 0; y < original.height(); ++y) {
+        for (int x = 0; x < original.width(); ++x) {
+            const QColor a = original.pixelColor(x, y);
+            const QColor b = restored.pixelColor(x, y);
+            const int difference = qMax(qMax(qAbs(a.red() - b.red()), qAbs(a.green() - b.green())),
+                                       qMax(qAbs(a.blue() - b.blue()), qAbs(a.alpha() - b.alpha())));
+            maxDifference = qMax(maxDifference, difference);
+            differentPixels += difference != 0;
+        }
+    }
+    QVERIFY(maxDifference <= 4);
+    QVERIFY(differentPixels < original.width() * original.height() / 1000);
+    QVERIFY(renderNestedImagePage(outputPath, 1).isNull());
+
+    const QVariantMap saved = candidateForKind(waitForCandidates(controller, 1), QStringLiteral("image"));
+    const QRectF savedFrame = saved.value(QStringLiteral("sourceRect")).toRectF();
+    QVERIFY(QLineF(savedFrame.topLeft(), originalFrame.topLeft()).length() < 0.00001);
+    QVERIFY(QLineF(savedFrame.bottomRight(), originalFrame.bottomRight()).length() < 0.00001);
+    QVERIFY(controller.selectCandidate(1, saved.value(QStringLiteral("objectId")).toString()));
+    controller.rotateSelectedImage(1);
+    const QString failurePath = m_temporaryDirectory.filePath(QStringLiteral("nested-resources-target-sentinel.pdf"));
+    QFile sentinel(failurePath);
+    QVERIFY(sentinel.open(QIODevice::WriteOnly));
+    QCOMPARE(sentinel.write("destination unchanged"), qint64(21));
+    sentinel.close();
+    const PDFSaveWriter::Request request = PDFSaveWriter::prepare(controller, failurePath,
+        m_temporaryDirectory.filePath(QStringLiteral("missing-source.pdf")));
+    QVERIFY(!PDFSaveWriter::save(request).succeeded());
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QVERIFY(sentinel.open(QIODevice::ReadOnly));
+    QCOMPARE(sentinel.readAll(), QByteArray("destination unchanged"));
+}
+
+void PDFEditControllerTest::preservesNestedImageResourcesWhenAddingImage()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("nested-neighbor-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(QStringLiteral("nested-neighbor-saved.pdf"));
+    QVERIFY(createSharedNestedImagePdf(sourcePath, false, 0, false, false, true));
+    const QImage original = renderNestedImagePage(sourcePath, 0);
+    const QImage peerPage = renderNestedImagePage(sourcePath, 1);
+    QVERIFY(!original.isNull());
+    QVERIFY(!peerPage.isNull());
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList originals = imageCandidates(waitForCandidates(controller, 0));
+    QCOMPARE(originals.size(), 2);
+    QImage image(40, 20, QImage::Format_ARGB32);
+    image.fill(Qt::blue);
+    const QVariantMap added = controller.addImageData(0, 0.5, 0.75, image, 60);
+    QVERIFY(!added.isEmpty());
+    const QRectF addedFrame = added.value(QStringLiteral("frameRect")).toRectF();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    const QImage withNeighbor = renderNestedImagePage(outputPath, 0);
+    QVERIFY(!withNeighbor.isNull());
+    for (const auto &entry : originals) {
+        const QRectF frame = entry.toMap().value(QStringLiteral("sourceRect")).toRectF();
+        QVERIFY(!frame.intersects(addedFrame));
+        const QRect pixels = imagePixelRect(frame, original.size());
+        QCOMPARE(withNeighbor.copy(pixels), original.copy(pixels));
+    }
+    QCOMPARE(renderNestedImagePage(outputPath, 1), peerPage);
+    const QPoint center(qRound(addedFrame.center().x() * withNeighbor.width()),
+                        qRound(addedFrame.center().y() * withNeighbor.height()));
+    QCOMPARE(withNeighbor.pixelColor(center), QColor(Qt::blue));
+    const QVariantList reopened = imageCandidates(waitForCandidates(controller, 0));
+    QCOMPARE(reopened.size(), 3);
+    const auto neighbor = std::find_if(reopened.cbegin(), reopened.cend(), [&addedFrame](const auto &entry) {
+        return entry.toMap().value(QStringLiteral("sourceRect")).toRectF().intersects(addedFrame);
+    });
+    QVERIFY(neighbor != reopened.cend());
+    QVERIFY(controller.selectCandidate(0, neighbor->toMap().value(QStringLiteral("objectId")).toString()));
+    controller.deleteSelectedObject();
+    QVERIFY(controller.save());
+    QCOMPARE(renderNestedImagePage(outputPath, 0), original);
+    QCOMPARE(renderNestedImagePage(outputPath, 1), peerPage);
+}
+
+void PDFEditControllerTest::editsExternalNestedImageWithoutChangingSharedPage()
+{
+    const QString sourcePath = qEnvironmentVariable("TREPDF_TEST_NESTED_IMAGE_PDF");
+    if (sourcePath.isEmpty())
+        QSKIP("Set TREPDF_TEST_NESTED_IMAGE_PDF to the 500 Lines or Less PDF fixture.");
+    QFile sourceFile(sourcePath);
+    QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+    const QByteArray sourceBytes = sourceFile.readAll();
+    sourceFile.close();
+    const QImage original = renderNestedImagePage(sourcePath, 0);
+    const QImage thirdPage = renderNestedImagePage(sourcePath, 2);
+    QVERIFY(!original.isNull());
+    QVERIFY(!thirdPage.isNull());
+    const QString outputDirectory = qEnvironmentVariable("TREPDF_TEST_NESTED_IMAGE_OUTPUT_DIR");
+    if (!outputDirectory.isEmpty()) {
+        QVERIFY(QDir().mkpath(outputDirectory));
+        QVERIFY(original.save(QDir(outputDirectory).filePath(QStringLiteral("original.png"))));
+    }
+    for (const QString &operation : {QStringLiteral("move"), QStringLiteral("resize"),
+                                     QStringLiteral("rotate"), QStringLiteral("delete")}) {
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+        const int sourcePageCount = document.pageCount();
+        controller.setDocument(&document);
+        const QVariantList candidates = imageCandidates(waitForCandidates(controller, 0));
+        QCOMPARE(candidates.size(), 1);
+        const QVariantMap candidate = candidates.constFirst().toMap();
+        QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+        QVERIFY(controller.selectedImageResizable());
+        QVERIFY(controller.selectedImageRotatable());
+        if (operation == QLatin1String("delete")) {
+            controller.deleteSelectedObject();
+        } else if (operation == QLatin1String("rotate")) {
+            controller.rotateSelectedImage(1);
+        } else {
+            const QRectF frame = controller.selectedFrameRect();
+            controller.beginSelectedFrameResize();
+            controller.updateSelectedFrameRect(QRectF(QPointF(frame.x(), 0.65),
+                operation == QLatin1String("resize") ? frame.size() * 0.7 : frame.size()));
+            controller.finishSelectedFrameResize();
+        }
+        QVERIFY(controller.hasDrafts());
+        const QString outputPath = m_temporaryDirectory.filePath(
+            QStringLiteral("external-nested-%1.pdf").arg(operation));
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+        QCOMPARE(document.pageCount(), sourcePageCount);
+        QCOMPARE(renderNestedImagePage(outputPath, 2), thirdPage);
+        const QImage saved = renderNestedImagePage(outputPath, 0);
+        if (!outputDirectory.isEmpty()) {
+            QVERIFY(saved.save(QDir(outputDirectory).filePath(operation + QStringLiteral(".png"))));
+        }
+        QVERIFY(changedPixelCount(original, saved, original.rect()) > 100);
+        QCOMPARE(imageCandidates(waitForCandidates(controller, 0)).size(),
+                 operation == QLatin1String("delete") ? 0 : 1);
+    }
+    QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+    QCOMPARE(sourceFile.readAll(), sourceBytes);
+}
+
 void PDFEditControllerTest::rendersAddedImageSnapshot()
 {
     QImage source(8, 8, QImage::Format_ARGB32);
@@ -1448,7 +1990,7 @@ void PDFEditControllerTest::savesRotatedAddedImageRoundTrip()
 void PDFEditControllerTest::rejectsUnsupportedImageRotation_data()
 {
     QTest::addColumn<QString>("fixture");
-    for (const char *fixture : {"clipped", "nested", "singular", "off-page", "too-tall"})
+    for (const char *fixture : {"clipped", "mixed-form", "singular", "off-page", "too-tall"})
         QTest::newRow(fixture) << QString::fromLatin1(fixture);
 }
 
@@ -1457,11 +1999,12 @@ void PDFEditControllerTest::rejectsUnsupportedImageRotation()
     QFETCH(QString, fixture);
     const QString sourcePath = m_temporaryDirectory.filePath(
         QStringLiteral("rotate-unsupported-%1.pdf").arg(fixture));
-    if (fixture == QLatin1String("clipped") || fixture == QLatin1String("nested")) {
-        const bool nested = fixture == QLatin1String("nested");
+    if (fixture == QLatin1String("clipped") || fixture == QLatin1String("mixed-form")) {
+        const bool nested = fixture == QLatin1String("mixed-form");
         const QByteArray content = nested ? QByteArray("/Fm0 Do\n")
             : QByteArray("q 110 120 90 40 re W n 120 0 0 60 100 100 cm /Im0 Do Q\n");
-        const QByteArray formContent("q 120 0 0 60 100 100 cm /Im0 Do Q\n");
+        const QByteArray formContent(
+            "q 120 0 0 60 100 100 cm /Im0 Do Q\n0 0 20 20 re f\n");
         QList<QByteArray> objects{
             QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
             QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),

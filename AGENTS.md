@@ -275,8 +275,12 @@ Current features:
   ratio, and writes it as a PDF image object on Save/Save As.
 - Top-level PDF image objects can be selected and deleted with Backspace,
   Delete, or the contextual Delete action. Deletion remains an undoable session
-  draft until Save/Save As removes the source object; images nested in Form
-  XObjects remain protected.
+  draft until Save/Save As removes the source object. A top-level Form XObject
+  containing only one image through at most 16 single-child Forms is also an
+  image candidate: edits target the outer occurrence, never the shared stream.
+  Mixed-content, marked, externally clipped or transparent outer Forms remain
+  protected, as do outer Forms with non-default fill (stencil paint safety).
+  Internal image masks and Form clipping stay intact.
 - Added images and editable top-level source images can be dragged within the
   page. A move preserves image size and creates one undoable command. Added
   images and eligible source images also have eight side/corner resize handles
@@ -288,8 +292,10 @@ Current features:
   draft/history entry and writes no PDF property. Each resize is one undoable
   geometry command. Source resize requires a finite, nonsingular image matrix,
   no custom clipping, and the entire image inside the visible page. Unsupported
-  top-level images keep their existing move/delete support; nested Form images
-  remain protected. Source preview transforms run on the render worker, and
+  top-level images keep their existing move/delete support; images in unsupported
+  Form structures remain protected. Image-only Form occurrences use the same
+  move/resize/rotate/delete history and preserve other uses on any page.
+  Source preview transforms run on the render worker, and
   Save/Save As composes the original matrix with the source-to-target frame
   mapping so pixels, original rotation/reflection, and z-order remain intact.
   The panel also provides Rotate left/right 90° for
@@ -474,6 +480,9 @@ Current features:
   executable is invoked.
 - `src/PDFSourceImageGeometry.h`: shared source-image resize eligibility and
   affine frame mapping for the candidate scanner, render preview, and writer.
+- `src/PDFImageFormResources.h/.cpp`: bounded qpdf resource restoration after
+  image-only Form edits, retaining inherited resource names pruned by PDFium
+  without overwriting new resources or changing shared page dictionaries.
 - `src/PDFStampPresets.h`: shared 24-preset catalogue, dynamic author/date
   formatting, and vector artwork for QML Stamp previews and saved appearances.
 - `src/PDFCommentAnnotation.h`: shared drawing-comment geometry/property
@@ -735,8 +744,11 @@ clipped or elided unintentionally.
   on a worker; the worker request must not retain controller/document pointers.
 - Resolve every source object path before removing source objects. Only
   top-level page text plus top-level image movement/resizing/rotation/deletion
-  are currently saveable; nested Form XObject content must remain non-editable until its
-  transform/clip/resource scope can be preserved. Keep moved/resized/rotated source
+  are currently saveable, including validated image-only Form occurrences.
+  Revalidate those wrappers with `PDFSourceImageGeometry::isImageOnlyForm()`;
+  transform/remove only the top-level occurrence, never its child objects or
+  shared Form stream. Arbitrary nested Form content remains non-editable.
+  Keep moved/resized/rotated source
   images in place and compose their existing matrix with the source-to-target
   normalized frame transform; never decode/recreate them. Use the shared
   `PDFSourceImageGeometry` mapping so CropBox offsets and intrinsic page rotation

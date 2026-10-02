@@ -543,7 +543,10 @@ public:
                 : move.kind == PDFEditController::DraftObjectMove::Kind::Path
                     ? FPDF_PAGEOBJ_PATH
                     : FPDF_PAGEOBJ_IMAGE;
-            if (!object || FPDFPageObj_GetType(object) != expectedType) {
+            const bool matchesType = move.kind == PDFEditController::DraftObjectMove::Kind::Image
+                ? PDFSourceImageGeometry::isImageObject(object)
+                : object && FPDFPageObj_GetType(object) == expectedType;
+            if (!matchesType) {
                 restore();
                 return false;
             }

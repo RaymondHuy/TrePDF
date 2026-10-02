@@ -34,6 +34,53 @@ inline bool finiteInvertibleMatrix(const FS_MATRIX &matrix)
     return finiteMatrix(matrix) && std::isfinite(determinant) && determinant != 0.0;
 }
 
+// Edit the page-level occurrence, never its shared Form stream. Only a chain
+// containing one image and no other content can act as an image as a whole.
+inline bool isImageOnlyForm(FPDF_PAGEOBJECT object)
+{
+    if (!object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_FORM
+        || FPDFPageObj_HasTransparency(object)) {
+        return false;
+    }
+    // PDFium cannot preserve arbitrary outer soft-mask graphics state when
+    // regenerating an occurrence, nor move its page-space clip with the image.
+    // Internal image masks and Form clips stay untouched in their own stream.
+    const FPDF_CLIPPATH clip = FPDFPageObj_GetClipPath(object);
+    if (!clip || FPDFClipPath_CountPaths(clip) != -1)
+        return false;
+    // A stencil image can inherit this paint. PDFium does not serialize every
+    // non-RGB outer color space; default black is safe without decoding pixels.
+    unsigned int red = 0, green = 0, blue = 0, alpha = 0;
+    if (!FPDFPageObj_GetFillColor(object, &red, &green, &blue, &alpha)
+        || red != 0 || green != 0 || blue != 0 || alpha != 255) {
+        return false;
+    }
+    constexpr int maximumFormDepth = 16;
+    for (int depth = 0; depth <= maximumFormDepth; ++depth) {
+        FS_MATRIX matrix{};
+        if (!object || FPDFPageObj_CountMarks(object) != 0
+            || !FPDFPageObj_GetMatrix(object, &matrix)
+            || !finiteInvertibleMatrix(matrix)) {
+            return false;
+        }
+        const int type = FPDFPageObj_GetType(object);
+        if (type == FPDF_PAGEOBJ_IMAGE)
+            return true;
+        if (type != FPDF_PAGEOBJ_FORM || depth == maximumFormDepth
+            || FPDFFormObj_CountObjects(object) != 1) {
+            return false;
+        }
+        object = FPDFFormObj_GetObject(object, 0);
+    }
+    return false;
+}
+
+inline bool isImageObject(FPDF_PAGEOBJECT object)
+{
+    return object && (FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_IMAGE
+                      || isImageOnlyForm(object));
+}
+
 inline bool hasSizeChange(const QRectF &sourceRect, const QRectF &frameRect)
 {
     return !qFuzzyCompare(sourceRect.width(), frameRect.width())
@@ -63,7 +110,7 @@ inline QTransform unitQuarterTurnTransform(int imageQuarterTurns)
 inline bool canResize(FPDF_PAGE page, FPDF_PAGEOBJECT object)
 {
     FS_MATRIX matrix{};
-    if (!page || !object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_IMAGE
+    if (!page || !isImageObject(object)
         || !FPDFPageObj_GetMatrix(object, &matrix)
         || !finiteInvertibleMatrix(matrix)) {
         return false;
@@ -85,6 +132,19 @@ inline bool canResize(FPDF_PAGE page, FPDF_PAGEOBJECT object)
     const double epsilon = std::max(
         double(pageBounds.right) - pageBounds.left,
         double(pageBounds.top) - pageBounds.bottom) * 1e-6;
+    if (FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_FORM) {
+        // Internal Form BBoxes and clipping travel with this occurrence. Only
+        // an external clip (checked above) would stay behind during a transform.
+        float left = 0, bottom = 0, right = 0, top = 0;
+        return FPDFPageObj_GetBounds(object, &left, &bottom, &right, &top)
+            && std::isfinite(left) && std::isfinite(bottom)
+            && std::isfinite(right) && std::isfinite(top)
+            && right > left && top > bottom
+            && left >= pageBounds.left - epsilon
+            && right <= pageBounds.right + epsilon
+            && bottom >= pageBounds.bottom - epsilon
+            && top <= pageBounds.top + epsilon;
+    }
     const std::array<QPointF, 4> corners{{{0, 0}, {1, 0}, {0, 1}, {1, 1}}};
     for (const QPointF &corner : corners) {
         const double pageX = matrix.a * corner.x() + matrix.c * corner.y() + matrix.e;
@@ -111,7 +171,8 @@ inline bool transformedMatrix(FPDF_PAGE page,
                               int imageQuarterTurns = 0)
 {
     const int quarterTurns = (imageQuarterTurns % 4 + 4) % 4;
-    if (!page || !finiteRect(sourceRect) || !finiteRect(frameRect)
+    if (!page || !isImageObject(object)
+        || !finiteRect(sourceRect) || !finiteRect(frameRect)
         || !finiteMatrix(originalMatrix)
         || ((quarterTurns != 0 || hasSizeChange(sourceRect, frameRect))
             && !canResize(page, object))) {

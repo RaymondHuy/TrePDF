@@ -91,6 +91,8 @@ qt_add_library(trepdf_password_writer STATIC
     src/PDFPasswordWriter.h
     src/PDFOpenTypeFontWriter.cpp
     src/PDFOpenTypeFontWriter.h
+    src/PDFImageFormResources.cpp
+    src/PDFImageFormResources.h
 )
 target_link_libraries(trepdf_password_writer PRIVATE QPDF::QPDF Qt6::Core ZLIB::ZLIB)
 

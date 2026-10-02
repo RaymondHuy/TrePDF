@@ -73,3 +73,26 @@ TREPDF_TEST_CTAN_CACHE=/tmp/trepdf-ctan-cache/files QT_QPA_PLATFORM=offscreen \
 This optional test does not install the inspected files; it skips when the
 environment variable is unset. The normal download tests use an isolated test
 font store and never modify the user's TrePDF font cache.
+
+## Image-Only Form XObjects
+
+`editsSharedNestedImagesRoundTrip` covers move/resize/rotate/delete, history,
+shared occurrences, nested matrices, image masks, internal clipping, CropBox,
+page rotation, and inherited resources. `previewsSharedNestedImageChanges`
+compares worker previews against saved output and verifies undo/discard restore
+the original raster. Unsafe mixed/marked/clipped/transparent Forms stay read-only.
+Resource regressions also cover adding/removing a neighboring image, page
+insertion/deletion, password replacement, ordinary encrypted Save, repeated
+Save/reopen, and preserving drafts/destination after save failure.
+
+The optional local-book regression checks page 1 while preserving shared page 3
+and the original file bytes:
+
+```sh
+TREPDF_TEST_NESTED_IMAGE_PDF="/path/to/500 Lines or Less.pdf" QT_QPA_PLATFORM=offscreen \
+  cmake-build-debug/tests/trepdf_edit_controller_tests editsExternalNestedImageWithoutChangingSharedPage
+```
+
+Set `TREPDF_TEST_NESTED_IMAGE_OUTPUT_DIR` to an empty scratch directory to retain
+rendered PNGs of the original and each operation for visual inspection. Edited
+PDFs remain temporary test artifacts; the supplied PDF is never overwritten.

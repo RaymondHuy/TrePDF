@@ -14,6 +14,7 @@
 #include "PDFFormDesignerController.h"
 #include "PDFPasswordWriter.h"
 #include "PDFOpenTypeFontWriter.h"
+#include "PDFImageFormResources.h"
 #include "PDFiumSynchronization.h"
 #include "PDFiumDocument.h"
 
@@ -2818,7 +2819,10 @@ QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
             ? FPDF_PAGEOBJ_IMAGE
             : draft.kind == SaveDraft::Kind::Shape
                 ? FPDF_PAGEOBJ_PATH : FPDF_PAGEOBJ_TEXT;
-        if (FPDFPageObj_GetType(source.object) != expectedType) {
+        const bool matchesType = draft.kind == SaveDraft::Kind::Image
+            ? PDFSourceImageGeometry::isImageObject(source.object)
+            : FPDFPageObj_GetType(source.object) == expectedType;
+        if (!matchesType) {
             result = failure(
                 PDFSaveWriter::Error::SourceObjectMissing,
                 draft.page,
@@ -5342,7 +5346,8 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                                       QVector<PDFCommentAnnotation::SourceDrawingGeometryUpdate>
                                           &sourceDrawingGeometryUpdates,
                                       QVector<PDFAcroFormCanonicalizer::SourceCommentGeometryUpdate>
-                                          &sourceCommentGeometryUpdates)
+                                          &sourceCommentGeometryUpdates,
+                                      QSet<int> &imageFormPages)
 {
     assertPDFiumProcessLockHeld();
     FPDF_PAGE loadedPage = FPDF_LoadPage(document, pageIndex);
@@ -5411,6 +5416,14 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                 && !draft.added;
         });
     if (hasPageObjectDrafts) {
+        // Retained Form occurrences can also rely on page resources that the
+        // generator prunes when a neighboring object is edited or added.
+        for (int index = 0; index < FPDFPage_CountObjects(page.get()); ++index) {
+            if (PDFSourceImageGeometry::isImageOnlyForm(FPDFPage_GetObject(page.get(), index))) {
+                imageFormPages.insert(pageIndex);
+                break;
+            }
+        }
         QSet<int> removedTextObjectIndexes;
         QSet<int> retainedTextObjectIndexes;
         for (const SaveDraft &draft : drafts) {
@@ -7288,6 +7301,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         previousInsertionPage = pageIndex;
     }
 
+    QSet<int> imageFormPages;
     FontResolver fontResolver(document.get());
     QVector<PDFAcroFormCanonicalizer::AnnotationRelationship>
         annotationRelationships;
@@ -7318,7 +7332,8 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             stampAnnotations,
             drawingAnnotations,
             sourceDrawingGeometryUpdates,
-            sourceCommentGeometryUpdates);
+            sourceCommentGeometryUpdates,
+            imageFormPages);
         if (!result.succeeded()) {
             return result;
         }
@@ -7433,6 +7448,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
     }
 
     if (request.m_data->pendingOpenPassword.isEmpty()
+        && imageFormPages.isEmpty()
         && fontResolver.openTypeFonts().isEmpty()
         && request.m_data->formFields.isEmpty()
         && annotationRelationships.isEmpty()
@@ -7467,7 +7483,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             -1,
             contentFile.errorString());
     }
-    const QString contentFilePath = contentFile.filePath(QStringLiteral("content.pdf"));
+    QString contentFilePath = contentFile.filePath(QStringLiteral("content.pdf"));
     // Canonicalizers need plaintext PDF dictionaries. Remove security only in
     // this private stage of a password replacement; commit always re-encrypts.
     const QByteArray stagingPassword = replacingPassword
@@ -7478,6 +7494,26 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         replacingPassword);
     if (!contentResult.succeeded()) {
         return contentResult;
+    }
+
+    if (!imageFormPages.isEmpty()) {
+        QMap<int, int> pageMap;
+        for (int sourcePage = 0; sourcePage < sourcePageCount; ++sourcePage) {
+            const int outputPage = outputPageForSource(sourcePage, sourcePageCount,
+                request.m_data->deletedSourcePages, request.m_data->pageInsertions);
+            if (imageFormPages.contains(outputPage))
+                pageMap.insert(outputPage, sourcePage);
+        }
+        const QString restoredPath = contentFile.filePath(QStringLiteral("resources.pdf"));
+        bool changed = false;
+        if (pageMap.size() != imageFormPages.size()
+            || !PDFImageFormResources::restoreMissing(request.m_data->sourceFilePath,
+                contentFilePath, restoredPath, pageMap, request.m_data->documentPassword,
+                stagingPassword, changed)) {
+            return failure(Error::PageContentGenerationFailed);
+        }
+        if (changed)
+            contentFilePath = restoredPath;
     }
 
     if (!manualLinkAnnotations.isEmpty()) {
