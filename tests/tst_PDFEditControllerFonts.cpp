@@ -4177,10 +4177,15 @@ void PDFEditControllerTest::downloadsPrivateFontAndResumesOriginalSave()
     // A cache file altered after installation must never become save input.
     QFile cached(QDir(store.path).filePath(QString::fromLatin1(
         QCryptographicHash::hash(font, QCryptographicHash::Sha256).toHex()) + QStringLiteral(".ttf")));
-    QVERIFY(cached.open(QIODevice::WriteOnly | QIODevice::Truncate));
-    cached.write("corrupted");
-    cached.close();
-    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    QByteArray sameSizeCorruption = font;
+    sameSizeCorruption[0] = char(quint8(sameSizeCorruption.at(0)) ^ 1U);
+    for (const QByteArray &invalidData : {font.first(font.size() - 1),
+             font + QByteArrayLiteral("extra"), sameSizeCorruption}) {
+        QVERIFY(cached.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(cached.write(invalidData), invalidData.size());
+        cached.close();
+        QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    }
     QString error;
     QVERIFY2(ApplicationFonts::installDownloadedFont(font, family, false, false, uint('z'), error), qPrintable(error));
     QCOMPARE(ApplicationFonts::downloadedFontFace(family, false, false).data, font);
@@ -4323,11 +4328,26 @@ void PDFEditControllerTest::selectsSourceTextWithoutDrafting_data()
     QTest::addColumn<qreal>("zoom");
     QTest::addColumn<QString>("probePath");
     QTest::addColumn<int>("gesture");
+    QTest::addColumn<bool>("loadWindowsOverlay");
     const auto addCases = [](const QByteArray &prefix, qreal zoom, const QString &path) {
         const QList<QByteArray> gestures{
             "idle-pointer", "click-frame", "click-handle", "jitter-frame", "jitter-handle"};
-        for (int gesture = 0; gesture < gestures.size(); ++gesture)
-            QTest::newRow((prefix + '-' + gestures[gesture]).constData()) << zoom << path << gesture;
+        for (bool windowsOverlay : {false, true}) {
+#ifdef Q_OS_WIN
+            if (windowsOverlay)
+                continue; // The registered platform type already uses this overlay.
+            const qsizetype gestureCount = gestures.size();
+#else
+            // Native overlays keep their existing drag behavior. Exercise the
+            // Windows-only threshold explicitly on every host as well.
+            const qsizetype gestureCount = windowsOverlay ? gestures.size() : 3;
+#endif
+            const QByteArray variant = windowsOverlay ? "windows-" : "platform-";
+            for (int gesture = 0; gesture < gestureCount; ++gesture) {
+                QTest::newRow((variant + prefix + '-' + gestures[gesture]).constData())
+                    << zoom << path << gesture << windowsOverlay;
+            }
+        }
     };
     addCases("75-percent", 0.75, {});
     addCases("291-percent", 2.91, {});
@@ -4341,6 +4361,7 @@ void PDFEditControllerTest::selectsSourceTextWithoutDrafting()
     QFETCH(qreal, zoom);
     QFETCH(QString, probePath);
     QFETCH(int, gesture);
+    QFETCH(bool, loadWindowsOverlay);
     const int pageIndex = probePath.isEmpty() ? 0 : 3;
     const QString sourcePath = probePath.isEmpty()
         ? m_temporaryDirectory.filePath(QStringLiteral("selection-without-edit.pdf")) : probePath;
@@ -4386,8 +4407,14 @@ void PDFEditControllerTest::selectsSourceTextWithoutDrafting()
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
     QQmlComponent component(&engine);
-    component.setData(QByteArrayLiteral(
-        "import TrePDF as PlatformComponents\nPlatformComponents.EditOverlay {}"), QUrl());
+    if (loadWindowsOverlay) {
+        const QString overlayPath = QFINDTESTDATA("../src/Components/Windows/EditOverlay.qml");
+        QVERIFY(!overlayPath.isEmpty());
+        component.loadUrl(QUrl::fromLocalFile(overlayPath));
+    } else {
+        component.setData(QByteArrayLiteral(
+            "import TrePDF as PlatformComponents\nPlatformComponents.EditOverlay {}"), QUrl());
+    }
     const QSizeF pageSize = pdf.pageSize(pageIndex);
     const qreal pageWidth = pageSize.width() * zoom;
     const qreal pageHeight = pageSize.height() * zoom;
@@ -4515,6 +4542,22 @@ void PDFEditControllerTest::selectsSourceTextWithoutDrafting()
     QCOMPARE(controller.selectedFrameRect(), draggedFrame);
     QCOMPARE(controller.selectedContentBounds(), draggedContent);
     controller.discardDrafts();
+
+    // Zoom/display changes run this hook before changing page geometry. A
+    // pending press must not turn into a drag using the old coordinates.
+    if (overlay->property("pendingFrameDrag").isValid()) {
+        selectAgain();
+        QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, gesturePoint);
+        QVERIFY(overlay->property("pendingFrameDrag").value<QQuickItem *>());
+        QVERIFY(QMetaObject::invokeMethod(overlay.get(), "prepareForSessionChange"));
+        QTest::mouseMove(&window, dragEnd);
+        QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, dragEnd);
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(!controller.canUndo());
+        QCOMPARE(controller.selectedFrameRect(), originalFrame);
+        QCOMPARE(controller.selectedContentBounds(), originalContent);
+        QVERIFY(!overlay->property("pendingFrameDrag").value<QQuickItem *>());
+    }
 
     // A keyboard command supersedes a pending mouse drag, without replaying
     // the stale press geometry when the pointer subsequently moves.

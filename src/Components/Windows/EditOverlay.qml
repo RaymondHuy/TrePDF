@@ -2143,6 +2143,7 @@ Item {
     }
 
     function prepareForSessionChange() {
+        pendingFrameDrag = null
         ++editFocusGeneration
         clearTextEditPreparation(true)
         selectionActions.close()

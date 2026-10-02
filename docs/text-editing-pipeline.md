@@ -30,7 +30,9 @@ CMake chọn đúng file overlay theo OS đích của bản build (`WIN32`) và 
 một type `TrePDF.EditOverlay`. `PageInteractionOverlay` dùng type có namespace
 này để tránh nạp nhầm file gốc từ cùng thư mục. Các test dùng chung helper chọn
 file theo OS và đăng ký cùng type; bản Windows giữ đường dẫn icon tương đối
-tới `src/assets` từ thư mục con `Windows`.
+tới `src/assets` từ thư mục con `Windows`. Test thao tác chọn/kéo còn nạp trực tiếp
+overlay Windows trên host khác để kiểm tra ngưỡng kéo mà không thay đổi hành vi
+overlay của macOS.
 
 ## 1. Tổng quan luồng xử lý
 
@@ -1308,7 +1310,8 @@ khung/handle chưa mở transaction geometry. Chỉ khi con trỏ vượt
 ngưỡng hệ thống `MouseArea.drag.threshold` (đo trong tọa độ scene), thao tác kéo mới gọi
 `beginSelectedFrameResize()`. Click hoặc rung chuột nhẹ không đồng bộ lại
 content bounds, tạo draft hay thêm Undo. Escape hủy cả thao tác đang chờ vượt
-ngưỡng lẫn thao tác kéo đã bắt đầu; phím mũi tên vẫn áp dụng trực tiếp.
+ngưỡng lẫn thao tác kéo đã bắt đầu; phím mũi tên vẫn áp dụng trực tiếp. Chuẩn bị
+đổi zoom hoặc bố cục cũng xóa thao tác kéo đang chờ để không tái sử dụng tọa độ cũ.
 
 Box text đang chọn có bốn resize handle ở giữa các cạnh. Khi bắt đầu kéo,
 `beginSelectedFrameResize()` chụp `Draft` hiện tại. Trong lúc kéo, QML chuẩn hóa
