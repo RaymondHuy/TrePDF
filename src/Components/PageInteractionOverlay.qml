@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import TrePDF
+import TrePDF as PlatformComponents
 
 Item {
     id: root
@@ -134,7 +135,7 @@ Item {
         }
     }
 
-    EditOverlay {
+    PlatformComponents.EditOverlay {
         id: editOverlay
 
         anchors.fill: parent

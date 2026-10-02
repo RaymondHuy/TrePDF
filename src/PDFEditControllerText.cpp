@@ -704,6 +704,11 @@ QFont PDFEditController::fontForDisplay(const QString &fontFamily,
     font.setItalic(fontItalic);
     font.setUnderline(fontUnderline);
     font.setPixelSize(boundedPixelSize);
+#ifdef Q_OS_WIN
+    // The whole layout is scaled to the page zoom. Rounding each advance to
+    // screen pixels here changes the source line width before that scaling.
+    font.setHintingPreference(QFont::PreferNoHinting);
+#endif
     font.setStretch(displayFontStretch(
         fontFamily,
         fontStretch,

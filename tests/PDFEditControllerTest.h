@@ -241,6 +241,7 @@ private slots:
     void alignsSelectedParagraphsWithUndoRedo();
     void calibratesDisplayStretchToPdfScale_data();
     void calibratesDisplayStretchToPdfScale();
+    void preservesSmallOpenTypeFontAdvances();
     void appliesFontStylesToDisplayFont_data();
     void appliesFontStylesToDisplayFont();
     void savesEditedTextRoundTrip();
@@ -489,6 +490,8 @@ private slots:
     void isolatesType1FontNames();
     void preservesType1UrlThroughInlineEditing_data();
     void preservesType1UrlThroughInlineEditing();
+    void selectsSourceTextWithoutDrafting_data();
+    void selectsSourceTextWithoutDrafting();
     void fallsBackToCtanAndReusesCachedFamily();
     void loadsCachedFontInFreshProcess();
     void preservesDownloadedFontSpacingOnReusedSaveWorker();

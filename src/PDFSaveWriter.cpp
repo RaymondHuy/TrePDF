@@ -704,6 +704,10 @@ QFont displayFont(const SaveFormat &format, qreal pageHeight)
     font.setItalic(format.fontItalic);
     font.setUnderline(format.fontUnderline);
     font.setPixelSize(pixelSize);
+#ifdef Q_OS_WIN
+    // Keep the writer's advances identical to fontForDisplay and calibration.
+    font.setHintingPreference(QFont::PreferNoHinting);
+#endif
     font.setStretch(ApplicationFonts::calibratedFontStretch(
         layoutFamily,
         format.fontStretch,

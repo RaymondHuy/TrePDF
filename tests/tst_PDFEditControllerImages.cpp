@@ -503,7 +503,7 @@ void PDFEditControllerTest::resizesSourceImageThroughQmlHandles()
     const qreal normalizedAspect = original.width() / original.height();
 
     const QString themePath = QFINDTESTDATA("../src/Components/AppTheme.qml");
-    const QString overlayPath = QFINDTESTDATA("../src/Components/EditOverlay.qml");
+    const QString overlayPath = editOverlayQmlPath();
     QVERIFY(registerQmlTestTypes(themePath));
     QQuickWindow window;
     window.resize(595, 842);

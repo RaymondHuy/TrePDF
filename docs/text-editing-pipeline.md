@@ -10,8 +10,9 @@ Các file chính:
   geometry/font, quyết định `editable`, selection và draft.
 - [`PDFEditController.h`](../src/PDFEditController.h): cấu trúc `Candidate` và
   các property đưa sang QML.
-- [`EditOverlay.qml`](../src/Components/EditOverlay.qml): hit test, hover box,
-  selection box và rich `TextEdit` khi edit.
+- [`EditOverlay.qml`](../src/Components/EditOverlay.qml) (macOS và nền tảng khác)
+  và [`Windows/EditOverlay.qml`](../src/Components/Windows/EditOverlay.qml)
+  (Windows): hit test, hover box, selection box và rich `TextEdit` khi edit.
 - [`PDFPageItem.cpp`](../src/PDFPageItem.cpp): render lại page mà tạm ẩn text
   object gốc khi đã có draft.
 - [`PDFSaveWriter.cpp`](../src/PDFSaveWriter.cpp): thay object nguồn bằng các
@@ -24,6 +25,14 @@ Các file chính:
 - [`PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) và
   [`PageInteractionOverlay.qml`](../src/Components/PageInteractionOverlay.qml):
   đặt `EditOverlay` trùng chính xác lên `PDFPageView`.
+
+CMake chọn đúng file overlay theo OS đích của bản build (`WIN32`) và chỉ đăng ký
+một type `TrePDF.EditOverlay`. `PageInteractionOverlay` dùng type có namespace
+này để tránh nạp nhầm file gốc từ cùng thư mục. Các test dùng chung helper chọn
+file theo OS và đăng ký cùng type; bản Windows giữ đường dẫn icon tương đối
+tới `src/assets` từ thư mục con `Windows`. Test thao tác chọn/kéo còn nạp trực tiếp
+overlay Windows trên host khác để kiểm tra ngưỡng kéo mà không thay đổi hành vi
+overlay của macOS.
 
 ## 1. Tổng quan luồng xử lý
 
@@ -702,6 +711,11 @@ PDF đích nhất. Kết quả được cache theo family, bold/italic, pixel si
 QML và `QTextLayout` của writer; giá trị logic trong draft và matrix PDF vẫn là
 `fontStretch`/`horizontalScale` ban đầu, không phải giá trị Qt đã hiệu chỉnh.
 
+Trên Windows, probe hiệu chỉnh, QFont của editor/preview và QFont của writer
+cùng dùng `PreferNoHinting`. Layout tính bằng điểm PDF rồi mới scale theo zoom;
+làm tròn advance theo pixel màn hình ở cỡ nhỏ có thể khiến font OTF giãn sai
+và nhiều giá trị stretch cho cùng chiều rộng. Không đổi chế độ hinting của macOS.
+
 Khi người dùng chọn một family khác, stretch của range được đổi về `100` để
 không mang scale của font nguồn sang font mới. Chọn lại chính family hiện tại
 khi stretch khác `100` cũng là thao tác normalize rõ ràng; cách này cho phép
@@ -1289,6 +1303,15 @@ Nếu render mode không suppress được hoặc suppression thất bại,
 ## 15. Khi user gõ, Enter, Ctrl/Cmd+Enter hoặc Esc
 
 ### 15.0 Resize frame
+
+Trên Windows, vùng bắt chuột di chuyển chỉ nằm trong khung chọn; click ra ngoài
+được chuyển đến hit-test của page để chọn đối tượng khác hoặc bỏ chọn. Nhấn chuột lên
+khung/handle chưa mở transaction geometry. Chỉ khi con trỏ vượt
+ngưỡng hệ thống `MouseArea.drag.threshold` (đo trong tọa độ scene), thao tác kéo mới gọi
+`beginSelectedFrameResize()`. Click hoặc rung chuột nhẹ không đồng bộ lại
+content bounds, tạo draft hay thêm Undo. Escape hủy cả thao tác đang chờ vượt
+ngưỡng lẫn thao tác kéo đã bắt đầu; phím mũi tên vẫn áp dụng trực tiếp. Chuẩn bị
+đổi zoom hoặc bố cục cũng xóa thao tác kéo đang chờ để không tái sử dụng tọa độ cũ.
 
 Box text đang chọn có bốn resize handle ở giữa các cạnh. Khi bắt đầu kéo,
 `beginSelectedFrameResize()` chụp `Draft` hiện tại. Trong lúc kéo, QML chuẩn hóa

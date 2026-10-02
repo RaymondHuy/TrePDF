@@ -23,6 +23,7 @@
 #include <QFontInfo>
 #include <QSemaphore>
 #include <QThreadPool>
+#include <QStyleHints>
 #include <zip.h>
 
 using namespace PDFEditControllerTestSupport;
@@ -1956,6 +1957,39 @@ void PDFEditControllerTest::calibratesDisplayStretchToPdfScale()
                        .arg(actualRatio, 0, 'f', 6)));
 }
 
+void PDFEditControllerTest::preservesSmallOpenTypeFontAdvances()
+{
+    // Register the fixture in memory only. PDF advances are outline units,
+    // independent of Windows' pixel-grid rounding at the editor's small size.
+    const QByteArray bytes = ctanTermesFontData(0);
+    QVERIFY(!bytes.isEmpty());
+    const int registration = QFontDatabase::addApplicationFontFromData(bytes);
+    QVERIFY(registration >= 0);
+    const auto removeFont = qScopeGuard([&] {
+        QFontDatabase::removeApplicationFont(registration);
+    });
+    const auto families = QFontDatabase::applicationFontFamilies(registration);
+    QVERIFY(!families.isEmpty());
+    const QString text = QStringLiteral(
+        "Attribution—you must attribute the work in the manner speciﬁed by the author or licensor (but not in any");
+    const QRawFont reference(bytes, 1000.0, QFont::PreferNoHinting);
+    QVERIFY(reference.isValid());
+    const auto glyphs = reference.glyphIndexesForString(text);
+    QVERIFY(!glyphs.contains(0));
+    qreal outlineWidth = 0.0;
+    for (const QPointF &advance : reference.advancesForGlyphIndexes(glyphs))
+        outlineWidth += advance.x();
+    for (const int stretch : {98, 100, 125}) {
+        const QFont font = m_controller.fontForDisplay(
+            families.first(), stretch, false, false, false, 9.0, 0.0, 0.0, true);
+        const qreal expectedWidth = outlineWidth * 9.0 / 1000.0 * stretch / 100.0;
+        const qreal width = QFontMetricsF(font).horizontalAdvance(text);
+        QVERIFY2(qAbs(width - expectedWidth) < 1.0,
+            qPrintable(QStringLiteral("Stretch %1: editor width %2, outline width %3")
+                .arg(stretch).arg(width).arg(expectedWidth)));
+    }
+}
+
 void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial_data()
 {
     QTest::addColumn<QString>("editedText");
@@ -3150,6 +3184,8 @@ void PDFEditControllerTest::fallsBackToCtanAndReusesCachedFamily()
         const auto installed = ApplicationFonts::downloadedFontFace(family, style & 2, style & 1);
         QVERIFY(installed.isValid());
         QCOMPARE(installed.data, ctanTermesFontData(style));
+        QVERIFY2(installed.data.capacity() <= 2 * installed.data.size(),
+                 "Reading a cached font must not allocate the maximum allowed font size.");
         QVERIFY(ApplicationFonts::isFontFaceSelectable(family, style & 2, style & 1));
     }
     // Every style is the original reviewed OpenType/CFF program from CTAN.
@@ -3283,6 +3319,9 @@ void PDFEditControllerTest::loadsCachedFontInFreshProcess()
     QVERIFY(cached.data.startsWith("OTTO"));
     QCOMPARE(QCryptographicHash::hash(cached.data, QCryptographicHash::Sha256).toHex(),
              QByteArrayLiteral("cc3fe7c707b81428d23d54df3eadd9228a2bf6a4d43125d94df56f5f63134659"));
+    // Native font engines can retain this buffer for the lifetime of the face.
+    QVERIFY2(cached.data.capacity() <= 2 * cached.data.size(),
+             "A small cached font must not retain a buffer sized for the font safety limit.");
     QCOMPARE(QRawFont(cached.data, 16.0, QFont::PreferNoHinting).familyName(), family);
     QVERIFY(ApplicationFonts::fontFaceSupportsText(
         family, false, false, QStringLiteral("tiếng Việt z"), ApplicationFonts::FontSource::Downloaded));
@@ -4138,10 +4177,15 @@ void PDFEditControllerTest::downloadsPrivateFontAndResumesOriginalSave()
     // A cache file altered after installation must never become save input.
     QFile cached(QDir(store.path).filePath(QString::fromLatin1(
         QCryptographicHash::hash(font, QCryptographicHash::Sha256).toHex()) + QStringLiteral(".ttf")));
-    QVERIFY(cached.open(QIODevice::WriteOnly | QIODevice::Truncate));
-    cached.write("corrupted");
-    cached.close();
-    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    QByteArray sameSizeCorruption = font;
+    sameSizeCorruption[0] = char(quint8(sameSizeCorruption.at(0)) ^ 1U);
+    for (const QByteArray &invalidData : {font.first(font.size() - 1),
+             font + QByteArrayLiteral("extra"), sameSizeCorruption}) {
+        QVERIFY(cached.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(cached.write(invalidData), invalidData.size());
+        cached.close();
+        QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    }
     QString error;
     QVERIFY2(ApplicationFonts::installDownloadedFont(font, family, false, false, uint('z'), error), qPrintable(error));
     QCOMPARE(ApplicationFonts::downloadedFontFace(family, false, false).data, font);
@@ -4277,6 +4321,270 @@ void PDFEditControllerTest::savesExternalPageFourOnSamePath()
     }
     QVERIFY(original.open(QIODevice::ReadOnly));
     QCOMPARE(original.readAll(), originalBytes);
+}
+
+void PDFEditControllerTest::selectsSourceTextWithoutDrafting_data()
+{
+    QTest::addColumn<qreal>("zoom");
+    QTest::addColumn<QString>("probePath");
+    QTest::addColumn<int>("gesture");
+    QTest::addColumn<bool>("loadWindowsOverlay");
+    const auto addCases = [](const QByteArray &prefix, qreal zoom, const QString &path) {
+        const QList<QByteArray> gestures{
+            "idle-pointer", "click-frame", "click-handle", "jitter-frame", "jitter-handle"};
+        for (bool windowsOverlay : {false, true}) {
+#ifdef Q_OS_WIN
+            if (windowsOverlay)
+                continue; // The registered platform type already uses this overlay.
+            const qsizetype gestureCount = gestures.size();
+#else
+            // Native overlays keep their existing drag behavior. Exercise the
+            // Windows-only threshold explicitly on every host as well.
+            const qsizetype gestureCount = windowsOverlay ? gestures.size() : 3;
+#endif
+            const QByteArray variant = windowsOverlay ? "windows-" : "platform-";
+            for (int gesture = 0; gesture < gestureCount; ++gesture) {
+                QTest::newRow((variant + prefix + '-' + gestures[gesture]).constData())
+                    << zoom << path << gesture << windowsOverlay;
+            }
+        }
+    };
+    addCases("75-percent", 0.75, {});
+    addCases("291-percent", 2.91, {});
+    const QString external = qEnvironmentVariable("TREPDF_TEST_MIXED_FONT_PDF");
+    if (!external.isEmpty())
+        addCases("external-page-four", 2.91, external);
+}
+
+void PDFEditControllerTest::selectsSourceTextWithoutDrafting()
+{
+    QFETCH(qreal, zoom);
+    QFETCH(QString, probePath);
+    QFETCH(int, gesture);
+    QFETCH(bool, loadWindowsOverlay);
+    const int pageIndex = probePath.isEmpty() ? 0 : 3;
+    const QString sourcePath = probePath.isEmpty()
+        ? m_temporaryDirectory.filePath(QStringLiteral("selection-without-edit.pdf")) : probePath;
+    if (probePath.isEmpty()) {
+        const QByteArray content(
+            "BT /F1 9 Tf 98 620 Td "
+            "(Attribution - source text must remain unchanged when selecting it.) Tj ET\n");
+        QVERIFY(writePdfObjects(sourcePath, {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>",
+            "<< /Length " + QByteArray::number(content.size()) + " >>\nstream\n"
+                + content + "endstream"}));
+    }
+    PDFDocument pdf;
+    PDFEditController controller;
+    QVERIFY(pdf.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&pdf);
+    controller.setTool(PDFEditController::SelectTool);
+    QVariantMap candidate;
+    for (const QVariant &value : waitForCandidates(controller, pageIndex)) {
+        const QVariantMap item = value.toMap();
+        if (item.value(QStringLiteral("text")).toString().startsWith(QStringLiteral("Attribution"))) {
+            candidate = item;
+            break;
+        }
+    }
+    QVERIFY2(!candidate.isEmpty(), "The Attribution source line must be selectable");
+    QVERIFY(candidate.value(QStringLiteral("editable")).toBool());
+    const QString objectId = candidate.value(QStringLiteral("objectId")).toString();
+    const QString originalText = candidate.value(QStringLiteral("text")).toString();
+    const QRectF originalFrame = candidate.value(QStringLiteral("frameRect")).toRectF();
+    const QRectF originalContent = candidate.value(QStringLiteral("contentBounds")).toRectF();
+    const QVariantList originalSpans = candidate.value(QStringLiteral("characterSpans")).toList();
+
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQuickWindow window;
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine);
+    if (loadWindowsOverlay) {
+        const QString overlayPath = QFINDTESTDATA("../src/Components/Windows/EditOverlay.qml");
+        QVERIFY(!overlayPath.isEmpty());
+        component.loadUrl(QUrl::fromLocalFile(overlayPath));
+    } else {
+        component.setData(QByteArrayLiteral(
+            "import TrePDF as PlatformComponents\nPlatformComponents.EditOverlay {}"), QUrl());
+    }
+    const QSizeF pageSize = pdf.pageSize(pageIndex);
+    const qreal pageWidth = pageSize.width() * zoom;
+    const qreal pageHeight = pageSize.height() * zoom;
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), pageIndex}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false}, {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), zoom},
+        {QStringLiteral("width"), pageWidth}, {QStringLiteral("height"), pageHeight}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    auto *overlayItem = qobject_cast<QQuickItem *>(overlay.get());
+    QVERIFY(overlayItem);
+    overlayItem->setParentItem(window.contentItem());
+    // Keep the source line visible even when a page at the reported zoom is
+    // taller than the display. The left page margin remains a blank click target.
+    window.resize(qMin(1600, qCeil(pageWidth)), 500);
+    overlayItem->setY(200.0 - originalFrame.center().y() * pageHeight);
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    const QPoint textPoint = overlayItem->mapToScene(QPointF(
+        (originalFrame.left() + originalFrame.width() * 0.2) * pageWidth,
+        originalFrame.center().y() * pageHeight)).toPoint();
+    const QPoint blankPoint = overlayItem->mapToScene(QPointF(
+        0.02 * pageWidth, originalFrame.center().y() * pageHeight)).toPoint();
+    QVERIFY(controller.candidateAt(pageIndex, 0.02, originalFrame.center().y()).isEmpty());
+
+    // Opening the contextual popup and clicking the page must dismiss both
+    // popup and selection on the first click, without an edit transaction.
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, textPoint);
+    QTRY_COMPARE(controller.selectedObjectId(), objectId);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, blankPoint);
+    QTRY_VERIFY(controller.selectedObjectId().isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, textPoint);
+    QTRY_COMPARE(controller.selectedObjectId(), objectId);
+    const qreal padding = overlay->property("boundingBoxPadding").toReal();
+    const QPoint handlePoint = overlayItem->mapToScene(QPointF(
+        originalFrame.center().x() * pageWidth,
+        originalFrame.top() * pageHeight - padding)).toPoint();
+    const bool resizes = gesture == 2 || gesture == 4;
+    const QPoint gesturePoint = resizes ? handlePoint : textPoint;
+    if (gesture == 0) {
+        QTest::mouseMove(&window, blankPoint);
+    } else {
+        QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, gesturePoint);
+        const QPoint releasePoint = gesture >= 3 ? gesturePoint + QPoint(1, 1) : gesturePoint;
+        if (gesture >= 3)
+            QTest::mouseMove(&window, releasePoint);
+        QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, releasePoint);
+    }
+    QCoreApplication::processEvents();
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(!overlay->property("editing").toBool());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QCOMPARE(controller.selectedText(), originalText);
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QCOMPARE(controller.selectedContentBounds(), originalContent);
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, blankPoint);
+    QTRY_VERIFY(controller.selectedObjectId().isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.canRedo());
+
+    const int dragDistance = qMax(30, QGuiApplication::styleHints()->startDragDistance() + 5);
+    // Expand upward: shrinking a short line may already hit the minimum height.
+    const QPoint dragDelta(resizes ? 0 : dragDistance, resizes ? -dragDistance : 12);
+    const QPoint dragEnd = gesturePoint + dragDelta;
+    const auto selectAgain = [&] {
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, textPoint);
+        QCoreApplication::processEvents();
+    };
+    selectAgain();
+    QCOMPARE(controller.selectedObjectId(), objectId);
+    // Escape must also cancel a press that has not crossed the drag threshold.
+    QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, gesturePoint);
+    QTest::mouseMove(&window, gesturePoint + QPoint(1, 1));
+    QTest::keyClick(&window, Qt::Key_Escape);
+    QTest::mouseMove(&window, dragEnd);
+    QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, dragEnd);
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+
+    // Crossing the threshold starts a real preview, which Escape rolls back.
+    QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, gesturePoint);
+    QTest::mouseMove(&window, dragEnd);
+    QTRY_VERIFY(controller.selectedFrameRect() != originalFrame);
+    QTest::keyClick(&window, Qt::Key_Escape);
+    QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, dragEnd);
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QCOMPARE(controller.selectedContentBounds(), originalContent);
+
+    // A completed drag still produces exactly one reversible command.
+    QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, gesturePoint);
+    QTest::mouseMove(&window, dragEnd);
+    QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, dragEnd);
+    QTRY_VERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QVERIFY(!controller.textEditActive());
+    const QRectF draggedFrame = controller.selectedFrameRect();
+    const QRectF draggedContent = controller.selectedContentBounds();
+    QVERIFY(draggedFrame != originalFrame);
+    QCOMPARE(controller.selectedText(), originalText);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(controller.canRedo());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QCOMPARE(controller.selectedContentBounds(), originalContent);
+    controller.redo();
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.canUndo());
+    QCOMPARE(controller.selectedFrameRect(), draggedFrame);
+    QCOMPARE(controller.selectedContentBounds(), draggedContent);
+    controller.discardDrafts();
+
+    // Zoom/display changes run this hook before changing page geometry. A
+    // pending press must not turn into a drag using the old coordinates.
+    if (overlay->property("pendingFrameDrag").isValid()) {
+        selectAgain();
+        QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, gesturePoint);
+        QVERIFY(overlay->property("pendingFrameDrag").value<QQuickItem *>());
+        QVERIFY(QMetaObject::invokeMethod(overlay.get(), "prepareForSessionChange"));
+        QTest::mouseMove(&window, dragEnd);
+        QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, dragEnd);
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(!controller.canUndo());
+        QCOMPARE(controller.selectedFrameRect(), originalFrame);
+        QCOMPARE(controller.selectedContentBounds(), originalContent);
+        QVERIFY(!overlay->property("pendingFrameDrag").value<QQuickItem *>());
+    }
+
+    // A keyboard command supersedes a pending mouse drag, without replaying
+    // the stale press geometry when the pointer subsequently moves.
+    selectAgain();
+    QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, gesturePoint);
+    QTest::keyClick(&window, resizes ? Qt::Key_Up : Qt::Key_Right);
+    const QRectF keyboardFrame = controller.selectedFrameRect();
+    QVERIFY(keyboardFrame != originalFrame);
+    QTest::mouseMove(&window, dragEnd);
+    QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, dragEnd);
+    QCOMPARE(controller.selectedFrameRect(), keyboardFrame);
+    controller.undo();
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    controller.discardDrafts();
+
+    selectAgain();
+    QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, gesturePoint);
+    controller.clearSelection();
+    QVERIFY(controller.selectCandidate(pageIndex, objectId));
+    QTest::mouseMove(&window, dragEnd);
+    QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, dragEnd);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.textEditActive());
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
 }
 
 void PDFEditControllerTest::preservesType1UrlThroughInlineEditing_data()
@@ -4418,7 +4726,7 @@ void PDFEditControllerTest::preservesType1UrlThroughInlineEditing()
     themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
-    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
     const QSizeF pageSize = pdf.pageSize(pageIndex);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), pageIndex}, {QStringLiteral("pooled"), false},
@@ -4763,7 +5071,7 @@ void PDFEditControllerTest::opensInlineEditorAfterFontPreparation()
     themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
-    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
     const QSizeF size = pdf.pageSize(0);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},

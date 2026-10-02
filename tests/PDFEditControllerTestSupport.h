@@ -884,6 +884,7 @@ public:
     using FormFieldLayer::mouseReleaseEvent;
 };
 
+QString editOverlayQmlPath();
 bool registerQmlTestTypes(const QString &themePath);
 
 } // namespace PDFEditControllerTestSupport

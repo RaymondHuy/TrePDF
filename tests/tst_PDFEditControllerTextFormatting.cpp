@@ -154,7 +154,7 @@ void PDFEditControllerTest::keepsParagraphSpacingThroughQmlEditing()
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
     QQmlComponent component(&engine, QUrl::fromLocalFile(
-        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+        editOverlayQmlPath()));
     const QSizeF pageSize = document.pageSize(0);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
         {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
@@ -757,7 +757,7 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
     const QString originalText = m_controller.selectedText();
     const qreal displayedHeight = m_document.pageSize(0).height() * 1.5;
     const QString themePath = QFINDTESTDATA("../src/Components/AppTheme.qml");
-    const QString overlayPath = QFINDTESTDATA("../src/Components/EditOverlay.qml");
+    const QString overlayPath = editOverlayQmlPath();
     QVERIFY(registerQmlTestTypes(themePath));
     QQuickWindow window;
     window.resize(900, 600);
@@ -1293,7 +1293,7 @@ void PDFEditControllerTest::rendersEmbeddedFontStylesBeforeSave()
     std::unique_ptr<QObject> theme(themeComponent.create());
     QVERIFY2(theme, qPrintable(themeComponent.errorString()));
     QQmlComponent component(&engine, QUrl::fromLocalFile(
-        QFINDTESTDATA("../src/Components/EditOverlay.qml")));
+        editOverlayQmlPath()));
     const qreal zoom = 1.5;
     const QSizeF pageSize = pdf.pageSize(page);
     std::unique_ptr<QObject> overlay(component.createWithInitialProperties({

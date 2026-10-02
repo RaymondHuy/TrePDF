@@ -157,6 +157,11 @@ qreal fontAdvanceForStretch(const QString &family,
     font.setItalic(italic);
     font.setPixelSize(pixelSize);
     font.setStretch(stretch);
+#ifdef Q_OS_WIN
+    // Match PDF-point editor/save layout. GDI's pixel-rounded advances can
+    // collapse different stretch values at small sizes, especially for OTF.
+    font.setHintingPreference(QFont::PreferNoHinting);
+#endif
     return QFontMetricsF(font).horizontalAdvance(fontStretchProbe());
 }
 
@@ -1013,9 +1018,13 @@ void loadDownloadedFonts(FontRegistry &registry)
             continue;
         scannedBytes += info.size();
         QFile file(info.absoluteFilePath());
-        if (!file.open(QIODevice::ReadOnly))
+        if (!file.open(QIODevice::ReadOnly) || file.size() != info.size())
             continue;
-        const QByteArray data = file.read(kMaximumSystemFontBytes + 1);
+        // Keep buffers proportional to the font, including when QRawFont
+        // retains the data. The extra byte detects growth during the read.
+        const QByteArray data = file.read(info.size() + 1);
+        if (data.size() != info.size() || file.error() != QFileDevice::NoError)
+            continue;
         const QByteArray digest = QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex();
         if (info.completeBaseName().toLatin1() != digest)
             continue;
@@ -1656,13 +1665,14 @@ FontFaceData downloadedFontFace(const QString &family, bool bold, bool italic)
     registerBundledFonts();
     FontFaceData result;
     const auto *font = findDownloadedFont(fontRegistry(), family, bold, italic);
-    if (!font)
+    if (!font || font->size <= 0 || font->size > kMaximumSystemFontBytes)
         return result;
     QFile file(font->path);
     if (!file.open(QIODevice::ReadOnly) || file.size() != font->size)
         return result;
-    const QByteArray data = file.read(kMaximumSystemFontBytes + 1);
+    const QByteArray data = file.read(font->size + 1);
     if (data.size() != font->size
+        || file.error() != QFileDevice::NoError
         || QCryptographicHash::hash(data, QCryptographicHash::Sha256) != font->digest)
         return result;
     result.data = data;
