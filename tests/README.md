@@ -96,3 +96,27 @@ TREPDF_TEST_NESTED_IMAGE_PDF="/path/to/500 Lines or Less.pdf" QT_QPA_PLATFORM=of
 Set `TREPDF_TEST_NESTED_IMAGE_OUTPUT_DIR` to an empty scratch directory to retain
 rendered PNGs of the original and each operation for visual inspection. Edited
 PDFs remain temporary test artifacts; the supplied PDF is never overwritten.
+
+## Single-Text Form XObjects
+
+`editsSharedTextFormsRoundTrip` covers content/color/resize replacement,
+matrix-only movement, deletion, history/discard, repeated Save/reopen, nested
+transforms, inherited font resources, CropBox and page rotation. Two occurrences on one page and a shared
+occurrence on another page must remain independent. `keepsUnsafeTextFormsReadOnly`
+covers mixed content, marks, clipping (including a smaller Form BBox),
+transparency, inherited paint, unsupported text transforms/render modes and
+over-deep chains. `previewsSharedTextFormMovesAndDeletion` compares worker
+previews against saved rendering and checks undo/redo/discard restoration.
+
+The optional book regression moves the subtitle on page 3 with its original
+Museo font, then explicitly selects a local Arial face for content edits
+(Qt cannot load the original raw CFF subset). It checks editor font preflight,
+neighboring content and page 1, and saves only temporary copies:
+
+```sh
+TREPDF_TEST_FORM_TEXT_PDF="/path/to/500 Lines or Less.pdf" QT_QPA_PLATFORM=offscreen \
+  cmake-build-debug/tests/trepdf_edit_controller_tests editsExternalFormTextWithoutChangingNeighbors
+```
+
+Set `TREPDF_TEST_FORM_TEXT_OUTPUT_DIR` to an empty scratch directory to retain
+the original, edited and edited-again page PNGs. The input PDF is never written.

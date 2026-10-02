@@ -413,6 +413,12 @@ private slots:
     void rejectsTamperedSourceShapeProvenance_data();
     void rejectsTamperedSourceShapeProvenance();
     void movesTopLevelTextWithUndoRedo();
+    void editsSharedTextFormsRoundTrip_data();
+    void editsSharedTextFormsRoundTrip();
+    void keepsUnsafeTextFormsReadOnly_data();
+    void keepsUnsafeTextFormsReadOnly();
+    void previewsSharedTextFormMovesAndDeletion();
+    void editsExternalFormTextWithoutChangingNeighbors();
     void movesTopLevelImageWithUndoRedo();
     void editsSharedNestedImagesRoundTrip_data();
     void editsSharedNestedImagesRoundTrip();

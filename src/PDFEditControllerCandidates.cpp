@@ -8,6 +8,7 @@
 #include "PDFSaveWriter.h"
 #include "PDFShapeUtils.h"
 #include "PDFSourceImageGeometry.h"
+#include "PDFSourceTextGeometry.h"
 #include "PDFiumSynchronization.h"
 #include "PDFiumDocument.h"
 
@@ -2571,9 +2572,23 @@ void PDFEditController::appendPageObjectCandidates(
     candidate.color = textColor(pageObject, renderMode);
     const bool editingAllowed = request.editingAllowed;
     const bool topLevelObject = objectPath.size() == 1;
+    const FPDF_PAGEOBJECT outerObject = !topLevelObject && !objectPath.isEmpty()
+        ? FPDFPage_GetObject(page, objectPath.constFirst())
+        : nullptr;
+    const bool textOnlyForm = outerObject
+        && PDFSourceTextGeometry::isTextOnlyForm(outerObject)
+        && PDFSourceTextGeometry::textObject(outerObject) == pageObject;
+    const bool editableOccurrence = topLevelObject || textOnlyForm;
+    if (textOnlyForm) {
+        // Keep the leaf's text, font and composed geometry, but own the whole
+        // page-level occurrence. Suppression, movement and replacement must
+        // never mutate a child of a potentially shared Form stream.
+        candidate.objectPath = QVector<int>{objectPath.constFirst()};
+        candidate.objectId = pageObjectId(candidate.objectPath);
+    }
     candidate.editable = editingAllowed
         && suppressionSupported
-        && topLevelObject
+        && editableOccurrence
         && inlineLayoutSupported;
     candidate.renderSuppressible = suppressionSupported;
     candidate.limited = true;
@@ -2583,7 +2598,7 @@ void PDFEditController::appendPageObjectCandidates(
     } else if (!suppressionSupported) {
         //% "Text clipping render modes cannot be edited safely yet."
         candidate.reason = qtTrId("PdfTextClippingEditUnsupported");
-    } else if (!topLevelObject) {
+    } else if (!editableOccurrence) {
         //% "Text inside a PDF form object cannot be saved safely yet."
         candidate.reason = qtTrId("PdfFormTextSaveUnsupported");
     } else if (!inlineLayoutSupported) {

@@ -2,6 +2,7 @@
 #include "PDFAtomicSaveFile.h"
 #include "PDFShapeUtils.h"
 #include "PDFSourceImageGeometry.h"
+#include "PDFSourceTextGeometry.h"
 #include "PDFWebLinkScanner.h"
 
 #include "ApplicationFonts.h"
@@ -1583,7 +1584,8 @@ public:
                                    FPDF_TEXTPAGE &textPage)
     {
         for (const SourceObject &source : sources) {
-            const FPDF_FONT font = FPDFTextObj_GetFont(source.object);
+            const FPDF_PAGEOBJECT textObject = PDFSourceTextGeometry::textObject(source.object);
+            const FPDF_FONT font = FPDFTextObj_GetFont(textObject);
             if (!font)
                 continue;
             auto found = m_originalType1Faces.find(font);
@@ -1638,7 +1640,7 @@ public:
                     }
                 }
             }
-            found->characters.unite(m_originalObjectCharacters.value(source.object));
+            found->characters.unite(m_originalObjectCharacters.value(textObject));
         }
     }
 
@@ -2821,7 +2823,9 @@ QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
                 ? FPDF_PAGEOBJ_PATH : FPDF_PAGEOBJ_TEXT;
         const bool matchesType = draft.kind == SaveDraft::Kind::Image
             ? PDFSourceImageGeometry::isImageObject(source.object)
-            : FPDFPageObj_GetType(source.object) == expectedType;
+            : draft.kind == SaveDraft::Kind::Text
+                ? PDFSourceTextGeometry::textObject(source.object) != nullptr
+                : FPDFPageObj_GetType(source.object) == expectedType;
         if (!matchesType) {
             result = failure(
                 PDFSaveWriter::Error::SourceObjectMissing,
@@ -5377,10 +5381,12 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         pageWidth,
         pageHeight);
     RasterizedPaints rasterizedPaints;
-    // Validate indexed shape identity before the paint-preservation pass can
-    // replace any source objects. Deletions require the same validation.
+    // Validate indexed shapes and text occurrences before the paint-preservation
+    // pass can replace source objects. A text-only Form must still have its
+    // bounded, safe single-child structure, including when it is deleted.
     for (const SaveDraft &draft : drafts) {
-        if (draft.kind != SaveDraft::Kind::Shape || draft.added) {
+        if ((draft.kind != SaveDraft::Kind::Shape && draft.kind != SaveDraft::Kind::Text)
+            || draft.added) {
             continue;
         }
         PDFSaveWriter::Result sourceResult;
@@ -5389,7 +5395,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         if (!sourceResult.succeeded()) {
             return sourceResult;
         }
-        if (sources.size() != 1) {
+        if (draft.kind == SaveDraft::Kind::Shape && sources.size() != 1) {
             return failure(PDFSaveWriter::Error::SourceObjectMissing,
                            pageIndex, draft.objectId);
         }
@@ -5419,7 +5425,9 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         // Retained Form occurrences can also rely on page resources that the
         // generator prunes when a neighboring object is edited or added.
         for (int index = 0; index < FPDFPage_CountObjects(page.get()); ++index) {
-            if (PDFSourceImageGeometry::isImageOnlyForm(FPDFPage_GetObject(page.get(), index))) {
+            const FPDF_PAGEOBJECT object = FPDFPage_GetObject(page.get(), index);
+            if (PDFSourceImageGeometry::isImageOnlyForm(object)
+                || PDFSourceTextGeometry::isTextOnlyForm(object)) {
                 imageFormPages.insert(pageIndex);
                 break;
             }
@@ -5514,13 +5522,15 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
 
         FPDF_FONT originalFont = prepared.kind == SaveDraft::Kind::Text
                 && !prepared.sources.isEmpty()
-            ? FPDFTextObj_GetFont(prepared.sources.constFirst().object)
+            ? FPDFTextObj_GetFont(PDFSourceTextGeometry::textObject(
+                  prepared.sources.constFirst().object))
             : nullptr;
         QVector<FPDF_FONT> sourceFonts;
         if (prepared.kind == SaveDraft::Kind::Text) {
             fontResolver.collectOriginalType1Fonts(page.get(), prepared.sources, sourceTextPage);
             for (const SourceObject &source : std::as_const(prepared.sources)) {
-                const FPDF_FONT font = FPDFTextObj_GetFont(source.object);
+                const FPDF_FONT font = FPDFTextObj_GetFont(
+                    PDFSourceTextGeometry::textObject(source.object));
                 if (font && !sourceFonts.contains(font))
                     sourceFonts.append(font);
                 if (font != originalFont) {

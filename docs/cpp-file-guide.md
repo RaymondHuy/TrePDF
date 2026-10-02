@@ -445,6 +445,11 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
   giữ mọi source object path để suppress/remove chính xác.
 - Trích source bounds, baseline/origin, font family/style/size/stretch, render
   mode/color, character span và paragraph format.
+- Với Form XObject top-level chỉ chứa một text qua tối đa 16 Form đơn an toàn,
+  đọc font/geometry từ text con nhưng lưu path occurrence ngoài cùng. Các nơi
+  dùng chung Form stream giữ độc lập khi sửa, di chuyển hoặc xóa. Khả năng mở
+  editor vẫn phụ thuộc font: raw CFF subset chưa được đăng ký trực tiếp; cần
+  font tương ứng khả dụng hoặc chọn font khác từ panel.
 - Giữ geometry chuẩn hóa của từng glyph source-text không phải whitespace trong
   kết quả scan/cache theo page và revision. Bốn text-markup tool hit-test trên dữ liệu này;
   GUI/QML không mở `FPDF_PAGE`/`FPDF_TEXTPAGE` hay gọi PDFium để dò chữ.
@@ -604,6 +609,10 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 - Với text đổi nội dung/format/frame, remove source objects và reflow bằng
   `QTextLayout`; tạo object theo line/style run, map top-left Qt sang bottom-left
   PDF và vẽ underline bằng path.
+- Text trong Form đơn được xác thực lại bằng `PDFSourceTextGeometry`; writer
+  lấy font từ text con nhưng dịch chuyển/thay/xóa root occurrence tại z-order
+  cũ. Form stream dùng chung không bị sửa; resource còn cần cho các occurrence
+  được giữ lại đi qua bước khôi phục resource hiện có.
 - Reuse source font hoặc PDF standard font khi an toàn; nếu cần thì load bundled/
   system TrueType snapshot, giữ font handle sống đến sau GenerateContent.
 - Bảo toàn exact source horizontal scale khi reuse; chỉ tính width compensation
@@ -1069,6 +1078,16 @@ designer, rồi phục hồi document và pixel nền an toàn.
 - Mọi patch kiểm format 32-bit, bounds và kích thước trước `memcpy`.
 
 ## Header hỗ trợ không có `.cpp`
+
+### [`src/PDFSourceTextGeometry.h`](../src/PDFSourceTextGeometry.h)
+
+- Helper dùng dưới `PDFiumProcessLock` cho scanner, preview và writer. Trả
+  text object trực tiếp hoặc text con duy nhất qua tối đa 16 Form đơn.
+- Nhánh Form từ chối sibling, mark, clipping, transparency, object inactive,
+  matrix không hữu hạn/suy biến và paint không được hỗ trợ; text con chỉ nhận
+  fill opaque. Helper không thay đổi hay sở hữu handle PDFium.
+- Text con chỉ cung cấp dữ liệu text/font; mọi mutation nhắm root occurrence
+  trên trang để không sửa các nơi dùng chung stream.
 
 ### [`src/PDFStampPresets.h`](../src/PDFStampPresets.h)
 
