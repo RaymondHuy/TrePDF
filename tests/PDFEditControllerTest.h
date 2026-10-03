@@ -13,6 +13,13 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void navigatesWithPageThumbnailsAcrossTabsAndSplitPanes();
+    void virtualizesAndReleasesPageThumbnails();
+    void filtersAndQueuesLocalPdfOpenRequests();
+    void opensNativePdfRequestsThroughMainWindow();
+    void opensDroppedPdfsWithoutLosingExistingDrafts();
+    void focusesDocumentSearchWithStandardShortcut();
+    void opensPdfDialogWithStandardShortcut();
     void stagesOpenPasswordUntilSave();
     void savesNewOpenPasswordAsynchronously_data();
     void savesNewOpenPasswordAsynchronously();

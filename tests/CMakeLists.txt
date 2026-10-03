@@ -14,7 +14,9 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerComments.cpp
     tst_PDFEditControllerDocument.cpp
     tst_PDFEditControllerDocumentView.cpp
+    tst_PDFEditControllerThumbnails.cpp
     tst_PDFEditControllerDrawingComments.cpp
+    tst_PDFEditControllerFileOpen.cpp
     tst_PDFEditControllerFonts.cpp
     tst_PDFEditControllerFormButtons.cpp
     tst_PDFEditControllerFormChoices.cpp
@@ -62,6 +64,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFAnnotationUtils.h
     ../src/PDFDocument.cpp
     ../src/PDFDocument.h
+    ../src/PDFFileOpenHandler.cpp
+    ../src/PDFFileOpenHandler.h
     ../src/LibxlsxwriterWorkbook.cpp
     ../src/SpreadsheetWorkbook.h
     ../src/SignatureLibrary.cpp

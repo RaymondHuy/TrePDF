@@ -94,6 +94,14 @@ Current features:
   libxlsxwriter. See `docs/excel-export-pipeline.md` for the complete contract.
 
 - Open multiple local PDF files in independent tabs and close them separately.
+- Open local PDFs through Finder/Open With and the Dock on macOS, positional
+  command-line paths/file URLs, or window drag-and-drop. `PDFFileOpenHandler`
+  buffers native requests before QML loads, filters local PDF files and deduplicates
+  canonical paths. `Main.qml` queues opens during saves/modal dialogs and reuses
+  the existing tab/password flow. Cmd/Ctrl+O opens the picker; Cmd/Ctrl+F commits
+  active edits to drafts, switches to View, reveals Search and selects its query.
+  The macOS bundle declares PDF Editor support with Alternate handler rank;
+  it does not change the default PDF application.
 - Insert a blank page immediately after the current page or delete the current
   page, with undo/redo/discard and Save/Save As persistence.
 - Add Sticky Note, Free Text, Highlight, Squiggly, Underline, Strikeout, Stamp,
@@ -217,6 +225,15 @@ Current features:
   These Edit shapes are page content, separate from comment annotations.
 - Render every page through PDFium.
 - Virtualized continuous scrolling with reusable QML delegates.
+- `PageThumbnailPanel.qml` provides a collapsible, virtualized left thumbnail
+  sidebar. `PDFDocumentSession::thumbnailsVisible` retains visibility per tab.
+  Clicks commit panel/editor/form input and navigate the active split pane.
+  Miniatures reuse `PDFPageView` at bounded dimensions with the shared raster
+  budget and form worker; pooled delegates detach document/controller, and
+  collapsing destroys the list. Thumbnails intentionally show saved page content
+  without an Edit controller or interaction overlays; content drafts refresh
+  after Save, while page structure, view rotation and runtime form values update
+  live. A visible reminder explains pending content.
 - Per-tab Page Display modes for Single Page, Continuous, Facing, and Continuous
   Facing, exposed through a compact dropdown. Single Page and Facing keep
   exactly one active page/spread delegate; both Continuous modes virtualize

@@ -1,4 +1,5 @@
 #include "PDFEditControllerTestSupport.h"
+#include "PDFFileOpenHandler.h"
 #include "SignatureLibrary.h"
 
 namespace PDFEditControllerTestSupport {
@@ -833,7 +834,10 @@ bool registerQmlTestTypes(const QString &themePath)
         return false;
     }
 
-    const bool cppTypesRegistered = qmlRegisterType<PDFDocument>(
+    const bool cppTypesRegistered = qmlRegisterSingletonType<PDFFileOpenHandler>(
+                                        "TrePDF", 1, 0, "FileOpenHandler",
+                                        &PDFFileOpenHandler::create) >= 0
+        && qmlRegisterType<PDFDocument>(
                                         "TrePDF",
                                         1,
                                         0,

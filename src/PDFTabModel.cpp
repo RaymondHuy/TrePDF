@@ -277,6 +277,11 @@ bool PDFDocumentSession::panelCollapsed() const
     return m_panelCollapsed;
 }
 
+bool PDFDocumentSession::thumbnailsVisible() const
+{
+    return m_thumbnailsVisible;
+}
+
 bool PDFDocumentSession::initialFitPending() const
 {
     return m_initialFitPending;
@@ -432,6 +437,14 @@ void PDFDocumentSession::setInitialFitPending(bool pending)
 
     m_initialFitPending = pending;
     emit initialFitPendingChanged();
+}
+
+void PDFDocumentSession::setThumbnailsVisible(bool visible)
+{
+    if (m_thumbnailsVisible == visible)
+        return;
+    m_thumbnailsVisible = visible;
+    emit thumbnailsVisibleChanged();
 }
 
 bool PDFDocumentSession::open(const QUrl &source, const QString &password)

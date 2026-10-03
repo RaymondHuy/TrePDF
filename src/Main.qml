@@ -21,6 +21,7 @@ ApplicationWindow {
     property bool allowWindowClose: false
     property string pendingDraftAction: ""
     property bool openingFiles: false
+    property var pendingOpenFiles: []
     property var passwordRequests: []
     property bool passwordRetryRequested: false
     property PDFDocumentSession pendingSession: null
@@ -75,6 +76,23 @@ ApplicationWindow {
             : emptyFormDesignerController
     readonly property bool activeWorkspaceHasPendingEdits:
         activeWorkspaceItem ? activeWorkspaceItem.hasPendingPanelEdits : false
+    readonly property bool modalOperationActive:
+        passwordRequests.length > 0 || fontDownloadController !== null
+        || signatureDialogLoader.active || setPasswordDialogLoader.active
+        || watermarkDialogLoader.active || openDialog.visible
+        || imageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
+        || externalLinkPopup.visible || discardDraftPopup.visible || deletePagePopup.visible
+    readonly property bool fileOpenBlocked:
+        tabModel.anySaving || openingFiles || modalOperationActive
+
+    onFileOpenBlockedChanged: {
+        if (!fileOpenBlocked)
+            Qt.callLater(flushPendingOpenFiles)
+    }
+    onActiveWorkspaceHasPendingEditsChanged: {
+        if (!activeWorkspaceHasPendingEdits)
+            Qt.callLater(flushPendingOpenFiles)
+    }
 
     palette.highlight: appTheme.foxitOrange
     palette.button: appTheme.foxitPaleOrange
@@ -211,7 +229,7 @@ ApplicationWindow {
     }
 
     function requestOpen() {
-        if (passwordRequests.length > 0)
+        if (modalOperationActive)
             return
         if (tabModel.anySaving) {
             //% "Please wait for the PDF to finish saving."
@@ -223,13 +241,54 @@ ApplicationWindow {
     }
 
     function openFiles(urls) {
+        const files = FileOpenHandler.localPdfFiles(urls)
+        const queued = pendingOpenFiles.slice()
+        for (let index = 0; index < files.length; ++index) {
+            const source = files[index].toString()
+            if (!queued.some(file => file.toString() === source)
+                    && !passwordRequests.some(request => request.source.toString() === source))
+                queued.push(files[index])
+        }
+        pendingOpenFiles = queued
+        flushPendingOpenFiles()
+    }
+
+    function flushPendingOpenFiles() {
+        if (fileOpenBlocked || pendingOpenFiles.length === 0)
+            return
         if (!prepareActiveWorkspace())
             return
+        const urls = pendingOpenFiles
+        pendingOpenFiles = []
         openingFiles = true
         for (let index = 0; index < urls.length; ++index)
             tabModel.open(urls[index])
         openingFiles = false
         rebuildWorkspace()
+    }
+
+    function receiveExternalFiles() {
+        const files = FileOpenHandler.takePendingFiles()
+        if (files.length === 0)
+            return
+        if (visibility === Window.Minimized)
+            showNormal()
+        raise()
+        requestActivate()
+        openFiles(files)
+    }
+
+    function requestFind() {
+        if (!activeDocument.loaded || fileOpenBlocked || !prepareActiveWorkspace())
+            return
+        appRibbon.focusSearch()
+    }
+
+    Component.onCompleted: Qt.callLater(receiveExternalFiles)
+
+    Connections {
+        target: FileOpenHandler
+        function onFilesPending() { window.receiveExternalFiles() }
     }
 
     function requestPassword(source, incorrectPassword) {
@@ -770,6 +829,7 @@ ApplicationWindow {
 
     PDFTabModel {
         id: tabModel
+        objectName: "pdfTabModel"
 
         onStatusMessage: message => window.showStatus(message)
         onAnySavingChanged: {
@@ -927,6 +987,22 @@ ApplicationWindow {
     }
 
     Shortcut {
+        objectName: "openPdfShortcut"
+        sequences: [StandardKey.Open]
+        autoRepeat: false
+        enabled: !window.fileOpenBlocked
+        onActivated: window.requestOpen()
+    }
+
+    Shortcut {
+        objectName: "findPdfShortcut"
+        sequences: [StandardKey.Find]
+        autoRepeat: false
+        enabled: window.activeDocument.loaded && !window.fileOpenBlocked
+        onActivated: window.requestFind()
+    }
+
+    Shortcut {
         sequence: "Escape"
         enabled: window.signaturePlacementPending
         onActivated: window.cancelSignature()
@@ -985,6 +1061,7 @@ ApplicationWindow {
 
     FileDialog {
         id: openDialog
+        objectName: "openPdfDialog"
 
         //% "Open PDFs"
         title: qsTrId("OpenPdfs")
@@ -1541,6 +1618,7 @@ ApplicationWindow {
 
         AppRibbon {
             id: appRibbon
+            objectName: "appRibbon"
 
             width: parent.width
             theme: appTheme
@@ -1802,6 +1880,51 @@ ApplicationWindow {
                 onDeleteCommentRequested: (page, objectId) => {
                     window.requestDeleteComment(page, objectId)
                 }
+            }
+        }
+    }
+
+    DropArea {
+        id: pdfFileDropArea
+        objectName: "pdfFileDropArea"
+        anchors.fill: parent
+        anchors.topMargin: -window.header.height
+        anchors.bottomMargin: -window.footer.height
+        z: 100
+        enabled: !window.fileOpenBlocked
+
+        onEntered: drag => {
+            drag.accepted = drag.hasUrls
+                && (drag.supportedActions & Qt.CopyAction) !== 0
+                && FileOpenHandler.localPdfFiles(drag.urls).length > 0
+        }
+        onDropped: drop => {
+            const files = FileOpenHandler.localPdfFiles(drop.urls)
+            if (window.fileOpenBlocked || files.length === 0
+                    || (drop.supportedActions & Qt.CopyAction) === 0) {
+                drop.accepted = false
+                return
+            }
+            drop.accept(Qt.CopyAction)
+            window.openFiles(files)
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 5
+            visible: pdfFileDropArea.containsDrag
+            color: "#eefdf7f1"
+            border.color: appTheme.foxitOrange
+            border.width: 2
+            radius: 6
+            Accessible.ignored: true
+
+            Label {
+                anchors.centerIn: parent
+                //% "Drop PDF files here to open"
+                text: qsTrId("DropPdfFilesToOpen")
+                font.pixelSize: 20
+                color: appTheme.foxitDarkOrange
             }
         }
     }

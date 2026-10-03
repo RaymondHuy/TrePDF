@@ -16,6 +16,13 @@ Item {
     implicitWidth: 400
     implicitHeight: 56
 
+    function focusSearch() {
+        if (!document.loaded)
+            return
+        searchField.forceActiveFocus(Qt.ShortcutFocusReason)
+        searchField.selectAll()
+    }
+
     onControllerChanged: {
         if (compositionPending && compositionController)
             compositionController.scheduleSearch(compositionController.query)
