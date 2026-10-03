@@ -2,10 +2,613 @@
 #include "PDFEditControllerTestSupport.h"
 #include "PDFFontAliases.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QStandardPaths>
 #include <QUuid>
 
 using namespace PDFEditControllerTestSupport;
+
+namespace {
+const QString restoredUpperText = QStringLiteral("Attribution continues onto another line");
+const QString restoredLowerPrefix = QStringLiteral("way ");
+const QString restoredLowerTail = QStringLiteral("the work continues here");
+
+QVector<SourceParagraphTextPart> indentedSourceParagraphParts()
+{
+    return {
+        {QStringLiteral("The previous paragraph ends here."), 72, 754, "Times-Roman", 1, 12},
+        {QStringLiteral("500 Lines or Less focuses on thoughtful design decisions made by programmers"),
+         90, 740, "Times-Italic", 0.98, 12},
+        {QStringLiteral("are building something new with fresh programs and practical lessons"),
+         72, 726, "Times-Roman", 1.01, 12},
+        {QStringLiteral("scratch examples help authors and readers understand this useful work"),
+         72, 712, "Times-Roman", 1, 12},
+        {QStringLiteral("had worked on previously."), 72, 698, "Times-Roman", 1, 12},
+        {QStringLiteral("Before reading the next chapter, consider another independent problem."),
+         90, 684, "Times-Roman", 1, 12},
+        {QStringLiteral("This is a different paragraph with its own final sentence."),
+         72, 670, "Times-Roman", 1, 12}};
+}
+
+bool createRestoredLineParagraphPdf(const QString &path, bool savedUpper, bool savedLower,
+                                    const QString &structure = QString(), qreal upperStretch = 1.0)
+{
+    const bool explicitBreak = structure == QLatin1String("explicit-break");
+    const bool wrapped = structure == QLatin1String("wrapped");
+    const QString lowerText = restoredLowerPrefix
+        + (explicitBreak ? QStringLiteral("\n") : QString()) + restoredLowerTail;
+    const auto model = [&](const QString &text, bool lower) {
+        QJsonArray paragraphs;
+        qsizetype start = 0;
+        for (const QString &line : text.split(QLatin1Char('\n'))) {
+            paragraphs.append(QJsonObject{
+                {QStringLiteral("start"), start}, {QStringLiteral("length"), line.size()},
+                {QStringLiteral("alignment"), lower && structure == QLatin1String("center")
+                    ? QStringLiteral("center")
+                    : lower && structure == QLatin1String("right")
+                        ? QStringLiteral("right") : QStringLiteral("left")},
+                {QStringLiteral("lineSpacing"), lower && structure == QLatin1String("leading")
+                    ? 1.25 : 1.0},
+                {QStringLiteral("spaceBeforeRatio"), lower && structure == QLatin1String("space-before")
+                    ? 6.0 / 842.0 : 0.0},
+                {QStringLiteral("spaceAfterRatio"), lower && structure == QLatin1String("space-after")
+                    ? 6.0 / 842.0 : 0.0}});
+            start += line.size() + 1;
+        }
+        return QJsonDocument(QJsonObject{
+            {QStringLiteral("text"), text}, {QStringLiteral("paragraphs"), paragraphs},
+            {QStringLiteral("sourceLineBreaks"), QJsonArray()},
+            {QStringLiteral("originOffset"), QJsonArray{0.0, 0.0}},
+            {QStringLiteral("frameOffset"), QJsonArray{0.0, -12.0 / 842.0,
+                400.0 / 595.0, (lower && (wrapped || explicitBreak) ? 32.0 : 16.0) / 842.0}}})
+            .toJson(QJsonDocument::Compact);
+    };
+    const QByteArray upperGroup = QUuid::createUuid().toByteArray(QUuid::WithoutBraces);
+    const QByteArray lowerGroup = QUuid::createUuid().toByteArray(QUuid::WithoutBraces);
+    QByteArray content;
+    const auto append = [&](const QString &text, int font, qreal x, qreal y,
+                            bool saved, bool lower, int index, int count, int start) {
+        if (saved) {
+            content += "/TrePDFParagraphLayout << /Version 1 /Group ("
+                + (lower ? lowerGroup : upperGroup) + ") /Index " + QByteArray::number(index)
+                + " /Count " + QByteArray::number(count) + " /Start " + QByteArray::number(start)
+                + " /Length " + QByteArray::number(text.size()) + " /Text <"
+                + text.toUtf8().toHex() + ">";
+            if (index == 0) {
+                content += " /Model <" + model(lower ? lowerText : restoredUpperText, lower).toHex() + ">";
+            }
+            content += " >> BDC\n";
+        }
+        content += "BT /F" + QByteArray::number(font) + " 12 Tf "
+            + QByteArray::number(lower ? 1.0 : upperStretch) + " 0 0 1 "
+            + QByteArray::number(x) + " " + QByteArray::number(y) + " Tm <"
+            + text.toLatin1().toHex() + "> Tj ET\n";
+        if (saved)
+            content += "EMC\n";
+    };
+    append(restoredUpperText, 1, 72.0, 740.0, savedUpper, false, 0, 1, 0);
+    append(restoredLowerPrefix, 1, 72.0, 726.0, savedLower, true, 0, 2, 0);
+    append(restoredLowerTail, 2, wrapped || explicitBreak ? 72.0 : 94.992,
+           wrapped || explicitBreak ? 712.0 : 726.0, savedLower, true, 1, 2,
+           restoredLowerPrefix.size() + (explicitBreak ? 1 : 0));
+    return writePdfObjects(path, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                   "/Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>"),
+        QByteArray("<< /Length ") + QByteArray::number(content.size()) + ">>\nstream\n"
+            + content + "endstream",
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>"),
+        QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic /Encoding /WinAnsiEncoding >>")});
+}
+}
+
+void PDFEditControllerTest::groupsRestoredSingleLinesIntoParagraph_data()
+{
+    QTest::addColumn<bool>("savedUpper");
+    QTest::addColumn<bool>("savedLower");
+    QTest::addColumn<qreal>("upperStretch");
+    QTest::newRow("restored-above-original") << true << false << 1.0;
+    QTest::newRow("restored-below-original") << false << true << 1.0;
+    QTest::newRow("both-restored") << true << true << 1.0;
+    QTest::newRow("restored-above-width-compensation") << true << false << 0.98;
+    QTest::newRow("restored-below-width-compensation") << false << true << 0.98;
+}
+
+void PDFEditControllerTest::groupsRestoredSingleLinesIntoParagraph()
+{
+    QFETCH(bool, savedUpper);
+    QFETCH(bool, savedLower);
+    QFETCH(qreal, upperStretch);
+    const QString path = m_temporaryDirectory.filePath(
+        QStringLiteral("restored-lines-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(createRestoredLineParagraphPdf(path, savedUpper, savedLower, QString(), upperStretch));
+    const QStringList originalObjects = topLevelTextObjects(path);
+    const QString paragraph = restoredUpperText + QLatin1Char('\n')
+        + restoredLowerPrefix + restoredLowerTail;
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QCOMPARE(candidates.size(), 1);
+    const QVariantMap candidate = candidateForText(candidates, paragraph);
+    QVERIFY(!candidate.isEmpty());
+    QCOMPARE(candidate.value(QStringLiteral("sourceRects")).toList().size(), 3);
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedParagraphFormats().size(), 2);
+    const qsizetype italicStart = restoredUpperText.size() + 1 + restoredLowerPrefix.size();
+    bool foundItalic = false;
+    for (const QVariant &value : controller.selectedCharacterSpans()) {
+        const QVariantMap span = value.toMap();
+        const qsizetype start = span.value(QStringLiteral("start")).toLongLong();
+        if (start <= italicStart && start + span.value(QStringLiteral("length")).toLongLong() > italicStart) {
+            QVERIFY(span.value(QStringLiteral("fontItalic")).toBool());
+            foundItalic = true;
+        }
+    }
+    QVERIFY(foundItalic);
+    const QVariantList spans = controller.selectedCharacterSpans();
+    const QVariantList formats = controller.selectedParagraphFormats();
+    const QRectF frame = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(paragraph);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedCharacterSpans(), spans);
+    QCOMPARE(controller.selectedParagraphFormats(), formats);
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+
+    const QPointF translation(0.02, 0.01);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(frame.translated(translation));
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QVERIFY(controller.draftsForPage(0).first().toMap()
+                .value(QStringLiteral("sourceTextMoveOnly")).toBool());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    const QString output = m_temporaryDirectory.filePath(
+        QStringLiteral("restored-lines-moved-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    QCOMPARE(topLevelTextObjects(output), originalObjects);
+    for (const QString &text : {restoredUpperText, restoredLowerPrefix, restoredLowerTail}) {
+        FS_MATRIX original{}, moved{};
+        QVERIFY(textObjectMatrix(path, text, original));
+        QVERIFY(textObjectMatrix(output, text, moved));
+        QCOMPARE(moved.a, original.a);
+        QCOMPARE(moved.b, original.b);
+        QCOMPARE(moved.c, original.c);
+        QCOMPARE(moved.d, original.d);
+        QVERIFY(qAbs(moved.e - original.e - translation.x() * 595.0) < 0.02);
+        QVERIFY(qAbs(moved.f - original.f + translation.y() * 842.0) < 0.02);
+    }
+    const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), paragraph);
+    QVERIFY(!reopened.isEmpty());
+    QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedParagraphFormats().size(), 2);
+    QVERIFY(!controller.hasDrafts());
+
+    const QString edited = paragraph + QStringLiteral(" more");
+    controller.commitSelectedText(edited);
+    QCOMPARE(controller.selectedText(), edited);
+    controller.undo();
+    QCOMPARE(controller.selectedText(), paragraph);
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.selectedText(), edited);
+    const QString editedOutput = m_temporaryDirectory.filePath(
+        QStringLiteral("restored-lines-edited-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(editedOutput)));
+    const QVariantMap editedCandidate = candidateForText(waitForCandidates(controller, 0), edited);
+    QVERIFY(!editedCandidate.isEmpty());
+    QVERIFY(editedCandidate.value(QStringLiteral("objectId")).toString()
+                .startsWith(QStringLiteral("paragraph-layout:")));
+    QVERIFY(controller.selectCandidate(
+        0, editedCandidate.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedParagraphFormats().size(), 2);
+    const QVariantList editedSpans = controller.selectedCharacterSpans();
+    for (qsizetype position = italicStart; position < edited.size(); ++position) {
+        bool covered = false;
+        for (const QVariant &value : editedSpans) {
+            const QVariantMap span = value.toMap();
+            const qsizetype start = span.value(QStringLiteral("start")).toLongLong();
+            const qsizetype end = start + span.value(QStringLiteral("length")).toLongLong();
+            if (position >= start && position < end) {
+                QVERIFY(span.value(QStringLiteral("fontItalic")).toBool());
+                covered = true;
+                break;
+            }
+        }
+        QVERIFY(covered);
+    }
+    const QRectF editedFrame = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(edited);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedCharacterSpans(), editedSpans);
+    QCOMPARE(controller.selectedFrameRect(), editedFrame);
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(topLevelTextObjects(path), originalObjects);
+}
+
+void PDFEditControllerTest::keepsStructuredRestoredParagraphsSeparate_data()
+{
+    QTest::addColumn<QString>("structure");
+    for (const char *value : {"wrapped", "explicit-break", "center", "right", "leading",
+                              "space-before", "space-after"})
+        QTest::newRow(value) << QString::fromLatin1(value);
+}
+
+void PDFEditControllerTest::keepsStructuredRestoredParagraphsSeparate()
+{
+    QFETCH(QString, structure);
+    const QString path = m_temporaryDirectory.filePath(
+        QStringLiteral("structured-restored-%1.pdf").arg(structure));
+    QVERIFY(createRestoredLineParagraphPdf(path, false, true, structure));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QCOMPARE(candidates.size(), 2);
+    QVERIFY(!candidateForText(candidates, restoredUpperText).isEmpty());
+    const QString lower = restoredLowerPrefix
+        + (structure == QLatin1String("explicit-break") ? QStringLiteral("\n") : QString())
+        + restoredLowerTail;
+    const QVariantMap restored = candidateForText(candidates, lower);
+    QVERIFY(!restored.isEmpty());
+    QVERIFY(restored.value(QStringLiteral("objectId")).toString()
+                .startsWith(QStringLiteral("paragraph-layout:")));
+}
+
+void PDFEditControllerTest::groupsExternalAttributionParagraph()
+{
+    const QString path = qEnvironmentVariable("TREPDF_TEST_PARAGRAPH_PDF");
+    if (path.isEmpty()) {
+        QSKIP("Set TREPDF_TEST_PARAGRAPH_PDF to the reported page-four fixture");
+    }
+    QFile source(path);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray original = source.readAll();
+    source.close();
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    QVERIFY(document.pageCount() > 3);
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 3);
+    QVariantMap attribution;
+    for (const QVariant &value : candidates) {
+        const QVariantMap candidate = value.toMap();
+        if (candidate.value(QStringLiteral("text")).toString()
+                .startsWith(QStringLiteral("Attribution"))) {
+            attribution = candidate;
+            break;
+        }
+    }
+    QVERIFY2(!attribution.isEmpty(), "Attribution text was not discovered");
+    const QString text = attribution.value(QStringLiteral("text")).toString();
+    QVERIFY2(text.contains(QStringLiteral("\nway that suggests")), qPrintable(text));
+    QVERIFY(controller.selectCandidate(
+        3, attribution.value(QStringLiteral("objectId")).toString()));
+    const QVariantList spans = controller.selectedCharacterSpans();
+    const QRectF frame = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(text);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedCharacterSpans(), spans);
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QCOMPARE(source.readAll(), original);
+}
+
+void PDFEditControllerTest::groupsIndentedSourceParagraphWithHistoryAndSave()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("indented-source.pdf"));
+    const QVector<SourceParagraphTextPart> parts = indentedSourceParagraphParts();
+    QVERIFY(createSourceParagraphPdf(sourcePath, parts));
+    const QString original = sourceParagraphText(parts, 1, 4);
+    const QStringList originalObjects = topLevelTextObjects(sourcePath);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    const QVariantMap candidate = candidateForText(candidates, original);
+    QVERIFY2(!candidate.isEmpty(), "Indented first row was not joined to its three body rows");
+    QVERIFY(!candidateForText(candidates, parts.first().text).isEmpty());
+    QVERIFY(!candidateForText(candidates, sourceParagraphText(parts, 5, 2)).isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QVariantList originalFormats = controller.selectedParagraphFormats();
+    QCOMPARE(originalFormats.size(), 4);
+    QVERIFY(qAbs(originalFormats[0].toMap().value(QStringLiteral("firstLineIndentRatio")).toReal()
+                 * 842.0 - 18.0) < 0.02);
+    for (int index = 1; index < originalFormats.size(); ++index)
+        QCOMPARE(originalFormats[index].toMap().value(QStringLiteral("firstLineIndentRatio")).toReal(), 0.0);
+    QVERIFY(qAbs(controller.selectedOriginX() * 595.0 - 72.0) < 0.02);
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
+    QVERIFY(originalSpans.first().toMap().value(QStringLiteral("fontItalic")).toBool());
+    bool foundRegular = false;
+    for (const QVariant &span : originalSpans)
+        foundRegular |= !span.toMap().value(QStringLiteral("fontItalic")).toBool();
+    QVERIFY(foundRegular);
+    const QRectF frame = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(original);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    QCOMPARE(controller.selectedParagraphFormats(), originalFormats);
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+
+    const QPointF translation(0.02, 0.002);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(frame.translated(translation));
+    controller.finishSelectedFrameResize();
+    QVERIFY(controller.draftsForPage(0).first().toMap()
+                .value(QStringLiteral("sourceTextMoveOnly")).toBool());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    const QString movedPath = m_temporaryDirectory.filePath(QStringLiteral("indented-moved.pdf"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(movedPath)));
+    QCOMPARE(topLevelTextObjects(movedPath), originalObjects);
+    for (int index = 0; index < parts.size(); ++index) {
+        FS_MATRIX before{}, after{};
+        QVERIFY(textObjectMatrix(sourcePath, parts[index].text, before));
+        QVERIFY(textObjectMatrix(movedPath, parts[index].text, after));
+        QCOMPARE(after.a, before.a);
+        QCOMPARE(after.b, before.b);
+        QCOMPARE(after.c, before.c);
+        QCOMPARE(after.d, before.d);
+        const bool moved = index >= 1 && index <= 4;
+        QVERIFY(qAbs(after.e - before.e - (moved ? translation.x() * 595.0 : 0.0)) < 0.02);
+        QVERIFY(qAbs(after.f - before.f + (moved ? translation.y() * 842.0 : 0.0)) < 0.02);
+    }
+    const QVariantMap moved = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY(!moved.isEmpty());
+    QVERIFY(controller.selectCandidate(0, moved.value(QStringLiteral("objectId")).toString()));
+    const QString edited = original + QStringLiteral(" More.");
+    controller.commitSelectedText(edited);
+    controller.undo();
+    QCOMPARE(controller.selectedText(), original);
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.selectedText(), edited);
+    const QString editedPath = m_temporaryDirectory.filePath(QStringLiteral("indented-edited.pdf"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(editedPath)));
+    const QVariantMap restored = candidateForText(waitForCandidates(controller, 0), edited);
+    QVERIFY(!restored.isEmpty());
+    QVERIFY(restored.value(QStringLiteral("objectId")).toString()
+                .startsWith(QStringLiteral("paragraph-layout:")));
+    QVERIFY(controller.selectCandidate(0, restored.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedParagraphFormats().size(), 4);
+    QVERIFY(qAbs(controller.selectedParagraphFormats().first().toMap()
+                     .value(QStringLiteral("firstLineIndentRatio")).toReal() * 842.0 - 18.0) < 0.02);
+    const auto first = textCharacterRangeInfo(editedPath, QStringLiteral("500 Lines"));
+    const auto body = textCharacterRangeInfo(editedPath, QStringLiteral("are building"));
+    QVERIFY(!first.isEmpty());
+    QVERIFY(!body.isEmpty());
+    QVERIFY(first.first().font.italic);
+    QVERIFY(!body.first().font.italic);
+    QVERIFY(qAbs(first.first().matrix.e - 90.0 - translation.x() * 595.0) < 0.08);
+    QVERIFY(qAbs(body.first().matrix.e - 72.0 - translation.x() * 595.0) < 0.08);
+    const auto restoredFormats = controller.selectedParagraphFormats();
+    const QRectF restoredFrame = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(edited);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedParagraphFormats(), restoredFormats);
+    QCOMPARE(controller.selectedFrameRect(), restoredFrame);
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(topLevelTextObjects(sourcePath), originalObjects);
+}
+
+void PDFEditControllerTest::preservesIndentedParagraphThroughQmlEditing()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("indented-editor.pdf"));
+    const auto parts = indentedSourceParagraphParts();
+    QVERIFY(createSourceParagraphPdf(sourcePath, parts));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+    const QString original = sourceParagraphText(parts, 1, 4);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    const auto originalFormats = controller.selectedParagraphFormats();
+    const QRectF originalFrame = controller.selectedFrameRect();
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
+    QQuickWindow window;
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false},
+        {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), 1.0},
+        {QStringLiteral("width"), 595.0}, {QStringLiteral("height"), 842.0}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    qobject_cast<QQuickItem *>(overlay.get())->setParentItem(window.contentItem());
+    window.resize(595, 842);
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    QObject *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = child;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QTRY_COMPARE(textDocument->toPlainText(), original);
+    QTRY_COMPARE(textDocument->blockCount(), 4);
+    QVERIFY(qAbs(textDocument->begin().blockFormat().textIndent() - 18.0) < 0.02);
+    QCOMPARE(textDocument->begin().next().blockFormat().textIndent(), 0.0);
+    QTRY_COMPARE(textDocument->begin().layout()->lineCount(), 1);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QCOMPARE(controller.selectedParagraphFormats(), originalFormats);
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QVERIFY(!controller.hasDrafts());
+
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    controller.setSelectedParagraphAlignment(PDFEditController::JustifyAlignment);
+    QString joined = original;
+    joined.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    QTRY_COMPARE(textDocument->toPlainText(), joined);
+    QTRY_COMPARE(textDocument->blockCount(), 1);
+    QCOMPARE(controller.selectedParagraphFormats().size(), 1);
+    QVERIFY(qAbs(textDocument->begin().blockFormat().textIndent() - 18.0) < 0.02);
+    QTRY_VERIFY(textDocument->begin().layout()->lineCount() > 1);
+    const QTextLayout *layout = textDocument->begin().layout();
+    QVERIFY(qAbs(layout->lineAt(0).x() - layout->lineAt(1).x() - 18.0) < 0.08);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    controller.undo();
+    QCOMPARE(controller.selectedText(), original);
+    QCOMPARE(controller.selectedParagraphFormats(), originalFormats);
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.selectedText(), joined);
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("indented-justified.pdf"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), joined);
+    QVERIFY(!reopened.isEmpty());
+    QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedParagraphFormats().size(), 1);
+    QVERIFY(qAbs(controller.selectedParagraphFormats().first().toMap()
+                     .value(QStringLiteral("firstLineIndentRatio")).toReal() * 842.0 - 18.0) < 0.02);
+    const auto savedFirst = textCharacterRangeInfo(output, QStringLiteral("500 Lines"));
+    QVERIFY(!savedFirst.isEmpty());
+    QVERIFY(qAbs(savedFirst.first().matrix.e - 90.0) < 0.08);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    QTRY_VERIFY(textDocument->begin().layout()->lineCount() > 1);
+    QVERIFY(qAbs(textDocument->begin().blockFormat().textIndent() - 18.0) < 0.02);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::keepsUnsafeIndentedTextSeparate_data()
+{
+    QTest::addColumn<QString>("caseName");
+    for (const char *name : {"inward-step", "column-offset", "short-heading", "different-font-size"})
+        QTest::newRow(name) << QString::fromLatin1(name);
+}
+
+void PDFEditControllerTest::keepsUnsafeIndentedTextSeparate()
+{
+    QFETCH(QString, caseName);
+    QVector<SourceParagraphTextPart> parts = indentedSourceParagraphParts().mid(1, 2);
+    if (caseName == QLatin1String("inward-step")) {
+        parts[0].x = 72;
+        parts[1].x = 90;
+    } else if (caseName == QLatin1String("column-offset")) {
+        parts[0].x = 120;
+    } else if (caseName == QLatin1String("short-heading")) {
+        parts[0].text = QStringLiteral("Chapter");
+    } else {
+        parts[0].fontSize = 14;
+    }
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("unsafe-indent-%1.pdf").arg(caseName));
+    QVERIFY(createSourceParagraphPdf(path, parts));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QVERIFY(!candidateForText(candidates, parts[0].text).isEmpty());
+    QVERIFY(!candidateForText(candidates, parts[1].text).isEmpty());
+}
+
+void PDFEditControllerTest::groupsExternalIndentedIntroductionParagraph()
+{
+    const QString path = qEnvironmentVariable("TREPDF_TEST_PARAGRAPH_PDF");
+    if (path.isEmpty())
+        QSKIP("Set TREPDF_TEST_PARAGRAPH_PDF to the reported page-seven fixture");
+    QFile source(path);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray original = source.readAll();
+    source.close();
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    QVERIFY(document.pageCount() > 6);
+    controller.setDocument(&document);
+    QVariantMap paragraph;
+    for (const QVariant &value : waitForCandidates(controller, 6)) {
+        const QVariantMap candidate = value.toMap();
+        if (candidate.value(QStringLiteral("text")).toString()
+                .startsWith(QStringLiteral("500 Lines or Less"))) {
+            paragraph = candidate;
+            break;
+        }
+    }
+    QVERIFY2(!paragraph.isEmpty(), "The indented introduction paragraph was not discovered");
+    const QString text = paragraph.value(QStringLiteral("text")).toString();
+    QVERIFY2(text.contains(QStringLiteral("focuses")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("\nare building")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("\nscratch")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("\nhad worked")), qPrintable(text));
+    QVERIFY(!text.contains(QStringLiteral("Before reading")));
+    QVERIFY(!text.contains(QStringLiteral("interesting to read")));
+    QCOMPARE(text.count(QLatin1Char('\n')), 3);
+    QVERIFY(controller.selectCandidate(6, paragraph.value(QStringLiteral("objectId")).toString()));
+    const auto formats = controller.selectedParagraphFormats();
+    QCOMPARE(formats.size(), 4);
+    QVERIFY(formats.first().toMap().value(QStringLiteral("firstLineIndentRatio")).toReal() > 0.0);
+    const auto spans = controller.selectedCharacterSpans();
+    QVERIFY(spans.first().toMap().value(QStringLiteral("fontItalic")).toBool());
+    const QRectF frame = controller.selectedFrameRect();
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(text);
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedParagraphFormats(), formats);
+    QCOMPARE(controller.selectedCharacterSpans(), spans);
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QCOMPARE(source.readAll(), original);
+}
+
+void PDFEditControllerTest::keepsOrdinaryParagraphAlignmentAnchored()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("ordinary-paragraph-drift.pdf"));
+    const QVector<SourceParagraphTextPart> parts{
+        {QStringLiteral("First source line should remain the left alignment anchor"),
+         72.0, 740.0, "Times-Roman", 1.0, 10.0F},
+        {QStringLiteral("Second source line is still within the original tolerance"),
+         75.5, 728.0, "Times-Roman", 1.0, 10.0F},
+        {QStringLiteral("Third source line must not drift beyond the original margin"),
+         79.0, 716.0, "Times-Roman", 1.0, 10.0F}};
+    QVERIFY(createSourceParagraphPdf(path, parts));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QVERIFY(!candidateForText(candidates, sourceParagraphText(parts, 0, 2)).isEmpty());
+    QVERIFY(!candidateForText(candidates, parts[2].text).isEmpty());
+    QVERIFY(candidateForText(candidates, sourceParagraphText(parts, 0, 3)).isEmpty());
+}
 
 void PDFEditControllerTest::groupsCompatibleTextObjectsOnSameLine()
 {
@@ -257,6 +860,7 @@ void PDFEditControllerTest::groupsSourceParagraphWithFractionalTransforms_data()
     QTest::addColumn<bool>("grouped");
     QTest::newRow("same-stretch-at-fractional-origins") << 0.99999046 << true;
     QTest::newRow("one-percent-stretch-difference") << 1.008 << true;
+    QTest::newRow("two-percent-stretch-difference") << 1.02 << true;
     QTest::newRow("different-source-stretch") << 1.03 << false;
 }
 

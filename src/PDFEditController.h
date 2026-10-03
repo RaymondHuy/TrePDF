@@ -630,6 +630,7 @@ private:
         ParagraphListStyle listStyle = ParagraphListStyle::None;
         int listLevel = 0;
         int listStart = 1;
+        qreal firstLineIndentRatio = 0.0;
     };
 
     struct Candidate {

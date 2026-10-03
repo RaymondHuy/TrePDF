@@ -702,11 +702,14 @@ Item {
                 * layoutHeight
             const after = Math.max(0, Number(paragraph.spaceAfterRatio) || 0)
                 * layoutHeight
+            const firstLineIndent = Math.max(0, Number(paragraph.firstLineIndentRatio) || 0)
+                * layoutHeight
             const paragraphStyle = "margin:0;white-space:pre-wrap;"
                 + (start === end ? "-qt-paragraph-type:empty;" : "")
                 + "line-height:" + (lineSpacing * 100).toFixed(6) + "%;"
                 + "margin-top:" + before.toFixed(6) + "px;"
                 + "margin-bottom:" + after.toFixed(6) + "px;"
+                + "text-indent:" + firstLineIndent.toFixed(6) + "px;"
             // Qt Rich Text supports block alignment through the align attribute.
             html += "<p align=\"" + escapeHtmlAttribute(alignment)
                 + "\" style=\"" + escapeHtmlAttribute(paragraphStyle) + "\">"

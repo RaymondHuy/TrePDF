@@ -131,6 +131,7 @@ struct SaveParagraph {
     qreal lineSpacing = 1.0;
     qreal spaceBeforeRatio = 0.0;
     qreal spaceAfterRatio = 0.0;
+    qreal firstLineIndentRatio = 0.0;
 };
 
 struct SaveDraft {
@@ -955,7 +956,8 @@ bool hasParagraphLayout(const SaveDraft &draft)
                        [](const SaveParagraph &paragraph) {
         return !qFuzzyCompare(paragraph.lineSpacing, 1.0)
             || !qFuzzyIsNull(paragraph.spaceBeforeRatio)
-            || !qFuzzyIsNull(paragraph.spaceAfterRatio);
+            || !qFuzzyIsNull(paragraph.spaceAfterRatio)
+            || !qFuzzyIsNull(paragraph.firstLineIndentRatio);
     });
 }
 
@@ -983,7 +985,8 @@ QJsonObject paragraphLayoutModel(const SaveDraft &draft)
             {QStringLiteral("alignment"), alignment},
             {QStringLiteral("lineSpacing"), paragraph.lineSpacing},
             {QStringLiteral("spaceBeforeRatio"), paragraph.spaceBeforeRatio},
-            {QStringLiteral("spaceAfterRatio"), paragraph.spaceAfterRatio}});
+            {QStringLiteral("spaceAfterRatio"), paragraph.spaceAfterRatio},
+            {QStringLiteral("firstLineIndentRatio"), paragraph.firstLineIndentRatio}});
     }
     QJsonArray sourceLineBreaks;
     for (qsizetype position : draft.sourceLineBreaks) {
@@ -1329,7 +1332,10 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
             || paragraph.spaceBeforeRatio * pageHeight > 144.0 + 0.001
             || !qIsFinite(paragraph.spaceAfterRatio)
             || paragraph.spaceAfterRatio < 0.0
-            || paragraph.spaceAfterRatio * pageHeight > 144.0 + 0.001) {
+            || paragraph.spaceAfterRatio * pageHeight > 144.0 + 0.001
+            || !qIsFinite(paragraph.firstLineIndentRatio)
+            || paragraph.firstLineIndentRatio < 0.0
+            || paragraph.firstLineIndentRatio * pageHeight > 144.0 + 0.001) {
             valid = false;
             return {};
         }
@@ -1359,8 +1365,12 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
             if (!line.isValid()) {
                 break;
             }
-            line.setLineWidth(layoutWidth);
-            line.setPosition(QPointF(0.0, paragraphHeight));
+            // Match QTextBlockFormat::textIndent: only the first visual line
+            // moves right, while wrapped continuation lines use the full frame.
+            const qreal indent = line.textStart() == 0
+                ? paragraph.firstLineIndentRatio * pageHeight : 0.0;
+            line.setLineWidth(qMax(kMinimumLayoutWidth, layoutWidth - indent));
+            line.setPosition(QPointF(indent, paragraphHeight));
             const qreal baseline = verticalOffset + line.y() + line.ascent();
             if (firstBaseline < 0.0) {
                 firstBaseline = baseline;
@@ -7165,7 +7175,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
                 alignment,
                 paragraph.lineSpacing,
                 paragraph.spaceBeforeRatio,
-                paragraph.spaceAfterRatio});
+                paragraph.spaceAfterRatio,
+                paragraph.firstLineIndentRatio});
         }
         saveDraft.sourceLineBreaks = draft->sourceLineBreaks;
         saveDraft.sourceParagraphLayout = !draft->candidate.sourceParagraphFormats.isEmpty();

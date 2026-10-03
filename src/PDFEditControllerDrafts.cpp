@@ -674,6 +674,7 @@ QVariantList PDFEditController::paragraphFormatMaps(
         map.insert(QStringLiteral("lineSpacing"), format.lineSpacing);
         map.insert(QStringLiteral("spaceBeforeRatio"), format.spaceBeforeRatio);
         map.insert(QStringLiteral("spaceAfterRatio"), format.spaceAfterRatio);
+        map.insert(QStringLiteral("firstLineIndentRatio"), format.firstLineIndentRatio);
         map.insert(QStringLiteral("listStyle"), listStyleName(format.listStyle));
         map.insert(QStringLiteral("listLevel"), format.listLevel);
         map.insert(QStringLiteral("listStart"), format.listStart);
@@ -989,6 +990,7 @@ bool PDFEditController::sameParagraphFormats(
             || leftFormat.lineSpacing != rightFormat.lineSpacing
             || leftFormat.spaceBeforeRatio != rightFormat.spaceBeforeRatio
             || leftFormat.spaceAfterRatio != rightFormat.spaceAfterRatio
+            || leftFormat.firstLineIndentRatio != rightFormat.firstLineIndentRatio
             || leftFormat.listStyle != rightFormat.listStyle
             || leftFormat.listLevel != rightFormat.listLevel
             || leftFormat.listStart != rightFormat.listStart) {

@@ -168,6 +168,17 @@ private slots:
     void keepsUnsafeMixedFontLineSeparate_data();
     void keepsUnsafeMixedFontLineSeparate();
     void groupsCompatibleSourceTextLinesIntoParagraph();
+    void groupsRestoredSingleLinesIntoParagraph_data();
+    void groupsRestoredSingleLinesIntoParagraph();
+    void keepsStructuredRestoredParagraphsSeparate_data();
+    void keepsStructuredRestoredParagraphsSeparate();
+    void groupsExternalAttributionParagraph();
+    void groupsIndentedSourceParagraphWithHistoryAndSave();
+    void preservesIndentedParagraphThroughQmlEditing();
+    void keepsUnsafeIndentedTextSeparate_data();
+    void keepsUnsafeIndentedTextSeparate();
+    void keepsOrdinaryParagraphAlignmentAnchored();
+    void groupsExternalIndentedIntroductionParagraph();
     void preservesSourceLineEndHyphens_data();
     void preservesSourceLineEndHyphens();
     void groupsSourceParagraphWithFractionalTransforms_data();

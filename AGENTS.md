@@ -373,11 +373,19 @@ Current features:
   Matching nearby lines become one paragraph draft when font family/size,
   paint, left origin (within
   0.4 em), baseline gaps (0.8–1.6 em), and regular leading agree. Bold, italic,
-  underline, and font-stretch differences of at most one percentage point are
-  preserved in source character spans; the initial frame measures those spans.
+  underline, and font-stretch differences of at most two percentage points
+  (or both stretches within 98–102%) are preserved in source character spans.
+  A first-line inset of 0.75–2.5 em can join body lines at a common left margin;
+  the opposite transition starts a separate paragraph. Short inset headings,
+  excessive offsets, overlapping text and source obstacles remain excluded.
+  `firstLineIndentRatio` retains that inset through editor, preview, history,
+  Justify and Save/reopen; the initial frame includes its width.
+  Restored single-line paragraph metadata can join adjacent lines only with
+  default left-aligned paragraph formatting and all source parts on one baseline.
+  Wrapped or explicitly formatted restored paragraphs remain separate.
   Source text with overlapping bounds stays separate; grouping must not cross
   columns or source obstacles.
-  Paragraphs retain `\n`, the first line's origin/baseline, and every flattened
+  Paragraphs retain `\n`, the body left margin and first line's baseline, and every flattened
   source part for rendering suppression and Save. Each paragraph is bounded to
   64 lines, 1,024 parts, and 32,768 UTF-16 code units; overlap and paragraph-link
   checks share a 200,000-comparison budget with source/line fallback. Content
