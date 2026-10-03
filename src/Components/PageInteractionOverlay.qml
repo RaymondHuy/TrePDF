@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls.Basic
 import TrePDF
 import TrePDF as PlatformComponents
 
@@ -8,6 +9,10 @@ Item {
     id: root
 
     required property AppTheme theme
+    property PDFDocument document
+    property PDFTextSelectionController textSelectionController
+    property bool textSelectionActive: false
+    property point textMenuPosition
     required property PDFEditController editController
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
@@ -47,8 +52,10 @@ Item {
         && !combFieldToolActive
 
     signal deleteCommentRequested(int page, string objectId)
+    signal textSelectionStarted()
 
     function prepareForSessionChange() {
+        textMenuLoader.active = false
         editOverlay.prepareForSessionChange()
         manualLinkLayer.prepareForSessionChange()
         formTextFieldOverlay.prepareForSessionChange()
@@ -131,6 +138,61 @@ Item {
                     selected,
                     toggle,
                     identityToken)
+            }
+        }
+    }
+
+    PDFTextSelectionItem {
+        id: textSelectionItem
+
+        objectName: "viewTextSelectionItem"
+        anchors.fill: parent
+        document: root.pooled ? null : root.document
+        controller: root.pooled ? null : root.textSelectionController
+        page: root.page
+        active: root.textSelectionActive && root.visible && !root.pooled
+            && !root.editController.saving && !root.editController.hasDrafts
+            && root.editController.tool === PDFEditController.BrowseTool
+        z: 1.5
+
+        onSelectionStarted: root.textSelectionStarted()
+        onActiveChanged: {
+            if (!active)
+                textMenuLoader.active = false
+        }
+        onContextMenuRequested: position => {
+            root.textMenuPosition = textSelectionItem.mapToItem(
+                root.viewportItem, position.x, position.y)
+            textMenuLoader.active = true
+            if (textMenuLoader.status === Loader.Ready) {
+                const menu = textMenuLoader.item as Menu
+                menu.popup(root.viewportItem, root.textMenuPosition)
+            }
+        }
+    }
+
+    Loader {
+        id: textMenuLoader
+
+        active: false
+        sourceComponent: Component {
+            Menu {
+                objectName: "viewTextSelectionMenu"
+                popupType: Popup.Item
+                MenuItem {
+                    //% "Copy"
+                    text: qsTrId("CopySelectedText")
+                    enabled: root.textSelectionController
+                        && root.textSelectionController.hasSelection
+                        && textSelectionItem.active
+                    onTriggered: {
+                        root.textSelectionController.copy()
+                        textSelectionItem.forceActiveFocus()
+                    }
+                }
+                onClosed: Qt.callLater(function() {
+                    textMenuLoader.active = false
+                })
             }
         }
     }

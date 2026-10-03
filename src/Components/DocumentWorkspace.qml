@@ -150,6 +150,7 @@ Item {
         searchController: root.session.searchController
         formController: root.session.formController
         formDesignerController: root.session.formDesignerController
+        viewTabActive: root.viewTabActive
         formsTabActive: !secondaryPane && root.formsTabActive
         editTabActive: !secondaryPane && root.editTabActive
         formFieldsVisible: root.formFieldsVisible

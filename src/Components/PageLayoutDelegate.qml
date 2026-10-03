@@ -12,6 +12,8 @@ Item {
     required property PDFDocument document
     required property PDFEditController editController
     required property PDFSearchController searchController
+    property PDFTextSelectionController textSelectionController
+    property bool viewTabActive: false
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
     required property Flickable viewportItem
@@ -75,6 +77,7 @@ Item {
             : null
 
     signal deleteCommentRequested(int page, string objectId)
+    signal textSelectionStarted()
 
     width: facingMode
         ? Math.max(viewportItem.width,
@@ -187,6 +190,8 @@ Item {
         document: root.document
         editController: root.editController
         searchController: root.searchController
+        textSelectionController: root.textSelectionController
+        viewTabActive: root.viewTabActive
         formController: root.formController
         formDesignerController: root.formDesignerController
         viewportItem: root.viewportItem
@@ -207,6 +212,7 @@ Item {
         currentPage: root.currentPage
         pooled: root.pooled
         sessionChangeGeneration: root.sessionChangeGeneration
+        onTextSelectionStarted: root.textSelectionStarted()
         onDeleteCommentRequested: (page, objectId) =>
             root.deleteCommentRequested(page, objectId)
     }
@@ -227,6 +233,8 @@ Item {
                 document: root.document
                 editController: root.editController
                 searchController: root.searchController
+                textSelectionController: root.textSelectionController
+                viewTabActive: root.viewTabActive
                 formController: root.formController
                 formDesignerController: root.formDesignerController
                 viewportItem: root.viewportItem
@@ -249,6 +257,7 @@ Item {
                 currentPage: root.currentPage
                 pooled: root.pooled
                 sessionChangeGeneration: root.sessionChangeGeneration
+                onTextSelectionStarted: root.textSelectionStarted()
                 onDeleteCommentRequested: (page, objectId) =>
                     root.deleteCommentRequested(page, objectId)
             }

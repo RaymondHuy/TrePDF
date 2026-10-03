@@ -254,6 +254,17 @@ Current features:
   history changes clear the query/results because search reads saved source
   text. Queries are capped at 256 UTF-16 code units, retained highlight geometry
   is bounded, and incomplete scans surface a limited state.
+- View supports single-page drag text selection, double-click word selection,
+  Cmd/Ctrl+C, a lazy right-click Copy menu, Cmd/Ctrl+A for the focused page, and
+  Escape to clear. Each viewport owns `PDFTextSelectionController` independently.
+  `PDFTextSelectionItem` reads saved source Unicode and normalized character
+  geometry on a bounded single worker, maps crop/intrinsic rotation through
+  PDFium, and renders highlights with scene-graph geometry. Visible source
+  Widgets and Links retain pointer priority. Pooling, source/page changes, leaving
+  View, and edit history changes cancel stale work and clear selection. Selection
+  requires saved content and PDF copy permission; scans need a text layer.
+  Pages exceeding 50,000 characters are rejected without partial extraction.
+  Selection does not create drafts or modify forms.
 - Per-tab left/right view rotation in 90-degree steps. Rotation is a scene-graph
   view transform only: it rotates the page texture and edit overlay together
   without changing PDF page geometry, drafts, or saved content.

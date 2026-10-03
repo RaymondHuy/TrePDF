@@ -9,6 +9,7 @@
 namespace {
 
 constexpr unsigned long kModifyContentsPermission = 1UL << 3;
+constexpr unsigned long kCopyTextPermission = 1UL << 4;
 constexpr unsigned long kModifyAnnotationsPermission = 1UL << 5;
 constexpr unsigned long kFillFormsPermission = 1UL << 8;
 constexpr unsigned long kAssembleDocumentPermission = 1UL << 10;
@@ -200,6 +201,8 @@ bool PDFDocument::open(const QUrl &source, const QString &password)
             m_maximumPageHeight = maximumPageHeight;
             m_allowsContentEditing = permissions == 0xffffffffUL
                 || (permissions & kModifyContentsPermission) != 0;
+            m_allowsTextCopy = permissions == 0xffffffffUL
+                || (permissions & kCopyTextPermission) != 0;
             m_allowsAnnotations = permissions == 0xffffffffUL
                 || (permissions & kModifyAnnotationsPermission) != 0;
             m_allowsPageAssembly = permissions == 0xffffffffUL
@@ -303,6 +306,11 @@ bool PDFDocument::allowsPasswordChange() const
     return m_document && m_allowsPasswordChange;
 }
 
+bool PDFDocument::allowsTextCopy() const
+{
+    return m_document && m_allowsTextCopy;
+}
+
 int PDFDocument::renderRevision() const
 {
     return m_revision;
@@ -356,6 +364,7 @@ void PDFDocument::closeDocumentLocked()
     m_passwordRequired = false;
     m_passwordProtected = false;
     m_allowsPasswordChange = false;
+    m_allowsTextCopy = false;
     m_sourcePageSizes.clear();
     m_pageSizes.clear();
     m_displaySourcePages.clear();

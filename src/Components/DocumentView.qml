@@ -14,6 +14,7 @@ Rectangle {
     required property PDFSearchController searchController
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
+    property bool viewTabActive: false
     property bool formsTabActive: false
     property bool editTabActive: false
     property bool formFieldsVisible: false
@@ -36,6 +37,19 @@ Rectangle {
     property bool paneActive: true
     property bool showActivePaneIndicator: false
     property string transientStatus
+    readonly property string textSelectionNotice: {
+        if (!viewTabActive || !document.loaded)
+            return ""
+        if (!document.allowsTextCopy) {
+            //% "This document does not allow copying text."
+            return qsTrId("DocumentTextCopyRestricted")
+        }
+        if (editController.hasDrafts) {
+            //% "Save your changes to select and copy text."
+            return qsTrId("SaveToSelectText")
+        }
+        return ""
+    }
     property int pendingNavigationPage: -1
     property int navigationGeneration: 0
     property int pendingSearchNavigationGeneration: -1
@@ -430,6 +444,7 @@ Rectangle {
     }
 
     function prepareForSessionChange() {
+        textSelection.clear()
         cancelPendingSearchNavigation()
         ++sessionChangeGeneration
         editController.finishSelectedFrameResize()
@@ -545,6 +560,25 @@ Rectangle {
         componentReady = true
         activePagedLayoutIndex = layoutIndexForPage(viewCurrentPage)
         syncFormDesignMode()
+    }
+
+    PDFTextSelectionController {
+        id: textSelection
+        objectName: "viewTextSelectionController"
+    }
+
+    onViewTabActiveChanged: textSelection.clear()
+    onVisibleChanged: {
+        if (!visible)
+            textSelection.clear()
+    }
+
+    Connections {
+        target: root.editController
+
+        function onHistoryStateChanged() {
+            textSelection.clear()
+        }
     }
 
     Connections {
@@ -682,6 +716,8 @@ Rectangle {
             document: root.document
             editController: root.editController
             searchController: root.searchController
+            textSelectionController: textSelection
+            viewTabActive: root.viewTabActive
             formController: root.formController
             formDesignerController: root.formDesignerController
             formsTabActive: root.formsTabActive
@@ -702,6 +738,7 @@ Rectangle {
             sessionChangeGeneration: root.sessionChangeGeneration
             onDeleteCommentRequested: (page, objectId) =>
                 root.deleteCommentRequested(page, objectId)
+            onTextSelectionStarted: root.activated()
 
             Connections {
                 target: root
@@ -754,6 +791,7 @@ Rectangle {
         radius: 4
         color: "#e63a3b3f"
         visible: root.transientStatus.length > 0
+            || root.textSelectionNotice.length > 0
         z: 10
 
         Label {
@@ -762,7 +800,8 @@ Rectangle {
             anchors.fill: parent
             anchors.leftMargin: 14
             anchors.rightMargin: 14
-            text: root.transientStatus
+            text: root.transientStatus.length > 0
+                ? root.transientStatus : root.textSelectionNotice
             textFormat: Text.PlainText
             color: "white"
             elide: Text.ElideRight

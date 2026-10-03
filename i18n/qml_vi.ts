@@ -22,8 +22,18 @@
         <source>Please wait for the PDF to finish saving.</source>
         <translation>Vui lòng đợi lưu tệp PDF hoàn tất.</translation>
     </message>
+    <message id="DocumentTextCopyRestricted">
+        <location filename="../src/Components/DocumentView.qml" line="45"/>
+        <source>This document does not allow copying text.</source>
+        <translation>Tài liệu này không cho phép sao chép văn bản.</translation>
+    </message>
+    <message id="SaveToSelectText">
+        <location filename="../src/Components/DocumentView.qml" line="49"/>
+        <source>Save your changes to select and copy text.</source>
+        <translation>Lưu thay đổi để chọn và sao chép chữ.</translation>
+    </message>
     <message id="OpenPdf">
-        <location filename="../src/Components/DocumentView.qml" line="742"/>
+        <location filename="../src/Components/DocumentView.qml" line="779"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="68"/>
         <location filename="../src/Components/ViewRibbon.qml" line="66"/>
@@ -296,9 +306,9 @@
         <translation>Bản nháp · Chưa lưu</translation>
     </message>
     <message id="NoDocumentOpen">
-        <location filename="../src/Components/DocumentView.qml" line="733"/>
-        <location filename="../src/PDFDocument.cpp" line="80"/>
-        <location filename="../src/PDFDocument.cpp" line="242"/>
+        <location filename="../src/Components/DocumentView.qml" line="770"/>
+        <location filename="../src/PDFDocument.cpp" line="81"/>
+        <location filename="../src/PDFDocument.cpp" line="245"/>
         <source>No document open</source>
         <translation>Chưa mở tài liệu</translation>
     </message>
@@ -1169,7 +1179,7 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
     <message id="PageNumber">
         <location filename="../src/Components/CommentPanel.qml" line="1087"/>
         <location filename="../src/Components/PageThumbnailPanel.qml" line="154"/>
-        <location filename="../src/Components/PdfPageDelegate.qml" line="219"/>
+        <location filename="../src/Components/PdfPageDelegate.qml" line="228"/>
         <source>Page %1</source>
         <translation>Trang %1</translation>
     </message>
@@ -1561,54 +1571,54 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Tìm kiếm</translation>
     </message>
     <message id="NoError">
-        <location filename="../src/PDFDocument.cpp" line="48"/>
+        <location filename="../src/PDFDocument.cpp" line="49"/>
         <source>No error</source>
         <translation>Không có lỗi</translation>
     </message>
     <message id="UnknownPdfiumError">
-        <location filename="../src/PDFDocument.cpp" line="51"/>
+        <location filename="../src/PDFDocument.cpp" line="52"/>
         <source>Unknown PDFium error</source>
         <translation>Lỗi PDFium không xác định</translation>
     </message>
     <message id="FileOpenOrReadFailed">
-        <location filename="../src/PDFDocument.cpp" line="54"/>
+        <location filename="../src/PDFDocument.cpp" line="55"/>
         <source>The file could not be opened or read</source>
         <translation>Không thể mở hoặc đọc tệp</translation>
     </message>
     <message id="InvalidPdfFile">
-        <location filename="../src/PDFDocument.cpp" line="57"/>
+        <location filename="../src/PDFDocument.cpp" line="58"/>
         <source>The file is not a valid PDF</source>
         <translation>Tệp không phải là PDF hợp lệ</translation>
     </message>
     <message id="PdfPasswordRequired">
-        <location filename="../src/PDFDocument.cpp" line="60"/>
+        <location filename="../src/PDFDocument.cpp" line="61"/>
         <source>The PDF requires a password</source>
         <translation>Tệp PDF yêu cầu mật khẩu</translation>
     </message>
     <message id="UnsupportedPdfSecurity">
-        <location filename="../src/PDFDocument.cpp" line="63"/>
+        <location filename="../src/PDFDocument.cpp" line="64"/>
         <source>The PDF security handler is unsupported</source>
         <translation>Không hỗ trợ trình xử lý bảo mật của tệp PDF</translation>
     </message>
     <message id="PdfPageLoadFailed">
-        <location filename="../src/PDFDocument.cpp" line="66"/>
+        <location filename="../src/PDFDocument.cpp" line="67"/>
         <source>The requested PDF page could not be loaded</source>
         <translation>Không thể tải trang PDF được yêu cầu</translation>
     </message>
     <message id="UnknownPdfiumStatus">
-        <location filename="../src/PDFDocument.cpp" line="69"/>
+        <location filename="../src/PDFDocument.cpp" line="70"/>
         <source>PDFium failed with an unknown status</source>
         <translation>PDFium gặp lỗi với trạng thái không xác định</translation>
     </message>
     <message id="LocalPdfFilesOnly">
-        <location filename="../src/PDFDocument.cpp" line="139"/>
+        <location filename="../src/PDFDocument.cpp" line="140"/>
         <location filename="../src/PDFEditControllerSave.cpp" line="231"/>
         <location filename="../src/PDFEditControllerSave.cpp" line="312"/>
         <source>Only local PDF files are supported</source>
         <translation>Chỉ hỗ trợ tệp PDF trên máy</translation>
     </message>
     <message id="LoadedPageCount" numerus="yes">
-        <location filename="../src/PDFDocument.cpp" line="224"/>
+        <location filename="../src/PDFDocument.cpp" line="227"/>
         <source>Loaded %n page(s)</source>
         <translation>
             <numerusform>Đã tải %n trang</numerusform>
@@ -3724,6 +3734,11 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <location filename="../src/Components/PageThumbnailPanel.qml" line="229"/>
         <source>Save to update thumbnail content.</source>
         <translation>Lưu để cập nhật nội dung hình thu nhỏ.</translation>
+    </message>
+    <message id="CopySelectedText">
+        <location filename="../src/Components/PageInteractionOverlay.qml" line="184"/>
+        <source>Copy</source>
+        <translation>Sao chép</translation>
     </message>
 </context>
 </TS>
