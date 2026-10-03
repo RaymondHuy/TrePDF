@@ -232,6 +232,10 @@ qt_add_qml_module(trepdf
         src/PDFSourceTextGeometry.h
         src/PDFSearchController.cpp
         src/PDFSearchController.h
+        src/PDFTextSelectionController.cpp
+        src/PDFTextSelectionController.h
+        src/PDFTextSelectionItem.cpp
+        src/PDFTextSelectionItem.h
         src/PDFTabModel.cpp
         src/PDFTabModel.h
         src/PDFTableExtractor.cpp

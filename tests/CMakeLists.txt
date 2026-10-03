@@ -15,6 +15,7 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerDocument.cpp
     tst_PDFEditControllerDocumentView.cpp
     tst_PDFEditControllerThumbnails.cpp
+    tst_PDFEditControllerTextSelection.cpp
     tst_PDFEditControllerDrawingComments.cpp
     tst_PDFEditControllerFileOpen.cpp
     tst_PDFEditControllerFonts.cpp
@@ -110,6 +111,10 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFShapeUtils.h
     ../src/PDFSearchController.cpp
     ../src/PDFSearchController.h
+    ../src/PDFTextSelectionController.cpp
+    ../src/PDFTextSelectionController.h
+    ../src/PDFTextSelectionItem.cpp
+    ../src/PDFTextSelectionItem.h
     ../src/PDFTabModel.cpp
     ../src/PDFTabModel.h
     ../src/PDFiumSynchronization.h
@@ -152,6 +157,7 @@ target_link_libraries(trepdf_edit_controller_tests
         Qt6::Quick
         Qt6::Test
         PDFium::PDFium
+        QPDF::QPDF
         Libxlsxwriter::Libxlsxwriter
 )
 

@@ -16,6 +16,8 @@
 #include "PDFRasterPlan.h"
 #include "PDFSaveWriter.h"
 #include "PDFSearchController.h"
+#include "PDFTextSelectionController.h"
+#include "PDFTextSelectionItem.h"
 #include "PDFTabModel.h"
 #include "PDFWidgetAnnotationSuppression.h"
 #include "PDFiumSynchronization.h"

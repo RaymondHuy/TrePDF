@@ -13,6 +13,14 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void selectsAndCopiesViewText();
+    void selectsViewTextOnRotatedPages_data();
+    void selectsViewTextOnRotatedPages();
+    void clearsViewTextSelectionAcrossSourceChanges();
+    void preservesFormsAndLinksDuringViewTextSelection();
+    void respectsViewTextCopyPermissions();
+    void boundsViewTextSelection();
+    void routesViewTextSelectionAcrossPanesAndModes();
     void navigatesWithPageThumbnailsAcrossTabsAndSplitPanes();
     void virtualizesAndReleasesPageThumbnails();
     void filtersAndQueuesLocalPdfOpenRequests();

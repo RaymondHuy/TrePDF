@@ -10,6 +10,8 @@ Item {
     required property PDFDocument document
     required property PDFEditController editController
     required property PDFSearchController searchController
+    property PDFTextSelectionController textSelectionController
+    property bool viewTabActive: false
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
     required property Flickable viewportItem
@@ -74,6 +76,7 @@ Item {
     }
 
     signal deleteCommentRequested(int page, string objectId)
+    signal textSelectionStarted()
 
     width: Math.max(viewWidth, maximumViewPageWidth * zoom + pageMargin * 2)
     height: pageFrame.height + pageLabel.implicitHeight + 12
@@ -171,6 +174,12 @@ Item {
 
             anchors.fill: pageView
             theme: pageCard.theme
+            document: pageCard.document
+            textSelectionController: pageCard.textSelectionController
+            textSelectionActive: pageCard.viewTabActive
+                && pageCard.visibleRasterRect.width > 0
+                && pageCard.visibleRasterRect.height > 0
+            onTextSelectionStarted: pageCard.textSelectionStarted()
             editController: pageCard.editController
             formController: pageCard.formController
             formDesignerController: pageCard.formDesignerController

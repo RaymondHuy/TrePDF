@@ -137,6 +137,14 @@ edits before managing watermarks, and save/discard pending watermarks before
 editing page content. See [watermark pipeline](docs/watermark-pipeline.md) for
 the persistence contract and limits.
 
+In View, drag across text on a page to select it, double-click a word, and use
+Cmd/Ctrl+C or the right-click Copy menu. Cmd/Ctrl+A selects the focused page's
+text; Escape clears the selection. Selection is independent in each split pane
+and follows page zoom and rotation. Source links and form widgets keep their
+click behavior. Text is read from the saved PDF, so pending edits must be saved
+or discarded first. Selection is currently limited to one page at a time;
+image-only scans require an existing OCR text layer. Copy permissions are honored.
+
 The View tab searches the current PDF text asynchronously across its source
 pages. Typing is debounced, a newer query cancels the older scan, and stale
 results are rejected after a document or page-structure revision. Matches on

@@ -854,6 +854,10 @@ bool registerQmlTestTypes(const QString &themePath)
                1,
                0,
                "PDFSearchController") >= 0
+        && qmlRegisterType<PDFTextSelectionController>(
+               "TrePDF", 1, 0, "PDFTextSelectionController") >= 0
+        && qmlRegisterType<PDFTextSelectionItem>(
+               "TrePDF", 1, 0, "PDFTextSelectionItem") >= 0
         && qmlRegisterType<PDFExcelExportController>(
                "TrePDF", 1, 0, "PDFExcelExportController") >= 0
         && qmlRegisterType<PDFFormController>(
