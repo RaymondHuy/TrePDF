@@ -3100,12 +3100,15 @@ QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphL
             const qreal factor = number("lineSpacing");
             const qreal before = number("spaceBeforeRatio");
             const qreal after = number("spaceAfterRatio");
+            const qreal indent = p.contains(QStringLiteral("firstLineIndentRatio"))
+                ? number("firstLineIndentRatio") : 0.0;
             const QString alignment = p.value(QStringLiteral("alignment")).toString();
             if (expectedStart > text.size() || number("start") != expectedStart
                 || number("length") != end - expectedStart
                 || !qIsFinite(factor) || factor < 0.5 || factor > 3.0
                 || !qIsFinite(before) || before < 0.0 || before * pageSize.height() > 144.001
                 || !qIsFinite(after) || after < 0.0 || after * pageSize.height() > 144.001
+                || !qIsFinite(indent) || indent < 0.0 || indent * pageSize.height() > 144.001
                 || (alignment != QLatin1String("left") && alignment != QLatin1String("center")
                     && alignment != QLatin1String("right") && alignment != QLatin1String("justify"))) {
                 valid = false;
@@ -3117,6 +3120,7 @@ QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphL
             format.lineSpacing = factor;
             format.spaceBeforeRatio = before;
             format.spaceAfterRatio = after;
+            format.firstLineIndentRatio = indent;
             format.alignment = alignment == QLatin1String("center") ? CenterAlignment
                 : alignment == QLatin1String("right") ? RightAlignment
                 : alignment == QLatin1String("justify") ? JustifyAlignment : LeftAlignment;
@@ -4042,12 +4046,39 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
     // Work from complete visual lines, then link only unambiguous neighbors
     // within one column. All paths remain attached to the resulting paragraph
     // so suppression, deletion, movement and Save share the existing pipeline.
+    const auto hasJoinableParagraphLayout = [&](const Candidate &candidate) {
+        if (candidate.sourceParagraphFormats.isEmpty()) {
+            return true;
+        }
+        // A previously edited single line carries paragraph metadata too. It
+        // can still continue a neighboring source line, provided joining does
+        // not discard explicit paragraph formatting or a wrapped layout.
+        if (candidate.sourceParagraphFormats.size() != 1
+            || !candidate.sourceParagraphLineBreaks.isEmpty()) {
+            return false;
+        }
+        const ParagraphFormat &format = candidate.sourceParagraphFormats.first();
+        if (format.start != 0 || format.length != candidate.text.size()
+            || format.alignment != LeftAlignment
+            || !qFuzzyCompare(format.lineSpacing, 1.0)
+            || !qFuzzyIsNull(format.spaceBeforeRatio)
+            || !qFuzzyIsNull(format.spaceAfterRatio)
+            || !qFuzzyIsNull(format.firstLineIndentRatio)
+            || format.listStyle != ParagraphListStyle::None) {
+            return false;
+        }
+        return std::all_of(candidate.parts.cbegin(), candidate.parts.cend(),
+            [&](const CandidatePart &part) {
+                return part.hasBaseline
+                    && qAbs(part.origin.y() - candidate.origin.y()) * pageSize.height() <= 0.1;
+            });
+    };
     const auto canJoinParagraph = [&](const Candidate &candidate) {
         return candidate.kind == QLatin1String("text")
             && candidate.editable && candidate.renderSuppressible
             && candidate.hasBaseline && !candidate.added
             && !candidate.parts.isEmpty()
-            && candidate.sourceParagraphFormats.isEmpty()
+            && hasJoinableParagraphLayout(candidate)
             && !overlappingText.contains(candidate.objectId)
             && !candidate.text.contains(QLatin1Char('\n'))
             && !candidate.text.contains(QLatin1Char('\r'))
@@ -4057,12 +4088,17 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         // A paragraph can change emphasis without changing its typeface.
         // Preserve each line's format instead of applying the first line's
         // bold/italic/underline and calibrated stretch to the entire paragraph.
+        // TeX can expand/contract each justified source row by up to 2%.
+        // Compare those rows across the full 98-102% band while retaining
+        // their individual spans; larger source scales still need to agree.
+        const bool compatibleStretch = qAbs(left.fontStretch - right.fontStretch) <= 2
+            || (qAbs(left.fontStretch - 100) <= 2 && qAbs(right.fontStretch - 100) <= 2);
         return !left.fontFamily.isEmpty()
             && sameFontFamily(PDFFontAliases::semanticFamily(left.fontFamily),
                               PDFFontAliases::semanticFamily(right.fontFamily))
             && qAbs(emSize(left) - emSize(right))
                 <= qMax<qreal>(0.25, 0.02 * qMax(emSize(left), emSize(right)))
-            && qAbs(left.fontStretch - right.fontStretch) <= 1
+            && compatibleStretch
             && left.color == right.color
             && left.fillColor == right.fillColor
             && left.strokeColor == right.strokeColor
@@ -4072,6 +4108,17 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
     const auto alignedLeft = [&](const Candidate &left, const Candidate &right) {
         return qAbs(left.origin.x() - right.origin.x()) * pageSize.width()
             <= kParagraphLeftAlignmentToleranceEm * qMax(emSize(left), emSize(right));
+    };
+    const auto startsIndentedParagraph = [&](const Candidate &upper, const Candidate &lower) {
+        const qreal em = qMax(emSize(upper), emSize(lower));
+        const qreal indent = (upper.origin.x() - lower.origin.x()) * pageSize.width();
+        // Only a first row may step OUT toward the body margin. The reverse
+        // direction starts a new paragraph. Reject short inset headings and
+        // large offsets that are more likely separate columns or list layouts.
+        return indent >= 0.75 * em && indent <= 2.5 * em && indent <= 144.0
+            && upper.geometry.sourceRect.width() >= 0.65 * lower.geometry.sourceRect.width()
+            && (lower.geometry.sourceRect.right() - upper.geometry.sourceRect.right())
+                * pageSize.width() <= 2.0 * em;
     };
     QVector<qsizetype> paragraphOrder;
     for (qsizetype index = 0; index < output.size(); ++index) {
@@ -4130,7 +4177,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             if (gap < kParagraphMinimumBaselineGapEm * upperEm
                 || gap >= nearestGap
                 || lowerRect.top() < upperRect.bottom()
-                || !alignedLeft(upper, lower)
+                || (!alignedLeft(upper, lower) && !startsIndentedParagraph(upper, lower))
                 || !paragraphStyleMatches(upper, lower)
                 || sharedWidth < 0.65 * qMin(upperRect.width(), lowerRect.width())) {
                 continue;
@@ -4173,7 +4220,13 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                 const Candidate &source = output[next].candidate;
                 const qreal gap = (source.origin.y() - output[last].candidate.origin.y())
                     * pageSize.height();
-                if (!alignedLeft(first, source) || !paragraphStyleMatches(first, source)
+                const bool indented = run.size() > 1
+                    && startsIndentedParagraph(first, output[run[1]].candidate);
+                const Candidate &body = indented ? output[run[1]].candidate : first;
+                const bool aligned = run.size() == 1
+                    ? alignedLeft(first, source) || startsIndentedParagraph(first, source)
+                    : alignedLeft(body, source);
+                if (!aligned || !paragraphStyleMatches(first, source)
                     || (previousGap > 0.0
                         && qAbs(gap - previousGap) > qMax<qreal>(2.0, 0.2 * emSize(first)))
                     || partCount + source.parts.size() > kMaximumParagraphParts
@@ -4258,11 +4311,20 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             }
             lineSpacing.append(lineSpacing.constLast());
             Candidate grouped = first;
+            const Candidate &body = output[run[1]].candidate;
+            const qreal firstIndent = startsIndentedParagraph(first, body)
+                ? (first.origin.x() - body.origin.x()) * pageSize.width() / pageSize.height()
+                : 0.0;
+            if (firstIndent > 0.0) {
+                grouped.origin.setX(body.origin.x());
+            }
             grouped.objectPath.clear();
             grouped.parts.clear();
             grouped.text.clear();
             grouped.sourceCharacterSpans.clear();
             grouped.textGlyphRects.clear();
+            grouped.sourceParagraphFormats.clear();
+            grouped.sourceParagraphLineBreaks.clear();
             QRectF sourceRect = first.geometry.sourceRect;
             qsizetype firstOrder = output[index].order;
             QByteArray identity;
@@ -4277,6 +4339,9 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                 paragraph.start = grouped.text.size();
                 paragraph.length = source.text.size();
                 paragraph.lineSpacing = lineSpacing[grouped.sourceParagraphFormats.size()];
+                if (grouped.sourceParagraphFormats.isEmpty()) {
+                    paragraph.firstLineIndentRatio = firstIndent;
+                }
                 grouped.sourceParagraphFormats.append(paragraph);
                 grouped.parts.append(source.parts);
                 appendSourceText(grouped, source);

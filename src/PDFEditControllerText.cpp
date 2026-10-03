@@ -72,6 +72,7 @@ constexpr int kEditorSourceAdvanceRatio = QTextFormat::UserProperty + 8;
 // and metrics, including through local undo/redo.
 constexpr int kEditorFontFamily = QTextFormat::UserProperty + 9;
 constexpr int kEditorFontStretch = QTextFormat::UserProperty + 10;
+constexpr int kEditorFirstLineIndentRatio = QTextFormat::UserProperty + 11;
 
 // Qt adds the insertion length and following format length when calculating
 // the redo cursor. A final custom item makes it use the changed text bounds
@@ -1171,9 +1172,11 @@ bool PDFEditController::applyParagraphFormatsToEditorDocument(
         format.setProperty(kEditorLineSpacing, paragraph.lineSpacing);
         format.setProperty(kEditorParagraphSpaceBeforeRatio, paragraph.spaceBeforeRatio);
         format.setProperty(kEditorParagraphSpaceAfterRatio, paragraph.spaceAfterRatio);
+        format.setProperty(kEditorFirstLineIndentRatio, paragraph.firstLineIndentRatio);
         format.setLineHeight(paragraph.lineSpacing * 100.0, QTextBlockFormat::ProportionalHeight);
         format.setTopMargin(paragraph.spaceBeforeRatio * displayedPageHeight);
         format.setBottomMargin(paragraph.spaceAfterRatio * displayedPageHeight);
+        format.setTextIndent(paragraph.firstLineIndentRatio * displayedPageHeight);
         switch (paragraph.alignment) {
         case LeftAlignment: format.setAlignment(Qt::AlignLeft); break;
         case RightAlignment: format.setAlignment(Qt::AlignRight); break;
@@ -1236,6 +1239,12 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
             const qreal value = format.doubleProperty(kEditorParagraphSpaceAfterRatio);
             if (qIsFinite(value) && value >= 0.0) {
                 paragraph.spaceAfterRatio = value;
+            }
+        }
+        if (format.hasProperty(kEditorFirstLineIndentRatio)) {
+            const qreal value = format.doubleProperty(kEditorFirstLineIndentRatio);
+            if (qIsFinite(value) && value >= 0.0) {
+                paragraph.firstLineIndentRatio = value;
             }
         }
     }
@@ -2264,9 +2273,17 @@ void PDFEditController::expandInitialTextFrame(Candidate &candidate,
     qsizetype lineStart = 0;
     const QStringList lines = candidate.text.split(QLatin1Char('\n'));
     for (const QString &line : lines) {
+        qreal firstLineIndent = 0.0;
+        for (const ParagraphFormat &paragraph : candidate.sourceParagraphFormats) {
+            if (paragraph.start == lineStart) {
+                firstLineIndent = paragraph.firstLineIndentRatio * pageSize.height();
+                break;
+            }
+        }
         if (candidate.sourceCharacterSpans.isEmpty()) {
             measuredWidth = qMax(measuredWidth,
-                qMax(metrics.horizontalAdvance(line), metrics.boundingRect(line).width()));
+                firstLineIndent
+                    + qMax(metrics.horizontalAdvance(line), metrics.boundingRect(line).width()));
         } else {
             QTextLayout layout(line, displayFont);
             QList<QTextLayout::FormatRange> formats;
@@ -2299,7 +2316,8 @@ void PDFEditController::expandInitialTextFrame(Candidate &candidate,
                 // column cap can measure only a prefix of the source line.
                 textLine.setLineWidth(pageSize.width());
                 measuredWidth = qMax(measuredWidth,
-                    qMax(textLine.horizontalAdvance(), textLine.naturalTextWidth()));
+                    firstLineIndent
+                        + qMax(textLine.horizontalAdvance(), textLine.naturalTextWidth()));
             }
             layout.endLayout();
         }

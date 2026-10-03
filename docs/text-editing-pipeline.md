@@ -355,9 +355,17 @@ paragraph và format từ từng object, thay vì đoán nhóm bằng ink gap. V
 đoạn khác font/đậm/nghiêng vẫn là một vùng edit qua nhiều lần Save; move-only
 vẫn dịch ma trận object nguồn theo pipeline cũ.
 
+Dòng đã có `TrePDFParagraphLayout` vẫn được xét gom với dòng liền kề nếu chỉ
+chứa một đoạn canh trái, spacing mặc định, không list hoặc ngắt dòng, và mọi
+source part cùng baseline (sai số tối đa 0.1 pt). Điều này cho phép một dòng
+đã sửa/lưu nối lại với dòng nguồn kế bên. Đoạn đã wrap thành nhiều hàng hoặc
+có định dạng đoạn riêng tiếp tục giữ nguyên. Khi gom, tạo lại paragraph formats
+và source breaks cho nhóm mới, giữ nguyên character spans của từng dòng.
+
 Bước gom đoạn nối các candidate dòng hoàn chỉnh, editable và suppressible theo
 thứ tự từ trên xuống. Mỗi cặp dòng phải cùng họ font đã resolve và paint,
-font stretch lệch tối đa một điểm phần trăm; cho phép khác đậm/nghiêng/gạch chân,
+font stretch lệch tối đa hai điểm phần trăm hoặc cả hai nằm trong khoảng
+98–102% (giữ co/giãn nhỏ từng dòng của TeX); cho phép khác đậm/nghiêng/gạch chân,
 cỡ hiển thị chênh không quá `max(0.25 pt, 2%)`, origin trái lệch tối đa `0.4 em`,
 và khoảng cách baseline nằm trong `0.8–1.6 em` của dòng trên. Source bounds hai
 dòng không được đè nhau; phần chiều ngang chung phải ít nhất 65% chiều rộng
@@ -368,8 +376,17 @@ Trước mỗi lần nối thêm dòng, code kiểm tra lại union của cả �
 các candidate nguồn bên ngoài, tránh dòng đầu dài khiến box đoạn bao cả nội
 dung bên cạnh một dòng sau ngắn hơn.
 
-Các dòng sau tiếp tục phải khớp họ font/cỡ/paint/stretch và origin trái của dòng
-đầu; leading giữa hai cặp liên tiếp lệch tối đa `max(2 pt, 0.2 em)`. Mỗi đoạn tối đa 64 dòng,
+Dòng đầu thụt vào `0.75–2.5 em` (tối đa 144 pt) có thể nối ra lề thân đoạn.
+Dòng đầu phải rộng ít nhất 65% dòng sau và mép phải không hụt quá `2 em`,
+tránh nhận nhầm tiêu đề ngắn. Chiều ngược từ thân đoạn vào một dòng thụt mới
+không được nối; sau dòng đầu, tất cả dòng tiếp tục cùng lề với dòng thứ hai.
+`firstLineIndentRatio` lưu độ thụt chia chiều cao trang, mặc định 0 khi đọc
+metadata cũ. QTextBlockFormat/HTML và writer đều thụt riêng dòng visual đầu,
+giảm chiều rộng wrap của dòng đó; các dòng wrap tiếp theo dùng toàn khung.
+Khoảng thụt được giữ qua no-op, undo/redo, Justify và Save/reopen.
+
+Các dòng sau tiếp tục phải khớp họ font/cỡ/paint/stretch của dòng đầu và lề thân
+đoạn; leading giữa hai cặp liên tiếp lệch tối đa `max(2 pt, 0.2 em)`. Mỗi đoạn tối đa 64 dòng,
 1.024 source parts và 32.768 UTF-16 code units, tính cả `\n` được thêm. Bước
 kiểm tra overlap, tìm liên kết và kiểm tra union đoạn dùng chung ngân sách
 200.000 phép so sánh:
@@ -377,7 +394,7 @@ hết ngân sách khi kiểm tra overlap thì giữ source candidates; hết ở
 liên kết hoặc mở rộng đoạn thì giữ kết quả gom dòng, không nhận một kết quả
 đoạn dở dang.
 
-Candidate đoạn dùng union source bounds, giữ origin/baseline của dòng đầu,
+Candidate đoạn dùng union source bounds, giữ lề thân đoạn/baseline của dòng đầu,
 ghép text bằng `\n`, đồng thời làm phẳng `parts` và giữ cả underline paths.
 `sourceCharacterSpans` giữ định dạng từng vùng chữ, kể cả bold/regular và stretch
 khác nhau giữa các dòng. Khoảng trắng ghép cùng dòng kế thừa format trước nó;
