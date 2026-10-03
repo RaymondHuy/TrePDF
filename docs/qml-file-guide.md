@@ -95,8 +95,10 @@ phạm vi toàn ứng dụng.
 
 **Điều phối hành động:**
 
-- Mở một hoặc nhiều PDF; chuyển sang tab đã mở nếu model phát hiện cùng canonical
-  path.
+- Mở một hoặc nhiều PDF từ file dialog, kéo thả hoặc singleton
+  `FileOpenHandler`; chuyển sang tab đã mở nếu model phát hiện cùng canonical
+  path. `pendingOpenFiles` giữ yêu cầu trong lúc lưu/hộp thoại; mở tiếp khi hết
+  chặn, qua cùng luồng mật khẩu.
 - Save, Save As, đóng tab, đóng cửa sổ và chuỗi xử lý draft chưa lưu. State
   `pendingDraftAction`/`pendingSession` ghi nhớ hành động cần tiếp tục sau khi
   người dùng Save, Discard hoặc Cancel.
@@ -114,8 +116,10 @@ phạm vi toàn ứng dụng.
 
 **Input toàn cục:**
 
-- Khai báo shortcut cho Open, Save, Save As, Undo, Redo và các hành động phù hợp
-  khác; trước thao tác sẽ kết thúc inline edit để state controller nhất quán.
+- Cmd/Ctrl+O mở file dialog. Cmd/Ctrl+F commit editor/panel, chuyển ribbon sang
+  View, cuộn ribbon để hiện Search và focus/chọn toàn bộ query hiện tại.
+- Khai báo shortcut cho Save, Save As, Undo, Redo và các hành động phù hợp khác;
+  trước thao tác sẽ kết thúc inline edit để state controller nhất quán.
 - Chặn đổi/đóng tab và đóng cửa sổ trong lúc có save bất đồng bộ.
 
 **Ràng buộc:** không lưu draft hoặc PDF data trong QML này. Các biến `pending*`
@@ -514,6 +518,18 @@ trong tab Edit; không lập chỉ mục, hiển thị hay sửa nội dung comm
 **Vòng đời:** `prepareForDeactivation()` yêu cầu `DocumentView` kết thúc editor,
 hủy interaction và lưu scroll trước khi workspace bị phá; hàm cũng chạy trong
 `Component.onDestruction` để không phụ thuộc caller luôn nhớ gọi.
+
+### [`src/Components/PageThumbnailPanel.qml`](../src/Components/PageThumbnailPanel.qml)
+
+Thanh hình thu nhỏ bên trái workspace, thu gọn theo `session.thumbnailsVisible`.
+`ListView` tái sử dụng delegate với cache một hàng; mỗi `PDFPageView` nằm trong
+khung tối đa 144 × 168 logical pixel, giữ DPR gốc và budget raster chung.
+Delegate pooled tách document/form controller; thu gọn hủy Loader/list/texture.
+Viền cam và tự cuộn theo trang của pane đang active. Click đi qua guard commit
+panel/editor/form của workspace rồi điều hướng pane đó. Dùng nội dung trang đã
+lưu (không gắn Edit controller để tránh suppression thiếu overlay); bản nháp
+nội dung cập nhật sau Save, có nhắc lưu. Cấu trúc trang, xoay view và giá trị form
+runtime cập nhật ngay. Thumbnail không có editor, search highlight hay input form.
 
 ### [`src/Components/DocumentView.qml`](../src/Components/DocumentView.qml)
 

@@ -129,7 +129,10 @@ if(APPLE)
         MACOSX_PACKAGE_LOCATION "Resources"
     )
     target_sources(trepdf PRIVATE "${TREPDF_MACOS_ICON}")
-    set_target_properties(trepdf PROPERTIES MACOSX_BUNDLE_ICON_FILE "TrePDF.icns")
+    set_target_properties(trepdf PROPERTIES
+        MACOSX_BUNDLE_ICON_FILE "TrePDF.icns"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TrePDFInfo.plist.in"
+    )
 elseif(WIN32)
     enable_language(RC)
     configure_file(
@@ -189,6 +192,8 @@ qt_add_qml_module(trepdf
         src/PDFStampPresets.h
         src/PDFDocument.cpp
         src/PDFDocument.h
+        src/PDFFileOpenHandler.cpp
+        src/PDFFileOpenHandler.h
         src/PDFEditController.cpp
         src/PDFEditController.h
         src/PDFEditControllerCandidates.cpp
@@ -257,6 +262,7 @@ qt_add_qml_module(trepdf
         src/Components/DocumentView.qml
         src/Components/DocumentTabBar.qml
         src/Components/DocumentWorkspace.qml
+        src/Components/PageThumbnailPanel.qml
         src/Components/DrawingCommentPropertiesPanel.qml
         src/Components/ImagePropertiesPanel.qml
         src/Components/DropdownOptionsPanel.qml

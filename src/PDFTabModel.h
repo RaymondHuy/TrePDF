@@ -94,6 +94,8 @@ class PDFDocumentSession : public QObject
                    NOTIFY splitScrollPositionInitializedChanged FINAL)
     Q_PROPERTY(bool panelCollapsed READ panelCollapsed WRITE setPanelCollapsed
                    NOTIFY panelCollapsedChanged FINAL)
+    Q_PROPERTY(bool thumbnailsVisible READ thumbnailsVisible WRITE setThumbnailsVisible
+                   NOTIFY thumbnailsVisibleChanged FINAL)
     Q_PROPERTY(bool initialFitPending READ initialFitPending WRITE setInitialFitPending
                    NOTIFY initialFitPendingChanged FINAL)
     Q_PROPERTY(bool hasDrafts READ hasDrafts NOTIFY hasDraftsChanged FINAL)
@@ -138,6 +140,7 @@ public:
     qreal splitScrollY() const;
     bool splitScrollPositionInitialized() const;
     bool panelCollapsed() const;
+    bool thumbnailsVisible() const;
     bool initialFitPending() const;
     bool hasDrafts() const;
     bool saving() const;
@@ -154,6 +157,7 @@ public:
     void setSplitScrollY(qreal scrollY);
     Q_INVOKABLE void setSplitScrollPosition(qreal scrollX, qreal scrollY);
     void setPanelCollapsed(bool collapsed);
+    void setThumbnailsVisible(bool visible);
     void setInitialFitPending(bool pending);
 
     bool open(const QUrl &source, const QString &password = QString());
@@ -173,6 +177,7 @@ signals:
     void splitScrollPositionChanged();
     void splitScrollPositionInitializedChanged();
     void panelCollapsedChanged();
+    void thumbnailsVisibleChanged();
     void initialFitPendingChanged();
     void hasDraftsChanged();
     void savingChanged();
@@ -204,6 +209,7 @@ private:
     bool m_separateCoverPage = false;
     SplitViewMode m_splitViewMode = NoSplit;
     bool m_panelCollapsed = false;
+    bool m_thumbnailsVisible = true;
     bool m_initialFitPending = true;
 };
 

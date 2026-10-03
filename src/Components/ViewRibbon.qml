@@ -38,6 +38,14 @@ Flickable {
     flickableDirection: Flickable.HorizontalFlick
     boundsBehavior: Flickable.StopAtBounds
 
+    function focusSearch() {
+        ribbonRow.forceLayout()
+        const left = searchControl.mapToItem(contentItem, 0, 0).x
+        contentX = Math.max(0, Math.min(contentWidth - width,
+            left + searchControl.width + 8 - width))
+        searchControl.focusSearch()
+    }
+
     Row {
         id: ribbonRow
 
@@ -215,6 +223,7 @@ Flickable {
             title: qsTrId("Search")
 
             SearchRibbonControl {
+                id: searchControl
                 theme: root.theme
                 document: root.document
                 controller: root.searchController

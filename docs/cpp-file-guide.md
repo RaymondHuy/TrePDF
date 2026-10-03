@@ -27,6 +27,8 @@ tệp, ownership, thread, dữ liệu trao đổi và ranh giới không nên ph
 
 - Tạo `QGuiApplication`, đặt application name `TrePDF` và organization
   `TreOffice`.
+- Cài `PDFFileOpenHandler` trước khi nạp font/QML để giữ yêu cầu mở từ hệ điều
+  hành và tham số đường dẫn/file URL trên dòng lệnh.
 - Gọi `ApplicationFonts::registerBundledFonts()` trước khi QML tạo font control,
   để danh mục font và face do app bundle cung cấp ổn định ngay từ đầu.
 - Ép Qt Quick Controls dùng style `Basic`, phù hợp các control QML tự vẽ nền/
@@ -35,6 +37,17 @@ tệp, ownership, thread, dữ liệu trao đổi và ranh giới không nên ph
   root object và load `Main` từ module `TrePDF`.
 - Chạy event loop. Tệp này không khởi tạo document/controller thủ công; các type
   được QML module/plugin đăng ký từ khai báo QML element trong class tương ứng.
+
+### [`src/PDFFileOpenHandler.h`](../src/PDFFileOpenHandler.h) và
+[`src/PDFFileOpenHandler.cpp`](../src/PDFFileOpenHandler.cpp)
+
+- Singleton QML `FileOpenHandler` do ứng dụng sở hữu, nhận `QFileOpenEvent`,
+  lọc PDF local và loại trùng theo canonical path.
+- Giữ yêu cầu đến sớm trong hàng đợi; signal `filesPending` được phát qua event
+  loop. `Main.qml` nhận bằng `takePendingFiles()` rồi dùng luồng mở tab/mật khẩu.
+- `localPdfFiles()` dùng chung cho kéo thả; không tự tải URL từ mạng hoặc đọc
+  PDF bên trong native event. Bundle macOS khai báo PDF trong
+  `cmake/TrePDFInfo.plist.in`, không đổi trình đọc mặc định.
 
 ### [`src/ApplicationFonts.cpp`](../src/ApplicationFonts.cpp) và
 [`src/ApplicationFonts.h`](../src/ApplicationFonts.h)
@@ -181,7 +194,7 @@ Tệp định nghĩa ba lớp có ownership khác nhau.
   guard và save snapshot bao quát cả content lẫn AcroForm. Search state không
   tham gia draft/save và được giữ độc lập theo tab.
 - Giữ state view chính: zoom, scroll X/Y, quarter-turn rotation, bốn mode Page
-  Display, cờ trang bìa riêng, panel collapsed và cờ initial fit.
+  Display, cờ trang bìa riêng, panel collapsed, `thumbnailsVisible` và cờ initial fit.
 - Expose `SplitViewMode` gồm No/Vertical/Horizontal cùng một child
   `PDFViewState` để pane phụ giữ zoom, trang và vị trí cuộn độc lập.
 - Tổng hợp `hasDrafts`/`saving`, title/path và chuyển tiếp status, save finished,

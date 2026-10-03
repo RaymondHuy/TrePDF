@@ -55,6 +55,25 @@ To run one test, append its unchanged method name:
 QT_QPA_PLATFORM=offscreen cmake-build-debug/tests/trepdf_edit_controller_tests savesTextSpacingWithoutStretchingGlyphs
 ```
 
+## Opening Files and Standard Shortcuts
+
+`tst_PDFEditControllerFileOpen.cpp` covers local PDF URL filtering (Unicode and
+spaces, uppercase extensions, canonical duplicates and symlinks), launch/native
+event coalescing, events arriving before the QML window, and repeated requests
+while a password or file dialog is open. Native requests and actual Qt drag/drop
+events open separate tabs without discarding existing drafts. Standard Open and
+Find shortcuts are dispatched to the real main window; Find switches from Edit
+to View, selects the current query, reveals the field in a narrow ribbon, and
+keeps search scoped to the current tab. File dialogs use Qt's non-native fallback
+only inside the automated test.
+
+```sh
+QT_QPA_PLATFORM=offscreen cmake-build-debug/tests/trepdf_edit_controller_tests filtersAndQueuesLocalPdfOpenRequests opensNativePdfRequestsThroughMainWindow opensDroppedPdfsWithoutLosingExistingDrafts focusesDocumentSearchWithStandardShortcut opensPdfDialogWithStandardShortcut
+```
+
+Finder's Launch Services routing and installed bundle document association still
+need a smoke test with the built macOS application.
+
 ## CTAN Font Catalogue
 
 `loadsEveryCtanCatalogueEntry` checks the packaged JSON and exact URL/style
@@ -120,3 +139,10 @@ TREPDF_TEST_FORM_TEXT_PDF="/path/to/500 Lines or Less.pdf" QT_QPA_PLATFORM=offsc
 
 Set `TREPDF_TEST_FORM_TEXT_OUTPUT_DIR` to an empty scratch directory to retain
 the original, edited and edited-again page PNGs. The input PDF is never written.
+
+`tst_PDFEditControllerThumbnails.cpp` covers thumbnail navigation in the active
+split pane, per-tab collapse state, page insertion/deletion with undo/discard,
+and bounded rendering/pooling over 240 mixed-size pages. It checks collapse
+cleanup, rotation, current-page reveal, and close/reopen during pending renders.
+Run both thumbnail tests with `QSG_RHI_BACKEND=metal` for native texture lifecycle
+coverage in addition to the offscreen suite.

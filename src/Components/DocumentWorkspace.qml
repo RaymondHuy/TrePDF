@@ -579,6 +579,22 @@ Item {
         anchors.fill: parent
         spacing: 0
 
+        PageThumbnailPanel {
+            Layout.preferredWidth: root.session.thumbnailsVisible ? 192 : 36
+            Layout.fillHeight: true
+            theme: root.theme
+            session: root.session
+            currentPage: root.activePage
+            navigationEnabled: root.initialViewReady && !root.session.saving
+            onPageRequested: page => {
+                if (!root.commitPendingPanelEdits())
+                    return
+                root.preparePaneViews()
+                root.session.prepareForDeactivation()
+                root.navigateActivePaneToPage(page)
+            }
+        }
+
         Item {
             id: documentArea
 

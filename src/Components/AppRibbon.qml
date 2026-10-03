@@ -28,6 +28,7 @@ Column {
     property bool listBoxToolSelected: false
     property bool combFieldToolSelected: false
     property bool commentsPanelVisible: true
+    property bool searchFocusPending: false
     readonly property bool viewTabActive: ribbonTabs.currentIndex === 0
     readonly property bool editTabActive: ribbonTabs.currentIndex === 1
     readonly property bool commentTabActive: ribbonTabs.currentIndex === 2
@@ -81,6 +82,28 @@ Column {
     signal redoRequested()
 
     spacing: 0
+
+    function focusSearch() {
+        if (!document.loaded || anySaving)
+            return
+        searchFocusPending = true
+        ribbonTabs.currentIndex = 0
+        applySearchFocus()
+    }
+
+    function applySearchFocus() {
+        if (!searchFocusPending || !viewTabActive || ribbonLoader.status !== Loader.Ready)
+            return
+        searchFocusPending = false
+        const viewRibbon = ribbonLoader.item as ViewRibbon
+        if (viewRibbon)
+            viewRibbon.focusSearch()
+    }
+
+    onViewTabActiveChanged: {
+        if (!viewTabActive)
+            searchFocusPending = false
+    }
 
     function isCommentTool(tool) {
         return tool === PDFEditController.CommentSelectTool
@@ -149,6 +172,7 @@ Column {
 
     Component.onCompleted: syncEditTool()
     onDocumentChanged: {
+        searchFocusPending = false
         textFieldToolSelected = false
         checkboxToolSelected = false
         radioButtonToolSelected = false
@@ -515,7 +539,9 @@ Column {
         }
 
         Loader {
+            id: ribbonLoader
             anchors.fill: parent
+            onLoaded: Qt.callLater(root.applySearchFocus)
             enabled: !root.anySaving || root.exportTabActive
             sourceComponent: ribbonTabs.currentIndex === 0
                 ? viewRibbonComponent

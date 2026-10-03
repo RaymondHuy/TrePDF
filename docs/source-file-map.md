@@ -123,7 +123,9 @@ flowchart TD
 
 ### Mở và render PDF
 
-1. `Main.qml` nhận URL từ file dialog và gọi `PDFTabModel::open()`.
+1. `Main.qml` nhận URL từ file dialog, kéo thả hoặc `PDFFileOpenHandler` (Finder,
+   Dock, dòng lệnh). URL PDF local được loại trùng; yêu cầu chờ khi đang lưu hoặc
+   có hộp thoại. Sau khi commit editor/panel, gọi `PDFTabModel::open()`.
 2. Model chuẩn hóa đường dẫn; nếu tệp đã mở thì chuyển sang tab đó, nếu chưa thì
    tạo `PDFDocumentSession` mới.
 3. `PDFDocument::open()` mở handle GUI-thread, đọc metadata/kích thước trang và
@@ -299,6 +301,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml) | Panel số ô/giới hạn ký tự bắt buộc và xóa Comb Field đang chọn. |
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |
 | [`src/Components/RadioButtonOptionsPanel.qml`](../src/Components/RadioButtonOptionsPanel.qml) | Panel Group ID và xóa Radio Button đang chọn. |
+| [`src/Components/PageThumbnailPanel.qml`](../src/Components/PageThumbnailPanel.qml) | Thanh thumbnail thu gọn, ảo hóa và điều hướng pane đang active. |
 | [`src/Components/DocumentView.qml`](../src/Components/DocumentView.qml) | Một delegate active cho Single/Facing; ListView ảo hóa và dominant-page tracking cho hai mode Continuous. |
 | [`src/Components/PageLayoutDelegate.qml`](../src/Components/PageLayoutDelegate.qml) | Hàng một trang hoặc spread hai trang, mapping cover, visible-area helper và pooling child. |
 | [`src/Components/PdfPageDelegate.qml`](../src/Components/PdfPageDelegate.qml) | Ghép texture, search highlight, coordinator interaction, rotation và layout của một trang. |

@@ -6,6 +6,24 @@ asynchronous rendering, per-tab whole-document text search and left/right view
 rotation, rich-text content edits, image insertion, Save/Save As, and an
 ID-based localization system with Vietnamese enabled by default.
 
+Open PDFs through the file picker, by dropping local PDF files onto the window,
+or from Finder's **Open With → TrePDF** on macOS (including while TrePDF is
+already running). The application also accepts local PDF paths/file URLs as
+command-line arguments. Multiple files use independent tabs; opening an existing
+file returns to its tab. External requests wait during saves and modal dialogs,
+and password-protected files use the same password prompt as the file picker.
+**Cmd+O / Ctrl+O** opens the file picker; **Cmd+F / Ctrl+F** switches to View,
+reveals and focuses Search, and selects the current query. Pending editor changes
+are committed to the document's draft before switching. TrePDF registers PDF
+support on macOS without changing the user's default PDF application.
+
+The left thumbnail sidebar shows numbered page previews and highlights the active
+page. Click a preview to navigate the focused pane, including in split view.
+The sidebar can collapse and remembers that choice per tab. Only nearby previews
+are rendered; collapsing releases them. Page insertion/deletion and view rotation
+update immediately. Page-content drafts appear in thumbnails after Save; the
+sidebar shows a reminder while changes are pending.
+
 The Sign tab adds visible signatures and initials drawn with a mouse/trackpad,
 typed in a chosen style, or imported from a local image with optional white
 background removal. It also places formatted dates and check/cross marks.
