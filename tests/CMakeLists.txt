@@ -1,5 +1,6 @@
 qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditController.cpp
+    tst_PlatformComponents.cpp
     PDFEditControllerTest.h
     PDFEditControllerTestSupport.h
     PDFEditControllerTestSupport.cpp
@@ -67,6 +68,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFDocument.h
     ../src/PDFFileOpenHandler.cpp
     ../src/PDFFileOpenHandler.h
+    ../src/platform/PlatformService.cpp
+    ../src/platform/PlatformService.h
     ../src/LibxlsxwriterWorkbook.cpp
     ../src/SpreadsheetWorkbook.h
     ../src/SignatureLibrary.cpp

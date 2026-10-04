@@ -2,6 +2,26 @@ include(FindPackageHandleStandardArgs)
 
 set(PDFium_ROOT "" CACHE PATH "PDFium installation prefix")
 
+if(IOS)
+    # iOS binaries and macOS binaries are incompatible even on the same CPU.
+    # Only accept the framework prepared with the iOS dependency script.
+    find_path(PDFium_INCLUDE_DIR fpdfview.h
+        PATHS "${PDFium_ROOT}/include" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+    find_path(PDFium_FRAMEWORK PDFium
+        PATHS "${PDFium_ROOT}/lib/PDFium.framework" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+    find_package_handle_standard_args(PDFium REQUIRED_VARS PDFium_INCLUDE_DIR PDFium_FRAMEWORK)
+    if(PDFium_FOUND AND NOT TARGET PDFium::PDFium)
+        add_library(PDFium::PDFium SHARED IMPORTED)
+        set_target_properties(PDFium::PDFium PROPERTIES
+            FRAMEWORK TRUE
+            IMPORTED_LOCATION "${PDFium_FRAMEWORK}/PDFium"
+            INTERFACE_INCLUDE_DIRECTORIES "${PDFium_INCLUDE_DIR}"
+        )
+    endif()
+    mark_as_advanced(PDFium_INCLUDE_DIR PDFium_FRAMEWORK)
+    return()
+endif()
+
 find_path(PDFium_INCLUDE_DIR
     NAMES fpdfview.h
     HINTS

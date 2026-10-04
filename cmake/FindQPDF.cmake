@@ -2,12 +2,19 @@ include(FindPackageHandleStandardArgs)
 
 set(QPDF_ROOT "" CACHE PATH "Prebuilt qpdf installation prefix")
 
+set(_QPDF_SEARCH_OPTIONS)
+if(IOS)
+    # Never fall back to a same-architecture macOS installation when targeting iPad.
+    list(APPEND _QPDF_SEARCH_OPTIONS NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+endif()
+
 find_path(QPDF_INCLUDE_DIR
     NAMES qpdf/qpdf-c.h
     HINTS
         "${QPDF_ROOT}"
         "$ENV{QPDF_ROOT}"
     PATH_SUFFIXES include
+    ${_QPDF_SEARCH_OPTIONS}
 )
 
 set(_QPDF_LIBRARY_NAMES qpdf)
@@ -21,9 +28,25 @@ find_library(QPDF_LIBRARY
         "${QPDF_ROOT}"
         "$ENV{QPDF_ROOT}"
     PATH_SUFFIXES lib
+    ${_QPDF_SEARCH_OPTIONS}
 )
 
 set(_QPDF_REQUIRED_VARS QPDF_LIBRARY QPDF_INCLUDE_DIR)
+if(IOS)
+    find_library(QPDF_JPEG_LIBRARY
+        NAMES jpeg
+        HINTS "${QPDF_ROOT}" "$ENV{QPDF_ROOT}"
+        PATH_SUFFIXES lib
+        NO_DEFAULT_PATH
+        NO_CMAKE_FIND_ROOT_PATH
+    )
+    find_package(ZLIB REQUIRED)
+    list(APPEND _QPDF_REQUIRED_VARS QPDF_JPEG_LIBRARY)
+    if((QPDF_LIBRARY AND NOT QPDF_LIBRARY MATCHES "\\.a$") OR
+       (QPDF_JPEG_LIBRARY AND NOT QPDF_JPEG_LIBRARY MATCHES "\\.a$"))
+        message(FATAL_ERROR "iOS requires static qpdf from prepare_ios_dependencies.py")
+    endif()
+endif()
 if(WIN32)
     get_filename_component(_QPDF_LIBRARY_DIR "${QPDF_LIBRARY}" DIRECTORY)
     # Official Windows packages use a versioned qpdf DLL (currently qpdf30.dll).
@@ -56,7 +79,14 @@ find_package_handle_standard_args(QPDF
 )
 
 if(QPDF_FOUND AND NOT TARGET QPDF::QPDF)
-    add_library(QPDF::QPDF SHARED IMPORTED)
+    if(IOS)
+        add_library(QPDF::QPDF STATIC IMPORTED)
+        set_target_properties(QPDF::QPDF PROPERTIES
+            INTERFACE_LINK_LIBRARIES "${QPDF_JPEG_LIBRARY};ZLIB::ZLIB"
+        )
+    else()
+        add_library(QPDF::QPDF SHARED IMPORTED)
+    endif()
     if(WIN32)
         set_target_properties(QPDF::QPDF PROPERTIES
             IMPORTED_IMPLIB "${QPDF_LIBRARY}"
@@ -72,6 +102,9 @@ if(QPDF_FOUND AND NOT TARGET QPDF::QPDF)
 endif()
 
 mark_as_advanced(QPDF_INCLUDE_DIR QPDF_LIBRARY)
+if(IOS)
+    mark_as_advanced(QPDF_JPEG_LIBRARY)
+endif()
 if(WIN32)
     mark_as_advanced(QPDF_RUNTIME_LIBRARY)
 endif()

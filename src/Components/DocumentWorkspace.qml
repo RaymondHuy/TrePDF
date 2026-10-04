@@ -182,6 +182,10 @@ Item {
                 paneState.currentPage = page
         }
         onActivated: root.activePaneIndex = paneIndex
+        onTouchZoomRequested: value => {
+            root.activePaneIndex = paneIndex
+            root.setZoom(value)
+        }
     }
 
     function expandCommentsPanelForSelection() {

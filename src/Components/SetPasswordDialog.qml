@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import TrePDF
+import "ios"
 
 Dialog {
     id: root
@@ -19,8 +20,14 @@ Dialog {
         && passwordInput.text.length > 0 && confirmationInput.text.length > 0
 
     parent: Overlay.overlay
-    anchors.centerIn: parent
-    width: Math.min(440, parent ? parent.width - 32 : 440)
+    anchors.centerIn: dialogMetrics.active ? undefined : parent
+    x: dialogMetrics.active
+        ? dialogMetrics.leftInset + (dialogMetrics.availableWidth - width) / 2 : 0
+    y: dialogMetrics.active
+        ? dialogMetrics.topInset + Math.max(8, (dialogMetrics.availableHeight - height) / 2) : 0
+    width: Math.min(440, parent ? dialogMetrics.availableWidth - 32 : 440)
+    height: dialogMetrics.active
+        ? Math.min(implicitHeight, dialogMetrics.availableHeight - 16) : implicitHeight
     padding: 20
     modal: true
     focus: true
@@ -31,6 +38,11 @@ Dialog {
         ? qsTrId("ChangePdfPasswordTitle")
         //% "Set PDF password"
         : qsTrId("SetPdfPasswordTitle")
+
+    DialogMetrics {
+        id: dialogMetrics
+        overlay: root.parent
+    }
 
     function submit() {
         if (!canSubmit)
@@ -77,7 +89,17 @@ Dialog {
         color: root.theme.ribbonTextColor
     }
 
-    contentItem: ColumnLayout {
+    contentItem: ScrollView {
+        id: passwordScroll
+        contentWidth: availableWidth
+        implicitHeight: passwordFields.implicitHeight
+        clip: true
+        contentData: [passwordFields]
+    }
+
+    readonly property ColumnLayout _passwordFields: ColumnLayout {
+        id: passwordFields
+        width: passwordScroll.availableWidth
         spacing: 12
 
         Label {

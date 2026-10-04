@@ -413,7 +413,7 @@ Column {
 
     Rectangle {
         width: parent.width
-        height: 34
+        height: Qt.platform.os === "ios" ? 44 : 34
         color: "#fffaf6"
 
         Rectangle {
@@ -434,7 +434,10 @@ Column {
                 id: ribbonTabs
                 objectName: "ribbonTabs"
 
-                Layout.preferredWidth: 590
+                Layout.preferredWidth: Qt.platform.os === "ios" ? 0 : 590
+                Layout.fillWidth: Qt.platform.os === "ios"
+                Layout.minimumWidth: 0
+                clip: Qt.platform.os === "ios"
                 Layout.fillHeight: true
                 enabled: !root.anySaving
                 spacing: 0
@@ -487,6 +490,7 @@ Column {
 
             Item {
                 Layout.fillWidth: true
+                visible: Qt.platform.os !== "ios"
             }
 
             Rectangle {

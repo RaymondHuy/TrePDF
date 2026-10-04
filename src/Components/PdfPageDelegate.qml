@@ -12,6 +12,7 @@ Item {
     required property PDFSearchController searchController
     property PDFTextSelectionController textSelectionController
     property bool viewTabActive: false
+    property bool textSelectionEnabled: true
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
     required property Flickable viewportItem
@@ -176,7 +177,7 @@ Item {
             theme: pageCard.theme
             document: pageCard.document
             textSelectionController: pageCard.textSelectionController
-            textSelectionActive: pageCard.viewTabActive
+            textSelectionActive: pageCard.viewTabActive && pageCard.textSelectionEnabled
                 && pageCard.visibleRasterRect.width > 0
                 && pageCard.visibleRasterRect.height > 0
             onTextSelectionStarted: pageCard.textSelectionStarted()

@@ -14,6 +14,7 @@ Item {
     required property PDFSearchController searchController
     property PDFTextSelectionController textSelectionController
     property bool viewTabActive: false
+    property bool textSelectionEnabled: true
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
     required property Flickable viewportItem
@@ -192,6 +193,7 @@ Item {
         searchController: root.searchController
         textSelectionController: root.textSelectionController
         viewTabActive: root.viewTabActive
+        textSelectionEnabled: root.textSelectionEnabled
         formController: root.formController
         formDesignerController: root.formDesignerController
         viewportItem: root.viewportItem
@@ -235,6 +237,7 @@ Item {
                 searchController: root.searchController
                 textSelectionController: root.textSelectionController
                 viewTabActive: root.viewTabActive
+                textSelectionEnabled: root.textSelectionEnabled
                 formController: root.formController
                 formDesignerController: root.formDesignerController
                 viewportItem: root.viewportItem

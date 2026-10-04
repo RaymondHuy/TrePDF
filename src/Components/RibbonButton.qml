@@ -23,7 +23,7 @@ ToolButton {
     display: AbstractButton.TextUnderIcon
     spacing: 3
     leftPadding: 5
-    rightPadding: menuIndicatorVisible ? 22 : 5
+    rightPadding: menuIndicatorVisible ? (Qt.platform.os === "ios" ? 42 : 22) : 5
     topPadding: 5
     bottomPadding: 4
     font.pixelSize: 11
@@ -62,7 +62,7 @@ ToolButton {
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        width: 18
+        width: Qt.platform.os === "ios" ? 38 : 18
         topInset: 1
         rightInset: 1
         bottomInset: 1

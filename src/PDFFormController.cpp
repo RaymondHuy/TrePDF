@@ -14,6 +14,12 @@
 
 namespace {
 
+#ifdef TREPDF_PDFIUM_NO_JAVASCRIPT
+constexpr bool formJavaScriptAvailable = false;
+#else
+constexpr bool formJavaScriptAvailable = true;
+#endif
+
 quint64 nextFormSessionId()
 {
     static std::atomic<quint64> nextId{1};
@@ -138,6 +144,10 @@ bool PDFFormController::javascriptEnabled() const
 
 void PDFFormController::setJavaScriptEnabled(bool enabled)
 {
+    if (enabled && !formJavaScriptAvailable) {
+        emit javascriptEnableFailed();
+        return;
+    }
     if (m_javascriptEnabled == enabled) {
         return;
     }
@@ -665,10 +675,11 @@ void PDFFormController::refreshDocumentState()
     const bool interactive = m_document
         && m_document->isLoaded()
         && m_document->allowsFormFilling();
+    const bool enableJavaScript = key.isValid() && formJavaScriptAvailable;
     const bool didInteractiveChange = m_interactive != interactive;
     const bool didJavaScriptChange = m_javascriptEnabled;
     const bool didJavaScriptPendingChange
-        = m_javascriptTransitionPending != key.isValid();
+        = m_javascriptTransitionPending != enableJavaScript;
     const bool historyChanged = hasDrafts() || m_canUndo || m_canRedo;
     const bool inputChanged = m_hasFocus
         || m_acceptsTextInput
@@ -690,7 +701,7 @@ void PDFFormController::refreshDocumentState()
     m_cursorType = FXCT_ARROW;
     m_pendingMutationCount = 0;
     m_javascriptEnabled = false;
-    m_javascriptTransitionPending = key.isValid();
+    m_javascriptTransitionPending = enableJavaScript;
     invalidateFormPages(-1);
     if (didInteractiveChange) {
         emit interactiveChanged();
@@ -709,7 +720,7 @@ void PDFFormController::refreshDocumentState()
     }
 
     const quint64 generation = m_generation;
-    if (key.isValid()) {
+    if (enableJavaScript) {
         // PDFDocument emits sourceChanged and loadedChanged in one state
         // update. Defer automatic form scripting until both signals settle so
         // document/open actions run only once for the current document.

@@ -5,6 +5,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import TrePDF
+import "ios"
 
 Dialog {
     id: root
@@ -39,9 +40,13 @@ Dialog {
     readonly property var fontFamilies: Qt.fontFamilies()
 
     parent: Overlay.overlay
-    anchors.centerIn: parent
-    width: Math.min(820, parent ? parent.width - 32 : 820)
-    height: Math.min(implicitHeight, parent ? parent.height - 32 : implicitHeight)
+    anchors.centerIn: dialogMetrics.active ? undefined : parent
+    x: dialogMetrics.active
+        ? dialogMetrics.leftInset + (dialogMetrics.availableWidth - width) / 2 : 0
+    y: dialogMetrics.active
+        ? dialogMetrics.topInset + Math.max(8, (dialogMetrics.availableHeight - height) / 2) : 0
+    width: Math.min(820, parent ? dialogMetrics.availableWidth - 32 : 820)
+    height: Math.min(implicitHeight, parent ? dialogMetrics.availableHeight - 32 : implicitHeight)
     padding: 20
     modal: true
     focus: true
@@ -55,6 +60,11 @@ Dialog {
             ? qsTrId("UpdateWatermark")
             //% "Add watermark"
             : qsTrId("AddWatermark")
+
+    DialogMetrics {
+        id: dialogMetrics
+        overlay: root.parent
+    }
 
     function settings() {
         return {
@@ -170,7 +180,7 @@ Dialog {
         initializationTimer.stop()
         previewTimer.stop()
         if (imageDialogLoader.status === Loader.Ready) {
-            const dialog = imageDialogLoader.item as FileDialog
+            const dialog = imageDialogLoader.item as PlatformFileDialog
             if (dialog)
                 dialog.close()
         }
@@ -664,9 +674,9 @@ Dialog {
         active: false
         onLoaded: {
             if (status === Loader.Ready && item)
-                (item as FileDialog).open()
+                (item as PlatformFileDialog).open()
         }
-        sourceComponent: FileDialog {
+        sourceComponent: PlatformFileDialog {
             //% "Choose watermark image"
             title: qsTrId("WatermarkChooseImageTitle")
             fileMode: FileDialog.OpenFile

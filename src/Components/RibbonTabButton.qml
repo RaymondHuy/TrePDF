@@ -7,7 +7,14 @@ TabButton {
     required property AppTheme theme
 
     implicitWidth: 104
-    implicitHeight: 34
+    implicitHeight: Qt.platform.os === "ios" ? 44 : 34
+    Binding {
+        target: control
+        property: "width"
+        value: control.implicitWidth
+        when: Qt.platform.os === "ios"
+        restoreMode: Binding.RestoreBindingOrValue
+    }
 
     contentItem: Text {
         text: control.text
