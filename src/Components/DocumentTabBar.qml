@@ -15,7 +15,7 @@ Rectangle {
     signal closeRequested(PDFDocumentSession session)
     signal openRequested()
 
-    implicitHeight: 38
+    implicitHeight: Qt.platform.os === "ios" ? 44 : 38
     height: implicitHeight
     color: "#f6f1ed"
 
@@ -57,7 +57,7 @@ Rectangle {
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        width: 40
+        width: Qt.platform.os === "ios" ? 44 : 40
         enabled: !root.tabModel.anySaving
         text: "+"
         font.pixelSize: 20

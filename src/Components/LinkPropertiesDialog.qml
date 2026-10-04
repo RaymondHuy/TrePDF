@@ -5,6 +5,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import TrePDF
+import "ios"
 
 Dialog {
     id: root
@@ -31,9 +32,13 @@ Dialog {
     signal submitRequested(var properties)
 
     parent: Overlay.overlay
-    anchors.centerIn: parent
-    width: Math.min(480, parent ? parent.width - 32 : 480)
-    height: Math.min(implicitHeight, parent ? parent.height - 32 : implicitHeight)
+    anchors.centerIn: dialogMetrics.active ? undefined : parent
+    x: dialogMetrics.active
+        ? dialogMetrics.leftInset + (dialogMetrics.availableWidth - width) / 2 : 0
+    y: dialogMetrics.active
+        ? dialogMetrics.topInset + Math.max(8, (dialogMetrics.availableHeight - height) / 2) : 0
+    width: Math.min(480, parent ? dialogMetrics.availableWidth - 32 : 480)
+    height: Math.min(implicitHeight, parent ? dialogMetrics.availableHeight - 32 : implicitHeight)
     padding: 20
     modal: true
     focus: true
@@ -44,6 +49,11 @@ Dialog {
         ? qsTrId("CreateManualLink")
         //% "Link properties"
         : qsTrId("ManualLinkProperties")
+
+    DialogMetrics {
+        id: dialogMetrics
+        overlay: root.parent
+    }
 
     function submit() {
         const isWeb = actionSelector.currentIndex === 0

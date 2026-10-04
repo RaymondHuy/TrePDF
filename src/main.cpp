@@ -1,5 +1,6 @@
 #include "ApplicationFonts.h"
 #include "PDFFileOpenHandler.h"
+#include "platform/PlatformService.h"
 
 #include <QCoreApplication>
 #include <QGuiApplication>
@@ -12,7 +13,8 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     auto *fileOpenHandler = new PDFFileOpenHandler(&app);
     app.installEventFilter(fileOpenHandler);
-    fileOpenHandler->enqueueArguments(QCoreApplication::arguments().mid(1));
+    auto *platformService = new PlatformService(fileOpenHandler, &app);
+    platformService->enqueueArguments(QCoreApplication::arguments().mid(1));
 
     QCoreApplication::setApplicationName(QStringLiteral("TrePDF"));
     QCoreApplication::setApplicationVersion(QStringLiteral(TREPDF_VERSION));

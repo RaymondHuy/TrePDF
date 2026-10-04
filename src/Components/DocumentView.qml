@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import TrePDF
+import "ios" as Platform
 
 Rectangle {
     id: root
@@ -115,6 +116,7 @@ Rectangle {
             ? activePagedLayoutIndex + 1 < layoutItemCount
             : viewCurrentPage + 1 < document.pageCount
 
+    signal touchZoomRequested(real value)
     signal openRequested()
     signal beginSelectedEditingRequested(string styleAction)
     signal deleteCommentRequested(int page, string objectId)
@@ -639,6 +641,24 @@ Rectangle {
         }
     }
 
+    Platform.DocumentInput {
+        id: documentInput
+        anchors.fill: parent
+        z: 10
+        theme: root.theme
+        documentLoaded: root.document.loaded
+        allowsTextCopy: root.document.allowsTextCopy
+        hasDrafts: root.editController.hasDrafts
+        saving: root.editController.saving
+        textEditing: root.editController.textEditActive
+        formTextFocused: root.formDesignerController.textFieldFocused
+        viewTabActive: root.viewTabActive
+        zoom: root.zoom
+        selectionController: textSelection
+        onZoomRequested: value => root.touchZoomRequested(value)
+        onActivated: root.activated()
+    }
+
     Timer {
         id: currentPageSyncTimer
 
@@ -718,6 +738,7 @@ Rectangle {
             searchController: root.searchController
             textSelectionController: textSelection
             viewTabActive: root.viewTabActive
+            textSelectionEnabled: documentInput.textSelectionEnabled
             formController: root.formController
             formDesignerController: root.formDesignerController
             formsTabActive: root.formsTabActive

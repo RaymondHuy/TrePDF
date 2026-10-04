@@ -5,6 +5,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import TrePDF
+import "ios"
 
 Dialog {
     id: root
@@ -35,10 +36,14 @@ Dialog {
 
     objectName: "signatureDialog"
     parent: Overlay.overlay
-    anchors.centerIn: parent
-    width: Math.min(640, parent ? parent.width - 32 : 640)
+    anchors.centerIn: dialogMetrics.active ? undefined : parent
+    x: dialogMetrics.active
+        ? dialogMetrics.leftInset + (dialogMetrics.availableWidth - width) / 2 : 0
+    y: dialogMetrics.active
+        ? dialogMetrics.topInset + Math.max(8, (dialogMetrics.availableHeight - height) / 2) : 0
+    width: Math.min(640, parent ? dialogMetrics.availableWidth - 32 : 640)
     height: Math.min(signatureMode ? 500 : 360,
-        parent ? parent.height - 32 : 500)
+        parent ? dialogMetrics.availableHeight - 32 : 500)
     padding: 18
     modal: true
     focus: true
@@ -59,6 +64,11 @@ Dialog {
             //% "Create a signature"
             return qsTrId("ESignCreateSignature")
         }
+    }
+
+    DialogMetrics {
+        id: dialogMetrics
+        overlay: root.parent
     }
 
     function schedulePreview() {
@@ -146,7 +156,7 @@ Dialog {
         initialized = false
         previewTimer.stop()
         if (imageDialogLoader.status === Loader.Ready) {
-            const picker = imageDialogLoader.item as FileDialog
+            const picker = imageDialogLoader.item as PlatformFileDialog
             if (picker)
                 picker.close()
         }
@@ -720,7 +730,7 @@ Dialog {
         id: imageDialogLoader
 
         active: false
-        sourceComponent: FileDialog {
+        sourceComponent: PlatformFileDialog {
             //% "Choose a signature image"
             title: qsTrId("ESignChooseImageTitle")
             nameFilters: [
@@ -737,7 +747,7 @@ Dialog {
         }
         onLoaded: {
             if (status === Loader.Ready) {
-                const picker = item as FileDialog
+                const picker = item as PlatformFileDialog
                 if (picker)
                     picker.open()
             }

@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import TrePDF
+import "ios"
 
 Control {
     id: root
@@ -49,7 +50,8 @@ Control {
     readonly property bool _interactionReady:
         documentLoaded && viewReady && !_contextActivationPending
 
-    implicitHeight: 38
+    readonly property real controlSize: Qt.platform.os === "ios" ? 40 : 28
+    implicitHeight: (Qt.platform.os === "ios" ? 48 : 38) + bottomPadding - 4
     leftPadding: 6
     rightPadding: 6
     topPadding: 4
@@ -500,15 +502,25 @@ Control {
         border.color: root.theme.ribbonBorder
     }
 
-    contentItem: RowLayout {
+    contentItem: HorizontalControlViewport {
+        id: controlViewport
+        contentImplicitWidth: controlRow.implicitWidth
+        contentImplicitHeight: controlRow.implicitHeight
+        content: [controlRow]
+    }
+
+    readonly property RowLayout _controlRow: RowLayout {
+        id: controlRow
+        width: controlViewport.contentWidth
+        height: controlViewport.height
         spacing: 2
 
         BarGlyphButton {
             id: readerFirstPageButton
             objectName: "readerFirstPageButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady && root.navigationPage > 0
             text: "\u00ab"
@@ -521,8 +533,8 @@ Control {
             id: readerPreviousPageButton
             objectName: "readerPreviousPageButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady && root.canNavigateBackward
             iconSource: "../assets/icons/chevron-left.svg"
@@ -587,7 +599,7 @@ Control {
             objectName: "readerPageCountLabel"
 
             Layout.minimumWidth: 34
-            Layout.preferredHeight: 28
+            Layout.preferredHeight: root.controlSize
             text: root._pageCountText(root.pageCount)
             color: root.documentLoaded
                 ? root.theme.ribbonTextColor
@@ -600,8 +612,8 @@ Control {
             id: readerNextPageButton
             objectName: "readerNextPageButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady && root.canNavigateForward
             iconSource: "../assets/icons/chevron-right.svg"
@@ -614,8 +626,8 @@ Control {
             id: readerLastPageButton
             objectName: "readerLastPageButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady
                 && root.navigationPage + 1 < root.pageCount
@@ -636,8 +648,8 @@ Control {
             id: readerPreviousViewButton
             objectName: "readerPreviousViewButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._canRestoreBackward
             iconSource: "../assets/icons/undo-2.svg"
@@ -650,8 +662,8 @@ Control {
             id: readerNextViewButton
             objectName: "readerNextViewButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._canRestoreForward
             iconSource: "../assets/icons/redo-2.svg"
@@ -670,8 +682,8 @@ Control {
             id: readerSinglePageButton
             objectName: "readerSinglePageButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady
             checkable: true
@@ -688,8 +700,8 @@ Control {
             id: readerContinuousPageButton
             objectName: "readerContinuousPageButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady
             checkable: true
@@ -706,8 +718,8 @@ Control {
             id: readerFacingPageButton
             objectName: "readerFacingPageButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady
             checkable: true
@@ -724,8 +736,8 @@ Control {
             id: readerContinuousFacingPageButton
             objectName: "readerContinuousFacingPageButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady
             checkable: true
@@ -749,8 +761,8 @@ Control {
             id: readerZoomOutButton
             objectName: "readerZoomOutButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady && root.zoom > 0.1001
             iconSource: "../assets/icons/zoom-out.svg"
@@ -764,7 +776,7 @@ Control {
             objectName: "readerZoomSlider"
 
             Layout.preferredWidth: 132
-            Layout.preferredHeight: 28
+            Layout.preferredHeight: root.controlSize
             enabled: root._interactionReady
             from: 0.0
             to: 1.0
@@ -850,8 +862,8 @@ Control {
             id: readerZoomInButton
             objectName: "readerZoomInButton"
 
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: root.controlSize
+            Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady && root.zoom < 4.9999
             iconSource: "../assets/icons/zoom-in.svg"

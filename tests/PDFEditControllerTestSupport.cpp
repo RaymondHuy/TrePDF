@@ -1,6 +1,7 @@
 #include "PDFEditControllerTestSupport.h"
 #include "PDFFileOpenHandler.h"
 #include "SignatureLibrary.h"
+#include "platform/PlatformService.h"
 
 namespace PDFEditControllerTestSupport {
 
@@ -837,6 +838,17 @@ bool registerQmlTestTypes(const QString &themePath)
     const bool cppTypesRegistered = qmlRegisterSingletonType<PDFFileOpenHandler>(
                                         "TrePDF", 1, 0, "FileOpenHandler",
                                         &PDFFileOpenHandler::create) >= 0
+        && qmlRegisterSingletonType<PlatformService>(
+               "TrePDF", 1, 0, "PlatformService",
+               [](QQmlEngine *engine, QJSEngine *scriptEngine) -> QObject * {
+                   auto *application = QCoreApplication::instance();
+                   if (!application->findChild<PlatformService *>(
+                           QString(), Qt::FindDirectChildrenOnly)) {
+                       new PlatformService(
+                           PDFFileOpenHandler::create(engine, scriptEngine), application);
+                   }
+                   return PlatformService::create(engine, scriptEngine);
+               }) >= 0
         && qmlRegisterType<PDFDocument>(
                                         "TrePDF",
                                         1,
@@ -937,6 +949,17 @@ bool registerQmlTestTypes(const QString &themePath)
                 encodedTypeName.constData()) < 0) {
             return false;
         }
+    }
+    const QDir platformDirectory(componentsDirectory.filePath(QStringLiteral("ios")));
+    const QStringList platformFiles = platformDirectory.entryList(
+        {QStringLiteral("*.qml")}, QDir::Files, QDir::Name);
+    if (platformFiles.isEmpty())
+        return false;
+    for (const QString &fileName : platformFiles) {
+        const QByteArray typeName = QFileInfo(fileName).completeBaseName().toUtf8();
+        if (qmlRegisterType(QUrl::fromLocalFile(platformDirectory.filePath(fileName)),
+                            "TrePDF", 1, 0, typeName.constData()) < 0)
+            return false;
     }
     registered = true;
     return registered;

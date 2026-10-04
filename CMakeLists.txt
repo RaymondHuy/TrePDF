@@ -19,13 +19,13 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 set(TREPDF_LOCAL_QT_PREFIX "/Users/luongvanhuy/Qt/6.11.0/macos")
 set(TREPDF_LOCAL_QT6_DIR "${TREPDF_LOCAL_QT_PREFIX}/lib/cmake/Qt6")
-if((NOT Qt6_DIR OR Qt6_DIR MATCHES "-NOTFOUND$") AND EXISTS "${TREPDF_LOCAL_QT6_DIR}/Qt6Config.cmake")
+if(NOT IOS AND (NOT Qt6_DIR OR Qt6_DIR MATCHES "-NOTFOUND$") AND EXISTS "${TREPDF_LOCAL_QT6_DIR}/Qt6Config.cmake")
     set(Qt6_DIR "${TREPDF_LOCAL_QT6_DIR}" CACHE PATH "Qt6 package configuration directory" FORCE)
     list(PREPEND CMAKE_PREFIX_PATH "${TREPDF_LOCAL_QT_PREFIX}")
 endif()
 
 set(TREPDF_LOCAL_PDFIUM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium")
-if((NOT PDFium_ROOT OR PDFium_ROOT MATCHES "-NOTFOUND$") AND EXISTS "${TREPDF_LOCAL_PDFIUM_ROOT}/include/fpdfview.h")
+if(NOT IOS AND (NOT PDFium_ROOT OR PDFium_ROOT MATCHES "-NOTFOUND$") AND EXISTS "${TREPDF_LOCAL_PDFIUM_ROOT}/include/fpdfview.h")
     set(PDFium_ROOT "${TREPDF_LOCAL_PDFIUM_ROOT}" CACHE PATH "PDFium installation prefix" FORCE)
 endif()
 
@@ -33,7 +33,7 @@ set(TREPDF_LOCAL_QPDF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/qpdf")
 if(NOT QPDF_ROOT OR QPDF_ROOT MATCHES "-NOTFOUND$")
     if(DEFINED ENV{QPDF_ROOT} AND NOT "$ENV{QPDF_ROOT}" STREQUAL "")
         set(QPDF_ROOT "$ENV{QPDF_ROOT}" CACHE PATH "Prebuilt qpdf installation prefix" FORCE)
-    else()
+    elseif(NOT IOS)
         set(QPDF_ROOT "${TREPDF_LOCAL_QPDF_ROOT}" CACHE PATH "Prebuilt qpdf installation prefix" FORCE)
     endif()
 endif()
@@ -45,14 +45,17 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
     Quick
     QuickControls2
 )
-find_package(PDFium REQUIRED)
-find_package(QPDF REQUIRED)
-
 qt_standard_project_setup(
     REQUIRES 6.8
     I18N_SOURCE_LANGUAGE en
     I18N_TRANSLATED_LANGUAGES vi
 )
+
+if(IOS AND (NOT PDFium_ROOT OR NOT QPDF_ROOT))
+    message(FATAL_ERROR "iOS needs its own PDFium_ROOT and QPDF_ROOT; run scripts/ci/prepare_ios_dependencies.py")
+endif()
+find_package(PDFium REQUIRED)
+find_package(QPDF REQUIRED)
 
 # Keep third-party build options local and the backend free of extra runtime
 # libraries. The vendored 1.2.4 source makes first-time/offline builds identical.
@@ -123,7 +126,7 @@ qt_add_resources(trepdf "trepdf_app_icon"
     FILES src/assets/branding/TrePDF-logo.png
 )
 
-if(APPLE)
+if(APPLE AND NOT IOS)
     set(TREPDF_MACOS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/branding/TrePDF.icns")
     set_source_files_properties("${TREPDF_MACOS_ICON}" PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
@@ -160,9 +163,33 @@ else()
     set(TREPDF_EDIT_OVERLAY_QML src/Components/EditOverlay.qml)
 endif()
 
+set(TREPDF_PLATFORM_QML
+    src/Components/ios/DialogMetrics.qml
+    src/Components/ios/DocumentAccess.qml
+    src/Components/ios/DocumentInput.qml
+    src/Components/ios/HorizontalControlViewport.qml
+    src/Components/ios/PlatformFileDialog.qml
+    src/Components/ios/WindowMetrics.qml
+)
+set(TREPDF_IOS_QML)
+foreach(TREPDF_PLATFORM_COMPONENT IN LISTS TREPDF_PLATFORM_QML)
+    get_filename_component(TREPDF_COMPONENT_NAME "${TREPDF_PLATFORM_COMPONENT}" NAME)
+    list(APPEND TREPDF_IOS_QML "src/Components/ios/+ios/${TREPDF_COMPONENT_NAME}")
+endforeach()
+# Selectors override these URLs at runtime, not by registering a second QML type.
+set_source_files_properties(${TREPDF_IOS_QML} PROPERTIES QT_QML_SKIP_QMLDIR_ENTRY TRUE)
+if(IOS)
+    set(TREPDF_PLATFORM_SERVICE src/ios/PlatformService.cpp)
+    target_compile_definitions(trepdf PRIVATE TREPDF_PDFIUM_NO_JAVASCRIPT)
+else()
+    set(TREPDF_PLATFORM_SERVICE src/platform/PlatformService.cpp)
+endif()
+
 qt_add_qml_module(trepdf
     URI TrePDF
     SOURCES
+        src/platform/PlatformService.h
+        ${TREPDF_PLATFORM_SERVICE}
         src/ApplicationFonts.cpp
         src/ApplicationFonts.h
         src/WindowsSystemFonts.cpp
@@ -259,6 +286,8 @@ qt_add_qml_module(trepdf
         src/Main.qml
         src/Components/AppRibbon.qml
         src/Components/AppTheme.qml
+        ${TREPDF_PLATFORM_QML}
+        ${TREPDF_IOS_QML}
         src/Components/CombFieldOptionsPanel.qml
         src/Components/CommentPanel.qml
         src/Components/CommentDrawingView.qml
@@ -396,6 +425,8 @@ endif()
 
 qt_add_translations(trepdf
     SOURCE_TARGETS trepdf
+    # Keep iPad-only messages when updating the shared catalog from macOS.
+    SOURCES src/ios/IOSDocumentAccess.mm src/ios/PlatformService.cpp
     TS_FILE_BASE qml
     TS_FILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/i18n"
     RESOURCE_PREFIX "/qt/qml/TrePDF/src/i18n"
@@ -406,6 +437,7 @@ qt_add_translations(trepdf
 target_include_directories(trepdf
     PRIVATE
         src
+        src/platform
 )
 
 target_link_libraries(trepdf
@@ -441,6 +473,9 @@ if(APPLE)
             "${TREPDF_CORE_TEXT_FRAMEWORK}"
     )
 
+endif()
+
+if(APPLE AND NOT IOS)
     get_target_property(TREPDF_PDFIUM_LIBRARY PDFium::PDFium IMPORTED_LOCATION)
     get_target_property(TREPDF_QPDF_LIBRARY QPDF::QPDF IMPORTED_LOCATION)
     set_target_properties(trepdf PROPERTIES
@@ -460,13 +495,69 @@ if(APPLE)
     )
 endif()
 
+if(IOS)
+    if(NOT CMAKE_GENERATOR STREQUAL "Xcode")
+        message(FATAL_ERROR "Use the Xcode generator for iOS framework embedding and signing")
+    endif()
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 17)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+    set(TREPDF_IOS_BUNDLE_ID "com.treoffice.trepdf" CACHE STRING "iPad application bundle identifier")
+    set(TREPDF_IOS_TEAM_ID "" CACHE STRING "Apple development team ID for device signing")
+    set(TREPDF_IOS_LICENSE_DIR "" CACHE PATH "Third-party notices prepared for iPad")
+    if(TREPDF_IOS_LICENSE_DIR)
+        file(GLOB_RECURSE TREPDF_IOS_LICENSES CONFIGURE_DEPENDS "${TREPDF_IOS_LICENSE_DIR}/*")
+        foreach(TREPDF_LICENSE IN LISTS TREPDF_IOS_LICENSES)
+            file(RELATIVE_PATH TREPDF_LICENSE_RELATIVE "${TREPDF_IOS_LICENSE_DIR}" "${TREPDF_LICENSE}")
+            get_filename_component(TREPDF_LICENSE_SUBDIR "${TREPDF_LICENSE_RELATIVE}" DIRECTORY)
+            set_source_files_properties("${TREPDF_LICENSE}" PROPERTIES
+                MACOSX_PACKAGE_LOCATION "Resources/licenses/${TREPDF_LICENSE_SUBDIR}")
+        endforeach()
+        target_sources(trepdf PRIVATE ${TREPDF_IOS_LICENSES})
+    endif()
+    set_source_files_properties(third_party/libxlsxwriter/License.txt PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources/licenses/libxlsxwriter")
+    target_sources(trepdf PRIVATE third_party/libxlsxwriter/License.txt)
+    target_sources(trepdf PRIVATE src/ios/IOSDocumentAccess.h src/ios/IOSDocumentAccess.mm)
+    set_source_files_properties(src/ios/IOSDocumentAccess.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    find_library(TREPDF_UIKIT_FRAMEWORK UIKit REQUIRED)
+    find_library(TREPDF_UTI_FRAMEWORK UniformTypeIdentifiers REQUIRED)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Svg)
+    target_link_libraries(trepdf PRIVATE
+        "${TREPDF_UIKIT_FRAMEWORK}" "${TREPDF_UTI_FRAMEWORK}" Qt6::Svg)
+    set(TREPDF_IOS_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/Assets.xcassets")
+    target_sources(trepdf PRIVATE "${TREPDF_IOS_ASSETS}")
+    set_source_files_properties("${TREPDF_IOS_ASSETS}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(trepdf PROPERTIES
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${TREPDF_IOS_BUNDLE_ID}"
+        MACOSX_BUNDLE_BUNDLE_NAME "TrePDF"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/Info.plist.in"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${TREPDF_IOS_BUNDLE_ID}"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "2"
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        XCODE_ATTRIBUTE_ENABLE_BITCODE "NO"
+        XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
+        XCODE_ATTRIBUTE_SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD "NO"
+        XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/Frameworks"
+        BUILD_RPATH "@executable_path/Frameworks"
+        INSTALL_RPATH "@executable_path/Frameworks"
+        XCODE_EMBED_FRAMEWORKS "${PDFium_FRAMEWORK}"
+        XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY YES
+        XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY YES
+    )
+    if(TREPDF_IOS_TEAM_ID)
+        set_target_properties(trepdf PROPERTIES XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${TREPDF_IOS_TEAM_ID}")
+    endif()
+endif()
+
 include(CTest)
 if(WIN32 AND NOT TREPDF_DEPLOY_RUNTIME)
     include(TrePDFWindowsRuntime)
     trepdf_deploy_windows_runtime(trepdf)
 endif()
 
-if(BUILD_TESTING)
+if(BUILD_TESTING AND NOT IOS)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
     add_subdirectory(tests)
 endif()
@@ -477,7 +568,7 @@ install(TARGETS trepdf
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-if(TREPDF_DEPLOY_RUNTIME)
+if(TREPDF_DEPLOY_RUNTIME AND NOT IOS)
     # The QML ribbon uses SVG icons. Linking the module also makes macdeployqt
     # include its image-format plugin in the installed app bundle.
     find_package(Qt6 6.8 REQUIRED COMPONENTS Svg)

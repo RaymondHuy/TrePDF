@@ -5,17 +5,26 @@ import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import TrePDF
+import "Components/ios"
 
 ApplicationWindow {
     id: window
 
     width: 1200
     height: 800
-    minimumWidth: 760
-    minimumHeight: 520
+    minimumWidth: windowMetrics.minimumWidth
+    minimumHeight: windowMetrics.minimumHeight
     visible: true
     //% "TrePDF"
     title: qsTrId("ApplicationTitle")
+
+    WindowMetrics { id: windowMetrics; window: window }
+
+    DocumentAccess {
+        id: documentAccess
+        onFilesAccepted: urls => window.openFiles(urls)
+        onErrorOccurred: message => window.showStatus(message)
+    }
 
     property string transientStatus: ""
     property bool allowWindowClose: false
@@ -82,6 +91,7 @@ ApplicationWindow {
         || watermarkDialogLoader.active || openDialog.visible
         || imageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
         || externalLinkPopup.visible || discardDraftPopup.visible || deletePagePopup.visible
+        || documentAccess.busy || saveAsDialog.writePending || excelExportDialog.writePending
     readonly property bool fileOpenBlocked:
         tabModel.anySaving || openingFiles || modalOperationActive
 
@@ -379,7 +389,9 @@ ApplicationWindow {
             showStatus(qsTrId("SaveBeforeExcelExport"))
             return
         }
-        tabModel.requestExcelExport(session, url)
+        excelExportDialog.trackWrite(session, url)
+        if (!tabModel.requestExcelExport(session, url))
+            excelExportDialog.finishWrite(session, false, url)
     }
 
     function commitActivePanelEdits() {
@@ -550,7 +562,9 @@ ApplicationWindow {
                     && !prepareActiveWorkspace()) {
                 return
             }
-            tabModel.requestSaveAs(session, url)
+            saveAsDialog.trackWrite(session, url)
+            if (!tabModel.requestSaveAs(session, url))
+                saveAsDialog.finishWrite(session, false, url)
         }
     }
 
@@ -842,6 +856,7 @@ ApplicationWindow {
             window.requestPassword(source, incorrectPassword)
         }
         onSessionSaveFinished: (session, succeeded) => {
+            saveAsDialog.finishWrite(session, succeeded, session.document.source)
             window.finishPendingDraftAction(session, succeeded)
         }
         onFontDownloadRequested: session => {
@@ -1059,7 +1074,7 @@ ApplicationWindow {
         onActivated: window.cancelDraftPrompt()
     }
 
-    FileDialog {
+    PlatformFileDialog {
         id: openDialog
         objectName: "openPdfDialog"
 
@@ -1079,7 +1094,8 @@ ApplicationWindow {
             objectName: "pdfPasswordPopup"
             parent: Overlay.overlay
             x: Math.round((window.width - width) / 2)
-            y: Math.round((window.height - height) / 2)
+            y: Math.max(windowMetrics.topInset,
+                Math.round((window.height - windowMetrics.keyboardInset - height) / 2))
             width: Math.min(440, window.width - 32)
             padding: 20
             modal: true
@@ -1203,7 +1219,8 @@ ApplicationWindow {
             objectName: "fontDownloadPopup"
             parent: Overlay.overlay
             x: Math.round((window.width - width) / 2)
-            y: Math.round((window.height - height) / 2)
+            y: Math.max(windowMetrics.topInset,
+                Math.round((window.height - windowMetrics.keyboardInset - height) / 2))
             width: Math.min(480, window.width - 32)
             padding: 20
             modal: true
@@ -1311,7 +1328,7 @@ ApplicationWindow {
         }
     }
 
-    FileDialog {
+    PlatformFileDialog {
         id: imageDialog
 
         //% "Select Image"
@@ -1323,7 +1340,7 @@ ApplicationWindow {
         onRejected: window.clearImageInsertRequest()
     }
 
-    FileDialog {
+    PlatformFileDialog {
         id: saveAsDialog
 
         //% "Save PDF As"
@@ -1336,7 +1353,7 @@ ApplicationWindow {
         onRejected: window.saveAsSession = null
     }
 
-    FileDialog {
+    PlatformFileDialog {
         id: excelExportDialog
 
         //% "Export to Excel"
@@ -1353,7 +1370,8 @@ ApplicationWindow {
         id: externalLinkPopup
 
         x: Math.round((window.width - width) / 2)
-        y: Math.round((window.height - height) / 2)
+        y: Math.max(windowMetrics.topInset,
+                Math.round((window.height - windowMetrics.keyboardInset - height) / 2))
         width: Math.min(520, window.width - 32)
         height: externalLinkContent.implicitHeight + 32
         modal: true
@@ -1475,7 +1493,8 @@ ApplicationWindow {
         id: discardDraftPopup
 
         x: Math.round((window.width - width) / 2)
-        y: Math.round((window.height - height) / 2)
+        y: Math.max(windowMetrics.topInset,
+                Math.round((window.height - windowMetrics.keyboardInset - height) / 2))
         width: Math.min(420, window.width - 32)
         height: discardDraftContent.implicitHeight + 32
         modal: true
@@ -1554,7 +1573,8 @@ ApplicationWindow {
         id: deletePagePopup
 
         x: Math.round((window.width - width) / 2)
-        y: Math.round((window.height - height) / 2)
+        y: Math.max(windowMetrics.topInset,
+                Math.round((window.height - windowMetrics.keyboardInset - height) / 2))
         width: Math.min(400, window.width - 32)
         height: deletePageContent.implicitHeight + 32
         modal: true
@@ -1615,12 +1635,15 @@ ApplicationWindow {
 
     header: Column {
         width: window.width
+        topPadding: windowMetrics.topInset
+        leftPadding: windowMetrics.leftInset
+        rightPadding: windowMetrics.rightInset
 
         AppRibbon {
             id: appRibbon
             objectName: "appRibbon"
 
-            width: parent.width
+            width: parent.width - parent.leftPadding - parent.rightPadding
             theme: appTheme
             document: window.activeDocument
             editController: window.activeEditController
@@ -1722,7 +1745,7 @@ ApplicationWindow {
         }
 
         DocumentTabBar {
-            width: parent.width
+            width: parent.width - parent.leftPadding - parent.rightPadding
             theme: appTheme
             tabModel: tabModel
             enabled: !tabModel.anySaving
@@ -1734,6 +1757,10 @@ ApplicationWindow {
 
     footer: ReaderControlBar {
         id: readerControlBar
+        bottomPadding: 4 + windowMetrics.bottomInset
+        leftPadding: 6 + windowMetrics.leftInset
+        rightPadding: 6 + windowMetrics.rightInset
+        visible: windowMetrics.keyboardInset === 0
 
         theme: appTheme
         documentLoaded: window.activeDocument.loaded
@@ -1822,6 +1849,7 @@ ApplicationWindow {
         id: workspaceLoader
 
         anchors.fill: parent
+        anchors.bottomMargin: Math.max(0, windowMetrics.keyboardInset - windowMetrics.bottomInset)
         active: false
         asynchronous: true
         onStatusChanged: {
@@ -1896,17 +1924,19 @@ ApplicationWindow {
         onEntered: drag => {
             drag.accepted = drag.hasUrls
                 && (drag.supportedActions & Qt.CopyAction) !== 0
-                && FileOpenHandler.localPdfFiles(drag.urls).length > 0
+                && documentAccess.candidates(drag.urls).length > 0
         }
         onDropped: drop => {
-            const files = FileOpenHandler.localPdfFiles(drop.urls)
+            const files = documentAccess.candidates(drop.urls)
             if (window.fileOpenBlocked || files.length === 0
                     || (drop.supportedActions & Qt.CopyAction) === 0) {
                 drop.accepted = false
                 return
             }
-            drop.accept(Qt.CopyAction)
-            window.openFiles(files)
+            if (documentAccess.accept(files))
+                drop.accept(Qt.CopyAction)
+            else
+                drop.accepted = false
         }
 
         Rectangle {

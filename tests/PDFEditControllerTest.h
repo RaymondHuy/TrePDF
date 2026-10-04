@@ -13,6 +13,15 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void selectsPlatformInputPerEngine_data();
+    void selectsPlatformInputPerEngine();
+    void selectsPlatformViewportPerEngine_data();
+    void selectsPlatformViewportPerEngine();
+    void selectsPlatformWindowMetrics_data();
+    void selectsPlatformWindowMetrics();
+    void guardsPlatformFileDialogWrites();
+    void createsSharedMainWithPlatformSelectors_data();
+    void createsSharedMainWithPlatformSelectors();
     void selectsAndCopiesViewText();
     void selectsViewTextOnRotatedPages_data();
     void selectsViewTextOnRotatedPages();

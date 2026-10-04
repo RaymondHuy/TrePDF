@@ -3740,5 +3740,41 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <source>Copy</source>
         <translation>Sao chép</translation>
     </message>
+    <message id="MobileSelectText">
+        <location filename="../src/Components/DocumentView.qml" line="655"/>
+        <source>Select text</source>
+        <translation>Chọn văn bản</translation>
+    </message>
+    <message id="IOSFilesPickerUnavailable">
+        <location filename="../src/PDFFileOpenHandler.cpp" line="147"/>
+        <location filename="../src/PDFFileOpenHandler.cpp" line="213"/>
+        <source>The Files picker is not available. Close any open dialog and try again.</source>
+        <translation>Không thể mở trình chọn tệp. Hãy đóng hộp thoại đang mở rồi thử lại.</translation>
+    </message>
+    <message id="IOSFilesInvalidExportName">
+        <location filename="../src/PDFFileOpenHandler.cpp" line="166"/>
+        <source>Choose a PDF or Excel file name with at most 180 characters.</source>
+        <translation>Hãy chọn tên tệp PDF hoặc Excel dài tối đa 180 ký tự.</translation>
+    </message>
+    <message id="IOSFilesLocalStorageFailed">
+        <location filename="../src/PDFFileOpenHandler.cpp" line="172"/>
+        <source>TrePDF could not create a local document. Check the available storage.</source>
+        <translation>TrePDF không thể tạo tài liệu trên thiết bị. Hãy kiểm tra dung lượng trống.</translation>
+    </message>
+    <message id="IOSFilesExportNeedsLocalFile">
+        <location filename="../src/PDFFileOpenHandler.cpp" line="195"/>
+        <source>Save the document in TrePDF before exporting it to Files.</source>
+        <translation>Hãy lưu tài liệu trong TrePDF trước khi xuất sang Tệp.</translation>
+    </message>
+    <message id="IOSFilesCopyFailed">
+        <location filename="../src/ios/IOSDocumentAccess.mm" line="61"/>
+        <source>Could not copy the document. Check its availability and the free storage. %1</source>
+        <translation>Không thể sao chép tài liệu. Hãy kiểm tra tệp và dung lượng trống. %1</translation>
+    </message>
+    <message id="IOSFilesTooManyDocuments">
+        <location filename="../src/ios/IOSDocumentAccess.mm" line="141"/>
+        <source>Select at most 32 PDF documents at a time.</source>
+        <translation>Mỗi lần chỉ chọn tối đa 32 tài liệu PDF.</translation>
+    </message>
 </context>
 </TS>
