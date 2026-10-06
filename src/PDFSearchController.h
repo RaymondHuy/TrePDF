@@ -72,6 +72,7 @@ signals:
                          quint64 resultsRevision);
 
 private:
+    friend class PDFMemoryTelemetry;
     struct PageRequest {
         int displayPage = -1;
         int sourcePage = -1;

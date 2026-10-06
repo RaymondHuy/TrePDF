@@ -915,6 +915,22 @@ clipped or elided unintentionally.
 
 ## Memory and Performance Invariants
 
+- Debug memory instrumentation lives in `PDFMemoryTelemetry` and
+  `PDFMemoryTelemetrySources.cpp`, behind `TREPDF_ENABLE_MEMORY_TELEMETRY`.
+  Non-Debug configurations compile out observers/counters/timer/logging; raster
+  lease accounting remains in `PDFRasterBudget`. macOS Debug snapshots also
+  sample Mach process footprint/resident/virtual bytes and all-zone malloc
+  in-use/reserved bytes via read-only `malloc_zone_statistics(nullptr, ...)`.
+  Keep processMemory, mallocHeap and resourceEstimates in separate snapshot/log
+  groups; do not add or subtract them or derive unaccounted/tracked totals.
+  phys_footprint is the main process KPI, MallocInUse is actual malloc heap
+  usage, and MallocReserved is allocator-reserved memory. Label raster charges
+  RasterBudget/LeaseBytes: conservative CPU + GPU estimates, not resident bytes;
+  a texture lease may outlive its CPU QImage. Continue logging with zero open
+  sessions; never trim or request allocator pressure relief for telemetry.
+  Do not change resource policy or PDFium lifecycle
+  to collect metrics. See `docs/memory-telemetry.md` for attribution and peaks.
+
 - Memory must scale with visible and near-visible pages, not total page count.
 - Never store rendered images for every page.
 - Never queue unlimited obsolete render jobs.

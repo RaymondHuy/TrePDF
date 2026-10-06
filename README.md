@@ -493,6 +493,9 @@ is the initial, statically linked backend bundled under `third_party/`.
 
 ## Source documentation
 
+- [`docs/memory-telemetry.md`](docs/memory-telemetry.md): Debug-only memory
+  counters, estimates, peak reset, logging and future QML debug-panel API.
+
 - [`docs/excel-export-pipeline.md`](docs/excel-export-pipeline.md): table detection,
   export transactions, cancellation, limits, backend replacement, and tests.
 

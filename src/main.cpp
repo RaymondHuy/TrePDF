@@ -1,5 +1,6 @@
 #include "ApplicationFonts.h"
 #include "PDFFileOpenHandler.h"
+#include "PDFMemoryTelemetry.h"
 #include "platform/PlatformService.h"
 
 #include <QCoreApplication>
@@ -11,6 +12,9 @@
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    PDFMemoryTelemetry::startLogging(&app);
+#endif
     auto *fileOpenHandler = new PDFFileOpenHandler(&app);
     app.installEventFilter(fileOpenHandler);
     auto *platformService = new PlatformService(fileOpenHandler, &app);

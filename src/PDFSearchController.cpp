@@ -1,4 +1,5 @@
 #include "PDFSearchController.h"
+#include "PDFMemoryTelemetry.h"
 
 #include "PDFDocument.h"
 #include "PDFiumSynchronization.h"
@@ -201,6 +202,9 @@ PDFSearchController::PDFSearchController(QObject *parent)
         &QTimer::timeout,
         this,
         &PDFSearchController::dispatchPendingWork);
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    PDFMemoryTelemetry::track(this);
+#endif
 }
 
 PDFSearchController::~PDFSearchController()

@@ -1,4 +1,5 @@
 #include "PDFEditController.h"
+#include "PDFMemoryTelemetry.h"
 
 #include <QBuffer>
 #include <QCoreApplication>
@@ -428,6 +429,9 @@ QVariantMap PDFEditController::loadWatermarkImage(const QUrl &url)
         return {};
     }
     m_watermarkDialogImage = std::move(image);
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    PDFMemoryTelemetry::updateEditController(this);
+#endif
     m_watermarkImageToken = QUuid::createUuid().toString(QUuid::WithoutBraces);
     return {{QStringLiteral("token"), m_watermarkImageToken},
         {QStringLiteral("preview"), imageUrl(m_watermarkDialogImage.scaled(360, 360, Qt::KeepAspectRatio, Qt::SmoothTransformation))}};

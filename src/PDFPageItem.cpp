@@ -1,4 +1,5 @@
 #include "PDFPageItem.h"
+#include "PDFMemoryTelemetry.h"
 #include "PDFAnnotationUtils.h"
 #include "PDFFormWorker.h"
 #include "PDFSourceImageGeometry.h"
@@ -51,7 +52,11 @@ class RasterTextureNode final : public QSGTransformNode
 public:
     RasterTextureNode(quint64 rasterId,
                       QSGTexture *texture,
-                      PDFRasterBudget::Lease lease)
+                      PDFRasterBudget::Lease lease
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+                      , bool tile
+#endif
+                      )
         : id(rasterId), reservation(std::move(lease))
     {
         textureNode = new QSGSimpleTextureNode;
@@ -59,6 +64,12 @@ public:
         textureNode->setFiltering(QSGTexture::Linear);
         textureNode->setTexture(texture);
         appendChildNode(textureNode);
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+        m_tile = tile;
+        PDFMemoryTelemetry::add(PDFMemoryTelemetry::TextureCount, 1);
+        if (m_tile)
+            PDFMemoryTelemetry::add(PDFMemoryTelemetry::TileCount, 1);
+#endif
     }
 
     ~RasterTextureNode() override
@@ -66,11 +77,19 @@ public:
         // Destroy the owned texture before the reservation member is released.
         removeChildNode(textureNode);
         delete textureNode;
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+        PDFMemoryTelemetry::add(PDFMemoryTelemetry::TextureCount, -1);
+        if (m_tile)
+            PDFMemoryTelemetry::add(PDFMemoryTelemetry::TileCount, -1);
+#endif
     }
 
     quint64 id;
     QSGSimpleTextureNode *textureNode = nullptr;
     PDFRasterBudget::Lease reservation;
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    bool m_tile = false;
+#endif
 };
 
 using CancellationFlag = std::shared_ptr<std::atomic_bool>;
@@ -657,6 +676,9 @@ private:
 struct PageRenderResult {
     QImage image;
     bool suppressionApplied = false;
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    PDFMemoryTelemetry::PendingImage pendingImage;
+#endif
 };
 
 PageRenderResult renderPageFromFile(
@@ -673,7 +695,11 @@ PageRenderResult renderPageFromFile(
         &deletedCommentAnnotations,
     const QVector<PDFWatermarks::PageChange> &watermarkChanges,
     const QStringList &suppressedFormWidgetIds,
-    const CancellationFlag &cancellation)
+    const CancellationFlag &cancellation
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    , const PDFRasterBudget::Lease &rasterLease
+#endif
+    )
 {
     if (!formDocument.isValid()
         || (!blankPage && sourcePage < 0)
@@ -688,11 +714,18 @@ PageRenderResult renderPageFromFile(
     if (image.isNull() || isCancelled(cancellation)) {
         return {};
     }
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    auto pendingImage = PDFMemoryTelemetry::trackImage(image, rasterLease);
+#endif
     image.fill(background);
 
     if (blankPage) {
         image.setDevicePixelRatio(devicePixelRatio);
-        return PageRenderResult{image, true};
+        return PageRenderResult{image, true
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+            , std::move(pendingImage)
+#endif
+        };
     }
 
     bool suppressionApplied = draftObjectPaths.isEmpty();
@@ -888,7 +921,11 @@ PageRenderResult renderPageFromFile(
         suppressionApplied
             && objectMovesApplied
             && annotationSuppressionApplied
-            && widgetSuppressionApplied};
+            && widgetSuppressionApplied
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+        , std::move(pendingImage)
+#endif
+    };
 }
 
 } // namespace
@@ -919,6 +956,9 @@ PDFPageItem::PDFPageItem(QQuickItem *parent)
             &QTimer::timeout,
             this,
             &PDFPageItem::scheduleRender);
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    PDFMemoryTelemetry::track(this);
+#endif
 }
 
 PDFPageItem::~PDFPageItem()
@@ -1319,8 +1359,15 @@ QSGNode *PDFPageItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
             QSGTexture *texture = window()->createTextureFromImage(
                 entry.image, QQuickWindow::TextureIsOpaque);
             entry.image = QImage();
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+            entry.pendingImage.reset();
+#endif
             if (texture) {
-                rasterNode = new RasterTextureNode(entry.id, texture, entry.reservation);
+                rasterNode = new RasterTextureNode(entry.id, texture, entry.reservation
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+                    , !entry.job.base
+#endif
+                );
                 node->appendChildNode(rasterNode);
             }
         }
@@ -1907,7 +1954,11 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                         deletedCommentAnnotations,
                         watermarkChanges,
                         suppressedFormWidgetIds,
-                        cancellation);
+                        cancellation
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+                        , reservation
+#endif
+                    );
                 }
                 result.suppressionApplied = result.suppressionApplied
                     && allDraftObjectsSuppressible;
@@ -1957,7 +2008,11 @@ void PDFPageItem::requestRender(const QSize &pixelSize, qreal devicePixelRatio)
                         job,
                         result.image,
                         std::move(reservation),
-                        budgetDenied);
+                        budgetDenied
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+                        , result.pendingImage
+#endif
+                    );
                 }, Qt::QueuedConnection);
         });
     };
@@ -2110,7 +2165,11 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
                                      const RasterJob &job,
                                      const QImage &image,
                                      PDFRasterBudget::Lease reservation,
-                                     bool budgetDenied)
+                                     bool budgetDenied
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+                                     , const PDFMemoryTelemetry::PendingImage &pendingImage
+#endif
+                                     )
 {
     QQuickWindow *quickWindow = window();
     const qreal currentDevicePixelRatio = quickWindow
@@ -2175,7 +2234,11 @@ void PDFPageItem::handleRenderResult(quint64 requestId,
     // QML and the new texture are then synchronized into the same rendered
     // frame; the previously displayed frame remains internally consistent.
     m_rasters.append({++m_nextRasterId, job, image,
-                      std::move(reservation), nextRasterUse()});
+                      std::move(reservation), nextRasterUse()
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+                      , pendingImage
+#endif
+    });
     m_cachedRequestId = requestId;
     m_cachedPixelSize = pixelSize;
     m_cachedPage = page;

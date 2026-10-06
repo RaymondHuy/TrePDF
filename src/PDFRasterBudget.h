@@ -15,6 +15,13 @@ struct State;
 
 class Budget;
 
+struct Statistics {
+    qint64 currentLeaseBytes = 0;
+    qint64 peakLeaseBytes = 0;
+    qint64 leaseCount = 0;
+    qint64 peakLeaseCount = 0;
+};
+
 // One lease follows a raster through worker allocation, queued delivery and
 // scene-graph texture ownership. Copying a Lease does not charge it again.
 class Reservation final
@@ -54,8 +61,15 @@ public:
     // Invalid sizes, overflow and insufficient capacity return an empty lease.
     // This is an accounting limit, not a limit on PDFium/driver allocations.
     Lease tryReserve(qint64 imageBytes);
+    bool owns(const Lease &lease) const noexcept;
     qint64 usedBytes() const;
     qint64 peakBytes() const;
+    qint64 currentLeaseBytes() const { return usedBytes(); }
+    qint64 peakLeaseBytes() const { return peakBytes(); }
+    qint64 leaseCount() const;
+    Statistics statistics() const;
+    // Debug reset rebases peaks to live reservations; it never releases capacity.
+    void resetPeaks();
 
     // Runs after capacity is released, without the budget mutex held, on the
     // releasing thread. GUI work must be queued by the caller. Passing an empty
@@ -70,6 +84,9 @@ Budget &globalBudget();
 Lease tryReserve(qint64 imageBytes);
 qint64 usedBytes();
 qint64 peakBytes();
+qint64 currentLeaseBytes();
+qint64 peakLeaseBytes();
+qint64 leaseCount();
 void setReleaseCallback(std::function<void()> callback);
 
 } // namespace PDFRasterBudget

@@ -544,6 +544,7 @@ signals:
     void textEditPreparationReady(int page, const QString &objectId, const QString &styleAction);
 
 private:
+    friend class PDFMemoryTelemetry;
     friend class PDFSaveWriter;
 
     struct TextSpacingSample {

@@ -1,4 +1,5 @@
 #include "PDFTabModel.h"
+#include "PDFMemoryTelemetry.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -170,6 +171,9 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
             &PDFViewState::positionInitializedChanged,
             this,
             &PDFDocumentSession::splitScrollPositionInitializedChanged);
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    PDFMemoryTelemetry::track(this);
+#endif
 }
 
 PDFDocument *PDFDocumentSession::document() const

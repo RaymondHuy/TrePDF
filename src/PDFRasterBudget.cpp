@@ -22,6 +22,8 @@ struct State {
     const qint64 maximumBytes;
     qint64 usedBytes = 0;
     qint64 peakBytes = 0;
+    qint64 leaseCount = 0;
+    qint64 peakLeaseCount = 0;
     std::shared_ptr<const std::function<void()>> releaseCallback;
 };
 
@@ -45,6 +47,7 @@ Reservation::~Reservation() noexcept
         const std::lock_guard<std::mutex> locker(m_state->mutex);
         Q_ASSERT(m_state->usedBytes >= m_bytes);
         m_state->usedBytes -= m_bytes;
+        --m_state->leaseCount;
         callback = m_state->releaseCallback;
     }
     if (callback) {
@@ -90,8 +93,15 @@ Lease Budget::tryReserve(qint64 imageBytes)
     }
     m_state->usedBytes += chargedBytes;
     m_state->peakBytes = (std::max)(m_state->peakBytes, m_state->usedBytes);
+    ++m_state->leaseCount;
+    m_state->peakLeaseCount = (std::max)(m_state->peakLeaseCount, m_state->leaseCount);
     lease->m_bytes = chargedBytes;
     return lease;
+}
+
+bool Budget::owns(const Lease &lease) const noexcept
+{
+    return lease && lease->m_state == m_state;
 }
 
 qint64 Budget::usedBytes() const
@@ -121,6 +131,25 @@ void Budget::setReleaseCallback(std::function<void()> callback)
     }
 }
 
+qint64 Budget::leaseCount() const
+{
+    return statistics().leaseCount;
+}
+
+Statistics Budget::statistics() const
+{
+    const std::lock_guard<std::mutex> locker(m_state->mutex);
+    return {m_state->usedBytes, m_state->peakBytes,
+            m_state->leaseCount, m_state->peakLeaseCount};
+}
+
+void Budget::resetPeaks()
+{
+    const std::lock_guard<std::mutex> locker(m_state->mutex);
+    m_state->peakBytes = m_state->usedBytes;
+    m_state->peakLeaseCount = m_state->leaseCount;
+}
+
 Budget &globalBudget()
 {
     static Budget budget;
@@ -141,6 +170,10 @@ qint64 peakBytes()
 {
     return globalBudget().peakBytes();
 }
+
+qint64 currentLeaseBytes() { return globalBudget().currentLeaseBytes(); }
+qint64 peakLeaseBytes() { return globalBudget().peakLeaseBytes(); }
+qint64 leaseCount() { return globalBudget().leaseCount(); }
 
 void setReleaseCallback(std::function<void()> callback)
 {

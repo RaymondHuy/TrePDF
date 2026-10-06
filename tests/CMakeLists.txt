@@ -1,4 +1,5 @@
 qt_add_executable(trepdf_edit_controller_tests
+    tst_PDFEditControllerMemoryTelemetry.cpp
     tst_PDFEditController.cpp
     tst_PlatformComponents.cpp
     PDFEditControllerTest.h
@@ -106,6 +107,9 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFPageItem.h
     ../src/PDFRasterBudget.cpp
     ../src/PDFRasterBudget.h
+    ../src/PDFMemoryTelemetry.cpp
+    ../src/PDFMemoryTelemetry.h
+    ../src/PDFMemoryTelemetrySources.cpp
     ../src/PDFRasterPlan.h
     ../src/PDFSaveWriter.cpp
     ../src/PDFSaveWriter.h
@@ -149,6 +153,7 @@ target_include_directories(trepdf_edit_controller_tests
     PRIVATE
         ../src
 )
+trepdf_configure_memory_telemetry(trepdf_edit_controller_tests)
 
 target_link_libraries(trepdf_edit_controller_tests
     PRIVATE
@@ -204,6 +209,10 @@ add_test(
 
 qt_add_executable(trepdf_excel_export_tests
     tst_PDFExcelExport.cpp
+    ../src/PDFMemoryTelemetry.cpp
+    ../src/PDFMemoryTelemetry.h
+    ../src/PDFRasterBudget.cpp
+    ../src/PDFRasterBudget.h
     ../src/PDFiumDocument.cpp
     ../src/PDFiumDocument.h
     ../src/PDFDocument.cpp
@@ -217,6 +226,7 @@ qt_add_executable(trepdf_excel_export_tests
     ../src/SpreadsheetWorkbook.h
 )
 target_include_directories(trepdf_excel_export_tests PRIVATE ../src)
+trepdf_configure_memory_telemetry(trepdf_excel_export_tests)
 target_link_libraries(trepdf_excel_export_tests PRIVATE
     Qt6::Gui Qt6::Qml Qt6::Test PDFium::PDFium Libxlsxwriter::Libxlsxwriter
 )
@@ -232,6 +242,17 @@ if(APPLE)
 endif()
 add_test(NAME PDFExcelExportTests COMMAND trepdf_excel_export_tests)
 set_tests_properties(PDFExcelExportTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Exercise the compiled-out branch even when the main build is Debug.
+qt_add_executable(trepdf_memory_telemetry_disabled_tests
+    tst_PDFMemoryTelemetryDisabled.cpp
+    ../src/PDFMemoryTelemetry.cpp
+    ../src/PDFMemoryTelemetry.h
+)
+target_include_directories(trepdf_memory_telemetry_disabled_tests PRIVATE ../src)
+target_compile_definitions(trepdf_memory_telemetry_disabled_tests PRIVATE TREPDF_ENABLE_MEMORY_TELEMETRY=0)
+target_link_libraries(trepdf_memory_telemetry_disabled_tests PRIVATE Qt6::Qml Qt6::Test)
+add_test(NAME PDFMemoryTelemetryDisabledTests COMMAND trepdf_memory_telemetry_disabled_tests)
 
 qt_add_executable(trepdf_spreadsheet_workbook_tests
     tst_SpreadsheetWorkbook.cpp

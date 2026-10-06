@@ -12,6 +12,15 @@ project(TrePDF
 
 option(TREPDF_DEPLOY_RUNTIME "Install Qt, QML and PDF runtime dependencies for distribution" OFF)
 
+# AUTO follows the active configuration, including multi-config generators.
+set(TREPDF_ENABLE_MEMORY_TELEMETRY "AUTO" CACHE STRING "Debug memory telemetry: AUTO, ON, or OFF; non-Debug is always disabled")
+set_property(CACHE TREPDF_ENABLE_MEMORY_TELEMETRY PROPERTY STRINGS AUTO ON OFF)
+function(trepdf_configure_memory_telemetry target)
+    target_compile_definitions(${target} PRIVATE
+        TREPDF_ENABLE_MEMORY_TELEMETRY=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${TREPDF_ENABLE_MEMORY_TELEMETRY}>>,1,0>
+    )
+endfunction()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -114,6 +123,7 @@ qt_add_executable(trepdf
     src/main.cpp
 )
 target_compile_definitions(trepdf PRIVATE TREPDF_VERSION="${PROJECT_VERSION}")
+trepdf_configure_memory_telemetry(trepdf)
 if(WIN32)
     # Windows min/max macros conflict with standard C++ calls, including in
     # generated QML type registration and MOC sources.
@@ -278,6 +288,9 @@ qt_add_qml_module(trepdf
         src/PDFPageItem.h
         src/PDFRasterBudget.cpp
         src/PDFRasterBudget.h
+        src/PDFMemoryTelemetry.cpp
+        src/PDFMemoryTelemetry.h
+        src/PDFMemoryTelemetrySources.cpp
         src/PDFRasterPlan.h
         src/SpreadsheetWorkbook.h
         src/SignatureLibrary.cpp

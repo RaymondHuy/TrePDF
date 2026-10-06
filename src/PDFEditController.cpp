@@ -1,4 +1,5 @@
 #include "PDFEditController.h"
+#include "PDFMemoryTelemetry.h"
 #include "PDFEditController_p.h"
 #include "ApplicationFonts.h"
 #include "PDFAnnotationUtils.h"
@@ -294,6 +295,9 @@ PDFEditController::PDFEditController(QObject *parent)
         &PDFEditController::selectionChanged,
         this,
         &PDFEditController::selectedGeometryChanged);
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    PDFMemoryTelemetry::track(this);
+#endif
 }
 
 PDFEditController::~PDFEditController()

@@ -1,7 +1,12 @@
 #include "PDFiumDocument.h"
+#include "PDFMemoryTelemetry.h"
 #include "PDFiumSynchronization.h"
 
 #include <QDir>
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+#include <QCoreApplication>
+#include <QThread>
+#endif
 #include <QFile>
 
 #include <limits>
@@ -60,7 +65,11 @@ PDFiumDocument::~PDFiumDocument()
 }
 
 PDFiumDocument::PDFiumDocument(PDFiumDocument &&other) noexcept
-    : m_reader(std::move(other.m_reader)),
+    :
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+      m_telemetryWorkerDocument(std::exchange(other.m_telemetryWorkerDocument, false)),
+#endif
+      m_reader(std::move(other.m_reader)),
       m_document(std::exchange(other.m_document, nullptr)),
       m_error(std::exchange(other.m_error, FPDF_ERR_SUCCESS))
 {
@@ -70,6 +79,9 @@ PDFiumDocument &PDFiumDocument::operator=(PDFiumDocument &&other) noexcept
 {
     if (this != &other) {
         reset();
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+        m_telemetryWorkerDocument = std::exchange(other.m_telemetryWorkerDocument, false);
+#endif
         m_reader = std::move(other.m_reader);
         m_document = std::exchange(other.m_document, nullptr);
         m_error = std::exchange(other.m_error, FPDF_ERR_SUCCESS);
@@ -82,6 +94,12 @@ void PDFiumDocument::reset()
     if (m_document) {
         assertPDFiumProcessLockHeld();
         FPDF_CloseDocument(m_document);
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+        if (m_telemetryWorkerDocument) {
+            PDFMemoryTelemetry::add(PDFMemoryTelemetry::WorkerDocumentCount, -1);
+            m_telemetryWorkerDocument = false;
+        }
+#endif
         m_document = nullptr;
     }
     // PDFium may still call the reader while closing the document.
@@ -126,6 +144,9 @@ PDFiumDocument PDFiumDocument::open(const QString &filePath,
             return result;
         }
         result.m_reader = std::move(reader);
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+        result.trackOpen();
+#endif
         return result;
     }
     // PDFium's custom access length is only 32 bits on Windows. Preserve the
@@ -138,5 +159,18 @@ PDFiumDocument PDFiumDocument::open(const QString &filePath,
     result.m_document = FPDF_LoadDocument(encodedPath.constData(), password.constData());
     if (!result.m_document)
         result.m_error = FPDF_GetLastError();
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    result.trackOpen();
+#endif
     return result;
 }
+
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+void PDFiumDocument::trackOpen()
+{
+    const auto *app = QCoreApplication::instance();
+    m_telemetryWorkerDocument = m_document && app && QThread::currentThread() != app->thread();
+    if (m_telemetryWorkerDocument)
+        PDFMemoryTelemetry::add(PDFMemoryTelemetry::WorkerDocumentCount, 1);
+}
+#endif

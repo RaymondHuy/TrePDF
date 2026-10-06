@@ -6,6 +6,7 @@
 #include "PDFFormDesignerController.h"
 #include "PDFRasterBudget.h"
 #include "PDFRasterPlan.h"
+#include "PDFMemoryTelemetry.h"
 
 #include <atomic>
 #include <memory>
@@ -94,6 +95,7 @@ protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data) override;
 
 private:
+    friend class PDFMemoryTelemetry;
     // Tests observe request generations without adding a QML diagnostics API.
     friend class PDFEditControllerTest;
 
@@ -109,6 +111,9 @@ private:
         QImage image; // Released at scene-graph upload; never a CPU raster cache.
         PDFRasterBudget::Lease reservation;
         quint64 lastUsed = 0;
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+        PDFMemoryTelemetry::PendingImage pendingImage;
+#endif
     };
 
     void refreshMetrics();
@@ -158,7 +163,11 @@ private:
                             const RasterJob &job,
                             const QImage &image,
                             PDFRasterBudget::Lease reservation,
-                            bool budgetDenied);
+                            bool budgetDenied
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+                            , const PDFMemoryTelemetry::PendingImage &pendingImage
+#endif
+                            );
 
     QPointer<PDFDocument> m_document;
     QPointer<PDFEditController> m_editController;

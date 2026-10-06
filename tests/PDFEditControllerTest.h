@@ -356,6 +356,13 @@ private slots:
     void choosesHybridRasterPlansWithHysteresis();
     void boundsHybridRasterGeometryAndCoverage();
     void reservesRasterBytesUntilLastOwnerReleases();
+    void reportsMemoryTelemetryPeaksAndSharedImages();
+    void reportsMemoryTelemetryGroupsAndLeaseCoverage();
+    void reportsMemoryTelemetryMallocZones();
+    void reportsMemoryTelemetrySessionsCachesAndHistory();
+    void reportsMemoryTelemetryRenderLifecycle();
+    void reportsMemoryTelemetryWorkerDocumentMoves();
+    void reportsMemoryTelemetryLoggingAndSingleton();
     void boundsConcurrentRasterReservations();
     void clipsFormSuppressionPatchesToRasterTile();
     void coalescesZoomRasterUntilInputSettles();

@@ -30,6 +30,10 @@ public:
 
 private:
     struct Reader;
+#if TREPDF_ENABLE_MEMORY_TELEMETRY
+    void trackOpen();
+    bool m_telemetryWorkerDocument = false;
+#endif
     std::unique_ptr<Reader> m_reader;
     FPDF_DOCUMENT m_document = nullptr;
     unsigned long m_error = FPDF_ERR_SUCCESS;

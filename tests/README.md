@@ -1,5 +1,16 @@
 # TrePDF tests
 
+The seven `reportsMemoryTelemetry*` tests cover Debug telemetry peaks, shared
+image attribution across drafts/undo/redo, caches/search, session cleanup,
+pending raster/SG texture lifetime, worker-document moves/failures, macOS Mach
+readings, separate process/heap/resource groups without mixed totals or
+remainders, explicit KPI/budget-estimate labels, pending lease overlap/expiry, all-zone malloc
+statistics (including a nondefault test zone) and logging after the last session
+closes. Run
+`reportsMemoryTelemetryRenderLifecycle` with native Metal as well as offscreen.
+`trepdf_memory_telemetry_disabled_tests` forces the compile flag to zero and
+checks that even explicit singleton/start/reset calls create no timer or data.
+
 `trepdf_excel_export_tests` is a separate focused executable for table geometry,
 PDF-to-XLSX extraction, writer cleanup, literal cell data, atomic output,
 cancellation, and worker/controller lifecycle. Run it with
