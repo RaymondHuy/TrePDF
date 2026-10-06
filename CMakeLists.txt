@@ -133,7 +133,7 @@ endif()
 qt_add_resources(trepdf "trepdf_app_icon"
     PREFIX "/trepdf/branding"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/branding"
-    FILES src/assets/branding/TrePDF-logo.png
+    FILES src/assets/branding/TrePDF-icon-512.png
 )
 
 if(APPLE AND NOT IOS)
