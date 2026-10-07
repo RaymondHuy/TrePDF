@@ -445,3 +445,4 @@ FodyWeavers.xsd
 *.msp
 coverage
 tmp
+.agents

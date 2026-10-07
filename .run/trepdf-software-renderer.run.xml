@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration name="trepdf-software-renderer" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="TrePDF" TARGET_NAME="trepdf" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="TrePDF" RUN_TARGET_NAME="trepdf">
+    <envs>
+      <env name="QT_QUICK_BACKEND" value="software" />
+      <env name="QSG_INFO" value="1" />
+    </envs>
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+    </method>
+  </configuration>
+</component>

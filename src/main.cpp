@@ -8,6 +8,36 @@
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 
+#ifdef Q_OS_MACOS
+#include <CoreFoundation/CoreFoundation.h>
+
+namespace {
+bool hasNativeBundleIcon()
+{
+    if (QGuiApplication::platformName() != QStringLiteral("cocoa"))
+        return false;
+
+    const auto bundle = CFBundleGetMainBundle();
+    if (!bundle)
+        return false;
+    const auto packageType = CFBundleGetValueForInfoDictionaryKey(bundle, CFSTR("CFBundlePackageType"));
+    const auto iconName = CFBundleGetValueForInfoDictionaryKey(bundle, CFSTR("CFBundleIconFile"));
+    if (!packageType || !CFEqual(packageType, CFSTR("APPL"))
+        || !iconName || CFGetTypeID(iconName) != CFStringGetTypeID()
+        || CFStringGetLength(static_cast<CFStringRef>(iconName)) == 0) {
+        return false;
+    }
+
+    const auto iconUrl = CFBundleCopyResourceURL(bundle, static_cast<CFStringRef>(iconName),
+                                                nullptr, nullptr);
+    if (!iconUrl)
+        return false;
+    CFRelease(iconUrl);
+    return true;
+}
+} // namespace
+#endif
+
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
@@ -19,7 +49,12 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName(QStringLiteral("TrePDF"));
     QCoreApplication::setApplicationVersion(QStringLiteral(TREPDF_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("TreOffice"));
-    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/trepdf/branding/TrePDF-logo.png")));
+    // Cocoa uses the bundle's ICNS, including when its executable is launched
+    // directly by CLion/terminal. Avoid a second decoded application icon.
+#ifdef Q_OS_MACOS
+    if (!hasNativeBundleIcon())
+#endif
+        QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/trepdf/branding/TrePDF-icon-512.png")));
 
     ApplicationFonts::registerBundledFonts();
     QQuickStyle::setStyle(QStringLiteral("Basic"));
