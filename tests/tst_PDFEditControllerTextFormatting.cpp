@@ -739,6 +739,156 @@ void PDFEditControllerTest::appliesFontSizeToTypingAtCaret()
     m_controller.discardDrafts();
 }
 
+void PDFEditControllerTest::appliesColorToTypingAtCaret_data()
+{
+    QTest::addColumn<bool>("addedText");
+    QTest::newRow("source-text") << false;
+    QTest::newRow("added-text") << true;
+}
+
+void PDFEditControllerTest::appliesColorToTypingAtCaret()
+{
+    QFETCH(bool, addedText);
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("caret-color-%1-source.pdf").arg(addedText));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("caret-color-%1-output.pdf").arg(addedText));
+    QVERIFY(createFontStylePdf(sourcePath));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(
+        waitForCandidates(controller, 0), QString::fromLatin1(kRegularText));
+    QVERIFY(!candidate.isEmpty());
+    if (addedText) {
+        QVERIFY(!controller.addText(0, 0.12, 0.55).isEmpty());
+    } else {
+        QVERIFY(controller.selectCandidate(
+            0, candidate.value(QStringLiteral("objectId")).toString()));
+        controller.beginSelectedTextEdit();
+    }
+    const QColor originalColor = controller.selectedColor();
+    const QVariantList initialSpans = controller.selectedCharacterSpans();
+    const QColor typingColor(QStringLiteral("#1565c0"));
+    controller.setSelectedTextRange(addedText ? 0 : 8, 0);
+    controller.setSelectedColor(typingColor);
+    QCOMPARE(controller.selectedColor(), typingColor);
+    QCOMPARE(controller.selectedCharacterSpans(), initialSpans);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    controller.finishSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+
+    if (addedText) {
+        QVERIFY(!controller.addText(0, 0.12, 0.55).isEmpty());
+        controller.updateSelectedTextPreview(QStringLiteral("Original"), 8);
+    } else {
+        QVERIFY(controller.selectCandidate(
+            0, candidate.value(QStringLiteral("objectId")).toString()));
+        controller.beginSelectedTextEdit();
+    }
+    const QString originalText = controller.selectedText();
+    const QVariantList beforeSpans = controller.selectedCharacterSpans();
+    const QVariantList beforeDrafts = controller.draftsForPage(0);
+    constexpr int insertionPosition = 3;
+    const QString insertedText = QStringLiteral("new");
+    controller.setSelectedTextRange(insertionPosition, 0);
+    controller.setSelectedColor(typingColor);
+    controller.setSelectedColor(typingColor);
+    QCOMPARE(controller.selectedCharacterSpans(), beforeSpans);
+    QCOMPARE(controller.draftsForPage(0), beforeDrafts);
+    QVERIFY(!controller.canUndo());
+    const QString coloredText = originalText.left(insertionPosition)
+        + insertedText + originalText.mid(insertionPosition);
+    controller.updateSelectedTextPreview(coloredText, insertionPosition + insertedText.size());
+    const QVariantList coloredSpans = controller.selectedCharacterSpans();
+    QCOMPARE(coloredSpans.size(), 3);
+    QCOMPARE(coloredSpans.at(0).toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
+    QCOMPARE(coloredSpans.at(1).toMap().value(QStringLiteral("color")).value<QColor>(), typingColor);
+    QCOMPARE(coloredSpans.at(1).toMap().value(QStringLiteral("start")).toInt(), insertionPosition);
+    QCOMPARE(coloredSpans.at(1).toMap().value(QStringLiteral("length")).toInt(), insertedText.size());
+    QCOMPARE(coloredSpans.at(2).toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
+
+    // Moving away from the typing position inherits the destination's color.
+    controller.setSelectedTextRange(1, 0);
+    QCOMPARE(controller.selectedColor(), originalColor);
+    const QString finalText = coloredText.left(1) + QLatin1Char('P') + coloredText.mid(1);
+    controller.updateSelectedTextPreview(finalText, 2);
+    const QVariantList finalSpans = controller.selectedCharacterSpans();
+    QCOMPARE(finalSpans.at(0).toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
+    const QString objectId = controller.selectedObjectId();
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.canUndo());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    controller.redo();
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QCOMPARE(controller.selectedText(), finalText);
+    QCOMPARE(controller.selectedCharacterSpans(), finalSpans);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    const auto savedCharacters = textCharacterRangeInfo(outputPath, finalText);
+    QCOMPARE(savedCharacters.size(), finalText.size());
+    for (qsizetype index = 0; index < savedCharacters.size(); ++index) {
+        if (finalText.at(index).isSpace())
+            continue;
+        const bool newlyColored = index >= insertionPosition + 1
+            && index < insertionPosition + 1 + insertedText.size();
+        QCOMPARE(savedCharacters.at(index).color, newlyColored ? typingColor : originalColor);
+    }
+}
+
+void PDFEditControllerTest::retainsTypingColorWhenChangingFontFamily()
+{
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0, m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    const QString originalText = m_controller.selectedText();
+    const QColor originalColor = m_controller.selectedColor();
+    QString replacementFamily;
+    for (const QString &family : m_controller.availableFontFamilies()) {
+        if (family.compare(m_controller.selectedFontFamily(), Qt::CaseInsensitive) != 0
+            && ApplicationFonts::isFontFaceSelectable(family, true, true)
+            && ApplicationFonts::fontFaceSupportsText(family, true, true, originalText)) {
+            replacementFamily = family;
+            break;
+        }
+    }
+    QVERIFY(!replacementFamily.isEmpty());
+    m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedTextRange(8, 0);
+    const QColor typingColor(QStringLiteral("#c62828"));
+    m_controller.setSelectedColor(typingColor);
+    m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedFontSize(30.0);
+    m_controller.setSelectedFontItalic(true);
+    m_controller.setSelectedFontUnderline(true);
+    QVERIFY(!m_controller.hasDrafts());
+    m_controller.setSelectedFontFamily(replacementFamily);
+    QCOMPARE(m_controller.selectedColor(), typingColor);
+    QCOMPARE(m_controller.selectedFontSize(), 30.0);
+    const QString editedText = originalText.left(8) + QLatin1Char('X') + originalText.mid(8);
+    m_controller.updateSelectedTextPreview(editedText, 9);
+    const QVariantList spans = m_controller.selectedCharacterSpans();
+    QCOMPARE(spans.size(), 3);
+    const QVariantMap inserted = spans.at(1).toMap();
+    QCOMPARE(inserted.value(QStringLiteral("color")).value<QColor>(), typingColor);
+    QCOMPARE(inserted.value(QStringLiteral("fontFamily")).toString(), replacementFamily);
+    QCOMPARE(inserted.value(QStringLiteral("fontSizeRatio")).toReal(),
+             30.0 / m_document.pageSize(0).height());
+    QVERIFY(inserted.value(QStringLiteral("fontBold")).toBool());
+    QVERIFY(inserted.value(QStringLiteral("fontItalic")).toBool());
+    QVERIFY(inserted.value(QStringLiteral("fontUnderline")).toBool());
+    QCOMPARE(spans.at(0).toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
+    QCOMPARE(spans.at(2).toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
+    m_controller.cancelSelectedTextEdit();
+    QVERIFY(!m_controller.hasDrafts());
+}
+
 void PDFEditControllerTest::joinsNativeFontSizeTypingUndo_data()
 {
     QTest::addColumn<bool>("inputMethod");
@@ -755,6 +905,7 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
     QVERIFY(m_controller.selectCandidate(
         0, m_regularCandidate.value(QStringLiteral("objectId")).toString()));
     const QString originalText = m_controller.selectedText();
+    const QColor originalColor = m_controller.selectedColor();
     const qreal displayedHeight = m_document.pageSize(0).height() * 1.5;
     const QString themePath = QFINDTESTDATA("../src/Components/AppTheme.qml");
     const QString overlayPath = editOverlayQmlPath();
@@ -799,6 +950,8 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
     QTRY_VERIFY(window.isExposed());
     QVERIFY(textEdit->setProperty("cursorPosition", originalText.size()));
     m_controller.setSelectedTextRange(originalText.size(), 0);
+    const QColor typingColor(QStringLiteral("#1565c0"));
+    m_controller.setSelectedColor(typingColor);
     m_controller.setSelectedFontSize(32);
     m_controller.setSelectedFontUnderline(true);
     item->forceActiveFocus();
@@ -815,14 +968,24 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
     cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
     QCOMPARE(cursor.charFormat().font().pixelSize() * item->scale(), 48.0);
     QVERIFY(cursor.charFormat().fontUnderline());
+    QCOMPARE(cursor.charFormat().foreground().color(), typingColor);
+    const QVariantList typedSpans = m_controller.selectedCharacterSpans();
+    QCOMPARE(typedSpans.constFirst().toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
+    QCOMPARE(typedSpans.constLast().toMap().value(QStringLiteral("color")).value<QColor>(), typingColor);
     QVERIFY(QMetaObject::invokeMethod(textEdit, "undo"));
     QTRY_COMPARE(m_controller.selectedText(), originalText);
     QCOMPARE(document->toPlainText(), originalText);
     QVERIFY(!document->isUndoAvailable());
+    for (const QVariant &span : m_controller.selectedCharacterSpans())
+        QCOMPARE(span.toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
     QVERIFY(QMetaObject::invokeMethod(textEdit, "redo"));
     QTRY_COMPARE(m_controller.selectedText(), originalText + insertedText);
     QCOMPARE(textEdit->property("cursorPosition").toInt(),
              originalText.size() + insertedText.size());
+    QCOMPARE(m_controller.selectedCharacterSpans(), typedSpans);
+    cursor.setPosition(originalText.size());
+    cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+    QCOMPARE(cursor.charFormat().foreground().color(), typingColor);
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "cancelEditing"));
 }
 
@@ -1097,6 +1260,7 @@ void PDFEditControllerTest::appliesFontStylesToTypingAtCaret()
         0,
         m_regularCandidate.value(QStringLiteral("objectId")).toString()));
     const QString originalText = QString::fromLatin1(kRegularText);
+    const QColor originalColor = m_controller.selectedColor();
     const qsizetype caretPosition = 8;
     const QString styledInsertion = QStringLiteral("new");
     const QString regularInsertion = QStringLiteral(" plain");
@@ -1153,6 +1317,7 @@ void PDFEditControllerTest::appliesFontStylesToTypingAtCaret()
     QVERIFY(m_controller.selectedFontItalic());
     QVERIFY(m_controller.selectedFontUnderline());
 
+    m_controller.setSelectedColor(originalColor);
     m_controller.setSelectedFontBold(false);
     m_controller.setSelectedFontItalic(false);
     m_controller.setSelectedFontUnderline(false);
@@ -1182,6 +1347,8 @@ void PDFEditControllerTest::appliesFontStylesToTypingAtCaret()
     const QVariantMap finalStyledSpan = finalSpans.at(1).toMap();
     const QVariantMap suffixSpan = finalSpans.at(2).toMap();
     QCOMPARE(prefixSpan.value(QStringLiteral("length")).toLongLong(), caretPosition);
+    QCOMPARE(prefixSpan.value(QStringLiteral("color")).value<QColor>(), originalColor);
+    QCOMPARE(suffixSpan.value(QStringLiteral("color")).value<QColor>(), originalColor);
     QVERIFY(!prefixSpan.value(QStringLiteral("fontBold")).toBool());
     QVERIFY(!prefixSpan.value(QStringLiteral("fontItalic")).toBool());
     QVERIFY(!prefixSpan.value(QStringLiteral("fontUnderline")).toBool());

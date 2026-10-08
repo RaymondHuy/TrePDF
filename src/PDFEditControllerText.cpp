@@ -774,6 +774,7 @@ void PDFEditController::applyTypingFormatToEditorDocument(
         m_typingCharacterFormat.fontBold ? QFont::Bold : QFont::Normal);
     format.setFontItalic(m_typingCharacterFormat.fontItalic);
     format.setFontUnderline(m_typingCharacterFormat.fontUnderline);
+    format.setForeground(m_typingCharacterFormat.color);
     format.setProperty(kEditorFontSizeRatio, m_typingCharacterFormat.fontSizeRatio);
     format.setProperty(kEditorDisplayFontSizeRatio,
                        m_typingCharacterFormat.displayFontSizeRatio);
@@ -1280,6 +1281,10 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
         format.fontBold = editorFormat.fontWeight() >= QFont::Bold;
         format.fontItalic = editorFormat.fontItalic();
         format.fontUnderline = editorFormat.fontUnderline();
+        if (editorFormat.hasProperty(QTextFormat::ForegroundBrush)
+            && editorFormat.foreground().color().isValid()) {
+            format.color = editorFormat.foreground().color().toRgb();
+        }
         if (editorFormat.hasProperty(kEditorLetterSpacingRatio)) {
             const qreal ratio = editorFormat.doubleProperty(kEditorLetterSpacingRatio);
             if (qIsFinite(ratio)) {
@@ -1711,6 +1716,28 @@ void PDFEditController::setSelectedColor(const QColor &color)
         return;
     }
 
+    const QColor normalizedColor = color.toRgb();
+    Draft draft = selectedDraftForDisplay();
+    if (m_textEditActive && m_selectedTextRangeLength == 0) {
+        const CharacterFormat current = selectedCharacterFormatForDisplay();
+        CharacterFormat typing = current;
+        typing.color = normalizedColor;
+        if (sameCharacterFormat(current, typing)) {
+            return;
+        }
+        const qsizetype caret = qBound<qsizetype>(
+            0, m_selectedTextRangeStart, draft.text.size());
+        if (sameCharacterFormat(typing, characterFormatAtPosition(draft, caret, true))) {
+            resetTypingFormat();
+        } else {
+            m_typingCharacterFormat = typing;
+            m_typingCharacterFormatPosition = caret;
+            m_typingCharacterFormatActive = true;
+        }
+        emit textFormatStateChanged();
+        return;
+    }
+
     const bool finishImmediately = !m_textEditActive;
     if (finishImmediately) {
         beginSelectedTextEdit();
@@ -1719,8 +1746,7 @@ void PDFEditController::setSelectedColor(const QColor &color)
         return;
     }
 
-    const QColor normalizedColor = color.toRgb();
-    Draft draft = selectedDraftForDisplay();
+    draft = selectedDraftForDisplay();
     qsizetype rangeStart = 0;
     qsizetype rangeLength = 0;
     selectedTextRangeForDraft(draft, rangeStart, rangeLength);
@@ -3161,6 +3187,7 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
     const qreal displayFontSizeRatio = m_typingCharacterFormat.displayFontSizeRatio;
     const qreal letterSpacingRatio = m_typingCharacterFormat.letterSpacingRatio;
     const qreal wordSpacingRatio = m_typingCharacterFormat.wordSpacingRatio;
+    const QColor color = m_typingCharacterFormat.color;
     m_typingCharacterFormat = characterFormatAtPosition(
         draft,
         m_typingCharacterFormatPosition,
@@ -3172,4 +3199,5 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
     m_typingCharacterFormat.displayFontSizeRatio = displayFontSizeRatio;
     m_typingCharacterFormat.letterSpacingRatio = letterSpacingRatio;
     m_typingCharacterFormat.wordSpacingRatio = wordSpacingRatio;
+    m_typingCharacterFormat.color = color;
 }

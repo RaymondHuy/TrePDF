@@ -339,9 +339,9 @@ chung budget 200.000 phép so sánh với kiểm tra overlap và gom đoạn; h�
 thì ngừng nối. Rich-text draft có thể lưu nhiều character span;
 `TextEdit` và draft overlay render từng span, còn các lệnh font,
 color, bold, italic và underline áp dụng vào range đang bôi đen. Khi selection
-collapse thành caret, Bold/Italic/Underline chỉ cập nhật typing format tạm để
-các ký tự gõ tiếp theo nhận style mới; text hiện có không đổi. Font family và
-color vẫn áp dụng cho toàn draft nếu không có range.
+collapse thành caret, màu chữ và Bold/Italic/Underline chỉ cập nhật typing format
+tạm để các ký tự gõ tiếp theo nhận format mới; text hiện có không đổi. Font family
+vẫn áp dụng cho toàn draft nếu không có range.
 
 Candidate dòng nhận bbox union, baseline/origin và style của part đầu tiên.
 `renderSuppressible` chỉ true khi mọi part đều suppress được. Candidate nguồn
@@ -813,7 +813,7 @@ giá trị spacing người dùng điều khiển. `ParagraphFormat` chứa alig
 list style (`none`, `bullet`, `decimal`), list level và số bắt đầu.
 
 Controller giữ thêm typing format tạm khi selection có length bằng `0`. Bấm
-Bold/Italic/Underline, cỡ chữ hoặc spacing chỉ thay trạng thái này, không tạo
+Màu chữ, Bold/Italic/Underline, cỡ chữ hoặc spacing chỉ thay trạng thái này, không tạo
 draft hoặc undo command.
 Khi text mới được chèn đúng caret, `setDraftText()` dùng typing format cho range
 vừa chèn; di chuyển caret hoặc tạo selection sẽ trở về format tại vị trí mới.
@@ -823,7 +823,7 @@ rồi merge cả display family vào document; chỉ đổi weight trên alias R
 không đủ để Qt hiển thị Bold. Family/stretch của model được giữ riêng trong
 custom properties để tắt kiểu chữ hoặc undo/redo khôi phục face nguồn và metrics.
 QML truyền cả vị trí caret sau edit để controller neo delta quanh vị trí gõ,
-tránh suy sai range khi chuỗi có ký tự lặp. Range mới chèn được merge B/I/U,
+tránh suy sai range khi chuỗi có ký tự lặp. Range mới chèn được merge màu chữ, B/I/U,
 cỡ chữ và spacing trực tiếp vào `QQuickTextDocument` bằng `QTextCursor` và nối
 với edit block trước đó;
 với phím gõ hoặc IME, event filter mở block trước khi Qt chèn text và đóng sau
@@ -835,7 +835,7 @@ caret theo vùng text thay đổi, tránh cộng đôi độ dài insertion và 
 Không reload toàn bộ rich HTML nên undo nội bộ của `TextEdit` vẫn xóa thao tác gõ
 và format trong một lần. Format cho range bôi đen cũng được merge trực tiếp bằng
 `QTextCursor` nhưng dùng edit block riêng. Sau undo/redo local, `onTextChanged`
-đọc lại B/I/U và semantic size ratio từ document vào character spans của controller, nên preview và dữ
+đọc lại màu chữ, B/I/U và semantic size ratio từ document vào character spans của controller, nên preview và dữ
 liệu Save không bị lệch nhau.
 
 Draft khởi tạo từ `sourceCharacterSpans` của candidate đã gom; candidate đơn
