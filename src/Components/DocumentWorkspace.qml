@@ -11,6 +11,17 @@ Item {
     required property AppTheme theme
     required property PDFDocumentSession session
     property bool viewTabActive: false
+    property bool headerTabActive: false
+    readonly property HeaderTextPlacement headerTextPlacement: headerPlacement
+    readonly property bool headerTextPanelOpen: headerPlacement.active
+    readonly property bool headerTextInputFocused: {
+        if (headerPlacement.inputFocused)
+            return true
+        if (headerTextPanelLoader.status !== Loader.Ready)
+            return false
+        const panel = headerTextPanelLoader.item as HeaderTextPanel
+        return panel ? panel.inputFocused : false
+    }
     property bool formsTabActive: false
     property bool editTabActive: false
     property bool signTabActive: false
@@ -136,6 +147,28 @@ Item {
     signal openRequested()
     signal deleteCommentRequested(int page, string objectId)
 
+    function openHeaderTextPanel() {
+        if (!headerTabActive || !session.document.loaded || session.saving)
+            return
+        headerPlacement.start()
+    }
+
+    function closeHeaderTextPanel() {
+        headerPlacement.cancel()
+    }
+
+    onHeaderTabActiveChanged: {
+        if (!headerTabActive)
+            closeHeaderTextPanel()
+    }
+    onSessionChanged: closeHeaderTextPanel()
+
+    HeaderTextPlacement {
+        id: headerPlacement
+        document: root.session.document
+        editController: root.session.editController
+    }
+
     component WorkspaceDocumentView: DocumentView {
         required property int paneIndex
         readonly property bool secondaryPane: paneIndex !== 0
@@ -151,6 +184,8 @@ Item {
         formController: root.session.formController
         formDesignerController: root.session.formDesignerController
         viewTabActive: root.viewTabActive
+        headerTabActive: root.headerTabActive
+        headerTextPlacement: secondaryPane ? null : root.headerTextPlacement
         formsTabActive: !secondaryPane && root.formsTabActive
         editTabActive: !secondaryPane && root.editTabActive
         formFieldsVisible: root.formFieldsVisible
@@ -661,6 +696,23 @@ Item {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        Loader {
+            id: headerTextPanelLoader
+            objectName: "headerTextPanelLoader"
+
+            Layout.preferredWidth: active ? 280 : 0
+            Layout.fillHeight: true
+            active: root.headerTextPanelOpen && root.headerTabActive
+                && root.session.document.loaded && !root.session.saving
+            visible: active
+            sourceComponent: Component {
+                HeaderTextPanel {
+                    theme: root.theme
+                    placement: root.headerTextPlacement
                 }
             }
         }

@@ -16,6 +16,8 @@ Rectangle {
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
     property bool viewTabActive: false
+    property bool headerTabActive: false
+    property HeaderTextPlacement headerTextPlacement: null
     property bool formsTabActive: false
     property bool editTabActive: false
     property bool formFieldsVisible: false
@@ -738,6 +740,8 @@ Rectangle {
             searchController: root.searchController
             textSelectionController: textSelection
             viewTabActive: root.viewTabActive
+            headerTabActive: root.headerTabActive
+            headerTextPlacement: root.headerTextPlacement
             textSelectionEnabled: documentInput.textSelectionEnabled
             formController: root.formController
             formDesignerController: root.formDesignerController

@@ -15,6 +15,18 @@ and Save/Save As persistence.
 
 Current features:
 
+- Header > Add Text arms click placement inside the gray 100-point header.
+  `HeaderTextOverlay.qml` shows an inline textbox at the clicked point, then
+  `HeaderTextPanel.qml` opens for font family/size/style/color and all-pages/custom
+  page-range selection. Formatting updates the whole pending textbox live and
+  persists through the existing added-text writer.
+  `HeaderTextPlacement.qml` owns temporary input independently of pooled delegates. `PDFEditControllerHeaderText.cpp` validates the complete
+  batch before creating ordinary added-text drafts inside the first 100 PDF
+  points. Apply is one undoable action; Save/Save As uses the existing text
+  writer, and reopened headers are ordinary independently editable page text.
+  The gray 100-point guide is presentation-only. Footer is currently an empty
+  tab. See `docs/header-text-pipeline.md` for limits and lifecycle behavior.
+
 - Protect > Watermark adds, updates and removes managed text/image watermarks
   across selected source pages. `PDFWatermark.h/.cpp` shares bounded versioned
   metadata, vector text/image snapshots, placement and PDFium mutation between

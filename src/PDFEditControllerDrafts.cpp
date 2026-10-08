@@ -1104,6 +1104,45 @@ void PDFEditController::applyDraftState(const Command &command,
                                         bool useAfterState,
                                         bool immediate)
 {
+    if (command.kind == Command::Kind::ObjectDraftBatch) {
+        QSet<int> changedPages;
+        bool removesSelection = false;
+        // Complete the entire mutation before notifying observers. In particular,
+        // draftsForPage() must never expose a partly-applied multi-page header.
+        for (const Draft &draft : command.addedDrafts) {
+            const Candidate &candidate = draft.candidate;
+            const QString key = draftKey(candidate.page, candidate.objectId);
+            if (useAfterState) {
+                const auto insertionPoint = std::lower_bound(
+                    m_addedCandidates.begin(), m_addedCandidates.end(),
+                    candidate.addedOrder,
+                    [](const Candidate &existing, quint64 order) {
+                        return existing.addedOrder < order;
+                    });
+                if (insertionPoint == m_addedCandidates.end()
+                    || insertionPoint->addedOrder != candidate.addedOrder) {
+                    m_addedCandidates.insert(insertionPoint, candidate);
+                }
+                m_drafts.insert(key, draft);
+            } else {
+                m_drafts.remove(key);
+                removeAddedCandidate(candidate.page, candidate.objectId);
+                removesSelection = removesSelection
+                    || (m_hasSelection && m_selectedCandidate.page == candidate.page
+                        && m_selectedCandidate.objectId == candidate.objectId);
+            }
+            changedPages.insert(candidate.page);
+        }
+        if (removesSelection) {
+            setSelection(nullptr);
+        }
+        QList<int> pages = changedPages.values();
+        std::sort(pages.begin(), pages.end());
+        for (int page : pages) {
+            markDraftStateChanged(page, immediate, false);
+        }
+        return;
+    }
     if (command.kind == Command::Kind::Watermarks) {
         m_watermarkChanges = useAfterState ? command.watermarksAfter : command.watermarksBefore;
         if (watermarkChangesPending()) {

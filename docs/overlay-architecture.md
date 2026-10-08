@@ -41,6 +41,8 @@ DocumentView (ListView, reuseItems: true)
     │   │   ├── PDFPageView          z 0: texture PDF từ worker
     │   │   ├── page border          z 0: nằm trên texture
     │   │   ├── SearchHighlightLayer z 0.5: highlight không tương tác
+    │   │   ├── headerAreaOverlay    z 0.75: dải đầu trang 100 pt khi Header active
+    │   │   ├── HeaderTextOverlay    z 2: click đặt chữ và textbox inline
     │   │   └── PageInteractionOverlay z 1: coordinator input
     │   │       ├── PDFFormView      z 1: bridge input form PDFium
     │   │       │   └── FormChoiceOverlay
@@ -89,6 +91,7 @@ trạng thái.
 | 0 | `PDFPageView` | 0 | Texture nền do `PDFPageItem` render. | Không trực tiếp. |
 | 0 | viền trang `Rectangle` | 0 | Viền current page; được khai báo sau texture nên nằm trên texture cùng `z`. | Không. |
 | 0.5 | `SearchHighlightLayer` | 0.5 | Vẽ tập rect match đã giới hạn trên display page; match hiện tại có màu cam. | Không; root luôn `enabled: false`. |
+| 0.75 | `headerAreaOverlay` | 0.75 | Dải xám nhạt phủ chiều rộng đầu trang, cao `100 * zoom` và không vượt chiều cao trang; chỉ hiện khi Header active và PDF đã mở. Không tạo draft hoặc ghi vào PDF. | Không; `enabled: false`, accessibility bỏ qua. |
 | 1 | `PageInteractionOverlay` | 1 | Coordinator chứa toàn bộ runtime/edit/designer interaction. | Root không tự nhận input; child quyết định. |
 
 ### Lớp bên trong `PageInteractionOverlay`
@@ -710,3 +713,8 @@ cho layer này. Browse chỉ bắt click của link draft; source link chưa s�
 PDFFormWorker xử lý. Dialog thuộc tính được tạo bằng Loader, đóng khi đổi tool,
 trang, session hoặc delegate bị pool. Move/resize preview là state cục bộ trong
 gesture và chỉ commit một history command khi thả chuột.
+
+Header > Add Text bật `HeaderTextOverlay` nhận click trong vùng 100 pt. Textbox
+inline nằm trên interaction overlay (z=2), dùng tọa độ PDF pt và scale theo zoom.
+`HeaderTextPlacement` của workspace giữ input qua delegate pooling; chỉ Apply
+mới tạo draft và panel phải chỉ chứa lựa chọn trang cùng Apply/Cancel.

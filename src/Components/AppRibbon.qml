@@ -36,6 +36,8 @@ Column {
     readonly property bool signTabActive: ribbonTabs.currentIndex === 4
     readonly property bool protectTabActive: ribbonTabs.currentIndex === 5
     readonly property bool exportTabActive: ribbonTabs.currentIndex === 6
+    readonly property bool headerTabActive: ribbonTabs.currentIndex === 7
+    readonly property bool footerTabActive: ribbonTabs.currentIndex === 8
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
         && document.loaded
@@ -78,6 +80,7 @@ Column {
     signal signatureRequested(string mode)
     signal setPasswordRequested()
     signal watermarkRequested(string mode)
+    signal headerTextRequested()
     signal undoRequested()
     signal redoRequested()
 
@@ -411,6 +414,30 @@ Column {
         }
     }
 
+    Component {
+        id: headerRibbonComponent
+
+        Item {
+            RibbonGroup {
+                x: 8
+                theme: root.theme
+                //% "Header"
+                title: qsTrId("HeaderTab")
+
+                RibbonButton {
+                    objectName: "headerAddTextButton"
+                    theme: root.theme
+                    documentLoaded: root.document.loaded
+                    enabled: root.document.loaded && !root.anySaving
+                    //% "Add Text"
+                    text: qsTrId("AddText")
+                    iconSource: "../assets/icons/type.svg"
+                    onClicked: root.headerTextRequested()
+                }
+            }
+        }
+    }
+
     Rectangle {
         width: parent.width
         height: Qt.platform.os === "ios" ? 44 : 34
@@ -434,7 +461,7 @@ Column {
                 id: ribbonTabs
                 objectName: "ribbonTabs"
 
-                Layout.preferredWidth: Qt.platform.os === "ios" ? 0 : 590
+                Layout.preferredWidth: Qt.platform.os === "ios" ? 0 : 760
                 Layout.fillWidth: Qt.platform.os === "ios"
                 Layout.minimumWidth: 0
                 clip: Qt.platform.os === "ios"
@@ -485,6 +512,20 @@ Column {
                     theme: root.theme
                     //% "Convert"
                     text: qsTrId("ConvertTab")
+                }
+
+                RibbonTabButton {
+                    objectName: "headerTabButton"
+                    theme: root.theme
+                    //% "Header"
+                    text: qsTrId("HeaderTab")
+                }
+
+                RibbonTabButton {
+                    objectName: "footerTabButton"
+                    theme: root.theme
+                    //% "Footer"
+                    text: qsTrId("FooterTab")
                 }
             }
 
@@ -559,7 +600,11 @@ Column {
                                 ? signRibbonComponent
                                 : ribbonTabs.currentIndex === 5
                                     ? protectRibbonComponent
-                                    : exportRibbonComponent
+                                    : ribbonTabs.currentIndex === 6
+                                        ? exportRibbonComponent
+                                        : ribbonTabs.currentIndex === 7
+                                            ? headerRibbonComponent
+                                            : null
         }
     }
 }

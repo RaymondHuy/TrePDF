@@ -334,6 +334,9 @@ ApplicationWindow {
 
     function requestSave() {
         if (activeSession && prepareActiveWorkspace()) {
+            const workspace = activeWorkspace()
+            if (workspace)
+                workspace.closeHeaderTextPanel()
             tabModel.requestSave(activeSession)
         }
     }
@@ -345,6 +348,9 @@ ApplicationWindow {
         const workspace = activeWorkspace()
         if (workspace && !workspace.commitPendingPanelEdits())
             return
+
+        if (workspace)
+            workspace.closeHeaderTextPanel()
 
         saveAsSession = activeSession
         saveAsDialog.selectedFile = saveAsSession.document.source
@@ -466,6 +472,16 @@ ApplicationWindow {
         imageInsertX = x
         imageInsertY = y
         imageDialog.open()
+    }
+
+    function requestHeaderText() {
+        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
+                || !appRibbon.headerTabActive || !prepareActiveWorkspace()) {
+            return
+        }
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.openHeaderTextPanel()
     }
 
     function requestSetPassword() {
@@ -1024,9 +1040,19 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Escape"
+        enabled: window.activeWorkspaceItem !== null
+            && (window.activeWorkspaceItem.headerTextPlacement.armed
+                || window.activeWorkspaceItem.headerTextPlacement.active)
+        onActivated: window.activeWorkspaceItem.closeHeaderTextPanel()
+    }
+
+    Shortcut {
         sequences: [StandardKey.Undo]
         enabled: window.activeSession !== null
             && window.activeEditController.canUndo
+            && !(window.activeWorkspaceItem
+                && window.activeWorkspaceItem.headerTextInputFocused)
             && !window.activeEditController.textEditActive
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
@@ -1038,6 +1064,8 @@ ApplicationWindow {
         sequences: [StandardKey.Redo]
         enabled: window.activeSession !== null
             && window.activeEditController.canRedo
+            && !(window.activeWorkspaceItem
+                && window.activeWorkspaceItem.headerTextInputFocused)
             && !window.activeWorkspaceHasPendingEdits
             && !window.activeEditController.textEditActive
             && !window.activeFormDesignerController.textFieldFocused
@@ -1730,6 +1758,7 @@ ApplicationWindow {
             onSignatureRequested: mode => window.requestSignature(mode)
             onSetPasswordRequested: window.requestSetPassword()
             onWatermarkRequested: mode => window.requestWatermark(mode)
+            onHeaderTextRequested: window.requestHeaderText()
             onProtectTabActiveChanged: {
                 if (!protectTabActive) {
                     window.cancelPasswordSetup()
@@ -1887,6 +1916,7 @@ ApplicationWindow {
                 theme: appTheme
                 session: window.workspaceSession
                 viewTabActive: appRibbon.viewTabActive
+                headerTabActive: appRibbon.headerTabActive
                 formsTabActive: appRibbon.formsTabActive
                 editTabActive: appRibbon.editTabActive
                 signTabActive: appRibbon.signTabActive

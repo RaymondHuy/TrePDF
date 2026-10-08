@@ -9,6 +9,7 @@ QtObject {
     readonly property color ribbonSurface: "#fffdfb"
     readonly property color ribbonBorder: "#ddd6d1"
     readonly property color ribbonTextColor: "#35363a"
+    readonly property color headerAreaColor: "#20000000"
     readonly property color signGreen: "#2f7656"
     readonly property color signPaleGreen: "#edf7f1"
 }

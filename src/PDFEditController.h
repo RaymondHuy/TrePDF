@@ -351,6 +351,12 @@ public:
     Q_INVOKABLE QVariantMap selectedDraftPreview() const;
     Q_INVOKABLE QVariantMap candidateAt(int page, qreal x, qreal y);
     Q_INVOKABLE QVariantMap addText(int page, qreal x, qreal y);
+    Q_INVOKABLE QString headerTextFontFamily() const;
+    Q_INVOKABLE QStringList headerTextFontFamilies(int filter, bool bold, bool italic) const;
+    Q_INVOKABLE bool addHeaderText(const QString &text, const QString &pages,
+                                  qreal xPoints = 24.0, qreal yPoints = 16.0,
+                                  qreal widthPoints = 0.0,
+                                  const QVariantMap &format = {});
     Q_INVOKABLE void requestAddImage(int page, qreal x, qreal y);
     Q_INVOKABLE QVariantMap addImage(int page,
                                      qreal x,
@@ -825,6 +831,7 @@ private:
     struct Command {
         enum class Kind {
             ObjectDraft,
+            ObjectDraftBatch,
             PageStructure,
             WebLinks,
             Watermarks
@@ -838,6 +845,8 @@ private:
         Draft before;
         bool hadAfter = false;
         Draft after;
+        // A batch of newly added objects, committed and restored atomically.
+        QVector<Draft> addedDrafts;
         PageState pageStateBefore;
         PageState pageStateAfter;
         QVector<PDFWebLinks::Link> webLinksBefore;
