@@ -357,6 +357,11 @@ public:
                                   qreal xPoints = 24.0, qreal yPoints = 16.0,
                                   qreal widthPoints = 0.0,
                                   const QVariantMap &format = {});
+    Q_INVOKABLE QVariantMap prepareHeaderImage(const QUrl &source);
+    Q_INVOKABLE void clearHeaderImage();
+    Q_INVOKABLE bool addHeaderImage(const QString &pages, qreal xPoints, qreal yPoints,
+                                   qreal widthPoints, qreal heightPoints,
+                                   int quarterTurns = 0);
     Q_INVOKABLE void requestAddImage(int page, qreal x, qreal y);
     Q_INVOKABLE QVariantMap addImage(int page,
                                      qreal x,
@@ -1151,6 +1156,8 @@ private:
     QHash<int, quint64> m_pageDraftRevisions;
     quint64 m_nextDraftRevision = 0;
     quint64 m_nextAddedObjectId = 0;
+    // Temporary placement pixels, shared with committed image drafts by QImage.
+    QImage m_headerImage;
     QVector<Command> m_undoStack;
     QVector<Command> m_redoStack;
     QHash<QByteArray, QString> m_registeredFontFamilies;

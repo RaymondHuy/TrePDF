@@ -13,6 +13,11 @@ Item {
     property bool viewTabActive: false
     property bool headerTabActive: false
     readonly property HeaderTextPlacement headerTextPlacement: headerPlacement
+    readonly property HeaderImagePlacement headerImagePlacement: headerImagePlacementState
+    readonly property bool headerImageInputFocused: {
+        const panel = headerImagePanelLoader.item as HeaderImagePanel
+        return panel ? panel.inputFocused : false
+    }
     readonly property bool headerTextPanelOpen: headerPlacement.active
     readonly property bool headerTextInputFocused: {
         if (headerPlacement.inputFocused)
@@ -145,11 +150,13 @@ Item {
     }
 
     signal openRequested()
+    signal headerImageFileRequested(HeaderImagePlacement placement)
     signal deleteCommentRequested(int page, string objectId)
 
     function openHeaderTextPanel() {
         if (!headerTabActive || !session.document.loaded || session.saving)
             return
+        headerImagePlacementState.cancel()
         headerPlacement.start()
     }
 
@@ -157,16 +164,35 @@ Item {
         headerPlacement.cancel()
     }
 
+    function openHeaderImagePanel() {
+        if (!headerTabActive || !session.document.loaded || session.saving)
+            return
+        headerPlacement.cancel()
+        headerImagePlacementState.start()
+    }
+
+    function closeHeaderPlacement() {
+        headerPlacement.cancel()
+        headerImagePlacementState.cancel()
+    }
+
     onHeaderTabActiveChanged: {
         if (!headerTabActive)
-            closeHeaderTextPanel()
+            closeHeaderPlacement()
     }
-    onSessionChanged: closeHeaderTextPanel()
+    onSessionChanged: closeHeaderPlacement()
 
     HeaderTextPlacement {
         id: headerPlacement
         document: root.session.document
         editController: root.session.editController
+    }
+
+    HeaderImagePlacement {
+        id: headerImagePlacementState
+        document: root.session.document
+        editController: root.session.editController
+        onFileRequested: root.headerImageFileRequested(headerImagePlacementState)
     }
 
     component WorkspaceDocumentView: DocumentView {
@@ -186,6 +212,7 @@ Item {
         viewTabActive: root.viewTabActive
         headerTabActive: root.headerTabActive
         headerTextPlacement: secondaryPane ? null : root.headerTextPlacement
+        headerImagePlacement: secondaryPane ? null : root.headerImagePlacement
         formsTabActive: !secondaryPane && root.formsTabActive
         editTabActive: !secondaryPane && root.editTabActive
         formFieldsVisible: root.formFieldsVisible
@@ -713,6 +740,22 @@ Item {
                 HeaderTextPanel {
                     theme: root.theme
                     placement: root.headerTextPlacement
+                }
+            }
+        }
+
+        Loader {
+            id: headerImagePanelLoader
+            objectName: "headerImagePanelLoader"
+            Layout.preferredWidth: active ? 280 : 0
+            Layout.fillHeight: true
+            active: root.headerImagePlacement.active && root.headerTabActive
+                && root.session.document.loaded && !root.session.saving
+            visible: active
+            sourceComponent: Component {
+                HeaderImagePanel {
+                    theme: root.theme
+                    placement: root.headerImagePlacement
                 }
             }
         }

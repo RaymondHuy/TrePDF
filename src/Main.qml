@@ -45,6 +45,8 @@ ApplicationWindow {
     property string externalLinkAuthority: ""
     property string externalLinkDisplayUrl: ""
     property bool externalLinkInsecureHttp: false
+    property HeaderImagePlacement headerImagePickerPlacement: null
+    property PDFDocumentSession headerImagePickerSession: null
     property PDFEditController imageInsertController: null
     property int imageInsertPage: -1
     property real imageInsertX: 0
@@ -89,7 +91,7 @@ ApplicationWindow {
         passwordRequests.length > 0 || fontDownloadController !== null
         || signatureDialogLoader.active || setPasswordDialogLoader.active
         || watermarkDialogLoader.active || openDialog.visible
-        || imageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
+        || imageDialog.visible || headerImageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
         || externalLinkPopup.visible || discardDraftPopup.visible || deletePagePopup.visible
         || documentAccess.busy || saveAsDialog.writePending || excelExportDialog.writePending
     readonly property bool fileOpenBlocked:
@@ -336,7 +338,7 @@ ApplicationWindow {
         if (activeSession && prepareActiveWorkspace()) {
             const workspace = activeWorkspace()
             if (workspace)
-                workspace.closeHeaderTextPanel()
+                workspace.closeHeaderPlacement()
             tabModel.requestSave(activeSession)
         }
     }
@@ -350,7 +352,7 @@ ApplicationWindow {
             return
 
         if (workspace)
-            workspace.closeHeaderTextPanel()
+            workspace.closeHeaderPlacement()
 
         saveAsSession = activeSession
         saveAsDialog.selectedFile = saveAsSession.document.source
@@ -482,6 +484,59 @@ ApplicationWindow {
         const workspace = activeWorkspace()
         if (workspace)
             workspace.openHeaderTextPanel()
+    }
+
+    function requestHeaderImage() {
+        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
+                || !appRibbon.headerTabActive || !prepareActiveWorkspace())
+            return
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.openHeaderImagePanel()
+    }
+
+    function requestHeaderImageFile(placement) {
+        const workspace = activeWorkspace()
+        if (!workspace || workspace.headerImagePlacement !== placement
+                || !placement.choosing || !appRibbon.headerTabActive
+                || tabModel.anySaving)
+            return
+        headerImagePickerPlacement = placement
+        headerImagePickerSession = activeSession
+        headerImageDialog.open()
+    }
+
+    function cancelHeaderImageFile() {
+        const placement = headerImagePickerPlacement
+        headerImagePickerPlacement = null
+        headerImagePickerSession = null
+        headerImageDialog.close()
+        if (placement)
+            placement.cancel()
+    }
+
+    function insertSelectedHeaderImage(source) {
+        const placement = headerImagePickerPlacement
+        const session = headerImagePickerSession
+        headerImagePickerPlacement = null
+        headerImagePickerSession = null
+        const workspace = activeWorkspace()
+        if (placement && session === activeSession && workspace
+                && workspace.headerImagePlacement === placement
+                && placement.choosing && appRibbon.headerTabActive
+                && !tabModel.anySaving)
+            placement.acceptImage(source)
+        else if (placement)
+            placement.cancel()
+    }
+
+    Connections {
+        target: window.headerImagePickerPlacement
+        function onChoosingChanged() {
+            if (window.headerImagePickerPlacement
+                    && !window.headerImagePickerPlacement.choosing)
+                window.cancelHeaderImageFile()
+        }
     }
 
     function requestSetPassword() {
@@ -789,6 +844,7 @@ ApplicationWindow {
     }
 
     onActiveSessionChanged: {
+        cancelHeaderImageFile()
         cancelSignature()
         cancelPasswordSetup()
         cancelWatermark()
@@ -1043,8 +1099,10 @@ ApplicationWindow {
         sequence: "Escape"
         enabled: window.activeWorkspaceItem !== null
             && (window.activeWorkspaceItem.headerTextPlacement.armed
-                || window.activeWorkspaceItem.headerTextPlacement.active)
-        onActivated: window.activeWorkspaceItem.closeHeaderTextPanel()
+                || window.activeWorkspaceItem.headerTextPlacement.active
+                || window.activeWorkspaceItem.headerImagePlacement.armed
+                || window.activeWorkspaceItem.headerImagePlacement.active)
+        onActivated: window.activeWorkspaceItem.closeHeaderPlacement()
     }
 
     Shortcut {
@@ -1052,7 +1110,8 @@ ApplicationWindow {
         enabled: window.activeSession !== null
             && window.activeEditController.canUndo
             && !(window.activeWorkspaceItem
-                && window.activeWorkspaceItem.headerTextInputFocused)
+                && (window.activeWorkspaceItem.headerTextInputFocused
+                    || window.activeWorkspaceItem.headerImageInputFocused))
             && !window.activeEditController.textEditActive
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
@@ -1065,7 +1124,8 @@ ApplicationWindow {
         enabled: window.activeSession !== null
             && window.activeEditController.canRedo
             && !(window.activeWorkspaceItem
-                && window.activeWorkspaceItem.headerTextInputFocused)
+                && (window.activeWorkspaceItem.headerTextInputFocused
+                    || window.activeWorkspaceItem.headerImageInputFocused))
             && !window.activeWorkspaceHasPendingEdits
             && !window.activeEditController.textEditActive
             && !window.activeFormDesignerController.textFieldFocused
@@ -1366,6 +1426,18 @@ ApplicationWindow {
         nameFilters: [qsTrId("ImageFileFilter")]
         onAccepted: window.insertSelectedImage(selectedFile)
         onRejected: window.clearImageInsertRequest()
+    }
+
+    PlatformFileDialog {
+        id: headerImageDialog
+        objectName: "headerImageFileDialog"
+        //% "Select Image"
+        title: qsTrId("SelectImage")
+        fileMode: FileDialog.OpenFile
+        //% "Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)"
+        nameFilters: [qsTrId("ImageFileFilter")]
+        onAccepted: window.insertSelectedHeaderImage(selectedFile)
+        onRejected: window.cancelHeaderImageFile()
     }
 
     PlatformFileDialog {
@@ -1759,6 +1831,7 @@ ApplicationWindow {
             onSetPasswordRequested: window.requestSetPassword()
             onWatermarkRequested: mode => window.requestWatermark(mode)
             onHeaderTextRequested: window.requestHeaderText()
+            onHeaderImageRequested: window.requestHeaderImage()
             onProtectTabActiveChanged: {
                 if (!protectTabActive) {
                     window.cancelPasswordSetup()
@@ -1935,6 +2008,7 @@ ApplicationWindow {
                 transientStatus: window.transientStatus
                 enabled: !tabModel.anySaving
                 onOpenRequested: window.requestOpen()
+                onHeaderImageFileRequested: placement => window.requestHeaderImageFile(placement)
                 onDeleteCommentRequested: (page, objectId) => {
                     window.requestDeleteComment(page, objectId)
                 }

@@ -401,3 +401,16 @@ rg --files src -g '*.h' | sort
 Khi trách nhiệm của một tệp thay đổi, cập nhật mô tả chi tiết trong guide tương
 ứng trước, sau đó sửa bảng chỉ mục ở tài liệu này nếu vai trò ngắn không còn
 đúng.
+
+## Header image placement
+
+| File | Responsibility |
+| --- | --- |
+| [`HeaderImagePlacement.qml`](../src/Components/HeaderImagePlacement.qml) | Ảnh tạm, khung PDF pt, giới hạn vùng 100 pt, batch Apply và hủy theo vòng đời. |
+| [`HeaderImageOverlay.qml`](../src/Components/HeaderImageOverlay.qml) | Click chọn vị trí, preview, kéo và tám nút đổi kích thước. |
+| [`HeaderImagePanel.qml`](../src/Components/HeaderImagePanel.qml) | Khóa tỷ lệ, xoay, tất cả/phạm vi trang, Áp dụng/Hủy. |
+
+Backend dùng `prepareHeaderImage()`/`addHeaderImage()` trong
+[`PDFEditControllerHeaderText.cpp`](../src/PDFEditControllerHeaderText.cpp).
+Regression tests: [`backend`](../tests/tst_PDFEditControllerHeaderImage.cpp),
+[`UI`](../tests/tst_PDFEditControllerHeaderImageUi.cpp).

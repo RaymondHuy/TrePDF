@@ -51,6 +51,17 @@ private slots:
     void keepsExistingPasswordWhenChangeFails();
     void rejectsPasswordChangesOnRestrictedDocuments();
     void headerTextUsesAtomicHistoryAndIndependentSessions();
+    void preparesHeaderImageWithoutDraftsAndSnapshotsPixels();
+    void headerImageUsesAtomicHistoryAndCustomPages();
+    void rejectsHeaderImageWithoutChangingHistory_data();
+    void rejectsHeaderImageWithoutChangingHistory();
+    void rejectsHeaderImageWhenAnyPageCannotFit();
+    void savesRotatedHeaderImageOnSelectedPages_data();
+    void savesRotatedHeaderImageOnSelectedPages();
+    void addsHeaderImageThroughMainWindow();
+    void transformsHeaderImagePreviewWithinHeader();
+    void cancelsHeaderImageAcrossUiChanges();
+    void retainsHeaderImageAcrossPageDelegatesAndZoom();
     void headerTextAppliesCustomPageRangesOnce();
     void rejectsInvalidHeaderTextWithoutChangingHistory_data();
     void rejectsInvalidHeaderTextWithoutChangingHistory();

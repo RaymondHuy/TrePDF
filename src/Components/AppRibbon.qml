@@ -81,6 +81,7 @@ Column {
     signal setPasswordRequested()
     signal watermarkRequested(string mode)
     signal headerTextRequested()
+    signal headerImageRequested()
     signal undoRequested()
     signal redoRequested()
 
@@ -433,6 +434,17 @@ Column {
                     text: qsTrId("AddText")
                     iconSource: "../assets/icons/type.svg"
                     onClicked: root.headerTextRequested()
+                }
+
+                RibbonButton {
+                    objectName: "headerAddImageButton"
+                    theme: root.theme
+                    documentLoaded: root.document.loaded
+                    enabled: root.document.loaded && !root.anySaving
+                    //% "Image"
+                    text: qsTrId("Image")
+                    iconSource: "../assets/icons/image-plus.svg"
+                    onClicked: root.headerImageRequested()
                 }
             }
         }

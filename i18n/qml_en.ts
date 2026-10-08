@@ -3897,5 +3897,41 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <source>Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color.</source>
         <translation>Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color.</translation>
     </message>
+    <message id="HeaderImage">
+        <location filename="../src/Components/HeaderImageOverlay.qml" line="41"/>
+        <location filename="../src/Components/HeaderImagePanel.qml" line="56"/>
+        <source>Header image</source>
+        <translation>Header image</translation>
+    </message>
+    <message id="AddHeaderImageFailed">
+        <location filename="../src/Components/HeaderImagePlacement.qml" line="182"/>
+        <source>Could not add the header image.</source>
+        <translation>Could not add the header image.</translation>
+    </message>
+    <message id="HeaderImagePreviewFailed">
+        <location filename="../src/Components/HeaderImageOverlay.qml" line="63"/>
+        <source>Could not display the header image. Choose the image again.</source>
+        <translation>Could not display the header image. Choose the image again.</translation>
+    </message>
+    <message id="HeaderImageDraftHint">
+        <location filename="../src/Components/HeaderImagePanel.qml" line="201"/>
+        <source>Apply creates a draft. Save or Save As writes the image to the PDF.</source>
+        <translation>Apply creates a draft. Save or Save As writes the image to the PDF.</translation>
+    </message>
+    <message id="HeaderImageRequired">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="425"/>
+        <source>Choose an image to add to the header.</source>
+        <translation>Choose an image to add to the header.</translation>
+    </message>
+    <message id="HeaderImageInvalidPosition">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="434"/>
+        <source>Keep the image within the first 100 pt of the page.</source>
+        <translation>Keep the image within the first 100 pt of the page.</translation>
+    </message>
+    <message id="HeaderImageDoesNotFit">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="472"/>
+        <source>The header image does not fit within the first 100 pt on page %1. Resize or move it.</source>
+        <translation>The header image does not fit within the first 100 pt on page %1. Resize or move it.</translation>
+    </message>
 </context>
 </TS>

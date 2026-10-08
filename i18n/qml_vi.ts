@@ -3892,5 +3892,41 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <source>Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color.</source>
         <translation>Chọn phông chữ hợp lệ, cỡ chữ nguyên từ 1 đến 512 pt và màu chữ không trong suốt.</translation>
     </message>
+    <message id="HeaderImage">
+        <location filename="../src/Components/HeaderImageOverlay.qml" line="41"/>
+        <location filename="../src/Components/HeaderImagePanel.qml" line="56"/>
+        <source>Header image</source>
+        <translation>Hình ảnh đầu trang</translation>
+    </message>
+    <message id="AddHeaderImageFailed">
+        <location filename="../src/Components/HeaderImagePlacement.qml" line="182"/>
+        <source>Could not add the header image.</source>
+        <translation>Không thể thêm hình ảnh vào đầu trang.</translation>
+    </message>
+    <message id="HeaderImagePreviewFailed">
+        <location filename="../src/Components/HeaderImageOverlay.qml" line="63"/>
+        <source>Could not display the header image. Choose the image again.</source>
+        <translation>Không thể hiển thị hình ảnh đầu trang. Hãy chọn lại hình ảnh.</translation>
+    </message>
+    <message id="HeaderImageDraftHint">
+        <location filename="../src/Components/HeaderImagePanel.qml" line="201"/>
+        <source>Apply creates a draft. Save or Save As writes the image to the PDF.</source>
+        <translation>Bấm Áp dụng để tạo bản nháp. Chọn Lưu hoặc Lưu thành để ghi hình ảnh vào PDF.</translation>
+    </message>
+    <message id="HeaderImageRequired">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="425"/>
+        <source>Choose an image to add to the header.</source>
+        <translation>Chọn hình ảnh để thêm vào đầu trang.</translation>
+    </message>
+    <message id="HeaderImageInvalidPosition">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="434"/>
+        <source>Keep the image within the first 100 pt of the page.</source>
+        <translation>Giữ hình ảnh trong vùng 100 pt đầu trang.</translation>
+    </message>
+    <message id="HeaderImageDoesNotFit">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="472"/>
+        <source>The header image does not fit within the first 100 pt on page %1. Resize or move it.</source>
+        <translation>Hình ảnh đầu trang không vừa vùng 100 pt ở trang %1. Hãy đổi kích thước hoặc di chuyển ảnh.</translation>
+    </message>
 </context>
 </TS>

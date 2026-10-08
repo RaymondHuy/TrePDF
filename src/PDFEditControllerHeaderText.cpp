@@ -1,7 +1,10 @@
 #include "PDFEditController.h"
 #include "ApplicationFonts.h"
 
+#include <QBuffer>
+#include <QFileInfo>
 #include <QFontInfo>
+#include <QImageReader>
 #include <QRegularExpression>
 #include <QTextLayout>
 #include <QTextOption>
@@ -23,6 +26,9 @@ constexpr qreal kHeaderHeight = 100.0;
 constexpr qreal kHeaderSideMargin = 24.0;
 constexpr qreal kHeaderFontSize = 12.0;
 constexpr qreal kWriterTopPadding = 1.0;
+constexpr qint64 kMaximumHeaderImageFileBytes = 64 * 1024 * 1024;
+constexpr qint64 kMaximumHeaderImagePixels = 40000000;
+constexpr int kMaximumHeaderImagePreviewDimension = 1024;
 
 enum class PageParseResult { Valid, Invalid, TooLarge };
 
@@ -304,6 +310,183 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
     }
 
     // Invalid input above leaves the editor, redo stack, and object IDs untouched.
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    m_nextAddedObjectId = nextAddedId;
+    m_undoStack.append(command);
+    m_redoStack.clear();
+    applyDraftState(command, true, true);
+    emit historyStateChanged();
+    return true;
+}
+
+QVariantMap PDFEditController::prepareHeaderImage(const QUrl &source)
+{
+    if (!m_document || !m_document->isLoaded() || m_saving)
+        return {};
+    if (watermarkChangesPending()) {
+        //% "Save or discard watermark changes before editing page content."
+        emit statusMessage(qtTrId("SaveWatermarkBeforeEditing"));
+        return {};
+    }
+    if (!documentAllowsEditing()) {
+        //% "This PDF does not permit content editing."
+        emit statusMessage(qtTrId("PdfEditingNotPermitted"));
+        return {};
+    }
+    if (!source.isLocalFile() || source.toLocalFile().isEmpty()) {
+        //% "Only local image files are supported."
+        emit statusMessage(qtTrId("LocalImageFilesOnly"));
+        return {};
+    }
+
+    const QFileInfo imageFile(source.toLocalFile());
+    if (!imageFile.isFile() || !imageFile.isReadable() || imageFile.size() <= 0) {
+        //% "The selected image could not be opened."
+        emit statusMessage(qtTrId("SelectedImageOpenFailed"));
+        return {};
+    }
+    if (imageFile.size() > kMaximumHeaderImageFileBytes) {
+        //% "The selected image is too large. Choose an image up to 40 megapixels and 64 MiB."
+        emit statusMessage(qtTrId("SelectedImageTooLarge"));
+        return {};
+    }
+
+    QImageReader reader(imageFile.absoluteFilePath());
+    reader.setAutoTransform(true);
+    const auto exceedsPixelLimit = [](const QSize &size) {
+        return size.isValid()
+            && qint64(size.width()) * size.height() > kMaximumHeaderImagePixels;
+    };
+    if (exceedsPixelLimit(reader.size())) {
+        //% "The selected image is too large. Choose an image up to 40 megapixels and 64 MiB."
+        emit statusMessage(qtTrId("SelectedImageTooLarge"));
+        return {};
+    }
+    QImage image = reader.read();
+    if (exceedsPixelLimit(image.size())) {
+        //% "The selected image is too large. Choose an image up to 40 megapixels and 64 MiB."
+        emit statusMessage(qtTrId("SelectedImageTooLarge"));
+        return {};
+    }
+    image = image.convertToFormat(QImage::Format_ARGB32);
+    image.setDevicePixelRatio(1.0);
+    if (image.isNull()) {
+        //% "The selected image could not be opened."
+        emit statusMessage(qtTrId("SelectedImageOpenFailed"));
+        return {};
+    }
+
+    const QImage preview = image.width() > kMaximumHeaderImagePreviewDimension
+            || image.height() > kMaximumHeaderImagePreviewDimension
+        ? image.scaled(kMaximumHeaderImagePreviewDimension,
+                       kMaximumHeaderImagePreviewDimension,
+                       Qt::KeepAspectRatio, Qt::SmoothTransformation)
+        : image;
+    QByteArray png;
+    QBuffer buffer(&png);
+    if (!buffer.open(QIODevice::WriteOnly) || !preview.save(&buffer, "PNG")) {
+        //% "The selected image could not be opened."
+        emit statusMessage(qtTrId("SelectedImageOpenFailed"));
+        return {};
+    }
+    const QVariantMap result{
+        {QStringLiteral("previewSource"), QStringLiteral("data:image/png;base64,")
+             + QString::fromLatin1(png.toBase64())},
+        {QStringLiteral("pixelWidth"), image.width()},
+        {QStringLiteral("pixelHeight"), image.height()}};
+    m_headerImage = std::move(image);
+    return result;
+}
+
+void PDFEditController::clearHeaderImage()
+{
+    m_headerImage = QImage();
+}
+
+bool PDFEditController::addHeaderImage(const QString &pages, qreal xPoints,
+                                       qreal yPoints, qreal widthPoints,
+                                       qreal heightPoints, int quarterTurns)
+{
+    if (!m_document || !m_document->isLoaded() || m_saving)
+        return false;
+    if (watermarkChangesPending()) {
+        //% "Save or discard watermark changes before editing page content."
+        emit statusMessage(qtTrId("SaveWatermarkBeforeEditing"));
+        return false;
+    }
+    if (!documentAllowsEditing()) {
+        //% "This PDF does not permit content editing."
+        emit statusMessage(qtTrId("PdfEditingNotPermitted"));
+        return false;
+    }
+    if (m_headerImage.isNull()) {
+        //% "Choose an image to add to the header."
+        emit statusMessage(qtTrId("HeaderImageRequired"));
+        return false;
+    }
+    if (!std::isfinite(xPoints) || !std::isfinite(yPoints)
+        || !std::isfinite(widthPoints) || !std::isfinite(heightPoints)
+        || xPoints < 0.0 || yPoints < 0.0 || widthPoints <= 0.0 || heightPoints <= 0.0
+        || yPoints >= kHeaderHeight || heightPoints > kHeaderHeight - yPoints
+        || quarterTurns < 0 || quarterTurns > 3) {
+        //% "Keep the image within the first 100 pt of the page."
+        emit statusMessage(qtTrId("HeaderImageInvalidPosition"));
+        return false;
+    }
+
+    QList<int> selectedPages;
+    const PageParseResult parsed = headerPages(pages, m_document->pageCount(), selectedPages);
+    if (parsed == PageParseResult::Invalid) {
+        //% "Enter valid page numbers or ranges, such as 1-3, 5."
+        emit statusMessage(qtTrId("HeaderTextInvalidPages"));
+        return false;
+    }
+    if (parsed == PageParseResult::TooLarge
+        || m_nextAddedObjectId > std::numeric_limits<quint64>::max()
+            - static_cast<quint64>(selectedPages.size())) {
+        //% "This header batch is too large. Apply it to fewer pages."
+        emit statusMessage(qtTrId("HeaderTextBatchTooLarge"));
+        return false;
+    }
+
+    Candidate prototype;
+    prototype.kind = QStringLiteral("addedImage");
+    //% "Image"
+    prototype.label = qtTrId("Image");
+    prototype.editable = true;
+    prototype.added = true;
+    prototype.image = m_headerImage;
+
+    Command command;
+    command.kind = Command::Kind::ObjectDraftBatch;
+    command.addedDrafts.reserve(selectedPages.size());
+    quint64 nextAddedId = m_nextAddedObjectId;
+    for (int page : std::as_const(selectedPages)) {
+        const QSizeF size = m_document->pageSize(page);
+        if (!std::isfinite(size.width()) || !std::isfinite(size.height())
+            || size.width() <= 0.0 || size.height() <= 0.0
+            || widthPoints > size.width() - xPoints
+            || heightPoints > qMin(kHeaderHeight, size.height()) - yPoints) {
+            //% "The header image does not fit within the first 100 pt on page %1. Resize or move it."
+            emit statusMessage(qtTrId("HeaderImageDoesNotFit").arg(page + 1));
+            return false;
+        }
+        Candidate candidate = prototype;
+        candidate.page = page;
+        candidate.addedOrder = ++nextAddedId;
+        candidate.objectId = QStringLiteral("added-image:")
+            + QString::number(candidate.addedOrder);
+        setInitialGeometry(candidate, QRectF(xPoints / size.width(),
+                                            yPoints / size.height(),
+                                            widthPoints / size.width(),
+                                            heightPoints / size.height()));
+        Draft draft = initialDraftForCandidate(candidate);
+        draft.imageQuarterTurns = quarterTurns;
+        command.addedDrafts.append(std::move(draft));
+    }
+
+    // Validate the full batch before mutating editor state, IDs, or history.
     finishSelectedFrameResize();
     finishSelectedTextEdit();
     m_nextAddedObjectId = nextAddedId;

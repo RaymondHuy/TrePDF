@@ -6,6 +6,11 @@ asynchronous rendering, per-tab whole-document text search and left/right view
 rotation, rich-text content edits, image insertion, Save/Save As, and an
 ID-based localization system with Vietnamese enabled by default.
 
+**Header → Image** places a local image inside the gray 100-point header.
+The pending image supports drag, eight resize handles, aspect-ratio lock and
+90° rotation. Choose all pages or a page range in the right panel, then Apply
+to create one undoable batch. Save/Save As writes ordinary editable PDF images.
+
 **Header → Add Text** lets you click inside the gray header area to place a
 textbox and type directly on the page. The right-side panel appears after
 placement to set font family, size, bold/italic/underline, text color, and

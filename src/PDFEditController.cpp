@@ -882,6 +882,7 @@ void PDFEditController::clearSelection()
 void PDFEditController::resetSession()
 {
     resetWatermarks();
+    clearHeaderImage();
     m_pendingOpenPassword.clear();
     cancelWebLinkCreation();
     m_autoWebLinks.clear();

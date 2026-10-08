@@ -14,6 +14,7 @@ Item {
     property bool viewTabActive: false
     property bool headerTabActive: false
     property HeaderTextPlacement headerTextPlacement: null
+    property HeaderImagePlacement headerImagePlacement: null
     property bool textSelectionEnabled: true
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
@@ -251,6 +252,22 @@ Item {
                 && !pageCard.pooled && placement !== null
             enabled: visible && !pageCard.editController.saving
             z: 2
+        }
+
+        HeaderImageOverlay {
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: Math.min(pageSurface.height, 100 * pageCard.zoom)
+            theme: pageCard.theme
+            editController: pageCard.editController
+            placement: pageCard.headerImagePlacement
+            page: pageCard.page
+            zoom: pageCard.zoom
+            visible: pageCard.headerTabActive && pageCard.document.loaded
+                && !pageCard.pooled && placement !== null
+            enabled: visible && !pageCard.editController.saving
+            z: 3
         }
     }
 
