@@ -297,6 +297,9 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/Components/CommentPanel.qml`](../src/Components/CommentPanel.qml) | Chỉ mục/danh sách comment toàn tài liệu, phản hồi một cấp, điều hướng, xóa và sửa nội dung comment/reply được hỗ trợ; không chứa control appearance. |
 | [`src/Components/DrawingCommentPropertiesPanel.qml`](../src/Components/DrawingCommentPropertiesPanel.qml) | Panel tab Edit dùng chung cho stroke, fill/no fill và opacity của Edit shape hoặc drawing comment; tiêu đề theo loại selection, source comment appearance không an toàn chỉ đọc. |
 | [`src/Components/ImagePropertiesPanel.qml`](../src/Components/ImagePropertiesPanel.qml) | Panel Thuộc tính ảnh khi chọn ảnh trong Edit hoặc Sign; chứa xoay trái/phải 90° và khóa tỷ lệ transient riêng từng tab. |
+| [`src/Components/HeaderTextPanel.qml`](../src/Components/HeaderTextPanel.qml) | Chọn tất cả trang/phạm vi trang và Áp dụng/Hủy sau khi đặt textbox Header. |
+| [`src/Components/HeaderTextPlacement.qml`](../src/Components/HeaderTextPlacement.qml) | State text/vị trí Header tạm, không phụ thuộc delegate pooling. |
+| [`src/Components/HeaderTextOverlay.qml`](../src/Components/HeaderTextOverlay.qml) | Click vùng Header và textbox inline theo tọa độ PDF pt. |
 | [`src/Components/TextFieldOptionsPanel.qml`](../src/Components/TextFieldOptionsPanel.qml) | Panel multi-line, giới hạn ký tự tùy chọn và xóa Text Field đang chọn. |
 | [`src/Components/CombFieldOptionsPanel.qml`](../src/Components/CombFieldOptionsPanel.qml) | Panel số ô/giới hạn ký tự bắt buộc và xóa Comb Field đang chọn. |
 | [`src/Components/DropdownOptionsPanel.qml`](../src/Components/DropdownOptionsPanel.qml) | Panel option dùng chung để cấu hình và xóa Dropdown hoặc List Box đang chọn. |
@@ -339,6 +342,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFEditControllerText.cpp`](../src/PDFEditControllerText.cpp) | Inline editor, chọn font và định dạng rich text. |
 | [`src/PDFEditControllerComments.cpp`](../src/PDFEditControllerComments.cpp) | Tạo/sửa comment, text markup, reply, status/checkmark và appearance properties. |
 | [`src/PDFEditControllerGeometry.cpp`](../src/PDFEditControllerGeometry.cpp) | Thêm text/image/shape, thao tác trang, di chuyển/resize draft và xoay ảnh. |
+| [`src/PDFEditControllerHeaderText.cpp`](../src/PDFEditControllerHeaderText.cpp) | Tạo batch text Header với kiểm tra phạm vi, font và vùng 100 pt trước khi mutate. |
 | [`src/PDFEditControllerDrafts.cpp`](../src/PDFEditControllerDrafts.cpp) | Snapshot, undo/redo/discard, dữ liệu trình bày và render draft. |
 | [`src/PDFEditControllerSave.cpp`](../src/PDFEditControllerSave.cpp) | Điều phối Save/Save As đồng bộ và bất đồng bộ. |
 | [`src/PDFEditControllerWebLinks.cpp`](../src/PDFEditControllerWebLinks.cpp) | Tạo/xóa link theo tab, scan bất đồng bộ, batch history, preview xóa và click draft qua xác nhận. |
@@ -364,6 +368,8 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFWidgetAnnotationSuppression.cpp`](../src/PDFWidgetAnnotationSuppression.cpp) | Ẩn Widget tạm thời và phục hồi patch khi render designer. |
 | [`tests/tst_PDFEditController.cpp`](../tests/tst_PDFEditController.cpp) | Bộ test tích hợp/hồi quy của edit, search, save, form, font và tab. |
 | [`tests/tst_PDFEditControllerSignatures.cpp`](../tests/tst_PDFEditControllerSignatures.cpp) | Preview/input chữ ký, thư viện atomic, history/discard và image Save/Save As/reopen. |
+| [`tests/tst_PDFEditControllerHeaderText.cpp`](../tests/tst_PDFEditControllerHeaderText.cpp) | Phạm vi trang, batch history, hình học và Header Save/Save As/reopen. |
+| [`tests/tst_PDFEditControllerHeaderTextUi.cpp`](../tests/tst_PDFEditControllerHeaderTextUi.cpp) | Luồng ribbon/panel Header, Áp dụng/Hủy, lỗi nhập và hủy input theo vòng đời. |
 
 ## Khi cần sửa một tính năng, bắt đầu ở đâu
 

@@ -6,6 +6,16 @@ asynchronous rendering, per-tab whole-document text search and left/right view
 rotation, rich-text content edits, image insertion, Save/Save As, and an
 ID-based localization system with Vietnamese enabled by default.
 
+**Header → Add Text** lets you click inside the gray header area to place a
+textbox and type directly on the page. The right-side panel appears after
+placement to set font family, size, bold/italic/underline, text color, and
+all pages or a page range such as `1-3, 5`. Formatting previews live in the
+textbox. Apply creates one undoable batch of
+text drafts in the first 100 PDF points of the selected pages; Save/Save As
+persists them as searchable page text. The gray header guide is view-only.
+After saving, each header can be edited independently through Edit. Footer
+currently provides an empty tab. See [the header text pipeline](docs/header-text-pipeline.md).
+
 Open PDFs through the file picker, by dropping local PDF files onto the window,
 or from Finder's **Open With → TrePDF** on macOS (including while TrePDF is
 already running). The application also accepts local PDF paths/file URLs as

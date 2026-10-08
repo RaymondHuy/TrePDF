@@ -12,6 +12,8 @@ Item {
     required property PDFSearchController searchController
     property PDFTextSelectionController textSelectionController
     property bool viewTabActive: false
+    property bool headerTabActive: false
+    property HeaderTextPlacement headerTextPlacement: null
     property bool textSelectionEnabled: true
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
@@ -170,6 +172,20 @@ Item {
             z: 0.5
         }
 
+        Rectangle {
+            objectName: "headerAreaOverlay"
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: Math.min(pageSurface.height, 100 * pageCard.zoom)
+            color: pageCard.theme.headerAreaColor
+            visible: pageCard.headerTabActive && pageCard.document.loaded
+                && !pageCard.pooled && width > 0 && height > 0
+            enabled: false
+            Accessible.ignored: true
+            z: 0.75
+        }
+
         PageInteractionOverlay {
             id: pageInteractionOverlay
 
@@ -219,6 +235,22 @@ Item {
             z: 1
             onDeleteCommentRequested: (page, objectId) =>
                 pageCard.deleteCommentRequested(page, objectId)
+        }
+
+        HeaderTextOverlay {
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: Math.min(pageSurface.height, 100 * pageCard.zoom)
+            theme: pageCard.theme
+            editController: pageCard.editController
+            placement: pageCard.headerTextPlacement
+            page: pageCard.page
+            zoom: pageCard.zoom
+            visible: pageCard.headerTabActive && pageCard.document.loaded
+                && !pageCard.pooled && placement !== null
+            enabled: visible && !pageCard.editController.saving
+            z: 2
         }
     }
 

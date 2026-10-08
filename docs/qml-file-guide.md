@@ -54,6 +54,9 @@ Main.qml
     ├── CommentPanel.qml
     ├── DrawingCommentPropertiesPanel.qml
     ├── ImagePropertiesPanel.qml
+    ├── HeaderTextPanel.qml
+    ├── HeaderTextPlacement.qml
+    ├── HeaderTextOverlay.qml
     ├── TextFormatPanel.qml
     ├── TextFieldOptionsPanel.qml
     ├── CombFieldOptionsPanel.qml
@@ -138,8 +141,12 @@ chỉ là state của workflow UI và phải được xóa khi popup đóng ho�
 
 ### [`src/Components/AppRibbon.qml`](../src/Components/AppRibbon.qml)
 
-**Vai trò:** host của năm tab View, Edit, Comment, Forms, Sign và cầu nối giữa
-ribbon con với `Main.qml`.
+**Vai trò:** host của chín tab View, Edit, Comment, Forms, Sign, Protect,
+Convert, Header và Footer; cầu nối giữa ribbon con với `Main.qml`.
+Header có nút Add Text dùng cùng icon `../assets/icons/type.svg`
+và `qsTrId("AddText")` với Edit; phát `headerTextRequested()` để bật đặt chữ bằng click trong vùng Header.
+Footer hiện có vùng lệnh trống. Khi Header active, mỗi trang đang hiển thị có
+dải xám nhạt cao 100 PDF pt ở đầu trang.
 
 **Đầu vào:** `theme`, `document`, `editController`, `searchController`; giữ lựa
 chọn tool Text Field, Check Box, Radio Button, Dropdown, List Box và Comb Field
@@ -149,6 +156,7 @@ của Forms.
 
 - Vẽ hàng tab ribbon, vùng lệnh tương ứng và trạng thái tên tài liệu/draft/save.
 - Tính `viewTabActive`, `editTabActive`, `commentTabActive`, `formsTabActive`, `signTabActive` và
+  `protectTabActive`, `exportTabActive`, `headerTabActive`, `footerTabActive` cùng
   các cờ tool form để workspace biết overlay nào được phép hiện/tương tác.
 - Khi vào Edit hoặc Sign, mặc định về `SelectTool`; khi vào Comment, bật
   `CommentSelectTool`; rời các tab này đưa `PDFEditController.tool` về Browse để
@@ -514,10 +522,33 @@ trong tab Edit; không lập chỉ mục, hiển thị hay sửa nội dung comm
   mở rộng; trạng thái collapsed được lưu theo session.
 - Chuyển các signal font family, bold/italic/underline, color và paragraph
   alignment vào `PDFEditController`.
+- Header > Add Text bật trạng thái đặt chữ; click trong vùng Header tạo textbox
+  inline và mở `HeaderTextPanel` qua Loader riêng. `HeaderTextPlacement` giữ text
+  và vị trí khi delegate bị pool; input chưa Áp dụng không tham gia draft guard.
 
 **Vòng đời:** `prepareForDeactivation()` yêu cầu `DocumentView` kết thúc editor,
 hủy interaction và lưu scroll trước khi workspace bị phá; hàm cũng chạy trong
 `Component.onDestruction` để không phụ thuộc caller luôn nhớ gọi.
+
+### [`src/Components/HeaderTextPanel.qml`](../src/Components/HeaderTextPanel.qml)
+
+**Vai trò:** chọn tất cả trang hoặc phạm vi `1-3, 5` sau khi đặt textbox trên trang.
+Nút Áp dụng gọi `PDFEditController.addHeaderText(text, pages, xPoints, yPoints, widthPoints)`; thành công đóng
+panel, thất bại giữ input và hiện lỗi. Hủy không tạo draft. Đổi tab/session,
+nguồn PDF, cấu trúc trang, history hoặc bắt đầu Save sẽ hủy input tạm. Undo/Redo
+trong ô nhập dùng history cục bộ của ô, không gọi history PDF. Chữ đã Áp dụng
+dùng preview và Save của added text; xem [pipeline](header-text-pipeline.md).
+
+### [`src/Components/HeaderTextPlacement.qml`](../src/Components/HeaderTextPlacement.qml)
+
+**Vai trò:** state tạm của workspace: chờ click, trang/vị trí/chiều rộng theo pt,
+text, lỗi và Apply/Cancel. Nội dung không phụ thuộc delegate đang hiển thị.
+
+### [`src/Components/HeaderTextOverlay.qml`](../src/Components/HeaderTextOverlay.qml)
+
+**Vai trò:** nhận click trong vùng xám khi Add Text được bật, hiển thị textbox
+inline bằng Loader trên `pageSurface` (z=2) để cùng zoom/xoay với PDF. Click đổi
+pixel sang pt đúng một lần. Panel không còn chứa ô nhập text.
 
 ### [`src/Components/PageThumbnailPanel.qml`](../src/Components/PageThumbnailPanel.qml)
 
@@ -606,6 +637,10 @@ tương tác.
   `PageInteractionOverlay`; coordinator xử lý z-order và cleanup chung.
 - `SearchHighlightLayer` nằm ở `z: 0.5`, dưới coordinator tương tác; nó đọc rect
   normalized của đúng display page và tự xoay cùng `pageSurface`.
+- `headerAreaOverlay` chỉ hiện khi Header active và tài liệu đã mở, cao
+  `100 * zoom` (giới hạn trong chiều cao trang), phủ toàn chiều rộng ở đầu
+  `pageSurface`. Dải xám bán trong suốt ở `z: 0.75` xoay cùng trang, không nhận
+  input, không tạo draft và không lưu vào PDF; áp dụng cho cả hai pane Split.
 - Hiển thị số trang ngoài page surface.
 
 Xem [overlay-architecture.md](overlay-architecture.md) để có cây item, z-order
@@ -983,7 +1018,7 @@ delegate được reuse.
 
 ### [`src/Components/RibbonTabButton.qml`](../src/Components/RibbonTabButton.qml)
 
-**Vai trò:** nút chọn View/Edit/Comment/Forms/Sign.
+**Vai trò:** nút chọn tab ribbon dùng chung.
 
 - Tùy biến background, text color và indicator theo checked/hover/focus.
 - Nhận theme, còn label/check state do `AppRibbon` cung cấp.

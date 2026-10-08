@@ -14,6 +14,8 @@ Item {
     required property PDFSearchController searchController
     property PDFTextSelectionController textSelectionController
     property bool viewTabActive: false
+    property bool headerTabActive: false
+    property HeaderTextPlacement headerTextPlacement: null
     property bool textSelectionEnabled: true
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
@@ -193,6 +195,8 @@ Item {
         searchController: root.searchController
         textSelectionController: root.textSelectionController
         viewTabActive: root.viewTabActive
+        headerTabActive: root.headerTabActive
+        headerTextPlacement: root.headerTextPlacement
         textSelectionEnabled: root.textSelectionEnabled
         formController: root.formController
         formDesignerController: root.formDesignerController
@@ -237,6 +241,8 @@ Item {
                 searchController: root.searchController
                 textSelectionController: root.textSelectionController
                 viewTabActive: root.viewTabActive
+                headerTabActive: root.headerTabActive
+                headerTextPlacement: root.headerTextPlacement
                 textSelectionEnabled: root.textSelectionEnabled
                 formController: root.formController
                 formDesignerController: root.formDesignerController

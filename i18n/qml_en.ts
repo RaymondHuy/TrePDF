@@ -99,11 +99,12 @@
         <translation>Your edits exist only in this session and have not been saved to the PDF.</translation>
     </message>
     <message id="Cancel">
-        <location filename="../src/Main.qml" line="1189"/>
-        <location filename="../src/Main.qml" line="1309"/>
-        <location filename="../src/Main.qml" line="1477"/>
-        <location filename="../src/Main.qml" line="1545"/>
-        <location filename="../src/Main.qml" line="1621"/>
+        <location filename="../src/Main.qml" line="1217"/>
+        <location filename="../src/Main.qml" line="1337"/>
+        <location filename="../src/Main.qml" line="1505"/>
+        <location filename="../src/Main.qml" line="1573"/>
+        <location filename="../src/Main.qml" line="1649"/>
+        <location filename="../src/Components/HeaderTextPanel.qml" line="689"/>
         <location filename="../src/Components/ExportRibbon.qml" line="59"/>
         <location filename="../src/Components/LinkPropertiesDialog.qml" line="336"/>
         <location filename="../src/Components/SetPasswordDialog.qml" line="172"/>
@@ -253,41 +254,52 @@
         <translation type="vanished">Enable</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="450"/>
+        <location filename="../src/Components/AppRibbon.qml" line="474"/>
         <source>View</source>
         <translation>View</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="456"/>
+        <location filename="../src/Components/AppRibbon.qml" line="480"/>
         <location filename="../src/Components/EditOverlay.qml" line="3780"/>
         <source>Edit</source>
         <translation>Edit</translation>
     </message>
     <message id="Comment">
-        <location filename="../src/Components/AppRibbon.qml" line="462"/>
+        <location filename="../src/Components/AppRibbon.qml" line="486"/>
         <source>Comment</source>
         <translation>Comment</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="468"/>
+        <location filename="../src/Components/AppRibbon.qml" line="492"/>
         <source>Forms</source>
         <translation>Forms</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="474"/>
+        <location filename="../src/Components/AppRibbon.qml" line="498"/>
         <source>E-Sign</source>
         <translation>E-Sign</translation>
     </message>
     <message id="ProtectTab">
-        <location filename="../src/Components/AppRibbon.qml" line="481"/>
+        <location filename="../src/Components/AppRibbon.qml" line="505"/>
         <location filename="../src/Components/ProtectRibbon.qml" line="38"/>
         <source>Protect</source>
         <translation>Protect</translation>
     </message>
     <message id="ConvertTab">
-        <location filename="../src/Components/AppRibbon.qml" line="487"/>
+        <location filename="../src/Components/AppRibbon.qml" line="511"/>
         <source>Convert</source>
         <translation>Convert</translation>
+    </message>
+    <message id="HeaderTab">
+        <location filename="../src/Components/AppRibbon.qml" line="425"/>
+        <location filename="../src/Components/AppRibbon.qml" line="521"/>
+        <source>Header</source>
+        <translation>Header</translation>
+    </message>
+    <message id="FooterTab">
+        <location filename="../src/Components/AppRibbon.qml" line="528"/>
+        <source>Footer</source>
+        <translation>Footer</translation>
     </message>
     <message id="ExportTab">
         <location filename="../src/Components/ExportRibbon.qml" line="38"/>
@@ -295,12 +307,12 @@
         <translation>Export</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="513"/>
+        <location filename="../src/Components/AppRibbon.qml" line="551"/>
         <source>Saving PDF…</source>
         <translation>Saving PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="517"/>
+        <location filename="../src/Components/AppRibbon.qml" line="555"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Draft · Not saved</translation>
@@ -583,8 +595,10 @@
         <translation>Edit Text</translation>
     </message>
     <message id="AddText">
+        <location filename="../src/Components/AppRibbon.qml" line="433"/>
         <location filename="../src/Components/EditRibbon.qml" line="178"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="133"/>
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="253"/>
         <source>Add Text</source>
         <translation>Add Text</translation>
     </message>
@@ -875,6 +889,7 @@ Save your changes, then switch to the View tab to try the link.</translation>
     </message>
     <message id="Underline">
         <location filename="../src/Components/CommentRibbon.qml" line="871"/>
+        <location filename="../src/Components/HeaderTextPanel.qml" line="516"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="900"/>
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="978"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="1215"/>
@@ -1649,6 +1664,7 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="209"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="272"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="371"/>
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="173"/>
         <source>This PDF does not permit content editing.</source>
         <translation>This PDF does not permit content editing.</translation>
     </message>
@@ -1954,6 +1970,7 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <location filename="../src/PDFEditController.cpp" line="503"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="634"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="714"/>
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="168"/>
         <source>Save or discard watermark changes before editing page content.</source>
         <translation>Save or discard watermark changes before editing page content.</translation>
     </message>
@@ -2064,26 +2081,31 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>Editing form fields and free-text annotations is not available in this draft editor yet.</translation>
     </message>
     <message id="VietnameseFonts">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="21"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="48"/>
         <source>Vietnamese</source>
         <translation>Vietnamese</translation>
     </message>
     <message id="EnglishFonts">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="23"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="50"/>
         <source>English</source>
         <translation>English</translation>
     </message>
     <message id="ChineseFonts">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="25"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="52"/>
         <source>Chinese</source>
         <translation>Chinese</translation>
     </message>
     <message id="JapaneseFonts">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="27"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="54"/>
         <source>Japanese</source>
         <translation>Japanese</translation>
     </message>
     <message id="KoreanFonts">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="29"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="56"/>
         <source>Korean</source>
         <translation>Korean</translation>
@@ -2129,16 +2151,22 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>Select editable text to enable formatting.</translation>
     </message>
     <message id="FontFamily">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="114"/>
+        <location filename="../src/Components/HeaderTextPanel.qml" line="130"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="409"/>
         <source>Font family</source>
         <translation>Font family</translation>
     </message>
     <message id="NoFontsMatchFilter">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="264"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="556"/>
         <source>No supported fonts match this filter.</source>
         <translation>No supported fonts match this filter.</translation>
     </message>
     <message id="FontSize">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="297"/>
+        <location filename="../src/Components/HeaderTextPanel.qml" line="334"/>
+        <location filename="../src/Components/HeaderTextPanel.qml" line="363"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="590"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="644"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="711"/>
@@ -2146,21 +2174,27 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>Font size</translation>
     </message>
     <message id="FontStyle">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="406"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="797"/>
         <source>Style</source>
         <translation>Style</translation>
     </message>
     <message id="Bold">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="430"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="820"/>
         <source>Bold</source>
         <translation>Bold</translation>
     </message>
     <message id="Italic">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="473"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="860"/>
         <source>Italic</source>
         <translation>Italic</translation>
     </message>
     <message id="FontColor">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="550"/>
+        <location filename="../src/Components/HeaderTextPanel.qml" line="560"/>
+        <location filename="../src/Components/HeaderTextPanel.qml" line="718"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="932"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="1128"/>
         <source>Font color</source>
@@ -3780,6 +3814,88 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <location filename="../src/ios/PlatformService.cpp" line="225"/>
         <source>Select at most 32 PDF documents at a time.</source>
         <translation>Select at most 32 PDF documents at a time.</translation>
+    </message>
+    <message id="AddHeaderTextFailed">
+        <location filename="../src/Components/HeaderTextPlacement.qml" line="158"/>
+        <source>Could not add header text.</source>
+        <translation>Could not add header text.</translation>
+    </message>
+    <message id="HeaderText">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="104"/>
+        <location filename="../src/Components/HeaderTextOverlay.qml" line="70"/>
+        <source>Header text</source>
+        <translation>Header text</translation>
+    </message>
+    <message id="HeaderTextPlaceholder">
+        <location filename="../src/Components/HeaderTextOverlay.qml" line="68"/>
+        <source>Enter header text</source>
+        <translation>Enter header text</translation>
+    </message>
+    <message id="HeaderApplyTo">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="607"/>
+        <source>Apply to</source>
+        <translation>Apply to</translation>
+    </message>
+    <message id="HeaderAllPages">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="625"/>
+        <source>All pages</source>
+        <translation>All pages</translation>
+    </message>
+    <message id="HeaderSelectedPages">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="636"/>
+        <location filename="../src/Components/HeaderTextPanel.qml" line="655"/>
+        <source>Selected pages</source>
+        <translation>Selected pages</translation>
+    </message>
+    <message id="HeaderPageRangePlaceholder">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="653"/>
+        <source>For example: 1-3, 5</source>
+        <translation>For example: 1-3, 5</translation>
+    </message>
+    <message id="HeaderTextDraftHint">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="664"/>
+        <source>Apply creates a draft. Save or Save As writes the text to the PDF.</source>
+        <translation>Apply creates a draft. Save or Save As writes the text to the PDF.</translation>
+    </message>
+    <message id="HeaderApply">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="699"/>
+        <source>Apply</source>
+        <translation>Apply</translation>
+    </message>
+    <message id="HeaderTextInvalidContent">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="196"/>
+        <source>Enter header text using at most 700 characters, without unsupported control characters.</source>
+        <translation>Enter header text using at most 700 characters, without unsupported control characters.</translation>
+    </message>
+    <message id="HeaderTextInvalidPages">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="238"/>
+        <source>Enter valid page numbers or ranges, such as 1-3, 5.</source>
+        <translation>Enter valid page numbers or ranges, such as 1-3, 5.</translation>
+    </message>
+    <message id="HeaderTextBatchTooLarge">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="246"/>
+        <source>This header batch is too large. Apply it to fewer pages.</source>
+        <translation>This header batch is too large. Apply it to fewer pages.</translation>
+    </message>
+    <message id="HeaderTextFontUnavailable">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="229"/>
+        <source>The selected header font or style is unavailable or does not support this text. Choose another font.</source>
+        <translation>The selected header font or style is unavailable or does not support this text. Choose another font.</translation>
+    </message>
+    <message id="HeaderTextDoesNotFit">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="288"/>
+        <source>Header text does not fit within the first 100 pt on page %1. Shorten the text.</source>
+        <translation>Header text does not fit within the first 100 pt on page %1. Shorten the text.</translation>
+    </message>
+    <message id="HeaderTextInvalidPosition">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="180"/>
+        <source>Choose a text position inside the first 100 pt of the page.</source>
+        <translation>Choose a text position inside the first 100 pt of the page.</translation>
+    </message>
+    <message id="HeaderTextInvalidFormat">
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="220"/>
+        <source>Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color.</source>
+        <translation>Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color.</translation>
     </message>
 </context>
 </TS>
