@@ -15,6 +15,16 @@ and Save/Save As persistence.
 
 Current features:
 
+- Header > Image arms placement in the gray 100-point header, opens the local
+  image picker after a click, then shows a temporary image and a right panel.
+  `HeaderImagePlacement.qml` owns the pending snapshot geometry independently of
+  pooled delegates; `HeaderImageOverlay.qml` supports drag/eight-handle resize,
+  and `HeaderImagePanel.qml` offers aspect lock, quarter turns and page ranges.
+  `prepareHeaderImage()` validates/snapshots pixels; `addHeaderImage()` in
+  `PDFEditControllerHeaderText.cpp` validates every target frame before one
+  undoable added-image batch. Save uses the existing image writer.
+  Cancel, tab/session/history/structure changes and Save abandon pending input.
+
 - Header > Add Text arms click placement inside the gray 100-point header.
   `HeaderTextOverlay.qml` shows an inline textbox at the clicked point, then
   `HeaderTextPanel.qml` opens for font family/size/style/color and all-pages/custom

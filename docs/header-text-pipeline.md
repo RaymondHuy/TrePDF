@@ -1,4 +1,4 @@
-# Header text
+# Header text and images
 
 Header > Add Text arms the placement cursor. Click inside the gray header area
 to open a textbox on the page at that position. The right-side panel then opens
@@ -76,3 +76,39 @@ the color picker lifecycle, pending size edits, Apply/Cancel, validation and
 transient input lifecycle. Format tests verify font, size, style, color and
 underline geometry after Save/reopen. Native macOS checks cover translated panel layout, selected pages,
 Undo/Redo, scrolling/zoom, Save/reopen and normal shutdown.
+
+## Header images
+
+Header > Image uses the Edit image icon and local file filter. Click in the
+100-point gray area to choose an image; canceling the picker creates no draft.
+The image is centered at the click and clamped into the header with its aspect
+ratio intact (initial width at most 150 pt/25% page width and height at most
+80 pt). The right panel appears after successful decoding. Drag and eight
+handles move/resize it within the header. Aspect lock defaults on; quarter
+turns preserve physical size and are disabled when the swapped frame cannot fit.
+Select all pages or a 1-based range, then Apply.
+
+`HeaderImagePlacement.qml` owns temporary geometry and a bounded preview URL;
+`PDFEditController` owns the decoded full-resolution QImage. `HeaderImageOverlay.qml`
+loads only for the selected visible page, so pooling does not lose placement.
+`HeaderImagePanel.qml` owns only panel input. Main binds the file picker to the
+active session/placement and discards stale results. Image and text placement
+cancel each other. Cancel, Escape, tab/session/history/page-structure changes,
+Save and workspace destruction clear temporary input without creating history.
+
+`prepareHeaderImage()` accepts local files using the Edit limits (64 MiB,
+40 million pixels), applies orientation and snapshots ARGB32 pixels. Its PNG
+preview has a maximum dimension of 1024. `addHeaderImage()` reuses the page-range
+parser (at most 10,000 pages), checks permissions, save/watermark guards, finite
+geometry and every target page before making a single `ObjectDraftBatch`.
+All targets use the same physical frame inside the first 100 pt; smaller pages
+that cannot fit reject the entire request and retain the pending input.
+Decoded pixels are shared between drafts and never reopened from the source
+path during Save. The existing image writer handles crop/rotation, alpha,
+quarter turns, undo/redo/discard, Save/Save As and failed-save retention.
+After reopen, each image is ordinary page content editable independently in Edit;
+there is no persistent Header group or automatic insertion onto later pages.
+
+`tst_PDFEditControllerHeaderImage.cpp` verifies snapshots, atomic batch history,
+range/geometry rejection and Save/reopen; `tst_PDFEditControllerHeaderImageUi.cpp`
+checks pending placement, page selection, frame controls and lifecycle behavior.
