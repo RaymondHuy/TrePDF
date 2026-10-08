@@ -455,13 +455,13 @@ Current features:
   draft previews lay out in PDF points, then scale as a whole with page zoom,
   preserving wrap, baseline, and font-size behavior at fractional zoom levels.
   Commit the active editor before changing primary-pane zoom. During inline
-  editing, bold/italic/underline apply to the
+  editing, color and bold/italic/underline apply to the
   selected range; with only a caret they become the typing format for
   subsequently inserted text without changing existing characters. Invoking
-  one of those controls on a selected text object opens its inline editor first
+  a bold/italic/underline control on a selected text object opens its inline editor first
   and leaves the caret at the end, so it never restyles the whole object. The
   editor merges range formatting directly into its text document and syncs
-  B/I/U and size back after local undo/redo without replacing the rich-text document.
+  color, B/I/U and size back after local undo/redo without replacing the rich-text document.
   The font picker filters system faces by the active bold/italic style using a
   lightweight save-compatibility probe; filtered PDF source fonts remain
   visible as the current value only.

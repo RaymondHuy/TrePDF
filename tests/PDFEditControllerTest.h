@@ -278,6 +278,9 @@ private slots:
     void rejectsInvalidAndNoOpFontSizes();
     void formatsFontSizeInSelectedRange();
     void appliesFontSizeToTypingAtCaret();
+    void appliesColorToTypingAtCaret_data();
+    void appliesColorToTypingAtCaret();
+    void retainsTypingColorWhenChangingFontFamily();
     void joinsNativeFontSizeTypingUndo_data();
     void joinsNativeFontSizeTypingUndo();
     void preservesEditorUndoWhenChangingFontSize();
