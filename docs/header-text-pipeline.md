@@ -3,8 +3,9 @@
 Header > Add Text arms the placement cursor. Click inside the gray header area
 to open a textbox on the page at that position. The right-side panel then opens
 with font family, size, bold/italic/underline, text color, and all-pages or
-1-based range selection such as `1-3, 5`. Formatting updates the complete
-pending header textbox live. Enter the text on
+1-based range selection such as `1-3, 5`. Font family, size and style update the
+complete pending header textbox live. Choosing a color sets the color for new
+text at the current caret; existing characters retain their colors. Enter the text on
 the page and press Apply in the panel. Duplicate page
 numbers are applied once. Cancel closes the panel without creating drafts.
 
@@ -17,7 +18,7 @@ Header text is ordinary page content and remains visible outside the Header tab.
 - `AppRibbon.qml` emits `headerTextRequested`; `Main.qml` prepares the active
   workspace and arms placement.
 - `DocumentWorkspace.qml` owns `HeaderTextPlacement.qml`, holding temporary
-  text, page and PDF-point geometry independently of virtualized delegates.
+  text, character colors, caret and PDF-point geometry independently of virtualized delegates.
   `HeaderTextOverlay.qml` captures clicks only in the gray region while armed,
   then lazily loads a scaled inline editor above page interactions. The panel
   appears only after placement and contains formatting, page selection and Apply/Cancel.
@@ -48,7 +49,10 @@ The editor scales as a whole with zoom to preserve line wrapping. Every selected
 coordinate mapping. Zoom and view rotation do not change saved geometry.
 
 The existing added-text preview and transactional text writer handle these
-drafts. Save/Save As writes searchable PDF text; Save As leaves the original
+drafts. Character colors are stored as rich-text spans and survive batch
+Undo/Redo and Save/reopen. The editor keeps color changes with their inserted
+text in local undo history. Moving the caret picks up the adjacent text color.
+Save/Save As writes searchable PDF text; Save As leaves the original
 file unchanged. A failed save retains the drafts. Page insertion/deletion
 uses the existing candidate/draft remapping and history snapshots.
 
@@ -64,6 +68,11 @@ Page-range parsing is bounded separately. Invalid ranges, empty text, unavailabl
 font glyphs, restricted editing, and overflow reject the complete request before
 any page changes. Header creation also respects the existing save and pending
 watermark guards.
+
+The optional `format.colors` list contains one opaque color per UTF-16 code unit
+of the input text. Missing or empty lists preserve the uniform-color API.
+Newline and NFC normalization map colors with the text; a composed grapheme
+uses its base character's color. Malformed color lists reject the entire batch.
 
 ## Verification
 

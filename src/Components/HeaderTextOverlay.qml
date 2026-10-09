@@ -49,6 +49,33 @@ Item {
                 TextArea {
                     id: textInput
                     objectName: "headerInlineTextInput"
+                    property bool initialized: false
+                    property bool synchronizing: false
+                    property int placementPage: -1
+
+                    function restoreFocus() {
+                        // A dialog can clear the window's root focus scope.
+                        const window = textInput.Window.window
+                        if (window)
+                            window.requestActivate()
+                        forceActiveFocus(Qt.OtherFocusReason)
+                    }
+
+                    function synchronize() {
+                        if (!initialized || synchronizing || !root.placement
+                                || !root.placement.active
+                                || root.placement.page !== placementPage)
+                            return
+                        synchronizing = true
+                        const state = root.editController.headerTextEditorState(textDocument)
+                        root.placement.text = state.text
+                        root.placement.colors = state.colors
+                        root.placement.cursorPosition = state.cursorPosition
+                        root.placement.typingPosition = state.typingPosition
+                        root.placement.textColor = state.color
+                        synchronizing = false
+                    }
+
                     width: editorScroll.availableWidth
                     padding: 0
                     topPadding: 1
@@ -58,17 +85,19 @@ Item {
                         root.placement ? root.placement.fontItalic : false,
                         root.placement ? root.placement.fontUnderline : false,
                         root.placement ? root.placement.fontSize : 12)
-                    text: root.placement ? root.placement.text : ""
                     textFormat: TextEdit.PlainText
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
-                    color: root.placement ? root.placement.textColor : "black"
+                    persistentSelection: true
+                    color: "black"
                     palette.highlight: root.theme.foxitOrange
                     //% "Enter header text"
                     placeholderText: qsTrId("HeaderTextPlaceholder")
                     //% "Header text"
                     Accessible.name: qsTrId("HeaderText")
                     onTextChanged: {
+                        if (!initialized || synchronizing)
+                            return
                         if (text.length > 700) {
                             const lastCodeUnit = text.charCodeAt(699)
                             remove(lastCodeUnit >= 0xD800 && lastCodeUnit <= 0xDBFF
@@ -76,13 +105,28 @@ Item {
                         }
                         if (root.placement && root.placement.text !== text)
                             root.placement.text = text
+                        Qt.callLater(synchronize)
                     }
+                    onCursorPositionChanged: Qt.callLater(synchronize)
                     onActiveFocusChanged: {
                         if (root.placement)
                             root.placement.inputFocused = activeFocus
+                        if (!activeFocus)
+                            synchronize()
                     }
-                    Component.onCompleted: forceActiveFocus()
+                    Component.onCompleted: {
+                        placementPage = root.placement.page
+                        text = root.placement.text
+                        cursorPosition = Math.min(root.placement.cursorPosition, length)
+                        root.editController.initializeHeaderTextEditor(textDocument,
+                            root.placement.colors, root.placement.typingPosition,
+                            root.placement.textColor)
+                        initialized = true
+                        forceActiveFocus()
+                    }
                     Component.onDestruction: {
+                        synchronize()
+                        initialized = false
                         if (root.placement && activeFocus)
                             root.placement.inputFocused = false
                     }
@@ -98,7 +142,13 @@ Item {
 
                     Connections {
                         target: root.placement
-                        function onFocusRequested() { textInput.forceActiveFocus() }
+                        function onFocusRequested() { textInput.restoreFocus() }
+                        function onSynchronizeRequested() { textInput.synchronize() }
+                        function onTypingColorRequested(value) {
+                            root.editController.setHeaderTextEditorColor(textInput.textDocument, value)
+                            textInput.synchronize()
+                            Qt.callLater(textInput.restoreFocus)
+                        }
                     }
                 }
             }

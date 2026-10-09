@@ -23,6 +23,9 @@ QtObject {
     property bool fontItalic: false
     property bool fontUnderline: false
     property color textColor: "black"
+    property var colors: []
+    property int cursorPosition: 0
+    property int typingPosition: -1
     property string errorText: ""
     property bool submitting: false
     property bool inputFocused: false
@@ -30,6 +33,8 @@ QtObject {
         && !editController.saving && !submitting && text.trim().length > 0
 
     signal focusRequested()
+    signal synchronizeRequested()
+    signal typingColorRequested(color value)
 
     function compatibleFont(family, bold, italic) {
         const families = editController.headerTextFontFamilies(-1, bold, italic)
@@ -80,7 +85,10 @@ QtObject {
     function setTextColor(value) {
         if (active) {
             InputMethod.commit()
+            synchronizeRequested()
             textColor = value
+            typingPosition = cursorPosition
+            typingColorRequested(value)
             errorText = ""
         }
     }
@@ -111,6 +119,9 @@ QtObject {
         initialHeightPoints = Math.min(Math.max(18, size.height * 0.04),
             Math.min(100, size.height) - yPoints)
         text = ""
+        colors = []
+        cursorPosition = 0
+        typingPosition = -1
         fontFamily = editController.headerTextFontFamily()
         fontSize = 12
         fontBold = false
@@ -127,6 +138,9 @@ QtObject {
         armed = false
         page = -1
         text = ""
+        colors = []
+        cursorPosition = 0
+        typingPosition = -1
         errorText = ""
         inputFocused = false
         xPoints = 0
@@ -137,6 +151,7 @@ QtObject {
 
     function submit(pages) {
         InputMethod.commit()
+        synchronizeRequested()
         if (!canSubmit)
             return
         errorText = ""
@@ -148,7 +163,8 @@ QtObject {
                 fontBold: fontBold,
                 fontItalic: fontItalic,
                 fontUnderline: fontUnderline,
-                color: textColor
+                color: textColor,
+                colors: colors
             })
         submitting = false
         if (succeeded) {

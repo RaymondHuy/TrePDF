@@ -6,6 +6,7 @@
 #include <QFontInfo>
 #include <QImageReader>
 #include <QRegularExpression>
+#include <QTextBoundaryFinder>
 #include <QTextLayout>
 #include <QTextOption>
 #include <QtTranslation>
@@ -98,6 +99,43 @@ bool validHeaderText(const QString &text)
         }
     }
     return true;
+}
+
+QVector<QColor> normalizedHeaderColors(const QString &text, const QVariantList &colors)
+{
+    QString lineText;
+    QVector<QColor> lineColors;
+    lineText.reserve(text.size());
+    lineColors.reserve(text.size());
+    for (qsizetype index = 0; index < text.size(); ++index) {
+        const QChar character = text.at(index);
+        lineColors.append(colors.at(index).value<QColor>());
+        if (character == QLatin1Char('\r')) {
+            lineText.append(QLatin1Char('\n'));
+            if (index + 1 < text.size() && text.at(index + 1) == QLatin1Char('\n'))
+                ++index;
+        } else {
+            lineText.append(character == QChar::LineSeparator
+                    || character == QChar::ParagraphSeparator
+                ? QLatin1Char('\n') : character);
+        }
+    }
+
+    QVector<QColor> result;
+    result.reserve(lineText.size());
+    QTextBoundaryFinder boundaries(QTextBoundaryFinder::Grapheme, lineText);
+    qsizetype start = 0;
+    for (qsizetype end = boundaries.toNextBoundary(); end >= 0;
+         end = boundaries.toNextBoundary()) {
+        const QString cluster = lineText.sliced(start, end - start);
+        const QString normalized = cluster.normalized(QString::NormalizationForm_C);
+        // A composed character belongs to its base character. Unchanged
+        // clusters retain the original UTF-16 colors without shifting suffixes.
+        for (qsizetype index = 0; index < normalized.size(); ++index)
+            result.append(lineColors.at(cluster == normalized ? start + index : start));
+        start = end;
+    }
+    return result;
 }
 
 qreal headerLayoutHeight(const QString &text, const QFont &font,
@@ -210,6 +248,14 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
     const QString family = familyValue.toString().trimmed();
     const QVariant colorValue = format.value(QStringLiteral("color"), QColor(Qt::black));
     const QColor color = colorValue.value<QColor>();
+    const QVariant colorsValue = format.value(QStringLiteral("colors"), QVariantList{});
+    const QVariantList colors = colorsValue.toList();
+    const bool validColors = colorsValue.metaType().id() == QMetaType::QVariantList
+        && (colors.isEmpty() || (colors.size() == text.size()
+            && std::all_of(colors.cbegin(), colors.cend(), [](const QVariant &value) {
+                const QColor characterColor = value.value<QColor>();
+                return characterColor.isValid() && characterColor.alpha() == 255;
+            })));
     const auto validStyleValue = [&format](const QString &key) {
         return !format.contains(key) || format.value(key).metaType().id() == QMetaType::Bool;
     };
@@ -218,10 +264,17 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
         || std::floor(fontSize) != fontSize
         || familyValue.metaType().id() != QMetaType::QString
         || family.isEmpty() || family.size() > 256
-        || !color.isValid() || color.alpha() != 255
+        || !color.isValid() || color.alpha() != 255 || !validColors
         || !validStyleValue(QStringLiteral("fontBold"))
         || !validStyleValue(QStringLiteral("fontItalic"))
         || !validStyleValue(QStringLiteral("fontUnderline"))) {
+        //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
+        emit statusMessage(qtTrId("HeaderTextInvalidFormat"));
+        return false;
+    }
+    const QVector<QColor> normalizedColors = colors.isEmpty()
+        ? QVector<QColor>() : normalizedHeaderColors(text, colors);
+    if (!colors.isEmpty() && normalizedColors.size() != normalizedText.size()) {
         //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
         emit statusMessage(qtTrId("HeaderTextInvalidFormat"));
         return false;
@@ -261,8 +314,8 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
     prototype.fontBold = bold;
     prototype.fontItalic = italic;
     prototype.fontUnderline = underline;
-    prototype.color = color;
-    prototype.fillColor = color;
+    prototype.color = normalizedColors.isEmpty() ? color : normalizedColors.constFirst();
+    prototype.fillColor = prototype.color;
     prototype.added = true;
     prototype.editable = true;
 
@@ -306,6 +359,19 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
                                             width / size.width(), height / size.height()));
         Draft draft = initialDraftForCandidate(candidate);
         setDraftText(draft, normalizedText);
+        if (!normalizedColors.isEmpty()) {
+            CharacterFormat characterFormat = primaryCharacterFormat(draft);
+            draft.characterSpans.clear();
+            qsizetype start = 0;
+            for (qsizetype end = 1; end <= normalizedColors.size(); ++end) {
+                if (end < normalizedColors.size()
+                    && normalizedColors.at(end) == normalizedColors.at(start))
+                    continue;
+                characterFormat.color = normalizedColors.at(start);
+                draft.characterSpans.append(CharacterSpan{start, end - start, characterFormat});
+                start = end;
+            }
+        }
         command.addedDrafts.append(std::move(draft));
     }
 

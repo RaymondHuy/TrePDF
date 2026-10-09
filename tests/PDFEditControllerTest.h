@@ -78,10 +78,15 @@ private slots:
     void savesHeaderTextAtExplicitPoint_data();
     void savesHeaderTextAtExplicitPoint();
     void formatsHeaderTextAcrossPagesAndSave();
+    void preservesHeaderCharacterColorsAcrossPagesAndSave_data();
+    void preservesHeaderCharacterColorsAcrossPagesAndSave();
+    void normalizesHeaderCharacterColorsWithUnicode();
     void rejectsInvalidHeaderTextFormatAtomically_data();
     void rejectsInvalidHeaderTextFormatAtomically();
     void addsHeaderTextThroughMainWindow();
     void formatsHeaderTextThroughMainWindow();
+    void appliesHeaderColorsOnlyToTypedCharacters();
+    void retainsHeaderColorsAcrossPageDelegatesAndZoom();
     void cancelsHeaderTextPanelAcrossUiChanges();
     void validatesHeaderTextPanelWithoutLosingInput();
     void watermarkDraftsUseHistoryAndRemainPerSession();

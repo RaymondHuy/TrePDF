@@ -241,6 +241,265 @@ private:
     QString m_nativeTextBefore;
 };
 
+// Header input is temporary and has no selected Draft. Keep its typing color
+// with the editor, while actual character colors live in QTextDocument history.
+// In particular, QTextCursor::mergeCharFormat at an empty selection must never
+// be forwarded through QQuickTextEdit's word-formatting cursorSelection API.
+class HeaderTextEditor final : public QObject
+{
+public:
+    explicit HeaderTextEditor(QQuickTextDocument *document)
+        : QObject(document), m_document(document)
+    {
+        setObjectName(QStringLiteral("trepdfHeaderTextEditor"));
+        resetChanges();
+        m_cursorPosition = currentCursorPosition();
+        m_undoSteps = textDocument()->availableUndoSteps();
+        connect(textDocument(), &QTextDocument::contentsChange, this,
+                [this](int position, int removed, int added) {
+            if (m_formatting || (removed == 0 && added == 0)) {
+                return;
+            }
+            // Track the actual changed range, not a string diff: replacing a
+            // selected "a" with another "a" still inserts a new colored glyph.
+            const int start = qBound(0, position, int(m_inserted.size()));
+            const int count = qBound(0, removed, int(m_inserted.size()) - start);
+            m_inserted.remove(start, count);
+            m_inserted.insert(start, qMax(0, added), true);
+            m_changed = true;
+        });
+        connect(textDocument(), &QTextDocument::undoCommandAdded, this, [this]() {
+            if (!m_formatting) {
+                m_newCommand = true;
+            }
+        });
+        if (document->parent()) {
+            document->parent()->installEventFilter(this);
+        }
+    }
+
+    void initialize(const QVariantList &colors, int typingPosition,
+                    const QColor &typingColor)
+    {
+        synchronize();
+        QScopedValueRollback<bool> formatting(m_formatting, true);
+        QTextDocument *document = textDocument();
+        const bool undoEnabled = document->isUndoRedoEnabled();
+        document->setUndoRedoEnabled(false);
+        const int length = document->toPlainText().size();
+        QTextCursor cursor(document);
+        for (int start = 0; start < length;) {
+            const QColor color = storedColor(colors, start);
+            int end = start + 1;
+            while (end < length && storedColor(colors, end) == color) {
+                ++end;
+            }
+            QTextCharFormat format;
+            format.setForeground(color);
+            cursor.setPosition(start);
+            cursor.setPosition(end, QTextCursor::KeepAnchor);
+            cursor.mergeCharFormat(format);
+            start = end;
+        }
+        document->setUndoRedoEnabled(undoEnabled);
+        m_cursorPosition = currentCursorPosition();
+        m_typingPosition = typingPosition == m_cursorPosition
+            && validColor(typingColor) ? typingPosition : -1;
+        m_typingColor = validColor(typingColor) ? typingColor : QColor(Qt::black);
+        m_undoSteps = document->availableUndoSteps();
+        resetChanges();
+    }
+
+    QVariantMap state()
+    {
+        synchronize();
+        const QString text = textDocument()->toPlainText();
+        QVariantList colors;
+        colors.reserve(text.size());
+        for (int position = 0; position < text.size(); ++position) {
+            colors.append(colorAt(position));
+        }
+        return {{QStringLiteral("text"), text},
+                {QStringLiteral("colors"), colors},
+                {QStringLiteral("cursorPosition"), m_cursorPosition},
+                {QStringLiteral("typingPosition"), m_typingPosition},
+                {QStringLiteral("color"), m_typingPosition >= 0
+                    ? m_typingColor : colorAt(qMax(0, m_cursorPosition - 1))}};
+    }
+
+    void setColor(const QColor &color)
+    {
+        if (!validColor(color)) {
+            return;
+        }
+        synchronize();
+        m_typingColor = color;
+        m_typingPosition = m_cursorPosition;
+    }
+
+protected:
+    bool eventFilter(QObject *editor, QEvent *event) override
+    {
+        if (event->type() != QEvent::KeyPress && event->type() != QEvent::KeyRelease
+            && event->type() != QEvent::InputMethod) {
+            return false;
+        }
+        synchronize();
+        bool changesText = false;
+        if (event->type() == QEvent::KeyPress) {
+            const auto *key = static_cast<QKeyEvent *>(event);
+            changesText = (!key->text().isEmpty()
+                && !(key->modifiers() & (Qt::ControlModifier | Qt::MetaModifier)))
+                || key->key() == Qt::Key_Backspace || key->key() == Qt::Key_Delete
+                || key->matches(QKeySequence::Paste) || key->matches(QKeySequence::Cut);
+            if (key->matches(QKeySequence::Undo) || key->matches(QKeySequence::Redo)) {
+                m_typingPosition = -1;
+            }
+        } else if (event->type() == QEvent::InputMethod) {
+            const auto *input = static_cast<QInputMethodEvent *>(event);
+            changesText = !input->commitString().isEmpty() || input->replacementLength() > 0;
+        }
+        if (changesText) {
+            m_nativeEdit = true;
+            m_editCursor = QTextCursor(textDocument());
+            m_editCursor.setPosition(currentCursorPosition());
+            m_editCursor.beginEditBlock();
+            QMetaObject::invokeMethod(this, [this]() { synchronize(); }, Qt::QueuedConnection);
+        }
+        Q_UNUSED(editor);
+        return false;
+    }
+
+private:
+    QTextDocument *textDocument() const { return m_document->textDocument(); }
+
+    static bool validColor(const QColor &color)
+    {
+        return color.isValid() && color.alpha() == 255;
+    }
+
+    static QColor storedColor(const QVariantList &colors, int position)
+    {
+        const QColor color = position < colors.size()
+            ? colors.at(position).value<QColor>() : QColor();
+        return validColor(color) ? color : QColor(Qt::black);
+    }
+
+    int currentCursorPosition() const
+    {
+        return qBound(0, m_document->parent()->property("cursorPosition").toInt(),
+                      qMax(0, textDocument()->characterCount() - 1));
+    }
+
+    QColor colorAt(int position) const
+    {
+        const int maximum = textDocument()->characterCount() - 1;
+        if (position < 0 || position >= maximum) {
+            return QColor(Qt::black);
+        }
+        QTextCursor cursor(textDocument());
+        cursor.setPosition(position);
+        cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+        const QBrush foreground = cursor.charFormat().foreground();
+        return foreground.style() != Qt::NoBrush && validColor(foreground.color())
+            ? foreground.color() : QColor(Qt::black);
+    }
+
+    void resetChanges()
+    {
+        m_inserted.fill(false, qMax(0, textDocument()->characterCount() - 1));
+        m_changed = false;
+        m_newCommand = false;
+    }
+
+    void synchronize()
+    {
+        if (m_synchronizing) {
+            return;
+        }
+        QScopedValueRollback<bool> synchronizing(m_synchronizing, true);
+        // Closing the native block emits its aggregated contentsChange. Keep
+        // the native marker set until those exact insertion ranges are known.
+        if (!m_editCursor.isNull()) {
+            QTextCursor cursor = std::exchange(m_editCursor, QTextCursor());
+            // Bound native pastes before publishing textChanged. Trimming in
+            // that signal would create a separate undo step after this block.
+            const QString text = textDocument()->toPlainText();
+            if (text.size() > 700) {
+                const int limit = text.at(699).isHighSurrogate() ? 699 : 700;
+                cursor.setPosition(limit);
+                cursor.setPosition(text.size(), QTextCursor::KeepAnchor);
+                cursor.removeSelectedText();
+            }
+            cursor.endEditBlock();
+        }
+        const bool edited = m_changed && (m_nativeEdit || m_newCommand);
+        const int currentPosition = currentCursorPosition();
+        if (edited && m_typingPosition >= 0) {
+            QTextDocument *document = textDocument();
+            const int maximum = qMin(int(m_inserted.size()), document->characterCount() - 1);
+            bool needsFormat = false;
+            for (int position = 0; position < maximum && !needsFormat; ++position) {
+                needsFormat = m_inserted.at(position) && colorAt(position) != m_typingColor;
+            }
+            if (needsFormat) {
+                QScopedValueRollback<bool> formatting(m_formatting, true);
+                QTextCursor cursor(document);
+                cursor.joinPreviousEditBlock();
+                QTextCharFormat format;
+                format.setForeground(m_typingColor);
+                for (int start = 0; start < maximum;) {
+                    if (!m_inserted.at(start)) {
+                        ++start;
+                        continue;
+                    }
+                    int end = start + 1;
+                    while (end < maximum && m_inserted.at(end)) {
+                        ++end;
+                    }
+                    cursor.setPosition(start);
+                    cursor.setPosition(end, QTextCursor::KeepAnchor);
+                    cursor.mergeCharFormat(format);
+                    start = end;
+                }
+                document->appendUndoItem(new EditorTypingCursorBoundary);
+                cursor.endEditBlock();
+            }
+            m_typingPosition = currentPosition;
+        } else if ((!edited && textDocument()->availableUndoSteps() != m_undoSteps)
+                   || currentPosition != m_cursorPosition) {
+            m_typingPosition = -1;
+        }
+        m_cursorPosition = currentPosition;
+        m_undoSteps = textDocument()->availableUndoSteps();
+        m_nativeEdit = false;
+        resetChanges();
+    }
+
+    QQuickTextDocument *m_document;
+    QTextCursor m_editCursor;
+    QVector<bool> m_inserted;
+    QColor m_typingColor = Qt::black;
+    int m_cursorPosition = 0;
+    int m_typingPosition = -1;
+    int m_undoSteps = 0;
+    bool m_nativeEdit = false;
+    bool m_changed = false;
+    bool m_newCommand = false;
+    bool m_formatting = false;
+    bool m_synchronizing = false;
+};
+
+HeaderTextEditor *headerTextEditor(QObject *textDocument)
+{
+    auto *document = qobject_cast<QQuickTextDocument *>(textDocument);
+    if (!document || !document->textDocument() || !document->parent()) {
+        return nullptr;
+    }
+    return static_cast<HeaderTextEditor *>(document->findChild<QObject *>(
+        QStringLiteral("trepdfHeaderTextEditor"), Qt::FindDirectChildrenOnly));
+}
+
 constexpr qreal kInitialTextFrameSafetyPoints = 4.0;
 
 constexpr qreal kTextEditMinimumPageMarginPoints = 12.0;
@@ -821,6 +1080,35 @@ void PDFEditController::applyTypingFormatToEditorDocument(
     cursor.mergeCharFormat(format);
     document->appendUndoItem(new EditorTypingCursorBoundary);
     cursor.endEditBlock();
+}
+
+void PDFEditController::initializeHeaderTextEditor(
+    QObject *textDocument, const QVariantList &colors,
+    int typingPosition, const QColor &typingColor) const
+{
+    auto *document = qobject_cast<QQuickTextDocument *>(textDocument);
+    if (!document || !document->textDocument() || !document->parent()) {
+        return;
+    }
+    HeaderTextEditor *editor = headerTextEditor(document);
+    if (!editor) {
+        editor = new HeaderTextEditor(document);
+    }
+    editor->initialize(colors, typingPosition, typingColor);
+}
+
+QVariantMap PDFEditController::headerTextEditorState(QObject *textDocument) const
+{
+    HeaderTextEditor *editor = headerTextEditor(textDocument);
+    return editor ? editor->state() : QVariantMap();
+}
+
+void PDFEditController::setHeaderTextEditorColor(
+    QObject *textDocument, const QColor &color) const
+{
+    if (HeaderTextEditor *editor = headerTextEditor(textDocument)) {
+        editor->setColor(color);
+    }
 }
 
 void PDFEditController::initializeEditorFontSizes(
