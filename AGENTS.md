@@ -28,8 +28,9 @@ Current features:
 - Header > Add Text arms click placement inside the gray 100-point header.
   `HeaderTextOverlay.qml` shows an inline textbox at the clicked point, then
   `HeaderTextPanel.qml` opens for font family/size/style/color and all-pages/custom
-  page-range selection. Formatting updates the whole pending textbox live and
-  persists through the existing added-text writer.
+  page-range selection. Font family/size/style update the whole pending textbox;
+  color changes apply to new text at the caret. Per-character colors persist
+  through the existing added-text writer.
   `HeaderTextPlacement.qml` owns temporary input independently of pooled delegates. `PDFEditControllerHeaderText.cpp` validates the complete
   batch before creating ordinary added-text drafts inside the first 100 PDF
   points. Apply is one undoable action; Save/Save As uses the existing text

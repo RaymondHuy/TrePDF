@@ -56,6 +56,22 @@ QVariantList headerDraftSnapshot(const PDFEditController &controller, int pageCo
     return snapshot;
 }
 
+QVector<QColor> headerDraftColors(const QVariantMap &draft)
+{
+    QVector<QColor> result(draft.value(QStringLiteral("text")).toString().size());
+    const QVariantList spans = draft.value(QStringLiteral("characterSpans")).toList();
+    for (const QVariant &value : spans) {
+        const QVariantMap span = value.toMap();
+        const int start = span.value(QStringLiteral("start")).toInt();
+        const int end = start + span.value(QStringLiteral("length")).toInt();
+        if (start < 0 || end > result.size())
+            return {};
+        for (int index = start; index < end; ++index)
+            result[index] = span.value(QStringLiteral("color")).value<QColor>();
+    }
+    return result;
+}
+
 } // namespace
 
 void PDFEditControllerTest::headerTextUsesAtomicHistoryAndIndependentSessions()
@@ -600,6 +616,20 @@ void PDFEditControllerTest::rejectsInvalidHeaderTextFormatAtomically_data()
     add("boolean-size", QStringLiteral("fontSize"), true);
     add("invalid-color", QStringLiteral("color"), QStringLiteral("invalid-color"));
     add("transparent-color", QStringLiteral("color"), QColor(20, 60, 80, 100));
+    add("non-list-colors", QStringLiteral("colors"), QStringLiteral("#ff0000"));
+    add("null-colors", QStringLiteral("colors"), QVariant());
+    add("short-colors", QStringLiteral("colors"), QVariantList{QColor(Qt::red)});
+    add("long-colors", QStringLiteral("colors"), QVariantList(7, QColor(Qt::red)));
+    QVariantList colors(text.size(), QColor(Qt::black));
+    colors[2] = QStringLiteral("invalid-color");
+    add("invalid-character-color", QStringLiteral("colors"), colors);
+    colors[2] = QColor(20, 60, 80, 100);
+    add("transparent-character-color", QStringLiteral("colors"), colors);
+    colors[2] = 123;
+    add("non-color-character", QStringLiteral("colors"), colors);
+    QTest::newRow("normalized-color-count")
+        << QVariantMap{{QStringLiteral("colors"), QVariantList{QColor(Qt::red)}}}
+        << QStringLiteral("a\u0301");
     add("non-boolean-style", QStringLiteral("fontBold"), QStringLiteral("true"));
     add("size-does-not-fit", QStringLiteral("fontSize"), 100);
     QTest::newRow("unavailable-glyph") << QVariantMap{} << QString::fromUcs4(U"\U0010ffff");
@@ -629,4 +659,110 @@ void PDFEditControllerTest::rejectsInvalidHeaderTextFormatAtomically()
     QVERIFY(controller.canRedo());
     controller.redo();
     QCOMPARE(controller.draftsForPage(1).size(), 1);
+}
+
+void PDFEditControllerTest::preservesHeaderCharacterColorsAcrossPagesAndSave_data()
+{
+    QTest::addColumn<QString>("pages");
+    QTest::newRow("all-pages") << QStringLiteral("all");
+    QTest::newRow("custom-pages") << QStringLiteral("1, 3");
+}
+
+void PDFEditControllerTest::preservesHeaderCharacterColorsAcrossPagesAndSave()
+{
+    QFETCH(QString, pages);
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("header-colors-source.pdf"));
+    const QString target = m_temporaryDirectory.filePath(QStringLiteral("header-colors-target.pdf"));
+    QVERIFY(createHeaderPages(source, {QSizeF(400, 500), QSizeF(500, 700), QSizeF(450, 600)}));
+    PDFDocument document;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    PDFEditController controller;
+    controller.setDocument(&document);
+    const QString text = QStringLiteral("BlackRedBlue");
+    const QVector<QColor> expected{
+        Qt::black, Qt::black, Qt::black, Qt::black, Qt::black,
+        Qt::red, Qt::red, Qt::red, Qt::blue, Qt::blue, Qt::blue, Qt::blue
+    };
+    QVariantList colors;
+    for (const QColor &color : expected)
+        colors.append(color.name()); // Match the QML array's string representation.
+    const QVariantMap format{
+        {QStringLiteral("fontSize"), 18},
+        {QStringLiteral("fontBold"), true},
+        {QStringLiteral("color"), QColor(Qt::blue)}, // Typing color is not the paragraph color.
+        {QStringLiteral("colors"), colors}
+    };
+    QVERIFY(controller.addHeaderText(text, pages, 24.0, 16.0, 300.0, format));
+    for (int page = 0; page < 3; ++page) {
+        const bool included = pages == QLatin1String("all") || page != 1;
+        const QVariantList drafts = controller.draftsForPage(page);
+        QCOMPARE(drafts.size(), included ? 1 : 0);
+        if (!included)
+            continue;
+        const QVariantMap draft = drafts.constFirst().toMap();
+        QCOMPARE(headerDraftColors(draft), expected);
+        const QVariantList spans = draft.value(QStringLiteral("characterSpans")).toList();
+        QCOMPARE(spans.size(), 3);
+        for (const QVariant &value : spans) {
+            const QVariantMap span = value.toMap();
+            QVERIFY(span.value(QStringLiteral("fontBold")).toBool());
+            QCOMPARE(span.value(QStringLiteral("fontSizeRatio")).toReal()
+                         * document.pageSize(page).height(), 18.0);
+        }
+    }
+    const QVariantList applied = headerDraftSnapshot(controller, 3);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    controller.redo();
+    QCOMPARE(headerDraftSnapshot(controller, 3), applied);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(target)));
+    QVERIFY(!controller.hasDrafts());
+    const auto characters = textCharacterRangeInfo(target, text);
+    QCOMPARE(characters.size(), text.size());
+    for (int index = 0; index < characters.size(); ++index) {
+        QCOMPARE(characters.at(index).color, expected.at(index));
+        QVERIFY(qAbs(characters.at(index).pointSize - 18.0) < 0.01);
+        QVERIFY(characters.at(index).font.weight >= 700);
+    }
+    PDFDocument reopened;
+    QVERIFY(reopened.open(QUrl::fromLocalFile(target)));
+    QCOMPARE(reopened.pageCount(), 3);
+    for (int page = 0; page < 3; ++page)
+        QCOMPARE(normalizedPageText(target, page).contains(text),
+                 pages == QLatin1String("all") || page != 1);
+}
+
+void PDFEditControllerTest::normalizesHeaderCharacterColorsWithUnicode()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("header-colors-unicode.pdf"));
+    QVERIFY(createHeaderPages(source, {QSizeF(400, 500)}));
+    PDFDocument document;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    PDFEditController controller;
+    controller.setDocument(&document);
+    const QString raw = QStringLiteral("A\u0323\u0302B\r\nC\rD\u2028E\u2029F");
+    const QString normalized = QStringLiteral("ẬB\nC\nD\nE\nF");
+    QVariantList colors;
+    for (int index = 0; index < raw.size(); ++index)
+        colors.append(QColor(index * 10, 100, 200));
+    const QVariantMap format{
+        {QStringLiteral("fontSize"), 10},
+        {QStringLiteral("colors"), colors}
+    };
+    QVERIFY(controller.addHeaderText(raw, QStringLiteral("all"), 24.0, 0.0, 300.0, format));
+    const QVariantMap draft = controller.draftsForPage(0).constFirst().toMap();
+    QCOMPARE(draft.value(QStringLiteral("text")).toString(), normalized);
+    QVector<QColor> expected;
+    for (int rawIndex : {0, 3, 4, 6, 7, 8, 9, 10, 11, 12})
+        expected.append(colors.at(rawIndex).value<QColor>());
+    QCOMPARE(headerDraftColors(draft), expected);
+
+    controller.discardDrafts();
+    const QColor uniform(Qt::darkGreen);
+    QVERIFY(controller.addHeaderText(QStringLiteral("Legacy"), QStringLiteral("all"),
+        24.0, 0.0, 300.0, {{QStringLiteral("color"), uniform},
+                          {QStringLiteral("colors"), QVariantList{}}}));
+    QCOMPARE(headerDraftColors(controller.draftsForPage(0).constFirst().toMap()),
+             QVector<QColor>(6, uniform));
 }

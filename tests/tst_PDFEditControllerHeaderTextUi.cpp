@@ -2,6 +2,7 @@
 #include "PDFEditControllerTestSupport.h"
 
 #include <QPointer>
+#include <QClipboard>
 
 using namespace PDFEditControllerTestSupport;
 
@@ -43,6 +44,38 @@ bool placeHeader(QObject *window)
         return false;
     QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier, position);
     return placement->property("active").toBool();
+}
+
+QVector<QColor> headerEditorColors(QObject *editor)
+{
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    if (!quickDocument || !quickDocument->textDocument())
+        return {};
+    auto *document = quickDocument->textDocument();
+    QVector<QColor> result;
+    for (int index = 0; index < document->toPlainText().size(); ++index) {
+        QTextCursor cursor(document);
+        cursor.setPosition(index);
+        cursor.setPosition(index + 1, QTextCursor::KeepAnchor);
+        const QBrush brush = cursor.charFormat().foreground();
+        result.append(brush.style() == Qt::NoBrush ? QColor(Qt::black) : brush.color());
+    }
+    return result;
+}
+
+QVector<QColor> headerUiDraftColors(const QVariantMap &draft)
+{
+    QVector<QColor> result(draft.value(QStringLiteral("text")).toString().size());
+    for (const QVariant &value : draft.value(QStringLiteral("characterSpans")).toList()) {
+        const QVariantMap span = value.toMap();
+        const int start = span.value(QStringLiteral("start")).toInt();
+        const int end = start + span.value(QStringLiteral("length")).toInt();
+        if (start < 0 || end > result.size())
+            return {};
+        for (int index = start; index < end; ++index)
+            result[index] = span.value(QStringLiteral("color")).value<QColor>();
+    }
+    return result;
 }
 }
 
@@ -163,10 +196,15 @@ void PDFEditControllerTest::formatsHeaderTextThroughMainWindow()
     auto *apply = panel->findChild<QObject *>(QStringLiteral("headerTextApplyButton"));
     QVERIFY(placement && text && family && size && color && apply);
     QVERIFY(text->setProperty("text", QStringLiteral("ABC")));
+    QVERIFY(text->setProperty("cursorPosition", 3));
     QVERIFY(QMetaObject::invokeMethod(placement, "setFontFamily",
         Q_ARG(QVariant, QVariant(QStringLiteral("Times New Roman")))));
     QCOMPARE(placement->property("fontFamily").toString(), QStringLiteral("Times New Roman"));
     QCOMPARE(family->property("displayText").toString(), QStringLiteral("Times New Roman"));
+    auto *quickWindow = qobject_cast<QQuickWindow *>(window.get());
+    QSignalSpy framePresented(quickWindow, &QQuickWindow::frameSwapped);
+    quickWindow->requestUpdate();
+    QVERIFY(framePresented.wait());
     for (const QString &name : {QStringLiteral("headerFontBoldButton"),
                                QStringLiteral("headerFontItalicButton"),
                                QStringLiteral("headerFontUnderlineButton")}) {
@@ -175,7 +213,7 @@ void PDFEditControllerTest::formatsHeaderTextThroughMainWindow()
         QTest::mouseClick(qobject_cast<QQuickWindow *>(window.get()), Qt::LeftButton,
             Qt::NoModifier, button->mapToScene(QPointF(button->width() / 2,
                 button->height() / 2)).toPoint());
-        QVERIFY(button->property("checked").toBool());
+        QTRY_VERIFY(button->property("checked").toBool());
     }
     QVERIFY(QMetaObject::invokeMethod(color, "clicked"));
     QPointer<QObject> colorDialog;
@@ -189,12 +227,20 @@ void PDFEditControllerTest::formatsHeaderTextThroughMainWindow()
     QVERIFY(colorDialog->setProperty("selectedColor", QColor(QStringLiteral("#1a4d99"))));
     QVERIFY(QMetaObject::invokeMethod(colorDialog, "accept"));
     QTRY_VERIFY(colorDialog.isNull());
+    QCOMPARE(headerEditorColors(text), QVector<QColor>(3, QColor(Qt::black)));
+    QTRY_VERIFY(text->hasActiveFocus());
+    QCOMPARE(text->property("cursorPosition").toInt(), 3);
+    QTest::keyClick(qobject_cast<QQuickWindow *>(window.get()), Qt::Key_X);
+    QTRY_COMPARE(text->property("text").toString(), QStringLiteral("ABCx"));
+    const QVector<QColor> expectedColors{Qt::black, Qt::black, Qt::black,
+        QColor(QStringLiteral("#1a4d99"))};
+    QTRY_COMPARE(headerEditorColors(text), expectedColors);
     // Leave a size edit pending: Apply must commit it before creating drafts.
     QVERIFY(size->setProperty("editText", QStringLiteral("18")));
     QVERIFY(size->setProperty("pending", true));
     const QFont previewFont = text->property("font").value<QFont>();
     QVERIFY(previewFont.bold() && previewFont.italic() && previewFont.underline());
-    QCOMPARE(text->property("color").value<QColor>(), QColor(QStringLiteral("#1a4d99")));
+    QCOMPARE(headerEditorColors(text), expectedColors);
     QVERIFY(!controller->hasDrafts());
     QVERIFY(QMetaObject::invokeMethod(apply, "clicked"));
     QTRY_VERIFY(panel.isNull());
@@ -206,7 +252,7 @@ void PDFEditControllerTest::formatsHeaderTextThroughMainWindow()
         QVERIFY(draft.value(QStringLiteral("fontBold")).toBool());
         QVERIFY(draft.value(QStringLiteral("fontItalic")).toBool());
         QVERIFY(draft.value(QStringLiteral("fontUnderline")).toBool());
-        QCOMPARE(draft.value(QStringLiteral("color")).value<QColor>(), QColor(QStringLiteral("#1a4d99")));
+        QCOMPARE(headerUiDraftColors(draft), expectedColors);
         QVERIFY(qAbs(draft.value(QStringLiteral("fontSizeRatio")).toReal()
             * session->document()->pageSize(page).height() - 18.0) < 0.001);
     }
@@ -221,6 +267,215 @@ void PDFEditControllerTest::formatsHeaderTextThroughMainWindow()
     QCOMPARE(placement->property("textColor").value<QColor>(), QColor(Qt::black));
     QVERIFY(QMetaObject::invokeMethod(placement, "cancel"));
     controller->discardDrafts();
+}
+
+void PDFEditControllerTest::appliesHeaderColorsOnlyToTypedCharacters()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("header-caret-color-ui.pdf"));
+    QVERIFY(createThreePageTextPdf(path));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFileInfo(
+        QFINDTESTDATA("../src/Main.qml")).canonicalFilePath()));
+    std::unique_ptr<QObject> window(component.create());
+    QVERIFY2(window, qPrintable(component.errorString()));
+    QVERIFY(window->setProperty("visible", true));
+    QVERIFY(window->setProperty("allowWindowClose", true));
+    auto *quickWindow = qobject_cast<QQuickWindow *>(window.get());
+    auto *model = window->findChild<PDFTabModel *>();
+    auto *tabs = window->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    QVERIFY(quickWindow && model && tabs);
+    auto *session = model->open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    QVERIFY(tabs->setProperty("currentIndex", 7));
+    QTRY_VERIFY(window->findChild<QObject *>(QStringLiteral("documentWorkspace")));
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestHeaderText"));
+    QTRY_VERIFY(placeHeader(window.get()));
+    auto *placement = window->findChild<QObject *>(QStringLiteral("headerTextPlacement"));
+    auto *text = headerVisualItem(window.get(), QStringLiteral("headerInlineTextInput"));
+    QVERIFY(placement && text);
+
+    // A choice before the first key affects the new characters only.
+    QVERIFY(QMetaObject::invokeMethod(placement, "setTextColor",
+        Q_ARG(QVariant, QColor(Qt::blue))));
+    QTRY_VERIFY(text->hasActiveFocus());
+    for (int index = 0; index < 3; ++index)
+        QTest::keyClick(quickWindow, Qt::Key_A);
+    QTRY_COMPARE(text->property("text").toString(), QStringLiteral("aaa"));
+    QTRY_COMPARE(headerEditorColors(text), QVector<QColor>(3, QColor(Qt::blue)));
+    QVERIFY(!session->editController()->hasDrafts());
+
+    // Repeated characters make prefix/suffix-only insertion detection ambiguous.
+    QVERIFY(text->setProperty("cursorPosition", 1));
+    QVERIFY(QMetaObject::invokeMethod(placement, "setTextColor",
+        Q_ARG(QVariant, QColor(Qt::red))));
+    QCOMPARE(headerEditorColors(text), QVector<QColor>(3, QColor(Qt::blue)));
+    QTRY_VERIFY(text->hasActiveFocus());
+    QTest::keyClick(quickWindow, Qt::Key_A);
+    QVector<QColor> expected{Qt::blue, Qt::red, Qt::blue, Qt::blue};
+    QTRY_COMPARE(text->property("text").toString(), QStringLiteral("aaaa"));
+    QTRY_COMPARE(headerEditorColors(text), expected);
+    QCOMPARE(text->property("cursorPosition").toInt(), 2);
+
+    // Selection replacement may leave the plain text unchanged, but is still a new edit.
+    QVERIFY(QMetaObject::invokeMethod(text, "select", Q_ARG(int, 1), Q_ARG(int, 2)));
+    QVERIFY(QMetaObject::invokeMethod(placement, "setTextColor",
+        Q_ARG(QVariant, QColor(Qt::green))));
+    QCOMPARE(headerEditorColors(text), expected);
+    QTRY_VERIFY(text->hasActiveFocus());
+    QCOMPARE(text->property("selectionStart").toInt(), 1);
+    QCOMPARE(text->property("selectionEnd").toInt(), 2);
+    QTest::keyClick(quickWindow, Qt::Key_A);
+    expected[1] = QColor(Qt::green);
+    QTRY_COMPARE(headerEditorColors(text), expected);
+    QCOMPARE(text->property("text").toString(), QStringLiteral("aaaa"));
+    QCOMPARE(text->property("cursorPosition").toInt(), 2);
+
+    // Color and text must share the native undo command; redo must restore the caret.
+    QTest::keySequence(quickWindow, QKeySequence(QKeySequence::Undo));
+    expected[1] = QColor(Qt::red);
+    QTRY_COMPARE(headerEditorColors(text), expected);
+    QTest::keySequence(quickWindow, QKeySequence(QKeySequence::Redo));
+    expected[1] = QColor(Qt::green);
+    QTRY_COMPARE(headerEditorColors(text), expected);
+    QTRY_COMPARE(text->property("cursorPosition").toInt(), 2);
+
+    // Moving away from a chosen typing color resumes the color at the new caret.
+    QVERIFY(QMetaObject::invokeMethod(placement, "setTextColor",
+        Q_ARG(QVariant, QColor(Qt::magenta))));
+    QCOMPARE(headerEditorColors(text), expected);
+    QVERIFY(text->setProperty("cursorPosition", 4));
+    QTRY_COMPARE(placement->property("textColor").value<QColor>(), QColor(Qt::blue));
+    QTest::keyClick(quickWindow, Qt::Key_B);
+    expected.append(QColor(Qt::blue));
+    QTRY_COMPARE(text->property("text").toString(), QStringLiteral("aaaab"));
+    QTRY_COMPARE(headerEditorColors(text), expected);
+
+    // Global font controls must not flatten the per-character foreground colors.
+    QVERIFY(QMetaObject::invokeMethod(placement, "setFontFamily",
+        Q_ARG(QVariant, QStringLiteral("Times New Roman"))));
+    QVERIFY(QMetaObject::invokeMethod(placement, "setFontSize", Q_ARG(QVariant, 16)));
+    for (const char *method : {"setFontBold", "setFontItalic", "setFontUnderline"})
+        QVERIFY(QMetaObject::invokeMethod(placement, method, Q_ARG(QVariant, true)));
+    QTRY_VERIFY(text->property("font").value<QFont>().bold());
+    QCOMPARE(headerEditorColors(text), expected);
+    QVERIFY(QMetaObject::invokeMethod(placement, "submit", Q_ARG(QVariant, QStringLiteral("all"))));
+    QVERIFY2(!placement->property("active").toBool(),
+        qPrintable(placement->property("errorText").toString()));
+    for (int page = 0; page < 3; ++page) {
+        const QVariantList drafts = session->editController()->draftsForPage(page);
+        QCOMPARE(drafts.size(), 1);
+        QCOMPARE(headerUiDraftColors(drafts.constFirst().toMap()), expected);
+    }
+    session->editController()->undo();
+    QVERIFY(!session->editController()->hasDrafts());
+
+    // Trimming an over-limit paste must not split a surrogate or separate its color undo.
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestHeaderText"));
+    QTRY_VERIFY(placeHeader(window.get()));
+    QTRY_VERIFY((text = headerVisualItem(window.get(), QStringLiteral("headerInlineTextInput"))));
+    QTRY_VERIFY(text->hasActiveFocus());
+    QTest::keyClick(quickWindow, Qt::Key_X);
+    QTRY_COMPARE(text->property("text").toString(), QStringLiteral("x"));
+    QVERIFY(QMetaObject::invokeMethod(placement, "setTextColor",
+        Q_ARG(QVariant, QColor(Qt::blue))));
+    QTRY_VERIFY(text->hasActiveFocus());
+    QGuiApplication::clipboard()->setText(QString(698, QLatin1Char('a'))
+        + QString::fromUtf8("\xf0\x9f\x98\x80") + QLatin1Char('z'));
+    QTest::keySequence(quickWindow, QKeySequence(QKeySequence::Paste));
+    const QString boundedText = QLatin1Char('x') + QString(698, QLatin1Char('a'));
+    QTRY_COMPARE(text->property("text").toString(), boundedText);
+    QVector<QColor> boundedColors(699, QColor(Qt::blue));
+    boundedColors[0] = QColor(Qt::black);
+    QTRY_COMPARE(headerEditorColors(text), boundedColors);
+    QTest::keySequence(quickWindow, QKeySequence(QKeySequence::Undo));
+    QTRY_COMPARE(text->property("text").toString(), QStringLiteral("x"));
+    QCOMPARE(headerEditorColors(text), QVector<QColor>{QColor(Qt::black)});
+    QTest::keySequence(quickWindow, QKeySequence(QKeySequence::Redo));
+    QTRY_COMPARE(text->property("text").toString(), boundedText);
+    QTRY_COMPARE(headerEditorColors(text), boundedColors);
+    QVERIFY(QMetaObject::invokeMethod(placement, "cancel"));
+}
+
+void PDFEditControllerTest::retainsHeaderColorsAcrossPageDelegatesAndZoom()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("header-color-delegates.pdf"));
+    QVERIFY(createThreePageTextPdf(path));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> window(component.create());
+    QVERIFY2(window, qPrintable(component.errorString()));
+    QVERIFY(window->setProperty("visible", true));
+    QVERIFY(window->setProperty("allowWindowClose", true));
+    auto *quickWindow = qobject_cast<QQuickWindow *>(window.get());
+    auto *model = window->findChild<PDFTabModel *>();
+    auto *tabs = window->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    QVERIFY(quickWindow && model && tabs);
+    auto *session = model->open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    QVERIFY(tabs->setProperty("currentIndex", 7));
+    QObject *workspace = nullptr;
+    QTRY_VERIFY((workspace = window->findChild<QObject *>(QStringLiteral("documentWorkspace"))));
+    QTRY_VERIFY(workspace->property("initialViewReady").toBool());
+    auto *view = workspace->findChild<QObject *>(QStringLiteral("primaryDocumentView"));
+    QVERIFY(view);
+    QSignalSpy navigationSettled(view, SIGNAL(navigationSettled(int)));
+    QVERIFY(navigationSettled.isValid());
+    QVERIFY(QMetaObject::invokeMethod(workspace, "setPageDisplayMode",
+        Q_ARG(QVariant, int(PDFDocumentSession::SinglePageMode))));
+    QTRY_VERIFY(navigationSettled.count() > 0);
+    QTRY_COMPARE(view->property("pendingNavigationPage").toInt(), -1);
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestHeaderText"));
+    QTRY_VERIFY(placeHeader(window.get()));
+    auto *placement = window->findChild<QObject *>(QStringLiteral("headerTextPlacement"));
+    QPointer<QQuickItem> oldEditor;
+    QTRY_VERIFY((oldEditor = headerVisualItem(window.get(), QStringLiteral("headerInlineTextInput"))));
+    QVERIFY(placement);
+    QTRY_VERIFY(oldEditor->hasActiveFocus());
+    QTest::keyClick(quickWindow, Qt::Key_A);
+    QVERIFY(QMetaObject::invokeMethod(placement, "setTextColor",
+        Q_ARG(QVariant, QColor(Qt::red))));
+    QTRY_VERIFY(oldEditor->hasActiveFocus());
+    QTest::keyClick(quickWindow, Qt::Key_B);
+    QTRY_COMPARE(headerEditorColors(oldEditor), (QVector<QColor>{Qt::black, Qt::red}));
+    QVERIFY(oldEditor->setProperty("cursorPosition", 1));
+    QVERIFY(QMetaObject::invokeMethod(placement, "setTextColor",
+        Q_ARG(QVariant, QColor(Qt::blue))));
+    const QVariantList originalColors = placement->property("colors").toList();
+    QCOMPARE(originalColors.size(), 2);
+    QVERIFY(QMetaObject::invokeMethod(workspace, "navigateToPage", Q_ARG(QVariant, 2)));
+    QTRY_COMPARE(session->document()->currentPage(), 2);
+    QTRY_VERIFY(oldEditor.isNull());
+    QVERIFY(placement->property("active").toBool());
+    QCOMPARE(placement->property("text").toString(), QStringLiteral("ab"));
+    QCOMPARE(placement->property("colors").toList(), originalColors);
+    QCOMPARE(placement->property("cursorPosition").toInt(), 1);
+    QCOMPARE(placement->property("textColor").value<QColor>(), QColor(Qt::blue));
+    QVERIFY(QMetaObject::invokeMethod(workspace, "setZoom", Q_ARG(QVariant, 1.75)));
+    QTRY_COMPARE(session->zoom(), 1.75);
+    QVERIFY(QMetaObject::invokeMethod(workspace, "navigateToPage", Q_ARG(QVariant, 0)));
+    QTRY_COMPARE(session->document()->currentPage(), 0);
+    QQuickItem *text = nullptr;
+    QTRY_VERIFY((text = headerVisualItem(window.get(), QStringLiteral("headerInlineTextInput"))));
+    QTRY_VERIFY(text->hasActiveFocus());
+    QCOMPARE(text->property("cursorPosition").toInt(), 1);
+    QCOMPARE(headerEditorColors(text), (QVector<QColor>{Qt::black, Qt::red}));
+    QTest::keyClick(quickWindow, Qt::Key_X);
+    QTRY_COMPARE(text->property("text").toString(), QStringLiteral("axb"));
+    const QVector<QColor> expected{Qt::black, Qt::blue, Qt::red};
+    QTRY_COMPARE(headerEditorColors(text), expected);
+    QVERIFY(QMetaObject::invokeMethod(placement, "submit", Q_ARG(QVariant, QStringLiteral("1,3"))));
+    QVERIFY2(!placement->property("active").toBool(),
+        qPrintable(placement->property("errorText").toString()));
+    for (int page : {0, 2}) {
+        const QVariantList drafts = session->editController()->draftsForPage(page);
+        QCOMPARE(drafts.size(), 1);
+        QCOMPARE(headerUiDraftColors(drafts.constFirst().toMap()), expected);
+    }
+    QVERIFY(session->editController()->draftsForPage(1).isEmpty());
+    session->editController()->undo();
+    QVERIFY(!session->editController()->hasDrafts());
 }
 
 void PDFEditControllerTest::cancelsHeaderTextPanelAcrossUiChanges()

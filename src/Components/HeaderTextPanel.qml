@@ -80,6 +80,7 @@ Rectangle {
     function openColorDialog() {
         if (!placement.active || placement.submitting)
             return
+        placement.synchronizeRequested()
         if (colorDialogLoader.status === Loader.Ready) {
             const dialog = colorDialogLoader.item as ColorDialog
             if (dialog) {
@@ -89,6 +90,17 @@ Rectangle {
         } else {
             colorDialogLoader.active = true
         }
+    }
+
+    function acceptColor(value) {
+        colorDialogLoader.active = false
+        if (placement.active && !placement.submitting)
+            placement.setTextColor(value)
+    }
+
+    function rejectColor() {
+        colorDialogLoader.active = false
+        placement.focusRequested()
     }
 
     Rectangle {
@@ -731,12 +743,8 @@ Rectangle {
             objectName: "headerFontColorDialog"
             //% "Font color"
             title: qsTrId("FontColor")
-            onAccepted: {
-                if (root.placement.active && !root.placement.submitting)
-                    root.placement.setTextColor(selectedColor)
-                colorDialogLoader.active = false
-            }
-            onRejected: colorDialogLoader.active = false
+            onAccepted: Qt.callLater(root.acceptColor, selectedColor)
+            onRejected: Qt.callLater(root.rejectColor)
         }
     }
 }

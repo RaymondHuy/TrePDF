@@ -353,6 +353,13 @@ public:
     Q_INVOKABLE QVariantMap addText(int page, qreal x, qreal y);
     Q_INVOKABLE QString headerTextFontFamily() const;
     Q_INVOKABLE QStringList headerTextFontFamilies(int filter, bool bold, bool italic) const;
+    Q_INVOKABLE void initializeHeaderTextEditor(QObject *textDocument,
+                                                const QVariantList &colors,
+                                                int typingPosition,
+                                                const QColor &typingColor) const;
+    Q_INVOKABLE QVariantMap headerTextEditorState(QObject *textDocument) const;
+    Q_INVOKABLE void setHeaderTextEditorColor(QObject *textDocument,
+                                              const QColor &color) const;
     Q_INVOKABLE bool addHeaderText(const QString &text, const QString &pages,
                                   qreal xPoints = 24.0, qreal yPoints = 16.0,
                                   qreal widthPoints = 0.0,
