@@ -50,6 +50,10 @@ private slots:
     void changesOpenPassword();
     void keepsExistingPasswordWhenChangeFails();
     void rejectsPasswordChangesOnRestrictedDocuments();
+    void headerPageNumbersRestartAndPersist();
+    void headerPageNumberSequencesAndLimits();
+    void rejectsHeaderPageNumbersAtomically();
+    void addsHeaderPageNumbersThroughMainWindow();
     void headerTextUsesAtomicHistoryAndIndependentSessions();
     void preparesHeaderImageWithoutDraftsAndSnapshotsPixels();
     void headerImageUsesAtomicHistoryAndCustomPages();

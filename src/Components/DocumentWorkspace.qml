@@ -14,6 +14,11 @@ Item {
     property bool headerTabActive: false
     readonly property HeaderTextPlacement headerTextPlacement: headerPlacement
     readonly property HeaderImagePlacement headerImagePlacement: headerImagePlacementState
+    readonly property HeaderPageNumberPlacement headerPageNumberPlacement: headerPageNumberPlacementState
+    readonly property bool headerPageNumberInputFocused: {
+        const panel = headerPageNumberPanelLoader.item as HeaderPageNumberPanel
+        return panel ? panel.inputFocused : false
+    }
     readonly property bool headerImageInputFocused: {
         const panel = headerImagePanelLoader.item as HeaderImagePanel
         return panel ? panel.inputFocused : false
@@ -157,6 +162,7 @@ Item {
         if (!headerTabActive || !session.document.loaded || session.saving)
             return
         headerImagePlacementState.cancel()
+        headerPageNumberPlacementState.cancel()
         headerPlacement.start()
     }
 
@@ -168,12 +174,22 @@ Item {
         if (!headerTabActive || !session.document.loaded || session.saving)
             return
         headerPlacement.cancel()
+        headerPageNumberPlacementState.cancel()
         headerImagePlacementState.start()
+    }
+
+    function openHeaderPageNumberPanel() {
+        if (!headerTabActive || !session.document.loaded || session.saving)
+            return
+        headerPlacement.cancel()
+        headerImagePlacementState.cancel()
+        headerPageNumberPlacementState.start()
     }
 
     function closeHeaderPlacement() {
         headerPlacement.cancel()
         headerImagePlacementState.cancel()
+        headerPageNumberPlacementState.cancel()
     }
 
     onHeaderTabActiveChanged: {
@@ -195,6 +211,12 @@ Item {
         onFileRequested: root.headerImageFileRequested(headerImagePlacementState)
     }
 
+    HeaderPageNumberPlacement {
+        id: headerPageNumberPlacementState
+        document: root.session.document
+        editController: root.session.editController
+    }
+
     component WorkspaceDocumentView: DocumentView {
         required property int paneIndex
         readonly property bool secondaryPane: paneIndex !== 0
@@ -213,6 +235,7 @@ Item {
         headerTabActive: root.headerTabActive
         headerTextPlacement: secondaryPane ? null : root.headerTextPlacement
         headerImagePlacement: secondaryPane ? null : root.headerImagePlacement
+        headerPageNumberPlacement: secondaryPane ? null : root.headerPageNumberPlacement
         formsTabActive: !secondaryPane && root.formsTabActive
         editTabActive: !secondaryPane && root.editTabActive
         formFieldsVisible: root.formFieldsVisible
@@ -756,6 +779,22 @@ Item {
                 HeaderImagePanel {
                     theme: root.theme
                     placement: root.headerImagePlacement
+                }
+            }
+        }
+
+        Loader {
+            id: headerPageNumberPanelLoader
+            objectName: "headerPageNumberPanelLoader"
+            Layout.preferredWidth: active ? 280 : 0
+            Layout.fillHeight: true
+            active: root.headerPageNumberPlacement.active && root.headerTabActive
+                && root.session.document.loaded && !root.session.saving
+            visible: active
+            sourceComponent: Component {
+                HeaderPageNumberPanel {
+                    theme: root.theme
+                    placement: root.headerPageNumberPlacement
                 }
             }
         }

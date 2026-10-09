@@ -364,6 +364,12 @@ public:
                                   qreal xPoints = 24.0, qreal yPoints = 16.0,
                                   qreal widthPoints = 0.0,
                                   const QVariantMap &format = {});
+    Q_INVOKABLE QString headerPageNumberText(int page, int firstPage, int lastPage,
+                                             int romanStartPage, int decimalStartPage) const;
+    Q_INVOKABLE bool addHeaderPageNumbers(int firstPage, int lastPage,
+                                         int romanStartPage, int decimalStartPage,
+                                         qreal xPoints, qreal yPoints, qreal widthPoints,
+                                         const QVariantMap &format = {});
     Q_INVOKABLE QVariantMap prepareHeaderImage(const QUrl &source);
     Q_INVOKABLE void clearHeaderImage();
     Q_INVOKABLE bool addHeaderImage(const QString &pages, qreal xPoints, qreal yPoints,
@@ -1032,6 +1038,9 @@ private:
                                       const QSizeF &pageSize);
     static CharacterFormat characterFormatForCandidate(const Candidate &candidate);
     static CharacterFormat primaryCharacterFormat(const Draft &draft);
+    bool addHeaderTextBatch(const QList<int> &pages, const QStringList &texts,
+                            qreal xPoints, qreal yPoints, qreal widthPoints,
+                            const QVariantMap &format);
     static CharacterFormat characterFormatAtPosition(const Draft &draft,
                                                       qsizetype position,
                                                       bool preferPrevious);

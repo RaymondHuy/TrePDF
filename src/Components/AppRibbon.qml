@@ -82,6 +82,7 @@ Column {
     signal watermarkRequested(string mode)
     signal headerTextRequested()
     signal headerImageRequested()
+    signal headerPageNumbersRequested()
     signal undoRequested()
     signal redoRequested()
 
@@ -445,6 +446,17 @@ Column {
                     text: qsTrId("Image")
                     iconSource: "../assets/icons/image-plus.svg"
                     onClicked: root.headerImageRequested()
+                }
+
+                RibbonButton {
+                    objectName: "headerPageNumbersButton"
+                    theme: root.theme
+                    documentLoaded: root.document.loaded
+                    enabled: root.document.loaded && !root.anySaving
+                    //% "Page numbers"
+                    text: qsTrId("HeaderPageNumbers")
+                    iconSource: "../assets/icons/page-single.svg"
+                    onClicked: root.headerPageNumbersRequested()
                 }
             }
         }

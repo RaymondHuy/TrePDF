@@ -3928,5 +3928,73 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <source>The header image does not fit within the first 100 pt on page %1. Resize or move it.</source>
         <translation>Hình ảnh đầu trang không vừa vùng 100 pt ở trang %1. Hãy đổi kích thước hoặc di chuyển ảnh.</translation>
     </message>
+    <message id="HeaderPageNumbers">
+        <location filename="../src/Components/AppRibbon.qml" line="457"/>
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="75"/>
+        <source>Page numbers</source>
+        <translation>Số trang</translation>
+    </message>
+    <message id="HeaderPageNumbersInvalidRange">
+        <location filename="../src/Components/HeaderPageNumberPlacement.qml" line="38"/>
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="296"/>
+        <source>Choose valid start and stop pages, with Roman numerals before Arabic numbers.</source>
+        <translation>Chọn mốc bắt đầu và dừng hợp lệ. Số La Mã phải bắt đầu trước số tự nhiên.</translation>
+    </message>
+    <message id="HeaderPageNumbersRomanLimit">
+        <location filename="../src/Components/HeaderPageNumberPlacement.qml" line="43"/>
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="300"/>
+        <source>Roman numerals support at most 3,999 numbered pages.</source>
+        <translation>Số La Mã hỗ trợ tối đa 3.999 trang được đánh số.</translation>
+    </message>
+    <message id="AddHeaderPageNumbersFailed">
+        <location filename="../src/Components/HeaderPageNumberPlacement.qml" line="117"/>
+        <source>Could not add page numbers.</source>
+        <translation>Không thể thêm số trang.</translation>
+    </message>
+    <message id="HeaderPageNumbersPdfPagesHint">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="81"/>
+        <source>All page positions below refer to pages in the PDF, starting at 1.</source>
+        <translation>Các mốc bên dưới là vị trí trang trong PDF, tính từ 1.</translation>
+    </message>
+    <message id="HeaderPageNumbersFirstPage">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="87"/>
+        <source>Start at PDF page</source>
+        <translation>Bắt đầu từ trang PDF</translation>
+    </message>
+    <message id="HeaderPageNumbersLastPage">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="102"/>
+        <source>Stop at PDF page (inclusive)</source>
+        <translation>Dừng ở trang PDF (bao gồm trang này)</translation>
+    </message>
+    <message id="HeaderPageNumbersRoman">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="119"/>
+        <source>Roman numerals (i, ii, iii)</source>
+        <translation>Số La Mã (i, ii, iii)</translation>
+    </message>
+    <message id="HeaderPageNumbersRomanStart">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="127"/>
+        <source>Begin i at PDF page</source>
+        <translation>Bắt đầu số i tại trang PDF</translation>
+    </message>
+    <message id="HeaderPageNumbersDecimal">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="146"/>
+        <source>Arabic numbers (1, 2, 3)</source>
+        <translation>Số tự nhiên (1, 2, 3)</translation>
+    </message>
+    <message id="HeaderPageNumbersDecimalStart">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="154"/>
+        <source>Begin 1 at PDF page</source>
+        <translation>Bắt đầu số 1 tại trang PDF</translation>
+    </message>
+    <message id="HeaderPageNumbersSequenceHint">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="170"/>
+        <source>Arabic numbers restart at 1. Roman numerals stop before that page. Pages before the first numbering start stay blank.</source>
+        <translation>Số tự nhiên bắt đầu lại từ 1. Số La Mã dừng trước trang đó. Các trang trước mốc đánh số đầu tiên được để trống.</translation>
+    </message>
+    <message id="HeaderDraftSaveHint">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="175"/>
+        <source>Apply creates a draft. Use Save or Save As to write it into the PDF.</source>
+        <translation>Bấm Áp dụng để tạo bản nháp. Chọn Lưu hoặc Lưu thành để ghi vào PDF.</translation>
+    </message>
 </context>
 </TS>

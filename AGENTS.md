@@ -15,6 +15,17 @@ and Save/Save As persistence.
 
 Current features:
 
+- Header > Page numbers places 12-point black numbers by clicking the gray
+  100-point header, then opens a right panel for inclusive PDF start/stop pages
+  and optional Roman/Arabic starts. Both sequences begin at one; Arabic resets
+  to 1 after Roman. Roman supports i–mmmcmxcix; a batch supports 10,000 pages.
+  `HeaderPageNumberPlacement.qml` owns pending state independently of pooled
+  delegates; previews share `headerPageNumberText()` with the controller.
+  `addHeaderPageNumbers()` uses the atomic added-text batch pipeline for
+  validation, Undo/Redo and Save/Save As. Numbers become ordinary page text;
+  later page operations do not renumber them automatically. See
+  `docs/header-text-pipeline.md` for lifecycle and range semantics.
+
 - Header > Image arms placement in the gray 100-point header, opens the local
   image picker after a click, then shows a temporary image and a right panel.
   `HeaderImagePlacement.qml` owns the pending snapshot geometry independently of

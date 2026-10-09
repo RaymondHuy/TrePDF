@@ -1,4 +1,4 @@
-# Header text and images
+# Header text, images and page numbers
 
 Header > Add Text arms the placement cursor. Click inside the gray header area
 to open a textbox on the page at that position. The right-side panel then opens
@@ -121,3 +121,37 @@ there is no persistent Header group or automatic insertion onto later pages.
 `tst_PDFEditControllerHeaderImage.cpp` verifies snapshots, atomic batch history,
 range/geometry rejection and Save/reopen; `tst_PDFEditControllerHeaderImageUi.cpp`
 checks pending placement, page selection, frame controls and lifecycle behavior.
+
+
+## Header page numbers
+
+Header > Page numbers arms placement in the same gray 100-point header. Clicking
+opens a preview at that PDF-point position and a right-side panel. The panel
+accepts a first/last PDF page (inclusive), an optional Roman start and an optional
+Arabic start. All positions are 1-based PDF page indices. Roman numbering starts
+at `i`; Arabic numbering restarts at `1`, including when following Roman numbers.
+When both are enabled, the Roman start must precede the Arabic start. Pages
+before the earliest enabled start, or outside the outer range, remain unnumbered.
+For example: range 2–10, Roman start 2, Arabic start 6 yields `i, ii, iii, iv` on
+PDF pages 2–5 and `1, 2, 3, 4, 5` on pages 6–10. Either numbering style can be
+used alone. Roman numbering is limited to 3,999 pages; batches to 10,000 pages.
+
+`HeaderPageNumberPlacement.qml` owns temporary settings independently of pooled
+pages; `HeaderPageNumberOverlay.qml` creates previews only for visible delegates.
+`headerPageNumberText()` shares sequence generation with the backend. The preview
+uses the default Header font at 12 pt in black, at a constant physical position
+on each target page. `HeaderPageNumberPanel.qml` validates ranges before Apply.
+All three Header placement tools cancel each other. Escape, tab/session/history/
+page-structure changes and Save abandon unapplied numbering.
+
+`addHeaderPageNumbers()` validates the whole sequence and uses the shared
+`addHeaderTextBatch()` transaction, including font, permission, geometry, save
+and watermark guards. Every page must fit before any drafts are created. Apply
+is one undoable batch; Save/Save As writes ordinary searchable text. Numbers are
+snapshots of page order at Apply and do not automatically renumber after later
+page insertion/deletion. Reopened numbers are independently editable through Edit;
+applying again adds a new batch instead of replacing previously saved numbers.
+
+`tst_PDFEditControllerHeaderPageNumbers.cpp` covers restart/stop boundaries,
+Roman conversion/limits, invalid ranges and atomic geometry failure, history,
+Save As/source preservation/reopen, and Main/ribbon/placement/panel wiring.
