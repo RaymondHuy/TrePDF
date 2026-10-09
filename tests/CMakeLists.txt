@@ -27,6 +27,7 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerImages.cpp
     tst_PDFEditControllerHeaderImage.cpp
     tst_PDFEditControllerHeaderImageUi.cpp
+    tst_PDFEditControllerHeaderPageNumbers.cpp
     tst_PDFEditControllerHeaderText.cpp
     tst_PDFEditControllerHeaderTextUi.cpp
     tst_PDFEditControllerInk.cpp

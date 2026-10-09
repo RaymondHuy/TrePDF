@@ -17,6 +17,7 @@ Item {
     property bool headerTabActive: false
     property HeaderTextPlacement headerTextPlacement: null
     property HeaderImagePlacement headerImagePlacement: null
+    property HeaderPageNumberPlacement headerPageNumberPlacement: null
     property bool textSelectionEnabled: true
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
@@ -199,6 +200,7 @@ Item {
         headerTabActive: root.headerTabActive
         headerTextPlacement: root.headerTextPlacement
         headerImagePlacement: root.headerImagePlacement
+        headerPageNumberPlacement: root.headerPageNumberPlacement
         textSelectionEnabled: root.textSelectionEnabled
         formController: root.formController
         formDesignerController: root.formDesignerController
@@ -246,6 +248,7 @@ Item {
                 headerTabActive: root.headerTabActive
                 headerTextPlacement: root.headerTextPlacement
                 headerImagePlacement: root.headerImagePlacement
+                headerPageNumberPlacement: root.headerPageNumberPlacement
                 textSelectionEnabled: root.textSelectionEnabled
                 formController: root.formController
                 formDesignerController: root.formDesignerController

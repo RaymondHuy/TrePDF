@@ -19,6 +19,7 @@ Rectangle {
     property bool headerTabActive: false
     property HeaderTextPlacement headerTextPlacement: null
     property HeaderImagePlacement headerImagePlacement: null
+    property HeaderPageNumberPlacement headerPageNumberPlacement: null
     property bool formsTabActive: false
     property bool editTabActive: false
     property bool formFieldsVisible: false
@@ -744,6 +745,7 @@ Rectangle {
             headerTabActive: root.headerTabActive
             headerTextPlacement: root.headerTextPlacement
             headerImagePlacement: root.headerImagePlacement
+            headerPageNumberPlacement: root.headerPageNumberPlacement
             textSelectionEnabled: documentInput.textSelectionEnabled
             formController: root.formController
             formDesignerController: root.formDesignerController

@@ -495,6 +495,15 @@ ApplicationWindow {
             workspace.openHeaderImagePanel()
     }
 
+    function requestHeaderPageNumbers() {
+        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
+                || !appRibbon.headerTabActive || !prepareActiveWorkspace())
+            return
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.openHeaderPageNumberPanel()
+    }
+
     function requestHeaderImageFile(placement) {
         const workspace = activeWorkspace()
         if (!workspace || workspace.headerImagePlacement !== placement
@@ -1101,7 +1110,9 @@ ApplicationWindow {
             && (window.activeWorkspaceItem.headerTextPlacement.armed
                 || window.activeWorkspaceItem.headerTextPlacement.active
                 || window.activeWorkspaceItem.headerImagePlacement.armed
-                || window.activeWorkspaceItem.headerImagePlacement.active)
+                || window.activeWorkspaceItem.headerImagePlacement.active
+                || window.activeWorkspaceItem.headerPageNumberPlacement.armed
+                || window.activeWorkspaceItem.headerPageNumberPlacement.active)
         onActivated: window.activeWorkspaceItem.closeHeaderPlacement()
     }
 
@@ -1111,7 +1122,8 @@ ApplicationWindow {
             && window.activeEditController.canUndo
             && !(window.activeWorkspaceItem
                 && (window.activeWorkspaceItem.headerTextInputFocused
-                    || window.activeWorkspaceItem.headerImageInputFocused))
+                    || window.activeWorkspaceItem.headerImageInputFocused
+                    || window.activeWorkspaceItem.headerPageNumberInputFocused))
             && !window.activeEditController.textEditActive
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
@@ -1125,7 +1137,8 @@ ApplicationWindow {
             && window.activeEditController.canRedo
             && !(window.activeWorkspaceItem
                 && (window.activeWorkspaceItem.headerTextInputFocused
-                    || window.activeWorkspaceItem.headerImageInputFocused))
+                    || window.activeWorkspaceItem.headerImageInputFocused
+                    || window.activeWorkspaceItem.headerPageNumberInputFocused))
             && !window.activeWorkspaceHasPendingEdits
             && !window.activeEditController.textEditActive
             && !window.activeFormDesignerController.textFieldFocused
@@ -1832,6 +1845,7 @@ ApplicationWindow {
             onWatermarkRequested: mode => window.requestWatermark(mode)
             onHeaderTextRequested: window.requestHeaderText()
             onHeaderImageRequested: window.requestHeaderImage()
+            onHeaderPageNumbersRequested: window.requestHeaderPageNumbers()
             onProtectTabActiveChanged: {
                 if (!protectTabActive) {
                     window.cancelPasswordSetup()

@@ -33,6 +33,55 @@ constexpr int kMaximumHeaderImagePreviewDimension = 1024;
 
 enum class PageParseResult { Valid, Invalid, TooLarge };
 
+enum class PageNumberRangeResult { Valid, Invalid, RomanLimit, TooLarge };
+
+PageNumberRangeResult validatePageNumberRange(int pageCount, int firstPage,
+                                             int lastPage, int romanStartPage,
+                                             int decimalStartPage)
+{
+    const auto validStart = [firstPage, lastPage](int page) {
+        return page == 0 || (page >= firstPage && page <= lastPage);
+    };
+    if (firstPage < 1 || lastPage < firstPage || lastPage > pageCount
+        || !validStart(romanStartPage) || !validStart(decimalStartPage)
+        || (romanStartPage == 0 && decimalStartPage == 0)
+        || (romanStartPage > 0 && decimalStartPage > 0
+            && romanStartPage >= decimalStartPage))
+        return PageNumberRangeResult::Invalid;
+    if (romanStartPage > 0) {
+        const int romanLast = decimalStartPage > 0 ? decimalStartPage - 1 : lastPage;
+        if (romanLast - romanStartPage + 1 > 3999)
+            return PageNumberRangeResult::RomanLimit;
+    }
+    const int firstNumberedPage = romanStartPage > 0 ? romanStartPage : decimalStartPage;
+    return lastPage - firstNumberedPage + 1 > kMaximumHeaderPages
+        ? PageNumberRangeResult::TooLarge : PageNumberRangeResult::Valid;
+}
+
+QString pageNumberText(int oneBasedPage, int romanStartPage, int decimalStartPage)
+{
+    if (decimalStartPage > 0 && oneBasedPage >= decimalStartPage)
+        return QString::number(oneBasedPage - decimalStartPage + 1);
+    if (romanStartPage <= 0 || oneBasedPage < romanStartPage)
+        return {};
+    int number = oneBasedPage - romanStartPage + 1;
+    static constexpr struct {
+        int value;
+        const char *text;
+    } numerals[] = {
+        {1000, "m"}, {900, "cm"}, {500, "d"}, {400, "cd"},
+        {100, "c"}, {90, "xc"}, {50, "l"}, {40, "xl"},
+        {10, "x"}, {9, "ix"}, {5, "v"}, {4, "iv"}, {1, "i"}};
+    QString result;
+    for (const auto &numeral : numerals) {
+        while (number >= numeral.value) {
+            result.append(QLatin1String(numeral.text));
+            number -= numeral.value;
+        }
+    }
+    return result;
+}
+
 PageParseResult headerPages(const QString &expression, int pageCount,
                             QList<int> &pages)
 {
@@ -207,6 +256,76 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
 {
     if (!m_document || !m_document->isLoaded() || m_saving)
         return false;
+    QList<int> selectedPages;
+    const PageParseResult parsed = headerPages(pages, m_document->pageCount(), selectedPages);
+    if (parsed == PageParseResult::Invalid) {
+        //% "Enter valid page numbers or ranges, such as 1-3, 5."
+        emit statusMessage(qtTrId("HeaderTextInvalidPages"));
+        return false;
+    }
+    if (parsed == PageParseResult::TooLarge) {
+        //% "This header batch is too large. Apply it to fewer pages."
+        emit statusMessage(qtTrId("HeaderTextBatchTooLarge"));
+        return false;
+    }
+    return addHeaderTextBatch(selectedPages, {text}, xPoints, yPoints, widthPoints, format);
+}
+
+QString PDFEditController::headerPageNumberText(int page, int firstPage, int lastPage,
+                                               int romanStartPage, int decimalStartPage) const
+{
+    if (!m_document || !m_document->isLoaded() || page < 0 || page >= m_document->pageCount()
+        || page < firstPage - qint64(1) || page >= lastPage
+        || validatePageNumberRange(m_document->pageCount(), firstPage, lastPage,
+                                   romanStartPage, decimalStartPage) != PageNumberRangeResult::Valid)
+        return {};
+    return pageNumberText(page + 1, romanStartPage, decimalStartPage);
+}
+
+bool PDFEditController::addHeaderPageNumbers(int firstPage, int lastPage,
+                                           int romanStartPage, int decimalStartPage,
+                                           qreal xPoints, qreal yPoints, qreal widthPoints,
+                                           const QVariantMap &format)
+{
+    if (!m_document || !m_document->isLoaded() || m_saving)
+        return false;
+    switch (validatePageNumberRange(m_document->pageCount(), firstPage, lastPage,
+                                    romanStartPage, decimalStartPage)) {
+    case PageNumberRangeResult::Invalid:
+        //% "Choose valid start and stop pages, with Roman numerals before Arabic numbers."
+        emit statusMessage(qtTrId("HeaderPageNumbersInvalidRange"));
+        return false;
+    case PageNumberRangeResult::RomanLimit:
+        //% "Roman numerals support at most 3,999 numbered pages."
+        emit statusMessage(qtTrId("HeaderPageNumbersRomanLimit"));
+        return false;
+    case PageNumberRangeResult::TooLarge:
+        //% "This header batch is too large. Apply it to fewer pages."
+        emit statusMessage(qtTrId("HeaderTextBatchTooLarge"));
+        return false;
+    case PageNumberRangeResult::Valid:
+        break;
+    }
+    const int firstNumberedPage = romanStartPage > 0 ? romanStartPage : decimalStartPage;
+    QList<int> pages;
+    QStringList texts;
+    pages.reserve(lastPage - firstNumberedPage + 1);
+    texts.reserve(lastPage - firstNumberedPage + 1);
+    // Use zero-based iteration so a document ending at INT_MAX cannot overflow.
+    for (int page = firstNumberedPage - 1; page < lastPage; ++page) {
+        pages.append(page);
+        texts.append(pageNumberText(page + 1, romanStartPage, decimalStartPage));
+    }
+    return addHeaderTextBatch(pages, texts, xPoints, yPoints, widthPoints, format);
+}
+
+bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
+                                         const QStringList &texts, qreal xPoints,
+                                         qreal yPoints, qreal widthPoints,
+                                         const QVariantMap &format)
+{
+    if (!m_document || !m_document->isLoaded() || m_saving)
+        return false;
     if (watermarkChangesPending()) {
         //% "Save or discard watermark changes before editing page content."
         emit statusMessage(qtTrId("SaveWatermarkBeforeEditing"));
@@ -225,19 +344,37 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
         return false;
     }
 
-    // Bound work even when an API caller bypasses the panel's input limit.
-    QString normalizedText;
-    if (text.size() <= kMaximumHeaderCharacters * 4) {
-        normalizedText = text;
-        normalizedText.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
-        normalizedText.replace(QLatin1Char('\r'), QLatin1Char('\n'));
-        normalizedText.replace(QChar::LineSeparator, QLatin1Char('\n'));
-        normalizedText.replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
-        normalizedText = normalizedText.normalized(QString::NormalizationForm_C);
+    Q_ASSERT(!selectedPages.isEmpty());
+    Q_ASSERT(texts.size() == 1 || texts.size() == selectedPages.size());
+    QStringList normalizedTexts;
+    normalizedTexts.reserve(texts.size());
+    qsizetype characterWork = 0;
+    for (const QString &text : texts) {
+        // Bound work even when an API caller bypasses the panel's input limit.
+        QString normalizedText;
+        if (text.size() <= kMaximumHeaderCharacters * 4) {
+            normalizedText = text;
+            normalizedText.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+            normalizedText.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+            normalizedText.replace(QChar::LineSeparator, QLatin1Char('\n'));
+            normalizedText.replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
+            normalizedText = normalizedText.normalized(QString::NormalizationForm_C);
+        }
+        if (!validHeaderText(normalizedText)) {
+            //% "Enter header text using at most 700 characters, without unsupported control characters."
+            emit statusMessage(qtTrId("HeaderTextInvalidContent"));
+            return false;
+        }
+        characterWork += normalizedText.size();
+        normalizedTexts.append(std::move(normalizedText));
     }
-    if (!validHeaderText(normalizedText)) {
-        //% "Enter header text using at most 700 characters, without unsupported control characters."
-        emit statusMessage(qtTrId("HeaderTextInvalidContent"));
+    if (texts.size() == 1)
+        characterWork *= selectedPages.size();
+    if (characterWork > kMaximumHeaderCharacterWork
+        || m_nextAddedObjectId > std::numeric_limits<quint64>::max()
+            - static_cast<quint64>(selectedPages.size())) {
+        //% "This header batch is too large. Apply it to fewer pages."
+        emit statusMessage(qtTrId("HeaderTextBatchTooLarge"));
         return false;
     }
 
@@ -251,7 +388,7 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
     const QVariant colorsValue = format.value(QStringLiteral("colors"), QVariantList{});
     const QVariantList colors = colorsValue.toList();
     const bool validColors = colorsValue.metaType().id() == QMetaType::QVariantList
-        && (colors.isEmpty() || (colors.size() == text.size()
+        && (colors.isEmpty() || (texts.size() == 1 && colors.size() == texts.constFirst().size()
             && std::all_of(colors.cbegin(), colors.cend(), [](const QVariant &value) {
                 const QColor characterColor = value.value<QColor>();
                 return characterColor.isValid() && characterColor.alpha() == 255;
@@ -273,8 +410,8 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
         return false;
     }
     const QVector<QColor> normalizedColors = colors.isEmpty()
-        ? QVector<QColor>() : normalizedHeaderColors(text, colors);
-    if (!colors.isEmpty() && normalizedColors.size() != normalizedText.size()) {
+        ? QVector<QColor>() : normalizedHeaderColors(texts.constFirst(), colors);
+    if (!colors.isEmpty() && normalizedColors.size() != normalizedTexts.constFirst().size()) {
         //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
         emit statusMessage(qtTrId("HeaderTextInvalidFormat"));
         return false;
@@ -283,28 +420,13 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
     const bool italic = format.value(QStringLiteral("fontItalic"), false).toBool();
     const bool underline = format.value(QStringLiteral("fontUnderline"), false).toBool();
     if (!ApplicationFonts::isFontFaceSelectable(family, bold, italic)
-        || !ApplicationFonts::fontFaceSupportsText(family, bold, italic, normalizedText)) {
+        || !ApplicationFonts::fontFaceSupportsText(
+            family, bold, italic, normalizedTexts.join(QLatin1Char('\n')))) {
         //% "The selected header font or style is unavailable or does not support this text. Choose another font."
         emit statusMessage(qtTrId("HeaderTextFontUnavailable"));
         return false;
     }
     const QFont layoutFont = fontForDisplay(family, 100, bold, italic, underline, fontSize);
-
-    QList<int> selectedPages;
-    const PageParseResult parsed = headerPages(pages, m_document->pageCount(), selectedPages);
-    if (parsed == PageParseResult::Invalid) {
-        //% "Enter valid page numbers or ranges, such as 1-3, 5."
-        emit statusMessage(qtTrId("HeaderTextInvalidPages"));
-        return false;
-    }
-    if (parsed == PageParseResult::TooLarge
-        || selectedPages.size() > kMaximumHeaderCharacterWork / normalizedText.size()
-        || m_nextAddedObjectId > std::numeric_limits<quint64>::max()
-            - static_cast<quint64>(selectedPages.size())) {
-        //% "This header batch is too large. Apply it to fewer pages."
-        emit statusMessage(qtTrId("HeaderTextBatchTooLarge"));
-        return false;
-    }
 
     Candidate prototype;
     prototype.kind = QStringLiteral("addedText");
@@ -324,7 +446,9 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
     command.addedDrafts.reserve(selectedPages.size());
     quint64 nextAddedId = m_nextAddedObjectId;
     QHash<qreal, qreal> heightByWidth;
-    for (int page : std::as_const(selectedPages)) {
+    for (qsizetype pageIndex = 0; pageIndex < selectedPages.size(); ++pageIndex) {
+        const int page = selectedPages.at(pageIndex);
+        const QString &normalizedText = normalizedTexts.at(normalizedTexts.size() == 1 ? 0 : pageIndex);
         const QSizeF size = m_document->pageSize(page);
         // Explicit placement keeps its physical origin on every target page.
         // A narrower page reduces only the width; it never shifts the origin.
@@ -335,12 +459,14 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
         qreal height = -1.0;
         if (std::isfinite(size.width()) && std::isfinite(size.height())
             && width > 0.0 && maximumHeight > 0.0) {
-            const auto cached = heightByWidth.constFind(width);
+            const auto cached = normalizedTexts.size() == 1
+                ? heightByWidth.constFind(width) : heightByWidth.cend();
             height = cached == heightByWidth.cend()
                 ? headerLayoutHeight(normalizedText, layoutFont, width,
                                      kHeaderHeight - yPoints)
                 : *cached;
-            heightByWidth.insert(width, height);
+            if (normalizedTexts.size() == 1)
+                heightByWidth.insert(width, height);
         }
         if (height <= 0.0 || height > maximumHeight + 0.001) {
             //% "Header text does not fit within the first 100 pt on page %1. Shorten the text."

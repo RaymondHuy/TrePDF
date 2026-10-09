@@ -305,6 +305,9 @@ qt_add_qml_module(trepdf
         src/Components/HeaderImagePlacement.qml
         src/Components/HeaderImageOverlay.qml
         src/Components/HeaderImagePanel.qml
+        src/Components/HeaderPageNumberPlacement.qml
+        src/Components/HeaderPageNumberOverlay.qml
+        src/Components/HeaderPageNumberPanel.qml
         src/Components/DropdownOptionsPanel.qml
         ${TREPDF_EDIT_OVERLAY_QML}
         src/Components/EditRibbon.qml

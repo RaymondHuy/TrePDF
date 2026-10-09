@@ -3933,5 +3933,73 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <source>The header image does not fit within the first 100 pt on page %1. Resize or move it.</source>
         <translation>The header image does not fit within the first 100 pt on page %1. Resize or move it.</translation>
     </message>
+    <message id="HeaderPageNumbers">
+        <location filename="../src/Components/AppRibbon.qml" line="457"/>
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="75"/>
+        <source>Page numbers</source>
+        <translation>Page numbers</translation>
+    </message>
+    <message id="HeaderPageNumbersInvalidRange">
+        <location filename="../src/Components/HeaderPageNumberPlacement.qml" line="38"/>
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="296"/>
+        <source>Choose valid start and stop pages, with Roman numerals before Arabic numbers.</source>
+        <translation>Choose valid start and stop pages, with Roman numerals before Arabic numbers.</translation>
+    </message>
+    <message id="HeaderPageNumbersRomanLimit">
+        <location filename="../src/Components/HeaderPageNumberPlacement.qml" line="43"/>
+        <location filename="../src/PDFEditControllerHeaderText.cpp" line="300"/>
+        <source>Roman numerals support at most 3,999 numbered pages.</source>
+        <translation>Roman numerals support at most 3,999 numbered pages.</translation>
+    </message>
+    <message id="AddHeaderPageNumbersFailed">
+        <location filename="../src/Components/HeaderPageNumberPlacement.qml" line="117"/>
+        <source>Could not add page numbers.</source>
+        <translation>Could not add page numbers.</translation>
+    </message>
+    <message id="HeaderPageNumbersPdfPagesHint">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="81"/>
+        <source>All page positions below refer to pages in the PDF, starting at 1.</source>
+        <translation>All page positions below refer to pages in the PDF, starting at 1.</translation>
+    </message>
+    <message id="HeaderPageNumbersFirstPage">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="87"/>
+        <source>Start at PDF page</source>
+        <translation>Start at PDF page</translation>
+    </message>
+    <message id="HeaderPageNumbersLastPage">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="102"/>
+        <source>Stop at PDF page (inclusive)</source>
+        <translation>Stop at PDF page (inclusive)</translation>
+    </message>
+    <message id="HeaderPageNumbersRoman">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="119"/>
+        <source>Roman numerals (i, ii, iii)</source>
+        <translation>Roman numerals (i, ii, iii)</translation>
+    </message>
+    <message id="HeaderPageNumbersRomanStart">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="127"/>
+        <source>Begin i at PDF page</source>
+        <translation>Begin i at PDF page</translation>
+    </message>
+    <message id="HeaderPageNumbersDecimal">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="146"/>
+        <source>Arabic numbers (1, 2, 3)</source>
+        <translation>Arabic numbers (1, 2, 3)</translation>
+    </message>
+    <message id="HeaderPageNumbersDecimalStart">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="154"/>
+        <source>Begin 1 at PDF page</source>
+        <translation>Begin 1 at PDF page</translation>
+    </message>
+    <message id="HeaderPageNumbersSequenceHint">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="170"/>
+        <source>Arabic numbers restart at 1. Roman numerals stop before that page. Pages before the first numbering start stay blank.</source>
+        <translation>Arabic numbers restart at 1. Roman numerals stop before that page. Pages before the first numbering start stay blank.</translation>
+    </message>
+    <message id="HeaderDraftSaveHint">
+        <location filename="../src/Components/HeaderPageNumberPanel.qml" line="175"/>
+        <source>Apply creates a draft. Use Save or Save As to write it into the PDF.</source>
+        <translation>Apply creates a draft. Use Save or Save As to write it into the PDF.</translation>
+    </message>
 </context>
 </TS>
