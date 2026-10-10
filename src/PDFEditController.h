@@ -39,6 +39,14 @@ class PDFEditController : public QObject
     QML_ELEMENT
     Q_PROPERTY(PDFDocument *document READ document WRITE setDocument NOTIFY documentChanged FINAL)
     Q_PROPERTY(Tool tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
+    Q_PROPERTY(bool headerSelectionOnly READ headerSelectionOnly WRITE setHeaderSelectionOnly NOTIFY headerSelectionOnlyChanged FINAL)
+    Q_PROPERTY(bool headerSyncAvailable READ headerSyncAvailable NOTIFY headerSyncChanged FINAL)
+    Q_PROPERTY(bool headerSyncLoading READ headerSyncLoading NOTIFY headerSyncChanged FINAL)
+    Q_PROPERTY(int headerSyncMatchCount READ headerSyncMatchCount NOTIFY headerSyncChanged FINAL)
+    Q_PROPERTY(QString headerSyncMatchPages READ headerSyncMatchPages NOTIFY headerSyncChanged FINAL)
+    Q_PROPERTY(QString headerSyncKey READ headerSyncKey NOTIFY headerSyncChanged FINAL)
+    Q_PROPERTY(bool headerSyncCanApply READ headerSyncCanApply NOTIFY headerSyncChanged FINAL)
+    Q_PROPERTY(QString headerSyncError READ headerSyncError NOTIFY headerSyncChanged FINAL)
     Q_PROPERTY(ShapeType shapeType READ shapeType WRITE setShapeType NOTIFY shapeTypeChanged FINAL)
     Q_PROPERTY(bool imageAspectRatioLocked READ imageAspectRatioLocked WRITE setImageAspectRatioLocked NOTIFY imageAspectRatioLockedChanged FINAL)
     Q_PROPERTY(QColor highlightColor READ highlightColor WRITE setHighlightColor NOTIFY highlightColorChanged FINAL)
@@ -233,6 +241,19 @@ public:
 
     Tool tool() const;
     void setTool(Tool tool);
+    bool headerSelectionOnly() const { return m_headerSelectionOnly; }
+    bool headerSyncAvailable() const;
+    bool headerSyncLoading() const { return m_headerSyncLoading; }
+    int headerSyncMatchCount() const;
+    QString headerSyncMatchPages() const;
+    QString headerSyncKey() const;
+    bool headerSyncCanApply() const;
+    QString headerSyncError() const { return m_headerSyncError; }
+    Q_INVOKABLE void findSimilarHeaders();
+    Q_INVOKABLE bool applyHeaderChanges(const QString &pages = QString());
+    Q_INVOKABLE void cancelHeaderSync();
+    void setHeaderSelectionOnly(bool enabled);
+    Q_INVOKABLE bool candidateAllowedInSelection(int page, const QString &objectId);
     ShapeType shapeType() const;
     void setShapeType(ShapeType shapeType);
     QColor highlightColor() const;
@@ -526,6 +547,8 @@ public:
 signals:
     void documentChanged();
     void toolChanged();
+    void headerSelectionOnlyChanged();
+    void headerSyncChanged();
     void shapeTypeChanged();
     void imageAspectRatioLockedChanged();
     void highlightColorChanged();
@@ -665,6 +688,10 @@ private:
         QVector<int> objectPath;
         QVector<CandidatePart> parts;
         QString kind;
+        QString headerGroupId;
+        QString headerRole;
+        QByteArray headerImageDigest;
+        bool headerMetadataInvalid = false;
         QString label;
         CandidateGeometry geometry;
         QRectF initialDraftFrameRect;
@@ -846,10 +873,21 @@ private:
         Candidate selectedCandidate;
     };
 
+    struct DraftChange {
+        QString key;
+        int page = -1;
+        QString objectId;
+        bool hadBefore = false;
+        Draft before;
+        bool hadAfter = false;
+        Draft after;
+    };
+
     struct Command {
         enum class Kind {
             ObjectDraft,
             ObjectDraftBatch,
+            HeaderDraftBatch,
             PageStructure,
             WebLinks,
             Watermarks
@@ -865,6 +903,7 @@ private:
         Draft after;
         // A batch of newly added objects, committed and restored atomically.
         QVector<Draft> addedDrafts;
+        QVector<DraftChange> changedDrafts;
         PageState pageStateBefore;
         PageState pageStateAfter;
         QVector<PDFWebLinks::Link> webLinksBefore;
@@ -884,6 +923,17 @@ private:
     };
 
     void resetSession();
+    void resetHeaderSync();
+    void captureHeaderSyncSelection();
+    void validateHeaderSyncHistory();
+    void scanNextHeaderPage();
+    void collectHeaderMatches(QVector<Candidate> candidates, int page);
+    bool headerSyncDraftEligible(const Draft &draft) const;
+    bool measureHeaderSyncText(Draft &draft) const;
+    bool headerSyncDraftMatches(const Draft &draft, bool &pageNumber) const;
+    Draft currentHeaderSyncDraft() const;
+    bool headerSyncHistoryCurrent() const;
+    void applyHeaderDraftBatch(const Command &command, bool useAfterState, bool immediate);
     void resetWatermarks();
     void invalidateWatermarks();
     bool canChangeWatermarks();
@@ -1040,7 +1090,7 @@ private:
     static CharacterFormat primaryCharacterFormat(const Draft &draft);
     bool addHeaderTextBatch(const QList<int> &pages, const QStringList &texts,
                             qreal xPoints, qreal yPoints, qreal widthPoints,
-                            const QVariantMap &format);
+                            const QVariantMap &format, bool pageNumbers = false);
     static CharacterFormat characterFormatAtPosition(const Draft &draft,
                                                       qsizetype position,
                                                       bool preferPrevious);
@@ -1127,12 +1177,15 @@ private:
     void rememberRejectedFontFingerprint(const QByteArray &fingerprint);
     void clearRegisteredFonts();
     bool isDesignerManagedSourceWidget(const Candidate &candidate) const;
+    bool candidateMatchesSelectionScope(const Candidate &candidate) const;
+    qreal selectionBottomRatio(int page) const;
     void notifyManagedWidgetVisibilityChanged(int page);
 
     QPointer<PDFDocument> m_document;
     QPointer<PDFFormController> m_formController;
     QPointer<PDFFormDesignerController> m_formDesignerController;
     Tool m_tool = BrowseTool;
+    bool m_headerSelectionOnly = false;
     ShapeType m_shapeType = RectangleShape;
     QColor m_highlightColor;
     QColor m_underlineColor;
@@ -1174,6 +1227,20 @@ private:
     quint64 m_nextAddedObjectId = 0;
     // Temporary placement pixels, shared with committed image drafts by QImage.
     QImage m_headerImage;
+    bool m_headerSyncValid = false;
+    bool m_headerSyncLoading = false;
+    bool m_headerSyncReady = false;
+    bool m_headerSyncPreserveNumbers = false;
+    bool m_headerSyncApplying = false;
+    bool m_headerSyncHadBefore = false;
+    Draft m_headerSyncBaseline;
+    QVector<Draft> m_headerSyncMatches;
+    QVector<CandidateScanRequest> m_headerSyncRequests;
+    qsizetype m_headerSyncRequestIndex = 0;
+    qsizetype m_headerSyncUndoIndex = 0;
+    qsizetype m_headerSyncRetainedBytes = 0;
+    QString m_headerSyncError;
+    std::shared_ptr<std::atomic_bool> m_headerSyncCancellation;
     QVector<Command> m_undoStack;
     QVector<Command> m_redoStack;
     QHash<QByteArray, QString> m_registeredFontFamilies;

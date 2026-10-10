@@ -90,7 +90,7 @@ ApplicationWindow {
     readonly property bool modalOperationActive:
         passwordRequests.length > 0 || fontDownloadController !== null
         || signatureDialogLoader.active || setPasswordDialogLoader.active
-        || watermarkDialogLoader.active || openDialog.visible
+        || watermarkDialogLoader.active || headerEntryNoticeLoader.active || openDialog.visible
         || imageDialog.visible || headerImageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
         || externalLinkPopup.visible || discardDraftPopup.visible || deletePagePopup.visible
         || documentAccess.busy || saveAsDialog.writePending || excelExportDialog.writePending
@@ -122,6 +122,41 @@ ApplicationWindow {
         if (activeSession)
             activeSession.prepareForDeactivation()
         return true
+    }
+
+    function prepareHeaderEntry() {
+        if (!prepareActiveWorkspace() || (activeSession && activeSession.hasDrafts)) {
+            headerEntryNoticeLoader.leavingHeader = false
+            headerEntryNoticeLoader.active = true
+            return false
+        }
+        return true
+    }
+
+    function prepareHeaderExit() {
+        const workspace = activeWorkspace()
+        // Check temporary placement before committing other inputs, whose history
+        // notifications could cancel the placement before it has been applied.
+        InputMethod.commit()
+        if (workspace)
+            workspace.headerTextPlacement.synchronizeRequested()
+        if ((workspace && workspace.hasPendingHeaderPlacement)
+                || !prepareActiveWorkspace() || (activeSession && activeSession.hasDrafts)) {
+            headerEntryNoticeLoader.leavingHeader = true
+            headerEntryNoticeLoader.active = true
+            return false
+        }
+        return true
+    }
+
+    function requestHeaderSave() {
+        const workspace = activeWorkspace()
+        if (workspace && !workspace.submitPendingHeaderPlacement()) {
+            //% "Please check the header settings in the right panel, then choose Apply or Cancel before switching tabs."
+            showStatus(qsTrId("HeaderPendingInputBeforeLeaving"))
+            return
+        }
+        requestSave()
     }
 
     function rebuildWorkspace() {
@@ -474,6 +509,16 @@ ApplicationWindow {
         imageInsertX = x
         imageInsertY = y
         imageDialog.open()
+    }
+
+    function requestHeaderSelect() {
+        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
+                || !appRibbon.headerTabActive || !prepareActiveWorkspace())
+            return
+        const workspace = activeWorkspace()
+        if (workspace)
+            workspace.closeHeaderPlacement()
+        appRibbon.syncEditTool()
     }
 
     function requestHeaderText() {
@@ -853,6 +898,12 @@ ApplicationWindow {
     }
 
     onActiveSessionChanged: {
+        headerEntryNoticeLoader.active = false
+        if (appRibbon.headerTabActive && activeSession && activeSession.hasDrafts) {
+            appRibbon.showViewTab()
+            headerEntryNoticeLoader.leavingHeader = false
+            headerEntryNoticeLoader.active = true
+        }
         cancelHeaderImageFile()
         cancelSignature()
         cancelPasswordSetup()
@@ -1031,6 +1082,94 @@ ApplicationWindow {
     }
 
     Loader {
+        id: headerEntryNoticeLoader
+        objectName: "headerEntryNoticeLoader"
+        property bool leavingHeader: false
+        active: false
+        sourceComponent: Popup {
+            id: headerEntryNotice
+            objectName: "headerEntryNotice"
+            parent: Overlay.overlay
+            x: Math.round((window.width - width) / 2)
+            y: Math.max(windowMetrics.topInset,
+                Math.round((window.height - windowMetrics.keyboardInset - height) / 2))
+            width: Math.min(480, window.width - 32)
+            height: headerEntryContent.implicitHeight + 32
+            padding: 16
+            modal: true
+            focus: true
+            closePolicy: Popup.CloseOnEscape
+            onOpened: headerEntryUnderstood.forceActiveFocus()
+            onClosed: headerEntryNoticeLoader.active = false
+            background: Rectangle {
+                radius: 6
+                color: "#fffdfb"
+                border.color: appTheme.ribbonBorder
+            }
+            contentItem: ColumnLayout {
+                id: headerEntryContent
+                spacing: 14
+                Label {
+                    Layout.fillWidth: true
+                    //% "Before leaving Header"
+                    readonly property string exitTitle: qsTrId("HeaderUnsavedExitTitle")
+                    //% "Before editing headers"
+                    readonly property string entryTitle: qsTrId("HeaderUnsavedChangesTitle")
+                    text: headerEntryNoticeLoader.leavingHeader ? exitTitle : entryTitle
+                    font.pixelSize: 18
+                    font.weight: Font.DemiBold
+                    color: appTheme.ribbonTextColor
+                    wrapMode: Text.Wrap
+                }
+                Label {
+                    objectName: "headerEntryNoticeMessage"
+                    Layout.fillWidth: true
+                    //% "Your header changes have not been saved yet. They may affect multiple pages, so please save or undo all changes before switching tabs. Any new header content will be applied before saving. You can also cancel content you have not applied yet in the right panel."
+                    readonly property string exitMessage: qsTrId("HeaderUnsavedExitMessage")
+                    //% "You have unsaved changes. Header edits can affect multiple pages, so please save or undo all your changes before continuing."
+                    readonly property string entryMessage: qsTrId("HeaderUnsavedChangesMessage")
+                    text: headerEntryNoticeLoader.leavingHeader ? exitMessage : entryMessage
+                    color: "#656268"
+                    wrapMode: Text.Wrap
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        id: headerEntryUnderstood
+                        objectName: "headerEntryUnderstoodButton"
+                        //% "Got it"
+                        text: qsTrId("HeaderUnsavedChangesUnderstood")
+                        onClicked: headerEntryNotice.close()
+                    }
+                    OrangeButton {
+                        objectName: "headerEntrySaveButton"
+                        theme: appTheme
+                        //% "Save"
+                        text: qsTrId("Save")
+                        onClicked: {
+                            const leavingHeader = headerEntryNoticeLoader.leavingHeader
+                            headerEntryNotice.close()
+                            if (leavingHeader)
+                                window.requestHeaderSave()
+                            else
+                                window.requestSave()
+                        }
+                    }
+                }
+            }
+        }
+        onLoaded: {
+            if (status === Loader.Ready) {
+                const notice = item as Popup
+                if (notice)
+                    notice.open()
+            }
+        }
+    }
+
+    Loader {
         id: setPasswordDialogLoader
         objectName: "setPasswordDialogLoader"
         active: false
@@ -1123,7 +1262,8 @@ ApplicationWindow {
             && !(window.activeWorkspaceItem
                 && (window.activeWorkspaceItem.headerTextInputFocused
                     || window.activeWorkspaceItem.headerImageInputFocused
-                    || window.activeWorkspaceItem.headerPageNumberInputFocused))
+                    || window.activeWorkspaceItem.headerPageNumberInputFocused
+                    || window.activeWorkspaceItem.headerSyncInputFocused))
             && !window.activeEditController.textEditActive
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
@@ -1138,7 +1278,8 @@ ApplicationWindow {
             && !(window.activeWorkspaceItem
                 && (window.activeWorkspaceItem.headerTextInputFocused
                     || window.activeWorkspaceItem.headerImageInputFocused
-                    || window.activeWorkspaceItem.headerPageNumberInputFocused))
+                    || window.activeWorkspaceItem.headerPageNumberInputFocused
+                    || window.activeWorkspaceItem.headerSyncInputFocused))
             && !window.activeWorkspaceHasPendingEdits
             && !window.activeEditController.textEditActive
             && !window.activeFormDesignerController.textFieldFocused
@@ -1764,6 +1905,18 @@ ApplicationWindow {
             session: window.activeSession
             anySaving: tabModel.anySaving
             hasPendingPanelEdits: window.activeWorkspaceHasPendingEdits
+            prepareHeaderEntry: () => window.prepareHeaderEntry()
+            prepareHeaderExit: () => window.prepareHeaderExit()
+            hasPendingHeaderPlacement: window.activeWorkspaceItem !== null
+                && window.activeWorkspaceItem.hasPendingHeaderPlacement
+            headerPlacementPending: window.activeWorkspaceItem !== null
+                && (window.activeWorkspaceItem.headerTextPlacement.armed
+                    || window.activeWorkspaceItem.headerTextPlacement.active
+                    || window.activeWorkspaceItem.headerImagePlacement.armed
+                    || window.activeWorkspaceItem.headerImagePlacement.active
+                    || window.activeWorkspaceItem.headerImagePlacement.choosing
+                    || window.activeWorkspaceItem.headerPageNumberPlacement.armed
+                    || window.activeWorkspaceItem.headerPageNumberPlacement.active)
             viewNavigationPage: window.activeWorkspaceItem
                 ? window.activeWorkspaceItem.activePage
                 : window.activeDocument.currentPage
@@ -1776,7 +1929,12 @@ ApplicationWindow {
                     && window.activeDocument.currentPage + 1
                         < window.activeDocument.pageCount
             onOpenRequested: window.requestOpen()
-            onSaveRequested: window.requestSave()
+            onSaveRequested: {
+                if (appRibbon.headerTabActive)
+                    window.requestHeaderSave()
+                else
+                    window.requestSave()
+            }
             onSaveAsRequested: window.requestSaveAs()
             onExcelExportRequested: window.requestExcelExport()
             onPageRequested: page => window.goToPage(page)
@@ -1843,6 +2001,7 @@ ApplicationWindow {
             onSignatureRequested: mode => window.requestSignature(mode)
             onSetPasswordRequested: window.requestSetPassword()
             onWatermarkRequested: mode => window.requestWatermark(mode)
+            onHeaderSelectRequested: window.requestHeaderSelect()
             onHeaderTextRequested: window.requestHeaderText()
             onHeaderImageRequested: window.requestHeaderImage()
             onHeaderPageNumbersRequested: window.requestHeaderPageNumbers()

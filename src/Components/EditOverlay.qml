@@ -19,6 +19,9 @@ Item {
     // font separately at each zoom otherwise changes wrapping on editor entry.
     readonly property real textLayoutScale: Math.max(0.01, pagePointScale)
     readonly property real textLayoutPageHeight: height / textLayoutScale
+    readonly property real selectionBottomRatio: controller.headerSelectionOnly
+        && controller.tool === PDFEditController.SelectTool
+        ? Math.min(1, 100 / Math.max(1, textLayoutPageHeight)) : 1
     property int viewRotation: 0
 
     property var drafts: []
@@ -902,6 +905,10 @@ Item {
     }
 
     function candidateMatchesSelectionTool(candidate) {
+        if (controller.headerSelectionOnly
+                && (!hasCandidate(candidate)
+                    || !controller.candidateAllowedInSelection(page, candidate.objectId)))
+            return false
         return controller.tool !== PDFEditController.CommentSelectTool
             || (hasCandidate(candidate) && isCommentKind(candidate.kind))
     }
@@ -1277,7 +1284,7 @@ Item {
                 Math.min(bottom - minimumHeight, top + deltaY / pageHeight))
         } else if (vertical > 0) {
             bottom = Math.min(
-                1,
+                selectionBottomRatio,
                 Math.max(top + minimumHeight, bottom + deltaY / pageHeight))
         }
 
@@ -1317,7 +1324,8 @@ Item {
             : horizontal > 0 ? 1 - left : 2 * Math.min(centerX, 1 - centerX)
         const availableHeight = vertical < 0
             ? bottom
-            : vertical > 0 ? 1 - top : 2 * Math.min(centerY, 1 - centerY)
+            : vertical > 0 ? selectionBottomRatio - top
+                : 2 * Math.min(centerY, selectionBottomRatio - centerY)
         const maximumScale = Math.min(
             availableWidth / frameWidth, availableHeight / frameHeight)
         if (maximumScale <= 0)
@@ -1350,7 +1358,7 @@ Item {
         const top = Math.max(
             0,
             Math.min(
-                1 - frameHeight,
+                selectionBottomRatio - frameHeight,
                 Number(startFrameRect.y) + deltaY / pageHeight))
         return Qt.rect(left, top, frameWidth, frameHeight)
     }
@@ -2340,6 +2348,11 @@ Item {
                     && hitArea.containsMouse) {
                 root.updateHoverAtPosition(hitArea.mouseX, hitArea.mouseY)
             }
+        }
+
+        function onHeaderSelectionOnlyChanged() {
+            root.prepareForSessionChange()
+            root.reloadData()
         }
 
         function onToolChanged() {

@@ -264,6 +264,14 @@ PDFEditController::PDFEditController(QObject *parent)
 {
     connect(this, &PDFEditController::savingChanged,
             this, &PDFEditController::passwordProtectionChanged);
+    connect(this, &PDFEditController::selectionChanged,
+            this, &PDFEditController::captureHeaderSyncSelection);
+    connect(this, &PDFEditController::historyStateChanged,
+            this, &PDFEditController::validateHeaderSyncHistory);
+    connect(this, &PDFEditController::savingChanged, this, [this]() {
+        if (m_saving)
+            resetHeaderSync();
+    });
     connect(this, &PDFEditController::historyStateChanged,
             this, &PDFEditController::cancelWebLinkCreation);
     connect(this, &PDFEditController::historyStateChanged,
@@ -298,6 +306,8 @@ PDFEditController::PDFEditController(QObject *parent)
 
 PDFEditController::~PDFEditController()
 {
+    if (m_headerSyncCancellation)
+        m_headerSyncCancellation->store(true, std::memory_order_relaxed);
     if (m_watermarkCancellation)
         m_watermarkCancellation->store(true, std::memory_order_relaxed);
     if (m_webLinkCancellation)
@@ -332,6 +342,7 @@ void PDFEditController::setDocument(PDFDocument *document)
         connect(m_document, &PDFDocument::sourceChanged, this, &PDFEditController::resetSession);
         connect(m_document, &PDFDocument::loadedChanged, this, &PDFEditController::resetSession);
         connect(m_document, &PDFDocument::pageStructureChanged, this, [this]() {
+            resetHeaderSync();
             cancelTextEditPreparation();
             cancelWebLinkCreation();
             invalidateWebLinks();
@@ -510,9 +521,10 @@ void PDFEditController::setTool(Tool tool)
     finishSelectedTextEdit();
     setPendingDrawingCommentPage(-1);
     m_tool = tool;
-    if ((m_tool == CommentSelectTool
-         && m_hasSelection
-         && !isCommentCandidateKind(m_selectedCandidate.kind))
+    if (tool != SelectTool)
+        resetHeaderSync();
+    if ((m_hasSelection
+         && !candidateMatchesSelectionScope(m_selectedCandidate))
         || m_tool == BrowseTool
         || m_tool == LinkTool
         || m_tool == StickyNoteTool
@@ -523,6 +535,85 @@ void PDFEditController::setTool(Tool tool)
         clearSelection();
     }
     emit toolChanged();
+}
+
+void PDFEditController::setHeaderSelectionOnly(bool enabled)
+{
+    if (m_headerSelectionOnly == enabled) {
+        return;
+    }
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    cancelTextEditPreparation();
+    m_headerSelectionOnly = enabled;
+    resetHeaderSync();
+    if (m_hasSelection && !candidateMatchesSelectionScope(m_selectedCandidate)) {
+        clearSelection();
+    }
+    emit headerSelectionOnlyChanged();
+    emit selectedGeometryChanged();
+    emit pageDataChanged(-1);
+    if (enabled)
+        captureHeaderSyncSelection();
+}
+
+qreal PDFEditController::selectionBottomRatio(int page) const
+{
+    if (!m_headerSelectionOnly || m_tool != SelectTool) {
+        return 1.0;
+    }
+    const qreal height = m_document ? m_document->pageSize(page).height() : 0.0;
+    return qIsFinite(height) && height > 0.0 ? qMin(1.0, 100.0 / height) : 0.0;
+}
+
+bool PDFEditController::candidateMatchesSelectionScope(const Candidate &candidate) const
+{
+    if (m_tool == CommentSelectTool && !isCommentCandidateKind(candidate.kind)) {
+        return false;
+    }
+    if (!m_headerSelectionOnly || m_tool != SelectTool) {
+        return true;
+    }
+    if (candidate.textMarkupHitTestOnly || candidate.isReplyAnnotation
+        || candidate.commentStateAnnotation || isDesignerManagedSourceWidget(candidate)) {
+        return false;
+    }
+    const auto draft = m_drafts.constFind(draftKey(candidate.page, candidate.objectId));
+    const Draft *displayDraft = m_textEditActive && m_textEditDisplayDraftActive
+            && m_textEditDisplayDraft.candidate.page == candidate.page
+            && m_textEditDisplayDraft.candidate.objectId == candidate.objectId
+        ? &m_textEditDisplayDraft
+        : draft != m_drafts.cend() ? &*draft : nullptr;
+    if (draftRepresentsDeletion(candidate.kind,
+            displayDraft ? displayDraft->text : candidate.text,
+            displayDraft && displayDraft->deleted)) {
+        return false;
+    }
+    QRectF bounds;
+    if (displayDraft) {
+        bounds = displayDraft->frameRect.united(displayDraft->contentBounds);
+    } else {
+        // Original glyph extents can exceed the inferred initial text frame.
+        bounds = candidate.geometry.sourceRect;
+        if (!candidate.sourceParagraphFormats.isEmpty()) {
+            bounds.setBottom(qMin<qreal>(1.0, bounds.bottom()
+                + candidate.sourceParagraphFormats.constLast().spaceAfterRatio));
+        }
+        bounds = bounds.united(candidate.initialDraftFrameRect);
+    }
+    constexpr qreal epsilon = 1e-8;
+    return qIsFinite(bounds.x()) && qIsFinite(bounds.y())
+        && qIsFinite(bounds.width()) && qIsFinite(bounds.height())
+        && bounds.width() > 0.0 && bounds.height() > 0.0
+        && bounds.left() >= -epsilon && bounds.top() >= -epsilon
+        && bounds.right() <= 1.0 + epsilon
+        && bounds.bottom() <= selectionBottomRatio(candidate.page) + epsilon;
+}
+
+bool PDFEditController::candidateAllowedInSelection(int page, const QString &objectId)
+{
+    const Candidate *candidate = findCandidate(page, objectId);
+    return candidate && candidateMatchesSelectionScope(*candidate);
 }
 
 PDFEditController::ShapeType PDFEditController::shapeType() const
@@ -722,6 +813,11 @@ QString PDFEditController::selectedReason() const
 QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
 {
     ensureCacheRevision();
+    if (m_headerSelectionOnly && m_tool == SelectTool
+        && (!qIsFinite(x) || !qIsFinite(y) || x < 0.0 || x > 1.0
+            || y < 0.0 || y > selectionBottomRatio(page))) {
+        return {};
+    }
     const QPointF point(x, y);
     const QSizeF pageSize = m_document
         ? m_document->pageSize(page)
@@ -739,8 +835,7 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
         if (candidate.isReplyAnnotation) {
             return;
         }
-        if (m_tool == CommentSelectTool
-            && !isCommentCandidateKind(candidate.kind)) {
+        if (!candidateMatchesSelectionScope(candidate)) {
             return;
         }
         if (m_tool == EditTextTool
@@ -759,8 +854,10 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
             || candidate.kind == QLatin1String("addedImage")
             || isGeometryCommentCandidateKind(candidate.kind)
             || isShapeCandidateKind(candidate.kind);
-        const QRectF candidateRect
-            = draftGeometryCandidate && draft != m_drafts.cend()
+        const QRectF candidateRect = m_headerSelectionOnly && m_tool == SelectTool
+                && draft != m_drafts.cend()
+            ? draft->frameRect.united(draft->contentBounds)
+            : draftGeometryCandidate && draft != m_drafts.cend()
             ? draft->frameRect
             : candidate.geometry.sourceRect;
         const QRectF hitRect = candidateRect.adjusted(
@@ -846,8 +943,7 @@ bool PDFEditController::selectCandidate(int page, const QString &objectId)
         clearSelection();
         return false;
     }
-    if (m_tool == CommentSelectTool
-        && !isCommentCandidateKind(candidate->kind)) {
+    if (!candidateMatchesSelectionScope(*candidate)) {
         return false;
     }
     const auto draft = m_drafts.constFind(draftKey(page, objectId));
@@ -881,6 +977,7 @@ void PDFEditController::clearSelection()
 
 void PDFEditController::resetSession()
 {
+    resetHeaderSync();
     resetWatermarks();
     clearHeaderImage();
     m_pendingOpenPassword.clear();
@@ -1029,8 +1126,7 @@ void PDFEditController::setSelection(const Candidate *candidate)
     m_selectedTextRangeLength = 0;
     if (!candidate
         || candidate->commentStateAnnotation
-        || (m_tool == CommentSelectTool
-            && !isCommentCandidateKind(candidate->kind))) {
+        || !candidateMatchesSelectionScope(*candidate)) {
         m_hasSelection = false;
         m_selectedCandidate = Candidate();
         m_selectedText.clear();

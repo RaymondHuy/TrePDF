@@ -15,6 +15,46 @@ and Save/Save As persistence.
 
 Current features:
 
+- Entering Header requires a clean active PDF. Main commits pending inline,
+  panel and form input before checking all session drafts. Unsaved changes keep
+  the previous ribbon tab and show a friendly Save/Got it notice; save or undo
+  all changes, then enter Header again. Edits within Header remain usable.
+  Leaving Header for any other ribbon tab also requires Save or Undo, including
+  Find navigation and unapplied text/image/page-number placement. The exit
+  notice preserves Header UI; its Save action submits pending placement with
+  the chosen page range before saving. Invalid input stays editable and blocks
+  Save. The clean-entry boundary reuses the per-session command history.
+  Header's Save button has its own File ribbon group after the Header tools,
+  matching View, and shares the exit notice's save flow, submitting pending
+  Header placement with its selected page range.
+  Switching to a dirty PDF while Header is active returns to View with the
+  same notice. Other dirty PDF tabs do not block a clean active PDF.
+
+- Header > Select enables synchronization by default in a right-side panel when
+  an eligible object is selected; users can uncheck it for that selection. It matches
+  the selected text/image's pre-edit snapshot against other 100-point headers,
+  then applies content, style, geometry or deletion to all matches or a custom
+  range. Text content/style changes copy the edited frame's physical size so
+  narrower group members keep the same wrapping. Header text also persists its
+  logical paragraph/frame through Save/reopen; bounded grouping recovers older
+  marked glyph fragments without joining ambiguous overprints. Newly created Header batches retain a UUID/role in bounded
+  `TrePDFHeader` object marks through Save/reopen. Unmarked PDF headers require
+  matching text/style/physical geometry or decoded image pixels; ambiguous
+  pages are skipped. Page-number formatting/movement retains per-page values.
+  `PDFEditControllerHeaderSync.cpp` owns bounded cancellable scanning and atomic
+  `HeaderDraftBatch` history, merging consecutive anchor edits into one Undo.
+  See `docs/header-text-pipeline.md` for matching and lifecycle details.
+
+- Header > Select activates on entry and reuses Edit selection and property
+  panels for objects entirely inside the first 100 PDF points. The transient
+  `headerSelectionOnly` controller scope filters source/draft pointer hits,
+  direct selection, keyboard traversal and history restoration. Move/resize
+  and image rotation stay inside the header; text retains Edit reflow behavior
+  and leaves Header selection if committed content overflows. Select cancels
+  pending Header placement. Edits affect one page object and use normal
+  Undo/Redo and Save; the optional synchronization panel propagates them to
+  matching headers. See `docs/header-text-pipeline.md`.
+
 - Header > Page numbers places 12-point black numbers by clicking the gray
   100-point header, then opens a right panel for inclusive PDF start/stop pages
   and optional Roman/Arabic starts. Both sequences begin at one; Arabic resets

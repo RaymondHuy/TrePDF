@@ -3,6 +3,7 @@
 #include "PDFShapeUtils.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFSourceTextGeometry.h"
+#include "PDFHeaderMetadata.h"
 #include "PDFWebLinkScanner.h"
 
 #include "ApplicationFonts.h"
@@ -149,6 +150,8 @@ struct SaveDraft {
     Kind kind = Kind::Text;
     int page = -1;
     QString objectId;
+    QString headerGroupId;
+    QString headerRole;
     QVector<QVector<int>> sourceObjectPaths;
     QVector<QVector<int>> sourceUnderlineObjectPaths;
     QString originalText;
@@ -938,7 +941,9 @@ bool hasParagraphLayout(const SaveDraft &draft)
 {
     // Resetting the controls must not discard the source group's explicit
     // paragraph boundaries or its original layout frame on the next save.
-    return draft.sourceParagraphLayout
+    // Header groups also need their frame retained for identical wrapping on
+    // other pages, even when their text uses only one default character format.
+    return draft.sourceParagraphLayout || !draft.headerGroupId.isEmpty()
         || std::any_of(draft.characterSpans.cbegin(), draft.characterSpans.cend(),
                        [](const SaveSpan &span) {
             return !qFuzzyIsNull(span.format.sourceAdvanceRatio);
@@ -3118,7 +3123,8 @@ PDFSaveWriter::Result createImageDraftObject(
     const bool configured = imageObject
         && FPDFImageObj_SetBitmap(loadedPages, 1, imageObject, bitmap)
         && coordinateMapper.imageMatrix(frame, matrix, draft.imageQuarterTurns)
-        && FPDFPageObj_SetMatrix(imageObject, &matrix);
+        && FPDFPageObj_SetMatrix(imageObject, &matrix)
+        && PDFHeaderMetadata::write(document, imageObject, draft.headerGroupId, draft.headerRole);
     if (!configured) {
         if (imageObject) {
             FPDFPageObj_Destroy(imageObject);
@@ -3539,7 +3545,8 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             && FPDFPageObj_SetMatrix(textObject, &matrix)
             && markTextSpacing(document, textObject, run, pageHeight, originOffset)
             && markParagraphLayout(document, textObject, run,
-                                   pageWidth, pageHeight, originOffset);
+                                   pageWidth, pageHeight, originOffset)
+            && PDFHeaderMetadata::write(document, textObject, draft.headerGroupId, draft.headerRole);
         if (!configured) {
             FPDFPageObj_Destroy(textObject);
             return failure(
@@ -7000,6 +7007,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
                     : SaveDraft::Kind::Text;
         saveDraft.page = draft->candidate.page;
         saveDraft.objectId = draft->candidate.objectId;
+        saveDraft.headerGroupId = draft->candidate.headerGroupId;
+        saveDraft.headerRole = draft->candidate.headerRole;
         saveDraft.originalText = draft->candidate.text;
         if (saveDraft.kind == SaveDraft::Kind::Text
             && !draft->candidate.parts.isEmpty()) {
