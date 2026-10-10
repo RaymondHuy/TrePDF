@@ -12,9 +12,15 @@ Item {
     required property PDFDocumentSession session
     property bool viewTabActive: false
     property bool headerTabActive: false
+    readonly property bool headerSelectionActive: headerTabActive
+        && session.editController.headerSelectionOnly
+        && session.editController.tool === PDFEditController.SelectTool
     readonly property HeaderTextPlacement headerTextPlacement: headerPlacement
     readonly property HeaderImagePlacement headerImagePlacement: headerImagePlacementState
     readonly property HeaderPageNumberPlacement headerPageNumberPlacement: headerPageNumberPlacementState
+    readonly property bool hasPendingHeaderPlacement:
+        (headerPlacement.active && headerPlacement.text.length > 0)
+        || headerImagePlacementState.active || headerPageNumberPlacementState.active
     readonly property bool headerPageNumberInputFocused: {
         const panel = headerPageNumberPanelLoader.item as HeaderPageNumberPanel
         return panel ? panel.inputFocused : false
@@ -22,6 +28,29 @@ Item {
     readonly property bool headerImageInputFocused: {
         const panel = headerImagePanelLoader.item as HeaderImagePanel
         return panel ? panel.inputFocused : false
+    }
+    readonly property bool headerSyncInputFocused: {
+        if (headerSyncPanelLoader.status !== Loader.Ready)
+            return false
+        const panel = headerSyncPanelLoader.item as HeaderSyncPanel
+        return panel ? panel.inputFocused : false
+    }
+    readonly property bool headerSyncPanelActive: headerSelectionActive
+        && session.document.loaded && session.editController.headerSyncAvailable
+    readonly property string headerSyncAnchorKey: session.editController.headerSyncKey
+    property bool headerSyncAllMatchingPages: true
+    property string headerSyncPageRange: ""
+    onHeaderSyncAnchorKeyChanged: {
+        headerSyncAllMatchingPages = true
+        headerSyncPageRange = ""
+        if (root.headerSyncAnchorKey.length > 0)
+            Qt.callLater(root.startHeaderSync, root.headerSyncAnchorKey)
+    }
+    function startHeaderSync(anchorKey: string): void {
+        // Starting a scan emits the same notifier used by headerSyncAnchorKey.
+        const controller = root.session.editController
+        if (root.headerSyncAnchorKey === anchorKey && controller.headerSyncAvailable)
+            controller.findSimilarHeaders()
     }
     readonly property bool headerTextPanelOpen: headerPlacement.active
     readonly property bool headerTextInputFocused: {
@@ -93,11 +122,12 @@ Item {
             || kind === "ink"
     }
     readonly property bool drawingCommentPropertiesPanelActive:
-        editTabActive && (drawingCommentSelected
+        (editTabActive || headerSelectionActive) && (drawingCommentSelected
             || session.editController.selectedKind === "addedShape"
             || session.editController.selectedKind === "sourceShape")
     readonly property bool imagePropertiesPanelActive:
-        (editTabActive || signTabActive) && session.editController.selectedObjectId.length > 0
+        (editTabActive || signTabActive || headerSelectionActive)
+            && session.editController.selectedObjectId.length > 0
             && (session.editController.selectedKind === "image"
                 || session.editController.selectedKind === "addedImage")
     readonly property DocumentView splitDocumentView:
@@ -190,6 +220,25 @@ Item {
         headerPlacement.cancel()
         headerImagePlacementState.cancel()
         headerPageNumberPlacementState.cancel()
+    }
+
+    function submitPendingHeaderPlacement() {
+        InputMethod.commit()
+        headerPlacement.synchronizeRequested()
+        if (headerPlacement.active && headerPlacement.text.length > 0) {
+            const panel = headerTextPanelLoader.status === Loader.Ready
+                ? headerTextPanelLoader.item as HeaderTextPanel : null
+            if (panel)
+                panel.submit()
+        } else if (headerImagePlacementState.active) {
+            const panel = headerImagePanelLoader.status === Loader.Ready
+                ? headerImagePanelLoader.item as HeaderImagePanel : null
+            if (panel)
+                panel.submit()
+        } else if (headerPageNumberPlacementState.active) {
+            headerPageNumberPlacementState.submit()
+        }
+        return !hasPendingHeaderPlacement
     }
 
     onHeaderTabActiveChanged: {
@@ -934,127 +983,179 @@ Item {
             }
         }
 
-        Loader {
-            id: imagePropertiesPanelLoader
+        ColumnLayout {
+            id: selectionProperties
+            objectName: "selectionPropertiesColumn"
+            readonly property bool syncOnly: root.headerSyncPanelActive
+                && !imagePropertiesPanelLoader.active && !textFormatPanelLoader.active
 
-            Layout.preferredWidth: active
-                ? root.session.panelCollapsed ? 42 : 264
-                : 0
+            Layout.preferredWidth: visible
+                ? root.session.panelCollapsed && !syncOnly ? 42 : 264 : 0
+            Layout.minimumWidth: Layout.preferredWidth
+            Layout.maximumWidth: Layout.preferredWidth
+            Layout.fillWidth: false
             Layout.fillHeight: true
-            active: root.session.document.loaded
-                && root.imagePropertiesPanelActive
-            visible: active
+            spacing: 0
+            visible: imagePropertiesPanelLoader.active || textFormatPanelLoader.active
+                || root.headerSyncPanelActive
 
-            sourceComponent: Component {
-                ImagePropertiesPanel {
-                    theme: root.theme
-                    editController: root.session.editController
-                    collapsed: root.session.panelCollapsed
-                    onCollapsedChangeRequested: collapsed => {
-                        root.session.panelCollapsed = collapsed
+            Loader {
+                id: headerSyncPanelLoader
+                objectName: "headerSyncPanelLoader"
+
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(implicitHeight,
+                    selectionProperties.height * 0.65)
+                active: root.headerSyncPanelActive
+                    && (!root.session.panelCollapsed || selectionProperties.syncOnly)
+                visible: active
+
+                sourceComponent: Component {
+                    HeaderSyncPanel {
+                        theme: root.theme
+                        editController: root.session.editController
+                        pendingPanelEdits: root.hasPendingPanelEdits
+                        allMatchingPages: root.headerSyncAllMatchingPages
+                        pageRange: root.headerSyncPageRange
+                        onPageScopeChangeRequested: allMatchingPages => {
+                            root.headerSyncAllMatchingPages = allMatchingPages
+                        }
+                        onPageRangeChangeRequested: pages => {
+                            root.headerSyncPageRange = pages
+                        }
+                        onApplyRequested: pages => {
+                            if (root.prepareForDeactivation())
+                                root.session.editController.applyHeaderChanges(pages)
+                        }
                     }
                 }
             }
-        }
 
-        Loader {
-            id: textFormatPanelLoader
+            Loader {
+                id: imagePropertiesPanelLoader
 
-            Layout.preferredWidth: active
-                ? root.session.panelCollapsed ? 42 : 264
-                : 0
-            Layout.fillHeight: true
-            active: root.session.document.loaded
-                && root.editTabActive
-                && !root.textFieldOptionsPanelActive
-                && !root.combFieldOptionsPanelActive
-                && !root.dropdownOptionsPanelActive
-                && !root.listBoxOptionsPanelActive
-                && !root.radioButtonOptionsPanelActive
-                && !root.drawingCommentPropertiesPanelActive
-                && !root.imagePropertiesPanelActive
-                && root.session.editController.tool !== PDFEditController.BrowseTool
-            visible: active
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                active: root.session.document.loaded
+                    && root.imagePropertiesPanelActive
+                visible: active
 
-            sourceComponent: Component {
-                TextFormatPanel {
-                    theme: root.theme
-                    collapsed: root.session.panelCollapsed
-                    availableFontFamilies:
-                        root.session.editController.availableFontFamilies
-                    fontFamiliesForFilter: function(filter) {
-                        return root.session.editController.fontFamiliesForFilter(filter)
-                    }
-                    selectedFontFamily:
-                        root.session.editController.selectedFontFamily
-                    selectedFontSize: root.session.editController.selectedFontSize
-                    selectedLetterSpacing: root.session.editController.selectedLetterSpacing
-                    selectedWordSpacing: root.session.editController.selectedWordSpacing
-                    selectedLineSpacing: root.session.editController.selectedLineSpacing
-                    selectedParagraphSpaceBefore:
-                        root.session.editController.selectedParagraphSpaceBefore
-                    selectedParagraphSpaceAfter:
-                        root.session.editController.selectedParagraphSpaceAfter
-                    formattingSession: root.session
-                    formattingContextKey: root.session.document.source + ":"
-                        + root.session.editController.selectedPage + ":"
-                        + root.session.editController.selectedObjectId + ":"
-                        + root.session.editController.textEditActive + ":"
-                        + root.session.editController.saving
-                    selectedFontBold: root.session.editController.selectedFontBold
-                    selectedFontItalic:
-                        root.session.editController.selectedFontItalic
-                    selectedFontUnderline:
-                        root.session.editController.selectedFontUnderline
-                    selectedColor: root.session.editController.selectedColor
-                    selectedParagraphAlignment:
-                        root.session.editController.selectedParagraphAlignment
-                    formattingEnabled:
-                        root.session.editController.selectedEditable
-                        && (root.session.editController.selectedKind === "text"
-                            || root.session.editController.selectedKind
-                                === "addedText")
-                    onFontFamilyChangeRequested: fontFamily => {
-                        root.session.editController.setSelectedFontFamily(fontFamily)
-                    }
-                    onFontSizeChangeRequested: fontSize => {
-                        root.session.editController.setSelectedFontSize(fontSize)
-                    }
-                    onLetterSpacingChangeRequested: points => {
-                        root.session.editController.setSelectedLetterSpacing(points)
-                    }
-                    onWordSpacingChangeRequested: points => {
-                        root.session.editController.setSelectedWordSpacing(points)
-                    }
-                    onLineSpacingChangeRequested: factor => {
-                        root.session.editController.setSelectedLineSpacing(factor)
-                    }
-                    onParagraphSpaceBeforeChangeRequested: points => {
-                        root.session.editController.setSelectedParagraphSpaceBefore(points)
-                    }
-                    onParagraphSpaceAfterChangeRequested: points => {
-                        root.session.editController.setSelectedParagraphSpaceAfter(points)
-                    }
-                    onFontBoldChangeRequested: enabled => {
-                        root.applyInlineStyleChange("bold", enabled)
-                    }
-                    onFontItalicChangeRequested: enabled => {
-                        root.applyInlineStyleChange("italic", enabled)
-                    }
-                    onFontUnderlineChangeRequested: enabled => {
-                        root.applyInlineStyleChange("underline", enabled)
-                    }
-                    onFontColorChangeRequested: color => {
-                        root.session.editController.setSelectedColor(color)
-                    }
-                    onParagraphAlignmentChangeRequested: alignment => {
-                        root.session.editController.setSelectedParagraphAlignment(
-                            alignment)
-                    }
-                    onCollapsedChangeRequested: collapsed => {
-                        root.session.panelCollapsed = collapsed
+                sourceComponent: Component {
+                    ImagePropertiesPanel {
+                        theme: root.theme
+                        editController: root.session.editController
+                        collapsed: root.session.panelCollapsed
+                        onCollapsedChangeRequested: collapsed => {
+                            root.session.panelCollapsed = collapsed
+                        }
                     }
                 }
+            }
+
+            Loader {
+                id: textFormatPanelLoader
+
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                active: root.session.document.loaded
+                    && (root.editTabActive || (root.headerSelectionActive
+                        && root.session.editController.selectedObjectId.length > 0))
+                    && !root.textFieldOptionsPanelActive
+                    && !root.combFieldOptionsPanelActive
+                    && !root.dropdownOptionsPanelActive
+                    && !root.listBoxOptionsPanelActive
+                    && !root.radioButtonOptionsPanelActive
+                    && !root.drawingCommentPropertiesPanelActive
+                    && !root.imagePropertiesPanelActive
+                    && root.session.editController.tool !== PDFEditController.BrowseTool
+                visible: active
+
+                sourceComponent: Component {
+                    TextFormatPanel {
+                        theme: root.theme
+                        collapsed: root.session.panelCollapsed
+                        availableFontFamilies:
+                            root.session.editController.availableFontFamilies
+                        fontFamiliesForFilter: function(filter) {
+                            return root.session.editController.fontFamiliesForFilter(filter)
+                        }
+                        selectedFontFamily:
+                            root.session.editController.selectedFontFamily
+                        selectedFontSize: root.session.editController.selectedFontSize
+                        selectedLetterSpacing: root.session.editController.selectedLetterSpacing
+                        selectedWordSpacing: root.session.editController.selectedWordSpacing
+                        selectedLineSpacing: root.session.editController.selectedLineSpacing
+                        selectedParagraphSpaceBefore:
+                            root.session.editController.selectedParagraphSpaceBefore
+                        selectedParagraphSpaceAfter:
+                            root.session.editController.selectedParagraphSpaceAfter
+                        formattingSession: root.session
+                        formattingContextKey: root.session.document.source + ":"
+                            + root.session.editController.selectedPage + ":"
+                            + root.session.editController.selectedObjectId + ":"
+                            + root.session.editController.textEditActive + ":"
+                            + root.session.editController.saving
+                        selectedFontBold: root.session.editController.selectedFontBold
+                        selectedFontItalic:
+                            root.session.editController.selectedFontItalic
+                        selectedFontUnderline:
+                            root.session.editController.selectedFontUnderline
+                        selectedColor: root.session.editController.selectedColor
+                        selectedParagraphAlignment:
+                            root.session.editController.selectedParagraphAlignment
+                        formattingEnabled:
+                            root.session.editController.selectedEditable
+                            && (root.session.editController.selectedKind === "text"
+                                || root.session.editController.selectedKind
+                                    === "addedText")
+                        onFontFamilyChangeRequested: fontFamily => {
+                            root.session.editController.setSelectedFontFamily(fontFamily)
+                        }
+                        onFontSizeChangeRequested: fontSize => {
+                            root.session.editController.setSelectedFontSize(fontSize)
+                        }
+                        onLetterSpacingChangeRequested: points => {
+                            root.session.editController.setSelectedLetterSpacing(points)
+                        }
+                        onWordSpacingChangeRequested: points => {
+                            root.session.editController.setSelectedWordSpacing(points)
+                        }
+                        onLineSpacingChangeRequested: factor => {
+                            root.session.editController.setSelectedLineSpacing(factor)
+                        }
+                        onParagraphSpaceBeforeChangeRequested: points => {
+                            root.session.editController.setSelectedParagraphSpaceBefore(points)
+                        }
+                        onParagraphSpaceAfterChangeRequested: points => {
+                            root.session.editController.setSelectedParagraphSpaceAfter(points)
+                        }
+                        onFontBoldChangeRequested: enabled => {
+                            root.applyInlineStyleChange("bold", enabled)
+                        }
+                        onFontItalicChangeRequested: enabled => {
+                            root.applyInlineStyleChange("italic", enabled)
+                        }
+                        onFontUnderlineChangeRequested: enabled => {
+                            root.applyInlineStyleChange("underline", enabled)
+                        }
+                        onFontColorChangeRequested: color => {
+                            root.session.editController.setSelectedColor(color)
+                        }
+                        onParagraphAlignmentChangeRequested: alignment => {
+                            root.session.editController.setSelectedParagraphAlignment(
+                                alignment)
+                        }
+                        onCollapsedChangeRequested: collapsed => {
+                            root.session.panelCollapsed = collapsed
+                        }
+                    }
+                }
+            }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: !imagePropertiesPanelLoader.active && !textFormatPanelLoader.active
             }
         }
 

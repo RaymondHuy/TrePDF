@@ -9,6 +9,7 @@
 #include "PDFShapeUtils.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFSourceTextGeometry.h"
+#include "PDFHeaderMetadata.h"
 #include "PDFiumSynchronization.h"
 #include "PDFiumDocument.h"
 
@@ -60,6 +61,62 @@
 using namespace PDFEditControllerPrivate;
 
 namespace {
+
+template<typename Candidate>
+bool sameHeaderGroup(const Candidate &left, const Candidate &right)
+{
+    return !left.headerMetadataInvalid && !right.headerMetadataInvalid
+        && left.headerGroupId == right.headerGroupId && left.headerRole == right.headerRole;
+}
+
+QByteArray headerImageDigest(FPDF_DOCUMENT document, FPDF_PAGE page,
+                             FPDF_PAGEOBJECT object, qint64 &remainingPixels)
+{
+    assertPDFiumProcessLockHeld();
+    FPDF_IMAGEOBJ_METADATA metadata{};
+    FS_MATRIX original{};
+    if (!object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_IMAGE
+        || !FPDFImageObj_GetImageMetadata(object, page, &metadata)
+        || metadata.width == 0 || metadata.height == 0
+        || metadata.width > PDFHeaderMetadata::kMaximumDigestPixels
+        || metadata.height > PDFHeaderMetadata::kMaximumDigestPixels
+        || qint64(metadata.width) * metadata.height > remainingPixels
+        || !FPDFPageObj_GetMatrix(object, &original)) {
+        return {};
+    }
+    remainingPixels -= qint64(metadata.width) * metadata.height;
+    // Render in intrinsic pixel dimensions so placement and display zoom do not
+    // affect the digest. This private scan document is restored immediately;
+    // masks/color spaces are included, unlike FPDFImageObj_GetBitmap().
+    const FS_MATRIX native{float(metadata.width), 0.0F, 0.0F, float(metadata.height), 0.0F, 0.0F};
+    if (!FPDFPageObj_SetMatrix(object, &native))
+        return {};
+    FPDF_BITMAP bitmap = FPDFImageObj_GetRenderedBitmap(document, page, object);
+    const bool restored = FPDFPageObj_SetMatrix(object, &original);
+    if (!bitmap)
+        return {};
+    QByteArray digest;
+    const int width = FPDFBitmap_GetWidth(bitmap);
+    const int height = FPDFBitmap_GetHeight(bitmap);
+    const int stride = FPDFBitmap_GetStride(bitmap);
+    const auto *data = static_cast<const uchar *>(FPDFBitmap_GetBuffer(bitmap));
+    QImage::Format format = QImage::Format_Invalid;
+    int bytesPerPixel = 0;
+    switch (FPDFBitmap_GetFormat(bitmap)) {
+    case FPDFBitmap_Gray: format = QImage::Format_Grayscale8; bytesPerPixel = 1; break;
+    case FPDFBitmap_BGR: format = QImage::Format_BGR888; bytesPerPixel = 3; break;
+    case FPDFBitmap_BGRx: format = QImage::Format_RGB32; bytesPerPixel = 4; break;
+    case FPDFBitmap_BGRA: format = QImage::Format_ARGB32; bytesPerPixel = 4; break;
+    case FPDFBitmap_BGRA_Premul: format = QImage::Format_ARGB32_Premultiplied; bytesPerPixel = 4; break;
+    default: break;
+    }
+    if (restored && data && width == int(metadata.width) && height == int(metadata.height)
+        && bytesPerPixel > 0 && stride >= qsizetype(width) * bytesPerPixel) {
+        digest = PDFHeaderMetadata::imageDigest(QImage(data, width, height, stride, format));
+    }
+    FPDFBitmap_Destroy(bitmap);
+    return digest;
+}
 
 constexpr qsizetype kMaximumCachedCandidatePages = 12;
 
@@ -806,6 +863,10 @@ QVariantList PDFEditController::candidatesForPage(int page)
     const QVector<Candidate> &candidates = ensurePageCandidates(page);
     result.reserve(candidates.size() + m_addedCandidates.size());
     for (const Candidate &candidate : candidates) {
+        if (m_headerSelectionOnly && m_tool == SelectTool
+            && !candidateMatchesSelectionScope(candidate)) {
+            continue;
+        }
         if (candidate.textMarkupHitTestOnly) {
             continue;
         }
@@ -828,6 +889,10 @@ QVariantList PDFEditController::candidatesForPage(int page)
     }
     for (const Candidate &candidate : std::as_const(m_addedCandidates)) {
         if (candidate.page != page) {
+            continue;
+        }
+        if (m_headerSelectionOnly && m_tool == SelectTool
+            && !candidateMatchesSelectionScope(candidate)) {
             continue;
         }
         if (candidate.isReplyAnnotation) {
@@ -2219,6 +2284,19 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
             embeddedFontDataBytes,
             cancellation);
     }
+    qint64 remainingHeaderImagePixels = PDFHeaderMetadata::kMaximumDigestPixels;
+    for (Candidate &candidate : candidates) {
+        if (candidateScanCancelled(cancellation))
+            break;
+        const QRectF rect = candidate.geometry.sourceRect;
+        if (candidate.kind == QLatin1String("image") && candidate.editable
+            && candidate.imageResizable && !candidate.headerMetadataInvalid
+            && candidate.objectPath.size() == 1 && rect.left() >= 0.0 && rect.top() >= 0.0
+            && rect.right() <= 1.0 && rect.bottom() * request.pageSize.height() <= 100.001) {
+            candidate.headerImageDigest = headerImageDigest(document, page,
+                FPDFPage_GetObject(page, candidate.objectPath.constFirst()), remainingHeaderImagePixels);
+        }
+    }
     if (!candidateScanCancelled(cancellation)) {
         qsizetype ignoredCommentBytes = 0;
         bool ignoredCommentMemoryBudgetExceeded = false;
@@ -2466,6 +2544,15 @@ void PDFEditController::appendPageObjectCandidates(
     candidate.objectId = pageObjectId(objectPath);
     candidate.objectPath = objectPath;
     candidate.textMarkupHitTestOnly = textMarkupHitTestOnly;
+    const auto headerMetadata = PDFHeaderMetadata::read(pageObject);
+    candidate.headerMetadataInvalid = headerMetadata.invalid
+        || (!headerMetadata.group.isEmpty()
+            && ((type == FPDF_PAGEOBJ_TEXT && headerMetadata.role == QLatin1String("image"))
+                || (type != FPDF_PAGEOBJ_TEXT && headerMetadata.role != QLatin1String("image"))));
+    if (!candidate.headerMetadataInvalid) {
+        candidate.headerGroupId = headerMetadata.group;
+        candidate.headerRole = headerMetadata.role;
+    }
     setInitialGeometry(candidate, rect);
     if (textLayout != textObjectLayouts.cend()) {
         candidate.textGlyphRects.reserve(textLayout->glyphBounds.size());
@@ -3147,7 +3234,7 @@ QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphL
             const Candidate &part = candidates[indices[order]];
             const int start = part.paragraphLayoutStart;
             if (!part.editable || !part.hasBaseline || part.parts.size() != 1
-                || part.invalidSpacingMetadata
+                || part.invalidSpacingMetadata || !sameHeaderGroup(first, part)
                 || part.paragraphLayoutIndex != order || part.paragraphLayoutCount != indices.size()
                 || start < previousEnd || start > text.size()
                 || part.paragraphLayoutLength > text.size() - start
@@ -3406,6 +3493,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                 + qMax(0.0, -previous.spacingWordPoints)
                     * previous.spacingText.count(QLatin1Char(' ')) + 0.02;
             if (!part.editable || !part.hasBaseline || !part.renderSuppressible
+                || !sameHeaderGroup(first, part)
                 || part.kind != QLatin1String("text") || part.parts.size() != 1
                 || part.spacingIndex != offset || part.spacingCount != indices.size()
                 || part.spacingStart != length || part.spacingText.isEmpty()
@@ -3515,6 +3603,31 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         return candidates;
     }
 
+    // Older Header saves emitted separate glyphs without paragraph metadata.
+    // Their common UUID permits small ink overlaps, but never duplicate origins
+    // or arbitrary overprints. Keep the normal grouping/obstacle budgets below.
+    const auto legacyHeaderText = [&](const Candidate &candidate) {
+        const QRectF rect = candidate.geometry.sourceRect;
+        return candidate.kind == QLatin1String("text") && candidate.editable
+            && candidate.renderSuppressible && candidate.hasBaseline
+            && !candidate.headerGroupId.isEmpty() && !candidate.headerMetadataInvalid
+            && candidate.headerRole == QLatin1String("text")
+            && !candidate.invalidSpacingMetadata && candidate.spacingGroup.isEmpty()
+            && candidate.paragraphLayoutGroup.isEmpty()
+            && candidate.sourceParagraphFormats.isEmpty()
+            && rect.left() >= 0.0 && rect.right() <= 1.0 && rect.top() >= 0.0
+            && rect.bottom() * pageSize.height() <= 100.0;
+    };
+    const auto legacyHeaderNeighbors = [&](const Candidate &left, const Candidate &right) {
+        const qreal em = qMax(left.fontSizeRatio, right.fontSizeRatio) * pageSize.height();
+        const qreal gap = (right.geometry.sourceRect.left() - left.geometry.sourceRect.right())
+            * pageSize.width();
+        return legacyHeaderText(left) && legacyHeaderText(right) && sameHeaderGroup(left, right)
+            && qAbs(left.origin.y() - right.origin.y()) * pageSize.height() <= 0.1
+            && (right.origin.x() - left.origin.x()) * pageSize.width() > 0.1
+            && gap >= -0.25 * em;
+    };
+
     // Overprinted or intersecting source text is ambiguous. Keep every
     // involved object independent, including when their baselines coincide.
     QVector<qsizetype> sourceTextOrder;
@@ -3542,6 +3655,8 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                 return candidates;
             }
             if (left.geometry.sourceRect.intersects(right.geometry.sourceRect)) {
+                if (legacyHeaderNeighbors(left, right) || legacyHeaderNeighbors(right, left))
+                    continue;
                 overlappingText.insert(left.objectId);
                 overlappingText.insert(right.objectId);
             }
@@ -3675,7 +3790,8 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         // Typeface, emphasis and calibrated horizontal stretch belong to each
         // character span. They do not define a new visual line. Keep paint and
         // size checks because replacement still shares the source paint mode.
-        return !left.fontFamily.isEmpty() && !right.fontFamily.isEmpty()
+        return sameHeaderGroup(left, right)
+            && !left.fontFamily.isEmpty() && !right.fontFamily.isEmpty()
             && qAbs(leftSize - rightSize) <= sizeTolerance
             && left.color == right.color
             && left.fillColor == right.fillColor
@@ -4093,12 +4209,12 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         // their individual spans; larger source scales still need to agree.
         const bool compatibleStretch = qAbs(left.fontStretch - right.fontStretch) <= 2
             || (qAbs(left.fontStretch - 100) <= 2 && qAbs(right.fontStretch - 100) <= 2);
-        return !left.fontFamily.isEmpty()
+        return sameHeaderGroup(left, right) && !left.fontFamily.isEmpty()
             && sameFontFamily(PDFFontAliases::semanticFamily(left.fontFamily),
                               PDFFontAliases::semanticFamily(right.fontFamily))
             && qAbs(emSize(left) - emSize(right))
                 <= qMax<qreal>(0.25, 0.02 * qMax(emSize(left), emSize(right)))
-            && compatibleStretch
+            && (compatibleStretch || (legacyHeaderText(left) && legacyHeaderText(right)))
             && left.color == right.color
             && left.fillColor == right.fillColor
             && left.strokeColor == right.strokeColor

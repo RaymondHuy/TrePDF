@@ -229,6 +229,8 @@ qt_add_qml_module(trepdf
         src/PDFEditControllerComments.cpp
         src/PDFEditControllerGeometry.cpp
         src/PDFEditControllerHeaderText.cpp
+        src/PDFEditControllerHeaderSync.cpp
+        src/PDFHeaderMetadata.h
         src/PDFEditControllerDrafts.cpp
         src/PDFEditControllerSave.cpp
         src/PDFEditControllerWebLinks.cpp
@@ -300,6 +302,7 @@ qt_add_qml_module(trepdf
         src/Components/DrawingCommentPropertiesPanel.qml
         src/Components/ImagePropertiesPanel.qml
         src/Components/HeaderTextPanel.qml
+        src/Components/HeaderSyncPanel.qml
         src/Components/HeaderTextPlacement.qml
         src/Components/HeaderTextOverlay.qml
         src/Components/HeaderImagePlacement.qml

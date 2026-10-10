@@ -1,5 +1,6 @@
 #include "PDFEditController.h"
 #include "ApplicationFonts.h"
+#include "PDFHeaderMetadata.h"
 
 #include <QBuffer>
 #include <QFileInfo>
@@ -316,13 +317,13 @@ bool PDFEditController::addHeaderPageNumbers(int firstPage, int lastPage,
         pages.append(page);
         texts.append(pageNumberText(page + 1, romanStartPage, decimalStartPage));
     }
-    return addHeaderTextBatch(pages, texts, xPoints, yPoints, widthPoints, format);
+    return addHeaderTextBatch(pages, texts, xPoints, yPoints, widthPoints, format, true);
 }
 
 bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
                                          const QStringList &texts, qreal xPoints,
                                          qreal yPoints, qreal widthPoints,
-                                         const QVariantMap &format)
+                                         const QVariantMap &format, bool pageNumbers)
 {
     if (!m_document || !m_document->isLoaded() || m_saving)
         return false;
@@ -440,6 +441,8 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
     prototype.fillColor = prototype.color;
     prototype.added = true;
     prototype.editable = true;
+    prototype.headerGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    prototype.headerRole = pageNumbers ? QStringLiteral("pageNumber") : QStringLiteral("text");
 
     Command command;
     command.kind = Command::Kind::ObjectDraftBatch;
@@ -649,6 +652,9 @@ bool PDFEditController::addHeaderImage(const QString &pages, qreal xPoints,
     prototype.editable = true;
     prototype.added = true;
     prototype.image = m_headerImage;
+    prototype.headerGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    prototype.headerRole = QStringLiteral("image");
+    prototype.headerImageDigest = PDFHeaderMetadata::imageDigest(m_headerImage);
 
     Command command;
     command.kind = Command::Kind::ObjectDraftBatch;

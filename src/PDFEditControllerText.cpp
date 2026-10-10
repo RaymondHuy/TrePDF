@@ -2449,7 +2449,11 @@ void PDFEditController::finishSelectedTextEdit()
     m_textEditCommand = Command();
     resetTextEditDisplayState();
     emit textEditActiveChanged();
-    emit selectionChanged();
+    if (m_hasSelection && !candidateMatchesSelectionScope(m_selectedCandidate)) {
+        setSelection(nullptr);
+    } else {
+        emit selectionChanged();
+    }
 
     Command command = baseline;
     const auto currentDraft = m_drafts.constFind(command.key);

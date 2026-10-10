@@ -13,6 +13,122 @@ The Header tab shows a translucent gray guide in the first 100 PDF points of
 each page. This guide is a non-interactive QML overlay and is never saved.
 Header text is ordinary page content and remains visible outside the Header tab.
 
+## Header selection
+
+Entry requires the active PDF to have no unsaved changes. Main first commits
+pending inline, panel and form input, then checks the session-wide draft state
+(including page operations, links, watermarks and password changes). A blocked
+entry keeps the previous ribbon tab/tool and opens a localized notice explaining
+the multi-page impact, with Save and Got it actions. Save uses the normal save
+flow; after saving or undoing all changes, click Header again to enter. New
+edits made while already in Header do not leave the tab. Switching to a dirty
+PDF while Header is active returns to View and shows the same notice. Dirty
+background PDFs do not block a clean active PDF.
+
+Leaving Header for another ribbon tab also requires a clean active PDF. The
+exit notice preserves Header selection, guides and panels, and applies to
+programmatic View navigation through Find as well. Pending text/image/page-number
+placement counts as a change; arming an empty tool or opening an empty textbox
+does not. The notice's Save action submits pending placement using its current
+panel settings and page range before normal Save. Invalid placement remains
+editable and prevents Save. Users may dismiss the notice to Undo committed
+changes or cancel unapplied placement, then switch tabs again. Save failures
+retain drafts and keep Header active. The clean-entry boundary and existing
+per-session Undo/Redo history are reused; no parallel command stack is needed.
+
+Header also provides Save in a separate File ribbon group after the Header tools,
+matching View and using the shared Save icon. Its button is enabled for draft
+changes, pending panel/inline edits or unapplied Header content,
+and disabled without a document or while saving. It shares the exit notice's
+save flow, including validation and submission of pending Header placement.
+
+Entering Header activates Select. It reuses Edit selection, inline text editing,
+property panels, move/resize, Delete and Undo/Redo, with eligibility limited to
+objects whose complete current frame and content bounds fit inside the first
+100 PDF points. Objects crossing the boundary or lying in the body cannot be
+selected by clicking, keyboard traversal or history restoration. Source content
+and applied Header drafts follow the same rules; unsupported objects retain
+their normal Edit restrictions. Changes initially affect the selected object on
+its page. The optional synchronization panel can apply them to matching headers.
+
+`PDFEditController::headerSelectionOnly` scopes `SelectTool` without introducing
+a second editing pipeline. Move, resize and image rotation stay within the
+header; aspect-locked resize uses the same boundary in the QML preview. Text
+uses the existing Edit reflow behavior: if newly entered content extends beyond
+the header, finishing the edit clears its Header selection; it remains editable
+through Edit. Switching away from Header removes the selection scope.
+Starting a Header placement temporarily uses Browse; clicking Select cancels
+pending placement and restores Header selection. The selection scope is transient
+and is not written into the PDF.
+
+`tst_PDFEditControllerHeaderSelection.cpp` checks source and draft eligibility,
+boundary-crossing objects, history, geometry, deletion/Save and Main-window
+pointer/keyboard/tool transitions.
+`guardsHeaderEntryUntilChangesAreSavedOrUndone` in the Header sync UI suite
+covers the entry guard, pending inline input, Save/Undo, forms/password drafts
+and switching documents.
+
+## Synchronizing similar headers
+
+Selecting a text or image header enables **Apply to similar headers** by default
+in the right panel and starts finding matches. Users can turn it off for the
+selected object; collapsing and reopening the panel preserves that choice.
+The panel scans other pages asynchronously and lists the matching PDF page
+numbers. Edit its content, formatting or geometry, then Apply copies the change
+to all matches or the intersection with a custom 1-based range. The original
+page retains its edit even if it is outside that range. Delete can also be
+applied after deleting the selected object; the panel retains its original
+matching snapshot until another object/tool is selected.
+
+Text content or formatting changes also copy the edited textbox's physical
+frame size, so previously narrower members of the same group do not introduce
+extra line wrapping. Position changes remain relative to each member's original
+position. Every resulting frame and content extent must fit inside its page's
+100-point header; otherwise Apply leaves the other pages unchanged. Page numbers
+retain their per-value sizing behavior.
+
+Saved Header text always retains its logical paragraph and layout frame through
+`TrePDFParagraphLayout`, including plain single-format text. Reopening must not
+shrink the frame to the ink bounds or split wrapped text into independent glyphs.
+For older marked Header text without this layout metadata, scanning can join
+nearby glyphs with the same UUID even when their ink overlaps by up to 0.25 em.
+Baselines and increasing origins must agree; duplicate origins, separated blocks
+and unmarked overprints keep the normal ambiguity checks. Inferred lines retain
+their individual character calibration when joining into a Header paragraph.
+
+Matching uses the snapshot taken before editing. Newly created Header text,
+images and page numbers carry a bounded `TrePDFHeader` object mark with a group
+UUID and role. The writer preserves this identity through Save/Save As and the
+scanner restores it after reopening. For existing PDFs without these marks,
+matching requires the same object type and nearby physical geometry (within
+2 PDF points). Text also requires identical content and compatible character
+formatting, including font size within 0.1 pt, face, style and color. Images
+require the same decoded pixel fingerprint. A page with multiple matching
+objects is ambiguous and is skipped. Objects outside the header or unsupported
+by the normal Edit pipeline are excluded.
+
+Page-number groups preserve each page's existing value when formatting or
+moving the group. Enlarged numbers expand their frame as needed to stay on one
+line, within the page edge. Unchanged embedded font faces and calibration stay
+specific to each number. For unmarked PDFs, canonical decimal/Roman values qualify
+only when they advance with the PDF page index and share the same numbering
+style and formatting. This fallback does not infer Roman/Arabic restarts.
+Changing a number's contents cannot be propagated as a group edit.
+
+`PDFEditControllerHeaderSync.cpp` uses a separate single scan worker, cancellation
+tokens and source/page revisions. It retains at most 64 MiB of matches and scans
+at most 10,000 pages. Source-image fingerprinting is limited to 4 million decoded
+pixels per page. Apply validates the entire target batch before changing other
+pages. It combines the selected object's consecutive edits and the propagated
+changes into one `HeaderDraftBatch`, so a single Undo restores the whole group.
+Undo/Redo, unrelated history, page structure, session/tool changes and Save
+cancel the current matching session. Matching does not create drafts by itself.
+
+`tst_PDFEditControllerHeaderSync.cpp` covers pre-edit matching, ambiguous and
+different headers, custom ranges, group metadata after Save/reopen, page-number
+preservation, image pixel matching, deletion and atomic history. The Main-window
+UI test covers the panel and inline editing flow.
+
 ## Ownership and lifecycle
 
 - `AppRibbon.qml` emits `headerTextRequested`; `Main.qml` prepares the active
@@ -57,8 +173,8 @@ file unchanged. A failed save retains the drafts. Page insertion/deletion
 uses the existing candidate/draft remapping and history snapshots.
 
 After Save/reopen, the text is ordinary PDF content and can be edited per page
-through Edit. Header batches do not carry managed group metadata: another Apply
-adds another batch, and does not replace an earlier header. The range is a
+through Edit or synchronized through Header Select using its group metadata.
+Another placement Apply adds a new group and does not replace an earlier header. The range is a
 snapshot of the page order at Apply; pages inserted later receive no automatic
 header. Footer currently has no editing commands.
 
@@ -115,8 +231,9 @@ that cannot fit reject the entire request and retain the pending input.
 Decoded pixels are shared between drafts and never reopened from the source
 path during Save. The existing image writer handles crop/rotation, alpha,
 quarter turns, undo/redo/discard, Save/Save As and failed-save retention.
-After reopen, each image is ordinary page content editable independently in Edit;
-there is no persistent Header group or automatic insertion onto later pages.
+After reopen, each image is ordinary page content editable independently in Edit
+or synchronizable through Header Select. Group identity persists, but later
+pages receive no automatic insertion.
 
 `tst_PDFEditControllerHeaderImage.cpp` verifies snapshots, atomic batch history,
 range/geometry rejection and Save/reopen; `tst_PDFEditControllerHeaderImageUi.cpp`

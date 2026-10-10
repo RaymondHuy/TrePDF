@@ -419,6 +419,7 @@ void PDFEditController::deleteSelectedObject()
 
 int PDFEditController::undo()
 {
+    resetHeaderSync();
     cancelWebLinkCreation();
     if (m_saving || m_textEditActive) {
         return -1;
@@ -441,6 +442,7 @@ int PDFEditController::undo()
 
 int PDFEditController::redo()
 {
+    resetHeaderSync();
     cancelWebLinkCreation();
     if (m_saving || m_textEditActive) {
         return -1;
@@ -463,6 +465,7 @@ int PDFEditController::redo()
 
 void PDFEditController::discardDrafts()
 {
+    resetHeaderSync();
     cancelWebLinkCreation();
     if (m_saving
         || (!m_textEditActive
@@ -1104,6 +1107,10 @@ void PDFEditController::applyDraftState(const Command &command,
                                         bool useAfterState,
                                         bool immediate)
 {
+    if (command.kind == Command::Kind::HeaderDraftBatch) {
+        applyHeaderDraftBatch(command, useAfterState, immediate);
+        return;
+    }
     if (command.kind == Command::Kind::ObjectDraftBatch) {
         QSet<int> changedPages;
         bool removesSelection = false;
@@ -1332,6 +1339,10 @@ bool PDFEditController::removeAddedCandidate(int page, const QString &objectId)
 void PDFEditController::updateSelectedTextFromDraft()
 {
     if (!m_hasSelection) {
+        return;
+    }
+    if (!candidateMatchesSelectionScope(m_selectedCandidate)) {
+        setSelection(nullptr);
         return;
     }
 

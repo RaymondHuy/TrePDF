@@ -524,6 +524,16 @@ void PDFEditControllerTest::cancelsHeaderTextPanelAcrossUiChanges()
             QVERIFY(QMetaObject::invokeMethod(cancel, "clicked"));
         } else if (action == QLatin1String("ribbon")) {
             QVERIFY(tabs->setProperty("currentIndex", 8));
+            QCOMPARE(tabs->property("currentIndex").toInt(), 7);
+            QVERIFY(panel && text->property("text").toString() == QStringLiteral("Never applied"));
+            auto *notice = window->findChild<QObject *>(QStringLiteral("headerEntryNoticeLoader"));
+            QVERIFY(notice && notice->property("active").toBool());
+            auto *understood = headerVisualItem(window.get(), QStringLiteral("headerEntryUnderstoodButton"));
+            QVERIFY(understood && QMetaObject::invokeMethod(understood, "clicked"));
+            auto *cancel = panel->findChild<QObject *>(QStringLiteral("headerTextCancelButton"));
+            QVERIFY(cancel && QMetaObject::invokeMethod(cancel, "clicked"));
+            QVERIFY(tabs->setProperty("currentIndex", 8));
+            QCOMPARE(tabs->property("currentIndex").toInt(), 8);
         } else if (action == QLatin1String("session")) {
             model->setCurrentIndex(1);
         } else if (action == QLatin1String("history")) {

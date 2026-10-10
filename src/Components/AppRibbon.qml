@@ -15,6 +15,12 @@ Column {
     property PDFDocumentSession session: null
     property bool anySaving: false
     property bool hasPendingPanelEdits: false
+    property bool headerPlacementPending: false
+    property bool hasPendingHeaderPlacement: false
+    property int acceptedTabIndex: 0
+    property var prepareHeaderEntry: function() { return !root.hasUnsavedChanges }
+    property var prepareHeaderExit: function() { return !root.hasUnsavedChanges }
+    property PDFEditController syncedEditController: null
     property int viewNavigationPage: document.currentPage
     property bool viewCanNavigateBackward: viewNavigationPage > 0
     property bool viewCanNavigateForward:
@@ -29,15 +35,15 @@ Column {
     property bool combFieldToolSelected: false
     property bool commentsPanelVisible: true
     property bool searchFocusPending: false
-    readonly property bool viewTabActive: ribbonTabs.currentIndex === 0
-    readonly property bool editTabActive: ribbonTabs.currentIndex === 1
-    readonly property bool commentTabActive: ribbonTabs.currentIndex === 2
-    readonly property bool formsTabActive: ribbonTabs.currentIndex === 3
-    readonly property bool signTabActive: ribbonTabs.currentIndex === 4
-    readonly property bool protectTabActive: ribbonTabs.currentIndex === 5
-    readonly property bool exportTabActive: ribbonTabs.currentIndex === 6
-    readonly property bool headerTabActive: ribbonTabs.currentIndex === 7
-    readonly property bool footerTabActive: ribbonTabs.currentIndex === 8
+    readonly property bool viewTabActive: root.acceptedTabIndex === 0
+    readonly property bool editTabActive: root.acceptedTabIndex === 1
+    readonly property bool commentTabActive: root.acceptedTabIndex === 2
+    readonly property bool formsTabActive: root.acceptedTabIndex === 3
+    readonly property bool signTabActive: root.acceptedTabIndex === 4
+    readonly property bool protectTabActive: root.acceptedTabIndex === 5
+    readonly property bool exportTabActive: root.acceptedTabIndex === 6
+    readonly property bool headerTabActive: root.acceptedTabIndex === 7
+    readonly property bool footerTabActive: root.acceptedTabIndex === 8
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
         && document.loaded
@@ -80,6 +86,7 @@ Column {
     signal signatureRequested(string mode)
     signal setPasswordRequested()
     signal watermarkRequested(string mode)
+    signal headerSelectRequested()
     signal headerTextRequested()
     signal headerImageRequested()
     signal headerPageNumbersRequested()
@@ -88,11 +95,35 @@ Column {
 
     spacing: 0
 
+    function showViewTab() {
+        // A document switch has already changed the session; do not run the
+        // previous Header's exit guard against the newly active document.
+        acceptedTabIndex = 0
+        ribbonTabs.setCurrentIndex(0)
+        syncEditTool()
+    }
+
+    function acceptTabChange() {
+        const requestedIndex = ribbonTabs.currentIndex
+        if (requestedIndex === acceptedTabIndex)
+            return
+        if (acceptedTabIndex === 7 && document.loaded && !prepareHeaderExit()) {
+            ribbonTabs.setCurrentIndex(acceptedTabIndex)
+            return
+        }
+        if (requestedIndex === 7 && document.loaded && !prepareHeaderEntry()) {
+            ribbonTabs.setCurrentIndex(acceptedTabIndex)
+            return
+        }
+        acceptedTabIndex = requestedIndex
+        syncEditTool()
+    }
+
     function focusSearch() {
         if (!document.loaded || anySaving)
             return
-        searchFocusPending = true
-        ribbonTabs.currentIndex = 0
+        ribbonTabs.setCurrentIndex(0)
+        searchFocusPending = viewTabActive
         applySearchFocus()
     }
 
@@ -138,16 +169,22 @@ Column {
     }
 
     function revealSelectedDrawingComment() {
-        if (ribbonTabs.currentIndex === 2 && drawingCommentSelected())
+        if (acceptedTabIndex === 2 && drawingCommentSelected())
             commentsPanelVisible = true
     }
 
     function syncEditTool() {
-        const activeTabIndex = ribbonTabs.currentIndex
+        const activeTabIndex = acceptedTabIndex
         const editActive = activeTabIndex === 1
         const signActive = activeTabIndex === 4
         const commentActive = activeTabIndex === 2
         const formsActive = activeTabIndex === 3
+        const headerActive = activeTabIndex === 7
+
+        if (syncedEditController && syncedEditController !== editController)
+            syncedEditController.headerSelectionOnly = false
+        syncedEditController = editController
+        editController.headerSelectionOnly = document.loaded && headerActive
 
         if (!document.loaded || !formsActive) {
             textFieldToolSelected = false
@@ -160,6 +197,9 @@ Column {
 
         if (!document.loaded) {
             editController.tool = PDFEditController.BrowseTool
+        } else if (headerActive) {
+            editController.tool = headerPlacementPending
+                ? PDFEditController.BrowseTool : PDFEditController.SelectTool
         } else if (commentActive) {
             editController.tool = PDFEditController.CommentSelectTool
             editController.requestCommentIndex()
@@ -176,6 +216,10 @@ Column {
     }
 
     Component.onCompleted: syncEditTool()
+    onHeaderPlacementPendingChanged: {
+        if (headerTabActive)
+            syncEditTool()
+    }
     onDocumentChanged: {
         searchFocusPending = false
         textFieldToolSelected = false
@@ -419,12 +463,28 @@ Column {
     Component {
         id: headerRibbonComponent
 
-        Item {
+        Row {
+            x: 8
+            height: 76
+
             RibbonGroup {
-                x: 8
                 theme: root.theme
                 //% "Header"
                 title: qsTrId("HeaderTab")
+
+                RibbonButton {
+                    objectName: "headerSelectButton"
+                    theme: root.theme
+                    documentLoaded: root.document.loaded
+                    enabled: root.document.loaded && !root.anySaving
+                    primary: root.document.loaded && root.headerTabActive
+                        && !root.headerPlacementPending
+                        && root.editController.tool === PDFEditController.SelectTool
+                    //% "Select"
+                    text: qsTrId("Select")
+                    iconSource: "../assets/icons/mouse-pointer-2.svg"
+                    onClicked: root.headerSelectRequested()
+                }
 
                 RibbonButton {
                     objectName: "headerAddTextButton"
@@ -457,6 +517,28 @@ Column {
                     text: qsTrId("HeaderPageNumbers")
                     iconSource: "../assets/icons/page-single.svg"
                     onClicked: root.headerPageNumbersRequested()
+                }
+            }
+
+            RibbonGroup {
+                theme: root.theme
+                //% "File"
+                title: qsTrId("File")
+
+                RibbonButton {
+                    objectName: "headerSaveButton"
+                    readonly property bool hasChanges: root.hasUnsavedChanges
+                        || root.hasPendingHeaderPlacement || root.editController.textEditActive
+                    theme: root.theme
+                    documentLoaded: root.document.loaded
+                    enabled: root.document.loaded && hasChanges && !root.anySaving
+                    primary: hasChanges
+                    //% "Save"
+                    text: qsTrId("Save")
+                    //% "Save PDF"
+                    toolTipText: qsTrId("SavePdf")
+                    iconSource: "../assets/icons/save.svg"
+                    onClicked: root.saveRequested()
                 }
             }
         }
@@ -493,7 +575,7 @@ Column {
                 enabled: !root.anySaving
                 spacing: 0
                 background: Item {}
-                onCurrentIndexChanged: root.syncEditTool()
+                onCurrentIndexChanged: root.acceptTabChange()
 
                 RibbonTabButton {
                     theme: root.theme
@@ -612,21 +694,21 @@ Column {
             anchors.fill: parent
             onLoaded: Qt.callLater(root.applySearchFocus)
             enabled: !root.anySaving || root.exportTabActive
-            sourceComponent: ribbonTabs.currentIndex === 0
+            sourceComponent: root.acceptedTabIndex === 0
                 ? viewRibbonComponent
-                : ribbonTabs.currentIndex === 1
+                : root.acceptedTabIndex === 1
                     ? editRibbonComponent
-                    : ribbonTabs.currentIndex === 2
+                    : root.acceptedTabIndex === 2
                         ? commentRibbonComponent
-                        : ribbonTabs.currentIndex === 3
+                        : root.acceptedTabIndex === 3
                             ? formRibbonComponent
-                            : ribbonTabs.currentIndex === 4
+                            : root.acceptedTabIndex === 4
                                 ? signRibbonComponent
-                                : ribbonTabs.currentIndex === 5
+                                : root.acceptedTabIndex === 5
                                     ? protectRibbonComponent
-                                    : ribbonTabs.currentIndex === 6
+                                    : root.acceptedTabIndex === 6
                                         ? exportRibbonComponent
-                                        : ribbonTabs.currentIndex === 7
+                                        : root.acceptedTabIndex === 7
                                             ? headerRibbonComponent
                                             : null
         }
