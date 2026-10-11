@@ -55,6 +55,8 @@ Rectangle {
     readonly property string japaneseFontsLabel: qsTrId("JapaneseFonts")
     //% "Korean"
     readonly property string koreanFontsLabel: qsTrId("KoreanFonts")
+    //% "Symbol"
+    readonly property string symbolFontsLabel: qsTrId("SymbolFonts")
     //% "Align left"
     readonly property string alignLeftLabel: qsTrId("AlignLeft")
     //% "Align right"
@@ -73,7 +75,9 @@ Rectangle {
         { value: PDFEditController.JapaneseFonts,
           label: japaneseFontsLabel },
         { value: PDFEditController.KoreanFonts,
-          label: koreanFontsLabel }
+          label: koreanFontsLabel },
+        { value: PDFEditController.SymbolFonts,
+          label: symbolFontsLabel }
     ]
     readonly property var paragraphAlignmentOptions: [
         { value: PDFEditController.LeftAlignment,

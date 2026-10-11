@@ -27,12 +27,15 @@ Rectangle {
     readonly property string japaneseFontsLabel: qsTrId("JapaneseFonts")
     //% "Korean"
     readonly property string koreanFontsLabel: qsTrId("KoreanFonts")
+    //% "Symbol"
+    readonly property string symbolFontsLabel: qsTrId("SymbolFonts")
     readonly property var fontFilterOptions: [
         { value: PDFEditController.VietnameseFonts, label: vietnameseFontsLabel },
         { value: PDFEditController.EnglishFonts, label: englishFontsLabel },
         { value: PDFEditController.ChineseFonts, label: chineseFontsLabel },
         { value: PDFEditController.JapaneseFonts, label: japaneseFontsLabel },
-        { value: PDFEditController.KoreanFonts, label: koreanFontsLabel }
+        { value: PDFEditController.KoreanFonts, label: koreanFontsLabel },
+        { value: PDFEditController.SymbolFonts, label: symbolFontsLabel }
     ]
     readonly property int selectedFontFamilyIndex: {
         const selectedKey = placement.fontFamily.toLowerCase()

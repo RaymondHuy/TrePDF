@@ -2164,6 +2164,12 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <source>Korean</source>
         <translation>Tiếng Hàn</translation>
     </message>
+    <message id="SymbolFonts">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="31"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="59"/>
+        <source>Symbol</source>
+        <translation>Symbol</translation>
+    </message>
     <message id="AlignLeft">
         <location filename="../src/Components/TextFormatPanel.qml" line="59"/>
         <source>Align left</source>

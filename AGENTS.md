@@ -527,8 +527,11 @@ Current features:
   The font picker filters system faces by the active bold/italic style using a
   lightweight save-compatibility probe; filtered PDF source fonts remain
   visible as the current value only.
-  Its single dropdown has Vietnamese, English, Chinese, Japanese, and Korean
-  filters. Language groups narrow the same save-compatible exact-face list,
+  Its single dropdown has Vietnamese, English, Chinese, Japanese, Korean, and
+  Symbol filters, also available for Header text. Symbol includes symbol-only
+  writing systems and named symbol/dingbat/math/icon/ornament families, including
+  Wingdings and Webdings, without requiring Latin coverage. All groups narrow
+  the same save-compatible exact-face list,
   intersecting every regular/bold/italic face used by a mixed-style selection.
 - ID-based localization with Vietnamese as the default UI language.
 - A restrained orange UI inspired by Foxit Reader.
@@ -960,8 +963,13 @@ clipped or elided unintentionally.
   through `FPDF_DeviceToPage()` so CropBox offsets and rotation match the
   editor; keep ovals vector by using cubic Bézier segments and retain
   insertion order with the other added page objects.
-- Preserve the earliest source z-order with `FPDFPage_InsertObjectAtIndex()`;
-  added text and images are appended in insertion order. Convert coordinates
+- Place replacement text runs with `FPDFPage_InsertObjectAtIndex()` after proven
+  interleaved line backgrounds while preserving foreground paint. Keep generated
+  underlines with their run and account for other drafts' effective geometry.
+  Validate finite bounds and bound comparisons; reject conflicting paint-order
+  constraints before commit. Translate original insertion boundaries after all
+  source removals so multiple drafts retain their order. Added text and images
+  are appended in insertion order. Convert coordinates
   with `FPDF_DeviceToPage()` so CropBox offsets and page rotation follow the
   same mapping as the editor.
 - Added images are decoded and size-limited on the GUI thread, then snapshotted
@@ -985,7 +993,13 @@ clipped or elided unintentionally.
   color or bitmap-only, missing-glyph, Restricted, and Preview & Print-only
   faces rather than silently substituting them. Filter the font picker with a
   lightweight exact-face CoreText probe, but keep content-specific glyph and
-  full-size validation in the save writer.
+  full-size validation in the save writer. CoreText coverage checks also accept
+  legacy symbol bytes only when the exact face's glyph mapper resolves them.
+  `PDFSymbolFont.h` repairs common Unicode bullet mappings missing from bounded
+  embedded legacy-symbol cmaps by uniquely matching the PDF outline to the same
+  program's glyph. Candidate scan and Save share the repaired snapshot; ambiguous
+  or unsupported mappings remain unchanged. Inferred spaces after bullets prefer
+  the following text face when the bullet subset lacks a space.
 
 ## Memory and Performance Invariants
 

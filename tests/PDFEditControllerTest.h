@@ -230,6 +230,10 @@ private slots:
     void separatesSameFamilySourceSubsetCaches();
     void filtersUnsupportedSystemFonts();
     void filtersFontFamiliesByLanguage();
+    void filtersSymbolFontFamilies();
+    void supportsLegacySymbolCharacters_data();
+    void supportsLegacySymbolCharacters();
+    void repairsSourceSymbolMappings();
     void intersectsFontFiltersAcrossMixedStyles();
     void detectsPdfFontStyles();
     void propagatesSourceStylesThroughSelection();
@@ -488,6 +492,9 @@ private slots:
     void savesBlankAfterDeletingAllSourcePages();
     void savesCurrentFileRoundTrip();
     void savesExternalPageFourOnSamePath();
+    void savesExternalMixedParagraphOnSamePath_data();
+    void savesExternalMixedParagraphOnSamePath();
+    void preservesInterleavedParagraphPaintOrder();
     void savesUnchangedCopyRoundTrip();
     void savesMultipleDraftsOnSamePage();
     void savesExpandedFrameBeforeRightColumn();

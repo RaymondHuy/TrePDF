@@ -246,6 +246,8 @@ QStringList PDFEditController::headerTextFontFamilies(int filter, bool bold, boo
         return ApplicationFonts::fontFamiliesForLanguage(Language::Japanese, bold, italic);
     case KoreanFonts:
         return ApplicationFonts::fontFamiliesForLanguage(Language::Korean, bold, italic);
+    case SymbolFonts:
+        return ApplicationFonts::fontFamiliesForLanguage(Language::Symbol, bold, italic);
     default:
         return ApplicationFonts::availableFontFamilies(bold, italic);
     }

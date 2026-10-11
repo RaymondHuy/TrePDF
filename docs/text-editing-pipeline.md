@@ -604,7 +604,14 @@ caller ngoài QML không bypass bộ lọc. Coverage theo text và giới hạn 
 system face được writer kiểm tra chính xác lúc Save.
 
 Popup vẫn là một dropdown duy nhất, với các bộ lọc `Tiếng Việt`, `Tiếng Anh`,
-`Tiếng Trung`, `Tiếng Nhật` và `Tiếng Hàn`. Nhóm tiếng Việt đòi đủ bộ ký tự Việt
+`Tiếng Trung`, `Tiếng Nhật`, `Tiếng Hàn` và `Symbol` (cả panel Edit và Header).
+Nhóm Symbol nhận family có writing system Symbol nhưng không có Latin, hoặc
+tên có từ chỉ font ký hiệu như Symbol/Symbols, Wingdings, Webdings, Dingbats,
+Math, Icons, Ornaments. Cách này giữ các Unicode symbol font được Qt đánh dấu
+Latin, nhưng không gom font văn bản thông thường chỉ vì có vài glyph ký hiệu.
+Nhóm này không yêu cầu coverage chữ Latin; font phải có sẵn và vượt probe Save
+cho đúng style đang chọn, nên font chỉ có Regular sẽ không hiện khi cần Bold.
+Nhóm tiếng Việt đòi đủ bộ ký tự Việt
 dựng sẵn. Nhóm tiếng Anh kết hợp metadata Latin với probe Basic Latin trên
 exact face. Ba nhóm CJK dùng `QFontDatabase::writingSystems()` để phân loại
 family rồi xác nhận một chuỗi glyph đại diện trên exact face. Mọi nhóm đều lọc
@@ -628,6 +635,23 @@ tổng font đăng ký trong session <= 64 MiB
 ```
 
 Font bytes được cache bằng SHA-256 để không đăng ký trùng.
+
+`PDFSymbolFont.h` xử lý thêm các subset TrueType dùng bảng mã Symbol cũ:
+PDF có thể ánh xạ dấu bullet Unicode (`U+2022`, `U+25A0`, `U+25AA`, `U+25CF`,
+`U+25CB`) qua `/ToUnicode`, trong khi `cmap` của font chỉ chứa mã private-use.
+Scanner và writer cùng đối chiếu outline PDF với glyph của chính font nhúng;
+chỉ khi khớp duy nhất mới bổ sung ánh xạ Unicode vào snapshot font. Font gốc,
+glyph và text Unicode không bị thay bằng ký tự gần giống. Dữ liệu sửa có cùng
+fingerprint cho editor và Save; Save/reopen dùng cmap đã bổ sung. Nhánh này
+chỉ nhận font tối đa 4 MiB với cmap Symbol format 4 giới hạn mã byte/`F000–F0FF`
+và Macintosh format 0; cmap Unicode có sẵn, mapping rộng hơn, outline mơ hồ
+hoặc glyph thiếu giữ nguyên luồng xử lý trước đó. Khoảng trắng suy ra giữa
+bullet và thân bài ưu tiên font thân bài nếu subset bullet không có space.
+
+Trên macOS, kiểm tra coverage của system face còn xác nhận mã byte legacy
+bằng `CTFontGetGlyphsForCharacters` trên đúng face khi charset không liệt kê
+mã đó. Không cho phép fallback sang font khác hay style mô phỏng để bỏ qua
+popup tải font.
 
 ### 7.2 Bold
 
@@ -1572,10 +1596,17 @@ ASCII và coverage tiếng Việt nếu nguồn công bố hỗ trợ.
    32.768 part; vượt giới hạn làm save thất bại trước commit. Mỗi part mang mark
    `TrePDFTextSpacing` version 2 để scanner có thể kiểm tra và phục hồi spacing
    semantic cùng hiệu chỉnh nguồn khi reopen; reader vẫn hỗ trợ version 1.
-5. Xóa mọi source object của draft, insert replacement tại z-order sớm nhất của
-   các object nguồn nếu draft có nội dung thay thế, rồi gọi
-   `FPDFPage_GenerateContent()` cho từng page đã đổi. Draft xóa image không tạo
-   replacement object.
+5. Với text group, xác định vị trí chèn riêng cho từng run để nền xen kẽ giữa
+   các dòng nguồn không che chữ mới. Chỉ coi paint là nền khi bounds của nó
+   giao với chữ nguồn được vẽ sau nó và không giao với chữ nguồn đã vẽ trước
+   nó; paint phủ lên chữ nguồn vẫn giữ vai trò foreground.
+   Underline đi cùng run, và geometry của các draft khác trong cùng Save được
+   tính sau move/resize hoặc tạo replacement. Kiểm tra geometry hữu hạn và tối
+   đa 8.388.608 phép so sánh cho mỗi draft; thứ tự lớp xung đột hoặc vượt giới
+   hạn làm Save thất bại trước commit. Xóa toàn bộ source cần thay trên trang,
+   quy đổi các mốc chèn theo những object còn lại rồi insert replacement giữ
+   thứ tự run. Sau đó gọi `FPDFPage_GenerateContent()` cho từng page đã đổi.
+   Draft xóa image không tạo replacement object.
 6. Serialize bằng `FPDF_SaveAsCopy()` với
    `FPDF_NO_INCREMENTAL` qua `PDFAtomicSaveFile`; chỉ commit file
    đích khi toàn bộ quá trình thành công.
