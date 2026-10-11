@@ -534,11 +534,15 @@ QStringList PDFEditController::missingFontFamilies() const
 
 bool PDFEditController::requestSelectedTextEdit(const QString &styleAction)
 {
+    const QString requestedFamily = styleAction.startsWith(QLatin1String("fontFamily:"))
+        ? styleAction.mid(11).trimmed() : QString();
+    const bool familyAction = !requestedFamily.isEmpty() && QFontDatabase::hasFamily(requestedFamily);
     if (!m_document || !m_document->isLoaded() || m_saving || m_pendingFontSave
         || !m_hasSelection || !m_selectedCandidate.editable
         || !isTextCandidateKind(m_selectedCandidate.kind)
         || (styleAction != QString() && styleAction != QLatin1String("bold")
-            && styleAction != QLatin1String("italic") && styleAction != QLatin1String("underline")))
+            && styleAction != QLatin1String("italic") && styleAction != QLatin1String("underline")
+            && !familyAction))
         return false;
     if (m_textEditActive)
         return true;
@@ -609,12 +613,15 @@ bool PDFEditController::requestSelectedTextEdit(const QString &styleAction)
     }
     if (valid && (position < draft.text.size() || draft.text.isEmpty()))
         valid = addRun(base, draft.text.mid(position));
-    if (valid && (styleAction == QLatin1String("bold") || styleAction == QLatin1String("italic"))) {
+    if (valid && (styleAction == QLatin1String("bold") || styleAction == QLatin1String("italic")
+                  || familyAction)) {
         CharacterFormat typing = characterFormatAtPosition(draft, draft.text.size(), true);
         if (styleAction == QLatin1String("bold"))
             typing.fontBold = !typing.fontBold;
-        else
+        else if (styleAction == QLatin1String("italic"))
             typing.fontItalic = !typing.fontItalic;
+        else
+            typing.fontFamily = requestedFamily;
         valid = addRun(typing, {});
     }
     if (!valid) {

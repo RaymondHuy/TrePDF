@@ -279,7 +279,8 @@ public:
     }
 
     void initialize(const QVariantList &colors, int typingPosition,
-                    const QColor &typingColor)
+                    const QColor &typingColor, const QVariantList &families,
+                    int typingFamilyPosition, const QString &typingFamily)
     {
         synchronize();
         QScopedValueRollback<bool> formatting(m_formatting, true);
@@ -287,15 +288,20 @@ public:
         const bool undoEnabled = document->isUndoRedoEnabled();
         document->setUndoRedoEnabled(false);
         const int length = document->toPlainText().size();
+        m_defaultFamily = PDFFontAliases::semanticFamily(document->defaultFont().family());
         QTextCursor cursor(document);
         for (int start = 0; start < length;) {
             const QColor color = storedColor(colors, start);
+            const QString family = start < families.size()
+                ? families.at(start).toString() : m_defaultFamily;
             int end = start + 1;
-            while (end < length && storedColor(colors, end) == color) {
+            while (end < length && storedColor(colors, end) == color
+                   && (end < families.size() ? families.at(end).toString() : m_defaultFamily) == family) {
                 ++end;
             }
             QTextCharFormat format;
             format.setForeground(color);
+            format.setFontFamilies({family});
             cursor.setPosition(start);
             cursor.setPosition(end, QTextCursor::KeepAnchor);
             cursor.mergeCharFormat(format);
@@ -306,6 +312,9 @@ public:
         m_typingPosition = typingPosition == m_cursorPosition
             && validColor(typingColor) ? typingPosition : -1;
         m_typingColor = validColor(typingColor) ? typingColor : QColor(Qt::black);
+        m_typingFamilyPosition = typingFamilyPosition == m_cursorPosition
+            && !typingFamily.isEmpty() ? typingFamilyPosition : -1;
+        m_typingFamily = typingFamily;
         m_undoSteps = document->availableUndoSteps();
         resetChanges();
     }
@@ -315,12 +324,19 @@ public:
         synchronize();
         const QString text = textDocument()->toPlainText();
         QVariantList colors;
+        QVariantList families;
         colors.reserve(text.size());
+        families.reserve(text.size());
         for (int position = 0; position < text.size(); ++position) {
             colors.append(colorAt(position));
+            families.append(familyAt(position));
         }
         return {{QStringLiteral("text"), text},
                 {QStringLiteral("colors"), colors},
+                {QStringLiteral("fontFamilies"), families},
+                {QStringLiteral("fontFamily"), m_typingFamilyPosition >= 0
+                    ? m_typingFamily : familyAt(qMax(0, m_cursorPosition - 1))},
+                {QStringLiteral("typingFamilyPosition"), m_typingFamilyPosition},
                 {QStringLiteral("cursorPosition"), m_cursorPosition},
                 {QStringLiteral("typingPosition"), m_typingPosition},
                 {QStringLiteral("color"), m_typingPosition >= 0
@@ -335,6 +351,29 @@ public:
         synchronize();
         m_typingColor = color;
         m_typingPosition = m_cursorPosition;
+    }
+
+    void setFontFamily(const QString &family)
+    {
+        if (family.isEmpty())
+            return;
+        synchronize();
+        const int length = textDocument()->toPlainText().size();
+        const int start = qBound(0, m_document->parent()->property("selectionStart").toInt(), length);
+        const int end = qBound(start, m_document->parent()->property("selectionEnd").toInt(), length);
+        if (start < end) {
+            QScopedValueRollback<bool> formatting(m_formatting, true);
+            QTextCursor cursor(textDocument());
+            cursor.setPosition(start);
+            cursor.setPosition(end, QTextCursor::KeepAnchor);
+            QTextCharFormat format;
+            format.setFontFamilies({family});
+            cursor.mergeCharFormat(format);
+            m_undoSteps = textDocument()->availableUndoSteps();
+            resetChanges();
+        }
+        m_typingFamily = family;
+        m_typingFamilyPosition = m_cursorPosition;
     }
 
 protected:
@@ -354,6 +393,7 @@ protected:
                 || key->matches(QKeySequence::Paste) || key->matches(QKeySequence::Cut);
             if (key->matches(QKeySequence::Undo) || key->matches(QKeySequence::Redo)) {
                 m_typingPosition = -1;
+                m_typingFamilyPosition = -1;
             }
         } else if (event->type() == QEvent::InputMethod) {
             const auto *input = static_cast<QInputMethodEvent *>(event);
@@ -405,6 +445,18 @@ private:
             ? foreground.color() : QColor(Qt::black);
     }
 
+    QString familyAt(int position) const
+    {
+        const int maximum = textDocument()->characterCount() - 1;
+        if (position < 0 || position >= maximum)
+            return m_defaultFamily;
+        QTextCursor cursor(textDocument());
+        cursor.setPosition(position);
+        cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+        const QStringList families = cursor.charFormat().fontFamilies().toStringList();
+        return families.isEmpty() ? m_defaultFamily : PDFFontAliases::semanticFamily(families.constFirst());
+    }
+
     void resetChanges()
     {
         m_inserted.fill(false, qMax(0, textDocument()->characterCount() - 1));
@@ -435,19 +487,24 @@ private:
         }
         const bool edited = m_changed && (m_nativeEdit || m_newCommand);
         const int currentPosition = currentCursorPosition();
-        if (edited && m_typingPosition >= 0) {
+        if (edited && (m_typingPosition >= 0 || m_typingFamilyPosition >= 0)) {
             QTextDocument *document = textDocument();
             const int maximum = qMin(int(m_inserted.size()), document->characterCount() - 1);
             bool needsFormat = false;
             for (int position = 0; position < maximum && !needsFormat; ++position) {
-                needsFormat = m_inserted.at(position) && colorAt(position) != m_typingColor;
+                needsFormat = m_inserted.at(position)
+                    && ((m_typingPosition >= 0 && colorAt(position) != m_typingColor)
+                        || (m_typingFamilyPosition >= 0 && familyAt(position) != m_typingFamily));
             }
             if (needsFormat) {
                 QScopedValueRollback<bool> formatting(m_formatting, true);
                 QTextCursor cursor(document);
                 cursor.joinPreviousEditBlock();
                 QTextCharFormat format;
-                format.setForeground(m_typingColor);
+                if (m_typingPosition >= 0)
+                    format.setForeground(m_typingColor);
+                if (m_typingFamilyPosition >= 0)
+                    format.setFontFamilies({m_typingFamily});
                 for (int start = 0; start < maximum;) {
                     if (!m_inserted.at(start)) {
                         ++start;
@@ -465,10 +522,14 @@ private:
                 document->appendUndoItem(new EditorTypingCursorBoundary);
                 cursor.endEditBlock();
             }
-            m_typingPosition = currentPosition;
+            if (m_typingPosition >= 0)
+                m_typingPosition = currentPosition;
+            if (m_typingFamilyPosition >= 0)
+                m_typingFamilyPosition = currentPosition;
         } else if ((!edited && textDocument()->availableUndoSteps() != m_undoSteps)
                    || currentPosition != m_cursorPosition) {
             m_typingPosition = -1;
+            m_typingFamilyPosition = -1;
         }
         m_cursorPosition = currentPosition;
         m_undoSteps = textDocument()->availableUndoSteps();
@@ -480,6 +541,9 @@ private:
     QTextCursor m_editCursor;
     QVector<bool> m_inserted;
     QColor m_typingColor = Qt::black;
+    QString m_defaultFamily;
+    QString m_typingFamily;
+    int m_typingFamilyPosition = -1;
     int m_cursorPosition = 0;
     int m_typingPosition = -1;
     int m_undoSteps = 0;
@@ -641,7 +705,9 @@ QStringList PDFEditController::fontFamiliesForFilter(FontFilter filter) const
         }
     };
 
-    if (m_hasSelection) {
+    if (m_hasSelection && m_textEditActive && m_selectedTextRangeLength == 0) {
+        appendRequirement(selectedCharacterFormatForDisplay());
+    } else if (m_hasSelection) {
         const Draft draft = selectedDraftForDisplay();
         qsizetype rangeStart = 0;
         qsizetype rangeLength = 0;
@@ -658,11 +724,6 @@ QStringList PDFEditController::fontFamiliesForFilter(FontFilter filter) const
         }
         if (requirements.isEmpty()) {
             appendRequirement(primaryCharacterFormat(draft));
-        }
-        if (m_textEditActive
-            && m_selectedTextRangeLength == 0
-            && m_typingCharacterFormatActive) {
-            appendRequirement(m_typingCharacterFormat);
         }
     } else {
         requirements.append(FontRequirement{
@@ -1089,7 +1150,8 @@ void PDFEditController::applyTypingFormatToEditorDocument(
 
 void PDFEditController::initializeHeaderTextEditor(
     QObject *textDocument, const QVariantList &colors,
-    int typingPosition, const QColor &typingColor) const
+    int typingPosition, const QColor &typingColor, const QVariantList &families,
+    int typingFamilyPosition, const QString &typingFamily) const
 {
     auto *document = qobject_cast<QQuickTextDocument *>(textDocument);
     if (!document || !document->textDocument() || !document->parent()) {
@@ -1099,7 +1161,8 @@ void PDFEditController::initializeHeaderTextEditor(
     if (!editor) {
         editor = new HeaderTextEditor(document);
     }
-    editor->initialize(colors, typingPosition, typingColor);
+    editor->initialize(colors, typingPosition, typingColor, families,
+                       typingFamilyPosition, typingFamily);
 }
 
 QVariantMap PDFEditController::headerTextEditorState(QObject *textDocument) const
@@ -1113,6 +1176,14 @@ void PDFEditController::setHeaderTextEditorColor(
 {
     if (HeaderTextEditor *editor = headerTextEditor(textDocument)) {
         editor->setColor(color);
+    }
+}
+
+void PDFEditController::setHeaderTextEditorFontFamily(
+    QObject *textDocument, const QString &family) const
+{
+    if (HeaderTextEditor *editor = headerTextEditor(textDocument)) {
+        editor->setFontFamily(family);
     }
 }
 
@@ -1776,14 +1847,39 @@ void PDFEditController::setSelectedTextRange(int start, int length)
 
 void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
 {
-    if (!m_hasSelection
+    if (m_saving || !m_hasSelection
         || !m_selectedCandidate.editable
+        || !isTextCandidateKind(m_selectedCandidate.kind)
         || fontFamily.trimmed().isEmpty()
         || !QFontDatabase::hasFamily(fontFamily)) {
         return;
     }
 
     Draft draft = selectedDraftForDisplay();
+    if (m_textEditActive && m_selectedTextRangeLength == 0) {
+        const CharacterFormat current = selectedCharacterFormatForDisplay();
+        if (!ApplicationFonts::isFontFaceSelectable(
+                fontFamily, current.fontBold, current.fontItalic)) {
+            return;
+        }
+        CharacterFormat typing = current;
+        typing.fontFamily = fontFamily;
+        typing.fontStretch = QFont::Unstretched;
+        typing.sourceAdvanceRatio = 0.0;
+        if (sameCharacterFormat(current, typing))
+            return;
+        const qsizetype caret = qBound<qsizetype>(
+            0, m_selectedTextRangeStart, draft.text.size());
+        if (sameCharacterFormat(typing, characterFormatAtPosition(draft, caret, true))) {
+            resetTypingFormat();
+        } else {
+            m_typingCharacterFormat = typing;
+            m_typingCharacterFormatPosition = caret;
+            m_typingCharacterFormatActive = true;
+        }
+        emit textFormatStateChanged();
+        return;
+    }
     qsizetype rangeStart = 0;
     qsizetype rangeLength = 0;
     selectedTextRangeForDraft(draft, rangeStart, rangeLength);
@@ -1814,16 +1910,6 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
             return;
         }
     }
-    if (m_textEditActive
-        && m_selectedTextRangeLength == 0
-        && m_typingCharacterFormatActive
-        && !ApplicationFonts::isFontFaceSelectable(
-            fontFamily,
-            m_typingCharacterFormat.fontBold,
-            m_typingCharacterFormat.fontItalic)) {
-        return;
-    }
-
     const bool finishImmediately = !m_textEditActive;
     if (finishImmediately) {
         beginSelectedTextEdit();
@@ -3489,6 +3575,9 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
         return;
     }
 
+    const QString fontFamily = m_typingCharacterFormat.fontFamily;
+    const int fontStretch = m_typingCharacterFormat.fontStretch;
+    const qreal sourceAdvanceRatio = m_typingCharacterFormat.sourceAdvanceRatio;
     const bool fontBold = m_typingCharacterFormat.fontBold;
     const bool fontItalic = m_typingCharacterFormat.fontItalic;
     const bool fontUnderline = m_typingCharacterFormat.fontUnderline;
@@ -3501,6 +3590,9 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
         draft,
         m_typingCharacterFormatPosition,
         true);
+    m_typingCharacterFormat.fontFamily = fontFamily;
+    m_typingCharacterFormat.fontStretch = fontStretch;
+    m_typingCharacterFormat.sourceAdvanceRatio = sourceAdvanceRatio;
     m_typingCharacterFormat.fontBold = fontBold;
     m_typingCharacterFormat.fontItalic = fontItalic;
     m_typingCharacterFormat.fontUnderline = fontUnderline;

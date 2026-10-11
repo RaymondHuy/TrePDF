@@ -433,6 +433,7 @@ void PDFEditControllerTest::changesFontFamilyForCurrentEdit()
     QVERIFY(!replacementFamily.isEmpty());
 
     m_controller.beginSelectedTextEdit();
+    m_controller.setSelectedTextRange(0, m_controller.selectedText().size());
     m_controller.setSelectedFontFamily(replacementFamily);
     m_controller.updateSelectedTextPreview(QStringLiteral("Restyled PDF text"));
     QVERIFY(m_controller.textEditActive());
@@ -849,6 +850,7 @@ void PDFEditControllerTest::retainsTypingColorWhenChangingFontFamily()
         0, m_regularCandidate.value(QStringLiteral("objectId")).toString()));
     const QString originalText = m_controller.selectedText();
     const QColor originalColor = m_controller.selectedColor();
+    const QString originalFamily = m_controller.selectedFontFamily();
     QString replacementFamily;
     for (const QString &family : m_controller.availableFontFamilies()) {
         if (family.compare(m_controller.selectedFontFamily(), Qt::CaseInsensitive) != 0
@@ -869,6 +871,8 @@ void PDFEditControllerTest::retainsTypingColorWhenChangingFontFamily()
     m_controller.setSelectedFontUnderline(true);
     QVERIFY(!m_controller.hasDrafts());
     m_controller.setSelectedFontFamily(replacementFamily);
+    QVERIFY(!m_controller.hasDrafts());
+    QCOMPARE(m_controller.selectedText(), originalText);
     QCOMPARE(m_controller.selectedColor(), typingColor);
     QCOMPARE(m_controller.selectedFontSize(), 30.0);
     const QString editedText = originalText.left(8) + QLatin1Char('X') + originalText.mid(8);
@@ -885,6 +889,10 @@ void PDFEditControllerTest::retainsTypingColorWhenChangingFontFamily()
     QVERIFY(inserted.value(QStringLiteral("fontUnderline")).toBool());
     QCOMPARE(spans.at(0).toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
     QCOMPARE(spans.at(2).toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
+    QCOMPARE(spans.at(0).toMap().value(QStringLiteral("fontFamily")).toString(), originalFamily);
+    QCOMPARE(spans.at(2).toMap().value(QStringLiteral("fontFamily")).toString(), originalFamily);
+    m_controller.setSelectedTextRange(1, 0);
+    QCOMPARE(m_controller.selectedFontFamily(), originalFamily);
     m_controller.cancelSelectedTextEdit();
     QVERIFY(!m_controller.hasDrafts());
 }
@@ -892,13 +900,21 @@ void PDFEditControllerTest::retainsTypingColorWhenChangingFontFamily()
 void PDFEditControllerTest::joinsNativeFontSizeTypingUndo_data()
 {
     QTest::addColumn<bool>("inputMethod");
-    QTest::newRow("keyboard") << false;
-    QTest::newRow("vietnamese-ime") << true;
+    QTest::addColumn<int>("caretPosition");
+    QTest::addColumn<bool>("fromSelection");
+    QTest::newRow("keyboard-start") << false << 0 << false;
+    QTest::newRow("keyboard-middle") << false << 8 << false;
+    QTest::newRow("keyboard-end") << false << -1 << false;
+    QTest::newRow("vietnamese-ime-middle") << true << 8 << false;
+    QTest::newRow("keyboard-open-editor") << false << -1 << true;
+    QTest::newRow("vietnamese-ime-open-editor") << true << -1 << true;
 }
 
 void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
 {
     QFETCH(bool, inputMethod);
+    QFETCH(int, caretPosition);
+    QFETCH(bool, fromSelection);
     const QString insertedText = inputMethod ? QStringLiteral("ế") : QStringLiteral("x");
     m_controller.discardDrafts();
     m_controller.setTool(PDFEditController::SelectTool);
@@ -906,6 +922,21 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
         0, m_regularCandidate.value(QStringLiteral("objectId")).toString()));
     const QString originalText = m_controller.selectedText();
     const QColor originalColor = m_controller.selectedColor();
+    const QString originalFamily = m_controller.selectedFontFamily();
+    if (caretPosition < 0)
+        caretPosition = originalText.size();
+    QString replacementFamily;
+    for (const QString &family : m_controller.availableFontFamilies()) {
+        if (family.compare(originalFamily, Qt::CaseInsensitive) != 0
+            && ApplicationFonts::isFontFaceSelectable(family, false, false)
+            && ApplicationFonts::fontFaceSupportsText(family, false, false, originalText + insertedText)) {
+            replacementFamily = family;
+            break;
+        }
+    }
+    QVERIFY(!replacementFamily.isEmpty());
+    const QString editedText = originalText.left(caretPosition) + insertedText
+        + originalText.mid(caretPosition);
     const qreal displayedHeight = m_document.pageSize(0).height() * 1.5;
     const QString themePath = QFINDTESTDATA("../src/Components/AppTheme.qml");
     const QString overlayPath = editOverlayQmlPath();
@@ -933,7 +964,14 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
     QVERIFY2(overlay, qPrintable(component.errorString()));
     qobject_cast<QQuickItem *>(overlay.get())->setParentItem(window.contentItem());
     window.show();
-    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    if (fromSelection) {
+        QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditingWithStyle",
+            Q_ARG(QVariant, QStringLiteral("fontFamily:") + replacementFamily)));
+    } else {
+        QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    }
+    QVERIFY(m_controller.textEditActive());
+    QVERIFY(!m_controller.hasDrafts());
     QObject *textEdit = nullptr;
     for (QObject *child : overlay->findChildren<QObject *>()) {
         if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
@@ -948,8 +986,13 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
     QVERIFY(quickDocument);
     QTextDocument *document = quickDocument->textDocument();
     QTRY_VERIFY(window.isExposed());
-    QVERIFY(textEdit->setProperty("cursorPosition", originalText.size()));
-    m_controller.setSelectedTextRange(originalText.size(), 0);
+    QVERIFY(textEdit->setProperty("cursorPosition", caretPosition));
+    m_controller.setSelectedTextRange(caretPosition, 0);
+    if (!fromSelection)
+        m_controller.setSelectedFontFamily(replacementFamily);
+    QCOMPARE(m_controller.selectedFontFamily(), replacementFamily);
+    QVERIFY(!m_controller.hasDrafts());
+    QCOMPARE(document->toPlainText(), originalText);
     const QColor typingColor(QStringLiteral("#1565c0"));
     m_controller.setSelectedColor(typingColor);
     m_controller.setSelectedFontSize(32);
@@ -962,16 +1005,24 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
     } else {
         QTest::keyClick(&window, Qt::Key_X);
     }
-    QTRY_COMPARE(m_controller.selectedText(), originalText + insertedText);
+    QTRY_COMPARE(m_controller.selectedText(), editedText);
     QTextCursor cursor(document);
-    cursor.setPosition(originalText.size());
+    cursor.setPosition(caretPosition);
     cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
     QCOMPARE(cursor.charFormat().font().pixelSize() * item->scale(), 48.0);
     QVERIFY(cursor.charFormat().fontUnderline());
     QCOMPARE(cursor.charFormat().foreground().color(), typingColor);
     const QVariantList typedSpans = m_controller.selectedCharacterSpans();
-    QCOMPARE(typedSpans.constFirst().toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
-    QCOMPARE(typedSpans.constLast().toMap().value(QStringLiteral("color")).value<QColor>(), typingColor);
+    for (const QVariant &value : typedSpans) {
+        const QVariantMap span = value.toMap();
+        const bool inserted = span.value(QStringLiteral("start")).toInt() == caretPosition;
+        QCOMPARE(span.value(QStringLiteral("fontFamily")).toString(),
+                 inserted ? replacementFamily : originalFamily);
+        QCOMPARE(span.value(QStringLiteral("color")).value<QColor>(),
+                 inserted ? typingColor : originalColor);
+    }
+    QCOMPARE(PDFFontAliases::semanticFamily(cursor.charFormat().fontFamilies().toStringList().value(0)),
+             replacementFamily);
     QVERIFY(QMetaObject::invokeMethod(textEdit, "undo"));
     QTRY_COMPARE(m_controller.selectedText(), originalText);
     QCOMPARE(document->toPlainText(), originalText);
@@ -979,11 +1030,11 @@ void PDFEditControllerTest::joinsNativeFontSizeTypingUndo()
     for (const QVariant &span : m_controller.selectedCharacterSpans())
         QCOMPARE(span.toMap().value(QStringLiteral("color")).value<QColor>(), originalColor);
     QVERIFY(QMetaObject::invokeMethod(textEdit, "redo"));
-    QTRY_COMPARE(m_controller.selectedText(), originalText + insertedText);
+    QTRY_COMPARE(m_controller.selectedText(), editedText);
     QCOMPARE(textEdit->property("cursorPosition").toInt(),
-             originalText.size() + insertedText.size());
+             caretPosition + insertedText.size());
     QCOMPARE(m_controller.selectedCharacterSpans(), typedSpans);
-    cursor.setPosition(originalText.size());
+    cursor.setPosition(caretPosition);
     cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
     QCOMPARE(cursor.charFormat().foreground().color(), typingColor);
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "cancelEditing"));

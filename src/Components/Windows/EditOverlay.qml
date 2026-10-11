@@ -2093,6 +2093,8 @@ Item {
             controller.setSelectedFontItalic(!controller.selectedFontItalic)
         else if (styleAction === "underline")
             controller.setSelectedFontUnderline(!controller.selectedFontUnderline)
+        else if (styleAction.startsWith("fontFamily:"))
+            controller.setSelectedFontFamily(styleAction.slice(11))
         const focusGeneration = ++editFocusGeneration
         const expectedController = controller
         Qt.callLater(function() {

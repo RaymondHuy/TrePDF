@@ -630,6 +630,10 @@ void PDFEditControllerTest::rejectsInvalidHeaderTextFormatAtomically_data()
     QTest::newRow("normalized-color-count")
         << QVariantMap{{QStringLiteral("colors"), QVariantList{QColor(Qt::red)}}}
         << QStringLiteral("a\u0301");
+    add("non-list-families", QStringLiteral("fontFamilies"), QStringLiteral("Arial"));
+    add("short-families", QStringLiteral("fontFamilies"), QVariantList{QStringLiteral("Arial")});
+    add("unknown-character-family", QStringLiteral("fontFamilies"), QVariantList(6, QStringLiteral("Missing TrePDF Face")));
+    add("invalid-character-family", QStringLiteral("fontFamilies"), QVariantList(6, 123));
     add("non-boolean-style", QStringLiteral("fontBold"), QStringLiteral("true"));
     add("size-does-not-fit", QStringLiteral("fontSize"), 100);
     QTest::newRow("unavailable-glyph") << QVariantMap{} << QString::fromUcs4(U"\U0010ffff");

@@ -378,10 +378,15 @@ public:
     Q_INVOKABLE void initializeHeaderTextEditor(QObject *textDocument,
                                                 const QVariantList &colors,
                                                 int typingPosition,
-                                                const QColor &typingColor) const;
+                                                const QColor &typingColor,
+                                                const QVariantList &families = {},
+                                                int typingFamilyPosition = -1,
+                                                const QString &typingFamily = {}) const;
     Q_INVOKABLE QVariantMap headerTextEditorState(QObject *textDocument) const;
     Q_INVOKABLE void setHeaderTextEditorColor(QObject *textDocument,
                                               const QColor &color) const;
+    Q_INVOKABLE void setHeaderTextEditorFontFamily(QObject *textDocument,
+                                                   const QString &family) const;
     Q_INVOKABLE bool addHeaderText(const QString &text, const QString &pages,
                                   qreal xPoints = 24.0, qreal yPoints = 16.0,
                                   qreal widthPoints = 0.0,

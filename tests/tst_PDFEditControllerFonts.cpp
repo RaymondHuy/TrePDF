@@ -1506,7 +1506,7 @@ void PDFEditControllerTest::intersectsFontFiltersAcrossMixedStyles()
     m_controller.setSelectedFontBold(true);
     QCOMPARE(
         m_controller.fontFamiliesForFilter(PDFEditController::EnglishFonts),
-        expectedEnglish);
+        boldEnglish);
 
     const QStringList regularEnglish =
         ApplicationFonts::fontFamiliesForLanguage(

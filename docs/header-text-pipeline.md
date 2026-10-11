@@ -3,11 +3,17 @@
 Header > Add Text arms the placement cursor. Click inside the gray header area
 to open a textbox on the page at that position. The right-side panel then opens
 with font family, size, bold/italic/underline, text color, and all-pages or
-1-based range selection such as `1-3, 5`. Font family, size and style update the
+1-based range selection such as `1-3, 5`. Choosing a font family applies only to
+the selected characters, or to new text at the caret when nothing is selected.
+Existing text outside the selection retains its font. Size and style update the
 complete pending header textbox live. Choosing a color sets the color for new
 text at the current caret; existing characters retain their colors. Enter the text on
 the page and press Apply in the panel. Duplicate page
 numbers are applied once. Cancel closes the panel without creating drafts.
+Edit > Add Text shares this initial-family selection through `headerTextFontFamily()`.
+The initial family prefers an available Arial face (bundled, system or downloaded), then
+an available bundled/system text family. Native UI aliases that cannot be saved
+are excluded from this fallback.
 
 The Header tab shows a translucent gray guide in the first 100 PDF points of
 each page. This guide is a non-interactive QML overlay and is never saved.
@@ -138,7 +144,7 @@ UI test covers the panel and inline editing flow.
 - `AppRibbon.qml` emits `headerTextRequested`; `Main.qml` prepares the active
   workspace and arms placement.
 - `DocumentWorkspace.qml` owns `HeaderTextPlacement.qml`, holding temporary
-  text, character colors, caret and PDF-point geometry independently of virtualized delegates.
+  text, character colors/font families, caret, pending typing format and PDF-point geometry independently of virtualized delegates.
   `HeaderTextOverlay.qml` captures clicks only in the gray region while armed,
   then lazily loads a scaled inline editor above page interactions. The panel
   appears only after placement and contains formatting, page selection and Apply/Cancel.
@@ -169,9 +175,11 @@ The editor scales as a whole with zoom to preserve line wrapping. Every selected
 coordinate mapping. Zoom and view rotation do not change saved geometry.
 
 The existing added-text preview and transactional text writer handle these
-drafts. Character colors are stored as rich-text spans and survive batch
-Undo/Redo and Save/reopen. The editor keeps color changes with their inserted
-text in local undo history. Moving the caret picks up the adjacent text color.
+drafts. Character colors and font families are stored as rich-text spans and
+survive batch Undo/Redo and Save/reopen. The editor keeps typing-format changes
+with their inserted text in local undo history; a selected-range font change is
+separately undoable. Moving the caret picks up the adjacent text color and font.
+Mixed font families also participate in header fit validation.
 Save/Save As writes searchable PDF text; Save As leaves the original
 file unchanged. A failed save retains the drafts. Page insertion/deletion
 uses the existing candidate/draft remapping and history snapshots.
@@ -192,7 +200,10 @@ watermark guards.
 The optional `format.colors` list contains one opaque color per UTF-16 code unit
 of the input text. Missing or empty lists preserve the uniform-color API.
 Newline and NFC normalization map colors with the text; a composed grapheme
-uses its base character's color. Malformed color lists reject the entire batch.
+uses its base character's color. The optional `format.fontFamilies` list likewise
+contains one family per UTF-16 code unit and follows the same normalization.
+Each family is validated against only its own characters and the global style.
+Malformed lists or unsupported faces/glyphs reject the entire batch.
 
 ## Verification
 
@@ -201,7 +212,8 @@ atomic rejection and history, independent sessions, Unicode Save/Save As,
 page insertion/deletion, cropped and rotated pages, save/permission/watermark
 guards, and failed-save retention. `tst_PDFEditControllerHeaderTextUi.cpp`
 covers Main/ribbon/panel wiring, actual mouse placement and style buttons,
-the color picker lifecycle, pending size edits, Apply/Cancel, validation and
+the color picker lifecycle, caret/selected-range family changes, local Undo/Redo,
+font/color retention through delegate pooling and Save/reopen, pending size edits, Apply/Cancel, validation and
 transient input lifecycle. Format tests verify font, size, style, color and
 underline geometry after Save/reopen. Native macOS checks cover translated panel layout, selected pages,
 Undo/Redo, scrolling/zoom, Save/reopen and normal shutdown.
