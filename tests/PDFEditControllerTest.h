@@ -56,6 +56,8 @@ private slots:
     void constrainsHeaderSelectionGeometry();
     void deletesHeaderSelectionWithUndoAndSave();
     void selectsHeaderObjectsThroughMainWindow();
+    void appliesFontFamilyThroughEditAndHeaderPanels_data();
+    void appliesFontFamilyThroughEditAndHeaderPanels();
     void syncsSimilarSourceHeadersFromOriginalText();
     void syncsGroupedHeaderDraftsToCustomPagesWithUndo();
     void syncsGroupedHeaderTextLayoutAcrossDifferentFrames();
@@ -109,6 +111,7 @@ private slots:
     void addsHeaderTextThroughMainWindow();
     void formatsHeaderTextThroughMainWindow();
     void appliesHeaderColorsOnlyToTypedCharacters();
+    void appliesHeaderFontsAtCaretAndSelection();
     void retainsHeaderColorsAcrossPageDelegatesAndZoom();
     void cancelsHeaderTextPanelAcrossUiChanges();
     void validatesHeaderTextPanelWithoutLosingInput();

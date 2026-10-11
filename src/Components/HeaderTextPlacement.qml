@@ -18,6 +18,9 @@ QtObject {
     property real initialHeightPoints: 0
     property string text: ""
     property string fontFamily: ""
+    property string baseFontFamily: ""
+    property var fontFamilies: []
+    property int typingFamilyPosition: -1
     property real fontSize: 12
     property bool fontBold: false
     property bool fontItalic: false
@@ -35,6 +38,7 @@ QtObject {
     signal focusRequested()
     signal synchronizeRequested()
     signal typingColorRequested(color value)
+    signal typingFontFamilyRequested(string value)
 
     function compatibleFont(family, bold, italic) {
         const families = editController.headerTextFontFamilies(-1, bold, italic)
@@ -45,7 +49,10 @@ QtObject {
     function setFontFamily(value) {
         if (active && compatibleFont(value, fontBold, fontItalic)) {
             InputMethod.commit()
+            synchronizeRequested()
             fontFamily = value
+            typingFamilyPosition = cursorPosition
+            typingFontFamilyRequested(value)
             errorText = ""
         }
     }
@@ -120,9 +127,12 @@ QtObject {
             Math.min(100, size.height) - yPoints)
         text = ""
         colors = []
+        fontFamilies = []
+        typingFamilyPosition = -1
         cursorPosition = 0
         typingPosition = -1
         fontFamily = editController.headerTextFontFamily()
+        baseFontFamily = fontFamily
         fontSize = 12
         fontBold = false
         fontItalic = false
@@ -139,6 +149,8 @@ QtObject {
         page = -1
         text = ""
         colors = []
+        fontFamilies = []
+        typingFamilyPosition = -1
         cursorPosition = 0
         typingPosition = -1
         errorText = ""
@@ -164,7 +176,8 @@ QtObject {
                 fontItalic: fontItalic,
                 fontUnderline: fontUnderline,
                 color: textColor,
-                colors: colors
+                colors: colors,
+                fontFamilies: fontFamilies
             })
         submitting = false
         if (succeeded) {

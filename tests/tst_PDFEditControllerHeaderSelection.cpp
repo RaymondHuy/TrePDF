@@ -242,6 +242,96 @@ void PDFEditControllerTest::deletesHeaderSelectionWithUndoAndSave()
     QCOMPARE(inspectImages(source).count, 3);
 }
 
+void PDFEditControllerTest::appliesFontFamilyThroughEditAndHeaderPanels_data()
+{
+    QTest::addColumn<int>("tab");
+    QTest::newRow("edit") << 1;
+    QTest::newRow("header") << 7;
+}
+
+void PDFEditControllerTest::appliesFontFamilyThroughEditAndHeaderPanels()
+{
+    QFETCH(int, tab);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("font-family-panels.pdf"));
+    QVERIFY(createHeaderSelectionPdf(path));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> window(component.create());
+    QVERIFY2(window, qPrintable(component.errorString()));
+    QVERIFY(window->setProperty("visible", true));
+    QVERIFY(window->setProperty("allowWindowClose", true));
+    auto *quickWindow = qobject_cast<QQuickWindow *>(window.get());
+    auto *model = window->findChild<PDFTabModel *>();
+    auto *tabs = window->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    QVERIFY(quickWindow && model && tabs);
+    auto *session = model->open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    auto &controller = *session->editController();
+    const QVariantMap header = candidateForText(waitForCandidates(controller, 0), QStringLiteral("Header text"));
+    QVERIFY(!header.isEmpty());
+    QVERIFY(tabs->setProperty("currentIndex", tab));
+    QTRY_COMPARE(controller.tool(), PDFEditController::SelectTool);
+    QVERIFY(controller.selectCandidate(0, selectionId(header)));
+    const QString originalFamily = controller.selectedFontFamily();
+    const QString originalText = controller.selectedText();
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
+    const QString family = QStringLiteral("Times New Roman");
+    QVERIFY(family != originalFamily);
+    QObject *panel = nullptr;
+    const auto findPanel = [&]() {
+        for (QObject *item : window->findChildren<QObject *>()) {
+            if (item->metaObject()->indexOfSignal("fontFamilyChangeRequested(QString)") >= 0)
+                return item;
+        }
+        return static_cast<QObject *>(nullptr);
+    };
+    QTRY_VERIFY((panel = findPanel()));
+    // Choosing a font before opening the editor starts typing at the end.
+    QVERIFY(QMetaObject::invokeMethod(panel, "fontFamilyChangeRequested", Q_ARG(QString, family)));
+    QTRY_VERIFY(controller.textEditActive());
+    QCOMPARE(controller.selectedFontFamily(), family);
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QVERIFY(!controller.hasDrafts());
+    auto *overlay = headerEditOverlay(quickWindow->contentItem());
+    QVERIFY(overlay);
+    QQuickItem *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = qobject_cast<QQuickItem *>(child);
+            break;
+        }
+    }
+    QVERIFY(editor);
+    QTRY_VERIFY(editor->hasActiveFocus());
+    QCOMPARE(editor->property("cursorPosition").toInt(), originalText.size());
+    QTest::keyClick(quickWindow, Qt::Key_X);
+    QTRY_COMPARE(controller.selectedText(), originalText + QLatin1Char('x'));
+    QCOMPARE(controller.selectedCharacterSpans().size(), 2);
+    QCOMPARE(controller.selectedCharacterSpans().constFirst().toMap().value(QStringLiteral("fontFamily")).toString(), originalFamily);
+    QCOMPARE(controller.selectedCharacterSpans().constLast().toMap().value(QStringLiteral("fontFamily")).toString(), family);
+    // The same panel changes only a selected range while editing.
+    QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 1), Q_ARG(int, 3)));
+    QTRY_COMPARE(controller.selectedFontFamily(), originalFamily);
+    QVERIFY(QMetaObject::invokeMethod(panel, "fontFamilyChangeRequested", Q_ARG(QString, family)));
+    const QVariantList spans = controller.selectedCharacterSpans();
+    QCOMPARE(spans.size(), 4);
+    QCOMPARE(spans.at(0).toMap().value(QStringLiteral("fontFamily")).toString(), originalFamily);
+    QCOMPARE(spans.at(1).toMap().value(QStringLiteral("fontFamily")).toString(), family);
+    QCOMPARE(spans.at(1).toMap().value(QStringLiteral("start")).toInt(), 1);
+    QCOMPARE(spans.at(1).toMap().value(QStringLiteral("length")).toInt(), 2);
+    QCOMPARE(spans.at(2).toMap().value(QStringLiteral("fontFamily")).toString(), originalFamily);
+    QVERIFY(QMetaObject::invokeMethod(overlay, "commitEditing"));
+    QVERIFY(controller.canUndo());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.selectedCharacterSpans(), spans);
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("font-family-panels-saved.pdf"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QVERIFY(normalizedPageText(saved, 0).contains(originalText + QLatin1Char('x')));
+}
+
 void PDFEditControllerTest::selectsHeaderObjectsThroughMainWindow()
 {
     const QString path = m_temporaryDirectory.filePath(QStringLiteral("header-selection-ui.pdf"));

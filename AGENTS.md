@@ -79,9 +79,13 @@ Current features:
 - Header > Add Text arms click placement inside the gray 100-point header.
   `HeaderTextOverlay.qml` shows an inline textbox at the clicked point, then
   `HeaderTextPanel.qml` opens for font family/size/style/color and all-pages/custom
-  page-range selection. Font family/size/style update the whole pending textbox;
-  color changes apply to new text at the caret. Per-character colors persist
-  through the existing added-text writer.
+  page-range selection. Font family changes apply to selected characters or new
+  text at the caret; size/style update the whole pending textbox. Color changes
+  apply to new text at the caret. Per-character fonts and colors persist through
+  the existing added-text writer and survive delegate pooling.
+  Edit > Add Text shares Header's initial family selection via
+  `headerTextFontFamily()`, including available system/downloaded Arial when
+  no Arial font is bundled.
   `HeaderTextPlacement.qml` owns temporary input independently of pooled delegates. `PDFEditControllerHeaderText.cpp` validates the complete
   batch before creating ordinary added-text drafts inside the first 100 PDF
   points. Apply is one undoable action; Save/Save As uses the existing text
@@ -517,10 +521,10 @@ Current features:
   draft previews lay out in PDF points, then scale as a whole with page zoom,
   preserving wrap, baseline, and font-size behavior at fractional zoom levels.
   Commit the active editor before changing primary-pane zoom. During inline
-  editing, color and bold/italic/underline apply to the
+  editing, font family, color and bold/italic/underline apply to the
   selected range; with only a caret they become the typing format for
   subsequently inserted text without changing existing characters. Invoking
-  a bold/italic/underline control on a selected text object opens its inline editor first
+  font family or a bold/italic/underline control on a selected text object opens its inline editor first
   and leaves the caret at the end, so it never restyles the whole object. The
   editor merges range formatting directly into its text document and syncs
   color, B/I/U and size back after local undo/redo without replacing the rich-text document.

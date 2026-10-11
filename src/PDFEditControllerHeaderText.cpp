@@ -151,15 +151,15 @@ bool validHeaderText(const QString &text)
     return true;
 }
 
-QVector<QColor> normalizedHeaderColors(const QString &text, const QVariantList &colors)
+QVariantList normalizedHeaderValues(const QString &text, const QVariantList &values)
 {
     QString lineText;
-    QVector<QColor> lineColors;
+    QVariantList lineValues;
     lineText.reserve(text.size());
-    lineColors.reserve(text.size());
+    lineValues.reserve(text.size());
     for (qsizetype index = 0; index < text.size(); ++index) {
         const QChar character = text.at(index);
-        lineColors.append(colors.at(index).value<QColor>());
+        lineValues.append(values.at(index));
         if (character == QLatin1Char('\r')) {
             lineText.append(QLatin1Char('\n'));
             if (index + 1 < text.size() && text.at(index + 1) == QLatin1Char('\n'))
@@ -171,7 +171,7 @@ QVector<QColor> normalizedHeaderColors(const QString &text, const QVariantList &
         }
     }
 
-    QVector<QColor> result;
+    QVariantList result;
     result.reserve(lineText.size());
     QTextBoundaryFinder boundaries(QTextBoundaryFinder::Grapheme, lineText);
     qsizetype start = 0;
@@ -180,27 +180,44 @@ QVector<QColor> normalizedHeaderColors(const QString &text, const QVariantList &
         const QString cluster = lineText.sliced(start, end - start);
         const QString normalized = cluster.normalized(QString::NormalizationForm_C);
         // A composed character belongs to its base character. Unchanged
-        // clusters retain the original UTF-16 colors without shifting suffixes.
+        // clusters retain the original UTF-16 metadata without shifting suffixes.
         for (qsizetype index = 0; index < normalized.size(); ++index)
-            result.append(lineColors.at(cluster == normalized ? start + index : start));
+            result.append(lineValues.at(cluster == normalized ? start + index : start));
         start = end;
     }
     return result;
 }
 
 qreal headerLayoutHeight(const QString &text, const QFont &font,
-                        qreal width, qreal maximumHeight)
+                        qreal width, qreal maximumHeight,
+                        const QVariantList &families = {})
 {
     // Match the plain, left-aligned added-text writer, including line advance
     // quantization and its one-point top inset. Measure before creating drafts.
     qreal height = kWriterTopPadding;
     const QStringList paragraphs = text.split(QLatin1Char('\n'), Qt::KeepEmptyParts);
+    int paragraphStart = 0;
     for (const QString &paragraph : paragraphs) {
         QTextLayout layout(paragraph.isEmpty() ? QStringLiteral(" ") : paragraph, font);
         QTextOption option;
         option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
         option.setAlignment(Qt::AlignLeft);
         layout.setTextOption(option);
+        if (!families.isEmpty()) {
+            QList<QTextLayout::FormatRange> ranges;
+            for (int start = 0; start < paragraph.size();) {
+                const QString family = families.at(paragraphStart + start).toString();
+                int end = start + 1;
+                while (end < paragraph.size()
+                       && families.at(paragraphStart + end).toString() == family)
+                    ++end;
+                QTextCharFormat format;
+                format.setFontFamilies({family});
+                ranges.append({start, end - start, format});
+                start = end;
+            }
+            layout.setFormats(ranges);
+        }
         layout.beginLayout();
         while (true) {
             QTextLine line = layout.createLine();
@@ -218,6 +235,7 @@ qreal headerLayoutHeight(const QString &text, const QFont &font,
             }
         }
         layout.endLayout();
+        paragraphStart += paragraph.size() + 1;
     }
     return height;
 }
@@ -227,9 +245,17 @@ qreal headerLayoutHeight(const QString &text, const QFont &font,
 QString PDFEditController::headerTextFontFamily() const
 {
     const QStringList families = ApplicationFonts::bundledFontFamilies();
-    return families.contains(QStringLiteral("Arial"), Qt::CaseInsensitive)
-        ? QStringLiteral("Arial")
-        : families.isEmpty() ? QFontInfo(QFont()).family() : families.constFirst();
+    if (ApplicationFonts::isFontFaceSelectable(QStringLiteral("Arial"), false, false))
+        return QStringLiteral("Arial");
+    if (!families.isEmpty())
+        return families.constFirst();
+    const QString systemDefault = QFontInfo(QFont()).family();
+    if (ApplicationFonts::isFontFaceSelectable(systemDefault, false, false))
+        return systemDefault;
+    // Native UI aliases such as .AppleSystemUIFont cannot be embedded on Save.
+    const QStringList available = ApplicationFonts::fontFamiliesForLanguage(
+        ApplicationFonts::FontLanguage::English, false, false);
+    return available.isEmpty() ? systemDefault : available.constFirst();
 }
 
 QStringList PDFEditController::headerTextFontFamilies(int filter, bool bold, bool italic) const
@@ -396,6 +422,14 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
                 const QColor characterColor = value.value<QColor>();
                 return characterColor.isValid() && characterColor.alpha() == 255;
             })));
+    const QVariant familiesValue = format.value(QStringLiteral("fontFamilies"), QVariantList{});
+    const QVariantList families = familiesValue.toList();
+    const bool validFamilies = familiesValue.metaType().id() == QMetaType::QVariantList
+        && (families.isEmpty() || (texts.size() == 1 && families.size() == texts.constFirst().size()
+            && std::all_of(families.cbegin(), families.cend(), [](const QVariant &value) {
+                return value.metaType().id() == QMetaType::QString
+                    && !value.toString().trimmed().isEmpty() && value.toString().size() <= 256;
+            })));
     const auto validStyleValue = [&format](const QString &key) {
         return !format.contains(key) || format.value(key).metaType().id() == QMetaType::Bool;
     };
@@ -404,7 +438,7 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
         || std::floor(fontSize) != fontSize
         || familyValue.metaType().id() != QMetaType::QString
         || family.isEmpty() || family.size() > 256
-        || !color.isValid() || color.alpha() != 255 || !validColors
+        || !color.isValid() || color.alpha() != 255 || !validColors || !validFamilies
         || !validStyleValue(QStringLiteral("fontBold"))
         || !validStyleValue(QStringLiteral("fontItalic"))
         || !validStyleValue(QStringLiteral("fontUnderline"))) {
@@ -412,9 +446,12 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
         emit statusMessage(qtTrId("HeaderTextInvalidFormat"));
         return false;
     }
-    const QVector<QColor> normalizedColors = colors.isEmpty()
-        ? QVector<QColor>() : normalizedHeaderColors(texts.constFirst(), colors);
-    if (!colors.isEmpty() && normalizedColors.size() != normalizedTexts.constFirst().size()) {
+    const QVariantList normalizedColors = colors.isEmpty()
+        ? QVariantList() : normalizedHeaderValues(texts.constFirst(), colors);
+    const QVariantList normalizedFamilies = families.isEmpty()
+        ? QVariantList() : normalizedHeaderValues(texts.constFirst(), families);
+    if ((!colors.isEmpty() && normalizedColors.size() != normalizedTexts.constFirst().size())
+        || (!families.isEmpty() && normalizedFamilies.size() != normalizedTexts.constFirst().size())) {
         //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
         emit statusMessage(qtTrId("HeaderTextInvalidFormat"));
         return false;
@@ -422,9 +459,20 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
     const bool bold = format.value(QStringLiteral("fontBold"), false).toBool();
     const bool italic = format.value(QStringLiteral("fontItalic"), false).toBool();
     const bool underline = format.value(QStringLiteral("fontUnderline"), false).toBool();
-    if (!ApplicationFonts::isFontFaceSelectable(family, bold, italic)
-        || !ApplicationFonts::fontFaceSupportsText(
-            family, bold, italic, normalizedTexts.join(QLatin1Char('\n')))) {
+    QHash<QString, QString> textByFamily;
+    if (normalizedFamilies.isEmpty()) {
+        textByFamily.insert(family, normalizedTexts.join(QLatin1Char('\n')));
+    } else {
+        const QString &text = normalizedTexts.constFirst();
+        for (int index = 0; index < text.size(); ++index)
+            textByFamily[normalizedFamilies.at(index).toString()].append(text.at(index));
+    }
+    const bool fontsAvailable = std::all_of(textByFamily.keyValueBegin(), textByFamily.keyValueEnd(),
+        [bold, italic](const auto &entry) {
+            return ApplicationFonts::isFontFaceSelectable(entry.first, bold, italic)
+                && ApplicationFonts::fontFaceSupportsText(entry.first, bold, italic, entry.second);
+        });
+    if (!fontsAvailable) {
         //% "The selected header font or style is unavailable or does not support this text. Choose another font."
         emit statusMessage(qtTrId("HeaderTextFontUnavailable"));
         return false;
@@ -435,11 +483,11 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
     prototype.kind = QStringLiteral("addedText");
     //% "Add Text"
     prototype.label = qtTrId("AddText");
-    prototype.fontFamily = family;
+    prototype.fontFamily = normalizedFamilies.isEmpty() ? family : normalizedFamilies.constFirst().toString();
     prototype.fontBold = bold;
     prototype.fontItalic = italic;
     prototype.fontUnderline = underline;
-    prototype.color = normalizedColors.isEmpty() ? color : normalizedColors.constFirst();
+    prototype.color = normalizedColors.isEmpty() ? color : normalizedColors.constFirst().value<QColor>();
     prototype.fillColor = prototype.color;
     prototype.added = true;
     prototype.editable = true;
@@ -468,7 +516,7 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
                 ? heightByWidth.constFind(width) : heightByWidth.cend();
             height = cached == heightByWidth.cend()
                 ? headerLayoutHeight(normalizedText, layoutFont, width,
-                                     kHeaderHeight - yPoints)
+                                     kHeaderHeight - yPoints, normalizedFamilies)
                 : *cached;
             if (normalizedTexts.size() == 1)
                 heightByWidth.insert(width, height);
@@ -490,15 +538,19 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
                                             width / size.width(), height / size.height()));
         Draft draft = initialDraftForCandidate(candidate);
         setDraftText(draft, normalizedText);
-        if (!normalizedColors.isEmpty()) {
+        if (!normalizedColors.isEmpty() || !normalizedFamilies.isEmpty()) {
             CharacterFormat characterFormat = primaryCharacterFormat(draft);
             draft.characterSpans.clear();
             qsizetype start = 0;
-            for (qsizetype end = 1; end <= normalizedColors.size(); ++end) {
-                if (end < normalizedColors.size()
-                    && normalizedColors.at(end) == normalizedColors.at(start))
+            for (qsizetype end = 1; end <= normalizedText.size(); ++end) {
+                if (end < normalizedText.size()
+                    && (normalizedColors.isEmpty() || normalizedColors.at(end) == normalizedColors.at(start))
+                    && (normalizedFamilies.isEmpty() || normalizedFamilies.at(end) == normalizedFamilies.at(start)))
                     continue;
-                characterFormat.color = normalizedColors.at(start);
+                if (!normalizedColors.isEmpty())
+                    characterFormat.color = normalizedColors.at(start).value<QColor>();
+                if (!normalizedFamilies.isEmpty())
+                    characterFormat.fontFamily = normalizedFamilies.at(start).toString();
                 draft.characterSpans.append(CharacterSpan{start, end - start, characterFormat});
                 start = end;
             }

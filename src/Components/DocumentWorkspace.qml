@@ -1109,7 +1109,10 @@ Item {
                                 || root.session.editController.selectedKind
                                     === "addedText")
                         onFontFamilyChangeRequested: fontFamily => {
-                            root.session.editController.setSelectedFontFamily(fontFamily)
+                            if (!root.session.editController.textEditActive)
+                                documentView.beginSelectedEditingWithStyle("fontFamily:" + fontFamily)
+                            else
+                                root.session.editController.setSelectedFontFamily(fontFamily)
                         }
                         onFontSizeChangeRequested: fontSize => {
                             root.session.editController.setSelectedFontSize(fontSize)

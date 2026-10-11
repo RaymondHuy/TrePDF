@@ -343,9 +343,11 @@ chung budget 200.000 phép so sánh với kiểm tra overlap và gom đoạn; h�
 thì ngừng nối. Rich-text draft có thể lưu nhiều character span;
 `TextEdit` và draft overlay render từng span, còn các lệnh font,
 color, bold, italic và underline áp dụng vào range đang bôi đen. Khi selection
-collapse thành caret, màu chữ và Bold/Italic/Underline chỉ cập nhật typing format
-tạm để các ký tự gõ tiếp theo nhận format mới; text hiện có không đổi. Font family
-vẫn áp dụng cho toàn draft nếu không có range.
+collapse thành caret, font family, màu chữ và Bold/Italic/Underline chỉ cập nhật
+typing format tạm để các ký tự gõ tiếp theo nhận format mới; text hiện có không đổi.
+Đổi font tại caret không tạo draft cho đến khi gõ. Di chuyển caret bỏ lựa chọn font
+tạm và đọc lại format ở vị trí mới. Dropdown lọc font theo style tại caret; khi
+bôi đen nhiều style, danh sách vẫn lấy giao các face hỗ trợ vùng được chọn.
 
 Candidate dòng nhận bbox union, baseline/origin và style của part đầu tiên.
 `renderSuppressible` chỉ true khi mọi part đều suppress được. Candidate nguồn
@@ -566,6 +568,12 @@ vào rich-text editor của page content. Hộp được đặt bằng click/dra
 ## 7. Các thuộc tính font và text được lấy như thế nào
 
 ### 7.1 Font family
+
+Text mới từ **Edit → Add Text** và **Header → Add Text** dùng chung
+`headerTextFontFamily()`: ưu tiên Arial khả dụng (font đóng gói, hệ thống hoặc
+cache đã tải), rồi font đóng gói đầu tiên, font mặc định hệ thống nếu hợp lệ,
+cuối cùng là font hỗ trợ tiếng Anh trong danh sách cho phép chọn. Vì vậy khi
+không đóng gói Arial, Edit vẫn dùng Arial hệ thống/cache giống Header.
 
 TrePDF ưu tiên theo thứ tự:
 
@@ -1206,6 +1214,11 @@ những span kề nhau có cùng format. Khi range collapse, trạng thái check
 Bold/Italic/Underline đọc format tại caret; thao tác toggle chuẩn bị style cho
 text gõ tiếp theo thay vì sửa toàn draft. Nếu editor chưa mở, bấm một trong ba
 nút sẽ mở editor của text đang chọn, đặt caret ở cuối rồi mới chuẩn bị style.
+Chọn font family từ panel cũng mở editor theo luồng này, qua preflight font của
+đoạn và font mới (`fontFamily:`), rồi đặt font cho phần gõ tiếp ở cuối. Quy tắc áp
+dụng cho text chọn ở tab Edit và Header, cùng cả overlay dùng chung và Windows.
+Header > Add Text giữ font family trong từng character span của textbox tạm;
+chi tiết ở `header-text-pipeline.md`.
 
 ## 11. Công thức kích thước editor frame
 

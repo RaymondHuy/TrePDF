@@ -72,6 +72,9 @@ Item {
                         const state = root.editController.headerTextEditorState(textDocument)
                         root.placement.text = state.text
                         root.placement.colors = state.colors
+                        root.placement.fontFamilies = state.fontFamilies
+                        root.placement.fontFamily = state.fontFamily
+                        root.placement.typingFamilyPosition = state.typingFamilyPosition
                         root.placement.cursorPosition = state.cursorPosition
                         root.placement.typingPosition = state.typingPosition
                         root.placement.textColor = state.color
@@ -82,7 +85,7 @@ Item {
                     padding: 0
                     topPadding: 1
                     font: root.editController.fontForDisplay(
-                        root.placement ? root.placement.fontFamily : "",
+                        root.placement ? root.placement.baseFontFamily : "",
                         100, root.placement ? root.placement.fontBold : false,
                         root.placement ? root.placement.fontItalic : false,
                         root.placement ? root.placement.fontUnderline : false,
@@ -122,7 +125,8 @@ Item {
                         cursorPosition = Math.min(root.placement.cursorPosition, length)
                         root.editController.initializeHeaderTextEditor(textDocument,
                             root.placement.colors, root.placement.typingPosition,
-                            root.placement.textColor)
+                            root.placement.textColor, root.placement.fontFamilies,
+                            root.placement.typingFamilyPosition, root.placement.fontFamily)
                         initialized = true
                         forceActiveFocus()
                     }
@@ -146,6 +150,11 @@ Item {
                         target: root.placement
                         function onFocusRequested() { textInput.restoreFocus() }
                         function onSynchronizeRequested() { textInput.synchronize() }
+                        function onTypingFontFamilyRequested(value) {
+                            root.editController.setHeaderTextEditorFontFamily(textInput.textDocument, value)
+                            textInput.synchronize()
+                            Qt.callLater(textInput.restoreFocus)
+                        }
                         function onTypingColorRequested(value) {
                             root.editController.setHeaderTextEditorColor(textInput.textDocument, value)
                             textInput.synchronize()

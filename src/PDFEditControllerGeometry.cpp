@@ -132,14 +132,7 @@ QVariantMap PDFEditController::addText(int page, qreal x, qreal y)
     //% "Add Text"
     candidate.label = qtTrId("AddText");
     candidate.text.clear();
-    const QStringList bundledFamilies = ApplicationFonts::bundledFontFamilies();
-    candidate.fontFamily = bundledFamilies.contains(
-        QStringLiteral("Arial"),
-        Qt::CaseInsensitive)
-        ? QStringLiteral("Arial")
-        : bundledFamilies.isEmpty()
-            ? QFontInfo(QFont()).family()
-            : bundledFamilies.constFirst();
+    candidate.fontFamily = headerTextFontFamily();
     candidate.fontSizeRatio = kAddedTextFontSizeRatio;
     candidate.displayFontSizeRatio = candidate.fontSizeRatio;
     candidate.color = Qt::black;
