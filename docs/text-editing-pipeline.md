@@ -1195,7 +1195,10 @@ chuột hoặc dùng Shift + phím mũi tên để chọn một đoạn; đoạn
 xanh nhạt (`#DCEBFF`) và chữ tối theo màu text của ribbon.
 
 Trong lúc `editing = true`, con trỏ chọn tùy biến bị vô hiệu hóa và `TextEdit`
-dùng con trỏ I-beam gốc của Qt. Vì vậy khi giữ chuột rồi kéo để bôi đen, con trỏ
+dùng con trỏ I-beam gốc của Qt. Vùng kéo khung `moveObjectMouse` phải được ẩn
+cùng lúc vô hiệu hóa, vì `MouseArea` bị disable vẫn có thể áp con trỏ bốn mũi tên
+lên vùng nhập. Quy tắc này áp dụng cho cả overlay dùng chung và Windows.
+Vì vậy khi giữ chuột rồi kéo để bôi đen, con trỏ
 di chuyển liên tục theo vị trí kéo thay vì chỉ cập nhật sau khi thả chuột.
 Range selection của `TextEdit` được gửi về controller bằng UTF-16 start/length.
 Lệnh formatting tách span ở hai biên range, cập nhật phần giữa rồi merge lại

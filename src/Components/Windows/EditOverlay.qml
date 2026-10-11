@@ -4243,6 +4243,7 @@ Item {
             anchors.fill: parent
             enabled: !root.editing
                 && root.isMovableKind(root.controller.selectedKind)
+            visible: enabled
             containmentMask: QtObject {
                 function contains(point: point): bool {
                     // A containment mask replaces the item's rectangular hit test.
