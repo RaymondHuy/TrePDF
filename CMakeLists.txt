@@ -200,6 +200,7 @@ qt_add_qml_module(trepdf
         src/ReviewedCtanFonts.h
         src/PDFFontAliases.cpp
         src/PDFFontAliases.h
+        src/PDFUnicodeFont.h
         src/GoogleFontsProvider.cpp
         src/GoogleFontsProvider.h
         src/CtanFontProvider.cpp

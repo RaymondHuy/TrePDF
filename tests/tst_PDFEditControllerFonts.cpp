@@ -8,6 +8,7 @@
 #include "CtanFontProvider.h"
 #include "GoogleFontsProvider.h"
 #include "PDFFontAliases.h"
+#include "PDFUnicodeFont.h"
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QStandardPaths>
@@ -423,9 +424,8 @@ bool createUninstalledSubsetPdf(const QString &path,
     if (!document)
         return false;
     const auto closeDocument = qScopeGuard([&]() { FPDF_CloseDocument(document); });
-    FPDF_FONT font = FPDFText_LoadFont(document,
-        reinterpret_cast<const uint8_t *>(fontData.constData()),
-        static_cast<uint32_t>(fontData.size()), FPDF_FONT_TRUETYPE, true);
+    const auto characters = sortedUniqueFontCharacters(objectText + seedText);
+    FPDF_FONT font = PDFUnicodeFont::loadTrueType(document, fontData, rawFont, characters);
     if (!font)
         return false;
     const auto closeFont = qScopeGuard([&]() { FPDFFont_Close(font); });
@@ -434,9 +434,9 @@ bool createUninstalledSubsetPdf(const QString &path,
         return false;
     const auto closePage = qScopeGuard([&]() { FPDF_ClosePage(page); });
     if (!addTextObjectWithFont(document, page, font,
-                              objectText, 72.0, 740.0)
+                              objectText, 72.0, 740.0, characters)
         || !addTextObjectWithFont(document, page, font,
-                                 seedText, 72.0, 680.0))
+                                 seedText, 72.0, 680.0, characters))
         return false;
     if (!FPDFPage_GenerateContent(page))
         return false;
@@ -532,9 +532,9 @@ bool rewriteTextWithSubsetFont(const QString &sourcePath, const QString &targetP
         return false;
     }
     const auto closeDocument = qScopeGuard([&]() { FPDF_CloseDocument(document); });
-    FPDF_FONT font = FPDFText_LoadFont(document,
-        reinterpret_cast<const uint8_t *>(fontData.constData()),
-        static_cast<uint32_t>(fontData.size()), FPDF_FONT_TRUETYPE, true);
+    const auto characters = sortedUniqueFontCharacters(text);
+    const QRawFont rawFont(fontData, 16.0, QFont::PreferNoHinting);
+    FPDF_FONT font = PDFUnicodeFont::loadTrueType(document, fontData, rawFont, characters);
     if (!font)
         return false;
     const auto closeFont = qScopeGuard([&]() { FPDFFont_Close(font); });
@@ -567,7 +567,7 @@ bool rewriteTextWithSubsetFont(const QString &sourcePath, const QString &targetP
         if (replacement)
             FPDFPageObj_Destroy(replacement);
     });
-    if (!FPDFText_SetText(replacement, reinterpret_cast<const FPDF_WCHAR *>(text.utf16()))
+    if (!PDFUnicodeFont::setText(replacement, characters, text)
         || !FPDFPageObj_SetMatrix(replacement, &matrix)
         || !FPDFPage_RemoveObject(page, original))
         return false;
@@ -2118,6 +2118,88 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial()
         QFile::remove(verificationPath);
         QVERIFY(QFile::copy(outputPath, verificationPath));
     }
+}
+
+void PDFEditControllerTest::preservesDistinctUnicodeAliasesInTrueTypeFonts()
+{
+    const QByteArray fontData = ApplicationFonts::bundledFontData(
+        QStringLiteral("Arial"), false, false);
+    const QRawFont rawFont(fontData, 16.0, QFont::PreferNoHinting);
+    QVERIFY(rawFont.isValid());
+    // The complete Arial program maps each pair to one outline. Distinct
+    // ToUnicode entries must survive even though the glyph IDs are identical.
+    for (const QString &pair : {QStringLiteral(" \u00a0"),
+                                QStringLiteral(";\u037e"),
+                                QStringLiteral("-\u00ad")}) {
+        const auto glyphs = rawFont.glyphIndexesForString(pair);
+        QCOMPARE(glyphs.size(), 2);
+        QVERIFY(glyphs.front() != 0);
+        QCOMPARE(glyphs.front(), glyphs.back());
+    }
+    const QString text = QStringLiteral("A B\u00a0C;D\u037eE-F\u00adG");
+    const QString path = m_temporaryDirectory.filePath(
+        QStringLiteral("distinct-unicode-aliases.pdf"));
+    QVERIFY(createEmbeddedFontPdf(path, fontData, text));
+    // Do not simplify whitespace or normalize Unicode in this assertion:
+    // NFC would itself fold the Greek question mark into the ASCII semicolon.
+    QCOMPARE(pageText(path), text);
+    const auto savedData = embeddedSourceFontData(path, text);
+    QVERIFY(preservesFontProgram(savedData, fontData));
+}
+
+void PDFEditControllerTest::preservesUnicodeSpacingThroughArialSaveReopen()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("unicode-spacing-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(
+        QStringLiteral("unicode-spacing-output.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(
+        QStringLiteral("unicode-spacing-resaved.pdf"));
+    const QString expectedText = QStringLiteral("A B\u00a0C;D-E");
+    const QString additionalText = QStringLiteral("e\u0301 29");
+    const QString normalizedAdditionalText = additionalText.normalized(QString::NormalizationForm_C);
+    QVERIFY(createFontStylePdf(sourcePath));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const auto candidate = candidateForText(waitForCandidates(controller, 0),
+        QString::fromLatin1(kRegularText));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedTextEdit();
+    controller.updateSelectedTextPreview(expectedText);
+    controller.setSelectedTextRange(0, expectedText.size());
+    controller.setSelectedFontFamily(QStringLiteral("Arial"));
+    controller.finishSelectedTextEdit();
+    QVERIFY(!controller.addText(0, 0.2, 0.8).isEmpty());
+    controller.updateSelectedTextPreview(additionalText);
+    controller.setSelectedTextRange(0, additionalText.size());
+    controller.setSelectedFontFamily(QStringLiteral("Arial"));
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY2(pageText(outputPath).contains(expectedText), qPrintable(pageText(outputPath)));
+    QVERIFY2(textRangesShareFont(outputPath, {expectedText, normalizedAdditionalText}),
+        "Independent drafts must share one complete font, including NFC-normalized characters.");
+
+    const auto systemFace = ApplicationFonts::systemFontFace(QStringLiteral("Arial"), false, false);
+    const auto fullFontData = systemFace.isValid() ? systemFace.data
+        : ApplicationFonts::bundledFontData(QStringLiteral("Arial"), false, false);
+    QVERIFY(preservesFontProgram(
+        embeddedSourceFontData(outputPath, QStringLiteral("A"), 0, true), fullFontData));
+
+    PDFDocument reopened;
+    PDFEditController reopenedController;
+    QVERIFY(reopened.open(QUrl::fromLocalFile(outputPath)));
+    reopenedController.setDocument(&reopened);
+    const auto reopenedCandidate = candidateForText(waitForCandidates(reopenedController, 0), expectedText);
+    QVERIFY(!reopenedCandidate.isEmpty());
+    QVERIFY(reopenedController.selectCandidate(0,
+        reopenedCandidate.value(QStringLiteral("objectId")).toString()));
+    reopenedController.setSelectedColor(QColor(QStringLiteral("#1565c0")));
+    QVERIFY(reopenedController.saveAs(QUrl::fromLocalFile(secondPath)));
+    QVERIFY2(pageText(secondPath).contains(expectedText), qPrintable(pageText(secondPath)));
 }
 
 void PDFEditControllerTest::savesVietnameseEditWithEmbeddedSystemFont_data()
@@ -4296,6 +4378,7 @@ void PDFEditControllerTest::savesExternalPageFourOnSamePath()
     QVERIFY(pageCount >= 4);
     auto *controller = session->editController();
     QSignalSpy saved(controller, &PDFEditController::saveFinished);
+    QString expectedText;
     for (int pass = 1; pass <= 2; ++pass) {
         QVariantMap candidate;
         for (const QVariant &value : waitForCandidates(*controller, 3)) {
@@ -4307,8 +4390,14 @@ void PDFEditControllerTest::savesExternalPageFourOnSamePath()
         }
         QVERIFY2(!candidate.isEmpty(), "Page-four Share paragraph was not discovered");
         QVERIFY(controller->selectCandidate(3, candidate.value(QStringLiteral("objectId")).toString()));
+        if (pass == 1)
+            expectedText = controller->selectedText();
+        else
+            QCOMPARE(controller->selectedText(), expectedText);
         const QString marker = QStringLiteral(" save verification %1").arg(pass);
-        controller->commitSelectedText(controller->selectedText() + marker);
+        expectedText += marker;
+        controller->commitSelectedText(expectedText);
+        QCOMPARE(controller->selectedText(), expectedText);
         QVERIFY(controller->hasDrafts());
         QVERIFY(tabs.requestSave(session));
         QTRY_COMPARE_WITH_TIMEOUT(saved.count(), pass, 30000);
@@ -4317,7 +4406,17 @@ void PDFEditControllerTest::savesExternalPageFourOnSamePath()
         QVERIFY(!controller->canUndo());
         QCOMPARE(session->document()->source(), QUrl::fromLocalFile(path));
         QCOMPARE(session->document()->pageCount(), pageCount);
-        QVERIFY(normalizedPageText(path, 3).contains(marker.trimmed()));
+        // Added text can wrap beside another paragraph. PDFium's whole-page
+        // reading order may interleave that neighbor between the marker's words.
+        // Reopen from disk and validate the complete logical paragraph instead;
+        // restoration checks each saved run against its actual PDF text.
+        PDFDocument reopened;
+        PDFEditController reopenedController;
+        QVERIFY(reopened.open(QUrl::fromLocalFile(path)));
+        reopenedController.setDocument(&reopened);
+        const auto restored = candidateForText(waitForCandidates(reopenedController, 3), expectedText);
+        QVERIFY2(!restored.isEmpty(), "Saved paragraph did not survive a fresh reopen");
+        QCOMPARE(restored.value(QStringLiteral("text")).toString(), expectedText);
     }
     QVERIFY(original.open(QIODevice::ReadOnly));
     QCOMPARE(original.readAll(), originalBytes);
@@ -4591,17 +4690,20 @@ void PDFEditControllerTest::preservesType1UrlThroughInlineEditing_data()
 {
     QTest::addColumn<qreal>("zoom");
     QTest::addColumn<QString>("probePath");
-    QTest::newRow("mixed-font-75-percent") << 0.75 << QString();
-    QTest::newRow("mixed-font-155-percent") << 1.55 << QString();
+    QTest::addColumn<bool>("paragraph");
+    QTest::newRow("mixed-font-75-percent") << 0.75 << QString() << false;
+    QTest::newRow("mixed-font-155-percent") << 1.55 << QString() << false;
+    QTest::newRow("mixed-font-paragraph") << 1.55 << QString() << true;
     const QString probe = qEnvironmentVariable("TREPDF_TEST_MIXED_FONT_PDF");
     if (!probe.isEmpty())
-        QTest::newRow("external-page-four") << 1.55 << probe;
+        QTest::newRow("external-page-four") << 1.55 << probe << false;
 }
 
 void PDFEditControllerTest::preservesType1UrlThroughInlineEditing()
 {
     QFETCH(qreal, zoom);
     QFETCH(QString, probePath);
+    QFETCH(bool, paragraph);
     // Downloaded registrations live for the process lifetime. Keep this
     // optional probe's temporary Termes store out of subsequent font tests.
     if (!probePath.isEmpty() && !qEnvironmentVariableIsSet("TREPDF_TYPE1_URL_PROBE")) {
@@ -4647,7 +4749,12 @@ void PDFEditControllerTest::preservesType1UrlThroughInlineEditing()
             return "<< /Length " + QByteArray::number(bytes.size()) + extra
                 + " >>\nstream\n" + bytes + "\nendstream";
         };
-        const QByteArray content = "BT /F1 9 Tf 72 740 Td (" + prefix.toLatin1()
+        // Group adjacent lines with slightly different sizes. Their separator
+        // must keep its own size when the saved paragraph enters the editor.
+        QByteArray content = paragraph
+            ? QByteArray("BT /F1 9.04 Tf 72 751 Td (License terms for this work) Tj ET\n")
+            : QByteArray();
+        content += "BT /F1 9 Tf 72 740 Td (" + prefix.toLatin1()
             + ") Tj /F2 9 Tf (" + url.toLatin1() + ") Tj ET\n";
         QByteArray widths;
         for (int c = 32; c <= 126; ++c)
@@ -4683,6 +4790,8 @@ void PDFEditControllerTest::preservesType1UrlThroughInlineEditing()
     QVERIFY2(!candidate.isEmpty(), "The mixed serif/monospace line must remain one candidate");
     QVERIFY(controller.selectCandidate(pageIndex, candidate.value(QStringLiteral("objectId")).toString()));
     const QString original = controller.selectedText();
+    if (paragraph)
+        QVERIFY(original.contains(QLatin1Char('\n')));
     const int urlStart = original.indexOf(url);
     QVERIFY2(urlStart >= prefix.size() - 1, qPrintable(original));
     const QVariantList originalSpans = controller.selectedCharacterSpans();
@@ -4700,12 +4809,14 @@ void PDFEditControllerTest::preservesType1UrlThroughInlineEditing()
         FPDF_TEXTPAGE text = FPDFText_LoadPage(page);
         QVERIFY(text);
         const auto closeText = qScopeGuard([&] { FPDFText_ClosePage(text); });
+        // The editable paragraph may join multiple source lines, whose page-text
+        // separators differ from its logical text. Locate the URL itself.
         FPDF_SCHHANDLE search = FPDFText_FindStart(text,
-            reinterpret_cast<FPDF_WIDESTRING>(original.utf16()), FPDF_MATCHCASE, 0);
+            reinterpret_cast<FPDF_WIDESTRING>(url.utf16()), FPDF_MATCHCASE, 0);
         QVERIFY(search);
         const auto closeSearch = qScopeGuard([&] { FPDFText_FindClose(search); });
         QVERIFY(FPDFText_FindNext(search));
-        const int start = FPDFText_GetSchResultIndex(search) + urlStart;
+        const int start = FPDFText_GetSchResultIndex(search);
         for (int i = 0; i < url.size(); ++i) {
             double x = 0.0, y = 0.0;
             QVERIFY(FPDFText_GetCharOrigin(text, start + i, &x, &y));
@@ -4815,7 +4926,9 @@ void PDFEditControllerTest::preservesType1UrlThroughInlineEditing()
     const QVariantMap reopened = candidateForText(waitForCandidates(controller, pageIndex), original + QLatin1Char('e'));
     QVERIFY(!reopened.isEmpty());
     QVERIFY(controller.selectCandidate(pageIndex, reopened.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(!controller.hasDrafts());
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+    QVERIFY(controller.textEditActive());
     QTRY_VERIFY2(keepsUrl(), qPrintable(error));
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
     QVERIFY(!controller.hasDrafts());

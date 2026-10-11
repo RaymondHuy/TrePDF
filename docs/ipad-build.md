@@ -140,7 +140,8 @@ tạm, kiểm tra certificate khớp profile, rồi xóa các signing assets do 
   trang bằng thanh điều khiển dưới. Thanh công cụ/tab có thể cuộn ngang.
 - Hộp thoại co theo vùng hiển thị/bàn phím; giao diện desktop giữ giá trị cũ.
 
-PDFium iOS dùng bản **không V8** để không yêu cầu quyền chạy JIT. JavaScript
+PDFium iOS dùng bản **157.0.8086.0 không V8**, ghim SHA-256 riêng cho thiết bị
+và simulator, để không yêu cầu quyền chạy JIT. JavaScript
 nhúng trong PDF (ví dụ tự tính toán bằng script) chưa được hỗ trợ trên iPad.
 Các form AcroForm thông thường vẫn dùng luồng hiện tại; XFA vốn không được hỗ trợ.
 Chưa có kiểm thử thiết bị thật hay chứng chỉ/profile của bạn trong workspace.

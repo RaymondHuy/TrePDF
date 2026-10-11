@@ -1,5 +1,6 @@
 #include "ApplicationFonts.h"
 #include "PDFFontAliases.h"
+#include "PDFUnicodeFont.h"
 #include "FontDownloadService.h"
 
 #include <QDir>
@@ -21,6 +22,7 @@
 #include <fpdf_text.h>
 #include <fpdfview.h>
 
+#include <algorithm>
 #include <future>
 #include <vector>
 
@@ -481,9 +483,12 @@ void WindowsSystemFontsTest::pdfiumRoundTrip()
     FPDF_DOCUMENT document = FPDF_CreateNewDocument();
     QVERIFY(document);
     const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
-    FPDF_FONT font = FPDFText_LoadFont(document,
-        reinterpret_cast<const uint8_t *>(face.data.constData()),
-        static_cast<uint32_t>(face.data.size()), FPDF_FONT_TRUETYPE, true);
+    const auto unicode = content.toUcs4();
+    QVector<char32_t> characters(unicode.cbegin(), unicode.cend());
+    std::sort(characters.begin(), characters.end());
+    characters.erase(std::unique(characters.begin(), characters.end()), characters.end());
+    const QRawFont rawFont(face.data, 16.0, QFont::PreferNoHinting);
+    FPDF_FONT font = PDFUnicodeFont::loadTrueType(document, face.data, rawFont, characters);
     QVERIFY(font);
     const auto closeFont = qScopeGuard([&] { FPDFFont_Close(font); });
     FPDF_PAGE page = FPDFPage_New(document, 0, 595.0, 842.0);
@@ -496,7 +501,7 @@ void WindowsSystemFontsTest::pdfiumRoundTrip()
         if (!inserted)
             FPDFPageObj_Destroy(object);
     });
-    QVERIFY(FPDFText_SetText(object, reinterpret_cast<FPDF_WIDESTRING>(content.utf16())));
+    QVERIFY(PDFUnicodeFont::setText(object, characters, content));
     FPDFPageObj_Transform(object, 1, 0, 0, 1, 40, 740);
     FPDFPage_InsertObject(page, object);
     inserted = true;

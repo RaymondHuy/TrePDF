@@ -1,4 +1,5 @@
 #include "PDFEditControllerTestSupport.h"
+#include "PDFUnicodeFont.h"
 
 namespace PDFEditControllerTestSupport {
 
@@ -249,7 +250,8 @@ bool addTextObjectWithFont(FPDF_DOCUMENT document,
                            FPDF_FONT font,
                            const QString &text,
                            double x,
-                           double y)
+                           double y,
+                           const QVector<char32_t> &characters)
 {
     FPDF_PAGEOBJECT textObject = FPDFPageObj_CreateTextObj(
         document,
@@ -259,12 +261,21 @@ bool addTextObjectWithFont(FPDF_DOCUMENT document,
         return false;
     }
     const auto *wideText = reinterpret_cast<const FPDF_WCHAR *>(text.utf16());
-    if (!FPDFText_SetText(textObject, wideText)) {
+    if (!(characters.isEmpty() ? FPDFText_SetText(textObject, wideText)
+                              : PDFUnicodeFont::setText(textObject, characters, text))) {
         FPDFPageObj_Destroy(textObject);
         return false;
     }
     FPDFPageObj_Transform(textObject, 1.0, 0.0, 0.0, 1.0, x, y);
     return FPDFPage_InsertObject(page, textObject);
+}
+
+QVector<char32_t> sortedUniqueFontCharacters(const QString &text)
+{
+    auto characters = text.toUcs4();
+    std::sort(characters.begin(), characters.end());
+    characters.erase(std::unique(characters.begin(), characters.end()), characters.end());
+    return QVector<char32_t>(characters.cbegin(), characters.cend());
 }
 
 bool addStyledTextObject(FPDF_DOCUMENT document,
@@ -565,14 +576,10 @@ bool createEmbeddedArialPdf(const QString &filePath)
         QStringLiteral("Arial"),
         false,
         false);
-    FPDF_FONT font = fontData.isEmpty()
-        ? nullptr
-        : FPDFText_LoadFont(
-              document,
-              reinterpret_cast<const uint8_t *>(fontData.constData()),
-              static_cast<uint32_t>(fontData.size()),
-              FPDF_FONT_TRUETYPE,
-              true);
+    const auto characters = sortedUniqueFontCharacters(
+        QStringLiteral("Tiếng Việt gốcKhông đổi"));
+    const QRawFont rawFont(fontData, 16.0, QFont::PreferNoHinting);
+    FPDF_FONT font = PDFUnicodeFont::loadTrueType(document, fontData, rawFont, characters);
     FPDF_PAGE page = font ? FPDFPage_New(document, 0, 595.0, 842.0) : nullptr;
     bool succeeded = page
         && addTextObjectWithFont(
@@ -581,14 +588,16 @@ bool createEmbeddedArialPdf(const QString &filePath)
             font,
             QStringLiteral("Tiếng Việt gốc"),
             72.0,
-            740.0)
+            740.0,
+            characters)
         && addTextObjectWithFont(
             document,
             page,
             font,
             QStringLiteral("Không đổi"),
             72.0,
-            680.0)
+            680.0,
+            characters)
         && FPDFPage_GenerateContent(page);
     if (page) {
         FPDF_ClosePage(page);
@@ -617,15 +626,12 @@ bool createEmbeddedFontPdf(const QString &filePath,
         return false;
     }
 
-    FPDF_FONT font = FPDFText_LoadFont(
-        document,
-        reinterpret_cast<const uint8_t *>(fontData.constData()),
-        static_cast<uint32_t>(fontData.size()),
-        FPDF_FONT_TRUETYPE,
-        true);
+    const auto characters = sortedUniqueFontCharacters(text);
+    const QRawFont rawFont(fontData, 16.0, QFont::PreferNoHinting);
+    FPDF_FONT font = PDFUnicodeFont::loadTrueType(document, fontData, rawFont, characters);
     FPDF_PAGE page = font ? FPDFPage_New(document, 0, 595.0, 842.0) : nullptr;
     bool succeeded = page
-        && addTextObjectWithFont(document, page, font, text, 72.0, 740.0)
+        && addTextObjectWithFont(document, page, font, text, 72.0, 740.0, characters)
         && FPDFPage_GenerateContent(page);
     if (page) {
         FPDF_ClosePage(page);
@@ -655,20 +661,17 @@ bool createGroupedSubsetFontPdf(const QString &filePath)
     if (!document) {
         return false;
     }
-    FPDF_FONT font = FPDFText_LoadFont(
-        document,
-        reinterpret_cast<const uint8_t *>(fontData.constData()),
-        static_cast<uint32_t>(fontData.size()),
-        FPDF_FONT_TRUETYPE,
-        true);
+    const auto characters = sortedUniqueFontCharacters(QStringLiteral("Helloworld"));
+    const QRawFont rawFont(fontData, 16.0, QFont::PreferNoHinting);
+    FPDF_FONT font = PDFUnicodeFont::loadTrueType(document, fontData, rawFont, characters);
     FPDF_PAGE page = font ? FPDFPage_New(document, 0, 595.0, 842.0) : nullptr;
     // The visible word gap comes entirely from object positions. Neither
     // source object encodes a space, so the subset has no space mapping.
     bool succeeded = page
         && addTextObjectWithFont(
-            document, page, font, QStringLiteral("Hello"), 72.0, 740.0)
+            document, page, font, QStringLiteral("Hello"), 72.0, 740.0, characters)
         && addTextObjectWithFont(
-            document, page, font, QStringLiteral("world"), 140.0, 740.0)
+            document, page, font, QStringLiteral("world"), 140.0, 740.0, characters)
         && FPDFPage_GenerateContent(page);
     if (page) {
         FPDF_ClosePage(page);

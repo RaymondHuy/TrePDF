@@ -13,6 +13,7 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void reloadsSavedCandidatesInNewDocumentInstances();
     void selectsPlatformInputPerEngine_data();
     void selectsPlatformInputPerEngine();
     void selectsPlatformViewportPerEngine_data();
@@ -351,6 +352,8 @@ private slots:
     void preservesIccBasedTextColorWhenAddingText();
     void savesVietnameseEditWithEmbeddedArial_data();
     void savesVietnameseEditWithEmbeddedArial();
+    void preservesDistinctUnicodeAliasesInTrueTypeFonts();
+    void preservesUnicodeSpacingThroughArialSaveReopen();
     void savesVietnameseEditWithEmbeddedSystemFont_data();
     void savesVietnameseEditWithEmbeddedSystemFont();
     void preservesInheritedSystemFontForVietnamese();
