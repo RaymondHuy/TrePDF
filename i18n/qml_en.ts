@@ -2165,6 +2165,12 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <source>Korean</source>
         <translation>Korean</translation>
     </message>
+    <message id="SymbolFonts">
+        <location filename="../src/Components/HeaderTextPanel.qml" line="31"/>
+        <location filename="../src/Components/TextFormatPanel.qml" line="59"/>
+        <source>Symbol</source>
+        <translation>Symbol</translation>
+    </message>
     <message id="AlignLeft">
         <location filename="../src/Components/TextFormatPanel.qml" line="59"/>
         <source>Align left</source>

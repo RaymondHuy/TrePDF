@@ -4229,6 +4229,7 @@ Item {
             anchors.fill: parent
             enabled: !root.editing
                 && root.isMovableKind(root.controller.selectedKind)
+            visible: enabled
             containmentMask: QtObject {
                 function contains(point: point): bool {
                     if (!root.isShapeKind(root.controller.selectedKind))

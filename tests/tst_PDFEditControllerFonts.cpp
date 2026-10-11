@@ -9,6 +9,7 @@
 #include "GoogleFontsProvider.h"
 #include "PDFFontAliases.h"
 #include "PDFUnicodeFont.h"
+#include "PDFSymbolFont.h"
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QStandardPaths>
@@ -1371,7 +1372,8 @@ void PDFEditControllerTest::filtersFontFamiliesByLanguage()
                  ApplicationFonts::FontLanguage::English,
                  ApplicationFonts::FontLanguage::Chinese,
                  ApplicationFonts::FontLanguage::Japanese,
-                 ApplicationFonts::FontLanguage::Korean}) {
+                 ApplicationFonts::FontLanguage::Korean,
+                 ApplicationFonts::FontLanguage::Symbol}) {
             const QStringList languageFamilies =
                 ApplicationFonts::fontFamiliesForLanguage(
                     language,
@@ -1403,6 +1405,58 @@ void PDFEditControllerTest::filtersFontFamiliesByLanguage()
         PDFEditController::KoreanFonts).contains(
             arial,
             Qt::CaseInsensitive));
+}
+
+void PDFEditControllerTest::filtersSymbolFontFamilies()
+{
+    PDFEditController controller;
+    const QStringList knownSymbols = {
+        QStringLiteral("Wingdings"), QStringLiteral("Wingdings 2"),
+        QStringLiteral("Wingdings 3"), QStringLiteral("Webdings"),
+        QStringLiteral("Symbol"), QStringLiteral("Apple Symbols"),
+        QStringLiteral("Zapf Dingbats"), QStringLiteral("Apple Braille"),
+        QStringLiteral("Noto Sans Symbols"), QStringLiteral("Noto Sans Symbols 2"),
+        QStringLiteral("STIX Two Math")};
+    for (int style = 0; style < 4; ++style) {
+        const bool bold = (style & 2) != 0;
+        const bool italic = (style & 1) != 0;
+        const QStringList families = ApplicationFonts::fontFamiliesForLanguage(
+            ApplicationFonts::FontLanguage::Symbol, bold, italic);
+        const QStringList available = ApplicationFonts::availableFontFamilies(bold, italic);
+        for (const QString &family : knownSymbols) {
+            QCOMPARE(families.contains(family, Qt::CaseInsensitive),
+                     available.contains(family, Qt::CaseInsensitive));
+        }
+        for (const QString &family : {QStringLiteral("Arial"), QStringLiteral("Times New Roman"),
+                                     QStringLiteral("Hoefler Text"), QStringLiteral("InaiMathi")}) {
+            QVERIFY2(!families.contains(family, Qt::CaseInsensitive), qPrintable(family));
+        }
+        QCOMPARE(controller.headerTextFontFamilies(PDFEditController::SymbolFonts, bold, italic),
+                 families);
+        if (style == 0)
+            QCOMPARE(controller.fontFamiliesForFilter(PDFEditController::SymbolFonts), families);
+    }
+
+    // A mixed regular/bold selection must not offer a regular-only dingbat face.
+    m_controller.discardDrafts();
+    QVERIFY(m_controller.selectCandidate(
+        0, m_regularCandidate.value(QStringLiteral("objectId")).toString()));
+    m_controller.beginSelectedTextEdit();
+    m_controller.updateSelectedTextPreview(QStringLiteral("ABCD"));
+    m_controller.setSelectedTextRange(1, 2);
+    m_controller.setSelectedFontBold(true);
+    m_controller.setSelectedTextRange(0, 4);
+    QStringList expected = ApplicationFonts::fontFamiliesForLanguage(
+        ApplicationFonts::FontLanguage::Symbol, false, false);
+    const QStringList boldFamilies = ApplicationFonts::fontFamiliesForLanguage(
+        ApplicationFonts::FontLanguage::Symbol, true, false);
+    expected.removeIf([&](const QString &family) {
+        return !boldFamilies.contains(family, Qt::CaseInsensitive);
+    });
+    QCOMPARE(m_controller.fontFamiliesForFilter(PDFEditController::SymbolFonts), expected);
+    m_controller.cancelSelectedTextEdit();
+    m_controller.clearSelection();
+    QVERIFY(!m_controller.hasDrafts());
 }
 
 void PDFEditControllerTest::intersectsFontFiltersAcrossMixedStyles()
@@ -4416,6 +4470,374 @@ void PDFEditControllerTest::savesExternalPageFourOnSamePath()
         reopenedController.setDocument(&reopened);
         const auto restored = candidateForText(waitForCandidates(reopenedController, 3), expectedText);
         QVERIFY2(!restored.isEmpty(), "Saved paragraph did not survive a fresh reopen");
+        QCOMPARE(restored.value(QStringLiteral("text")).toString(), expectedText);
+    }
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    QCOMPARE(original.readAll(), originalBytes);
+}
+
+void PDFEditControllerTest::supportsLegacySymbolCharacters_data()
+{
+    QTest::addColumn<QString>("family");
+    for (const char *family : {"Wingdings", "Wingdings 2", "Wingdings 3", "Webdings"})
+        QTest::newRow(family) << QString::fromLatin1(family);
+}
+
+void PDFEditControllerTest::supportsLegacySymbolCharacters()
+{
+#ifndef Q_OS_MACOS
+    QSKIP("CoreText legacy symbol coverage regression");
+#else
+    QFETCH(QString, family);
+    if (!ApplicationFonts::systemFontFace(family, false, false).isValid())
+        QSKIP("The exact symbol face is not installed or embeddable");
+    QFont font(family);
+    font.setStyleStrategy(QFont::NoFontMerging);
+    const QRawFont raw = QRawFont::fromFont(font);
+    QCOMPARE(raw.familyName(), family);
+    for (ushort character : {ushort(0x00a7), ushort(0x006e)}) {
+        const QString legacy{QChar(character)};
+        const QString privateUse{QChar(ushort(character + 0xf000))};
+        const auto glyphs = raw.glyphIndexesForString(legacy);
+        QVERIFY(!glyphs.isEmpty() && glyphs.first() != 0);
+        QCOMPARE(glyphs, raw.glyphIndexesForString(privateUse));
+        QVERIFY(ApplicationFonts::fontFaceSupportsText(
+            family, false, false, privateUse, ApplicationFonts::FontSource::System));
+        QVERIFY2(ApplicationFonts::fontFaceSupportsText(
+            family, false, false, legacy, ApplicationFonts::FontSource::System),
+            qPrintable(QStringLiteral("%1 can render U+%2 but preflight rejects it")
+                           .arg(family).arg(character, 4, 16, QLatin1Char('0'))));
+    }
+    // A symbol font must not acquire coverage from another font or a synthetic face.
+    for (ushort character : {ushort(0x25a0), ushort(0x2022), ushort(0x1ea1)}) {
+        QVERIFY(!raw.supportsCharacter(character));
+        QVERIFY(!ApplicationFonts::fontFaceSupportsText(
+            family, false, false, QString(QChar(character)), ApplicationFonts::FontSource::System));
+    }
+    QVERIFY(!ApplicationFonts::fontFaceSupportsText(
+        family, true, false, QString(QChar(0x00a7)), ApplicationFonts::FontSource::System));
+#endif
+}
+
+void PDFEditControllerTest::repairsSourceSymbolMappings()
+{
+    QByteArray data = uninstalledSubsetFontData("SyMap");
+    const QRawFont original(data, 16, QFont::PreferNoHinting);
+    QVERIFY(original.isValid());
+    const uint glyph = original.glyphIndexesForString(QStringLiteral("A")).first();
+    QVERIFY(glyph > 0 && glyph <= 65535);
+    qsizetype cmapEntry = -1, head = -1;
+    for (int i = 0; i < sfntUInt16(data, 4); ++i) {
+        const int entry = 12 + i * 16;
+        if (data.mid(entry, 4) == "cmap") cmapEntry = entry;
+        if (data.mid(entry, 4) == "head") head = sfntUInt32(data, entry + 8);
+    }
+    QVERIFY(cmapEntry >= 0 && head >= 0);
+    // A single legacy symbol at F0A7, with its Unicode meaning supplied by PDF.
+    QByteArray cmap = QByteArray::fromHex(
+        "00000001000300000000000c0004002000000004000400010000"
+        "f0a7ffff0000f0a7ffff0000000100000000");
+    const quint16 delta = quint16(glyph - 0xf0a7);
+    cmap[36] = char(delta >> 8);
+    cmap[37] = char(delta);
+    while (data.size() % 4) data.append('\0');
+    setSfntUInt32(data, cmapEntry + 4, sfntChecksum(cmap, 0, cmap.size()));
+    setSfntUInt32(data, cmapEntry + 8, data.size());
+    setSfntUInt32(data, cmapEntry + 12, cmap.size());
+    data += cmap;
+    setSfntUInt32(data, head + 8, 0);
+    setSfntUInt32(data, head + 8, 0xb1b0afbaU - sfntChecksum(data, 0, data.size()));
+    const QRawFont symbol(data, 16, QFont::PreferNoHinting);
+    QVERIFY(symbol.isValid());
+    QCOMPARE(symbol.glyphIndexesForString(QString(QChar(0xf0a7))).first(), glyph);
+    QVERIFY(!symbol.supportsCharacter(0x25aa));
+    PDFiumProcessLock lock;
+    const auto document = FPDF_CreateNewDocument();
+    QVERIFY(document);
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    const QByteArray unicodeMap = QByteArrayLiteral(
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap "
+        "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def "
+        "/CMapName /TestSymbol def /CMapType 2 def "
+        "1 begincodespacerange <0000> <FFFF> endcodespacerange "
+        "1 beginbfchar <0001> <25AA> endbfchar endcmap "
+        "CMapName currentdict /CMap defineresource pop end end");
+    const QByteArray gids = QByteArray::fromHex("0000") + char(glyph >> 8) + char(glyph);
+    const auto font = FPDFText_LoadCidType2Font(document,
+        reinterpret_cast<const uint8_t *>(data.constData()), uint32_t(data.size()), unicodeMap.constData(),
+        reinterpret_cast<const uint8_t *>(gids.constData()), uint32_t(gids.size()));
+    QVERIFY(font);
+    const auto closeFont = qScopeGuard([&] { FPDFFont_Close(font); });
+    const QByteArray repaired = PDFSymbolFont::withUnicodeBullets(font, data);
+    QVERIFY(repaired != data);
+    const QRawFont mapped(repaired, 16, QFont::PreferNoHinting);
+    QCOMPARE(mapped.glyphIndexesForString(QString(QChar(0x25aa))).first(), glyph);
+    QCOMPARE(mapped.pathForGlyph(glyph), symbol.pathForGlyph(glyph));
+    QCOMPARE(mapped.fontTable("glyf"), symbol.fontTable("glyf"));
+    for (uint character : {0x2022U, 0x25a0U, 0x25cfU, 0x25cbU})
+        QVERIFY(!mapped.supportsCharacter(character));
+    for (uint character : {0xa7U, 0xf0a7U}) {
+        if (symbol.supportsCharacter(character))
+            QCOMPARE(mapped.glyphIndexesForString(QString(QChar(ushort(character)))),
+                     symbol.glyphIndexesForString(QString(QChar(ushort(character)))));
+    }
+    QCOMPARE(PDFSymbolFont::withUnicodeBullets(font, repaired), repaired);
+    QCOMPARE(PDFSymbolFont::withUnicodeBullets(font, QByteArray("invalid")), QByteArray("invalid"));
+    // Out-of-domain symbol mappings must remain byte-exact instead of losing coverage.
+    QByteArray widerCmap = cmap;
+    widerCmap[26] = char(0xf1);
+    QVERIFY(!PDFSymbolFont::detail::hasOnlyLegacySymbolCoverage(widerCmap));
+}
+
+void PDFEditControllerTest::savesExternalMixedParagraphOnSamePath_data()
+{
+    QTest::addColumn<QString>("paragraphMarker");
+    QTest::addColumn<bool>("symbolParagraph");
+    QTest::newRow("body") << QStringLiteral("Tham gia troubleshooting") << false;
+    QTest::newRow("wingdings") << QStringLiteral("Có từ 4+") << true;
+}
+
+void PDFEditControllerTest::savesExternalMixedParagraphOnSamePath()
+{
+    QFETCH(QString, paragraphMarker);
+    QFETCH(bool, symbolParagraph);
+    const QString external = qEnvironmentVariable("TREPDF_TEST_MIXED_PARAGRAPH_PDF");
+    if (external.isEmpty())
+        QSKIP("Set TREPDF_TEST_MIXED_PARAGRAPH_PDF to the affected PDF for this probe");
+    // Other font tests register synthetic Aptos faces for their fixtures.
+    // A fresh process keeps those registrations out of this real-document probe.
+    if (!qEnvironmentVariableIsSet("TREPDF_EXTERNAL_MIXED_PARAGRAPH_PROBE")) {
+        QProcess probe;
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("TREPDF_EXTERNAL_MIXED_PARAGRAPH_PROBE"), QStringLiteral("1"));
+        probe.setProcessEnvironment(environment);
+        probe.setProcessChannelMode(QProcess::MergedChannels);
+        const QString logPath = m_temporaryDirectory.filePath(QStringLiteral("external-mixed-paragraph.txt"));
+        probe.start(QCoreApplication::applicationFilePath(),
+                    {QStringLiteral("savesExternalMixedParagraphOnSamePath:")
+                         + QString::fromLatin1(QTest::currentDataTag()),
+                     QStringLiteral("-o"), logPath + QStringLiteral(",txt")});
+        QVERIFY2(probe.waitForStarted(10000), qPrintable(probe.errorString()));
+        QVERIFY2(probe.waitForFinished(60000), qPrintable(probe.errorString()));
+        QFile log(logPath);
+        QVERIFY(log.open(QIODevice::ReadOnly));
+        const QByteArray output = log.readAll();
+        QVERIFY2(probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0,
+                 output.constData());
+        return;
+    }
+    QFile original(external);
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = original.readAll();
+    original.close();
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("mixed-paragraph-copy.pdf"));
+    QVERIFY(QFile::copy(external, path));
+
+    PDFTabModel tabs;
+    PDFDocumentSession *session = tabs.open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    const int pageCount = session->document()->pageCount();
+    QVERIFY(pageCount >= 2);
+    auto *controller = session->editController();
+    controller->setTool(PDFEditController::SelectTool);
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQuickWindow window;
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
+    const QSizeF pageSize = session->document()->pageSize(1);
+    const auto renderedPage = [&]() {
+        PDFiumProcessLock lock;
+        FPDF_DOCUMENT pdf = FPDF_LoadDocument(QFile::encodeName(path).constData(), nullptr);
+        if (!pdf)
+            return QImage();
+        const auto closePdf = qScopeGuard([&] { FPDF_CloseDocument(pdf); });
+        FPDF_PAGE page = FPDF_LoadPage(pdf, 1);
+        if (!page)
+            return QImage();
+        const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+        QImage image(QSize(qCeil(pageSize.width() * 2), qCeil(pageSize.height() * 2)),
+                     QImage::Format_ARGB32);
+        image.fill(Qt::white);
+        FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(image.width(), image.height(), FPDFBitmap_BGRA,
+                                                image.bits(), image.bytesPerLine());
+        if (!bitmap)
+            return QImage();
+        FPDF_RenderPageBitmap(bitmap, page, 0, 0, image.width(), image.height(), 0, 0);
+        FPDFBitmap_Destroy(bitmap);
+        return image;
+    };
+    const auto bulletOutlines = [&]() {
+        QList<QByteArray> outlines;
+        PDFiumProcessLock lock;
+        const auto pdf = FPDF_LoadDocument(QFile::encodeName(path).constData(), nullptr);
+        if (!pdf) return outlines;
+        const auto closePdf = qScopeGuard([&] { FPDF_CloseDocument(pdf); });
+        const auto page = FPDF_LoadPage(pdf, 1);
+        if (!page) return outlines;
+        const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+        const auto text = FPDFText_LoadPage(page);
+        if (!text) return outlines;
+        const auto closeText = qScopeGuard([&] { FPDFText_ClosePage(text); });
+        for (int index = 0; index < FPDFText_CountChars(text); ++index) {
+            if (FPDFText_GetUnicode(text, index) != 0x25aa) continue;
+            const auto object = FPDFText_GetTextObject(text, index);
+            outlines.append(PDFSymbolFont::detail::outlineKey(FPDFTextObj_GetFont(object), 0x25aa));
+        }
+        return outlines;
+    };
+    const auto originalBullets = symbolParagraph ? bulletOutlines() : QList<QByteArray>();
+    if (symbolParagraph) {
+        QVERIFY(originalBullets.size() >= 6);
+        QVERIFY(!originalBullets.first().isEmpty());
+    }
+    const QImage originalImage = renderedPage();
+    QVERIFY(!originalImage.isNull());
+    const qreal zoom = 1.55;
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), 1}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false}, {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(controller)},
+        {QStringLiteral("pagePointScale"), zoom},
+        {QStringLiteral("width"), pageSize.width() * zoom},
+        {QStringLiteral("height"), pageSize.height() * zoom}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    auto *overlayItem = qobject_cast<QQuickItem *>(overlay.get());
+    overlayItem->setParentItem(window.contentItem());
+    window.resize(qCeil(pageSize.width() * zoom), qCeil(pageSize.height() * zoom));
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QSignalSpy saved(controller, &PDFEditController::saveFinished);
+    QSignalSpy saveFontPrompt(controller, &PDFEditController::fontDownloadRequested);
+    QString expectedText;
+    QRect paragraphPixels;
+    for (int pass = 1; pass <= 2; ++pass) {
+        QVariantMap candidate;
+        const QVariantList candidates = waitForCandidates(*controller, 1);
+        for (const QVariant &value : candidates) {
+            const QVariantMap item = value.toMap();
+            const QString text = item.value(QStringLiteral("text")).toString();
+            if (text.contains(paragraphMarker)) {
+                candidate = item;
+                break;
+            }
+        }
+        QVERIFY2(!candidate.isEmpty(), "Page-two mixed paragraph was not discovered");
+        QVERIFY(controller->selectCandidate(1, candidate.value(QStringLiteral("objectId")).toString()));
+        if (pass == 1) {
+            expectedText = controller->selectedText();
+            const QRectF frame = controller->selectedFrameRect();
+            paragraphPixels = QRectF(frame.x() * originalImage.width(),
+                                     frame.y() * originalImage.height(),
+                                     frame.width() * originalImage.width(),
+                                     frame.height() * originalImage.height()).toAlignedRect()
+                                  .intersected(originalImage.rect());
+        } else
+            QCOMPARE(controller->selectedText(), expectedText);
+        if (symbolParagraph) {
+            QString symbolText;
+            for (const QVariant &value : controller->selectedCharacterSpans()) {
+                const auto span = value.toMap();
+                if (PDFFontAliases::semanticFamily(span.value(QStringLiteral("fontFamily")).toString())
+                        .compare(QStringLiteral("Wingdings"), Qt::CaseInsensitive) == 0)
+                    symbolText += expectedText.mid(span.value(QStringLiteral("start")).toInt(),
+                                                   span.value(QStringLiteral("length")).toInt());
+            }
+            QVERIFY2(symbolText.contains(QChar(0x25aa)),
+                     qPrintable(QStringLiteral("Missing Unicode Wingdings bullet in: %1").arg(symbolText)));
+            QSignalSpy fontPrompt(controller, &PDFEditController::fontDownloadRequested);
+            QVERIFY2(controller->requestSelectedTextEdit(),
+                     qPrintable(QStringLiteral("Unexpected missing fonts: %1")
+                                    .arg(controller->missingFontFamilies().join(QStringLiteral(", ")))));
+            QCOMPARE(fontPrompt.count(), 0);
+            QVERIFY(!controller->hasDrafts());
+        }
+        QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginSelectedEditing"));
+        QObject *editor = nullptr;
+        for (QObject *child : overlay->findChildren<QObject *>()) {
+            if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+                editor = child;
+                break;
+            }
+        }
+        QVERIFY(editor);
+        auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(quickDocument);
+        QTRY_COMPARE(quickDocument->textDocument()->toPlainText(), expectedText);
+        if (symbolParagraph) {
+            QTextDocument *textDocument = quickDocument->textDocument();
+            textDocument->size();
+            const int position = expectedText.indexOf(QChar(0x25aa));
+            const QTextBlock block = textDocument->findBlock(position);
+            const auto runs = block.layout()->glyphRuns(position - block.position(), 1);
+            QVERIFY(!runs.isEmpty());
+            for (const auto &run : runs) {
+                QCOMPARE(PDFFontAliases::semanticFamily(run.rawFont().familyName()), QStringLiteral("Wingdings"));
+                QVERIFY(run.rawFont().supportsCharacter(0x25aa));
+                QCOMPARE(run.glyphIndexes(), run.rawFont().glyphIndexesForString(QString(QChar(0x25aa))));
+            }
+        }
+        editor->setProperty("cursorPosition", expectedText.size());
+        qobject_cast<QQuickItem *>(editor)->forceActiveFocus();
+        for (int key = 0; key < 4; ++key)
+            QTest::keyClick(&window, Qt::Key_X);
+        expectedText += QStringLiteral("xxxx");
+        QTRY_COMPARE(controller->selectedText(), expectedText);
+        QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+        QVERIFY(controller->hasDrafts());
+        QVERIFY(tabs.requestSave(session));
+        QTRY_VERIFY_WITH_TIMEOUT(saved.count() == pass || !saveFontPrompt.isEmpty(), 30000);
+        QVERIFY2(saveFontPrompt.isEmpty(), qPrintable(controller->missingFontFamilies().join(QStringLiteral(", "))));
+        QCOMPARE(saved.count(), pass);
+        QVERIFY(saved.constLast().constFirst().toBool());
+        QVERIFY(!controller->hasDrafts());
+        QCOMPARE(session->document()->pageCount(), pageCount);
+        if (symbolParagraph) {
+            const auto savedBullets = bulletOutlines();
+            QCOMPARE(savedBullets.size(), originalBullets.size());
+            for (const auto &outline : savedBullets)
+                QCOMPARE(outline, originalBullets.first());
+        }
+        const QImage savedImage = renderedPage();
+        QVERIFY(!savedImage.isNull());
+        QString outputDirectory = qEnvironmentVariable("TREPDF_TEST_MIXED_PARAGRAPH_OUTPUT_DIR");
+        if (symbolParagraph && !outputDirectory.isEmpty())
+            outputDirectory = QDir(outputDirectory).filePath(QStringLiteral("wingdings"));
+        if (!outputDirectory.isEmpty()) {
+            QVERIFY(QDir().mkpath(outputDirectory));
+            const QString prefix = QDir(outputDirectory).filePath(QStringLiteral("save-%1").arg(pass));
+            QVERIFY(QFile::copy(path, prefix + QStringLiteral(".pdf")));
+            QVERIFY(savedImage.save(prefix + QStringLiteral(".png")));
+            if (pass == 1)
+                QVERIFY(originalImage.save(QDir(outputDirectory).filePath(QStringLiteral("before.png"))));
+        }
+        const auto darkPixels = [](const QImage &image, const QRect &area) {
+            int count = 0;
+            for (int y = area.top(); y <= area.bottom(); ++y)
+                for (int x = area.left(); x <= area.right(); ++x)
+                    if (qGray(image.pixel(x, y)) < 160)
+                        ++count;
+            return count;
+        };
+        for (int band = 0; band < 3; ++band) {
+            const QRect area(paragraphPixels.x(), paragraphPixels.y() + paragraphPixels.height() * band / 3,
+                             paragraphPixels.width(), paragraphPixels.height() / 3);
+            const int sourceInk = darkPixels(originalImage, area);
+            QVERIFY(sourceInk > 500);
+            QVERIFY2(darkPixels(savedImage, area) > sourceInk * 0.80,
+                     "Saved paragraph text is present in extraction but hidden in the rendered page");
+        }
+        PDFDocument reopened;
+        PDFEditController reopenedController;
+        QVERIFY(reopened.open(QUrl::fromLocalFile(path)));
+        reopenedController.setDocument(&reopened);
+        const auto restored = candidateForText(waitForCandidates(reopenedController, 1), expectedText);
+        QVERIFY2(!restored.isEmpty(), "Saved mixed paragraph did not survive a fresh reopen");
         QCOMPARE(restored.value(QStringLiteral("text")).toString(), expectedText);
     }
     QVERIFY(original.open(QIODevice::ReadOnly));

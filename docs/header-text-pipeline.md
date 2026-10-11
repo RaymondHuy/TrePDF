@@ -61,6 +61,10 @@ Starting a Header placement temporarily uses Browse; clicking Select cancels
 pending placement and restores Header selection. The selection scope is transient
 and is not written into the PDF.
 
+Header Select uses the orange pointer when hovering a text candidate, as in Edit.
+Inactive Header, form and link placement MouseAreas are hidden as well as disabled:
+Qt Quick can otherwise let their cursor override Select even without accepting input.
+
 `tst_PDFEditControllerHeaderSelection.cpp` checks source and draft eligibility,
 boundary-crossing objects, history, geometry, deletion/Save and Main-window
 pointer/keyboard/tool transitions.

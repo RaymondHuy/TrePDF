@@ -122,6 +122,77 @@ PDFium 157.0.8086.0 upgrade validation on macOS ARM64 / Qt 6.11 (2026-10-11):
   also passes with the native macOS Qt platform.
 - Windows/Linux app builds and iOS device execution were not run locally.
 
+## Symbol font filter
+
+`filtersSymbolFontFamilies` checks the available symbol families (including
+Wingdings/Webdings and Unicode Symbol faces), excludes ordinary text families,
+and verifies exact-style filtering and mixed-style intersections in Edit and
+Header. Installed-family assertions use the same embedding eligibility as Save.
+
+`supportsLegacySymbolCharacters` verifies CoreText/Qt agreement on legacy byte
+aliases for installed Wingdings 1/2/3 and Webdings, while rejecting unsupported
+Unicode and synthetic bold. `repairsSourceSymbolMappings` uses a generated font
+with a symbol cmap and a PDF-only Unicode mapping; it verifies exact glyph and
+outline preservation, absent-bullet rejection, bounded cmap handling and repeated
+repair stability without depending on installed proprietary fonts.
+
+```sh
+QT_QPA_PLATFORM=offscreen cmake-build-debug/tests/trepdf_edit_controller_tests filtersFontFamiliesByLanguage filtersSymbolFontFamilies intersectsFontFiltersAcrossMixedStyles
+```
+
+## Paragraph paint order
+
+`preservesInterleavedParagraphPaintOrder` uses a generated mixed-style paragraph
+with white backgrounds between its lines, deliberate foreground paint, unrelated
+lower text and a second content stream. It checks rendered ink and unchanged
+foreground/lower regions through two Save/reopen cycles, alongside extracted
+text and restored paragraph candidates. Extraction alone cannot detect text
+that still exists but is hidden behind a background.
+
+```sh
+QT_QPA_PLATFORM=offscreen cmake-build-debug/tests/trepdf_edit_controller_tests preservesInterleavedParagraphPaintOrder
+```
+
+The optional `savesExternalMixedParagraphOnSamePath` probe reproduces page 2 of
+`cmc4.pdf` through the inline editor and asynchronous Save. It edits a temporary
+copy twice, checks raster ink in three paragraph bands and opens an independent
+document after each Save to verify the complete paragraph. Its `body` row covers
+the original missing-text report; the `wingdings` row covers the Must-have bullet
+paragraph. That row also checks that editor preflight creates no download prompt
+or draft, that the editor uses the Wingdings glyph rather than font fallback, and
+that PDF bullet outlines and Unicode remain unchanged after both saves. It verifies that the
+source file bytes remain unchanged. Set `TREPDF_TEST_MIXED_PARAGRAPH_PDF` to
+enable it; otherwise the probe skips. Optional
+`TREPDF_TEST_MIXED_PARAGRAPH_OUTPUT_DIR` retains before/after PNGs and both saved
+PDF copies for inspection (`wingdings/` holds the bullet row). Use a fresh output directory for each run because
+existing PDF outputs are not overwritten.
+
+```sh
+TREPDF_TEST_MIXED_PARAGRAPH_PDF="$HOME/Downloads/cmc4.pdf" \
+TREPDF_TEST_MIXED_PARAGRAPH_OUTPUT_DIR="$(mktemp -d /tmp/trepdf-mixed-paragraph.XXXXXX)" \
+QT_QPA_PLATFORM=offscreen cmake-build-debug/tests/trepdf_edit_controller_tests savesExternalMixedParagraphOnSamePath
+```
+
+Validation on macOS ARM64 / Qt 6.11 / PDFium 157.0.8086.0 (2026-10-11):
+
+- Full offscreen suite with the external book and `cmc4.pdf` probes enabled:
+  1,058 passed, 0 failed, 2 skipped (optional CTAN catalogue and a helper that
+  runs separately in the font-download test's child process).
+- Both paint-order probes passed on the native Cocoa/Metal backend. Poppler
+  independently rendered the second saved copy with the complete paragraph.
+- A separate app instance opened the saved four-page PDF, scrolled both ways,
+  changed zoom repeatedly, closed/reopened the document and quit with exit 0.
+
+After the Wingdings mapping fix, on the same macOS/Qt/PDFium configuration:
+
+- Full offscreen suite with the external book and `cmc4.pdf` probes enabled:
+  1,061 passed, 0 failed, 6 skipped.
+- Native Cocoa/Metal font preflight, symbol mapping and both `cmc4.pdf` rows:
+  12 passed, 0 failed, 0 skipped. Both Save/reopen cycles retain the original
+  square-bullet outlines; an independent Poppler render confirms their appearance.
+- The app and test targets build successfully. Windows/Linux execution was not
+  run locally.
+
 ## CTAN Font Catalogue
 
 `loadsEveryCtanCatalogueEntry` checks the packaged JSON and exact URL/style

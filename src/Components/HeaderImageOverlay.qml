@@ -17,6 +17,7 @@ Item {
         objectName: "headerImagePlacementArea"
         anchors.fill: parent
         enabled: root.placement !== null && root.placement.armed
+        visible: enabled
         acceptedButtons: Qt.LeftButton
         cursorShape: Qt.CrossCursor
         onClicked: mouse => root.placement.place(root.page,

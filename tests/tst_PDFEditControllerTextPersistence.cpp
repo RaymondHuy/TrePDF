@@ -3,6 +3,90 @@
 
 using namespace PDFEditControllerTestSupport;
 
+void PDFEditControllerTest::preservesInterleavedParagraphPaintOrder()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("interleaved-paints.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("interleaved-paints-saved.pdf"));
+    const QByteArray content(
+        "q 1 1 1 rg 25 216 350 25 re f* Q\n"
+        "BT 0 g /F1 18 Tf 40 220 Td (First row regular and ) Tj /F2 18 Tf (bold) Tj ET\n"
+        "q 0.8 0.2 0.1 rg 135 216 12 25 re f* Q\n"
+        "q 1 1 1 rg 25 193 350 23 re f* Q\n"
+        "BT 0 g /F1 18 Tf 40 197 Td (Second row regular and ) Tj /F2 18 Tf (bold) Tj ET\n"
+        "q 1 1 1 rg 25 170 350 23 re f* Q\n"
+        "BT 0 g /F1 18 Tf 40 174 Td (Third row regular and ) Tj /F2 18 Tf (bold) Tj ET\n"
+        "q 1 1 1 rg 25 100 350 25 re f* Q\n"
+        "BT 0 g /F1 18 Tf 40 105 Td (Unrelated lower text) Tj ET\n"
+        "q 0.1 0.3 0.8 rg 95 100 14 25 re f* Q\n");
+    const QByteArray finalContent("BT 0 g /F1 10 Tf 40 40 Td (Final stream footer) Tj ET\n");
+    const auto stream = [](const QByteArray &data) {
+        return "<< /Length " + QByteArray::number(data.size()) + " >>\nstream\n" + data + "endstream";
+    };
+    QVERIFY(writePdfObjects(source, {
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 280] "
+            "/Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents [6 0 R 7 0 R] >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+        stream(content), stream(finalContent)}));
+    const QImage before = renderFirstPage(source, QSize(800, 560));
+    QVERIFY(!before.isNull());
+    const auto darkPixels = [](const QImage &image, const QRect &area) {
+        int count = 0;
+        for (int y = area.top(); y <= area.bottom(); ++y)
+            for (int x = area.left(); x <= area.right(); ++x)
+                if (qGray(image.pixel(x, y)) < 160)
+                    ++count;
+        return count;
+    };
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    QString expected;
+    for (int pass = 0; pass < 2; ++pass) {
+        QVariantMap paragraph;
+        for (const auto &value : waitForCandidates(controller, 0)) {
+            const auto candidate = value.toMap();
+            const QString text = candidate.value(QStringLiteral("text")).toString();
+            if (text.startsWith(QStringLiteral("First row"))) {
+                paragraph = candidate;
+                break;
+            }
+        }
+        QVERIFY(!paragraph.isEmpty());
+        QVERIFY(controller.selectCandidate(0, paragraph.value(QStringLiteral("objectId")).toString()));
+        const QString text = controller.selectedText();
+        QVERIFY2(text.contains(QStringLiteral("Third row")), qPrintable(text));
+        if (pass == 0)
+            expected = text;
+        else
+            QCOMPARE(text, expected);
+        expected += QStringLiteral(" x");
+        controller.commitSelectedText(expected);
+        QVERIFY(pass == 0 ? controller.saveAs(QUrl::fromLocalFile(output)) : controller.save());
+        const QImage after = renderFirstPage(output, before.size());
+        QVERIFY(!after.isNull());
+        for (int row = 0; row < 3; ++row) {
+            const QRect area(78, 86 + row * 46, 500, 42);
+            const int sourceInk = darkPixels(before, area);
+            QVERIFY(sourceInk > 500);
+            const int savedInk = darkPixels(after, area);
+            QVERIFY2(savedInk > sourceInk * 0.85,
+                qPrintable(QStringLiteral("Saved row %1 lost text: %2 dark pixels, expected at least %3")
+                    .arg(row).arg(savedInk).arg(sourceInk * 0.85)));
+        }
+        // Keep unrelated foreground paint and the second content stream intact.
+        QCOMPARE(changedPixelCount(before, after, QRect(270, 78, 24, 50)), 0);
+        QCOMPARE(changedPixelCount(before, after, QRect(40, 290, 710, 250)), 0);
+        const QString savedText = normalizedPageText(output);
+        QVERIFY(savedText.contains(QStringLiteral("Unrelated lower text")));
+        QVERIFY(savedText.contains(QStringLiteral("Final stream footer")));
+        QVERIFY(!candidateForText(waitForCandidates(controller, 0), expected).isEmpty());
+    }
+}
+
 void PDFEditControllerTest::savesEditedTextRoundTrip()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(

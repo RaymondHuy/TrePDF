@@ -13,6 +13,7 @@
 #include "PDFEditController.h"
 #include "PDFFontAliases.h"
 #include "PDFUnicodeFont.h"
+#include "PDFSymbolFont.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
 #include "PDFPasswordWriter.h"
@@ -264,6 +265,7 @@ struct PreparedDraft {
     QVector<SourceObject> sources;
     QVector<FPDF_PAGEOBJECT> objects;
     QVector<FPDF_BITMAP> bitmaps;
+    QVector<int> objectInsertionBoundaries;
     int insertionIndex = 0;
     bool append = false;
     bool movesSourceObjects = false;
@@ -271,6 +273,123 @@ struct PreparedDraft {
     QRectF frameRect;
     int imageQuarterTurns = 0;
 };
+
+bool pageObjectBounds(FPDF_PAGEOBJECT object, QRectF &bounds)
+{
+    float left = 0.0F, bottom = 0.0F, right = 0.0F, top = 0.0F;
+    if (!FPDFPageObj_GetBounds(object, &left, &bottom, &right, &top)
+        || !qIsFinite(left) || !qIsFinite(bottom)
+        || !qIsFinite(right) || !qIsFinite(top) || right < left || top < bottom) {
+        return false;
+    }
+    bounds = QRectF(left, bottom, right - left, top - bottom);
+    return true;
+}
+
+bool prepareTextPaintOrder(FPDF_PAGE page, PreparedDraft &prepared,
+                          const QHash<int, QRectF> &changedPaintBounds)
+{
+    prepared.objectInsertionBoundaries.fill(prepared.insertionIndex, prepared.objects.size());
+    if (prepared.kind != SaveDraft::Kind::Text || prepared.sources.size() < 2
+        || prepared.objects.isEmpty()) {
+        return true;
+    }
+
+    struct SourceBounds {
+        int index;
+        QRectF bounds;
+    };
+    QVector<SourceBounds> sources;
+    QSet<int> sourceIndexes;
+    int lastSourceIndex = prepared.insertionIndex;
+    for (const SourceObject &source : std::as_const(prepared.sources)) {
+        QRectF bounds;
+        if (!pageObjectBounds(source.object, bounds))
+            return false;
+        sources.append({source.topLevelIndex, bounds});
+        sourceIndexes.insert(source.topLevelIndex);
+        lastSourceIndex = qMax(lastSourceIndex, source.topLevelIndex);
+    }
+
+    struct InterleavedPaint {
+        int index;
+        QRectF bounds;
+        bool background;
+    };
+    QVector<InterleavedPaint> paints;
+    // Keep geometry work bounded for adversarial pages with many interleaved
+    // objects and runs. A failure leaves the source/destination untouched.
+    constexpr qint64 maximumComparisons = 8 * 1024 * 1024;
+    qint64 comparisons = 0;
+    for (int index = prepared.insertionIndex + 1; index < lastSourceIndex; ++index) {
+        if (sourceIndexes.contains(index))
+            continue;
+        QRectF bounds;
+        const auto changed = changedPaintBounds.constFind(index);
+        if (changed != changedPaintBounds.cend()) {
+            // Another draft may move or replace this paint in the same Save.
+            // Its new bounds are authoritative; never infer it as a source
+            // background from geometry that is about to disappear.
+            if (!changed->isEmpty())
+                paints.append({index, *changed, false});
+            continue;
+        }
+        if (!pageObjectBounds(FPDFPage_GetObject(page, index), bounds))
+            return false;
+        bool behindSource = false;
+        bool overSource = false;
+        for (const SourceBounds &source : std::as_const(sources)) {
+            if (++comparisons > maximumComparisons)
+                return false;
+            if (!bounds.intersects(source.bounds))
+                continue;
+            behindSource |= index < source.index;
+            overSource |= index > source.index;
+        }
+        paints.append({index, bounds, behindSource && !overSource});
+    }
+
+    // Word can paint a separate background before each line of a paragraph.
+    // Replacing every line at the first source index puts later lines under
+    // those backgrounds. Place each new run after the backgrounds it touches,
+    // while stopping before paint that intentionally covered earlier text.
+    // Per-run placement also preserves a foreground between two source lines.
+    for (qsizetype index = 0; index < prepared.objects.size(); ++index) {
+        const FPDF_PAGEOBJECT object = prepared.objects.at(index);
+        if (FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_PATH && index > 0) {
+            // Generated underlines belong to the immediately preceding run.
+            prepared.objectInsertionBoundaries[index]
+                = prepared.objectInsertionBoundaries.at(index - 1);
+            continue;
+        }
+        QRectF bounds;
+        if (!pageObjectBounds(object, bounds))
+            return false;
+        if (index + 1 < prepared.objects.size()
+            && FPDFPageObj_GetType(prepared.objects.at(index + 1)) == FPDF_PAGEOBJ_PATH) {
+            QRectF underlineBounds;
+            if (!pageObjectBounds(prepared.objects.at(index + 1), underlineBounds))
+                return false;
+            bounds = bounds.united(underlineBounds);
+        }
+        int lowerBoundary = prepared.insertionIndex;
+        int upperBoundary = lastSourceIndex;
+        for (const InterleavedPaint &paint : std::as_const(paints)) {
+            if (++comparisons > maximumComparisons)
+                return false;
+            if (!bounds.intersects(paint.bounds))
+                continue;
+            if (paint.background)
+                lowerBoundary = qMax(lowerBoundary, paint.index + 1);
+            else
+                upperBoundary = qMin(upperBoundary, paint.index);
+        }
+        if (lowerBoundary > upperBoundary)
+            return false;
+        prepared.objectInsertionBoundaries[index] = lowerBoundary;
+    }
+    return true;
+}
 
 using PdfDocumentHandle = PDFiumDocument;
 
@@ -1138,6 +1257,39 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
     std::sort(boundaries.begin(), boundaries.end());
     boundaries.erase(std::unique(boundaries.begin(), boundaries.end()),
                      boundaries.end());
+    // Symbol subsets often have a bullet but no space. Keep an inferred
+    // separator with the following word when the preceding face cannot encode
+    // it; the paragraph model retains the separator's own semantic format.
+    QHash<QString, bool> spaceCoverage;
+    const auto supportsSpace = [&](qsizetype position) {
+        const SaveFormat &format = formatAt(draft, position);
+        const QString key = fontFaceKey(format) + QLatin1Char('|')
+            + QString::fromLatin1(format.sourceFontFingerprint.toHex());
+        auto cached = spaceCoverage.constFind(key);
+        if (cached == spaceCoverage.cend()) {
+            const QRawFont raw(format.embeddableFontData, 16.0, QFont::PreferNoHinting);
+            cached = spaceCoverage.insert(key, raw.isValid() && raw.supportsCharacter(U' '));
+        }
+        return cached.value();
+    };
+    for (qsizetype index = 1; index + 1 < boundaries.size(); ++index) {
+        const qsizetype end = boundaries[index];
+        qsizetype spaceStart = end;
+        while (spaceStart > boundaries[index - 1]
+               && draft.text.at(spaceStart - 1) == QLatin1Char(' '))
+            --spaceStart;
+        if (spaceStart == end || spaceStart == boundaries[index - 1])
+            continue;
+        if (samePositionedFormat(formatAt(draft, spaceStart - 1), formatAt(draft, end)))
+            continue;
+        if (!supportsSpace(spaceStart - 1) && supportsSpace(end))
+            boundaries[index] = spaceStart;
+    }
+    const auto visibleFormatPosition = [&](qsizetype position, qsizetype end) {
+        while (position + 1 < end && draft.text.at(position).isSpace())
+            ++position;
+        return position;
+    };
     const qsizetype clusterCount = boundaries.size() - 1;
     if (clusterCount > kMaximumSpacingLineParts
         || runs.size() + clusterCount > kMaximumSpacingDraftParts) {
@@ -1178,7 +1330,7 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
         // keeping this boundary preserves exact marked-text validation while
         // each multi-character word still establishes horizontal text flow.
         const bool merge = !positionedRuns.isEmpty() && positioned && positionedRuns.last()
-            && !draft.text.at(start - 1).isSpace()
+            && !draft.text.at(start - 1).isSpace() && !draft.text.at(start).isSpace()
             && samePositionedFormat(
                 formatAt(draft, qMax(positionedBoundaries[positionedBoundaries.size() - 2], firstVisible)),
                 formatAt(draft, qMax(start, firstVisible)));
@@ -1211,7 +1363,7 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
         run.spacingStart = static_cast<int>(start - lineStart);
         run.spacingIndex = static_cast<int>(index);
         run.spacingCount = static_cast<int>(count);
-        run.format = formatAt(draft, qMax(start, firstVisible));
+        run.format = formatAt(draft, visibleFormatPosition(start, end));
         run.hasCharacterPositions = positionedRuns.at(index);
         if (run.hasCharacterPositions) {
             // Keep same-face characters in one TJ object. Singleton objects
@@ -1950,6 +2102,7 @@ private:
         if (!FPDFFont_GetFontData(font, reinterpret_cast<uint8_t *>(face.data.data()),
                                   size, &actualSize) || actualSize != size)
             return {};
+        face.data = PDFSymbolFont::withUnicodeBullets(font, face.data);
         face.fingerprint = QCryptographicHash::hash(face.data, QCryptographicHash::Sha256);
         const auto existing = m_sourceData.constFind(face.fingerprint);
         if (existing != m_sourceData.cend())
@@ -5686,14 +5839,42 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         }
     }
 
-    std::stable_sort(
-        preparedDrafts.begin(),
-        preparedDrafts.end(),
-        [](const PreparedDraft &left, const PreparedDraft &right) {
-            return left.insertionIndex > right.insertionIndex;
-        });
+    QHash<int, QRectF> changedPaintBounds;
+    for (const PreparedDraft &prepared : std::as_const(preparedDrafts)) {
+        QRectF bounds;
+        const auto includeBounds = [&](FPDF_PAGEOBJECT object) {
+            QRectF objectBounds;
+            if (!pageObjectBounds(object, objectBounds))
+                return false;
+            bounds = bounds.united(objectBounds);
+            return true;
+        };
+        bool valid = true;
+        if (prepared.movesSourceObjects) {
+            for (const SourceObject &source : prepared.sources)
+                valid = includeBounds(source.object) && valid;
+        } else {
+            for (FPDF_PAGEOBJECT object : prepared.objects)
+                valid = includeBounds(object) && valid;
+        }
+        if (!valid) {
+            destroyPreparedObjects(preparedDrafts);
+            return failure(PDFSaveWriter::Error::UnsupportedSourceObject,
+                           pageIndex, prepared.objectId);
+        }
+        for (const SourceObject &source : prepared.sources)
+            changedPaintBounds.insert(source.topLevelIndex, bounds);
+    }
+    for (PreparedDraft &prepared : preparedDrafts) {
+        if (!prepareTextPaintOrder(page.get(), prepared, changedPaintBounds)) {
+            destroyPreparedObjects(preparedDrafts);
+            return failure(PDFSaveWriter::Error::UnsupportedSourceObject,
+                           pageIndex, prepared.objectId);
+        }
+    }
 
     QSet<FPDF_PAGEOBJECT> removed;
+    QSet<int> removedIndexes;
     for (PreparedDraft &prepared : preparedDrafts) {
         if (!prepared.movesSourceObjects) {
             for (const SourceObject &source : std::as_const(prepared.sources)) {
@@ -5716,33 +5897,55 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
                         pageIndex);
                 }
                 removed.insert(source.object);
+                removedIndexes.insert(source.topLevelIndex);
                 FPDFPageObj_Destroy(source.object);
             }
         }
+    }
 
-        const int insertionIndex = prepared.append
-            ? FPDFPage_CountObjects(page.get())
-            : prepared.insertionIndex;
-        for (qsizetype index = 0; index < prepared.objects.size(); ++index) {
-            FPDF_PAGEOBJECT object = prepared.objects.at(index);
-            if (!FPDFPage_InsertObjectAtIndex(
-                    page.get(),
-                    object,
-                    static_cast<size_t>(insertionIndex + index))) {
-                prepared.objects[index] = nullptr;
-                destroyPreparedObjects(preparedDrafts);
-                const PDFSaveWriter::Error creationError
-                    = prepared.kind == SaveDraft::Kind::Image
-                    ? PDFSaveWriter::Error::ImageObjectCreationFailed
-                    : prepared.kind == SaveDraft::Kind::Shape
-                        ? PDFSaveWriter::Error::ShapeObjectCreationFailed
-                        : PDFSaveWriter::Error::TextObjectCreationFailed;
-                return failure(
-                    creationError,
-                    pageIndex);
-            }
-            prepared.objects[index] = nullptr;
+    // Boundaries refer to the original page, not a shifting object index.
+    // Remove all sources first, then translate each boundary to the number of
+    // surviving original objects before it. Descending insertion preserves
+    // ordering even when several drafts have interleaved source objects.
+    QVector<int> survivingBefore(originalObjectCount + 1);
+    for (int index = 0; index < originalObjectCount; ++index)
+        survivingBefore[index + 1] = survivingBefore.at(index)
+            + (removedIndexes.contains(index) ? 0 : 1);
+    struct ObjectInsertion {
+        qsizetype draft;
+        qsizetype object;
+        int boundary;
+    };
+    QVector<ObjectInsertion> insertions;
+    for (qsizetype draft = 0; draft < preparedDrafts.size(); ++draft) {
+        const auto &prepared = preparedDrafts.at(draft);
+        for (qsizetype index = 0; index < prepared.objects.size(); ++index)
+            insertions.append({draft, index, prepared.objectInsertionBoundaries.at(index)});
+    }
+    std::stable_sort(insertions.begin(), insertions.end(),
+        [](const ObjectInsertion &left, const ObjectInsertion &right) {
+            return left.boundary < right.boundary;
+        });
+    for (auto it = insertions.crbegin(); it != insertions.crend(); ++it) {
+        auto &prepared = preparedDrafts[it->draft];
+        FPDF_PAGEOBJECT object = prepared.objects.at(it->object);
+        if (!FPDFPage_InsertObjectAtIndex(
+                page.get(),
+                object,
+                static_cast<size_t>(survivingBefore.at(it->boundary)))) {
+            prepared.objects[it->object] = nullptr;
+            destroyPreparedObjects(preparedDrafts);
+            const PDFSaveWriter::Error creationError
+                = prepared.kind == SaveDraft::Kind::Image
+                ? PDFSaveWriter::Error::ImageObjectCreationFailed
+                : prepared.kind == SaveDraft::Kind::Shape
+                    ? PDFSaveWriter::Error::ShapeObjectCreationFailed
+                    : PDFSaveWriter::Error::TextObjectCreationFailed;
+            return failure(
+                creationError,
+                pageIndex);
         }
+        prepared.objects[it->object] = nullptr;
     }
 
     if (hasPageObjectDrafts

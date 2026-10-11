@@ -250,6 +250,7 @@ FocusScope {
 
         anchors.fill: parent
         enabled: root.editing && !propertiesLoader.active
+        visible: enabled
         acceptedButtons: Qt.LeftButton
         preventStealing: true
         cursorShape: Qt.CrossCursor

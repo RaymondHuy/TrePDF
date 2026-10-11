@@ -9,6 +9,7 @@
 #include "PDFShapeUtils.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFSourceTextGeometry.h"
+#include "PDFSymbolFont.h"
 #include "PDFHeaderMetadata.h"
 #include "PDFiumSynchronization.h"
 #include "PDFiumDocument.h"
@@ -973,6 +974,10 @@ void PDFEditController::snapshotFontResolutionLocked(
                 } else {
                     snapshot.embeddedFontData.resize(
                         static_cast<qsizetype>(actualByteCount));
+                    const QByteArray mapped = PDFSymbolFont::withUnicodeBullets(
+                        font, snapshot.embeddedFontData);
+                    if (mapped.size() <= remainingSnapshotBytes)
+                        snapshot.embeddedFontData = mapped;
                     embeddedFontDataBytes += snapshot.embeddedFontData.size();
                 }
             }
@@ -3852,7 +3857,8 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         grouped.text.append(source.text);
     };
     const auto appendSeparator = [&](Candidate &grouped, const QString &separator,
-                                     const Candidate *followingLine = nullptr) {
+                                     const Candidate *followingLine = nullptr,
+                                     const Candidate *followingWord = nullptr) {
         if (followingLine) {
             // QTextDocument reports a paragraph separator using the following
             // block's initial character format. Seed inferred breaks the same
@@ -3887,9 +3893,12 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                 // Give only the inferred separator a complete local face;
                 // implicit Qt fallback can otherwise merge its cluster with
                 // the following word and lose that word's glyph boundaries.
-                for (const QString &family : {PDFFontAliases::semanticFamily(format.fontFamily),
-                                               QStringLiteral("Arial")}) {
-                    if (supportsSeparator(family)) {
+                for (const QString &family : {
+                         followingWord ? followingWord->fontFamily : QString(),
+                         followingWord ? PDFFontAliases::semanticFamily(followingWord->fontFamily) : QString(),
+                         PDFFontAliases::semanticFamily(format.fontFamily),
+                         QStringLiteral("Arial")}) {
+                    if (!family.isEmpty() && supportsSeparator(family)) {
                         format.fontFamily = family;
                         break;
                     }
@@ -4116,7 +4125,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
                         run[index - 1].candidate,
                         source);
                     grouped.parts.last().separatorAfter = separator;
-                    appendSeparator(grouped, separator);
+                    appendSeparator(grouped, separator, nullptr, &source);
                 }
 
                 CandidatePart part = source.parts.constFirst();

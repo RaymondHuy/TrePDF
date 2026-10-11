@@ -698,6 +698,11 @@ QStringList PDFEditController::fontFamiliesForFilter(FontFilter filter) const
                 ApplicationFonts::FontLanguage::Korean,
                 requirement.bold,
                 requirement.italic));
+        case SymbolFonts:
+            return QStringList(ApplicationFonts::fontFamiliesForLanguage(
+                ApplicationFonts::FontLanguage::Symbol,
+                requirement.bold,
+                requirement.italic));
         }
         return QStringList(ApplicationFonts::availableFontFamilies(
             requirement.bold,

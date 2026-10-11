@@ -11,7 +11,8 @@ enum class FontLanguage {
     English,
     Chinese,
     Japanese,
-    Korean
+    Korean,
+    Symbol
 };
 
 enum class FontSource {

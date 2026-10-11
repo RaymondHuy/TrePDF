@@ -18,6 +18,8 @@ Item {
         objectName: "headerTextPlacementArea"
         anchors.fill: parent
         enabled: root.placement !== null && root.placement.armed
+        // Disabled MouseAreas can still override the Select cursor in Qt Quick.
+        visible: enabled
         acceptedButtons: Qt.LeftButton
         cursorShape: Qt.IBeamCursor
         onClicked: mouse => root.placement.place(root.page,

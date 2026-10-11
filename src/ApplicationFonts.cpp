@@ -19,6 +19,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QRawFont>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QScopeGuard>
 #include <QSet>
@@ -42,7 +43,7 @@
 namespace {
 
 constexpr qsizetype kMaximumSystemFontBytes = 64 * 1024 * 1024;
-constexpr int kFontLanguageCount = 5;
+constexpr int kFontLanguageCount = 6;
 
 QVector<uint> visibleCodePoints(const QString &text)
 {
@@ -1048,6 +1049,8 @@ int fontLanguageIndex(ApplicationFonts::FontLanguage language)
         return 3;
     case ApplicationFonts::FontLanguage::Korean:
         return 4;
+    case ApplicationFonts::FontLanguage::Symbol:
+        return 5;
     }
     Q_UNREACHABLE_RETURN(0);
 }
@@ -1180,14 +1183,24 @@ bool systemFaceSupportsCharacters(FontRegistry &registry,
             key,
             createdCharacterSet);
     }
-    return std::all_of(
-        characters.cbegin(),
-        characters.cend(),
-        [&characterSet](uint character) {
-            return CFCharacterSetIsLongCharacterMember(
-                characterSet.value(),
-                static_cast<UTF32Char>(character));
-        });
+    CfHandle<CTFontRef> exactFace;
+    for (uint character : characters) {
+        if (CFCharacterSetIsLongCharacterMember(characterSet.value(), UTF32Char(character)))
+            continue;
+        // CoreText's charset lists only PUA entries for legacy symbol cmaps,
+        // while its glyph mapper (and Qt) also accepts the corresponding bytes.
+        if (character > 0xffU)
+            return false;
+        if (!exactFace)
+            exactFace = exactSystemFont(systemFamily.value(), bold, italic);
+        if (!exactFace)
+            return false;
+        const UniChar unit = UniChar(character);
+        CGGlyph glyph = 0;
+        if (!CTFontGetGlyphsForCharacters(exactFace.get(), &unit, &glyph, 1) || !glyph)
+            return false;
+    }
+    return true;
 #elif defined(Q_OS_WIN)
     return exactWindowsSystemFont(registry, systemFamily.value(), bold, italic)
         .supportsCharacters(characters);
@@ -1575,6 +1588,18 @@ const QStringList &fontFamiliesForLanguage(FontLanguage language,
                     italic,
                     koreanProbe());
             break;
+        case FontLanguage::Symbol: {
+            // Unicode symbol faces such as Apple Symbols and Symbol can report
+            // Latin rather than Symbol. Match whole family-name terms as well;
+            // ordinary text faces with incidental symbols stay out of this list.
+            static const QRegularExpression symbolFamily(
+                QStringLiteral("(?:^|[\\s_-])(?:symbols?|dingbats?|wingdings|webdings|math|icons?|ornaments)(?:$|[\\s_-]|[0-9])"),
+                QRegularExpression::CaseInsensitiveOption);
+            matches = (writingSystems.contains(QFontDatabase::Symbol)
+                       && !writingSystems.contains(QFontDatabase::Latin))
+                || symbolFamily.match(family).hasMatch();
+            break;
+        }
         }
         if (matches) {
             families.append(family);

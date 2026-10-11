@@ -547,6 +547,7 @@ Item {
         enabled: root.formsActive
             && root.placementFieldType >= 0
             && !root.pooled
+        visible: enabled
         acceptedButtons: Qt.LeftButton
         cursorShape: enabled ? Qt.CrossCursor : Qt.ArrowCursor
         preventStealing: true
@@ -592,6 +593,7 @@ Item {
             && root.fieldsInteractive
             && root.placementFieldType < 0
             && !root.pooled
+        visible: enabled
         acceptedButtons: Qt.LeftButton
         z: 1
 

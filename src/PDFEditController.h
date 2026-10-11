@@ -216,7 +216,8 @@ public:
         EnglishFonts,
         ChineseFonts,
         JapaneseFonts,
-        KoreanFonts
+        KoreanFonts,
+        SymbolFonts
     };
     Q_ENUM(FontFilter)
 
