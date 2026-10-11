@@ -203,7 +203,11 @@ Candidate được quét theo nhu cầu khi QML gọi một trong các hàm như
 - `selectCandidate(page, objectId)`.
 
 `ensurePageCandidates()` cache kết quả theo page. Cache bị xóa khi revision của
-document thay đổi.
+document thay đổi. Bản PDFium giữ trên worker dùng khóa gồm UUID bất biến của
+`PDFDocument`, đường dẫn, revision và mật khẩu. Revision chỉ có ý nghĩa trong
+một instance; UUID ngăn worker dùng lại nội dung cũ khi đóng rồi mở lại file vừa
+Save bằng một `PDFDocument` mới có cùng đường dẫn và revision. Kết quả scan
+trả về cũng phải khớp UUID của document hiện tại.
 
 ## 4. Quá trình quét một page
 
@@ -976,6 +980,12 @@ và các character span. Sau undo/redo, `syncEditorFontStyles()` đọc lại c�
 đoạn từ document để panel, draft và Save đồng bộ. Trường hợp nối ngắt dòng nguồn
 cần nạp lại nội dung editor vì plain text cũng đã thay đổi.
 
+Ký tự phân cách đoạn giữ cỡ chữ, bold/italic/underline và màu riêng từ character
+span khi khởi tạo editor. Khi đồng bộ, định dạng của nó được đọc từ
+`QTextBlock::charFormat()` ở block kế tiếp; `QTextCursor::charFormat()` trên
+selection này trả định dạng ký tự đầu dòng sau. Cách xử lý này giữ nguyên các
+đoạn trộn cỡ chữ/kiểu chữ khi chỉ mở rồi đóng editor, kể cả sau Save/reopen.
+
 Save layout từng dòng theo cùng hệ số và block margin, đặt từng từ theo advance
 của Qt để tránh biến phép fit dòng thành font stretch sau nhiều lần lưu.
 Metadata đoạn giữ text, range định dạng, frame và định dạng chữ của phần trắng
@@ -1507,6 +1517,15 @@ ASCII và coverage tiếng Việt nếu nguồn công bố hỗ trợ.
    sửa vẫn giữ font resource cũ. Font mới nhúng giữ bảng shaping/kerning để
    lần sửa sau dùng embedded font vẫn giữ advance. Không bật subsetter của
    PDFium vì nó bỏ các bảng này; kích thước PDF có thể lớn hơn. Underline được tạo thành path.
+   Từ PDFium 157.0.8086.0, `PDFUnicodeFont.h` cấp CID riêng cho từng Unicode
+   khi nhúng **mọi TrueType face**, kể cả font đầy đủ từ hệ thống/cache/bundled.
+   Writer tự dựng `ToUnicode` và `CIDToGIDMap`, rồi ghi `FPDFText_SetCharcodes`
+   để giữ dấu cách thường/NBSP, các dấu câu dùng chung glyph và ký tự ngoài BMP.
+   Cách này tránh bảng mã trùng CID do `FPDFText_LoadFont` tự sinh; PDFium 8086
+   [đổi cách xử lý mapping trùng thành lấy giá trị cuối](https://pdfium.googlesource.com/pdfium/+/refs/heads/chromium/8086/core/fpdfapi/font/cpdf_tounicodemap.cpp#376).
+   Tập ký tự của cùng complete face được gom trong một Save để các trang dùng
+   chung resource, tối đa 65.535 Unicode mỗi encoding. Font program, glyph ID,
+   bảng shaping/kerning và chính sách NFC của editor không thay đổi.
    Font CTAN tải về là OpenType/CFF tĩnh đã xác thực. Writer nạp qua nhánh
    Type1 của PDFium, rồi `PDFOpenTypeFontWriter` dùng qpdf C API trong staging
    để chuyển đúng font program mới có SHA-256 khớp sang `/FontFile3` với

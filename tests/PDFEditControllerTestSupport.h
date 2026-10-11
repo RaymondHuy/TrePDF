@@ -317,7 +317,10 @@ bool addTextObjectWithFont(FPDF_DOCUMENT document,
                            FPDF_FONT font,
                            const QString &text,
                            double x,
-                           double y);
+                           double y,
+                           const QVector<char32_t> &characters = {});
+
+QVector<char32_t> sortedUniqueFontCharacters(const QString &text);
 
 bool addStyledTextObject(FPDF_DOCUMENT document,
                          FPDF_PAGE page,

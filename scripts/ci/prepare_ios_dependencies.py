@@ -26,11 +26,11 @@ from prepare_dependencies import (
 PDFIUM_PACKAGES = {
     "ios-device-arm64": (
         "iphoneos", "pdfium-ios-device-arm64.tgz",
-        "9832bdb08bd4522c0ae4c7cd8eebdedc14e2281fbef2a2450fde948ddd7c200d",
+        "a25c134cf778c9067082fee8b42cbff8d1561a2e1bb4b613c635e8f4a68e1356",
     ),
     "ios-simulator-arm64": (
         "iphonesimulator", "pdfium-ios-simulator-arm64.tgz",
-        "7420517cb81e7096b8c0fbb71a2a06c9e9f62ea323d75e492f0f1b212629044c",
+        "dced2ba4fd37b9c39f363039efb9574f1c2b0171186d3a32eccaf0391180b13f",
     ),
 }
 JPEG_VERSION = "3.1.2"
@@ -63,7 +63,8 @@ def verify_native_platform(binary: Path, sdk: str, deployment_target: str) -> No
 
 def prepare_pdfium(directory: Path, target: str, deployment_target: str) -> Path:
     sdk, package, checksum = PDFIUM_PACKAGES[target]
-    archive = download(PDFIUM_BASE + package, checksum, directory / "downloads")
+    archive = download(PDFIUM_BASE + package, checksum,
+                       directory / "downloads" / f"pdfium-{PDFIUM_VERSION}")
     prefix = directory / "pdfium"
     extract(archive, prefix)
     binary = prefix / "lib/libpdfium.dylib"
@@ -84,8 +85,8 @@ def prepare_pdfium(directory: Path, target: str, deployment_target: str) -> Path
         "CFBundleName": "PDFium",
         "CFBundlePackageType": "FMWK",
         "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "154.0.8021",
-        "CFBundleVersion": "8021.0",
+        "CFBundleShortVersionString": ".".join(PDFIUM_VERSION.split(".")[:3]),
+        "CFBundleVersion": ".".join(PDFIUM_VERSION.split(".")[2:]),
         "CFBundleSupportedPlatforms": ["iPhoneOS" if sdk == "iphoneos" else "iPhoneSimulator"],
         "MinimumOSVersion": deployment_target,
     }

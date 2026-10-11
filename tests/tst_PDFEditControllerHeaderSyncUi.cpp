@@ -19,7 +19,11 @@ QQuickItem *syncVisualItem(QQuickItem *parent, const QString &name)
 
 QQuickItem *syncEditOverlay(QQuickItem *parent)
 {
-    if (parent->isVisible() && parent->property("page").toInt() == 0
+    // The workspace and page delegates load asynchronously. DocumentView also
+    // has beginSelectedEditing(), but no page property or live editor yet.
+    if (parent->isVisible() && parent->property("page").isValid()
+        && parent->property("page").toInt() == 0
+        && parent->metaObject()->indexOfProperty("editingObjectId") >= 0
         && parent->metaObject()->indexOfMethod("beginSelectedEditing()") >= 0)
         return parent;
     for (QQuickItem *child : parent->childItems()) {
@@ -407,6 +411,11 @@ void PDFEditControllerTest::guardsHeaderExitUntilChangesAreSavedOrUndone()
     QVERIFY(tabs->setProperty("currentIndex", 7));
     QTRY_VERIFY(controller.headerSelectionOnly());
     QTRY_VERIFY(quickWindow->isExposed());
+    // Child items can exist while the asynchronous workspace is still
+    // incubating. Only the ready workspace participates in Main's edit flush.
+    QObject *workspace = nullptr;
+    QTRY_VERIFY((workspace = window->property("activeWorkspaceItem").value<QObject *>()));
+    QTRY_VERIFY(workspace->property("initialViewReady").toBool());
     const auto candidate = candidateForText(waitForCandidates(controller, 0), QStringLiteral("Saved header"));
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
@@ -430,7 +439,11 @@ void PDFEditControllerTest::guardsHeaderExitUntilChangesAreSavedOrUndone()
         if (index == 7)
             continue;
         QVERIFY(tabs->setProperty("currentIndex", index));
-        QTRY_VERIFY(noticeLoader->property("active").toBool());
+        QTRY_VERIFY2(noticeLoader->property("active").toBool(),
+            qPrintable(QStringLiteral("tab %1, current %2, selected %3, editing %4, drafts %5, text %6")
+                .arg(index).arg(tabs->property("currentIndex").toInt())
+                .arg(controller.selectedObjectId()).arg(controller.textEditActive())
+                .arg(controller.hasDrafts()).arg(controller.selectedText())));
         QCOMPARE(tabs->property("currentIndex").toInt(), 7);
         QVERIFY(noticeLoader->property("leavingHeader").toBool());
         QVERIFY(ribbon->property("headerTabActive").toBool());
@@ -482,11 +495,14 @@ void PDFEditControllerTest::savesPendingHeaderPlacementBeforeLeaving()
     auto &controller = *session->editController();
     QVERIFY(tabs->setProperty("currentIndex", 7));
     QTRY_VERIFY(quickWindow->isExposed());
+    QObject *workspace = nullptr;
+    QTRY_VERIFY((workspace = window->property("activeWorkspaceItem").value<QObject *>()));
+    QTRY_VERIFY(workspace->property("initialViewReady").toBool());
     const auto item = [&](const char *name) {
         return syncVisualItem(quickWindow->contentItem(), QString::fromLatin1(name));
     };
-    auto *placement = window->findChild<QObject *>(QStringLiteral("headerTextPlacement"));
-    QVERIFY(placement);
+    QObject *placement = nullptr;
+    QTRY_VERIFY((placement = window->findChild<QObject *>(QStringLiteral("headerTextPlacement"))));
     QQuickItem *headerSave = nullptr;
     QTRY_VERIFY((headerSave = item("headerSaveButton")));
     QVERIFY(!headerSave->isEnabled());

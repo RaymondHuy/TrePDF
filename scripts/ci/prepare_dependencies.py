@@ -20,20 +20,20 @@ import urllib.request
 import zipfile
 
 
-PDFIUM_VERSION = "154.0.8021.0"
-PDFIUM_BASE = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8021/"
+PDFIUM_VERSION = "157.0.8086.0"
+PDFIUM_BASE = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8086/"
 PDFIUM_PACKAGES = {
     "windows-x64": (
         "pdfium-v8-win-x64.tgz",
-        "bc9b671c57a3ee3bbc18fda26e4374759b6e57f3bef6ddcc5c9a60d7b4ef6999",
+        "cb8f1e0e0c0dd74cbb17e8ec11d8969c4b95638fd3e66fd1c7e4a684d28a0d46",
     ),
     "macos-arm64": (
         "pdfium-v8-mac-arm64.tgz",
-        "1ab55be379a8eb8c9eaf80067787f19c0442527e3d6ce0234598ed4ebaa79118",
+        "0c71e67f1e65ac00d92365c92b57acd3e11ae9b2c1866977872eaecc49344938",
     ),
     "linux-x64": (
         "pdfium-v8-linux-x64.tgz",
-        "5e1ad0d67242040493ba992a58d82848f24344b2b81be0655cf881e20abc49b7",
+        "8e3efa4fe6784ed80fd58ef3c839b072ddcd79b16880706892a008f8a2da730b",
     ),
 }
 QPDF_VERSION = "12.4.1"
@@ -224,7 +224,8 @@ def main() -> None:
     directory.mkdir(parents=True, exist_ok=True)
     repo = Path(__file__).resolve().parents[2]
     package, checksum = PDFIUM_PACKAGES[args.platform]
-    archive = download(PDFIUM_BASE + package, checksum, directory / "downloads")
+    archive = download(PDFIUM_BASE + package, checksum,
+                       directory / "downloads" / f"pdfium-{PDFIUM_VERSION}")
     pdfium = directory / "pdfium"
     extract(archive, pdfium)
     copy_notices(pdfium, directory / "licenses/pdfium", ("LICENSE",))

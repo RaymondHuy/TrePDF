@@ -3,6 +3,30 @@
 
 using namespace PDFEditControllerTestSupport;
 
+void PDFEditControllerTest::reloadsSavedCandidatesInNewDocumentInstances()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("reopened-candidates.pdf"));
+    QVERIFY(createThreePageTextPdf(path));
+    QString expectedText = QStringLiteral("First fixture page");
+    // Each newly opened document has the same local revision. Keep the scan
+    // worker alive while replacing the file and recreating the GUI objects.
+    for (int pass = 1; pass <= 3; ++pass) {
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(path)));
+        controller.setDocument(&document);
+        const auto candidate = candidateForText(waitForCandidates(controller, 0), expectedText);
+        QVERIFY2(!candidate.isEmpty(), qPrintable(expectedText));
+        if (pass == 3)
+            break;
+        QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+        expectedText = QStringLiteral("Saved pass %1").arg(pass);
+        controller.commitSelectedText(expectedText);
+        QVERIFY(controller.save());
+        QCOMPARE(normalizedPageText(path, 0), expectedText);
+    }
+}
+
 void PDFEditControllerTest::addsBlankPageWithUndoRedoAndDiscard()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(

@@ -74,6 +74,54 @@ QT_QPA_PLATFORM=offscreen cmake-build-debug/tests/trepdf_edit_controller_tests f
 Finder's Launch Services routing and installed bundle document association still
 need a smoke test with the built macOS application.
 
+## Unicode font persistence
+
+`preservesDistinctUnicodeAliasesInTrueTypeFonts` checks exact Unicode extraction
+after embedding complete Arial: ordinary/nonbreaking spaces, ASCII semicolon/Greek
+question mark, and hyphen/soft hyphen retain distinct mappings despite sharing glyph IDs.
+`preservesUnicodeSpacingThroughArialSaveReopen` covers the controller's Save,
+reopen, color edit and second Save without normalizing away nonbreaking spaces.
+It also verifies that independent drafts with NFC-normalized text share one
+complete font resource.
+The direct embedding test deliberately bypasses the editor's existing NFC
+policy, which canonically maps U+037E to the ASCII semicolon. TrueType source
+fixtures use explicit CID mappings too; intentional missing subset characters
+remain absent from their font mapping.
+
+`reloadsSavedCandidatesInNewDocumentInstances` saves twice to the same path and
+reopens it with three independent `PDFDocument` instances. It checks both saved
+page text and freshly scanned candidates, guarding against worker-cache reuse
+when separate instances have the same local revision.
+
+The optional `savesExternalPageFourOnSamePath` probe also opens an independent
+document after each Save and compares the complete edited paragraph. This avoids
+mistaking whole-page extraction order for lost text when a wrapped line overlaps
+a neighboring paragraph. Paragraph restoration validates its stored ranges
+against actual PDF text objects.
+
+Header UI tests wait for the asynchronous workspace and initial view to be ready,
+then locate a page-specific editor. Their Save/Undo and pending-placement
+assertions run only after Main can flush the real editor's contents.
+
+The `mixed-font-paragraph` row in `preservesType1UrlThroughInlineEditing` covers
+adjacent lines with slightly different font sizes. Entering and committing the
+editor must preserve the paragraph separator's own format, including after
+Save/reopen, and must not create a draft without a real change.
+
+PDFium 157.0.8086.0 upgrade validation on macOS ARM64 / Qt 6.11 (2026-10-11):
+
+- Controller suite with the optional book fixtures enabled: 1,056 passed,
+  0 failed, 2 skipped. Both Header cases and the page-four repeated-save probe
+  pass. Skips are the external CTAN download-cache check and a fresh-process
+  probe that is invoked separately by its parent test.
+- Excel suite: 24 passed. Native Metal rendering/zoom/thumbnail checks: 8 passed.
+  The built app also rendered a 478-page PDF, scrolled in both directions,
+  changed zoom, closed/reopened the document and quit without a crash report.
+- Native Metal Header checks: 6 passed; baseline/Type 1 URL checks including the
+  external page-four fixture: 9 passed. The document-instance cache regression
+  also passes with the native macOS Qt platform.
+- Windows/Linux app builds and iOS device execution were not run locally.
+
 ## CTAN Font Catalogue
 
 `loadsEveryCtanCatalogueEntry` checks the packaged JSON and exact URL/style

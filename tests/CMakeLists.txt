@@ -58,6 +58,7 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/ReviewedCtanFonts.h
     ../src/PDFFontAliases.cpp
     ../src/PDFFontAliases.h
+    ../src/PDFUnicodeFont.h
     ../src/GoogleFontsProvider.cpp
     ../src/GoogleFontsProvider.h
     ../src/CtanFontProvider.cpp

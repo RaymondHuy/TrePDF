@@ -7,6 +7,7 @@
 #include <QSizeF>
 #include <QString>
 #include <QUrl>
+#include <QUuid>
 #include <QVector>
 #include <QtQml/qqmlregistration.h>
 
@@ -70,6 +71,8 @@ public:
     bool allowsPasswordChange() const;
     bool allowsTextCopy() const;
     int renderRevision() const;
+    // Revisions are local to one object; worker caches also need its lifetime identity.
+    QUuid instanceId() const { return m_instanceId; }
     int sourcePageCount() const;
     int sourcePageIndex(int page) const;
     int displayPageIndexForSourcePage(int sourcePage) const;
@@ -97,6 +100,7 @@ private:
     void updatePageMetrics();
 
     PDFiumDocument m_document;
+    const QUuid m_instanceId = QUuid::createUuid();
     QUrl m_source;
     QString m_filePath;
     QByteArray m_documentPassword;

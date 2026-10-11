@@ -1156,6 +1156,12 @@ void PDFEditController::initializeEditorFontSizes(
         format.setProperty(kEditorLetterSpacingRatio, span.format.letterSpacingRatio);
         format.setProperty(kEditorWordSpacingRatio, span.format.wordSpacingRatio);
         format.setProperty(kEditorSourceAdvanceRatio, span.format.sourceAdvanceRatio);
+        // HTML carries these styles on visible runs, but omits the paragraph
+        // separator. Seed its complete style along with the exact metrics.
+        format.setFontWeight(span.format.fontBold ? QFont::Bold : QFont::Normal);
+        format.setFontItalic(span.format.fontItalic);
+        format.setFontUnderline(span.format.fontUnderline);
+        format.setForeground(span.format.color);
         format.setFontKerning(qFuzzyIsNull(span.format.sourceAdvanceRatio));
         if (qIsFinite(displayedPageHeight) && displayedPageHeight > 0.0) {
             const qreal ratio = span.format.displayFontSizeRatio > 0.0
@@ -1564,7 +1570,13 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
     for (qsizetype position = 0; position < textLength; ++position) {
         cursor.setPosition(static_cast<int>(position));
         cursor.setPosition(static_cast<int>(position + 1), QTextCursor::KeepAnchor);
-        const QTextCharFormat editorFormat = cursor.charFormat();
+        // Selecting a paragraph separator makes QTextCursor::charFormat()
+        // report the first character of the following block. Its own format
+        // is stored on that block and can have a different size or style.
+        const QTextCharFormat editorFormat = document->characterAt(static_cast<int>(position))
+                == QChar::ParagraphSeparator
+            ? document->findBlock(static_cast<int>(position + 1)).charFormat()
+            : cursor.charFormat();
         CharacterFormat &format = formats[position];
         format.fontBold = editorFormat.fontWeight() >= QFont::Bold;
         format.fontItalic = editorFormat.fontItalic();
