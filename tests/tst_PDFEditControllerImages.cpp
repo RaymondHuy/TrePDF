@@ -1,6 +1,9 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <QClipboard>
+#include <QMimeData>
+
 using namespace PDFEditControllerTestSupport;
 
 namespace {
@@ -13,12 +16,14 @@ QByteArray imageFixtureStream(const QByteArray &dictionary, const QByteArray &co
 
 bool createSharedNestedImagePdf(const QString &path, bool nested, int rotation,
                                bool offsetCrop, bool internalClip = false,
-                               bool inheritedResources = false)
+                               bool inheritedResources = false,
+                               bool coloredBackdrop = false)
 {
     const QByteArray geometry = QByteArray("/MediaBox [0 0 400 400] /Rotate ")
         + QByteArray::number(rotation * 90)
         + (offsetCrop ? " /CropBox [20 20 380 380] " : " ");
-    const QByteArray firstContent(
+    const QByteArray firstContent = (coloredBackdrop
+        ? QByteArray("q 0.7 0.1 0.8 rg 0 0 400 400 re f Q\n") : QByteArray()) + QByteArray(
         "q 1 0 0 1 50 270 cm /Fm0 Do Q\n"
         "q 1 0 0 1 230 270 cm /Fm0 Do Q\n");
     const QByteArray secondContent("q 1 0 0 1 90 150 cm /Fm0 Do Q\n");
@@ -666,6 +671,589 @@ void PDFEditControllerTest::addsImageWithUndoRedo()
     controller.redo();
     QCOMPARE(controller.selectedFrameRect(), resizedFrame);
     QCOMPARE(controller.selectedContentBounds(), resizedFrame);
+}
+
+void PDFEditControllerTest::copiesAndPastesAddedImagesWithHistoryAndSave()
+{
+    QClipboard *clipboard = QGuiApplication::clipboard();
+    QVERIFY(clipboard);
+    clipboard->clear();
+    const auto clearClipboard = qScopeGuard([clipboard]() { clipboard->clear(); });
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("clipboard-added-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(QStringLiteral("clipboard-added-saved.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+    QImage image(80, 40, QImage::Format_ARGB32);
+    QPainter imagePainter(&image);
+    imagePainter.fillRect(QRect(0, 0, 40, 20), Qt::red);
+    imagePainter.fillRect(QRect(40, 0, 40, 20), Qt::green);
+    imagePainter.fillRect(QRect(0, 20, 40, 20), Qt::blue);
+    imagePainter.fillRect(QRect(40, 20, 40, 20), Qt::yellow);
+    imagePainter.end();
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.addImageData(0, 0.35, 0.45, image).isEmpty());
+    const QString originalId = controller.selectedObjectId();
+    controller.setImageAspectRatioLocked(false);
+    const QRectF initialFrame = controller.selectedFrameRect();
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(QRectF(initialFrame.topLeft(),
+        QSizeF(initialFrame.width() * 0.7, initialFrame.height() * 1.3)));
+    controller.finishSelectedFrameResize();
+    controller.rotateSelectedImage(1);
+    const QRectF copiedFrame = controller.selectedFrameRect();
+    const QVariantList beforeCopy = controller.draftsForPage(0);
+    QVERIFY(controller.selectedImageCopyable());
+    QVERIFY(controller.copySelectedImage());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.clipboardHasImage(), 5000);
+    QCOMPARE(controller.draftsForPage(0), beforeCopy);
+    QCOMPARE(controller.selectedObjectId(), originalId);
+    const QImage copied = clipboard->image();
+    QVERIFY(!copied.isNull());
+    const QImage rotated = image.transformed(QTransform().rotate(90));
+    const QSizeF pageSize = document.pageSize(0);
+    const qreal copiedAspect = copiedFrame.width() * pageSize.width()
+        / (copiedFrame.height() * pageSize.height());
+    QVERIFY(qAbs(qreal(copied.width()) / copied.height() - copiedAspect) < 0.03);
+    for (const QPointF point : {QPointF(0.25, 0.25), QPointF(0.75, 0.25),
+                               QPointF(0.25, 0.75), QPointF(0.75, 0.75)}) {
+        QCOMPARE(copied.pixelColor(int(point.x() * copied.width()), int(point.y() * copied.height())),
+                 rotated.pixelColor(int(point.x() * rotated.width()), int(point.y() * rotated.height())));
+    }
+
+    const QVariantMap pasted = controller.pasteImageFromClipboard(0);
+    QVERIFY(!pasted.isEmpty());
+    const QString pastedId = pasted.value(QStringLiteral("objectId")).toString();
+    QVERIFY(pastedId != originalId);
+    const QRectF pastedFrame = controller.selectedFrameRect();
+    QVERIFY(qAbs(pastedFrame.width() - copiedFrame.width()) < 0.000001);
+    QVERIFY(qAbs(pastedFrame.height() - copiedFrame.height()) < 0.000001);
+    QVERIFY(qAbs((pastedFrame.x() - copiedFrame.x()) * pageSize.width() - 12.0) < 0.001);
+    QVERIFY(qAbs((pastedFrame.y() - copiedFrame.y()) * pageSize.height() - 12.0) < 0.001);
+    QCOMPARE(controller.draftsForPage(0).size(), 2);
+    controller.undo();
+    QCOMPARE(controller.draftsForPage(0), beforeCopy);
+    controller.redo();
+    QCOMPARE(controller.draftsForPage(0).size(), 2);
+    QVERIFY(controller.selectCandidate(0, pastedId));
+    QCOMPARE(controller.selectedFrameRect(), pastedFrame);
+
+    // Removing the original also proves the clipboard owns its pixels.
+    QVERIFY(controller.selectCandidate(0, originalId));
+    controller.deleteSelectedObject();
+    clipboard->clear();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(inspectImages(sourcePath).count, 0);
+    QCOMPARE(inspectImages(outputPath).count, 1);
+    const QVariantList reopened = imageCandidates(waitForCandidates(controller, 0));
+    QCOMPARE(reopened.size(), 1);
+    const QRectF savedFrame = reopened.constFirst().toMap().value(QStringLiteral("sourceRect")).toRectF();
+    QVERIFY(QLineF(savedFrame.topLeft(), pastedFrame.topLeft()).length() < 0.0001);
+    QVERIFY(QLineF(savedFrame.bottomRight(), pastedFrame.bottomRight()).length() < 0.0001);
+    const QImage saved = renderFirstPage(outputPath, QSize(1190, 1684));
+    QVERIFY(!saved.isNull());
+    for (const QPointF point : {QPointF(0.25, 0.25), QPointF(0.75, 0.25),
+                               QPointF(0.25, 0.75), QPointF(0.75, 0.75)}) {
+        QCOMPARE(saved.pixelColor(qRound((pastedFrame.x() + point.x() * pastedFrame.width()) * saved.width()),
+                                  qRound((pastedFrame.y() + point.y() * pastedFrame.height()) * saved.height())),
+                 rotated.pixelColor(int(point.x() * rotated.width()), int(point.y() * rotated.height())));
+    }
+}
+
+void PDFEditControllerTest::copiesSourceImageAppearanceWithoutChangingPdf_data()
+{
+    QTest::addColumn<bool>("topLevel");
+    QTest::addColumn<bool>("nested");
+    QTest::addColumn<int>("rotation");
+    QTest::addColumn<bool>("clipped");
+    QTest::newRow("top-level") << true << false << 0 << false;
+    QTest::newRow("top-level-cropped-90") << true << false << 1 << false;
+    QTest::newRow("masked-form") << false << false << 0 << false;
+    QTest::newRow("masked-form-chain") << false << true << 0 << false;
+    QTest::newRow("masked-clipped-chain-cropped-90") << false << true << 1 << true;
+}
+
+void PDFEditControllerTest::copiesSourceImageAppearanceWithoutChangingPdf()
+{
+    QFETCH(bool, topLevel);
+    QFETCH(bool, nested);
+    QFETCH(int, rotation);
+    QFETCH(bool, clipped);
+    QClipboard *clipboard = QGuiApplication::clipboard();
+    QVERIFY(clipboard);
+    clipboard->clear();
+    const auto clearClipboard = qScopeGuard([clipboard]() { clipboard->clear(); });
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("clipboard-source-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString referencePath = m_temporaryDirectory.filePath(
+        QStringLiteral("clipboard-reference-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    if (topLevel) {
+        QVERIFY(createTopLevelImagePdf(sourcePath, {-120, 20, 15, 60, 420, 500}, rotation, rotation != 0));
+        QVERIFY(QFile::copy(sourcePath, referencePath));
+    } else {
+        // The colored page artwork must not leak into the copied image's mask.
+        QVERIFY(createSharedNestedImagePdf(sourcePath, nested, rotation, rotation != 0, clipped, false, true));
+        QVERIFY(createSharedNestedImagePdf(referencePath, nested, rotation, rotation != 0, clipped));
+    }
+    QFile sourceFile(sourcePath);
+    QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = sourceFile.readAll();
+    sourceFile.close();
+    const QImage originalPage = renderNestedImagePage(sourcePath, 0, QSize(1600, 1600));
+    const QImage referencePage = renderNestedImagePage(referencePath, 0, QSize(1600, 1600));
+    QVERIFY(!originalPage.isNull());
+    QVERIFY(!referencePage.isNull());
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+    const QVariantList candidates = imageCandidates(waitForCandidates(controller, 0));
+    QCOMPARE(candidates.size(), topLevel ? 1 : 2);
+    QVERIFY(controller.selectCandidate(0, candidates.constFirst().toMap().value(QStringLiteral("objectId")).toString()));
+    const QRectF frame = controller.selectedFrameRect();
+    QVERIFY(controller.selectedImageCopyable());
+    QVERIFY(controller.copySelectedImage());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.clipboardHasImage(), 10000);
+    const QImage copied = clipboard->image();
+    QVERIFY(!copied.isNull());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+    QCOMPARE(sourceFile.readAll(), originalBytes);
+    sourceFile.close();
+    QCOMPARE(renderNestedImagePage(sourcePath, 0, originalPage.size()), originalPage);
+
+    QImage overWhite(copied.size(), QImage::Format_ARGB32);
+    overWhite.fill(Qt::white);
+    QPainter painter(&overWhite);
+    painter.drawImage(QPoint(), copied);
+    painter.end();
+    bool hasPartialAlpha = false;
+    for (int y = 0; y < copied.height() && !hasPartialAlpha; ++y) {
+        for (int x = 0; x < copied.width(); ++x) {
+            const int alpha = copied.pixelColor(x, y).alpha();
+            if (alpha > 0 && alpha < 250) {
+                hasPartialAlpha = true;
+                break;
+            }
+        }
+    }
+    if (!topLevel)
+        QVERIFY(hasPartialAlpha);
+    for (qreal y : {0.15, 0.35, 0.65, 0.85}) {
+        for (qreal x : {0.15, 0.35, 0.65, 0.85}) {
+            const int pixelX = int(x * overWhite.width());
+            const int pixelY = int(y * overWhite.height());
+            const QColor actual = overWhite.pixelColor(pixelX, pixelY);
+            // Compare the same pixel centers at both raster resolutions.
+            // Sampling the nominal fraction instead straddles sheared edges.
+            const QColor expected = referencePage.pixelColor(
+                int((frame.x() + (pixelX + 0.5) / overWhite.width() * frame.width())
+                    * referencePage.width()),
+                int((frame.y() + (pixelY + 0.5) / overWhite.height() * frame.height())
+                    * referencePage.height()));
+            // PDFium's antialiasing can put a sheared edge on either side of
+            // a pixel at different resolutions. Permit one copied pixel of
+            // coverage variation, without relaxing interior color/alpha checks.
+            const QRect neighborhood = QRectF(
+                (frame.x() + qMax(0, pixelX - 1) / qreal(overWhite.width()) * frame.width())
+                    * referencePage.width(),
+                (frame.y() + qMax(0, pixelY - 1) / qreal(overWhite.height()) * frame.height())
+                    * referencePage.height(),
+                3.0 * frame.width() / overWhite.width() * referencePage.width(),
+                3.0 * frame.height() / overWhite.height() * referencePage.height())
+                .toAlignedRect().intersected(referencePage.rect());
+            int minimum[3] = {255, 255, 255};
+            int maximum[3] = {0, 0, 0};
+            for (int ry = neighborhood.top(); ry <= neighborhood.bottom(); ++ry) {
+                for (int rx = neighborhood.left(); rx <= neighborhood.right(); ++rx) {
+                    const QColor color = referencePage.pixelColor(rx, ry);
+                    const int channels[] = {color.red(), color.green(), color.blue()};
+                    for (int channel = 0; channel < 3; ++channel) {
+                        minimum[channel] = qMin(minimum[channel], channels[channel]);
+                        maximum[channel] = qMax(maximum[channel], channels[channel]);
+                    }
+                }
+            }
+            const int channels[] = {actual.red(), actual.green(), actual.blue()};
+            for (int channel = 0; channel < 3; ++channel) {
+                QVERIFY2(channels[channel] >= minimum[channel] - 24
+                             && channels[channel] <= maximum[channel] + 24,
+                         qPrintable(QStringLiteral("Copied appearance at (%1, %2): %3, expected near %4")
+                             .arg(x).arg(y).arg(actual.name(), expected.name())));
+            }
+        }
+    }
+}
+
+void PDFEditControllerTest::pastesHeaderCopiesAtOriginalCoordinates_data()
+{
+    QTest::addColumn<bool>("sourceImage");
+    QTest::addColumn<bool>("differentPageSize");
+    QTest::addColumn<bool>("pasteInHeader");
+    QTest::newRow("added-same-size-header") << false << false << true;
+    QTest::newRow("source-same-size-header") << true << false << true;
+    QTest::newRow("added-different-size-header") << false << true << true;
+    QTest::newRow("source-different-size-header") << true << true << true;
+    QTest::newRow("added-same-size-edit") << false << false << false;
+    QTest::newRow("source-same-size-edit") << true << false << false;
+    QTest::newRow("added-different-size-edit") << false << true << false;
+    QTest::newRow("source-different-size-edit") << true << true << false;
+}
+
+void PDFEditControllerTest::pastesHeaderCopiesAtOriginalCoordinates()
+{
+    QFETCH(bool, sourceImage);
+    QFETCH(bool, differentPageSize);
+    QFETCH(bool, pasteInHeader);
+    QClipboard *clipboard = QGuiApplication::clipboard();
+    QVERIFY(clipboard);
+    clipboard->clear();
+    const auto clearClipboard = qScopeGuard([clipboard]() { clipboard->clear(); });
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("clipboard-header-position-%1.pdf")
+            .arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString outputPath = sourcePath + QStringLiteral(".saved.pdf");
+    const QByteArray destinationBox = differentPageSize ? "600 800" : "400 500";
+    QVERIFY(writePdfObjects(sourcePath, {
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 500] "
+        "/Resources << /XObject << /Im0 7 0 R >> >> /Contents 5 0 R >>",
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ")
+            + destinationBox + "] /Resources << >> /Contents 6 0 R >>",
+        imageFixtureStream({}, sourceImage
+            ? QByteArray("q 80 0 0 40 67 437 cm /Im0 Do Q") : QByteArray()),
+        imageFixtureStream({}, {}),
+        imageFixtureStream(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 2 "
+            "/ColorSpace /DeviceRGB /BitsPerComponent 8",
+            QByteArray::fromHex("ff000000ff000000ffffff00")),
+    }));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setHeaderSelectionOnly(true);
+    controller.setTool(PDFEditController::SelectTool);
+    if (sourceImage) {
+        const QVariantList candidates = imageCandidates(waitForCandidates(controller, 0));
+        QCOMPARE(candidates.size(), 1);
+        QVERIFY(controller.selectCandidate(0,
+            candidates.constFirst().toMap().value(QStringLiteral("objectId")).toString()));
+    } else {
+        QImage image(80, 40, QImage::Format_ARGB32);
+        image.fill(Qt::cyan);
+        QVERIFY(!controller.addImageData(0, 107.0 / 400.0, 43.0 / 500.0,
+                                         image, 80.0, 40.0).isEmpty());
+    }
+    const QRectF original = controller.selectedFrameRect();
+    const QSizeF sourceSize = document.pageSize(0);
+    const QRectF originalPoints(original.x() * sourceSize.width(),
+                                original.y() * sourceSize.height(),
+                                original.width() * sourceSize.width(),
+                                original.height() * sourceSize.height());
+    QVERIFY(QLineF(originalPoints.topLeft(), QPointF(67, 23)).length() < 0.001);
+    QVERIFY(controller.selectedImageCopyable());
+    QVERIFY(controller.copySelectedImage());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.clipboardHasImage(), 10000);
+    // Placement follows the copy's origin even if the destination uses Edit.
+    controller.setHeaderSelectionOnly(pasteInHeader);
+    QVERIFY(!controller.pasteImageFromClipboard(1).isEmpty());
+    const QString pastedId = controller.selectedObjectId();
+    const QRectF pasted = controller.selectedFrameRect();
+    const QSizeF destinationSize = document.pageSize(1);
+    const QRectF pastedPoints(pasted.x() * destinationSize.width(),
+                              pasted.y() * destinationSize.height(),
+                              pasted.width() * destinationSize.width(),
+                              pasted.height() * destinationSize.height());
+    QVERIFY(QLineF(pastedPoints.topLeft(), originalPoints.topLeft()).length() < 0.001);
+    QVERIFY(QLineF(pastedPoints.bottomRight(), originalPoints.bottomRight()).length() < 0.001);
+    QCOMPARE(controller.draftsForPage(1).size(), 1);
+    controller.undo();
+    QVERIFY(controller.draftsForPage(1).isEmpty());
+    controller.redo();
+    QVERIFY(controller.selectCandidate(1, pastedId));
+    QCOMPARE(controller.selectedFrameRect(), pasted);
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    for (int page = 0; page < 2; ++page) {
+        const QVariantList savedImages = imageCandidates(waitForCandidates(controller, page));
+        QCOMPARE(savedImages.size(), 1);
+        const QRectF saved = savedImages.constFirst().toMap()
+                                 .value(QStringLiteral("sourceRect")).toRectF();
+        const QSizeF size = document.pageSize(page);
+        const QRectF savedPoints(saved.x() * size.width(), saved.y() * size.height(),
+                                saved.width() * size.width(), saved.height() * size.height());
+        QVERIFY(QLineF(savedPoints.topLeft(), originalPoints.topLeft()).length() < 0.01);
+        QVERIFY(QLineF(savedPoints.bottomRight(), originalPoints.bottomRight()).length() < 0.01);
+    }
+}
+
+void PDFEditControllerTest::matchesPastedHeaderImagesBeforeAndAfterSave_data()
+{
+    QTest::addColumn<bool>("sourceImage");
+    QTest::addColumn<bool>("softMask");
+    QTest::newRow("added") << false << false;
+    QTest::newRow("source") << true << false;
+    QTest::newRow("source-with-alpha") << true << true;
+}
+
+void PDFEditControllerTest::matchesPastedHeaderImagesBeforeAndAfterSave()
+{
+    QFETCH(bool, sourceImage);
+    QFETCH(bool, softMask);
+    QClipboard *clipboard = QGuiApplication::clipboard();
+    QVERIFY(clipboard);
+    clipboard->clear();
+    const auto clearClipboard = qScopeGuard([clipboard]() { clipboard->clear(); });
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("clipboard-header-match-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString outputPath = sourcePath + QStringLiteral(".saved.pdf");
+    QImage image(366, 162, QImage::Format_ARGB32);
+    QByteArray pixels;
+    QByteArray alpha;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QColor color((x * 7 + y) % 256, (x + y * 3) % 256, (x * 5 + y * 11) % 256,
+                               softMask ? (x + y) % 256 : 255);
+            image.setPixelColor(x, y, color);
+            pixels.append(char(color.red()));
+            pixels.append(char(color.green()));
+            pixels.append(char(color.blue()));
+            alpha.append(char(color.alpha()));
+        }
+    }
+    const QByteArray placement("q 132 0 0 58.399 269.0221 426.4131 cm /Im0 Do Q");
+    const QByteArray pagePrefix("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 500 500] ");
+    QVERIFY(writePdfObjects(sourcePath, {
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 6 0 R] /Count 4 >>",
+        pagePrefix + "/Resources << /XObject << /Im0 12 0 R >> >> /Contents 7 0 R >>",
+        pagePrefix + "/Resources << >> /Contents 8 0 R >>",
+        pagePrefix + "/Resources << /XObject << /Im0 11 0 R >> >> /Contents 9 0 R >>",
+        pagePrefix + "/Resources << >> /Contents 10 0 R >>",
+        imageFixtureStream({}, placement),
+        imageFixtureStream({}, {}),
+        imageFixtureStream({}, sourceImage ? placement : QByteArray()),
+        imageFixtureStream({}, {}),
+        imageFixtureStream(QByteArray("/Type /XObject /Subtype /Image /Width 366 /Height 162 ")
+            + "/ColorSpace /DeviceRGB /BitsPerComponent 8"
+            + (softMask ? " /SMask 13 0 R" : ""), pixels),
+        imageFixtureStream("/Type /XObject /Subtype /Image /Width 366 /Height 162 "
+            "/ColorSpace /DeviceRGB /BitsPerComponent 8", QByteArray(pixels.size(), char(127))),
+        imageFixtureStream("/Type /XObject /Subtype /Image /Width 366 /Height 162 "
+            "/ColorSpace /DeviceGray /BitsPerComponent 8", alpha),
+    }));
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setHeaderSelectionOnly(true);
+    controller.setTool(PDFEditController::SelectTool);
+    if (sourceImage) {
+        const QVariantList images = imageCandidates(waitForCandidates(controller, 2));
+        QCOMPARE(images.size(), 1);
+        QVERIFY(controller.selectCandidate(2, images.constFirst().toMap().value(QStringLiteral("objectId")).toString()));
+    } else {
+        QVERIFY(!controller.addImageData(2, (269.0221 + 66) / 500, (15.1879 + 58.399 / 2) / 500,
+                                         image, 132, 58.399).isEmpty());
+    }
+    const QRectF sourceFrame = controller.selectedFrameRect();
+    QVERIFY(controller.copySelectedImage());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.clipboardHasImage(), 10000);
+    QVERIFY(!controller.pasteImageFromClipboard(3).isEmpty());
+    QVERIFY(QLineF(controller.selectedFrameRect().topLeft(), sourceFrame.topLeft()).length() < 0.00001);
+    controller.findSimilarHeaders();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.headerSyncLoading(), 15000);
+    QCOMPARE(controller.headerSyncMatchCount(), 2);
+    QCOMPARE(controller.headerSyncMatchPages(), QStringLiteral("3-4"));
+
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    document.close();
+    QVERIFY(document.open(QUrl::fromLocalFile(outputPath)));
+    controller.setHeaderSelectionOnly(true);
+    controller.setTool(PDFEditController::SelectTool);
+    const QVariantList reopened = imageCandidates(waitForCandidates(controller, 3));
+    QCOMPARE(reopened.size(), 1);
+    QVERIFY(controller.selectCandidate(3, reopened.constFirst().toMap().value(QStringLiteral("objectId")).toString()));
+    controller.findSimilarHeaders();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.headerSyncLoading(), 15000);
+    QCOMPARE(controller.headerSyncMatchCount(), 2);
+    QCOMPARE(controller.headerSyncMatchPages(), QStringLiteral("3-4"));
+    const QRectF beforeMove = controller.selectedFrameRect();
+    const QRectF moved = beforeMove.translated(0.02, 0.01);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(moved);
+    controller.finishSelectedFrameResize();
+    QVERIFY2(controller.applyHeaderChanges(), qPrintable(controller.headerSyncError()));
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    QVERIFY(controller.draftsForPage(1).isEmpty());
+    for (int page : {2, 3}) {
+        QVERIFY(!waitForCandidates(controller, page).isEmpty());
+        QCOMPARE(controller.draftsForPage(page).size(), 1);
+        const QRectF actual = controller.draftsForPage(page).constFirst().toMap().value(QStringLiteral("frameRect")).toRectF();
+        QVERIFY(QLineF(actual.topLeft(), moved.topLeft()).length() < 0.00001);
+        // Added-image Save quantizes frame edges to 1/64 pt; the untouched
+        // source retains its original fractional dimensions when only moved.
+        QVERIFY(QLineF(actual.bottomRight(), moved.bottomRight()).length() < 0.0001);
+    }
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.draftsForPage(2).size(), 1);
+    QCOMPARE(controller.draftsForPage(3).size(), 1);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
+    for (int page : {2, 3}) {
+        const QVariantList images = imageCandidates(waitForCandidates(controller, page));
+        QCOMPARE(images.size(), 1);
+        const QRectF actual = images.constFirst().toMap().value(QStringLiteral("sourceRect")).toRectF();
+        QVERIFY(QLineF(actual.topLeft(), moved.topLeft()).length() < 0.0001);
+        QVERIFY(QLineF(actual.bottomRight(), moved.bottomRight()).length() < 0.0001);
+    }
+}
+
+void PDFEditControllerTest::pastesClipboardImagesWithinHeaderAndRejectsInvalidInput()
+{
+    QClipboard *clipboard = QGuiApplication::clipboard();
+    QVERIFY(clipboard);
+    clipboard->clear();
+    const auto clearClipboard = qScopeGuard([clipboard]() { clipboard->clear(); });
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("clipboard-header-source.pdf"));
+    QVERIFY(createFontStylePdf(sourcePath));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setHeaderSelectionOnly(true);
+    controller.setTool(PDFEditController::SelectTool);
+    QVERIFY(!controller.clipboardHasImage());
+    QVERIFY(controller.pasteImageFromClipboard(0).isEmpty());
+    clipboard->setText(QStringLiteral("Clipboard text is not an image"));
+    QVERIFY(!controller.clipboardHasImage());
+    QVERIFY(controller.pasteImageFromClipboard(0).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+
+    QImage tallImage(40, 400, QImage::Format_ARGB32);
+    tallImage.fill(QColor(QStringLiteral("#259fd0")));
+    clipboard->setImage(tallImage);
+    QVERIFY(controller.clipboardHasImage());
+    QVERIFY(controller.pasteImageFromClipboard(-1).isEmpty());
+    QVERIFY(controller.pasteImageFromClipboard(document.pageCount()).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    const QVariantMap pasted = controller.pasteImageFromClipboard(0);
+    QVERIFY(!pasted.isEmpty());
+    const QRectF frame = controller.selectedFrameRect();
+    const QSizeF pageSize = document.pageSize(0);
+    QVERIFY(frame.left() >= 0.0);
+    QVERIFY(frame.right() <= 1.0);
+    QVERIFY(frame.top() >= 0.0);
+    QVERIFY(frame.bottom() * pageSize.height() <= 100.0001);
+    QVERIFY(qAbs(frame.width() * pageSize.width() / (frame.height() * pageSize.height()) - 0.1) < 0.001);
+    QCOMPARE(controller.selectedKind(), QStringLiteral("addedImage"));
+    QVERIFY(controller.selectedImageCopyable());
+    QVERIFY(controller.copySelectedImage());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.clipboardHasImage(), 5000);
+    const QVariantMap duplicate = controller.pasteImageFromClipboard(0);
+    QVERIFY(!duplicate.isEmpty());
+    const QRectF duplicateFrame = controller.selectedFrameRect();
+    QCOMPARE(duplicateFrame.size(), frame.size());
+    QVERIFY(duplicateFrame.bottom() * pageSize.height() <= 100.0001);
+    QCOMPARE(controller.draftsForPage(0).size(), 2);
+    controller.undo();
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    controller.redo();
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    controller.discardDrafts();
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::cancelsSourceImageCopyWithoutPastingStaleClipboard()
+{
+    QClipboard *clipboard = QGuiApplication::clipboard();
+    QVERIFY(clipboard);
+    clipboard->clear();
+    const auto clearClipboard = qScopeGuard([clipboard]() { clipboard->clear(); });
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("clipboard-cancel-source.pdf"));
+    const QString nextPath = m_temporaryDirectory.filePath(QStringLiteral("clipboard-cancel-next.pdf"));
+    QVERIFY(createSharedNestedImagePdf(sourcePath, true, 0, false, true));
+    QVERIFY(createTopLevelImagePdf(nextPath));
+    PDFDocument document;
+    PDFDocument nextDocument;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    QVERIFY(nextDocument.open(QUrl::fromLocalFile(nextPath)));
+    PDFEditController nextController;
+    nextController.setDocument(&nextDocument);
+    nextController.setTool(PDFEditController::SelectTool);
+    const QVariantList nextCandidates = imageCandidates(waitForCandidates(nextController, 0));
+    QCOMPARE(nextCandidates.size(), 1);
+    QVERIFY(nextController.selectCandidate(0,
+        nextCandidates.constFirst().toMap().value(QStringLiteral("objectId")).toString()));
+    int nextCopySuccesses = 0;
+    connect(&nextController, &PDFEditController::statusMessage, this,
+            [&nextCopySuccesses](const QString &message) {
+        if (message == qtTrId("ImageCopied"))
+            ++nextCopySuccesses;
+    });
+
+    for (const QString &change : {QStringLiteral("selection"), QStringLiteral("clipboard"),
+                                  QStringLiteral("document")}) {
+        PDFEditController controller;
+        controller.setDocument(&document);
+        controller.setTool(PDFEditController::SelectTool);
+        const QVariantList candidates = imageCandidates(waitForCandidates(controller, 0));
+        QCOMPARE(candidates.size(), 2);
+        QVERIFY(controller.selectCandidate(0,
+            candidates.constFirst().toMap().value(QStringLiteral("objectId")).toString()));
+        QImage sentinel(16, 12, QImage::Format_ARGB32);
+        sentinel.fill(Qt::magenta);
+        clipboard->setImage(sentinel);
+        QVERIFY(controller.clipboardHasImage());
+        QVERIFY(controller.copySelectedImage());
+        // Source rendering completes through a queued GUI callback. Before that
+        // callback, Paste must not insert the image left on the clipboard.
+        QVERIFY(!controller.clipboardHasImage());
+        QVERIFY(!nextController.clipboardHasImage());
+        QVERIFY(nextController.pasteImageFromClipboard(0).isEmpty());
+        QVERIFY(!nextController.hasDrafts());
+        QVERIFY(controller.pasteImageFromClipboard(0).isEmpty());
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(!controller.canUndo());
+        if (change == QLatin1String("selection")) {
+            controller.clearSelection();
+        } else if (change == QLatin1String("clipboard")) {
+            sentinel.fill(Qt::cyan);
+            clipboard->setImage(sentinel);
+        } else {
+            controller.setDocument(&nextDocument);
+        }
+        QCOMPARE(clipboard->image(), sentinel);
+        QVERIFY(controller.clipboardHasImage());
+        QSignalSpy clipboardChanges(clipboard, &QClipboard::dataChanged);
+
+        // A successful subsequent source copy drains the single copy worker.
+        // This checks delayed completion without relying on an arbitrary sleep.
+        const int previousSuccesses = nextCopySuccesses;
+        bool nextStarted = false;
+        QTRY_VERIFY_WITH_TIMEOUT(nextStarted || (nextStarted = nextController.copySelectedImage()), 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(nextCopySuccesses, previousSuccesses + 1, 5000);
+        QCOMPARE(clipboardChanges.size(), 1);
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(!controller.canUndo());
+        QVERIFY(!nextController.hasDrafts());
+    }
 }
 
 void PDFEditControllerTest::movesAddedImageWithUndoRedo()

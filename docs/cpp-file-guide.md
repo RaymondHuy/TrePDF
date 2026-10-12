@@ -405,6 +405,7 @@ state, API QML/C++ hoặc logic xử lý; khai báo lớp giữ trong
 | [`PDFEditControllerAnnotationScan.cpp`](../src/PDFEditControllerAnnotationScan.cpp) | Scan annotation nguồn, chỉ mục comment và trạng thái thread. |
 | [`PDFEditControllerText.cpp`](../src/PDFEditControllerText.cpp) | Inline editor, font và định dạng rich text. |
 | [`PDFEditControllerComments.cpp`](../src/PDFEditControllerComments.cpp) | Tạo/sửa comment, text markup, reply, status/checkmark và appearance properties. |
+| [`PDFEditControllerClipboard.cpp`](../src/PDFEditControllerClipboard.cpp) | Sao chép ảnh vào clipboard bằng worker riêng; dán thành draft có Undo/Redo, giữ kích thước và giới hạn vùng Header. |
 | [`PDFEditControllerGeometry.cpp`](../src/PDFEditControllerGeometry.cpp) | Thêm text/image/shape, thao tác trang và di chuyển/resize draft. |
 | [`PDFEditControllerHeaderText.cpp`](../src/PDFEditControllerHeaderText.cpp) | Kiểm tra nội dung/phạm vi và thêm text hoặc ảnh Header nhiều trang bằng một batch Undo/Redo; snapshot ảnh trước Apply. |
 | [`PDFEditControllerDrafts.cpp`](../src/PDFEditControllerDrafts.cpp) | Snapshot, undo/redo/discard, dữ liệu trình bày và render draft. |

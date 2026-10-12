@@ -341,6 +341,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 | [`src/PDFEditControllerAnnotationScan.cpp`](../src/PDFEditControllerAnnotationScan.cpp) | Scan annotation nguồn, chỉ mục comment và trạng thái thread. |
 | [`src/PDFEditControllerText.cpp`](../src/PDFEditControllerText.cpp) | Inline editor, chọn font và định dạng rich text. |
 | [`src/PDFEditControllerComments.cpp`](../src/PDFEditControllerComments.cpp) | Tạo/sửa comment, text markup, reply, status/checkmark và appearance properties. |
+| [`src/PDFEditControllerClipboard.cpp`](../src/PDFEditControllerClipboard.cpp) | Sao chép ảnh vào clipboard bằng worker riêng; dán thành draft có Undo/Redo, giữ kích thước và giới hạn vùng Header. |
 | [`src/PDFEditControllerGeometry.cpp`](../src/PDFEditControllerGeometry.cpp) | Thêm text/image/shape, thao tác trang, di chuyển/resize draft và xoay ảnh. |
 | [`src/PDFEditControllerHeaderText.cpp`](../src/PDFEditControllerHeaderText.cpp) | Tạo batch text Header với kiểm tra phạm vi, font và vùng 100 pt trước khi mutate. |
 | [`src/PDFEditControllerDrafts.cpp`](../src/PDFEditControllerDrafts.cpp) | Snapshot, undo/redo/discard, dữ liệu trình bày và render draft. |

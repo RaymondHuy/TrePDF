@@ -9,15 +9,15 @@
         <translation>TrePDF</translation>
     </message>
     <message id="FeatureComingSoon">
-        <location filename="../src/Main.qml" line="952"/>
+        <location filename="../src/Main.qml" line="968"/>
         <source>%1 is coming soon</source>
         <translation>%1 is coming soon</translation>
     </message>
     <message id="WaitForPdfSave">
-        <location filename="../src/Main.qml" line="331"/>
-        <location filename="../src/Main.qml" line="881"/>
-        <location filename="../src/Main.qml" line="936"/>
-        <location filename="../src/Main.qml" line="994"/>
+        <location filename="../src/Main.qml" line="347"/>
+        <location filename="../src/Main.qml" line="897"/>
+        <location filename="../src/Main.qml" line="952"/>
+        <location filename="../src/Main.qml" line="1010"/>
         <location filename="../src/PDFTabModel.cpp" line="562"/>
         <source>Please wait for the PDF to finish saving.</source>
         <translation>Please wait for the PDF to finish saving.</translation>
@@ -41,24 +41,24 @@
         <translation>Open PDF</translation>
     </message>
     <message id="PdfFileFilter">
-        <location filename="../src/Main.qml" line="1403"/>
-        <location filename="../src/Main.qml" line="1680"/>
+        <location filename="../src/Main.qml" line="1441"/>
+        <location filename="../src/Main.qml" line="1718"/>
         <source>PDF files (*.pdf)</source>
         <translation>PDF files (*.pdf)</translation>
     </message>
     <message id="SavePdfAs">
-        <location filename="../src/Main.qml" line="1677"/>
+        <location filename="../src/Main.qml" line="1715"/>
         <location filename="../src/Components/ViewRibbon.qml" line="94"/>
         <source>Save PDF As</source>
         <translation>Save PDF As</translation>
     </message>
     <message id="OpenPdfs">
-        <location filename="../src/Main.qml" line="1400"/>
+        <location filename="../src/Main.qml" line="1438"/>
         <source>Open PDFs</source>
         <translation>Open PDFs</translation>
     </message>
     <message id="DropPdfFilesToOpen">
-        <location filename="../src/Main.qml" line="2308"/>
+        <location filename="../src/Main.qml" line="2348"/>
         <source>Drop PDF files here to open</source>
         <translation>Drop PDF files here to open</translation>
     </message>
@@ -79,33 +79,33 @@
         <translation type="vanished">Some automatic form features are unavailable for this PDF.</translation>
     </message>
     <message id="SelectImage">
-        <location filename="../src/Main.qml" line="1653"/>
-        <location filename="../src/Main.qml" line="1665"/>
+        <location filename="../src/Main.qml" line="1691"/>
+        <location filename="../src/Main.qml" line="1703"/>
         <source>Select Image</source>
         <translation>Select Image</translation>
     </message>
     <message id="ImageFileFilter">
-        <location filename="../src/Main.qml" line="1656"/>
-        <location filename="../src/Main.qml" line="1668"/>
+        <location filename="../src/Main.qml" line="1694"/>
+        <location filename="../src/Main.qml" line="1706"/>
         <source>Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</source>
         <translation>Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)</translation>
     </message>
     <message id="SaveChangesToDocumentQuestion">
-        <location filename="../src/Main.qml" line="1849"/>
+        <location filename="../src/Main.qml" line="1887"/>
         <source>Save changes to “%1”?</source>
         <translation>Save changes to “%1”?</translation>
     </message>
     <message id="UnsavedEditsDescription">
-        <location filename="../src/Main.qml" line="1860"/>
+        <location filename="../src/Main.qml" line="1898"/>
         <source>Your edits exist only in this session and have not been saved to the PDF.</source>
         <translation>Your edits exist only in this session and have not been saved to the PDF.</translation>
     </message>
     <message id="Cancel">
-        <location filename="../src/Main.qml" line="1507"/>
-        <location filename="../src/Main.qml" line="1627"/>
-        <location filename="../src/Main.qml" line="1807"/>
-        <location filename="../src/Main.qml" line="1875"/>
-        <location filename="../src/Main.qml" line="1951"/>
+        <location filename="../src/Main.qml" line="1545"/>
+        <location filename="../src/Main.qml" line="1665"/>
+        <location filename="../src/Main.qml" line="1845"/>
+        <location filename="../src/Main.qml" line="1913"/>
+        <location filename="../src/Main.qml" line="1989"/>
         <location filename="../src/Components/HeaderTextPanel.qml" line="718"/>
         <location filename="../src/Components/HeaderImagePanel.qml" line="226"/>
         <location filename="../src/Components/HeaderPageNumberPanel.qml" line="193"/>
@@ -118,164 +118,164 @@
         <translation>Cancel</translation>
     </message>
     <message id="HeaderPendingInputBeforeLeaving">
-        <location filename="../src/Main.qml" line="159"/>
+        <location filename="../src/Main.qml" line="175"/>
         <source>Please check the header settings in the right panel, then choose Save again. Your changes are still here.</source>
         <oldsource>Please check the header settings in the right panel, then choose Apply or Cancel before switching tabs.</oldsource>
         <translation>Please check the header settings in the right panel, then choose Save again. Your changes are still here.</translation>
     </message>
     <message id="HeaderSaveSelectionChanged">
-        <location filename="../src/Main.qml" line="187"/>
+        <location filename="../src/Main.qml" line="203"/>
         <source>The header selection changed. Choose Save again when you are ready.</source>
         <translation>The header selection changed. Choose Save again when you are ready.</translation>
     </message>
     <message id="SaveBeforeExcelExport">
-        <location filename="../src/Main.qml" line="466"/>
-        <location filename="../src/Main.qml" line="492"/>
+        <location filename="../src/Main.qml" line="482"/>
+        <location filename="../src/Main.qml" line="508"/>
         <source>Save the PDF changes before exporting to Excel.</source>
         <translation>Save the PDF changes before exporting to Excel.</translation>
     </message>
     <message id="ESignClickToPlace">
-        <location filename="../src/Main.qml" line="712"/>
+        <location filename="../src/Main.qml" line="728"/>
         <source>Click the page to place your signature or mark. Press Escape to cancel.</source>
         <translation>Click the page to place your signature or mark. Press Escape to cancel.</translation>
     </message>
     <message id="ExternalLinkOpenFailed">
-        <location filename="../src/Main.qml" line="855"/>
+        <location filename="../src/Main.qml" line="871"/>
         <source>The link could not be opened in your default browser.</source>
         <translation>The link could not be opened in your default browser.</translation>
     </message>
     <message id="HeaderUnsavedExitTitle">
-        <location filename="../src/Main.qml" line="1188"/>
+        <location filename="../src/Main.qml" line="1204"/>
         <source>Before leaving Header</source>
         <translation>Before leaving Header</translation>
     </message>
     <message id="HeaderUnsavedChangesTitle">
-        <location filename="../src/Main.qml" line="1190"/>
+        <location filename="../src/Main.qml" line="1206"/>
         <source>Before editing headers</source>
         <translation>Before editing headers</translation>
     </message>
     <message id="HeaderUnsavedExitMessage">
-        <location filename="../src/Main.qml" line="1201"/>
+        <location filename="../src/Main.qml" line="1217"/>
         <source>Your header changes have not been saved yet. They may affect multiple pages, so please save or undo all changes before switching tabs. Any new header content will be applied before saving. You can also cancel content you have not applied yet in the right panel.</source>
         <translation>Your header changes have not been saved yet. They may affect multiple pages, so please save or undo all changes before switching tabs. Any new header content will be applied before saving. You can also cancel content you have not applied yet in the right panel.</translation>
     </message>
     <message id="HeaderUnsavedChangesMessage">
-        <location filename="../src/Main.qml" line="1203"/>
+        <location filename="../src/Main.qml" line="1219"/>
         <source>You have unsaved changes. Header edits can affect multiple pages, so please save or undo all your changes before continuing.</source>
         <translation>You have unsaved changes. Header edits can affect multiple pages, so please save or undo all your changes before continuing.</translation>
     </message>
     <message id="HeaderUnsavedChangesUnderstood">
-        <location filename="../src/Main.qml" line="1216"/>
+        <location filename="../src/Main.qml" line="1232"/>
         <source>Got it</source>
         <translation>Got it</translation>
     </message>
     <message id="EnterPdfPasswordTitle">
-        <location filename="../src/Main.qml" line="1461"/>
+        <location filename="../src/Main.qml" line="1499"/>
         <source>Enter PDF password</source>
         <translation>Enter PDF password</translation>
     </message>
     <message id="EnterPdfPasswordForFile">
-        <location filename="../src/Main.qml" line="1470"/>
+        <location filename="../src/Main.qml" line="1508"/>
         <source>Enter the password to open “%1”.</source>
         <translation>Enter the password to open “%1”.</translation>
     </message>
     <message id="PdfPasswordPlaceholder">
-        <location filename="../src/Main.qml" line="1485"/>
+        <location filename="../src/Main.qml" line="1523"/>
         <source>Password</source>
         <translation>Password</translation>
     </message>
     <message id="IncorrectPdfPassword">
-        <location filename="../src/Main.qml" line="1495"/>
+        <location filename="../src/Main.qml" line="1533"/>
         <source>Incorrect password. Please try again.</source>
         <translation>Incorrect password. Please try again.</translation>
     </message>
     <message id="OpenPasswordPdf">
-        <location filename="../src/Main.qml" line="1514"/>
+        <location filename="../src/Main.qml" line="1552"/>
         <source>Open</source>
         <translation>Open</translation>
     </message>
     <message id="DownloadEditFontsTitle">
-        <location filename="../src/Main.qml" line="1575"/>
+        <location filename="../src/Main.qml" line="1613"/>
         <source>Prepare fonts for editing</source>
         <translation>Prepare fonts for editing</translation>
     </message>
     <message id="DownloadMissingFontTitle">
-        <location filename="../src/Main.qml" line="1577"/>
+        <location filename="../src/Main.qml" line="1615"/>
         <source>Download font family</source>
         <translation>Download font family</translation>
     </message>
     <message id="EditFontDownloadInProgress">
-        <location filename="../src/Main.qml" line="1599"/>
+        <location filename="../src/Main.qml" line="1637"/>
         <source>Downloading fonts. Text editing will open automatically when the downloads finish.</source>
         <translation>Downloading fonts. Text editing will open automatically when the downloads finish.</translation>
     </message>
     <message id="EditFontDownloadConfirmation">
-        <location filename="../src/Main.qml" line="1601"/>
+        <location filename="../src/Main.qml" line="1639"/>
         <source>Download the following font families before editing this text?</source>
         <translation>Download the following font families before editing this text?</translation>
     </message>
     <message id="FontDownloadInProgress">
-        <location filename="../src/Main.qml" line="1605"/>
+        <location filename="../src/Main.qml" line="1643"/>
         <source>Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish.</source>
         <translation>Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish.</translation>
     </message>
     <message id="FontDownloadConfirmation">
-        <location filename="../src/Main.qml" line="1608"/>
+        <location filename="../src/Main.qml" line="1646"/>
         <source>The application does not have the complete %1 font. Would you like it to download all available regular, bold, italic and bold italic styles of this family and continue saving?</source>
         <translation>The application does not have the complete %1 font. Would you like it to download all available regular, bold, italic and bold italic styles of this family and continue saving?</translation>
     </message>
     <message id="ConfirmFontDownload">
-        <location filename="../src/Main.qml" line="1637"/>
+        <location filename="../src/Main.qml" line="1675"/>
         <source>OK</source>
         <translation>OK</translation>
     </message>
     <message id="ExportExcel">
-        <location filename="../src/Main.qml" line="1690"/>
+        <location filename="../src/Main.qml" line="1728"/>
         <location filename="../src/Components/ExportRibbon.qml" line="47"/>
         <source>Export to Excel</source>
         <translation>Export to Excel</translation>
     </message>
     <message id="ExcelFileFilter">
-        <location filename="../src/Main.qml" line="1693"/>
+        <location filename="../src/Main.qml" line="1731"/>
         <source>Excel workbooks (*.xlsx)</source>
         <translation>Excel workbooks (*.xlsx)</translation>
     </message>
     <message id="OpenExternalLinkQuestion">
-        <location filename="../src/Main.qml" line="1731"/>
+        <location filename="../src/Main.qml" line="1769"/>
         <source>Open link to %1?</source>
         <translation>Open link to %1?</translation>
     </message>
     <message id="ExternalLinkDocumentWantsToOpen">
-        <location filename="../src/Main.qml" line="1745"/>
+        <location filename="../src/Main.qml" line="1783"/>
         <source>“%1” wants to open this address in your default browser.</source>
         <translation>“%1” wants to open this address in your default browser.</translation>
     </message>
     <message id="InsecureHttpLinkWarning">
-        <location filename="../src/Main.qml" line="1788"/>
+        <location filename="../src/Main.qml" line="1826"/>
         <source>This link uses HTTP, so the connection may not be secure.</source>
         <translation>This link uses HTTP, so the connection may not be secure.</translation>
     </message>
     <message id="OpenInBrowser">
-        <location filename="../src/Main.qml" line="1815"/>
+        <location filename="../src/Main.qml" line="1853"/>
         <source>Open in Browser</source>
         <translation>Open in Browser</translation>
     </message>
     <message id="Save">
-        <location filename="../src/Main.qml" line="1223"/>
-        <location filename="../src/Main.qml" line="1883"/>
-        <location filename="../src/Components/AppRibbon.qml" line="537"/>
+        <location filename="../src/Main.qml" line="1239"/>
+        <location filename="../src/Main.qml" line="1921"/>
+        <location filename="../src/Components/AppRibbon.qml" line="547"/>
         <location filename="../src/Components/ProtectRibbon.qml" line="157"/>
         <location filename="../src/Components/ViewRibbon.qml" line="77"/>
         <source>Save</source>
         <translation>Save</translation>
     </message>
     <message id="Discard">
-        <location filename="../src/Main.qml" line="1893"/>
+        <location filename="../src/Main.qml" line="1931"/>
         <source>Discard</source>
         <translation>Discard</translation>
     </message>
     <message id="ConfirmDeletePageQuestion">
-        <location filename="../src/Main.qml" line="1933"/>
+        <location filename="../src/Main.qml" line="1971"/>
         <source>Do you want to delete page %1?</source>
         <translation>Do you want to delete page %1?</translation>
     </message>
@@ -296,50 +296,50 @@
         <translation type="vanished">Enable</translation>
     </message>
     <message id="View">
-        <location filename="../src/Components/AppRibbon.qml" line="583"/>
+        <location filename="../src/Components/AppRibbon.qml" line="593"/>
         <source>View</source>
         <translation>View</translation>
     </message>
     <message id="Edit">
-        <location filename="../src/Components/AppRibbon.qml" line="589"/>
-        <location filename="../src/Components/EditOverlay.qml" line="3795"/>
+        <location filename="../src/Components/AppRibbon.qml" line="599"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3796"/>
         <source>Edit</source>
         <translation>Edit</translation>
     </message>
     <message id="Comment">
-        <location filename="../src/Components/AppRibbon.qml" line="595"/>
+        <location filename="../src/Components/AppRibbon.qml" line="605"/>
         <source>Comment</source>
         <translation>Comment</translation>
     </message>
     <message id="Forms">
-        <location filename="../src/Components/AppRibbon.qml" line="601"/>
+        <location filename="../src/Components/AppRibbon.qml" line="611"/>
         <source>Forms</source>
         <translation>Forms</translation>
     </message>
     <message id="ESign">
-        <location filename="../src/Components/AppRibbon.qml" line="607"/>
+        <location filename="../src/Components/AppRibbon.qml" line="617"/>
         <source>E-Sign</source>
         <translation>E-Sign</translation>
     </message>
     <message id="ProtectTab">
-        <location filename="../src/Components/AppRibbon.qml" line="614"/>
+        <location filename="../src/Components/AppRibbon.qml" line="624"/>
         <location filename="../src/Components/ProtectRibbon.qml" line="38"/>
         <source>Protect</source>
         <translation>Protect</translation>
     </message>
     <message id="ConvertTab">
-        <location filename="../src/Components/AppRibbon.qml" line="620"/>
+        <location filename="../src/Components/AppRibbon.qml" line="630"/>
         <source>Convert</source>
         <translation>Convert</translation>
     </message>
     <message id="HeaderTab">
-        <location filename="../src/Components/AppRibbon.qml" line="473"/>
-        <location filename="../src/Components/AppRibbon.qml" line="627"/>
+        <location filename="../src/Components/AppRibbon.qml" line="477"/>
+        <location filename="../src/Components/AppRibbon.qml" line="637"/>
         <source>Header</source>
         <translation>Header</translation>
     </message>
     <message id="FooterTab">
-        <location filename="../src/Components/AppRibbon.qml" line="634"/>
+        <location filename="../src/Components/AppRibbon.qml" line="644"/>
         <source>Footer</source>
         <translation>Footer</translation>
     </message>
@@ -349,12 +349,12 @@
         <translation>Export</translation>
     </message>
     <message id="SavingPdf">
-        <location filename="../src/Components/AppRibbon.qml" line="660"/>
+        <location filename="../src/Components/AppRibbon.qml" line="670"/>
         <source>Saving PDF…</source>
         <translation>Saving PDF…</translation>
     </message>
     <message id="DraftNotSaved">
-        <location filename="../src/Components/AppRibbon.qml" line="664"/>
+        <location filename="../src/Components/AppRibbon.qml" line="674"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="133"/>
         <source>Draft · Not saved</source>
         <translation>Draft · Not saved</translation>
@@ -367,7 +367,7 @@
         <translation>No document open</translation>
     </message>
     <message id="PdfEditSurface">
-        <location filename="../src/Components/EditOverlay.qml" line="3418"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3419"/>
         <source>PDF edit surface</source>
         <translation>PDF edit surface</translation>
     </message>
@@ -377,8 +377,8 @@
         <translation type="vanished">Use Tab or arrow keys to select content, Enter to edit text, drag selected text, images, or shapes to move them, draw with Shapes or text markup tools, drag or click with Free Text, or click with Sticky Note to add a comment</translation>
     </message>
     <message id="Delete">
-        <location filename="../src/Main.qml" line="1959"/>
-        <location filename="../src/Components/EditOverlay.qml" line="3826"/>
+        <location filename="../src/Main.qml" line="1997"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3862"/>
         <location filename="../src/Components/FormTextFieldOverlay.qml" line="1064"/>
         <location filename="../src/Components/ManualLinkLayer.qml" line="534"/>
         <location filename="../src/Components/ManualLinkLayer.qml" line="580"/>
@@ -391,82 +391,87 @@
         <translation type="vanished">Use Tab or arrow keys to select content, Enter to edit text, drag selected text, images, or shapes to move them, draw with Shapes or text markup tools, drag or click with Free Text, or click with Sticky Note to add a comment</translation>
     </message>
     <message id="ResizeFromTopLeft">
-        <location filename="../src/Components/EditOverlay.qml" line="950"/>
+        <location filename="../src/Components/EditOverlay.qml" line="951"/>
         <source>%1 from top-left</source>
         <translation>%1 from top-left</translation>
     </message>
     <message id="ResizeFromTop">
-        <location filename="../src/Components/EditOverlay.qml" line="955"/>
+        <location filename="../src/Components/EditOverlay.qml" line="956"/>
         <source>%1 from top</source>
         <translation>%1 from top</translation>
     </message>
     <message id="ResizeFromTopRight">
-        <location filename="../src/Components/EditOverlay.qml" line="960"/>
+        <location filename="../src/Components/EditOverlay.qml" line="961"/>
         <source>%1 from top-right</source>
         <translation>%1 from top-right</translation>
     </message>
     <message id="ResizeFromRight">
-        <location filename="../src/Components/EditOverlay.qml" line="965"/>
+        <location filename="../src/Components/EditOverlay.qml" line="966"/>
         <source>%1 from right</source>
         <translation>%1 from right</translation>
     </message>
     <message id="ResizeFromBottomRight">
-        <location filename="../src/Components/EditOverlay.qml" line="970"/>
+        <location filename="../src/Components/EditOverlay.qml" line="971"/>
         <source>%1 from bottom-right</source>
         <translation>%1 from bottom-right</translation>
     </message>
     <message id="ResizeFromBottom">
-        <location filename="../src/Components/EditOverlay.qml" line="975"/>
+        <location filename="../src/Components/EditOverlay.qml" line="976"/>
         <source>%1 from bottom</source>
         <translation>%1 from bottom</translation>
     </message>
     <message id="ResizeFromBottomLeft">
-        <location filename="../src/Components/EditOverlay.qml" line="980"/>
+        <location filename="../src/Components/EditOverlay.qml" line="981"/>
         <source>%1 from bottom-left</source>
         <translation>%1 from bottom-left</translation>
     </message>
     <message id="ResizeFromLeft">
-        <location filename="../src/Components/EditOverlay.qml" line="985"/>
+        <location filename="../src/Components/EditOverlay.qml" line="986"/>
         <source>%1 from left</source>
         <translation>%1 from left</translation>
     </message>
     <message id="PdfEditSurfaceDescriptionWithDrawingComments">
-        <location filename="../src/Components/EditOverlay.qml" line="3420"/>
+        <location filename="../src/Components/EditOverlay.qml" line="3421"/>
         <source>Use Tab or arrow keys to select content, Enter to edit text, drag selected content to move it, draw with Shapes, markup, or drawing comment tools, and use Enter or double-click to finish polygon comments</source>
         <translation>Use Tab or arrow keys to select content, Enter to edit text, drag selected content to move it, draw with Shapes, markup, or drawing comment tools, and use Enter or double-click to finish polygon comments</translation>
     </message>
+    <message id="CopyImage">
+        <location filename="../src/Components/EditOverlay.qml" line="3828"/>
+        <source>Copy</source>
+        <translation>Copy</translation>
+    </message>
     <message id="MoveImage">
-        <location filename="../src/Components/EditOverlay.qml" line="4264"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4300"/>
         <source>Move image</source>
         <translation>Move image</translation>
     </message>
     <message id="MoveShape">
-        <location filename="../src/Components/EditOverlay.qml" line="4268"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4304"/>
         <source>Move shape</source>
         <translation>Move shape</translation>
     </message>
     <message id="MoveDrawingComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4273"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4309"/>
         <source>Move drawing comment</source>
         <translation>Move drawing comment</translation>
     </message>
     <message id="MoveInkComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4277"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4313"/>
         <source>Move ink comment</source>
         <translation>Move ink comment</translation>
     </message>
     <message id="MoveStampComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4281"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4317"/>
         <source>Move stamp comment</source>
         <translation>Move stamp comment</translation>
     </message>
     <message id="MoveComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4286"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4322"/>
         <source>Move comment</source>
         <translation>Move comment</translation>
     </message>
     <message id="MoveText">
-        <location filename="../src/Components/EditOverlay.qml" line="4289"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4325"/>
         <source>Move text</source>
         <translation>Move text</translation>
     </message>
@@ -509,42 +514,42 @@
         <translation>Lock aspect ratio</translation>
     </message>
     <message id="ResizeImage">
-        <location filename="../src/Components/EditOverlay.qml" line="4409"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4445"/>
         <source>Resize image</source>
         <translation>Resize image</translation>
     </message>
     <message id="ResizeShape">
-        <location filename="../src/Components/EditOverlay.qml" line="4413"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4449"/>
         <source>Resize shape</source>
         <translation>Resize shape</translation>
     </message>
     <message id="ResizeDrawingComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4418"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4454"/>
         <source>Resize drawing comment</source>
         <translation>Resize drawing comment</translation>
     </message>
     <message id="ResizeInkComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4422"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4458"/>
         <source>Resize ink comment</source>
         <translation>Resize ink comment</translation>
     </message>
     <message id="ResizeStampComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4426"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4462"/>
         <source>Resize stamp comment</source>
         <translation>Resize stamp comment</translation>
     </message>
     <message id="ResizeComment">
-        <location filename="../src/Components/EditOverlay.qml" line="4431"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4467"/>
         <source>Resize comment</source>
         <translation>Resize comment</translation>
     </message>
     <message id="ResizeTextBox">
-        <location filename="../src/Components/EditOverlay.qml" line="4434"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4470"/>
         <source>Resize text box</source>
         <translation>Resize text box</translation>
     </message>
     <message id="ApplyOrCancelEditHint">
-        <location filename="../src/Components/EditOverlay.qml" line="4593"/>
+        <location filename="../src/Components/EditOverlay.qml" line="4629"/>
         <source>Ctrl/Cmd+Enter to apply · Esc to cancel</source>
         <oldsource>Enter to apply · Esc to cancel</oldsource>
         <translation>Ctrl/Cmd+Enter to apply · Esc to cancel</translation>
@@ -627,7 +632,7 @@
         <translation>Content</translation>
     </message>
     <message id="Select">
-        <location filename="../src/Components/AppRibbon.qml" line="484"/>
+        <location filename="../src/Components/AppRibbon.qml" line="488"/>
         <location filename="../src/Components/CommentRibbon.qml" line="753"/>
         <location filename="../src/Components/EditRibbon.qml" line="158"/>
         <location filename="../src/Components/FormRibbon.qml" line="49"/>
@@ -641,7 +646,7 @@
         <translation>Edit Text</translation>
     </message>
     <message id="AddText">
-        <location filename="../src/Components/AppRibbon.qml" line="495"/>
+        <location filename="../src/Components/AppRibbon.qml" line="501"/>
         <location filename="../src/Components/EditRibbon.qml" line="178"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="133"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="485"/>
@@ -654,12 +659,12 @@
         <translation>Objects</translation>
     </message>
     <message id="Image">
-        <location filename="../src/Components/AppRibbon.qml" line="506"/>
+        <location filename="../src/Components/AppRibbon.qml" line="514"/>
         <location filename="../src/Components/EditRibbon.qml" line="194"/>
         <location filename="../src/Components/WatermarkDialog.qml" line="318"/>
         <location filename="../src/Components/WatermarkDialog.qml" line="345"/>
         <location filename="../src/PDFEditControllerCandidates.cpp" line="2606"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="319"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="323"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="705"/>
         <source>Image</source>
         <translation>Image</translation>
@@ -1480,7 +1485,7 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation type="vanished">Validate Signatures</translation>
     </message>
     <message id="File">
-        <location filename="../src/Components/AppRibbon.qml" line="526"/>
+        <location filename="../src/Components/AppRibbon.qml" line="536"/>
         <location filename="../src/Components/SignRibbon.qml" line="144"/>
         <location filename="../src/Components/ProtectRibbon.qml" line="150"/>
         <location filename="../src/Components/ViewRibbon.qml" line="58"/>
@@ -1493,7 +1498,7 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>Open</translation>
     </message>
     <message id="SavePdf">
-        <location filename="../src/Components/AppRibbon.qml" line="539"/>
+        <location filename="../src/Components/AppRibbon.qml" line="549"/>
         <location filename="../src/Components/ViewRibbon.qml" line="79"/>
         <source>Save PDF</source>
         <translation>Save PDF</translation>
@@ -1709,11 +1714,12 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <location filename="../src/PDFEditControllerCandidates.cpp" line="2616"/>
         <location filename="../src/PDFEditControllerCandidates.cpp" line="2698"/>
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="1212"/>
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="392"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="120"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="178"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="202"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="265"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="364"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="267"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="368"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="365"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="583"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="669"/>
@@ -2014,11 +2020,27 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <source>The selected image could not be opened.</source>
         <translation>The selected image could not be opened.</translation>
     </message>
+    <message id="ImageCopied">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="65"/>
+        <source>Image copied. You can paste it with Ctrl/Cmd+V.</source>
+        <translation>Image copied. You can paste it with Ctrl/Cmd+V.</translation>
+    </message>
+    <message id="ImageCopyFailed">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="68"/>
+        <source>Couldn&apos;t copy this image. Please select it and try again.</source>
+        <translation>Couldn&apos;t copy this image. Please select it and try again.</translation>
+    </message>
+    <message id="ClipboardImageInvalid">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="402"/>
+        <source>The clipboard image couldn&apos;t be read. Copy the image again and try pasting.</source>
+        <translation>The clipboard image couldn&apos;t be read. Copy the image again and try pasting.</translation>
+    </message>
     <message id="SelectedImageTooLarge">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="407"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="221"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="235"/>
         <location filename="../src/PDFEditControllerGeometry.cpp" line="247"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="270"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="272"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="600"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="612"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="618"/>
@@ -2026,9 +2048,9 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>The selected image is too large. Choose an image up to 40 megapixels and 64 MiB.</translation>
     </message>
     <message id="SaveWatermarkBeforeEditing">
-        <location filename="../src/PDFEditController.cpp" line="514"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="627"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="707"/>
+        <location filename="../src/PDFEditController.cpp" line="516"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="631"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="711"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="360"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="578"/>
         <location filename="../src/PDFEditControllerHeaderText.cpp" line="664"/>
@@ -2036,12 +2058,12 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>Save or discard watermark changes before editing page content.</translation>
     </message>
     <message id="PdfOpenPasswordInvalid">
-        <location filename="../src/PDFEditController.cpp" line="684"/>
+        <location filename="../src/PDFEditController.cpp" line="686"/>
         <source>Enter a password containing 1 to 127 UTF-8 bytes and no null characters.</source>
         <translation>Enter a password containing 1 to 127 UTF-8 bytes and no null characters.</translation>
     </message>
     <message id="PdfAnnotationsNotPermitted">
-        <location filename="../src/PDFEditController.cpp" line="961"/>
+        <location filename="../src/PDFEditController.cpp" line="963"/>
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="1140"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="862"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="884"/>
@@ -2066,13 +2088,13 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>This PDF does not permit changing annotations.</translation>
     </message>
     <message id="PdfPageAssemblyNotPermitted">
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="635"/>
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="715"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="639"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="719"/>
         <source>This PDF does not permit adding or deleting pages.</source>
         <translation>This PDF does not permit adding or deleting pages.</translation>
     </message>
     <message id="CannotDeleteOnlyPage">
-        <location filename="../src/PDFEditControllerGeometry.cpp" line="720"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="724"/>
         <source>A PDF must contain at least one page.</source>
         <translation>A PDF must contain at least one page.</translation>
     </message>
@@ -4017,7 +4039,7 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>The header image does not fit within the first 100 pt on page %1. Resize or move it.</translation>
     </message>
     <message id="HeaderPageNumbers">
-        <location filename="../src/Components/AppRibbon.qml" line="517"/>
+        <location filename="../src/Components/AppRibbon.qml" line="527"/>
         <location filename="../src/Components/HeaderPageNumberPanel.qml" line="75"/>
         <source>Page numbers</source>
         <translation>Page numbers</translation>
@@ -4120,34 +4142,34 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation type="vanished">Apply changes</translation>
     </message>
     <message id="HeaderSyncLimit">
-        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="520"/>
-        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="539"/>
+        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="523"/>
+        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="542"/>
         <source>There are too many matching headers. Narrow the document before trying again.</source>
         <translation>There are too many matching headers. Narrow the document before trying again.</translation>
     </message>
     <message id="HeaderSyncNoMatches">
-        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="574"/>
+        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="577"/>
         <source>No unambiguous matching headers were found on other pages.</source>
         <translation>No unambiguous matching headers were found on other pages.</translation>
     </message>
     <message id="HeaderSyncInvalidPages">
         <location filename="../src/Components/DocumentWorkspace.qml" line="266"/>
-        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="616"/>
+        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="619"/>
         <source>Enter valid PDF pages, for example 1-3, 5.</source>
         <translation>Enter valid PDF pages, for example 1-3, 5.</translation>
     </message>
     <message id="HeaderSyncCannotApply">
-        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="631"/>
+        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="636"/>
         <source>A matching header changed or the result does not fit inside the 100pt header. Find matches again or adjust the edit.</source>
         <translation>A matching header changed or the result does not fit inside the 100pt header. Find matches again or adjust the edit.</translation>
     </message>
     <message id="HeaderSyncNumberContent">
-        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="639"/>
+        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="644"/>
         <source>Page numbers keep their own values. Restore this number before applying formatting or position changes.</source>
         <translation>Page numbers keep their own values. Restore this number before applying formatting or position changes.</translation>
     </message>
     <message id="HeaderSyncEmptyRange">
-        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="764"/>
+        <location filename="../src/PDFEditControllerHeaderSync.cpp" line="779"/>
         <source>The selected range contains no matching headers on other pages.</source>
         <translation>The selected range contains no matching headers on other pages.</translation>
     </message>
