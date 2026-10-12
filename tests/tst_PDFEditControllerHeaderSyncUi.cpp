@@ -75,6 +75,14 @@ void PDFEditControllerTest::syncsHeadersThroughMainWindow()
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>"}));
+    {
+        PDFDocument document;
+        QVERIFY(document.open(QUrl::fromLocalFile(path)));
+        PDFEditController controller;
+        controller.setDocument(&document);
+        QVERIFY(controller.addHeaderText(QStringLiteral("Original"), QStringLiteral("all"), 24, 20, 180));
+        QVERIFY(controller.save());
+    }
     QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
     QQmlEngine engine;
     QQmlComponent component(&engine, QUrl::fromLocalFile(QFileInfo(
@@ -91,12 +99,18 @@ void PDFEditControllerTest::syncsHeadersThroughMainWindow()
     QVERIFY(session);
     auto &controller = *session->editController();
     QVERIFY(tabs->setProperty("currentIndex", 7));
-    QVERIFY(controller.addHeaderText(QStringLiteral("Original"), QStringLiteral("all"), 24, 20, 180));
-    const QString anchor = controller.draftsForPage(0).first().toMap()
-        .value(QStringLiteral("objectId")).toString();
     QTRY_VERIFY(controller.headerSelectionOnly());
+    const auto savedCandidate = [&](const QString &text) {
+        return candidateForText(waitForCandidates(controller, 0), text)
+            .value(QStringLiteral("objectId")).toString();
+    };
+    QString anchor = savedCandidate(QStringLiteral("Original"));
+    QVERIFY(!anchor.isEmpty());
     QVERIFY(controller.selectCandidate(0, anchor));
     QTRY_VERIFY(quickWindow->isExposed());
+    QObject *workspace = nullptr;
+    QTRY_VERIFY((workspace = window->property("activeWorkspaceItem").value<QObject *>()));
+    QTRY_VERIFY(workspace->property("initialViewReady").toBool());
 
     const auto item = [&](const char *name) {
         return syncVisualItem(quickWindow->contentItem(), QString::fromLatin1(name));
@@ -116,6 +130,7 @@ void PDFEditControllerTest::syncsHeadersThroughMainWindow()
     QTRY_VERIFY(enable->property("checked").toBool());
     QTRY_COMPARE_WITH_TIMEOUT(controller.headerSyncMatchCount(), 3, 15000);
     QCOMPARE(controller.headerSyncMatchPages(), QStringLiteral("1-3"));
+    QVERIFY(!item("headerSyncApplyButton"));
     // Opting out stays off when the properties panel is recreated.
     QVERIFY(click(enable));
     QTRY_VERIFY(!enable->property("checked").toBool());
@@ -163,67 +178,166 @@ void PDFEditControllerTest::syncsHeadersThroughMainWindow()
     QVERIFY(editor->setProperty("text", QStringLiteral("Changed header")));
     customPages = item("headerSyncSelectedPages");
     range = item("headerSyncPageRange");
-    auto *apply = item("headerSyncApplyButton");
-    QVERIFY(customPages && range && apply);
+    auto *save = item("headerSaveButton");
+    QVERIFY(customPages && range && save);
     QVERIFY(customPages->setProperty("checked", true));
-    QVERIFY(range->setProperty("text", QStringLiteral("2")));
-    QTRY_VERIFY(apply->isEnabled());
-    // Invoke the actual panel action while the inline editor still owns uncommitted text.
-    QVERIFY(controller.textEditActive());
-    QVERIFY(QMetaObject::invokeMethod(apply, "clicked"));
-    QTRY_VERIFY(!controller.textEditActive());
-    QCOMPARE(syncUiText(controller, 0), QStringLiteral("Changed header"));
-    QCOMPARE(syncUiText(controller, 1), QStringLiteral("Changed header"));
-    QCOMPARE(syncUiText(controller, 2), QStringLiteral("Original"));
-    controller.undo();
-    for (int page = 0; page < 3; ++page)
-        QCOMPARE(syncUiText(controller, page), QStringLiteral("Original"));
+    QTRY_VERIFY(save->isEnabled());
+    QSignalSpy saved(model, &PDFTabModel::sessionSaveFinished);
+    const auto fileBytes = [&]() {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const QByteArray originalBytes = fileBytes();
+    QVERIFY(!originalBytes.isEmpty());
 
-    // Apply also commits a pending font-size field before batching the edit.
+    // Empty or invalid custom ranges must keep the pending edit and never write
+    // the source file. In particular, empty custom input must not mean all pages.
+    QVERIFY(controller.textEditActive());
+    for (const QString &invalidRange : {QString(), QStringLiteral("4")}) {
+        QVERIFY(range->setProperty("text", invalidRange));
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QTest::qWait(150);
+        QCOMPARE(saved.count(), 0);
+        QVERIFY(!controller.saving());
+        QCOMPARE(fileBytes(), originalBytes);
+        QCOMPARE(range->property("text").toString(), invalidRange);
+        QVERIFY(controller.hasDrafts() || controller.textEditActive());
+    }
+    QVERIFY(range->setProperty("text", QStringLiteral("2")));
+    QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+    QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 15000);
+    QVERIFY(saved.first().at(1).toBool());
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(normalizedPageText(path, 0), QStringLiteral("Changed header"));
+    QCOMPARE(normalizedPageText(path, 1), QStringLiteral("Changed header"));
+    QCOMPARE(normalizedPageText(path, 2), QStringLiteral("Original"));
+    QCOMPARE(tabs->property("currentIndex").toInt(), 7);
+
+    // Save commits a pending font-size field and applies it to all matching pages.
+    anchor = savedCandidate(QStringLiteral("Changed header"));
+    QVERIFY(!anchor.isEmpty());
     QVERIFY(controller.selectCandidate(0, anchor));
     QTRY_VERIFY((enable = item("headerSyncEnabled")));
     QTRY_VERIFY(enable->property("checked").toBool());
     QTRY_COMPARE_WITH_TIMEOUT(controller.headerSyncMatchCount(), 3, 15000);
+    auto *allPages = item("headerSyncAllPages");
+    QVERIFY(allPages);
+    QVERIFY(allPages->setProperty("checked", true));
     QQuickItem *fontSizeBox = nullptr;
     QTRY_VERIFY((fontSizeBox = syncFontSizeBox(quickWindow->contentItem())));
-    const qreal originalSize = controller.selectedFontSize();
     QVERIFY(QMetaObject::invokeMethod(fontSizeBox, "beginSizeEdit"));
     QVERIFY(fontSizeBox->setProperty("editText", QStringLiteral("14")));
-    auto *workspace = window->findChild<QObject *>(QStringLiteral("documentWorkspace"));
-    QVERIFY(workspace);
     QVERIFY(workspace->property("hasPendingPanelEdits").toBool());
-    QTRY_VERIFY((apply = item("headerSyncApplyButton")) && apply->isEnabled());
-    QVERIFY(QMetaObject::invokeMethod(apply, "clicked"));
+    QTRY_VERIFY((save = item("headerSaveButton")) && save->isEnabled());
+    saved.clear();
+    // A save requested during the asynchronous match scan must wait and retain
+    // the pending property input until that match set can be applied.
+    controller.findSimilarHeaders();
+    QVERIFY(controller.headerSyncLoading());
+    QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+    QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 15000);
+    QVERIFY(saved.first().at(1).toBool());
     QTRY_VERIFY(!workspace->property("hasPendingPanelEdits").toBool());
-    QCOMPARE(controller.selectedFontSize(), 14.0);
-    for (int page = 0; page < 3; ++page) {
-        const auto draft = controller.draftsForPage(page).first().toMap();
-        const auto spans = draft.value(QStringLiteral("characterSpans")).toList();
-        QVERIFY(!spans.isEmpty());
-        QCOMPARE(spans.first().toMap().value(QStringLiteral("fontSizeRatio")).toReal() * 400, 14.0);
+    QVERIFY(!controller.hasDrafts());
+    {
+        PDFDocument reopened;
+        QVERIFY(reopened.open(QUrl::fromLocalFile(path)));
+        PDFEditController reopenedController;
+        reopenedController.setDocument(&reopened);
+        reopenedController.setTool(PDFEditController::SelectTool);
+        for (int page = 0; page < 3; ++page) {
+            QCOMPARE(normalizedPageText(path, page), QStringLiteral("Changed header"));
+            const auto candidate = candidateForText(waitForCandidates(reopenedController, page),
+                QStringLiteral("Changed header"));
+            QVERIFY(!candidate.isEmpty());
+            QVERIFY(reopenedController.selectCandidate(page,
+                candidate.value(QStringLiteral("objectId")).toString()));
+            QVERIFY(qAbs(reopenedController.selectedFontSize() - 14.0) < 0.01);
+        }
     }
-    controller.undo();
-    QCOMPARE(controller.selectedFontSize(), originalSize);
 
-    // The synchronization panel survives deleting its anchor and still applies/undoes as a group.
+    // Clicking blank space after moving a header must retain the pending
+    // synchronization snapshot for Save, even though no object remains selected.
+    anchor = savedCandidate(QStringLiteral("Changed header"));
+    QVERIFY(!anchor.isEmpty());
+    QVERIFY(controller.selectCandidate(0, anchor));
+    QTRY_COMPARE_WITH_TIMEOUT(controller.headerSyncMatchCount(), 3, 15000);
+    allPages = item("headerSyncAllPages");
+    QVERIFY(allPages);
+    QVERIFY(allPages->setProperty("checked", true));
+    const QRectF movedFrame = controller.selectedFrameRect().translated(12.0 / 300, 3.0 / 400);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(movedFrame);
+    controller.finishSelectedFrameResize();
+    controller.clearSelection();
+    QVERIFY(controller.selectedObjectId().isEmpty());
+    QVERIFY(controller.headerSyncCanApply());
+    QTRY_VERIFY((save = item("headerSaveButton")) && save->isEnabled());
+    saved.clear();
+    QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+    QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 15000);
+    QVERIFY(saved.first().at(1).toBool());
+    QVERIFY(!controller.hasDrafts());
+    for (int page = 0; page < 3; ++page) {
+        const auto candidate = candidateForText(waitForCandidates(controller, page),
+            QStringLiteral("Changed header"));
+        QVERIFY(!candidate.isEmpty());
+        const QRectF frame = candidate.value(QStringLiteral("frameRect")).toRectF();
+        QVERIFY(qAbs(frame.x() - movedFrame.x()) * 300 < 0.1);
+        QVERIFY(qAbs(frame.y() - movedFrame.y()) * 400 < 0.1);
+    }
+
+    // Opting out saves only the local inline edit, even with a custom range set.
+    anchor = savedCandidate(QStringLiteral("Changed header"));
+    QVERIFY(!anchor.isEmpty());
     QVERIFY(controller.selectCandidate(0, anchor));
     QTRY_VERIFY((enable = item("headerSyncEnabled")));
     QTRY_VERIFY(enable->property("checked").toBool());
     QTRY_COMPARE_WITH_TIMEOUT(controller.headerSyncMatchCount(), 3, 15000);
+    customPages = item("headerSyncSelectedPages");
+    range = item("headerSyncPageRange");
+    QVERIFY(customPages && range);
+    QVERIFY(customPages->setProperty("checked", true));
+    QVERIFY(range->setProperty("text", QString()));
+    QVERIFY(click(enable));
+    QTRY_VERIFY(!enable->property("checked").toBool());
+    QTRY_VERIFY((overlay = syncEditOverlay(quickWindow->contentItem())));
+    QVERIFY(QMetaObject::invokeMethod(overlay, "beginSelectedEditing"));
+    QTRY_VERIFY(controller.textEditActive());
+    QTRY_VERIFY((editor = syncTextEditor(overlay)));
+    QVERIFY(editor->setProperty("text", QStringLiteral("Local header")));
+    QTRY_VERIFY((save = item("headerSaveButton")) && save->isEnabled());
+    saved.clear();
+    QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+    QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 15000);
+    QVERIFY(saved.first().at(1).toBool());
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(normalizedPageText(path, 0), QStringLiteral("Local header"));
+    QCOMPARE(normalizedPageText(path, 1), QStringLiteral("Changed header"));
+    QCOMPARE(normalizedPageText(path, 2), QStringLiteral("Changed header"));
+
+    // Save retains the synchronization snapshot after deleting its selected anchor.
+    anchor = savedCandidate(QStringLiteral("Local header"));
+    QVERIFY(!anchor.isEmpty());
+    QVERIFY(controller.selectCandidate(0, anchor));
+    QTRY_VERIFY((enable = item("headerSyncEnabled")));
+    QTRY_VERIFY(enable->property("checked").toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(controller.headerSyncMatchCount(), 3, 15000);
+    allPages = item("headerSyncAllPages");
+    QVERIFY(allPages);
+    QVERIFY(allPages->setProperty("checked", true));
     controller.deleteSelectedObject();
     QVERIFY(controller.selectedObjectId().isEmpty());
-    QTRY_VERIFY((apply = item("headerSyncApplyButton")) && apply->isEnabled());
-    QVERIFY(QMetaObject::invokeMethod(apply, "clicked"));
+    QTRY_VERIFY(item("headerSyncPanel"));
+    QTRY_VERIFY((save = item("headerSaveButton")) && save->isEnabled());
+    saved.clear();
+    QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+    QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 15000);
+    QVERIFY(saved.first().at(1).toBool());
+    QVERIFY(!controller.hasDrafts());
     for (int page = 0; page < 3; ++page)
-        QVERIFY(controller.draftsForPage(page).isEmpty());
-    controller.undo();
-    for (int page = 0; page < 3; ++page)
-        QCOMPARE(syncUiText(controller, page), QStringLiteral("Original"));
-    QVERIFY(controller.selectCandidate(0, anchor));
-    QTRY_VERIFY((enable = item("headerSyncEnabled")));
-    QTRY_VERIFY(enable->property("checked").toBool());
-    QTRY_COMPARE_WITH_TIMEOUT(controller.headerSyncMatchCount(), 3, 15000);
-    controller.discardDrafts();
+        QVERIFY(normalizedPageText(path, page).isEmpty());
     QVERIFY(tabs->setProperty("currentIndex", 1));
     QTRY_VERIFY(!controller.headerSyncAvailable());
     QCOMPARE(controller.headerSyncMatchCount(), 0);

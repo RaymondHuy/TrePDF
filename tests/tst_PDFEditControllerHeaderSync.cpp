@@ -312,6 +312,185 @@ void PDFEditControllerTest::syncsGroupedHeaderTextLayoutAcrossDifferentFrames()
     }
 }
 
+void PDFEditControllerTest::syncsNarrowedAndMovedHeaderText_data()
+{
+    QTest::addColumn<qreal>("peerWidth");
+    QTest::addColumn<bool>("shrinkHeight");
+    QTest::addColumn<bool>("displacedPeers");
+    QTest::newRow("equal-saved-frames") << qreal(180) << false << false;
+    QTest::newRow("different-saved-frames") << qreal(65) << false << false;
+    QTest::newRow("height-only") << qreal(180) << true << false;
+    QTest::newRow("displaced-group-members") << qreal(180) << false << true;
+}
+
+void PDFEditControllerTest::syncsNarrowedAndMovedHeaderText()
+{
+    QFETCH(qreal, peerWidth);
+    QFETCH(bool, shrinkHeight);
+    QFETCH(bool, displacedPeers);
+    const QString suffix = QString::fromLatin1(QTest::currentDataTag());
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("sync-narrow-move-%1.pdf").arg(suffix));
+    const QString seed = m_temporaryDirectory.filePath(QStringLiteral("sync-narrow-move-seed-%1.pdf").arg(suffix));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("sync-narrow-move-saved-%1.pdf").arg(suffix));
+    QVERIFY(writePdfObjects(path, {
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> >>"}));
+    PDFDocument document;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    PDFEditController controller;
+    controller.setDocument(&document);
+    const QString text = QStringLiteral("hello");
+    QVERIFY(controller.addHeaderText(text, QStringLiteral("all"), 24, 20, peerWidth));
+    controller.setTool(PDFEditController::SelectTool);
+    if (shrinkHeight) {
+        for (int page = 0; page < 3; ++page) {
+            const QSizeF size = document.pageSize(page);
+            QVERIFY(controller.selectCandidate(page, syncId(onlyDraft(controller, page))));
+            controller.beginSelectedFrameResize();
+            controller.updateSelectedFrameRect(QRectF(24.0 / size.width(), 20.0 / size.height(),
+                peerWidth / size.width(), 60.0 / size.height()));
+            controller.finishSelectedFrameResize();
+        }
+    }
+    QVERIFY(controller.selectCandidate(0, syncId(onlyDraft(controller, 0))));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(QRectF(24.0 / 300, 20.0 / 400, 180.0 / 300,
+        (shrinkHeight ? 60.0 : 24.0) / 400));
+    controller.finishSelectedFrameResize();
+    if (displacedPeers) {
+        // A member moved separately before Save still belongs to this group.
+        for (int page = 1; page < 3; ++page) {
+            const QSizeF size = document.pageSize(page);
+            QVERIFY(controller.selectCandidate(page, syncId(onlyDraft(controller, page))));
+            controller.beginSelectedFrameResize();
+            controller.updateSelectedFrameRect(controller.selectedFrameRect().translated(
+                76.0 / size.width(), 40.0 / size.height()));
+            controller.finishSelectedFrameResize();
+        }
+    }
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(seed)));
+
+    activateHeaderSelection(controller);
+    QVector<QRectF> originalFrames;
+    for (int page = 0; page < 3; ++page) {
+        const auto candidate = headerCandidate(controller, page, text);
+        QVERIFY(!candidate.isEmpty());
+        originalFrames.append(candidate.value(QStringLiteral("frameRect")).toRectF());
+    }
+    QVERIFY(qAbs(originalFrames.at(0).width() * 300 - 180) < 0.01);
+    QVERIFY(qAbs(originalFrames.at(1).width() * 300 - peerWidth) < 0.01);
+    QVERIFY(controller.selectCandidate(0, syncId(headerCandidate(controller, 0, text))));
+    controller.findSimilarHeaders();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.headerSyncMatchCount(), 3, 15000);
+
+    // Each gesture is valid on its own. The translated old content box would
+    // cross the right page edge or 100pt header limit, while the new frame fits.
+    const QRectF original = controller.selectedFrameRect();
+    const QRectF targetFramePoints = shrinkHeight
+        ? QRectF(24, 70, 180, 24) : QRectF(220, 40, 60, 24);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(QRectF(original.topLeft(),
+        QSizeF(targetFramePoints.width() / 300, targetFramePoints.height() / 400)));
+    // The inline editor reports the newly laid-out content during a resize.
+    controller.updateSelectedContentBounds(controller.selectedFrameRect());
+    controller.finishSelectedFrameResize();
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(QRectF(targetFramePoints.x() / 300,
+        targetFramePoints.y() / 400, targetFramePoints.width() / 300, targetFramePoints.height() / 400));
+    controller.finishSelectedFrameResize();
+    const QRectF anchorFrame = controller.selectedFrameRect();
+    QVERIFY(qAbs(anchorFrame.x() * 300 - targetFramePoints.x()) < 0.01);
+    QVERIFY(qAbs(anchorFrame.y() * 400 - targetFramePoints.y()) < 0.01);
+    QVERIFY(qAbs(anchorFrame.width() * 300 - targetFramePoints.width()) < 0.01);
+    QVERIFY(qAbs(anchorFrame.height() * 400 - targetFramePoints.height()) < 0.01);
+    QVERIFY(controller.selectedContentBounds().right() <= 1.0);
+    QVERIFY(controller.selectedContentBounds().bottom() * 400 <= 100.001);
+    QVERIFY(controller.headerSyncCanApply());
+    QVERIFY2(controller.applyHeaderChanges(), qPrintable(controller.headerSyncError()));
+
+    QVector<QRectF> synchronizedFrames;
+    for (int page = 0; page < 3; ++page) {
+        const auto draft = onlyDraft(controller, page);
+        const auto frame = draft.value(QStringLiteral("frameRect")).toRectF();
+        const auto content = draft.value(QStringLiteral("contentBounds")).toRectF();
+        const QSizeF size = document.pageSize(page);
+        QCOMPARE(draft.value(QStringLiteral("text")).toString(), text);
+        QVERIFY(qAbs(frame.x() * size.width() - targetFramePoints.x()) < 0.01);
+        QVERIFY(qAbs(frame.y() * size.height() - targetFramePoints.y()) < 0.01);
+        QVERIFY(qAbs(frame.width() * size.width() - targetFramePoints.width()) < 0.01);
+        QVERIFY(qAbs(frame.height() * size.height() - anchorFrame.height() * 400) < 0.01);
+        QVERIFY(content.right() <= 1.0);
+        QVERIFY(content.bottom() * size.height() <= 100.001);
+        synchronizedFrames.append(frame);
+    }
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    for (int page = 0; page < 3; ++page) {
+        const auto candidate = headerCandidate(controller, page, text);
+        QCOMPARE(candidate.value(QStringLiteral("frameRect")).toRectF(), originalFrames.at(page));
+    }
+    controller.redo();
+    for (int page = 0; page < 3; ++page)
+        QCOMPARE(onlyDraft(controller, page).value(QStringLiteral("frameRect")).toRectF(), synchronizedFrames.at(page));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+
+    PDFDocument reopenedDocument;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+    PDFEditController reopenedController;
+    reopenedController.setDocument(&reopenedDocument);
+    activateHeaderSelection(reopenedController);
+    for (int page = 0; page < 3; ++page) {
+        QCOMPARE(normalizedPageText(saved, page), text);
+        const auto candidate = headerCandidate(reopenedController, page, text);
+        QVERIFY(!candidate.isEmpty());
+        const auto frame = candidate.value(QStringLiteral("frameRect")).toRectF();
+        const QSizeF size = reopenedDocument.pageSize(page);
+        QVERIFY(qAbs(frame.x() * size.width() - targetFramePoints.x()) < 0.01);
+        QVERIFY(qAbs(frame.y() * size.height() - targetFramePoints.y()) < 0.01);
+        QVERIFY(qAbs(frame.width() * size.width() - targetFramePoints.width()) < 0.01);
+        QVERIFY(qAbs(frame.height() * size.height() - anchorFrame.height() * 400) < 0.01);
+    }
+    QVERIFY(reopenedController.selectCandidate(0, syncId(headerCandidate(reopenedController, 0, text))));
+    reopenedController.findSimilarHeaders();
+    QTRY_COMPARE_WITH_TIMEOUT(reopenedController.headerSyncMatchCount(), 3, 15000);
+}
+
+void PDFEditControllerTest::rejectsReflowedHeaderContentOutsideHeader()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("sync-reflow-overflow.pdf"));
+    QVERIFY(createSyncPages(path, 3));
+    PDFDocument document;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    PDFEditController controller;
+    controller.setDocument(&document);
+    const QString text = QStringLiteral("hello hello hello hello");
+    QVERIFY(controller.addHeaderText(text, QStringLiteral("all"), 24, 70, 180));
+    activateHeaderSelection(controller);
+    QVERIFY(controller.selectCandidate(0, syncId(onlyDraft(controller, 0))));
+    controller.findSimilarHeaders();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.headerSyncMatchCount(), 3, 15000);
+    const QVariantMap firstPeer = onlyDraft(controller, 1);
+    const QVariantMap secondPeer = onlyDraft(controller, 2);
+    const QRectF originalFrame = controller.selectedFrameRect();
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(QRectF(originalFrame.topLeft(), QSizeF(40.0 / 300, originalFrame.height())));
+    controller.finishSelectedFrameResize();
+    const QVariantMap editedAnchor = onlyDraft(controller, 0);
+    QVERIFY(controller.selectedFrameRect().bottom() * 400 <= 100.001);
+    QVERIFY(controller.headerSyncCanApply());
+    // The frame fits, but four wrapped lines extend below the actual header.
+    QVERIFY(!controller.applyHeaderChanges());
+    QVERIFY(!controller.headerSyncError().isEmpty());
+    QCOMPARE(onlyDraft(controller, 0), editedAnchor);
+    QCOMPARE(onlyDraft(controller, 1), firstPeer);
+    QCOMPARE(onlyDraft(controller, 2), secondPeer);
+    controller.undo();
+    QCOMPARE(onlyDraft(controller, 0).value(QStringLiteral("frameRect")).toRectF(), originalFrame);
+}
+
 void PDFEditControllerTest::retainsHeaderGroupsAndPageNumberValuesAfterSave()
 {
     const QString path = m_temporaryDirectory.filePath(QStringLiteral("sync-numbers.pdf"));

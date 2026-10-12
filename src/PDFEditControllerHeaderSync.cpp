@@ -196,7 +196,7 @@ void PDFEditController::resetHeaderSync()
     cancelHeaderSync();
 }
 
-bool PDFEditController::headerSyncDraftEligible(const Draft &draft) const
+bool PDFEditController::headerSyncDraftEligible(const Draft &draft, bool includeContentBounds) const
 {
     const Candidate &candidate = draft.candidate;
     if (!m_document || !candidate.editable || candidate.headerMetadataInvalid
@@ -213,9 +213,10 @@ bool PDFEditController::headerSyncDraftEligible(const Draft &draft) const
         return false;
     const QSizeF size = m_document->pageSize(candidate.page);
     if (!qIsFinite(size.width()) || !qIsFinite(size.height()) || size.isEmpty()
-        || !validRect(draft.frameRect) || !validRect(draft.contentBounds))
+        || !validRect(draft.frameRect) || (includeContentBounds && !validRect(draft.contentBounds)))
         return false;
-    const QRectF bounds = inPoints(draft.frameRect.united(draft.contentBounds), size);
+    const QRectF bounds = inPoints(includeContentBounds
+        ? draft.frameRect.united(draft.contentBounds) : draft.frameRect, size);
     return qIsFinite(bounds.x()) && qIsFinite(bounds.y())
         && qIsFinite(bounds.width()) && qIsFinite(bounds.height())
         && bounds.width() > 0 && bounds.height() > 0
@@ -226,9 +227,11 @@ bool PDFEditController::headerSyncDraftEligible(const Draft &draft) const
 
 bool PDFEditController::measureHeaderSyncText(Draft &draft) const
 {
-    const QSizeF size = m_document->pageSize(draft.candidate.page);
-    if (!headerSyncDraftEligible(draft) || draft.characterSpans.isEmpty())
+    // A resized peer still has its previous content extent until this reflow.
+    // Validate the new frame first, then check the measured content below.
+    if (!headerSyncDraftEligible(draft, false) || draft.characterSpans.isEmpty())
         return false;
+    const QSizeF size = m_document->pageSize(draft.candidate.page);
     qsizetype covered = 0;
     for (const CharacterSpan &span : draft.characterSpans) {
         const CharacterFormat &format = span.format;
@@ -365,11 +368,13 @@ void PDFEditController::captureHeaderSyncSelection()
         emit headerSyncChanged();
         return;
     }
-    // Deletion clears selection, but its original matching snapshot remains
-    // available until the user selects another object or leaves Header.
+    // Keep an edited header's snapshot after clicking outside its frame, so
+    // Save can still propagate the edit even without a visible selection.
     if (m_headerSyncValid && !m_hasSelection) {
         const Draft current = currentHeaderSyncDraft();
-        if (draftRepresentsDeletion(current.candidate.kind, current.text, current.deleted)) {
+        if (draftRepresentsDeletion(current.candidate.kind, current.text, current.deleted)
+            || ((m_headerSyncReady || m_headerSyncLoading || !m_headerSyncError.isEmpty())
+                && !sameDraftContent(current, m_headerSyncBaseline))) {
             emit headerSyncChanged();
             return;
         }
@@ -624,6 +629,8 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
     const bool contentChanged = anchor.text != m_headerSyncBaseline.text;
     const bool formatChanged = !sameCharacterSpans(anchor.characterSpans, m_headerSyncBaseline.characterSpans)
         || !sameParagraphFormats(anchor.paragraphFormats, m_headerSyncBaseline.paragraphFormats);
+    const bool frameResized = !withinTolerance(newFrame.width(), oldFrame.width(), 0.001)
+        || !withinTolerance(newFrame.height(), oldFrame.height(), 0.001);
     const auto fail = [this]() {
         //% "A matching header changed or the result does not fit inside the 100pt header. Find matches again or adjust the edit."
         m_headerSyncError = qtTrId("HeaderSyncCannotApply");
@@ -638,10 +645,9 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
         emit headerSyncChanged();
         return false;
     }
-    if (!deleting && (!headerSyncDraftEligible(anchor)
-        || (isTextCandidateKind(anchor.candidate.kind)
-            && (contentChanged || formatChanged || !withinTolerance(newFrame.width(), oldFrame.width(), 0.001))
-            && !measureHeaderSyncText(anchor))))
+    const bool reflowAnchor = isTextCandidateKind(anchor.candidate.kind)
+        && (contentChanged || formatChanged || frameResized);
+    if (!deleting && !(reflowAnchor ? measureHeaderSyncText(anchor) : headerSyncDraftEligible(anchor)))
         return fail();
     newFrame = inPoints(anchor.frameRect, anchorSize);
     qsizetype textWork = anchor.text.size();
@@ -676,12 +682,21 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
             // Group members can retain different saved layout widths. Copy the
             // edited text's frame size so identical content wraps identically.
             const bool copyTextLayout = text && !m_headerSyncPreserveNumbers
-                && (contentChanged || formatChanged);
+                && (contentChanged || formatChanged || frameResized);
             const QSizeF targetSize = copyTextLayout ? newFrame.size()
                 : QSizeF(previous.width() + newFrame.width() - oldFrame.width(),
                          previous.height() + newFrame.height() - oldFrame.height());
-            const QRectF target(previous.topLeft() + newFrame.topLeft() - oldFrame.topLeft(),
-                targetSize);
+            QPointF targetOrigin = previous.topLeft() + newFrame.topLeft() - oldFrame.topLeft();
+            // A saved Header group may contain members moved independently.
+            // Moving the group sets the edited coordinates, rather than adding
+            // its old offsets again and pushing those members out of the header.
+            if (!anchor.candidate.headerGroupId.isEmpty()) {
+                if (!withinTolerance(newFrame.x(), oldFrame.x(), 0.001))
+                    targetOrigin.setX(newFrame.x());
+                if (!withinTolerance(newFrame.y(), oldFrame.y(), 0.001))
+                    targetOrigin.setY(newFrame.y());
+            }
+            const QRectF target(targetOrigin, targetSize);
             after.frameRect = fromPoints(target, size);
             after.contentBounds = before.contentBounds.translated(after.frameRect.topLeft() - before.frameRect.topLeft());
             if (text && (contentChanged || formatChanged)) {
@@ -741,7 +756,9 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
                 after.imageQuarterTurns = (before.imageQuarterTurns + anchor.imageQuarterTurns
                     - m_headerSyncBaseline.imageQuarterTurns + 4) % 4;
                 after.contentBounds = after.frameRect;
-            } else if (contentChanged || formatChanged || !withinTolerance(target.width(), previous.width(), 0.001)) {
+            } else if (contentChanged || formatChanged
+                || !withinTolerance(target.width(), previous.width(), 0.001)
+                || !withinTolerance(target.height(), previous.height(), 0.001)) {
                 // Validate every reflow before making the batch visible.
                 if (!measureHeaderSyncText(after))
                     return fail();

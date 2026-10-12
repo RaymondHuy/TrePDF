@@ -15,7 +15,11 @@ Column {
     property PDFDocumentSession session: null
     property bool anySaving: false
     property bool hasPendingPanelEdits: false
-    property bool headerPlacementPending: false
+    property bool headerTextToolSelected: false
+    property bool headerImageToolSelected: false
+    property bool headerPageNumberToolSelected: false
+    readonly property bool headerPlacementPending: headerTextToolSelected
+        || headerImageToolSelected || headerPageNumberToolSelected
     property bool hasPendingHeaderPlacement: false
     property int acceptedTabIndex: 0
     property var prepareHeaderEntry: function() { return !root.hasUnsavedChanges }
@@ -491,6 +495,8 @@ Column {
                     theme: root.theme
                     documentLoaded: root.document.loaded
                     enabled: root.document.loaded && !root.anySaving
+                    primary: root.document.loaded && root.headerTabActive
+                        && root.headerTextToolSelected
                     //% "Add Text"
                     text: qsTrId("AddText")
                     iconSource: "../assets/icons/type.svg"
@@ -502,6 +508,8 @@ Column {
                     theme: root.theme
                     documentLoaded: root.document.loaded
                     enabled: root.document.loaded && !root.anySaving
+                    primary: root.document.loaded && root.headerTabActive
+                        && root.headerImageToolSelected
                     //% "Image"
                     text: qsTrId("Image")
                     iconSource: "../assets/icons/image-plus.svg"
@@ -513,6 +521,8 @@ Column {
                     theme: root.theme
                     documentLoaded: root.document.loaded
                     enabled: root.document.loaded && !root.anySaving
+                    primary: root.document.loaded && root.headerTabActive
+                        && root.headerPageNumberToolSelected
                     //% "Page numbers"
                     text: qsTrId("HeaderPageNumbers")
                     iconSource: "../assets/icons/page-single.svg"

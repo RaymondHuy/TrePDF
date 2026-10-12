@@ -33,9 +33,19 @@ Current features:
 - Header > Select enables synchronization by default in a right-side panel when
   an eligible object is selected; users can uncheck it for that selection. It matches
   the selected text/image's pre-edit snapshot against other 100-point headers,
-  then applies content, style, geometry or deletion to all matches or a custom
-  range. Text content/style changes copy the edited frame's physical size so
-  narrower group members keep the same wrapping. Header text also persists its
+  then Save, Cmd/Ctrl+S or Save As commits input, waits for the current scan and
+  applies content, style, geometry or deletion to all matches or a custom range
+  before writing. The synchronization panel has no separate Apply changes button.
+  Invalid or empty custom ranges and scan/apply failures stop saving and retain
+  the edits; disabling synchronization saves only the selected object's change.
+  A dirty enabled anchor survives blank deselection until another object, tool
+  or history change replaces its matching context. Synchronization remains per
+  selection. Text content/style/resize changes copy the edited frame's physical
+  size so narrower group members keep the same wrapping. Resized text is reflowed
+  before validating its content bounds, including after movement near page edges.
+  Moving managed Header groups copies each changed physical coordinate instead
+  of accumulating earlier per-page offsets; unmarked headers keep relative movement.
+  Header text also persists its
   logical paragraph/frame through Save/reopen; bounded grouping recovers older
   marked glyph fragments without joining ambiguous overprints. Newly created Header batches retain a UUID/role in bounded
   `TrePDFHeader` object marks through Save/reopen. Unmarked PDF headers require
@@ -52,8 +62,8 @@ Current features:
   and image rotation stay inside the header; text retains Edit reflow behavior
   and leaves Header selection if committed content overflows. Select cancels
   pending Header placement. Edits affect one page object and use normal
-  Undo/Redo and Save; the optional synchronization panel propagates them to
-  matching headers. See `docs/header-text-pipeline.md`.
+  Undo/Redo and Save; enabled synchronization propagates them to matching headers
+  during Save. See `docs/header-text-pipeline.md`.
 
 - Header > Page numbers places 12-point black numbers by clicking the gray
   100-point header, then opens a right panel for inclusive PDF start/stop pages

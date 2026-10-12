@@ -40,7 +40,11 @@ Item {
     readonly property string headerSyncAnchorKey: session.editController.headerSyncKey
     property bool headerSyncAllMatchingPages: true
     property string headerSyncPageRange: ""
+    property string headerSaveError: ""
+    onHeaderSyncAllMatchingPagesChanged: headerSaveError = ""
+    onHeaderSyncPageRangeChanged: headerSaveError = ""
     onHeaderSyncAnchorKeyChanged: {
+        headerSaveError = ""
         headerSyncAllMatchingPages = true
         headerSyncPageRange = ""
         if (root.headerSyncAnchorKey.length > 0)
@@ -239,6 +243,35 @@ Item {
             headerPageNumberPlacementState.submit()
         }
         return !hasPendingHeaderPlacement
+    }
+
+    function applyPendingHeaderChanges() {
+        headerSaveError = ""
+        const controller = session.editController
+        if (!headerSelectionActive || !controller.headerSyncAvailable)
+            return true
+        if (controller.headerSyncLoading)
+            return false
+        // A completed scan with no peers has a count of one (the anchor).
+        // A failed scan has no result and must not silently save a local edit.
+        if (controller.headerSyncMatchCount === 0
+                && controller.headerSyncError.length > 0) {
+            headerSaveError = controller.headerSyncError
+            return false
+        }
+        if (!controller.headerSyncCanApply)
+            return true
+        if (!headerSyncAllMatchingPages && headerSyncPageRange.trim().length === 0) {
+            //% "Enter valid PDF pages, for example 1-3, 5."
+            headerSaveError = qsTrId("HeaderSyncInvalidPages")
+            return false
+        }
+        if (!controller.applyHeaderChanges(headerSyncAllMatchingPages
+                ? "" : headerSyncPageRange.trim())) {
+            headerSaveError = controller.headerSyncError
+            return false
+        }
+        return true
     }
 
     onHeaderTabActiveChanged: {
@@ -1014,18 +1047,14 @@ Item {
                     HeaderSyncPanel {
                         theme: root.theme
                         editController: root.session.editController
-                        pendingPanelEdits: root.hasPendingPanelEdits
                         allMatchingPages: root.headerSyncAllMatchingPages
                         pageRange: root.headerSyncPageRange
+                        saveError: root.headerSaveError
                         onPageScopeChangeRequested: allMatchingPages => {
                             root.headerSyncAllMatchingPages = allMatchingPages
                         }
                         onPageRangeChangeRequested: pages => {
                             root.headerSyncPageRange = pages
-                        }
-                        onApplyRequested: pages => {
-                            if (root.prepareForDeactivation())
-                                root.session.editController.applyHeaderChanges(pages)
                         }
                     }
                 }

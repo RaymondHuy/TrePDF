@@ -11,15 +11,14 @@ Rectangle {
 
     required property AppTheme theme
     required property PDFEditController editController
-    property bool pendingPanelEdits: false
     property bool allMatchingPages: true
     property string pageRange: ""
+    property string saveError: ""
     readonly property bool inputFocused: pageRangeInput.activeFocus
     readonly property bool syncActive: editController.headerSyncLoading
         || editController.headerSyncMatchCount > 0
         || editController.headerSyncError.length > 0
 
-    signal applyRequested(string pages)
     signal pageScopeChangeRequested(bool allMatchingPages)
     signal pageRangeChangeRequested(string pages)
 
@@ -95,7 +94,7 @@ Rectangle {
                 spacing: 8
 
                 FieldLabel {
-                    //% "Edit this header, then apply the changes to the matching pages."
+                    //% "Choose Save to apply your changes to the matching pages and save the PDF."
                     text: qsTrId("HeaderSyncEditHint")
                 }
 
@@ -181,24 +180,9 @@ Rectangle {
                 FieldLabel {
                     objectName: "headerSyncError"
                     visible: text.length > 0
-                    text: root.editController.headerSyncError
+                    text: root.saveError.length > 0
+                        ? root.saveError : root.editController.headerSyncError
                     color: "#b3261e"
-                }
-
-                Button {
-                    objectName: "headerSyncApplyButton"
-                    Layout.fillWidth: true
-                    enabled: !root.editController.headerSyncLoading
-                        && !root.editController.saving
-                        && (root.editController.headerSyncCanApply
-                            || ((root.editController.textEditActive || root.pendingPanelEdits)
-                                && root.editController.headerSyncMatchCount > 1))
-                        && (allPages.checked || pageRangeInput.text.trim().length > 0)
-                    highlighted: true
-                    //% "Apply changes"
-                    text: qsTrId("HeaderSyncApplyChanges")
-                    onClicked: root.applyRequested(allPages.checked
-                        ? "" : pageRangeInput.text.trim())
                 }
             }
         }

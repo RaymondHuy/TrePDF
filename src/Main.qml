@@ -36,6 +36,7 @@ ApplicationWindow {
     property PDFDocumentSession pendingSession: null
     property PDFEditController fontDownloadController: null
     property PDFDocumentSession saveAsSession: null
+    property var headerSaveRequest: null
     property PDFDocumentSession excelExportSession: null
     property PDFDocumentSession workspaceSession: null
     property PDFDocumentSession deletePageSession: null
@@ -95,7 +96,7 @@ ApplicationWindow {
         || externalLinkPopup.visible || discardDraftPopup.visible || deletePagePopup.visible
         || documentAccess.busy || saveAsDialog.writePending || excelExportDialog.writePending
     readonly property bool fileOpenBlocked:
-        tabModel.anySaving || openingFiles || modalOperationActive
+        tabModel.anySaving || headerSaveRequest !== null || openingFiles || modalOperationActive
 
     onFileOpenBlockedChanged: {
         if (!fileOpenBlocked)
@@ -149,14 +150,61 @@ ApplicationWindow {
         return true
     }
 
-    function requestHeaderSave() {
+    function requestHeaderSave(saveAs = false) {
+        if (!activeSession || tabModel.anySaving || headerSaveRequest !== null)
+            return
         const workspace = activeWorkspace()
         if (workspace && !workspace.submitPendingHeaderPlacement()) {
-            //% "Please check the header settings in the right panel, then choose Apply or Cancel before switching tabs."
+            //% "Please check the header settings in the right panel, then choose Save again. Your changes are still here."
             showStatus(qsTrId("HeaderPendingInputBeforeLeaving"))
             return
         }
-        requestSave()
+        if (!prepareActiveWorkspace())
+            return
+        headerSaveRequest = {
+            session: activeSession,
+            workspace: workspace,
+            anchorKey: activeEditController.headerSyncKey,
+            source: activeDocument.source.toString(),
+            saveAs: saveAs
+        }
+        // Let the selection's queued match scan start before deciding to save.
+        Qt.callLater(continueHeaderSave)
+    }
+
+    function continueHeaderSave() {
+        const request = headerSaveRequest
+        if (!request)
+            return
+        const workspace = activeWorkspace()
+        if (request.session !== activeSession || request.workspace !== workspace
+                || !appRibbon.headerTabActive
+                || !activeDocument.loaded
+                || request.source !== activeDocument.source.toString()
+                || request.anchorKey !== activeEditController.headerSyncKey) {
+            headerSaveRequest = null
+            //% "The header selection changed. Choose Save again when you are ready."
+            showStatus(qsTrId("HeaderSaveSelectionChanged"))
+            return
+        }
+        if (activeEditController.headerSyncLoading)
+            return
+        // Input may have changed while the asynchronous match scan was running.
+        if (!prepareActiveWorkspace()) {
+            headerSaveRequest = null
+            return
+        }
+        headerSaveRequest = null
+        if (workspace && !workspace.applyPendingHeaderChanges()) {
+            showStatus(workspace.headerSaveError)
+            return
+        }
+        if (workspace)
+            workspace.closeHeaderPlacement()
+        if (request.saveAs)
+            openPreparedSaveAs()
+        else
+            tabModel.requestSave(activeSession)
     }
 
     function rebuildWorkspace() {
@@ -370,6 +418,10 @@ ApplicationWindow {
     }
 
     function requestSave() {
+        if (appRibbon.headerTabActive) {
+            requestHeaderSave()
+            return
+        }
         if (activeSession && prepareActiveWorkspace()) {
             const workspace = activeWorkspace()
             if (workspace)
@@ -379,6 +431,10 @@ ApplicationWindow {
     }
 
     function requestSaveAs() {
+        if (appRibbon.headerTabActive) {
+            requestHeaderSave(true)
+            return
+        }
         if (!activeSession || tabModel.anySaving)
             return
 
@@ -389,6 +445,10 @@ ApplicationWindow {
         if (workspace)
             workspace.closeHeaderPlacement()
 
+        openPreparedSaveAs()
+    }
+
+    function openPreparedSaveAs() {
         saveAsSession = activeSession
         saveAsDialog.selectedFile = saveAsSession.document.source
         saveAsDialog.open()
@@ -898,6 +958,7 @@ ApplicationWindow {
     }
 
     onActiveSessionChanged: {
+        headerSaveRequest = null
         headerEntryNoticeLoader.active = false
         if (appRibbon.headerTabActive && activeSession && activeSession.hasDrafts) {
             appRibbon.showViewTab()
@@ -1009,7 +1070,19 @@ ApplicationWindow {
     }
 
     Connections {
+        target: window.activeDocument
+        function onSourceChanged() { window.headerSaveRequest = null }
+        function onLoadedChanged() { window.headerSaveRequest = null }
+        function onPageStructureChanged() { window.headerSaveRequest = null }
+    }
+
+    Connections {
         target: window.activeEditController
+
+        function onHeaderSyncChanged() {
+            if (window.headerSaveRequest !== null)
+                Qt.callLater(window.continueHeaderSave)
+        }
 
         function onToolChanged() {
             if (window.signaturePlacementPending
@@ -1292,8 +1365,11 @@ ApplicationWindow {
         sequences: [StandardKey.Save]
         enabled: window.activeDocument.loaded
             && (window.activeEditController.hasDrafts
-                || window.activeWorkspaceHasPendingEdits)
-            && !tabModel.anySaving
+                || window.activeWorkspaceHasPendingEdits
+                || window.activeEditController.textEditActive
+                || (window.activeWorkspaceItem !== null
+                    && window.activeWorkspaceItem.hasPendingHeaderPlacement))
+            && !tabModel.anySaving && window.headerSaveRequest === null
         onActivated: window.requestSave()
     }
 
@@ -1903,19 +1979,21 @@ ApplicationWindow {
             editController: window.activeEditController
             searchController: window.activeSearchController
             session: window.activeSession
-            anySaving: tabModel.anySaving
+            anySaving: tabModel.anySaving || window.headerSaveRequest !== null
             hasPendingPanelEdits: window.activeWorkspaceHasPendingEdits
             prepareHeaderEntry: () => window.prepareHeaderEntry()
             prepareHeaderExit: () => window.prepareHeaderExit()
             hasPendingHeaderPlacement: window.activeWorkspaceItem !== null
                 && window.activeWorkspaceItem.hasPendingHeaderPlacement
-            headerPlacementPending: window.activeWorkspaceItem !== null
+            headerTextToolSelected: window.activeWorkspaceItem !== null
                 && (window.activeWorkspaceItem.headerTextPlacement.armed
-                    || window.activeWorkspaceItem.headerTextPlacement.active
-                    || window.activeWorkspaceItem.headerImagePlacement.armed
+                    || window.activeWorkspaceItem.headerTextPlacement.active)
+            headerImageToolSelected: window.activeWorkspaceItem !== null
+                && (window.activeWorkspaceItem.headerImagePlacement.armed
                     || window.activeWorkspaceItem.headerImagePlacement.active
-                    || window.activeWorkspaceItem.headerImagePlacement.choosing
-                    || window.activeWorkspaceItem.headerPageNumberPlacement.armed
+                    || window.activeWorkspaceItem.headerImagePlacement.choosing)
+            headerPageNumberToolSelected: window.activeWorkspaceItem !== null
+                && (window.activeWorkspaceItem.headerPageNumberPlacement.armed
                     || window.activeWorkspaceItem.headerPageNumberPlacement.active)
             viewNavigationPage: window.activeWorkspaceItem
                 ? window.activeWorkspaceItem.activePage
