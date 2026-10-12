@@ -47,6 +47,9 @@ matching View and using the shared Save icon. Its button is enabled for draft
 changes, pending panel/inline edits or unapplied Header content,
 and disabled without a document or while saving. It shares the exit notice's
 save flow, including validation and submission of pending Header placement.
+Cmd/Ctrl+S and Save As use the same Header preparation flow. With synchronization
+enabled, saving commits panel and inline input, waits for the current matching
+scan, and applies the selected range before writing the PDF or opening Save As.
 
 Entering Header activates Select. It reuses Edit selection, inline text editing,
 property panels, move/resize, Delete and Undo/Redo, with eligibility limited to
@@ -55,7 +58,7 @@ objects whose complete current frame and content bounds fit inside the first
 selected by clicking, keyboard traversal or history restoration. Source content
 and applied Header drafts follow the same rules; unsupported objects retain
 their normal Edit restrictions. Changes initially affect the selected object on
-its page. The optional synchronization panel can apply them to matching headers.
+its page. Enabled synchronization applies them to matching headers during Save.
 
 `PDFEditController::headerSelectionOnly` scopes `SelectTool` without introducing
 a second editing pipeline. Move, resize and image rotation stay within the
@@ -84,17 +87,32 @@ Selecting a text or image header enables **Apply to similar headers** by default
 in the right panel and starts finding matches. Users can turn it off for the
 selected object; collapsing and reopening the panel preserves that choice.
 The panel scans other pages asynchronously and lists the matching PDF page
-numbers. Edit its content, formatting or geometry, then Apply copies the change
-to all matches or the intersection with a custom 1-based range. The original
-page retains its edit even if it is outside that range. Delete can also be
-applied after deleting the selected object; the panel retains its original
-matching snapshot until another object/tool is selected.
+numbers. Edit its content, formatting or geometry, then Save copies the change
+to all matches or the intersection with a custom 1-based range before writing
+the PDF. There is no separate Apply changes button. Save, Cmd/Ctrl+S, Save As
+and the Header exit notice's Save action share this flow. Disabling
+synchronization saves the selected object's edit without propagating it.
+The original page retains its edit even if it is outside the custom range.
+An empty or invalid custom range, a failed scan or a rejected batch prevents
+saving and leaves the edits and settings available for correction.
 
-Text content or formatting changes also copy the edited textbox's physical
+The pre-edit matching snapshot also supports deletion. An edited anchor with
+synchronization enabled retains its snapshot and page scope after clicking a
+blank area, so Save still propagates the change without a visible selection.
+Selecting another object starts a new matching context; synchronization applies
+to the current selection, rather than accumulating a queue of earlier anchors.
+Collapsing the panel does not discard its synchronization choice or page range.
+
+Text content, formatting or explicit resize changes also copy the edited textbox's physical
 frame size, so previously narrower members of the same group do not introduce
-extra line wrapping. Position changes remain relative to each member's original
-position. Every resulting frame and content extent must fit inside its page's
-100-point header; otherwise Apply leaves the other pages unchanged. Page numbers
+extra line wrapping. For a managed Header group, movement copies each changed
+physical coordinate from the edited member; an independently moved member does
+not receive its old offset again. Unchanged coordinates remain intact. Unmarked
+source headers retain relative movement. Resized text is remeasured before checking its content extent, so a
+shortened textbox moved near the page edge is not rejected using its old width.
+Every resulting frame and content extent must fit inside its page's
+100-point header; otherwise synchronization leaves the other pages unchanged
+and prevents Save. Page numbers
 retain their per-value sizing behavior.
 
 Saved Header text always retains its logical paragraph and layout frame through
@@ -128,16 +146,20 @@ Changing a number's contents cannot be propagated as a group edit.
 `PDFEditControllerHeaderSync.cpp` uses a separate single scan worker, cancellation
 tokens and source/page revisions. It retains at most 64 MiB of matches and scans
 at most 10,000 pages. Source-image fingerprinting is limited to 4 million decoded
-pixels per page. Apply validates the entire target batch before changing other
-pages. It combines the selected object's consecutive edits and the propagated
+pixels per page. During Save preparation, `applyHeaderChanges()` validates the
+entire target batch before changing other pages. It combines the selected
+object's consecutive edits and the propagated
 changes into one `HeaderDraftBatch`, so a single Undo restores the whole group.
-Undo/Redo, unrelated history, page structure, session/tool changes and Save
-cancel the current matching session. Matching does not create drafts by itself.
+Undo/Redo, unrelated history, page structure and session/tool changes cancel
+the current matching session. A queued Save is bound to the session, workspace,
+source and anchor; changing that context cancels the request. Starting the actual
+PDF write clears matching state only after synchronization has completed.
+Matching does not create drafts by itself.
 
 `tst_PDFEditControllerHeaderSync.cpp` covers pre-edit matching, ambiguous and
 different headers, custom ranges, group metadata after Save/reopen, page-number
 preservation, image pixel matching, deletion and atomic history. The Main-window
-UI test covers the panel and inline editing flow.
+UI test covers the panel, inline editing and synchronization through Save.
 
 ## Ownership and lifecycle
 
@@ -149,8 +171,9 @@ UI test covers the panel and inline editing flow.
   then lazily loads a scaled inline editor above page interactions. The panel
   appears only after placement and contains formatting, page selection and Apply/Cancel.
   Input remains separate from document drafts. Switching tabs/documents,
-  changing page structure/history, or starting Save closes the panel. Save
-  does not implicitly apply its input.
+  changing page structure/history, or starting the actual PDF write closes the
+  panel. Header Save preparation submits pending placement with the current
+  settings first; invalid placement stays editable and prevents saving.
 - Apply calls `PDFEditController::addHeaderText(text, pages, xPoints, yPoints, widthPoints, format)`. Failures retain
   the input and show a localized message. Success closes the panel.
 - `PDFEditControllerHeaderText.cpp` builds and validates all target drafts

@@ -935,7 +935,7 @@ private:
     void validateHeaderSyncHistory();
     void scanNextHeaderPage();
     void collectHeaderMatches(QVector<Candidate> candidates, int page);
-    bool headerSyncDraftEligible(const Draft &draft) const;
+    bool headerSyncDraftEligible(const Draft &draft, bool includeContentBounds = true) const;
     bool measureHeaderSyncText(Draft &draft) const;
     bool headerSyncDraftMatches(const Draft &draft, bool &pageNumber) const;
     Draft currentHeaderSyncDraft() const;

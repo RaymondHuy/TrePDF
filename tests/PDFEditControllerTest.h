@@ -61,6 +61,9 @@ private slots:
     void syncsSimilarSourceHeadersFromOriginalText();
     void syncsGroupedHeaderDraftsToCustomPagesWithUndo();
     void syncsGroupedHeaderTextLayoutAcrossDifferentFrames();
+    void syncsNarrowedAndMovedHeaderText_data();
+    void syncsNarrowedAndMovedHeaderText();
+    void rejectsReflowedHeaderContentOutsideHeader();
     void syncsLegacyFragmentedHeaderText();
     void retainsHeaderGroupsAndPageNumberValuesAfterSave();
     void syncsHeaderImagesAndDeletionWithHistory();
