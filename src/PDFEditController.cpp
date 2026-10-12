@@ -262,6 +262,7 @@ PDFEditController::PDFEditController(QObject *parent)
           kDrawingCommentBlue,
           kDrawingCommentAlpha)
 {
+    initializeImageClipboard();
     connect(this, &PDFEditController::savingChanged,
             this, &PDFEditController::passwordProtectionChanged);
     connect(this, &PDFEditController::selectionChanged,
@@ -306,6 +307,7 @@ PDFEditController::PDFEditController(QObject *parent)
 
 PDFEditController::~PDFEditController()
 {
+    cancelImageCopy();
     if (m_headerSyncCancellation)
         m_headerSyncCancellation->store(true, std::memory_order_relaxed);
     if (m_watermarkCancellation)
@@ -977,6 +979,7 @@ void PDFEditController::clearSelection()
 
 void PDFEditController::resetSession()
 {
+    cancelImageCopy();
     resetHeaderSync();
     resetWatermarks();
     clearHeaderImage();

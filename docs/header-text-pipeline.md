@@ -135,6 +135,15 @@ require the same decoded pixel fingerprint. A page with multiple matching
 objects is ambiguous and is skipped. Objects outside the header or unsupported
 by the normal Edit pipeline are excluded.
 
+Header image Copy/Paste retains physical position and size. Newly pasted images
+receive a pixel fingerprint before selection. For upright, unreflected, unclipped
+top-level source images, Copy uses the same bounded intrinsic-pixel decoder as
+matching; unrotated added images retain their pixels too. Keeping frame geometry
+separate from pixel dimensions avoids unnecessary resampling and allows unmarked
+copied logos to match before Save and after reopening. Complex transforms and
+image-only Forms retain the appearance-rendering clipboard path; strict matching
+and managed-group ownership rules remain unchanged.
+
 Page-number groups preserve each page's existing value when formatting or
 moving the group. Enlarged numbers expand their frame as needed to stay on one
 line, within the page edge. Unchanged embedded font faces and calibration stay

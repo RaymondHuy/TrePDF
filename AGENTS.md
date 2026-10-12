@@ -411,7 +411,21 @@ Current features:
   and a Lock aspect ratio checkbox in a dedicated right-side Image Properties
   panel. The panel appears only when an image is selected in Edit and expands
   when activated, replacing the text-formatting panel. Its checkbox is disabled
-  for unsupported images or while saving; the selection popup keeps Delete.
+  for unsupported images or while saving. Edit and Header image selection popups
+  offer Copy beside Delete. Copy and Cmd/Ctrl+C put the visible image on the
+  system clipboard; Cmd/Ctrl+V adds an independent image draft on the current
+  primary-pane page. Text inputs keep their own clipboard shortcuts. TrePDF
+  clipboard metadata preserves physical size. Images copied in Header retain
+  their original position in PDF points when pasted, including across different
+  page sizes; images copied in Edit use a small offset. Both are clamped to the
+  destination page or the 100-point Header. Oversized Header pastes
+  are proportionally reduced. Paste uses normal Undo/Redo and Save/Save As.
+  Added images receive their decoded-pixel fingerprint immediately. Header
+  copies of upright, unclipped top-level images preserve intrinsic pixels using
+  the same bounded decoder as Header matching, so a pasted logo can match its
+  source before Save and after reopening without resampling differences.
+  `PDFEditControllerClipboard.cpp` snapshots eligible source images, including
+  image-only Forms, on a private worker document and respects PDF copy permission.
   The lock defaults to enabled and is transient per-tab controller state; toggling it creates no
   draft/history entry and writes no PDF property. Each resize is one undoable
   geometry command. Source resize requires a finite, nonsingular image matrix,

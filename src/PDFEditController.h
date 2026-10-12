@@ -114,6 +114,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedImageResizable READ selectedImageResizable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedImageRotatable READ selectedImageRotatable NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedImageCopyable READ selectedImageCopyable NOTIFY selectedImageCopyableChanged FINAL)
+    Q_PROPERTY(bool clipboardHasImage READ clipboardHasImage NOTIFY clipboardImageChanged FINAL)
     Q_PROPERTY(bool selectedDeletable READ selectedDeletable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingPropertiesEditable READ selectedDrawingPropertiesEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingSupportsFill READ selectedDrawingSupportsFill NOTIFY selectionChanged FINAL)
@@ -329,6 +331,10 @@ public:
     bool selectedEditable() const;
     bool selectedImageResizable() const;
     bool selectedImageRotatable() const;
+    bool selectedImageCopyable() const;
+    bool clipboardHasImage() const;
+    Q_INVOKABLE bool copySelectedImage();
+    Q_INVOKABLE QVariantMap pasteImageFromClipboard(int page);
     bool selectedDeletable() const;
     bool selectedDrawingPropertiesEditable() const;
     bool selectedDrawingSupportsFill() const;
@@ -410,7 +416,7 @@ public:
     // Inserts snapshotted pixels through the normal image draft/history path.
     // A zero width keeps Add Image's default sizing; positive widths are PDF points.
     QVariantMap addImageData(int page, qreal x, qreal y, QImage image,
-                            qreal widthPoints = 0.0);
+                            qreal widthPoints = 0.0, qreal heightPoints = 0.0);
     Q_INVOKABLE QVariantMap addShape(int page,
                                      const QPointF &startPoint,
                                      const QPointF &endPoint);
@@ -557,6 +563,8 @@ signals:
     void headerSyncChanged();
     void shapeTypeChanged();
     void imageAspectRatioLockedChanged();
+    void clipboardImageChanged();
+    void selectedImageCopyableChanged();
     void highlightColorChanged();
     void underlineColorChanged();
     void squigglyColorChanged();
@@ -930,6 +938,8 @@ private:
     };
 
     void resetSession();
+    void initializeImageClipboard();
+    void cancelImageCopy();
     void resetHeaderSync();
     void captureHeaderSyncSelection();
     void validateHeaderSyncHistory();
@@ -1302,6 +1312,7 @@ private:
     bool m_downloadingFont = false;
     QSet<QString> m_attemptedFontDownloads;
     bool m_imageAspectRatioLocked = true;
+    std::shared_ptr<std::atomic_bool> m_imageCopyCancellation;
     QString m_selectedText;
     bool m_textEditActive = false;
     qsizetype m_selectedTextRangeStart = 0;

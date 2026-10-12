@@ -205,6 +205,7 @@ Item {
         pooled: root.pooled
         theme: root.theme
         controller: root.editController
+        imageClipboardEnabled: root.editTabActive || root.editController.headerSelectionOnly
         pagePointScale: root.pagePointScale
         viewRotation: root.viewportTransformState.length > 0
             ? Number(root.viewportTransformState[0])

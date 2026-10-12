@@ -23,6 +23,7 @@ Item {
         && controller.tool === PDFEditController.SelectTool
         ? Math.min(1, 100 / Math.max(1, textLayoutPageHeight)) : 1
     property int viewRotation: 0
+    property bool imageClipboardEnabled: false
 
     property var drafts: []
     property var contentDrafts: []
@@ -3738,7 +3739,7 @@ Item {
             || root.isCommentKind(root.controller.selectedKind)
 
         parent: root
-        width: compactSelection ? 71 : 136
+        width: compactSelection && !copyImageAction.visible ? 71 : 136
         height: 62
         padding: 4
         modal: false
@@ -3812,6 +3813,41 @@ Item {
                     onClicked: {
                         selectionActions.close()
                         root.beginSelectedEditing()
+                    }
+                }
+
+                ToolButton {
+                    id: copyImageAction
+                    objectName: "copyImageAction"
+
+                    width: 63
+                    height: 54
+                    display: AbstractButton.TextUnderIcon
+                    spacing: 2
+                    //% "Copy"
+                    text: qsTrId("CopyImage")
+                    icon.source: "../assets/icons/copy-image.svg"
+                    icon.width: 24
+                    icon.height: 24
+                    icon.color: "transparent"
+                    font.pixelSize: 10
+                    visible: root.imageClipboardEnabled
+                        && root.isImageKind(root.controller.selectedKind)
+                    enabled: root.controller.selectedImageCopyable
+
+                    background: Rectangle {
+                        radius: 4
+                        color: copyImageAction.down
+                            ? "#f5dfcf"
+                            : copyImageAction.hovered
+                                ? root.theme.foxitPaleOrange
+                                : "transparent"
+                    }
+
+                    onClicked: {
+                        selectionActions.close()
+                        root.forceActiveFocus()
+                        root.controller.copySelectedImage()
                     }
                 }
 

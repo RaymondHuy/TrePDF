@@ -4,6 +4,7 @@
 #include "PDFAnnotationUtils.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
+#include "PDFHeaderMetadata.h"
 #include "PDFSaveWriter.h"
 #include "PDFiumSynchronization.h"
 
@@ -251,12 +252,14 @@ QVariantMap PDFEditController::addImage(int page,
 }
 
 QVariantMap PDFEditController::addImageData(int page, qreal x, qreal y,
-                                         QImage image, qreal widthPoints)
+                                         QImage image, qreal widthPoints, qreal heightPoints)
 {
     if (m_saving || !m_document || !m_document->isLoaded()
         || page < 0 || page >= m_document->pageCount()
         || !std::isfinite(x) || !std::isfinite(y)
         || !std::isfinite(widthPoints) || widthPoints < 0.0
+        || !std::isfinite(heightPoints) || heightPoints < 0.0
+        || (heightPoints > 0.0 && widthPoints <= 0.0)
         || image.isNull()) {
         return {};
     }
@@ -281,7 +284,9 @@ QVariantMap PDFEditController::addImageData(int page, qreal x, qreal y,
     qreal frameWidth = widthPoints > 0.0
         ? qMin<qreal>(1.0, widthPoints / pageSize.width())
         : kAddedImageMaximumDimensionRatio;
-    qreal frameHeight = frameWidth
+    qreal frameHeight = heightPoints > 0.0
+        ? heightPoints / pageSize.height() * (frameWidth * pageSize.width() / widthPoints)
+        : frameWidth
         * pageSize.width()
         / pageSize.height()
         * static_cast<qreal>(image.height())
@@ -320,6 +325,7 @@ QVariantMap PDFEditController::addImageData(int page, qreal x, qreal y,
     candidate.editable = true;
     candidate.added = true;
     candidate.image = std::move(image);
+    candidate.headerImageDigest = PDFHeaderMetadata::imageDigest(candidate.image);
     setInitialGeometry(
         candidate,
         QRectF(frameX, frameY, frameWidth, frameHeight));

@@ -511,6 +511,16 @@ private slots:
     void savesAddedTextRoundTrip();
     void rendersAddedImageSnapshot();
     void addsImageWithUndoRedo();
+    void copiesAndPastesAddedImagesWithHistoryAndSave();
+    void copiesSourceImageAppearanceWithoutChangingPdf_data();
+    void copiesSourceImageAppearanceWithoutChangingPdf();
+    void pastesHeaderCopiesAtOriginalCoordinates_data();
+    void pastesHeaderCopiesAtOriginalCoordinates();
+    void matchesPastedHeaderImagesBeforeAndAfterSave_data();
+    void matchesPastedHeaderImagesBeforeAndAfterSave();
+    void pastesClipboardImagesWithinHeaderAndRejectsInvalidInput();
+    void cancelsSourceImageCopyWithoutPastingStaleClipboard();
+    void copiesAndPastesImagesThroughMainWindow();
     void movesAddedImageWithUndoRedo();
     void addsShapeWithUndoRedo();
     void savesShapesRoundTrip();

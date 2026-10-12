@@ -228,6 +228,7 @@ qt_add_qml_module(trepdf
         src/PDFEditControllerAnnotationScan.cpp
         src/PDFEditControllerText.cpp
         src/PDFEditControllerComments.cpp
+        src/PDFEditControllerClipboard.cpp
         src/PDFEditControllerGeometry.cpp
         src/PDFEditControllerHeaderText.cpp
         src/PDFEditControllerHeaderSync.cpp
@@ -357,6 +358,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/arrow.svg
         src/assets/icons/bold-text.svg
         src/assets/icons/cancel.svg
+        src/assets/icons/copy-image.svg
         src/assets/icons/calendar-days.svg
         src/assets/icons/chevron-left.svg
         src/assets/icons/chevron-right.svg

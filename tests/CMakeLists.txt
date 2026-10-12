@@ -94,6 +94,7 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFEditControllerAnnotationScan.cpp
     ../src/PDFEditControllerText.cpp
     ../src/PDFEditControllerComments.cpp
+    ../src/PDFEditControllerClipboard.cpp
     ../src/PDFEditControllerGeometry.cpp
     ../src/PDFEditControllerHeaderText.cpp
     ../src/PDFEditControllerHeaderSync.cpp

@@ -89,6 +89,58 @@ inline bool write(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object,
         && FPDFPageObjMark_SetStringParam(document, object, mark, "Role", roleBytes.constData());
 }
 
+// Shared native pixel snapshot for matching and lossless Header clipboard copies.
+// Only use private worker documents: the image matrix is temporarily replaced.
+inline QImage nativeImage(FPDF_DOCUMENT document, FPDF_PAGE page,
+                          FPDF_PAGEOBJECT object, qint64 &remainingPixels)
+{
+    assertPDFiumProcessLockHeld();
+    FPDF_IMAGEOBJ_METADATA metadata{};
+    FS_MATRIX original{};
+    if (!object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_IMAGE
+        || !FPDFImageObj_GetImageMetadata(object, page, &metadata)
+        || metadata.width == 0 || metadata.height == 0
+        || metadata.width > PDFHeaderMetadata::kMaximumDigestPixels
+        || metadata.height > PDFHeaderMetadata::kMaximumDigestPixels
+        || qint64(metadata.width) * metadata.height > remainingPixels
+        || !FPDFPageObj_GetMatrix(object, &original)) {
+        return {};
+    }
+    remainingPixels -= qint64(metadata.width) * metadata.height;
+    // Render in intrinsic pixel dimensions so placement and display zoom do not
+    // affect the digest. This private scan document is restored immediately;
+    // masks/color spaces are included, unlike FPDFImageObj_GetBitmap().
+    const FS_MATRIX native{float(metadata.width), 0.0F, 0.0F, float(metadata.height), 0.0F, 0.0F};
+    if (!FPDFPageObj_SetMatrix(object, &native))
+        return {};
+    FPDF_BITMAP bitmap = FPDFImageObj_GetRenderedBitmap(document, page, object);
+    const bool restored = FPDFPageObj_SetMatrix(object, &original);
+    if (!bitmap)
+        return {};
+    QImage image;
+    const int width = FPDFBitmap_GetWidth(bitmap);
+    const int height = FPDFBitmap_GetHeight(bitmap);
+    const int stride = FPDFBitmap_GetStride(bitmap);
+    const auto *data = static_cast<const uchar *>(FPDFBitmap_GetBuffer(bitmap));
+    QImage::Format format = QImage::Format_Invalid;
+    int bytesPerPixel = 0;
+    switch (FPDFBitmap_GetFormat(bitmap)) {
+    case FPDFBitmap_Gray: format = QImage::Format_Grayscale8; bytesPerPixel = 1; break;
+    case FPDFBitmap_BGR: format = QImage::Format_BGR888; bytesPerPixel = 3; break;
+    case FPDFBitmap_BGRx: format = QImage::Format_RGB32; bytesPerPixel = 4; break;
+    case FPDFBitmap_BGRA: format = QImage::Format_ARGB32; bytesPerPixel = 4; break;
+    case FPDFBitmap_BGRA_Premul: format = QImage::Format_ARGB32_Premultiplied; bytesPerPixel = 4; break;
+    default: break;
+    }
+    if (restored && data && width == int(metadata.width) && height == int(metadata.height)
+        && bytesPerPixel > 0 && stride >= qsizetype(width) * bytesPerPixel) {
+        image = QImage(data, width, height, stride, format).convertToFormat(QImage::Format_ARGB32);
+        image.detach(); // Own pixels before releasing the PDFium bitmap.
+    }
+    FPDFBitmap_Destroy(bitmap);
+    return image;
+}
+
 inline QByteArray imageDigest(const QImage &source)
 {
     if (source.isNull() || qint64(source.width()) * source.height() > kMaximumDigestPixels)

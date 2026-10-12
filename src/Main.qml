@@ -97,6 +97,22 @@ ApplicationWindow {
         || documentAccess.busy || saveAsDialog.writePending || excelExportDialog.writePending
     readonly property bool fileOpenBlocked:
         tabModel.anySaving || headerSaveRequest !== null || openingFiles || modalOperationActive
+    readonly property bool imageClipboardShortcutsEnabled:
+        activeDocument.loaded && !fileOpenBlocked
+        && (appRibbon.editTabActive || appRibbon.headerTabActive)
+        && activeWorkspaceItem !== null && activeWorkspaceItem.activePaneIndex === 0
+        && activeEditController.tool === PDFEditController.SelectTool
+        && !activeWorkspaceHasPendingEdits
+        && !activeEditController.textEditActive
+        && !activeFormDesignerController.textFieldFocused
+        && !(activeFocusItem instanceof TextInput)
+        && !(activeFocusItem instanceof TextEdit)
+        && !activeWorkspaceItem.headerTextPlacement.armed
+        && !activeWorkspaceItem.headerTextPlacement.active
+        && !activeWorkspaceItem.headerImagePlacement.armed
+        && !activeWorkspaceItem.headerImagePlacement.active
+        && !activeWorkspaceItem.headerPageNumberPlacement.armed
+        && !activeWorkspaceItem.headerPageNumberPlacement.active
 
     onFileOpenBlockedChanged: {
         if (!fileOpenBlocked)
@@ -1308,6 +1324,28 @@ ApplicationWindow {
         autoRepeat: false
         enabled: window.activeDocument.loaded && !window.fileOpenBlocked
         onActivated: window.requestFind()
+    }
+
+    Shortcut {
+        objectName: "copyImageShortcut"
+        sequences: [StandardKey.Copy]
+        autoRepeat: false
+        enabled: window.imageClipboardShortcutsEnabled
+            && window.activeEditController.selectedImageCopyable
+        onActivated: window.activeEditController.copySelectedImage()
+    }
+
+    Shortcut {
+        objectName: "pasteImageShortcut"
+        sequences: [StandardKey.Paste]
+        autoRepeat: false
+        enabled: window.imageClipboardShortcutsEnabled
+            && window.activeEditController.clipboardHasImage
+        onActivated: {
+            const workspace = window.activeWorkspaceItem
+            if (workspace && workspace.prepareForDeactivation())
+                window.activeEditController.pasteImageFromClipboard(workspace.activePage)
+        }
     }
 
     Shortcut {

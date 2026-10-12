@@ -1,6 +1,9 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <QClipboard>
+#include <QKeySequence>
+#include <QMimeData>
 #include <QPointer>
 
 using namespace PDFEditControllerTestSupport;
@@ -63,6 +66,146 @@ QString syncUiText(const PDFEditController &controller, int page)
     return drafts.isEmpty() ? QString()
         : drafts.first().toMap().value(QStringLiteral("text")).toString();
 }
+}
+
+void PDFEditControllerTest::copiesAndPastesImagesThroughMainWindow()
+{
+    QTest::failOnWarning(QRegularExpression(QStringLiteral(".*Binding loop.*")));
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("image-clipboard-ui.pdf"));
+    QVERIFY(writePdfObjects(path, {
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>"}));
+    QImage pixels(40, 20, QImage::Format_ARGB32);
+    pixels.fill(QColor(27, 129, 194));
+    {
+        PDFDocument document;
+        QVERIFY(document.open(QUrl::fromLocalFile(path)));
+        PDFEditController controller;
+        controller.setDocument(&document);
+        QVERIFY(!controller.addImageData(0, 0.25, 0.1, pixels, 60).isEmpty());
+        QVERIFY(controller.save());
+    }
+
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFileInfo(
+        QFINDTESTDATA("../src/Main.qml")).canonicalFilePath()));
+    std::unique_ptr<QObject> window(component.create());
+    QVERIFY2(window, qPrintable(component.errorString()));
+    QVERIFY(window->setProperty("visible", true));
+    QVERIFY(window->setProperty("allowWindowClose", true));
+    auto *quickWindow = qobject_cast<QQuickWindow *>(window.get());
+    auto *model = window->findChild<PDFTabModel *>();
+    auto *tabs = window->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    auto *copyShortcut = window->findChild<QObject *>(QStringLiteral("copyImageShortcut"));
+    auto *pasteShortcut = window->findChild<QObject *>(QStringLiteral("pasteImageShortcut"));
+    QVERIFY(quickWindow && model && tabs && copyShortcut && pasteShortcut);
+    auto *clipboard = QGuiApplication::clipboard();
+    QVERIFY(clipboard);
+    clipboard->clear();
+    QVERIFY(!pasteShortcut->property("enabled").toBool());
+    auto *session = model->open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    auto &controller = *session->editController();
+    QTRY_VERIFY(quickWindow->isExposed());
+    QObject *workspace = nullptr;
+    QTRY_VERIFY((workspace = window->property("activeWorkspaceItem").value<QObject *>()));
+    QTRY_VERIFY(workspace->property("initialViewReady").toBool());
+
+    // The same image action is present in Edit and Header, and each paste is
+    // one independent undoable image rather than a modification of the source.
+    for (const int tab : {1, 7}) {
+        clipboard->clear();
+        QVERIFY(tabs->setProperty("currentIndex", tab));
+        QTRY_COMPARE(controller.headerSelectionOnly(), tab == 7);
+        const QVariantMap candidate = candidateForKind(waitForCandidates(controller, 0),
+            QStringLiteral("image"));
+        QVERIFY(!candidate.isEmpty());
+        const QString sourceId = candidate.value(QStringLiteral("objectId")).toString();
+        QVERIFY(controller.selectCandidate(0, sourceId));
+        QQuickItem *overlay = nullptr;
+        QTRY_VERIFY((overlay = syncEditOverlay(quickWindow->contentItem())));
+        const QRectF frame = controller.selectedFrameRect();
+        QVERIFY(QMetaObject::invokeMethod(overlay, "showSelectionActions",
+            Q_ARG(QVariant, frame.center().x() * overlay->width()),
+            Q_ARG(QVariant, frame.center().y() * overlay->height()),
+            Q_ARG(QVariant, candidate)));
+        QQuickItem *copy = nullptr;
+        QTRY_VERIFY((copy = syncVisualItem(quickWindow->contentItem(),
+            QStringLiteral("copyImageAction"))));
+        QTRY_VERIFY(copy->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(copy, "clicked"));
+        QTRY_VERIFY(!clipboard->image().isNull());
+        QCOMPARE(controller.selectedObjectId(), sourceId);
+        QVERIFY(!controller.hasDrafts());
+
+        overlay->forceActiveFocus();
+        QTRY_VERIFY(copyShortcut->property("enabled").toBool());
+        QTRY_VERIFY(pasteShortcut->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(pasteShortcut, "activated"));
+        QTRY_COMPARE(controller.draftsForPage(0).size(), 1);
+        QCOMPARE(controller.selectedKind(), QStringLiteral("addedImage"));
+        QVERIFY(controller.selectedObjectId() != sourceId);
+        QVERIFY(controller.draftsForPage(1).isEmpty());
+        const QRectF pastedFrame = controller.selectedFrameRect();
+        QVERIFY(pastedFrame.left() >= 0 && pastedFrame.right() <= 1);
+        QVERIFY(pastedFrame.top() >= 0);
+        QVERIFY(pastedFrame.bottom() <= (tab == 7 ? 100.0 / 400 : 1.0) + 0.000001);
+        clipboard->clear();
+        QTRY_VERIFY(copyShortcut->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(copyShortcut, "activated"));
+        QTRY_VERIFY(!clipboard->image().isNull());
+        QCOMPARE(controller.draftsForPage(0).size(), 1);
+        controller.undo();
+        QVERIFY(!controller.hasDrafts());
+
+        if (tab == 7) {
+            // Arming another Header tool must reserve its placement gesture.
+            auto *placement = workspace->property("headerTextPlacement").value<QObject *>();
+            QVERIFY(placement && placement->setProperty("armed", true));
+            QTRY_VERIFY(!pasteShortcut->property("enabled").toBool());
+            QVERIFY(placement->setProperty("armed", false));
+        }
+    }
+
+    QVERIFY(tabs->setProperty("currentIndex", 1));
+    const auto candidate = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("image"));
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    // A clipboard may advertise both text and pixels. A focused text field
+    // must receive its normal paste, without creating an image behind it.
+    QQmlComponent inputComponent(&engine);
+    inputComponent.setData("import QtQuick\nTextInput { width: 240; height: 32; text: \"Before \" }", QUrl());
+    std::unique_ptr<QObject> inputObject(inputComponent.create());
+    auto *input = qobject_cast<QQuickItem *>(inputObject.get());
+    QVERIFY2(input, qPrintable(inputComponent.errorString()));
+    input->setParentItem(quickWindow->contentItem());
+    input->setZ(1000);
+    input->forceActiveFocus();
+    QVERIFY(input->setProperty("cursorPosition", 7));
+    auto *mixedClipboard = new QMimeData;
+    mixedClipboard->setText(QStringLiteral("pasted text"));
+    mixedClipboard->setImageData(pixels);
+    clipboard->setMimeData(mixedClipboard);
+    QTRY_COMPARE(quickWindow->activeFocusItem(), input);
+    QTRY_VERIFY(!copyShortcut->property("enabled").toBool());
+    QTRY_VERIFY(!pasteShortcut->property("enabled").toBool());
+    QTest::keySequence(quickWindow, QKeySequence(QKeySequence::Paste));
+    QTRY_COMPARE(input->property("text").toString(), QStringLiteral("Before pasted text"));
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(QMetaObject::invokeMethod(input, "selectAll"));
+    QTest::keySequence(quickWindow, QKeySequence(QKeySequence::Copy));
+    QTRY_COMPARE(clipboard->text(), QStringLiteral("Before pasted text"));
+    clipboard->setImage(pixels);
+    input->setFocus(false);
+    quickWindow->contentItem()->forceActiveFocus();
+    QTRY_VERIFY(pasteShortcut->property("enabled").toBool());
+
+    QVERIFY(tabs->setProperty("currentIndex", 0));
+    QTRY_VERIFY(!copyShortcut->property("enabled").toBool());
+    QTRY_VERIFY(!pasteShortcut->property("enabled").toBool());
+    clipboard->clear();
 }
 
 void PDFEditControllerTest::syncsHeadersThroughMainWindow()
