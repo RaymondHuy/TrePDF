@@ -45,7 +45,7 @@ QRectF fromPoints(const QRectF &rect, const QSizeF &size)
             rect.width() / size.width(), rect.height() / size.height()};
 }
 
-bool near(qreal a, qreal b, qreal tolerance = 2.0)
+bool withinTolerance(qreal a, qreal b, qreal tolerance = 2.0)
 {
     return qIsFinite(a) && qIsFinite(b) && qAbs(a - b) <= tolerance;
 }
@@ -437,8 +437,8 @@ bool PDFEditController::headerSyncDraftMatches(const Draft &draft, bool &pageNum
     const int numberB = text ? numberValue(draft.text, romanB) : 0;
     pageNumber = numberA > 0 && numberB > 0 && romanA == romanB
         && numberB - numberA == draft.candidate.page - anchor.candidate.page;
-    if (!near(a.x(), b.x()) || !near(a.y(), b.y()) || !near(a.height(), b.height())
-        || (!pageNumber && !near(a.width(), b.width())))
+    if (!withinTolerance(a.x(), b.x()) || !withinTolerance(a.y(), b.y()) || !withinTolerance(a.height(), b.height())
+        || (!pageNumber && !withinTolerance(a.width(), b.width())))
         return false;
     if (!text)
         return !anchor.candidate.headerImageDigest.isEmpty()
@@ -450,11 +450,11 @@ bool PDFEditController::headerSyncDraftMatches(const Draft &draft, bool &pageNum
         return false;
     const auto sameFormat = [&](const CharacterFormat &left, const CharacterFormat &right) {
         return sameFontFamily(left.fontFamily, right.fontFamily)
-            && near(left.fontSizeRatio * anchorSize.height(), right.fontSizeRatio * targetSize.height(), 0.1)
+            && withinTolerance(left.fontSizeRatio * anchorSize.height(), right.fontSizeRatio * targetSize.height(), 0.1)
             && left.fontBold == right.fontBold && left.fontItalic == right.fontItalic
             && left.fontUnderline == right.fontUnderline && left.color == right.color
-            && near(left.letterSpacingRatio * anchorSize.height(), right.letterSpacingRatio * targetSize.height(), 0.01)
-            && near(left.wordSpacingRatio * anchorSize.height(), right.wordSpacingRatio * targetSize.height(), 0.01)
+            && withinTolerance(left.letterSpacingRatio * anchorSize.height(), right.letterSpacingRatio * targetSize.height(), 0.01)
+            && withinTolerance(left.wordSpacingRatio * anchorSize.height(), right.wordSpacingRatio * targetSize.height(), 0.01)
             && left.fontStretch == right.fontStretch;
     };
     if (anchor.paragraphFormats.size() != draft.paragraphFormats.size())
@@ -463,10 +463,10 @@ bool PDFEditController::headerSyncDraftMatches(const Draft &draft, bool &pageNum
         const ParagraphFormat &aParagraph = anchor.paragraphFormats.at(index);
         const ParagraphFormat &bParagraph = draft.paragraphFormats.at(index);
         if (aParagraph.alignment != bParagraph.alignment
-            || !near(aParagraph.lineSpacing, bParagraph.lineSpacing, 0.001)
-            || !near(aParagraph.spaceBeforeRatio * anchorSize.height(), bParagraph.spaceBeforeRatio * targetSize.height(), 0.1)
-            || !near(aParagraph.spaceAfterRatio * anchorSize.height(), bParagraph.spaceAfterRatio * targetSize.height(), 0.1)
-            || !near(aParagraph.firstLineIndentRatio * anchorSize.height(), bParagraph.firstLineIndentRatio * targetSize.height(), 0.1)
+            || !withinTolerance(aParagraph.lineSpacing, bParagraph.lineSpacing, 0.001)
+            || !withinTolerance(aParagraph.spaceBeforeRatio * anchorSize.height(), bParagraph.spaceBeforeRatio * targetSize.height(), 0.1)
+            || !withinTolerance(aParagraph.spaceAfterRatio * anchorSize.height(), bParagraph.spaceAfterRatio * targetSize.height(), 0.1)
+            || !withinTolerance(aParagraph.firstLineIndentRatio * anchorSize.height(), bParagraph.firstLineIndentRatio * targetSize.height(), 0.1)
             || aParagraph.listStyle != bParagraph.listStyle || aParagraph.listLevel != bParagraph.listLevel
             || aParagraph.listStart != bParagraph.listStart)
             return false;
@@ -640,7 +640,7 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
     }
     if (!deleting && (!headerSyncDraftEligible(anchor)
         || (isTextCandidateKind(anchor.candidate.kind)
-            && (contentChanged || formatChanged || !near(newFrame.width(), oldFrame.width(), 0.001))
+            && (contentChanged || formatChanged || !withinTolerance(newFrame.width(), oldFrame.width(), 0.001))
             && !measureHeaderSyncText(anchor))))
         return fail();
     newFrame = inPoints(anchor.frameRect, anchorSize);
@@ -741,7 +741,7 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
                 after.imageQuarterTurns = (before.imageQuarterTurns + anchor.imageQuarterTurns
                     - m_headerSyncBaseline.imageQuarterTurns + 4) % 4;
                 after.contentBounds = after.frameRect;
-            } else if (contentChanged || formatChanged || !near(target.width(), previous.width(), 0.001)) {
+            } else if (contentChanged || formatChanged || !withinTolerance(target.width(), previous.width(), 0.001)) {
                 // Validate every reflow before making the batch visible.
                 if (!measureHeaderSyncText(after))
                     return fail();

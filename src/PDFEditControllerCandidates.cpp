@@ -310,7 +310,7 @@ private:
             m_document.reset();
         }
         m_filePath.clear();
-        m_documentId = {};
+        m_documentId = QUuid{};
         m_password.clear();
         m_revision = -1;
     }
