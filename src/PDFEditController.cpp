@@ -22,6 +22,7 @@
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QFontMetricsF>
+#include <QGuiApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
@@ -263,6 +264,10 @@ PDFEditController::PDFEditController(QObject *parent)
           kDrawingCommentAlpha)
 {
     initializeImageClipboard();
+    // Registration can emit before the private registry finishes its batch.
+    // Refresh every open session only after caches and all faces are ready.
+    connect(qGuiApp, &QGuiApplication::fontDatabaseChanged,
+            this, &PDFEditController::textFormatStateChanged, Qt::QueuedConnection);
     connect(this, &PDFEditController::savingChanged,
             this, &PDFEditController::passwordProtectionChanged);
     connect(this, &PDFEditController::selectionChanged,

@@ -674,6 +674,24 @@ private slots:
     void downloadsPrivateFontAndResumesOriginalSave();
     void validatesFontFamilyBeforeInstallation();
     void rollsBackFontFamilyWhenOptionalTargetBlocked();
+    void installsUserFontFamily_data();
+    void installsUserFontFamily();
+    void rejectsInvalidUserFontBatch_data();
+    void rejectsInvalidUserFontBatch();
+    void keepsUserFontImportIdempotent();
+    void keepsUserFontAfterDownloadCacheRemoval();
+    void rollsBackUserFontsWhenTargetBlocked();
+    void validatesUserFontImportForm_data();
+    void validatesUserFontImportForm();
+    void importsUserFontsFromLocalFiles();
+    void importsUserFontsThroughSettingsDialog();
+    void previewsExactUserFontFace_data();
+    void previewsExactUserFontFace();
+    void clearsInvalidUserFontPreview_data();
+    void clearsInvalidUserFontPreview();
+    void releasesUserFontPreviewOnDestruction();
+    void keepsImportedFontAfterPreviewCloses();
+    void previewsUserFontsThroughSettingsDialog();
 
 private:
     QString m_fontStoreRoot;

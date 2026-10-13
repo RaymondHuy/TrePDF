@@ -4558,5 +4558,178 @@ Kiểu chữ: %2
         <source>The downloaded file is invalid, does not match the requested font style, or cannot be used for editing.</source>
         <translation>Tệp phông chữ tải về không hợp lệ, không đúng kiểu chữ yêu cầu hoặc không thể dùng để chỉnh sửa.</translation>
     </message>
+    <message id="SettingsTab">
+        <location filename="../src/Components/AppRibbon.qml" line="576"/>
+        <location filename="../src/Components/AppRibbon.qml" line="685"/>
+        <source>Settings</source>
+        <translation>Thiết lập</translation>
+    </message>
+    <message id="SettingsFontButton">
+        <location filename="../src/Components/AppRibbon.qml" line="584"/>
+        <source>Font</source>
+        <translation>Font</translation>
+    </message>
+    <message id="UserFontDialogTitle">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="43"/>
+        <source>Add fonts</source>
+        <translation>Thêm phông chữ</translation>
+    </message>
+    <message id="UserFontDialogHint">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="138"/>
+        <source>Enter the font&apos;s family name, for example Noto Sans, then choose the files for the styles you have. You do not need all four styles.</source>
+        <translation>Nhập tên họ phông chữ, ví dụ Noto Sans, rồi chọn file cho các kiểu bạn có. Không cần chọn đủ cả bốn kiểu.</translation>
+    </message>
+    <message id="UserFontFamilyLabel">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="145"/>
+        <location filename="../src/Components/FontSettingsDialog.qml" line="158"/>
+        <source>Font family name</source>
+        <translation>Tên họ phông chữ</translation>
+    </message>
+    <message id="UserFontFamilyPlaceholder">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="157"/>
+        <source>For example: Noto Sans</source>
+        <translation>Ví dụ: Noto Sans</translation>
+    </message>
+    <message id="UserFontNoFile">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="187"/>
+        <source>No file selected</source>
+        <translation>Chưa chọn file</translation>
+    </message>
+    <message id="UserFontChooseFile">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="198"/>
+        <source>Choose file</source>
+        <translation>Chọn file</translation>
+    </message>
+    <message id="UserFontChooseStyleFile">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="200"/>
+        <location filename="../src/Components/FontSettingsDialog.qml" line="281"/>
+        <source>Choose a %1 font file</source>
+        <translation>Chọn file phông chữ %1</translation>
+    </message>
+    <message id="UserFontRemoveStyleFile">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="211"/>
+        <source>Remove the %1 file</source>
+        <translation>Bỏ file %1</translation>
+    </message>
+    <message id="UserFontStorageHint">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="222"/>
+        <source>Use TTF or OTF files from the same font family. Added fonts are saved in TrePDF and remain available the next time you open the app.</source>
+        <translation>Chọn file TTF hoặc OTF thuộc cùng một họ phông chữ. Phông được lưu riêng trong TrePDF và vẫn có khi bạn mở lại ứng dụng.</translation>
+    </message>
+    <message id="UserFontImportSuccess">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="241"/>
+        <source>%1 has been added. You can now choose it when editing text.</source>
+        <translation>Đã thêm %1. Bạn có thể chọn phông chữ này khi chỉnh sửa văn bản.</translation>
+    </message>
+    <message id="UserFontClose">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="258"/>
+        <source>Close</source>
+        <translation>Đóng</translation>
+    </message>
+    <message id="UserFontAdd">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="268"/>
+        <source>Add font</source>
+        <translation>Thêm phông chữ</translation>
+    </message>
+    <message id="UserFontFileFilter">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="284"/>
+        <source>Font files (*.ttf *.otf)</source>
+        <translation>File phông chữ (*.ttf *.otf)</translation>
+    </message>
+    <message id="UserFontInvalidName">
+        <location filename="../src/UserFontManager.cpp" line="61"/>
+        <source>Enter the font&apos;s family name, using at most 256 characters.</source>
+        <translation>Nhập tên họ phông chữ, tối đa 256 ký tự.</translation>
+    </message>
+    <message id="UserFontLocalFileRequired">
+        <location filename="../src/UserFontManager.cpp" line="78"/>
+        <source>Choose a font file on this device for %1.</source>
+        <translation>Chọn file phông chữ trên thiết bị này cho kiểu %1.</translation>
+    </message>
+    <message id="UserFontFileTypeRequired">
+        <location filename="../src/UserFontManager.cpp" line="84"/>
+        <source>Choose a .ttf or .otf file for %1.</source>
+        <translation>Chọn file .ttf hoặc .otf cho kiểu %1.</translation>
+    </message>
+    <message id="UserFontCannotRead">
+        <location filename="../src/UserFontManager.cpp" line="88"/>
+        <location filename="../src/UserFontManager.cpp" line="97"/>
+        <location filename="../src/UserFontManager.cpp" line="102"/>
+        <source>Cannot read %1. Choose an accessible font file for %2.</source>
+        <translation>Không đọc được %1. Hãy chọn file phông chữ có thể truy cập cho kiểu %2.</translation>
+    </message>
+    <message id="UserFontInvalidSize">
+        <location filename="../src/UserFontManager.cpp" line="92"/>
+        <source>%1 is empty, invalid, or larger than 64 MiB. Choose another font file.</source>
+        <translation>%1 bị trống, không hợp lệ hoặc lớn hơn 64 MiB. Hãy chọn file phông chữ khác.</translation>
+    </message>
+    <message id="UserFontFaceMismatch">
+        <location filename="../src/UserFontManager.cpp" line="116"/>
+        <source>%1 contains %2 (%3), but this slot requires %4 (%5). Check the family name or choose the matching file.</source>
+        <translation>%1 chứa phông %2 (%3), nhưng ô này cần %4 (%5). Hãy kiểm tra tên họ phông chữ hoặc chọn đúng file.</translation>
+    </message>
+    <message id="UserFontUnsupportedFile">
+        <location filename="../src/UserFontManager.cpp" line="120"/>
+        <source>%1 cannot be used for %2. Choose a valid static TTF or OTF font that permits editable embedding in PDFs. Variable fonts, font collections and color fonts are not supported.</source>
+        <translation>Không thể dùng %1 cho kiểu %2. Hãy chọn file TTF hoặc OTF tĩnh hợp lệ, cho phép nhúng và chỉnh sửa trong PDF. Chưa hỗ trợ phông biến thiên, bộ sưu tập phông hoặc phông màu.</translation>
+    </message>
+    <message id="UserFontFaceConflict">
+        <location filename="../src/UserFontManager.cpp" line="125"/>
+        <source>A different version of %1 (%2) is already in TrePDF&apos;s font library. It has not been replaced.</source>
+        <translation>Kho phông của TrePDF đã có một phiên bản khác của %1 (%2). Phông hiện có được giữ nguyên.</translation>
+    </message>
+    <message id="UserFontFilesRequired">
+        <location filename="../src/UserFontManager.cpp" line="131"/>
+        <source>Choose at least one font file to add.</source>
+        <translation>Chọn ít nhất một file phông chữ để thêm.</translation>
+    </message>
+    <message id="UserFontStorageFull">
+        <location filename="../src/UserFontManager.cpp" line="139"/>
+        <source>TrePDF&apos;s font library is full (128 files or 256 MiB). No fonts were added.</source>
+        <translation>Kho phông của TrePDF đã đầy (128 file hoặc 256 MiB). Chưa có phông nào được thêm.</translation>
+    </message>
+    <message id="UserFontInstallFailed">
+        <location filename="../src/UserFontManager.cpp" line="142"/>
+        <source>Could not add these fonts to %1. Check that the folder is writable and has enough free space, then try again.</source>
+        <translation>Không thể thêm các phông chữ vào %1. Hãy kiểm tra quyền ghi và dung lượng trống của thư mục rồi thử lại.</translation>
+    </message>
+    <message id="UserFontPreviewTitle">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="248"/>
+        <source>Preview</source>
+        <translation>Xem thử</translation>
+    </message>
+    <message id="UserFontPreviewBold">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="256"/>
+        <source>Bold</source>
+        <translation>Đậm</translation>
+    </message>
+    <message id="UserFontPreviewItalic">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="264"/>
+        <source>Italic</source>
+        <translation>Nghiêng</translation>
+    </message>
+    <message id="UserFontPreviewSample">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="286"/>
+        <source>The quick brown fox jumps over the lazy dog.
+Tiếng Việt: Nguyễn Ánh — 0123456789</source>
+        <translation>The quick brown fox jumps over the lazy dog.
+Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
+    </message>
+    <message id="UserFontPreviewInput">
+        <location filename="../src/Components/FontSettingsDialog.qml" line="288"/>
+        <location filename="../src/Components/FontSettingsDialog.qml" line="290"/>
+        <source>Type here to try the font</source>
+        <translation>Gõ tại đây để thử phông chữ</translation>
+    </message>
+    <message id="UserFontPreviewMissing">
+        <location filename="../src/UserFontManager.cpp" line="158"/>
+        <source></source>
+        <translation>Chọn file phông chữ %1 để xem thử kiểu này.</translation>
+    </message>
+    <message id="UserFontPreviewFailed">
+        <location filename="../src/UserFontManager.cpp" line="187"/>
+        <source></source>
+        <translation>Không thể xem thử phông chữ này. Hãy chọn file khác hoặc thử lại.</translation>
+    </message>
 </context>
 </TS>

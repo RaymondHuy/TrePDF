@@ -48,6 +48,7 @@ Column {
     readonly property bool exportTabActive: root.acceptedTabIndex === 6
     readonly property bool headerTabActive: root.acceptedTabIndex === 7
     readonly property bool footerTabActive: root.acceptedTabIndex === 8
+    readonly property bool settingsTabActive: root.acceptedTabIndex === 9
     readonly property bool marginTabActive: headerTabActive || footerTabActive
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
@@ -73,6 +74,7 @@ Column {
     signal saveAsRequested()
     signal excelExportRequested()
     signal mergePdfRequested()
+    signal fontSettingsRequested()
     signal pageRequested(int page)
     signal pageStepRequested(int direction)
     signal searchResultRequested(int page,
@@ -562,6 +564,33 @@ Column {
         }
     }
 
+    Component {
+        id: settingsRibbonComponent
+
+        Row {
+            x: 8
+            height: 76
+
+            RibbonGroup {
+                theme: root.theme
+                //% "Settings"
+                title: qsTrId("SettingsTab")
+
+                RibbonButton {
+                    objectName: "settingsFontButton"
+                    theme: root.theme
+                    documentLoaded: root.document.loaded
+                    requiresDocument: false
+                    //% "Font"
+                    text: qsTrId("SettingsFontButton")
+                    iconSource: "../assets/icons/type.svg"
+                    enabled: !root.anySaving
+                    onClicked: root.fontSettingsRequested()
+                }
+            }
+        }
+    }
+
     Rectangle {
         width: parent.width
         height: Qt.platform.os === "ios" ? 44 : 34
@@ -585,7 +614,7 @@ Column {
                 id: ribbonTabs
                 objectName: "ribbonTabs"
 
-                Layout.preferredWidth: Qt.platform.os === "ios" ? 0 : 760
+                Layout.preferredWidth: Qt.platform.os === "ios" ? 0 : 840
                 Layout.fillWidth: Qt.platform.os === "ios"
                 Layout.minimumWidth: 0
                 clip: Qt.platform.os === "ios"
@@ -650,6 +679,13 @@ Column {
                     theme: root.theme
                     //% "Footer"
                     text: qsTrId("FooterTab")
+                }
+
+                RibbonTabButton {
+                    objectName: "settingsTabButton"
+                    theme: root.theme
+                    //% "Settings"
+                    text: qsTrId("SettingsTab")
                 }
             }
 
@@ -743,7 +779,9 @@ Column {
                                         ? exportRibbonComponent
                                         : root.marginTabActive
                                             ? headerRibbonComponent
-                                            : null
+                                            : root.settingsTabActive
+                                                ? settingsRibbonComponent
+                                                : null
         }
     }
 }

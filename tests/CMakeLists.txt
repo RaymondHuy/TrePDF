@@ -85,6 +85,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/SpreadsheetWorkbook.h
     ../src/SignatureLibrary.cpp
     ../src/SignatureLibrary.h
+    ../src/UserFontManager.cpp
+    ../src/UserFontManager.h
     ../src/PDFExcelExportController.cpp
     ../src/PDFExcelExportController.h
     ../src/PDFMergeController.cpp

@@ -692,7 +692,7 @@ void PDFEditControllerTest::guardsHeaderExitUntilChangesAreSavedOrUndone()
         return button && QMetaObject::invokeMethod(button, "clicked");
     };
     // Every ribbon tab uses the same guard, including Footer and programmatic changes.
-    for (int index = 0; index < 9; ++index) {
+    for (int index = 0; index < tabs->property("count").toInt(); ++index) {
         if (index == 7)
             continue;
         QVERIFY(tabs->setProperty("currentIndex", index));
