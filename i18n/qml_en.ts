@@ -4305,5 +4305,172 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <source>Before leaving Footer</source>
         <translation>Before leaving Footer</translation>
     </message>
+    <message id="MergePdf">
+        <location filename="../src/Components/EditRibbon.qml" line="453"/>
+        <location filename="../src/Components/MergePdfDialog.qml" line="40"/>
+        <source>Merge PDF</source>
+        <translation>Merge PDF</translation>
+    </message>
+    <message id="MergePdfDescription">
+        <location filename="../src/Components/MergePdfDialog.qml" line="126"/>
+        <source>Add PDF files, arrange their order, then save them as one new PDF. Your original files stay unchanged.</source>
+        <translation>Add PDF files, arrange their order, then save them as one new PDF. Your original files stay unchanged.</translation>
+    </message>
+    <message id="MergePdfAddFiles">
+        <location filename="../src/Components/MergePdfDialog.qml" line="138"/>
+        <source>Add PDF files…</source>
+        <translation>Add PDF files…</translation>
+    </message>
+    <message id="MergePdfSummary">
+        <location filename="../src/Components/MergePdfDialog.qml" line="149"/>
+        <source>%1 files · %2 pages</source>
+        <translation>%1 files · %2 pages</translation>
+    </message>
+    <message id="MergePdfFileList">
+        <location filename="../src/Components/MergePdfDialog.qml" line="177"/>
+        <source>PDF files in merge order</source>
+        <translation>PDF files in merge order</translation>
+    </message>
+    <message id="MergePdfPageCount">
+        <location filename="../src/Components/MergePdfDialog.qml" line="266"/>
+        <source>%1 pages</source>
+        <translation>%1 pages</translation>
+    </message>
+    <message id="MergePdfEmpty">
+        <location filename="../src/Components/MergePdfDialog.qml" line="278"/>
+        <source>Choose at least two PDF files to get started.</source>
+        <translation>Choose at least two PDF files to get started.</translation>
+    </message>
+    <message id="MergePdfMoveUp">
+        <location filename="../src/Components/MergePdfDialog.qml" line="294"/>
+        <source>Move up</source>
+        <translation>Move up</translation>
+    </message>
+    <message id="MergePdfMoveDown">
+        <location filename="../src/Components/MergePdfDialog.qml" line="301"/>
+        <source>Move down</source>
+        <translation>Move down</translation>
+    </message>
+    <message id="MergePdfRemoveFile">
+        <location filename="../src/Components/MergePdfDialog.qml" line="309"/>
+        <source>Remove</source>
+        <translation>Remove</translation>
+    </message>
+    <message id="MergePdfReorderHint">
+        <location filename="../src/Components/MergePdfDialog.qml" line="323"/>
+        <source>Drag the handle to reorder, or select a file and use Move up / Move down.</source>
+        <translation>Drag the handle to reorder, or select a file and use Move up / Move down.</translation>
+    </message>
+    <message id="MergePdfMetadataNotice">
+        <location filename="../src/Components/MergePdfDialog.qml" line="332"/>
+        <source>Page content is preserved. Bookmarks, attachments and accessibility tags are not merged yet.</source>
+        <translation>Page content is preserved. Bookmarks, attachments and accessibility tags are not merged yet.</translation>
+    </message>
+    <message id="MergePdfSaveAs">
+        <location filename="../src/Components/MergePdfDialog.qml" line="380"/>
+        <source>Merge and save as…</source>
+        <translation>Merge and save as…</translation>
+    </message>
+    <message id="MergePdfChooseFiles">
+        <location filename="../src/Components/MergePdfDialog.qml" line="412"/>
+        <source>Choose PDF files to merge</source>
+        <translation>Choose PDF files to merge</translation>
+    </message>
+    <message id="MergePdfFilesFilter">
+        <location filename="../src/Components/MergePdfDialog.qml" line="415"/>
+        <location filename="../src/Components/MergePdfDialog.qml" line="437"/>
+        <source>PDF files (*.pdf)</source>
+        <translation>PDF files (*.pdf)</translation>
+    </message>
+    <message id="MergePdfSaveTitle">
+        <location filename="../src/Components/MergePdfDialog.qml" line="433"/>
+        <source>Save merged PDF</source>
+        <translation>Save merged PDF</translation>
+    </message>
+    <message id="MergePdfDestinationOpen">
+        <location filename="../src/PDFTabModel.cpp" line="709"/>
+        <source>This PDF is open in another tab. Choose a different name for the merged file.</source>
+        <translation>This PDF is open in another tab. Choose a different name for the merged file.</translation>
+    </message>
+    <message id="MergePdfSaveSourceFirst">
+        <location filename="../src/PDFTabModel.cpp" line="713"/>
+        <source>Save the changes in “%1” before merging so the new PDF includes your latest edits.</source>
+        <translation>Save the changes in “%1” before merging so the new PDF includes your latest edits.</translation>
+    </message>
+    <message id="MergePdfWaitBeforeClosing">
+        <location filename="../src/Main.qml" line="1064"/>
+        <source>Merging is still running. Please wait, or cancel it in the Merge PDF window.</source>
+        <translation>Merging is still running. Please wait, or cancel it in the Merge PDF window.</translation>
+    </message>
+    <message id="MergePdfInvalidFile">
+        <location filename="../src/PDFMergeController.cpp" line="107"/>
+        <source>Could not read %1 as a complete PDF. Check the file and add it again.</source>
+        <translation>Could not read %1 as a complete PDF. Check the file and add it again.</translation>
+    </message>
+    <message id="MergePdfEncryptedFile">
+        <location filename="../src/PDFMergeController.cpp" line="110"/>
+        <source>%1 is password-protected. Add a PDF without password protection to merge it.</source>
+        <translation>%1 is password-protected. Add a PDF without password protection to merge it.</translation>
+    </message>
+    <message id="MergePdfUnsupportedFile">
+        <location filename="../src/PDFMergeController.cpp" line="113"/>
+        <source>%1 uses digital signatures, XFA forms, layers, or actions that cannot be preserved when merging yet.</source>
+        <translation>%1 uses digital signatures, XFA forms, layers, or actions that cannot be preserved when merging yet.</translation>
+    </message>
+    <message id="MergePdfLimitExceeded">
+        <location filename="../src/PDFMergeController.cpp" line="116"/>
+        <source>Merge supports up to 100 PDFs, 10,000 pages, 256 MB per file, and 1 GB in total.</source>
+        <translation>Merge supports up to 100 PDFs, 10,000 pages, 256 MB per file, and 1 GB in total.</translation>
+    </message>
+    <message id="MergePdfSourceChanged">
+        <location filename="../src/PDFMergeController.cpp" line="119"/>
+        <source>%1 changed after it was added. Remove it and add it again before merging.</source>
+        <translation>%1 changed after it was added. Remove it and add it again before merging.</translation>
+    </message>
+    <message id="MergePdfInvalidDestination">
+        <location filename="../src/PDFMergeController.cpp" line="122"/>
+        <source>Choose a writable PDF destination different from every input file.</source>
+        <translation>Choose a writable PDF destination different from every input file.</translation>
+    </message>
+    <message id="MergePdfFailed">
+        <location filename="../src/PDFMergeController.cpp" line="125"/>
+        <source>Could not merge these PDFs. Your original files and destination have not been changed.</source>
+        <translation>Could not merge these PDFs. Your original files and destination have not been changed.</translation>
+    </message>
+    <message id="MergePdfAlreadyAdded">
+        <location filename="../src/PDFMergeController.cpp" line="532"/>
+        <source>These PDFs are already in the list.</source>
+        <translation>These PDFs are already in the list.</translation>
+    </message>
+    <message id="MergePdfReading">
+        <location filename="../src/PDFMergeController.cpp" line="535"/>
+        <source>Reading PDF files…</source>
+        <translation>Reading PDF files…</translation>
+    </message>
+    <message id="MergePdfNeedsFiles">
+        <location filename="../src/PDFMergeController.cpp" line="574"/>
+        <source>Add at least two PDFs to merge.</source>
+        <translation>Add at least two PDFs to merge.</translation>
+    </message>
+    <message id="MergePdfWorking">
+        <location filename="../src/PDFMergeController.cpp" line="593"/>
+        <source>Merging PDF files…</source>
+        <translation>Merging PDF files…</translation>
+    </message>
+    <message id="MergePdfAlreadyRunning">
+        <location filename="../src/PDFMergeController.cpp" line="617"/>
+        <source>Another PDF merge is finishing. Please try again in a moment.</source>
+        <translation>Another PDF merge is finishing. Please try again in a moment.</translation>
+    </message>
+    <message id="MergePdfSucceeded">
+        <location filename="../src/PDFMergeController.cpp" line="796"/>
+        <source>Merged PDF saved to %1.</source>
+        <translation>Merged PDF saved to %1.</translation>
+    </message>
+    <message id="MergePdfCancelled">
+        <location filename="../src/PDFMergeController.cpp" line="799"/>
+        <source>PDF merge cancelled. Your files have not been changed.</source>
+        <translation>PDF merge cancelled. Your files have not been changed.</translation>
+    </message>
 </context>
 </TS>

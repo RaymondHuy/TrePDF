@@ -14,6 +14,7 @@ Flickable {
 
     signal pageRequested(int page)
     signal deletePageRequested(int page)
+    signal mergePdfRequested()
     signal undoRequested()
     signal redoRequested()
     signal toolRequested(string toolName)
@@ -441,6 +442,18 @@ Flickable {
                     && root.document.pageCount > 1
                     && !root.editController.saving
                 onClicked: root.deletePageRequested(root.document.currentPage)
+            }
+
+            RibbonButton {
+                objectName: "mergePdfButton"
+                theme: root.theme
+                documentLoaded: true
+                visible: Qt.platform.os !== "ios"
+                //% "Merge PDF"
+                text: qsTrId("MergePdf")
+                iconSource: "../assets/icons/merge-pdf.svg"
+                enabled: !root.editController.saving
+                onClicked: root.mergePdfRequested()
             }
         }
 

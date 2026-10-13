@@ -690,6 +690,32 @@ bool PDFTabModel::requestExcelExport(PDFDocumentSession *session, const QUrl &ta
     return session->excelExportController()->exportTo(target);
 }
 
+QString PDFTabModel::mergeValidationError(const QList<QUrl> &sources, const QUrl &target) const
+{
+    if (anySaving()) {
+        //% "Please wait for the PDF to finish saving."
+        return qtTrId("WaitForPdfSave");
+    }
+    const QString targetIdentity = fileIdentity(target);
+    QStringList sourceIdentities;
+    for (const QUrl &source : sources)
+        sourceIdentities.append(fileIdentity(source));
+    for (const PDFDocumentSession *session : m_sessions) {
+        const QString identity = fileIdentity(session->document()->source());
+        if (identity.isEmpty())
+            continue;
+        if (identity == targetIdentity) {
+            //% "This PDF is open in another tab. Choose a different name for the merged file."
+            return qtTrId("MergePdfDestinationOpen");
+        }
+        if (sourceIdentities.contains(identity) && session->hasDrafts()) {
+            //% "Save the changes in “%1” before merging so the new PDF includes your latest edits."
+            return qtTrId("MergePdfSaveSourceFirst").arg(session->title());
+        }
+    }
+    return {};
+}
+
 PDFDocumentSession *PDFTabModel::firstDraftSession() const
 {
     for (PDFDocumentSession *session : m_sessions) {

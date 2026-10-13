@@ -72,6 +72,7 @@ Column {
     signal saveRequested()
     signal saveAsRequested()
     signal excelExportRequested()
+    signal mergePdfRequested()
     signal pageRequested(int page)
     signal pageStepRequested(int direction)
     signal searchResultRequested(int page,
@@ -324,6 +325,7 @@ Column {
             hasPendingPanelEdits: root.hasPendingPanelEdits
             onPageRequested: page => root.pageRequested(page)
             onDeletePageRequested: page => root.deletePageRequested(page)
+            onMergePdfRequested: root.mergePdfRequested()
             onUndoRequested: root.undoRequested()
             onRedoRequested: root.redoRequested()
             onToolRequested: toolName => root.toolRequested(toolName)

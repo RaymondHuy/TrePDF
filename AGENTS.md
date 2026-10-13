@@ -188,6 +188,14 @@ Current features:
   libxlsxwriter. See `docs/excel-export-pipeline.md` for the complete contract.
 
 - Open multiple local PDF files in independent tabs and close them separately.
+- Edit > Pages > Merge PDF opens a lazy file-list dialog even without an open
+  document. Users add local PDFs, inspect page counts, reorder them by dragging
+  or using Up/Down, remove files, and save the merged pages as a separate PDF.
+  `PDFMergeController` owns bounded asynchronous inspection and qpdf-based
+  merging, cancellation, source validation and atomic output. Main checks open
+  input drafts and rejects destinations used by open tabs; success opens the
+  result in a new tab. See `docs/pdf-merge-pipeline.md` for supported features
+  and limits.
 - Open local PDFs through Finder/Open With and the Dock on macOS, positional
   command-line paths/file URLs, or window drag-and-drop. `PDFFileOpenHandler`
   buffers native requests before QML loads, filters local PDF files and deduplicates

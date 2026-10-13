@@ -38,6 +38,8 @@ private slots:
     void opensDroppedPdfsWithoutLosingExistingDrafts();
     void focusesDocumentSearchWithStandardShortcut();
     void opensPdfDialogWithStandardShortcut();
+    void mergesPdfsThroughMainWindow();
+    void guardsMergeAgainstOpenPdfDraftsAndDestinations();
     void stagesOpenPasswordUntilSave();
     void savesNewOpenPasswordAsynchronously_data();
     void savesNewOpenPasswordAsynchronously();
