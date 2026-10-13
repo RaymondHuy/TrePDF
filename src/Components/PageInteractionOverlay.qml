@@ -43,6 +43,9 @@ Item {
         && formController.interactive
         && !formController.javascriptTransitionPending
         && !editController.saving
+        // Margin placement uses BrowseTool for pointer routing, not form editing.
+        // Even a blank form click can emit a pending-history notification.
+        && !editController.headerSelectionOnly
         && editController.tool === PDFEditController.BrowseTool
         && !textFieldToolActive
         && !checkboxToolActive

@@ -692,12 +692,18 @@ void PDFEditControllerTest::cancelsHeaderTextPanelAcrossUiChanges()
             QVERIFY(QMetaObject::invokeMethod(window.get(), "requestSave"));
         }
         QTRY_VERIFY2(panel.isNull(), qPrintable(action));
+        // Save applies pending text; the other transitions cancel it.
+        if (action == QLatin1String("save"))
+            QTRY_VERIFY_WITH_TIMEOUT(!controller->saving() && !controller->hasDrafts(), 10000);
         if (controller->hasDrafts())
             controller->discardDrafts();
         QVERIFY(!controller->hasDrafts());
         QVERIFY(!second->editController()->hasDrafts());
-        for (int page = 0; page < 3; ++page)
-            QVERIFY(!pageText(firstPath, page).contains(QStringLiteral("Never applied")));
+        for (int page = 0; page < 3; ++page) {
+            const QString savedText = normalizedPageText(firstPath, page);
+            QVERIFY2(savedText.contains(QStringLiteral("Never applied"))
+                         == (action == QLatin1String("save")), qPrintable(savedText));
+        }
     }
 }
 

@@ -52,8 +52,11 @@ Rectangle {
 
             Label {
                 Layout.fillWidth: true
-                //% "Header image"
-                text: qsTrId("HeaderImage")
+                text: root.placement.footerMode
+                    //% "Footer image"
+                    ? qsTrId("FooterImage")
+                    //% "Header image"
+                    : qsTrId("HeaderImage")
                 color: root.theme.ribbonTextColor
                 font.pixelSize: 17
                 font.weight: Font.DemiBold

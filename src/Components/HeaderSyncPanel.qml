@@ -71,8 +71,11 @@ Rectangle {
                 enabled: root.editController.headerSyncAvailable
                     && !root.editController.saving
                 checked: root.syncActive
-                //% "Apply to similar headers"
-                text: qsTrId("HeaderSyncEnabled")
+                text: root.editController.footerMode
+                    //% "Apply to similar footers"
+                    ? qsTrId("FooterSyncEnabled")
+                    //% "Apply to similar headers"
+                    : qsTrId("HeaderSyncEnabled")
                 palette.highlight: root.theme.foxitOrange
                 contentItem: Label {
                     text: syncEnabled.text
@@ -101,8 +104,11 @@ Rectangle {
                 FieldLabel {
                     objectName: "headerSyncMatchSummary"
                     text: root.editController.headerSyncLoading
-                        //% "Finding similar headers…"
-                        ? qsTrId("HeaderSyncLoading")
+                        ? (root.editController.footerMode
+                            //% "Finding similar footers…"
+                            ? qsTrId("FooterSyncLoading")
+                            //% "Finding similar headers…"
+                            : qsTrId("HeaderSyncLoading"))
                         //% "%1 matching pages (including this page)"
                         : qsTrId("HeaderSyncMatchCount")
                             .arg(root.editController.headerSyncMatchCount)

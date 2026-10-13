@@ -834,16 +834,17 @@ QRectF PDFEditController::rotatedImageFrame(const Draft &draft, int quarterTurns
         ? frame.height() * pageSize.height() / pageSize.width() : frame.width();
     const qreal height = swapsAxes
         ? frame.width() * pageSize.width() / pageSize.height() : frame.height();
+    const qreal minimumTop = selectionTopRatio(draft.candidate.page);
     const qreal maximumBottom = selectionBottomRatio(draft.candidate.page);
     if (!std::isfinite(width) || !std::isfinite(height)
-        || width > 1.0 || height > maximumBottom) {
+        || width > 1.0 || height > maximumBottom - minimumTop) {
         return {};
     }
 
     // Keep the center when possible and shift away from page edges without scaling.
     const QPointF center = frame.center();
     return QRectF(qBound(0.0, center.x() - width / 2.0, 1.0 - width),
-                  qBound(0.0, center.y() - height / 2.0, maximumBottom - height),
+                  qBound(minimumTop, center.y() - height / 2.0, maximumBottom - height),
                   width, height);
 }
 
@@ -928,6 +929,7 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
 
     const QRectF normalizedRect = frameRect.normalized();
     Draft draft = selectedDraftForDisplay();
+    const qreal minimumTop = selectionTopRatio(draft.candidate.page);
     const qreal maximumBottom = selectionBottomRatio(draft.candidate.page);
     const QRectF currentFrameRect = draft.frameRect.normalized();
     constexpr qreal geometryEpsilon = 1e-9;
@@ -956,7 +958,7 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
             requestedX,
             1.0 - effectiveBounds.right());
         const qreal translationY = qBound<qreal>(
-            -effectiveBounds.top(),
+            minimumTop - effectiveBounds.top(),
             requestedY,
             maximumBottom - effectiveBounds.bottom());
         const QPointF translation(translationX, translationY);
@@ -964,9 +966,9 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         resizedContentBounds = draft.contentBounds.translated(translation);
     } else {
         const qreal left = qBound<qreal>(0.0, normalizedRect.left(), 1.0);
-        const qreal top = qBound<qreal>(0.0, normalizedRect.top(), maximumBottom);
+        const qreal top = qBound<qreal>(minimumTop, normalizedRect.top(), maximumBottom);
         const qreal right = qBound<qreal>(0.0, normalizedRect.right(), 1.0);
-        const qreal bottom = qBound<qreal>(0.0, normalizedRect.bottom(), maximumBottom);
+        const qreal bottom = qBound<qreal>(minimumTop, normalizedRect.bottom(), maximumBottom);
         if (right - left <= 0.0 || bottom - top <= 0.0) {
             return;
         }

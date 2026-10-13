@@ -96,10 +96,16 @@ Item {
                     persistentSelection: true
                     color: "black"
                     palette.highlight: root.theme.foxitOrange
-                    //% "Enter header text"
-                    placeholderText: qsTrId("HeaderTextPlaceholder")
-                    //% "Header text"
-                    Accessible.name: qsTrId("HeaderText")
+                    placeholderText: root.editController.footerMode
+                        //% "Enter footer text"
+                        ? qsTrId("FooterTextPlaceholder")
+                        //% "Enter header text"
+                        : qsTrId("HeaderTextPlaceholder")
+                    Accessible.name: root.editController.footerMode
+                        //% "Footer text"
+                        ? qsTrId("FooterText")
+                        //% "Header text"
+                        : qsTrId("HeaderText")
                     onTextChanged: {
                         if (!initialized || synchronizing)
                             return

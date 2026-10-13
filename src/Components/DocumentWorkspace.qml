@@ -12,6 +12,7 @@ Item {
     required property PDFDocumentSession session
     property bool viewTabActive: false
     property bool headerTabActive: false
+    property bool footerMode: false
     readonly property bool headerSelectionActive: headerTabActive
         && session.editController.headerSelectionOnly
         && session.editController.tool === PDFEditController.SelectTool
@@ -278,6 +279,7 @@ Item {
         if (!headerTabActive)
             closeHeaderPlacement()
     }
+    onFooterModeChanged: closeHeaderPlacement()
     onSessionChanged: closeHeaderPlacement()
 
     HeaderTextPlacement {
@@ -315,6 +317,7 @@ Item {
         formDesignerController: root.session.formDesignerController
         viewTabActive: root.viewTabActive
         headerTabActive: root.headerTabActive
+        footerMode: root.footerMode
         headerTextPlacement: secondaryPane ? null : root.headerTextPlacement
         headerImagePlacement: secondaryPane ? null : root.headerImagePlacement
         headerPageNumberPlacement: secondaryPane ? null : root.headerPageNumberPlacement

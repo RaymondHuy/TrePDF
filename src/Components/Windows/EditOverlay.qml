@@ -19,9 +19,14 @@ Item {
     // font separately at each zoom otherwise changes wrapping on editor entry.
     readonly property real textLayoutScale: Math.max(0.01, pagePointScale)
     readonly property real textLayoutPageHeight: height / textLayoutScale
-    readonly property real selectionBottomRatio: controller.headerSelectionOnly
+    readonly property bool marginSelectionActive: controller.headerSelectionOnly
         && controller.tool === PDFEditController.SelectTool
-        ? Math.min(1, 100 / Math.max(1, textLayoutPageHeight)) : 1
+    readonly property real selectionBandHeightRatio:
+        Math.min(1, 100 / Math.max(1, textLayoutPageHeight))
+    readonly property real selectionTopRatio: marginSelectionActive && controller.footerMode
+        ? 1 - selectionBandHeightRatio : 0
+    readonly property real selectionBottomRatio: marginSelectionActive && !controller.footerMode
+        ? selectionBandHeightRatio : 1
     property int viewRotation: 0
     property bool imageClipboardEnabled: false
 
@@ -1288,7 +1293,7 @@ Item {
 
         if (vertical < 0) {
             top = Math.max(
-                0,
+                selectionTopRatio,
                 Math.min(bottom - minimumHeight, top + deltaY / pageHeight))
         } else if (vertical > 0) {
             bottom = Math.min(
@@ -1331,9 +1336,9 @@ Item {
             ? right
             : horizontal > 0 ? 1 - left : 2 * Math.min(centerX, 1 - centerX)
         const availableHeight = vertical < 0
-            ? bottom
+            ? bottom - selectionTopRatio
             : vertical > 0 ? selectionBottomRatio - top
-                : 2 * Math.min(centerY, selectionBottomRatio - centerY)
+                : 2 * Math.min(centerY - selectionTopRatio, selectionBottomRatio - centerY)
         const maximumScale = Math.min(
             availableWidth / frameWidth, availableHeight / frameHeight)
         if (maximumScale <= 0)
@@ -1364,7 +1369,7 @@ Item {
                 1 - frameWidth,
                 Number(startFrameRect.x) + deltaX / pageWidth))
         const top = Math.max(
-            0,
+            selectionTopRatio,
             Math.min(
                 selectionBottomRatio - frameHeight,
                 Number(startFrameRect.y) + deltaY / pageHeight))
@@ -2362,6 +2367,11 @@ Item {
                     && hitArea.containsMouse) {
                 root.updateHoverAtPosition(hitArea.mouseX, hitArea.mouseY)
             }
+        }
+
+        function onFooterModeChanged() {
+            root.prepareForSessionChange()
+            root.reloadData()
         }
 
         function onHeaderSelectionOnlyChanged() {

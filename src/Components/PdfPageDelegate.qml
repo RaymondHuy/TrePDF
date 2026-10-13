@@ -13,6 +13,7 @@ Item {
     property PDFTextSelectionController textSelectionController
     property bool viewTabActive: false
     property bool headerTabActive: false
+    property bool footerMode: false
     property HeaderTextPlacement headerTextPlacement: null
     property HeaderImagePlacement headerImagePlacement: null
     property HeaderPageNumberPlacement headerPageNumberPlacement: null
@@ -176,7 +177,7 @@ Item {
 
         Rectangle {
             objectName: "headerAreaOverlay"
-            anchors.top: parent.top
+            y: pageCard.footerMode ? pageSurface.height - height : 0
             anchors.left: parent.left
             anchors.right: parent.right
             height: Math.min(pageSurface.height, 100 * pageCard.zoom)
@@ -240,7 +241,7 @@ Item {
         }
 
         HeaderTextOverlay {
-            anchors.top: parent.top
+            y: pageCard.footerMode ? pageSurface.height - height : 0
             anchors.left: parent.left
             anchors.right: parent.right
             height: Math.min(pageSurface.height, 100 * pageCard.zoom)
@@ -256,7 +257,7 @@ Item {
         }
 
         HeaderImageOverlay {
-            anchors.top: parent.top
+            y: pageCard.footerMode ? pageSurface.height - height : 0
             anchors.left: parent.left
             anchors.right: parent.right
             height: Math.min(pageSurface.height, 100 * pageCard.zoom)
@@ -272,7 +273,7 @@ Item {
         }
 
         HeaderPageNumberOverlay {
-            anchors.top: parent.top
+            y: pageCard.footerMode ? pageSurface.height - height : 0
             anchors.left: parent.left
             anchors.right: parent.right
             height: Math.min(pageSurface.height, 100 * pageCard.zoom)

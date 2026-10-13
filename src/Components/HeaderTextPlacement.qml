@@ -9,6 +9,7 @@ QtObject {
 
     required property PDFDocument document
     required property PDFEditController editController
+    readonly property bool footerMode: editController ? editController.footerMode : false
     property bool armed: false
     readonly property bool active: page >= 0
     property int page: -1
@@ -183,11 +184,15 @@ QtObject {
         if (succeeded) {
             cancel()
         } else if (errorText.length === 0) {
-            //% "Could not add header text."
-            errorText = qsTrId("AddHeaderTextFailed")
+            errorText = footerMode
+                //% "Could not add footer text."
+                ? qsTrId("AddFooterTextFailed")
+                //% "Could not add header text."
+                : qsTrId("AddHeaderTextFailed")
         }
     }
 
+    onFooterModeChanged: cancel()
     onDocumentChanged: cancel()
     onEditControllerChanged: cancel()
     onTextChanged: {

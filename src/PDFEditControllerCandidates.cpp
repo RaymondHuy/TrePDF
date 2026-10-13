@@ -2264,7 +2264,9 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
         if (candidate.kind == QLatin1String("image") && candidate.editable
             && candidate.imageResizable && !candidate.headerMetadataInvalid
             && candidate.objectPath.size() == 1 && rect.left() >= 0.0 && rect.top() >= 0.0
-            && rect.right() <= 1.0 && rect.bottom() * request.pageSize.height() <= 100.001) {
+            && rect.right() <= 1.0 && rect.bottom() <= 1.0
+            && (rect.bottom() * request.pageSize.height() <= 100.001
+                || rect.top() * request.pageSize.height() >= request.pageSize.height() - 100.001)) {
             candidate.headerImageDigest = headerImageDigest(document, page,
                 FPDFPage_GetObject(page, candidate.objectPath.constFirst()), remainingHeaderImagePixels);
         }
@@ -2519,8 +2521,10 @@ void PDFEditController::appendPageObjectCandidates(
     const auto headerMetadata = PDFHeaderMetadata::read(pageObject);
     candidate.headerMetadataInvalid = headerMetadata.invalid
         || (!headerMetadata.group.isEmpty()
-            && ((type == FPDF_PAGEOBJ_TEXT && headerMetadata.role == QLatin1String("image"))
-                || (type != FPDF_PAGEOBJ_TEXT && headerMetadata.role != QLatin1String("image"))));
+            && ((type == FPDF_PAGEOBJ_TEXT && (headerMetadata.role == QLatin1String("image")
+                || headerMetadata.role == QLatin1String("footerImage")))
+                || (type != FPDF_PAGEOBJ_TEXT && headerMetadata.role != QLatin1String("image")
+                    && headerMetadata.role != QLatin1String("footerImage"))));
     if (!candidate.headerMetadataInvalid) {
         candidate.headerGroupId = headerMetadata.group;
         candidate.headerRole = headerMetadata.role;

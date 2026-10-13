@@ -38,8 +38,11 @@ Item {
             objectName: "headerImageFrame"
             activeFocusOnTab: true
             Accessible.role: Accessible.Graphic
-            //% "Header image"
-            Accessible.name: qsTrId("HeaderImage")
+            Accessible.name: root.editController.footerMode
+                //% "Footer image"
+                ? qsTrId("FooterImage")
+                //% "Header image"
+                : qsTrId("HeaderImage")
             Component.onCompleted: forceActiveFocus()
 
             Image {
@@ -60,8 +63,11 @@ Item {
                 Accessible.ignored: true
                 onStatusChanged: {
                     if (status === Image.Error && root.placement) {
-                        //% "Could not display the header image. Choose the image again."
-                        root.placement.errorText = qsTrId("HeaderImagePreviewFailed")
+                        root.placement.errorText = root.editController.footerMode
+                            //% "Could not display the footer image. Choose the image again."
+                            ? qsTrId("FooterImagePreviewFailed")
+                            //% "Could not display the header image. Choose the image again."
+                            : qsTrId("HeaderImagePreviewFailed")
                     }
                 }
             }

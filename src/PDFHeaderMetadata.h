@@ -25,7 +25,9 @@ inline bool valid(const QString &group, const QString &role)
     const QUuid uuid(group);
     return !uuid.isNull() && uuid.toString(QUuid::WithoutBraces) == group
         && (role == QLatin1String("text") || role == QLatin1String("image")
-            || role == QLatin1String("pageNumber"));
+            || role == QLatin1String("pageNumber")
+            || role == QLatin1String("footerText") || role == QLatin1String("footerImage")
+            || role == QLatin1String("footerPageNumber"));
 }
 
 inline Metadata read(FPDF_PAGEOBJECT object)

@@ -15,6 +15,7 @@ Item {
     property PDFTextSelectionController textSelectionController
     property bool viewTabActive: false
     property bool headerTabActive: false
+    property bool footerMode: false
     property HeaderTextPlacement headerTextPlacement: null
     property HeaderImagePlacement headerImagePlacement: null
     property HeaderPageNumberPlacement headerPageNumberPlacement: null
@@ -198,6 +199,7 @@ Item {
         textSelectionController: root.textSelectionController
         viewTabActive: root.viewTabActive
         headerTabActive: root.headerTabActive
+        footerMode: root.footerMode
         headerTextPlacement: root.headerTextPlacement
         headerImagePlacement: root.headerImagePlacement
         headerPageNumberPlacement: root.headerPageNumberPlacement
@@ -246,6 +248,7 @@ Item {
                 textSelectionController: root.textSelectionController
                 viewTabActive: root.viewTabActive
                 headerTabActive: root.headerTabActive
+                footerMode: root.footerMode
                 headerTextPlacement: root.headerTextPlacement
                 headerImagePlacement: root.headerImagePlacement
                 headerPageNumberPlacement: root.headerPageNumberPlacement
