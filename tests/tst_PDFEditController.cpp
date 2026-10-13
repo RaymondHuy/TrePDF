@@ -16,10 +16,23 @@ void PDFEditControllerTest::initTestCase()
         QVERIFY(!QUuid(cacheProbeApp.mid(prefix.size())).isNull());
         QStandardPaths::setTestModeEnabled(true);
         QCoreApplication::setApplicationName(cacheProbeApp);
+    } else {
+        m_originalApplicationName = QCoreApplication::applicationName();
+        m_originalTestMode = QStandardPaths::isTestModeEnabled();
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName(QStringLiteral("TrePDF-fixture-test-")
+            + QUuid::createUuid().toString(QUuid::WithoutBraces));
+        const QString root = QFileInfo(ApplicationFonts::downloadedFontDirectory()).absolutePath();
+        QCOMPARE(QFileInfo(root).fileName(), QCoreApplication::applicationName());
+        QVERIFY(!QFileInfo::exists(root));
+        m_fontStoreRoot = root;
     }
     ApplicationFonts::registerBundledFonts();
     if (!cacheProbeApp.isEmpty())
         return;
+
+    QString fontError;
+    QVERIFY2(installTestFonts(fontError), qPrintable(fontError));
 
     const QString pdfPath = m_temporaryDirectory.filePath(QStringLiteral("font-styles.pdf"));
     QVERIFY2(createFontStylePdf(pdfPath), "Could not create the PDF test fixture");
@@ -58,6 +71,17 @@ void PDFEditControllerTest::initTestCase()
     QVERIFY2(!m_rightColumnCandidate.isEmpty(), "Right column candidate was not discovered");
     QVERIFY2(!m_uprightCandidate.isEmpty(), "Upright candidate was not discovered");
     QVERIFY2(!m_obliqueCandidate.isEmpty(), "Oblique candidate was not discovered");
+}
+
+void PDFEditControllerTest::cleanupTestCase()
+{
+    if (m_fontStoreRoot.isEmpty())
+        return;
+    m_controller.setDocument(nullptr);
+    m_document.close();
+    QVERIFY(QDir(m_fontStoreRoot).removeRecursively());
+    QCoreApplication::setApplicationName(m_originalApplicationName);
+    QStandardPaths::setTestModeEnabled(m_originalTestMode);
 }
 
 QTEST_MAIN(PDFEditControllerTest)

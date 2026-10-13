@@ -26,11 +26,11 @@ from prepare_dependencies import (
 PDFIUM_PACKAGES = {
     "ios-device-arm64": (
         "iphoneos", "pdfium-ios-device-arm64.tgz",
-        "a25c134cf778c9067082fee8b42cbff8d1561a2e1bb4b613c635e8f4a68e1356",
+        "9bd1a444edab9f9610cd15beb30af0fa2c18357317117da2e9c292543a267139",
     ),
     "ios-simulator-arm64": (
         "iphonesimulator", "pdfium-ios-simulator-arm64.tgz",
-        "dced2ba4fd37b9c39f363039efb9574f1c2b0171186d3a32eccaf0391180b13f",
+        "b66dcd38508cb39fbd76fbf8cf9210feddb8960653bfbaf2e670592fc799d119",
     ),
 }
 JPEG_VERSION = "3.1.2"

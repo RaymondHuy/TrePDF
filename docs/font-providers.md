@@ -50,6 +50,24 @@ chung với macOS trong `ApplicationFonts`; PDFium nhận snapshot TrueType
 font, không giữ handle DirectWrite. Probe picker không dựng cả sfnt; lúc chuẩn
 bị và ghi Save vẫn kiểm tra bytes và coverage đầy đủ theo nội dung cần ghi.
 
+## Font cho biểu mẫu và Free Text khi Save
+
+App không còn đóng gói Arial. `PDFSaveWriter::prepare()` chụp một face Unicode
+TrueType khả dụng trên GUI thread cho Text Field, Dropdown, List Box và Free Text.
+Thứ tự chọn là family mặc định của Qt, các family đã tải, Arial/Liberation Sans/
+Noto Sans/DejaVu Sans, rồi các family hệ thống còn lại; với từng family, kiểm
+tra cache trước hệ thống. Face phải qua kiểm tra quyền nhúng, có `glyf/loca`,
+không quá 64 MiB và có ASCII cùng ký tự kiểm tra tiếng Việt U+1ECD.
+Luồng này chỉ dùng font cục bộ, không tự tải font khi Save.
+
+Worker nhận bytes và family layout đã đăng ký, không đọc đường dẫn Arial cũ.
+Canonicalizer dựng tên PostScript, metrics, CID và ToUnicode từ chính snapshot;
+`/AP` dùng cùng face. Resource `/TrePDFUF*` mới lưu SHA-256 của font. Chỉ tái sử
+dụng resource khi digest và version khớp; font cũ không có digest được giữ cho
+field chưa sửa, còn field đang sửa nhận resource phù hợp. Cache template chỉ
+giữ một font trên mỗi worker và cập nhật khi snapshot đổi. Nếu không có face
+phù hợp, Save báo lỗi và giữ bản nháp/tệp đích theo cơ chế lưu nguyên tử hiện có.
+
 ## Kiểm tra font trước khi chỉnh sửa
 
 Khi xác thực font tải về, tên family legacy của Windows (OpenType name ID 1)

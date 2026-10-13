@@ -3,8 +3,166 @@
 
 namespace PDFEditControllerTestSupport {
 
+namespace {
+quint16 sfntUInt16(const QByteArray &data, qsizetype offset)
+{
+    return (quint16(quint8(data.at(offset))) << 8)
+        | quint8(data.at(offset + 1));
+}
 
-bool createArialSubsetCollisionSourcePdf(const QString &filePath)
+quint32 sfntUInt32(const QByteArray &data, qsizetype offset)
+{
+    return (quint32(sfntUInt16(data, offset)) << 16)
+        | sfntUInt16(data, offset + 2);
+}
+
+void setSfntUInt32(QByteArray &data, qsizetype offset, quint32 value)
+{
+    for (int byte = 0; byte < 4; ++byte)
+        data[offset + byte] = char(value >> (24 - byte * 8));
+}
+
+quint32 sfntChecksum(const QByteArray &data, qsizetype offset, qsizetype length)
+{
+    quint32 sum = 0;
+    for (qsizetype start = 0; start < length; start += 4) {
+        quint32 word = 0;
+        for (int byte = 0; byte < 4; ++byte) {
+            word <<= 8;
+            if (start + byte < length)
+                word |= quint8(data.at(offset + start + byte));
+        }
+        sum += word;
+    }
+    return sum;
+}
+} // namespace
+
+QByteArray renamedTestFontData(const QString &family, bool bold, bool italic)
+{
+    const QString style = bold
+        ? (italic ? QStringLiteral("BoldItalic") : QStringLiteral("Bold"))
+        : (italic ? QStringLiteral("Italic") : QStringLiteral("Regular"));
+    QFile file(QStringLiteral(":/trepdf/tests/fonts/liberation/LiberationSans-%1.ttf").arg(style));
+    const QByteArray source = file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    if (source.size() < 12 || family.isEmpty())
+        return {};
+    const auto setUInt16 = [](QByteArray &bytes, qsizetype offset, quint16 value) {
+        bytes[offset] = char(value >> 8);
+        bytes[offset + 1] = char(value);
+    };
+    const auto utf16be = [](const QString &text) {
+        QByteArray bytes;
+        for (QChar character : text) {
+            bytes.append(char(character.unicode() >> 8));
+            bytes.append(char(character.unicode()));
+        }
+        return bytes;
+    };
+    const int tableCount = sfntUInt16(source, 4);
+    if (12 + tableCount * 16 > source.size())
+        return {};
+    QByteArray result = source.left(12 + tableCount * 16);
+    qsizetype headOffset = -1;
+    bool renamed = false;
+    for (int table = 0; table < tableCount; ++table) {
+        const qsizetype entry = 12 + table * 16;
+        const qsizetype offset = sfntUInt32(source, entry + 8);
+        const qsizetype length = sfntUInt32(source, entry + 12);
+        if (offset > source.size() || length > source.size() - offset)
+            return {};
+        QByteArray data = source.mid(offset, length);
+        const QByteArray tag = source.mid(entry, 4);
+        if (tag == QByteArrayLiteral("name")) {
+            if (data.size() < 6 || sfntUInt16(data, 0) != 0)
+                return {};
+            const int count = sfntUInt16(data, 2);
+            const qsizetype storage = sfntUInt16(data, 4);
+            if (6 + count * 12 > data.size() || storage > data.size())
+                return {};
+            QByteArray names = data.left(6 + count * 12);
+            setUInt16(names, 4, quint16(names.size()));
+            QByteArray strings;
+            for (int index = 0; index < count; ++index) {
+                const qsizetype record = 6 + index * 12;
+                const qsizetype stringOffset = storage + sfntUInt16(data, record + 10);
+                const qsizetype stringLength = sfntUInt16(data, record + 8);
+                if (stringOffset > data.size() || stringLength > data.size() - stringOffset)
+                    return {};
+                QByteArray name = data.mid(stringOffset, stringLength);
+                QString replacement = family;
+                if (sfntUInt16(data, record + 6) == 6)
+                    replacement.remove(QLatin1Char(' '));
+                const QByteArray original = name;
+                const QString sourceFamily = QStringLiteral("Liberation Sans");
+                QString sourcePostScriptFamily = sourceFamily;
+                sourcePostScriptFamily.remove(QLatin1Char(' '));
+                QString replacementPostScriptFamily = family;
+                replacementPostScriptFamily.remove(QLatin1Char(' '));
+                // Rebuild the string storage because family names and aliases
+                // need not have the same length. Preserve each face's suffix.
+                name.replace(sourceFamily.toLatin1(), replacement.toLatin1());
+                name.replace(utf16be(sourceFamily), utf16be(replacement));
+                name.replace(sourcePostScriptFamily.toLatin1(), replacementPostScriptFamily.toLatin1());
+                name.replace(utf16be(sourcePostScriptFamily), utf16be(replacementPostScriptFamily));
+                renamed |= name != original;
+                if (strings.size() + name.size() > 65535)
+                    return {};
+                setUInt16(names, record + 8, quint16(name.size()));
+                setUInt16(names, record + 10, quint16(strings.size()));
+                strings.append(name);
+            }
+            data = names + strings;
+        }
+        while (result.size() % 4)
+            result.append('\0');
+        if (tag == QByteArrayLiteral("head")) {
+            if (data.size() < 12)
+                return {};
+            headOffset = result.size();
+            setSfntUInt32(data, 8, 0);
+        }
+        setSfntUInt32(result, entry + 4, sfntChecksum(data, 0, data.size()));
+        setSfntUInt32(result, entry + 8, quint32(result.size()));
+        setSfntUInt32(result, entry + 12, quint32(data.size()));
+        result.append(data);
+    }
+    if (!renamed || headOffset < 0)
+        return {};
+    setSfntUInt32(result, headOffset + 8,
+                  quint32(0xb1b0afba) - sfntChecksum(result, 0, result.size()));
+    return result;
+}
+
+QString testFontFamily()
+{
+    return QStringLiteral("TrePDFTestSans");
+}
+
+QByteArray testFontData(bool bold, bool italic)
+{
+    // A private family prevents system-installed Liberation Sans versions from
+    // replacing the pinned fixture during layout or Save. Originals stay intact.
+    static const std::array<QByteArray, 4> faces{
+        renamedTestFontData(testFontFamily(), false, false),
+        renamedTestFontData(testFontFamily(), false, true),
+        renamedTestFontData(testFontFamily(), true, false),
+        renamedTestFontData(testFontFamily(), true, true)};
+    return faces[(bold ? 2 : 0) + (italic ? 1 : 0)];
+}
+
+bool installTestFonts(QString &error)
+{
+    QList<ApplicationFonts::DownloadedFontData> faces;
+    for (int style = 0; style < 4; ++style) {
+        const bool bold = style & 2;
+        const bool italic = style & 1;
+        faces.append({testFontData(bold, italic), testFontFamily(), bold, italic, uint('a')});
+    }
+    return ApplicationFonts::installDownloadedFonts(faces, error);
+}
+
+bool createFontSubsetCollisionSourcePdf(const QString &filePath)
 {
     const QByteArray pageContent(
         "BT\n"
@@ -36,7 +194,7 @@ bool createArialSubsetCollisionSourcePdf(const QString &filePath)
                 "<< /Type /Font /Subtype /Type1 /BaseFont /Courier "
                 "/Encoding /WinAnsiEncoding >>"),
             QByteArray(
-                "<< /Type /Font /Subtype /Type1 /BaseFont /Arial "
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
                 "/Encoding /WinAnsiEncoding >>"),
             contentStream,
         });
@@ -565,17 +723,14 @@ bool createStretchedTextPdf(const QString &filePath,
     return succeeded;
 }
 
-bool createEmbeddedArialPdf(const QString &filePath)
+bool createEmbeddedTestFontPdf(const QString &filePath)
 {
     FPDF_DOCUMENT document = FPDF_CreateNewDocument();
     if (!document) {
         return false;
     }
 
-    const QByteArray fontData = ApplicationFonts::bundledFontData(
-        QStringLiteral("Arial"),
-        false,
-        false);
+    const QByteArray fontData = testFontData();
     const auto characters = sortedUniqueFontCharacters(
         QStringLiteral("Tiếng Việt gốcKhông đổi"));
     const QRawFont rawFont(fontData, 16.0, QFont::PreferNoHinting);
@@ -650,8 +805,7 @@ bool createEmbeddedFontPdf(const QString &filePath,
 
 bool createGroupedSubsetFontPdf(const QString &filePath)
 {
-    const QByteArray fontData = ApplicationFonts::bundledFontData(
-        QStringLiteral("Arial"), false, false);
+    const QByteArray fontData = testFontData();
     if (fontData.isEmpty()) {
         return false;
     }

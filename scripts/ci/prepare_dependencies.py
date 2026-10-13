@@ -20,20 +20,20 @@ import urllib.request
 import zipfile
 
 
-PDFIUM_VERSION = "157.0.8086.0"
-PDFIUM_BASE = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8086/"
+PDFIUM_VERSION = "157.0.8100.0"
+PDFIUM_BASE = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8100/"
 PDFIUM_PACKAGES = {
     "windows-x64": (
         "pdfium-v8-win-x64.tgz",
-        "cb8f1e0e0c0dd74cbb17e8ec11d8969c4b95638fd3e66fd1c7e4a684d28a0d46",
+        "10a926574aa43ef673ba1a89bc64c559307ab541ca6169299d77797a8472dd7b",
     ),
     "macos-arm64": (
         "pdfium-v8-mac-arm64.tgz",
-        "0c71e67f1e65ac00d92365c92b57acd3e11ae9b2c1866977872eaecc49344938",
+        "6923e58ecb8dc332c01667efbbde258a71385fc3ef736bea4204b87c4d14a83c",
     ),
     "linux-x64": (
         "pdfium-v8-linux-x64.tgz",
-        "8e3efa4fe6784ed80fd58ef3c839b072ddcd79b16880706892a008f8a2da730b",
+        "78a68e46d871a52599c98af31a30a433f5441e670c03bba1f6b7a8444d645782",
     ),
 }
 QPDF_VERSION = "12.4.1"

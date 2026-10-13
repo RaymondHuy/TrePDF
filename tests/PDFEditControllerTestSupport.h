@@ -83,6 +83,10 @@
 
 namespace PDFEditControllerTestSupport {
 
+QString testFontFamily();
+QByteArray renamedTestFontData(const QString &family, bool bold = false, bool italic = false);
+QByteArray testFontData(bool bold = false, bool italic = false);
+bool installTestFonts(QString &error);
 
 constexpr char kRegularText[] = "Regular PDF text";
 constexpr char kBoldText[] = "Bold PDF text";
@@ -164,7 +168,7 @@ QVector<int> selectedChoiceOptions(
     const QString &filePath,
     int annotationIndex);
 
-bool createArialSubsetCollisionSourcePdf(const QString &filePath);
+bool createFontSubsetCollisionSourcePdf(const QString &filePath);
 
 enum class PatternPaintMode {
     Fill,
@@ -416,7 +420,7 @@ bool createThreePageTextPdf(const QString &filePath);
 bool createStretchedTextPdf(const QString &filePath,
                             qreal horizontalScale = 2.0);
 
-bool createEmbeddedArialPdf(const QString &filePath);
+bool createEmbeddedTestFontPdf(const QString &filePath);
 
 bool createEmbeddedFontPdf(const QString &filePath,
                            const QByteArray &fontData,

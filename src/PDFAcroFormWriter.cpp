@@ -973,6 +973,7 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
     const QString &sourceFilePath,
     const QString &targetFilePath,
     const QVector<Field> &fields,
+    const ApplicationFonts::FontFaceData &fontFace,
     const QByteArray &password)
 {
     assertPDFiumProcessLockHeld();
@@ -1244,6 +1245,7 @@ PDFAcroFormWriter::Result PDFAcroFormWriter::write(
     if (!PDFAcroFormCanonicalizer::finalizeFields(
             targetFilePath,
             formFields,
+            fontFace,
             finalizeError)) {
         QFile::remove(targetFilePath);
         return failure(finalizeError);

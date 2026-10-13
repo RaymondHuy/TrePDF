@@ -671,6 +671,9 @@ page annotation array; không được gọi `FPDFPage_GenerateContent()`.
 
 Free Text được canonicalizer dựng `/AP` Unicode có wrap, nền trắng và viền đen;
 `/Contents` vẫn là semantic text cho reader khác tìm kiếm và đọc.
+Font appearance được chụp từ font cục bộ khả dụng trước khi chạy worker Save,
+không phụ thuộc Arial đóng gói. Chi tiết chọn và tái sử dụng font nằm trong
+[đặc tả font](font-providers.md#font-cho-biểu-mẫu-và-free-text-khi-save).
 
 Bốn text-markup subtype mới được dựng `/AP /N` vector từ chính `/QuadPoints`,
 `/C` và `/CA` đã ghi trên annotation. `Rect`, `QuadPoints` và AP được tạo trong

@@ -48,8 +48,8 @@ _deps/windows/
 
 The downloaded packages and SHA-256 hashes are:
 
-- [PDFium 157.0.8086.0, Windows x64 with V8/XFA](https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8086/pdfium-v8-win-x64.tgz):
-  `cb8f1e0e0c0dd74cbb17e8ec11d8969c4b95638fd3e66fd1c7e4a684d28a0d46`
+- [PDFium 157.0.8100.0, Windows x64 with V8/XFA](https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8100/pdfium-v8-win-x64.tgz):
+  `10a926574aa43ef673ba1a89bc64c559307ab541ca6169299d77797a8472dd7b`
 - [qpdf 12.4.1, MinGW x64](https://github.com/qpdf/qpdf/releases/download/v12.4.1/qpdf-12.4.1-mingw64.zip):
   `6a47eeddc8ff712a6e003314daae25569402c6e904ba82b7b9181d7b0301b689`
 

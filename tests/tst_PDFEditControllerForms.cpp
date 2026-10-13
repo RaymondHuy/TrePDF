@@ -1,7 +1,101 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
+#include "PDFAcroFormCanonicalizer.h"
+
+#include <QCryptographicHash>
 
 using namespace PDFEditControllerTestSupport;
+
+void PDFEditControllerTest::keepsAcroFormFontResourcesConsistentAcrossFontChanges()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("form-font-fingerprint.pdf"));
+    QVERIFY(writePdfObjects(path, {
+        QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                   "/Resources << >> /Annots [4 0 R 5 0 R] >>"),
+        QByteArray("<< /Type /Annot /Subtype /Square /Rect [40 700 240 730] /NM (text-field-1) >>"),
+        QByteArray("<< /Type /Annot /Subtype /Square /Rect [40 650 240 680] /NM (text-field-2) >>"),
+    }));
+    const auto regular = ApplicationFonts::downloadedFontFace(testFontFamily(), false, false);
+    const auto bold = ApplicationFonts::downloadedFontFace(testFontFamily(), true, false);
+    QVERIFY(regular.isValid());
+    QVERIFY(bold.isValid());
+    QVERIFY(regular.data != bold.data);
+
+    PDFAcroFormCanonicalizer::Field first;
+    first.widgetId = QStringLiteral("text-field-1");
+    first.fieldName = QStringLiteral("First");
+    first.value = QStringLiteral("Font example");
+    first.defaultValue = first.value;
+    first.pageRect = QRectF(40, 700, 200, 30);
+    auto second = first;
+    second.widgetId = QStringLiteral("text-field-2");
+    second.fieldName = QStringLiteral("Second");
+    second.pageRect.moveTop(650);
+    QString error;
+    QVERIFY2(PDFAcroFormCanonicalizer::finalizeFields(path, {first, second}, regular, error),
+             qPrintable(error));
+
+    const auto readFile = [](const QString &filePath) {
+        QFile file(filePath);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const auto defaultAppearance = [](const QByteArray &pdf, int objectNumber) {
+        const QByteArray objectToken = '\n' + QByteArray::number(objectNumber) + " 0 obj";
+        const qsizetype start = pdf.lastIndexOf(objectToken);
+        if (start < 0)
+            return QByteArray();
+        const QByteArray object = pdf.mid(start, pdf.indexOf("endobj", start) - start);
+        const qsizetype appearanceStart = object.indexOf("/DA (");
+        if (appearanceStart < 0)
+            return QByteArray();
+        const qsizetype valueStart = appearanceStart + 5;
+        return object.mid(valueStart, object.indexOf(')', valueStart) - valueStart);
+    };
+    const QByteArray original = readFile(path);
+    const QByteArray originalAppearance = defaultAppearance(original, 4);
+    QVERIFY(originalAppearance.startsWith("/TrePDFUF"));
+    QCOMPARE(defaultAppearance(original, 5), originalAppearance);
+    QCOMPARE(original.count("/Subtype /Type0"), 1);
+
+    first.operation = PDFAcroFormCanonicalizer::Operation::NormalizeAppearance;
+    QVERIFY2(PDFAcroFormCanonicalizer::finalizeFields(path, {first}, bold, error), qPrintable(error));
+    const QByteArray changed = readFile(path);
+    const QByteArray changedAppearance = defaultAppearance(changed, 4);
+    QVERIFY(changedAppearance.startsWith("/TrePDFUF"));
+    QVERIFY(changedAppearance != originalAppearance);
+    QCOMPARE(defaultAppearance(changed, 5), originalAppearance);
+    QCOMPARE(changed.count("/Subtype /Type0"), 2);
+    const QByteArray boldFingerprint = QCryptographicHash::hash(bold.data, QCryptographicHash::Sha256);
+    QVERIFY(changed.contains("/TrePDFFontSHA256 <" + boldFingerprint.toHex() + '>'));
+
+    // The identical face reuses its resource instead of growing the PDF on each save.
+    QVERIFY2(PDFAcroFormCanonicalizer::finalizeFields(path, {first}, bold, error), qPrintable(error));
+    const QByteArray repeated = readFile(path);
+    QCOMPARE(defaultAppearance(repeated, 4), changedAppearance);
+    QCOMPARE(repeated.count("/Subtype /Type0"), 2);
+
+    // Old TrePDF fonts remain referenced by untouched fields even without a digest.
+    const QString legacyPath = m_temporaryDirectory.filePath(QStringLiteral("form-font-legacy.pdf"));
+    QByteArray legacy = original;
+    const QByteArray regularFingerprint = QCryptographicHash::hash(regular.data, QCryptographicHash::Sha256);
+    const QByteArray marker = "/TrePDFFontSHA256 <" + regularFingerprint.toHex() + '>';
+    QVERIFY(legacy.contains(marker));
+    legacy.replace(marker, QByteArray(marker.size(), ' '));
+    QFile legacyFile(legacyPath);
+    QVERIFY(legacyFile.open(QIODevice::WriteOnly));
+    QCOMPARE(legacyFile.write(legacy), legacy.size());
+    legacyFile.close();
+    QVERIFY2(PDFAcroFormCanonicalizer::finalizeFields(legacyPath, {first}, regular, error), qPrintable(error));
+    const QByteArray migrated = readFile(legacyPath);
+    QCOMPARE(migrated.count("/Subtype /Type0"), 2);
+    QVERIFY(defaultAppearance(migrated, 4) != originalAppearance);
+    QCOMPARE(defaultAppearance(migrated, 5), originalAppearance);
+    const AcroFormFieldInspection inspection = inspectAcroFormField(legacyPath, QStringLiteral("First"));
+    QVERIFY(inspection.readable);
+    QCOMPARE(inspection.value, first.value);
+}
 
 void PDFEditControllerTest::storesTransientTextFieldsByPage()
 {

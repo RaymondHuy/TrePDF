@@ -261,7 +261,7 @@ void PDFEditControllerTest::clearsViewTextSelectionAcrossSourceChanges()
     const QString first = m_temporaryDirectory.filePath(QStringLiteral("view-selection-before.pdf"));
     const QString second = m_temporaryDirectory.filePath(QStringLiteral("view-selection-unicode.pdf"));
     QVERIFY(createViewSelectionPdf(first));
-    QVERIFY(createEmbeddedArialPdf(second));
+    QVERIFY(createEmbeddedTestFontPdf(second));
     PDFDocument document;
     QVERIFY(document.open(QUrl::fromLocalFile(first)));
     const auto centers = viewSelectionGlyphCenters(first);
