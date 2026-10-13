@@ -76,6 +76,8 @@ private slots:
     void syncsLegacyFragmentedHeaderText();
     void retainsHeaderGroupsAndPageNumberValuesAfterSave();
     void syncsHeaderImagesAndDeletionWithHistory();
+    void savesHeaderImageDeletionWithOffPagePaths();
+    void savesExternalHeaderImageDeletion();
     void invalidatesHeaderSyncAcrossHistoryAndSessionChanges();
     void matchesHeaderImagesByPixelsNotOnlyGeometry();
     void syncsHeadersThroughMainWindow();

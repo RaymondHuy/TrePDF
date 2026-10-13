@@ -1,6 +1,8 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <QCryptographicHash>
+
 using namespace PDFEditControllerTestSupport;
 
 namespace {
@@ -30,7 +32,7 @@ bool createSyncPages(const QString &path, int count, bool existing = false)
         + QByteArray::number(count) + " >>";
     return writePdfObjects(path, objects);
 }
-bool createImageSyncPages(const QString &path)
+bool createImageSyncPages(const QString &path, const QByteArray &extraContent = {})
 {
     QVector<QByteArray> objects{
         "<< /Type /Catalog /Pages 2 0 R >>", {},
@@ -48,6 +50,7 @@ bool createImageSyncPages(const QString &path)
                                  "q 40 0 0 20 24 180 cm /I1 Do Q\n");
         if (page == 3)
             content += "q 40 0 0 20 25 349 cm /I1 Do Q\n";
+        content += extraContent;
         objects.append("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] "
             "/Resources << /XObject << /I1 " + QByteArray::number(page == 2 ? 4 : 3)
             + " 0 R >> >> /Contents " + QByteArray::number(id + 1) + " 0 R >>");
@@ -585,6 +588,102 @@ void PDFEditControllerTest::syncsHeaderImagesAndDeletionWithHistory()
         QVERIFY(onlyDraft(controller, page).value(QStringLiteral("deleted")).toBool());
     controller.undo();
     QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::savesHeaderImageDeletionWithOffPagePaths()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("sync-images-off-page.pdf"));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("sync-images-off-page-saved.pdf"));
+    // These valid but invisible paths must not prevent saving unrelated edits.
+    // The reported document contains table borders below its visible page.
+    QVERIFY(createImageSyncPages(path,
+        "q 0.7 g 24 -103 200 1 re f Q\n"
+        "q 0.7 g 24 430 200 1 re f Q\n"
+        "q 0.7 g -50 120 1 80 re f Q\n"
+        "q 0.7 g 330 120 1 80 re f Q\n"
+        // A partly visible edge paint still needs normal preservation.
+        "q 0.7 g 24 -1 200 2 re f Q\n"));
+    const QImage before = renderFirstPage(path, QSize(300, 400));
+    QVERIFY(!before.isNull());
+    PDFDocument document;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    PDFEditController controller;
+    controller.setDocument(&document);
+    activateHeaderSelection(controller);
+    const auto candidates = waitForCandidates(controller, 0);
+    QCOMPARE(candidates.size(), 1);
+    QVERIFY(controller.selectCandidate(0, syncId(candidates.constFirst().toMap())));
+    controller.findSimilarHeaders();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.headerSyncMatchCount(), 2, 15000);
+    controller.deleteSelectedObject();
+    QVERIFY2(controller.applyHeaderChanges(), qPrintable(controller.headerSyncError()));
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    const PDFSaveWriter::Result result = PDFSaveWriter::save(controller, saved);
+    QVERIFY2(result.succeeded(), qPrintable(QStringLiteral("Save failed: %1, page %2, %3")
+        .arg(int(result.error)).arg(result.page).arg(result.detail)));
+    const QImage after = renderFirstPage(saved, QSize(300, 400));
+    QVERIFY(!after.isNull());
+    QCOMPARE(after.copy(0, 100, 300, 300), before.copy(0, 100, 300, 300));
+    QVERIFY(changedPixelCount(before, after, QRect(0, 0, 300, 100)) > 0);
+    QVERIFY(document.open(QUrl::fromLocalFile(saved)));
+    activateHeaderSelection(controller);
+    QVERIFY(waitForCandidates(controller, 0).isEmpty());
+    QVERIFY(waitForCandidates(controller, 1).isEmpty());
+    QCOMPARE(waitForCandidates(controller, 2).size(), 1);
+    QCOMPARE(waitForCandidates(controller, 3).size(), 2);
+}
+
+void PDFEditControllerTest::savesExternalHeaderImageDeletion()
+{
+    const QString sourcePath = qEnvironmentVariable("TREPDF_TEST_HEADER_IMAGE_PDF");
+    if (sourcePath.isEmpty())
+        QSKIP("Set TREPDF_TEST_HEADER_IMAGE_PDF to a PDF with a repeated Header image.");
+    const auto sourceHash = [&sourcePath]() {
+        QFile source(sourcePath);
+        if (!source.open(QIODevice::ReadOnly))
+            return QByteArray();
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        return hash.addData(&source) ? hash.result() : QByteArray();
+    };
+    const QByteArray beforeHash = sourceHash();
+    QVERIFY(!beforeHash.isEmpty());
+    PDFDocument document;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    const int pageCount = document.pageCount();
+    QVERIFY(pageCount >= 4);
+    PDFEditController controller;
+    controller.setDocument(&document);
+    activateHeaderSelection(controller);
+    const auto candidates = waitForCandidates(controller, 3);
+    QVariantMap anchor;
+    for (const QVariant &value : candidates) {
+        const QVariantMap candidate = value.toMap();
+        if (candidate.value(QStringLiteral("kind")).toString() == QLatin1String("image")) {
+            anchor = candidate;
+            break;
+        }
+    }
+    QVERIFY(!anchor.isEmpty());
+    QVERIFY(controller.selectCandidate(3, syncId(anchor)));
+    controller.findSimilarHeaders();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.headerSyncLoading(), 60000);
+    QCOMPARE(controller.headerSyncMatchCount(), pageCount);
+    controller.deleteSelectedObject();
+    QVERIFY2(controller.applyHeaderChanges(), qPrintable(controller.headerSyncError()));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("external-header-image-deleted.pdf"));
+    const PDFSaveWriter::Result result = PDFSaveWriter::save(controller, saved);
+    QVERIFY2(result.succeeded(), qPrintable(QStringLiteral("Save failed: %1, page %2, %3")
+        .arg(int(result.error)).arg(result.page).arg(result.detail)));
+    QVERIFY(document.open(QUrl::fromLocalFile(saved)));
+    QCOMPARE(document.pageCount(), pageCount);
+    activateHeaderSelection(controller);
+    for (int page = 0; page < pageCount; ++page) {
+        for (const QVariant &value : waitForCandidates(controller, page))
+            QVERIFY(value.toMap().value(QStringLiteral("kind")).toString() != QLatin1String("image"));
+    }
+    QCOMPARE(sourceHash(), beforeHash);
 }
 
 void PDFEditControllerTest::invalidatesHeaderSyncAcrossHistoryAndSessionChanges()
