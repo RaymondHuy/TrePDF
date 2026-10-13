@@ -26,6 +26,7 @@
 #include <QSemaphore>
 #include <QThreadPool>
 #include <QStyleHints>
+#include <QTranslator>
 #include <zip.h>
 
 using namespace PDFEditControllerTestSupport;
@@ -159,6 +160,33 @@ QByteArray fontMetadata(const QString &family, bool allStyles = false)
 
 const QByteArray fullFontStylesheet = QByteArrayLiteral(
     "@font-face {src: url(https://fonts.gstatic.com/s/test/v1/complete.ttf) format('truetype');}");
+
+// Keep the tests independent of app translation resources while exposing the
+// diagnostic's substituted family/style and stable reason ID for assertions.
+class FontDiagnosticTranslator final : public QTranslator
+{
+public:
+    FontDiagnosticTranslator() { QCoreApplication::installTranslator(this); }
+    ~FontDiagnosticTranslator() override { QCoreApplication::removeTranslator(this); }
+    bool isEmpty() const override { return false; }
+    QString translate(const char *, const char *sourceText, const char *, int) const override
+    {
+        const QByteArray id(sourceText);
+        if (id == "FontDownloadFaceFailure")
+            return QStringLiteral("Font: %1\nStyle: %2\n\n%3");
+        if (id == "FontDownloadStyleUnavailable" || id == "FontDownloadIncompleteCoverage")
+            return QString::fromLatin1(id) + QStringLiteral(": %1");
+        if (id == "FontDownloadStyleRegular")
+            return QStringLiteral("Regular");
+        if (id == "FontDownloadStyleBold")
+            return QStringLiteral("Bold");
+        if (id == "FontDownloadStyleItalic")
+            return QStringLiteral("Italic");
+        if (id == "FontDownloadStyleBoldItalic")
+            return QStringLiteral("Bold Italic");
+        return {};
+    }
+};
 
 QByteArray ctanTermesFontData(int style)
 {
@@ -549,7 +577,7 @@ bool createUnavailableType1FontPdf(const QString &path, const QByteArray &fontNa
 }
 
 bool createMixedPreflightFontsPdf(const QString &path, const QByteArray &first,
-                                 const QByteArray &second)
+                                 const QByteArray &second, bool embeddedFirst = false)
 {
     const QByteArray content = "BT /F1 12 Tf 40 760 Td (Alpha ) Tj "
         "/F2 12 Tf (beta ) Tj /F3 12 Tf (gamma ) Tj /F1 12 Tf (delta) Tj ET\n"
@@ -558,14 +586,45 @@ bool createMixedPreflightFontsPdf(const QString &path, const QByteArray &first,
         return "<< /Type /Font /Subtype /Type1 /BaseFont /" + name
             + " /Encoding /WinAnsiEncoding >>";
     };
-    return writePdfObjects(path, {
+    QList<QByteArray> objects{
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
             "/Resources << /Font << /F1 4 0 R /F2 5 0 R /F3 6 0 R >> >> /Contents 7 0 R >>",
         font(first + "-Regular"), font(second + "-Bold"), font(first + "-Italic"),
         "<< /Length " + QByteArray::number(content.size())
-            + " >>\nstream\n" + content + "endstream"});
+            + " >>\nstream\n" + content + "endstream"};
+    if (embeddedFirst) {
+        QList<QByteArray> programs;
+        for (bool italic : {false, true}) {
+            const QByteArray data = uninstalledSubsetFontData(first, false, italic);
+            const QRawFont raw(data, 1000.0, QFont::PreferNoHinting);
+            if (!raw.isValid())
+                return false;
+            QByteArray widths;
+            for (ushort code = 32; code <= 126; ++code) {
+                const auto glyphs = raw.glyphIndexesForString(QString(QChar(code)));
+                const auto advances = raw.advancesForGlyphIndexes(glyphs);
+                if (advances.size() != 1)
+                    return false;
+                widths += QByteArray::number(advances.first().x(), 'f', 4) + ' ';
+            }
+            const QByteArray name = first + (italic ? "-Italic" : "-Regular");
+            objects[italic ? 5 : 3] = "<< /Type /Font /Subtype /TrueType /BaseFont /" + name
+                + " /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 126 /Widths [" + widths
+                + "] /FontDescriptor " + (italic ? "9" : "8") + " 0 R >>";
+            objects.append("<< /Type /FontDescriptor /FontName /" + name
+                + " /Flags 32 /FontBBox [-1000 -1000 2000 2000] /ItalicAngle "
+                + (italic ? "-12" : "0")
+                + " /Ascent 1000 /Descent -300 /CapHeight 700 /StemV 80 /FontFile2 "
+                + (italic ? "11" : "10") + " 0 R >>");
+            programs.append("<< /Length " + QByteArray::number(data.size())
+                + " /Length1 " + QByteArray::number(data.size()) + " >>\nstream\n"
+                + data + "\nendstream");
+        }
+        objects.append(programs);
+    }
+    return writePdfObjects(path, objects);
 }
 
 } // namespace
@@ -2719,6 +2778,7 @@ void PDFEditControllerTest::rejectsUnsafeFontDownloads_data()
 void PDFEditControllerTest::rejectsUnsafeFontDownloads()
 {
     QFETCH(int, scenario);
+    FontDiagnosticTranslator translator;
     IsolatedFontStore store;
     QVERIFY(store.fresh);
     FontNetwork network;
@@ -2741,10 +2801,137 @@ void PDFEditControllerTest::rejectsUnsafeFontDownloads()
     service.start(family, scenario == 8, false, scenario == 9 ? 0x10fffd : uint('z'));
     QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
     QVERIFY(!finished.first().at(0).toBool());
-    QVERIFY(!finished.first().at(1).toString().isEmpty());
+    const QString diagnostic = finished.first().at(1).toString();
+    QVERIFY(diagnostic.contains(QStringLiteral("Font: DlBad\nStyle: ")
+                               + (scenario == 8 ? QStringLiteral("Bold") : QStringLiteral("Regular"))));
+    QVERIFY(!diagnostic.contains(QStringLiteral("FontDownloadStyleUnavailable")));
+    if (scenario == 0)
+        QVERIFY(diagnostic.contains(QStringLiteral("FontDownloadFaceUnavailable")));
+    if (scenario == 1)
+        QVERIFY(diagnostic.contains(QStringLiteral("FontDownloadNetworkFailed")));
+    if (scenario >= 6 && scenario <= 8)
+        QVERIFY(diagnostic.contains(QStringLiteral("FontDownloadValidationFailed")));
+    if (scenario == 9)
+        QVERIFY(diagnostic.contains(QStringLiteral("FontDownloadIncompleteCoverage")));
     QCOMPARE(network.requests.size(), scenario < 4 ? 1 : scenario < 6 ? 2 : 3);
     QVERIFY(!QFileInfo::exists(store.path));
     QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+}
+
+void PDFEditControllerTest::describesUnavailableFontStyles_data()
+{
+    QTest::addColumn<int>("style");
+    QTest::addColumn<QString>("family");
+    QTest::addColumn<QString>("styleLabel");
+    QTest::addColumn<QString>("availableLabel");
+    QTest::newRow("regular") << 0 << QStringLiteral("DlStyle")
+                            << QStringLiteral("Regular") << QStringLiteral("Bold");
+    QTest::newRow("bold") << 2 << QStringLiteral("DlStyle")
+                         << QStringLiteral("Bold") << QStringLiteral("Regular");
+    QTest::newRow("italic") << 1 << QStringLiteral("DlStyle")
+                           << QStringLiteral("Italic") << QStringLiteral("Regular");
+    QTest::newRow("bold-italic") << 3 << QStringLiteral("DlStyle")
+                                << QStringLiteral("Bold Italic") << QStringLiteral("Regular");
+    QTest::newRow("inconsolata-italic") << 1 << QStringLiteral("Inconsolatazi4")
+        << QStringLiteral("Italic") << QStringLiteral("Regular, Bold");
+    QTest::newRow("inconsolata-bold-italic") << 3 << QStringLiteral("Inconsolatazi4")
+        << QStringLiteral("Bold Italic") << QStringLiteral("Regular, Bold");
+}
+
+void PDFEditControllerTest::describesUnavailableFontStyles()
+{
+    QFETCH(int, style);
+    QFETCH(QString, family);
+    QFETCH(QString, styleLabel);
+    QFETCH(QString, availableLabel);
+    FontDiagnosticTranslator translator;
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    FontNetwork network;
+    QByteArray metadata = fontMetadata(family);
+    if (family == QLatin1String("Inconsolatazi4"))
+        metadata = QByteArrayLiteral("[]"); // Fall through to the real local CTAN catalogue.
+    else if (style == 0)
+        metadata.replace("[400]", "[700]");
+    network.responses = {{metadata}};
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family, style & 2, style & 1, uint('t'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY(!finished.first().at(0).toBool());
+    QCOMPARE(finished.first().at(1).toString(),
+             QStringLiteral("Font: %1\nStyle: %2\n\nFontDownloadStyleUnavailable: %3")
+                 .arg(family, styleLabel, availableLabel));
+    QCOMPARE(network.requests.size(), 1);
+    QVERIFY(!QFileInfo::exists(store.path));
+}
+
+void PDFEditControllerTest::showsFontDownloadFailuresInPopup()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("font-failure-popup.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(QStringLiteral("font-failure-other.pdf"));
+    QVERIFY(createFontStylePdf(path));
+    QVERIFY(createFontStylePdf(secondPath));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QVERIFY(root->setProperty("allowWindowClose", true));
+    auto *window = qobject_cast<QQuickWindow *>(root.get());
+    auto *tabs = root->findChild<PDFTabModel *>();
+    QVERIFY(window && tabs);
+    window->show();
+    QTRY_VERIFY(window->isExposed());
+    auto *session = tabs->open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    auto *controller = session->editController();
+    controller->setTool(PDFEditController::StickyNoteTool);
+    QVERIFY(!controller->addStickyNote(0, QPointF(0.2, 0.2)).isEmpty());
+    const QVariantList drafts = controller->draftsForPage(0);
+    QSignalSpy status(controller, &PDFEditController::statusMessage);
+    const QString message = QStringLiteral(
+        "Phông chữ: Inconsolatazi4\nKiểu chữ: Đậm nghiêng (Bold Italic)\n\n"
+        "Nguồn tải không cung cấp kiểu chữ này. Các kiểu hiện có: Thường (Regular), Đậm (Bold).\n\n"
+        "Chưa bắt đầu chỉnh sửa. Nội dung của bạn vẫn được giữ nguyên.");
+    const auto popup = [&]() {
+        return root->findChild<QObject *>(QStringLiteral("fontDownloadFailurePopup"));
+    };
+    const auto showFailure = [&]() { emit controller->fontDownloadFailed(message); };
+    showFailure();
+    QTRY_VERIFY(popup() && popup()->property("opened").toBool());
+    QVERIFY(popup()->property("modal").toBool());
+    QVERIFY(root->property("fileOpenBlocked").toBool());
+    auto *label = root->findChild<QObject *>(QStringLiteral("fontDownloadFailureMessage"));
+    QVERIFY(label);
+    QCOMPARE(label->property("text").toString(), message);
+    QCOMPARE(status.size(), 0);
+    QCOMPARE(controller->draftsForPage(0), drafts);
+    QVERIFY(!controller->textEditActive());
+    auto *dismiss = root->findChild<QObject *>(QStringLiteral("dismissFontDownloadFailureButton"));
+    QVERIFY(dismiss);
+    QVERIFY(QMetaObject::invokeMethod(dismiss, "clicked"));
+    QTRY_VERIFY(!popup());
+    QVERIFY(!root->property("fileOpenBlocked").toBool());
+    showFailure();
+    QTRY_VERIFY(popup() && popup()->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!popup());
+    showFailure();
+    QTRY_VERIFY(popup() && popup()->property("opened").toBool());
+    auto *other = tabs->open(QUrl::fromLocalFile(secondPath));
+    QVERIFY(other);
+    QTRY_VERIFY(!popup());
+    showFailure(); // An old/background session cannot replace the active session's UI.
+    QCoreApplication::processEvents();
+    QVERIFY(!popup());
+    tabs->setCurrentIndex(tabs->indexOf(session));
+    QCOMPARE(controller->draftsForPage(0), drafts);
+    showFailure();
+    QTRY_VERIFY(popup() && popup()->property("opened").toBool());
+    controller->discardDrafts();
+    QVERIFY(tabs->closeSession(session));
+    QTRY_VERIFY(!popup());
 }
 
 void PDFEditControllerTest::cancelsFontDownloadBeforeInstallation()
@@ -5461,11 +5648,141 @@ void PDFEditControllerTest::skipsInlineFontDownloadForEmbeddedAndCachedFaces()
     QCOMPARE(saved.size(), 0);
 }
 
+void PDFEditControllerTest::substitutesOnlyMissingInlineFonts()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString available = QStringLiteral("PfKept");
+    const QString missing = QStringLiteral("PfLost");
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("preflight-fallback.pdf"));
+    // Use real embedded-font metrics for the preserved runs. A made-up Type 1
+    // face without /Widths is suitable for prompting tests, not Save fidelity.
+    QVERIFY(createMixedPreflightFontsPdf(path, available.toLatin1(), missing.toLatin1(), true));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+    const QString original = QStringLiteral("Alpha beta gamma delta");
+    const auto candidate = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
+    const QRectF originalFrame = controller.selectedFrameRect();
+    QSignalSpy prepared(&controller, &PDFEditController::textEditPreparationReady);
+    QSignalSpy requested(&controller, &PDFEditController::fontDownloadRequested);
+    bool downloadStarted = false;
+    connect(&controller, &PDFEditController::fontDownloadStateChanged, &controller, [&] {
+        downloadStarted = downloadStarted || controller.downloadingFont();
+    });
+    QVERIFY(!controller.requestSelectedTextEdit());
+    QCOMPARE(controller.missingFontFamilies(), QStringList({missing}));
+    const QString fallback = controller.textEditFallbackFamily();
+    QVERIFY(!fallback.isEmpty());
+    QVERIFY(fallback.compare(available, Qt::CaseInsensitive) != 0);
+    QVERIFY(ApplicationFonts::fontFaceSupportsText(fallback, true, false, QStringLiteral("beta ")));
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(controller.continueTextEditWithFallback());
+    QCOMPARE(prepared.size(), 1);
+    QVERIFY(controller.textEditActive());
+    QVERIFY(!controller.fontDownloadPending());
+    QVERIFY(!downloadStarted);
+    QVERIFY(!ApplicationFonts::downloadedFontFace(missing, true, false).isValid());
+
+    // Escape must restore the whole source snapshot, including font spans and
+    // frame geometry, even though fallback was applied before editor activation.
+    controller.cancelSelectedTextEdit();
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QCOMPARE(controller.selectedFrameRect(), originalFrame);
+    QVERIFY(!controller.requestSelectedTextEdit());
+    QCOMPARE(controller.textEditFallbackFamily(), fallback);
+    QVERIFY(controller.continueTextEditWithFallback());
+
+    const auto formatAt = [](const QVariantList &spans, int position) {
+        for (const QVariant &entry : spans) {
+            const QVariantMap span = entry.toMap();
+            const int start = span.value(QStringLiteral("start")).toInt();
+            if (position >= start && position < start + span.value(QStringLiteral("length")).toInt())
+                return span;
+        }
+        return QVariantMap();
+    };
+    const auto assertMixedFonts = [&](const QVariantList &spans) {
+        const QVariantMap first = formatAt(spans, 0);
+        const QVariantMap replaced = formatAt(spans, 6);
+        const QVariantMap italic = formatAt(spans, 11);
+        const QVariantMap last = formatAt(spans, 17);
+        QCOMPARE(PDFFontAliases::semanticFamily(first.value(QStringLiteral("fontFamily")).toString()), available);
+        QCOMPARE(PDFFontAliases::semanticFamily(replaced.value(QStringLiteral("fontFamily")).toString()), fallback);
+        QVERIFY(replaced.value(QStringLiteral("fontBold")).toBool());
+        QCOMPARE(PDFFontAliases::semanticFamily(italic.value(QStringLiteral("fontFamily")).toString()), available);
+        QVERIFY(italic.value(QStringLiteral("fontItalic")).toBool());
+        QCOMPARE(PDFFontAliases::semanticFamily(last.value(QStringLiteral("fontFamily")).toString()), available);
+    };
+    assertMixedFonts(controller.selectedCharacterSpans());
+    controller.finishSelectedTextEdit();
+    QVERIFY(controller.hasDrafts());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    controller.redo();
+    QVERIFY(controller.hasDrafts());
+    assertMixedFonts(controller.selectedCharacterSpans());
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("preflight-fallback-saved.pdf"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const QVariantList reopenedCandidates = waitForCandidates(controller, 0);
+    const auto reopened = candidateForText(reopenedCandidates, original);
+    QStringList reopenedTexts;
+    for (const QVariant &entry : reopenedCandidates)
+        reopenedTexts.append(entry.toMap().value(QStringLiteral("text")).toString());
+    QVERIFY2(!reopened.isEmpty(), qPrintable(reopenedTexts.join(QStringLiteral(" | "))));
+    QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+    assertMixedFonts(controller.selectedCharacterSpans());
+    QVERIFY(controller.requestSelectedTextEdit());
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(requested.size(), 2);
+    QVERIFY(!downloadStarted);
+}
+
+void PDFEditControllerTest::rejectsUnavailableInlineFontFallback()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("preflight-no-fallback.pdf"));
+    QVERIFY(createUnavailableType1FontPdf(path, "PfNoFallback-Regular"));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+    const QString original = QStringLiteral("to Share\u2014to copy, distribute the work");
+    const auto candidate = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    // A Unicode noncharacter has no usable replacement glyph. Never disclose
+    // one font and silently use another or lose the unsupported character.
+    const char32_t unavailable = 0x10ffff;
+    const QString edited = original + QString::fromUcs4(&unavailable, 1);
+    controller.commitSelectedText(edited);
+    const QVariantList originalDrafts = controller.draftsForPage(0);
+    QSignalSpy prepared(&controller, &PDFEditController::textEditPreparationReady);
+    QVERIFY(!controller.requestSelectedTextEdit());
+    QVERIFY(controller.fontDownloadPending());
+    QVERIFY(controller.textEditFallbackFamily().isEmpty());
+    QVERIFY(!controller.continueTextEditWithFallback());
+    QVERIFY(controller.fontDownloadPending());
+    QVERIFY(!controller.textEditActive());
+    QVERIFY(!controller.downloadingFont());
+    QCOMPARE(controller.draftsForPage(0), originalDrafts);
+    QCOMPARE(prepared.size(), 0);
+    controller.cancelTextEditPreparation();
+    QCOMPARE(controller.selectedText(), edited);
+}
+
 void PDFEditControllerTest::cancelsStaleInlineFontPreparation_data()
 {
     QTest::addColumn<QString>("action");
     for (const char *action : {"decline", "cancel", "selection", "tool", "document", "history",
-                               "deactivate", "request-reset", "download-start"})
+                               "deactivate", "request-reset", "download-start", "fallback-close",
+                               "fallback-edit-begin"})
         QTest::newRow(action) << QString::fromLatin1(action);
 }
 
@@ -5513,6 +5830,18 @@ void PDFEditControllerTest::cancelsStaleInlineFontPreparation()
                 controller.cancelTextEditPreparation();
         });
         controller.respondToFontDownload(true);
+    } else if (action == QLatin1String("fallback-close")) {
+        connect(&controller, &PDFEditController::fontDownloadStateChanged, &session, [&]() {
+            if (!controller.fontDownloadPending() && session.document()->isLoaded())
+                session.document()->close();
+        });
+        QVERIFY(!controller.continueTextEditWithFallback());
+    } else if (action == QLatin1String("fallback-edit-begin")) {
+        connect(&controller, &PDFEditController::textEditActiveChanged, &session, [&]() {
+            if (controller.textEditActive())
+                controller.cancelSelectedTextEdit();
+        });
+        QVERIFY(!controller.continueTextEditWithFallback());
     }
     else
         session.prepareForDeactivation();
@@ -5523,6 +5852,7 @@ void PDFEditControllerTest::cancelsStaleInlineFontPreparation()
     QVERIFY(!controller.textEditActive());
     QVERIFY(!controller.hasDrafts());
     controller.respondToFontDownload(true); // A late response must not revive the editor.
+    QVERIFY(!controller.continueTextEditWithFallback());
     QCoreApplication::processEvents();
     QCOMPARE(prepared.size(), 0);
     QCOMPARE(saved.size(), 0);
@@ -5532,14 +5862,18 @@ void PDFEditControllerTest::opensInlineEditorAfterFontPreparation_data()
 {
     QTest::addColumn<QString>("styleAction");
     QTest::addColumn<QByteArray>("familyBytes");
-    QTest::newRow("plain-entry") << QString() << QByteArray("PfQml");
-    QTest::newRow("bold-entry") << QStringLiteral("bold") << QByteArray("PfBld");
+    QTest::addColumn<bool>("useFallback");
+    QTest::newRow("plain-entry") << QString() << QByteArray("PfQml") << false;
+    QTest::newRow("bold-entry") << QStringLiteral("bold") << QByteArray("PfBld") << false;
+    QTest::newRow("plain-fallback") << QString() << QByteArray("PfQmf") << true;
+    QTest::newRow("bold-fallback") << QStringLiteral("bold") << QByteArray("PfBmf") << true;
 }
 
 void PDFEditControllerTest::opensInlineEditorAfterFontPreparation()
 {
     QFETCH(QString, styleAction);
     QFETCH(QByteArray, familyBytes);
+    QFETCH(bool, useFallback);
     IsolatedFontStore store;
     QVERIFY(store.fresh);
     const QString family = QString::fromLatin1(familyBytes);
@@ -5586,28 +5920,35 @@ void PDFEditControllerTest::opensInlineEditorAfterFontPreparation()
     QVERIFY(!controller.textEditActive());
     QVERIFY(!controller.hasDrafts());
 
-    // Use the real downloader with a deterministic transport; responding after
-    // installation exercises the controller resume path without network access.
-    FontNetwork network;
-    network.responses = {{fontMetadata(family, true)}};
-    const QList<int> faceOrder = styleAction == QLatin1String("bold")
-        ? QList<int>{2, 0, 1, 3} : QList<int>{0, 1, 2, 3};
-    for (int style : faceOrder) {
-        network.responses.append(FontResponse{fullFontStylesheet});
-        network.responses.append(FontResponse{uninstalledSubsetFontData(familyBytes, style & 2, style & 1)});
+    QString editingFamily = family;
+    if (useFallback) {
+        editingFamily = controller.textEditFallbackFamily();
+        QVERIFY(!editingFamily.isEmpty());
+        QVERIFY(controller.continueTextEditWithFallback());
+    } else {
+        // Use the real downloader with a deterministic transport; responding after
+        // installation exercises the controller resume path without network access.
+        FontNetwork network;
+        network.responses = {{fontMetadata(family, true)}};
+        const QList<int> faceOrder = styleAction == QLatin1String("bold")
+            ? QList<int>{2, 0, 1, 3} : QList<int>{0, 1, 2, 3};
+        for (int style : faceOrder) {
+            network.responses.append(FontResponse{fullFontStylesheet});
+            network.responses.append(FontResponse{uninstalledSubsetFontData(familyBytes, style & 2, style & 1)});
+        }
+        FontDownloadService service(nullptr, &network);
+        QSignalSpy downloaded(&service, &FontDownloadService::finished);
+        service.start(family, styleAction == QLatin1String("bold"), false, uint('a'));
+        QTRY_COMPARE_WITH_TIMEOUT(downloaded.size(), 1, 5000);
+        QVERIFY2(downloaded.first().first().toBool(), qPrintable(downloaded.first().at(1).toString()));
+        controller.respondToFontDownload(true);
     }
-    FontDownloadService service(nullptr, &network);
-    QSignalSpy downloaded(&service, &FontDownloadService::finished);
-    service.start(family, styleAction == QLatin1String("bold"), false, uint('a'));
-    QTRY_COMPARE_WITH_TIMEOUT(downloaded.size(), 1, 5000);
-    QVERIFY2(downloaded.first().first().toBool(), qPrintable(downloaded.first().at(1).toString()));
-    controller.respondToFontDownload(true);
     QTRY_COMPARE_WITH_TIMEOUT(prepared.size(), 1, 5000);
     QCOMPARE(prepared.first().at(1).toString(), objectId);
-    QCOMPARE(prepared.first().at(2).toString(), styleAction);
+    QCOMPARE(prepared.first().at(2).toString(), useFallback ? QString() : styleAction);
     QTRY_VERIFY(overlay->property("editing").toBool());
     QVERIFY(controller.textEditActive());
-    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.hasDrafts(), useFallback);
     QVERIFY(!controller.saving());
     QCOMPARE(saved.size(), 0);
     QObject *editor = nullptr;
@@ -5623,8 +5964,9 @@ void PDFEditControllerTest::opensInlineEditorAfterFontPreparation()
     QTextDocument *document = quickDocument->textDocument();
     QCOMPARE(document->toPlainText(), original);
     QTRY_VERIFY(document->begin().layout()->lineCount() > 0);
-    const QRawFont expected(ApplicationFonts::downloadedFontFace(family, false, false).data,
-                            12.0, QFont::PreferNoHinting);
+    QFont expectedFont(ApplicationFonts::displayFamilyForStyle(editingFamily, false, false, original));
+    expectedFont.setPixelSize(12);
+    const QRawFont expected = QRawFont::fromFont(expectedFont);
     QVERIFY(expected.isValid());
     const auto runs = document->begin().layout()->glyphRuns(0, original.size(),
         QTextLayout::RetrieveGlyphIndexes | QTextLayout::RetrieveGlyphPositions);
@@ -5653,7 +5995,7 @@ void PDFEditControllerTest::opensInlineEditorAfterFontPreparation()
         QTRY_COMPARE(controller.selectedText(), original);
     }
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
-    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.hasDrafts(), useFallback);
     QCOMPARE(pdf.source().toLocalFile(), path);
     QCOMPARE(saved.size(), 0);
 }

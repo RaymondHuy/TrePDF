@@ -532,6 +532,11 @@ QStringList PDFEditController::missingFontFamilies() const
     return m_pendingFontSave ? QStringList{m_pendingFontSave->failure.detail} : QStringList{};
 }
 
+QString PDFEditController::textEditFallbackFamily() const
+{
+    return m_pendingFontEdit ? m_pendingFontEdit->fallbackFamily : QString();
+}
+
 bool PDFEditController::requestSelectedTextEdit(const QString &styleAction)
 {
     const QString requestedFamily = styleAction.startsWith(QLatin1String("fontFamily:"))
@@ -632,11 +637,13 @@ bool PDFEditController::requestSelectedTextEdit(const QString &styleAction)
 
     auto pending = std::make_unique<PendingFontEdit>();
     QHash<QString, qsizetype> semanticIndices;
+    QHash<QString, QSet<QString>> displayFacesBySemanticKey;
     for (const auto &run : std::as_const(displayRuns)) {
         if (sourceFaceSupportsEdit(run.family, run.bold, run.italic, run.text))
             continue;
         const QString family = PDFFontAliases::semanticFamily(run.family).trimmed();
         const QString key = editFontKey(family, run.bold, run.italic);
+        displayFacesBySemanticKey[key].insert(editFontKey(run.family, run.bold, run.italic));
         const auto found = semanticIndices.constFind(key);
         if (found == semanticIndices.cend()) {
             semanticIndices.insert(key, pending->requirements.size());
@@ -647,12 +654,43 @@ bool PDFEditController::requestSelectedTextEdit(const QString &styleAction)
     }
     for (const auto &required : std::as_const(pending->requirements)) {
         if (!ApplicationFonts::fontFaceSupportsText(required.family, required.bold,
-                                                    required.italic, required.text)
-            && !pending->missingFamilies.contains(required.family, Qt::CaseInsensitive))
-            pending->missingFamilies.append(required.family);
+                                                    required.italic, required.text)) {
+            pending->fallbackRequirements.append(required);
+            pending->missingDisplayFaces.unite(displayFacesBySemanticKey.value(
+                editFontKey(required.family, required.bold, required.italic)));
+            if (!pending->missingFamilies.contains(required.family, Qt::CaseInsensitive))
+                pending->missingFamilies.append(required.family);
+        }
     }
     if (pending->missingFamilies.isEmpty())
         return true;
+    // Resolve once before showing the prompt, so consent names the same exact
+    // local family that will be applied and embedded. Never rely on Qt's silent
+    // per-glyph fallback or replace a usable source face of the same family.
+    const auto supportsFallback = [&pending](const QString &family) {
+        return !family.isEmpty() && std::all_of(
+            pending->fallbackRequirements.cbegin(), pending->fallbackRequirements.cend(),
+            [&family](const TextEditFontRequirement &required) {
+                return ApplicationFonts::fontFaceSupportsText(
+                    family, required.bold, required.italic, required.text);
+            });
+    };
+    const QString defaultFamily = headerTextFontFamily();
+    if (supportsFallback(defaultFamily)) {
+        pending->fallbackFamily = defaultFamily;
+    } else {
+        // Font files and character work already have bounded validation. Cap
+        // this local search as well, even on hosts with very large font lists.
+        const auto &first = pending->fallbackRequirements.constFirst();
+        const QStringList families = ApplicationFonts::availableFontFamilies(first.bold, first.italic);
+        const qsizetype limit = qMin<qsizetype>(families.size(), 128);
+        for (qsizetype index = 0; index < limit; ++index) {
+            if (families.at(index) != defaultFamily && supportsFallback(families.at(index))) {
+                pending->fallbackFamily = families.at(index);
+                break;
+            }
+        }
+    }
     pending->document = m_document;
     pending->revision = m_document->renderRevision();
     pending->sourceFilePath = m_document->renderFilePath();
@@ -667,6 +705,83 @@ bool PDFEditController::requestSelectedTextEdit(const QString &styleAction)
     if (generation == m_textEditPreparationGeneration && textEditPreparationIsCurrent())
         emit fontDownloadRequested();
     return false;
+}
+
+bool PDFEditController::continueTextEditWithFallback()
+{
+    if (m_downloadingFont || !textEditPreparationIsCurrent()
+        || m_pendingFontEdit->fallbackFamily.isEmpty())
+        return false;
+    // Revalidate the disclosed face without silently choosing a different one.
+    for (const auto &required : std::as_const(m_pendingFontEdit->fallbackRequirements)) {
+        if (!ApplicationFonts::fontFaceSupportsText(m_pendingFontEdit->fallbackFamily,
+                                                    required.bold, required.italic, required.text))
+            return false;
+    }
+    const auto pending = std::move(m_pendingFontEdit);
+    const quint64 generation = ++m_textEditPreparationGeneration;
+    const auto sameSelection = [&]() {
+        return generation == m_textEditPreparationGeneration && !m_pendingFontEdit
+            && !m_pendingFontSave && !m_saving && m_hasSelection && m_selectedCandidate.editable
+            && m_document && m_document == pending->document && m_document->isLoaded()
+            && m_document->renderRevision() == pending->revision
+            && m_document->renderFilePath() == pending->sourceFilePath
+            && m_selectedCandidate.page == pending->page
+            && m_selectedCandidate.objectId == pending->objectId && m_tool == pending->tool;
+    };
+    emit fontDownloadStateChanged();
+    if (!sameSelection() || m_textEditActive
+        || m_pageDraftRevisions.value(pending->page) != pending->draftRevision)
+        return false;
+
+    // Capture the baseline before changing any fonts, so Escape and the single
+    // edit Undo also restore the original families and geometry.
+    beginSelectedTextEdit();
+    if (!sameSelection() || !m_textEditActive
+        || m_pageDraftRevisions.value(pending->page) != pending->draftRevision)
+        return false;
+    Draft draft = selectedDraftForDisplay();
+    CharacterFormat typing = characterFormatAtPosition(draft, draft.text.size(), true);
+    const auto replaceMissing = [&pending](CharacterFormat &format) {
+        if (!pending->missingDisplayFaces.contains(
+                editFontKey(format.fontFamily, format.fontBold, format.fontItalic)))
+            return;
+        format.fontFamily = pending->fallbackFamily;
+        format.fontStretch = QFont::Unstretched;
+        format.sourceAdvanceRatio = 0.0;
+    };
+    if (pending->styleAction == QLatin1String("bold")) {
+        typing.fontBold = !typing.fontBold;
+        typing.sourceAdvanceRatio = 0.0;
+    } else if (pending->styleAction == QLatin1String("italic")) {
+        typing.fontItalic = !typing.fontItalic;
+        typing.sourceAdvanceRatio = 0.0;
+    } else if (pending->styleAction == QLatin1String("underline")) {
+        typing.fontUnderline = !typing.fontUnderline;
+    } else if (pending->styleAction.startsWith(QLatin1String("fontFamily:"))) {
+        typing.fontFamily = pending->styleAction.mid(11).trimmed();
+        typing.fontStretch = QFont::Unstretched;
+        typing.sourceAdvanceRatio = 0.0;
+    }
+    replaceMissing(typing);
+    const bool changed = updateCharacterFormats(draft, 0, draft.text.size(), replaceMissing);
+    if (changed)
+        updateSelectedDraft(draft);
+    if (!sameSelection() || !m_textEditActive
+        || !sameDraftContent(selectedDraftForDisplay(), draft))
+        return false;
+    // Apply the pending action only to future typing, just like entering the
+    // editor from the formatting panel. QML must not toggle the style again.
+    m_selectedTextRangeStart = draft.text.size();
+    m_selectedTextRangeLength = 0;
+    m_typingCharacterFormat = typing;
+    m_typingCharacterFormatPosition = draft.text.size();
+    m_typingCharacterFormatActive = !sameCharacterFormat(
+        typing, characterFormatAtPosition(draft, draft.text.size(), true));
+    emit textEditPreparationReady(pending->page, pending->objectId, QString());
+    if (sameSelection() && m_textEditActive)
+        emit textFormatStateChanged();
+    return true;
 }
 
 bool PDFEditController::textEditPreparationIsCurrent() const
@@ -743,8 +858,9 @@ void PDFEditController::continueTextEditPreparation()
     }
     const QString key = editFontKey(next->family, next->bold, next->italic);
     if (m_pendingFontEdit->attemptedFaces.contains(key)) {
-        //% "The downloaded font does not contain every face and character required by this text."
-        finishTextEditFontDownload(false, qtTrId("TextEditDownloadedFontIncomplete"));
+        //% "The downloaded %1 (%2) font still cannot display all the characters in this text."
+        finishTextEditFontDownload(false, qtTrId("TextEditDownloadedFontIncomplete")
+            .arg(next->family, FontDownloadService::styleName(next->bold, next->italic)));
         return;
     }
     m_pendingFontEdit->attemptedFaces.insert(key);
@@ -784,8 +900,8 @@ void PDFEditController::finishTextEditFontDownload(bool succeeded, const QString
     }
     if (!succeeded) {
         cancelTextEditPreparation();
-        //% "The font could not be downloaded: %1. Text editing has not started."
-        emit statusMessage(qtTrId("FontDownloadEditFailed").arg(error));
+        //% "%1\n\nText editing has not started. Your text is unchanged."
+        emit fontDownloadFailed(qtTrId("FontDownloadEditFailed").arg(error));
         return;
     }
     continueTextEditPreparation();
@@ -884,8 +1000,8 @@ void PDFEditController::finishFontDownload(bool succeeded, const QString &error)
         clearFontRecovery();
         m_saving = false;
         emit savingChanged();
-        //% "The font could not be downloaded: %1. Your edits have been kept."
-        emit statusMessage(qtTrId("FontDownloadSaveFailed").arg(error));
+        //% "%1\n\nYour PDF was not saved. Your edits have been kept."
+        emit fontDownloadFailed(qtTrId("FontDownloadSaveFailed").arg(error));
         emit saveFinished(false);
         return;
     }

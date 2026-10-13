@@ -767,6 +767,11 @@ bool PDFTabModel::contains(PDFDocumentSession *session) const
 
 void PDFTabModel::connectSession(PDFDocumentSession *session)
 {
+    connect(session->editController(), &PDFEditController::fontDownloadFailed,
+            this, [this, session](const QString &message) {
+                if (contains(session))
+                    emit fontDownloadFailed(session, message);
+            });
     connect(session->editController(), &PDFEditController::fontDownloadRequested,
             this, [this, session]() {
                 if (contains(session))

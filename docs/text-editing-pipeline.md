@@ -1460,8 +1460,14 @@ snapshot không bị thay đổi và không có save thứ hai chạy đồng th
 `saveFinished(true)`. Open tạo tab mới và không làm mất draft của tab hiện tại.
 
 Trước khi mở inline editor, ứng dụng kiểm tra tất cả font/kiểu chữ trong
-đoạn được chọn và hỏi tải các font còn thiếu. Editor chỉ mở sau khi kiểm tra
-đạt; hủy hoặc đổi đoạn/tab không tạo bản nháp. Xem
+đoạn được chọn. Popup liệt kê font thiếu và cho chọn **Hủy**, **Dùng font thay
+thế**, hoặc **OK** để tải. Lựa chọn thay thế nêu rõ tên một family cục bộ đã
+kiểm tra đủ face/ký tự, dùng cùng family cho editor và Save, đồng thời báo
+bố cục có thể thay đổi. Chỉ run/face thiếu được đổi; phần đã có font phù hợp
+giữ nguyên. Nếu không có font thay thế đủ khả năng, lựa chọn này bị vô hiệu
+hóa và popup hướng dẫn tải. Thay font nằm trong phiên edit thông thường nên
+Escape hoàn nguyên, commit/Undo/Redo và Save giữ cùng kết quả. Hủy popup
+hoặc đổi đoạn/tab trước khi chọn không tạo bản nháp. Xem
 [kiểm tra font trước khi chỉnh sửa](font-providers.md#kiểm-tra-font-trước-khi-chỉnh-sửa)
 về font nhúng, danh sách tải và phạm vi yêu cầu chờ.
 
@@ -1475,6 +1481,10 @@ Serif. Các face đã có trong kho riêng được dùng lại. Chỉ bỏ qua 
 khi nguồn không cung cấp; nếu kiểu cần để lưu không có, hoặc một lượt tải thực
 tế thất bại, luồng Save báo lỗi. Hủy hoặc tải thất bại giữ draft, undo/redo và
 file đích.
+Lỗi tải mở popup thông báo tên font, đúng kiểu Regular/Bold/Italic/Bold Italic
+và lý do. Khi nguồn tải xác nhận thiếu style, popup liệt kê những style có sẵn;
+lỗi mạng và thiếu ký tự không bị báo nhầm là không hỗ trợ style. Popup đóng
+bằng OK/Escape và không giữ thông báo cũ khi đổi/đóng tài liệu.
 Controller giữ nguyên đường dẫn Save/Save As, document/revision và snapshot
 AcroForm trong lúc chờ. Sau khi tải và đăng ký toàn bộ các kiểu khả dụng thành
 công, controller tạo save request mới rồi tiếp tục lưu vào đúng đường dẫn đó.

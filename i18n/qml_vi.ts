@@ -214,9 +214,31 @@
         <translation>Đang tải phông chữ. Trình chỉnh sửa sẽ tự mở khi tải xong.</translation>
     </message>
     <message id="EditFontDownloadConfirmation">
-        <location filename="../src/Main.qml" line="1639"/>
-        <source>Download the following font families before editing this text?</source>
-        <translation>Tải các phông chữ sau trước khi chỉnh sửa đoạn văn bản này?</translation>
+        <location filename="../src/Main.qml" line="1749"/>
+        <source>TrePDF is missing the following fonts:
+%1
+
+Choose OK to download them and keep the text close to its original appearance. Or choose Use replacement font to edit now with %2 without downloading. Only missing fonts will be replaced with %2 when editing and saving; the layout may change.</source>
+        <translation>TrePDF chưa có đầy đủ các phông chữ sau:
+%1
+
+Bấm OK để tải phông chữ và giữ hình thức gần bản gốc. Hoặc chọn “Dùng font thay thế” để chỉnh sửa ngay với %2 mà không cần tải. Chỉ các phông chữ còn thiếu sẽ được thay bằng %2 khi chỉnh sửa và lưu; bố cục có thể thay đổi.</translation>
+    </message>
+    <message id="EditFontFallbackUnavailable">
+        <location filename="../src/Main.qml" line="1752"/>
+        <source>TrePDF is missing the following fonts:
+%1
+
+No available replacement supports all the characters and styles in this text. Choose OK to download the missing fonts, or Cancel to keep the text unchanged.</source>
+        <translation>TrePDF chưa có đầy đủ các phông chữ sau:
+%1
+
+Chưa tìm được phông chữ có sẵn phù hợp với tất cả ký tự và kiểu chữ trong đoạn này. Bấm OK để tải phông chữ còn thiếu, hoặc Hủy để giữ nguyên nội dung.</translation>
+    </message>
+    <message id="UseReplacementFont">
+        <location filename="../src/Main.qml" line="1786"/>
+        <source>Use replacement font</source>
+        <translation>Dùng font thay thế</translation>
     </message>
     <message id="FontDownloadInProgress">
         <location filename="../src/Main.qml" line="1643"/>
@@ -1875,14 +1897,18 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Đoạn văn bản có quá nhiều kiểu phông chữ để chuẩn bị chỉnh sửa.</translation>
     </message>
     <message id="TextEditDownloadedFontIncomplete">
-        <location filename="../src/PDFEditControllerSave.cpp" line="747"/>
-        <source>The downloaded font does not contain every face and character required by this text.</source>
-        <translation>Phông chữ đã tải chưa có đủ kiểu chữ và ký tự cần cho đoạn văn bản này.</translation>
+        <location filename="../src/PDFEditControllerSave.cpp" line="862"/>
+        <source>The downloaded %1 (%2) font still cannot display all the characters in this text.</source>
+        <translation>Phông chữ %1 (%2) đã tải vẫn chưa hiển thị được tất cả ký tự trong đoạn này.</translation>
     </message>
     <message id="FontDownloadEditFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="788"/>
-        <source>The font could not be downloaded: %1. Text editing has not started.</source>
-        <translation>Không thể tải phông chữ: %1. Chưa bắt đầu chỉnh sửa văn bản.</translation>
+        <location filename="../src/PDFEditControllerSave.cpp" line="904"/>
+        <source>%1
+
+Text editing has not started. Your text is unchanged.</source>
+        <translation>%1
+
+Chưa bắt đầu chỉnh sửa. Nội dung của bạn vẫn được giữ nguyên.</translation>
     </message>
     <message id="FontDownloadCancelled">
         <location filename="../src/PDFEditControllerSave.cpp" line="824"/>
@@ -1890,9 +1916,13 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <translation>Đã hủy tải font. Các chỉnh sửa vẫn được giữ lại.</translation>
     </message>
     <message id="FontDownloadSaveFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="888"/>
-        <source>The font could not be downloaded: %1. Your edits have been kept.</source>
-        <translation>Không thể tải font: %1 Các chỉnh sửa vẫn được giữ lại.</translation>
+        <location filename="../src/PDFEditControllerSave.cpp" line="1004"/>
+        <source>%1
+
+Your PDF was not saved. Your edits have been kept.</source>
+        <translation>%1
+
+PDF chưa được lưu. Các chỉnh sửa của bạn vẫn được giữ lại.</translation>
     </message>
     <message id="FontDownloadContinuingSave">
         <location filename="../src/PDFEditControllerSave.cpp" line="907"/>
@@ -4470,6 +4500,63 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <location filename="../src/PDFMergeController.cpp" line="799"/>
         <source>PDF merge cancelled. Your files have not been changed.</source>
         <translation>Đã hủy gộp PDF. Các file của bạn vẫn được giữ nguyên.</translation>
+    </message>
+    <message id="FontDownloadFailedTitle">
+        <location filename="../src/Main.qml" line="1726"/>
+        <source>Font could not be downloaded</source>
+        <translation>Không thể tải phông chữ</translation>
+    </message>
+    <message id="FontDownloadStyleRegular">
+        <location filename="../src/FontDownloadService.cpp" line="86"/>
+        <source>Regular</source>
+        <translation>Thường (Regular)</translation>
+    </message>
+    <message id="FontDownloadStyleBold">
+        <location filename="../src/FontDownloadService.cpp" line="79"/>
+        <source>Bold</source>
+        <translation>Đậm (Bold)</translation>
+    </message>
+    <message id="FontDownloadStyleItalic">
+        <location filename="../src/FontDownloadService.cpp" line="83"/>
+        <source>Italic</source>
+        <translation>Nghiêng (Italic)</translation>
+    </message>
+    <message id="FontDownloadStyleBoldItalic">
+        <location filename="../src/FontDownloadService.cpp" line="75"/>
+        <source>Bold Italic</source>
+        <translation>Đậm nghiêng (Bold Italic)</translation>
+    </message>
+    <message id="FontDownloadFaceFailure">
+        <location filename="../src/FontDownloadService.cpp" line="623"/>
+        <source>Font: %1
+Style: %2
+
+%3</source>
+        <translation>Phông chữ: %1
+Kiểu chữ: %2
+
+%3</translation>
+    </message>
+    <message id="FontDownloadStyleUnavailable">
+        <location filename="../src/FontDownloadService.cpp" line="336"/>
+        <source>The font source does not offer this style. Available styles: %1.</source>
+        <translation>Nguồn tải không cung cấp kiểu chữ này. Các kiểu hiện có: %1.</translation>
+    </message>
+    <message id="FontDownloadStyleNotOffered">
+        <location filename="../src/FontDownloadService.cpp" line="332"/>
+        <source>The font source does not offer this style for this font.</source>
+        <translation>Nguồn tải không cung cấp kiểu chữ này cho phông chữ đã chọn.</translation>
+    </message>
+    <message id="FontDownloadFaceUnavailable">
+        <location filename="../src/FontDownloadService.cpp" line="613"/>
+        <source>TrePDF could not find a complete downloadable copy of this font style in its font sources.</source>
+        <translation>TrePDF chưa tìm thấy bản đầy đủ của phông chữ với kiểu này trong các nguồn tải hiện có.</translation>
+    </message>
+    <message id="FontDownloadValidationFailed">
+        <location filename="../src/FontDownloadService.cpp" line="536"/>
+        <location filename="../src/FontDownloadService.cpp" line="542"/>
+        <source>The downloaded file is invalid, does not match the requested font style, or cannot be used for editing.</source>
+        <translation>Tệp phông chữ tải về không hợp lệ, không đúng kiểu chữ yêu cầu hoặc không thể dùng để chỉnh sửa.</translation>
     </message>
 </context>
 </TS>
