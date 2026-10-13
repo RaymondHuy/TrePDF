@@ -68,6 +68,24 @@ FontDownloadService::~FontDownloadService()
     cancel();
 }
 
+QString FontDownloadService::styleName(bool bold, bool italic)
+{
+    if (bold && italic) {
+        //% "Bold Italic"
+        return qtTrId("FontDownloadStyleBoldItalic");
+    }
+    if (bold) {
+        //% "Bold"
+        return qtTrId("FontDownloadStyleBold");
+    }
+    if (italic) {
+        //% "Italic"
+        return qtTrId("FontDownloadStyleItalic");
+    }
+    //% "Regular"
+    return qtTrId("FontDownloadStyleRegular");
+}
+
 void FontDownloadService::start(const QString &family, bool bold, bool italic,
                                 uint requiredCodePoint)
 {
@@ -76,6 +94,8 @@ void FontDownloadService::start(const QString &family, bool bold, bool italic,
     m_family = normalizedRequestedFamily(family);
     m_bold = bold;
     m_italic = italic;
+    m_errorBold = bold;
+    m_errorItalic = italic;
     m_requiredCodePoint = requiredCodePoint;
     m_redirects = 0;
     m_requireVietnamese = false;
@@ -296,11 +316,27 @@ void FontDownloadService::processMetadata(const QByteArray &data)
     }
     const int required = (m_bold ? 2 : 0) + (m_italic ? 1 : 0);
     if (m_providerFamily.availability != IFontProvider::Availability::Found
-        || m_providerFamily.license.isEmpty() || !m_providerFamily.styles[required]) {
+        || m_providerFamily.license.isEmpty()) {
         failUnavailable();
         return;
     }
     m_family = m_providerFamily.name;
+    if (!m_providerFamily.styles[required]) {
+        QStringList available;
+        for (const int style : {0, 2, 1, 3}) {
+            if (m_providerFamily.styles[style])
+                available.append(styleName(bool(style & 2), bool(style & 1)));
+        }
+        if (available.isEmpty()) {
+            //% "The font source does not offer this style for this font."
+            complete(false, qtTrId("FontDownloadStyleNotOffered"));
+            return;
+        }
+        //% "The font source does not offer this style. Available styles: %1."
+        complete(false, qtTrId("FontDownloadStyleUnavailable")
+                            .arg(available.join(QStringLiteral(", "))));
+        return;
+    }
     m_requireVietnamese = m_providerFamily.vietnamese;
     const auto &styles = m_providerFamily.styles;
     prepareFaces(styles[0], styles[1], styles[2], styles[3]);
@@ -348,6 +384,8 @@ void FontDownloadService::requestNextFace()
         return;
     }
     const Face &face = m_faces.at(m_faceIndex);
+    m_errorBold = face.bold;
+    m_errorItalic = face.italic;
     const auto &provider = m_providers[size_t(m_providerIndex)];
     const QUrl url = m_fontSourceIndex == 0
         ? provider->faceUrl(m_providerFamily, face.bold, face.italic)
@@ -488,17 +526,24 @@ bool FontDownloadService::stageFont(const QByteArray &data, Face &face)
 {
     if (!m_active)
         return false;
+    m_errorBold = face.bold;
+    m_errorItalic = face.italic;
     QString error;
     if (!ApplicationFonts::validateDownloadedFontData(
-            data, m_family, face.bold, face.italic, requiredCharacter(face), error)) {
+            data, m_family, face.bold, face.italic, 0, error)) {
         qWarning().noquote() << "Font download validation failed for" << m_family << ':' << error;
-        //% "The downloaded font could not be validated or stored in TrePDF's font folder."
-        complete(false, qtTrId("FontDownloadInstallFailed"));
+        //% "The downloaded file is invalid, does not match the requested font style, or cannot be used for editing."
+        complete(false, qtTrId("FontDownloadValidationFailed"));
         return false;
     }
     const QRawFont font(data, 16.0, QFont::PreferNoHinting);
     if (!font.isValid()) {
-        failUnavailable();
+        //% "The downloaded file is invalid, does not match the requested font style, or cannot be used for editing."
+        complete(false, qtTrId("FontDownloadValidationFailed"));
+        return false;
+    }
+    if (requiredCharacter(face) && !font.supportsCharacter(requiredCharacter(face))) {
+        complete(false, incompleteFontMessage(m_family));
         return false;
     }
     for (uint character = 32; character <= 126; ++character) {
@@ -537,6 +582,8 @@ void FontDownloadService::installFamily()
     }
     QList<ApplicationFonts::DownloadedFontData> pending;
     for (const Face &face : std::as_const(m_faces)) {
+        m_errorBold = face.bold;
+        m_errorItalic = face.italic;
         if (face.data.isEmpty()) {
             if (!hasCachedFace(face)) {
                 failUnavailable();
@@ -547,6 +594,10 @@ void FontDownloadService::installFamily()
         pending.append({face.data, m_family, face.bold, face.italic, requiredCharacter(face)});
     }
     QString error;
+    // Installation is atomic for the whole family; its failure cannot identify
+    // a particular sibling face. Keep the user's requested style as context.
+    m_errorBold = m_bold;
+    m_errorItalic = m_italic;
     if (!pending.isEmpty() && !ApplicationFonts::installDownloadedFonts(pending, error)) {
         qWarning().noquote() << "Font download installation failed for" << m_family << ':' << error;
         //% "The downloaded font could not be validated or stored in TrePDF's font folder."
@@ -558,14 +609,19 @@ void FontDownloadService::installFamily()
 
 void FontDownloadService::failUnavailable()
 {
-    //% "A complete downloadable version of %1 in this style was not found."
-    complete(false, qtTrId("FontDownloadUnavailable").arg(m_family));
+    //% "TrePDF could not find a complete downloadable copy of this font style in its font sources."
+    complete(false, qtTrId("FontDownloadFaceUnavailable"));
 }
 
 void FontDownloadService::complete(bool success, const QString &error)
 {
     if (!m_active)
         return;
+    // Capture before cancel() clears the active download. Even connection and
+    // validation failures must identify the exact face, not just its family.
+    //% "Font: %1\nStyle: %2\n\n%3"
+    const QString message = success ? error : qtTrId("FontDownloadFaceFailure")
+        .arg(m_family, styleName(m_errorBold, m_errorItalic), error);
     cancel();
-    emit finished(success, error);
+    emit finished(success, message);
 }

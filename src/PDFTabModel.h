@@ -267,6 +267,7 @@ signals:
     void sessionSaveFinished(PDFDocumentSession *session, bool succeeded);
     void passwordRequested(const QUrl &source, bool incorrectPassword);
     void fontDownloadRequested(PDFDocumentSession *session);
+    void fontDownloadFailed(PDFDocumentSession *session, const QString &message);
     void externalLinkRequested(PDFDocumentSession *session,
                                quint64 requestId,
                                const QString &authority,

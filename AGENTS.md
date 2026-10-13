@@ -538,11 +538,20 @@ Current features:
   cache, Google Fonts, then the packaged CTAN JSON catalogue. Fonts under
   `src/assets/fonts` remain available as local fallback. Opening the inline
   editor first checks every selected text span's family/style/glyph coverage.
-  Missing faces use a single consent popup and sequential downloads before
-  resuming the same selection; cancellation or session changes abandon the
-  pending editor without creating drafts. Usable source faces remain preferred,
+  Missing faces use a single consent popup with Cancel, Use replacement font,
+  and OK to download before resuming the same selection. The replacement option
+  names a verified local family and changes only missing faces for both editing
+  and Save, with normal Escape/Undo semantics and no network request. If no
+  local family supports all required styles/glyphs, replacement is unavailable.
+  Cancellation or session changes abandon the pending editor without creating
+  drafts. Usable source faces remain preferred,
   while substitute previews require an exact local face. Save retains its font
-  recovery for newly entered glyphs/styles. See `docs/font-providers.md`.
+  recovery for newly entered glyphs/styles. Download failures open a modal notice
+  naming the font and failed Regular/Bold/Italic/Bold Italic face. Validated
+  provider metadata can identify an unavailable style and list available styles;
+  lookup, network and glyph/validation failures retain their distinct reasons.
+  Failed preparation leaves text unchanged; failed Save retains drafts and the
+  destination. See `docs/font-providers.md`.
 - Contextual Edit/Delete actions when selecting editable text; deletion remains
   an undoable draft until Save writes it into the PDF.
 - Transactional PDF persistence through a separate PDFium document handle.

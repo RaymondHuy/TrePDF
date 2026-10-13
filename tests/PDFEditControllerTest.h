@@ -622,12 +622,17 @@ private slots:
     void cancelsMissingFontSaveWithoutLosingDrafts();
     void checksAllFontsBeforeInlineEditing();
     void skipsInlineFontDownloadForEmbeddedAndCachedFaces();
+    void substitutesOnlyMissingInlineFonts();
+    void rejectsUnavailableInlineFontFallback();
     void cancelsStaleInlineFontPreparation_data();
     void cancelsStaleInlineFontPreparation();
     void opensInlineEditorAfterFontPreparation_data();
     void opensInlineEditorAfterFontPreparation();
     void rejectsUnsafeFontDownloads_data();
     void rejectsUnsafeFontDownloads();
+    void describesUnavailableFontStyles_data();
+    void describesUnavailableFontStyles();
+    void showsFontDownloadFailuresInPopup();
     void cancelsFontDownloadBeforeInstallation();
     void downloadsEveryAvailableFontStyle();
     void downloadsOnlyAdvertisedFontStyles();

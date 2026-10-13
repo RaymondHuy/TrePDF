@@ -80,6 +80,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool downloadingFont READ downloadingFont NOTIFY fontDownloadStateChanged FINAL)
     Q_PROPERTY(QString missingFontFamily READ missingFontFamily NOTIFY fontDownloadStateChanged FINAL)
     Q_PROPERTY(QStringList missingFontFamilies READ missingFontFamilies NOTIFY fontDownloadStateChanged FINAL)
+    Q_PROPERTY(QString textEditFallbackFamily READ textEditFallbackFamily NOTIFY fontDownloadStateChanged FINAL)
     Q_PROPERTY(bool textEditActive READ textEditActive NOTIFY textEditActiveChanged FINAL)
     Q_PROPERTY(QStringList bundledFontFamilies READ bundledFontFamilies CONSTANT FINAL)
     Q_PROPERTY(QStringList availableFontFamilies READ availableFontFamilies NOTIFY textFormatStateChanged FINAL)
@@ -555,10 +556,12 @@ public:
     Q_INVOKABLE void cancelFontDownload();
     Q_INVOKABLE bool requestSelectedTextEdit(const QString &styleAction = QString());
     Q_INVOKABLE void cancelTextEditPreparation();
+    Q_INVOKABLE bool continueTextEditWithFallback();
     bool fontDownloadPending() const { return bool(m_pendingFontSave) || bool(m_pendingFontEdit); }
     bool fontDownloadForEdit() const { return bool(m_pendingFontEdit); }
     bool downloadingFont() const { return m_downloadingFont; }
     QString missingFontFamily() const;
+    QString textEditFallbackFamily() const;
     QStringList missingFontFamilies() const;
 
 signals:
@@ -607,6 +610,7 @@ signals:
     void imageFileRequested(int page, qreal x, qreal y);
     void saveFinished(bool succeeded);
     void fontDownloadRequested();
+    void fontDownloadFailed(const QString &message);
     void fontDownloadStateChanged();
     void textEditPreparationReady(int page, const QString &objectId, const QString &styleAction);
 
@@ -1307,6 +1311,9 @@ private:
         quint64 draftRevision = 0;
         QString styleAction;
         QVector<TextEditFontRequirement> requirements;
+        QVector<TextEditFontRequirement> fallbackRequirements;
+        QSet<QString> missingDisplayFaces;
+        QString fallbackFamily;
         QStringList missingFamilies;
         QSet<QString> attemptedFaces;
         bool accepted = false;

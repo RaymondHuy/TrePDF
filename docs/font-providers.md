@@ -86,13 +86,30 @@ hiện có. Các yêu cầu trùng family/style được gộp lại. Font nhún
 hoặc một font thay thế đang hiển thị được không đủ để vượt qua kiểm tra.
 Font hệ thống, font đã tải và font bundled được kiểm tra theo đúng face.
 
-Nếu còn thiếu font, editor chưa mở và popup liệt kê các family cần tải.
-Chỉ sau khi người dùng đồng ý, ứng dụng mới tải tuần tự qua
+Nếu còn thiếu font, editor chưa mở và popup liệt kê các family cần tải cùng
+tên font cục bộ có thể thay thế. Ba lựa chọn theo thứ tự là **Hủy**, **Dùng
+font thay thế**, **OK**. Hủy giữ nguyên nội dung; OK đồng ý tải. Chỉ sau khi
+người dùng đồng ý tải, ứng dụng mới tải tuần tự qua
 `FontDownloadService`, dùng chung kho font và các kiểm tra của luồng Save.
 Một lượt tải family lấy các kiểu thường, đậm, nghiêng và đậm nghiêng mà
 provider cung cấp. Sau đó ứng dụng kiểm lại tất cả face/ký tự cần cho đoạn;
 chỉ khi đủ mới tiếp tục mở editor. Bấm đậm/nghiêng/gạch chân để bắt đầu edit
 cũng đi qua bước này và giữ thao tác định dạng cho caret cuối đoạn.
+
+**Dùng font thay thế** mở editor mà không gửi yêu cầu tải font. Controller ưu
+tiên family mặc định dùng chung với Header/Edit > Add Text
+(`headerTextFontFamily()`), rồi tìm trong các family cục bộ khả dụng. Một family
+chỉ được đề xuất khi đủ face đậm/nghiêng, ký tự và điều kiện nhúng cho toàn bộ
+phần cần thay. Nếu không có family phù hợp, popup giải thích cần tải font và
+vô hiệu hóa lựa chọn thay thế. Tên trong popup chính là family được áp dụng
+cho editor và Save; không mặc định hứa dùng Arial khi máy chưa có Arial.
+
+Chỉ các run/face thiếu được thay; font nguồn nhúng dùng được và font cục bộ
+đủ coverage được giữ nguyên. Việc thay font thuộc cùng phiên chỉnh sửa với
+nội dung mới: Escape khôi phục trạng thái trước khi mở editor, commit tạo
+thao tác Undo/Redo bình thường và Save mới ghi vào PDF. Popup cho biết bố cục
+có thể thay đổi do khác metrics của font. Lựa chọn này chỉ xuất hiện ở bước
+chuẩn bị edit, không tự thay font trong hộp thoại khôi phục khi Save.
 
 Yêu cầu chờ gắn với document, revision và đoạn đang chọn. Hủy, đổi đoạn,
 đổi công cụ/tab, đóng tài liệu, thay đổi lịch sử hoặc bắt đầu Save hủy việc
@@ -100,6 +117,18 @@ mở editor đang chờ. Lỗi tải giữ nguyên nội dung và bản nháp; t
 tạo thao tác undo hoặc tự lưu PDF. Font đã được cài thành công vẫn có trong
 kho riêng. Luồng khôi phục font lúc Save tiếp tục xử lý ký tự hoặc kiểu chữ
 mới được thêm sau bước kiểm tra ban đầu.
+
+Lỗi tải font khi mở editor hoặc Save hiển thị bằng popup **Không thể tải phông
+chữ**, có nút OK để đóng (hoặc Escape), thay cho thông báo thoáng qua ở cuối
+màn hình. Popup ghi tên font và đúng face gặp lỗi: **Thường (Regular)**,
+**Đậm (Bold)**, **Nghiêng (Italic)** hoặc **Đậm nghiêng (Bold Italic)**.
+Nếu metadata hợp lệ của nguồn tải không có face được yêu cầu, thông báo nêu
+nguồn không cung cấp kiểu đó và liệt kê các kiểu hiện có. Ví dụ catalogue CTAN
+của `Inconsolatazi4` có Regular/Bold, không có Italic/Bold Italic.
+Không tìm thấy family, lỗi mạng, font sai/không dùng được và thiếu ký tự có
+thông báo riêng; không suy diễn lỗi mạng thành font không hỗ trợ kiểu chữ.
+Popup cũng nói rõ editor chưa mở/nội dung không đổi hoặc Save chưa thành
+công/bản nháp vẫn còn. Đổi hoặc đóng tab/tài liệu xóa popup cũ.
 
 ## Cache và xác thực
 

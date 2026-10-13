@@ -214,9 +214,31 @@
         <translation>Downloading fonts. Text editing will open automatically when the downloads finish.</translation>
     </message>
     <message id="EditFontDownloadConfirmation">
-        <location filename="../src/Main.qml" line="1639"/>
-        <source>Download the following font families before editing this text?</source>
-        <translation>Download the following font families before editing this text?</translation>
+        <location filename="../src/Main.qml" line="1749"/>
+        <source>TrePDF is missing the following fonts:
+%1
+
+Choose OK to download them and keep the text close to its original appearance. Or choose Use replacement font to edit now with %2 without downloading. Only missing fonts will be replaced with %2 when editing and saving; the layout may change.</source>
+        <translation>TrePDF is missing the following fonts:
+%1
+
+Choose OK to download them and keep the text close to its original appearance. Or choose Use replacement font to edit now with %2 without downloading. Only missing fonts will be replaced with %2 when editing and saving; the layout may change.</translation>
+    </message>
+    <message id="EditFontFallbackUnavailable">
+        <location filename="../src/Main.qml" line="1752"/>
+        <source>TrePDF is missing the following fonts:
+%1
+
+No available replacement supports all the characters and styles in this text. Choose OK to download the missing fonts, or Cancel to keep the text unchanged.</source>
+        <translation>TrePDF is missing the following fonts:
+%1
+
+No available replacement supports all the characters and styles in this text. Choose OK to download the missing fonts, or Cancel to keep the text unchanged.</translation>
+    </message>
+    <message id="UseReplacementFont">
+        <location filename="../src/Main.qml" line="1786"/>
+        <source>Use replacement font</source>
+        <translation>Use replacement font</translation>
     </message>
     <message id="FontDownloadInProgress">
         <location filename="../src/Main.qml" line="1643"/>
@@ -1876,14 +1898,18 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>This text contains too many font runs to prepare for editing.</translation>
     </message>
     <message id="TextEditDownloadedFontIncomplete">
-        <location filename="../src/PDFEditControllerSave.cpp" line="747"/>
-        <source>The downloaded font does not contain every face and character required by this text.</source>
-        <translation>The downloaded font does not contain every face and character required by this text.</translation>
+        <location filename="../src/PDFEditControllerSave.cpp" line="862"/>
+        <source>The downloaded %1 (%2) font still cannot display all the characters in this text.</source>
+        <translation>The downloaded %1 (%2) font still cannot display all the characters in this text.</translation>
     </message>
     <message id="FontDownloadEditFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="788"/>
-        <source>The font could not be downloaded: %1. Text editing has not started.</source>
-        <translation>The font could not be downloaded: %1. Text editing has not started.</translation>
+        <location filename="../src/PDFEditControllerSave.cpp" line="904"/>
+        <source>%1
+
+Text editing has not started. Your text is unchanged.</source>
+        <translation>%1
+
+Text editing has not started. Your text is unchanged.</translation>
     </message>
     <message id="FontDownloadCancelled">
         <location filename="../src/PDFEditControllerSave.cpp" line="824"/>
@@ -1891,9 +1917,13 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <translation>Font download cancelled. Your edits have been kept.</translation>
     </message>
     <message id="FontDownloadSaveFailed">
-        <location filename="../src/PDFEditControllerSave.cpp" line="888"/>
-        <source>The font could not be downloaded: %1. Your edits have been kept.</source>
-        <translation>The font could not be downloaded: %1. Your edits have been kept.</translation>
+        <location filename="../src/PDFEditControllerSave.cpp" line="1004"/>
+        <source>%1
+
+Your PDF was not saved. Your edits have been kept.</source>
+        <translation>%1
+
+Your PDF was not saved. Your edits have been kept.</translation>
     </message>
     <message id="FontDownloadContinuingSave">
         <location filename="../src/PDFEditControllerSave.cpp" line="907"/>
@@ -4471,6 +4501,63 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <location filename="../src/PDFMergeController.cpp" line="799"/>
         <source>PDF merge cancelled. Your files have not been changed.</source>
         <translation>PDF merge cancelled. Your files have not been changed.</translation>
+    </message>
+    <message id="FontDownloadFailedTitle">
+        <location filename="../src/Main.qml" line="1726"/>
+        <source>Font could not be downloaded</source>
+        <translation>Font could not be downloaded</translation>
+    </message>
+    <message id="FontDownloadStyleRegular">
+        <location filename="../src/FontDownloadService.cpp" line="86"/>
+        <source>Regular</source>
+        <translation>Regular</translation>
+    </message>
+    <message id="FontDownloadStyleBold">
+        <location filename="../src/FontDownloadService.cpp" line="79"/>
+        <source>Bold</source>
+        <translation>Bold</translation>
+    </message>
+    <message id="FontDownloadStyleItalic">
+        <location filename="../src/FontDownloadService.cpp" line="83"/>
+        <source>Italic</source>
+        <translation>Italic</translation>
+    </message>
+    <message id="FontDownloadStyleBoldItalic">
+        <location filename="../src/FontDownloadService.cpp" line="75"/>
+        <source>Bold Italic</source>
+        <translation>Bold Italic</translation>
+    </message>
+    <message id="FontDownloadFaceFailure">
+        <location filename="../src/FontDownloadService.cpp" line="623"/>
+        <source>Font: %1
+Style: %2
+
+%3</source>
+        <translation>Font: %1
+Style: %2
+
+%3</translation>
+    </message>
+    <message id="FontDownloadStyleUnavailable">
+        <location filename="../src/FontDownloadService.cpp" line="336"/>
+        <source>The font source does not offer this style. Available styles: %1.</source>
+        <translation>The font source does not offer this style. Available styles: %1.</translation>
+    </message>
+    <message id="FontDownloadStyleNotOffered">
+        <location filename="../src/FontDownloadService.cpp" line="332"/>
+        <source>The font source does not offer this style for this font.</source>
+        <translation>The font source does not offer this style for this font.</translation>
+    </message>
+    <message id="FontDownloadFaceUnavailable">
+        <location filename="../src/FontDownloadService.cpp" line="613"/>
+        <source>TrePDF could not find a complete downloadable copy of this font style in its font sources.</source>
+        <translation>TrePDF could not find a complete downloadable copy of this font style in its font sources.</translation>
+    </message>
+    <message id="FontDownloadValidationFailed">
+        <location filename="../src/FontDownloadService.cpp" line="536"/>
+        <location filename="../src/FontDownloadService.cpp" line="542"/>
+        <source>The downloaded file is invalid, does not match the requested font style, or cannot be used for editing.</source>
+        <translation>The downloaded file is invalid, does not match the requested font style, or cannot be used for editing.</translation>
     </message>
 </context>
 </TS>

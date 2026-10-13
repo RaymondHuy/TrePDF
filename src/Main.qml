@@ -35,6 +35,8 @@ ApplicationWindow {
     property bool passwordRetryRequested: false
     property PDFDocumentSession pendingSession: null
     property PDFEditController fontDownloadController: null
+    property PDFDocumentSession fontDownloadFailureSession: null
+    property string fontDownloadFailureMessage: ""
     property PDFDocumentSession saveAsSession: null
     property var headerSaveRequest: null
     property PDFDocumentSession excelExportSession: null
@@ -90,6 +92,7 @@ ApplicationWindow {
         activeWorkspaceItem ? activeWorkspaceItem.hasPendingPanelEdits : false
     readonly property bool modalOperationActive:
         passwordRequests.length > 0 || fontDownloadController !== null
+        || fontDownloadFailureLoader.active
         || signatureDialogLoader.active || setPasswordDialogLoader.active
         || watermarkDialogLoader.active || mergePdfDialogLoader.active
         || headerEntryNoticeLoader.active || openDialog.visible
@@ -1030,6 +1033,8 @@ ApplicationWindow {
     }
 
     onActiveSessionChanged: {
+        fontDownloadFailureSession = null
+        fontDownloadFailureMessage = ""
         headerSaveRequest = null
         headerEntryNoticeLoader.active = false
         if (appRibbon.marginTabActive && activeSession && activeSession.hasDrafts) {
@@ -1131,7 +1136,15 @@ ApplicationWindow {
             window.finishPendingDraftAction(session, succeeded)
         }
         onFontDownloadRequested: session => {
+            window.fontDownloadFailureSession = null
+            window.fontDownloadFailureMessage = ""
             window.fontDownloadController = session.editController
+        }
+        onFontDownloadFailed: (session, message) => {
+            if (session === window.activeSession) {
+                window.fontDownloadFailureMessage = message
+                window.fontDownloadFailureSession = session
+            }
         }
         onExternalLinkRequested:
             (session, requestId, authority, displayUrl, insecureHttp) => {
@@ -1666,6 +1679,96 @@ ApplicationWindow {
     }
 
     Connections {
+        target: window.fontDownloadFailureSession
+            ? window.fontDownloadFailureSession.document : null
+        function onSourceChanged() {
+            window.fontDownloadFailureSession = null
+            window.fontDownloadFailureMessage = ""
+        }
+        function onLoadedChanged() {
+            window.fontDownloadFailureSession = null
+            window.fontDownloadFailureMessage = ""
+        }
+    }
+
+    Loader {
+        id: fontDownloadFailureLoader
+        active: window.fontDownloadFailureSession !== null
+            && window.fontDownloadFailureMessage.length > 0
+        sourceComponent: Popup {
+            id: fontDownloadFailurePopup
+            objectName: "fontDownloadFailurePopup"
+            parent: Overlay.overlay
+            x: Math.round((window.width - width) / 2)
+            y: Math.max(windowMetrics.topInset,
+                Math.round((window.height - windowMetrics.keyboardInset - height) / 2))
+            width: Math.min(600, window.width - 32)
+            padding: 20
+            modal: true
+            focus: true
+            z: 200
+            closePolicy: Popup.CloseOnEscape
+            onOpened: dismissFontDownloadFailureButton.forceActiveFocus()
+            onClosed: {
+                window.fontDownloadFailureSession = null
+                window.fontDownloadFailureMessage = ""
+            }
+            background: Rectangle {
+                radius: 6
+                color: "#fffdfb"
+                border.color: appTheme.ribbonBorder
+            }
+            contentItem: ColumnLayout {
+                spacing: 16
+                Label {
+                    Layout.fillWidth: true
+                    //% "Font could not be downloaded"
+                    text: qsTrId("FontDownloadFailedTitle")
+                    font.pixelSize: 18
+                    font.weight: Font.DemiBold
+                    color: appTheme.ribbonTextColor
+                    wrapMode: Text.Wrap
+                }
+                ScrollView {
+                    id: fontDownloadFailureScroll
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(
+                        fontDownloadFailureMessage.implicitHeight,
+                        Math.max(64, window.height - windowMetrics.keyboardInset - 240))
+                    contentWidth: availableWidth
+                    clip: true
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    Label {
+                        id: fontDownloadFailureMessage
+                        objectName: "fontDownloadFailureMessage"
+                        width: fontDownloadFailureScroll.availableWidth
+                        text: window.fontDownloadFailureMessage
+                        textFormat: Text.PlainText
+                        color: appTheme.ribbonTextColor
+                        wrapMode: Text.Wrap
+                    }
+                }
+                OrangeButton {
+                    id: dismissFontDownloadFailureButton
+                    objectName: "dismissFontDownloadFailureButton"
+                    Layout.alignment: Qt.AlignRight
+                    theme: appTheme
+                    //% "OK"
+                    text: qsTrId("ConfirmFontDownload")
+                    onClicked: fontDownloadFailurePopup.close()
+                }
+            }
+        }
+        onLoaded: {
+            if (status === Loader.Ready) {
+                const popup = item as Popup
+                if (popup)
+                    popup.open()
+            }
+        }
+    }
+
+    Connections {
         target: window.fontDownloadController
         function onFontDownloadStateChanged() {
             if (window.fontDownloadController
@@ -1684,7 +1787,7 @@ ApplicationWindow {
             x: Math.round((window.width - width) / 2)
             y: Math.max(windowMetrics.topInset,
                 Math.round((window.height - windowMetrics.keyboardInset - height) / 2))
-            width: Math.min(480, window.width - 32)
+            width: Math.min(fontDownloadPopup.forEdit ? 600 : 480, window.width - 32)
             padding: 20
             modal: true
             focus: true
@@ -1696,6 +1799,8 @@ ApplicationWindow {
             readonly property bool forEdit: controller ? controller.fontDownloadForEdit : false
             readonly property string fontFamilies: controller
                 ? controller.missingFontFamilies.join("\n") : ""
+            readonly property string fallbackFamily: controller && forEdit
+                ? controller.textEditFallbackFamily : ""
 
             Shortcut {
                 sequence: "Escape"
@@ -1741,10 +1846,13 @@ ApplicationWindow {
                         text: fontDownloadPopup.forEdit
                             ? (fontDownloadPopup.downloading
                                 //% "Downloading fonts. Text editing will open automatically when the downloads finish."
-                                ? qsTrId("EditFontDownloadInProgress")
-                                //% "Download the following font families before editing this text?"
-                                : qsTrId("EditFontDownloadConfirmation"))
-                                + "\n\n" + fontDownloadPopup.fontFamilies
+                                ? qsTrId("EditFontDownloadInProgress") + "\n\n" + fontDownloadPopup.fontFamilies
+                                : fontDownloadPopup.fallbackFamily.length > 0
+                                    //% "TrePDF is missing the following fonts:\n%1\n\nChoose OK to download them and keep the text close to its original appearance. Or choose Use replacement font to edit now with %2 without downloading. Only missing fonts will be replaced with %2 when editing and saving; the layout may change."
+                                    ? qsTrId("EditFontDownloadConfirmation")
+                                        .arg(fontDownloadPopup.fontFamilies).arg(fontDownloadPopup.fallbackFamily)
+                                    //% "TrePDF is missing the following fonts:\n%1\n\nNo available replacement supports all the characters and styles in this text. Choose OK to download the missing fonts, or Cancel to keep the text unchanged."
+                                    : qsTrId("EditFontFallbackUnavailable").arg(fontDownloadPopup.fontFamilies))
                             : fontDownloadPopup.downloading
                                 //% "Downloading the available regular, bold, italic and bold italic styles of %1. Saving will continue automatically when all downloads finish."
                                 ? qsTrId("FontDownloadInProgress").arg(
@@ -1773,6 +1881,17 @@ ApplicationWindow {
                         onClicked: {
                             if (fontDownloadPopup.controller)
                                 fontDownloadPopup.controller.cancelFontDownload()
+                        }
+                    }
+                    Button {
+                        objectName: "continueTextEditWithFallbackButton"
+                        //% "Use replacement font"
+                        text: qsTrId("UseReplacementFont")
+                        visible: fontDownloadPopup.forEdit && !fontDownloadPopup.downloading
+                        enabled: fontDownloadPopup.fallbackFamily.length > 0
+                        onClicked: {
+                            if (fontDownloadPopup.controller)
+                                fontDownloadPopup.controller.continueTextEditWithFallback()
                         }
                     }
                     OrangeButton {

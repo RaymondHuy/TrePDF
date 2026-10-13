@@ -29,6 +29,7 @@ public:
     ~FontDownloadService() override;
 
     void start(const QString &family, bool bold, bool italic, uint requiredCodePoint);
+    static QString styleName(bool bold, bool italic);
     // Teardown and user cancellation are silent and never install a late reply.
     void cancel();
 
@@ -80,6 +81,8 @@ private:
     int m_fontSourceIndex = 0;
     bool m_bold = false;
     bool m_italic = false;
+    bool m_errorBold = false;
+    bool m_errorItalic = false;
     bool m_requireVietnamese = false;
     bool m_active = false;
 };
