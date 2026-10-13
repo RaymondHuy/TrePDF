@@ -659,10 +659,10 @@ Column {
             }
 
             Rectangle {
-                Layout.preferredWidth: draftStatusLabel.implicitWidth + 20
+                Layout.preferredWidth: draftStatusContent.implicitWidth + 20
                 Layout.preferredHeight: 24
                 Layout.alignment: Qt.AlignVCenter
-                visible: root.hasUnsavedChanges || root.editController.saving
+                visible: root.hasUnsavedChanges || root.anySaving
                 radius: 12
                 color: root.theme.foxitPaleOrange
                 border.color: root.theme.foxitBorderOrange
@@ -670,25 +670,40 @@ Column {
                 Accessible.role: Accessible.StaticText
                 Accessible.name: draftStatusLabel.text
 
-                Label {
-                    id: draftStatusLabel
-
-                    readonly property string savingStatusText: {
-                        //% "Saving PDF…"
-                        return qsTrId("SavingPdf")
-                    }
-                    readonly property string draftStatusText: {
-                        //% "Draft · Not saved"
-                        return qsTrId("DraftNotSaved")
-                    }
+                RowLayout {
+                    id: draftStatusContent
 
                     anchors.centerIn: parent
-                    text: root.editController.saving
-                        ? savingStatusText
-                        : draftStatusText
-                    color: root.theme.foxitDarkOrange
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
+                    spacing: 6
+
+                    BusyIndicator {
+                        objectName: "pdfSaveBusyIndicator"
+                        Layout.preferredWidth: 16
+                        Layout.preferredHeight: 16
+                        padding: 0
+                        palette.dark: root.theme.foxitDarkOrange
+                        visible: root.anySaving
+                        running: visible
+                        Accessible.ignored: true
+                    }
+
+                    Label {
+                        id: draftStatusLabel
+
+                        readonly property string savingStatusText: {
+                            //% "Saving PDF…"
+                            return qsTrId("SavingPdf")
+                        }
+                        readonly property string draftStatusText: {
+                            //% "Draft · Not saved"
+                            return qsTrId("DraftNotSaved")
+                        }
+
+                        text: root.anySaving ? savingStatusText : draftStatusText
+                        color: root.theme.foxitDarkOrange
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                    }
                 }
             }
         }

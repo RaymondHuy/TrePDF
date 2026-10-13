@@ -2363,15 +2363,17 @@ bool restorePageObjectActivity(
     return restored;
 }
 
-bool renderIsolatedPageObject(FPDF_PAGE page,
-                              int objectIndex,
-                              QImage &image,
-                              FS_MATRIX &imageMatrix)
+enum class IsolatedPaintResult { Failed, OutsidePage, Rendered };
+
+IsolatedPaintResult renderIsolatedPageObject(FPDF_PAGE page,
+                                             int objectIndex,
+                                             QImage &image,
+                                             FS_MATRIX &imageMatrix)
 {
     assertPDFiumProcessLockHeld();
     const int objectCount = FPDFPage_CountObjects(page);
     if (objectIndex < 0 || objectIndex >= objectCount) {
-        return false;
+        return IsolatedPaintResult::Failed;
     }
 
     QVector<FPDF_PAGEOBJECT> objects;
@@ -2382,13 +2384,13 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
         FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, index);
         FPDF_BOOL active = false;
         if (!object || !FPDFPageObj_GetIsActive(object, &active)) {
-            return false;
+            return IsolatedPaintResult::Failed;
         }
         objects.append(object);
         activeStates.append(active);
     }
     if (!activeStates.at(objectIndex)) {
-        return false;
+        return IsolatedPaintResult::Failed;
     }
 
     bool isolated = true;
@@ -2402,7 +2404,7 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
     }
     if (!isolated) {
         restorePageObjectActivity(objects, activeStates);
-        return false;
+        return IsolatedPaintResult::Failed;
     }
 
     float left = 0.0F;
@@ -2419,12 +2421,14 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
     const qreal width = static_cast<qreal>(right - left);
     const qreal height = static_cast<qreal>(top - bottom);
     if (!boundsAvailable
+        || !std::isfinite(left) || !std::isfinite(bottom)
+        || !std::isfinite(right) || !std::isfinite(top)
         || !std::isfinite(width)
         || !std::isfinite(height)
         || width <= 0.0
         || height <= 0.0) {
         restorePageObjectActivity(objects, activeStates);
-        return false;
+        return IsolatedPaintResult::Failed;
     }
 
     const qreal pageWidth = FPDF_GetPageWidthF(page);
@@ -2434,7 +2438,7 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
         || pageWidth <= 0.0
         || pageHeight <= 0.0) {
         restorePageObjectActivity(objects, activeStates);
-        return false;
+        return IsolatedPaintResult::Failed;
     }
 
     qreal scale = kUnsupportedPaintRasterScale;
@@ -2446,7 +2450,7 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
     }
     if (!std::isfinite(scale) || scale < 0.25) {
         restorePageObjectActivity(objects, activeStates);
-        return false;
+        return IsolatedPaintResult::Failed;
     }
 
     const int pagePixelWidth = qCeil(pageWidth * scale);
@@ -2456,38 +2460,7 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
         || static_cast<qint64>(pagePixelWidth) * pagePixelHeight
             > kMaximumUnsupportedPaintPixels + 16384) {
         restorePageObjectActivity(objects, activeStates);
-        return false;
-    }
-
-    QImage renderedPage(
-        pagePixelWidth,
-        pagePixelHeight,
-        QImage::Format_ARGB32);
-    renderedPage.fill(Qt::transparent);
-    FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
-        pagePixelWidth,
-        pagePixelHeight,
-        FPDFBitmap_BGRA,
-        renderedPage.bits(),
-        renderedPage.bytesPerLine());
-    if (!bitmap) {
-        restorePageObjectActivity(objects, activeStates);
-        return false;
-    }
-    FPDF_RenderPageBitmap(
-        bitmap,
-        page,
-        0,
-        0,
-        pagePixelWidth,
-        pagePixelHeight,
-        0,
-        0);
-    FPDFBitmap_Destroy(bitmap);
-
-    if (!restorePageObjectActivity(objects, activeStates)) {
-        image = {};
-        return false;
+        return IsolatedPaintResult::Failed;
     }
 
     const qreal padding = 2.0 / scale;
@@ -2503,8 +2476,8 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
     };
     int minimumX = pagePixelWidth;
     int minimumY = pagePixelHeight;
-    int maximumX = 0;
-    int maximumY = 0;
+    int maximumX = -1;
+    int maximumY = -1;
     for (const QPointF &corner : pageCorners) {
         int deviceX = 0;
         int deviceY = 0;
@@ -2519,7 +2492,8 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
                 corner.y(),
                 &deviceX,
                 &deviceY)) {
-            return false;
+            restorePageObjectActivity(objects, activeStates);
+            return IsolatedPaintResult::Failed;
         }
         minimumX = qMin(minimumX, deviceX);
         minimumY = qMin(minimumY, deviceY);
@@ -2530,11 +2504,52 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
         QPoint(minimumX, minimumY),
         QPoint(maximumX, maximumY))
                            .normalized()
-                           .intersected(renderedPage.rect());
+                           .intersected(QRect(0, 0, pagePixelWidth, pagePixelHeight));
     if (crop.isEmpty()) {
-        return false;
+        // A valid paint wholly outside the visible page needs no raster
+        // replacement. Keep its original object; it is not an image failure.
+        return restorePageObjectActivity(objects, activeStates)
+            ? IsolatedPaintResult::OutsidePage : IsolatedPaintResult::Failed;
     }
+
+    QImage renderedPage(
+        pagePixelWidth,
+        pagePixelHeight,
+        QImage::Format_ARGB32);
+    if (renderedPage.isNull()) {
+        restorePageObjectActivity(objects, activeStates);
+        return IsolatedPaintResult::Failed;
+    }
+    renderedPage.fill(Qt::transparent);
+    FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(
+        pagePixelWidth,
+        pagePixelHeight,
+        FPDFBitmap_BGRA,
+        renderedPage.bits(),
+        renderedPage.bytesPerLine());
+    if (!bitmap) {
+        restorePageObjectActivity(objects, activeStates);
+        return IsolatedPaintResult::Failed;
+    }
+    FPDF_RenderPageBitmap(
+        bitmap,
+        page,
+        0,
+        0,
+        pagePixelWidth,
+        pagePixelHeight,
+        0,
+        0);
+    FPDFBitmap_Destroy(bitmap);
+
+    if (!restorePageObjectActivity(objects, activeStates)) {
+        image = {};
+        return IsolatedPaintResult::Failed;
+    }
+
     image = renderedPage.copy(crop);
+    if (image.isNull())
+        return IsolatedPaintResult::Failed;
 
     double bottomLeftX = 0.0;
     double bottomLeftY = 0.0;
@@ -2578,7 +2593,7 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
             &topLeftX,
             &topLeftY)) {
         image = {};
-        return false;
+        return IsolatedPaintResult::Failed;
     }
     imageMatrix = FS_MATRIX{
         static_cast<float>(bottomRightX - bottomLeftX),
@@ -2587,7 +2602,7 @@ bool renderIsolatedPageObject(FPDF_PAGE page,
         static_cast<float>(topLeftY - bottomLeftY),
         static_cast<float>(bottomLeftX),
         static_cast<float>(bottomLeftY)};
-    return true;
+    return IsolatedPaintResult::Rendered;
 }
 
 bool colorsApproximatelyEqual(const QColor &left, const QColor &right)
@@ -2931,11 +2946,11 @@ PDFSaveWriter::Result prepareUnsupportedPaints(
 
         QImage renderedObject;
         FS_MATRIX imageMatrix{};
-        if (!renderIsolatedPageObject(
-                inspectionPage,
-                index,
-                renderedObject,
-                imageMatrix)) {
+        const IsolatedPaintResult rendered = renderIsolatedPageObject(
+            inspectionPage, index, renderedObject, imageMatrix);
+        if (rendered == IsolatedPaintResult::OutsidePage)
+            continue;
+        if (rendered == IsolatedPaintResult::Failed) {
             return failure(
                 PDFSaveWriter::Error::ImageObjectCreationFailed,
                 pageIndex);
