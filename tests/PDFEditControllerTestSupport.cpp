@@ -1,5 +1,6 @@
 #include "PDFEditControllerTestSupport.h"
 #include "PDFFileOpenHandler.h"
+#include "PDFMergeController.h"
 #include "SignatureLibrary.h"
 #include "platform/PlatformService.h"
 
@@ -870,6 +871,7 @@ bool registerQmlTestTypes(const QString &themePath)
                "TrePDF", 1, 0, "PDFTextSelectionController") >= 0
         && qmlRegisterType<PDFTextSelectionItem>(
                "TrePDF", 1, 0, "PDFTextSelectionItem") >= 0
+        && qmlRegisterType<PDFMergeController>("TrePDF", 1, 0, "PDFMergeController") >= 0
         && qmlRegisterType<PDFExcelExportController>(
                "TrePDF", 1, 0, "PDFExcelExportController") >= 0
         && qmlRegisterType<PDFFormController>(

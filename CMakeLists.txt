@@ -246,6 +246,8 @@ qt_add_qml_module(trepdf
         src/PDFEditController_p.h
         src/PDFExcelExportController.cpp
         src/PDFExcelExportController.h
+        src/PDFMergeController.cpp
+        src/PDFMergeController.h
         src/PDFFormController.cpp
         src/PDFFormController.h
         src/PDFFormAppearance.h
@@ -340,6 +342,7 @@ qt_add_qml_module(trepdf
         src/Components/ProtectRibbon.qml
         src/Components/SetPasswordDialog.qml
         src/Components/WatermarkDialog.qml
+        src/Components/MergePdfDialog.qml
         src/Components/SignatureDialog.qml
         src/Components/SearchHighlightLayer.qml
         src/Components/SearchRibbonControl.qml
@@ -365,6 +368,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/comb-field.svg
         src/assets/icons/comment.svg
         src/assets/icons/delete-page.svg
+        src/assets/icons/merge-pdf.svg
         src/assets/icons/diamond.svg
         src/assets/icons/down.svg
         src/assets/icons/dropdown-menu.svg
@@ -466,6 +470,7 @@ target_link_libraries(trepdf
         Qt6::Quick
         Qt6::QuickControls2
         PDFium::PDFium
+        QPDF::QPDF
         Libxlsxwriter::Libxlsxwriter
 )
 

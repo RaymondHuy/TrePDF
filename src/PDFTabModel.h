@@ -251,6 +251,7 @@ public:
     Q_INVOKABLE bool requestSave(PDFDocumentSession *session);
     Q_INVOKABLE bool requestSaveAs(PDFDocumentSession *session, const QUrl &target);
     Q_INVOKABLE bool requestExcelExport(PDFDocumentSession *session, const QUrl &target);
+    Q_INVOKABLE QString mergeValidationError(const QList<QUrl> &sources, const QUrl &target) const;
     Q_INVOKABLE PDFDocumentSession *firstDraftSession() const;
     Q_INVOKABLE void finishAllEdits();
 

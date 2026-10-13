@@ -19,6 +19,7 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerTextSelection.cpp
     tst_PDFEditControllerDrawingComments.cpp
     tst_PDFEditControllerFileOpen.cpp
+    tst_PDFEditControllerMerge.cpp
     tst_PDFEditControllerFonts.cpp
     tst_PDFEditControllerFormButtons.cpp
     tst_PDFEditControllerFormChoices.cpp
@@ -86,6 +87,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/SignatureLibrary.h
     ../src/PDFExcelExportController.cpp
     ../src/PDFExcelExportController.h
+    ../src/PDFMergeController.cpp
+    ../src/PDFMergeController.h
     ../src/PDFTableExtractor.cpp
     ../src/PDFTableExtractor.h
     ../src/PDFTableLayout.h
@@ -243,6 +246,42 @@ if(APPLE)
         VERBATIM
     )
 endif()
+qt_add_executable(trepdf_merge_tests
+    tst_PDFMerge.cpp
+    ../src/PDFMergeController.cpp
+    ../src/PDFMergeController.h
+    ../src/PDFAtomicSaveFile.cpp
+    ../src/PDFAtomicSaveFile.h
+    ../src/PDFDocument.cpp
+    ../src/PDFDocument.h
+    ../src/PDFiumDocument.cpp
+    ../src/PDFiumDocument.h
+)
+target_include_directories(trepdf_merge_tests PRIVATE ../src)
+target_link_libraries(trepdf_merge_tests PRIVATE
+    Qt6::Gui Qt6::Qml Qt6::Test PDFium::PDFium QPDF::QPDF
+)
+if(WIN32)
+    target_compile_definitions(trepdf_merge_tests PRIVATE NOMINMAX)
+endif()
+if(APPLE)
+    add_custom_command(TARGET trepdf_merge_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${TREPDF_TEST_PDFIUM_LIBRARY}"
+            "$<TARGET_FILE_DIR:trepdf_merge_tests>/libpdfium.dylib"
+        COMMAND install_name_tool -change ./libpdfium.dylib
+            @loader_path/libpdfium.dylib "$<TARGET_FILE:trepdf_merge_tests>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${TREPDF_TEST_QPDF_LIBRARY}"
+            "$<TARGET_FILE_DIR:trepdf_merge_tests>/libqpdf.dylib"
+        COMMAND install_name_tool -change @rpath/libqpdf.dylib
+            @loader_path/libqpdf.dylib "$<TARGET_FILE:trepdf_merge_tests>"
+        VERBATIM
+    )
+endif()
+add_test(NAME PDFMergeTests COMMAND trepdf_merge_tests)
+set_tests_properties(PDFMergeTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_test(NAME PDFExcelExportTests COMMAND trepdf_excel_export_tests)
 set_tests_properties(PDFExcelExportTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 

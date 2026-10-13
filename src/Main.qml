@@ -91,7 +91,8 @@ ApplicationWindow {
     readonly property bool modalOperationActive:
         passwordRequests.length > 0 || fontDownloadController !== null
         || signatureDialogLoader.active || setPasswordDialogLoader.active
-        || watermarkDialogLoader.active || headerEntryNoticeLoader.active || openDialog.visible
+        || watermarkDialogLoader.active || mergePdfDialogLoader.active
+        || headerEntryNoticeLoader.active || openDialog.visible
         || imageDialog.visible || headerImageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
         || externalLinkPopup.visible || discardDraftPopup.visible || deletePagePopup.visible
         || documentAccess.busy || saveAsDialog.writePending || excelExportDialog.writePending
@@ -501,6 +502,32 @@ ApplicationWindow {
             ? source.replace(/\.pdf$/i, ".xlsx")
             : source + ".xlsx"
         excelExportDialog.open()
+    }
+
+    function requestMergePdf() {
+        if (Qt.platform.os === "ios" || fileOpenBlocked || !prepareActiveWorkspace())
+            return
+        tabModel.finishAllEdits()
+        pdfMergeController.clear()
+        mergePdfDialogLoader.active = true
+    }
+
+    function mergePdfTo(target) {
+        if (mergePdfDialogLoader.status !== Loader.Ready)
+            return
+        const dialog = mergePdfDialogLoader.item as MergePdfDialog
+        if (!dialog || pdfMergeController.busy)
+            return
+        const sources = []
+        for (const file of pdfMergeController.files)
+            sources.push(file.url)
+        const error = tabModel.mergeValidationError(sources, target)
+        if (error.length > 0) {
+            dialog.errorText = error
+            return
+        }
+        dialog.errorText = ""
+        pdfMergeController.mergeTo(target)
     }
 
     function exportExcelTo(url) {
@@ -1032,6 +1059,11 @@ ApplicationWindow {
             return
 
         close.accepted = false
+        if (pdfMergeController.busy) {
+            //% "Merging is still running. Please wait, or cancel it in the Merge PDF window."
+            showStatus(qsTrId("MergePdfWaitBeforeClosing"))
+            return
+        }
         if (!prepareActiveWorkspace())
             return
         tabModel.finishAllEdits()
@@ -1320,6 +1352,33 @@ ApplicationWindow {
         }
     }
 
+    PDFMergeController {
+        id: pdfMergeController
+        objectName: "pdfMergeController"
+        onCompleted: url => {
+            Qt.callLater(function() { window.openFiles([url]) })
+        }
+    }
+
+    Loader {
+        id: mergePdfDialogLoader
+        objectName: "mergePdfDialogLoader"
+        active: false
+        sourceComponent: MergePdfDialog {
+            theme: appTheme
+            controller: pdfMergeController
+            onMergeRequested: target => window.mergePdfTo(target)
+            onClosed: mergePdfDialogLoader.active = false
+        }
+        onLoaded: {
+            if (status === Loader.Ready) {
+                const dialog = item as MergePdfDialog
+                if (dialog)
+                    dialog.open()
+            }
+        }
+    }
+
     Connections {
         target: window.watermarkSession ? window.watermarkSession.document : null
         function onSourceChanged() { window.cancelWatermark() }
@@ -1422,6 +1481,7 @@ ApplicationWindow {
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
             && !tabModel.anySaving
+            && !mergePdfDialogLoader.active
         onActivated: window.requestUndo()
     }
 
@@ -1439,6 +1499,7 @@ ApplicationWindow {
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
             && !tabModel.anySaving
+            && !mergePdfDialogLoader.active
         onActivated: window.requestRedo()
     }
 
@@ -1451,18 +1512,21 @@ ApplicationWindow {
                 || (window.activeWorkspaceItem !== null
                     && window.activeWorkspaceItem.hasPendingHeaderPlacement))
             && !tabModel.anySaving && window.headerSaveRequest === null
+            && !mergePdfDialogLoader.active
         onActivated: window.requestSave()
     }
 
     Shortcut {
         sequences: [StandardKey.SaveAs]
         enabled: window.activeDocument.loaded && !tabModel.anySaving
+            && !mergePdfDialogLoader.active
         onActivated: window.requestSaveAs()
     }
 
     Shortcut {
         sequences: [StandardKey.Close]
         enabled: window.activeSession !== null && !tabModel.anySaving
+            && !mergePdfDialogLoader.active
         onActivated: window.requestCloseSession(window.activeSession)
     }
 
@@ -2096,6 +2160,7 @@ ApplicationWindow {
             }
             onSaveAsRequested: window.requestSaveAs()
             onExcelExportRequested: window.requestExcelExport()
+            onMergePdfRequested: window.requestMergePdf()
             onPageRequested: page => window.goToPage(page)
             onPageStepRequested: direction => {
                 const workspace = window.activeWorkspace()
