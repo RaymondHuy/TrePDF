@@ -331,6 +331,7 @@ lại; Check Box source-backed và cấu trúc AcroForm tùy ý vẫn được b
 |---|---|
 | [`src/main.cpp`](../src/main.cpp) | Khởi động Qt/QML, style, font và ngôn ngữ mặc định. |
 | [`src/ApplicationFonts.cpp`](../src/ApplicationFonts.cpp) | Danh mục, kiểm tra, hiệu chuẩn và snapshot font. |
+| [`src/UserFontManager.h`](../src/UserFontManager.h), [`src/UserFontManager.cpp`](../src/UserFontManager.cpp), [`src/Components/FontSettingsDialog.qml`](../src/Components/FontSettingsDialog.qml) | Thiết lập → Font: nhập tên family, chọn file theo bốn kiểu và lưu batch đã xác thực vào `AppLocalDataLocation/user-font`; dùng chung registry font và Save. |
 | [`src/WindowsSystemFonts.h`](../src/WindowsSystemFonts.h), [`src/WindowsSystemFonts.cpp`](../src/WindowsSystemFonts.cpp) | Adapter DirectWrite: chọn face hệ thống Windows thật, kiểm glyph và đọc bảng sfnt/TTC có giới hạn; `ApplicationFonts` kiểm quyền nhúng và dựng snapshot. |
 | [`src/PDFTabModel.cpp`](../src/PDFTabModel.cpp) | Session mỗi tab và model nhiều tab. |
 | [`src/PDFDocument.cpp`](../src/PDFDocument.cpp) | Document GUI-thread, kích thước và page map transient. |

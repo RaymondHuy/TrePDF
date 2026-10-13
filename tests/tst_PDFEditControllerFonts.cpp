@@ -10,6 +10,7 @@
 #include "PDFFontAliases.h"
 #include "PDFUnicodeFont.h"
 #include "PDFSymbolFont.h"
+#include "UserFontManager.h"
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QStandardPaths>
@@ -4525,6 +4526,665 @@ void PDFEditControllerTest::rollsBackFontFamilyWhenOptionalTargetBlocked()
     QVERIFY(!QFontDatabase::families().contains(family));
     QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
     QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, true).isValid());
+}
+
+void PDFEditControllerTest::installsUserFontFamily_data()
+{
+    QTest::addColumn<int>("styleMask");
+    QTest::newRow("complete") << 15;
+    QTest::newRow("regular-only") << 1;
+    QTest::newRow("italic-only") << 2;
+    QTest::newRow("bold-only") << 4;
+    QTest::newRow("bolditalic-only") << 8;
+}
+
+void PDFEditControllerTest::installsUserFontFamily()
+{
+    QFETCH(int, styleMask);
+    const QString family = QStringLiteral("TrePDFUserFamily%1").arg(styleMask);
+    const QString sample = QStringLiteral("Tiếng Việt — 123");
+    const auto verifyFaces = [&] {
+        for (int style = 0; style < 4; ++style) {
+            const bool expected = (styleMask & (1 << style)) != 0;
+            const auto face = ApplicationFonts::downloadedFontFace(family, style & 2, style & 1);
+            QCOMPARE(face.isValid(), expected);
+            if (!expected)
+                continue;
+            QCOMPARE(face.data, renamedTestFontData(family, style & 2, style & 1));
+            QVERIFY(ApplicationFonts::isFontFaceSelectable(family, style & 2, style & 1));
+            QVERIFY(ApplicationFonts::fontFaceSupportsText(family, style & 2, style & 1,
+                sample, ApplicationFonts::FontSource::Downloaded));
+        }
+    };
+    if (qEnvironmentVariableIsSet("TREPDF_USER_FONT_RELOAD_PROBE")) {
+        // initTestCase registered the persisted user-font directory before
+        // this function. No parent process registration can satisfy this check.
+        QVERIFY(QStandardPaths::isTestModeEnabled());
+        verifyFaces();
+        return;
+    }
+
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString directory = ApplicationFonts::userFontDirectory();
+    QCOMPARE(directory, QDir(QFileInfo(store.path).absolutePath())
+        .filePath(QStringLiteral("user-font")));
+    QVERIFY(directory != store.path);
+    QList<ApplicationFonts::DownloadedFontData> fonts;
+    for (int style = 0; style < 4; ++style) {
+        if (styleMask & (1 << style))
+            fonts.append({renamedTestFontData(family, style & 2, style & 1),
+                          family, bool(style & 2), bool(style & 1), 0});
+    }
+    QString error;
+    QVERIFY2(ApplicationFonts::installUserFonts(fonts, error), qPrintable(error));
+    verifyFaces();
+    QCOMPARE(QDir(directory).entryList({QStringLiteral("*.ttf")}, QDir::Files).size(),
+             fonts.size());
+    QVERIFY(!QFileInfo::exists(store.path));
+    for (const auto &font : fonts) {
+        const QString filename = QString::fromLatin1(
+            QCryptographicHash::hash(font.data, QCryptographicHash::Sha256).toHex())
+            + QStringLiteral(".ttf");
+        QFile savedFont(QDir(directory).filePath(filename));
+        QVERIFY(savedFont.open(QIODevice::ReadOnly));
+        QCOMPARE(savedFont.readAll(), font.data);
+    }
+
+    QProcess probe;
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("TREPDF_FONT_CACHE_PROBE_APP"),
+                       QCoreApplication::applicationName());
+    environment.insert(QStringLiteral("TREPDF_USER_FONT_RELOAD_PROBE"), QStringLiteral("1"));
+    environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+    probe.setProcessEnvironment(environment);
+    probe.setProcessChannelMode(QProcess::MergedChannels);
+    probe.start(QCoreApplication::applicationFilePath(),
+        {QStringLiteral("installsUserFontFamily:%1").arg(QString::fromLatin1(QTest::currentDataTag()))});
+    QVERIFY2(probe.waitForStarted(10000), qPrintable(probe.errorString()));
+    QVERIFY2(probe.waitForFinished(30000), qPrintable(probe.errorString()));
+    const QByteArray output = probe.readAll();
+    QVERIFY2(probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0,
+             output.constData());
+
+    if (styleMask == 15) {
+        // Exercise the existing writer with a locally uploaded face: importing
+        // must make it usable for PDF editing and embedding, not just Qt display.
+        const QString source = m_temporaryDirectory.filePath(QStringLiteral("user-font-source.pdf"));
+        QVERIFY(createFontStylePdf(source));
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(source)));
+        controller.setDocument(&document);
+        const auto candidate = candidateForText(waitForCandidates(controller, 0),
+                                               QString::fromLatin1(kRegularText));
+        QVERIFY(!candidate.isEmpty());
+        QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+        controller.beginSelectedTextEdit();
+        controller.updateSelectedTextPreview(sample);
+        controller.setSelectedTextRange(0, sample.size());
+        controller.setSelectedFontFamily(family);
+        controller.finishSelectedTextEdit();
+        QCOMPARE(controller.selectedFontFamily(), family);
+        const QString path = m_temporaryDirectory.filePath(QStringLiteral("user-font-save.pdf"));
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(path)));
+        QVERIFY(normalizedPageText(path).contains(sample));
+        const auto embedded = textObjectFontInfo(path, QStringLiteral("Tiếng"));
+        QVERIFY(embedded.found);
+        QCOMPARE(embedded.embedded, 1);
+        QCOMPARE(compactFontName(embedded.familyName), compactFontName(family));
+    }
+}
+
+void PDFEditControllerTest::rejectsInvalidUserFontBatch_data()
+{
+    QTest::addColumn<QString>("failure");
+    for (const char *name : {"wrong-family", "wrong-style", "mixed-family", "duplicate-face",
+                             "restricted-embedding", "invalid-file", "empty"})
+        QTest::newRow(name) << QString::fromLatin1(name);
+}
+
+void PDFEditControllerTest::rejectsInvalidUserFontBatch()
+{
+    QFETCH(QString, failure);
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFUserRejected") + failure;
+    const QByteArray regular = renamedTestFontData(family);
+    QByteArray italic = renamedTestFontData(family, false, true);
+    QVERIFY(!regular.isEmpty());
+    QVERIFY(!italic.isEmpty());
+    QList<ApplicationFonts::DownloadedFontData> fonts{
+        {regular, family, false, false, 0}, {italic, family, false, true, 0}};
+    if (failure == QStringLiteral("wrong-family")) {
+        fonts.last().family = QStringLiteral("Another family");
+    } else if (failure == QStringLiteral("wrong-style")) {
+        fonts.last().data = regular;
+    } else if (failure == QStringLiteral("mixed-family")) {
+        fonts.last().family = family + QStringLiteral("Other");
+        fonts.last().data = renamedTestFontData(fonts.last().family, false, true);
+    } else if (failure == QStringLiteral("duplicate-face")) {
+        fonts.last() = fonts.first();
+    } else if (failure == QStringLiteral("restricted-embedding")) {
+        bool changed = false;
+        for (int table = 0; table < sfntUInt16(italic, 4); ++table) {
+            const qsizetype entry = 12 + table * 16;
+            if (italic.mid(entry, 4) != QByteArrayLiteral("OS/2"))
+                continue;
+            const qsizetype flags = sfntUInt32(italic, entry + 8) + 8;
+            italic[flags] = 0;
+            italic[flags + 1] = 2; // Restricted license embedding.
+            changed = true;
+            break;
+        }
+        QVERIFY(changed);
+        fonts.last().data = italic;
+    } else if (failure == QStringLiteral("invalid-file")) {
+        fonts.last().data = QByteArrayLiteral("not a font");
+    } else {
+        fonts.clear();
+    }
+    QString error;
+    QVERIFY(!ApplicationFonts::installUserFonts(fonts, error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(!QFileInfo::exists(ApplicationFonts::userFontDirectory()));
+    QVERIFY(!QFileInfo::exists(store.path));
+    QVERIFY(!QFontDatabase::families().contains(family));
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, true).isValid());
+}
+
+void PDFEditControllerTest::keepsUserFontImportIdempotent()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFUserRepeat");
+    const QByteArray regular = renamedTestFontData(family);
+    const QList<ApplicationFonts::DownloadedFontData> fonts{{regular, family, false, false, 0}};
+    QString error;
+    QVERIFY2(ApplicationFonts::installUserFonts(fonts, error), qPrintable(error));
+    QVERIFY2(ApplicationFonts::installUserFonts(fonts, error), qPrintable(error));
+    QCOMPARE(QDir(ApplicationFonts::userFontDirectory()).entryList(QDir::Files).size(), 1);
+
+    QByteArray changedFont = regular;
+    bool changed = false;
+    for (int table = 0; table < sfntUInt16(changedFont, 4); ++table) {
+        const qsizetype entry = 12 + table * 16;
+        if (changedFont.mid(entry, 4) != QByteArrayLiteral("head"))
+            continue;
+        const qsizetype timestamp = sfntUInt32(changedFont, entry + 8) + 32;
+        changedFont[timestamp] = char(quint8(changedFont.at(timestamp)) ^ 1U);
+        changed = true;
+        break;
+    }
+    QVERIFY(changed);
+    QVERIFY2(ApplicationFonts::validateDownloadedFontData(
+        changedFont, family, false, false, 0, error), qPrintable(error));
+    QVERIFY(!ApplicationFonts::installUserFonts({{changedFont, family, false, false, 0}}, error));
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(ApplicationFonts::downloadedFontFace(family, false, false).data, regular);
+    QCOMPARE(QDir(ApplicationFonts::userFontDirectory()).entryList(QDir::Files).size(), 1);
+}
+
+void PDFEditControllerTest::keepsUserFontAfterDownloadCacheRemoval()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFUserCachedCopy");
+    const QByteArray regular = renamedTestFontData(family);
+    const QList<ApplicationFonts::DownloadedFontData> fonts{{regular, family, false, false, 0}};
+    QString error;
+    QVERIFY2(ApplicationFonts::installDownloadedFonts(fonts, error), qPrintable(error));
+    QVERIFY2(ApplicationFonts::installUserFonts(fonts, error), qPrintable(error));
+    QCOMPARE(QDir(ApplicationFonts::userFontDirectory()).entryList(QDir::Files).size(), 1);
+    QVERIFY(QDir(store.path).removeRecursively());
+    // Uploading an already downloaded face must create an independent user
+    // copy. A later cache cleanup must not make the imported font unusable.
+    const auto face = ApplicationFonts::downloadedFontFace(family, false, false);
+    QVERIFY(face.isValid());
+    QCOMPARE(face.data, regular);
+}
+
+void PDFEditControllerTest::rollsBackUserFontsWhenTargetBlocked()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFUserBlocked");
+    const QByteArray regular = renamedTestFontData(family);
+    const QByteArray italic = renamedTestFontData(family, false, true);
+    const QString directory = ApplicationFonts::userFontDirectory();
+    const QString blocked = QDir(directory).filePath(QString::fromLatin1(
+        QCryptographicHash::hash(italic, QCryptographicHash::Sha256).toHex()) + QStringLiteral(".ttf"));
+    QVERIFY(QDir().mkpath(blocked));
+    QFile marker(QDir(blocked).filePath(QStringLiteral("preserve.txt")));
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    QCOMPARE(marker.write("existing directory"), 18);
+    marker.close();
+    QString error;
+    QVERIFY(!ApplicationFonts::installUserFonts({
+        {regular, family, false, false, 0}, {italic, family, false, true, 0}}, error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(QDir(directory).entryList(QDir::Files).isEmpty());
+    QVERIFY(marker.open(QIODevice::ReadOnly));
+    QCOMPARE(marker.readAll(), QByteArrayLiteral("existing directory"));
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, true).isValid());
+    QVERIFY(!QFontDatabase::families().contains(family));
+}
+
+void PDFEditControllerTest::validatesUserFontImportForm_data()
+{
+    QTest::addColumn<QString>("failure");
+    for (const char *name : {"blank-name", "no-files", "remote-url", "missing-file", "wrong-style"})
+        QTest::newRow(name) << QString::fromLatin1(name);
+}
+
+void PDFEditControllerTest::validatesUserFontImportForm()
+{
+    QFETCH(QString, failure);
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFUserForm") + failure;
+    const QString filePath = m_temporaryDirectory.filePath(family + QStringLiteral(".ttf"));
+    QFile file(filePath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray data = renamedTestFontData(family);
+    QCOMPARE(file.write(data), data.size());
+    file.close();
+    QUrl regular = QUrl::fromLocalFile(filePath);
+    QUrl bold;
+    QString requestedFamily = family;
+    if (failure == QStringLiteral("blank-name"))
+        requestedFamily = QStringLiteral(" \t ");
+    else if (failure == QStringLiteral("no-files"))
+        regular = QUrl();
+    else if (failure == QStringLiteral("remote-url"))
+        regular = QUrl(QStringLiteral("https://example.com/font.ttf"));
+    else if (failure == QStringLiteral("missing-file"))
+        regular = QUrl::fromLocalFile(filePath + QStringLiteral(".missing"));
+    else
+        bold = regular;
+
+    UserFontManager manager;
+    QSignalSpy imported(&manager, &UserFontManager::fontsChanged);
+    QCOMPARE(manager.storageDirectory(), QDir::toNativeSeparators(ApplicationFonts::userFontDirectory()));
+    QVERIFY(!manager.importFonts(requestedFamily, regular, bold, {}, {}));
+    QVERIFY(!manager.error().isEmpty());
+    QVERIFY(imported.isEmpty());
+    QVERIFY(!QFileInfo::exists(manager.storageDirectory()));
+    QVERIFY(!QFileInfo::exists(store.path));
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    manager.clearError();
+    QVERIFY(manager.error().isEmpty());
+}
+
+void PDFEditControllerTest::importsUserFontsThroughSettingsDialog()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFUserDialog");
+    QFile file(m_temporaryDirectory.filePath(QStringLiteral("user-dialog-regular.ttf")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray data = renamedTestFontData(family);
+    QCOMPARE(file.write(data), data.size());
+    file.close();
+    const QUrl source = QUrl::fromLocalFile(file.fileName());
+
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFileInfo(
+        QFINDTESTDATA("../src/Main.qml")).canonicalFilePath()));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QVERIFY(root->setProperty("allowWindowClose", true));
+    auto *tabs = root->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    auto *manager = root->findChild<UserFontManager *>(QStringLiteral("userFontManager"));
+    auto *model = root->findChild<PDFTabModel *>();
+    QVERIFY(tabs && manager && model);
+    QCOMPARE(model->count(), 0);
+    QVERIFY(tabs->setProperty("currentIndex", 9));
+    QObject *button = nullptr;
+    QTRY_VERIFY((button = root->findChild<QObject *>(QStringLiteral("settingsFontButton"))));
+    QVERIFY(button->property("enabled").toBool());
+    QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+    QPointer<QObject> dialog;
+    QTRY_VERIFY((dialog = root->findChild<QObject *>(QStringLiteral("fontSettingsDialog")))
+        && dialog->property("visible").toBool());
+    QVERIFY(root->property("modalOperationActive").toBool());
+    QVERIFY(root->property("fileOpenBlocked").toBool());
+    QObject *name = dialog->findChild<QObject *>(QStringLiteral("userFontFamilyInput"));
+    QVERIFY(name);
+    QVERIFY(!dialog->property("canSubmit").toBool());
+    QVERIFY(name->setProperty("text", family));
+    QVERIFY(dialog->setProperty("regularFile", source));
+    QVERIFY(dialog->property("canSubmit").toBool());
+    QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+    QTRY_VERIFY(dialog.isNull());
+    QVERIFY(!QFileInfo::exists(ApplicationFonts::userFontDirectory()));
+
+    // Reopening starts clean, and a mismatched face retains editable input.
+    QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+    QTRY_VERIFY((dialog = root->findChild<QObject *>(QStringLiteral("fontSettingsDialog")))
+        && dialog->property("visible").toBool());
+    name = dialog->findChild<QObject *>(QStringLiteral("userFontFamilyInput"));
+    QVERIFY(name);
+    QVERIFY(name->property("text").toString().isEmpty());
+    QVERIFY(name->setProperty("text", family));
+    QVERIFY(dialog->setProperty("boldFile", source));
+    QVERIFY(QMetaObject::invokeMethod(dialog, "submit"));
+    QVERIFY(dialog->property("visible").toBool());
+    QVERIFY(!dialog->property("imported").toBool());
+    QVERIFY(!manager->error().isEmpty());
+    QVERIFY(!QFileInfo::exists(ApplicationFonts::userFontDirectory()));
+    QVERIFY(dialog->setProperty("boldFile", QUrl()));
+    QVERIFY(dialog->setProperty("regularFile", source));
+    QSignalSpy imported(manager, &UserFontManager::fontsChanged);
+    QVERIFY(QMetaObject::invokeMethod(dialog, "submit"));
+    QCOMPARE(imported.count(), 1);
+    QVERIFY(dialog->property("imported").toBool());
+    QVERIFY(manager->error().isEmpty());
+    QVERIFY(ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    QVERIFY(!dialog->property("canSubmit").toBool());
+    QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+    QTRY_VERIFY(dialog.isNull());
+    QVERIFY(!root->property("modalOperationActive").toBool());
+}
+
+void PDFEditControllerTest::importsUserFontsFromLocalFiles()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFUserFormSuccess");
+    QList<QUrl> files;
+    for (bool boldItalic : {false, true}) {
+        const QString filename = family + (boldItalic ? QStringLiteral("-BoldItalic.ttf")
+                                                    : QStringLiteral("-Regular.ttf"));
+        QFile file(m_temporaryDirectory.filePath(filename));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        const auto data = renamedTestFontData(family, boldItalic, boldItalic);
+        QCOMPARE(file.write(data), data.size());
+        files.append(QUrl::fromLocalFile(file.fileName()));
+    }
+    UserFontManager manager;
+    QSignalSpy imported(&manager, &UserFontManager::fontsChanged);
+    QVERIFY(!manager.importFonts({}, {}, {}, {}, {}));
+    QVERIFY(!manager.error().isEmpty());
+    QVERIFY2(manager.importFonts(family, files.first(), {}, {}, files.last()),
+             qPrintable(manager.error()));
+    QVERIFY(manager.error().isEmpty());
+    QCOMPARE(imported.size(), 1);
+    QCOMPARE(manager.fileName(files.first()), family + QStringLiteral("-Regular.ttf"));
+    for (bool boldItalic : {false, true}) {
+        const auto face = ApplicationFonts::downloadedFontFace(family, boldItalic, boldItalic);
+        QVERIFY(face.isValid());
+        QCOMPARE(face.data, renamedTestFontData(family, boldItalic, boldItalic));
+    }
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, true, false).isValid());
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, true).isValid());
+    QCOMPARE(QDir(manager.storageDirectory()).entryList(QDir::Files).size(), 2);
+    QVERIFY(!QFileInfo::exists(store.path));
+}
+
+void PDFEditControllerTest::previewsExactUserFontFace_data()
+{
+    QTest::addColumn<int>("style");
+    QTest::addColumn<bool>("openType");
+    const char *styles[] = {"regular", "italic", "bold", "bold-italic"};
+    for (bool openType : {false, true}) {
+        for (int style = 0; style < 4; ++style) {
+            const QByteArray name = QByteArray(openType ? "otf-" : "ttf-") + styles[style];
+            QTest::newRow(name.constData()) << style << openType;
+        }
+    }
+}
+
+void PDFEditControllerTest::previewsExactUserFontFace()
+{
+    QFETCH(int, style);
+    QFETCH(bool, openType);
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const bool bold = style & 2;
+    const bool italic = style & 1;
+    const QString testFamily = QStringLiteral("TrePDFPreview%1").arg(style);
+    const QByteArray data = openType ? ctanTermesFontData(style)
+                                    : renamedTestFontData(testFamily, bold, italic);
+    const QRawFont expected(data, 24, QFont::PreferNoHinting);
+    QVERIFY(expected.isValid());
+    const QString family = expected.familyName();
+    QFile file(m_temporaryDirectory.filePath(QStringLiteral("font-preview-%1.%2")
+        .arg(style).arg(openType ? QStringLiteral("otf") : QStringLiteral("ttf"))));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(data), data.size());
+    file.close();
+
+    const QStringList installedFamilies = ApplicationFonts::downloadedFontFamilies();
+    const QByteArray installedData = ApplicationFonts::downloadedFontFace(family, bold, italic).data;
+    UserFontManager manager;
+    QSignalSpy imported(&manager, &UserFontManager::fontsChanged);
+    QVERIFY2(manager.preparePreview(QUrl::fromLocalFile(file.fileName()), bold, italic),
+             qPrintable(manager.previewError()));
+    QVERIFY(manager.previewError().isEmpty());
+    const QString alias = manager.previewFamily();
+    QVERIFY(!alias.isEmpty());
+    QVERIFY(alias != family);
+    QVERIFY(QFontDatabase::families().contains(alias));
+    QCOMPARE(PDFFontAliases::semanticFamily(alias), family);
+    QVERIFY(PDFFontAliases::matchesStyle(alias, bold, italic));
+    QFont font(alias);
+    font.setPixelSize(24);
+    font.setBold(bold);
+    font.setItalic(italic);
+    font.setHintingPreference(QFont::PreferNoHinting);
+    const QRawFont actual = QRawFont::fromFont(font);
+    QVERIFY(actual.isValid());
+    QCOMPARE(actual.familyName(), alias);
+    QCOMPARE(actual.weight(), expected.weight());
+    QCOMPARE(actual.style(), expected.style());
+    const QString sample = QStringLiteral("Tiếng Việt — Abc 0123");
+    const auto glyphs = actual.glyphIndexesForString(sample);
+    QCOMPARE(glyphs, expected.glyphIndexesForString(sample));
+    QCOMPARE(actual.advancesForGlyphIndexes(glyphs), expected.advancesForGlyphIndexes(glyphs));
+    for (quint32 glyph : glyphs) {
+        QVERIFY(glyph != 0);
+        QCOMPARE(actual.pathForGlyph(glyph), expected.pathForGlyph(glyph));
+    }
+    // Merely choosing a file must not install it or expose its private alias
+    // to the normal font picker. The bytes are only owned by this preview.
+    QCOMPARE(ApplicationFonts::downloadedFontFamilies(), installedFamilies);
+    QCOMPARE(ApplicationFonts::downloadedFontFace(family, bold, italic).data, installedData);
+    QVERIFY(!ApplicationFonts::availableFontFamilies(bold, italic).contains(alias));
+    QVERIFY(imported.isEmpty());
+    QVERIFY(!QFileInfo::exists(ApplicationFonts::userFontDirectory()));
+    QVERIFY(!QFileInfo::exists(store.path));
+
+    manager.clearPreview();
+    QVERIFY(manager.previewFamily().isEmpty());
+    QVERIFY(manager.previewError().isEmpty());
+    QVERIFY(!QFontDatabase::families().contains(alias));
+    QVERIFY(!PDFFontAliases::matchesStyle(alias, bold, italic));
+}
+
+void PDFEditControllerTest::clearsInvalidUserFontPreview_data()
+{
+    QTest::addColumn<QString>("failure");
+    for (const char *failure : {"wrong-style", "missing-file", "invalid-file", "remote-url",
+                                "wrong-extension", "empty-selection"})
+        QTest::newRow(failure) << QString::fromLatin1(failure);
+}
+
+void PDFEditControllerTest::clearsInvalidUserFontPreview()
+{
+    QFETCH(QString, failure);
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFPreviewInvalid") + failure;
+    QFile file(m_temporaryDirectory.filePath(family + QStringLiteral(".ttf")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray data = renamedTestFontData(family);
+    QCOMPARE(file.write(data), data.size());
+    file.close();
+    const QUrl validSource = QUrl::fromLocalFile(file.fileName());
+    UserFontManager manager;
+    QVERIFY2(manager.preparePreview(validSource, false, false), qPrintable(manager.previewError()));
+    const QString previousAlias = manager.previewFamily();
+    QUrl source = validSource;
+    bool bold = false;
+    if (failure == QStringLiteral("wrong-style")) {
+        bold = true;
+    } else if (failure == QStringLiteral("missing-file")) {
+        source = QUrl::fromLocalFile(file.fileName() + QStringLiteral("-missing.ttf"));
+    } else if (failure == QStringLiteral("invalid-file")) {
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QVERIFY(file.write(QByteArrayLiteral("this is not a font file")) > 0);
+        file.close();
+    } else if (failure == QStringLiteral("remote-url")) {
+        source = QUrl(QStringLiteral("https://example.com/font.ttf"));
+    } else if (failure == QStringLiteral("wrong-extension")) {
+        const QString path = file.fileName() + QStringLiteral(".txt");
+        QVERIFY(QFile::copy(file.fileName(), path));
+        source = QUrl::fromLocalFile(path);
+    } else {
+        source = QUrl();
+    }
+    QVERIFY(!manager.preparePreview(source, bold, false));
+    QVERIFY(manager.previewFamily().isEmpty());
+    QVERIFY(!manager.previewError().isEmpty());
+    QVERIFY(!QFontDatabase::families().contains(previousAlias));
+    QVERIFY(!PDFFontAliases::matchesStyle(previousAlias, false, false));
+    QVERIFY(!ApplicationFonts::downloadedFontFace(family, false, false).isValid());
+    QVERIFY(!QFileInfo::exists(ApplicationFonts::userFontDirectory()));
+    QVERIFY(!QFileInfo::exists(store.path));
+    manager.clearPreview();
+    QVERIFY(manager.previewError().isEmpty());
+}
+
+void PDFEditControllerTest::releasesUserFontPreviewOnDestruction()
+{
+    const QString family = QStringLiteral("TrePDFPreviewLifetime");
+    QFile file(m_temporaryDirectory.filePath(QStringLiteral("font-preview-lifetime.ttf")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray data = renamedTestFontData(family);
+    QCOMPARE(file.write(data), data.size());
+    file.close();
+    QString alias;
+    {
+        UserFontManager manager;
+        QVERIFY2(manager.preparePreview(QUrl::fromLocalFile(file.fileName()), false, false),
+                 qPrintable(manager.previewError()));
+        alias = manager.previewFamily();
+        QVERIFY(QFontDatabase::families().contains(alias));
+    }
+    QVERIFY(!QFontDatabase::families().contains(alias));
+    QVERIFY(!PDFFontAliases::matchesStyle(alias, false, false));
+}
+
+void PDFEditControllerTest::keepsImportedFontAfterPreviewCloses()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFPreviewThenImport");
+    QFile file(m_temporaryDirectory.filePath(QStringLiteral("font-preview-import.ttf")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray data = renamedTestFontData(family, true, true);
+    QCOMPARE(file.write(data), data.size());
+    file.close();
+    const QUrl source = QUrl::fromLocalFile(file.fileName());
+    UserFontManager manager;
+    QVERIFY2(manager.preparePreview(source, true, true), qPrintable(manager.previewError()));
+    QVERIFY2(manager.importFonts(family, {}, {}, {}, source), qPrintable(manager.error()));
+    manager.clearPreview();
+    const auto installed = ApplicationFonts::downloadedFontFace(family, true, true);
+    QVERIFY(installed.isValid());
+    QCOMPARE(installed.data, data);
+    QVERIFY(QFontDatabase::families().contains(installed.layoutFamily));
+    QVERIFY(PDFFontAliases::matchesStyle(installed.layoutFamily, true, true));
+    QFont font(installed.layoutFamily);
+    font.setPixelSize(24);
+    font.setBold(true);
+    font.setItalic(true);
+    const auto actual = QRawFont::fromFont(font);
+    QCOMPARE(actual.familyName(), installed.layoutFamily);
+    const QRawFont expected(data, 24);
+    const QString sample = QStringLiteral("Preview rồi thêm font");
+    QCOMPARE(actual.glyphIndexesForString(sample), expected.glyphIndexesForString(sample));
+    QCOMPARE(QDir(manager.storageDirectory()).entryList(QDir::Files).size(), 1);
+}
+
+void PDFEditControllerTest::previewsUserFontsThroughSettingsDialog()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString family = QStringLiteral("TrePDFPreviewDialog");
+    const char *properties[] = {"regularFile", "italicFile", "boldFile", "boldItalicFile"};
+    QList<QUrl> sources;
+    for (int style = 0; style < 4; ++style) {
+        QFile file(m_temporaryDirectory.filePath(QStringLiteral("font-preview-dialog-%1.ttf").arg(style)));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        const QByteArray data = renamedTestFontData(family, style & 2, style & 1);
+        QCOMPARE(file.write(data), data.size());
+        sources.append(QUrl::fromLocalFile(file.fileName()));
+    }
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFileInfo(
+        QFINDTESTDATA("../src/Main.qml")).canonicalFilePath()));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QVERIFY(root->setProperty("allowWindowClose", true));
+    auto *tabs = root->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    auto *manager = root->findChild<UserFontManager *>(QStringLiteral("userFontManager"));
+    QVERIFY(tabs && manager);
+    QVERIFY(tabs->setProperty("currentIndex", 9));
+    QObject *button = nullptr;
+    QTRY_VERIFY((button = root->findChild<QObject *>(QStringLiteral("settingsFontButton"))));
+    QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+    QPointer<QObject> dialog;
+    QTRY_VERIFY((dialog = root->findChild<QObject *>(QStringLiteral("fontSettingsDialog")))
+        && dialog->property("visible").toBool());
+    QObject *name = dialog->findChild<QObject *>(QStringLiteral("userFontFamilyInput"));
+    QObject *boldButton = dialog->findChild<QObject *>(QStringLiteral("userFontPreviewBoldButton"));
+    QObject *italicButton = dialog->findChild<QObject *>(QStringLiteral("userFontPreviewItalicButton"));
+    QObject *sample = dialog->findChild<QObject *>(QStringLiteral("userFontPreviewText"));
+    QVERIFY(name && boldButton && italicButton && sample);
+    QVERIFY(name->property("text").toString().isEmpty());
+    for (int style = 0; style < 4; ++style)
+        QVERIFY(dialog->setProperty(properties[style], sources[style]));
+    // A family name is only required for installation. Preview should already
+    // use the chosen file's metadata while the user is completing the form.
+    const QString sampleText = QStringLiteral("Gõ thử tiếng Việt — Bold / Italic 123");
+    QVERIFY(sample->setProperty("text", sampleText));
+    for (int style : {0, 2, 3, 1}) {
+        const bool bold = style & 2;
+        const bool italic = style & 1;
+        if (boldButton->property("checked").toBool() != bold)
+            QVERIFY(QMetaObject::invokeMethod(boldButton, "toggle"));
+        if (italicButton->property("checked").toBool() != italic)
+            QVERIFY(QMetaObject::invokeMethod(italicButton, "toggle"));
+        QTRY_VERIFY(!manager->previewFamily().isEmpty());
+        QVERIFY2(manager->previewError().isEmpty(), qPrintable(manager->previewError()));
+        QVERIFY(PDFFontAliases::matchesStyle(manager->previewFamily(), bold, italic));
+        const QFont previewFont = sample->property("font").value<QFont>();
+        QCOMPARE(previewFont.family(), manager->previewFamily());
+        QCOMPARE(previewFont.bold(), bold);
+        QCOMPARE(previewFont.italic(), italic);
+        QCOMPARE(sample->property("text").toString(), sampleText);
+    }
+    const QString previousAlias = manager->previewFamily();
+    QVERIFY(dialog->setProperty("italicFile", QUrl()));
+    QTRY_VERIFY(manager->previewFamily().isEmpty());
+    QVERIFY(!manager->previewError().isEmpty());
+    QVERIFY(!QFontDatabase::families().contains(previousAlias));
+    QCOMPARE(sample->property("text").toString(), sampleText);
+    QVERIFY(dialog->setProperty("italicFile", sources[1]));
+    QTRY_VERIFY(!manager->previewFamily().isEmpty());
+    const QString finalAlias = manager->previewFamily();
+    QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+    QTRY_VERIFY(dialog.isNull());
+    QVERIFY(manager->previewFamily().isEmpty());
+    QVERIFY(!QFontDatabase::families().contains(finalAlias));
+    QVERIFY(!QFileInfo::exists(ApplicationFonts::userFontDirectory()));
+    QVERIFY(!QFileInfo::exists(store.path));
 }
 
 void PDFEditControllerTest::savesExternalPageFourOnSamePath()

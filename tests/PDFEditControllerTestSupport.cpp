@@ -2,6 +2,7 @@
 #include "PDFFileOpenHandler.h"
 #include "PDFMergeController.h"
 #include "SignatureLibrary.h"
+#include "UserFontManager.h"
 #include "platform/PlatformService.h"
 
 namespace PDFEditControllerTestSupport {
@@ -862,6 +863,8 @@ bool registerQmlTestTypes(const QString &themePath)
                "PDFEditController") >= 0
         && qmlRegisterType<SignatureLibrary>(
                "TrePDF", 1, 0, "SignatureLibrary") >= 0
+        && qmlRegisterType<UserFontManager>(
+               "TrePDF", 1, 0, "UserFontManager") >= 0
         && qmlRegisterType<PDFSearchController>(
                "TrePDF",
                1,

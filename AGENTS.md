@@ -15,6 +15,17 @@ and Save/Save As persistence.
 
 Current features:
 
+- Settings > Font opens a lazy modal, including without an open PDF, for a
+  family name and optional Regular/Bold/Italic/Bold Italic TTF/OTF files.
+  `UserFontManager` validates local snapshots and `ApplicationFonts` installs
+  each batch atomically in `AppLocalDataLocation/user-font`. Imports share
+  the existing exact-face registry, picker, edit preflight and Save pipeline,
+  and reload on startup. An editable Preview with Bold/Italic toggles uses
+  temporary private aliases of the selected files, without installing them;
+  missing or mismatched styles remain unavailable instead of being synthesized.
+  User fonts and downloaded fonts share a 128-file /
+  256 MiB storage bound. See `docs/font-providers.md` for paths and limits.
+
 - Entering Header requires a clean active PDF. Main commits pending inline,
   panel and form input before checking all session drafts. Unsaved changes keep
   the previous ribbon tab and show a friendly Save/Got it notice; save or undo

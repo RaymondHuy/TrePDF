@@ -289,6 +289,8 @@ qt_add_qml_module(trepdf
         src/SpreadsheetWorkbook.h
         src/SignatureLibrary.cpp
         src/SignatureLibrary.h
+        src/UserFontManager.cpp
+        src/UserFontManager.h
     QML_FILES
         src/Main.qml
         src/Components/AppRibbon.qml
@@ -344,6 +346,7 @@ qt_add_qml_module(trepdf
         src/Components/WatermarkDialog.qml
         src/Components/MergePdfDialog.qml
         src/Components/SignatureDialog.qml
+        src/Components/FontSettingsDialog.qml
         src/Components/SearchHighlightLayer.qml
         src/Components/SearchRibbonControl.qml
         src/Components/SquigglyLine.qml

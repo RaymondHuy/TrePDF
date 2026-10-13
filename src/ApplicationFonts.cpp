@@ -1002,15 +1002,13 @@ bool registerDownloadedFont(FontRegistry &registry, const QString &path,
     return true;
 }
 
-void loadDownloadedFonts(FontRegistry &registry)
+void loadPrivateFontDirectory(FontRegistry &registry, const QString &directory,
+                              int &scannedFiles, qint64 &scannedBytes)
 {
-    const QString directory = ApplicationFonts::downloadedFontDirectory();
-    if (directory.isEmpty())
+    if (directory.isEmpty() || QFileInfo(directory).isSymLink())
         return;
     QDirIterator files(directory, QStringList{QStringLiteral("*.ttf"), QStringLiteral("*.otf")},
                        QDir::Files | QDir::NoSymLinks);
-    qint64 scannedBytes = 0;
-    int scannedFiles = 0;
     while (files.hasNext() && scannedFiles++ < kMaximumDownloadedFonts) {
         files.next();
         const QFileInfo info = files.fileInfo();
@@ -1034,6 +1032,41 @@ void loadDownloadedFonts(FontRegistry &registry)
         if (validateDownloadedFont(data, font, error))
             registerDownloadedFont(registry, info.absoluteFilePath(), data, font);
     }
+}
+
+void loadDownloadedFonts(FontRegistry &registry)
+{
+    // Both locations share one bounded scan and one exact-face registry. User
+    // imports take precedence when stale copies also exist in the cache.
+    int scannedFiles = 0;
+    qint64 scannedBytes = 0;
+    loadPrivateFontDirectory(registry, ApplicationFonts::userFontDirectory(),
+                             scannedFiles, scannedBytes);
+    loadPrivateFontDirectory(registry, ApplicationFonts::downloadedFontDirectory(),
+                             scannedFiles, scannedBytes);
+}
+
+bool privateFontStorageUsage(qsizetype &files, qint64 &bytes)
+{
+    files = 0;
+    bytes = 0;
+    for (const QString &directory : {ApplicationFonts::userFontDirectory(),
+             ApplicationFonts::downloadedFontDirectory()}) {
+        if (directory.isEmpty() || QFileInfo(directory).isSymLink())
+            continue;
+        QDirIterator entries(directory,
+            QStringList{QStringLiteral("*.ttf"), QStringLiteral("*.otf")},
+            QDir::Files | QDir::NoSymLinks);
+        while (entries.hasNext()) {
+            entries.next();
+            const qint64 size = entries.fileInfo().size();
+            if (++files > kMaximumDownloadedFonts || size < 0
+                || size > kMaximumDownloadedFontBytes - bytes)
+                return false;
+            bytes += size;
+        }
+    }
+    return true;
 }
 
 int fontLanguageIndex(ApplicationFonts::FontLanguage language)
@@ -1679,6 +1712,12 @@ QString downloadedFontDirectory()
     return root.isEmpty() ? QString() : QDir(root).filePath(QStringLiteral("fonts"));
 }
 
+QString userFontDirectory()
+{
+    const QString root = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    return root.isEmpty() ? QString() : QDir(root).filePath(QStringLiteral("user-font"));
+}
+
 const QStringList &downloadedFontFamilies()
 {
     registerBundledFonts();
@@ -1717,7 +1756,9 @@ bool validateDownloadedFontData(const QByteArray &data, const QString &family,
                                           requiredCodePoint, font, error);
 }
 
-bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &error)
+static bool installPrivateFonts(const QList<DownloadedFontData> &fonts,
+                                const QString &directory, bool userImport,
+                                QString &error)
 {
     error.clear();
     if (!fontRegistrationThread()) {
@@ -1730,9 +1771,12 @@ bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &err
     }
     registerBundledFonts();
     FontRegistry &registry = fontRegistry();
-    const QString directory = downloadedFontDirectory();
     if (directory.isEmpty()) {
         error = QStringLiteral("The private font directory is unavailable.");
+        return false;
+    }
+    if (QFileInfo(directory).isSymLink()) {
+        error = QStringLiteral("The private font directory cannot be a symbolic link.");
         return false;
     }
     struct PendingFont {
@@ -1755,6 +1799,12 @@ bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &err
     qsizetype totalFaces = registry.downloadedFonts.size();
     for (const auto &registered : std::as_const(registry.downloadedFonts))
         totalBytes += registered.size;
+    qsizetype storedFiles = 0;
+    qint64 storedBytes = 0;
+    if (!privateFontStorageUsage(storedFiles, storedBytes)) {
+        error = QStringLiteral("The private font storage limit has been reached.");
+        return false;
+    }
 
     // Validate the entire batch and its storage requirements before touching any
     // file or registering a face. This also bounds rollback data and work.
@@ -1762,6 +1812,11 @@ bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &err
         PendingFont &item = pending[size_t(index)];
         const DownloadedFontData &request = fonts.at(index);
         item.request = &request;
+        if (userImport && request.family.compare(fonts.constFirst().family,
+                Qt::CaseInsensitive) != 0) {
+            error = QStringLiteral("All imported faces must belong to the same font family.");
+            return false;
+        }
         if (!validateRequestedDownloadedFont(request.data, request.family,
                 request.bold, request.italic, request.requiredCodePoint, item.font, error))
             return false;
@@ -1779,7 +1834,7 @@ bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &err
             return false;
         }
         item.alreadyRegistered = existing != nullptr;
-        item.path = existing ? existing->path : QDir(directory).filePath(
+        item.path = existing && !userImport ? existing->path : QDir(directory).filePath(
             QString::fromLatin1(item.digest.toHex())
                 + (request.data.startsWith("OTTO") ? QStringLiteral(".otf") : QStringLiteral(".ttf")));
         if (!existing) {
@@ -1809,6 +1864,16 @@ bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &err
                 return false;
             }
             item.fileMatches = oldData == request.data;
+            if (userImport && !item.fileMatches) {
+                error = QStringLiteral("A different file already occupies this user-font destination.");
+                return false;
+            }
+        }
+        storedFiles += item.hadFile ? 0 : 1;
+        storedBytes += request.data.size() - (item.hadFile ? previous.size() : 0);
+        if (storedFiles > kMaximumDownloadedFonts || storedBytes > kMaximumDownloadedFontBytes) {
+            error = QStringLiteral("The private font storage limit has been reached.");
+            return false;
         }
     }
     if (!QDir().mkpath(directory)) {
@@ -1906,9 +1971,34 @@ bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &err
         }
         item.registrationId = registry.downloadedFonts.constLast().registrationId;
     }
+    if (userImport) {
+        // A face may already have been downloaded. Persist it in user-font and
+        // only switch its resolver path after the entire import has succeeded.
+        for (qsizetype index = 0; index < fonts.size(); ++index) {
+            const PendingFont &item = pending[size_t(index)];
+            for (auto &registered : registry.downloadedFonts) {
+                if (registered.digest == item.digest
+                    && registered.family.compare(item.font.family, Qt::CaseInsensitive) == 0
+                    && registered.bold == item.font.bold && registered.italic == item.font.italic) {
+                    registered.path = item.path;
+                    break;
+                }
+            }
+        }
+    }
     clearFontSelectionCaches(registry);
     succeeded = true;
     return true;
+}
+
+bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &error)
+{
+    return installPrivateFonts(fonts, downloadedFontDirectory(), false, error);
+}
+
+bool installUserFonts(const QList<DownloadedFontData> &fonts, QString &error)
+{
+    return installPrivateFonts(fonts, userFontDirectory(), true, error);
 }
 
 bool installDownloadedFont(const QByteArray &data, const QString &family,

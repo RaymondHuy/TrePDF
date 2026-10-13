@@ -75,6 +75,9 @@ int calibratedFontStretch(const QString &family,
 QByteArray bundledFontData(const QString &family, bool bold, bool italic);
 FontFaceData systemFontFace(const QString &family, bool bold, bool italic);
 QString downloadedFontDirectory();
+// User-selected faces are stored separately from the download cache, while
+// sharing the same validated runtime registry and exact-face resolver.
+QString userFontDirectory();
 const QStringList &downloadedFontFamilies();
 FontFaceData downloadedFontFace(const QString &family, bool bold, bool italic);
 // Validates a complete face without registering it or writing to private storage.
@@ -90,6 +93,9 @@ struct DownloadedFontData {
 };
 // Installs at most four validated faces together, rolling back a failed batch.
 bool installDownloadedFonts(const QList<DownloadedFontData> &fonts, QString &error);
+// GUI thread only. Imports one to four faces of the same metadata family into
+// user-font as one batch; the supplied family is not an arbitrary display alias.
+bool installUserFonts(const QList<DownloadedFontData> &fonts, QString &error);
 // Called on the GUI thread only, after the caller has obtained download consent.
 // Fonts are private to TrePDF and are never installed in the operating system.
 bool installDownloadedFont(const QByteArray &data, const QString &family,

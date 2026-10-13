@@ -1,4 +1,4 @@
-# Nguồn tải font
+# Nguồn font và kho font người dùng
 
 `IFontProvider` mô tả nguồn đã được kiểm tra; `FontDownloadService` chịu trách
 nhiệm mạng, giới hạn dung lượng/thời gian/redirect, hủy, kiểm tra font và cài đặt
@@ -130,7 +130,56 @@ thông báo riêng; không suy diễn lỗi mạng thành font không hỗ trợ
 Popup cũng nói rõ editor chưa mở/nội dung không đổi hoặc Save chưa thành
 công/bản nháp vẫn còn. Đổi hoặc đóng tab/tài liệu xóa popup cũ.
 
-## Cache và xác thực
+## Thêm font từ thiết bị
+
+**Thiết lập → Font** mở modal ngay cả khi chưa mở PDF. Người dùng nhập tên
+family thực tế (ví dụ `Noto Sans`) và chọn file cho từng kiểu **Regular**,
+**Bold**, **Italic**, **Bold Italic**. Có thể thêm từ một đến bốn kiểu; các
+kiểu còn thiếu không được tạo giả. Tên là family trong metadata font, không
+phải tên file hay bí danh tùy ý. Form cho phép đổi/xóa lựa chọn trước khi thêm;
+hủy form không cài font.
+
+Khung **Preview** cho phép gõ thử trước khi thêm. Hai nút **Bold** và **Italic**
+chọn đúng file Regular/Bold/Italic/Bold Italic; bật cả hai dùng file Bold Italic.
+Nếu chưa chọn hoặc chọn sai file cho kiểu đang xem, khung báo lỗi thay vì mô
+phỏng kiểu chữ. Preview dùng family đọc từ file nên không cần nhập tên trước.
+Font được đăng ký tạm bằng tên riêng, không ghi `user-font` hay thêm vào picker;
+đổi file, đóng hoặc hủy modal sẽ nhả font preview. Nội dung gõ thử được giữ khi
+đổi kiểu và không ghi vào PDF.
+
+`UserFontManager` đọc một snapshot có giới hạn của mỗi file cục bộ, tối đa
+64 MiB/file, rồi dùng validator chung của `ApplicationFonts`. Chỉ nhận static
+TTF hoặc OTF/CFF đúng family/style, có quyền nhúng/chỉnh sửa PDF. Font variable,
+collection TTC/OTC, CFF2, font màu và file lỗi bị từ chối. Thông báo sai
+family/style ghi rõ kiểu yêu cầu và family/kiểu thực tế đọc từ file.
+
+`ApplicationFonts::installUserFonts()` kiểm tra toàn bộ batch trước khi ghi,
+dùng `QSaveFile` và rollback nếu ghi/đăng ký thất bại. Tên file lưu là SHA-256
+của bytes gốc với đuôi `.ttf`/`.otf`; tên family nhập không được dùng làm
+đường dẫn. Nhập lại cùng bytes không tạo bản thừa. Một phiên bản khác của
+family/style đã có trong kho riêng bị từ chối, không âm thầm ghi đè.
+
+Font tự thêm lưu riêng qua `ApplicationFonts::userFontDirectory()`, bằng
+`AppLocalDataLocation/user-font`:
+
+| Hệ điều hành | Thư mục font tự thêm |
+| --- | --- |
+| macOS | `~/Library/Application Support/TreOffice/TrePDF/user-font/` |
+| Windows | `%LOCALAPPDATA%\TreOffice\TrePDF\user-font\` |
+| Linux | `~/.local/share/TreOffice/TrePDF/user-font/` |
+
+Linux dùng `$XDG_DATA_HOME/TreOffice/TrePDF/user-font/` khi `XDG_DATA_HOME`
+là đường dẫn tuyệt đối. Đường dẫn thực tế luôn lấy từ `QStandardPaths`.
+
+Khi khởi động, app kiểm tra và nạp `user-font` trước cache `fonts` vào cùng
+registry. Hai thư mục chia sẻ giới hạn **128 file / 256 MiB**. Nếu font đã có
+trong cache tải về, thao tác thêm vẫn lưu một bản độc lập vào `user-font`.
+Font được đăng ký riêng cho TrePDF, không tải lên mạng hay cài vào hệ điều
+hành. Font dùng được ngay trong picker, kiểm tra trước khi edit và Save, rồi
+tiếp tục có sau khi mở app lại. Bộ lọc ngôn ngữ/kiểu chữ vẫn yêu cầu coverage
+và đúng face; thêm font không tự đổi nội dung hay font của PDF đang mở.
+
+## Cache tải về và xác thực
 
 `ApplicationFonts::downloadedFontDirectory()` lấy thư mục từ
 `QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)` rồi

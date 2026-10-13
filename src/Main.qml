@@ -95,6 +95,7 @@ ApplicationWindow {
         || fontDownloadFailureLoader.active
         || signatureDialogLoader.active || setPasswordDialogLoader.active
         || watermarkDialogLoader.active || mergePdfDialogLoader.active
+        || fontSettingsDialogLoader.active
         || headerEntryNoticeLoader.active || openDialog.visible
         || imageDialog.visible || headerImageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
         || externalLinkPopup.visible || discardDraftPopup.visible || deletePagePopup.visible
@@ -1205,6 +1206,29 @@ ApplicationWindow {
         objectName: "signatureLibrary"
     }
 
+    UserFontManager {
+        id: userFontManager
+        objectName: "userFontManager"
+    }
+
+    Loader {
+        id: fontSettingsDialogLoader
+        objectName: "fontSettingsDialogLoader"
+        active: false
+        sourceComponent: FontSettingsDialog {
+            theme: appTheme
+            manager: userFontManager
+            onClosed: fontSettingsDialogLoader.active = false
+        }
+        onLoaded: {
+            if (status === Loader.Ready) {
+                const dialog = item as FontSettingsDialog
+                if (dialog)
+                    dialog.open()
+            }
+        }
+    }
+
     Connections {
         target: window.signatureSession ? window.signatureSession.document : null
         function onSourceChanged() { window.cancelSignature() }
@@ -1494,7 +1518,7 @@ ApplicationWindow {
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
             && !tabModel.anySaving
-            && !mergePdfDialogLoader.active
+            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
         onActivated: window.requestUndo()
     }
 
@@ -1512,7 +1536,7 @@ ApplicationWindow {
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
             && !tabModel.anySaving
-            && !mergePdfDialogLoader.active
+            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
         onActivated: window.requestRedo()
     }
 
@@ -1525,21 +1549,21 @@ ApplicationWindow {
                 || (window.activeWorkspaceItem !== null
                     && window.activeWorkspaceItem.hasPendingHeaderPlacement))
             && !tabModel.anySaving && window.headerSaveRequest === null
-            && !mergePdfDialogLoader.active
+            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
         onActivated: window.requestSave()
     }
 
     Shortcut {
         sequences: [StandardKey.SaveAs]
         enabled: window.activeDocument.loaded && !tabModel.anySaving
-            && !mergePdfDialogLoader.active
+            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
         onActivated: window.requestSaveAs()
     }
 
     Shortcut {
         sequences: [StandardKey.Close]
         enabled: window.activeSession !== null && !tabModel.anySaving
-            && !mergePdfDialogLoader.active
+            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
         onActivated: window.requestCloseSession(window.activeSession)
     }
 
@@ -2280,6 +2304,10 @@ ApplicationWindow {
             onSaveAsRequested: window.requestSaveAs()
             onExcelExportRequested: window.requestExcelExport()
             onMergePdfRequested: window.requestMergePdf()
+            onFontSettingsRequested: {
+                if (!window.fileOpenBlocked)
+                    fontSettingsDialogLoader.active = true
+            }
             onPageRequested: page => window.goToPage(page)
             onPageStepRequested: direction => {
                 const workspace = window.activeWorkspace()
