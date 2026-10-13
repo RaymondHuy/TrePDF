@@ -1485,7 +1485,7 @@ void PDFEditControllerTest::rendersEmbeddedFontStylesBeforeSave()
         : probePath;
     if (probePath.isEmpty()) {
         PDFiumProcessLock lock;
-        QVERIFY(createEmbeddedArialPdf(sourcePath));
+        QVERIFY(createEmbeddedTestFontPdf(sourcePath));
     }
     PDFDocument pdf;
     PDFEditController controller;

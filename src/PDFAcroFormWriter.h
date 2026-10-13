@@ -6,6 +6,8 @@
 #include <QStringList>
 #include <QVector>
 
+namespace ApplicationFonts { struct FontFaceData; }
+
 class PDFAcroFormWriter
 {
 public:
@@ -55,5 +57,6 @@ public:
     static Result write(const QString &sourceFilePath,
                         const QString &targetFilePath,
                         const QVector<Field> &fields,
+                        const ApplicationFonts::FontFaceData &fontFace,
                         const QByteArray &password = {});
 };

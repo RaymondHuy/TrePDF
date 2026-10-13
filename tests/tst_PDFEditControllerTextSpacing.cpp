@@ -755,9 +755,9 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
     const QString firstPath = m_temporaryDirectory.filePath(tag + QStringLiteral("-clusters-first.pdf"));
     const QString secondPath = m_temporaryDirectory.filePath(tag + QStringLiteral("-clusters-second.pdf"));
     if (embeddedUnicode) {
-        QFile fontFile(QFINDTESTDATA("../src/assets/fonts/Arial/Arial-Regular.TTF"));
-        QVERIFY(fontFile.open(QIODevice::ReadOnly));
-        QVERIFY(createPositionedUnicodeTextPdf(sourcePath, original, fontFile.readAll()));
+        const QByteArray fontData = testFontData();
+        QVERIFY(!fontData.isEmpty());
+        QVERIFY(createPositionedUnicodeTextPdf(sourcePath, original, fontData));
         QCOMPARE(original, original.normalized(QString::NormalizationForm_C));
         PDFiumProcessLock lock;
         const auto sourceFont = textObjectFontInfo(sourcePath, original);

@@ -12,6 +12,8 @@
 
 #include <array>
 
+namespace ApplicationFonts { struct FontFaceData; }
+
 class PDFAcroFormCanonicalizer
 {
 public:
@@ -128,6 +130,7 @@ public:
 
     static bool finalizeFields(const QString &filePath,
                                const QVector<Field> &fields,
+                               const ApplicationFonts::FontFaceData &fontFace,
                                QString &error);
     static bool finalizeAnnotationRelationships(
         const QString &filePath,
@@ -136,6 +139,7 @@ public:
     static bool finalizeFreeTextAnnotations(
         const QString &filePath,
         const QVector<FreeTextAnnotation> &annotations,
+        const ApplicationFonts::FontFaceData &fontFace,
         QString &error);
     static bool finalizeTextMarkupAnnotations(
         const QString &filePath,

@@ -48,7 +48,7 @@ Local builds keep the default `0.1.0` unless `-DTREPDF_VERSION=...` is supplied.
 ## Dependencies and packaging
 
 [`prepare_dependencies.py`](../scripts/ci/prepare_dependencies.py) requires
-Python 3.12 or newer. It downloads PDFium 157.0.8086.0 and verifies SHA-256 for
+Python 3.12 or newer. It downloads PDFium 157.0.8100.0 and verifies SHA-256 for
 each platform. Desktop and iOS downloads use `downloads/pdfium-<version>/`
 so cached archives from an earlier release do not block an upgrade.
 qpdf 12.4.1 uses the checked-in macOS ARM64 package, the official

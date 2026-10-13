@@ -13,6 +13,7 @@ class PDFEditControllerTest : public QObject
 
 private slots:
     void initTestCase();
+    void cleanupTestCase();
     void reloadsSavedCandidatesInNewDocumentInstances();
     void selectsPlatformInputPerEngine_data();
     void selectsPlatformInputPerEngine();
@@ -204,6 +205,7 @@ private slots:
     void rendersMultilineFormFieldPreview();
     void movesFormFieldsWithoutResizing();
     void savesTextFieldAsAcroForm();
+    void keepsAcroFormFontResourcesConsistentAcrossFontChanges();
     void savesAndRehydratesCombField();
     void savesAndRehydratesCheckbox();
     void savesAndRehydratesRadioButton();
@@ -232,8 +234,8 @@ private slots:
     void reschedulesCancelledHoverForSamePage();
     void defersUncachedHoverWhilePdfiumIsBusy();
     void dropsAsyncResultsAfterControllerDestruction();
-    void registersBundledFonts();
-    void keepsArialLayoutStableAfterEmbeddedSubsetCollision();
+    void registersTestFontsWithoutBundledFonts();
+    void keepsFontLayoutStableAfterEmbeddedSubsetCollision();
     void preservesFirstSpaceAfterSubsetSave();
     void preservesInferredSpaceAfterGroupedSubsetEdit();
     void reembedsUninstalledSourceSubsetForNewObjectGlyphs();
@@ -371,7 +373,7 @@ private slots:
     void savesVietnameseEditWithEmbeddedArial_data();
     void savesVietnameseEditWithEmbeddedArial();
     void preservesDistinctUnicodeAliasesInTrueTypeFonts();
-    void preservesUnicodeSpacingThroughArialSaveReopen();
+    void preservesUnicodeSpacingThroughFontSaveReopen();
     void savesVietnameseEditWithEmbeddedSystemFont_data();
     void savesVietnameseEditWithEmbeddedSystemFont();
     void preservesInheritedSystemFontForVietnamese();
@@ -667,6 +669,9 @@ private slots:
     void rollsBackFontFamilyWhenOptionalTargetBlocked();
 
 private:
+    QString m_fontStoreRoot;
+    QString m_originalApplicationName;
+    bool m_originalTestMode = false;
     QTemporaryDir m_temporaryDirectory;
     PDFDocument m_document;
     PDFEditController m_controller;

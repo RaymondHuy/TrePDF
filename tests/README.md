@@ -74,12 +74,41 @@ QT_QPA_PLATFORM=offscreen cmake-build-debug/tests/trepdf_edit_controller_tests f
 Finder's Launch Services routing and installed bundle document association still
 need a smoke test with the built macOS application.
 
+## Font fixtures without bundled Arial
+
+The app does not bundle Arial. Generic font regressions use four pinned static
+Liberation Sans 2.1.5 faces (regular, bold, italic, bold italic), licensed under
+SIL OFL 1.1. Source, license and checksums are in
+[`fixtures/fonts/liberation/NOTICE.md`](fixtures/fonts/liberation/NOTICE.md).
+Only `trepdf_edit_controller_tests` embeds them under
+`:/trepdf/tests/fonts/liberation`; application resources remain unchanged.
+
+`testFontData()` renames the face in memory to `TrePDFTestSans`, so an installed
+Liberation Sans version cannot change the test's metrics or font bytes. Suite
+initialization installs these faces into a unique, test-mode application font
+store; cleanup removes that store. It never installs fonts into the OS or uses
+the user's TrePDF cache. Download tests use independent stores and simulated
+network responses. Fresh-process cache probes intentionally keep their parent's
+store instead of installing generic fixtures.
+
+Missing-family, subset, symbol and provider-response fixtures derive private
+families from the same pinned programs. The Unicode-alias fixture explicitly
+maps paired characters to the same glyph; it does not rely on a vendor's cmap.
+`registersTestFontsWithoutBundledFonts` checks that the app font list is empty,
+Arial's former resource is absent, and all four test faces are usable.
+The specifically named system-Arial regression still checks actual Arial and
+skips only when that exact system face is unavailable; generic tests do not.
+
+`keepsAcroFormFontResourcesConsistentAcrossFontChanges` covers font changes,
+reusing the same face, and migrating legacy resources without changing untouched
+fields. Form and Free Text Save regressions run without application font assets.
+
 ## Unicode font persistence
 
 `preservesDistinctUnicodeAliasesInTrueTypeFonts` checks exact Unicode extraction
-after embedding complete Arial: ordinary/nonbreaking spaces, ASCII semicolon/Greek
+after embedding a complete private fixture: ordinary/nonbreaking spaces, ASCII semicolon/Greek
 question mark, and hyphen/soft hyphen retain distinct mappings despite sharing glyph IDs.
-`preservesUnicodeSpacingThroughArialSaveReopen` covers the controller's Save,
+`preservesUnicodeSpacingThroughFontSaveReopen` covers the controller's Save,
 reopen, color edit and second Save without normalizing away nonbreaking spaces.
 It also verifies that independent drafts with NFC-normalized text share one
 complete font resource.
@@ -121,6 +150,44 @@ PDFium 157.0.8086.0 upgrade validation on macOS ARM64 / Qt 6.11 (2026-10-11):
   external page-four fixture: 9 passed. The document-instance cache regression
   also passes with the native macOS Qt platform.
 - Windows/Linux app builds and iOS device execution were not run locally.
+
+PDFium 157.0.8100.0 initial upgrade validation, before the no-Arial test migration,
+on macOS ARM64 / Qt 6.11 (2026-10-13):
+
+- Built the app and all four test targets. Verified downloaded SHA-256 values
+  for Windows x64, macOS ARM64, Linux x64 and both iOS ARM64 packages against
+  the official release. Vendored macOS files match the upstream archive;
+  macOS 13 and iOS 17 minimum deployment requirements remain unchanged.
+- Controller suite: 1,056 passed, 53 failed, 4 skipped, with the book and mixed
+  paragraph Save probes enabled. All 53 failed rows were reproduced with
+  PDFium 157.0.8086.0 by running their 45 test functions independently against
+  the same test executable. They depend on the removed bundled Arial assets;
+  this includes existing AcroForm/FreeText Save failures as well as font fixtures.
+  This initial run was not fully green; the failures were not introduced by
+  the PDFium upgrade. The migration described above removes this dependency.
+- Merge: 12 passed, 1 skipped; Excel: 24 passed; workbook: 7 passed. Native
+  Cocoa/Metal checks: 11 passed and the same missing-Arial symbol fixture failed.
+  Both repeated-save paragraph rows, the page-four repeated-save probe, Header
+  persistence, zoom settling, tiles and thumbnail lifecycle passed.
+- A separate app instance rendered a 478-page PDF, scrolled in both directions,
+  changed zoom, closed/reopened the document and quit with exit code 0.
+  Windows/Linux application builds and iOS execution were not run locally.
+
+No-Arial migration validation on macOS ARM64 / Qt 6.11 (2026-10-13):
+
+- Built the app and all four test targets with PDFium 157.0.8100.0.
+- All four CTest suites pass. Controller: 1,112 passed, 0 failed, 2 skipped;
+  merge: 12 passed, 0 failed, 1 optional external-fixture skip; Excel: 24 passed;
+  workbook: 7 passed. The controller's two skips are the external CTAN cache
+  check and its child-process probe (the parent download test runs that probe).
+- The 53 missing-Arial failures from the initial upgrade run are resolved.
+  Book page-four repeated Save, mixed-font paragraph Save, Header, AcroForm and
+  Free Text checks pass. No generic regression was disabled or skipped.
+- Native Cocoa/Metal checks: 11 passed, 0 failed, including font resources,
+  field and Free Text round-trips, page-four repeated Save and tile rendering.
+- A separate app instance opened a 478-page PDF, rendered the first page and
+  page four, scrolled both ways, changed zoom repeatedly, closed/reopened the
+  PDF and quit with exit code 0. Windows/Linux builds were not run locally.
 
 ## Symbol font filter
 

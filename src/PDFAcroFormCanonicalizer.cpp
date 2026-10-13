@@ -1,9 +1,11 @@
 #include "PDFAcroFormCanonicalizer.h"
 
+#include "ApplicationFonts.h"
 #include "PDFFormAppearance.h"
 #include "PDFStampPresets.h"
 
 #include <QByteArray>
+#include <QCryptographicHash>
 #include <QFile>
 #include <QFont>
 #include <QHash>
@@ -16,6 +18,7 @@
 #include <QSet>
 #include <QTextOption>
 #include <QUuid>
+#include <QtEndian>
 
 #include <algorithm>
 #include <array>
@@ -25,10 +28,8 @@
 
 namespace {
 
-constexpr char kUnicodeFormFontPath[]
-    = ":/trepdf/fonts/Arial/Arial-Regular.TTF";
-constexpr char kUnicodeFormFontBaseName[] = "ArialMT";
 constexpr char kUnicodeFormFontResourcePrefix[] = "TrePDFUF";
+constexpr char kUnicodeFormFontFingerprintKey[] = "TrePDFFontSHA256";
 constexpr int kMaximumChoiceOptions = 4096;
 constexpr qsizetype kMaximumChoiceOptionCharacters = 1024 * 1024;
 constexpr int kMaximumTextFieldLength = 1000000;
@@ -193,6 +194,8 @@ QByteArray radioButtonExportName(const QString &widgetId)
 }
 
 struct UnicodeFormFontTemplate {
+    QByteArray baseName;
+    QByteArray fingerprint;
     QByteArray compressedFontData;
     QByteArray compressedCidToGidMap;
     QByteArray widths;
@@ -1174,20 +1177,63 @@ QByteArray deflatedStream(const QByteArray &source)
     return compressed;
 }
 
-UnicodeFormFontTemplate buildUnicodeFormFontTemplate()
+QByteArray fontPostScriptName(const QRawFont &font)
+{
+    const QByteArray names = font.fontTable("name");
+    if (names.size() < 6)
+        return {};
+    const auto word = [&names](qsizetype offset) {
+        return qFromBigEndian<quint16>(names.constData() + offset);
+    };
+    const qsizetype count = word(2);
+    const qsizetype strings = word(4);
+    if (count > (names.size() - 6) / 12 || strings > names.size())
+        return {};
+    for (qsizetype index = 0; index < count; ++index) {
+        const qsizetype record = 6 + index * 12;
+        const quint16 platform = word(record);
+        if (word(record + 6) != 6 || (platform != 0 && platform != 1 && platform != 3))
+            continue;
+        const qsizetype size = word(record + 8);
+        const qsizetype start = strings + word(record + 10);
+        const bool unicode = platform != 1;
+        if (size <= 0 || size > 254 || start > names.size() - size
+            || (unicode && size % 2 != 0))
+            continue;
+        QByteArray name;
+        for (qsizetype offset = 0; offset < size; offset += unicode ? 2 : 1) {
+            const uint character = unicode ? word(start + offset)
+                : static_cast<unsigned char>(names.at(start + offset));
+            if (character < 33 || character > 126) {
+                name.clear();
+                break;
+            }
+            // PDF names escape delimiters even if a font uses them in name ID 6.
+            if (QByteArrayView("#%()/<>[]{}").contains(static_cast<char>(character)))
+                name += '#' + uppercaseHex(character, 2);
+            else
+                name += static_cast<char>(character);
+        }
+        if (!name.isEmpty())
+            return name;
+    }
+    return {};
+}
+
+UnicodeFormFontTemplate buildUnicodeFormFontTemplate(
+    const ApplicationFonts::FontFaceData &fontFace)
 {
     UnicodeFormFontTemplate result;
-    QFile fontFile(QString::fromLatin1(kUnicodeFormFontPath));
-    if (!fontFile.open(QIODevice::ReadOnly)) {
+    if (!fontFace.isValid()) {
         result.error = QStringLiteral(
-            "The bundled AcroForm font could not be opened.");
+            "No embeddable Unicode TrueType font is available for forms and Free Text.");
         return result;
     }
-    const QByteArray fontData = fontFile.readAll();
+    const QByteArray &fontData = fontFace.data;
     if (fontData.isEmpty()
-        || fontData.size() > std::numeric_limits<quint32>::max()) {
+        || fontData.size() > 64 * 1024 * 1024) {
         result.error = QStringLiteral(
-            "The bundled AcroForm font data is invalid.");
+            "The AcroForm font data is invalid.");
         return result;
     }
 
@@ -1196,11 +1242,18 @@ UnicodeFormFontTemplate buildUnicodeFormFontTemplate()
         fontData,
         metricPixelSize,
         QFont::PreferNoHinting);
-    if (!rawFont.isValid()) {
+    if (!rawFont.isValid() || rawFont.fontTable("glyf").isEmpty()
+        || rawFont.fontTable("loca").isEmpty()) {
         result.error = QStringLiteral(
-            "The bundled AcroForm font could not be decoded.");
+            "The AcroForm font is not a supported TrueType face.");
         return result;
     }
+    result.baseName = fontPostScriptName(rawFont);
+    if (result.baseName.isEmpty()) {
+        result.error = QStringLiteral("The AcroForm font has no valid PostScript name.");
+        return result;
+    }
+    result.fingerprint = QCryptographicHash::hash(fontData, QCryptographicHash::Sha256);
 
     // Identity-H uses two-byte Unicode values as CIDs. Keep those CIDs stable
     // and provide an explicit CID-to-glyph map so form engines can resolve
@@ -1225,7 +1278,7 @@ UnicodeFormFontTemplate buildUnicodeFormFontTemplate()
     }
     if (!glyphByCodePoint.contains(0x1ecdU)) {
         result.error = QStringLiteral(
-            "The bundled AcroForm font does not contain Vietnamese glyphs.");
+            "The AcroForm font does not contain Vietnamese glyphs.");
         return result;
     }
 
@@ -1239,7 +1292,7 @@ UnicodeFormFontTemplate buildUnicodeFormFontTemplate()
         glyphIndexes);
     if (advances.size() != glyphIndexes.size()) {
         result.error = QStringLiteral(
-            "The bundled AcroForm font metrics could not be read.");
+            "The AcroForm font metrics could not be read.");
         return result;
     }
 
@@ -1302,7 +1355,7 @@ UnicodeFormFontTemplate buildUnicodeFormFontTemplate()
         "begincmap\n"
         "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) "
         "/Supplement 0 >> def\n"
-        "/CMapName /TrePDFArial-UCS def\n"
+        "/CMapName /TrePDFUnicode-UCS def\n"
         "/CMapType 2 def\n"
         "1 begincodespacerange\n"
         "<0000> <FFFF>\n"
@@ -1362,15 +1415,24 @@ UnicodeFormFontTemplate buildUnicodeFormFontTemplate()
     }
     if (!result.isValid()) {
         result.error = QStringLiteral(
-            "The bundled AcroForm font resources could not be generated.");
+            "The AcroForm font resources could not be generated.");
     }
     return result;
 }
 
-const UnicodeFormFontTemplate &unicodeFormFontTemplate()
+const UnicodeFormFontTemplate &unicodeFormFontTemplate(
+    const ApplicationFonts::FontFaceData &fontFace)
 {
-    static const UnicodeFormFontTemplate font
-        = buildUnicodeFormFontTemplate();
+    // Keep one bounded template per save worker; a newly installed face or a
+    // recovered font cache must not reuse a previous failure or other font.
+    static thread_local QByteArray fingerprint;
+    static thread_local UnicodeFormFontTemplate font;
+    const QByteArray current = QCryptographicHash::hash(
+        fontFace.data, QCryptographicHash::Sha256);
+    if (fingerprint != current || !font.isValid()) {
+        font = buildUnicodeFormFontTemplate(fontFace);
+        fingerprint = current;
+    }
     return font;
 }
 
@@ -1385,6 +1447,7 @@ QByteArray textFieldDefaultAppearance(QByteArrayView fontResourceName)
 
 QImage textFieldAppearanceImage(
     const PDFAcroFormCanonicalizer::Field &field,
+    const QString &fontFamily,
     bool dropdown = false)
 {
     constexpr qreal rasterScale = 2.0;
@@ -1429,7 +1492,7 @@ QImage textFieldAppearanceImage(
             pixelWidth - 2.0 * borderInset,
             pixelHeight - 2.0 * borderInset));
 
-    QFont font(QStringLiteral("Arial"));
+    QFont font(fontFamily);
     font.setPixelSize(qMax(
         1,
         qRound(
@@ -1556,7 +1619,8 @@ QImage textFieldAppearanceImage(
 }
 
 QImage freeTextAppearanceImage(const QRectF &pageRect,
-                               const QString &text)
+                               const QString &text,
+                               const QString &fontFamily)
 {
     constexpr qreal rasterScale = 2.0;
     constexpr int maximumDimension = 2048;
@@ -1597,7 +1661,7 @@ QImage freeTextAppearanceImage(const QRectF &pageRect,
         pixelWidth - 2.0 * borderInset,
         pixelHeight - 2.0 * borderInset));
 
-    QFont font(QStringLiteral("Arial"));
+    QFont font(fontFamily);
     font.setPixelSize(qMax(
         1,
         qRound(
@@ -1626,7 +1690,8 @@ QImage freeTextAppearanceImage(const QRectF &pageRect,
 }
 
 QImage listBoxAppearanceImage(
-    const PDFAcroFormCanonicalizer::Field &field)
+    const PDFAcroFormCanonicalizer::Field &field,
+    const QString &fontFamily)
 {
     constexpr qreal rasterScale = 2.0;
     constexpr int maximumDimension = 2048;
@@ -1675,7 +1740,7 @@ QImage listBoxAppearanceImage(
         borderPixelWidth,
         qMax(0.0, pixelWidth - 2.0 * borderPixelWidth),
         qMax(0.0, pixelHeight - 2.0 * borderPixelWidth));
-    QFont font(QStringLiteral("Arial"));
+    QFont font(fontFamily);
     font.setPixelSize(qMax(
         1,
         qRound(
@@ -4906,6 +4971,17 @@ bool updateFreeTextAppearanceDictionary(
             error);
 }
 
+bool usesManagedUnicodeDefaultAppearance(const QByteArray &object)
+{
+    constexpr QByteArrayView key("/DA");
+    const qsizetype position = keyPosition(object.constData(), object.size(), key);
+    QByteArray appearance;
+    return position >= 0
+        && parsePdfString(object.constData(), object.size(), position + key.size(), appearance)
+        && appearance.trimmed().startsWith(QByteArrayLiteral("/")
+                                          + QByteArray(kUnicodeFormFontResourcePrefix));
+}
+
 QByteArray normalizedFieldAppearanceObject(
     const QByteArray &existingObject,
     int appearanceObjectNumber,
@@ -4915,7 +4991,8 @@ QByteArray normalizedFieldAppearanceObject(
     QString &error)
 {
     // Keep field-level extensions such as /MaxLen, /Q and /AA intact. A
-    // legacy visual migration owns only the normal appearance and its marker.
+    // legacy visual migration owns only the normal appearance and its marker,
+    // plus the managed font reference when the snapshotted face has changed.
     QByteArray object = existingObject;
     const QByteArray appearance
         = QByteArrayLiteral("<< /N ")
@@ -5129,6 +5206,7 @@ struct FormFontResource {
 bool findUnicodeFormFontResource(
     const ParsedPdf &pdf,
     const ObjectReference &acroFormReference,
+    const QByteArray &fontFingerprint,
     FormFontResource &resource,
     QString &error)
 {
@@ -5243,7 +5321,19 @@ bool findUnicodeFormFontResource(
             encodingKey >= 0
                 ? encodingKey + QByteArrayView("/Encoding").size()
                 : candidateObject.size());
+        const QByteArray fingerprintKey = QByteArrayLiteral("/")
+            + QByteArray(kUnicodeFormFontFingerprintKey);
+        const qsizetype fingerprintPosition = keyPosition(
+            candidateObject.constData(), candidateObject.size(), fingerprintKey);
+        QByteArray candidateFingerprint;
+        const bool matchesFont = fingerprintPosition >= 0
+            && parsePdfString(candidateObject.constData(), candidateObject.size(),
+                              fingerprintPosition + fingerprintKey.size(), candidateFingerprint)
+            && candidateFingerprint == fontFingerprint;
+        // Older resources have no fingerprint. Keep them available to existing
+        // fields, but install a new resource for this save's snapshotted face.
         if (!candidateObject.isEmpty()
+            && matchesFont
             && versionCursor.integer(version)
             && version == PDFFormAppearance::kFontVersion
             && subtypeCursor.consume("/Type0")
@@ -5375,13 +5465,14 @@ QByteArray standardFormFontObject(int objectNumber)
 
 QByteArray unicodeFormFontObject(int objectNumber,
                                  int descendantFontObjectNumber,
-                                 int toUnicodeObjectNumber)
+                                 int toUnicodeObjectNumber,
+                                 const UnicodeFormFontTemplate &font)
 {
     return QByteArray::number(objectNumber)
         + QByteArrayLiteral(
             " 0 obj\n"
             "<< /Type /Font /Subtype /Type0 /BaseFont /")
-        + QByteArrayLiteral(kUnicodeFormFontBaseName)
+        + font.baseName
         + QByteArrayLiteral(
             " /Encoding /Identity-H /DescendantFonts [")
         + QByteArray::number(descendantFontObjectNumber)
@@ -5391,6 +5482,11 @@ QByteArray unicodeFormFontObject(int objectNumber,
         + QByteArray(PDFFormAppearance::kFontVersionKey)
         + ' '
         + QByteArray::number(PDFFormAppearance::kFontVersion)
+        + QByteArrayLiteral(" /")
+        + QByteArray(kUnicodeFormFontFingerprintKey)
+        + QByteArrayLiteral(" <")
+        + font.fingerprint.toHex()
+        + '>'
         + QByteArrayLiteral(" >>\nendobj");
 }
 
@@ -5398,13 +5494,14 @@ QByteArray unicodeFormDescendantFontObject(
     int objectNumber,
     int widthsObjectNumber,
     int descriptorObjectNumber,
-    int cidToGidMapObjectNumber)
+    int cidToGidMapObjectNumber,
+    const UnicodeFormFontTemplate &font)
 {
     return QByteArray::number(objectNumber)
         + QByteArrayLiteral(
             " 0 obj\n"
             "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /")
-        + QByteArrayLiteral(kUnicodeFormFontBaseName)
+        + font.baseName
         + QByteArrayLiteral(
             " /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) "
             "/Supplement 0 >> /DW 1000 /W ")
@@ -5435,7 +5532,7 @@ QByteArray unicodeFormFontDescriptorObject(
         + QByteArrayLiteral(
             " 0 obj\n"
             "<< /Type /FontDescriptor /FontName /")
-        + QByteArrayLiteral(kUnicodeFormFontBaseName)
+        + font.baseName
         + QByteArrayLiteral(" /Flags 4 /FontBBox [")
         + QByteArray::number(font.boundingLeft)
         + ' '
@@ -5647,6 +5744,7 @@ bool appendIncrementalUpdate(const QString &filePath,
 bool PDFAcroFormCanonicalizer::finalizeFields(
     const QString &filePath,
     const QVector<Field> &formFields,
+    const ApplicationFonts::FontFaceData &fontFace,
     QString &error)
 {
     if (formFields.isEmpty()) {
@@ -6337,13 +6435,14 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
         if (!findUnicodeFormFontResource(
                 pdf,
                 sourceAcroFormReference,
+                QCryptographicHash::hash(fontFace.data, QCryptographicHash::Sha256),
                 defaultFontResource,
                 error)) {
             file.unmap(mapped);
             return false;
         }
         if (defaultFontResource.reference.number < 0) {
-            unicodeFont = &unicodeFormFontTemplate();
+            unicodeFont = &unicodeFormFontTemplate(fontFace);
             if (!unicodeFont->isValid()) {
                 error = unicodeFont->error;
                 file.unmap(mapped);
@@ -6515,9 +6614,11 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             || isFixedChoiceField(formField.type)) {
             const bool dropdown = formField.type == FieldType::Dropdown;
             const bool listBox = formField.type == FieldType::ListBox;
+            const QString fontFamily = fontFace.layoutFamily.isEmpty()
+                ? fontFace.family : fontFace.layoutFamily;
             const QImage appearanceImage = listBox
-                ? listBoxAppearanceImage(formField)
-                : textFieldAppearanceImage(formField, dropdown);
+                ? listBoxAppearanceImage(formField, fontFamily)
+                : textFieldAppearanceImage(formField, fontFamily, dropdown);
             appearancePixels += static_cast<qint64>(appearanceImage.width())
                 * appearanceImage.height();
             if (appearancePixels > maximumAppearancePixels) {
@@ -6550,7 +6651,9 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
                             ? PDFFormAppearance::kDropdownVersion
                             : PDFFormAppearance::kTextFieldVersion,
                     defaultFontResource.name,
-                    dropdown || listBox,
+                    dropdown || listBox
+                        || usesManagedUnicodeDefaultAppearance(
+                            resolvedWidgets.at(index).existingObject),
                     error);
                 if (listBox
                     && !widgetObject.isEmpty()
@@ -6735,14 +6838,16 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
             unicodeFormFontObject(
                 unicodeFontObjects.type0,
                 unicodeFontObjects.descendant,
-                unicodeFontObjects.toUnicode)});
+                unicodeFontObjects.toUnicode,
+                *unicodeFont)});
         incrementalObjects.append({
             ObjectReference{unicodeFontObjects.descendant, 0},
             unicodeFormDescendantFontObject(
                 unicodeFontObjects.descendant,
                 unicodeFontObjects.widths,
                 unicodeFontObjects.descriptor,
-                unicodeFontObjects.cidToGidMap)});
+                unicodeFontObjects.cidToGidMap,
+                *unicodeFont)});
         incrementalObjects.append({
             ObjectReference{unicodeFontObjects.widths, 0},
             unicodeFormWidthsObject(
@@ -6789,6 +6894,7 @@ bool PDFAcroFormCanonicalizer::finalizeFields(
 bool PDFAcroFormCanonicalizer::finalizeFreeTextAnnotations(
     const QString &filePath,
     const QVector<FreeTextAnnotation> &annotations,
+    const ApplicationFonts::FontFaceData &fontFace,
     QString &error)
 {
     if (annotations.isEmpty()) {
@@ -6879,6 +6985,7 @@ bool PDFAcroFormCanonicalizer::finalizeFreeTextAnnotations(
         if (!findUnicodeFormFontResource(
                 pdf,
                 sourceAcroFormReference,
+                QCryptographicHash::hash(fontFace.data, QCryptographicHash::Sha256),
                 defaultFontResource,
                 error)) {
             return fail(error);
@@ -6896,7 +7003,7 @@ bool PDFAcroFormCanonicalizer::finalizeFreeTextAnnotations(
     const UnicodeFormFontTemplate *unicodeFont = nullptr;
     if (installUnicodeDefaultAppearance
         && defaultFontResource.reference.number < 0) {
-        unicodeFont = &unicodeFormFontTemplate();
+        unicodeFont = &unicodeFormFontTemplate(fontFace);
         if (!unicodeFont->isValid()) {
             return fail(unicodeFont->error);
         }
@@ -6997,7 +7104,8 @@ bool PDFAcroFormCanonicalizer::finalizeFreeTextAnnotations(
         }
         const QImage appearanceImage = freeTextAppearanceImage(
             pageRect,
-            annotation.text);
+            annotation.text,
+            fontFace.layoutFamily.isEmpty() ? fontFace.family : fontFace.layoutFamily);
         const QByteArray compressedPixels = compressedRgbPixels(
             appearanceImage);
         if (appearanceImage.isNull() || compressedPixels.isEmpty()) {
@@ -7133,14 +7241,16 @@ bool PDFAcroFormCanonicalizer::finalizeFreeTextAnnotations(
             unicodeFormFontObject(
                 unicodeFontObjects.type0,
                 unicodeFontObjects.descendant,
-                unicodeFontObjects.toUnicode)});
+                unicodeFontObjects.toUnicode,
+                *unicodeFont)});
         incrementalObjects.append({
             ObjectReference{unicodeFontObjects.descendant, 0},
             unicodeFormDescendantFontObject(
                 unicodeFontObjects.descendant,
                 unicodeFontObjects.widths,
                 unicodeFontObjects.descriptor,
-                unicodeFontObjects.cidToGidMap)});
+                unicodeFontObjects.cidToGidMap,
+                *unicodeFont)});
         incrementalObjects.append({
             ObjectReference{unicodeFontObjects.widths, 0},
             unicodeFormWidthsObject(

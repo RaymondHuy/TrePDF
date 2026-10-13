@@ -7032,6 +7032,41 @@ PDFSaveWriter::Result addWebLinks(
     return {};
 }
 
+ApplicationFonts::FontFaceData snapshotUnicodeFormFont()
+{
+    // Called by prepare() on the GUI thread. The worker receives font bytes and
+    // a registered layout family, never a path or a platform font lookup.
+    QStringList families = ApplicationFonts::downloadedFontFamilies();
+    families.prepend(QFont().family());
+    families.append({QStringLiteral("Arial"), QStringLiteral("Liberation Sans"),
+                     QStringLiteral("Noto Sans"), QStringLiteral("DejaVu Sans")});
+    families.append(ApplicationFonts::systemFontFamilies());
+    families.removeDuplicates();
+    const auto suitable = [](const ApplicationFonts::FontFaceData &face) {
+        if (!face.isValid() || face.data.size() > 64 * 1024 * 1024)
+            return false;
+        const QRawFont font(face.data, 16.0, QFont::PreferNoHinting);
+        if (!font.isValid() || font.fontTable("glyf").isEmpty()
+            || font.fontTable("loca").isEmpty()
+            || !font.supportsCharacter(0x1ecdU))
+            return false;
+        for (uint character = 0x20; character < 0x7f; ++character) {
+            if (!font.supportsCharacter(character))
+                return false;
+        }
+        return true;
+    };
+    for (const QString &family : std::as_const(families)) {
+        auto face = ApplicationFonts::downloadedFontFace(family, false, false);
+        if (suitable(face))
+            return face;
+        face = ApplicationFonts::systemFontFace(family, false, false);
+        if (suitable(face))
+            return face;
+    }
+    return {};
+}
+
 } // namespace
 
 struct PDFSaveWriter::Request::Data {
@@ -7043,6 +7078,7 @@ struct PDFSaveWriter::Request::Data {
     QVector<PDFPageInsertion> pageInsertions;
     QVector<SaveDraft> drafts;
     QVector<PDFFormDesignerController::SaveField> formFields;
+    ApplicationFonts::FontFaceData unicodeFormFont;
     QVector<PDFWebLinks::Link> autoWebLinks;
     QVector<PDFWebLinks::SourceLink> removedWebLinks;
     QVector<PDFWebLinks::ManualLink> manualLinks;
@@ -7447,6 +7483,20 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.sourceParagraphLayout = !draft->candidate.sourceParagraphFormats.isEmpty();
         data->drafts.append(std::move(saveDraft));
     }
+
+    const bool hasUnicodeFields = std::any_of(data->formFields.cbegin(), data->formFields.cend(),
+        [](const PDFFormDesignerController::SaveField &field) {
+            return field.operation != PDFFormDesignerController::SaveField::Remove
+                && (field.type == PDFFormDesignerController::Text
+                    || field.type == PDFFormDesignerController::Dropdown
+                    || field.type == PDFFormDesignerController::ListBox);
+        });
+    const bool hasFreeText = std::any_of(data->drafts.cbegin(), data->drafts.cend(),
+        [](const SaveDraft &draft) {
+            return !draft.deleted && draft.kind == SaveDraft::Kind::FreeText;
+        });
+    if (hasUnicodeFields || hasFreeText)
+        data->unicodeFormFont = snapshotUnicodeFormFont();
 
     std::sort(data->drafts.begin(), data->drafts.end(), [](const SaveDraft &left,
                                                            const SaveDraft &right) {
@@ -7864,6 +7914,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             if (!PDFAcroFormCanonicalizer::finalizeFreeTextAnnotations(
                     contentFilePath,
                     freeTextAnnotations,
+                    request.m_data->unicodeFormFont,
                     appearanceError)) {
                 return failure(
                     Error::CommentAnnotationCreationFailed,
@@ -7926,6 +7977,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
             contentFilePath,
             formFilePath,
             acroFormFields,
+            request.m_data->unicodeFormFont,
             stagingPassword);
     if (!acroFormResult.succeeded) {
         return failure(
@@ -7974,6 +8026,7 @@ PDFSaveWriter::Result PDFSaveWriter::save(const Request &request)
         if (!PDFAcroFormCanonicalizer::finalizeFreeTextAnnotations(
                 formFilePath,
                 freeTextAnnotations,
+                request.m_data->unicodeFormFont,
                 appearanceError)) {
             return failure(
                 Error::CommentAnnotationCreationFailed,

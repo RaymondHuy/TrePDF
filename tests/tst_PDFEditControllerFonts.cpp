@@ -240,132 +240,76 @@ quint32 sfntChecksum(const QByteArray &data, qsizetype offset, qsizetype length)
 QByteArray uninstalledSubsetFontData(const QByteArray &alias = QByteArrayLiteral("QrZxy"),
                                    bool bold = false, bool italic = false)
 {
-    if (alias.size() != 5)
-        return {};
-    QByteArray wideAlias;
-    for (char character : alias) {
-        wideAlias.append('\0');
-        wideAlias.append(character);
-    }
-    QByteArray data = ApplicationFonts::bundledFontData(
-        QStringLiteral("Arial"), bold, italic);
-    if (data.size() < 12)
-        return {};
-    const int tableCount = sfntUInt16(data, 4);
-    if (12 + tableCount * 16 > data.size())
-        return {};
-    qsizetype headOffset = -1;
-    bool renamed = false;
-    for (int table = 0; table < tableCount; ++table) {
-        const qsizetype entry = 12 + table * 16;
-        const qsizetype offset = sfntUInt32(data, entry + 8);
-        const qsizetype length = sfntUInt32(data, entry + 12);
-        if (offset > data.size() || length > data.size() - offset)
-            return {};
-        if (data.mid(entry, 4) == QByteArrayLiteral("head"))
-            headOffset = offset;
-        if (data.mid(entry, 4) != QByteArrayLiteral("name"))
-            continue;
-        QByteArray names = data.mid(offset, length);
-        // Equal-length replacements keep every name-record offset intact.
-        names.replace(QByteArrayLiteral("Arial"), alias);
-        names.replace(QByteArray("\0A\0r\0i\0a\0l", 10),
-                      wideAlias);
-        renamed = names != data.mid(offset, length);
-        data.replace(offset, length, names);
-    }
-    if (!renamed || headOffset < 0 || headOffset + 12 > data.size())
-        return {};
-    setSfntUInt32(data, headOffset + 8, 0);
-    for (int table = 0; table < tableCount; ++table) {
-        const qsizetype entry = 12 + table * 16;
-        setSfntUInt32(data, entry + 4,
-            sfntChecksum(data, sfntUInt32(data, entry + 8),
-                         sfntUInt32(data, entry + 12)));
-    }
-    setSfntUInt32(data, headOffset + 8,
-        quint32(0xb1b0afba) - sfntChecksum(data, 0, data.size()));
-    return data;
+    return renamedTestFontData(QString::fromLatin1(alias), bold, italic);
 }
 
-QByteArray renamedBundledFontData(const QString &family, bool bold = false, bool italic = false)
+QByteArray fontWithSharedUnicodeGlyphs(const QByteArray &source)
 {
-    const QByteArray source = ApplicationFonts::bundledFontData(QStringLiteral("Arial"), bold, italic);
-    if (source.size() < 12 || family.isEmpty())
+    // Explicitly model Unicode aliases; do not depend on a vendor font's cmap.
+    // Call with a renamed test face so the modified program has a private name.
+    const QRawFont raw(source, 16.0, QFont::PreferNoHinting);
+    if (!raw.isValid() || source.size() < 12)
         return {};
-    const auto setUInt16 = [](QByteArray &bytes, qsizetype offset, quint16 value) {
-        bytes[offset] = char(value >> 8);
-        bytes[offset + 1] = char(value);
-    };
-    const auto utf16be = [](const QString &text) {
-        QByteArray bytes;
-        for (QChar character : text) {
-            bytes.append(char(character.unicode() >> 8));
-            bytes.append(char(character.unicode()));
-        }
-        return bytes;
-    };
-    const int tableCount = sfntUInt16(source, 4);
-    if (12 + tableCount * 16 > source.size())
+    QString characters;
+    for (uint code = 0; code < 0xffff; ++code) {
+        if (code < 0xd800 || code > 0xdfff)
+            characters.append(QChar(ushort(code)));
+    }
+    const auto glyphs = raw.glyphIndexesForString(characters);
+    if (glyphs.size() != characters.size())
         return {};
-    QByteArray result = source.left(12 + tableCount * 16);
-    qsizetype headOffset = -1;
-    bool renamed = false;
-    for (int table = 0; table < tableCount; ++table) {
+    QMap<uint, quint32> mapping;
+    for (qsizetype index = 0; index < characters.size(); ++index) {
+        if (glyphs[index])
+            mapping.insert(characters[index].unicode(), glyphs[index]);
+    }
+    for (const auto &alias : {qMakePair(0x00a0U, uint(' ')),
+                              qMakePair(0x037eU, uint(';')),
+                              qMakePair(0x00adU, uint('-'))}) {
+        if (!mapping.value(alias.second))
+            return {};
+        mapping.insert(alias.first, mapping.value(alias.second));
+    }
+    const auto append32 = [](QByteArray &bytes, quint32 value) {
+        const qsizetype offset = bytes.size();
+        bytes.resize(offset + 4);
+        setSfntUInt32(bytes, offset, value);
+    };
+    // Windows UCS-4 format 12, with one group per supported BMP character.
+    QByteArray cmap = QByteArray::fromHex("000000010003000a0000000c000c0000");
+    append32(cmap, 16 + quint32(mapping.size()) * 12);
+    append32(cmap, 0);
+    append32(cmap, quint32(mapping.size()));
+    for (auto entry = mapping.cbegin(); entry != mapping.cend(); ++entry) {
+        append32(cmap, entry.key());
+        append32(cmap, entry.key());
+        append32(cmap, entry.value());
+    }
+    const int count = sfntUInt16(source, 4);
+    if (12 + count * 16 > source.size())
+        return {};
+    qsizetype cmapEntry = -1, headOffset = -1;
+    for (int table = 0; table < count; ++table) {
         const qsizetype entry = 12 + table * 16;
         const qsizetype offset = sfntUInt32(source, entry + 8);
         const qsizetype length = sfntUInt32(source, entry + 12);
         if (offset > source.size() || length > source.size() - offset)
             return {};
-        QByteArray data = source.mid(offset, length);
-        const QByteArray tag = source.mid(entry, 4);
-        if (tag == QByteArrayLiteral("name")) {
-            if (data.size() < 6 || sfntUInt16(data, 0) != 0)
-                return {};
-            const int count = sfntUInt16(data, 2);
-            const qsizetype storage = sfntUInt16(data, 4);
-            if (6 + count * 12 > data.size() || storage > data.size())
-                return {};
-            QByteArray names = data.left(6 + count * 12);
-            setUInt16(names, 4, quint16(names.size()));
-            QByteArray strings;
-            for (int index = 0; index < count; ++index) {
-                const qsizetype record = 6 + index * 12;
-                const qsizetype stringOffset = storage + sfntUInt16(data, record + 10);
-                const qsizetype stringLength = sfntUInt16(data, record + 8);
-                if (stringOffset > data.size() || stringLength > data.size() - stringOffset)
-                    return {};
-                QByteArray name = data.mid(stringOffset, stringLength);
-                QString replacement = family;
-                if (sfntUInt16(data, record + 6) == 6)
-                    replacement.remove(QLatin1Char(' '));
-                const QByteArray original = name;
-                name.replace(QByteArrayLiteral("Arial"), replacement.toLatin1());
-                name.replace(utf16be(QStringLiteral("Arial")), utf16be(replacement));
-                renamed |= name != original;
-                if (strings.size() + name.size() > 65535)
-                    return {};
-                setUInt16(names, record + 8, quint16(name.size()));
-                setUInt16(names, record + 10, quint16(strings.size()));
-                strings.append(name);
-            }
-            data = names + strings;
-        }
-        while (result.size() % 4)
-            result.append('\0');
-        if (tag == QByteArrayLiteral("head")) {
-            if (data.size() < 12)
-                return {};
-            headOffset = result.size();
-            setSfntUInt32(data, 8, 0);
-        }
-        setSfntUInt32(result, entry + 4, sfntChecksum(data, 0, data.size()));
-        setSfntUInt32(result, entry + 8, quint32(result.size()));
-        setSfntUInt32(result, entry + 12, quint32(data.size()));
-        result.append(data);
+        if (source.mid(entry, 4) == "cmap")
+            cmapEntry = entry;
+        if (source.mid(entry, 4) == "head" && length >= 12)
+            headOffset = offset;
     }
-    if (!renamed || headOffset < 0)
+    if (cmapEntry < 0 || headOffset < 0)
         return {};
+    QByteArray result = source;
+    while (result.size() % 4)
+        result.append('\0');
+    setSfntUInt32(result, cmapEntry + 4, sfntChecksum(cmap, 0, cmap.size()));
+    setSfntUInt32(result, cmapEntry + 8, quint32(result.size()));
+    setSfntUInt32(result, cmapEntry + 12, quint32(cmap.size()));
+    result += cmap;
+    setSfntUInt32(result, headOffset + 8, 0);
     setSfntUInt32(result, headOffset + 8,
                   quint32(0xb1b0afba) - sfntChecksum(result, 0, result.size()));
     return result;
@@ -414,9 +358,12 @@ QList<QPair<QByteArray, QByteArray>> aptosArchiveEntries()
 bool createUninstalledSubsetPdf(const QString &path,
                                const QString &objectText = QStringLiteral("2017"),
                                const QString &seedText = QStringLiteral("a "),
-                               const QByteArray &alias = QByteArrayLiteral("QrZxy"))
+                               const QByteArray &alias = QByteArrayLiteral("QrZxy"),
+                               bool sharedUnicodeGlyphs = false)
 {
-    const QByteArray fontData = uninstalledSubsetFontData(alias);
+    const QByteArray fontData = sharedUnicodeGlyphs
+        ? fontWithSharedUnicodeGlyphs(uninstalledSubsetFontData(alias))
+        : uninstalledSubsetFontData(alias);
     const QRawFont rawFont(fontData, 16.0, QFont::PreferNoHinting);
     if (!rawFont.isValid() || rawFont.familyName() != QString::fromLatin1(alias))
         return false;
@@ -675,9 +622,8 @@ void PDFEditControllerTest::usesCompatibleFontForUnreadableType1Glyphs()
         const QRawFont displayed = QRawFont::fromFont(display);
         QVERIFY(displayed.isValid());
         const auto fallbackFace = ApplicationFonts::systemFontFace(fallback, bold, italic);
-        const QRawFont expected(fallbackFace.isValid() ? fallbackFace.data
-                                 : ApplicationFonts::bundledFontData(fallback, bold, italic),
-                               16.0, QFont::PreferNoHinting);
+        QVERIFY(fallbackFace.isValid());
+        const QRawFont expected(fallbackFace.data, 16.0, QFont::PreferNoHinting);
         QVERIFY(expected.isValid());
         const auto displayedGlyphs = displayed.glyphIndexesForString(expectedText);
         const auto expectedGlyphs = expected.glyphIndexesForString(expectedText);
@@ -759,7 +705,8 @@ void PDFEditControllerTest::preservesUnicodeAliasesWhenReembeddingSourceSubset()
         QStringLiteral("source-subset-unicode-aliases.pdf"));
     const QString outputPath = m_temporaryDirectory.filePath(
         QStringLiteral("saved-subset-unicode-aliases.pdf"));
-    QVERIFY(createUninstalledSubsetPdf(sourcePath));
+    QVERIFY(createUninstalledSubsetPdf(sourcePath, QStringLiteral("2017"),
+                                      QStringLiteral("a "), "QrZxy", true));
     const QRawFont sourceFont(
         embeddedSourceFontData(sourcePath, QStringLiteral("2017")),
         16.0, QFont::PreferNoHinting);
@@ -952,26 +899,31 @@ void PDFEditControllerTest::separatesSameFamilySourceSubsetCaches()
     QVERIFY(!outputSecond.supportsCharacter(uint('a')));
 }
 
-void PDFEditControllerTest::registersBundledFonts()
+void PDFEditControllerTest::registersTestFontsWithoutBundledFonts()
 {
-    QVERIFY(QFile::exists(QStringLiteral(
-        ":/trepdf/fonts/Arial/Arial-Regular.TTF")));
-    QVERIFY(ApplicationFonts::bundledFontFamilies().contains(
-        QStringLiteral("Arial"),
-        Qt::CaseInsensitive));
-    QCOMPARE(
-        m_controller.bundledFontFamilies(),
-        ApplicationFonts::bundledFontFamilies());
-    QVERIFY(!ApplicationFonts::systemFontFamilies().isEmpty());
+    QVERIFY(ApplicationFonts::bundledFontFamilies().isEmpty());
+    QVERIFY(m_controller.bundledFontFamilies().isEmpty());
+    QVERIFY(!QFile::exists(QStringLiteral(":/trepdf/fonts/Arial/Arial-Regular.TTF")));
+    for (int style = 0; style < 4; ++style) {
+        const bool bold = (style & 2) != 0;
+        const bool italic = (style & 1) != 0;
+        const QByteArray data = testFontData(bold, italic);
+        QVERIFY(!data.isEmpty());
+        const QRawFont font(data, 16.0, QFont::PreferNoHinting);
+        QVERIFY(font.isValid());
+        QCOMPARE(font.familyName(), testFontFamily());
+        QCOMPARE(font.weight() >= QFont::Bold, bold);
+        QCOMPARE(font.style() != QFont::StyleNormal, italic);
+        const auto installed = ApplicationFonts::downloadedFontFace(testFontFamily(), bold, italic);
+        QVERIFY(installed.isValid());
+        QCOMPARE(installed.data, data);
+        QVERIFY(ApplicationFonts::availableFontFamilies(bold, italic).contains(
+            testFontFamily(), Qt::CaseInsensitive));
+    }
 
     const QStringList availableFamilies = m_controller.availableFontFamilies();
-    QCOMPARE(
-        availableFamilies.first(),
-        ApplicationFonts::bundledFontFamilies().first());
-    QVERIFY(availableFamilies.contains(
-        QStringLiteral("Arial"),
-        Qt::CaseInsensitive));
-
+    QVERIFY(!availableFamilies.isEmpty());
+    QVERIFY(availableFamilies.contains(testFontFamily(), Qt::CaseInsensitive));
     QStringList uniqueFamilies;
     for (const QString &family : availableFamilies) {
         QVERIFY(ApplicationFonts::isFontFaceSelectable(family, false, false));
@@ -1045,17 +997,17 @@ void PDFEditControllerTest::isolatesEmbeddedSubsetFromCachedCompleteFace()
     QCOMPARE(ApplicationFonts::downloadedFontFace(family, false, false).data, complete);
 }
 
-void PDFEditControllerTest::keepsArialLayoutStableAfterEmbeddedSubsetCollision()
+void PDFEditControllerTest::keepsFontLayoutStableAfterEmbeddedSubsetCollision()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
-        QStringLiteral("arial-collision-source.pdf"));
+        QStringLiteral("font-collision-source.pdf"));
     const QString collisionPath = m_temporaryDirectory.filePath(
-        QStringLiteral("arial-collision-subset.pdf"));
+        QStringLiteral("font-collision-subset.pdf"));
     const QString fullPath = m_temporaryDirectory.filePath(
-        QStringLiteral("arial-collision-full.pdf"));
+        QStringLiteral("font-collision-full.pdf"));
     const QString outputPath = m_temporaryDirectory.filePath(
-        QStringLiteral("arial-collision-output.pdf"));
-    QVERIFY(createArialSubsetCollisionSourcePdf(sourcePath));
+        QStringLiteral("font-collision-output.pdf"));
+    QVERIFY(createFontSubsetCollisionSourcePdf(sourcePath));
 
     PDFDocument document;
     PDFEditController controller;
@@ -1067,17 +1019,17 @@ void PDFEditControllerTest::keepsArialLayoutStableAfterEmbeddedSubsetCollision()
         QStringLiteral("Á"));
     QVERIFY(!seedCandidate.isEmpty());
     QVERIFY(seedCandidate.value(QStringLiteral("fontFamily")).toString()
-            != QStringLiteral("Arial"));
+            != testFontFamily());
     QVERIFY(controller.selectCandidate(
         0,
         seedCandidate.value(QStringLiteral("objectId")).toString()));
     controller.beginSelectedTextEdit();
     controller.setSelectedTextRange(0, QStringLiteral("Á").size());
-    controller.setSelectedFontFamily(QStringLiteral("Arial"));
+    controller.setSelectedFontFamily(testFontFamily());
     controller.finishSelectedTextEdit();
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(fullPath)));
     QVERIFY(rewriteTextWithSubsetFont(fullPath, collisionPath, QStringLiteral("Á"),
-        ApplicationFonts::bundledFontData(QStringLiteral("Arial"), false, false)));
+        testFontData()));
     QVERIFY(document.open(QUrl::fromLocalFile(collisionPath)));
 
     const TextObjectFontInfo embeddedFont = textObjectFontInfo(
@@ -1086,7 +1038,7 @@ void PDFEditControllerTest::keepsArialLayoutStableAfterEmbeddedSubsetCollision()
     QVERIFY(embeddedFont.found);
     QCOMPARE(embeddedFont.embedded, 1);
     QVERIFY(hasSubsetFontPrefix(embeddedFont.baseName));
-    QCOMPARE(embeddedFont.familyName, QStringLiteral("Arial"));
+    QCOMPARE(embeddedFont.familyName, testFontFamily());
     const QRawFont subsetProgram(embeddedSourceFontData(collisionPath, QStringLiteral("Á")),
                                 16.0, QFont::PreferNoHinting);
     QVERIFY(subsetProgram.isValid());
@@ -1097,19 +1049,21 @@ void PDFEditControllerTest::keepsArialLayoutStableAfterEmbeddedSubsetCollision()
         QString::fromLatin1(kFontCollisionTargetText));
     QVERIFY(sourceFont.found);
     QCOMPARE(sourceFont.embedded, 0);
-    QCOMPARE(sourceFont.familyName, QStringLiteral("Arial"));
+    QCOMPARE(sourceFont.baseName, QStringLiteral("Helvetica"));
 
     const QVariantMap targetCandidate = candidateForText(
         waitForCandidates(controller, 0),
         QString::fromLatin1(kFontCollisionTargetText));
     QVERIFY(!targetCandidate.isEmpty());
-    QCOMPARE(
-        targetCandidate.value(QStringLiteral("fontFamily")).toString(),
-        QStringLiteral("Arial"));
     QVERIFY(controller.selectCandidate(
         0,
         targetCandidate.value(QStringLiteral("objectId")).toString()));
     controller.beginSelectedTextEdit();
+    // Select the complete downloaded face after registering the same-family
+    // source subset. Do not depend on PDFium finding an OS-installed Arial.
+    controller.setSelectedTextRange(0, QString::fromLatin1(kFontCollisionTargetText).size());
+    controller.setSelectedFontFamily(testFontFamily());
+    QCOMPARE(controller.selectedFontFamily(), testFontFamily());
 
     const QSizeF pageSize = document.pageSize(0);
     const qreal layoutWidth = (
@@ -1281,7 +1235,7 @@ void PDFEditControllerTest::filtersUnsupportedSystemFonts()
         const QStringList families = ApplicationFonts::availableFontFamilies(
             bold,
             italic);
-        QVERIFY(families.contains(QStringLiteral("Arial"), Qt::CaseInsensitive));
+        QVERIFY(families.contains(testFontFamily(), Qt::CaseInsensitive));
 
         QStringList uniqueFamilies;
         for (const QString &family : families) {
@@ -1334,16 +1288,16 @@ void PDFEditControllerTest::filtersFontFamiliesByLanguage()
     m_controller.discardDrafts();
     m_controller.clearSelection();
 
-    const QString arial = QStringLiteral("Arial");
+    const QString family = testFontFamily();
     const QString vietnameseText = QStringLiteral("Tiếng Việt có dấu");
     const QString chineseText = QStringLiteral("中文");
     QVERIFY(ApplicationFonts::fontFaceSupportsText(
-        arial,
+        family,
         false,
         false,
         vietnameseText));
     QVERIFY(!ApplicationFonts::fontFaceSupportsText(
-        arial,
+        family,
         false,
         false,
         chineseText));
@@ -1359,13 +1313,13 @@ void PDFEditControllerTest::filtersFontFamiliesByLanguage()
                 ApplicationFonts::FontLanguage::Vietnamese,
                 bold,
                 italic);
-        QVERIFY(vietnameseFamilies.contains(arial, Qt::CaseInsensitive));
+        QVERIFY(vietnameseFamilies.contains(family, Qt::CaseInsensitive));
         const QStringList englishFamilies =
             ApplicationFonts::fontFamiliesForLanguage(
                 ApplicationFonts::FontLanguage::English,
                 bold,
                 italic);
-        QVERIFY(englishFamilies.contains(arial, Qt::CaseInsensitive));
+        QVERIFY(englishFamilies.contains(family, Qt::CaseInsensitive));
 
         for (ApplicationFonts::FontLanguage language : {
                  ApplicationFonts::FontLanguage::Vietnamese,
@@ -1387,23 +1341,23 @@ void PDFEditControllerTest::filtersFontFamiliesByLanguage()
 
     QVERIFY(m_controller.fontFamiliesForFilter(
         PDFEditController::VietnameseFonts).contains(
-            arial,
+            family,
             Qt::CaseInsensitive));
     QVERIFY(m_controller.fontFamiliesForFilter(
         PDFEditController::EnglishFonts).contains(
-            arial,
+            family,
             Qt::CaseInsensitive));
     QVERIFY(!m_controller.fontFamiliesForFilter(
         PDFEditController::ChineseFonts).contains(
-            arial,
+            family,
             Qt::CaseInsensitive));
     QVERIFY(!m_controller.fontFamiliesForFilter(
         PDFEditController::JapaneseFonts).contains(
-            arial,
+            family,
             Qt::CaseInsensitive));
     QVERIFY(!m_controller.fontFamiliesForFilter(
         PDFEditController::KoreanFonts).contains(
-            arial,
+            family,
             Qt::CaseInsensitive));
 }
 
@@ -1589,8 +1543,8 @@ void PDFEditControllerTest::resetsStretchWhenChangingFontFamily()
         candidate.value(QStringLiteral("objectId")).toString()));
 
     const QString originalFamily = controller.selectedFontFamily();
-    const QString replacementFamily = QStringLiteral("Arial");
-    QVERIFY(ApplicationFonts::bundledFontFamilies().contains(
+    const QString replacementFamily = testFontFamily();
+    QVERIFY(ApplicationFonts::availableFontFamilies().contains(
         replacementFamily,
         Qt::CaseInsensitive));
     QVERIFY(originalFamily.compare(
@@ -1788,7 +1742,7 @@ void PDFEditControllerTest::preservesSourceScaleForUnchangedRichTextRuns()
 
     controller.beginSelectedTextEdit();
     controller.setSelectedTextRange(1, 3);
-    controller.setSelectedFontFamily(QStringLiteral("Arial"));
+    controller.setSelectedFontFamily(testFontFamily());
     controller.finishSelectedTextEdit();
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
 
@@ -1798,7 +1752,7 @@ void PDFEditControllerTest::preservesSourceScaleForUnchangedRichTextRuns()
         const qreal scale = horizontalScale(characters[index].matrix);
         if (index >= 1 && index < 4) {
             QVERIFY2(scale >= 0.85 && scale <= 1.20,
-                qPrintable(QStringLiteral("Changed Arial character %1 scale is %2")
+                qPrintable(QStringLiteral("Changed fixture-font character %1 scale is %2")
                     .arg(index).arg(scale, 0, 'f', 6)));
         } else {
             QVERIFY2(qAbs(scale - 2.0) <= 0.01,
@@ -1956,10 +1910,10 @@ void PDFEditControllerTest::calibratesDisplayStretchToPdfScale_data()
     QTest::addColumn<int>("targetStretch");
     QTest::addColumn<int>("pixelSize");
 
-    QTest::newRow("bundled-arial-condensed")
-        << QStringLiteral("Arial") << 89 << 16;
-    QTest::newRow("bundled-arial-expanded")
-        << QStringLiteral("Arial") << 125 << 64;
+    QTest::newRow("test-font-condensed")
+        << testFontFamily() << 89 << 16;
+    QTest::newRow("test-font-expanded")
+        << testFontFamily() << 125 << 64;
     if (ApplicationFonts::systemFontFamilies().contains(
             QStringLiteral("Didot"),
             Qt::CaseInsensitive)
@@ -2082,6 +2036,14 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial()
     QFETCH(QString, untouchedText);
     QFETCH(bool, expectedBold);
 
+    const auto systemFace = ApplicationFonts::systemFontFace(
+        QStringLiteral("Arial"), expectedBold, false);
+    if (!systemFace.isValid() || !ApplicationFonts::fontFaceSupportsText(
+            QStringLiteral("Arial"), expectedBold, false, editedText,
+            ApplicationFonts::FontSource::System)) {
+        QSKIP("The exact system Arial face is unavailable for this fallback regression");
+    }
+
     const QString expectedText = editedText.normalized(
         QString::NormalizationForm_C);
     const QString sourcePath = m_temporaryDirectory.filePath(
@@ -2115,10 +2077,7 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial()
         savedText,
         savedText.normalized(QString::NormalizationForm_C));
 
-    const auto systemFace = ApplicationFonts::systemFontFace(
-        QStringLiteral("Arial"), expectedBold, false);
-    const QByteArray fullFontData = systemFace.isValid() ? systemFace.data
-        : ApplicationFonts::bundledFontData(QStringLiteral("Arial"), expectedBold, false);
+    const QByteArray fullFontData = systemFace.data;
     QVERIFY(!fullFontData.isEmpty());
     const auto sourceCharacters = textCharacterRangeInfo(sourcePath, sourceText);
     QCOMPARE(sourceCharacters.size(), sourceText.size());
@@ -2176,11 +2135,11 @@ void PDFEditControllerTest::savesVietnameseEditWithEmbeddedArial()
 
 void PDFEditControllerTest::preservesDistinctUnicodeAliasesInTrueTypeFonts()
 {
-    const QByteArray fontData = ApplicationFonts::bundledFontData(
-        QStringLiteral("Arial"), false, false);
+    const QByteArray fontData = fontWithSharedUnicodeGlyphs(
+        renamedTestFontData(QStringLiteral("TrePDFAliasFixture")));
     const QRawFont rawFont(fontData, 16.0, QFont::PreferNoHinting);
     QVERIFY(rawFont.isValid());
-    // The complete Arial program maps each pair to one outline. Distinct
+    // The fixture maps each pair to one outline. Distinct
     // ToUnicode entries must survive even though the glyph IDs are identical.
     for (const QString &pair : {QStringLiteral(" \u00a0"),
                                 QStringLiteral(";\u037e"),
@@ -2201,7 +2160,7 @@ void PDFEditControllerTest::preservesDistinctUnicodeAliasesInTrueTypeFonts()
     QVERIFY(preservesFontProgram(savedData, fontData));
 }
 
-void PDFEditControllerTest::preservesUnicodeSpacingThroughArialSaveReopen()
+void PDFEditControllerTest::preservesUnicodeSpacingThroughFontSaveReopen()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(
         QStringLiteral("unicode-spacing-source.pdf"));
@@ -2225,21 +2184,19 @@ void PDFEditControllerTest::preservesUnicodeSpacingThroughArialSaveReopen()
     controller.beginSelectedTextEdit();
     controller.updateSelectedTextPreview(expectedText);
     controller.setSelectedTextRange(0, expectedText.size());
-    controller.setSelectedFontFamily(QStringLiteral("Arial"));
+    controller.setSelectedFontFamily(testFontFamily());
     controller.finishSelectedTextEdit();
     QVERIFY(!controller.addText(0, 0.2, 0.8).isEmpty());
     controller.updateSelectedTextPreview(additionalText);
     controller.setSelectedTextRange(0, additionalText.size());
-    controller.setSelectedFontFamily(QStringLiteral("Arial"));
+    controller.setSelectedFontFamily(testFontFamily());
     controller.finishSelectedTextEdit();
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     QVERIFY2(pageText(outputPath).contains(expectedText), qPrintable(pageText(outputPath)));
     QVERIFY2(textRangesShareFont(outputPath, {expectedText, normalizedAdditionalText}),
         "Independent drafts must share one complete font, including NFC-normalized characters.");
 
-    const auto systemFace = ApplicationFonts::systemFontFace(QStringLiteral("Arial"), false, false);
-    const auto fullFontData = systemFace.isValid() ? systemFace.data
-        : ApplicationFonts::bundledFontData(QStringLiteral("Arial"), false, false);
+    const QByteArray fullFontData = testFontData();
     QVERIFY(preservesFontProgram(
         embeddedSourceFontData(outputPath, QStringLiteral("A"), 0, true), fullFontData));
 
@@ -2601,7 +2558,7 @@ void PDFEditControllerTest::preservesEmbeddedFontForFormatOnlyVietnameseEdit()
         QStringLiteral("save-embedded-format-output.pdf"));
     const QString editedText = QStringLiteral("Tiếng Việt gốc");
     const QString untouchedText = QStringLiteral("Không đổi");
-    QVERIFY(createEmbeddedArialPdf(sourcePath));
+    QVERIFY(createEmbeddedTestFontPdf(sourcePath));
 
     PDFDocument document;
     PDFEditController controller;
@@ -3770,7 +3727,7 @@ void PDFEditControllerTest::prefersGoogleForCtanFamily()
     IsolatedFontStore store;
     QVERIFY(store.fresh);
     const QString family = QStringLiteral("TeX Gyre Heros");
-    const QByteArray font = renamedBundledFontData(family);
+    const QByteArray font = renamedTestFontData(family);
     QVERIFY(!font.isEmpty());
     FontNetwork network;
     network.responses = {{fontMetadata(family)}, {fullFontStylesheet}, {font}};
@@ -3846,7 +3803,7 @@ void PDFEditControllerTest::followsCtanDirectorToMirror()
             "https://ctan.example.net/tex-archive/fonts/tex-gyre/opentype/texgyrecursor-%1.otf")
             .arg(styles.at(style)));
         network.responses.append(FontResponse{{}, 302, mirror});
-        network.responses.append(FontResponse{renamedBundledFontData(family, style & 2, style & 1)});
+        network.responses.append(FontResponse{renamedTestFontData(family, style & 2, style & 1)});
     }
     FontDownloadService service(nullptr, &network);
     QSignalSpy finished(&service, &FontDownloadService::finished);
@@ -3858,7 +3815,7 @@ void PDFEditControllerTest::followsCtanDirectorToMirror()
         QCOMPARE(network.requests.at(1 + style * 2).url().host(), QStringLiteral("mirror.ctan.org"));
         QCOMPARE(network.requests.at(2 + style * 2).url().host(), QStringLiteral("ctan.example.net"));
         QCOMPARE(ApplicationFonts::downloadedFontFace(family, style & 2, style & 1).data,
-                 renamedBundledFontData(family, style & 2, style & 1));
+                 renamedTestFontData(family, style & 2, style & 1));
     }
 }
 
@@ -4116,9 +4073,9 @@ void PDFEditControllerTest::rejectsUnsafeCtanDownloads()
     } else if (scenario == 9) {
         network.responses.append(FontResponse{QByteArrayLiteral("not a font")});
     } else if (scenario == 10) {
-        network.responses.append(FontResponse{renamedBundledFontData(QStringLiteral("Different Font"))});
+        network.responses.append(FontResponse{renamedTestFontData(QStringLiteral("Different Font"))});
     } else {
-        network.responses.append(FontResponse{renamedBundledFontData(family, true, false)});
+        network.responses.append(FontResponse{renamedTestFontData(family, true, false)});
     }
     FontDownloadService service(nullptr, &network);
     QSignalSpy finished(&service, &FontDownloadService::finished);
