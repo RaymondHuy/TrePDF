@@ -123,6 +123,10 @@
         <oldsource>Please check the header settings in the right panel, then choose Apply or Cancel before switching tabs.</oldsource>
         <translation>Bạn kiểm tra lại thiết lập đầu trang ở bảng bên phải rồi bấm Lưu nhé. Các chỉnh sửa của bạn vẫn được giữ lại.</translation>
     </message>
+    <message id="MarginPendingInputBeforeToolChange">
+        <source>Please check the settings in the right panel before changing tools. Your content is still here.</source>
+        <translation>Bạn kiểm tra lại thiết lập ở bảng bên phải trước khi đổi công cụ nhé. Nội dung vừa thêm vẫn được giữ nguyên.</translation>
+    </message>
     <message id="HeaderSaveSelectionChanged">
         <location filename="../src/Main.qml" line="203"/>
         <source>The header selection changed. Choose Save again when you are ready.</source>

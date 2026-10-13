@@ -307,6 +307,15 @@ void PDFEditControllerTest::cancelsHeaderImageAcrossUiChanges()
         }
         QTRY_VERIFY2(panel.isNull(), qPrintable(action));
         QTRY_VERIFY(!placement || !placement->property("active").toBool());
+        if (action == QLatin1String("textTool")) {
+            // Leaving Image keeps its all-pages placement as unsaved drafts.
+            for (int page = 0; page < 3; ++page) {
+                const auto drafts = controller->draftsForPage(page);
+                QCOMPARE(drafts.size(), 1);
+                QCOMPARE(drafts.constFirst().toMap().value(QStringLiteral("kind")).toString(),
+                    QStringLiteral("addedImage"));
+            }
+        }
         QVERIFY(!controller->addHeaderImage(QStringLiteral("1"), 0, 0, 20, 20));
         // Save submits the pending placement and completes asynchronously.
         if (action == QLatin1String("save"))

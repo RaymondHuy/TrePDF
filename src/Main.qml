@@ -597,9 +597,31 @@ ApplicationWindow {
         imageDialog.open()
     }
 
-    function requestHeaderSelect() {
+    function prepareHeaderTool(tool) {
         if (!activeSession || !activeDocument.loaded || tabModel.anySaving
-                || !appRibbon.marginTabActive || !prepareActiveWorkspace())
+                || !appRibbon.marginTabActive)
+            return false
+        const workspace = activeWorkspace()
+        if (workspace) {
+            const keepingPlacement = (tool === "text"
+                    && (workspace.headerTextPlacement.armed || workspace.headerTextPlacement.active))
+                || (tool === "image" && (workspace.headerImagePlacement.armed
+                    || workspace.headerImagePlacement.active || workspace.headerImagePlacement.choosing))
+                || (tool === "numbers" && (workspace.headerPageNumberPlacement.armed
+                    || workspace.headerPageNumberPlacement.active))
+            // Preserve pending content before a tool change clears its editor/panel.
+            // This creates an undoable draft only; Save still owns writing the PDF.
+            if (!keepingPlacement && !workspace.submitPendingHeaderPlacement()) {
+                //% "Please check the settings in the right panel before changing tools. Your content is still here."
+                showStatus(qsTrId("MarginPendingInputBeforeToolChange"))
+                return false
+            }
+        }
+        return prepareActiveWorkspace()
+    }
+
+    function requestHeaderSelect() {
+        if (!prepareHeaderTool("select"))
             return
         const workspace = activeWorkspace()
         if (workspace)
@@ -608,8 +630,7 @@ ApplicationWindow {
     }
 
     function requestHeaderText() {
-        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
-                || !appRibbon.marginTabActive || !prepareActiveWorkspace()) {
+        if (!prepareHeaderTool("text")) {
             return
         }
         const workspace = activeWorkspace()
@@ -618,8 +639,7 @@ ApplicationWindow {
     }
 
     function requestHeaderImage() {
-        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
-                || !appRibbon.marginTabActive || !prepareActiveWorkspace())
+        if (!prepareHeaderTool("image"))
             return
         const workspace = activeWorkspace()
         if (workspace)
@@ -627,8 +647,7 @@ ApplicationWindow {
     }
 
     function requestHeaderPageNumbers() {
-        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
-                || !appRibbon.marginTabActive || !prepareActiveWorkspace())
+        if (!prepareHeaderTool("numbers"))
             return
         const workspace = activeWorkspace()
         if (workspace)

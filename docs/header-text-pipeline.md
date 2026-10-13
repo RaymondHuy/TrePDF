@@ -66,9 +66,17 @@ header; aspect-locked resize uses the same boundary in the QML preview. Text
 uses the existing Edit reflow behavior: if newly entered content extends beyond
 the header, finishing the edit clears its Header selection; it remains editable
 through Edit. Switching away from Header removes the selection scope.
-Starting a Header placement temporarily uses Browse; clicking Select cancels
-pending placement and restores Header selection. The selection scope is transient
-and is not written into the PDF.
+Starting a Header placement temporarily uses Browse. Losing focus keeps pending
+content, formatting and geometry intact. Clicking Select or a different placement
+tool submits the current placement as an undoable, unsaved draft using its panel's
+page range before restoring selection or arming the next tool. Invalid settings
+block the tool change and retain the editor and its input. Clicking the same tool
+keeps its pending editor. Empty placement can be abandoned; Cancel and Escape
+explicitly discard pending input. This behavior is shared by Footer. The selection
+scope is transient and is not written into the PDF.
+Runtime form interaction stays disabled while this scope is active, including
+placement's Browse mode. A blank-page click must not dispatch a form mutation or
+emit a transient form-history notification that cancels pending margin input.
 
 Header Select uses the orange pointer when hovering a text candidate, as in Edit.
 Inactive Header, form and link placement MouseAreas are hidden as well as disabled:
@@ -265,9 +273,11 @@ Select all pages or a 1-based range, then Apply.
 `PDFEditController` owns the decoded full-resolution QImage. `HeaderImageOverlay.qml`
 loads only for the selected visible page, so pooling does not lose placement.
 `HeaderImagePanel.qml` owns only panel input. Main binds the file picker to the
-active session/placement and discards stale results. Image and text placement
-cancel each other. Cancel, Escape, tab/session/history/page-structure changes,
-Save and workspace destruction clear temporary input without creating history.
+active session/placement and discards stale results. Changing tools first submits
+valid placement to drafts; focus loss alone keeps the pending preview. Save also
+submits placement before writing. Cancel, Escape, session/history/page-structure
+changes and workspace destruction clear temporary input without creating history.
+Ribbon tab changes with pending content are blocked by the Save/Undo guard.
 
 `prepareHeaderImage()` accepts local files using the Edit limits (64 MiB,
 40 million pixels), applies orientation and snapshots ARGB32 pixels. Its PNG
@@ -306,8 +316,10 @@ pages; `HeaderPageNumberOverlay.qml` creates previews only for visible delegates
 `headerPageNumberText()` shares sequence generation with the backend. The preview
 uses the default Header font at 12 pt in black, at a constant physical position
 on each target page. `HeaderPageNumberPanel.qml` validates ranges before Apply.
-All three Header placement tools cancel each other. Escape, tab/session/history/
-page-structure changes and Save abandon unapplied numbering.
+Changing Header placement tools or choosing Select submits valid pending numbering
+to drafts; Save submits it before writing. Invalid settings retain the current tool.
+Escape and session/history/page-structure changes abandon unapplied numbering;
+ribbon tab changes with pending numbering require Save or cancellation.
 
 `addHeaderPageNumbers()` validates the whole sequence and uses the shared
 `addHeaderTextBatch()` transaction, including font, permission, geometry, save

@@ -242,3 +242,170 @@ void PDFEditControllerTest::footerToolsAndSaveGuardsThroughMainWindow()
     QVERIFY(noticeLoader->property("footerMode").toBool());
     controller.discardDrafts();
 }
+
+void PDFEditControllerTest::retainsMarginPlacementAcrossFocusAndToolChanges_data()
+{
+    QTest::addColumn<bool>("footer");
+    QTest::addColumn<bool>("image");
+    QTest::newRow("header-text") << false << false;
+    QTest::newRow("header-image") << false << true;
+    QTest::newRow("footer-text") << true << false;
+    QTest::newRow("footer-image") << true << true;
+}
+
+void PDFEditControllerTest::retainsMarginPlacementAcrossFocusAndToolChanges()
+{
+    QFETCH(bool, footer);
+    QFETCH(bool, image);
+    QTest::failOnWarning(QRegularExpression(QStringLiteral(".*Binding loop.*")));
+    const QString path = m_temporaryDirectory.filePath(
+        QStringLiteral("margin-focus-%1.pdf").arg(QString::fromLatin1(QTest::currentDataTag())));
+    const QString imagePath = m_temporaryDirectory.filePath(QStringLiteral("margin-focus.png"));
+    QVERIFY(footerPages(path));
+    QFile sourceFile(path);
+    QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+    const QByteArray savedSource = sourceFile.readAll();
+    sourceFile.close();
+    QImage pixels(60, 30, QImage::Format_ARGB32);
+    pixels.fill(Qt::blue);
+    QVERIFY(pixels.save(imagePath));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFileInfo(
+        QFINDTESTDATA("../src/Main.qml")).canonicalFilePath()));
+    std::unique_ptr<QObject> window(component.create());
+    QVERIFY2(window, qPrintable(component.errorString()));
+    QVERIFY(window->setProperty("visible", true));
+    QVERIFY(window->setProperty("allowWindowClose", true));
+    auto *quickWindow = qobject_cast<QQuickWindow *>(window.get());
+    auto *model = window->findChild<PDFTabModel *>();
+    auto *tabs = window->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    QVERIFY(quickWindow && model && tabs);
+    auto *session = model->open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    auto &controller = *session->editController();
+    QVERIFY(tabs->setProperty("currentIndex", footer ? 8 : 7));
+    QObject *workspace = nullptr;
+    QTRY_VERIFY((workspace = window->property("activeWorkspaceItem").value<QObject *>()));
+    QTRY_VERIFY(workspace->property("initialViewReady").toBool());
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "setZoom", Q_ARG(QVariant, 1.0)));
+    const char *request = image ? "requestHeaderImage" : "requestHeaderText";
+    const QString placementName = image ? QStringLiteral("headerImagePlacement")
+                                        : QStringLiteral("headerTextPlacement");
+    const QString panelName = image ? QStringLiteral("headerImagePanel")
+                                    : QStringLiteral("headerTextPanel");
+    const QString expectedText = QStringLiteral("Kept margin text");
+    const auto beginPlacement = [&]() {
+        if (!QMetaObject::invokeMethod(window.get(), request))
+            return false;
+        auto *placement = workspace->findChild<QObject *>(placementName);
+        if (!placement || !QMetaObject::invokeMethod(placement, "place", Q_ARG(QVariant, 0),
+                Q_ARG(QVariant, 24.0), Q_ARG(QVariant, 20.0)))
+            return false;
+        if (!image)
+            return placement->property("active").toBool();
+        auto *picker = window->findChild<QObject *>(QStringLiteral("headerImageFileDialog"));
+        if (!picker || !QMetaObject::invokeMethod(window.get(), "insertSelectedHeaderImage",
+                Q_ARG(QVariant, QUrl::fromLocalFile(imagePath))))
+            return false;
+        QMetaObject::invokeMethod(picker, "close");
+        return placement->property("active").toBool();
+    };
+    QVERIFY(beginPlacement());
+    auto *placement = workspace->findChild<QObject *>(placementName);
+    QPointer<QObject> panel;
+    QTRY_VERIFY((panel = workspace->findChild<QObject *>(panelName)));
+    QQuickItem *editor = nullptr;
+    if (!image) {
+        QTRY_VERIFY((editor = footerItem(quickWindow->contentItem(), QStringLiteral("headerInlineTextInput"))));
+        QVERIFY(editor->setProperty("text", expectedText));
+    }
+    auto *custom = panel->findChild<QObject *>(image ? QStringLiteral("headerImageCustomPagesSelector")
+                                                    : QStringLiteral("headerCustomPagesSelector"));
+    auto *range = panel->findChild<QObject *>(image ? QStringLiteral("headerImagePageRangeInput")
+                                                   : QStringLiteral("headerPageRangeInput"));
+    QVERIFY(custom && range);
+    QVERIFY(custom->setProperty("checked", true));
+    QVERIFY(range->setProperty("text", QStringLiteral("0, 4")));
+    const QString preview = placement->property("previewSource").toString();
+    const qreal x = placement->property("xPoints").toReal();
+    const qreal y = placement->property("yPoints").toReal();
+
+    // A real click in the page body and focus leaving the editor must not discard input.
+    QQuickItem *guide = nullptr;
+    QTRY_VERIFY((guide = footerItem(quickWindow->contentItem(), QStringLiteral("headerAreaOverlay"))));
+    quickWindow->contentItem()->forceActiveFocus();
+    QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
+        guide->parentItem()->mapToScene(QPointF(150, 200)).toPoint());
+    QVERIFY(placement->property("active").toBool());
+    QVERIFY(panel);
+    QVERIFY(!controller.hasDrafts());
+    if (!image)
+        QCOMPARE(editor->property("text").toString(), expectedText);
+    else
+        QCOMPARE(placement->property("previewSource").toString(), preview);
+    QCOMPARE(placement->property("xPoints").toReal(), x);
+    QCOMPARE(placement->property("yPoints").toReal(), y);
+    QVERIFY(QMetaObject::invokeMethod(window.get(), request));
+    QVERIFY(placement->property("active").toBool());
+
+    // Invalid page ranges keep the current tool and editable placement intact.
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestHeaderSelect"));
+    QVERIFY(placement->property("active").toBool());
+    QVERIFY(panel);
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.tool(), PDFEditController::BrowseTool);
+    QCOMPARE(range->property("text").toString(), QStringLiteral("0, 4"));
+    QVERIFY(!placement->property("errorText").toString().isEmpty());
+
+    // A valid tool change retains the object as an ordinary unsaved draft on its chosen pages.
+    QVERIFY(range->setProperty("text", QStringLiteral("1, 3")));
+    QVERIFY(QMetaObject::invokeMethod(window.get(), image ? "requestHeaderText" : "requestHeaderImage"));
+    QTRY_VERIFY(panel.isNull());
+    QVERIFY(!placement->property("active").toBool());
+    QVERIFY(controller.hasDrafts());
+    for (int page = 0; page < 3; ++page) {
+        const auto drafts = controller.draftsForPage(page);
+        QCOMPARE(drafts.size(), page == 1 ? 0 : 1);
+        if (drafts.isEmpty())
+            continue;
+        const QVariantMap draft = drafts.constFirst().toMap();
+        QCOMPARE(draft.value(QStringLiteral("kind")).toString(),
+            image ? QStringLiteral("addedImage") : QStringLiteral("addedText"));
+        if (!image)
+            QCOMPARE(draft.value(QStringLiteral("text")).toString(), expectedText);
+        const QRectF frame = draft.value(QStringLiteral("frameRect")).toRectF();
+        const QSizeF size = session->document()->pageSize(page);
+        QVERIFY(qAbs(frame.left() * size.width() - x) < 0.01);
+        QVERIFY(qAbs(frame.top() * size.height() - (footer ? size.height() - 100 + y : y)) < 0.01);
+    }
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestHeaderSelect"));
+    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+    QCOMPARE(sourceFile.readAll(), savedSource);
+    sourceFile.close();
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestSave"));
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.saving() && !controller.hasDrafts(), 15000);
+    for (int page = 0; page < 3; ++page) {
+        if (image) {
+            const auto saved = candidateForKind(waitForCandidates(controller, page), QStringLiteral("image"));
+            QCOMPARE(!saved.isEmpty(), page != 1);
+        } else {
+            QCOMPARE(normalizedPageText(path, page).contains(expectedText), page != 1);
+        }
+    }
+
+    // Explicit Cancel still abandons a newly placed object without creating a draft.
+    QVERIFY(beginPlacement());
+    QTRY_VERIFY((panel = workspace->findChild<QObject *>(panelName)));
+    if (!image) {
+        QTRY_VERIFY((editor = footerItem(quickWindow->contentItem(), QStringLiteral("headerInlineTextInput"))));
+        QVERIFY(editor->setProperty("text", QStringLiteral("Cancelled text")));
+    }
+    auto *cancel = panel->findChild<QObject *>(image ? QStringLiteral("headerImageCancelButton")
+                                                    : QStringLiteral("headerTextCancelButton"));
+    QVERIFY(cancel && QMetaObject::invokeMethod(cancel, "clicked"));
+    QTRY_VERIFY(panel.isNull());
+    QVERIFY(!placement->property("active").toBool());
+    QVERIFY(!controller.hasDrafts());
+}

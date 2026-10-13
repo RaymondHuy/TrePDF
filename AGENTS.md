@@ -60,8 +60,11 @@ Current features:
   `headerSelectionOnly` controller scope filters source/draft pointer hits,
   direct selection, keyboard traversal and history restoration. Move/resize
   and image rotation stay inside the header; text retains Edit reflow behavior
-  and leaves Header selection if committed content overflows. Select cancels
-  pending Header placement. Edits affect one page object and use normal
+  and leaves Header selection if committed content overflows. Losing focus retains
+  pending Header/Footer text and images. Select or a different placement tool
+  submits valid pending content to undoable, unsaved drafts using the chosen page
+  range; invalid input blocks the tool change and stays editable. Cancel/Escape
+  explicitly discards pending placement. Edits affect one page object and use normal
   Undo/Redo and Save; enabled synchronization propagates them to matching headers
   during Save. See `docs/header-text-pipeline.md`.
 
@@ -84,7 +87,8 @@ Current features:
   `prepareHeaderImage()` validates/snapshots pixels; `addHeaderImage()` in
   `PDFEditControllerHeaderText.cpp` validates every target frame before one
   undoable added-image batch. Save uses the existing image writer.
-  Cancel, tab/session/history/structure changes and Save abandon pending input.
+  Cancel, session/history/structure changes abandon pending input. Select/tool
+  changes and Save submit it first; ribbon tab guards preserve pending content.
 
 - Header > Add Text arms click placement inside the gray 100-point header.
   `HeaderTextOverlay.qml` shows an inline textbox at the clicked point, then

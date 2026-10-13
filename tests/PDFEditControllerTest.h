@@ -62,6 +62,8 @@ private slots:
     void footerNumbersKeepValuesAfterSync();
     void footerImagesCopyAndConstrainGeometry();
     void footerToolsAndSaveGuardsThroughMainWindow();
+    void retainsMarginPlacementAcrossFocusAndToolChanges_data();
+    void retainsMarginPlacementAcrossFocusAndToolChanges();
     void syncsSimilarSourceHeadersFromOriginalText();
     void syncsGroupedHeaderDraftsToCustomPagesWithUndo();
     void syncsGroupedHeaderTextLayoutAcrossDifferentFrames();
