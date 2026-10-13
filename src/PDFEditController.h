@@ -39,6 +39,7 @@ class PDFEditController : public QObject
     QML_ELEMENT
     Q_PROPERTY(PDFDocument *document READ document WRITE setDocument NOTIFY documentChanged FINAL)
     Q_PROPERTY(Tool tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
+    Q_PROPERTY(bool footerMode READ footerMode WRITE setFooterMode NOTIFY footerModeChanged FINAL)
     Q_PROPERTY(bool headerSelectionOnly READ headerSelectionOnly WRITE setHeaderSelectionOnly NOTIFY headerSelectionOnlyChanged FINAL)
     Q_PROPERTY(bool headerSyncAvailable READ headerSyncAvailable NOTIFY headerSyncChanged FINAL)
     Q_PROPERTY(bool headerSyncLoading READ headerSyncLoading NOTIFY headerSyncChanged FINAL)
@@ -244,6 +245,10 @@ public:
 
     Tool tool() const;
     void setTool(Tool tool);
+    bool footerMode() const { return m_footerMode; }
+    void setFooterMode(bool enabled);
+    Q_INVOKABLE qreal selectionTopRatio(int page) const;
+    Q_INVOKABLE qreal selectionBottomRatio(int page) const;
     bool headerSelectionOnly() const { return m_headerSelectionOnly; }
     bool headerSyncAvailable() const;
     bool headerSyncLoading() const { return m_headerSyncLoading; }
@@ -559,6 +564,7 @@ public:
 signals:
     void documentChanged();
     void toolChanged();
+    void footerModeChanged();
     void headerSelectionOnlyChanged();
     void headerSyncChanged();
     void shapeTypeChanged();
@@ -1195,7 +1201,6 @@ private:
     void clearRegisteredFonts();
     bool isDesignerManagedSourceWidget(const Candidate &candidate) const;
     bool candidateMatchesSelectionScope(const Candidate &candidate) const;
-    qreal selectionBottomRatio(int page) const;
     void notifyManagedWidgetVisibilityChanged(int page);
 
     QPointer<PDFDocument> m_document;
@@ -1203,6 +1208,7 @@ private:
     QPointer<PDFFormDesignerController> m_formDesignerController;
     Tool m_tool = BrowseTool;
     bool m_headerSelectionOnly = false;
+    bool m_footerMode = false;
     ShapeType m_shapeType = RectangleShape;
     QColor m_highlightColor;
     QColor m_underlineColor;

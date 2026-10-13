@@ -45,6 +45,21 @@ QRectF fromPoints(const QRectF &rect, const QSizeF &size)
             rect.width() / size.width(), rect.height() / size.height()};
 }
 
+QRectF inMarginPoints(const QRectF &rect, const QSizeF &size, bool footer)
+{
+    return inPoints(rect, size).translated(0.0, footer ? -qMax(0.0, size.height() - 100.0) : 0.0);
+}
+
+QRectF fromMarginPoints(const QRectF &rect, const QSizeF &size, bool footer)
+{
+    return fromPoints(rect.translated(0.0, footer ? qMax(0.0, size.height() - 100.0) : 0.0), size);
+}
+
+bool isPageNumberRole(const QString &role)
+{
+    return role == QLatin1String("pageNumber") || role == QLatin1String("footerPageNumber");
+}
+
 bool withinTolerance(qreal a, qreal b, qreal tolerance = 2.0)
 {
     return qIsFinite(a) && qIsFinite(b) && qAbs(a - b) <= tolerance;
@@ -200,6 +215,8 @@ bool PDFEditController::headerSyncDraftEligible(const Draft &draft, bool include
 {
     const Candidate &candidate = draft.candidate;
     if (!m_document || !candidate.editable || candidate.headerMetadataInvalid
+        || (!candidate.headerGroupId.isEmpty()
+            && candidate.headerRole.startsWith(QLatin1String("footer")) != m_footerMode)
         || candidate.textMarkupHitTestOnly || draft.deleted
         || !(candidate.kind == QLatin1String("text")
              || candidate.kind == QLatin1String("addedText")
@@ -215,8 +232,8 @@ bool PDFEditController::headerSyncDraftEligible(const Draft &draft, bool include
     if (!qIsFinite(size.width()) || !qIsFinite(size.height()) || size.isEmpty()
         || !validRect(draft.frameRect) || (includeContentBounds && !validRect(draft.contentBounds)))
         return false;
-    const QRectF bounds = inPoints(includeContentBounds
-        ? draft.frameRect.united(draft.contentBounds) : draft.frameRect, size);
+    const QRectF bounds = inMarginPoints(includeContentBounds
+        ? draft.frameRect.united(draft.contentBounds) : draft.frameRect, size, m_footerMode);
     return qIsFinite(bounds.x()) && qIsFinite(bounds.y())
         && qIsFinite(bounds.width()) && qIsFinite(bounds.height())
         && bounds.width() > 0 && bounds.height() > 0
@@ -427,7 +444,7 @@ bool PDFEditController::headerSyncDraftMatches(const Draft &draft, bool &pageNum
     // A valid group is authoritative and cannot accidentally absorb nearby
     // external content with identical appearance.
     if (!anchor.candidate.headerGroupId.isEmpty()) {
-        pageNumber = anchor.candidate.headerRole == QLatin1String("pageNumber");
+        pageNumber = isPageNumberRole(anchor.candidate.headerRole);
         return anchor.candidate.headerGroupId == draft.candidate.headerGroupId
             && anchor.candidate.headerRole == draft.candidate.headerRole;
     }
@@ -435,8 +452,8 @@ bool PDFEditController::headerSyncDraftMatches(const Draft &draft, bool &pageNum
         return false;
     const QSizeF anchorSize = m_document->pageSize(anchor.candidate.page);
     const QSizeF targetSize = m_document->pageSize(draft.candidate.page);
-    const QRectF a = inPoints(anchor.frameRect, anchorSize);
-    const QRectF b = inPoints(draft.frameRect, targetSize);
+    const QRectF a = inMarginPoints(anchor.frameRect, anchorSize, m_footerMode);
+    const QRectF b = inMarginPoints(draft.frameRect, targetSize, m_footerMode);
     bool romanA = false, romanB = false;
     const int numberA = text ? numberValue(anchor.text, romanA) : 0;
     const int numberB = text ? numberValue(draft.text, romanB) : 0;
@@ -519,8 +536,11 @@ void PDFEditController::collectHeaderMatches(QVector<Candidate> candidates, int 
         + matches.first().characterSpans.size() * sizeof(CharacterSpan);
     if (m_headerSyncRetainedBytes > maximumRetainedBytes) {
         cancelHeaderSync();
-        //% "There are too many matching headers. Narrow the document before trying again."
-        m_headerSyncError = qtTrId("HeaderSyncLimit");
+        m_headerSyncError = (m_footerMode
+            //% "There are too many matching footers. Narrow the document before trying again."
+            ? qtTrId("FooterSyncLimit")
+            //% "There are too many matching headers. Narrow the document before trying again."
+            : qtTrId("HeaderSyncLimit"));
         emit headerSyncChanged();
         return;
     }
@@ -538,14 +558,17 @@ void PDFEditController::findSimilarHeaders()
         return;
     }
     if (m_document->pageCount() > maximumPages) {
-        //% "There are too many matching headers. Narrow the document before trying again."
-        m_headerSyncError = qtTrId("HeaderSyncLimit");
+        m_headerSyncError = (m_footerMode
+            //% "There are too many matching footers. Narrow the document before trying again."
+            ? qtTrId("FooterSyncLimit")
+            //% "There are too many matching headers. Narrow the document before trying again."
+            : qtTrId("HeaderSyncLimit"));
         emit headerSyncChanged();
         return;
     }
     m_headerSyncRetainedBytes = 0;
     m_headerSyncRequestIndex = 0;
-    m_headerSyncPreserveNumbers = m_headerSyncBaseline.candidate.headerRole == QLatin1String("pageNumber");
+    m_headerSyncPreserveNumbers = isPageNumberRole(m_headerSyncBaseline.candidate.headerRole);
     m_headerSyncCancellation = std::make_shared<std::atomic_bool>(false);
     m_headerSyncLoading = true;
     for (int page = 0; page < m_document->pageCount(); ++page) {
@@ -573,8 +596,11 @@ void PDFEditController::scanNextHeaderPage()
         m_headerSyncReady = true;
         m_headerSyncRequests.clear();
         if (m_headerSyncMatches.isEmpty()) {
-            //% "No unambiguous matching headers were found on other pages."
-            m_headerSyncError = qtTrId("HeaderSyncNoMatches");
+            m_headerSyncError = (m_footerMode
+                //% "No unambiguous matching footers were found on other pages."
+                ? qtTrId("FooterSyncNoMatches")
+                //% "No unambiguous matching headers were found on other pages."
+                : qtTrId("HeaderSyncNoMatches"));
         }
         emit headerSyncChanged();
         return;
@@ -615,8 +641,11 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
         return false;
     QSet<int> pageFilter;
     if (!selectedPages(pages, m_document->pageCount(), pageFilter)) {
-        //% "Enter valid PDF pages, for example 1-3, 5."
-        m_headerSyncError = qtTrId("HeaderSyncInvalidPages");
+        m_headerSyncError = (m_footerMode
+            //% "Enter valid PDF pages, for example 1-3, 5."
+            ? qtTrId("FooterSyncInvalidPages")
+            //% "Enter valid PDF pages, for example 1-3, 5."
+            : qtTrId("HeaderSyncInvalidPages"));
         emit headerSyncChanged();
         return false;
     }
@@ -624,24 +653,30 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
     Draft anchor = currentHeaderSyncDraft();
     const bool deleting = draftRepresentsDeletion(anchor.candidate.kind, anchor.text, anchor.deleted);
     const QSizeF anchorSize = m_document->pageSize(anchor.candidate.page);
-    const QRectF oldFrame = inPoints(m_headerSyncBaseline.frameRect, anchorSize);
-    QRectF newFrame = inPoints(anchor.frameRect, anchorSize);
+    const QRectF oldFrame = inMarginPoints(m_headerSyncBaseline.frameRect, anchorSize, m_footerMode);
+    QRectF newFrame = inMarginPoints(anchor.frameRect, anchorSize, m_footerMode);
     const bool contentChanged = anchor.text != m_headerSyncBaseline.text;
     const bool formatChanged = !sameCharacterSpans(anchor.characterSpans, m_headerSyncBaseline.characterSpans)
         || !sameParagraphFormats(anchor.paragraphFormats, m_headerSyncBaseline.paragraphFormats);
     const bool frameResized = !withinTolerance(newFrame.width(), oldFrame.width(), 0.001)
         || !withinTolerance(newFrame.height(), oldFrame.height(), 0.001);
     const auto fail = [this]() {
-        //% "A matching header changed or the result does not fit inside the 100pt header. Find matches again or adjust the edit."
-        m_headerSyncError = qtTrId("HeaderSyncCannotApply");
+        m_headerSyncError = (m_footerMode
+            //% "A matching footer changed or the result does not fit inside the 100pt footer. Find matches again or adjust the edit."
+            ? qtTrId("FooterSyncCannotApply")
+            //% "A matching header changed or the result does not fit inside the 100pt header. Find matches again or adjust the edit."
+            : qtTrId("HeaderSyncCannotApply"));
         emit headerSyncChanged();
         return false;
     };
     // A number group copies appearance and placement only. An edited number
     // remains a local edit until the user restores its original value.
     if (!deleting && m_headerSyncPreserveNumbers && contentChanged) {
-        //% "Page numbers keep their own values. Restore this number before applying formatting or position changes."
-        m_headerSyncError = qtTrId("HeaderSyncNumberContent");
+        m_headerSyncError = (m_footerMode
+            //% "Page numbers keep their own values. Restore this number before applying formatting or position changes."
+            ? qtTrId("FooterSyncNumberContent")
+            //% "Page numbers keep their own values. Restore this number before applying formatting or position changes."
+            : qtTrId("HeaderSyncNumberContent"));
         emit headerSyncChanged();
         return false;
     }
@@ -649,7 +684,7 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
         && (contentChanged || formatChanged || frameResized);
     if (!deleting && !(reflowAnchor ? measureHeaderSyncText(anchor) : headerSyncDraftEligible(anchor)))
         return fail();
-    newFrame = inPoints(anchor.frameRect, anchorSize);
+    newFrame = inMarginPoints(anchor.frameRect, anchorSize, m_footerMode);
     qsizetype textWork = anchor.text.size();
     Command command;
     command.kind = Command::Kind::HeaderDraftBatch;
@@ -677,7 +712,7 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
             const QSizeF size = m_document->pageSize(page);
             if (size.isEmpty())
                 return fail();
-            const QRectF previous = inPoints(before.frameRect, size);
+            const QRectF previous = inMarginPoints(before.frameRect, size, m_footerMode);
             const bool text = isTextCandidateKind(before.candidate.kind);
             // Group members can retain different saved layout widths. Copy the
             // edited text's frame size so identical content wraps identically.
@@ -697,7 +732,7 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
                     targetOrigin.setY(newFrame.y());
             }
             const QRectF target(targetOrigin, targetSize);
-            after.frameRect = fromPoints(target, size);
+            after.frameRect = fromMarginPoints(target, size, m_footerMode);
             after.contentBounds = before.contentBounds.translated(after.frameRect.topLeft() - before.frameRect.topLeft());
             if (text && (contentChanged || formatChanged)) {
                 const qreal scale = anchorSize.height() / size.height();
@@ -775,8 +810,11 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
             existing != m_drafts.cend(), before, hadAfter, after});
     }
     if (command.changedDrafts.size() < 2) {
-        //% "The selected range contains no matching headers on other pages."
-        m_headerSyncError = qtTrId("HeaderSyncEmptyRange");
+        m_headerSyncError = (m_footerMode
+            //% "The selected range contains no matching footers on other pages."
+            ? qtTrId("FooterSyncEmptyRange")
+            //% "The selected range contains no matching headers on other pages."
+            : qtTrId("HeaderSyncEmptyRange"));
         emit headerSyncChanged();
         return false;
     }

@@ -9,6 +9,7 @@ QtObject {
 
     required property PDFDocument document
     required property PDFEditController editController
+    readonly property bool footerMode: editController ? editController.footerMode : false
     property bool armed: false
     property int page: -1
     readonly property bool active: page >= 0
@@ -43,8 +44,11 @@ QtObject {
             return qsTrId("HeaderPageNumbersRomanLimit")
         }
         if (lastPage - firstNumberedPage + 1 > 10000) {
-            //% "This header batch is too large. Apply it to fewer pages."
-            return qsTrId("HeaderTextBatchTooLarge")
+            return footerMode
+                //% "This footer batch is too large. Apply it to fewer pages."
+                ? qsTrId("FooterTextBatchTooLarge")
+                //% "This header batch is too large. Apply it to fewer pages."
+                : qsTrId("HeaderTextBatchTooLarge")
         }
         return ""
     }
@@ -124,6 +128,7 @@ QtObject {
     onRomanStartPageChanged: errorText = ""
     onDecimalEnabledChanged: errorText = ""
     onDecimalStartPageChanged: errorText = ""
+    onFooterModeChanged: cancel()
     onDocumentChanged: cancel()
     onEditControllerChanged: cancel()
 

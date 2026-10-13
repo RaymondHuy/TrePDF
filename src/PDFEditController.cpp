@@ -559,9 +559,36 @@ void PDFEditController::setHeaderSelectionOnly(bool enabled)
         captureHeaderSyncSelection();
 }
 
+void PDFEditController::setFooterMode(bool enabled)
+{
+    if (m_footerMode == enabled)
+        return;
+    finishSelectedFrameResize();
+    finishSelectedTextEdit();
+    cancelTextEditPreparation();
+    cancelImageCopy();
+    m_footerMode = enabled;
+    resetHeaderSync();
+    if (m_hasSelection && !candidateMatchesSelectionScope(m_selectedCandidate))
+        clearSelection();
+    emit footerModeChanged();
+    emit selectedGeometryChanged();
+    emit pageDataChanged(-1);
+    if (m_headerSelectionOnly)
+        captureHeaderSyncSelection();
+}
+
+qreal PDFEditController::selectionTopRatio(int page) const
+{
+    if (!m_headerSelectionOnly || !m_footerMode || m_tool != SelectTool)
+        return 0.0;
+    const qreal height = m_document ? m_document->pageSize(page).height() : 0.0;
+    return qIsFinite(height) && height > 0.0 ? qMax(0.0, 1.0 - 100.0 / height) : 0.0;
+}
+
 qreal PDFEditController::selectionBottomRatio(int page) const
 {
-    if (!m_headerSelectionOnly || m_tool != SelectTool) {
+    if (!m_headerSelectionOnly || m_footerMode || m_tool != SelectTool) {
         return 1.0;
     }
     const qreal height = m_document ? m_document->pageSize(page).height() : 0.0;
@@ -607,7 +634,8 @@ bool PDFEditController::candidateMatchesSelectionScope(const Candidate &candidat
     return qIsFinite(bounds.x()) && qIsFinite(bounds.y())
         && qIsFinite(bounds.width()) && qIsFinite(bounds.height())
         && bounds.width() > 0.0 && bounds.height() > 0.0
-        && bounds.left() >= -epsilon && bounds.top() >= -epsilon
+        && bounds.left() >= -epsilon
+        && bounds.top() >= selectionTopRatio(candidate.page) - epsilon
         && bounds.right() <= 1.0 + epsilon
         && bounds.bottom() <= selectionBottomRatio(candidate.page) + epsilon;
 }
@@ -817,7 +845,7 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
     ensureCacheRevision();
     if (m_headerSelectionOnly && m_tool == SelectTool
         && (!qIsFinite(x) || !qIsFinite(y) || x < 0.0 || x > 1.0
-            || y < 0.0 || y > selectionBottomRatio(page))) {
+            || y < selectionTopRatio(page) || y > selectionBottomRatio(page))) {
         return {};
     }
     const QPointF point(x, y);

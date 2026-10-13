@@ -308,6 +308,9 @@ void PDFEditControllerTest::cancelsHeaderImageAcrossUiChanges()
         QTRY_VERIFY2(panel.isNull(), qPrintable(action));
         QTRY_VERIFY(!placement || !placement->property("active").toBool());
         QVERIFY(!controller->addHeaderImage(QStringLiteral("1"), 0, 0, 20, 20));
+        // Save submits the pending placement and completes asynchronously.
+        if (action == QLatin1String("save"))
+            QTRY_VERIFY_WITH_TIMEOUT(!controller->saving() && !controller->hasDrafts(), 10000);
         if (controller->hasDrafts())
             controller->discardDrafts();
         QVERIFY(!controller->hasDrafts());

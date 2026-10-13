@@ -17,6 +17,7 @@ Rectangle {
     required property PDFFormDesignerController formDesignerController
     property bool viewTabActive: false
     property bool headerTabActive: false
+    property bool footerMode: false
     property HeaderTextPlacement headerTextPlacement: null
     property HeaderImagePlacement headerImagePlacement: null
     property HeaderPageNumberPlacement headerPageNumberPlacement: null
@@ -743,6 +744,7 @@ Rectangle {
             textSelectionController: textSelection
             viewTabActive: root.viewTabActive
             headerTabActive: root.headerTabActive
+            footerMode: root.footerMode
             headerTextPlacement: root.headerTextPlacement
             headerImagePlacement: root.headerImagePlacement
             headerPageNumberPlacement: root.headerPageNumberPlacement

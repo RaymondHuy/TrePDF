@@ -58,6 +58,10 @@ private slots:
     void selectsHeaderObjectsThroughMainWindow();
     void appliesFontFamilyThroughEditAndHeaderPanels_data();
     void appliesFontFamilyThroughEditAndHeaderPanels();
+    void footerTextPersistsAndSyncsAcrossPageSizes();
+    void footerNumbersKeepValuesAfterSync();
+    void footerImagesCopyAndConstrainGeometry();
+    void footerToolsAndSaveGuardsThroughMainWindow();
     void syncsSimilarSourceHeadersFromOriginalText();
     void syncsGroupedHeaderDraftsToCustomPagesWithUndo();
     void syncsGroupedHeaderTextLayoutAcrossDifferentFrames();

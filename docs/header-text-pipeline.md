@@ -320,3 +320,32 @@ applying again adds a new batch instead of replacing previously saved numbers.
 `tst_PDFEditControllerHeaderPageNumbers.cpp` covers restart/stop boundaries,
 Roman conversion/limits, invalid ranges and atomic geometry failure, history,
 Save As/source preservation/reopen, and Main/ribbon/placement/panel wiring.
+
+
+## Footer parity
+
+Footer reuses the Header ribbon, placement, selection, synchronization and Save
+pipeline. `PDFEditController::footerMode` chooses the last 100 PDF points instead
+of the first 100. Shared `addHeaderText`, `addHeaderImage` and
+`addHeaderPageNumbers` APIs accept band-local Y coordinates: zero is the top of
+the footer band, even when pages have different heights. Drafts and selection
+retain ordinary normalized page coordinates. Move, resize and rotation enforce
+both top and bottom bounds of the active band.
+
+The Footer tab defaults to Select and exposes text, images, page numbers and a
+separate File/Save group. Save submits pending placement and propagates enabled
+similar-footer changes before writing. Entry and exit require saved/undone
+changes, including Header-to-Footer transitions; notices name the affected tab.
+Shared QML placements are canceled on mode changes, and the save request retains
+its originating mode so an asynchronous scan cannot save a different margin.
+
+Footer groups use `footerText`, `footerImage` and `footerPageNumber` roles in the
+existing bounded `TrePDFHeader` metadata. Group matching is isolated from Header
+roles. Unmarked footers match text/style/geometry or image pixels using physical
+coordinates relative to the footer band. Copying an image in Footer preserves
+its physical size and band-local Y when pasted onto another page; destination
+bounds still apply. Roman/Arabic page-number values remain page-specific during
+format/position synchronization.
+
+`tst_PDFEditControllerFooter.cpp` covers different page heights, persistence,
+synchronization, number values, clipboard geometry, tool state and tab guards.

@@ -100,8 +100,10 @@ Current features:
   batch before creating ordinary added-text drafts inside the first 100 PDF
   points. Apply is one undoable action; Save/Save As uses the existing text
   writer, and reopened headers are ordinary independently editable page text.
-  The gray 100-point guide is presentation-only. Footer is currently an empty
-  tab. See `docs/header-text-pipeline.md` for limits and lifecycle behavior.
+  The gray 100-point guide is presentation-only. Footer shares this pipeline in
+  the last 100 PDF points, with its own tools, messages, synchronization scope
+  and Save/Undo tab guards. See `docs/header-text-pipeline.md` for limits and
+  lifecycle behavior.
 
 - Protect > Watermark adds, updates and removes managed text/image watermarks
   across selected source pages. `PDFWatermark.h/.cpp` shares bounded versioned

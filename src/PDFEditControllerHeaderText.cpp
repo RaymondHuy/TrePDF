@@ -288,13 +288,19 @@ bool PDFEditController::addHeaderText(const QString &text, const QString &pages,
     QList<int> selectedPages;
     const PageParseResult parsed = headerPages(pages, m_document->pageCount(), selectedPages);
     if (parsed == PageParseResult::Invalid) {
-        //% "Enter valid page numbers or ranges, such as 1-3, 5."
-        emit statusMessage(qtTrId("HeaderTextInvalidPages"));
+        emit statusMessage((m_footerMode
+            //% "Enter valid page numbers or ranges, such as 1-3, 5."
+            ? qtTrId("FooterTextInvalidPages")
+            //% "Enter valid page numbers or ranges, such as 1-3, 5."
+            : qtTrId("HeaderTextInvalidPages")));
         return false;
     }
     if (parsed == PageParseResult::TooLarge) {
-        //% "This header batch is too large. Apply it to fewer pages."
-        emit statusMessage(qtTrId("HeaderTextBatchTooLarge"));
+        emit statusMessage((m_footerMode
+            //% "This footer batch is too large. Apply it to fewer pages."
+            ? qtTrId("FooterTextBatchTooLarge")
+            //% "This header batch is too large. Apply it to fewer pages."
+            : qtTrId("HeaderTextBatchTooLarge")));
         return false;
     }
     return addHeaderTextBatch(selectedPages, {text}, xPoints, yPoints, widthPoints, format);
@@ -321,16 +327,25 @@ bool PDFEditController::addHeaderPageNumbers(int firstPage, int lastPage,
     switch (validatePageNumberRange(m_document->pageCount(), firstPage, lastPage,
                                     romanStartPage, decimalStartPage)) {
     case PageNumberRangeResult::Invalid:
-        //% "Choose valid start and stop pages, with Roman numerals before Arabic numbers."
-        emit statusMessage(qtTrId("HeaderPageNumbersInvalidRange"));
+        emit statusMessage((m_footerMode
+            //% "Choose valid start and stop pages, with Roman numerals before Arabic numbers."
+            ? qtTrId("FooterPageNumbersInvalidRange")
+            //% "Choose valid start and stop pages, with Roman numerals before Arabic numbers."
+            : qtTrId("HeaderPageNumbersInvalidRange")));
         return false;
     case PageNumberRangeResult::RomanLimit:
-        //% "Roman numerals support at most 3,999 numbered pages."
-        emit statusMessage(qtTrId("HeaderPageNumbersRomanLimit"));
+        emit statusMessage((m_footerMode
+            //% "Roman numerals support at most 3,999 numbered pages."
+            ? qtTrId("FooterPageNumbersRomanLimit")
+            //% "Roman numerals support at most 3,999 numbered pages."
+            : qtTrId("HeaderPageNumbersRomanLimit")));
         return false;
     case PageNumberRangeResult::TooLarge:
-        //% "This header batch is too large. Apply it to fewer pages."
-        emit statusMessage(qtTrId("HeaderTextBatchTooLarge"));
+        emit statusMessage((m_footerMode
+            //% "This footer batch is too large. Apply it to fewer pages."
+            ? qtTrId("FooterTextBatchTooLarge")
+            //% "This header batch is too large. Apply it to fewer pages."
+            : qtTrId("HeaderTextBatchTooLarge")));
         return false;
     case PageNumberRangeResult::Valid:
         break;
@@ -368,8 +383,11 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
     if (!std::isfinite(xPoints) || !std::isfinite(yPoints) || !std::isfinite(widthPoints)
         || xPoints < 0.0 || yPoints < 0.0 || widthPoints < 0.0
         || yPoints >= kHeaderHeight) {
-        //% "Choose a text position inside the first 100 pt of the page."
-        emit statusMessage(qtTrId("HeaderTextInvalidPosition"));
+        emit statusMessage((m_footerMode
+            //% "Choose a text position inside the last 100 pt of the page."
+            ? qtTrId("FooterTextInvalidPosition")
+            //% "Choose a text position inside the first 100 pt of the page."
+            : qtTrId("HeaderTextInvalidPosition")));
         return false;
     }
 
@@ -390,8 +408,11 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
             normalizedText = normalizedText.normalized(QString::NormalizationForm_C);
         }
         if (!validHeaderText(normalizedText)) {
-            //% "Enter header text using at most 700 characters, without unsupported control characters."
-            emit statusMessage(qtTrId("HeaderTextInvalidContent"));
+            emit statusMessage((m_footerMode
+                //% "Enter footer text using at most 700 characters, without unsupported control characters."
+                ? qtTrId("FooterTextInvalidContent")
+                //% "Enter header text using at most 700 characters, without unsupported control characters."
+                : qtTrId("HeaderTextInvalidContent")));
             return false;
         }
         characterWork += normalizedText.size();
@@ -402,8 +423,11 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
     if (characterWork > kMaximumHeaderCharacterWork
         || m_nextAddedObjectId > std::numeric_limits<quint64>::max()
             - static_cast<quint64>(selectedPages.size())) {
-        //% "This header batch is too large. Apply it to fewer pages."
-        emit statusMessage(qtTrId("HeaderTextBatchTooLarge"));
+        emit statusMessage((m_footerMode
+            //% "This footer batch is too large. Apply it to fewer pages."
+            ? qtTrId("FooterTextBatchTooLarge")
+            //% "This header batch is too large. Apply it to fewer pages."
+            : qtTrId("HeaderTextBatchTooLarge")));
         return false;
     }
 
@@ -442,8 +466,11 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
         || !validStyleValue(QStringLiteral("fontBold"))
         || !validStyleValue(QStringLiteral("fontItalic"))
         || !validStyleValue(QStringLiteral("fontUnderline"))) {
-        //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
-        emit statusMessage(qtTrId("HeaderTextInvalidFormat"));
+        emit statusMessage((m_footerMode
+            //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
+            ? qtTrId("FooterTextInvalidFormat")
+            //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
+            : qtTrId("HeaderTextInvalidFormat")));
         return false;
     }
     const QVariantList normalizedColors = colors.isEmpty()
@@ -452,8 +479,11 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
         ? QVariantList() : normalizedHeaderValues(texts.constFirst(), families);
     if ((!colors.isEmpty() && normalizedColors.size() != normalizedTexts.constFirst().size())
         || (!families.isEmpty() && normalizedFamilies.size() != normalizedTexts.constFirst().size())) {
-        //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
-        emit statusMessage(qtTrId("HeaderTextInvalidFormat"));
+        emit statusMessage((m_footerMode
+            //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
+            ? qtTrId("FooterTextInvalidFormat")
+            //% "Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color."
+            : qtTrId("HeaderTextInvalidFormat")));
         return false;
     }
     const bool bold = format.value(QStringLiteral("fontBold"), false).toBool();
@@ -473,8 +503,11 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
                 && ApplicationFonts::fontFaceSupportsText(entry.first, bold, italic, entry.second);
         });
     if (!fontsAvailable) {
-        //% "The selected header font or style is unavailable or does not support this text. Choose another font."
-        emit statusMessage(qtTrId("HeaderTextFontUnavailable"));
+        emit statusMessage((m_footerMode
+            //% "The selected footer font or style is unavailable or does not support this text. Choose another font."
+            ? qtTrId("FooterTextFontUnavailable")
+            //% "The selected header font or style is unavailable or does not support this text. Choose another font."
+            : qtTrId("HeaderTextFontUnavailable")));
         return false;
     }
     const QFont layoutFont = fontForDisplay(family, 100, bold, italic, underline, fontSize);
@@ -492,7 +525,9 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
     prototype.added = true;
     prototype.editable = true;
     prototype.headerGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    prototype.headerRole = pageNumbers ? QStringLiteral("pageNumber") : QStringLiteral("text");
+    prototype.headerRole = m_footerMode
+        ? (pageNumbers ? QStringLiteral("footerPageNumber") : QStringLiteral("footerText"))
+        : (pageNumbers ? QStringLiteral("pageNumber") : QStringLiteral("text"));
 
     Command command;
     command.kind = Command::Kind::ObjectDraftBatch;
@@ -522,8 +557,11 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
                 heightByWidth.insert(width, height);
         }
         if (height <= 0.0 || height > maximumHeight + 0.001) {
-            //% "Header text does not fit within the first 100 pt on page %1. Shorten the text."
-            emit statusMessage(qtTrId("HeaderTextDoesNotFit").arg(page + 1));
+            emit statusMessage((m_footerMode
+                //% "Footer text does not fit within the last 100 pt on page %1. Shorten the text."
+                ? qtTrId("FooterTextDoesNotFit")
+                //% "Header text does not fit within the first 100 pt on page %1. Shorten the text."
+                : qtTrId("HeaderTextDoesNotFit")).arg(page + 1));
             return false;
         }
 
@@ -534,7 +572,7 @@ bool PDFEditController::addHeaderTextBatch(const QList<int> &selectedPages,
         candidate.fontSizeRatio = fontSize / size.height();
         candidate.displayFontSizeRatio = candidate.fontSizeRatio;
         setInitialGeometry(candidate, QRectF(xPoints / size.width(),
-                                            yPoints / size.height(),
+                                            (yPoints + (m_footerMode ? qMax(0.0, size.height() - kHeaderHeight) : 0.0)) / size.height(),
                                             width / size.width(), height / size.height()));
         Draft draft = initialDraftForCandidate(candidate);
         setDraftText(draft, normalizedText);
@@ -670,8 +708,11 @@ bool PDFEditController::addHeaderImage(const QString &pages, qreal xPoints,
         return false;
     }
     if (m_headerImage.isNull()) {
-        //% "Choose an image to add to the header."
-        emit statusMessage(qtTrId("HeaderImageRequired"));
+        emit statusMessage((m_footerMode
+            //% "Choose an image to add to the footer."
+            ? qtTrId("FooterImageRequired")
+            //% "Choose an image to add to the header."
+            : qtTrId("HeaderImageRequired")));
         return false;
     }
     if (!std::isfinite(xPoints) || !std::isfinite(yPoints)
@@ -679,23 +720,32 @@ bool PDFEditController::addHeaderImage(const QString &pages, qreal xPoints,
         || xPoints < 0.0 || yPoints < 0.0 || widthPoints <= 0.0 || heightPoints <= 0.0
         || yPoints >= kHeaderHeight || heightPoints > kHeaderHeight - yPoints
         || quarterTurns < 0 || quarterTurns > 3) {
-        //% "Keep the image within the first 100 pt of the page."
-        emit statusMessage(qtTrId("HeaderImageInvalidPosition"));
+        emit statusMessage((m_footerMode
+            //% "Keep the image within the last 100 pt of the page."
+            ? qtTrId("FooterImageInvalidPosition")
+            //% "Keep the image within the first 100 pt of the page."
+            : qtTrId("HeaderImageInvalidPosition")));
         return false;
     }
 
     QList<int> selectedPages;
     const PageParseResult parsed = headerPages(pages, m_document->pageCount(), selectedPages);
     if (parsed == PageParseResult::Invalid) {
-        //% "Enter valid page numbers or ranges, such as 1-3, 5."
-        emit statusMessage(qtTrId("HeaderTextInvalidPages"));
+        emit statusMessage((m_footerMode
+            //% "Enter valid page numbers or ranges, such as 1-3, 5."
+            ? qtTrId("FooterTextInvalidPages")
+            //% "Enter valid page numbers or ranges, such as 1-3, 5."
+            : qtTrId("HeaderTextInvalidPages")));
         return false;
     }
     if (parsed == PageParseResult::TooLarge
         || m_nextAddedObjectId > std::numeric_limits<quint64>::max()
             - static_cast<quint64>(selectedPages.size())) {
-        //% "This header batch is too large. Apply it to fewer pages."
-        emit statusMessage(qtTrId("HeaderTextBatchTooLarge"));
+        emit statusMessage((m_footerMode
+            //% "This footer batch is too large. Apply it to fewer pages."
+            ? qtTrId("FooterTextBatchTooLarge")
+            //% "This header batch is too large. Apply it to fewer pages."
+            : qtTrId("HeaderTextBatchTooLarge")));
         return false;
     }
 
@@ -707,7 +757,7 @@ bool PDFEditController::addHeaderImage(const QString &pages, qreal xPoints,
     prototype.added = true;
     prototype.image = m_headerImage;
     prototype.headerGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    prototype.headerRole = QStringLiteral("image");
+    prototype.headerRole = m_footerMode ? QStringLiteral("footerImage") : QStringLiteral("image");
     prototype.headerImageDigest = PDFHeaderMetadata::imageDigest(m_headerImage);
 
     Command command;
@@ -720,8 +770,11 @@ bool PDFEditController::addHeaderImage(const QString &pages, qreal xPoints,
             || size.width() <= 0.0 || size.height() <= 0.0
             || widthPoints > size.width() - xPoints
             || heightPoints > qMin(kHeaderHeight, size.height()) - yPoints) {
-            //% "The header image does not fit within the first 100 pt on page %1. Resize or move it."
-            emit statusMessage(qtTrId("HeaderImageDoesNotFit").arg(page + 1));
+            emit statusMessage((m_footerMode
+                //% "The footer image does not fit within the last 100 pt on page %1. Resize or move it."
+                ? qtTrId("FooterImageDoesNotFit")
+                //% "The header image does not fit within the first 100 pt on page %1. Resize or move it."
+                : qtTrId("HeaderImageDoesNotFit")).arg(page + 1));
             return false;
         }
         Candidate candidate = prototype;
@@ -730,7 +783,7 @@ bool PDFEditController::addHeaderImage(const QString &pages, qreal xPoints,
         candidate.objectId = QStringLiteral("added-image:")
             + QString::number(candidate.addedOrder);
         setInitialGeometry(candidate, QRectF(xPoints / size.width(),
-                                            yPoints / size.height(),
+                                            (yPoints + (m_footerMode ? qMax(0.0, size.height() - kHeaderHeight) : 0.0)) / size.height(),
                                             widthPoints / size.width(),
                                             heightPoints / size.height()));
         Draft draft = initialDraftForCandidate(candidate);

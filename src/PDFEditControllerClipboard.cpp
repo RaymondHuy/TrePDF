@@ -133,7 +133,7 @@ QImage displayedImage(QImage image, int quarterTurns, const QSizeF &physicalSize
 }
 
 bool writeImageClipboard(QImage image, const QRectF &frame, const QSizeF &pageSize,
-                         bool copiedFromHeader)
+                         bool copiedFromHeader, bool copiedFromFooter)
 {
     QClipboard *clipboard = QGuiApplication::clipboard();
     if (!clipboard || image.isNull() || !finiteFrame(frame) || !finiteSize(pageSize))
@@ -145,6 +145,8 @@ bool writeImageClipboard(QImage image, const QRectF &frame, const QSizeF &pageSi
         {QStringLiteral("height"), frame.height() * pageSize.height()},
         {QStringLiteral("x"), frame.x()}, {QStringLiteral("y"), frame.y()},
         {QStringLiteral("copiedFromHeader"), copiedFromHeader},
+        {QStringLiteral("copiedFromFooter"), copiedFromFooter},
+        {QStringLiteral("footerYPoints"), frame.y() * pageSize.height() - qMax(0.0, pageSize.height() - 100.0)},
         {QStringLiteral("xPoints"), frame.x() * pageSize.width()},
         {QStringLiteral("yPoints"), frame.y() * pageSize.height()},
         {QStringLiteral("pixelWidth"), image.width()},
@@ -347,6 +349,7 @@ bool PDFEditController::copySelectedImage()
         return false;
     const Draft draft = selectedDraftForDisplay();
     const bool copiedFromHeader = m_headerSelectionOnly;
+    const bool copiedFromFooter = copiedFromHeader && m_footerMode;
     const QSizeF pageSize = m_document->pageSize(draft.candidate.page);
     const QSizeF physicalSize(draft.frameRect.width() * pageSize.width(),
                               draft.frameRect.height() * pageSize.height());
@@ -356,7 +359,7 @@ bool PDFEditController::copySelectedImage()
             && qint64(pixels.width()) * pixels.height() <= maximumCopyPixels
             && qMax(pixels.width(), pixels.height()) <= maximumCopyDimension;
         const bool copied = writeImageClipboard(preservePixels ? pixels : displayedImage(pixels,
-            draft.imageQuarterTurns, physicalSize), draft.frameRect, pageSize, copiedFromHeader);
+            draft.imageQuarterTurns, physicalSize), draft.frameRect, pageSize, copiedFromHeader, copiedFromFooter);
         emit statusMessage(imageCopyMessage(copied));
         return copied;
     }
@@ -373,12 +376,12 @@ bool PDFEditController::copySelectedImage()
     const QPointer<PDFEditController> controller(this);
     const QPointer<PDFDocument> sourceDocument(m_document);
     QRunnable *task = QRunnable::create([controller, sourceDocument, source, request, draft,
-                                       copiedFromHeader, cancellation] {
+                                       copiedFromHeader, copiedFromFooter, cancellation] {
         QImage image = renderSourceImage(request, cancellation);
         QObject *app = QCoreApplication::instance();
         if (!app || cancelled(cancellation))
             return;
-        QMetaObject::invokeMethod(app, [controller, sourceDocument, source, draft, copiedFromHeader, cancellation,
+        QMetaObject::invokeMethod(app, [controller, sourceDocument, source, draft, copiedFromHeader, copiedFromFooter, cancellation,
                                       image = std::move(image)]() mutable {
             if (!controller || cancelled(cancellation)
                 || controller->m_imageCopyCancellation != cancellation)
@@ -395,7 +398,7 @@ bool PDFEditController::copySelectedImage()
                 return;
             }
             const bool copied = writeImageClipboard(std::move(image), draft.frameRect,
-                                                    source.pageSize, copiedFromHeader);
+                                                    source.pageSize, copiedFromHeader, copiedFromFooter);
             finishImageCopy(cancellation);
             emit controller->statusMessage(imageCopyMessage(copied));
         }, Qt::QueuedConnection);
@@ -440,13 +443,15 @@ QVariantMap PDFEditController::pasteImageFromClipboard(int page)
     if (!finiteSize(pageSize))
         return {};
     const qreal availableHeight = m_headerSelectionOnly ? qMin(100.0, pageSize.height()) : pageSize.height();
+    const qreal minimumTop = m_headerSelectionOnly && m_footerMode
+        ? pageSize.height() - availableHeight : 0.0;
     qreal width = pageSize.width() * 0.25;
     qreal height = width * image.height() / image.width();
     if (height > pageSize.height() * 0.25) {
         width *= pageSize.height() * 0.25 / height;
         height = pageSize.height() * 0.25;
     }
-    QPointF topLeft((pageSize.width() - width) / 2.0, (availableHeight - height) / 2.0);
+    QPointF topLeft((pageSize.width() - width) / 2.0, minimumTop + (availableHeight - height) / 2.0);
     const QByteArray geometryBytes = mime->data(imageGeometryMime);
     if (!geometryBytes.isEmpty() && geometryBytes.size() <= 2048) {
         const QJsonObject geometry = QJsonDocument::fromJson(geometryBytes).object();
@@ -474,6 +479,11 @@ QVariantMap PDFEditController::pasteImageFromClipboard(int page)
                 && headerPosition.x() >= 0 && headerPosition.x() <= 1000000
                 && headerPosition.y() >= 0 && headerPosition.y() <= 1000000) {
                 topLeft = headerPosition;
+                const qreal footerY = geometry.value(QStringLiteral("footerYPoints")).toDouble(unknown);
+                if (geometry.value(QStringLiteral("copiedFromFooter")).toBool()
+                    && qIsFinite(footerY) && footerY >= 0.0 && footerY <= 100.0) {
+                    topLeft.setY(qMax(0.0, pageSize.height() - 100.0) + footerY);
+                }
             }
         }
     }
@@ -481,7 +491,7 @@ QVariantMap PDFEditController::pasteImageFromClipboard(int page)
     width *= fit;
     height *= fit;
     topLeft.setX(qBound(0.0, topLeft.x(), pageSize.width() - width));
-    topLeft.setY(qBound(0.0, topLeft.y(), availableHeight - height));
+    topLeft.setY(qBound(minimumTop, topLeft.y(), minimumTop + availableHeight - height));
     return addImageData(page, (topLeft.x() + width / 2.0) / pageSize.width(),
         (topLeft.y() + height / 2.0) / pageSize.height(), std::move(image), width, height);
 }

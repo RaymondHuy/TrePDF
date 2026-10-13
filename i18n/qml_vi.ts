@@ -4172,5 +4172,133 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <source>The selected range contains no matching headers on other pages.</source>
         <translation>Phạm vi đã chọn không có đầu trang tương đồng ở trang khác.</translation>
     </message>
+    <message id="AddFooterImageFailed">
+        <source>Could not add the footer image.</source>
+        <translation>Không thể thêm hình ảnh vào chân trang.</translation>
+    </message>
+    <message id="AddFooterTextFailed">
+        <source>Could not add footer text.</source>
+        <translation>Không thể thêm chữ vào chân trang.</translation>
+    </message>
+    <message id="FooterImage">
+        <source>Footer image</source>
+        <translation>Hình ảnh chân trang</translation>
+    </message>
+    <message id="FooterImageDoesNotFit">
+        <source>The footer image does not fit within the last 100 pt on page %1. Resize or move it.</source>
+        <translation>Hình ảnh chân trang không vừa vùng 100 pt ở trang %1. Hãy đổi kích thước hoặc di chuyển ảnh.</translation>
+    </message>
+    <message id="FooterImageInvalidPosition">
+        <source>Keep the image within the last 100 pt of the page.</source>
+        <translation>Giữ hình ảnh trong vùng 100 pt chân trang.</translation>
+    </message>
+    <message id="FooterImagePreviewFailed">
+        <source>Could not display the footer image. Choose the image again.</source>
+        <translation>Không thể hiển thị hình ảnh chân trang. Hãy chọn lại hình ảnh.</translation>
+    </message>
+    <message id="FooterImageRequired">
+        <source>Choose an image to add to the footer.</source>
+        <translation>Chọn hình ảnh để thêm vào chân trang.</translation>
+    </message>
+    <message id="FooterPageNumbersInvalidRange">
+        <source>Choose valid start and stop pages, with Roman numerals before Arabic numbers.</source>
+        <translation>Chọn mốc bắt đầu và dừng hợp lệ. Số La Mã phải bắt đầu trước số tự nhiên.</translation>
+    </message>
+    <message id="FooterPageNumbersRomanLimit">
+        <source>Roman numerals support at most 3,999 numbered pages.</source>
+        <translation>Số La Mã hỗ trợ tối đa 3.999 trang được đánh số.</translation>
+    </message>
+    <message id="FooterPendingInputBeforeLeaving">
+        <source>Please check the footer settings in the right panel, then choose Save again. Your changes are still here.</source>
+        <translation>Bạn kiểm tra lại thiết lập chân trang ở bảng bên phải rồi bấm Lưu nhé. Các chỉnh sửa của bạn vẫn được giữ lại.</translation>
+    </message>
+    <message id="FooterSaveSelectionChanged">
+        <source>The footer selection changed. Choose Save again when you are ready.</source>
+        <translation>Bạn đã đổi nội dung chân trang đang chọn. Khi chỉnh sửa xong, hãy bấm Lưu lại nhé.</translation>
+    </message>
+    <message id="FooterSyncCannotApply">
+        <source>A matching footer changed or the result does not fit inside the 100pt footer. Find matches again or adjust the edit.</source>
+        <translation>Một chân trang đã thay đổi hoặc kết quả vượt vùng chân trang 100pt. Hãy tìm lại hoặc điều chỉnh nội dung.</translation>
+    </message>
+    <message id="FooterSyncEmptyRange">
+        <source>The selected range contains no matching footers on other pages.</source>
+        <translation>Phạm vi đã chọn không có chân trang tương đồng ở trang khác.</translation>
+    </message>
+    <message id="FooterSyncEnabled">
+        <source>Apply to similar footers</source>
+        <translation>Áp dụng cho chân trang tương đồng</translation>
+    </message>
+    <message id="FooterSyncInvalidPages">
+        <source>Enter valid PDF pages, for example 1-3, 5.</source>
+        <translation>Nhập các trang PDF hợp lệ, ví dụ: 1-3, 5.</translation>
+    </message>
+    <message id="FooterSyncLimit">
+        <source>There are too many matching footers. Narrow the document before trying again.</source>
+        <translation>Tài liệu hoặc số chân trang phù hợp vượt giới hạn. Hãy thử với tài liệu ít trang hơn.</translation>
+    </message>
+    <message id="FooterSyncLoading">
+        <source>Finding similar footers…</source>
+        <translation>Đang tìm chân trang tương đồng…</translation>
+    </message>
+    <message id="FooterSyncNoMatches">
+        <source>No unambiguous matching footers were found on other pages.</source>
+        <translation>Không tìm thấy chân trang tương đồng đủ rõ ràng ở các trang khác.</translation>
+    </message>
+    <message id="FooterSyncNumberContent">
+        <source>Page numbers keep their own values. Restore this number before applying formatting or position changes.</source>
+        <translation>Mỗi trang giữ số riêng. Hãy khôi phục số ban đầu trước khi áp dụng thay đổi định dạng hoặc vị trí.</translation>
+    </message>
+    <message id="FooterText">
+        <source>Footer text</source>
+        <translation>Chữ chân trang</translation>
+    </message>
+    <message id="FooterTextBatchTooLarge">
+        <source>This footer batch is too large. Apply it to fewer pages.</source>
+        <translation>Số lượng chữ chân trang quá lớn. Hãy áp dụng cho ít trang hơn.</translation>
+    </message>
+    <message id="FooterTextDoesNotFit">
+        <source>Footer text does not fit within the last 100 pt on page %1. Shorten the text.</source>
+        <translation>Chữ không vừa vùng chân trang 100 pt ở trang %1. Hãy rút ngắn nội dung.</translation>
+    </message>
+    <message id="FooterTextFontUnavailable">
+        <source>The selected footer font or style is unavailable or does not support this text. Choose another font.</source>
+        <translation>Phông hoặc kiểu chữ chân trang đã chọn không khả dụng hoặc không hỗ trợ nội dung này. Hãy chọn phông khác.</translation>
+    </message>
+    <message id="FooterTextInvalidContent">
+        <source>Enter footer text using at most 700 characters, without unsupported control characters.</source>
+        <translation>Nhập tối đa 700 ký tự, không chứa ký tự điều khiển không được hỗ trợ.</translation>
+    </message>
+    <message id="FooterTextInvalidFormat">
+        <source>Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color.</source>
+        <translation>Chọn phông chữ hợp lệ, cỡ chữ nguyên từ 1 đến 512 pt và màu chữ không trong suốt.</translation>
+    </message>
+    <message id="FooterTextInvalidPages">
+        <source>Enter valid page numbers or ranges, such as 1-3, 5.</source>
+        <translation>Nhập số trang hoặc phạm vi hợp lệ, ví dụ: 1-3, 5.</translation>
+    </message>
+    <message id="FooterTextInvalidPosition">
+        <source>Choose a text position inside the last 100 pt of the page.</source>
+        <translation>Chọn vị trí chữ trong vùng chân trang 100 pt.</translation>
+    </message>
+    <message id="FooterTextPlaceholder">
+        <source>Enter footer text</source>
+        <translation>Nhập nội dung chân trang</translation>
+    </message>
+    <message id="FooterUnsavedChangesMessage">
+        <source>You have unsaved changes. Footer edits can affect multiple pages, so please save or undo all your changes before continuing.</source>
+        <translation>Tài liệu đang có thay đổi chưa lưu. Vì chỉnh sửa chân trang có thể ảnh hưởng đến nhiều trang, bạn vui lòng lưu hoặc hoàn tác toàn bộ thay đổi trước khi tiếp tục nhé.</translation>
+    </message>
+    <message id="FooterUnsavedChangesTitle">
+        <source>Before editing footers</source>
+        <translation>Trước khi chỉnh sửa chân trang</translation>
+    </message>
+    <message id="FooterUnsavedExitMessage">
+        <source>Your footer changes have not been saved yet. They may affect multiple pages, so please save or undo all changes before switching tabs. Any new footer content will be applied before saving. You can also cancel content you have not applied yet in the right panel.</source>
+        <translation>Chân trang đang có thay đổi chưa lưu và có thể ảnh hưởng đến nhiều trang. Bạn vui lòng lưu hoặc hoàn tác toàn bộ thay đổi trước khi chuyển tab nhé. Nội dung mới đang thêm sẽ được áp dụng trước khi lưu. Bạn cũng có thể bấm Hủy ở panel bên phải nếu chưa muốn thêm nội dung đó.</translation>
+    </message>
+    <message id="FooterUnsavedExitTitle">
+        <source>Before leaving Footer</source>
+        <translation>Trước khi rời Chân trang</translation>
+    </message>
 </context>
 </TS>

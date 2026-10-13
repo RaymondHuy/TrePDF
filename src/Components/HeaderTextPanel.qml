@@ -129,8 +129,11 @@ Rectangle {
 
             Label {
                 Layout.fillWidth: true
-                //% "Header text"
-                text: qsTrId("HeaderText")
+                text: root.placement.footerMode
+                    //% "Footer text"
+                    ? qsTrId("FooterText")
+                    //% "Header text"
+                    : qsTrId("HeaderText")
                 color: root.theme.ribbonTextColor
                 font.pixelSize: 17
                 font.weight: Font.DemiBold

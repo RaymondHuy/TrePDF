@@ -4173,5 +4173,133 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <source>The selected range contains no matching headers on other pages.</source>
         <translation>The selected range contains no matching headers on other pages.</translation>
     </message>
+    <message id="AddFooterImageFailed">
+        <source>Could not add the footer image.</source>
+        <translation>Could not add the footer image.</translation>
+    </message>
+    <message id="AddFooterTextFailed">
+        <source>Could not add footer text.</source>
+        <translation>Could not add footer text.</translation>
+    </message>
+    <message id="FooterImage">
+        <source>Footer image</source>
+        <translation>Footer image</translation>
+    </message>
+    <message id="FooterImageDoesNotFit">
+        <source>The footer image does not fit within the last 100 pt on page %1. Resize or move it.</source>
+        <translation>The footer image does not fit within the last 100 pt on page %1. Resize or move it.</translation>
+    </message>
+    <message id="FooterImageInvalidPosition">
+        <source>Keep the image within the last 100 pt of the page.</source>
+        <translation>Keep the image within the last 100 pt of the page.</translation>
+    </message>
+    <message id="FooterImagePreviewFailed">
+        <source>Could not display the footer image. Choose the image again.</source>
+        <translation>Could not display the footer image. Choose the image again.</translation>
+    </message>
+    <message id="FooterImageRequired">
+        <source>Choose an image to add to the footer.</source>
+        <translation>Choose an image to add to the footer.</translation>
+    </message>
+    <message id="FooterPageNumbersInvalidRange">
+        <source>Choose valid start and stop pages, with Roman numerals before Arabic numbers.</source>
+        <translation>Choose valid start and stop pages, with Roman numerals before Arabic numbers.</translation>
+    </message>
+    <message id="FooterPageNumbersRomanLimit">
+        <source>Roman numerals support at most 3,999 numbered pages.</source>
+        <translation>Roman numerals support at most 3,999 numbered pages.</translation>
+    </message>
+    <message id="FooterPendingInputBeforeLeaving">
+        <source>Please check the footer settings in the right panel, then choose Save again. Your changes are still here.</source>
+        <translation>Please check the footer settings in the right panel, then choose Save again. Your changes are still here.</translation>
+    </message>
+    <message id="FooterSaveSelectionChanged">
+        <source>The footer selection changed. Choose Save again when you are ready.</source>
+        <translation>The footer selection changed. Choose Save again when you are ready.</translation>
+    </message>
+    <message id="FooterSyncCannotApply">
+        <source>A matching footer changed or the result does not fit inside the 100pt footer. Find matches again or adjust the edit.</source>
+        <translation>A matching footer changed or the result does not fit inside the 100pt footer. Find matches again or adjust the edit.</translation>
+    </message>
+    <message id="FooterSyncEmptyRange">
+        <source>The selected range contains no matching footers on other pages.</source>
+        <translation>The selected range contains no matching footers on other pages.</translation>
+    </message>
+    <message id="FooterSyncEnabled">
+        <source>Apply to similar footers</source>
+        <translation>Apply to similar footers</translation>
+    </message>
+    <message id="FooterSyncInvalidPages">
+        <source>Enter valid PDF pages, for example 1-3, 5.</source>
+        <translation>Enter valid PDF pages, for example 1-3, 5.</translation>
+    </message>
+    <message id="FooterSyncLimit">
+        <source>There are too many matching footers. Narrow the document before trying again.</source>
+        <translation>There are too many matching footers. Narrow the document before trying again.</translation>
+    </message>
+    <message id="FooterSyncLoading">
+        <source>Finding similar footers…</source>
+        <translation>Finding similar footers…</translation>
+    </message>
+    <message id="FooterSyncNoMatches">
+        <source>No unambiguous matching footers were found on other pages.</source>
+        <translation>No unambiguous matching footers were found on other pages.</translation>
+    </message>
+    <message id="FooterSyncNumberContent">
+        <source>Page numbers keep their own values. Restore this number before applying formatting or position changes.</source>
+        <translation>Page numbers keep their own values. Restore this number before applying formatting or position changes.</translation>
+    </message>
+    <message id="FooterText">
+        <source>Footer text</source>
+        <translation>Footer text</translation>
+    </message>
+    <message id="FooterTextBatchTooLarge">
+        <source>This footer batch is too large. Apply it to fewer pages.</source>
+        <translation>This footer batch is too large. Apply it to fewer pages.</translation>
+    </message>
+    <message id="FooterTextDoesNotFit">
+        <source>Footer text does not fit within the last 100 pt on page %1. Shorten the text.</source>
+        <translation>Footer text does not fit within the last 100 pt on page %1. Shorten the text.</translation>
+    </message>
+    <message id="FooterTextFontUnavailable">
+        <source>The selected footer font or style is unavailable or does not support this text. Choose another font.</source>
+        <translation>The selected footer font or style is unavailable or does not support this text. Choose another font.</translation>
+    </message>
+    <message id="FooterTextInvalidContent">
+        <source>Enter footer text using at most 700 characters, without unsupported control characters.</source>
+        <translation>Enter footer text using at most 700 characters, without unsupported control characters.</translation>
+    </message>
+    <message id="FooterTextInvalidFormat">
+        <source>Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color.</source>
+        <translation>Choose a valid font, a whole-number size from 1 to 512 pt, and an opaque text color.</translation>
+    </message>
+    <message id="FooterTextInvalidPages">
+        <source>Enter valid page numbers or ranges, such as 1-3, 5.</source>
+        <translation>Enter valid page numbers or ranges, such as 1-3, 5.</translation>
+    </message>
+    <message id="FooterTextInvalidPosition">
+        <source>Choose a text position inside the last 100 pt of the page.</source>
+        <translation>Choose a text position inside the last 100 pt of the page.</translation>
+    </message>
+    <message id="FooterTextPlaceholder">
+        <source>Enter footer text</source>
+        <translation>Enter footer text</translation>
+    </message>
+    <message id="FooterUnsavedChangesMessage">
+        <source>You have unsaved changes. Footer edits can affect multiple pages, so please save or undo all your changes before continuing.</source>
+        <translation>You have unsaved changes. Footer edits can affect multiple pages, so please save or undo all your changes before continuing.</translation>
+    </message>
+    <message id="FooterUnsavedChangesTitle">
+        <source>Before editing footers</source>
+        <translation>Before editing footers</translation>
+    </message>
+    <message id="FooterUnsavedExitMessage">
+        <source>Your footer changes have not been saved yet. They may affect multiple pages, so please save or undo all changes before switching tabs. Any new footer content will be applied before saving. You can also cancel content you have not applied yet in the right panel.</source>
+        <translation>Your footer changes have not been saved yet. They may affect multiple pages, so please save or undo all changes before switching tabs. Any new footer content will be applied before saving. You can also cancel content you have not applied yet in the right panel.</translation>
+    </message>
+    <message id="FooterUnsavedExitTitle">
+        <source>Before leaving Footer</source>
+        <translation>Before leaving Footer</translation>
+    </message>
 </context>
 </TS>

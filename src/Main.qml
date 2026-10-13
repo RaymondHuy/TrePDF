@@ -99,7 +99,7 @@ ApplicationWindow {
         tabModel.anySaving || headerSaveRequest !== null || openingFiles || modalOperationActive
     readonly property bool imageClipboardShortcutsEnabled:
         activeDocument.loaded && !fileOpenBlocked
-        && (appRibbon.editTabActive || appRibbon.headerTabActive)
+        && (appRibbon.editTabActive || appRibbon.marginTabActive)
         && activeWorkspaceItem !== null && activeWorkspaceItem.activePaneIndex === 0
         && activeEditController.tool === PDFEditController.SelectTool
         && !activeWorkspaceHasPendingEdits
@@ -141,16 +141,17 @@ ApplicationWindow {
         return true
     }
 
-    function prepareHeaderEntry() {
+    function prepareHeaderEntry(footerMode = false) {
         if (!prepareActiveWorkspace() || (activeSession && activeSession.hasDrafts)) {
             headerEntryNoticeLoader.leavingHeader = false
+            headerEntryNoticeLoader.footerMode = footerMode
             headerEntryNoticeLoader.active = true
             return false
         }
         return true
     }
 
-    function prepareHeaderExit() {
+    function prepareHeaderExit(footerMode = false) {
         const workspace = activeWorkspace()
         // Check temporary placement before committing other inputs, whose history
         // notifications could cancel the placement before it has been applied.
@@ -160,6 +161,7 @@ ApplicationWindow {
         if ((workspace && workspace.hasPendingHeaderPlacement)
                 || !prepareActiveWorkspace() || (activeSession && activeSession.hasDrafts)) {
             headerEntryNoticeLoader.leavingHeader = true
+            headerEntryNoticeLoader.footerMode = footerMode
             headerEntryNoticeLoader.active = true
             return false
         }
@@ -171,8 +173,11 @@ ApplicationWindow {
             return
         const workspace = activeWorkspace()
         if (workspace && !workspace.submitPendingHeaderPlacement()) {
-            //% "Please check the header settings in the right panel, then choose Save again. Your changes are still here."
-            showStatus(qsTrId("HeaderPendingInputBeforeLeaving"))
+            showStatus(appRibbon.footerTabActive
+                //% "Please check the footer settings in the right panel, then choose Save again. Your changes are still here."
+                ? qsTrId("FooterPendingInputBeforeLeaving")
+                //% "Please check the header settings in the right panel, then choose Save again. Your changes are still here."
+                : qsTrId("HeaderPendingInputBeforeLeaving"))
             return
         }
         if (!prepareActiveWorkspace())
@@ -181,6 +186,7 @@ ApplicationWindow {
             session: activeSession,
             workspace: workspace,
             anchorKey: activeEditController.headerSyncKey,
+            footerMode: appRibbon.footerTabActive,
             source: activeDocument.source.toString(),
             saveAs: saveAs
         }
@@ -194,13 +200,17 @@ ApplicationWindow {
             return
         const workspace = activeWorkspace()
         if (request.session !== activeSession || request.workspace !== workspace
-                || !appRibbon.headerTabActive
+                || !appRibbon.marginTabActive
+                || request.footerMode !== appRibbon.footerTabActive
                 || !activeDocument.loaded
                 || request.source !== activeDocument.source.toString()
                 || request.anchorKey !== activeEditController.headerSyncKey) {
             headerSaveRequest = null
-            //% "The header selection changed. Choose Save again when you are ready."
-            showStatus(qsTrId("HeaderSaveSelectionChanged"))
+            showStatus(request.footerMode
+                //% "The footer selection changed. Choose Save again when you are ready."
+                ? qsTrId("FooterSaveSelectionChanged")
+                //% "The header selection changed. Choose Save again when you are ready."
+                : qsTrId("HeaderSaveSelectionChanged"))
             return
         }
         if (activeEditController.headerSyncLoading)
@@ -434,7 +444,7 @@ ApplicationWindow {
     }
 
     function requestSave() {
-        if (appRibbon.headerTabActive) {
+        if (appRibbon.marginTabActive) {
             requestHeaderSave()
             return
         }
@@ -447,7 +457,7 @@ ApplicationWindow {
     }
 
     function requestSaveAs() {
-        if (appRibbon.headerTabActive) {
+        if (appRibbon.marginTabActive) {
             requestHeaderSave(true)
             return
         }
@@ -589,7 +599,7 @@ ApplicationWindow {
 
     function requestHeaderSelect() {
         if (!activeSession || !activeDocument.loaded || tabModel.anySaving
-                || !appRibbon.headerTabActive || !prepareActiveWorkspace())
+                || !appRibbon.marginTabActive || !prepareActiveWorkspace())
             return
         const workspace = activeWorkspace()
         if (workspace)
@@ -599,7 +609,7 @@ ApplicationWindow {
 
     function requestHeaderText() {
         if (!activeSession || !activeDocument.loaded || tabModel.anySaving
-                || !appRibbon.headerTabActive || !prepareActiveWorkspace()) {
+                || !appRibbon.marginTabActive || !prepareActiveWorkspace()) {
             return
         }
         const workspace = activeWorkspace()
@@ -609,7 +619,7 @@ ApplicationWindow {
 
     function requestHeaderImage() {
         if (!activeSession || !activeDocument.loaded || tabModel.anySaving
-                || !appRibbon.headerTabActive || !prepareActiveWorkspace())
+                || !appRibbon.marginTabActive || !prepareActiveWorkspace())
             return
         const workspace = activeWorkspace()
         if (workspace)
@@ -618,7 +628,7 @@ ApplicationWindow {
 
     function requestHeaderPageNumbers() {
         if (!activeSession || !activeDocument.loaded || tabModel.anySaving
-                || !appRibbon.headerTabActive || !prepareActiveWorkspace())
+                || !appRibbon.marginTabActive || !prepareActiveWorkspace())
             return
         const workspace = activeWorkspace()
         if (workspace)
@@ -628,7 +638,7 @@ ApplicationWindow {
     function requestHeaderImageFile(placement) {
         const workspace = activeWorkspace()
         if (!workspace || workspace.headerImagePlacement !== placement
-                || !placement.choosing || !appRibbon.headerTabActive
+                || !placement.choosing || !appRibbon.marginTabActive
                 || tabModel.anySaving)
             return
         headerImagePickerPlacement = placement
@@ -653,7 +663,7 @@ ApplicationWindow {
         const workspace = activeWorkspace()
         if (placement && session === activeSession && workspace
                 && workspace.headerImagePlacement === placement
-                && placement.choosing && appRibbon.headerTabActive
+                && placement.choosing && appRibbon.marginTabActive
                 && !tabModel.anySaving)
             placement.acceptImage(source)
         else if (placement)
@@ -976,7 +986,8 @@ ApplicationWindow {
     onActiveSessionChanged: {
         headerSaveRequest = null
         headerEntryNoticeLoader.active = false
-        if (appRibbon.headerTabActive && activeSession && activeSession.hasDrafts) {
+        if (appRibbon.marginTabActive && activeSession && activeSession.hasDrafts) {
+            headerEntryNoticeLoader.footerMode = appRibbon.footerTabActive
             appRibbon.showViewTab()
             headerEntryNoticeLoader.leavingHeader = false
             headerEntryNoticeLoader.active = true
@@ -1174,6 +1185,7 @@ ApplicationWindow {
         id: headerEntryNoticeLoader
         objectName: "headerEntryNoticeLoader"
         property bool leavingHeader: false
+        property bool footerMode: false
         active: false
         sourceComponent: Popup {
             id: headerEntryNotice
@@ -1200,10 +1212,16 @@ ApplicationWindow {
                 spacing: 14
                 Label {
                     Layout.fillWidth: true
-                    //% "Before leaving Header"
-                    readonly property string exitTitle: qsTrId("HeaderUnsavedExitTitle")
-                    //% "Before editing headers"
-                    readonly property string entryTitle: qsTrId("HeaderUnsavedChangesTitle")
+                    readonly property string exitTitle: headerEntryNoticeLoader.footerMode
+                        //% "Before leaving Footer"
+                        ? qsTrId("FooterUnsavedExitTitle")
+                        //% "Before leaving Header"
+                        : qsTrId("HeaderUnsavedExitTitle")
+                    readonly property string entryTitle: headerEntryNoticeLoader.footerMode
+                        //% "Before editing footers"
+                        ? qsTrId("FooterUnsavedChangesTitle")
+                        //% "Before editing headers"
+                        : qsTrId("HeaderUnsavedChangesTitle")
                     text: headerEntryNoticeLoader.leavingHeader ? exitTitle : entryTitle
                     font.pixelSize: 18
                     font.weight: Font.DemiBold
@@ -1213,10 +1231,16 @@ ApplicationWindow {
                 Label {
                     objectName: "headerEntryNoticeMessage"
                     Layout.fillWidth: true
-                    //% "Your header changes have not been saved yet. They may affect multiple pages, so please save or undo all changes before switching tabs. Any new header content will be applied before saving. You can also cancel content you have not applied yet in the right panel."
-                    readonly property string exitMessage: qsTrId("HeaderUnsavedExitMessage")
-                    //% "You have unsaved changes. Header edits can affect multiple pages, so please save or undo all your changes before continuing."
-                    readonly property string entryMessage: qsTrId("HeaderUnsavedChangesMessage")
+                    readonly property string exitMessage: headerEntryNoticeLoader.footerMode
+                        //% "Your footer changes have not been saved yet. They may affect multiple pages, so please save or undo all changes before switching tabs. Any new footer content will be applied before saving. You can also cancel content you have not applied yet in the right panel."
+                        ? qsTrId("FooterUnsavedExitMessage")
+                        //% "Your header changes have not been saved yet. They may affect multiple pages, so please save or undo all changes before switching tabs. Any new header content will be applied before saving. You can also cancel content you have not applied yet in the right panel."
+                        : qsTrId("HeaderUnsavedExitMessage")
+                    readonly property string entryMessage: headerEntryNoticeLoader.footerMode
+                        //% "You have unsaved changes. Footer edits can affect multiple pages, so please save or undo all your changes before continuing."
+                        ? qsTrId("FooterUnsavedChangesMessage")
+                        //% "You have unsaved changes. Header edits can affect multiple pages, so please save or undo all your changes before continuing."
+                        : qsTrId("HeaderUnsavedChangesMessage")
                     text: headerEntryNoticeLoader.leavingHeader ? exitMessage : entryMessage
                     color: "#656268"
                     wrapMode: Text.Wrap
@@ -2019,8 +2043,8 @@ ApplicationWindow {
             session: window.activeSession
             anySaving: tabModel.anySaving || window.headerSaveRequest !== null
             hasPendingPanelEdits: window.activeWorkspaceHasPendingEdits
-            prepareHeaderEntry: () => window.prepareHeaderEntry()
-            prepareHeaderExit: () => window.prepareHeaderExit()
+            prepareHeaderEntry: footerMode => window.prepareHeaderEntry(footerMode)
+            prepareHeaderExit: footerMode => window.prepareHeaderExit(footerMode)
             hasPendingHeaderPlacement: window.activeWorkspaceItem !== null
                 && window.activeWorkspaceItem.hasPendingHeaderPlacement
             headerTextToolSelected: window.activeWorkspaceItem !== null
@@ -2046,7 +2070,7 @@ ApplicationWindow {
                         < window.activeDocument.pageCount
             onOpenRequested: window.requestOpen()
             onSaveRequested: {
-                if (appRibbon.headerTabActive)
+                if (appRibbon.marginTabActive)
                     window.requestHeaderSave()
                 else
                     window.requestSave()
@@ -2278,7 +2302,8 @@ ApplicationWindow {
                 theme: appTheme
                 session: window.workspaceSession
                 viewTabActive: appRibbon.viewTabActive
-                headerTabActive: appRibbon.headerTabActive
+                headerTabActive: appRibbon.marginTabActive
+                footerMode: appRibbon.footerTabActive
                 formsTabActive: appRibbon.formsTabActive
                 editTabActive: appRibbon.editTabActive
                 signTabActive: appRibbon.signTabActive

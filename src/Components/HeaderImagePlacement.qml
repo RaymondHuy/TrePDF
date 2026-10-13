@@ -9,6 +9,7 @@ QtObject {
 
     required property PDFDocument document
     required property PDFEditController editController
+    readonly property bool footerMode: editController ? editController.footerMode : false
     property bool armed: false
     property bool choosing: false
     property bool preparing: false
@@ -178,11 +179,15 @@ QtObject {
         if (succeeded) {
             cancel()
         } else if (errorText.length === 0) {
-            //% "Could not add the header image."
-            errorText = qsTrId("AddHeaderImageFailed")
+            errorText = footerMode
+                //% "Could not add the footer image."
+                ? qsTrId("AddFooterImageFailed")
+                //% "Could not add the header image."
+                : qsTrId("AddHeaderImageFailed")
         }
     }
 
+    onFooterModeChanged: cancel()
     onDocumentChanged: cancel()
     onEditControllerChanged: cancel()
     Component.onDestruction: {

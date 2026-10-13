@@ -48,6 +48,7 @@ Column {
     readonly property bool exportTabActive: root.acceptedTabIndex === 6
     readonly property bool headerTabActive: root.acceptedTabIndex === 7
     readonly property bool footerTabActive: root.acceptedTabIndex === 8
+    readonly property bool marginTabActive: headerTabActive || footerTabActive
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
         && document.loaded
@@ -111,11 +112,12 @@ Column {
         const requestedIndex = ribbonTabs.currentIndex
         if (requestedIndex === acceptedTabIndex)
             return
-        if (acceptedTabIndex === 7 && document.loaded && !prepareHeaderExit()) {
+        if (marginTabActive && document.loaded && !prepareHeaderExit(footerTabActive)) {
             ribbonTabs.setCurrentIndex(acceptedTabIndex)
             return
         }
-        if (requestedIndex === 7 && document.loaded && !prepareHeaderEntry()) {
+        if ((requestedIndex === 7 || requestedIndex === 8) && document.loaded
+                && !prepareHeaderEntry(requestedIndex === 8)) {
             ribbonTabs.setCurrentIndex(acceptedTabIndex)
             return
         }
@@ -183,12 +185,13 @@ Column {
         const signActive = activeTabIndex === 4
         const commentActive = activeTabIndex === 2
         const formsActive = activeTabIndex === 3
-        const headerActive = activeTabIndex === 7
+        const marginActive = activeTabIndex === 7 || activeTabIndex === 8
 
         if (syncedEditController && syncedEditController !== editController)
             syncedEditController.headerSelectionOnly = false
         syncedEditController = editController
-        editController.headerSelectionOnly = document.loaded && headerActive
+        editController.footerMode = activeTabIndex === 8
+        editController.headerSelectionOnly = document.loaded && marginActive
 
         if (!document.loaded || !formsActive) {
             textFieldToolSelected = false
@@ -201,7 +204,7 @@ Column {
 
         if (!document.loaded) {
             editController.tool = PDFEditController.BrowseTool
-        } else if (headerActive) {
+        } else if (marginActive) {
             editController.tool = headerPlacementPending
                 ? PDFEditController.BrowseTool : PDFEditController.SelectTool
         } else if (commentActive) {
@@ -221,7 +224,7 @@ Column {
 
     Component.onCompleted: syncEditTool()
     onHeaderPlacementPendingChanged: {
-        if (headerTabActive)
+        if (marginTabActive)
             syncEditTool()
     }
     onDocumentChanged: {
@@ -473,15 +476,18 @@ Column {
 
             RibbonGroup {
                 theme: root.theme
-                //% "Header"
-                title: qsTrId("HeaderTab")
+                title: root.footerTabActive
+                    //% "Footer"
+                    ? qsTrId("FooterTab")
+                    //% "Header"
+                    : qsTrId("HeaderTab")
 
                 RibbonButton {
-                    objectName: "headerSelectButton"
+                    objectName: root.footerTabActive ? "footerSelectButton" : "headerSelectButton"
                     theme: root.theme
                     documentLoaded: root.document.loaded
                     enabled: root.document.loaded && !root.anySaving
-                    primary: root.document.loaded && root.headerTabActive
+                    primary: root.document.loaded && root.marginTabActive
                         && !root.headerPlacementPending
                         && root.editController.tool === PDFEditController.SelectTool
                     //% "Select"
@@ -491,11 +497,11 @@ Column {
                 }
 
                 RibbonButton {
-                    objectName: "headerAddTextButton"
+                    objectName: root.footerTabActive ? "footerAddTextButton" : "headerAddTextButton"
                     theme: root.theme
                     documentLoaded: root.document.loaded
                     enabled: root.document.loaded && !root.anySaving
-                    primary: root.document.loaded && root.headerTabActive
+                    primary: root.document.loaded && root.marginTabActive
                         && root.headerTextToolSelected
                     //% "Add Text"
                     text: qsTrId("AddText")
@@ -504,11 +510,11 @@ Column {
                 }
 
                 RibbonButton {
-                    objectName: "headerAddImageButton"
+                    objectName: root.footerTabActive ? "footerAddImageButton" : "headerAddImageButton"
                     theme: root.theme
                     documentLoaded: root.document.loaded
                     enabled: root.document.loaded && !root.anySaving
-                    primary: root.document.loaded && root.headerTabActive
+                    primary: root.document.loaded && root.marginTabActive
                         && root.headerImageToolSelected
                     //% "Image"
                     text: qsTrId("Image")
@@ -517,11 +523,11 @@ Column {
                 }
 
                 RibbonButton {
-                    objectName: "headerPageNumbersButton"
+                    objectName: root.footerTabActive ? "footerPageNumbersButton" : "headerPageNumbersButton"
                     theme: root.theme
                     documentLoaded: root.document.loaded
                     enabled: root.document.loaded && !root.anySaving
-                    primary: root.document.loaded && root.headerTabActive
+                    primary: root.document.loaded && root.marginTabActive
                         && root.headerPageNumberToolSelected
                     //% "Page numbers"
                     text: qsTrId("HeaderPageNumbers")
@@ -536,7 +542,7 @@ Column {
                 title: qsTrId("File")
 
                 RibbonButton {
-                    objectName: "headerSaveButton"
+                    objectName: root.footerTabActive ? "footerSaveButton" : "headerSaveButton"
                     readonly property bool hasChanges: root.hasUnsavedChanges
                         || root.hasPendingHeaderPlacement || root.editController.textEditActive
                     theme: root.theme
@@ -718,7 +724,7 @@ Column {
                                     ? protectRibbonComponent
                                     : root.acceptedTabIndex === 6
                                         ? exportRibbonComponent
-                                        : root.acceptedTabIndex === 7
+                                        : root.marginTabActive
                                             ? headerRibbonComponent
                                             : null
         }

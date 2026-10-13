@@ -25,6 +25,7 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerFormTextPersistence.cpp
     tst_PDFEditControllerForms.cpp
     tst_PDFEditControllerImages.cpp
+    tst_PDFEditControllerFooter.cpp
     tst_PDFEditControllerHeaderImage.cpp
     tst_PDFEditControllerHeaderImageUi.cpp
     tst_PDFEditControllerHeaderPageNumbers.cpp
