@@ -159,7 +159,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=PDFIUM_PACKAGES, required=True)
     parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--deployment-target", default="17.0")
+    parser.add_argument("--deployment-target", default="18.0")
     parser.add_argument("--parallel", type=int, default=4)
     args = parser.parse_args()
     if sys.version_info < (3, 12):

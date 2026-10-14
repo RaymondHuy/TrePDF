@@ -1,6 +1,8 @@
 # QML profiling from CLion
 
-Local setup verified on macOS with Qt 6.11.0 on 2026-10-06.
+Local paths target Qt 6.12.0 on macOS. The profiling workflow below was
+verified with Qt 6.11.0 on 2026-10-06; a new profiling trace has not yet been
+recorded with Qt 6.12.0.
 
 ## Configured build and run
 
@@ -11,7 +13,7 @@ CLion has a separate local CMake profile:
 | Profile | `Debug-QMLProfiler` |
 | Build type | `Debug` |
 | Build directory | `cmake-build-debug-qml` |
-| CMake options | `-DCMAKE_CXX_FLAGS_INIT=-DQT_QML_DEBUG -DCMAKE_PREFIX_PATH=/Users/luongvanhuy/Qt/6.11.0/macos` |
+| CMake options | `-DCMAKE_CXX_FLAGS_INIT=-DQT_QML_DEBUG -DCMAKE_PREFIX_PATH=/Users/luongvanhuy/Qt/6.12.0/macos` |
 
 The profile is stored in the local `.idea/workspace.xml`. The run configuration
 is in `.run/trepdf-qml-profiler.run.xml`, with target `trepdf` and arguments:
@@ -32,7 +34,7 @@ so recreating this setup requires a fresh build directory.
 2. The app waits for a profiler because `block` is enabled. Look for
    `QML Debugger: Waiting for connection on port 3768` in the Run console.
 3. Open `/Users/luongvanhuy/Qt/Qt Creator.app` and select **Analyze > QML Profiler
-   (Attach to Waiting Application)**. Select kit **Qt 6.11.0 for macOS** and port
+   (Attach to Waiting Application)**. Select kit **Qt 6.12.0 for macOS** and port
    **3768**.
 4. Enable Profiling if recording is off, then reproduce the UI interaction.
 5. Disable Profiling and wait for the data before closing TrePDF. Save it with

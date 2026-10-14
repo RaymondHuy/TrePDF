@@ -41,6 +41,7 @@ Item {
         sourceComponent: Component {
             ScrollView {
                 id: editorScroll
+                width: editorLoader.width
                 height: Math.min(editorLoader.maximumHeightPoints,
                     Math.max(root.placement ? root.placement.initialHeightPoints : 0,
                         textInput.contentHeight + textInput.topPadding + textInput.bottomPadding))
@@ -81,6 +82,10 @@ Item {
                         synchronizing = false
                     }
 
+                    // The page frame owns the width; a wrapped placeholder must
+                    // not feed its implicit size back into the ScrollView.
+                    implicitWidth: editorLoader.width
+                    implicitHeight: contentHeight + topPadding + bottomPadding
                     width: editorScroll.availableWidth
                     padding: 0
                     topPadding: 1

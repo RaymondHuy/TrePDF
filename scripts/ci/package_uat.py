@@ -95,12 +95,17 @@ def main() -> None:
     parser.add_argument("--platform", choices=("windows-x64", "macos-arm64", "linux-x64"),
                         required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--variant", default="",
+                        help="Optional archive suffix, for example qt6.11")
     parser.add_argument("--stage", type=Path, required=True)
     parser.add_argument("--dependencies", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not re.fullmatch(r"0\.0\.[1-9][0-9]*", args.version):
         parser.error("UAT version must have the form 0.0.x, with x >= 1")
+    if args.variant and not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", args.variant):
+        parser.error("Package variant must contain only lowercase letters, digits, dots or hyphens")
+    package = args.platform + (f"-{args.variant}" if args.variant else "")
     stage = args.stage.resolve()
     manifest = json.loads((args.dependencies / "manifest.json").read_text(encoding="utf-8"))
     if manifest["platform"] != args.platform:
@@ -141,6 +146,7 @@ def main() -> None:
     metadata = {
         "version": args.version,
         "platform": args.platform,
+        "variant": args.variant,
         "commit": os.environ.get("GITHUB_SHA", "local"),
         "run_number": os.environ.get("GITHUB_RUN_NUMBER"),
         "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
@@ -161,7 +167,7 @@ def main() -> None:
             shutil.copy2(notice, destination / filename)
 
     args.output.mkdir(parents=True, exist_ok=True)
-    archive_base = args.output.resolve() / f"TrePDF-{args.version}-{args.platform}"
+    archive_base = args.output.resolve() / f"TrePDF-{args.version}-{package}"
     if args.platform == "macos-arm64":
         archive = Path(str(archive_base) + ".zip")
         # Preserve .app permissions and framework symlinks inside the ZIP.
@@ -186,7 +192,7 @@ def main() -> None:
     print(checksum, end="", flush=True)
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(summary, "a", encoding="utf-8") as stream:
-            stream.write(f"### TrePDF {args.version} — {args.platform}\n\n"
+            stream.write(f"### TrePDF {args.version} — {package}\n\n"
                          f"Package: `{archive.name}`\n\n"
                          "Release build, runtime deployment and startup smoke check passed.\n")
 

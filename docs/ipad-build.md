@@ -1,9 +1,10 @@
 # Build và thử TrePDF trên iPad
 
-TrePDF có target iPad riêng, yêu cầu iPadOS 17 trở lên. Build bằng Qt 6.11.0
+TrePDF có target iPad riêng, yêu cầu iPadOS 18 trở lên. Build bằng Qt 6.12.0
 for iOS và Xcode trên Mac. Workflow desktop `uat` và các thư viện macOS giữ
 nguyên; workflow mới là `uat-ipad`, chạy thủ công với version `0.0.x` theo số
-lần chạy của riêng workflow này. Re-run giữ version cũ.
+lần chạy của riêng workflow này. Re-run giữ version cũ. Giới hạn iPadOS 18
+theo [nền tảng được Qt 6.12 hỗ trợ](https://doc.qt.io/qt-6.12/supported-platforms.html).
 
 ## Tổ chức component theo platform
 
@@ -47,8 +48,10 @@ Account trong Xcode, kết nối iPad, Trust máy Mac và bật Developer Mode t
 iPad khi Xcode yêu cầu. Personal Team có profile hết hạn sau 7 ngày; lúc đó
 build/cài lại. Không cần Developer ID hoặc notarization của macOS.
 
-Máy hiện tại đã có Qt iOS ở `_deps/qt-ios/6.11.0/ios`, thư viện PDF ở
-`_deps/ios/device`, và project Xcode ở `build/ipad/TrePDF.xcodeproj`.
+Sau khi chạy các lệnh chuẩn bị bên dưới, Qt iOS nằm ở
+`_deps/qt-ios/6.12.0/ios`, thư viện PDF ở `_deps/ios/device`, và project
+Xcode ở `build/ipad/TrePDF.xcodeproj`. Máy Mac hiện tại chỉ nâng SDK Qt
+macOS lên 6.12.0; SDK và build iOS 6.12.0 chưa được cài hoặc kiểm chứng local.
 
 1. Mở `build/ipad/TrePDF.xcodeproj` bằng Xcode.
 2. Chọn scheme **trepdf**, target **trepdf** → **Signing & Capabilities**.
@@ -70,21 +73,21 @@ python3 -m venv _deps/ios-tools
 _deps/ios-tools/bin/python -m pip install aqtinstall==3.3.0 cmake==3.31.6 ninja==1.11.1.3
 export PATH="$PWD/_deps/ios-tools/bin:$PATH"
 
-python -m aqt install-qt mac desktop 6.11.0 clang_64 -O _deps/qt-ios -m qtshadertools qttasktree
-python -m aqt install-qt mac ios 6.11.0 ios -O _deps/qt-ios -m qtshadertools qtimageformats qttasktree
+python -m aqt install-qt mac desktop 6.12.0 clang_64 -O _deps/qt-ios -m qtshadertools qttasktree
+python -m aqt install-qt mac ios 6.12.0 ios -O _deps/qt-ios -m qtshadertools qtimageformats qttasktree
 python scripts/ci/prepare_ios_dependencies.py \
   --platform ios-device-arm64 --directory _deps/ios/device
 
 python scripts/ci/build_ios.py \
-  --qt-ios _deps/qt-ios/6.11.0/ios \
-  --qt-host _deps/qt-ios/6.11.0/macos \
+  --qt-ios _deps/qt-ios/6.12.0/ios \
+  --qt-host _deps/qt-ios/6.12.0/macos \
   --dependencies _deps/ios/device --configure-only \
   --bundle-id com.tenban.trepdf
 open build/ipad/TrePDF.xcodeproj
 ```
 
 Máy hiện tại dùng host Qt sẵn có, thay `--qt-host` bằng
-`/Users/luongvanhuy/Qt/6.11.0/macos`. Device và simulator là các platform khác
+`/Users/luongvanhuy/Qt/6.12.0/macos`. Device và simulator là các platform khác
 nhau; không dùng thư viện macOS/simulator để link bản device dù đều ARM64.
 Script dependency cũng hỗ trợ `ios-simulator-arm64` cho người có Qt simulator
 ARM64 tương thích; workflow hiện build device.
