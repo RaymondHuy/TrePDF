@@ -10,11 +10,10 @@ permissions:
 env:
   # A new manual run increments x; re-running that run retains its version.
   TREPDF_VERSION: 0.0.${{ github.run_number }}
-  QT_VERSION: '6.10.3'
 
 jobs:
   build:
-    name: ${{ matrix.platform }}
+    name: ${{ matrix.package || matrix.platform }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -24,34 +23,64 @@ jobs:
           - platform: windows-x64
             os: windows-2022
             qt-arch: win64_msvc2022_64
+            qt-version: '6.12.0'
           - platform: macos-arm64
             os: macos-15
             qt-arch: clang_64
+            qt-version: '6.12.0'
+            macos-target: '14.4'
+          - platform: macos-arm64
+            package: macos-arm64-qt6.11
+            variant: qt6.11
+            os: macos-15
+            qt-arch: clang_64
+            qt-version: '6.11.0'
+            macos-target: '13.0'
           - platform: linux-x64
             os: ubuntu-24.04
             qt-arch: linux_gcc_64
+            qt-version: '6.12.0'
     defaults:
       run:
         shell: bash
     env:
       TREPDF_PLATFORM: ${{ matrix.platform }}
+      TREPDF_PACKAGE: ${{ matrix.package || matrix.platform }}
+      TREPDF_VARIANT: ${{ matrix.variant }}
+      QT_VERSION: ${{ matrix.qt-version }}
+      MACOS_DEPLOYMENT_TARGET: ${{ matrix.macos-target }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
       - name: Set up MSVC x64
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c # v1.13.0
-        with:
-          arch: x64
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsPath = & $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $vsPath) {
+            throw 'Visual Studio 2022 with the MSVC x64 tools was not found.'
+          }
+          $previousEnvironment = @{}
+          Get-ChildItem Env: | ForEach-Object { $previousEnvironment[$_.Name] = $_.Value }
+          Import-Module (Join-Path $vsPath 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll') -ErrorAction Stop
+          Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64' -ErrorAction Stop
+          if ($env:VSCMD_ARG_TGT_ARCH -ne 'x64' -or $env:VSCMD_ARG_HOST_ARCH -ne 'x64') {
+            throw 'Visual Studio did not initialize the requested x64 toolchain.'
+          }
+          Get-Command cl.exe -ErrorAction Stop | Out-Null
+          Get-ChildItem Env: | Where-Object { $previousEnvironment[$_.Name] -cne $_.Value } | ForEach-Object {
+            "$($_.Name)=$($_.Value)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
 
       - name: Install Linux build and runtime dependencies
         if: runner.os == 'Linux'
@@ -69,12 +98,15 @@ jobs:
         run: python -m pip install 'cmake==3.31.6' 'ninja==1.11.1.3'
 
       - name: Install Qt
-        # Call the pinned implementation directly; the composite wrapper uses a floating @v4.
-        uses: jurplel/install-qt-action/action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
+        # Call the pinned implementation directly to use the Python version configured above.
+        uses: jurplel/install-qt-action/action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
         with:
           version: ${{ env.QT_VERSION }}
           arch: ${{ matrix.qt-arch }}
-          modules: qtshadertools qtimageformats
+          modules: qtshadertools qtimageformats qttasktree
+          aqtversion: '==3.3.0'
+          # Released aqt 3.3.0 cannot read the split Qt 6.12 Windows repository.
+          aqtsource: ${{ runner.os == 'Windows' && 'https://github.com/miurahr/aqtinstall/archive/076e1659807d0b362a3ed684d54c2e9c775eb9c7.zip' || '' }}
           cache: true
           install-deps: false
 
@@ -87,7 +119,7 @@ jobs:
         run: |
           options=()
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            options+=(-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0)
+            options+=(-DCMAKE_OSX_ARCHITECTURES=arm64 "-DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOS_DEPLOYMENT_TARGET")
           elif [[ "$RUNNER_OS" == "Windows" ]]; then
             options+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl "-DZLIB_ROOT=$ZLIB_ROOT")
           fi
@@ -109,19 +141,20 @@ jobs:
       - name: Deploy runtime
         run: |
           cmake --install build/uat --config Release \
-            --prefix "$PWD/build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PLATFORM"
+            --prefix "$PWD/build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE"
 
       - name: Verify and package
         run: |
           python scripts/ci/package_uat.py \
             --platform "$TREPDF_PLATFORM" --version "$TREPDF_VERSION" \
-            --stage "build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PLATFORM" \
+            --variant "$TREPDF_VARIANT" \
+            --stage "build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE" \
             --dependencies _deps/uat --output artifacts
 
       - name: Upload package
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: TrePDF-${{ env.TREPDF_VERSION }}-${{ matrix.platform }}
+          name: TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
           path: artifacts/*
           if-no-files-found: error
           compression-level: 0
