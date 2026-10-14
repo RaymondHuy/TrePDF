@@ -1112,7 +1112,7 @@ private:
                                        const TextObjectLayout &layout,
                                        const QSizeF &pageSize);
     static void readSourceTextSpacing(FPDF_PAGEOBJECT object, Candidate &candidate,
-                                      const QSizeF &pageSize);
+                                      const QSizeF &pageSize, const QString &encodedSourceText);
     static CharacterFormat characterFormatForCandidate(const Candidate &candidate);
     static CharacterFormat primaryCharacterFormat(const Draft &draft);
     bool addHeaderTextBatch(const QList<int> &pages, const QStringList &texts,
@@ -1131,7 +1131,8 @@ private:
     static bool normalizeSourceParagraphBreaks(Draft &draft,
                                                qsizetype &first, qsizetype &last);
     static void readSourceParagraphLayout(FPDF_PAGE page, FPDF_PAGEOBJECT object,
-                                          Candidate &candidate, const QSizeF &pageSize);
+                                          Candidate &candidate, const QSizeF &pageSize,
+                                          const QString &encodedSourceText);
     QVector<Candidate> restoreSourceParagraphLayouts(QVector<Candidate> candidates,
                                                      const QSizeF &pageSize) const;
     static QVector<ParagraphFormat> paragraphFormatsForText(

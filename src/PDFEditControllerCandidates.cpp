@@ -2671,8 +2671,8 @@ void PDFEditController::appendPageObjectCandidates(
 
     if (candidate.editable && textLayout != textObjectLayouts.cend()) {
         inferSourceTextSpacing(candidate, *textLayout, pageSize);
-        readSourceTextSpacing(pageObject, candidate, pageSize);
-        readSourceParagraphLayout(page, pageObject, candidate, pageSize);
+        readSourceTextSpacing(pageObject, candidate, pageSize, textLayout->encodedText);
+        readSourceParagraphLayout(page, pageObject, candidate, pageSize, textLayout->encodedText);
         if (!textLayout->positionsUnsupported && !candidate.invalidSpacingMetadata
             && candidate.spacingGroup.isEmpty() && candidate.paragraphLayoutGroup.isEmpty()) {
             // Compare complete origins after resolving the display face. Small
@@ -2864,7 +2864,8 @@ void PDFEditController::inferSourceTextSpacing(
 }
 
 void PDFEditController::readSourceTextSpacing(
-    FPDF_PAGEOBJECT object, Candidate &candidate, const QSizeF &pageSize)
+    FPDF_PAGEOBJECT object, Candidate &candidate, const QSizeF &pageSize,
+    const QString &encodedSourceText)
 {
     assertPDFiumProcessLockHeld();
     if (pageSize.isEmpty()) {
@@ -2945,14 +2946,16 @@ void PDFEditController::readSourceTextSpacing(
     }
     const QString text = QString::fromUtf8(bytes);
     // PDFium collapses repeated boundary spaces in extracted object text.
-    // The mark retains their exact count; all visible characters must match.
+    // The mark retains their exact count. Compare encoded source characters:
+    // PDFium may insert a generated space for a large TJ/cluster advance, even
+    // when the saved logical text has no space at that boundary.
     const auto visibleText = [](const QString &value) { return value.trimmed(); };
     QString encodedText = text;
     encodedText.remove(QLatin1Char('\t'));
     if (text.toUtf8() != bytes || text.size() > 32768
         || text.contains(QChar::Null) || text.contains(QLatin1Char('\n'))
         || text.contains(QLatin1Char('\r'))
-        || visibleText(encodedText) != visibleText(candidate.text)) {
+        || visibleText(encodedText) != visibleText(encodedSourceText)) {
         return;
     }
     float originOffset = 0.0F;
@@ -3020,7 +3023,8 @@ void PDFEditController::readSourceTextSpacing(
 }
 
 void PDFEditController::readSourceParagraphLayout(
-    FPDF_PAGE page, FPDF_PAGEOBJECT object, Candidate &candidate, const QSizeF &pageSize)
+    FPDF_PAGE page, FPDF_PAGEOBJECT object, Candidate &candidate, const QSizeF &pageSize,
+    const QString &encodedSourceText)
 {
     assertPDFiumProcessLockHeld();
     const int markCount = FPDFPageObj_CountMarks(object);
@@ -3085,7 +3089,7 @@ void PDFEditController::readSourceParagraphLayout(
     if (QUuid(groupId).isNull() || text.toUtf8() != bytes || text.size() != length
         || text.contains(QChar::Null) || text.contains(QLatin1Char('\n'))
         || text.contains(QLatin1Char('\r'))
-        || encoded.simplified() != candidate.text.simplified()) {
+        || encoded.simplified() != encodedSourceText.simplified()) {
         return;
     }
     candidate.paragraphLayoutGroup = groupId;

@@ -1,6 +1,9 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 
 using namespace PDFEditControllerTestSupport;
@@ -18,6 +21,44 @@ bool createPositionedTextPdf(const QString &path, const QByteArray &content)
                    "/Encoding /WinAnsiEncoding >>"),
         QByteArray("<< /Length ") + QByteArray::number(content.size())
             + " >>\nstream\n" + content + "endstream"});
+}
+
+QByteArray managedNumericColumnContent(bool paragraphLayout, bool encodedSpace = false)
+{
+    // Only the two digits are semantic text. PDFium generates a separator for
+    // their large TJ displacement, as it does for a saved spreadsheet column.
+    const QByteArray spacingRuns("[[0,1,0,0,47.3],[1,1,0,0,0]]");
+    QByteArray content = QByteArrayLiteral(
+        "/TrePDFTextSpacing << /Version 2 "
+        "/Group (394a1c09-0c17-4ac8-a23b-584419059e40) "
+        "/Index 0 /Count 1 /Start 0 /LetterSpacing 0 /WordSpacing 0 "
+        "/SourceAdvance 47.3 /Text <3131> /SpacingRuns <")
+        + spacingRuns.toHex() + "> >> BDC\n";
+    if (paragraphLayout) {
+        const QJsonObject model{
+            {QStringLiteral("text"), QStringLiteral("11")},
+            {QStringLiteral("paragraphs"), QJsonArray{QJsonObject{
+                {QStringLiteral("start"), 0}, {QStringLiteral("length"), 2},
+                {QStringLiteral("alignment"), QStringLiteral("left")},
+                {QStringLiteral("lineSpacing"), 1.0},
+                {QStringLiteral("spaceBeforeRatio"), 0.0},
+                {QStringLiteral("spaceAfterRatio"), 0.0}}}},
+            {QStringLiteral("originOffset"), QJsonArray{0.0, 0.0}},
+            {QStringLiteral("frameOffset"),
+                QJsonArray{0.0, -10.0 / 842.0, 70.0 / 595.0, 14.0 / 842.0}}};
+        content += QByteArrayLiteral(
+            "/TrePDFParagraphLayout << /Version 1 "
+            "/Group (6ecbb0b9-dbe7-44f4-b533-f93903f64fa1) "
+            "/Index 0 /Count 1 /Start 0 /Length 2 /Text <3131> /Model <")
+            + QJsonDocument(model).toJson(QJsonDocument::Compact).toHex() + "> >> BDC\n";
+    }
+    content += encodedSpace
+        ? "BT /F1 11 Tf 1 0 0 1 72 740 Tm [(1 ) -4050 (1)] TJ ET\n"
+        : "BT /F1 11 Tf 1 0 0 1 72 740 Tm [(1) -4300 (1)] TJ ET\n";
+    if (paragraphLayout)
+        content += "EMC\n";
+    content += "EMC\n";
+    return content;
 }
 
 bool createPositionedUnicodeTextPdf(const QString &path, const QString &text,
@@ -87,7 +128,8 @@ bool createPositionedUnicodeTextPdf(const QString &path, const QString &text,
         stream(toUnicode)});
 }
 
-QVector<qreal> visibleCharacterOrigins(const QString &path)
+QVector<qreal> visibleCharacterOrigins(const QString &path,
+                                     const QRectF &normalizedFrame = {})
 {
     PDFiumProcessLock lock;
     QVector<qreal> origins;
@@ -106,6 +148,10 @@ QVector<qreal> visibleCharacterOrigins(const QString &path)
         if (FPDFText_IsGenerated(textPage, index) == 1 || character.isSpace()) continue;
         double x = 0.0, y = 0.0;
         if (!FPDFText_GetCharOrigin(textPage, index, &x, &y)) return {};
+        if (!normalizedFrame.isEmpty()
+            && !normalizedFrame.contains(QPointF(x / FPDF_GetPageWidthF(page),
+                1.0 - y / FPDF_GetPageHeightF(page))))
+            continue;
         origins.append(x);
     }
     return origins;
@@ -998,6 +1044,233 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
         QVERIFY(qAbs(secondOrigins[index] - editorOrigins[index]) < 0.15);
     for (int index = 0; index < originalOrigins.size(); ++index)
         QVERIFY(qAbs(secondOrigins[index] - originalOrigins[index]) < 0.15);
+}
+
+void PDFEditControllerTest::preservesNumericColumnSpacingThroughEditorAndSave_data()
+{
+    QTest::addColumn<QByteArray>("content");
+    QTest::addColumn<QString>("expectedText");
+    QTest::addColumn<qreal>("zoom");
+    const QByteArray generated(
+        "BT /F1 11 Tf 1 0 0 1 72 740 Tm [(1) -4300 (1)] TJ ET\n");
+    QTest::newRow("generated-space-75-percent")
+        << generated << QStringLiteral("1 1") << 0.75;
+    QTest::newRow("generated-space-155-percent")
+        << generated << QStringLiteral("1 1") << 1.55;
+    QTest::newRow("encoded-space")
+        << QByteArray("BT /F1 11 Tf 1 0 0 1 72 740 Tm [(1 ) -4050 (1)] TJ ET\n")
+        << QStringLiteral("1 1") << 1.0;
+    QTest::newRow("managed-spacing-with-generated-space")
+        << managedNumericColumnContent(false) << QStringLiteral("11") << 1.55;
+    QTest::newRow("managed-paragraph-with-generated-space")
+        << managedNumericColumnContent(true) << QStringLiteral("11") << 0.75;
+    QByteArray rows;
+    QStringList lines;
+    for (int number = 1; number <= 9; ++number) {
+        const QByteArray digit = QByteArray::number(number);
+        rows += "BT /F1 11 Tf 1 0 0 1 72 "
+            + QByteArray::number(740.0 - (number - 1) * 13.56, 'f', 2)
+            + " Tm [(" + digit + ") -4300 (" + digit + ")";
+        QString line = QString::number(number) + QLatin1Char(' ') + QString::number(number);
+        if (number == 2) {
+            rows += " -300 (1)";
+            line += QStringLiteral(" 1");
+        }
+        rows += "] TJ ET\n";
+        lines.append(line);
+    }
+    QTest::newRow("nine-numeric-rows") << rows << lines.join(QLatin1Char('\n')) << 1.55;
+    // The optional real-document probe uses a temporary copy and Save As only.
+    QTest::newRow("external-pdf") << QByteArray() << QString() << 1.0;
+}
+
+void PDFEditControllerTest::preservesNumericColumnSpacingThroughEditorAndSave()
+{
+    QFETCH(QByteArray, content);
+    QFETCH(QString, expectedText);
+    QFETCH(qreal, zoom);
+    const QString tag = QString::fromLatin1(QTest::currentDataTag());
+    const QString sourcePath = m_temporaryDirectory.filePath(tag + QStringLiteral("-columns.pdf"));
+    const QString firstPath = m_temporaryDirectory.filePath(tag + QStringLiteral("-columns-color.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(tag + QStringLiteral("-columns-typed.pdf"));
+    if (content.isEmpty()) {
+        const QString external = qEnvironmentVariable("TREPDF_TEST_COLUMN_SPACING_PDF");
+        if (external.isEmpty())
+            QSKIP("Set TREPDF_TEST_COLUMN_SPACING_PDF to Book3.pdf for this probe.");
+        QVERIFY(QFile::copy(external, sourcePath));
+    } else {
+        QVERIFY(createPositionedTextPdf(sourcePath, content));
+    }
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QVariantMap candidate;
+    if (expectedText.isEmpty()) {
+        for (const QVariant &value : candidates) {
+            const QVariantMap entry = value.toMap();
+            const QString text = entry.value(QStringLiteral("text")).toString();
+            QString digits = text;
+            digits.remove(QLatin1Char(' '));
+            if (digits.startsWith(QStringLiteral("11\n221\n"))) {
+                candidate = entry;
+                expectedText = text;
+                break;
+            }
+        }
+    } else {
+        candidate = candidateForText(candidates, expectedText);
+    }
+    QVERIFY2(!candidate.isEmpty(), "Numeric source rows must remain available as editable text");
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QSizeF pageSize = document.pageSize(0);
+    // Include the baseline and a short appended number while excluding lower
+    // source paragraphs in the external fixture.
+    const QRectF sourceFrame = controller.selectedFrameRect();
+    const QRectF originFilter = sourceFrame.adjusted(
+        -1.0 / pageSize.width(), -1.0 / pageSize.height(),
+        30.0 / pageSize.width(), 1.0 / pageSize.height());
+    const QVector<qreal> sourceOrigins = visibleCharacterOrigins(sourcePath, originFilter);
+    QString visible = expectedText;
+    visible.remove(QRegularExpression(QStringLiteral("\\s")));
+    QCOMPARE(sourceOrigins.size(), visible.size());
+    QVERIFY(sourceOrigins.size() >= 2);
+    QVERIFY2(sourceOrigins[1] - sourceOrigins[0] > 40.0,
+             "The fixture must have a real column-sized horizontal gap");
+    const QVariantList originalSpans = controller.selectedCharacterSpans();
+
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false},
+        {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), zoom},
+        {QStringLiteral("width"), pageSize.width() * zoom},
+        {QStringLiteral("height"), pageSize.height() * zoom}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    QQuickWindow window;
+    window.resize(qCeil(pageSize.width() * zoom), qCeil(pageSize.height() * zoom));
+    qobject_cast<QQuickItem *>(overlay.get())->setParentItem(window.contentItem());
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
+                                     Q_ARG(QVariant, QVariant(candidate))));
+    QObject *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = child;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QTRY_COMPARE(textDocument->toPlainText(), expectedText);
+    QTRY_COMPARE(editor->property("lineCount").toInt(), expectedText.count(QLatin1Char('\n')) + 1);
+    const auto editorOrigins = [&]() {
+        QVector<qreal> origins;
+        const qreal originX = controller.selectedOriginX() * pageSize.width();
+        for (QTextBlock block = textDocument->begin(); block.isValid(); block = block.next()) {
+            QTextLayout *layout = block.layout();
+            if (!layout || layout->lineCount() != 1)
+                return QVector<qreal>();
+            const QTextLine line = layout->lineAt(0);
+            const QString text = block.text();
+            for (int index = 0; index < text.size(); ++index) {
+                if (!text.at(index).isSpace())
+                    origins.append(originX + line.cursorToX(index));
+            }
+        }
+        return origins;
+    };
+    QString originMismatch;
+    const auto originsMatch = [&](const QVector<qreal> &actual,
+                                  const QVector<qreal> &expected) {
+        originMismatch.clear();
+        if (actual.size() != expected.size()) {
+            originMismatch = QStringLiteral("Expected %1 column glyphs, got %2")
+                .arg(expected.size()).arg(actual.size());
+            return false;
+        }
+        for (qsizetype index = 0; index < actual.size(); ++index) {
+            if (!qIsFinite(actual[index])
+                || qAbs(actual[index] - expected[index]) >= 0.15) {
+                originMismatch = QStringLiteral("Column glyph %1: expected x=%2, actual x=%3")
+                    .arg(index).arg(expected[index]).arg(actual[index]);
+                return false;
+            }
+        }
+        return true;
+    };
+    QVERIFY2(originsMatch(editorOrigins(), sourceOrigins), qPrintable(originMismatch));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QCOMPARE(controller.selectedFrameRect(), sourceFrame);
+
+    // A color change forces replacement of the source text instead of allowing
+    // a no-op save to pass through the original PDF objects.
+    controller.setSelectedColor(Qt::blue);
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(firstPath)));
+    QVERIFY2(originsMatch(visibleCharacterOrigins(firstPath, originFilter), sourceOrigins),
+             qPrintable(originMismatch));
+    const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), expectedText);
+    QVERIFY(!reopened.isEmpty());
+    QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
+                                     Q_ARG(QVariant, QVariant(reopened))));
+    QTRY_COMPARE(textDocument->toPlainText(), expectedText);
+    QVERIFY2(originsMatch(editorOrigins(), sourceOrigins), qPrintable(originMismatch));
+    auto *editorItem = qobject_cast<QQuickItem *>(editor);
+    QVERIFY(editorItem);
+    editorItem->forceActiveFocus();
+    QTRY_VERIFY(editorItem->hasActiveFocus());
+    QVERIFY(editor->setProperty("cursorPosition", expectedText.size()));
+    QTest::keyClick(&window, Qt::Key_1);
+    QTRY_COMPARE(textDocument->toPlainText(), expectedText + QLatin1Char('1'));
+    QTRY_COMPARE(controller.selectedText(), expectedText + QLatin1Char('1'));
+    const QVector<qreal> typedOrigins = editorOrigins();
+    QCOMPARE(typedOrigins.size(), sourceOrigins.size() + 1);
+    QVERIFY2(originsMatch(typedOrigins.mid(0, sourceOrigins.size()), sourceOrigins),
+             qPrintable(originMismatch));
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(secondPath)));
+    QVERIFY2(originsMatch(visibleCharacterOrigins(secondPath, originFilter), typedOrigins),
+             qPrintable(originMismatch));
+}
+
+void PDFEditControllerTest::rejectsNumericColumnMetadataThatOmitsEncodedSpace()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(
+        QStringLiteral("column-metadata-omits-encoded-space.pdf"));
+    // The metadata says "11", but the PDF actually encodes "1 1". Accepting
+    // generated separators must not weaken validation of literal source text.
+    QVERIFY(createPositionedTextPdf(sourcePath, managedNumericColumnContent(true, true)));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QVERIFY(candidateForText(candidates, QStringLiteral("11")).isEmpty());
+    const QVariantMap candidate = candidateForText(candidates, QStringLiteral("1 1"));
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(!candidate.value(QStringLiteral("objectId")).toString()
+                 .startsWith(QLatin1String("paragraph-layout:")));
 }
 
 void PDFEditControllerTest::rejectsDamagedSourceClusterMetadata()

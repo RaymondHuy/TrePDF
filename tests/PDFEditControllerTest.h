@@ -302,6 +302,9 @@ private slots:
     void rejectsIrregularSourceTextSpacing();
     void preservesSourceClusterPositionsThroughEditorAndSave_data();
     void preservesSourceClusterPositionsThroughEditorAndSave();
+    void preservesNumericColumnSpacingThroughEditorAndSave_data();
+    void preservesNumericColumnSpacingThroughEditorAndSave();
+    void rejectsNumericColumnMetadataThatOmitsEncodedSpace();
     void editsSourceClusterSpacingWithUndo();
     void rejectsDamagedSourceClusterMetadata();
     void editsSpacingInSelectedRangeAndAtCaret();

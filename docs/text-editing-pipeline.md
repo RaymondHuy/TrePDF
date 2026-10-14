@@ -969,6 +969,13 @@ rồi ghép lại các part của cùng dòng; metadata lỗi hoặc vượt gi�
 coi là spacing tin cậy. Đây là dữ liệu hỗ trợ editor: PDF vẫn hiển thị bằng text
 object và vị trí chuẩn, không phụ thuộc TrePDF để render.
 
+Khi đối chiếu text trong hai mark này, scanner dùng ký tự thực sự được mã hóa
+trong object, bỏ qua separator do PDFium tự suy diễn từ khoảng dịch `TJ` lớn.
+Ví dụ hai số ở hai cột có logical text `11` vẫn giữ vị trí riêng, dù PDFium
+trích xuất thành `1 1`. Space thật trong nội dung vẫn được kiểm tra; không xóa
+mọi khoảng trắng để chấp nhận metadata. Quy tắc này giữ spacing khi mở lại
+và Edit các bảng đã lưu bằng TrePDF, bao gồm ca `Book3.pdf`.
+
 Trong nhánh layout có spacing hoặc paragraph metadata, text Latin/Common chạy
 trái sang phải giữ vị trí từng cụm kể cả khi spacing bằng 0. Các ký tự đơn giản
 cùng font/style được gom vào một text object và dùng `FPDFText_SetPositions()`
