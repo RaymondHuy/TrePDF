@@ -536,6 +536,10 @@ For manual Windows, macOS Apple Silicon and Linux packages from GitHub Actions,
 see [the UAT workflow guide](docs/github-uat.md). The `uat` workflow assigns
 versions `0.0.1`, `0.0.2`, and so on to new manual runs.
 
+The configured Qt 6.12.0 macOS build requires macOS 14.4 or newer. UAT also
+provides `macos-arm64-qt6.11`, built with Qt 6.11.0 for macOS 13 or newer.
+Both macOS packages are for Apple Silicon (M1 or newer).
+
 Install Qt 6.8 or newer and provide a PDFium build that contains `fpdfview.h`
 and the `pdfium` library. Like PDFium, qpdf 12.4.1 is bundled as a prebuilt macOS
 arm64 library with public headers under `third_party/qpdf` (macOS 13 or newer).
@@ -552,7 +556,7 @@ provenance, checksums, and offline rebuild instructions.
 
 ```sh
 cmake -S . -B build \
-  -DQt6_DIR=/Users/luongvanhuy/Qt/6.11.0/macos/lib/cmake/Qt6 \
+  -DQt6_DIR=/Users/luongvanhuy/Qt/6.12.0/macos/lib/cmake/Qt6 \
   -DPDFium_ROOT=third_party/pdfium
 cmake --build build
 ```
@@ -574,7 +578,7 @@ libraries stay in ignored local files; the macOS setup below is unchanged.
 Qt is already configured for this local SDK:
 
 ```sh
-/Users/luongvanhuy/Qt/6.11.0/macos
+/Users/luongvanhuy/Qt/6.12.0/macos
 ```
 
 PDFium is configured from `third_party/pdfium` and qpdf from `third_party/qpdf`.

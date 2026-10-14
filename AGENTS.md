@@ -710,9 +710,9 @@ Current features:
 
 This project is configured for the following local SDK:
 
-- Qt prefix: `/Users/luongvanhuy/Qt/6.11.0/macos`
-- `Qt6_DIR`: `/Users/luongvanhuy/Qt/6.11.0/macos/lib/cmake/Qt6`
-- `qmake`: `/Users/luongvanhuy/Qt/6.11.0/macos/bin/qmake`
+- Qt prefix: `/Users/luongvanhuy/Qt/6.12.0/macos`
+- `Qt6_DIR`: `/Users/luongvanhuy/Qt/6.12.0/macos/lib/cmake/Qt6`
+- `qmake`: `/Users/luongvanhuy/Qt/6.12.0/macos/bin/qmake`
 - PDFium root: `<repo>/third_party/pdfium`
 - qpdf root: `<repo>/third_party/qpdf` (override with `QPDF_ROOT`)
 - CLion: `/Applications/CLion.app`

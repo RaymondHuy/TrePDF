@@ -71,10 +71,14 @@ def main() -> None:
     args.build = args.build.resolve()
     args.output = args.output.resolve()
     roots = manifest["roots"]
+    # Qt 6.12 supports iOS 18+, including when reusing older PDF dependencies.
+    deployment_target = max(
+        manifest["deployment_target"], "18.0",
+        key=lambda value: tuple(map(int, value.split("."))))
     configure = [str(args.qt_ios.resolve() / "bin/qt-cmake"), "-S", str(repo), "-B", str(args.build),
                  "-G", "Xcode", f"-DQT_HOST_PATH={args.qt_host.resolve()}",
                  "-DCMAKE_OSX_ARCHITECTURES=arm64", "-DCMAKE_OSX_SYSROOT=iphoneos",
-                 f"-DCMAKE_OSX_DEPLOYMENT_TARGET={manifest['deployment_target']}",
+                 f"-DCMAKE_OSX_DEPLOYMENT_TARGET={deployment_target}",
                  "-DBUILD_TESTING=OFF", "-DTREPDF_DEPLOY_RUNTIME=OFF",
                  f"-DTREPDF_VERSION={args.version}", f"-DTREPDF_IOS_BUNDLE_ID={args.bundle_id}",
                  f"-DTREPDF_IOS_TEAM_ID={args.team_id}",
