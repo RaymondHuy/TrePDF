@@ -31,6 +31,10 @@ PDFIUM_PACKAGES = {
         "pdfium-v8-mac-arm64.tgz",
         "6923e58ecb8dc332c01667efbbde258a71385fc3ef736bea4204b87c4d14a83c",
     ),
+    "macos-x64": (
+        "pdfium-v8-mac-x64.tgz",
+        "486260d6f3cf9f3daffcb9f30fd9c49f421da9b3ba78bf26ca1e9f745e01076e",
+    ),
     "linux-x64": (
         "pdfium-v8-linux-x64.tgz",
         "78a68e46d871a52599c98af31a30a433f5441e670c03bba1f6b7a8444d645782",
@@ -44,6 +48,12 @@ ZLIB_VERSION = "1.3.1"
 ZLIB_URL = f"https://github.com/madler/zlib/releases/download/v{ZLIB_VERSION}/zlib-{ZLIB_VERSION}.tar.gz"
 ZLIB_SHA256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
 QPDF_NOTICES = ("LICENSE.txt", "NOTICE.md", "Artistic-2.0")
+JPEG_VERSION = "3.1.2"
+JPEG_URL = (
+    "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/"
+    f"{JPEG_VERSION}/libjpeg-turbo-{JPEG_VERSION}.tar.gz"
+)
+JPEG_SHA256 = "8f0012234b464ce50890c490f18194f913a7b1f4e6a03d6644179fa0f867d0cf"
 
 
 def sha256(path: Path) -> str:
@@ -148,6 +158,42 @@ def checked_in_qpdf(repo: Path) -> Path:
     return source
 
 
+def macos_intel_qpdf_options(directory: Path) -> list[str]:
+    # Use a pinned static JPEG and the system zlib so the Intel package never
+    # depends on a runner's Homebrew installation or its deployment target.
+    sdk = Path(subprocess.check_output(
+        ["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True).strip())
+    common = [
+        "-DCMAKE_OSX_ARCHITECTURES=x86_64",
+        f"-DCMAKE_OSX_SYSROOT={sdk}",
+        f"-DCMAKE_OSX_DEPLOYMENT_TARGET={os.environ['MACOS_DEPLOYMENT_TARGET']}",
+    ]
+    archive = download(JPEG_URL, JPEG_SHA256, directory / "downloads")
+    extract(archive, directory / "sources")
+    source = directory / "sources" / f"libjpeg-turbo-{JPEG_VERSION}"
+    build = directory / "build-jpeg"
+    prefix = directory / "jpeg"
+    run("cmake", "-S", source, "-B", build, "-G", "Ninja", *common,
+        "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        "-DENABLE_SHARED=OFF", "-DENABLE_STATIC=ON", "-DWITH_TURBOJPEG=OFF",
+        "-DWITH_TOOLS=OFF", "-DWITH_TESTS=OFF", "-DWITH_SIMD=OFF")
+    run("cmake", "--build", build, "--target", "jpeg-static", "--parallel", "4")
+    (prefix / "include").mkdir(parents=True, exist_ok=True)
+    (prefix / "lib").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(build / "libjpeg.a", prefix / "lib/libjpeg.a")
+    for header in ("jpeglib.h", "jmorecfg.h"):
+        shutil.copy2(source / "src" / header, prefix / "include" / header)
+    shutil.copy2(build / "jconfig.h", prefix / "include/jconfig.h")
+    copy_notices(source, directory / "licenses/libjpeg-turbo", ("LICENSE.md", "README.ijg"))
+    # qpdf uses its own find variables and probes pkg-config before them.
+    return [*common, "-DCMAKE_INSTALL_NAME_DIR=@rpath",
+            "-DPKG_CONFIG_EXECUTABLE=/usr/bin/false",
+            f"-DLIBJPEG_H_PATH={prefix / 'include'}",
+            f"-DLIBJPEG_LIB_PATH={prefix / 'lib/libjpeg.a'}",
+            f"-DZLIB_H_PATH={sdk / 'usr/include'}",
+            f"-DZLIB_LIB_PATH={sdk / 'usr/lib/libz.tbd'}"]
+
+
 def prepare_qpdf(target: str, directory: Path, repo: Path) -> Path:
     if target == "macos-arm64":
         prefix = directory / "qpdf"
@@ -170,6 +216,7 @@ def prepare_qpdf(target: str, directory: Path, repo: Path) -> Path:
         source = directory / "sources" / f"qpdf-{QPDF_VERSION}"
         build = directory / "build-qpdf"
         prefix = directory / "qpdf"
+        options = macos_intel_qpdf_options(directory) if target == "macos-x64" else []
         run("cmake", "-S", source, "-B", build, "-G", "Ninja",
             "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={prefix}",
             "-DCMAKE_INSTALL_LIBDIR=lib", "-DBUILD_SHARED_LIBS=ON",
@@ -177,10 +224,15 @@ def prepare_qpdf(target: str, directory: Path, repo: Path) -> Path:
             "-DINSTALL_EXAMPLES=OFF", "-DENABLE_QTC=OFF", "-DUSE_IMPLICIT_CRYPTO=OFF",
             "-DREQUIRE_CRYPTO_NATIVE=ON", "-DREQUIRE_CRYPTO_OPENSSL=OFF",
             "-DREQUIRE_CRYPTO_GNUTLS=OFF", "-DDEFAULT_CRYPTO=native",
-            "-DUSE_INSECURE_RANDOM=OFF", "-DSKIP_OS_SECURE_RANDOM=OFF", "-DZOPFLI=OFF")
+            "-DUSE_INSECURE_RANDOM=OFF", "-DSKIP_OS_SECURE_RANDOM=OFF", "-DZOPFLI=OFF",
+            *options)
         run("cmake", "--build", build, "--target", "libqpdf", "--parallel", "4")
         for component in ("lib", "dev"):
             run("cmake", "--install", build, "--component", component)
+        if target == "macos-x64":
+            # Match the unversioned filename copied into TrePDF.app by CMake.
+            run("install_name_tool", "-id", "@rpath/libqpdf.dylib",
+                prefix / "lib/libqpdf.dylib")
         notices = source
     copy_notices(notices, directory / "licenses/qpdf", QPDF_NOTICES)
     return prefix
@@ -215,6 +267,7 @@ def main() -> None:
     expected_system, expected_machines = {
         "windows-x64": ("Windows", {"amd64", "x86_64"}),
         "macos-arm64": ("Darwin", {"arm64", "aarch64"}),
+        "macos-x64": ("Darwin", {"x86_64", "amd64"}),
         "linux-x64": ("Linux", {"amd64", "x86_64"}),
     }[args.platform]
     if platform.system() != expected_system or platform.machine().lower() not in expected_machines:
@@ -237,6 +290,8 @@ def main() -> None:
     if args.platform == "windows-x64":
         roots["ZLIB_ROOT"] = str(prepare_zlib(directory))
         versions["zlib"] = ZLIB_VERSION
+    elif args.platform == "macos-x64":
+        versions["libjpeg-turbo"] = JPEG_VERSION
     manifest = {
         "platform": args.platform,
         "roots": roots,
