@@ -1,7 +1,9 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <QClipboard>
 #include <QJsonArray>
+#include <QMimeData>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
@@ -10,13 +12,15 @@ using namespace PDFEditControllerTestSupport;
 
 namespace {
 
-bool createPositionedTextPdf(const QString &path, const QByteArray &content)
+bool createPositionedTextPdf(const QString &path, const QByteArray &content,
+                             qreal pageHeight = 842.0)
 {
     return writePdfObjects(path, {
         QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
         QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
-        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
-                   "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"),
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 ")
+            + QByteArray::number(pageHeight, 'g', 17)
+            + "] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
         QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman "
                    "/Encoding /WinAnsiEncoding >>"),
         QByteArray("<< /Length ") + QByteArray::number(content.size())
@@ -59,6 +63,26 @@ QByteArray managedNumericColumnContent(bool paragraphLayout, bool encodedSpace =
         content += "EMC\n";
     content += "EMC\n";
     return content;
+}
+
+QByteArray managedSpacingContent(const QString &text, qreal advance, qreal letterSpacing)
+{
+    const int gapPosition = text.indexOf(QLatin1Char(' ')) >= 0 ? 1 : 0;
+    QJsonArray runArray;
+    for (int index = 0; index < text.size(); ++index)
+        runArray.append(QJsonArray{index, 1, letterSpacing, 0.0, index == gapPosition ? advance : 0.0});
+    const QByteArray runs = QJsonDocument(runArray).toJson(QJsonDocument::Compact);
+    return QByteArrayLiteral(
+        "/TrePDFTextSpacing << /Version 2 "
+        "/Group (cf141bbc-24d2-4f3b-b1f7-7bbefce5be15) "
+        "/Index 0 /Count 1 /Start 0 /LetterSpacing ")
+        + QByteArray::number(letterSpacing) + " /WordSpacing 0 /SourceAdvance "
+        + QByteArray::number(advance, 'g', 17) + " /Text <" + text.toUtf8().toHex()
+        + "> /SpacingRuns <" + runs.toHex() + "> >> BDC\n"
+        + "BT /F1 11 Tf " + QByteArray::number(letterSpacing)
+        + " Tc 1 0 0 1 72 740 Tm [(" + text.left(gapPosition + 1).toLatin1() + ") "
+        + QByteArray::number(-advance * 1000.0 / 11.0, 'f', 8)
+        + " (" + text.mid(gapPosition + 1).toLatin1() + ")] TJ ET\nEMC\n";
 }
 
 bool createPositionedUnicodeTextPdf(const QString &path, const QString &text,
@@ -168,6 +192,61 @@ QVector<qreal> sourceAdvances(const QVariantList &spans, int length)
             advances[index] = span.value(QStringLiteral("sourceAdvanceRatio")).toReal();
     }
     return advances;
+}
+
+constexpr int virtualSpaceProperty = QTextFormat::UserProperty + 12;
+
+QTextCharFormat characterFormatAt(QTextDocument *document, int position)
+{
+    QTextCursor cursor(document);
+    cursor.setPosition(position);
+    cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+    return cursor.charFormat();
+}
+
+qreal virtualSpaceWidth(QTextDocument *document, qreal pageHeight,
+                        int start = 0, int length = -1)
+{
+    const int end = length < 0 ? document->toPlainText().size() : start + length;
+    qreal width = 0.0;
+    for (int position = start; position < end; ++position) {
+        if (document->characterAt(position) == QLatin1Char(' '))
+            width += characterFormatAt(document, position)
+                         .doubleProperty(virtualSpaceProperty) * pageHeight;
+    }
+    return width;
+}
+
+QString semanticEditorText(QTextDocument *document)
+{
+    const QString text = document->toPlainText();
+    QString semantic;
+    for (int position = 0; position < text.size(); ++position) {
+        if (text.at(position) != QLatin1Char(' ')
+            || characterFormatAt(document, position).doubleProperty(virtualSpaceProperty) <= 0.0)
+            semantic.append(text.at(position));
+    }
+    return semantic;
+}
+
+QVector<qreal> editorVisibleOrigins(QTextDocument *document, qreal originX,
+                                  bool firstBlockOnly = false)
+{
+    QVector<qreal> origins;
+    for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
+        const QTextLayout *layout = block.layout();
+        if (!layout || layout->lineCount() != 1)
+            return {};
+        const QTextLine line = layout->lineAt(0);
+        const QString text = block.text();
+        for (int position = 0; position < text.size(); ++position) {
+            if (!text.at(position).isSpace())
+                origins.append(originX + line.cursorToX(position));
+        }
+        if (firstBlockOnly)
+            break;
+    }
+    return origins;
 }
 
 } // namespace
@@ -871,15 +950,17 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
     auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
     QVERIFY(quickDocument);
     QTextDocument *textDocument = quickDocument->textDocument();
-    QTRY_COMPARE(textDocument->toPlainText(), original);
+    QTRY_COMPARE(semanticEditorText(textDocument), original);
+    const QString projected = textDocument->toPlainText();
+    const QVariantList projectedSpans = controller.selectedCharacterSpans();
     QTRY_COMPARE(editor->property("lineCount").toInt(), 1);
     const QTextLine line = textDocument->begin().layout()->lineAt(0);
     QVERIFY(line.isValid());
     int glyph = 0;
     QVector<qreal> initialEditorOrigins;
     const qreal originX = controller.selectedOriginX() * pageSize.width();
-    for (int index = 0; index < original.size(); ++index) {
-        if (original.at(index).isSpace()) continue;
+    for (int index = 0; index < projected.size(); ++index) {
+        if (projected.at(index).isSpace()) continue;
         const qreal editorOrigin = originX + line.cursorToX(index);
         initialEditorOrigins.append(editorOrigin);
         QVERIFY2(qAbs(editorOrigin - originalOrigins[glyph]) < 0.15,
@@ -889,8 +970,12 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
     }
     // Native typing goes through TextEdit's event/undo path. New text must not
     // copy a source boundary correction, and one local undo restores it.
-    const int insertion = 12;
-    const QString typed = original.left(insertion) + QStringLiteral("x") + original.mid(insertion);
+    int insertion = 0;
+    for (int semanticPosition = 0; insertion < projected.size() && semanticPosition < 12; ++insertion) {
+        if (characterFormatAt(textDocument, insertion).doubleProperty(virtualSpaceProperty) <= 0.0)
+            ++semanticPosition;
+    }
+    const QString typed = projected.left(insertion) + QStringLiteral("x") + projected.mid(insertion);
     auto *editorItem = qobject_cast<QQuickItem *>(editor);
     QVERIFY(editorItem);
     editorItem->forceActiveFocus();
@@ -912,9 +997,9 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
     QTest::keyClick(&window, Qt::Key_Delete);
     QCOMPARE(textDocument->toPlainText(), typed);
     QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
-    QTRY_COMPARE(textDocument->toPlainText(), original);
-    QTRY_COMPARE(controller.selectedText(), original);
-    QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+    QTRY_COMPARE(textDocument->toPlainText(), projected);
+    QTRY_COMPARE(controller.selectedText(), projected);
+    QCOMPARE(controller.selectedCharacterSpans(), projectedSpans);
     QVERIFY(QMetaObject::invokeMethod(editor, "redo"));
     QTRY_COMPARE(textDocument->toPlainText(), typed);
     QTRY_COMPARE(controller.selectedText(), typed);
@@ -923,8 +1008,8 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
     QCoreApplication::processEvents();
     QCOMPARE(textDocument->toPlainText(), typed);
     QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
-    QTRY_COMPARE(textDocument->toPlainText(), original);
-    QTRY_COMPARE(controller.selectedText(), original);
+    QTRY_COMPARE(textDocument->toPlainText(), projected);
+    QTRY_COMPARE(controller.selectedText(), projected);
     if (embeddedUnicode) {
         // This boundary carries a real TJ adjustment, so clearing it during
         // native input and recovering it with undo cannot pass vacuously.
@@ -940,7 +1025,7 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
                 QCoreApplication::sendEvent(editorItem, &preedit);
                 QCOMPARE(textDocument->toPlainText(), original);
                 QCOMPARE(controller.selectedText(), original);
-                QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+                QCOMPARE(controller.selectedCharacterSpans(), projectedSpans);
                 QInputMethodEvent commit;
                 commit.setCommitString(inserted);
                 QCoreApplication::sendEvent(editorItem, &commit);
@@ -970,9 +1055,9 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
                 QCOMPARE(editedAdvances[index - removed + inserted.size()], advances[index]);
 
             QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
-            QTRY_COMPARE(textDocument->toPlainText(), original);
-            QTRY_COMPARE(controller.selectedText(), original);
-            QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+            QTRY_COMPARE(textDocument->toPlainText(), projected);
+            QTRY_COMPARE(controller.selectedText(), projected);
+            QCOMPARE(controller.selectedCharacterSpans(), projectedSpans);
             const QTextLine restoredLine = textDocument->begin().layout()->lineAt(0);
             QVERIFY(restoredLine.isValid());
             int restoredGlyph = 0;
@@ -986,9 +1071,9 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
             QTRY_COMPARE(controller.selectedText(), expected);
             QCOMPARE(controller.selectedCharacterSpans(), editedSpans);
             QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
-            QTRY_COMPARE(textDocument->toPlainText(), original);
-            QTRY_COMPARE(controller.selectedText(), original);
-            QCOMPARE(controller.selectedCharacterSpans(), originalSpans);
+            QTRY_COMPARE(textDocument->toPlainText(), projected);
+            QTRY_COMPARE(controller.selectedText(), projected);
+            QCOMPARE(controller.selectedCharacterSpans(), projectedSpans);
         }
     }
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
@@ -1018,12 +1103,15 @@ void PDFEditControllerTest::preservesSourceClusterPositionsThroughEditorAndSave(
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
                                      Q_ARG(QVariant, QVariant(reopened))));
     editorItem->forceActiveFocus();
-    QVERIFY(editor->setProperty("cursorPosition", original.size()));
+    QTRY_COMPARE(semanticEditorText(textDocument), original);
+    const QString reopenedProjection = textDocument->toPlainText();
+    QVERIFY(editor->setProperty("cursorPosition", reopenedProjection.size()));
     for (Qt::Key key : {Qt::Key_Space, Qt::Key_M, Qt::Key_O, Qt::Key_R, Qt::Key_E}) {
         QTest::keyClick(&window, key);
         QCoreApplication::processEvents();
     }
-    QTRY_COMPARE(controller.selectedText(), original + QStringLiteral(" more"));
+    QTRY_COMPARE(controller.selectedText(), reopenedProjection + QStringLiteral(" more"));
+    QCOMPARE(semanticEditorText(textDocument), original + QStringLiteral(" more"));
     const QTextLine editedLine = textDocument->begin().layout()->lineAt(0);
     QVector<qreal> editorOrigins;
     for (int index = 0; index < controller.selectedText().size(); ++index) {
@@ -1096,7 +1184,7 @@ void PDFEditControllerTest::preservesNumericColumnSpacingThroughEditorAndSave()
     if (content.isEmpty()) {
         const QString external = qEnvironmentVariable("TREPDF_TEST_COLUMN_SPACING_PDF");
         if (external.isEmpty())
-            QSKIP("Set TREPDF_TEST_COLUMN_SPACING_PDF to Book3.pdf for this probe.");
+            QSKIP("Set TREPDF_TEST_COLUMN_SPACING_PDF to Book4.pdf for this probe.");
         QVERIFY(QFile::copy(external, sourcePath));
     } else {
         QVERIFY(createPositionedTextPdf(sourcePath, content));
@@ -1114,7 +1202,7 @@ void PDFEditControllerTest::preservesNumericColumnSpacingThroughEditorAndSave()
             const QString text = entry.value(QStringLiteral("text")).toString();
             QString digits = text;
             digits.remove(QLatin1Char(' '));
-            if (digits.startsWith(QStringLiteral("11\n221\n"))) {
+            if (digits.section(QLatin1Char('\n'), 0, 0) == QStringLiteral("11")) {
                 candidate = entry;
                 expectedText = text;
                 break;
@@ -1177,7 +1265,7 @@ void PDFEditControllerTest::preservesNumericColumnSpacingThroughEditorAndSave()
     auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
     QVERIFY(quickDocument);
     QTextDocument *textDocument = quickDocument->textDocument();
-    QTRY_COMPARE(textDocument->toPlainText(), expectedText);
+    QTRY_COMPARE(semanticEditorText(textDocument), expectedText);
     QTRY_COMPARE(editor->property("lineCount").toInt(), expectedText.count(QLatin1Char('\n')) + 1);
     const auto editorOrigins = [&]() {
         QVector<qreal> origins;
@@ -1233,16 +1321,18 @@ void PDFEditControllerTest::preservesNumericColumnSpacingThroughEditorAndSave()
     QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
     QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
                                      Q_ARG(QVariant, QVariant(reopened))));
-    QTRY_COMPARE(textDocument->toPlainText(), expectedText);
+    QTRY_COMPARE(semanticEditorText(textDocument), expectedText);
     QVERIFY2(originsMatch(editorOrigins(), sourceOrigins), qPrintable(originMismatch));
     auto *editorItem = qobject_cast<QQuickItem *>(editor);
     QVERIFY(editorItem);
     editorItem->forceActiveFocus();
     QTRY_VERIFY(editorItem->hasActiveFocus());
-    QVERIFY(editor->setProperty("cursorPosition", expectedText.size()));
+    const QString expandedText = textDocument->toPlainText();
+    QVERIFY(editor->setProperty("cursorPosition", expandedText.size()));
     QTest::keyClick(&window, Qt::Key_1);
-    QTRY_COMPARE(textDocument->toPlainText(), expectedText + QLatin1Char('1'));
-    QTRY_COMPARE(controller.selectedText(), expectedText + QLatin1Char('1'));
+    QTRY_COMPARE(textDocument->toPlainText(), expandedText + QLatin1Char('1'));
+    QTRY_COMPARE(controller.selectedText(), expandedText + QLatin1Char('1'));
+    QCOMPARE(semanticEditorText(textDocument), expectedText + QLatin1Char('1'));
     const QVector<qreal> typedOrigins = editorOrigins();
     QCOMPARE(typedOrigins.size(), sourceOrigins.size() + 1);
     QVERIFY2(originsMatch(typedOrigins.mid(0, sourceOrigins.size()), sourceOrigins),
@@ -1252,6 +1342,556 @@ void PDFEditControllerTest::preservesNumericColumnSpacingThroughEditorAndSave()
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(secondPath)));
     QVERIFY2(originsMatch(visibleCharacterOrigins(secondPath, originFilter), typedOrigins),
              qPrintable(originMismatch));
+}
+
+void PDFEditControllerTest::distinguishesVirtualGapsFromOrdinarySpacing_data()
+{
+    QTest::addColumn<QString>("text");
+    QTest::addColumn<qreal>("advance");
+    QTest::addColumn<qreal>("letterSpacing");
+    QTest::addColumn<bool>("projectsGap");
+    QTest::addColumn<bool>("integralMultiple");
+    QTest::newRow("encoded-source-space") << QStringLiteral("1 1") << 47.3 << 0.0 << true << false;
+    QTest::newRow("negative-source-advance") << QStringLiteral("11") << -1.0 << 0.0 << false << false;
+    QTest::newRow("small-source-advance") << QStringLiteral("11") << 0.25 << 0.0 << false << false;
+    QTest::newRow("large-user-letter-spacing") << QStringLiteral("11") << 0.0 << 12.0 << false << false;
+    QTest::newRow("integral-space-multiple") << QStringLiteral("11") << 0.0 << 0.0 << true << true;
+}
+
+void PDFEditControllerTest::distinguishesVirtualGapsFromOrdinarySpacing()
+{
+    QFETCH(QString, text);
+    QFETCH(qreal, advance);
+    QFETCH(qreal, letterSpacing);
+    QFETCH(bool, projectsGap);
+    QFETCH(bool, integralMultiple);
+    const QString tag = QString::fromLatin1(QTest::currentDataTag());
+    const QString sourcePath = m_temporaryDirectory.filePath(tag + QStringLiteral("-gap-source.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(tag + QStringLiteral("-gap-saved.pdf"));
+    qreal fixtureHeight = 842.0;
+    if (integralMultiple) {
+        const QString probePath = m_temporaryDirectory.filePath(QStringLiteral("integral-gap-font-probe.pdf"));
+        QVERIFY(createPositionedTextPdf(probePath, managedSpacingContent(text, 0.0, 0.0)));
+        PDFDocument probeDocument;
+        PDFEditController probe;
+        QVERIFY(probeDocument.open(QUrl::fromLocalFile(probePath)));
+        probe.setDocument(&probeDocument);
+        const QVariantMap candidate = candidateForText(waitForCandidates(probe, 0), text);
+        QVERIFY(!candidate.isEmpty());
+        QVERIFY(probe.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+        const QVariantMap format = probe.selectedCharacterSpans().first().toMap();
+        const QFont font = probe.fontForDisplay(
+            format.value(QStringLiteral("fontFamily")).toString(),
+            format.value(QStringLiteral("fontStretch")).toInt(),
+            format.value(QStringLiteral("fontBold")).toBool(),
+            format.value(QStringLiteral("fontItalic")).toBool(), false,
+            format.value(QStringLiteral("displayFontSizeRatio")).toReal()
+                * probeDocument.pageSize(0).height(), 0.0, 0.0, true);
+        const qreal step = QFontMetricsF(font).horizontalAdvance(QLatin1Char(' '));
+        QVERIFY(step > 0.0);
+        // Find an integral physical width whose normalized quotient rounds
+        // upward. The old ceil/repeated-add split emitted a zero-width cell,
+        // which became a real PDF space when opening and closing the editor.
+        bool found = false;
+        for (int height = 792; height <= 1000 && !found; ++height) {
+            for (int multiple = 2; multiple <= 100; ++multiple) {
+                const qreal width = step * multiple;
+                const qreal ratio = width / height;
+                const qreal stepRatio = step / height;
+                const int count = qCeil(ratio / stepRatio);
+                if (count <= multiple)
+                    continue;
+                qreal accumulated = 0.0;
+                for (int index = 0; index < count - 1; ++index)
+                    accumulated += stepRatio;
+                if (ratio - accumulated <= 0.0) {
+                    fixtureHeight = height;
+                    advance = width;
+                    found = true;
+                    break;
+                }
+            }
+        }
+        QVERIFY2(found, "The loaded font must provide the integral-gap rounding regression fixture");
+    }
+    QVERIFY(createPositionedTextPdf(sourcePath, managedSpacingContent(text, advance, letterSpacing), fixtureHeight));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), text);
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QVariantList sourceSpans = controller.selectedCharacterSpans();
+    const QVector<qreal> originalOrigins = visibleCharacterOrigins(sourcePath);
+    const qreal pageHeight = document.pageSize(0).height();
+    if (integralMultiple)
+        QCOMPARE(sourceAdvances(sourceSpans, text.size()).first(), advance / pageHeight);
+    controller.beginSelectedTextEdit();
+    controller.prepareEditorVirtualSpaces();
+    const QString projected = controller.selectedText();
+    QVector<bool> virtualCharacters(projected.size(), false);
+    qreal projectedWidth = 0.0;
+    for (const QVariant &value : controller.selectedCharacterSpans()) {
+        const QVariantMap span = value.toMap();
+        const qreal ratio = span.value(QStringLiteral("virtualSpaceRatio")).toReal();
+        const int start = span.value(QStringLiteral("start")).toInt();
+        const int length = span.value(QStringLiteral("length")).toInt();
+        if (ratio <= 0.0)
+            continue;
+        projectedWidth += ratio * pageHeight * length;
+        for (int index = start; index < start + length; ++index) {
+            QVERIFY(index < virtualCharacters.size());
+            QCOMPARE(projected.at(index), QLatin1Char(' '));
+            virtualCharacters[index] = true;
+        }
+    }
+    QString semantic;
+    for (int index = 0; index < projected.size(); ++index) {
+        if (!virtualCharacters.at(index))
+            semantic.append(projected.at(index));
+    }
+    QCOMPARE(semantic, text);
+    if (projectsGap) {
+        QVERIFY(projected.size() > text.size());
+        QVERIFY(qAbs(projectedWidth - advance) < 0.0001);
+        // Only PDF-encoded spaces remain semantic beside projected cells.
+        QCOMPARE(semantic.count(QLatin1Char(' ')), text.count(QLatin1Char(' ')));
+        if (integralMultiple) {
+            for (int position = 1; position < projected.size() - 1; ++position)
+                QVERIFY(virtualCharacters.at(position));
+        }
+    } else {
+        QCOMPARE(projected, text);
+        QCOMPARE(projectedWidth, 0.0);
+    }
+    controller.finishSelectedTextEdit();
+    QCOMPARE(controller.selectedText(), text);
+    QCOMPARE(controller.selectedCharacterSpans(), sourceSpans);
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    if (projectsGap)
+        controller.setSelectedColor(Qt::blue); // Rewrite the mixed real/virtual-space fixture.
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+    const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), text);
+    QVERIFY(!reopened.isEmpty());
+    const QVector<qreal> savedOrigins = visibleCharacterOrigins(savedPath);
+    QCOMPARE(savedOrigins.size(), originalOrigins.size());
+    for (qsizetype index = 0; index < savedOrigins.size(); ++index)
+        QVERIFY(qAbs(savedOrigins.at(index) - originalOrigins.at(index)) < 0.15);
+}
+
+void PDFEditControllerTest::editsVirtualSourceGapThroughQmlAndSave_data()
+{
+    QTest::addColumn<QString>("operation");
+    QTest::addColumn<bool>("external");
+    for (const char *operation : {"unchanged", "backspace", "delete", "selected-gap",
+                                 "insert-digit", "insert-literal-space", "undo-redo",
+                                 "vietnamese-ime", "clipboard-virtual", "clipboard-plain", "clipboard-cross-size",
+                                 "font-size", "font-family", "insert-first", "insert-last",
+                                 "delete-remainder", "delete-anchor", "replace-literal-space",
+                                 "ime-replacement", "insert-newline", "underline-virtual-only",
+                                 "underline-typing"}) {
+        QTest::newRow(operation) << QString::fromLatin1(operation) << false;
+    }
+    if (!qEnvironmentVariableIsEmpty("TREPDF_TEST_COLUMN_SPACING_PDF")) {
+        for (const char *operation : {"unchanged", "backspace", "insert-digit", "insert-literal-space", "undo-redo", "font-size", "font-family"})
+            QTest::newRow(qPrintable(QStringLiteral("external-") + QString::fromLatin1(operation)))
+                << QString::fromLatin1(operation) << true;
+    }
+}
+
+void PDFEditControllerTest::editsVirtualSourceGapThroughQmlAndSave()
+{
+    QFETCH(QString, operation);
+    QFETCH(bool, external);
+    const QString tag = QString::fromLatin1(QTest::currentDataTag());
+    const QString sourcePath = m_temporaryDirectory.filePath(tag + QStringLiteral("-virtual-source.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(tag + QStringLiteral("-virtual-saved.pdf"));
+    const QString secondPath = m_temporaryDirectory.filePath(tag + QStringLiteral("-virtual-second.pdf"));
+    if (external)
+        QVERIFY(QFile::copy(qEnvironmentVariable("TREPDF_TEST_COLUMN_SPACING_PDF"), sourcePath));
+    else
+        QVERIFY(createPositionedTextPdf(sourcePath, managedNumericColumnContent(true)));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::SelectTool);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    QVariantMap candidate;
+    for (const QVariant &value : candidates) {
+        const QVariantMap entry = value.toMap();
+        if (entry.value(QStringLiteral("text")).toString().section(QLatin1Char('\n'), 0, 0)
+            == QStringLiteral("11")) {
+            candidate = entry;
+            break;
+        }
+    }
+    QVERIFY(!candidate.isEmpty());
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    const QString sourceSemantic = controller.selectedText();
+    const QString semanticSuffix = sourceSemantic.mid(2);
+    const QVariantList sourceSpans = controller.selectedCharacterSpans();
+    const QSizeF pageSize = document.pageSize(0);
+    // Book4 restores an entire managed paragraph. Exercise its first gap while
+    // retaining every following line; compare the edited first-line glyphs.
+    const QRectF originFilter = external
+        ? QRectF(0.0, controller.selectedBaselineY() - 2.0 / pageSize.height(),
+                 1.0, 4.0 / pageSize.height()) : QRectF();
+    const QVector<qreal> sourceOrigins = visibleCharacterOrigins(sourcePath, originFilter);
+    QCOMPARE(sourceOrigins.size(), 2);
+    constexpr qreal zoom = 1.55;
+
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false},
+        {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), zoom},
+        {QStringLiteral("width"), pageSize.width() * zoom},
+        {QStringLiteral("height"), pageSize.height() * zoom}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    QQuickWindow window;
+    window.resize(qCeil(pageSize.width() * zoom), qCeil(pageSize.height() * zoom));
+    qobject_cast<QQuickItem *>(overlay.get())->setParentItem(window.contentItem());
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing",
+                                     Q_ARG(QVariant, QVariant(candidate))));
+    QObject *editor = nullptr;
+    for (QObject *child : overlay->findChildren<QObject *>()) {
+        if (child->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = child;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *editorItem = qobject_cast<QQuickItem *>(editor);
+    QVERIFY(editorItem);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *textDocument = quickDocument->textDocument();
+    QTRY_COMPARE(semanticEditorText(textDocument), sourceSemantic);
+    const QString expanded = textDocument->toPlainText();
+    int gapCells = 0;
+    while (gapCells + 1 < expanded.size()
+           && characterFormatAt(textDocument, gapCells + 1).doubleProperty(virtualSpaceProperty) > 0.0)
+        ++gapCells;
+    QVERIFY2(gapCells >= 2, "A column-sized source advance must expose multiple caret stops");
+    QCOMPARE(expanded.section(QLatin1Char('\n'), 0, 0),
+             QStringLiteral("1") + QString(gapCells, QLatin1Char(' ')) + QLatin1Char('1'));
+    QCOMPARE(characterFormatAt(textDocument, 0).doubleProperty(virtualSpaceProperty), 0.0);
+    QCOMPARE(characterFormatAt(textDocument, gapCells + 1).doubleProperty(virtualSpaceProperty), 0.0);
+    for (int position = 1; position <= gapCells; ++position)
+        QVERIFY(characterFormatAt(textDocument, position).doubleProperty(virtualSpaceProperty) > 0.0);
+    const qreal initialGapWidth = virtualSpaceWidth(textDocument, pageSize.height());
+    const qreal initialFirstGapWidth = virtualSpaceWidth(textDocument, pageSize.height(), 1, gapCells);
+    const qreal sourceGap = sourceAdvances(sourceSpans, 2).first() * pageSize.height();
+    QVERIFY(sourceGap > 40.0);
+    QVERIFY(qAbs(initialFirstGapWidth - sourceGap) < 0.0001);
+    QCOMPARE(controller.selectedText(), expanded);
+    QTRY_COMPARE(editor->property("lineCount").toInt(), sourceSemantic.count(QLatin1Char('\n')) + 1);
+    const auto editorOrigins = [&] {
+        return editorVisibleOrigins(textDocument, controller.selectedOriginX() * pageSize.width(), external);
+    };
+    const auto compareOrigins = [](const QVector<qreal> &actual, const QVector<qreal> &expected) {
+        QCOMPARE(actual.size(), expected.size());
+        for (qsizetype index = 0; index < expected.size(); ++index) {
+            QVERIFY2(qAbs(actual[index] - expected[index]) < 0.15,
+                qPrintable(QStringLiteral("Glyph %1: editor/source %2 pt, saved %3 pt")
+                    .arg(index).arg(expected[index], 0, 'f', 5).arg(actual[index], 0, 'f', 5)));
+        }
+    };
+    compareOrigins(editorOrigins(), sourceOrigins);
+    editorItem->forceActiveFocus();
+    QTRY_VERIFY(editorItem->hasActiveFocus());
+    const int middle = 1 + gapCells / 2;
+    QVERIFY(editor->setProperty("cursorPosition", middle));
+    QTest::keyClick(&window, Qt::Key_Left);
+    QCOMPARE(editor->property("cursorPosition").toInt(), middle - 1);
+    QTest::keyClick(&window, Qt::Key_Right);
+    QCOMPARE(editor->property("cursorPosition").toInt(), middle);
+
+    QString expectedSemantic = sourceSemantic;
+    qreal expectedGapWidth = initialGapWidth;
+    const QTextCharFormat originalFirstFormat = characterFormatAt(textDocument, 0);
+    if (operation == QLatin1String("underline-virtual-only")) {
+        const QVariantList projectedSpans = controller.selectedCharacterSpans();
+        QVERIFY(!textDocument->isUndoAvailable());
+        QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, middle - 1), Q_ARG(int, middle + 1)));
+        controller.setSelectedTextRange(middle - 1, 2);
+        controller.setSelectedFontUnderline(true);
+        QCoreApplication::processEvents();
+        QCOMPARE(textDocument->toPlainText(), expanded);
+        QCOMPARE(controller.selectedCharacterSpans(), projectedSpans);
+        QVERIFY(!textDocument->isUndoAvailable());
+        QVERIFY(!characterFormatAt(textDocument, middle - 1).fontUnderline());
+        QVERIFY(!characterFormatAt(textDocument, middle).fontUnderline());
+    } else if (operation == QLatin1String("underline-typing")) {
+        controller.setSelectedTextRange(middle, 0);
+        controller.setSelectedFontUnderline(true);
+        expectedSemantic = QStringLiteral("151");
+        QTest::keyClick(&window, Qt::Key_5);
+        QTRY_COMPARE(textDocument->toPlainText(), expanded.left(middle) + QLatin1Char('5') + expanded.mid(middle));
+        QTRY_VERIFY(characterFormatAt(textDocument, middle).fontUnderline());
+        QCOMPARE(characterFormatAt(textDocument, middle).doubleProperty(virtualSpaceProperty), 0.0);
+        QVERIFY(!characterFormatAt(textDocument, middle - 1).fontUnderline());
+        QVERIFY(characterFormatAt(textDocument, middle + 1).fontUnderline());
+    } else if (operation == QLatin1String("backspace") || operation == QLatin1String("undo-redo")) {
+        expectedGapWidth -= virtualSpaceWidth(textDocument, pageSize.height(), middle - 1, 1);
+        QTest::keyClick(&window, Qt::Key_Backspace);
+        QTRY_COMPARE(textDocument->toPlainText().size(), expanded.size() - 1);
+        if (operation == QLatin1String("undo-redo")) {
+            const QString removed = textDocument->toPlainText();
+            QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+            QTRY_COMPARE(textDocument->toPlainText(), expanded);
+            QVERIFY(qAbs(virtualSpaceWidth(textDocument, pageSize.height()) - initialGapWidth) < 0.0001);
+            QVERIFY(QMetaObject::invokeMethod(editor, "redo"));
+            QTRY_COMPARE(textDocument->toPlainText(), removed);
+        }
+    } else if (operation == QLatin1String("delete")) {
+        expectedGapWidth -= virtualSpaceWidth(textDocument, pageSize.height(), middle, 1);
+        QTest::keyClick(&window, Qt::Key_Delete);
+        QTRY_COMPARE(textDocument->toPlainText().size(), expanded.size() - 1);
+    } else if (operation == QLatin1String("selected-gap")) {
+        expectedGapWidth -= virtualSpaceWidth(textDocument, pageSize.height(), middle - 1, 2);
+        QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, middle - 1), Q_ARG(int, middle + 1)));
+        QCOMPARE(editor->property("selectedText").toString(), QStringLiteral("  "));
+        QTest::keyClick(&window, Qt::Key_Backspace);
+        QTRY_COMPARE(textDocument->toPlainText().size(), expanded.size() - 2);
+    } else if (operation == QLatin1String("delete-remainder")) {
+        const qreal remainder = virtualSpaceWidth(textDocument, pageSize.height(), gapCells, 1);
+        QVERIFY(remainder > 0.0);
+        QVERIFY(remainder < virtualSpaceWidth(textDocument, pageSize.height(), 1, 1));
+        expectedGapWidth -= remainder;
+        QVERIFY(editor->setProperty("cursorPosition", gapCells));
+        QTest::keyClick(&window, Qt::Key_Delete);
+        QTRY_COMPARE(textDocument->toPlainText().size(), expanded.size() - 1);
+    } else if (operation == QLatin1String("delete-anchor")) {
+        expectedSemantic = QStringLiteral("1");
+        QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 0), Q_ARG(int, 1)));
+        QTest::keyClick(&window, Qt::Key_Backspace);
+        QTRY_COMPARE(textDocument->toPlainText(), expanded.mid(1));
+    } else if (operation == QLatin1String("insert-digit")
+               || operation == QLatin1String("insert-first")
+               || operation == QLatin1String("insert-last")) {
+        expectedSemantic = QStringLiteral("151") + semanticSuffix;
+        const int insertion = operation == QLatin1String("insert-first") ? 1
+            : operation == QLatin1String("insert-last") ? gapCells + 1 : middle;
+        QVERIFY(editor->setProperty("cursorPosition", insertion));
+        QTest::keyClick(&window, Qt::Key_5);
+        QTRY_COMPARE(textDocument->toPlainText(), expanded.left(insertion) + QLatin1Char('5') + expanded.mid(insertion));
+        QCOMPARE(characterFormatAt(textDocument, insertion).doubleProperty(virtualSpaceProperty), 0.0);
+    } else if (operation == QLatin1String("replace-literal-space")) {
+        expectedSemantic = QStringLiteral("1 1");
+        expectedGapWidth -= virtualSpaceWidth(textDocument, pageSize.height(), middle, 1);
+        QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, middle), Q_ARG(int, middle + 1)));
+        QTest::keyClick(&window, Qt::Key_Space);
+        // Equal plain text is still an edit: provenance changed to a real space.
+        QTRY_COMPARE(textDocument->toPlainText(), expanded);
+        QTRY_COMPARE(characterFormatAt(textDocument, middle).doubleProperty(virtualSpaceProperty), 0.0);
+    } else if (operation == QLatin1String("insert-newline")) {
+        expectedSemantic = QStringLiteral("1\n1");
+        QTest::keyClick(&window, Qt::Key_Return);
+        QTRY_COMPARE(textDocument->toPlainText(), expanded.left(middle) + QLatin1Char('\n') + expanded.mid(middle));
+    } else if (operation == QLatin1String("insert-literal-space")) {
+        expectedSemantic = QStringLiteral("1 1") + semanticSuffix;
+        QTest::keyClick(&window, Qt::Key_Space);
+        QTRY_COMPARE(textDocument->toPlainText().size(), expanded.size() + 1);
+        QTRY_COMPARE(characterFormatAt(textDocument, middle).doubleProperty(virtualSpaceProperty), 0.0);
+    } else if (operation == QLatin1String("vietnamese-ime") || operation == QLatin1String("ime-replacement")) {
+        expectedSemantic = QStringLiteral("1ế1");
+        controller.setSelectedTextRange(middle, 0);
+        controller.setSelectedFontFamily(testFontFamily());
+        QInputMethodEvent preedit(QStringLiteral("e"), {});
+        QCoreApplication::sendEvent(editorItem, &preedit);
+        QCOMPARE(textDocument->toPlainText(), expanded);
+        QVERIFY(qAbs(virtualSpaceWidth(textDocument, pageSize.height()) - initialGapWidth) < 0.0001);
+        QInputMethodEvent commit;
+        if (operation == QLatin1String("ime-replacement")) {
+            commit.setCommitString(QStringLiteral("e"));
+            QCoreApplication::sendEvent(editorItem, &commit);
+            QTRY_COMPARE(textDocument->toPlainText(), expanded.left(middle) + QLatin1Char('e') + expanded.mid(middle));
+        }
+        commit.setCommitString(QStringLiteral("ế"),
+            operation == QLatin1String("ime-replacement") ? -1 : 0,
+            operation == QLatin1String("ime-replacement") ? 1 : 0);
+        QCoreApplication::sendEvent(editorItem, &commit);
+        QTRY_COMPARE(textDocument->toPlainText(), expanded.left(middle) + QStringLiteral("ế") + expanded.mid(middle));
+        QTRY_COMPARE(characterFormatAt(textDocument, middle).doubleProperty(virtualSpaceProperty), 0.0);
+    } else if (operation.startsWith(QLatin1String("clipboard-"))) {
+        QClipboard *clipboard = QGuiApplication::clipboard();
+        QVERIFY(clipboard);
+        const QMimeData *previous = clipboard->mimeData();
+        auto restoredClipboard = std::make_unique<QMimeData>();
+        if (previous) {
+            for (const QString &format : previous->formats())
+                restoredClipboard->setData(format, previous->data(format));
+        }
+        const auto restoreClipboard = qScopeGuard([&] { clipboard->setMimeData(restoredClipboard.release()); });
+        if (operation == QLatin1String("clipboard-cross-size")) {
+            QVERIFY(QMetaObject::invokeMethod(editor, "selectAll"));
+            QTest::keySequence(&window, QKeySequence::Copy);
+            QTRY_COMPARE(clipboard->text(), expanded);
+            controller.setSelectedTextRange(0, expanded.size());
+            controller.setSelectedFontSize(18.0);
+            QCoreApplication::processEvents();
+            QVERIFY(editor->setProperty("cursorPosition", expanded.size()));
+            controller.setSelectedTextRange(expanded.size(), 0);
+            controller.setSelectedFontSize(20.0); // Paste retains copied format, not the typing size.
+            QTest::keySequence(&window, QKeySequence::Paste);
+            QTRY_COMPARE(textDocument->toPlainText(), expanded + expanded);
+            QTRY_VERIFY(qAbs(characterFormatAt(textDocument, expanded.size())
+                .doubleProperty(QTextFormat::UserProperty + 1) * pageSize.height() - 11.0) < 0.01);
+            expectedSemantic = QStringLiteral("1111");
+            expectedGapWidth *= 2;
+        } else if (operation == QLatin1String("clipboard-virtual")) {
+            expectedGapWidth += virtualSpaceWidth(textDocument, pageSize.height(), middle - 1, 2);
+            QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, middle - 1), Q_ARG(int, middle + 1)));
+            QTest::keySequence(&window, QKeySequence::Copy);
+            QTRY_COMPARE(clipboard->text(), QStringLiteral("  "));
+        } else {
+            expectedSemantic = QStringLiteral("1 1");
+            clipboard->setText(QStringLiteral(" "));
+        }
+        if (operation != QLatin1String("clipboard-cross-size")) {
+            QVERIFY(editor->setProperty("cursorPosition", middle));
+            QTest::keySequence(&window, QKeySequence::Paste);
+            QTRY_COMPARE(textDocument->toPlainText().size(), expanded.size()
+                + (operation == QLatin1String("clipboard-virtual") ? 2 : 1));
+            if (operation == QLatin1String("clipboard-plain"))
+                QTRY_COMPARE(characterFormatAt(textDocument, middle).doubleProperty(virtualSpaceProperty), 0.0);
+        }
+    } else if (operation == QLatin1String("font-size") || operation == QLatin1String("font-family")) {
+        const int formatLength = external ? gapCells + 2 : expanded.size();
+        QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 0), Q_ARG(int, formatLength)));
+        controller.setSelectedTextRange(0, formatLength);
+        if (operation == QLatin1String("font-size"))
+            controller.setSelectedFontSize(18.0);
+        else
+            controller.setSelectedFontFamily(external ? QStringLiteral("Times New Roman") : testFontFamily());
+        // A style change preserves the physical gap, including its remainder.
+        QTRY_COMPARE(semanticEditorText(textDocument), expectedSemantic);
+        QVERIFY(qAbs(virtualSpaceWidth(textDocument, pageSize.height()) - initialGapWidth) < 0.0001);
+        const QTextCharFormat changedFirstFormat = characterFormatAt(textDocument, 0);
+        QVERIFY(changedFirstFormat != originalFirstFormat);
+        QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+        QTRY_COMPARE(characterFormatAt(textDocument, 0), originalFirstFormat);
+        QCOMPARE(textDocument->toPlainText(), expanded);
+        QVERIFY(qAbs(virtualSpaceWidth(textDocument, pageSize.height()) - initialGapWidth) < 0.0001);
+        QVERIFY(QMetaObject::invokeMethod(editor, "redo"));
+        QTRY_COMPARE(characterFormatAt(textDocument, 0), changedFirstFormat);
+    }
+
+    QTRY_COMPARE(semanticEditorText(textDocument), expectedSemantic);
+    QTRY_COMPARE(controller.selectedText(), textDocument->toPlainText());
+    QVERIFY(qAbs(virtualSpaceWidth(textDocument, pageSize.height()) - expectedGapWidth) < 0.0001);
+    const QVector<qreal> editedOrigins = editorOrigins();
+    QVERIFY(!editedOrigins.isEmpty());
+    if (operation != QLatin1String("delete-anchor"))
+        QVERIFY(qAbs(editedOrigins.constFirst() - sourceOrigins.constFirst()) < 0.01);
+    if (operation == QLatin1String("insert-digit") || operation == QLatin1String("insert-literal-space")
+        || operation == QLatin1String("insert-first") || operation == QLatin1String("insert-last")
+        || operation == QLatin1String("underline-typing")
+        || operation == QLatin1String("vietnamese-ime") || operation == QLatin1String("ime-replacement")
+        || operation.startsWith(QLatin1String("clipboard-")))
+        QVERIFY2(editedOrigins.constLast() > sourceOrigins.constLast(), "Insertion must push the suffix like Word");
+    if (expectedGapWidth < initialGapWidth && operation != QLatin1String("replace-literal-space"))
+        QVERIFY(qAbs(editedOrigins.constLast() - sourceOrigins.constLast()
+                     - expectedGapWidth + initialGapWidth) < 0.15);
+
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QCOMPARE(controller.selectedText(), expectedSemantic);
+    const QVariantList committedSpans = controller.selectedCharacterSpans();
+    for (const QVariant &value : committedSpans)
+        QCOMPARE(value.toMap().value(QStringLiteral("virtualSpaceRatio")).toReal(), 0.0);
+    if (operation == QLatin1String("unchanged") || operation == QLatin1String("underline-virtual-only")) {
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(!controller.canUndo());
+        QCOMPARE(committedSpans, sourceSpans);
+    } else {
+        QVERIFY(controller.hasDrafts());
+        controller.undo();
+        QCOMPARE(controller.selectedText(), sourceSemantic);
+        QCOMPARE(controller.selectedCharacterSpans(), sourceSpans);
+        QVERIFY(!controller.hasDrafts());
+        controller.redo();
+        QCOMPARE(controller.selectedText(), expectedSemantic);
+        QCOMPARE(controller.selectedCharacterSpans(), committedSpans);
+    }
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+    compareOrigins(visibleCharacterOrigins(savedPath, originFilter), editedOrigins);
+    const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), expectedSemantic);
+    QVERIFY2(!reopened.isEmpty(), "Save must preserve real text without encoding virtual spaces");
+    QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+    const auto verifyTypedUnderline = [&] {
+        if (operation != QLatin1String("underline-typing"))
+            return;
+        const QVariantList spans = controller.selectedCharacterSpans();
+        for (int position = 0; position < 3; ++position) {
+            bool found = false;
+            for (const QVariant &value : spans) {
+                const QVariantMap span = value.toMap();
+                const int start = span.value(QStringLiteral("start")).toInt();
+                if (position < start || position >= start + span.value(QStringLiteral("length")).toInt())
+                    continue;
+                QCOMPARE(span.value(QStringLiteral("fontUnderline")).toBool(), position == 1);
+                found = true;
+                break;
+            }
+            QVERIFY(found);
+        }
+    };
+    verifyTypedUnderline();
+    const QVector<qreal> advances = sourceAdvances(controller.selectedCharacterSpans(), expectedSemantic.size());
+    qreal savedGapWidth = 0.0;
+    if (external) {
+        const int firstLineLength = expectedSemantic.section(QLatin1Char('\n'), 0, 0).size();
+        // A small correction remains on the final glyph; only the advances
+        // preceding that glyph represent the first editable gap.
+        for (int index = 0; index < firstLineLength - 1; ++index)
+            savedGapWidth += advances.at(index) * pageSize.height();
+        QVERIFY(qAbs(savedGapWidth - (initialFirstGapWidth + expectedGapWidth - initialGapWidth)) < 0.001);
+        QCOMPARE(controller.selectedText().mid(firstLineLength), semanticSuffix);
+    } else {
+        for (qreal advance : advances)
+            savedGapWidth += advance * pageSize.height();
+        for (const QVariant &value : controller.selectedParagraphFormats())
+            savedGapWidth += value.toMap().value(QStringLiteral("firstLineIndentRatio")).toReal() * pageSize.height();
+        QVERIFY(qAbs(savedGapWidth - expectedGapWidth) < 0.001);
+    }
+    if (operation == QLatin1String("insert-first")) {
+        QCOMPARE(advances.at(0), 0.0);
+        QVERIFY(advances.at(1) > 0.0);
+    } else if (operation == QLatin1String("insert-last")) {
+        QVERIFY(advances.at(0) > 0.0);
+        QCOMPARE(advances.at(1), 0.0);
+    } else if (expectedSemantic.section(QLatin1Char('\n'), 0, 0) == QLatin1String("151")
+               || expectedSemantic == QStringLiteral("1ế1")) {
+        QVERIFY(advances.at(0) > 0.0);
+        QVERIFY(advances.at(1) > 0.0);
+    }
+    // Reopen then force a second replacement to expose coordinate or spacing
+    // drift hidden by a byte-copy/no-op Save As.
+    controller.setSelectedColor(Qt::blue);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(secondPath)));
+    compareOrigins(visibleCharacterOrigins(secondPath, originFilter), editedOrigins);
+    const QVariantMap secondReopened = candidateForText(waitForCandidates(controller, 0), expectedSemantic);
+    QVERIFY(!secondReopened.isEmpty());
+    if (operation == QLatin1String("underline-typing")) {
+        QVERIFY(controller.selectCandidate(0, secondReopened.value(QStringLiteral("objectId")).toString()));
+        verifyTypedUnderline();
+    }
 }
 
 void PDFEditControllerTest::rejectsNumericColumnMetadataThatOmitsEncodedSpace()

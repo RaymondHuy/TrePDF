@@ -474,8 +474,11 @@ public:
                                                        int start,
                                                        int length,
                                                        qreal displayedPageHeight = 0.0) const;
+    Q_INVOKABLE void prepareEditorVirtualSpaces();
     Q_INVOKABLE void initializeEditorFontSizes(QObject *textDocument,
                                                qreal displayedPageHeight = 0.0) const;
+    Q_INVOKABLE bool applyFontFamilyToEditorDocument(
+        QObject *textDocument, int start, int length, const QString &family, qreal displayedPageHeight) const;
     Q_INVOKABLE bool applyFontSizeToEditorDocument(QObject *textDocument,
                                                    int start,
                                                    int length,
@@ -598,6 +601,7 @@ signals:
     void selectionTextSpacingApplied(int start, int length,
                                       qreal letterSpacingRatio, qreal wordSpacingRatio);
     void selectionParagraphSpacingApplied();
+    void selectionFontFamilyApplied(int start, int length, const QString &family);
     void selectionFontSizeApplied(int start, int length, qreal fontSizeRatio);
     void selectionFontStyleApplied(int start,
                                    int length,
@@ -656,6 +660,8 @@ private:
         qreal wordSpacingRatio = 0.0;
         // Per-cluster source adjustment, separate from user tracking controls.
         qreal sourceAdvanceRatio = 0.0;
+        // Editor-only U+0020 cell with fixed physical width; never PDF text.
+        qreal virtualSpaceRatio = 0.0;
         int fontStretch = 100;
         bool fontBold = false;
         bool fontItalic = false;
@@ -1139,6 +1145,7 @@ private:
         const QString &text,
         const ParagraphFormat &prototype);
     static Draft initialDraftForCandidate(const Candidate &candidate);
+    static Draft collapseEditorVirtualSpaces(const Draft &draft);
     static QVector<QRectF> highlightRectsForDraft(const Draft &draft);
     static QVector<std::array<QPointF, 4>> textMarkupQuadsForDraft(
         const Draft &draft);
@@ -1331,6 +1338,7 @@ private:
     bool m_textEditActive = false;
     qsizetype m_selectedTextRangeStart = 0;
     qsizetype m_selectedTextRangeLength = 0;
+    bool m_editorVirtualSpacesPrepared = false;
     CharacterFormat m_typingCharacterFormat;
     qsizetype m_typingCharacterFormatPosition = -1;
     bool m_typingCharacterFormatActive = false;

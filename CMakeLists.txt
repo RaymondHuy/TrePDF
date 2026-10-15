@@ -227,6 +227,7 @@ qt_add_qml_module(trepdf
         src/PDFEditControllerCandidates.cpp
         src/PDFEditControllerAnnotationScan.cpp
         src/PDFEditControllerText.cpp
+        src/PDFEditControllerVirtualSpaces.cpp
         src/PDFEditControllerComments.cpp
         src/PDFEditControllerClipboard.cpp
         src/PDFEditControllerGeometry.cpp

@@ -304,6 +304,10 @@ private slots:
     void preservesSourceClusterPositionsThroughEditorAndSave();
     void preservesNumericColumnSpacingThroughEditorAndSave_data();
     void preservesNumericColumnSpacingThroughEditorAndSave();
+    void editsVirtualSourceGapThroughQmlAndSave_data();
+    void editsVirtualSourceGapThroughQmlAndSave();
+    void distinguishesVirtualGapsFromOrdinarySpacing_data();
+    void distinguishesVirtualGapsFromOrdinarySpacing();
     void rejectsNumericColumnMetadataThatOmitsEncodedSpace();
     void editsSourceClusterSpacingWithUndo();
     void rejectsDamagedSourceClusterMetadata();

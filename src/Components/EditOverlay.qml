@@ -841,6 +841,7 @@ Item {
 
     function loadEditorRichText(cursorPosition, selectionStart, selectionEnd) {
         loadingEditorText = true
+        controller.prepareEditorVirtualSpaces()
         editor.text = richTextHtml(
             controller.selectedText,
             controller.selectedCharacterSpans,
@@ -2454,6 +2455,18 @@ Item {
                     length,
                     root.textLayoutPageHeight)
             }
+        }
+
+        function onSelectionFontFamilyApplied(start, length, family) {
+            if (!root.editing)
+                return
+            root.suppressNextEditorReload = true
+            root.applyingEditorDocumentFormat = true
+            const applied = root.controller.applyFontFamilyToEditorDocument(
+                editor.textDocument, start, length, family, root.textLayoutPageHeight)
+            root.applyingEditorDocumentFormat = false
+            if (!applied)
+                root.suppressNextEditorReload = false
         }
 
         function onSelectionFontSizeApplied(start, length, fontSizeRatio) {

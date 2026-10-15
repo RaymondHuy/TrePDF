@@ -629,6 +629,7 @@ QVariantList PDFEditController::characterSpanMaps(
         map.insert(QStringLiteral("letterSpacingRatio"), span.format.letterSpacingRatio);
         map.insert(QStringLiteral("wordSpacingRatio"), span.format.wordSpacingRatio);
         map.insert(QStringLiteral("sourceAdvanceRatio"), span.format.sourceAdvanceRatio);
+        map.insert(QStringLiteral("virtualSpaceRatio"), span.format.virtualSpaceRatio);
         map.insert(QStringLiteral("fontBold"), span.format.fontBold);
         map.insert(QStringLiteral("fontItalic"), span.format.fontItalic);
         map.insert(QStringLiteral("fontUnderline"), span.format.fontUnderline);
@@ -953,6 +954,7 @@ bool PDFEditController::sameCharacterFormat(const CharacterFormat &left,
         && left.letterSpacingRatio == right.letterSpacingRatio
         && left.wordSpacingRatio == right.wordSpacingRatio
         && left.sourceAdvanceRatio == right.sourceAdvanceRatio
+        && left.virtualSpaceRatio == right.virtualSpaceRatio
         && left.fontBold == right.fontBold
         && left.fontItalic == right.fontItalic
         && left.fontUnderline == right.fontUnderline
@@ -1042,6 +1044,8 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
     if (m_textEditActive && m_textEditDisplayDraftActive) {
         m_textEditDisplayDraft = normalizedDraft;
     }
+    const QString displayText = normalizedDraft.text;
+    normalizedDraft = collapseEditorVirtualSpaces(normalizedDraft);
     const Draft originalDraft = initialDraftForCandidate(m_selectedCandidate);
     const QString key = draftKey(m_selectedCandidate.page, m_selectedCandidate.objectId);
     const auto existingDraft = m_drafts.constFind(key);
@@ -1062,7 +1066,7 @@ void PDFEditController::updateSelectedDraft(const Draft &draft)
         changed = true;
     }
 
-    m_selectedText = normalizedDraft.text;
+    m_selectedText = displayText;
     if (changed) {
         const bool reusesSourceCommentSuppressionTexture
             = m_frameResizeActive

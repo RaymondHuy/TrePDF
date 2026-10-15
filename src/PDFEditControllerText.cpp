@@ -17,6 +17,11 @@
 
 #include <QByteArray>
 #include <QCoreApplication>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QDataStream>
+#include <QMimeData>
+#include <QTextDocumentFragment>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFont>
@@ -28,6 +33,9 @@
 #include <QImageReader>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMutexLocker>
 #include <QPolygonF>
 #include <QQuickTextDocument>
@@ -73,6 +81,57 @@ constexpr int kEditorSourceAdvanceRatio = QTextFormat::UserProperty + 8;
 constexpr int kEditorFontFamily = QTextFormat::UserProperty + 9;
 constexpr int kEditorFontStretch = QTextFormat::UserProperty + 10;
 constexpr int kEditorFirstLineIndentRatio = QTextFormat::UserProperty + 11;
+constexpr int kEditorVirtualSpaceRatio = QTextFormat::UserProperty + 12;
+
+// Keep a cell's physical width independent of its font, zoom and user tracking.
+// The marker participates in QTextDocument history; a literal space has zero.
+void applyVirtualSpaceWidth(QTextCharFormat &format, qreal ratio, qreal pageHeight)
+{
+    format.setProperty(kEditorVirtualSpaceRatio, ratio);
+    if (ratio <= 0.0 || pageHeight <= 0.0)
+        return;
+    QFont font = format.font();
+    font.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
+    font.setWordSpacing(0.0);
+    font.setKerning(false);
+    const qreal natural = QFontMetricsF(font).horizontalAdvance(QLatin1Char(' '));
+    format.setFontKerning(false);
+    format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+    const qreal spacing = std::round((ratio * pageHeight - natural) * 64.0) / 64.0;
+    font.setLetterSpacing(QFont::AbsoluteSpacing, spacing);
+    // QFont's fixed-point conversion rounds negative tracking toward zero.
+    // Compensate the measured conversion, not the semantic cell width.
+    format.setFontLetterSpacing(spacing + spacing - font.letterSpacing());
+    format.setFontWordSpacing(0.0);
+}
+
+// A virtual cell has no independent PDF ink; its underline follows the real
+// glyph carrying the advance. Keep that true after typing or deleting anchors.
+void normalizeVirtualSpaceUnderline(QTextDocument *document, QTextCursor &cursor, bool &merging)
+{
+    bool underline = false;
+    for (int position = 0; position < document->characterCount() - 1; ++position) {
+        cursor.setPosition(position);
+        cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+        const QTextCharFormat current = cursor.charFormat();
+        const QChar character = document->characterAt(position);
+        if (character == QLatin1Char(' ')
+            && current.doubleProperty(kEditorVirtualSpaceRatio) > 0.0) {
+            if (current.fontUnderline() != underline) {
+                if (!merging) {
+                    cursor.joinPreviousEditBlock();
+                    merging = true;
+                }
+                QTextCharFormat decoration;
+                decoration.setFontUnderline(underline);
+                cursor.mergeCharFormat(decoration);
+            }
+        } else {
+            underline = character != QChar::ParagraphSeparator
+                && character != QChar::LineSeparator && current.fontUnderline();
+        }
+    }
+}
 
 // Qt adds the insertion length and following format length when calculating
 // the redo cursor. A final custom item makes it use the changed text bounds
@@ -159,14 +218,39 @@ public:
         }
     }
 
-    ~EditorTypingEditBlock() override
-    {
-        finish();
+    void setPageHeight(qreal height) { m_pageHeight = height; }
+    bool insertedAt(int position) const {
+        return position >= 0 && position < m_inserted.size() && m_inserted.at(position);
+    }
+    qreal pastedVirtualRatio(int position) const {
+        const int relative = position - m_pasteStart;
+        return relative >= 0 && relative < m_pastedWidths.size() && m_pageHeight > 0
+            ? m_pastedWidths.at(relative) / m_pageHeight : 0.0;
     }
 
-    bool takePendingTextEdit()
+    // QQuickTextEdit destroys its QTextDocument before QObject children. Never
+    // dereference the document from this child's destructor.
+    ~EditorTypingEditBlock() override = default;
+
+    QTextCharFormat pastedFormat(int position) const {
+        const int relative = position - m_pasteStart;
+        return relative >= 0 && relative < m_pastedFormats.size()
+            ? m_pastedFormats.at(relative) : QTextCharFormat();
+    }
+    bool hasPastedFormats() const { return !m_pastedFormats.isEmpty(); }
+
+    bool takePendingTextEdit(bool *nativeEdit = nullptr)
     {
-        const bool pending = m_nativeEdit || m_newCommand;
+        finish();
+        // A queued format synchronization can leave undoCommandAdded pending
+        // until after Undo. A new edit clears redo history; Undo must instead
+        // retain the character properties restored by QTextDocument.
+        const bool pending = m_nativeEdit
+            || (m_newCommand && !m_document->textDocument()->isRedoAvailable());
+        if (nativeEdit)
+            *nativeEdit = m_nativeEdit;
+        if (!m_nativeEdit)
+            m_inserted.clear();
         m_nativeEdit = false;
         m_newCommand = false;
         return pending;
@@ -180,8 +264,18 @@ protected:
             finish();
         }
         bool insertsText = false;
+        bool cut = false;
+        bool paste = false;
+        int replacementStart = editor->property("selectionStart").toInt();
+        int replacementEnd = editor->property("selectionEnd").toInt();
         if (event->type() == QEvent::KeyPress) {
             const auto *key = static_cast<QKeyEvent *>(event);
+            if (key->matches(QKeySequence::Copy)) {
+                copySelection(editor);
+                return true;
+            }
+            cut = key->matches(QKeySequence::Cut);
+            paste = key->matches(QKeySequence::Paste);
             insertsText = (!key->text().isEmpty()
                 && !(key->modifiers() & (Qt::ControlModifier | Qt::MetaModifier)))
                 || key->key() == Qt::Key_Backspace || key->key() == Qt::Key_Delete
@@ -189,9 +283,96 @@ protected:
         } else if (event->type() == QEvent::InputMethod) {
             const auto *input = static_cast<QInputMethodEvent *>(event);
             insertsText = !input->commitString().isEmpty() || input->replacementLength() > 0;
+            if (replacementStart == replacementEnd) {
+                replacementStart += input->replacementStart();
+                replacementEnd = replacementStart + input->replacementLength();
+            }
         }
         if (insertsText) {
             m_nativeEdit = true;
+            m_nativeChangeStart = replacementStart;
+            m_nativeChangeEnd = replacementEnd;
+            m_inserted.fill(false, qMax(0, m_document->textDocument()->characterCount() - 1));
+            m_pastedWidths.clear();
+            m_pastedFormats.clear();
+            m_pasteStart = editor->property("selectionStart").toInt();
+            if (paste) {
+                const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+                const QByteArray payload = mime ? mime->data(virtualSpaceMime()) : QByteArray();
+                // Decode only a bounded self-contained payload; clipboard data is untrusted.
+                if (!payload.isEmpty() && payload.size() <= 1024 * 1024) {
+                    QDataStream stream(payload);
+                    const QString text = mime->text();
+                    quint32 count = 0;
+                    stream >> count;
+                    char digest[32];
+                    const int digestSize = stream.readRawData(digest, sizeof(digest));
+                    if (count == quint32(text.size()) && count <= 32768
+                        && payload.size() == 4 + 32 + qint64(count) * 8
+                        && digestSize == 32
+                        && QByteArray(digest, 32) == QCryptographicHash::hash(text.toUtf8(), QCryptographicHash::Sha256)) {
+                        QVector<qreal> widths;
+                        for (quint32 index = 0; index < count; ++index) {
+                            double width = 0.0;
+                            stream >> width;
+                            if (!qIsFinite(width) || width < 0.0 || width > 512.0
+                                || (width > 0.0 && text.at(index) != QLatin1Char(' '))) {
+                                widths.clear();
+                                break;
+                            }
+                            widths.append(width);
+                        }
+                        if (stream.status() == QDataStream::Ok && widths.size() == text.size())
+                            m_pastedWidths = widths;
+                    }
+                }
+                if (!m_pastedWidths.isEmpty()) {
+                    const QByteArray data = mime->data(characterFormatMime());
+                    if (data.size() <= 4 * 1024 * 1024) {
+                        const QJsonArray formats = QJsonDocument::fromJson(data).array();
+                        if (formats.size() == m_pastedWidths.size()) {
+                            for (const QJsonValue &value : formats) {
+                                const QJsonObject record = value.toObject();
+                                const QString family = record.value(QStringLiteral("family")).toString();
+                                const double size = record.value(QStringLiteral("size")).toDouble(-1);
+                                const double displaySize = record.value(QStringLiteral("displaySize")).toDouble(-1);
+                                const double letter = record.value(QStringLiteral("letter")).toDouble(1000);
+                                const double word = record.value(QStringLiteral("word")).toDouble(1000);
+                                const int stretch = record.value(QStringLiteral("stretch")).toInt(-1);
+                                const QColor color(record.value(QStringLiteral("color")).toString());
+                                if (family.isEmpty() || family.size() > 1024
+                                    || !qIsFinite(size) || size <= 0 || size > 512
+                                    || !qIsFinite(displaySize) || displaySize < 0 || displaySize > 512
+                                    || !qIsFinite(letter) || qAbs(letter) > 512
+                                    || !qIsFinite(word) || qAbs(word) > 512
+                                    || stretch < 1 || stretch > 4000 || !color.isValid()) {
+                                    m_pastedFormats.clear();
+                                    break;
+                                }
+                                QTextCharFormat format;
+                                const bool bold = record.value(QStringLiteral("bold")).toBool();
+                                const bool italic = record.value(QStringLiteral("italic")).toBool();
+                                const QString face = ApplicationFonts::displayFamilyForStyle(family, bold, italic);
+                                const int pixels = qMax(1, qRound(displaySize > 0 ? displaySize : size));
+                                format.setFontFamilies({face.isEmpty() ? family : face});
+                                format.setFontWeight(bold ? QFont::Bold : QFont::Normal);
+                                format.setFontItalic(italic);
+                                format.setFontUnderline(record.value(QStringLiteral("underline")).toBool());
+                                format.setForeground(color);
+                                format.setProperty(QTextFormat::FontPixelSize, pixels);
+                                format.setFontStretch(ApplicationFonts::calibratedFontStretch(face, stretch, bold, italic, pixels));
+                                format.setProperty(kEditorFontFamily, family);
+                                format.setProperty(kEditorFontStretch, stretch);
+                                format.setProperty(kEditorFontSizeRatio, size / m_pageHeight);
+                                format.setProperty(kEditorDisplayFontSizeRatio, displaySize / m_pageHeight);
+                                format.setProperty(kEditorLetterSpacingRatio, letter / m_pageHeight);
+                                format.setProperty(kEditorWordSpacingRatio, word / m_pageHeight);
+                                m_pastedFormats.append(format);
+                            }
+                        }
+                    }
+                }
+            }
             m_nativeEventPending = true;
             m_nativeTextBefore = m_document->textDocument()
                 ? m_document->textDocument()->toPlainText() : QString();
@@ -204,10 +385,68 @@ protected:
                                          m_document->textDocument()->characterCount() - 1));
             m_cursor.beginEditBlock();
         }
+        if (cut) {
+            copySelection(editor);
+            QTextCursor cursor(m_document->textDocument());
+            const int start = editor->property("selectionStart").toInt();
+            cursor.setPosition(start);
+            cursor.setPosition(editor->property("selectionEnd").toInt(), QTextCursor::KeepAnchor);
+            cursor.removeSelectedText();
+            editor->setProperty("cursorPosition", start);
+            return true;
+        }
         return false;
     }
 
 private:
+    static QString characterFormatMime() { return QStringLiteral("application/x-trepdf-character-formats-v1"); }
+    static QString virtualSpaceMime() { return QStringLiteral("application/x-trepdf-virtual-spaces-v1"); }
+
+    void copySelection(QObject *editor)
+    {
+        const int start = editor->property("selectionStart").toInt();
+        const int end = editor->property("selectionEnd").toInt();
+        if (start >= end)
+            return;
+        QTextCursor cursor(m_document->textDocument());
+        cursor.setPosition(start);
+        cursor.setPosition(end, QTextCursor::KeepAnchor);
+        const QTextDocumentFragment fragment(cursor);
+        const QString text = fragment.toPlainText();
+        auto *mime = new QMimeData;
+        mime->setText(text);
+        mime->setHtml(fragment.toHtml());
+        if (text.size() <= 32768 && m_pageHeight > 0.0) {
+            QByteArray payload;
+            QDataStream stream(&payload, QIODevice::WriteOnly);
+            stream << quint32(text.size());
+            const QByteArray digest = QCryptographicHash::hash(text.toUtf8(), QCryptographicHash::Sha256);
+            stream.writeRawData(digest.constData(), digest.size());
+            QJsonArray formats;
+            for (int position = start; position < end; ++position) {
+                cursor.setPosition(position);
+                cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+                const QTextCharFormat format = cursor.charFormat();
+                stream << double(text.at(position - start) == QLatin1Char(' ')
+                    ? format.doubleProperty(kEditorVirtualSpaceRatio) * m_pageHeight : 0.0);
+                formats.append(QJsonObject{
+                    {QStringLiteral("family"), format.stringProperty(kEditorFontFamily)},
+                    {QStringLiteral("size"), format.doubleProperty(kEditorFontSizeRatio) * m_pageHeight},
+                    {QStringLiteral("displaySize"), format.doubleProperty(kEditorDisplayFontSizeRatio) * m_pageHeight},
+                    {QStringLiteral("letter"), format.doubleProperty(kEditorLetterSpacingRatio) * m_pageHeight},
+                    {QStringLiteral("word"), format.doubleProperty(kEditorWordSpacingRatio) * m_pageHeight},
+                    {QStringLiteral("stretch"), format.intProperty(kEditorFontStretch)},
+                    {QStringLiteral("bold"), format.fontWeight() >= QFont::Bold},
+                    {QStringLiteral("italic"), format.fontItalic()},
+                    {QStringLiteral("underline"), format.fontUnderline()},
+                    {QStringLiteral("color"), format.foreground().color().name(QColor::HexArgb)}});
+            }
+            mime->setData(virtualSpaceMime(), payload);
+            mime->setData(characterFormatMime(), QJsonDocument(formats).toJson(QJsonDocument::Compact));
+        }
+        QGuiApplication::clipboard()->setMimeData(mime);
+    }
+
     void finish()
     {
         if (!m_cursor.isNull()) {
@@ -219,10 +458,25 @@ private:
             cursor.endEditBlock();
         }
         if (m_nativeEventPending) {
+            const QString after = m_document->textDocument()->toPlainText();
+            const int start = qBound(0, m_nativeChangeStart, int(m_nativeTextBefore.size()));
+            const int end = qBound(start, m_nativeChangeEnd, int(m_nativeTextBefore.size()));
+            const int inserted = after.size() - (m_nativeTextBefore.size() - (end - start));
+            m_inserted.fill(false, after.size());
+            // Preedit can report a whole-block contentsChange even though only
+            // its commit changed text. Verify the native replacement boundary
+            // against both immutable sides, never mark that broad signal range.
+            if (inserted >= 0 && start + inserted <= after.size()
+                && after.first(start) == m_nativeTextBefore.first(start)
+                && after.sliced(start + inserted) == m_nativeTextBefore.sliced(end)) {
+                for (int position = start; position < start + inserted; ++position)
+                    m_inserted[position] = true;
+            }
             // Boundary Delete/Backspace and empty paste produce no textChanged
             // signal. Do not let their pending flag invalidate the next undo.
             if (m_document->textDocument()
-                && m_document->textDocument()->toPlainText() == m_nativeTextBefore) {
+                && start == end
+                && after == m_nativeTextBefore) {
                 m_nativeEdit = false;
                 m_newCommand = false;
             }
@@ -239,6 +493,13 @@ private:
     bool m_closingNativeBlock = false;
     bool m_nativeEventPending = false;
     QString m_nativeTextBefore;
+    QVector<bool> m_inserted;
+    QVector<qreal> m_pastedWidths;
+    QVector<QTextCharFormat> m_pastedFormats;
+    qreal m_pageHeight = 0.0;
+    int m_pasteStart = 0;
+    int m_nativeChangeStart = 0;
+    int m_nativeChangeEnd = 0;
 };
 
 // Header input is temporary and has no selected Draft. Keep its typing color
@@ -1074,6 +1335,10 @@ void PDFEditController::applyTypingFormatToEditorDocument(
     if (!document || !m_typingCharacterFormatActive || length <= 0) {
         return;
     }
+    const auto *typingBlock = static_cast<EditorTypingEditBlock *>(quickTextDocument->findChild<QObject *>(
+        QStringLiteral("trepdfTypingEditBlock"), Qt::FindDirectChildrenOnly));
+    if (typingBlock && typingBlock->hasPastedFormats())
+        return;
 
     const int maximumPosition = qMax(0, document->characterCount() - 1);
     const int rangeStart = qBound(0, start, maximumPosition);
@@ -1106,6 +1371,7 @@ void PDFEditController::applyTypingFormatToEditorDocument(
     format.setProperty(kEditorLetterSpacingRatio, m_typingCharacterFormat.letterSpacingRatio);
     format.setProperty(kEditorWordSpacingRatio, m_typingCharacterFormat.wordSpacingRatio);
     format.setProperty(kEditorSourceAdvanceRatio, 0.0);
+    format.setProperty(kEditorVirtualSpaceRatio, 0.0);
     format.setFontKerning(true);
     if (qIsFinite(displayedPageHeight) && displayedPageHeight > 0.0) {
         const qreal ratio = m_typingCharacterFormat.displayFontSizeRatio > 0.0
@@ -1144,6 +1410,8 @@ void PDFEditController::applyTypingFormatToEditorDocument(
     cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
     cursor.joinPreviousEditBlock();
     cursor.mergeCharFormat(format);
+    bool merging = true;
+    normalizeVirtualSpaceUnderline(document, cursor, merging);
     document->appendUndoItem(new EditorTypingCursorBoundary);
     cursor.endEditBlock();
 }
@@ -1209,10 +1477,13 @@ void PDFEditController::initializeEditorFontSizes(
             return controller->m_typingCharacterFormatActive
                 || std::any_of(current.characterSpans.cbegin(), current.characterSpans.cend(),
                                [](const CharacterSpan &span) {
-                    return !qFuzzyIsNull(span.format.sourceAdvanceRatio);
+                    return !qFuzzyIsNull(span.format.sourceAdvanceRatio)
+                        || span.format.virtualSpaceRatio > 0.0;
                 });
         });
     }
+    static_cast<EditorTypingEditBlock *>(quickDocument->findChild<QObject *>(
+        QStringLiteral("trepdfTypingEditBlock"), Qt::FindDirectChildrenOnly))->setPageHeight(displayedPageHeight);
     // Called only immediately after loading a new rich document, before user
     // edits. Metadata must not become a visible undo step.
     const bool undoEnabled = document->isUndoRedoEnabled();
@@ -1254,7 +1525,10 @@ void PDFEditController::initializeEditorFontSizes(
         }
         cursor.setPosition(start);
         cursor.setPosition(end, QTextCursor::KeepAnchor);
-        cursor.mergeCharFormat(format);
+        QTextCharFormat complete = cursor.charFormat();
+        complete.merge(format);
+        applyVirtualSpaceWidth(complete, span.format.virtualSpaceRatio, displayedPageHeight);
+        cursor.setCharFormat(complete);
     }
     document->setUndoRedoEnabled(undoEnabled);
 }
@@ -1272,14 +1546,17 @@ void PDFEditController::normalizeEditorSourceSpacing(
         QStringLiteral("trepdfTypingEditBlock"), Qt::FindDirectChildrenOnly));
     // Undo and redo restore their own custom properties. Reapplying the edit
     // invalidation there would erase the source spacing that undo just restored.
-    if (!block || !block->takePendingTextEdit()) {
+    bool nativeEdit = false;
+    if (!block || !block->takePendingTextEdit(&nativeEdit)) {
         return;
     }
     Draft draft = selectedDraftForDisplay();
     const QString text = document->toPlainText();
-    if (draft.text == text) {
+    // A format command can still be pending when Undo restores its properties.
+    // Only native replacement (including space-for-space) needs normalization
+    // when the text is unchanged; do not turn a format undo into a new command.
+    if (draft.text == text && !nativeEdit)
         return;
-    }
     const int position = quickDocument->parent()
         ? quickDocument->parent()->property("cursorPosition").toInt() : -1;
     setDraftText(draft, text, nullptr, -1, position);
@@ -1289,8 +1566,14 @@ void PDFEditController::normalizeEditorSourceSpacing(
         for (int index = int(span.start); index < span.start + span.length; ++index) {
             cursor.setPosition(index);
             cursor.setPosition(index + 1, QTextCursor::KeepAnchor);
-            const QTextCharFormat previous = cursor.charFormat();
-            if (previous.doubleProperty(kEditorSourceAdvanceRatio) == span.format.sourceAdvanceRatio) {
+            QTextCharFormat previous = cursor.charFormat();
+            const bool inserted = block->insertedAt(index);
+            if (inserted)
+                previous.merge(block->pastedFormat(index));
+            const qreal virtualRatio = inserted ? block->pastedVirtualRatio(index) : span.format.virtualSpaceRatio;
+            if (!inserted
+                && previous.doubleProperty(kEditorSourceAdvanceRatio) == span.format.sourceAdvanceRatio
+                && previous.doubleProperty(kEditorVirtualSpaceRatio) == virtualRatio) {
                 continue;
             }
             if (!merging) {
@@ -1305,14 +1588,61 @@ void PDFEditController::normalizeEditorSourceSpacing(
             format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
             format.setFontLetterSpacing(
                 (letterSpacing + span.format.sourceAdvanceRatio) * displayedPageHeight);
-            cursor.mergeCharFormat(format);
+            QTextCharFormat complete = previous;
+            complete.merge(format);
+            applyVirtualSpaceWidth(complete, virtualRatio, displayedPageHeight);
+            if (virtualRatio <= 0.0)
+                complete.setFontWordSpacing(previous.doubleProperty(kEditorWordSpacingRatio) * displayedPageHeight);
+            cursor.setCharFormat(complete);
         }
     }
+    normalizeVirtualSpaceUnderline(document, cursor, merging);
     if (merging) {
         document->appendUndoItem(new EditorTypingCursorBoundary);
         cursor.endEditBlock();
     }
     block->takePendingTextEdit();
+}
+
+bool PDFEditController::applyFontFamilyToEditorDocument(
+    QObject *textDocument, int start, int length, const QString &family,
+    qreal displayedPageHeight) const
+{
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    QTextDocument *document = quickDocument ? quickDocument->textDocument() : nullptr;
+    if (!document || !m_textEditActive || !m_hasSelection || length <= 0
+        || family.isEmpty() || !qIsFinite(displayedPageHeight) || displayedPageHeight <= 0.0)
+        return false;
+    const int maximum = document->characterCount() - 1;
+    const int first = qBound(0, start, maximum);
+    const int last = int(qBound(qint64(first), qint64(start) + length, qint64(maximum)));
+    if (first == last)
+        return false;
+    QTextCursor cursor(document);
+    cursor.beginEditBlock();
+    for (int position = first; position < last; ++position) {
+        cursor.setPosition(position);
+        cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+        QTextCharFormat format = cursor.charFormat();
+        const bool bold = format.fontWeight() >= QFont::Bold;
+        const QString displayFamily = ApplicationFonts::displayFamilyForStyle(
+            family, bold, format.fontItalic(), cursor.selectedText());
+        format.setFontFamilies({displayFamily.isEmpty() ? family : displayFamily});
+        format.setProperty(kEditorFontFamily, family);
+        format.setProperty(kEditorFontStretch, QFont::Unstretched);
+        format.setProperty(kEditorSourceAdvanceRatio, 0.0);
+        const int pixels = format.intProperty(QTextFormat::FontPixelSize);
+        format.setFontStretch(displayFontStretch(family, QFont::Unstretched,
+            bold, format.fontItalic(), pixels));
+        format.setFontKerning(true);
+        format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+        format.setFontLetterSpacing(format.doubleProperty(kEditorLetterSpacingRatio) * displayedPageHeight);
+        format.setFontWordSpacing(format.doubleProperty(kEditorWordSpacingRatio) * displayedPageHeight);
+        applyVirtualSpaceWidth(format, format.doubleProperty(kEditorVirtualSpaceRatio), displayedPageHeight);
+        cursor.setCharFormat(format);
+    }
+    cursor.endEditBlock();
+    return true;
 }
 
 bool PDFEditController::applyFontSizeToEditorDocument(
@@ -1359,7 +1689,10 @@ bool PDFEditController::applyFontSizeToEditorDocument(
             span.format.fontBold, span.format.fontItalic, pixels));
         cursor.setPosition(rangeStart);
         cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
-        cursor.mergeCharFormat(format);
+        QTextCharFormat complete = cursor.charFormat();
+        complete.merge(format);
+        applyVirtualSpaceWidth(complete, complete.doubleProperty(kEditorVirtualSpaceRatio), displayedPageHeight);
+        cursor.setCharFormat(complete);
     }
     cursor.endEditBlock();
     return true;
@@ -1406,7 +1739,10 @@ bool PDFEditController::applyTextSpacingToEditorDocument(
             format.setProperty(kEditorWordSpacingRatio, wordSpacingRatio);
             format.setFontWordSpacing(wordSpacingRatio * displayedPageHeight);
         }
-        cursor.mergeCharFormat(format);
+        QTextCharFormat complete = cursor.charFormat();
+        complete.merge(format);
+        applyVirtualSpaceWidth(complete, complete.doubleProperty(kEditorVirtualSpaceRatio), displayedPageHeight);
+        cursor.setCharFormat(complete);
     }
     cursor.endEditBlock();
     return true;
@@ -1455,9 +1791,14 @@ bool PDFEditController::applyFontStyleToEditorDocument(
     QTextCursor cursor(document);
     cursor.beginEditBlock();
     if (style == static_cast<int>(FontStyle::Underline)) {
-        cursor.setPosition(rangeStart);
-        cursor.setPosition(rangeEnd, QTextCursor::KeepAnchor);
-        cursor.mergeCharFormat(format);
+        for (int position = rangeStart; position < rangeEnd; ++position) {
+            cursor.setPosition(position);
+            cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+            if (cursor.charFormat().doubleProperty(kEditorVirtualSpaceRatio) <= 0.0)
+                cursor.mergeCharFormat(format);
+        }
+        bool merging = true;
+        normalizeVirtualSpaceUnderline(document, cursor, merging);
     } else {
         const qreal pageHeight = m_document
             ? m_document->pageSize(m_selectedCandidate.page).height() : 0.0;
@@ -1491,7 +1832,10 @@ bool PDFEditController::applyFontStyleToEditorDocument(
             updated.setFontKerning(true);
             updated.setFontLetterSpacingType(QFont::AbsoluteSpacing);
             updated.setFontLetterSpacing(previous.doubleProperty(kEditorLetterSpacingRatio) * pageHeight);
-            cursor.mergeCharFormat(updated);
+            QTextCharFormat complete = previous;
+            complete.merge(updated);
+            applyVirtualSpaceWidth(complete, complete.doubleProperty(kEditorVirtualSpaceRatio), pageHeight);
+            cursor.setCharFormat(complete);
         }
     }
     cursor.endEditBlock();
@@ -1654,6 +1998,13 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
             ? document->findBlock(static_cast<int>(position + 1)).charFormat()
             : cursor.charFormat();
         CharacterFormat &format = formats[position];
+        const qreal virtualRatio = editorFormat.doubleProperty(kEditorVirtualSpaceRatio);
+        format.virtualSpaceRatio = draft.text.at(position) == QLatin1Char(' ')
+                && qIsFinite(virtualRatio) && virtualRatio > 0.0 ? virtualRatio : 0.0;
+        if (editorFormat.hasProperty(kEditorFontFamily))
+            format.fontFamily = editorFormat.stringProperty(kEditorFontFamily);
+        if (editorFormat.hasProperty(kEditorFontStretch))
+            format.fontStretch = editorFormat.intProperty(kEditorFontStretch);
         format.fontBold = editorFormat.fontWeight() >= QFont::Bold;
         format.fontItalic = editorFormat.fontItalic();
         format.fontUnderline = editorFormat.fontUnderline();
@@ -1939,6 +2290,8 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
         return;
     }
     rebaseTypingFormat(draft);
+    if (!finishImmediately && rangeLength > 0)
+        emit selectionFontFamilyApplied(int(rangeStart), int(rangeLength), fontFamily);
     updateSelectedDraft(draft);
 
     if (finishImmediately) {
@@ -2462,7 +2815,9 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
         draft,
         rangeStart,
         rangeLength,
-        [&updatedStyle](CharacterFormat &format) {
+        [&updatedStyle, style](CharacterFormat &format) {
+            if (style == FontStyle::Underline && format.virtualSpaceRatio > 0.0)
+                return;
             format = updatedStyle(format);
         });
     if (!changed) {
@@ -2492,7 +2847,7 @@ void PDFEditController::finishSelectedTextEdit()
     }
 
     const Command baseline = m_textEditCommand;
-    Draft finalizedDraft = selectedDraftForDisplay();
+    Draft finalizedDraft = collapseEditorVirtualSpaces(selectedDraftForDisplay());
     const auto textMetricsUnchanged = [&]() {
         qsizetype left = 0;
         qsizetype right = 0;
@@ -3096,6 +3451,7 @@ PDFEditController::TextChange PDFEditController::setDraftText(
     // A source advance describes one original cluster boundary. New text must
     // never inherit that boundary's adjustment from the preceding character.
     insertedFormat.sourceAdvanceRatio = 0.0;
+    insertedFormat.virtualSpaceRatio = 0.0;
     QVector<CharacterFormat> newFormats;
     newFormats.reserve(newLength);
     for (qsizetype index = 0; index < commonPrefix; ++index) {
@@ -3554,6 +3910,7 @@ void PDFEditController::selectedParagraphRangeForDraft(
 
 void PDFEditController::resetTextEditDisplayState()
 {
+    m_editorVirtualSpacesPrepared = false;
     resetTypingFormat();
     m_textEditDisplayDraft = Draft();
     m_textEditDisplayDraftActive = false;
