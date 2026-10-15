@@ -10,6 +10,9 @@ Các file chính:
   geometry/font, quyết định `editable`, selection và draft.
 - [`PDFEditController.h`](../src/PDFEditController.h): cấu trúc `Candidate` và
   các property đưa sang QML.
+- [`PDFEditControllerVirtualSpaces.cpp`](../src/PDFEditControllerVirtualSpaces.cpp):
+  ánh xạ khoảng dịch nguồn thành các bước caret tạm trong editor và gộp lại
+  thành khoảng dịch trước khi tạo session draft.
 - [`EditOverlay.qml`](../src/Components/EditOverlay.qml) (macOS và nền tảng khác)
   và [`Windows/EditOverlay.qml`](../src/Components/Windows/EditOverlay.qml)
   (Windows): hit test, hover box, selection box và rich `TextEdit` khi edit.
@@ -841,7 +844,9 @@ Draft
 
 `CharacterFormat` hiện chứa family, font size ratio, display size ratio,
 stretch, `letterSpacingRatio`, `wordSpacingRatio`, `sourceAdvanceRatio`, bold,
-italic, underline và color. Ba ratio khoảng cách được chuẩn hóa theo chiều cao
+italic, underline và color. Editor còn dùng `virtualSpaceRatio` để đánh dấu
+riêng ô khoảng trắng ảo có độ rộng cố định; trường này không được ghi thành
+ký tự PDF. Các ratio khoảng cách được chuẩn hóa theo chiều cao
 trang PDF, giống size ratio, và tham gia so sánh draft/undo/redo.
 `sourceAdvanceRatio` là hiệu chỉnh advance của cụm chữ nguồn, tách biệt với hai
 giá trị spacing người dùng điều khiển. `ParagraphFormat` chứa alignment,
@@ -927,13 +932,16 @@ glyph, font và vị trí; nếu không khớp thì giữ các object riêng. D�
 nhánh này giới hạn 1.024 UTF-16 code unit. Baseline của glyph nguồn phải nằm
 trong sai số 0,05 point; không ép các vị trí chữ cao/thấp khác nhau vào một dòng.
 
-`sourceAdvanceRatio` không hiện thành giãn ký tự trong panel. Editor, draft
-preview và writer cộng nó với `letterSpacingRatio` khi đo/vẽ Qt, còn caret,
+`sourceAdvanceRatio` không hiện thành giãn ký tự trong panel. Draft preview
+và writer cộng nó với `letterSpacingRatio` khi đo/vẽ Qt; editor dùng cùng cách
+với hiệu chỉnh nhỏ/âm và chiếu khoảng dịch dương lớn thành Space ảo ở mục
+7.10.1. Caret,
 selection và wrap dùng chính layout đó. Khi chèn/xóa, giữ hiệu chỉnh của phần
 prefix/suffix không bị tác động, xóa hiệu chỉnh ở cụm thay đổi và ranh giới ngay
 trước chỗ sửa; ký tự mới dùng spacing semantic của typing format. Đổi family,
 cỡ chữ, đậm/nghiêng hoặc spacing xóa hiệu chỉnh trong vùng được đổi, vì advance
-nguồn không còn tương ứng với metric mới. Đổi màu hoặc gạch chân vẫn giữ nó.
+nguồn không còn tương ứng với metric mới. Quy tắc xóa này không xóa độ rộng của
+Space ảo đã chiếu trong editor. Đổi màu hoặc gạch chân vẫn giữ hiệu chỉnh nguồn.
 Custom character property của `QTextDocument` lưu hiệu chỉnh này cùng undo/redo;
 không hiệu chỉnh lại document khi undo đang phục hồi dữ liệu cũ. Việc đóng
 edit block của IME không được xem là một lần gõ mới. Các span có hiệu chỉnh
@@ -969,6 +977,13 @@ rồi ghép lại các part của cùng dòng; metadata lỗi hoặc vượt gi�
 coi là spacing tin cậy. Đây là dữ liệu hỗ trợ editor: PDF vẫn hiển thị bằng text
 object và vị trí chuẩn, không phụ thuộc TrePDF để render.
 
+Khi đối chiếu text trong hai mark này, scanner dùng ký tự thực sự được mã hóa
+trong object, bỏ qua separator do PDFium tự suy diễn từ khoảng dịch `TJ` lớn.
+Ví dụ hai số ở hai cột có logical text `11` vẫn giữ vị trí riêng, dù PDFium
+trích xuất thành `1 1`. Space thật trong nội dung vẫn được kiểm tra; không xóa
+mọi khoảng trắng để chấp nhận metadata. Quy tắc này giữ spacing khi mở lại
+và Edit các bảng đã lưu bằng TrePDF, bao gồm ca `Book3.pdf`.
+
 Trong nhánh layout có spacing hoặc paragraph metadata, text Latin/Common chạy
 trái sang phải giữ vị trí từng cụm kể cả khi spacing bằng 0. Các ký tự đơn giản
 cùng font/style được gom vào một text object và dùng `FPDFText_SetPositions()`
@@ -979,6 +994,81 @@ hoặc ligature. Giới hạn 1.024 cụm/dòng và 32.768 part/draft vẫn áp 
 giới hạn sẽ hủy Save trước khi
 ghi đè đích. Metadata spacing lỗi ở bất kỳ part nào cũng ngăn phục hồi paragraph
 từ nhóm đó, tránh âm thầm thay residual hỏng bằng 0.
+
+### 7.10.1 Khoảng trắng ảo khi Edit Text
+
+PDF có thể chứa text thật `11` và khoảng dịch `SourceAdvance` sau số `1` đầu,
+chẳng hạn 47,47 PDF point. Khi mở editor, `prepareEditorVirtualSpaces()` chiếu
+khoảng dịch đó thành các ký tự U+0020 tạm có `virtualSpaceRatio` riêng. Chúng
+hiện như khoảng trắng bình thường, không vẽ dấu chấm. Qt vì thế hỗ trợ click
+đặt caret, mũi tên, bôi đen, Backspace và Delete từng bước bằng cơ chế text gốc.
+
+Chỉ chiếu `sourceAdvanceRatio` hữu hạn, dương, tối đa 512 PDF point và ít nhất
+bằng hai lần advance của Space tự nhiên trong font/cỡ chữ/stretch đang dùng.
+Không biến `letterSpacingRatio`, `wordSpacingRatio`, hiệu chỉnh âm hoặc hiệu
+chỉnh nhỏ thành Space ảo. Chỉ tách tại grapheme boundary, với format đồng nhất
+trong cụm, và giới hạn toàn bộ chuỗi sau chiếu ở 32.768 UTF-16 code unit. Khi
+không đủ ngân sách, khoảng đó giữ dạng hiệu chỉnh nguồn. Khoảng dịch cuối dòng
+hoặc cuối chuỗi cũng được chiếu nếu đủ điều kiện, để phần khoảng còn lại sau
+khi xóa ký tự phía sau vẫn sửa tiếp được ở lần mở editor sau.
+
+Mỗi bước dùng advance Space đo từ font; bước cuối giữ đúng phần dư trong đơn
+vị normalized của nguồn. Tổng độ rộng các bước bằng khoảng dịch ban đầu, không
+làm tròn từng bước theo pixel hoặc PDF point. Khi đổi font/cỡ chữ/style,
+editor tính lại phần bù font để mỗi ô ảo giữ nguyên độ rộng vật lý. `SourceAdvance`
+đã tách không còn nằm trên ký tự nguồn, tránh cộng khoảng dịch hai lần.
+
+Hành vi nhập liệu là **chèn như Word**: gõ `5` ở giữa khoảng ảo giữ các bước
+còn lại ở cả hai phía và đẩy số `1` cuối sang phải theo advance của `5`. Không
+tiêu thụ khoảng trống để chứa ký tự mới. Quy tắc này không phụ thuộc khoảng
+trống còn lại có đủ chứa chữ hay không; khi đến giới hạn frame, dùng wrap và
+các kiểm tra biên trang hiện có. Space do người dùng gõ là Space thật, kể cả
+khi gõ ngay trong khoảng ảo hoặc thay một ô ảo bằng một Space có hình thức giống
+hệt. Nội dung lưu trong ví dụ là `151` cùng hiệu chỉnh riêng sau số `1` đầu và
+sau số `5`; nếu người dùng gõ thêm Space thật thì ký tự đó vẫn nằm trong text PDF.
+
+Chỉ display draft và `QTextDocument` đang edit dùng chuỗi mở rộng. Session draft,
+preview ngoài editor, history của controller và Save dùng kết quả của
+`collapseEditorVirtualSpaces()`: bỏ đúng các U+0020 có marker, cộng độ rộng vào
+`sourceAdvanceRatio` của cụm thật trước đó, giữ các Space không có marker.
+Ánh xạ hai chiều dùng boundary UTF-16, bao gồm boundary cuối chuỗi, để chuyển
+character spans, paragraph ranges, source line breaks và selection khi mở.
+Trong editor, caret/selection/formatting và local Undo/Redo cùng dùng chuỗi mở
+rộng; custom properties đi cùng native edit block và committed IME text. Không
+thay document chỉ để cập nhật marker. Mở rồi đóng/Save mà không sửa phải phục
+hồi text, độ rộng và span nguồn, không tự tạo draft hoặc hàng loạt Space thật.
+
+Copy/Cut trong editor ghi thêm MIME riêng
+`application/x-trepdf-virtual-spaces-v1` chứa text và độ rộng PDF point của mỗi
+ô. Paste nội bộ kiểm tra payload có giới hạn và text khớp để phục hồi marker,
+kể cả giữa các trang có chiều cao khác nhau. MIME định dạng đi kèm giữ family,
+cỡ chữ, màu và style của vùng sao chép; đổi font/cỡ tại nơi dán không biến
+định dạng đã sao chép thành typing format. Plain text/HTML cho ứng dụng khác
+vẫn chứa các khoảng trắng nhìn thấy. Paste plain text không có MIME hợp lệ coi
+mọi Space là ký tự thật, không suy đoán marker từ chuỗi khoảng trắng.
+
+Khoảng dịch không có nét vẽ riêng. Gạch chân trên các ô ảo đi theo ký tự thật
+đứng trước, khớp path underline khi Save. Chỉ chọn ô ảo rồi bật gạch chân không
+tạo thay đổi; bật gạch chân tại caret vẫn áp cho chữ gõ tiếp. Chèn/xóa và Undo
+cùng khôi phục liên kết này trong một bước history của editor.
+
+Nếu xóa cả cụm thật neo một khoảng ảo ở đầu đoạn, phần khoảng còn lại được lưu
+thành `firstLineIndentRatio` để giữ vị trí chữ mà không sinh Space thật. Nó vẫn
+là các ô có caret trong phiên edit hiện tại; sau khi kết thúc rồi mở editor lại,
+phần đó là thụt dòng đầu đoạn. Không tự chiếu các indent nguồn tùy ý thành
+Space ảo. Phạm vi này không mở rộng các giới hạn glyph/shaping của nhánh lưu
+hiệu chỉnh nguồn ở mục 7.10.
+
+Kiểm thử trong `tst_PDFEditControllerTextSpacing.cpp` dùng QML TextEdit thật,
+native key events, IME preedit/commit/replacement và clipboard. Các ca gồm
+no-op, xóa/chọn một phần gap, phần dư, chèn ở đầu/giữa/cuối, Space thật,
+đổi font/cỡ, gạch chân, hai tầng Undo/Redo và hai lần Save/reopen. Kiểm tra
+tổng độ rộng theo metadata ở sai số dưới 0,0001 pt và glyph origin so với
+editor dưới 0,15 pt, bao gồm font có khác biệt advance giữa Qt và PDFium.
+Biến môi trường `TREPDF_TEST_COLUMN_SPACING_PDF` bật thêm các ca trên bản sao
+tạm của Book4. File hiện tại có dòng `11` trong một paragraph nhiều dòng;
+test giữ toàn semantic suffix khi sửa gap của dòng đầu, không ghi vào file
+được truyền qua biến môi trường.
 
 ### 7.11 Giãn dòng và khoảng cách đoạn
 
@@ -1180,6 +1270,8 @@ Controller lưu snapshot rich-text draft trước edit vào `m_textEditCommand`,
 draft mới cho đến khi text, spans, paragraph formats hoặc geometry thực sự thay
 đổi; nếu text và paragraph formats cuối cùng vẫn bằng snapshot và không resize,
 geometry tự mở rộng bị loại bỏ khi kết thúc edit.
+Display draft được chiếu Space ảo sau khi đã chuẩn bị font; kiểm tra no-op và
+ghi session draft luôn dùng text semantic đã gộp lại, xem mục 7.10.1.
 
 Candidate dòng/đoạn vẫn dùng đúng một draft key `page|objectId`. Rich-text spans
 không được chia ngược về từng source part trong session; `CandidatePart` giữ
@@ -1422,6 +1514,10 @@ paragraph separator của Qt thành `\n`, rồi gọi `updateSelectedTextPreview
 - khác trạng thái nguồn: lưu rich-text draft;
 - cập nhật `selectedText`;
 - phát signal để overlay và page renderer cập nhật.
+
+Nếu có Space ảo, controller giữ display draft mở rộng cho editor và gộp marker
+thành `sourceAdvanceRatio` trong bản sao trước khi so sánh/lưu session draft.
+Do đó các range đang nhập không bị lệch sang index của chuỗi PDF đã rút gọn.
 
 ### 15.2 Enter
 
