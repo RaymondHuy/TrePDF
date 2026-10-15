@@ -28,6 +28,7 @@ jobs:
             os: macos-15
             qt-arch: clang_64
             qt-version: '6.12.0'
+            macos-arch: arm64
             macos-target: '14.4'
           - platform: macos-arm64
             package: macos-arm64-qt6.11
@@ -35,6 +36,21 @@ jobs:
             os: macos-15
             qt-arch: clang_64
             qt-version: '6.11.0'
+            macos-arch: arm64
+            macos-target: '13.0'
+          - platform: macos-x64
+            os: macos-15-intel
+            qt-arch: clang_64
+            qt-version: '6.12.0'
+            macos-arch: x86_64
+            macos-target: '14.4'
+          - platform: macos-x64
+            package: macos-x64-qt6.11
+            variant: qt6.11
+            os: macos-15-intel
+            qt-arch: clang_64
+            qt-version: '6.11.0'
+            macos-arch: x86_64
             macos-target: '13.0'
           - platform: linux-x64
             os: ubuntu-24.04
@@ -48,6 +64,7 @@ jobs:
       TREPDF_PACKAGE: ${{ matrix.package || matrix.platform }}
       TREPDF_VARIANT: ${{ matrix.variant }}
       QT_VERSION: ${{ matrix.qt-version }}
+      MACOS_ARCHITECTURE: ${{ matrix.macos-arch }}
       MACOS_DEPLOYMENT_TARGET: ${{ matrix.macos-target }}
 
     steps:
@@ -119,7 +136,7 @@ jobs:
         run: |
           options=()
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            options+=(-DCMAKE_OSX_ARCHITECTURES=arm64 "-DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOS_DEPLOYMENT_TARGET")
+            options+=("-DCMAKE_OSX_ARCHITECTURES=$MACOS_ARCHITECTURE" "-DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOS_DEPLOYMENT_TARGET")
           elif [[ "$RUNNER_OS" == "Windows" ]]; then
             options+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl "-DZLIB_ROOT=$ZLIB_ROOT")
           fi
