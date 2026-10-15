@@ -14,6 +14,9 @@ import subprocess
 import tempfile
 
 
+MACOS_ARCHITECTURES = {"macos-arm64": "arm64", "macos-x64": "x86_64"}
+
+
 def verify_macos_bundle(app: Path) -> None:
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
 
@@ -58,7 +61,7 @@ def smoke_test(executable: Path, target: str) -> None:
     else:
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     # macdeployqt ships Cocoa; its default deployment does not include offscreen.
-    environment.update(QT_QPA_PLATFORM="cocoa" if target == "macos-arm64" else "offscreen",
+    environment.update(QT_QPA_PLATFORM="cocoa" if target in MACOS_ARCHITECTURES else "offscreen",
                        QT_QUICK_BACKEND="software")
     with tempfile.TemporaryDirectory(prefix="trepdf-uat-") as temporary:
         # Also launch outside the install tree to catch working-directory assumptions.
@@ -92,7 +95,7 @@ def smoke_test(executable: Path, target: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", choices=("windows-x64", "macos-arm64", "linux-x64"),
+    parser.add_argument("--platform", choices=("windows-x64", "macos-arm64", "macos-x64", "linux-x64"),
                         required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--variant", default="",
@@ -113,6 +116,7 @@ def main() -> None:
     executable = stage / {
         "windows-x64": "bin/trepdf.exe",
         "macos-arm64": "trepdf.app/Contents/MacOS/trepdf",
+        "macos-x64": "trepdf.app/Contents/MacOS/trepdf",
         "linux-x64": "bin/trepdf",
     }[args.platform]
     if not executable.is_file():
@@ -128,10 +132,13 @@ def main() -> None:
         launcher.chmod(0o755)
         executable = launcher
 
-    if args.platform == "macos-arm64":
+    if args.platform in MACOS_ARCHITECTURES:
+        subprocess.run(["lipo", str(executable), "-verify_arch",
+                        MACOS_ARCHITECTURES[args.platform]], check=True)
         sign_macos_bundle(stage / "trepdf.app")
+        processor = "Apple Silicon" if args.platform == "macos-arm64" else "Intel"
         (stage / "START-HERE.txt").write_text(
-            "TrePDF UAT for macOS (Apple Silicon)\n\n"
+            f"TrePDF UAT for macOS ({processor})\n\n"
             "This build has an ad-hoc integrity signature, without Apple notarization.\n"
             "After verifying the archive SHA-256, extract it and open trepdf.app.\n"
             "If macOS blocks it as an unidentified developer, approve this app in\n"
@@ -153,7 +160,7 @@ def main() -> None:
         "qt": os.environ.get("QT_VERSION", "local"),
         "dependencies": manifest["versions"],
     }
-    if args.platform == "macos-arm64":
+    if args.platform in MACOS_ARCHITECTURES:
         metadata["macos_signing"] = "ad-hoc; not notarized"
     (stage / "build-info.json").write_text(
         json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
@@ -168,7 +175,7 @@ def main() -> None:
 
     args.output.mkdir(parents=True, exist_ok=True)
     archive_base = args.output.resolve() / f"TrePDF-{args.version}-{package}"
-    if args.platform == "macos-arm64":
+    if args.platform in MACOS_ARCHITECTURES:
         archive = Path(str(archive_base) + ".zip")
         # Preserve .app permissions and framework symlinks inside the ZIP.
         subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent",
