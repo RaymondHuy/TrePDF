@@ -785,6 +785,10 @@ Trên Windows, probe hiệu chỉnh, QFont của editor/preview và QFont của 
 cùng dùng `PreferNoHinting`. Layout tính bằng điểm PDF rồi mới scale theo zoom;
 làm tròn advance theo pixel màn hình ở cỡ nhỏ có thể khiến font OTF giãn sai
 và nhiều giá trị stretch cho cùng chiều rộng. Không đổi chế độ hinting của macOS.
+Phép đo khoảng trắng trong `applyVirtualSpaceWidth()` cũng dùng `PreferNoHinting`
+trên Windows vì `QTextCharFormat::font()` không chứa thiết lập hinting kế thừa
+từ editor. Nếu đo bằng advance đã làm tròn rồi áp vào layout chưa làm tròn,
+sai số sẽ cộng dồn qua từng ô khoảng trắng ảo và làm lệch chữ phía sau.
 
 Khi người dùng chọn một family khác, stretch của range được đổi về `100` để
 không mang scale của font nguồn sang font mới. Chọn lại chính family hiện tại

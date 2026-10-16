@@ -91,6 +91,11 @@ void applyVirtualSpaceWidth(QTextCharFormat &format, qreal ratio, qreal pageHeig
     if (ratio <= 0.0 || pageHeight <= 0.0)
         return;
     QFont font = format.font();
+#ifdef Q_OS_WIN
+    // Character formats omit the editor's inherited hinting preference. Measure
+    // the same fractional advances as fontForDisplay(), not rounded pixels.
+    font.setHintingPreference(QFont::PreferNoHinting);
+#endif
     font.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
     font.setWordSpacing(0.0);
     font.setKerning(false);
