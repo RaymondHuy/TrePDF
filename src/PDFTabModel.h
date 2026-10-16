@@ -5,6 +5,7 @@
 #include "PDFExcelExportController.h"
 #include "PDFFormController.h"
 #include "PDFFormDesignerController.h"
+#include "PDFOCRController.h"
 #include "PDFSearchController.h"
 
 #include <QAbstractListModel>
@@ -69,6 +70,7 @@ class PDFDocumentSession : public QObject
                    CONSTANT FINAL)
     Q_PROPERTY(PDFExcelExportController *excelExportController READ excelExportController
                    CONSTANT FINAL)
+    Q_PROPERTY(PDFOCRController *ocrController READ ocrController CONSTANT FINAL)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged FINAL)
     Q_PROPERTY(QString filePath READ filePath NOTIFY filePathChanged FINAL)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
@@ -125,6 +127,7 @@ public:
     PDFFormDesignerController *formDesignerController() const;
     PDFSearchController *searchController() const;
     PDFExcelExportController *excelExportController() const;
+    PDFOCRController *ocrController() const;
     QString title() const;
     QString filePath() const;
     qreal zoom() const;
@@ -198,6 +201,7 @@ private:
     PDFFormDesignerController *m_formDesignerController = nullptr;
     PDFSearchController *m_searchController = nullptr;
     PDFExcelExportController *m_excelExportController = nullptr;
+    PDFOCRController *m_ocrController = nullptr;
     PDFViewState *m_secondaryViewState = nullptr;
     QString m_title;
     QString m_filePath;
@@ -251,6 +255,8 @@ public:
     Q_INVOKABLE bool requestSave(PDFDocumentSession *session);
     Q_INVOKABLE bool requestSaveAs(PDFDocumentSession *session, const QUrl &target);
     Q_INVOKABLE bool requestExcelExport(PDFDocumentSession *session, const QUrl &target);
+    Q_INVOKABLE bool requestOCR(PDFDocumentSession *session, const QUrl &target,
+                               const QString &language, const QString &pageRange);
     Q_INVOKABLE QString mergeValidationError(const QList<QUrl> &sources, const QUrl &target) const;
     Q_INVOKABLE PDFDocumentSession *firstDraftSession() const;
     Q_INVOKABLE void finishAllEdits();
@@ -265,6 +271,7 @@ signals:
     void hasDraftsChanged();
     void statusMessage(const QString &message);
     void sessionSaveFinished(PDFDocumentSession *session, bool succeeded);
+    void sessionOCRFinished(PDFDocumentSession *session, bool succeeded, const QUrl &target);
     void passwordRequested(const QUrl &source, bool incorrectPassword);
     void fontDownloadRequested(PDFDocumentSession *session);
     void fontDownloadFailed(PDFDocumentSession *session, const QString &message);
@@ -279,6 +286,7 @@ signals:
 private:
     static QString fileIdentity(const QUrl &source);
     bool contains(PDFDocumentSession *session) const;
+    void cancelOCRForDestination(const QUrl &target);
     void connectSession(PDFDocumentSession *session);
 
     QVector<PDFDocumentSession *> m_sessions;

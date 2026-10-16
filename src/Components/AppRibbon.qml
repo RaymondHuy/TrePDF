@@ -15,6 +15,7 @@ Column {
     property PDFDocumentSession session: null
     property bool anySaving: false
     property bool hasPendingPanelEdits: false
+    property bool ocrPanelVisible: false
     property bool headerTextToolSelected: false
     property bool headerImageToolSelected: false
     property bool headerPageNumberToolSelected: false
@@ -73,6 +74,7 @@ Column {
     signal saveRequested()
     signal saveAsRequested()
     signal excelExportRequested()
+    signal ocrRequested()
     signal mergePdfRequested()
     signal fontSettingsRequested()
     signal pageRequested(int page)
@@ -467,7 +469,9 @@ Column {
             session: root.session
             anySaving: root.anySaving
             hasPendingPanelEdits: root.hasPendingPanelEdits
+            ocrPanelVisible: root.ocrPanelVisible
             onExportRequested: root.excelExportRequested()
+            onOcrRequested: root.ocrRequested()
         }
     }
 

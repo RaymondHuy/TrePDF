@@ -122,6 +122,15 @@ def main() -> None:
     if not executable.is_file():
         parser.error(f"Deployed application is missing: {executable}")
 
+    ocr_data = (executable.parent.parent / "Resources/tessdata"
+                if args.platform in MACOS_ARCHITECTURES else executable.parent / "tessdata")
+    original_data = Path(manifest["roots"]["OCR_ROOT"]) / "share/tessdata"
+    for filename in ("eng.traineddata", "vie.traineddata", "pdf.ttf"):
+        deployed = ocr_data / filename
+        if not deployed.is_file() or hashlib.sha256(deployed.read_bytes()).digest() != hashlib.sha256(
+                (original_data / filename).read_bytes()).digest():
+            raise RuntimeError(f"Missing or changed bundled OCR data: {filename}")
+
     if args.platform == "linux-x64":
         launcher = stage / "TrePDF.sh"
         launcher.write_text(

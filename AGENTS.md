@@ -188,6 +188,18 @@ Current features:
   remain read-only. New edits cancel
   in-flight detection; completed links retain independent spatial geometry.
 
+- Convert > Recognize Text (OCR) opens a lazy panel for English/Vietnamese
+  recognition on all, current or selected PDF pages. A clean saved source is
+  required. `PDFOCRController` owns a bounded, cancellable worker per job;
+  `PDFOCRPipeline` renders through private PDFium under the process-wide lock,
+  recognizes with bundled Tesseract/Leptonica outside that lock, and adds an
+  invisible text-only layer through qpdf without replacing source page images.
+  Pages with existing text are skipped. The validated result is atomically saved
+  as a separate PDF and opens in a new tab. OCR is an export, not a content draft;
+  source changes/close cancel work. Desktop macOS, Windows and Linux share the
+  implementation; iOS hides the unavailable feature. See `docs/ocr-pipeline.md`
+  for limits, packaging, geometry, encryption and destination safety.
+
 - The Convert tab writes detected PDF tables to Excel, one worksheet per table.
   Export requires saved source content and text-based ruled grids with closed
   perimeters; rectangular merged cells are preserved. Borderless/scan tables

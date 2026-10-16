@@ -94,6 +94,7 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
     , m_formDesignerController(new PDFFormDesignerController(this))
     , m_searchController(new PDFSearchController(this))
     , m_excelExportController(new PDFExcelExportController(this))
+    , m_ocrController(new PDFOCRController(this))
     , m_secondaryViewState(new PDFViewState(this))
 {
     m_formDesignerController->setDocument(m_document);
@@ -114,6 +115,23 @@ PDFDocumentSession::PDFDocumentSession(QObject *parent)
             m_excelExportController, &PDFExcelExportController::cancel);
     connect(m_excelExportController, &PDFExcelExportController::statusMessage,
             this, &PDFDocumentSession::statusMessage);
+    m_ocrController->setDocument(m_document);
+    m_ocrController->setRecognitionGuard([this]() {
+        prepareForDeactivation();
+        return !hasDrafts() && !saving();
+    });
+    connect(m_editController, &PDFEditController::historyStateChanged,
+            m_ocrController, &PDFOCRController::cancel);
+    connect(m_editController, &PDFEditController::savingChanged,
+            m_ocrController, &PDFOCRController::cancel);
+    connect(m_editController, &PDFEditController::passwordProtectionChanged,
+            m_ocrController, &PDFOCRController::cancel);
+    connect(m_ocrController, &PDFOCRController::statusMessage,
+            this, &PDFDocumentSession::statusMessage);
+    connect(this, &PDFDocumentSession::hasDraftsChanged, m_ocrController, [this]() {
+        if (hasDrafts())
+            m_ocrController->cancel();
+    });
     connect(
         m_editController,
         &PDFEditController::historyStateChanged,
@@ -200,6 +218,11 @@ PDFSearchController *PDFDocumentSession::searchController() const
 PDFExcelExportController *PDFDocumentSession::excelExportController() const
 {
     return m_excelExportController;
+}
+
+PDFOCRController *PDFDocumentSession::ocrController() const
+{
+    return m_ocrController;
 }
 
 QString PDFDocumentSession::title() const
@@ -563,6 +586,10 @@ PDFDocumentSession *PDFTabModel::open(const QUrl &source, const QString &passwor
         return nullptr;
     }
 
+    // A destination may have been selected before it was opened in a tab.
+    // Cancel under the worker's commit mutex before exposing the old file; if
+    // commit already won, opening reads the completed OCR file instead.
+    cancelOCRForDestination(source);
     const QString identity = fileIdentity(source);
     if (!identity.isEmpty()) {
         for (int index = 0; index < m_sessions.size(); ++index) {
@@ -619,6 +646,7 @@ bool PDFTabModel::closeSession(PDFDocumentSession *session)
         return false;
     }
     session->excelExportController()->cancel();
+    session->ocrController()->cancel();
     const int oldCurrentIndex = m_currentIndex;
     const bool removingCurrentSession = index == oldCurrentIndex;
 
@@ -671,6 +699,7 @@ bool PDFTabModel::requestSaveAs(PDFDocumentSession *session, const QUrl &target)
         }
     }
 
+    cancelOCRForDestination(target);
     return session->editController()->requestSaveAs(target);
 }
 
@@ -688,6 +717,14 @@ bool PDFTabModel::requestExcelExport(PDFDocumentSession *session, const QUrl &ta
         }
     }
     return session->excelExportController()->exportTo(target);
+}
+
+bool PDFTabModel::requestOCR(PDFDocumentSession *session, const QUrl &target,
+                            const QString &language, const QString &pageRange)
+{
+    if (!contains(session) || anySaving())
+        return false;
+    return session->ocrController()->recognizeTo(target, language, pageRange);
 }
 
 QString PDFTabModel::mergeValidationError(const QList<QUrl> &sources, const QUrl &target) const
@@ -765,8 +802,33 @@ bool PDFTabModel::contains(PDFDocumentSession *session) const
     return session && m_sessions.contains(session);
 }
 
+void PDFTabModel::cancelOCRForDestination(const QUrl &target)
+{
+    const QString identity = fileIdentity(target);
+    if (identity.isEmpty())
+        return;
+    for (PDFDocumentSession *session : m_sessions) {
+        if (session->ocrController()->busy()
+            && fileIdentity(session->ocrController()->target()) == identity)
+            session->ocrController()->cancel();
+    }
+}
+
 void PDFTabModel::connectSession(PDFDocumentSession *session)
 {
+    session->ocrController()->setDestinationGuard([this](const QUrl &target) {
+        const QString identity = fileIdentity(target);
+        for (PDFDocumentSession *other : m_sessions) {
+            if (!identity.isEmpty() && identity == fileIdentity(other->document()->source()))
+                return false;
+        }
+        return !anySaving();
+    });
+    connect(session->ocrController(), &PDFOCRController::finished,
+            this, [this, session](bool succeeded, const QUrl &target) {
+                if (contains(session))
+                    emit sessionOCRFinished(session, succeeded, target);
+            });
     connect(session->editController(), &PDFEditController::fontDownloadFailed,
             this, [this, session](const QString &message) {
                 if (contains(session))

@@ -34,6 +34,112 @@ void PDFEditControllerTest::exposesExcelExportTabAndDraftGuard()
     QVERIFY(window->setProperty("allowWindowClose", true));
 }
 
+void PDFEditControllerTest::routesOCRPanelAndGuardsDirtySources()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("ocr-ui.pdf"));
+    const QString otherPath = m_temporaryDirectory.filePath(QStringLiteral("ocr-ui-other.pdf"));
+    const QString resultPath = m_temporaryDirectory.filePath(QStringLiteral("ocr-ui-result.pdf"));
+    QVERIFY(createDifferentPageSizesPdf(sourcePath));
+    QVERIFY(createFontStylePdf(otherPath));
+    QVERIFY(createFontStylePdf(resultPath));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> window(component.create());
+    QVERIFY2(window, qPrintable(component.errorString()));
+    window->setProperty("visible", false);
+    auto *model = window->findChild<PDFTabModel *>();
+    QVERIFY(model);
+    auto *session = model->open(QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+    auto *tabs = window->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    auto *panelLoader = window->findChild<QObject *>(QStringLiteral("ocrPanelLoader"));
+    QVERIFY(tabs);
+    QVERIFY(panelLoader);
+    QVERIFY(!panelLoader->property("active").toBool());
+    QVERIFY(!window->findChild<QObject *>(QStringLiteral("ocrPanel")));
+    QVERIFY(tabs->setProperty("currentIndex", 6));
+    QObject *ribbonButton = nullptr;
+    QTRY_VERIFY((ribbonButton = window->findChild<QObject *>(QStringLiteral("recognizeTextButton"))));
+    QVERIFY(ribbonButton->property("enabled").toBool());
+    QVERIFY(QMetaObject::invokeMethod(ribbonButton, "clicked"));
+    QPointer<QObject> panel;
+    QTRY_VERIFY((panel = window->findChild<QObject *>(QStringLiteral("ocrPanel"))));
+    auto *startButton = panel->findChild<QObject *>(QStringLiteral("startOCRButton"));
+    auto *languageSelector = panel->findChild<QObject *>(QStringLiteral("ocrLanguageSelector"));
+    auto *pageSelector = panel->findChild<QObject *>(QStringLiteral("ocrPageSelector"));
+    auto *rangeInput = panel->findChild<QObject *>(QStringLiteral("ocrPageRangeInput"));
+    QVERIFY(startButton);
+    QVERIFY(languageSelector);
+    QVERIFY(pageSelector);
+    QVERIFY(rangeInput);
+    QVERIFY(startButton->property("enabled").toBool());
+    QCOMPARE(panel->property("selectedLanguage").toString(), QStringLiteral("eng+vie"));
+    QCOMPARE(panel->property("selectedPageRange").toString(), QString());
+    QVERIFY(languageSelector->setProperty("currentIndex", 1));
+    QCOMPARE(panel->property("selectedLanguage").toString(), QStringLiteral("vie"));
+    QVERIFY(languageSelector->setProperty("currentIndex", 2));
+    QCOMPARE(panel->property("selectedLanguage").toString(), QStringLiteral("eng"));
+
+    // Custom input must be valid before a destination chooser can be opened.
+    QVERIFY(pageSelector->setProperty("currentIndex", 2));
+    QVERIFY(!startButton->property("enabled").toBool());
+    QVERIFY(rangeInput->setProperty("text", QStringLiteral("0,1")));
+    QVERIFY(!panel->property("validPageRange").toBool());
+    QVERIFY(rangeInput->setProperty("text", QStringLiteral("01")));
+    QVERIFY(!panel->property("validPageRange").toBool());
+    QVERIFY(rangeInput->setProperty("text", QStringLiteral("2-1")));
+    QVERIFY(!panel->property("validPageRange").toBool());
+    QVERIFY(rangeInput->setProperty("text", QString::number(session->document()->pageCount() + 1)));
+    QVERIFY(!panel->property("validPageRange").toBool());
+    QVERIFY(rangeInput->setProperty("text", QStringLiteral("1-2, 1")));
+    QVERIFY(panel->property("validPageRange").toBool());
+    QVERIFY(startButton->property("enabled").toBool());
+    QCOMPARE(panel->property("selectedPageRange").toString(), QStringLiteral("1-2, 1"));
+    QVERIFY(pageSelector->setProperty("currentIndex", 1));
+    QCOMPARE(panel->property("selectedPageRange").toString(),
+             QString::number(panel->property("currentPage").toInt() + 1));
+    QVariant rangeValid;
+    QVERIFY(QMetaObject::invokeMethod(panel, "validatePageRange",
+        Q_RETURN_ARG(QVariant, rangeValid), Q_ARG(QVariant, QStringLiteral("1-1000, 1")),
+        Q_ARG(QVariant, 1200)));
+    QVERIFY(rangeValid.toBool());
+    QVERIFY(QMetaObject::invokeMethod(panel, "validatePageRange",
+        Q_RETURN_ARG(QVariant, rangeValid), Q_ARG(QVariant, QStringLiteral("1-1000, 1001")),
+        Q_ARG(QVariant, 1200)));
+    QVERIFY(!rangeValid.toBool());
+    QVERIFY(QMetaObject::invokeMethod(panel, "validatePageRange",
+        Q_RETURN_ARG(QVariant, rangeValid), Q_ARG(QVariant, QStringLiteral("1-1001")),
+        Q_ARG(QVariant, 1200)));
+    QVERIFY(!rangeValid.toBool());
+
+    QVERIFY(session->editController()->addBlankPage());
+    QTRY_VERIFY(!startButton->property("enabled").toBool());
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestOCR",
+        Q_ARG(QVariant, QStringLiteral("eng")), Q_ARG(QVariant, QString())));
+    QVERIFY(!window->property("ocrOutputSession").value<QObject *>());
+    session->editController()->discardDrafts();
+    QTRY_VERIFY(startButton->property("enabled").toBool());
+
+    // Leaving Convert releases the optional UI; returning restores it lazily.
+    QVERIFY(tabs->setProperty("currentIndex", 0));
+    QTRY_VERIFY(panel.isNull());
+    QVERIFY(!panelLoader->property("active").toBool());
+    QVERIFY(tabs->setProperty("currentIndex", 6));
+    QTRY_VERIFY((panel = window->findChild<QObject *>(QStringLiteral("ocrPanel"))));
+    auto *otherSession = model->open(QUrl::fromLocalFile(otherPath));
+    QVERIFY(otherSession);
+    QTRY_VERIFY(panel.isNull());
+    QVERIFY(!panelLoader->property("active").toBool());
+
+    // Completion belongs to its source session even after another tab is active.
+    model->sessionOCRFinished(session, true, QUrl::fromLocalFile(resultPath));
+    QTRY_COMPARE(model->count(), 3);
+    QTRY_COMPARE(QFileInfo(model->currentSession()->document()->source().toLocalFile()).canonicalFilePath(),
+                 QFileInfo(resultPath).canonicalFilePath());
+    QVERIFY(window->setProperty("allowWindowClose", true));
+}
+
 void PDFEditControllerTest::defaultsCommentTabToCommentSelectTool()
 {
     const QString sourcePath = m_temporaryDirectory.filePath(

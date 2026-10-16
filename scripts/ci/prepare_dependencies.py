@@ -292,6 +292,17 @@ def main() -> None:
         versions["zlib"] = ZLIB_VERSION
     elif args.platform == "macos-x64":
         versions["libjpeg-turbo"] = JPEG_VERSION
+    ocr = directory / "ocr"
+    ocr_options = ["--zlib-root", roots["ZLIB_ROOT"]] if args.platform == "windows-x64" else []
+    run(sys.executable, repo / "scripts/build-ocr.py", "--prefix", ocr,
+        "--work", directory / "ocr-build", *ocr_options)
+    roots["OCR_ROOT"] = str(ocr)
+    ocr_manifest = json.loads((ocr / "manifest.json").read_text(encoding="utf-8"))
+    versions.update(tesseract=ocr_manifest["tesseract"], leptonica=ocr_manifest["leptonica"],
+                    tessdata_fast=ocr_manifest["models"])
+    for name, notice in (("tesseract", "tesseract.txt"), ("leptonica", "leptonica.txt"),
+                         ("tessdata_fast", "tessdata.txt")):
+        copy_notices(ocr / "licenses", directory / "licenses" / name, (notice,))
     manifest = {
         "platform": args.platform,
         "roots": roots,

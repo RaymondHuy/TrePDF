@@ -199,6 +199,7 @@ private slots:
     void routesSavedManualPageLinksThroughNavigation();
     void suppressesOriginalDestinationWhileEditingSourceLink();
     void exposesExcelExportTabAndDraftGuard();
+    void routesOCRPanelAndGuardsDirtySources();
     void storesTransientTextFieldsByPage();
     void limitsTransientTextFieldInputLength();
     void storesTransientRadioButtons();
