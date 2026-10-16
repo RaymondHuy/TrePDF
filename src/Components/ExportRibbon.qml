@@ -10,6 +10,7 @@ Flickable {
     property PDFDocumentSession session: null
     property bool anySaving: false
     property bool hasPendingPanelEdits: false
+    property bool ocrPanelVisible: false
     readonly property PDFExcelExportController controller: session
         ? session.excelExportController
         : null
@@ -18,6 +19,7 @@ Flickable {
         (session && session.hasDrafts) || hasPendingPanelEdits
 
     signal exportRequested()
+    signal ocrRequested()
 
     clip: true
     contentWidth: ribbonRow.implicitWidth + 16
@@ -62,6 +64,25 @@ Flickable {
                     if (root.controller)
                         root.controller.cancel()
                 }
+            }
+        }
+
+        RibbonGroup {
+            visible: root.session && root.session.ocrController.available
+            theme: root.theme
+            //% "Text recognition"
+            title: qsTrId("OCRRibbonGroup")
+
+            RibbonButton {
+                objectName: "recognizeTextButton"
+                theme: root.theme
+                documentLoaded: root.session && root.session.document.loaded
+                enabled: documentLoaded && !root.anySaving
+                //% "Recognize Text (OCR)"
+                text: qsTrId("RecognizeTextOCR")
+                iconSource: "../assets/icons/type.svg"
+                primary: root.ocrPanelVisible
+                onClicked: root.ocrRequested()
             }
         }
 

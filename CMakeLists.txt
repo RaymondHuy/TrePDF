@@ -56,6 +56,9 @@ if(IOS AND (NOT PDFium_ROOT OR NOT QPDF_ROOT))
 endif()
 find_package(PDFium REQUIRED)
 find_package(QPDF REQUIRED)
+if(NOT IOS)
+    find_package(TrePDFOCR REQUIRED)
+endif()
 
 # Keep third-party build options local and the backend free of extra runtime
 # libraries. The vendored 1.2.4 source makes first-time/offline builds identical.
@@ -109,6 +112,19 @@ target_include_directories(trepdf_font_archive PUBLIC
 )
 # The public minizip headers include zlib.h, so consumers need its include path.
 target_link_libraries(trepdf_font_archive PUBLIC ZLIB::ZLIB)
+
+qt_add_library(trepdf_ocr_pipeline STATIC
+    src/PDFOCRPipeline.cpp
+    src/PDFOCRPipeline.h
+)
+target_link_libraries(trepdf_ocr_pipeline PRIVATE Qt6::Gui PDFium::PDFium QPDF::QPDF)
+if(NOT IOS)
+    target_compile_definitions(trepdf_ocr_pipeline PUBLIC TREPDF_HAS_OCR=1)
+    target_link_libraries(trepdf_ocr_pipeline PRIVATE Tesseract::Tesseract)
+endif()
+if(WIN32)
+    target_compile_definitions(trepdf_ocr_pipeline PRIVATE NOMINMAX)
+endif()
 
 qt_add_executable(trepdf
     src/main.cpp
@@ -247,6 +263,8 @@ qt_add_qml_module(trepdf
         src/PDFEditController_p.h
         src/PDFExcelExportController.cpp
         src/PDFExcelExportController.h
+        src/PDFOCRController.cpp
+        src/PDFOCRController.h
         src/PDFMergeController.cpp
         src/PDFMergeController.h
         src/PDFFormController.cpp
@@ -322,6 +340,7 @@ qt_add_qml_module(trepdf
         ${TREPDF_EDIT_OVERLAY_QML}
         src/Components/EditRibbon.qml
         src/Components/ExportRibbon.qml
+        src/Components/OCRPanel.qml
         src/Components/FormChoiceOverlay.qml
         src/Components/FormRibbon.qml
         src/Components/FormTextFieldOverlay.qml
@@ -448,7 +467,7 @@ if(Qt6_VERSION VERSION_LESS 6.10)
 endif()
 
 qt_add_translations(trepdf
-    SOURCE_TARGETS trepdf
+    SOURCE_TARGETS trepdf trepdf_ocr_pipeline
     # Keep iPad-only messages when updating the shared catalog from macOS.
     SOURCES src/ios/IOSDocumentAccess.mm src/ios/PlatformService.cpp
     TS_FILE_BASE qml
@@ -470,6 +489,7 @@ target_link_libraries(trepdf
         Qt6::Network
         trepdf_font_archive
         trepdf_password_writer
+        trepdf_ocr_pipeline
         Qt6::QmlIntegration
         Qt6::Quick
         Qt6::QuickControls2
@@ -477,6 +497,22 @@ target_link_libraries(trepdf
         QPDF::QPDF
         Libxlsxwriter::Libxlsxwriter
 )
+
+if(NOT IOS)
+    if(APPLE)
+        set(TREPDF_OCR_RUNTIME_DATA "$<TARGET_BUNDLE_DIR:trepdf>/Contents/Resources/tessdata")
+        install(DIRECTORY "${TREPDF_OCR_DATA_DIR}/" DESTINATION "trepdf.app/Contents/Resources/tessdata")
+        install(DIRECTORY "${OCR_ROOT}/licenses/" DESTINATION "trepdf.app/Contents/Resources/licenses/ocr")
+    else()
+        set(TREPDF_OCR_RUNTIME_DATA "$<TARGET_FILE_DIR:trepdf>/tessdata")
+        install(DIRECTORY "${TREPDF_OCR_DATA_DIR}/" DESTINATION "${CMAKE_INSTALL_BINDIR}/tessdata")
+        install(DIRECTORY "${OCR_ROOT}/licenses/" DESTINATION "${CMAKE_INSTALL_DATADIR}/trepdf/licenses/ocr")
+    endif()
+    add_custom_command(TARGET trepdf POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${TREPDF_OCR_DATA_DIR}" "${TREPDF_OCR_RUNTIME_DATA}"
+        VERBATIM
+    )
+endif()
 
 set_target_properties(trepdf PROPERTIES
     MACOSX_BUNDLE TRUE

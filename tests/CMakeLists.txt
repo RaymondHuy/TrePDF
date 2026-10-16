@@ -89,6 +89,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/UserFontManager.h
     ../src/PDFExcelExportController.cpp
     ../src/PDFExcelExportController.h
+    ../src/PDFOCRController.cpp
+    ../src/PDFOCRController.h
     ../src/PDFMergeController.cpp
     ../src/PDFMergeController.h
     ../src/PDFTableExtractor.cpp
@@ -185,6 +187,7 @@ target_link_libraries(trepdf_edit_controller_tests
         Qt6::Network
         trepdf_font_archive
         trepdf_password_writer
+        trepdf_ocr_pipeline
         Qt6::Qml
         Qt6::Quick
         Qt6::Test
@@ -308,3 +311,51 @@ target_link_libraries(trepdf_spreadsheet_workbook_tests PRIVATE
     Qt6::Core Qt6::Test Libxlsxwriter::Libxlsxwriter
 )
 add_test(NAME SpreadsheetWorkbookTests COMMAND trepdf_spreadsheet_workbook_tests)
+
+qt_add_executable(trepdf_ocr_pipeline_tests
+    tst_PDFOCRPipeline.cpp
+    ../src/PDFiumDocument.cpp
+)
+target_include_directories(trepdf_ocr_pipeline_tests PRIVATE ../src)
+target_link_libraries(trepdf_ocr_pipeline_tests PRIVATE
+    trepdf_ocr_pipeline Qt6::Gui Qt6::Test PDFium::PDFium QPDF::QPDF
+)
+# A deterministic backend in this test exercises async lifecycle and atomic
+# destination handling independently from recognition quality.
+qt_add_executable(trepdf_ocr_controller_tests
+    tst_PDFOCRController.cpp
+    ../src/PDFOCRController.cpp
+    ../src/PDFDocument.cpp
+    ../src/PDFiumDocument.cpp
+)
+target_include_directories(trepdf_ocr_controller_tests PRIVATE ../src)
+target_link_libraries(trepdf_ocr_controller_tests PRIVATE
+    Qt6::Gui Qt6::Qml Qt6::Test PDFium::PDFium
+)
+target_compile_definitions(trepdf_ocr_controller_tests PRIVATE TREPDF_HAS_OCR=1)
+foreach(ocr_test IN ITEMS trepdf_ocr_pipeline_tests trepdf_ocr_controller_tests)
+    target_compile_definitions(${ocr_test} PRIVATE
+        TREPDF_OCR_TESSDATA_DIR="${TREPDF_OCR_DATA_DIR}"
+        TREPDF_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    if(WIN32)
+        target_compile_definitions(${ocr_test} PRIVATE NOMINMAX)
+        if(NOT TREPDF_DEPLOY_RUNTIME)
+            trepdf_deploy_windows_runtime(${ocr_test})
+        endif()
+    elseif(APPLE)
+        add_custom_command(TARGET ${ocr_test} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${TREPDF_TEST_PDFIUM_LIBRARY}" "$<TARGET_FILE_DIR:${ocr_test}>/libpdfium.dylib"
+            COMMAND install_name_tool -change ./libpdfium.dylib
+                @loader_path/libpdfium.dylib "$<TARGET_FILE:${ocr_test}>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${TREPDF_TEST_QPDF_LIBRARY}" "$<TARGET_FILE_DIR:${ocr_test}>/libqpdf.dylib"
+            COMMAND install_name_tool -change @rpath/libqpdf.dylib
+                @loader_path/libqpdf.dylib "$<TARGET_FILE:${ocr_test}>"
+            VERBATIM
+        )
+    endif()
+    add_test(NAME ${ocr_test} COMMAND ${ocr_test})
+    set_tests_properties(${ocr_test} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endforeach()

@@ -4732,5 +4732,250 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <source></source>
         <translation></translation>
     </message>
+    <message id="OCRSaveFirstHint">
+        <location filename="../src/Main.qml" line="534"/>
+        <location filename="../src/Main.qml" line="557"/>
+        <location filename="../src/Components/OCRPanel.qml" line="188"/>
+        <source>Save or undo your PDF changes before starting OCR.</source>
+        <translation>Save or undo your PDF changes before starting OCR.</translation>
+    </message>
+    <message id="OCRSavePDF">
+        <location filename="../src/Main.qml" line="2065"/>
+        <source>Save OCR PDF</source>
+        <translation>Save OCR PDF</translation>
+    </message>
+    <message id="OCRRibbonGroup">
+        <location filename="../src/Components/ExportRibbon.qml" line="74"/>
+        <source>Text recognition</source>
+        <translation>Text recognition</translation>
+    </message>
+    <message id="RecognizeTextOCR">
+        <location filename="../src/Components/ExportRibbon.qml" line="82"/>
+        <location filename="../src/Components/OCRPanel.qml" line="93"/>
+        <source>Recognize Text (OCR)</source>
+        <translation>Recognize Text (OCR)</translation>
+    </message>
+    <message id="Close">
+        <location filename="../src/Components/OCRPanel.qml" line="101"/>
+        <source>Close</source>
+        <translation>Close</translation>
+    </message>
+    <message id="OCROutputDescription">
+        <location filename="../src/Components/OCRPanel.qml" line="110"/>
+        <source>Create a copy of this PDF with searchable, selectable text. The original page appearance is preserved.</source>
+        <translation>Create a copy of this PDF with searchable, selectable text. The original page appearance is preserved.</translation>
+    </message>
+    <message id="OCRLanguage">
+        <location filename="../src/Components/OCRPanel.qml" line="117"/>
+        <source>Recognition language</source>
+        <translation>Recognition language</translation>
+    </message>
+    <message id="OCRLanguageVietnameseEnglish">
+        <location filename="../src/Components/OCRPanel.qml" line="128"/>
+        <source>Vietnamese and English</source>
+        <translation>Vietnamese and English</translation>
+    </message>
+    <message id="OCRLanguageVietnamese">
+        <location filename="../src/Components/OCRPanel.qml" line="130"/>
+        <source>Vietnamese</source>
+        <translation>Vietnamese</translation>
+    </message>
+    <message id="OCRLanguageEnglish">
+        <location filename="../src/Components/OCRPanel.qml" line="132"/>
+        <source>English</source>
+        <translation>English</translation>
+    </message>
+    <message id="OCRPageRange">
+        <location filename="../src/Components/OCRPanel.qml" line="139"/>
+        <source>Pages to recognize</source>
+        <translation>Pages to recognize</translation>
+    </message>
+    <message id="OCRAllPages">
+        <location filename="../src/Components/OCRPanel.qml" line="150"/>
+        <source>All pages</source>
+        <translation>All pages</translation>
+    </message>
+    <message id="OCRCurrentPage">
+        <location filename="../src/Components/OCRPanel.qml" line="152"/>
+        <source>Current page (%1)</source>
+        <translation>Current page (%1)</translation>
+    </message>
+    <message id="OCRCustomPages">
+        <location filename="../src/Components/OCRPanel.qml" line="154"/>
+        <source>Custom page range</source>
+        <translation>Custom page range</translation>
+    </message>
+    <message id="OCRPageRangePlaceholder">
+        <location filename="../src/Components/OCRPanel.qml" line="165"/>
+        <source>For example: 1-3, 5</source>
+        <translation>For example: 1-3, 5</translation>
+    </message>
+    <message id="OCRPageRangeHint">
+        <location filename="../src/Components/OCRPanel.qml" line="172"/>
+        <source>Use PDF page numbers from 1 to %1. Separate pages or ranges with commas.</source>
+        <translation>Use PDF page numbers from 1 to %1. Separate pages or ranges with commas.</translation>
+    </message>
+    <message id="OCRSkipExistingTextHint">
+        <location filename="../src/Components/OCRPanel.qml" line="181"/>
+        <source>Pages that already contain text are skipped to avoid duplicate text. Mixed pages containing both text and scanned images are also skipped.</source>
+        <translation>Pages that already contain text are skipped to avoid duplicate text. Mixed pages containing both text and scanned images are also skipped.</translation>
+    </message>
+    <message id="OCRProgress">
+        <location filename="../src/Components/OCRPanel.qml" line="202"/>
+        <source>OCR progress</source>
+        <translation>OCR progress</translation>
+    </message>
+    <message id="OCRProgressPages">
+        <location filename="../src/Components/OCRPanel.qml" line="208"/>
+        <source>%1 of %2 pages processed</source>
+        <translation>%1 of %2 pages processed</translation>
+    </message>
+    <message id="OCRPageSummary">
+        <location filename="../src/Components/OCRPanel.qml" line="223"/>
+        <source>Recognized: %1 · Skipped: %2 · No text found: %3</source>
+        <translation>Recognized: %1 · Skipped: %2 · No text found: %3</translation>
+    </message>
+    <message id="OCRCreatePDF">
+        <location filename="../src/Components/OCRPanel.qml" line="240"/>
+        <source>Create OCR PDF…</source>
+        <translation>Create OCR PDF…</translation>
+    </message>
+    <message id="OCRUnavailable">
+        <location filename="../src/PDFOCRController.cpp" line="189"/>
+        <source>OCR is unavailable in this build.</source>
+        <translation>OCR is unavailable in this build.</translation>
+    </message>
+    <message id="OCRNeedsDocument">
+        <location filename="../src/PDFOCRController.cpp" line="193"/>
+        <source>Open a PDF before recognizing text.</source>
+        <translation>Open a PDF before recognizing text.</translation>
+    </message>
+    <message id="OCRNeedsSavedDocument">
+        <location filename="../src/PDFOCRController.cpp" line="197"/>
+        <location filename="../src/PDFOCRController.cpp" line="231"/>
+        <location filename="../src/PDFOCRController.cpp" line="236"/>
+        <source>Save your changes before recognizing text.</source>
+        <translation>Save your changes before recognizing text.</translation>
+    </message>
+    <message id="OCRPermissionDenied">
+        <location filename="../src/PDFOCRController.cpp" line="203"/>
+        <source>This PDF does not allow text recognition.</source>
+        <translation>This PDF does not allow text recognition.</translation>
+    </message>
+    <message id="OCRInvalidLanguage">
+        <location filename="../src/PDFOCRController.cpp" line="208"/>
+        <source>Choose English, Vietnamese, or English and Vietnamese for OCR.</source>
+        <translation>Choose English, Vietnamese, or English and Vietnamese for OCR.</translation>
+    </message>
+    <message id="OCRInvalidDestination">
+        <location filename="../src/PDFOCRController.cpp" line="216"/>
+        <source>Choose a PDF destination different from the source file.</source>
+        <translation>Choose a PDF destination different from the source file.</translation>
+    </message>
+    <message id="OCRDestinationInUse">
+        <location filename="../src/PDFOCRController.cpp" line="220"/>
+        <source>Choose a destination that is not used by an open PDF.</source>
+        <translation>Choose a destination that is not used by an open PDF.</translation>
+    </message>
+    <message id="OCRInvalidPageRange">
+        <location filename="../src/PDFOCRController.cpp" line="225"/>
+        <source>Enter valid page numbers or ranges, such as 1, 3-5. Select at most 1,000 pages.</source>
+        <translation>Enter valid page numbers or ranges, such as 1, 3-5. Select at most 1,000 pages.</translation>
+    </message>
+    <message id="OCRRecognizing">
+        <location filename="../src/PDFOCRController.cpp" line="257"/>
+        <source>Recognizing text…</source>
+        <translation>Recognizing text…</translation>
+    </message>
+    <message id="OCRAlreadyRunning">
+        <location filename="../src/PDFOCRController.cpp" line="287"/>
+        <source>Another OCR job is running. Try again when it finishes.</source>
+        <translation>Another OCR job is running. Try again when it finishes.</translation>
+    </message>
+    <message id="OCRSucceeded">
+        <location filename="../src/PDFOCRController.cpp" line="382"/>
+        <source>OCR complete: %1 pages recognized, %2 pages already had text, %3 pages had no text detected.</source>
+        <translation>OCR complete: %1 pages recognized, %2 pages already had text, %3 pages had no text detected.</translation>
+    </message>
+    <message id="OCRCancelled">
+        <location filename="../src/PDFOCRController.cpp" line="388"/>
+        <source>OCR cancelled. No output file was changed.</source>
+        <translation>OCR cancelled. No output file was changed.</translation>
+    </message>
+    <message id="OCRNoText">
+        <location filename="../src/PDFOCRController.cpp" line="391"/>
+        <source>No new text was recognized. Pages with existing text were skipped; no output file was changed.</source>
+        <translation>No new text was recognized. Pages with existing text were skipped; no output file was changed.</translation>
+    </message>
+    <message id="OCRFailed">
+        <location filename="../src/PDFOCRController.cpp" line="397"/>
+        <source>Could not create the OCR PDF. Check the document, language data and destination, then try again.</source>
+        <translation>Could not create the OCR PDF. Check the document, language data and destination, then try again.</translation>
+    </message>
+    <message id="OCRPipelineInvalidRequest">
+        <location filename="../src/PDFOCRPipeline.cpp" line="362"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="387"/>
+        <source>Choose a valid page range, language and separate OCR output file.</source>
+        <translation>Choose a valid page range, language and separate OCR output file.</translation>
+    </message>
+    <message id="OCRPipelineModelsMissing">
+        <location filename="../src/PDFOCRPipeline.cpp" line="369"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="411"/>
+        <source>The OCR language files are missing or invalid. Reinstall TrePDF.</source>
+        <translation>The OCR language files are missing or invalid. Reinstall TrePDF.</translation>
+    </message>
+    <message id="OCRPipelineReadFailed">
+        <location filename="../src/PDFOCRPipeline.cpp" line="382"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="395"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="431"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="434"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="446"/>
+        <source>The source PDF could not be read for OCR.</source>
+        <translation>The source PDF could not be read for OCR.</translation>
+    </message>
+    <message id="OCRPipelineUnsupported">
+        <location filename="../src/PDFOCRPipeline.cpp" line="400"/>
+        <source>This PDF does not allow the content changes and text extraction required for OCR.</source>
+        <translation>This PDF does not allow the content changes and text extraction required for OCR.</translation>
+    </message>
+    <message id="OCRPipelineWriteFailed">
+        <location filename="../src/PDFOCRPipeline.cpp" line="405"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="514"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="521"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="540"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="545"/>
+        <source>The searchable PDF could not be written.</source>
+        <translation>The searchable PDF could not be written.</translation>
+    </message>
+    <message id="OCRPipelineLimitExceeded">
+        <location filename="../src/PDFOCRPipeline.cpp" line="443"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="451"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="459"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="498"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="504"/>
+        <source>A page exceeds the size or text limits supported by OCR.</source>
+        <translation>A page exceeds the size or text limits supported by OCR.</translation>
+    </message>
+    <message id="OCRPipelineRecognitionFailed">
+        <location filename="../src/PDFOCRPipeline.cpp" line="483"/>
+        <location filename="../src/PDFOCRPipeline.cpp" line="564"/>
+        <source>Text recognition could not finish. Try fewer pages or a clearer scan.</source>
+        <translation>Text recognition could not finish. Try fewer pages or a clearer scan.</translation>
+    </message>
+    <message id="OCRPipelineValidationFailed">
+        <location filename="../src/PDFOCRPipeline.cpp" line="550"/>
+        <source>The OCR output did not pass validation. The original PDF is unchanged.</source>
+        <translation>The OCR output did not pass validation. The original PDF is unchanged.</translation>
+    </message>
+    <message id="OCRPipelineUnavailable">
+        <location filename="../src/PDFOCRPipeline.cpp" line="577"/>
+        <source>OCR is not available in this build.</source>
+        <translation>OCR is not available in this build.</translation>
+    </message>
+    <message id="OCRPageLimitHint">
+        <location filename="../src/Components/OCRPanel.qml" line="190"/>
+        <source>Select up to 1,000 pages per OCR run. Use a custom range for larger documents.</source>
+        <translation>Select up to 1,000 pages per OCR run. Use a custom range for larger documents.</translation>
+    </message>
 </context>
 </TS>

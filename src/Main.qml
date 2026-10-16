@@ -40,6 +40,10 @@ ApplicationWindow {
     property PDFDocumentSession saveAsSession: null
     property var headerSaveRequest: null
     property PDFDocumentSession excelExportSession: null
+    property PDFDocumentSession ocrOutputSession: null
+    property string ocrOutputLanguage: "eng+vie"
+    property string ocrOutputPageRange: ""
+    property bool ocrPanelRequested: false
     property PDFDocumentSession workspaceSession: null
     property PDFDocumentSession deletePageSession: null
     property int deletePageIndex: -1
@@ -98,8 +102,10 @@ ApplicationWindow {
         || fontSettingsDialogLoader.active
         || headerEntryNoticeLoader.active || openDialog.visible
         || imageDialog.visible || headerImageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
+        || ocrOutputDialog.visible
         || externalLinkPopup.visible || discardDraftPopup.visible || deletePagePopup.visible
         || documentAccess.busy || saveAsDialog.writePending || excelExportDialog.writePending
+        || ocrOutputDialog.writePending
     readonly property bool fileOpenBlocked:
         tabModel.anySaving || headerSaveRequest !== null || openingFiles || modalOperationActive
     readonly property bool imageClipboardShortcutsEnabled:
@@ -506,6 +512,60 @@ ApplicationWindow {
             ? source.replace(/\.pdf$/i, ".xlsx")
             : source + ".xlsx"
         excelExportDialog.open()
+    }
+
+    function showOCRPanel() {
+        if (!activeSession || !activeDocument.loaded || tabModel.anySaving
+                || !activeSession.ocrController.available || !prepareActiveWorkspace())
+            return
+        ocrPanelRequested = true
+    }
+
+    function requestOCR(language, pageRange) {
+        if (!activeSession || tabModel.anySaving || modalOperationActive
+                || !activeDocument.loaded || activeSession.ocrController.busy)
+            return
+        InputMethod.commit()
+        if (!prepareActiveWorkspace())
+            return
+        const session = activeSession
+        if (session.hasDrafts) {
+            //% "Save or undo your PDF changes before starting OCR."
+            showStatus(qsTrId("OCRSaveFirstHint"))
+            return
+        }
+        ocrOutputSession = session
+        ocrOutputLanguage = language
+        ocrOutputPageRange = pageRange
+        const source = session.document.source.toString()
+        ocrOutputDialog.selectedFile = /\.pdf$/i.test(source)
+            ? source.replace(/\.pdf$/i, "-ocr.pdf") : source + "-ocr.pdf"
+        ocrOutputDialog.open()
+    }
+
+    function createOCRFile(url) {
+        const session = ocrOutputSession
+        const language = ocrOutputLanguage
+        const pageRange = ocrOutputPageRange
+        ocrOutputSession = null
+        if (!session || tabModel.indexOf(session) < 0 || session !== activeSession
+                || !session.document.loaded || tabModel.anySaving
+                || session.ocrController.busy || !prepareActiveWorkspace())
+            return
+        if (session.hasDrafts) {
+            //% "Save or undo your PDF changes before starting OCR."
+            showStatus(qsTrId("OCRSaveFirstHint"))
+            return
+        }
+        ocrOutputDialog.trackWrite(session, url)
+        if (!tabModel.requestOCR(session, url, language, pageRange))
+            ocrOutputDialog.finishWrite(session, false, url)
+    }
+
+    function cancelOCRDestination() {
+        ocrOutputSession = null
+        if (ocrOutputDialog.visible)
+            ocrOutputDialog.reject()
     }
 
     function requestMergePdf() {
@@ -1034,6 +1094,8 @@ ApplicationWindow {
     }
 
     onActiveSessionChanged: {
+        cancelOCRDestination()
+        ocrPanelRequested = activeSession !== null && activeSession.ocrController.busy
         fontDownloadFailureSession = null
         fontDownloadFailureMessage = ""
         headerSaveRequest = null
@@ -1136,6 +1198,11 @@ ApplicationWindow {
             saveAsDialog.finishWrite(session, succeeded, session.document.source)
             window.finishPendingDraftAction(session, succeeded)
         }
+        onSessionOCRFinished: (session, succeeded, target) => {
+            ocrOutputDialog.finishWrite(session, succeeded, target)
+            if (succeeded)
+                Qt.callLater(function() { window.openFiles([target]) })
+        }
         onFontDownloadRequested: session => {
             window.fontDownloadFailureSession = null
             window.fontDownloadFailureMessage = ""
@@ -1166,6 +1233,13 @@ ApplicationWindow {
         function onSourceChanged() { window.headerSaveRequest = null }
         function onLoadedChanged() { window.headerSaveRequest = null }
         function onPageStructureChanged() { window.headerSaveRequest = null }
+    }
+
+    Connections {
+        target: window.ocrOutputSession ? window.ocrOutputSession.document : null
+        function onSourceChanged() { window.cancelOCRDestination() }
+        function onLoadedChanged() { window.cancelOCRDestination() }
+        function onPageStructureChanged() { window.cancelOCRDestination() }
     }
 
     Connections {
@@ -1984,6 +2058,19 @@ ApplicationWindow {
         onRejected: window.excelExportSession = null
     }
 
+    PlatformFileDialog {
+        id: ocrOutputDialog
+        objectName: "ocrOutputDialog"
+        //% "Save OCR PDF"
+        title: qsTrId("OCRSavePDF")
+        fileMode: FileDialog.SaveFile
+        //% "PDF files (*.pdf)"
+        nameFilters: [qsTrId("PdfFileFilter")]
+        defaultSuffix: "pdf"
+        onAccepted: window.createOCRFile(selectedFile)
+        onRejected: window.ocrOutputSession = null
+    }
+
     Popup {
         id: externalLinkPopup
 
@@ -2269,6 +2356,7 @@ ApplicationWindow {
             session: window.activeSession
             anySaving: tabModel.anySaving || window.headerSaveRequest !== null
             hasPendingPanelEdits: window.activeWorkspaceHasPendingEdits
+            ocrPanelVisible: ocrPanelLoader.active
             prepareHeaderEntry: footerMode => window.prepareHeaderEntry(footerMode)
             prepareHeaderExit: footerMode => window.prepareHeaderExit(footerMode)
             hasPendingHeaderPlacement: window.activeWorkspaceItem !== null
@@ -2303,6 +2391,7 @@ ApplicationWindow {
             }
             onSaveAsRequested: window.requestSaveAs()
             onExcelExportRequested: window.requestExcelExport()
+            onOcrRequested: window.showOCRPanel()
             onMergePdfRequested: window.requestMergePdf()
             onFontSettingsRequested: {
                 if (!window.fileOpenBlocked)
@@ -2495,6 +2584,7 @@ ApplicationWindow {
         id: workspaceLoader
 
         anchors.fill: parent
+        anchors.rightMargin: ocrPanelLoader.active ? ocrPanelLoader.width : 0
         anchors.bottomMargin: Math.max(0, windowMetrics.keyboardInset - windowMetrics.bottomInset)
         active: false
         asynchronous: true
@@ -2558,6 +2648,31 @@ ApplicationWindow {
                     window.requestDeleteComment(page, objectId)
                 }
             }
+        }
+    }
+
+    Loader {
+        id: ocrPanelLoader
+        objectName: "ocrPanelLoader"
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Math.max(0, windowMetrics.keyboardInset - windowMetrics.bottomInset)
+        width: Math.min(340, window.width * 0.45)
+        active: window.ocrPanelRequested && appRibbon.exportTabActive
+            && window.activeSession !== null && window.activeDocument.loaded
+        visible: active
+        asynchronous: true
+        sourceComponent: OCRPanel {
+            theme: appTheme
+            session: window.activeSession
+            currentPage: window.activeWorkspaceItem
+                ? window.activeWorkspaceItem.activePage : window.activeDocument.currentPage
+            anySaving: tabModel.anySaving
+            outputDialogOpen: ocrOutputDialog.visible
+            hasPendingPanelEdits: window.activeWorkspaceHasPendingEdits
+            onStartRequested: (language, pageRange) => window.requestOCR(language, pageRange)
+            onCloseRequested: window.ocrPanelRequested = false
         }
     }
 
