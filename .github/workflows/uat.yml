@@ -149,6 +149,7 @@ jobs:
             "-DCMAKE_PREFIX_PATH=$QT_ROOT_DIR" \
             "-DPDFium_ROOT=$PDFium_ROOT" \
             "-DQPDF_ROOT=$QPDF_ROOT" \
+            "-DOCR_ROOT=$OCR_ROOT" \
             -DCMAKE_INSTALL_BINDIR=bin -DCMAKE_INSTALL_LIBDIR=lib \
             "${options[@]}"
 
