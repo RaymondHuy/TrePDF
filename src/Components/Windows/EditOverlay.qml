@@ -842,6 +842,7 @@ Item {
 
     function loadEditorRichText(cursorPosition, selectionStart, selectionEnd) {
         loadingEditorText = true
+        controller.prepareEditorVirtualSpaces()
         editor.text = richTextHtml(
             controller.selectedText,
             controller.selectedCharacterSpans,
@@ -2468,6 +2469,18 @@ Item {
             }
         }
 
+        function onSelectionFontFamilyApplied(start, length, family) {
+            if (!root.editing)
+                return
+            root.suppressNextEditorReload = true
+            root.applyingEditorDocumentFormat = true
+            const applied = root.controller.applyFontFamilyToEditorDocument(
+                editor.textDocument, start, length, family, root.textLayoutPageHeight)
+            root.applyingEditorDocumentFormat = false
+            if (!applied)
+                root.suppressNextEditorReload = false
+        }
+
         function onSelectionFontSizeApplied(start, length, fontSizeRatio) {
             if (!root.editing)
                 return
@@ -3848,7 +3861,7 @@ Item {
                     spacing: 2
                     //% "Copy"
                     text: qsTrId("CopyImage")
-                    icon.source: "../assets/icons/copy-image.svg"
+                    icon.source: "../../assets/icons/copy-image.svg"
                     icon.width: 24
                     icon.height: 24
                     icon.color: "transparent"
