@@ -48,7 +48,7 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
 qt_standard_project_setup(
     REQUIRES 6.8
     I18N_SOURCE_LANGUAGE en
-    I18N_TRANSLATED_LANGUAGES vi en
+    I18N_TRANSLATED_LANGUAGES vi en hr th
 )
 
 if(IOS AND (NOT PDFium_ROOT OR NOT QPDF_ROOT))
