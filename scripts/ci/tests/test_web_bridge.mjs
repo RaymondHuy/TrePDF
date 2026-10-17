@@ -1,0 +1,310 @@
+// Exercise the browser/Qt boundary with deterministic worker and timer doubles.
+// node --test scripts/ci/tests/test_web_bridge.mjs
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+import vm from 'node:vm';
+
+const source = readFileSync(new URL('../../../src/web/browser-bridge.js', import.meta.url), 'utf8');
+const flush = () => new Promise(resolve => setImmediate(resolve));
+
+function harness() {
+    const messages = [];
+    const pixels = [];
+    const workers = [];
+    const elements = [];
+    const timers = new Map();
+    const urls = [];
+    const revoked = [];
+    const allocations = new Set();
+    let address = 8;
+    let timerId = 0;
+    const runtime = {
+        HEAPU8: new Uint8Array(1024 * 1024),
+        _malloc(size) {
+            const pointer = address;
+            address += size + 8;
+            allocations.add(pointer);
+            return pointer;
+        },
+        _free(pointer) {
+            assert.ok(allocations.delete(pointer), 'each allocation is freed exactly once');
+        },
+        _trepdfWebMessage(pointer) {
+            const end = runtime.HEAPU8.indexOf(0, pointer);
+            messages.push(JSON.parse(new TextDecoder().decode(runtime.HEAPU8.slice(pointer, end))));
+        },
+        _trepdfWebPixels(requestId, generation, width, height, pointer) {
+            pixels.push({ requestId, generation, width, height,
+                bytes: runtime.HEAPU8.slice(pointer, pointer + width * height * 4) });
+        }
+    };
+    class FakeWorker {
+        constructor(url) {
+            this.url = String(url);
+            this.posts = [];
+            this.transfers = [];
+            this.terminated = false;
+            workers.push(this);
+        }
+        postMessage(message, transfer = []) {
+            this.transfers.push(transfer.length);
+            this.posts.push(structuredClone(message, { transfer }));
+        }
+        terminate() { this.terminated = true; }
+        respond(message) { this.onmessage({ data: message }); }
+    }
+    class BrowserURL extends URL {
+        static createObjectURL(blob) {
+            urls.push(blob);
+            return `blob:test-${urls.length}`;
+        }
+        static revokeObjectURL(url) { revoked.push(url); }
+    }
+    const sandbox = {
+        Module: runtime, TextEncoder, Uint8Array, ArrayBuffer,
+        URL: BrowserURL, Worker: FakeWorker,
+        setTimeout(callback, delay) {
+            timers.set(++timerId, { callback, delay });
+            return timerId;
+        },
+        clearTimeout(id) { timers.delete(id); },
+        document: {
+            baseURI: 'https://example.test/nested/trepdf/index.html',
+            body: { appendChild(element) { element.attached = true; } },
+            createElement(tag) {
+                const element = {
+                    tag, style: {}, files: [], listeners: new Map(),
+                    setAttribute(key, value) { this[key] = value; },
+                    addEventListener(event, callback) { this.listeners.set(event, callback); },
+                    click() { this.clicked = true; },
+                    remove() { this.removed = true; }
+                };
+                elements.push(element);
+                return element;
+            }
+        }
+    };
+    vm.runInNewContext(source, sandbox, { filename: 'browser-bridge.js' });
+    const bridge = runtime.trepdfWeb;
+    return {
+        bridge, runtime, messages, pixels, workers, elements, timers, urls, revoked, allocations,
+        async select(file) {
+            bridge.chooseFile();
+            const input = elements.at(-1);
+            assert.equal(input.tag, 'input');
+            input.files = [file];
+            input.listeners.get('change')();
+            await flush();
+            return input;
+        },
+        fire(delay) {
+            const entry = [...timers].find(([, timer]) => timer.delay === delay);
+            assert.ok(entry, `a ${delay} ms timeout is armed`);
+            timers.delete(entry[0]);
+            entry[1].callback();
+        },
+        opened() {
+            const worker = workers.at(-1);
+            const generation = worker.posts.find(message => message.type === 'open').generation;
+            worker.respond({ type: 'opened', generation, pages: [{ width: 200, height: 100 }] });
+            return { worker, generation };
+        }
+    };
+}
+
+function file(bytes = '%PDF-1.7 original bytes', name = 'original.pdf') {
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    Object.defineProperty(blob, 'name', { value: name });
+    return blob;
+}
+
+test('initialize resolves a nested worker URL and clears the idle startup watchdog', () => {
+    const h = harness();
+    h.bridge.initialize();
+    assert.equal(h.workers[0].url, 'https://example.test/nested/trepdf/pdfium/pdfium-worker.js');
+    assert.equal(h.timers.size, 1);
+    h.workers[0].respond({ type: 'ready' });
+    assert.deepEqual(h.messages, [{ type: 'ready', generation: 0 }]);
+    assert.equal(h.timers.size, 0);
+    assert.equal(h.allocations.size, 0);
+});
+
+test('generation -1 engine startup errors are fatal and cancel the startup watchdog', () => {
+    const h = harness();
+    h.bridge.initialize();
+    h.workers[0].respond({ type: 'error', generation: -1, message: 'Missing engine file.' });
+    assert.equal(h.messages.at(-1).message, 'Missing engine file.');
+    assert.equal(h.messages.at(-1).fatal, true);
+    assert.equal(h.workers[0].terminated, true);
+    assert.equal(h.timers.size, 0);
+});
+
+test('empty and oversized files are rejected before reading their bytes', async () => {
+    const h = harness();
+    let reads = 0;
+    for (const size of [0, 64 * 1024 * 1024 + 1]) {
+        await h.select({ name: 'invalid.pdf', size, arrayBuffer() { ++reads; throw new Error(); } });
+        assert.match(h.messages.at(-1).message, /64 MiB/);
+        assert.equal(h.messages.at(-1).fatal, undefined);
+    }
+    assert.equal(reads, 0);
+    assert.equal(h.workers.length, 0);
+});
+
+test('selected bytes transfer once; ready during open retains its watchdog; download uses original Blob', async () => {
+    const h = harness();
+    const original = file('exact\0binary\xffcontents', 'Vietnamese tên.pdf');
+    const input = await h.select(original);
+    assert.equal(input.removed, true);
+    const worker = h.workers[0];
+    assert.equal(worker.transfers[0], 1);
+    assert.deepEqual(new Uint8Array(worker.posts[0].bytes), new Uint8Array(await original.arrayBuffer()));
+    worker.respond({ type: 'ready' });
+    assert.equal(h.timers.size, 1, 'opening remains bounded after engine readiness');
+    h.bridge.downloadFile();
+    assert.equal(h.urls.length, 0, 'downloads require a successfully opened document');
+    h.opened();
+    assert.equal(h.timers.size, 0);
+    h.bridge.downloadFile();
+    assert.equal(h.urls[0], original, 'download reuses the original Blob without reserializing PDF content');
+    const link = h.elements.at(-1);
+    assert.equal(link.download, original.name);
+    assert.equal(link.href, 'blob:test-1');
+    assert.ok(link.clicked && link.removed);
+    h.fire(1000);
+    assert.deepEqual(h.revoked, ['blob:test-1']);
+});
+
+test('raster bytes reach Qt before freeing memory, and one render is active at a time', async () => {
+    const h = harness();
+    await h.select(file());
+    const { worker, generation } = h.opened();
+    h.bridge.render(1, 0, 200);
+    h.bridge.render(2, 1, 200);
+    assert.equal(worker.posts.length, 2, 'second render waits in queue');
+    const rgba = new Uint8Array([255, 1, 2, 255, 3, 4, 5, 255]);
+    worker.respond({ type: 'rendered', generation, requestId: 1, width: 2, height: 1, bytes: rgba.buffer });
+    assert.equal(h.pixels.length, 1);
+    assert.deepEqual(h.pixels[0].bytes, rgba);
+    assert.equal(h.pixels[0].generation, generation);
+    assert.equal(worker.posts.at(-1).requestId, 2);
+    assert.equal(h.allocations.size, 0);
+});
+
+test('cancelling active and queued pages suppresses callbacks and advances the queue', async () => {
+    const h = harness();
+    await h.select(file());
+    const { worker, generation } = h.opened();
+    h.bridge.render(10, 0, 200);
+    h.bridge.render(11, 1, 200);
+    h.bridge.render(12, 2, 200);
+    h.bridge.cancel(10);
+    h.bridge.cancel(11);
+    worker.respond({ type: 'rendered', generation, requestId: 10, width: 1, height: 1, bytes: new ArrayBuffer(4) });
+    assert.equal(h.pixels.length, 0);
+    assert.equal(worker.posts.at(-1).requestId, 12);
+    assert.equal(worker.posts.some(message => message.requestId === 11), false);
+});
+
+test('render queue is bounded and reports rejected requests without losing the document', async () => {
+    const h = harness();
+    await h.select(file());
+    h.opened();
+    for (let requestId = 1; requestId <= 66; ++requestId) h.bridge.render(requestId, requestId, 200);
+    assert.equal(h.messages.at(-1).requestId, 66);
+    assert.match(h.messages.at(-1).message, /Too many pages/);
+    assert.equal(h.messages.at(-1).fatal, undefined);
+    h.bridge.downloadFile();
+    assert.equal(h.urls.length, 1);
+});
+
+test('replacement and close ignore terminated workers and stale generation responses', async () => {
+    const h = harness();
+    await h.select(file());
+    const first = h.opened();
+    h.bridge.render(1, 0, 200);
+    await h.select(file('replacement', 'second.pdf'));
+    const second = h.opened();
+    assert.equal(first.worker.terminated, true);
+    const count = h.messages.length;
+    first.worker.respond({ type: 'error', generation: first.generation, message: 'stale' });
+    first.worker.onerror();
+    second.worker.respond({ type: 'error', generation: first.generation, message: 'old generation' });
+    assert.equal(h.messages.length, count);
+    h.bridge.closeFile();
+    assert.equal(second.worker.terminated, true);
+    second.worker.respond({ type: 'opened', generation: second.generation, pages: [] });
+    assert.equal(h.messages.at(-1).type, 'closed');
+    h.bridge.downloadFile();
+    assert.equal(h.urls.length, 0);
+    assert.equal(h.timers.size, 0);
+});
+
+test('closing during an asynchronous file read prevents a late worker from opening', async () => {
+    const h = harness();
+    let resolve;
+    await h.select({ name: 'slow.pdf', size: 3, arrayBuffer: () => new Promise(done => { resolve = done; }) });
+    h.bridge.closeFile();
+    resolve(new ArrayBuffer(3));
+    await flush();
+    assert.equal(h.workers.length, 0);
+    assert.equal(h.messages.at(-1).type, 'closed');
+});
+
+test('a wrong request ID cannot cancel the active render timeout', async () => {
+    const h = harness();
+    await h.select(file());
+    const { worker, generation } = h.opened();
+    h.bridge.render(100, 0, 200);
+    worker.respond({ type: 'rendered', generation, requestId: 99, width: 1, height: 1, bytes: new ArrayBuffer(4) });
+    assert.equal(h.timers.size, 1);
+    h.fire(30000);
+    assert.equal(worker.terminated, true);
+    assert.equal(h.messages.at(-1).fatal, true);
+});
+
+test('startup, open and render timeouts terminate the worker and reject downloads', async () => {
+    for (const stage of ['startup', 'open', 'render']) {
+        const h = harness();
+        if (stage === 'startup') h.bridge.initialize();
+        else {
+            await h.select(file());
+            if (stage === 'render') { h.opened(); h.bridge.render(1, 0, 200); }
+        }
+        h.fire(30000);
+        assert.equal(h.workers[0].terminated, true);
+        assert.match(h.messages.at(-1).message, /too long/);
+        assert.equal(h.messages.at(-1).fatal, true);
+        h.bridge.downloadFile();
+        assert.equal(h.urls.length, 0);
+    }
+});
+
+test('malformed render payloads are rejected before copying them to Qt', async () => {
+    const h = harness();
+    await h.select(file());
+    const { worker, generation } = h.opened();
+    h.bridge.render(1, 0, 200);
+    worker.respond({ type: 'rendered', generation, requestId: 1, width: 4097, height: 1, bytes: new ArrayBuffer(4) });
+    assert.equal(h.pixels.length, 0);
+    assert.equal(h.messages.at(-1).fatal, true);
+    assert.equal(worker.terminated, true);
+});
+
+test('picker cancellation and dispose remove DOM nodes and outstanding work', () => {
+    const h = harness();
+    h.bridge.initialize();
+    h.bridge.chooseFile();
+    h.bridge.chooseFile();
+    assert.equal(h.elements.length, 1, 'only one picker is active');
+    const first = h.elements[0];
+    first.listeners.get('cancel')();
+    assert.equal(first.removed, true);
+    h.bridge.chooseFile();
+    assert.equal(h.elements.length, 2);
+    h.bridge.dispose();
+    assert.equal(h.elements[1].removed, true);
+    assert.equal(h.workers[0].terminated, true);
+    assert.equal(h.timers.size, 0);
+});
