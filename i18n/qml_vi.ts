@@ -4976,5 +4976,21 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <source>Select up to 1,000 pages per OCR run. Use a custom range for larger documents.</source>
         <translation>Chọn tối đa 1.000 trang mỗi lần OCR. Dùng phạm vi tùy chọn cho tài liệu lớn hơn.</translation>
     </message>
+    <message id="InformationTab">
+        <location filename="../src/Components/RibbonTabStrip.qml" line="130"/>
+        <source>Information</source>
+        <translation>Thông tin</translation>
+    </message>
+    <message id="ApplicationVersionLabel">
+        <location filename="../src/Components/InformationRibbon.qml" line="50"/>
+        <source>Version %1</source>
+        <translation>Phiên bản %1</translation>
+    </message>
+    <message id="ApplicationContactEmail">
+        <location filename="../src/Components/InformationRibbon.qml" line="68"/>
+        <location filename="../src/Components/InformationRibbon.qml" line="89"/>
+        <source>Contact email</source>
+        <translation>Email liên hệ</translation>
+    </message>
 </context>
 </TS>

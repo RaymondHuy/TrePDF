@@ -319,6 +319,7 @@ qt_add_qml_module(trepdf
     QML_FILES
         src/Main.qml
         src/Components/AppRibbon.qml
+        src/Components/InformationRibbon.qml
         src/Components/AppTheme.qml
         src/Components/platform/AppWindow.qml
         src/Components/DocumentTabs.qml

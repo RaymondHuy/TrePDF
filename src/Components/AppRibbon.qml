@@ -48,6 +48,7 @@ Column {
     readonly property bool headerTabActive: root.acceptedTabIndex === 7
     readonly property bool footerTabActive: root.acceptedTabIndex === 8
     readonly property bool settingsTabActive: root.acceptedTabIndex === 9
+    readonly property bool informationTabActive: root.acceptedTabIndex === 10
     readonly property bool marginTabActive: headerTabActive || footerTabActive
     readonly property bool textFieldToolActive: formsTabActive
         && textFieldToolSelected
@@ -593,6 +594,14 @@ Column {
         }
     }
 
+    Component {
+        id: informationRibbonComponent
+
+        InformationRibbon {
+            theme: root.theme
+        }
+    }
+
     RibbonTabStrip {
         id: ribbonTabs
 
@@ -630,7 +639,9 @@ Column {
                                             ? headerRibbonComponent
                                             : root.settingsTabActive
                                                 ? settingsRibbonComponent
-                                                : null
+                                                : root.informationTabActive
+                                                    ? informationRibbonComponent
+                                                    : null
         }
     }
 }

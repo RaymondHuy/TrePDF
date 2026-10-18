@@ -15,6 +15,12 @@ and Save/Save As persistence.
 
 Current features:
 
+- The Information tab after Settings shows the running application version from
+  `Qt.application.version` (`TREPDF_VERSION`) and the contact email
+  `trebase177@gmail.com`. `InformationRibbon.qml` is loaded on demand and works
+  without an open PDF. The email is read-only, selectable and copyable; it does
+  not send messages. Normal ribbon switching and Header/Footer exit guards apply.
+
 - Settings > Font opens a lazy modal, including without an open PDF, for a
   family name and optional Regular/Bold/Italic/Bold Italic TTF/OTF files.
   `UserFontManager` validates local snapshots and `ApplicationFonts` installs
