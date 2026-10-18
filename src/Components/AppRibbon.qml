@@ -1,8 +1,6 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
 import TrePDF
 
 Column {
@@ -595,172 +593,19 @@ Column {
         }
     }
 
-    Rectangle {
+    RibbonTabStrip {
+        id: ribbonTabs
+
         width: parent.width
-        height: Qt.platform.os === "ios" ? 44 : 34
-        color: "#fffaf6"
-
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 1
-            color: root.theme.ribbonBorder
-        }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 10
-            anchors.rightMargin: 10
-            spacing: 0
-
-            TabBar {
-                id: ribbonTabs
-                objectName: "ribbonTabs"
-
-                Layout.preferredWidth: Qt.platform.os === "ios" ? 0 : 840
-                Layout.fillWidth: Qt.platform.os === "ios"
-                Layout.minimumWidth: 0
-                clip: Qt.platform.os === "ios"
-                Layout.fillHeight: true
-                enabled: !root.anySaving
-                spacing: 0
-                background: Item {}
-                onCurrentIndexChanged: root.acceptTabChange()
-
-                RibbonTabButton {
-                    theme: root.theme
-                    //% "View"
-                    text: qsTrId("View")
-                }
-
-                RibbonTabButton {
-                    theme: root.theme
-                    //% "Edit"
-                    text: qsTrId("Edit")
-                }
-
-                RibbonTabButton {
-                    theme: root.theme
-                    //% "Comment"
-                    text: qsTrId("Comment")
-                }
-
-                RibbonTabButton {
-                    theme: root.theme
-                    //% "Forms"
-                    text: qsTrId("Forms")
-                }
-
-                RibbonTabButton {
-                    theme: root.theme
-                    //% "E-Sign"
-                    text: qsTrId("ESign")
-                }
-
-                RibbonTabButton {
-                    objectName: "protectTabButton"
-                    theme: root.theme
-                    //% "Protect"
-                    text: qsTrId("ProtectTab")
-                }
-
-                RibbonTabButton {
-                    theme: root.theme
-                    //% "Convert"
-                    text: qsTrId("ConvertTab")
-                }
-
-                RibbonTabButton {
-                    objectName: "headerTabButton"
-                    theme: root.theme
-                    //% "Header"
-                    text: qsTrId("HeaderTab")
-                }
-
-                RibbonTabButton {
-                    objectName: "footerTabButton"
-                    theme: root.theme
-                    //% "Footer"
-                    text: qsTrId("FooterTab")
-                }
-
-                RibbonTabButton {
-                    objectName: "settingsTabButton"
-                    theme: root.theme
-                    //% "Settings"
-                    text: qsTrId("SettingsTab")
-                }
-            }
-
-            Item {
-                Layout.fillWidth: true
-                visible: Qt.platform.os !== "ios"
-            }
-
-            Rectangle {
-                Layout.preferredWidth: draftStatusContent.implicitWidth + 20
-                Layout.preferredHeight: 24
-                Layout.alignment: Qt.AlignVCenter
-                visible: root.hasUnsavedChanges || root.anySaving
-                radius: 12
-                color: root.theme.foxitPaleOrange
-                border.color: root.theme.foxitBorderOrange
-                border.width: 1
-                Accessible.role: Accessible.StaticText
-                Accessible.name: draftStatusLabel.text
-
-                RowLayout {
-                    id: draftStatusContent
-
-                    anchors.centerIn: parent
-                    spacing: 6
-
-                    BusyIndicator {
-                        objectName: "pdfSaveBusyIndicator"
-                        Layout.preferredWidth: 16
-                        Layout.preferredHeight: 16
-                        padding: 0
-                        palette.dark: root.theme.foxitDarkOrange
-                        visible: root.anySaving
-                        running: visible
-                        Accessible.ignored: true
-                    }
-
-                    Label {
-                        id: draftStatusLabel
-
-                        readonly property string savingStatusText: {
-                            //% "Saving PDF…"
-                            return qsTrId("SavingPdf")
-                        }
-                        readonly property string draftStatusText: {
-                            //% "Draft · Not saved"
-                            return qsTrId("DraftNotSaved")
-                        }
-
-                        text: root.anySaving ? savingStatusText : draftStatusText
-                        color: root.theme.foxitDarkOrange
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
-                    }
-                }
-            }
-        }
+        theme: root.theme
+        anySaving: root.anySaving
+        hasUnsavedChanges: root.hasUnsavedChanges
+        onCurrentIndexChanged: root.acceptTabChange()
     }
 
-    Rectangle {
+    RibbonSurface {
         width: parent.width
-        height: 78
-        color: root.theme.ribbonSurface
-
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 1
-            color: root.theme.ribbonBorder
-        }
+        theme: root.theme
 
         Loader {
             id: ribbonLoader
