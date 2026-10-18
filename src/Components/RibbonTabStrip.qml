@@ -10,7 +10,7 @@ Rectangle {
     required property AppTheme theme
     property bool anySaving: false
     property bool hasUnsavedChanges: false
-    property list<int> enabledTabs: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    property list<int> enabledTabs: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     property alias currentIndex: tabBar.currentIndex
 
     function setCurrentIndex(index: int) {
@@ -120,6 +120,14 @@ Rectangle {
                 theme: root.theme
                 //% "Settings"
                 text: qsTrId("SettingsTab")
+            }
+
+            RibbonTabButton {
+                enabled: root.enabledTabs.indexOf(10) !== -1
+                objectName: "informationTabButton"
+                theme: root.theme
+                //% "Information"
+                text: qsTrId("InformationTab")
             }
         }
 
