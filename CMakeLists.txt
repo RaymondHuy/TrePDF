@@ -17,7 +17,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-option(TREPDF_BUILD_WEB "Build the isolated, read-only browser viewer" OFF)
+option(TREPDF_BUILD_WEB "Build the isolated browser preview" OFF)
 if(TREPDF_BUILD_WEB)
     add_subdirectory(src/web)
     return()
@@ -320,6 +320,13 @@ qt_add_qml_module(trepdf
         src/Main.qml
         src/Components/AppRibbon.qml
         src/Components/AppTheme.qml
+        src/Components/platform/AppWindow.qml
+        src/Components/DocumentTabs.qml
+        src/Components/DocumentEmptyState.qml
+        src/Components/ReaderModes.qml
+        src/Components/RibbonTabStrip.qml
+        src/Components/RibbonSurface.qml
+        src/Components/ViewRibbonTools.qml
         ${TREPDF_PLATFORM_QML}
         ${TREPDF_IOS_QML}
         src/Components/CombFieldOptionsPanel.qml
@@ -345,6 +352,7 @@ qt_add_qml_module(trepdf
         src/Components/DropdownOptionsPanel.qml
         ${TREPDF_EDIT_OVERLAY_QML}
         src/Components/EditRibbon.qml
+        src/Components/EditRibbonTools.qml
         src/Components/ExportRibbon.qml
         src/Components/OCRPanel.qml
         src/Components/FormChoiceOverlay.qml

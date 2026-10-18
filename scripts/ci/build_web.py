@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the isolated Qt WebAssembly viewer and package only its static website."""
+"""Build the isolated Qt WebAssembly preview and package only its static website."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def stage_site(build: Path, dependencies: Path, destination: Path, version: str)
             raise RuntimeError(f"Missing PDFium browser runtime: {runtime / filename}")
 
     # Never turn a source checkout, SDK or build tree into a public document root.
-    # Only files generated for the executable and the explicit worker are staged.
+    # Only generated runtime files and explicit browser adapters/fonts are staged.
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and any(destination.iterdir()):
         marker = destination / "build-info.json"
@@ -56,8 +56,16 @@ def stage_site(build: Path, dependencies: Path, destination: Path, version: str)
         (site / "pdfium").mkdir()
         for filename in ("pdfium.js", "pdfium.wasm"):
             shutil.copy2(runtime / filename, site / "pdfium" / filename)
-        shutil.copy2(REPO / "src/web/pdfium-worker.js", site / "pdfium/pdfium-worker.js")
+        for filename in ("pdfium-worker.js", "pdfium-editor.js", "pdfium-source.js"):
+            shutil.copy2(REPO / "src/web" / filename, site / "pdfium" / filename)
+        (site / "pdfium/fonts").mkdir()
+        shutil.copy2(REPO / "src/web/fonts/LiberationSans-Regular.ttf",
+                     site / "pdfium/fonts/LiberationSans-Regular.ttf")
         shutil.copytree(dependencies / "licenses", site / "licenses")
+        (site / "licenses/LiberationSans").mkdir()
+        for filename in ("LICENSE", "AUTHORS", "NOTICE.md"):
+            shutil.copy2(REPO / "src/web/fonts" / filename,
+                         site / "licenses/LiberationSans" / filename)
         shutil.copy2(REPO / "LICENSE", site / "licenses/TrePDF-LICENSE")
         (site / "licenses/Qt-NOTICE.txt").write_text(
             "This build statically links Qt 6.12.0 for WebAssembly.\n"
@@ -81,8 +89,12 @@ def stage_site(build: Path, dependencies: Path, destination: Path, version: str)
             "Do not open index.html through file://. Serve only this extracted folder.\n"
             "For hosting, upload the contents of this folder to an HTTPS static host.\n"
             "Serve .wasm as application/wasm. No backend or COOP/COEP headers are needed.\n\n"
-            "This preview opens, displays and downloads the original PDF locally.\n"
-            "It does not include editing, forms, OCR or persistent document storage.\n",
+            "This preview opens and displays local PDFs, and adds text and shapes.\n"
+            "Edit can move, change or delete items added during the current session,\n"
+            "with Undo/Redo. Save downloads a PDF containing those additions.\n"
+            "Without any edits, download preserves the original PDF bytes.\n"
+            "Editing existing PDF objects, forms, OCR and persistent document storage\n"
+            "are not included. Reloading or closing the page discards session changes.\n",
             encoding="utf-8")
         if destination.exists():
             shutil.rmtree(destination)

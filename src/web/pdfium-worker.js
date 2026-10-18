@@ -13,6 +13,10 @@ let currentBytes = 0;
 let currentGeneration = -1;
 let newestGeneration = -1;
 let pageSizes = [];
+let editor = null;
+
+importScripts("./pdfium-source.js");
+importScripts("./pdfium-editor.js");
 
 const ready = new Promise((resolve, reject) => {
     self.Module = {
@@ -46,6 +50,7 @@ function closeDocument(engine) {
     currentBytes = 0;
     currentGeneration = -1;
     pageSizes = [];
+    editor = null;
 }
 
 function openDocument(engine, request) {
@@ -82,7 +87,8 @@ function openDocument(engine, request) {
             pageSizes.push({ width, height });
         }
         currentGeneration = request.generation;
-        self.postMessage({ type: "opened", generation: currentGeneration, pages: pageSizes });
+        editor = new TrePdfEditor(engine, request.bytes, currentDocument, pageSizes);
+        self.postMessage({ type: "opened", generation: currentGeneration, pages: pageSizes, ...editor.state() });
     } catch (error) {
         closeDocument(engine);
         throw error;
@@ -98,6 +104,9 @@ function renderPage(engine, request) {
         throw new Error("This page is outside the current PDF.");
     if (!Number.isFinite(request.width) || request.width <= 0)
         throw new Error("The requested page width is invalid.");
+    if (editor?.original.scan(request.page))
+        self.postMessage({ type:"indexed", generation:currentGeneration, requestId:request.requestId,
+            page:request.page, objects:editor.state().objects, sourceNotice:editor.original.notice() });
     const size = pageSizes[request.page];
     const scale = Math.min(request.width / size.width,
                           MAX_DIMENSION / Math.max(size.width, size.height),
@@ -147,11 +156,31 @@ self.onmessage = event => {
             if (request.generation < newestGeneration) return;
             if (request.type === "open") openDocument(engine, request);
             else if (request.type === "render") renderPage(engine, request);
+            else if (request.type === "edit" || request.type === "export") {
+                if (!editor || request.generation !== currentGeneration)
+                    throw new Error("Open a PDF before editing it.");
+                if (!Number.isSafeInteger(request.operationId) || request.operationId < 1)
+                    throw new Error("Invalid editing operation.");
+                if (request.type === "edit") {
+                    const replacement = await editor.edit(request.command);
+                    engine._FPDF_CloseDocument(currentDocument);
+                    engine._free(currentBytes);
+                    currentDocument = replacement.document;
+                    currentBytes = replacement.bytes;
+                    self.postMessage({ type: "edited", generation: currentGeneration,
+                        operationId: request.operationId, ...editor.state() });
+                } else {
+                    const bytes = editor.export(currentDocument);
+                    self.postMessage({ type: "exported", generation: currentGeneration,
+                        operationId: request.operationId, ...editor.state(), bytes }, [bytes]);
+                }
+            }
             else if (request.type === "close") closeDocument(engine);
             else throw new Error("Unsupported PDF operation.");
         } catch (error) {
             self.postMessage({ type: "error", generation: request.generation,
                                requestId: request.requestId,
+                               operationId: request.operationId,
                                message: error instanceof Error ? error.message : "The PDF operation failed." });
         }
     });

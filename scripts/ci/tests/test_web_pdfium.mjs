@@ -20,8 +20,9 @@ global.__dirname = workerData.engineDirectory;
 global.location = { href: pathToFileURL(path.join(workerData.engineDirectory, 'pdfium-worker.js')).href };
 global.postMessage = (message, transfers) => parentPort.postMessage(message, transfers);
 global.importScripts = name => {
-    if (name !== './pdfium.js') throw new Error('Unexpected worker import');
-    vm.runInThisContext(testFs.readFileSync(path.join(workerData.engineDirectory, name), 'utf8'));
+    if (!['./pdfium.js', './pdfium-editor.js', './pdfium-source.js'].includes(name)) throw new Error('Unexpected worker import');
+    const base = name === './pdfium.js' ? workerData.engineDirectory : path.dirname(workerData.source);
+    vm.runInThisContext(testFs.readFileSync(path.join(base, name), 'utf8'));
 };
 parentPort.on('message', data => self.onmessage({ data }));
 vm.runInThisContext(testFs.readFileSync(workerData.source, 'utf8'));
@@ -68,7 +69,7 @@ async function receive(predicate) {
 async function send(request) {
     worker.postMessage(request, request.bytes ? [request.bytes] : []);
     return receive(message => message.generation === request.generation
-        && (request.requestId === undefined || message.requestId === request.requestId));
+        && (request.requestId === undefined || message.type !== "indexed" && message.requestId === request.requestId));
 }
 
 try {

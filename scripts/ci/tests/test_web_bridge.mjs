@@ -8,7 +8,7 @@ import vm from 'node:vm';
 const source = readFileSync(new URL('../../../src/web/browser-bridge.js', import.meta.url), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function harness() {
+function harness(overrides = {}) {
     const messages = [];
     const pixels = [];
     const workers = [];
@@ -17,6 +17,7 @@ function harness() {
     const urls = [];
     const revoked = [];
     const allocations = new Set();
+    const listeners = new Map();
     let address = 8;
     let timerId = 0;
     const runtime = {
@@ -62,8 +63,12 @@ function harness() {
         static revokeObjectURL(url) { revoked.push(url); }
     }
     const sandbox = {
-        Module: runtime, TextEncoder, Uint8Array, ArrayBuffer,
+        Module: runtime, TextEncoder, Uint8Array, ArrayBuffer, Blob,
         URL: BrowserURL, Worker: FakeWorker,
+        addEventListener(event, callback) { listeners.set(event, callback); },
+        removeEventListener(event, callback) {
+            if (listeners.get(event) === callback) listeners.delete(event);
+        },
         setTimeout(callback, delay) {
             timers.set(++timerId, { callback, delay });
             return timerId;
@@ -85,10 +90,11 @@ function harness() {
             }
         }
     };
+    Object.assign(sandbox, overrides);
     vm.runInNewContext(source, sandbox, { filename: 'browser-bridge.js' });
     const bridge = runtime.trepdfWeb;
     return {
-        bridge, runtime, messages, pixels, workers, elements, timers, urls, revoked, allocations,
+        bridge, runtime, messages, pixels, workers, elements, timers, urls, revoked, allocations, listeners,
         async select(file) {
             bridge.chooseFile();
             const input = elements.at(-1);
@@ -107,7 +113,7 @@ function harness() {
         opened() {
             const worker = workers.at(-1);
             const generation = worker.posts.find(message => message.type === 'open').generation;
-            worker.respond({ type: 'opened', generation, pages: [{ width: 200, height: 100 }] });
+            worker.respond({ type: 'opened', generation, canEdit: true, pages: [{ width: 200, height: 100 }] });
             return { worker, generation };
         }
     };
@@ -307,4 +313,267 @@ test('picker cancellation and dispose remove DOM nodes and outstanding work', ()
     assert.equal(h.elements[1].removed, true);
     assert.equal(h.workers[0].terminated, true);
     assert.equal(h.timers.size, 0);
+});
+
+test('rejected edits preserve active and queued rasters without leaving pages loading', async () => {
+    const h = harness();
+    await h.select(file());
+    const { worker, generation } = h.opened();
+    h.bridge.render(1, 0, 100);
+    h.bridge.render(2, 0, 120);
+    assert.equal(h.bridge.edit(JSON.stringify({action: 'add', object: {type: 'text'}})), true);
+    assert.equal(h.bridge.edit(JSON.stringify({action: 'undo'})), false, 'one pending mutation');
+    worker.respond({type: 'rendered', generation, requestId: 1, width: 1, height: 1,
+        bytes: new Uint8Array([1, 2, 3, 4]).buffer});
+    assert.equal(h.pixels.length, 1, 'active raster finishes before the edit starts');
+    const edit = worker.posts.at(-1);
+    assert.equal(edit.type, 'edit');
+    assert.equal(worker.posts.filter(p => p.requestId === 2).length, 0);
+    worker.respond({type: 'error', generation, operationId: edit.operationId, message: 'Text is too large.'});
+    assert.equal(h.messages.at(-1).fatal, undefined);
+    assert.equal(worker.terminated, false, 'a rejected edit keeps the document alive');
+    assert.equal(worker.posts.at(-1).requestId, 2, 'queued page resumes after a rejected mutation');
+    worker.respond({type: 'rendered', generation, requestId: 2, width: 1, height: 1,
+        bytes: new Uint8Array([1, 2, 3, 4]).buffer});
+    assert.deepEqual(h.pixels.map(p => p.requestId), [1, 2]);
+});
+
+test('successful edits replace queued rasters at the Qt reset boundary', async () => {
+    const h = harness();
+    await h.select(file());
+    const {worker, generation} = h.opened();
+    h.bridge.render(1, 0, 100);
+    h.bridge.render(2, 0, 120);
+    h.bridge.edit(JSON.stringify({action: 'add', object: {type: 'text'}}));
+    worker.respond({type: 'rendered', generation, requestId: 1, width: 1, height: 1,
+        bytes: new Uint8Array([1, 2, 3, 4]).buffer});
+    worker.respond({type: 'edited', generation, operationId: worker.posts.at(-1).operationId,
+        objects: [{id: 1}], dirty: true, canUndo: true});
+    assert.equal(worker.posts.filter(p => p.requestId === 2).length, 0,
+        'queued rasters invalidated by the successful edit are not dispatched');
+    h.bridge.render(3, 0, 100);
+    assert.equal(worker.posts.at(-1).requestId, 3, 'new Qt raster request uses the edited document');
+});
+
+test('successful and failed exports both resume queued page renders', async () => {
+    for (const success of [true, false]) {
+        const h = harness();
+        await h.select(file());
+        const {worker, generation} = h.opened();
+        h.bridge.edit(JSON.stringify({action: 'add', object: {type: 'text'}}));
+        worker.respond({type: 'edited', generation, operationId: worker.posts.at(-1).operationId,
+            objects: [{id: 1}], dirty: true, canUndo: true});
+        h.bridge.render(1, 0, 100);
+        h.bridge.render(2, 0, 120);
+        h.bridge.downloadFile();
+        worker.respond({type: 'rendered', generation, requestId: 1, width: 1, height: 1,
+            bytes: new Uint8Array([1, 2, 3, 4]).buffer});
+        const operationId = worker.posts.at(-1).operationId;
+        assert.equal(worker.posts.at(-1).type, 'export');
+        worker.respond(success
+            ? {type: 'exported', generation, operationId, dirty: false,
+                bytes: new TextEncoder().encode('%PDF-1.7 saved').buffer}
+            : {type: 'error', generation, operationId, message: 'Export failed.'});
+        assert.equal(worker.posts.at(-1).requestId, 2, 'queued render resumes after export');
+        worker.respond({type: 'rendered', generation, requestId: 2, width: 1, height: 1,
+            bytes: new Uint8Array([1, 2, 3, 4]).buffer});
+        assert.deepEqual(h.pixels.map(p => p.requestId), [1, 2]);
+    }
+});
+
+test('modified download uses verified export bytes and later clean downloads keep the saved PDF', async () => {
+    const h = harness();
+    await h.select(file());
+    const { worker, generation } = h.opened();
+    h.bridge.edit(JSON.stringify({action: 'add', object: {type: 'text'}}));
+    worker.respond({type: 'edited', generation, operationId: worker.posts.at(-1).operationId,
+        objects: [{id: 1}], dirty: true, canUndo: true, canRedo: false, selectedId: 1});
+    h.bridge.downloadFile();
+    const exportRequest = worker.posts.at(-1);
+    assert.equal(exportRequest.type, 'export');
+    assert.equal(h.urls.length, 0, 'no original-file download while edits are pending');
+    const bytes = new TextEncoder().encode('%PDF-1.7 edited').buffer;
+    worker.respond({type: 'exported', generation, operationId: exportRequest.operationId,
+        objects: [{id: 1}], dirty: false, canUndo: true, canRedo: false, bytes});
+    assert.equal(await h.urls.at(-1).text(), '%PDF-1.7 edited');
+    assert.equal(h.elements.at(-1).download, 'original-edited.pdf');
+    assert.equal('bytes' in h.messages.at(-1), false, 'PDF bytes never enter Qt JSON state');
+    h.bridge.downloadFile();
+    assert.equal(h.urls[0], h.urls[1]);
+    assert.equal(h.allocations.size, 0);
+});
+
+test('failed export retains drafts for retry, read-only documents cannot submit edits', async () => {
+    const h = harness();
+    await h.select(file());
+    const { worker, generation } = h.opened();
+    h.bridge.edit(JSON.stringify({action: 'add', object: {type: 'text'}}));
+    worker.respond({type: 'edited', generation, operationId: worker.posts.at(-1).operationId,
+        objects: [{id: 1}], dirty: true, canUndo: true});
+    h.bridge.downloadFile();
+    worker.respond({type: 'error', generation, operationId: worker.posts.at(-1).operationId,
+        message: 'The PDF could not be saved.'});
+    assert.equal(h.urls.length, 0);
+    h.bridge.downloadFile();
+    assert.equal(worker.posts.at(-1).type, 'export', 'retry never falls back to original bytes');
+    h.bridge.closeFile();
+    await h.select(file());
+    const readonlyWorker = h.workers.at(-1);
+    readonlyWorker.respond({type: 'opened', generation: 3, pages: [{width: 200, height: 100}], canEdit: false});
+    assert.equal(h.bridge.edit(JSON.stringify({action: 'add'})), false);
+});
+
+test('leaving the browser warns for pending input and unsaved edits, and clears after save or close', async () => {
+    const h = harness();
+    h.bridge.initialize();
+    const warns = () => {
+        let prevented = false;
+        const event = {preventDefault() { prevented = true; }};
+        h.listeners.get('beforeunload')(event);
+        assert.equal(event.returnValue === '', prevented);
+        return prevented;
+    };
+    assert.equal(warns(), false);
+    await h.select(file());
+    const {worker, generation} = h.opened();
+    h.bridge.setPendingInput(true);
+    assert.equal(warns(), true, 'unapplied text is protected');
+    h.bridge.setPendingInput(false);
+    assert.equal(warns(), false);
+    h.bridge.render(1, 0, 100);
+    h.bridge.edit(JSON.stringify({action: 'add', object: {type: 'text'}}));
+    assert.equal(warns(), true, 'a first edit waiting for a render is protected');
+    worker.respond({type: 'rendered', generation, requestId: 1, width: 1, height: 1,
+        bytes: new Uint8Array([1, 2, 3, 4]).buffer});
+    assert.equal(warns(), true, 'an in-flight first edit is protected');
+    worker.respond({type: 'edited', generation, operationId: worker.posts.at(-1).operationId,
+        objects: [{id: 1}], dirty: true, canUndo: true});
+    assert.equal(warns(), true, 'applied unsaved objects are protected');
+    h.bridge.downloadFile();
+    worker.respond({type: 'error', generation, operationId: worker.posts.at(-1).operationId,
+        message: 'Export failed.'});
+    assert.equal(warns(), true, 'failed export retains the guard');
+    h.bridge.downloadFile();
+    worker.respond({type: 'exported', generation, operationId: worker.posts.at(-1).operationId,
+        objects: [{id: 1}], dirty: false, bytes: new TextEncoder().encode('%PDF-1.7 saved').buffer});
+    assert.equal(warns(), false, 'successful download clears the saved draft guard');
+    h.bridge.setPendingInput(true);
+    h.bridge.closeFile();
+    assert.equal(warns(), false);
+    h.bridge.dispose();
+    assert.equal(h.listeners.has('beforeunload'), false);
+});
+
+
+test('source metadata keeps the active raster watchdog and accepts a canceled-page catalog', async () => {
+    const h = harness();
+    await h.select(file());
+    const {worker, generation} = h.opened();
+    h.bridge.render(40, 0, 100);
+    h.bridge.render(41, 1, 100);
+    h.bridge.cancel(40);
+    worker.respond({type: 'indexed', generation: generation - 1, requestId: 40, objects: []});
+    worker.respond({type: 'indexed', generation, requestId: 99, objects: []});
+    assert.equal(h.messages.filter(m => m.type === 'indexed').length, 0);
+    worker.respond({type: 'indexed', generation, requestId: 40,
+        objects: [{id: 1000000, source: true, type: 'image', page: 0}]});
+    assert.equal(h.messages.at(-1).objects[0].id, 1000000);
+    assert.equal(worker.posts.at(-1).requestId, 40, 'metadata does not start another render');
+    assert.ok([...h.timers.values()].some(timer => timer.delay === 30000));
+    worker.respond({type: 'rendered', generation, requestId: 40, width: 1, height: 1,
+        pixels: new ArrayBuffer(4)});
+    assert.equal(worker.posts.at(-1).requestId, 41);
+    assert.equal(h.pixels.length, 0, 'canceled page pixels remain suppressed');
+});
+
+function imageHarness(bitmapPromise) {
+    const bitmap = {width: 2, height: 1, closed: false, close() { this.closed = true; }};
+    const rgba = new Uint8ClampedArray([220, 0, 0, 255, 0, 0, 220, 255]);
+    const h = harness({
+        createImageBitmap: async () => bitmapPromise ? await bitmapPromise : bitmap,
+        OffscreenCanvas: class {
+            getContext() { return {drawImage() {}, getImageData() { return {data: rgba}; }}; }
+        }
+    });
+    return {...h, bitmap, rgba};
+}
+async function selectReplacement(h, image = new Blob(['image'], {type: 'image/png'})) {
+    assert.equal(h.bridge.replaceImage(1000000), true);
+    const input = h.elements.at(-1);
+    assert.equal(input.accept, 'image/png,image/jpeg,image/webp');
+    input.files = [image];
+    input.listeners.get('change')();
+    await flush();
+}
+
+test('replacement transfers bounded RGBA pixels and preserves normal operation history', async () => {
+    const h = imageHarness();
+    await h.select(file());
+    const {worker, generation} = h.opened();
+    await selectReplacement(h);
+    const op = worker.posts.at(-1);
+    assert.equal(op.type, 'edit');
+    assert.equal(op.command.action, 'replaceImage');
+    assert.equal(op.command.object.id, 1000000);
+    assert.deepEqual([...new Uint8Array(op.command.image.bytes)], [220, 0, 0, 255, 0, 0, 220, 255]);
+    assert.equal(worker.transfers.at(-1), 1);
+    assert.equal(h.rgba.byteLength, 0, 'RGBA ownership transferred to worker');
+    assert.equal(h.bitmap.closed, true);
+    assert.ok(h.messages.some(m => m.type === 'editing'));
+    assert.equal(h.bridge.replaceImage(1000000), false, 'second picker blocked during edit');
+    worker.respond({type: 'edited', generation, operationId: op.operationId,
+        dirty: true, canUndo: true, objects: [{id: 1000000, type: 'image', hasReplacement: true}]});
+    assert.equal(h.messages.at(-1).objects[0].hasReplacement, true);
+    h.bridge.downloadFile();
+    assert.equal(worker.posts.at(-1).type, 'export');
+});
+
+test('canceling replacement creates no draft; invalid image leaves the PDF usable', async () => {
+    const h = imageHarness();
+    await h.select(file());
+    const {worker} = h.opened();
+    const before = worker.posts.length;
+    assert.equal(h.bridge.replaceImage(1000000), true);
+    h.elements.at(-1).listeners.get('cancel')();
+    assert.equal(worker.posts.length, before);
+    assert.equal(h.messages.some(m => m.type === 'editing'), false);
+    await selectReplacement(h, new Blob(['svg'], {type: 'image/svg+xml'}));
+    assert.match(h.messages.at(-1).message, /PNG, JPEG or WebP/);
+    assert.equal(worker.terminated, false);
+    h.bridge.downloadFile();
+    assert.equal(h.urls.length, 1);
+    assert.equal(await h.urls[0].text(), '%PDF-1.7 original bytes');
+});
+
+test('image decode is guarded on unload and cannot change a closed or replaced PDF', async () => {
+    let resolveBitmap;
+    const promise = new Promise(resolve => { resolveBitmap = resolve; });
+    const h = imageHarness(promise);
+    h.bridge.initialize();
+    await h.select(file());
+    const {worker} = h.opened();
+    await selectReplacement(h);
+    let prevented = false;
+    h.listeners.get('beforeunload')({preventDefault() { prevented = true; }});
+    assert.equal(prevented, true);
+    assert.equal(h.bridge.edit('{"action":"undo"}'), false);
+    h.bridge.closeFile();
+    const count = h.messages.length;
+    resolveBitmap(h.bitmap);
+    await flush();
+    assert.equal(h.messages.length, count);
+    assert.equal(h.bitmap.closed, true);
+    assert.equal(worker.posts.filter(p => p.type === 'edit').length, 0);
+});
+
+test('oversized decoded images release the bitmap and allow retry', async () => {
+    const h = imageHarness();
+    h.bitmap.width = 4097;
+    await h.select(file());
+    const {worker} = h.opened();
+    await selectReplacement(h);
+    assert.match(h.messages.at(-1).message, /4 megapixels/);
+    assert.equal(h.bitmap.closed, true);
+    assert.equal(worker.posts.some(p => p.type === 'edit'), false);
+    assert.equal(h.bridge.replaceImage(1000000), true);
 });

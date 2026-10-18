@@ -9,9 +9,10 @@ Source archive: `https://github.com/liberationfonts/liberation-fonts/files/72614
 Archive SHA-256: `7191c669bf38899f73a2094ed00f7b800553364f90e2637010a69c0e268f25d0`.
 Individual file hashes are recorded in `SHA256SUMS`.
 
-Only the controller test executable embeds these files, under
-`:/trepdf/tests/fonts/liberation`. They are not application font resources and
-are not shipped in TrePDF. Tests use a temporary private download store when
+Only the controller test executable embeds this fixture directory, under
+`:/trepdf/tests/fonts/liberation`. The web preview distributes a separate,
+unmodified Regular face in `src/web/fonts`; desktop font resources are unchanged.
+Tests use a temporary private download store when
 they need locally available complete faces, and remove that store afterward.
 All fixture families are renamed in memory, including the default `TrePDFTestSans`,
 to prevent collisions with installed Liberation Sans. Synthetic missing-font,

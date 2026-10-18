@@ -6,17 +6,13 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import TrePDF
 import "Components/ios"
+import "Components/platform"
 
-ApplicationWindow {
+AppWindow {
     id: window
 
-    width: 1200
-    height: 800
     minimumWidth: windowMetrics.minimumWidth
     minimumHeight: windowMetrics.minimumHeight
-    visible: true
-    //% "TrePDF"
-    title: qsTrId("ApplicationTitle")
 
     WindowMetrics { id: windowMetrics; window: window }
 

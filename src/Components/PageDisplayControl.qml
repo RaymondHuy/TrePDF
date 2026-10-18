@@ -2,30 +2,34 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
-import TrePDF
 
 RibbonButton {
     id: root
     objectName: "pageDisplayControl"
 
-    property int pageDisplayMode: PDFDocumentSession.ContinuousMode
+    property int pageDisplayMode: ReaderModes.ContinuousMode
+    property var allowedPageDisplayModes: [
+        ReaderModes.SinglePageMode, ReaderModes.ContinuousMode,
+        ReaderModes.FacingMode, ReaderModes.ContinuousFacingMode
+    ]
     property bool separateCoverPage: false
     property bool splitViewEnabled: false
-    property int splitViewMode: PDFDocumentSession.NoSplit
+    property bool splitViewSupported: true
+    property int splitViewMode: ReaderModes.NoSplit
     readonly property bool facingMode:
-        pageDisplayMode === PDFDocumentSession.FacingMode
-        || pageDisplayMode === PDFDocumentSession.ContinuousFacingMode
+        pageDisplayMode === ReaderModes.FacingMode
+        || pageDisplayMode === ReaderModes.ContinuousFacingMode
     readonly property url activeLayoutIcon: {
-        if (pageDisplayMode === PDFDocumentSession.SinglePageMode)
+        if (pageDisplayMode === ReaderModes.SinglePageMode)
             return "../assets/icons/page-single.svg"
-        if (pageDisplayMode === PDFDocumentSession.FacingMode)
+        if (pageDisplayMode === ReaderModes.FacingMode)
             return "../assets/icons/page-facing.svg"
-        if (pageDisplayMode === PDFDocumentSession.ContinuousFacingMode)
+        if (pageDisplayMode === ReaderModes.ContinuousFacingMode)
             return "../assets/icons/page-continuous-facing.svg"
         return "../assets/icons/page-continuous.svg"
     }
     readonly property url activeSplitIcon: {
-        if (splitViewMode === PDFDocumentSession.HorizontalSplit)
+        if (splitViewMode === ReaderModes.HorizontalSplit)
             return "../assets/icons/page-split-horizontal.svg"
         return "../assets/icons/page-split-vertical.svg"
     }
@@ -118,16 +122,17 @@ RibbonButton {
                 objectName: "singlePageDisplayItem"
                 theme: root.theme
                 enabled: root.documentLoaded
+                    && root.allowedPageDisplayModes.indexOf(ReaderModes.SinglePageMode) >= 0
                 optionIconSource: "../assets/icons/page-single.svg"
                 selected: root.pageDisplayMode
-                    === PDFDocumentSession.SinglePageMode
+                    === ReaderModes.SinglePageMode
                 //% "Single Page"
                 text: qsTrId("PageDisplaySinglePage")
                 KeyNavigation.up: splitMainButton
                 KeyNavigation.down: continuousButton
                 onClicked: {
                     root.pageDisplayModeRequested(
-                        PDFDocumentSession.SinglePageMode)
+                        ReaderModes.SinglePageMode)
                     pageDisplayPopup.close()
                 }
             }
@@ -137,16 +142,17 @@ RibbonButton {
                 objectName: "continuousPageDisplayItem"
                 theme: root.theme
                 enabled: root.documentLoaded
+                    && root.allowedPageDisplayModes.indexOf(ReaderModes.ContinuousMode) >= 0
                 optionIconSource: "../assets/icons/page-continuous.svg"
                 selected: root.pageDisplayMode
-                    === PDFDocumentSession.ContinuousMode
+                    === ReaderModes.ContinuousMode
                 //% "Continuous"
                 text: qsTrId("PageDisplayContinuous")
                 KeyNavigation.up: singlePageButton
                 KeyNavigation.down: facingButton
                 onClicked: {
                     root.pageDisplayModeRequested(
-                        PDFDocumentSession.ContinuousMode)
+                        ReaderModes.ContinuousMode)
                     pageDisplayPopup.close()
                 }
             }
@@ -156,16 +162,17 @@ RibbonButton {
                 objectName: "facingPageDisplayItem"
                 theme: root.theme
                 enabled: root.documentLoaded
+                    && root.allowedPageDisplayModes.indexOf(ReaderModes.FacingMode) >= 0
                 optionIconSource: "../assets/icons/page-facing.svg"
                 selected: root.pageDisplayMode
-                    === PDFDocumentSession.FacingMode
+                    === ReaderModes.FacingMode
                 //% "Facing"
                 text: qsTrId("PageDisplayFacing")
                 KeyNavigation.up: continuousButton
                 KeyNavigation.down: continuousFacingButton
                 onClicked: {
                     root.pageDisplayModeRequested(
-                        PDFDocumentSession.FacingMode)
+                        ReaderModes.FacingMode)
                     pageDisplayPopup.close()
                 }
             }
@@ -175,17 +182,18 @@ RibbonButton {
                 objectName: "continuousFacingPageDisplayItem"
                 theme: root.theme
                 enabled: root.documentLoaded
+                    && root.allowedPageDisplayModes.indexOf(ReaderModes.ContinuousFacingMode) >= 0
                 optionIconSource:
                     "../assets/icons/page-continuous-facing.svg"
                 selected: root.pageDisplayMode
-                    === PDFDocumentSession.ContinuousFacingMode
+                    === ReaderModes.ContinuousFacingMode
                 //% "Continuous Facing"
                 text: qsTrId("PageDisplayContinuousFacing")
                 KeyNavigation.up: facingButton
                 KeyNavigation.down: separateCoverButton
                 onClicked: {
                     root.pageDisplayModeRequested(
-                        PDFDocumentSession.ContinuousFacingMode)
+                        ReaderModes.ContinuousFacingMode)
                     pageDisplayPopup.close()
                 }
             }
@@ -202,6 +210,7 @@ RibbonButton {
                 objectName: "separateCoverPageDisplayItem"
                 theme: root.theme
                 enabled: root.documentLoaded && root.facingMode
+                    && root.allowedPageDisplayModes.indexOf(root.pageDisplayMode) >= 0
                 optionIconSource: "../assets/icons/page-separate-cover.svg"
                 selected: root.separateCoverPage && root.facingMode
                 //% "Separate Cover Page"
@@ -243,7 +252,7 @@ RibbonButton {
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     anchors.right: splitMenuButton.left
-                    enabled: root.documentLoaded
+                    enabled: root.documentLoaded && root.splitViewSupported
                     topPadding: 6
                     bottomPadding: 6
                     leftPadding: 10
@@ -281,7 +290,7 @@ RibbonButton {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     width: 34
-                    enabled: root.documentLoaded
+                    enabled: root.documentLoaded && root.splitViewSupported
                     focusPolicy: Qt.TabFocus
                     text: "\u25b8"
                     font.pixelSize: 16
@@ -337,28 +346,30 @@ RibbonButton {
 
                     MenuItem {
                         objectName: "verticalSplitPageDisplayItem"
+                        enabled: root.documentLoaded && root.splitViewSupported
                         checkable: true
                         checked: root.splitViewMode
-                            === PDFDocumentSession.VerticalSplit
+                            === ReaderModes.VerticalSplit
                         //% "Vertical Split"
                         text: qsTrId("PageDisplayVerticalSplit")
                         onTriggered: {
                             root.splitViewModeRequested(
-                                PDFDocumentSession.VerticalSplit)
+                                ReaderModes.VerticalSplit)
                             pageDisplayPopup.close()
                         }
                     }
 
                     MenuItem {
                         objectName: "horizontalSplitPageDisplayItem"
+                        enabled: root.documentLoaded && root.splitViewSupported
                         checkable: true
                         checked: root.splitViewMode
-                            === PDFDocumentSession.HorizontalSplit
+                            === ReaderModes.HorizontalSplit
                         //% "Horizontal Split"
                         text: qsTrId("PageDisplayHorizontalSplit")
                         onTriggered: {
                             root.splitViewModeRequested(
-                                PDFDocumentSession.HorizontalSplit)
+                                ReaderModes.HorizontalSplit)
                             pageDisplayPopup.close()
                         }
                     }

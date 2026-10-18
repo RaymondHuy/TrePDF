@@ -1,498 +1,80 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Controls.Basic
 import TrePDF
 
-Flickable {
+EditRibbonTools {
     id: root
 
-    required property AppTheme theme
     required property PDFDocument document
     required property PDFEditController editController
-    property bool hasPendingPanelEdits: false
 
-    signal pageRequested(int page)
-    signal deletePageRequested(int page)
-    signal mergePdfRequested()
-    signal undoRequested()
-    signal redoRequested()
-    signal toolRequested(string toolName)
+    documentLoaded: document.loaded
+    documentContext: document
+    pageCount: document.pageCount
+    currentPage: document.currentPage
+    currentTool: toolName(editController.tool)
+    currentShape: shapeTypeName(editController.shapeType)
+    saving: editController.saving
+    canUndo: editController.canUndo
+    canRedo: editController.canRedo
+    textEditActive: editController.textEditActive
+    creatingWebLinks: editController.creatingWebLinks
+    removingWebLinks: editController.removingWebLinks
+    loadingEditableLinks: editController.loadingEditableLinks
+    mergeVisible: Qt.platform.os !== "ios"
 
-    readonly property var shapeOptions: [
-        {
-            type: PDFEditController.RectangleShape,
-            icon: "../assets/icons/rectangle.svg"
-        },
-        {
-            type: PDFEditController.EllipseShape,
-            icon: "../assets/icons/oval.svg"
-        },
-        {
-            type: PDFEditController.LineShape,
-            icon: "../assets/icons/line.svg"
-        },
-        {
-            type: PDFEditController.ArrowShape,
-            icon: "../assets/icons/arrow.svg"
-        },
-        {
-            type: PDFEditController.TriangleShape,
-            icon: "../assets/icons/triangle.svg"
-        },
-        {
-            type: PDFEditController.DiamondShape,
-            icon: "../assets/icons/diamond.svg"
+    onSelectToolRequested: toolName => {
+        switch (toolName) {
+        case "select": editController.tool = PDFEditController.SelectTool; break
+        case "editText": editController.tool = PDFEditController.EditTextTool; break
+        case "addText": editController.tool = PDFEditController.AddTextTool; break
+        case "addImage": editController.tool = PDFEditController.AddImageTool; break
         }
-    ]
+    }
+    onShapeRequested: shapeName => {
+        switch (shapeName) {
+        case "rectangle": editController.shapeType = PDFEditController.RectangleShape; break
+        case "ellipse": editController.shapeType = PDFEditController.EllipseShape; break
+        case "line": editController.shapeType = PDFEditController.LineShape; break
+        case "arrow": editController.shapeType = PDFEditController.ArrowShape; break
+        case "triangle": editController.shapeType = PDFEditController.TriangleShape; break
+        case "diamond": editController.shapeType = PDFEditController.DiamondShape; break
+        default: return
+        }
+        editController.tool = PDFEditController.AddShapeTool
+    }
+    onAddBlankPageRequested: {
+        const page = editController.addBlankPage()
+        if (page >= 0)
+            root.pageRequested(page)
+    }
+    onBeginLinkEditingRequested: editController.beginLinkEditing()
+    onAutoCreateLinksRequested: editController.autoCreateWebLinks()
+    onRemoveLinksRequested: editController.removeWebLinks()
+    onCancelLinksRequested: editController.cancelWebLinkCreation()
 
-    clip: true
-    contentWidth: ribbonRow.implicitWidth + 16
-    contentHeight: height
-    flickableDirection: Flickable.HorizontalFlick
-    boundsBehavior: Flickable.StopAtBounds
-
-    function shapeName(shapeType) {
-        switch (shapeType) {
-        case PDFEditController.RectangleShape:
-            //% "Rectangle"
-            return qsTrId("RectangleShape")
-        case PDFEditController.EllipseShape:
-            //% "Oval"
-            return qsTrId("OvalShape")
-        case PDFEditController.LineShape:
-            //% "Line"
-            return qsTrId("LineShape")
-        case PDFEditController.ArrowShape:
-            //% "Arrow"
-            return qsTrId("ArrowShape")
-        case PDFEditController.TriangleShape:
-            //% "Triangle"
-            return qsTrId("TriangleShape")
-        case PDFEditController.DiamondShape:
-            //% "Diamond"
-            return qsTrId("DiamondShape")
+    function toolName(tool: int): string {
+        switch (tool) {
+        case PDFEditController.SelectTool: return "select"
+        case PDFEditController.EditTextTool: return "editText"
+        case PDFEditController.AddTextTool: return "addText"
+        case PDFEditController.AddImageTool: return "addImage"
+        case PDFEditController.AddShapeTool: return "addShape"
+        case PDFEditController.LinkTool: return "link"
         }
         return ""
     }
 
-    function selectShape(shapeType) {
-        shapePopup.close()
-        editController.shapeType = shapeType
-        editController.tool = PDFEditController.AddShapeTool
+    function shapeTypeName(shape: int): string {
+        switch (shape) {
+        case PDFEditController.RectangleShape: return "rectangle"
+        case PDFEditController.EllipseShape: return "ellipse"
+        case PDFEditController.LineShape: return "line"
+        case PDFEditController.ArrowShape: return "arrow"
+        case PDFEditController.TriangleShape: return "triangle"
+        case PDFEditController.DiamondShape: return "diamond"
+        }
+        return ""
     }
-
-    component ShapeOptionButton: ToolButton {
-        id: shapeOption
-
-        required property int optionType
-        required property url optionIconSource
-
-        width: 92
-        height: 66
-        padding: 5
-        checkable: true
-        checked: root.editController.tool === PDFEditController.AddShapeTool
-            && root.editController.shapeType === optionType
-        focusPolicy: Qt.TabFocus
-        Accessible.name: root.shapeName(optionType)
-        onClicked: root.selectShape(optionType)
-
-        contentItem: Column {
-            spacing: 3
-
-            Image {
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: 46
-                height: 30
-                source: shapeOption.optionIconSource
-                sourceSize: Qt.size(width * 3, height * 3)
-                fillMode: Image.PreserveAspectFit
-                smooth: true
-                mipmap: true
-                Accessible.ignored: true
-            }
-
-            Label {
-                width: parent.width
-                text: root.shapeName(shapeOption.optionType)
-                color: root.theme.ribbonTextColor
-                font.pixelSize: 10
-                horizontalAlignment: Text.AlignHCenter
-                elide: Text.ElideRight
-            }
-        }
-
-        background: Rectangle {
-            radius: 5
-            color: shapeOption.down
-                ? "#f5dfcf"
-                : shapeOption.hovered
-                        || shapeOption.visualFocus
-                        || shapeOption.checked
-                    ? root.theme.foxitPaleOrange
-                    : "transparent"
-            border.width: shapeOption.checked
-                ? 2
-                : shapeOption.hovered || shapeOption.visualFocus ? 1 : 0
-            border.color: shapeOption.checked
-                ? root.theme.foxitDarkOrange
-                : root.theme.foxitBorderOrange
-        }
-    }
-
-    Row {
-        id: ribbonRow
-
-        x: 8
-        height: 76
-
-        RibbonGroup {
-            theme: root.theme
-            //% "Content"
-            title: qsTrId("Content")
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Select"
-                text: qsTrId("Select")
-                iconSource: "../assets/icons/mouse-pointer-2.svg"
-                primary: root.editController.tool === PDFEditController.SelectTool
-                onClicked: root.editController.tool = PDFEditController.SelectTool
-            }
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Edit Text"
-                text: qsTrId("EditText")
-                iconSource: "../assets/icons/type.svg"
-                primary: root.editController.tool === PDFEditController.EditTextTool
-                onClicked: root.editController.tool = PDFEditController.EditTextTool
-            }
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Add Text"
-                text: qsTrId("AddText")
-                iconSource: "../assets/icons/type.svg"
-                primary: root.editController.tool === PDFEditController.AddTextTool
-                onClicked: root.editController.tool = PDFEditController.AddTextTool
-            }
-        }
-
-        RibbonGroup {
-            theme: root.theme
-            //% "Objects"
-            title: qsTrId("Objects")
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Image"
-                text: qsTrId("Image")
-                //% "Add Image"
-                toolTipText: qsTrId("AddImage")
-                iconSource: "../assets/icons/image-plus.svg"
-                primary: root.editController.tool === PDFEditController.AddImageTool
-                onClicked: root.editController.tool = PDFEditController.AddImageTool
-            }
-
-            RibbonButton {
-                id: linkButton
-
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Link"
-                text: qsTrId("Link")
-                iconSource: "../assets/icons/link-2.svg"
-                menuIndicatorVisible: true
-                menuToolTipText: text
-                enabled: root.document.loaded && !root.editController.saving
-                primary: linkMenuLoader.active
-                    || root.editController.tool === PDFEditController.LinkTool
-                onClicked: linkMenuLoader.active = true
-                onMenuRequested: linkMenuLoader.active = true
-                onEnabledChanged: {
-                    if (!enabled)
-                        linkMenuLoader.active = false
-                }
-                onVisibleChanged: {
-                    if (!visible)
-                        linkMenuLoader.active = false
-                }
-
-                Connections {
-                    target: root
-                    function onDocumentChanged() {
-                        linkMenuLoader.active = false
-                    }
-                }
-
-                Loader {
-                    id: linkMenuLoader
-
-                    active: false
-                    onLoaded: {
-                        if (status === Loader.Ready && item)
-                            (item as Menu).open()
-                    }
-
-                    sourceComponent: Menu {
-                        id: linkMenu
-
-                        //% "Create a link: Choose this tool, then drag a rectangle around the text or area you want to make clickable. Enter a web address or choose a page in this PDF.\n\nEdit a link: Double-click an existing link to change its destination or appearance.\n\nMove or resize: Drag the link frame to move it, or drag an edge or corner handle to resize it.\n\nSave your changes, then switch to the View tab to try the link."
-                        readonly property string linkHelpText: qsTrId("AddOrEditLinkHelp")
-
-                        parent: linkButton
-                        y: linkButton.height
-                        width: 280
-                        padding: 4
-                        popupType: Popup.Item
-                        focus: true
-                        closePolicy: Popup.CloseOnEscape
-                            | Popup.CloseOnPressOutsideParent
-                        onClosed: linkMenuLoader.active = false
-
-                        delegate: MenuItem {
-                            id: linkMenuItem
-
-                            implicitHeight: 32
-                            leftPadding: 12
-                            rightPadding: 12
-                            font.pixelSize: 12
-                            palette.text: root.theme.ribbonTextColor
-                            palette.highlightedText: root.theme.ribbonTextColor
-                            Accessible.description: action === addOrEditLinkAction
-                                ? linkMenu.linkHelpText : ""
-
-                            Loader {
-                                active: linkMenu.opened
-                                    && linkMenuItem.action === addOrEditLinkAction
-
-                                sourceComponent: HelpToolTip {
-                                    theme: root.theme
-                                    parent: linkMenuItem
-                                    title: addOrEditLinkAction.text
-                                    visible: linkMenu.opened && linkMenuItem.enabled
-                                        && !linkMenuItem.down
-                                        && (linkMenuItem.hovered || linkMenuItem.visualFocus)
-                                    text: linkMenu.linkHelpText
-                                }
-                            }
-
-                            background: Rectangle {
-                                radius: 4
-                                color: linkMenuItem.highlighted
-                                    ? root.theme.foxitPaleOrange : "transparent"
-                            }
-                        }
-
-                        Action {
-                            id: addOrEditLinkAction
-
-                            //% "Add or edit a link"
-                            text: qsTrId("AddOrEditLink")
-                            enabled: !root.hasPendingPanelEdits
-                                && !root.editController.creatingWebLinks
-                                && !root.editController.removingWebLinks
-                                && !root.editController.loadingEditableLinks
-                            onTriggered: root.editController.beginLinkEditing()
-                        }
-
-                        Action {
-                            text: root.editController.creatingWebLinks
-                                //% "Cancel creating links"
-                                ? qsTrId("CancelCreatingWebLinks")
-                                //% "Auto-create links from URLs"
-                                : qsTrId("AutoCreateLinksFromUrls")
-                            enabled: root.editController.creatingWebLinks
-                                || (!root.hasPendingPanelEdits
-                                    && !root.editController.removingWebLinks)
-                            onTriggered: {
-                                if (root.editController.creatingWebLinks)
-                                    root.editController.cancelWebLinkCreation()
-                                else
-                                    root.editController.autoCreateWebLinks()
-                            }
-                        }
-
-                        Action {
-                            text: root.editController.removingWebLinks
-                                //% "Cancel removing links"
-                                ? qsTrId("CancelRemovingWebLinks")
-                                //% "Remove web links"
-                                : qsTrId("RemoveWebLinks")
-                            enabled: root.editController.removingWebLinks
-                                || (!root.hasPendingPanelEdits
-                                    && !root.editController.creatingWebLinks)
-                            onTriggered: {
-                                if (root.editController.removingWebLinks)
-                                    root.editController.cancelWebLinkCreation()
-                                else
-                                    root.editController.removeWebLinks()
-                            }
-                        }
-
-                        background: Rectangle {
-                            radius: 7
-                            color: root.theme.ribbonSurface
-                            border.width: 1
-                            border.color: root.theme.ribbonBorder
-                        }
-                    }
-                }
-            }
-
-            RibbonButton {
-                id: shapeButton
-
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Shapes"
-                text: qsTrId("Shapes")
-                iconSource: "../assets/icons/shapes.svg"
-                menuIndicatorVisible: true
-                //% "Choose shape"
-                menuToolTipText: qsTrId("ChooseShape")
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                primary: root.editController.tool
-                    === PDFEditController.AddShapeTool
-                onClicked: shapePopup.open()
-                onMenuRequested: shapePopup.open()
-                onEnabledChanged: {
-                    if (!enabled)
-                        shapePopup.close()
-                }
-
-                Popup {
-                    id: shapePopup
-
-                    x: shapeButton.width - width
-                    y: shapeButton.height
-                    width: 300
-                    padding: 8
-                    focus: true
-                    closePolicy: Popup.CloseOnEscape
-                        | Popup.CloseOnPressOutsideParent
-
-                    contentItem: Grid {
-                        columns: 3
-                        columnSpacing: 4
-                        rowSpacing: 4
-
-                        Repeater {
-                            model: root.shapeOptions
-
-                            delegate: ShapeOptionButton {
-                                required property var modelData
-
-                                optionType: modelData.type
-                                optionIconSource: modelData.icon
-                            }
-                        }
-                    }
-
-                    background: Rectangle {
-                        radius: 7
-                        color: root.theme.ribbonSurface
-                        border.width: 1
-                        border.color: root.theme.ribbonBorder
-                    }
-                }
-            }
-        }
-
-        RibbonGroup {
-            theme: root.theme
-            //% "Page"
-            title: qsTrId("Page")
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Add Page"
-                text: qsTrId("AddPage")
-                //% "Add Blank Page"
-                toolTipText: qsTrId("AddBlankPage")
-                iconSource: "../assets/icons/add-page.svg"
-                preserveIconColors: true
-                enabled: root.document.loaded
-                    && !root.editController.saving
-                onClicked: {
-                    const page = root.editController.addBlankPage()
-                    if (page >= 0)
-                        root.pageRequested(page)
-                }
-            }
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Delete Page"
-                text: qsTrId("DeletePage")
-                //% "Delete Current Page"
-                toolTipText: qsTrId("DeleteCurrentPage")
-                iconSource: "../assets/icons/delete-page.svg"
-                preserveIconColors: true
-                enabled: root.document.loaded
-                    && root.document.pageCount > 1
-                    && !root.editController.saving
-                onClicked: root.deletePageRequested(root.document.currentPage)
-            }
-
-            RibbonButton {
-                objectName: "mergePdfButton"
-                theme: root.theme
-                documentLoaded: true
-                visible: Qt.platform.os !== "ios"
-                //% "Merge PDF"
-                text: qsTrId("MergePdf")
-                iconSource: "../assets/icons/merge-pdf.svg"
-                enabled: !root.editController.saving
-                onClicked: root.mergePdfRequested()
-            }
-        }
-
-        RibbonGroup {
-            theme: root.theme
-            //% "History"
-            title: qsTrId("History")
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Undo"
-                text: qsTrId("Undo")
-                iconSource: "../assets/icons/undo-2.svg"
-                enabled: root.document.loaded
-                    && root.editController.canUndo
-                    && !root.editController.saving
-                    && !root.editController.textEditActive
-                onClicked: root.undoRequested()
-            }
-
-            RibbonButton {
-                theme: root.theme
-                documentLoaded: root.document.loaded
-                //% "Redo"
-                text: qsTrId("Redo")
-                iconSource: "../assets/icons/redo-2.svg"
-                enabled: root.document.loaded
-                    && root.editController.canRedo
-                    && !root.hasPendingPanelEdits
-                    && !root.editController.saving
-                    && !root.editController.textEditActive
-                onClicked: root.redoRequested()
-            }
-        }
-    }
-
-    ScrollBar.horizontal: ScrollBar {
-        policy: ScrollBar.AsNeeded
-    }
-
 }

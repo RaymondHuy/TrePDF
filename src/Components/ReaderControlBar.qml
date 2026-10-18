@@ -3,7 +3,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import TrePDF
 import "ios"
 
 Control {
@@ -18,7 +17,11 @@ Control {
     property bool canNavigateForward:
         documentLoaded && navigationPage + 1 < pageCount
     property real zoom: 1.0
-    property int pageDisplayMode: PDFDocumentSession.ContinuousMode
+    property int pageDisplayMode: ReaderModes.ContinuousMode
+    property var allowedPageDisplayModes: [
+        ReaderModes.SinglePageMode, ReaderModes.ContinuousMode,
+        ReaderModes.FacingMode, ReaderModes.ContinuousFacingMode
+    ]
     property bool viewReady: documentLoaded
     property var viewContextOwner: null
     property int viewContextPane: 0
@@ -686,14 +689,15 @@ Control {
             Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady
+                && root.allowedPageDisplayModes.indexOf(ReaderModes.SinglePageMode) >= 0
             checkable: true
             selected: root.pageDisplayMode
-                === PDFDocumentSession.SinglePageMode
+                === ReaderModes.SinglePageMode
             iconSource: "../assets/icons/page-single.svg"
             //% "Single Page"
             accessibleText: qsTrId("PageDisplaySinglePage")
             onClicked: root.pageDisplayModeRequested(
-                PDFDocumentSession.SinglePageMode)
+                ReaderModes.SinglePageMode)
         }
 
         BarIconButton {
@@ -704,14 +708,15 @@ Control {
             Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady
+                && root.allowedPageDisplayModes.indexOf(ReaderModes.ContinuousMode) >= 0
             checkable: true
             selected: root.pageDisplayMode
-                === PDFDocumentSession.ContinuousMode
+                === ReaderModes.ContinuousMode
             iconSource: "../assets/icons/page-continuous.svg"
             //% "Continuous"
             accessibleText: qsTrId("PageDisplayContinuous")
             onClicked: root.pageDisplayModeRequested(
-                PDFDocumentSession.ContinuousMode)
+                ReaderModes.ContinuousMode)
         }
 
         BarIconButton {
@@ -722,14 +727,15 @@ Control {
             Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady
+                && root.allowedPageDisplayModes.indexOf(ReaderModes.FacingMode) >= 0
             checkable: true
             selected: root.pageDisplayMode
-                === PDFDocumentSession.FacingMode
+                === ReaderModes.FacingMode
             iconSource: "../assets/icons/page-facing.svg"
             //% "Facing"
             accessibleText: qsTrId("PageDisplayFacing")
             onClicked: root.pageDisplayModeRequested(
-                PDFDocumentSession.FacingMode)
+                ReaderModes.FacingMode)
         }
 
         BarIconButton {
@@ -740,14 +746,15 @@ Control {
             Layout.preferredHeight: root.controlSize
             theme: root.theme
             enabled: root._interactionReady
+                && root.allowedPageDisplayModes.indexOf(ReaderModes.ContinuousFacingMode) >= 0
             checkable: true
             selected: root.pageDisplayMode
-                === PDFDocumentSession.ContinuousFacingMode
+                === ReaderModes.ContinuousFacingMode
             iconSource: "../assets/icons/page-continuous-facing.svg"
             //% "Continuous Facing"
             accessibleText: qsTrId("PageDisplayContinuousFacing")
             onClicked: root.pageDisplayModeRequested(
-                PDFDocumentSession.ContinuousFacingMode)
+                ReaderModes.ContinuousFacingMode)
         }
 
         Rectangle {

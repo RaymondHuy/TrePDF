@@ -791,26 +791,11 @@ Rectangle {
         z: 9
     }
 
-    ColumnLayout {
+    DocumentEmptyState {
         anchors.centerIn: parent
-        spacing: 14
+        theme: root.theme
         visible: !root.document.loaded
-
-        Label {
-            //% "No document open"
-            text: qsTrId("NoDocumentOpen")
-            font.pixelSize: 22
-            color: "#33251d"
-            Layout.alignment: Qt.AlignHCenter
-        }
-
-        OrangeButton {
-            theme: root.theme
-            //% "Open PDF"
-            text: qsTrId("OpenPdf")
-            onClicked: root.openRequested()
-            Layout.alignment: Qt.AlignHCenter
-        }
+        onOpenRequested: root.openRequested()
     }
 
     Rectangle {

@@ -71,8 +71,89 @@ void BrowserDocument::closeFile()
 void BrowserDocument::downloadFile()
 {
 #ifdef Q_OS_WASM
-    if (!m_pages.isEmpty() && !m_busy)
+    if (!m_pages.isEmpty() && !m_busy) {
+        if (m_dirty) {
+            m_busy = true;
+            m_error.clear();
+            emit stateChanged();
+        }
         EM_ASM({ Module.trepdfWeb.downloadFile(); });
+    }
+#endif
+}
+
+bool BrowserDocument::replaceImage(int id)
+{
+    if (!m_canEdit || m_busy || m_pages.isEmpty())
+        return false;
+    bool eligible = false;
+    for (const QVariant &value : m_objects) {
+        const QVariantMap object = value.toMap();
+        if (object.value(QStringLiteral("id")).toInt() == id
+            && object.value(QStringLiteral("type")).toString() == QStringLiteral("image")
+            && object.value(QStringLiteral("editable")).toBool()) {
+            eligible = true;
+            break;
+        }
+    }
+    if (!eligible)
+        return false;
+#ifdef Q_OS_WASM
+    return EM_ASM_INT({ return Module.trepdfWeb.replaceImage($0) ? 1 : 0; }, id) != 0;
+#else
+    return false;
+#endif
+}
+
+bool BrowserDocument::applyEdit(const QVariantMap &command)
+{
+    if (!m_canEdit || m_busy || m_pages.isEmpty())
+        return false;
+#ifdef Q_OS_WASM
+    const QByteArray json = QJsonDocument(QJsonObject::fromVariantMap(command))
+                                .toJson(QJsonDocument::Compact);
+    m_busy = true;
+    m_error.clear();
+    emit stateChanged();
+    const bool accepted = EM_ASM_INT({
+        return Module.trepdfWeb.edit(UTF8ToString($0)) ? 1 : 0;
+    }, json.constData());
+    if (!accepted) {
+        m_busy = false;
+        m_error = tr("Wait for the current operation, then try again.");
+        emit stateChanged();
+    }
+    return accepted;
+#else
+    Q_UNUSED(command);
+    return false;
+#endif
+}
+
+void BrowserDocument::undo()
+{
+    if (m_canUndo)
+        applyEdit({{QStringLiteral("action"), QStringLiteral("undo")}});
+}
+
+void BrowserDocument::redo()
+{
+    if (m_canRedo)
+        applyEdit({{QStringLiteral("action"), QStringLiteral("redo")}});
+}
+
+void BrowserDocument::discard()
+{
+    if (m_dirty)
+        applyEdit({{QStringLiteral("action"), QStringLiteral("discard")}});
+}
+
+void BrowserDocument::setPendingInput(bool pending)
+{
+#ifdef Q_OS_WASM
+    EM_ASM({ Module.trepdfWeb.setPendingInput(!!$0); }, pending);
+#else
+    Q_UNUSED(pending);
 #endif
 }
 
@@ -80,6 +161,10 @@ void BrowserDocument::clearPages()
 {
     m_requests.clear();
     m_pages.clear();
+    m_objects.clear();
+    m_canEdit = m_dirty = m_canUndo = m_canRedo = false;
+    m_editReason.clear();
+    m_sourceNotice.clear();
     emit reset();
     emit pagesChanged();
 }
@@ -128,10 +213,36 @@ void BrowserDocument::receiveMessage(const QByteArray &json)
         m_ready = true;
     } else if (generation != m_generation) {
         return;
+    } else if (type == "editing") {
+        m_busy = true;
+        m_error.clear();
+    } else if (type == "indexed") {
+        m_objects = message.value("objects").toArray().toVariantList();
+        m_sourceNotice = message.value("sourceNotice").toString();
     } else if (type == "opened") {
+        m_objects = message.value("objects").toArray().toVariantList();
+        m_sourceNotice = message.value("sourceNotice").toString();
         m_pages = message.value("pages").toArray().toVariantList();
+        m_canEdit = message.value("canEdit").toBool();
+        m_editReason = message.value("editReason").toString();
         m_busy = false;
         emit pagesChanged();
+    } else if (type == "edited" || type == "exported") {
+        m_busy = false;
+        m_error.clear();
+        m_objects = message.value("objects").toArray().toVariantList();
+        m_dirty = message.value("dirty").toBool();
+        m_sourceNotice = message.value("sourceNotice").toString();
+        m_canUndo = message.value("canUndo").toBool();
+        m_canRedo = message.value("canRedo").toBool();
+        if (type == "edited") {
+            m_requests.clear();
+            emit reset();
+        }
+        emit stateChanged();
+        if (type == "edited")
+            emit edited(message.value("selectedId").toInt(-1));
+        return;
     } else if (type == "error") {
         const QString error = message.value("message").toString();
         const int request = message.value("requestId").toInt();
