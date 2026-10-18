@@ -188,6 +188,7 @@ target_link_libraries(trepdf_edit_controller_tests
         trepdf_font_archive
         trepdf_password_writer
         trepdf_ocr_pipeline
+        trepdf_ocr_languages
         Qt6::Qml
         Qt6::Quick
         Qt6::Test
@@ -330,7 +331,7 @@ qt_add_executable(trepdf_ocr_controller_tests
 )
 target_include_directories(trepdf_ocr_controller_tests PRIVATE ../src)
 target_link_libraries(trepdf_ocr_controller_tests PRIVATE
-    Qt6::Gui Qt6::Qml Qt6::Test PDFium::PDFium
+    Qt6::Gui Qt6::Qml Qt6::Test PDFium::PDFium trepdf_ocr_languages
 )
 target_compile_definitions(trepdf_ocr_controller_tests PRIVATE TREPDF_HAS_OCR=1)
 foreach(ocr_test IN ITEMS trepdf_ocr_pipeline_tests trepdf_ocr_controller_tests)
@@ -359,3 +360,12 @@ foreach(ocr_test IN ITEMS trepdf_ocr_pipeline_tests trepdf_ocr_controller_tests)
     add_test(NAME ${ocr_test} COMMAND ${ocr_test})
     set_tests_properties(${ocr_test} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endforeach()
+
+qt_add_executable(trepdf_ocr_language_tests tst_OCRLanguageManager.cpp)
+target_link_libraries(trepdf_ocr_language_tests PRIVATE
+    trepdf_ocr_languages Qt6::Network Qt6::Test
+)
+add_test(NAME OCRLanguageManagerTests COMMAND trepdf_ocr_language_tests)
+if(WIN32 AND NOT TREPDF_DEPLOY_RUNTIME)
+    trepdf_deploy_windows_runtime(trepdf_ocr_language_tests)
+endif()

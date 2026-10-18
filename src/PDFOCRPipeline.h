@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 #include <QVector>
 
@@ -26,8 +27,17 @@ struct Request {
     // Zero-based source indices, unique and in document order. Unselected pages
     // remain present and unchanged in the output document.
     QVector<int> sourcePages;
+    // One to four unique, catalogued language codes in recognition priority
+    // order (for example "vie+eng"). Never use user text as a filename.
     QString language;
+    // Directory containing the bundled PDF font. Standalone callers can also
+    // provide all selected models here by leaving modelPaths empty.
     QString tessdataPath;
+    // The controller snapshots installed paths, not manager/controller objects.
+    // The worker copies and verifies their pinned bytes into its private
+    // directory before Tesseract opens anything, so later cache changes cannot
+    // alter a running engine. A nonempty map must cover exactly the selection.
+    QHash<QString, QString> modelPaths;
     std::shared_ptr<std::atomic_bool> cancellation;
 };
 

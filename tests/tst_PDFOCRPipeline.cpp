@@ -1,8 +1,10 @@
 #include "PDFOCRPipeline.h"
+#include "OCRLanguageManager.h"
 #include "PDFiumDocument.h"
 #include "PDFiumSynchronization.h"
 
 #include <QFile>
+#include <QDir>
 #include <QFont>
 #include <QImage>
 #include <QPainter>
@@ -460,6 +462,144 @@ private slots:
         QCOMPARE(result.outcome, PDFOCRPipeline::Result::NoText);
         QCOMPARE(result.emptyPages, 1);
         QVERIFY(!QFile::exists(output));
+    }
+
+    void rejectsUnsafeLanguageSelections_data()
+    {
+        QTest::addColumn<QString>("language");
+        QTest::newRow("empty") << QString();
+        QTest::newRow("unknown") << QStringLiteral("zzz");
+        QTest::newRow("traversal") << QStringLiteral("../eng");
+        QTest::newRow("absolute-path") << QStringLiteral("/eng");
+        QTest::newRow("duplicate") << QStringLiteral("vie+eng+vie");
+        QTest::newRow("empty-component") << QStringLiteral("eng++vie");
+        QTest::newRow("over-limit") << QStringLiteral("eng+vie+fra+tha+hrv");
+    }
+
+    void rejectsUnsafeLanguageSelections()
+    {
+        QFETCH(QString, language);
+        QTemporaryDir directory;
+        const QString source = directory.filePath(QStringLiteral("source.pdf"));
+        const QString output = directory.filePath(QStringLiteral("output.pdf"));
+        QVERIFY(createPdf(source));
+        const QByteArray original = read(source);
+        QCOMPARE(PDFOCRPipeline::run(request(source, language), output).outcome,
+                 PDFOCRPipeline::Result::Failed);
+        QVERIFY(!QFile::exists(output));
+        QCOMPARE(read(source), original);
+    }
+
+    void snapshotsModelsBeforeRecognitionAndPreservesLanguageOrder()
+    {
+        QTemporaryDir directory;
+        const QString source = directory.filePath(QStringLiteral("source.pdf"));
+        const QString output = directory.filePath(QStringLiteral("output.pdf"));
+        QVERIFY(createPdf(source, 0, false, true, false, 2));
+        auto input = request(source, QStringLiteral("vie+eng"));
+        input.sourcePages = {0, 1};
+        const QDir bundled(input.tessdataPath);
+        for (const QString &code : {QStringLiteral("eng"), QStringLiteral("vie")}) {
+            const QString filename = code + QStringLiteral(".traineddata");
+            const QString temporaryModel = directory.filePath(filename);
+            QVERIFY(QFile::copy(bundled.filePath(filename), temporaryModel));
+            input.modelPaths.insert(code, temporaryModel);
+        }
+        const auto result = PDFOCRPipeline::run(input, output, [&](int completed) {
+            if (completed == 1) {
+                // Removing the source cache after initialization must not alter
+                // the second page or the renderer's private language data.
+                for (const QString &path : std::as_const(input.modelPaths))
+                    QVERIFY(QFile::remove(path));
+            }
+        });
+        QCOMPARE(result.outcome, PDFOCRPipeline::Result::Succeeded);
+        QCOMPARE(result.recognizedPages, 2);
+        QVERIFY(inspect(output, 1).text.contains(QStringLiteral("Tiếng Việt có")));
+    }
+
+    void missingOrCorruptModelsDoNotWriteOutput_data()
+    {
+        QTest::addColumn<QString>("mode");
+        for (const char *mode : {"missing", "truncated", "corrupt", "symlink", "incomplete-map", "extra-map", "bad-font"})
+            QTest::newRow(mode) << QString::fromLatin1(mode);
+    }
+
+    void missingOrCorruptModelsDoNotWriteOutput()
+    {
+        QFETCH(QString, mode);
+        QTemporaryDir directory;
+        const QString source = directory.filePath(QStringLiteral("source.pdf"));
+        const QString output = directory.filePath(QStringLiteral("output.pdf"));
+        QVERIFY(createPdf(source));
+        const QByteArray original = read(source);
+        auto input = request(source);
+        const QDir bundled(input.tessdataPath);
+        const QString model = directory.filePath(QStringLiteral("eng.traineddata"));
+        input.modelPaths.insert(QStringLiteral("eng"), model);
+        if (mode != QStringLiteral("missing") && mode != QStringLiteral("symlink")) {
+            QVERIFY(QFile::copy(bundled.filePath(QStringLiteral("eng.traineddata")), model));
+            QFile writable(model);
+            QVERIFY(writable.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+        }
+        if (mode == QStringLiteral("truncated")) {
+            QFile file(model);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QVERIFY(file.resize(8));
+        } else if (mode == QStringLiteral("corrupt")) {
+            QFile file(model);
+            QVERIFY(file.open(QIODevice::ReadWrite));
+            QByteArray byte = file.read(1);
+            QCOMPARE(byte.size(), 1);
+            byte[0] = char(byte[0] ^ 0xff);
+            QVERIFY(file.seek(0));
+            QCOMPARE(file.write(byte), 1);
+        } else if (mode == QStringLiteral("symlink")) {
+            if (!QFile::link(bundled.filePath(QStringLiteral("eng.traineddata")), model))
+                QSKIP("Symbolic links are unavailable on this platform.");
+        } else if (mode == QStringLiteral("incomplete-map")) {
+            input.language = QStringLiteral("eng+vie");
+        } else if (mode == QStringLiteral("extra-map")) {
+            input.modelPaths.insert(QStringLiteral("vie"), bundled.filePath(QStringLiteral("vie.traineddata")));
+        } else if (mode == QStringLiteral("bad-font")) {
+            input.tessdataPath = directory.path();
+            QFile font(directory.filePath(QStringLiteral("pdf.ttf")));
+            QVERIFY(font.open(QIODevice::WriteOnly));
+            QCOMPARE(font.write(QByteArray(572, 'x')), 572);
+        }
+        QCOMPARE(PDFOCRPipeline::run(input, output).outcome, PDFOCRPipeline::Result::Failed);
+        QVERIFY(!QFile::exists(output));
+        QCOMPARE(read(source), original);
+
+        // A destination that already exists is rejected before any staging
+        // cleanup; even failed model validation must preserve these bytes.
+        QFile existing(output);
+        QVERIFY(existing.open(QIODevice::WriteOnly));
+        const QByteArray previous("existing destination");
+        QCOMPARE(existing.write(previous), previous.size());
+        existing.close();
+        QCOMPARE(PDFOCRPipeline::run(input, output).outcome, PDFOCRPipeline::Result::Failed);
+        QCOMPARE(read(output), previous);
+    }
+
+    void recognizesWithDownloadedLanguageFixture()
+    {
+        // Optional local fixture supplied by release/feature validation. Never
+        // download models from a test or alter the user's installed cache.
+        const QString fixture = qEnvironmentVariable("TREPDF_TEST_FRA_MODEL");
+        if (fixture.isEmpty())
+            QSKIP("Set TREPDF_TEST_FRA_MODEL to a pinned French model to exercise downloaded models.");
+        QTemporaryDir directory;
+        const QString source = directory.filePath(QStringLiteral("source.pdf"));
+        const QString output = directory.filePath(QStringLiteral("output.pdf"));
+        QVERIFY(createPdf(source));
+        auto input = request(source, QStringLiteral("fra+eng"));
+        input.modelPaths.insert(QStringLiteral("fra"), fixture);
+        input.modelPaths.insert(QStringLiteral("eng"),
+                               QDir(input.tessdataPath).filePath(QStringLiteral("eng.traineddata")));
+        const auto result = PDFOCRPipeline::run(input, output);
+        QCOMPARE(result.outcome, PDFOCRPipeline::Result::Succeeded);
+        QVERIFY(inspect(output).text.contains(QStringLiteral("SEARCHABLE DOCUMENT")));
     }
 };
 

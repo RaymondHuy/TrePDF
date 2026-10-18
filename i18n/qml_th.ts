@@ -4740,8 +4740,8 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
     </message>
     <message id="OCRInvalidLanguage">
         <location filename="../src/PDFOCRController.cpp" line="208"/>
-        <source>Choose English, Vietnamese, or English and Vietnamese for OCR.</source>
-        <translation>เลือกภาษาอังกฤษ ภาษาเวียดนาม หรือทั้งภาษาอังกฤษและภาษาเวียดนามสำหรับ OCR</translation>
+        <source>Choose between one and four different OCR languages.</source>
+        <translation>เลือกภาษา OCR ที่ไม่ซ้ำกันตั้งแต่หนึ่งถึงสี่ภาษา</translation>
     </message>
     <message id="OCRInvalidDestination">
         <location filename="../src/PDFOCRController.cpp" line="216"/>
@@ -4797,8 +4797,8 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
     <message id="OCRPipelineModelsMissing">
         <location filename="../src/PDFOCRPipeline.cpp" line="369"/>
         <location filename="../src/PDFOCRPipeline.cpp" line="414"/>
-        <source>The OCR language files are missing or invalid. Reinstall TrePDF.</source>
-        <translation>ไฟล์ภาษาสำหรับ OCR หายไปหรือไม่ถูกต้อง ติดตั้ง TrePDF ใหม่</translation>
+        <source>The OCR language files are missing or damaged. Open Languages and prepare them again. If English or Vietnamese is affected, reinstall TrePDF.</source>
+        <translation>ไฟล์ภาษา OCR หายไปหรือเสียหาย โปรดเปิดตัวเลือกภาษาเพื่อเตรียมไฟล์อีกครั้ง หากมีปัญหากับภาษาอังกฤษหรือภาษาเวียดนาม ให้ติดตั้ง TrePDF ใหม่</translation>
     </message>
     <message id="OCRPipelineReadFailed">
         <location filename="../src/PDFOCRPipeline.cpp" line="382"/>
@@ -4868,6 +4868,262 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <location filename="../src/Components/InformationRibbon.qml" line="89"/>
         <source>Contact email</source>
         <translation>อีเมลติดต่อ</translation>
+    </message>
+    <message id="OCRLanguageThai">
+        <location filename="../src/OCRLanguageManager.cpp" line="59"/>
+        <source>Thai</source>
+        <translation>ภาษาไทย</translation>
+    </message>
+    <message id="OCRLanguageFrench">
+        <location filename="../src/OCRLanguageManager.cpp" line="63"/>
+        <source>French</source>
+        <translation>ภาษาฝรั่งเศส</translation>
+    </message>
+    <message id="OCRLanguageCroatian">
+        <location filename="../src/OCRLanguageManager.cpp" line="67"/>
+        <source>Croatian</source>
+        <translation>ภาษาโครเอเชีย</translation>
+    </message>
+    <message id="OCRLanguageGerman">
+        <location filename="../src/OCRLanguageManager.cpp" line="71"/>
+        <source>German</source>
+        <translation>ภาษาเยอรมัน</translation>
+    </message>
+    <message id="OCRLanguageSpanish">
+        <location filename="../src/OCRLanguageManager.cpp" line="75"/>
+        <source>Spanish</source>
+        <translation>ภาษาสเปน</translation>
+    </message>
+    <message id="OCRLanguageItalian">
+        <location filename="../src/OCRLanguageManager.cpp" line="79"/>
+        <source>Italian</source>
+        <translation>ภาษาอิตาลี</translation>
+    </message>
+    <message id="OCRLanguagePortuguese">
+        <location filename="../src/OCRLanguageManager.cpp" line="83"/>
+        <source>Portuguese</source>
+        <translation>ภาษาโปรตุเกส</translation>
+    </message>
+    <message id="OCRLanguageChineseSimplified">
+        <location filename="../src/OCRLanguageManager.cpp" line="87"/>
+        <source>Chinese (Simplified)</source>
+        <translation>ภาษาจีน (ตัวย่อ)</translation>
+    </message>
+    <message id="OCRLanguageChineseTraditional">
+        <location filename="../src/OCRLanguageManager.cpp" line="91"/>
+        <source>Chinese (Traditional)</source>
+        <translation>ภาษาจีน (ตัวเต็ม)</translation>
+    </message>
+    <message id="OCRLanguageJapanese">
+        <location filename="../src/OCRLanguageManager.cpp" line="95"/>
+        <source>Japanese</source>
+        <translation>ภาษาญี่ปุ่น</translation>
+    </message>
+    <message id="OCRLanguageKorean">
+        <location filename="../src/OCRLanguageManager.cpp" line="99"/>
+        <source>Korean</source>
+        <translation>ภาษาเกาหลี</translation>
+    </message>
+    <message id="OCRLanguageRussian">
+        <location filename="../src/OCRLanguageManager.cpp" line="103"/>
+        <source>Russian</source>
+        <translation>ภาษารัสเซีย</translation>
+    </message>
+    <message id="OCRLanguageArabic">
+        <location filename="../src/OCRLanguageManager.cpp" line="107"/>
+        <source>Arabic</source>
+        <translation>ภาษาอาหรับ</translation>
+    </message>
+    <message id="OCRLanguageHindi">
+        <location filename="../src/OCRLanguageManager.cpp" line="111"/>
+        <source>Hindi</source>
+        <translation>ภาษาฮินดี</translation>
+    </message>
+    <message id="OCRLanguageIndonesian">
+        <location filename="../src/OCRLanguageManager.cpp" line="115"/>
+        <source>Indonesian</source>
+        <translation>ภาษาอินโดนีเซีย</translation>
+    </message>
+    <message id="OCRLanguageMalay">
+        <location filename="../src/OCRLanguageManager.cpp" line="119"/>
+        <source>Malay</source>
+        <translation>ภาษามลายู</translation>
+    </message>
+    <message id="OCRLanguageDutch">
+        <location filename="../src/OCRLanguageManager.cpp" line="123"/>
+        <source>Dutch</source>
+        <translation>ภาษาดัตช์</translation>
+    </message>
+    <message id="OCRLanguagePolish">
+        <location filename="../src/OCRLanguageManager.cpp" line="127"/>
+        <source>Polish</source>
+        <translation>ภาษาโปแลนด์</translation>
+    </message>
+    <message id="OCRLanguageTurkish">
+        <location filename="../src/OCRLanguageManager.cpp" line="131"/>
+        <source>Turkish</source>
+        <translation>ภาษาตุรกี</translation>
+    </message>
+    <message id="OCRLanguageUkrainian">
+        <location filename="../src/OCRLanguageManager.cpp" line="135"/>
+        <source>Ukrainian</source>
+        <translation>ภาษายูเครน</translation>
+    </message>
+    <message id="OCRLanguageCzech">
+        <location filename="../src/OCRLanguageManager.cpp" line="139"/>
+        <source>Czech</source>
+        <translation>ภาษาเช็ก</translation>
+    </message>
+    <message id="OCRLanguageSwedish">
+        <location filename="../src/OCRLanguageManager.cpp" line="143"/>
+        <source>Swedish</source>
+        <translation>ภาษาสวีเดน</translation>
+    </message>
+    <message id="OCRLanguageRomanian">
+        <location filename="../src/OCRLanguageManager.cpp" line="147"/>
+        <source>Romanian</source>
+        <translation>ภาษาโรมาเนีย</translation>
+    </message>
+    <message id="OCRLanguageDownloadTimedOut">
+        <location filename="../src/OCRLanguageManager.cpp" line="176"/>
+        <source>The language download took too long. Check your connection and try again.</source>
+        <translation>การดาวน์โหลดภาษาหมดเวลา โปรดตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง</translation>
+    </message>
+    <message id="OCRLanguageSelectionInvalid">
+        <location filename="../src/OCRLanguageManager.cpp" line="371"/>
+        <source>Choose between one and four languages used in this document.</source>
+        <translation>เลือกภาษาที่ใช้ในเอกสารนี้ตั้งแต่หนึ่งถึงสี่ภาษา</translation>
+    </message>
+    <message id="OCRLanguageCatalogUnavailable">
+        <location filename="../src/OCRLanguageManager.cpp" line="388"/>
+        <source>The language list could not be loaded. Reinstall TrePDF and try again.</source>
+        <translation>ไม่สามารถโหลดรายการภาษาได้ โปรดติดตั้ง TrePDF ใหม่แล้วลองอีกครั้ง</translation>
+    </message>
+    <message id="OCRLanguageChecking">
+        <location filename="../src/OCRLanguageManager.cpp" line="400"/>
+        <source>Checking language files…</source>
+        <translation>กำลังตรวจสอบไฟล์ภาษา…</translation>
+    </message>
+    <message id="OCRLanguageBundledMissing">
+        <location filename="../src/OCRLanguageManager.cpp" line="462"/>
+        <source>An included language file is missing or damaged. Reinstall TrePDF to restore English and Vietnamese.</source>
+        <translation>ไฟล์ภาษาที่มาพร้อมแอปหายไปหรือเสียหาย โปรดติดตั้ง TrePDF ใหม่เพื่อกู้คืนภาษาอังกฤษและภาษาเวียดนาม</translation>
+    </message>
+    <message id="OCRLanguageCheckBusy">
+        <location filename="../src/OCRLanguageManager.cpp" line="477"/>
+        <source>Language files are still being checked. Please try again in a moment.</source>
+        <translation>กำลังตรวจสอบไฟล์ภาษาอยู่ โปรดลองอีกครั้งในอีกสักครู่</translation>
+    </message>
+    <message id="OCRLanguageDownloadUnavailable">
+        <location filename="../src/OCRLanguageManager.cpp" line="497"/>
+        <source>The language download could not start. Please try again.</source>
+        <translation>ไม่สามารถเริ่มดาวน์โหลดภาษาได้ โปรดลองอีกครั้ง</translation>
+    </message>
+    <message id="OCRLanguageStorageFailed">
+        <location filename="../src/OCRLanguageManager.cpp" line="510"/>
+        <location filename="../src/OCRLanguageManager.cpp" line="517"/>
+        <location filename="../src/OCRLanguageManager.cpp" line="560"/>
+        <location filename="../src/OCRLanguageManager.cpp" line="594"/>
+        <source>TrePDF could not save the language file. Check available disk space and folder access, then try again.</source>
+        <translation>TrePDF ไม่สามารถบันทึกไฟล์ภาษาได้ โปรดตรวจสอบพื้นที่ว่างบนดิสก์และสิทธิ์เข้าถึงโฟลเดอร์ แล้วลองอีกครั้ง</translation>
+    </message>
+    <message id="OCRLanguageDownloading">
+        <location filename="../src/OCRLanguageManager.cpp" line="535"/>
+        <source>Downloading %1…</source>
+        <translation>กำลังดาวน์โหลด %1…</translation>
+    </message>
+    <message id="OCRLanguageIntegrityFailed">
+        <location filename="../src/OCRLanguageManager.cpp" line="546"/>
+        <location filename="../src/OCRLanguageManager.cpp" line="555"/>
+        <location filename="../src/OCRLanguageManager.cpp" line="589"/>
+        <source>The language file could not be verified and was not installed. Please try again.</source>
+        <translation>ไม่สามารถตรวจสอบไฟล์ภาษาได้ จึงยังไม่ได้ติดตั้งไฟล์นี้ โปรดลองอีกครั้ง</translation>
+    </message>
+    <message id="OCRLanguageDownloadFailed">
+        <location filename="../src/OCRLanguageManager.cpp" line="581"/>
+        <source>The language could not be downloaded. Check your internet connection and try again.</source>
+        <translation>ไม่สามารถดาวน์โหลดภาษาได้ โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองอีกครั้ง</translation>
+    </message>
+    <message id="OCRLanguagesNotReady">
+        <location filename="../src/PDFOCRController.cpp" line="234"/>
+        <source>The selected language files are not ready. Open Languages and download them before starting OCR.</source>
+        <translation>ไฟล์ภาษาที่เลือกยังไม่พร้อม โปรดเปิดตัวเลือกภาษาและดาวน์โหลดไฟล์ก่อนเริ่ม OCR</translation>
+    </message>
+    <message id="OCRChooseLanguagesTitle">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="48"/>
+        <source>Which languages are in your PDF?</source>
+        <translation>PDF ของคุณใช้ภาษาใดบ้าง?</translation>
+    </message>
+    <message id="OCRChooseLanguagesExplanation">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="135"/>
+        <source>Choose the languages that appear in the document so OCR can recognize letters and accents correctly. You can select more than one for a multilingual PDF.</source>
+        <translation>เลือกภาษาที่ปรากฏในเอกสารเพื่อให้ OCR จดจำตัวอักษรและเครื่องหมายกำกับเสียงได้ถูกต้อง หาก PDF มีหลายภาษา คุณสามารถเลือกได้มากกว่าหนึ่งภาษา</translation>
+    </message>
+    <message id="OCRLanguageDownloadExplanation">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="142"/>
+        <source>English and Vietnamese are included. Other languages download once, then work offline. Your PDF stays on your computer.</source>
+        <translation>มีภาษาอังกฤษและภาษาเวียดนามให้แล้ว ภาษาอื่นดาวน์โหลดเพียงครั้งเดียว จากนั้นใช้งานแบบออฟไลน์ได้ ไฟล์ PDF จะอยู่ในคอมพิวเตอร์ของคุณเสมอ</translation>
+    </message>
+    <message id="OCRSearchLanguages">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="155"/>
+        <source>Search languages</source>
+        <translation>ค้นหาภาษา</translation>
+    </message>
+    <message id="OCRLanguageSelectionHint">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="168"/>
+        <source>%1 of %2 selected. Choose only languages present in the PDF for better accuracy.</source>
+        <translation>เลือกแล้ว %1 จาก %2 ภาษา เลือกเฉพาะภาษาที่มีใน PDF เพื่อความแม่นยำที่ดีขึ้น</translation>
+    </message>
+    <message id="OCRLanguageReadyOffline">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="206"/>
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="232"/>
+        <source>Ready to use offline</source>
+        <translation>พร้อมใช้งานแบบออฟไลน์</translation>
+    </message>
+    <message id="OCRLanguageDownloadsOnApply">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="208"/>
+        <source>Downloads when you apply your selection</source>
+        <translation>จะดาวน์โหลดเมื่อยืนยันการเลือก</translation>
+    </message>
+    <message id="OCRLanguageDownloadSize">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="234"/>
+        <source>Download · %1 MB</source>
+        <translation>ดาวน์โหลด · %1 MB</translation>
+    </message>
+    <message id="OCRNoMatchingLanguages">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="248"/>
+        <source>No matching languages. Try another name.</source>
+        <translation>ไม่พบภาษาที่ตรงกัน ลองค้นหาด้วยชื่ออื่น</translation>
+    </message>
+    <message id="OCRLanguageTotalDownloadSize">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="260"/>
+        <source>Download once: %1 MB. An internet connection is needed for this step.</source>
+        <translation>ดาวน์โหลดครั้งเดียว: %1 MB ขั้นตอนนี้ต้องเชื่อมต่ออินเทอร์เน็ต</translation>
+    </message>
+    <message id="OCRLanguageDownloadProgress">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="274"/>
+        <source>Language download progress</source>
+        <translation>ความคืบหน้าการดาวน์โหลดภาษา</translation>
+    </message>
+    <message id="OCRLanguageRetry">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="314"/>
+        <source>Try again</source>
+        <translation>ลองอีกครั้ง</translation>
+    </message>
+    <message id="OCRLanguageDownloadAndUse">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="317"/>
+        <source>Download and use</source>
+        <translation>ดาวน์โหลดและใช้งาน</translation>
+    </message>
+    <message id="OCRUseSelectedLanguages">
+        <location filename="../src/Components/OCRLanguageDialog.qml" line="319"/>
+        <source>Use these languages</source>
+        <translation>ใช้ภาษาที่เลือก</translation>
+    </message>
+    <message id="OCRChooseLanguages">
+        <location filename="../src/Components/OCRPanel.qml" line="205"/>
+        <source>Choose languages…</source>
+        <translation>เลือกภาษา…</translation>
     </message>
 </context>
 </TS>

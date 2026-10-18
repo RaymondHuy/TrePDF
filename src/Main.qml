@@ -99,6 +99,7 @@ AppWindow {
         || headerEntryNoticeLoader.active || openDialog.visible
         || imageDialog.visible || headerImageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
         || ocrOutputDialog.visible
+        || (ocrPanelLoader.panel && ocrPanelLoader.panel.languageDialogOpen)
         || externalLinkPopup.visible || discardDraftPopup.visible || deletePagePopup.visible
         || documentAccess.busy || saveAsDialog.writePending || excelExportDialog.writePending
         || ocrOutputDialog.writePending
@@ -2650,6 +2651,7 @@ AppWindow {
     Loader {
         id: ocrPanelLoader
         objectName: "ocrPanelLoader"
+        readonly property OCRPanel panel: status === Loader.Ready ? item as OCRPanel : null
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom

@@ -194,11 +194,19 @@ Current features:
   remain read-only. New edits cancel
   in-flight detection; completed links retain independent spatial geometry.
 
-- Convert > Recognize Text (OCR) opens a lazy panel for English/Vietnamese
-  recognition on all, current or selected PDF pages. A clean saved source is
+- Convert > Recognize Text (OCR) opens a lazy panel and a language modal explaining
+  why the user selects the languages in the scan. English/Vietnamese are bundled
+  and initially selected; up to four catalog languages can be combined.
+  `OCRLanguageManager` verifies existing models asynchronously and downloads
+  missing models from a pinned official `tessdata_fast` revision, with progress,
+  cancellation, retry and persistent offline reuse. Documents are never uploaded.
+  Applying languages does not start OCR; Cancel keeps the previous selection.
+  Recognition supports all, current or selected PDF pages. A clean saved source is
   required. `PDFOCRController` owns a bounded, cancellable worker per job;
   `PDFOCRPipeline` renders through private PDFium under the process-wide lock,
-  recognizes with bundled Tesseract/Leptonica outside that lock, and adds an
+  snapshots the selected model files and PDF font into a private directory with
+  bounded copies and pinned SHA-256 validation, recognizes with Tesseract/Leptonica
+  outside that lock, and adds an
   invisible text-only layer through qpdf without replacing source page images.
   Pages with existing text are skipped. The validated result is atomically saved
   as a separate PDF and opens in a new tab. OCR is an export, not a content draft;

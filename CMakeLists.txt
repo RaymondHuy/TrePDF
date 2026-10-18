@@ -119,11 +119,28 @@ target_include_directories(trepdf_font_archive PUBLIC
 # The public minizip headers include zlib.h, so consumers need its include path.
 target_link_libraries(trepdf_font_archive PUBLIC ZLIB::ZLIB)
 
+qt_add_library(trepdf_ocr_languages STATIC
+    src/OCRLanguageManager.cpp
+    src/OCRLanguageManager.h
+)
+target_include_directories(trepdf_ocr_languages PUBLIC src)
+target_link_libraries(trepdf_ocr_languages PUBLIC Qt6::Core Qt6::QmlIntegration PRIVATE Qt6::Network)
+if(NOT IOS)
+    target_compile_definitions(trepdf_ocr_languages PRIVATE
+        TREPDF_OCR_TESSDATA_DIR="${TREPDF_OCR_DATA_DIR}"
+    )
+endif()
+qt_add_resources(trepdf_ocr_languages "trepdf_ocr_languages_catalog"
+    PREFIX "/ocr"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    FILES src/ocr-languages.json
+)
+
 qt_add_library(trepdf_ocr_pipeline STATIC
     src/PDFOCRPipeline.cpp
     src/PDFOCRPipeline.h
 )
-target_link_libraries(trepdf_ocr_pipeline PRIVATE Qt6::Gui PDFium::PDFium QPDF::QPDF)
+target_link_libraries(trepdf_ocr_pipeline PRIVATE Qt6::Gui PDFium::PDFium QPDF::QPDF trepdf_ocr_languages)
 if(NOT IOS)
     target_compile_definitions(trepdf_ocr_pipeline PUBLIC TREPDF_HAS_OCR=1)
     target_link_libraries(trepdf_ocr_pipeline PRIVATE Tesseract::Tesseract)
@@ -356,6 +373,7 @@ qt_add_qml_module(trepdf
         src/Components/EditRibbonTools.qml
         src/Components/ExportRibbon.qml
         src/Components/OCRPanel.qml
+        src/Components/OCRLanguageDialog.qml
         src/Components/FormChoiceOverlay.qml
         src/Components/FormRibbon.qml
         src/Components/FormTextFieldOverlay.qml
@@ -481,8 +499,10 @@ if(Qt6_VERSION VERSION_LESS 6.10)
     set(TREPDF_LRELEASE_OPTIONS -idbased)
 endif()
 
+qt_generate_foreign_qml_types(trepdf_ocr_languages trepdf)
+
 qt_add_translations(trepdf
-    SOURCE_TARGETS trepdf trepdf_ocr_pipeline
+    SOURCE_TARGETS trepdf trepdf_ocr_pipeline trepdf_ocr_languages
     # Keep iPad-only messages when updating the shared catalog from macOS.
     SOURCES src/ios/IOSDocumentAccess.mm src/ios/PlatformService.cpp
     TS_FILE_BASE qml
@@ -496,6 +516,7 @@ target_include_directories(trepdf
     PRIVATE
         src
         src/platform
+        "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 target_link_libraries(trepdf
@@ -505,6 +526,7 @@ target_link_libraries(trepdf
         trepdf_font_archive
         trepdf_password_writer
         trepdf_ocr_pipeline
+        trepdf_ocr_languages
         Qt6::QmlIntegration
         Qt6::Quick
         Qt6::QuickControls2

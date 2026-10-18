@@ -19,8 +19,10 @@ Rectangle {
     readonly property bool busy: controller && controller.busy
     readonly property bool hasUnsavedChanges: (session && session.hasDrafts)
         || hasPendingPanelEdits
-    readonly property string selectedLanguage: languageSelector.currentIndex === 1
-        ? "vie" : languageSelector.currentIndex === 2 ? "eng" : "eng+vie"
+    property var selectedLanguageCodes: ["eng", "vie"]
+    property string selectedLanguageLabel: ""
+    readonly property string selectedLanguage: selectedLanguageCodes.join("+")
+    readonly property bool languageDialogOpen: languageDialogLoader.active
     readonly property string selectedPageRange: pageSelector.currentIndex === 1
         ? String(currentPage + 1)
         : pageSelector.currentIndex === 2 ? pageRangeInput.text.trim() : ""
@@ -35,6 +37,22 @@ Rectangle {
 
     implicitWidth: 320
     color: theme.ribbonSurface
+
+    function chooseLanguages() {
+        if (!busy && !outputDialogOpen && !anySaving)
+            languageDialogLoader.active = true
+    }
+
+    function closeLanguageDialog() {
+        if (!languageDialogLoader)
+            return
+        if (languageDialogLoader.status === Loader.Ready) {
+            const dialog = languageDialogLoader.item as OCRLanguageDialog
+            if (dialog)
+                dialog.reject()
+        }
+        languageDialogLoader.active = false
+    }
 
     function validatePageRange(value, pageCount) {
         const parts = value.trim().split(",")
@@ -59,12 +77,52 @@ Rectangle {
     }
 
     onSessionChanged: {
-        if (languageSelector)
-            languageSelector.currentIndex = 0
+        closeLanguageDialog()
+        selectedLanguageCodes = ["eng", "vie"]
+        selectedLanguageLabel = ""
         if (pageSelector)
             pageSelector.currentIndex = 0
         if (pageRangeInput)
             pageRangeInput.clear()
+    }
+
+    onBusyChanged: { if (busy) closeLanguageDialog() }
+    onAnySavingChanged: { if (anySaving) closeLanguageDialog() }
+
+    Component.onCompleted: {
+        if (session && session.document.loaded && !busy)
+            chooseLanguages()
+    }
+
+    Connections {
+        target: root.session ? root.session.document : null
+        function onSourceChanged() { root.closeLanguageDialog() }
+        function onLoadedChanged() { root.closeLanguageDialog() }
+        function onPageStructureChanged() { root.closeLanguageDialog() }
+    }
+
+    Loader {
+        id: languageDialogLoader
+        objectName: "ocrLanguageDialogLoader"
+        active: false
+        asynchronous: true
+        sourceComponent: OCRLanguageDialog {
+            theme: root.theme
+            currentCodes: root.selectedLanguageCodes
+            onLanguagesSelected: (codes, label) => {
+                root.selectedLanguageCodes = codes
+                root.selectedLanguageLabel = label
+            }
+            onClosed: {
+                languageDialogLoader.active = false
+                chooseLanguagesButton.forceActiveFocus()
+            }
+        }
+        onLoaded: {
+            const dialog = item as OCRLanguageDialog
+            if (dialog)
+                dialog.open()
+        }
     }
 
     component FieldLabel: Label {
@@ -130,20 +188,22 @@ Rectangle {
                 text: qsTrId("OCRLanguage")
                 font.weight: Font.DemiBold
             }
-            ComboBox {
-                id: languageSelector
-                objectName: "ocrLanguageSelector"
-                Layout.fillWidth: true
-                enabled: !root.busy && !root.outputDialogOpen
-                Accessible.name: languageLabel.text
-                model: [
+            FieldLabel {
+                objectName: "ocrSelectedLanguages"
+                text: root.selectedLanguageLabel.length > 0 ? root.selectedLanguageLabel
                     //% "Vietnamese and English"
-                    qsTrId("OCRLanguageVietnameseEnglish"),
-                    //% "Vietnamese"
-                    qsTrId("OCRLanguageVietnamese"),
-                    //% "English"
-                    qsTrId("OCRLanguageEnglish")
-                ]
+                    : qsTrId("OCRLanguageVietnameseEnglish")
+                font.pixelSize: 12
+            }
+            Button {
+                id: chooseLanguagesButton
+                objectName: "chooseOCRLanguagesButton"
+                Layout.fillWidth: true
+                enabled: !root.busy && !root.outputDialogOpen && !root.anySaving
+                    && !root.languageDialogOpen
+                //% "Choose languages…"
+                text: qsTrId("OCRChooseLanguages")
+                onClicked: root.chooseLanguages()
             }
 
             FieldLabel {
@@ -255,7 +315,7 @@ Rectangle {
                 enabled: root.controller && root.controller.available
                     && root.session.document.loaded && !root.anySaving
                     && !root.outputDialogOpen && !root.hasUnsavedChanges
-                    && root.validPageRange
+                    && !root.languageDialogOpen && root.validPageRange
                 //% "Create OCR PDF…"
                 text: qsTrId("OCRCreatePDF")
                 onClicked: root.startRequested(root.selectedLanguage, root.selectedPageRange)
