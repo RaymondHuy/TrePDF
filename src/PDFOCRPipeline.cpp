@@ -3,9 +3,11 @@
 #include <QCoreApplication>
 
 #ifdef TREPDF_HAS_OCR
+#include "OCRLanguageManager.h"
 #include "PDFiumDocument.h"
 #include "PDFiumSynchronization.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -89,6 +91,64 @@ struct StagingGuard {
 bool cancelled(const Request &request)
 {
     return request.cancellation && request.cancellation->load(std::memory_order_relaxed);
+}
+
+// Validate the bytes that Tesseract will actually read, rather than hashing a
+// cache path and reopening that mutable path later. Reading and writing remain
+// bounded and cancellable, and the private destination is never published.
+bool snapshotFile(const Request &request, const QString &sourcePath,
+                  const QString &destinationPath, qint64 expectedBytes,
+                  const QByteArray &expectedHash)
+{
+    constexpr qint64 maximumModelBytes = 128 * 1024 * 1024;
+    const QFileInfo info(sourcePath);
+    if (sourcePath.isEmpty() || sourcePath.contains(QChar::Null)
+        || !info.isAbsolute() || !info.isFile() || info.isSymLink()
+        || expectedBytes <= 0 || expectedBytes > maximumModelBytes
+        || expectedHash.size() != 32 || info.size() != expectedBytes)
+        return false;
+    QFile source(sourcePath);
+    QFile destination(destinationPath);
+    if (!source.open(QIODevice::ReadOnly) || source.size() != expectedBytes
+        || !destination.open(QIODevice::WriteOnly | QIODevice::NewOnly))
+        return false;
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    qint64 total = 0;
+    while (!source.atEnd()) {
+        if (cancelled(request))
+            return false;
+        const QByteArray chunk = source.read(64 * 1024);
+        if (chunk.isEmpty() || chunk.size() > expectedBytes - total
+            || destination.write(chunk) != chunk.size())
+            return false;
+        total += chunk.size();
+        hash.addData(chunk);
+    }
+    return !cancelled(request) && source.error() == QFileDevice::NoError
+        && total == expectedBytes && hash.result() == expectedHash
+        && destination.flush();
+}
+
+bool snapshotLanguageData(const Request &request, const QTemporaryDir &directory)
+{
+    const QStringList codes = request.language.split(QLatin1Char('+'));
+    if (!request.modelPaths.isEmpty() && request.modelPaths.size() != codes.size())
+        return false;
+    const QDir bundled(request.tessdataPath);
+    for (const QString &code : codes) {
+        const QString filename = code + QStringLiteral(".traineddata");
+        const QString path = request.modelPaths.isEmpty()
+            ? bundled.absoluteFilePath(filename) : request.modelPaths.value(code);
+        if (!snapshotFile(request, path, directory.filePath(filename),
+                          OCRLanguageManager::modelBytes(code),
+                          OCRLanguageManager::modelSha256(code)))
+            return false;
+    }
+    // This tiny Unicode font is shipped by the pinned Tesseract 5.5.3 package.
+    // It also needs a stable private copy for TessPDFRenderer after recognition.
+    return snapshotFile(request, bundled.absoluteFilePath(QStringLiteral("pdf.ttf")),
+                        directory.filePath(QStringLiteral("pdf.ttf")), 572,
+                        QByteArray::fromHex("c7845420925a23d88ed830a63957b8af85a66a8daf8d9fc90e843673b2ef1a59"));
 }
 
 bool nonWhitespace(char32_t value)
@@ -356,18 +416,19 @@ Result run(const Request &request, const QString &stagingOutputPath,
         || outputInfo.exists() || outputInfo.isSymLink()
         || sourceInfo.absoluteFilePath() == outputInfo.absoluteFilePath()
         || request.sourcePages.isEmpty() || request.sourcePages.size() > maximumPages
-        || (request.language != QStringLiteral("eng") && request.language != QStringLiteral("vie")
-            && request.language != QStringLiteral("eng+vie"))) {
+        || !OCRLanguageManager::validSelection(request.language)) {
         //% "Choose a valid page range, language and separate OCR output file."
         return fail(qtTrId("OCRPipelineInvalidRequest"));
     }
     StagingGuard staging{stagingOutputPath};
-    for (const QString &language : request.language.split(QLatin1Char('+'))) {
-        const QFileInfo model(QDir(request.tessdataPath).filePath(language + QStringLiteral(".traineddata")));
-        if (!model.isFile() || model.size() <= 0 || model.size() > 128 * 1024 * 1024) {
-            //% "The OCR language files are missing or invalid. Reinstall TrePDF."
-            return fail(qtTrId("OCRPipelineModelsMissing"));
-        }
+    // The engine and renderers are destroyed before this private directory.
+    // No network or shared-cache mutation is allowed on the recognition path.
+    QTemporaryDir languageData;
+    if (!languageData.isValid() || request.tessdataPath.isEmpty()
+        || request.tessdataPath.contains(QChar::Null)
+        || !snapshotLanguageData(request, languageData)) {
+        //% "The OCR language files are missing or damaged. Open Languages and prepare them again. If English or Vietnamese is affected, reinstall TrePDF."
+        return fail(qtTrId("OCRPipelineModelsMissing"));
     }
     SourceDocument source;
     int pageCount = 0;
@@ -408,7 +469,7 @@ Result run(const Request &request, const QString &stagingOutputPath,
         return fail(qtTrId("OCRPipelineUnsupported"));
     }
     tesseract::TessBaseAPI engine;
-    const QByteArray dataPath = QFile::encodeName(request.tessdataPath);
+    const QByteArray dataPath = QFile::encodeName(languageData.path());
     const QByteArray language = request.language.toLatin1();
     if (engine.Init(dataPath.constData(), language.constData(), tesseract::OEM_LSTM_ONLY) != 0)
         return fail(qtTrId("OCRPipelineModelsMissing"));

@@ -66,20 +66,90 @@ void PDFEditControllerTest::routesOCRPanelAndGuardsDirtySources()
     QPointer<QObject> panel;
     QTRY_VERIFY((panel = window->findChild<QObject *>(QStringLiteral("ocrPanel"))));
     auto *startButton = panel->findChild<QObject *>(QStringLiteral("startOCRButton"));
-    auto *languageSelector = panel->findChild<QObject *>(QStringLiteral("ocrLanguageSelector"));
+    auto *chooseLanguages = panel->findChild<QObject *>(QStringLiteral("chooseOCRLanguagesButton"));
     auto *pageSelector = panel->findChild<QObject *>(QStringLiteral("ocrPageSelector"));
     auto *rangeInput = panel->findChild<QObject *>(QStringLiteral("ocrPageRangeInput"));
     QVERIFY(startButton);
-    QVERIFY(languageSelector);
+    QVERIFY(chooseLanguages);
     QVERIFY(pageSelector);
     QVERIFY(rangeInput);
-    QVERIFY(startButton->property("enabled").toBool());
+    // Explain language choice on first entry. File actions and OCR cannot start
+    // underneath the modal, and selecting languages does not itself run OCR.
+    QPointer<QObject> languageDialog;
+    QTRY_VERIFY((languageDialog = panel->findChild<QObject *>(QStringLiteral("ocrLanguageDialog"))));
+    QTRY_VERIFY(languageDialog->property("visible").toBool());
+    QVERIFY(window->property("modalOperationActive").toBool());
+    QVERIFY(window->property("fileOpenBlocked").toBool());
+    QVERIFY(!startButton->property("enabled").toBool());
     QCOMPARE(panel->property("selectedLanguage").toString(), QStringLiteral("eng+vie"));
     QCOMPARE(panel->property("selectedPageRange").toString(), QString());
-    QVERIFY(languageSelector->setProperty("currentIndex", 1));
-    QCOMPARE(panel->property("selectedLanguage").toString(), QStringLiteral("vie"));
-    QVERIFY(languageSelector->setProperty("currentIndex", 2));
+
+    auto setLanguageSelected = [&languageDialog](const QString &code, bool selected) {
+        return QMetaObject::invokeMethod(languageDialog, "setLanguageSelected",
+            Q_ARG(QString, code), Q_ARG(bool, selected));
+    };
+    auto selectedLanguageCount = [&engine, &languageDialog]() {
+        return engine.newQObject(languageDialog).property(QStringLiteral("selectedCodes"))
+            .property(QStringLiteral("length")).toInt();
+    };
+    auto languageManagerBusy = [&languageDialog]() {
+        const auto *manager = languageDialog->findChild<QObject *>(QStringLiteral("ocrLanguageManager"));
+        return !manager || manager->property("busy").toBool();
+    };
+    auto *applyLanguages = languageDialog->findChild<QObject *>(QStringLiteral("applyOCRLanguagesButton"));
+    auto *searchLanguages = languageDialog->findChild<QObject *>(QStringLiteral("ocrLanguageSearch"));
+    auto *languageList = languageDialog->findChild<QObject *>(QStringLiteral("ocrLanguageList"));
+    QVERIFY(applyLanguages);
+    QVERIFY(searchLanguages);
+    QVERIFY(languageList);
+    QTRY_VERIFY(!languageManagerBusy());
+    QVERIFY(setLanguageSelected(QStringLiteral("eng"), false));
+    QVERIFY(setLanguageSelected(QStringLiteral("vie"), false));
+    QCOMPARE(selectedLanguageCount(), 0);
+    QVERIFY(!applyLanguages->property("enabled").toBool());
+    QVERIFY(setLanguageSelected(QStringLiteral("eng"), true));
+    QVERIFY(setLanguageSelected(QStringLiteral("vie"), true));
+    QVERIFY(setLanguageSelected(QStringLiteral("fra"), true));
+    QVERIFY(setLanguageSelected(QStringLiteral("hrv"), true));
+    QCOMPARE(selectedLanguageCount(), 4);
+    QVERIFY(setLanguageSelected(QStringLiteral("tha"), true));
+    QCOMPARE(selectedLanguageCount(), 4);
+    QVERIFY(searchLanguages->setProperty("text", QStringLiteral("tha")));
+    QTRY_COMPARE(languageList->property("count").toInt(), 1);
+    QVERIFY(searchLanguages->setProperty("text", QStringLiteral("no-matching-language")));
+    QTRY_COMPARE(languageList->property("count").toInt(), 0);
+    QVERIFY(searchLanguages->setProperty("text", QString()));
+    QTRY_VERIFY(languageList->property("count").toInt() > 4);
+
+    // Cancel leaves the panel's committed selection intact and releases the UI.
+    QVERIFY(QMetaObject::invokeMethod(languageDialog, "reject"));
+    QTRY_VERIFY(languageDialog.isNull());
+    QCOMPARE(panel->property("selectedLanguage").toString(), QStringLiteral("eng+vie"));
+    QTRY_VERIFY(!window->property("modalOperationActive").toBool());
+    QVERIFY(!window->property("fileOpenBlocked").toBool());
+    QVERIFY(startButton->property("enabled").toBool());
+
+    // Bundled language choices become usable without network access. Preparing
+    // them only applies the choice; creating an output still requires Start.
+    QVERIFY(QMetaObject::invokeMethod(chooseLanguages, "clicked"));
+    QTRY_VERIFY((languageDialog = panel->findChild<QObject *>(QStringLiteral("ocrLanguageDialog"))));
+    QTRY_VERIFY(languageDialog->property("visible").toBool());
+    QTRY_VERIFY(!languageManagerBusy());
+    QVERIFY(setLanguageSelected(QStringLiteral("vie"), false));
+    QVERIFY(QMetaObject::invokeMethod(languageDialog, "submit"));
+    QTRY_VERIFY(languageDialog.isNull());
     QCOMPARE(panel->property("selectedLanguage").toString(), QStringLiteral("eng"));
+    QVERIFY(!session->ocrController()->busy());
+    QVERIFY(!window->property("ocrOutputSession").value<QObject *>());
+    QVERIFY(QMetaObject::invokeMethod(chooseLanguages, "clicked"));
+    QTRY_VERIFY((languageDialog = panel->findChild<QObject *>(QStringLiteral("ocrLanguageDialog"))));
+    QTRY_VERIFY(languageDialog->property("visible").toBool());
+    QTRY_VERIFY(!languageManagerBusy());
+    QVERIFY(setLanguageSelected(QStringLiteral("eng"), false));
+    QVERIFY(setLanguageSelected(QStringLiteral("vie"), true));
+    QVERIFY(QMetaObject::invokeMethod(languageDialog, "submit"));
+    QTRY_VERIFY(languageDialog.isNull());
+    QCOMPARE(panel->property("selectedLanguage").toString(), QStringLiteral("vie"));
 
     // Custom input must be valid before a destination chooser can be opened.
     QVERIFY(pageSelector->setProperty("currentIndex", 2));
@@ -113,7 +183,13 @@ void PDFEditControllerTest::routesOCRPanelAndGuardsDirtySources()
         Q_ARG(QVariant, 1200)));
     QVERIFY(!rangeValid.toBool());
 
+    // Source structure changes dismiss the selection modal instead of applying
+    // a stale selection or starting OCR against another source revision.
+    QVERIFY(QMetaObject::invokeMethod(chooseLanguages, "clicked"));
+    QTRY_VERIFY((languageDialog = panel->findChild<QObject *>(QStringLiteral("ocrLanguageDialog"))));
+    QTRY_VERIFY(languageDialog->property("visible").toBool());
     QVERIFY(session->editController()->addBlankPage());
+    QTRY_VERIFY(languageDialog.isNull());
     QTRY_VERIFY(!startButton->property("enabled").toBool());
     QVERIFY(QMetaObject::invokeMethod(window.get(), "requestOCR",
         Q_ARG(QVariant, QStringLiteral("eng")), Q_ARG(QVariant, QString())));

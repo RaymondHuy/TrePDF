@@ -1,8 +1,10 @@
 #include "PDFDocument.h"
 #include "PDFOCRController.h"
 #include "PDFOCRPipeline.h"
+#include "OCRLanguageManager.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -20,6 +22,8 @@ std::atomic_int activeWorkers{0};
 bool failRecognition = false;
 bool noNewText = false;
 QVector<int> capturedPages;
+QString capturedLanguage;
+QHash<QString, QString> capturedModels;
 const QByteArray outputBytes("%PDF-1.7\ncontroller-test-output\n");
 
 bool writeBytes(const QString &path, const QByteArray &bytes)
@@ -68,6 +72,8 @@ Result run(const Request &request, const QString &stagedOutputPath,
     ++activeWorkers;
     struct Exit { ~Exit() { --activeWorkers; } } exit;
     capturedPages = request.sourcePages;
+    capturedLanguage = request.language;
+    capturedModels = request.modelPaths;
     entered.store(true);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (!releaseWorker.load() && !request.cancellation->load()
@@ -109,6 +115,8 @@ private slots:
         failRecognition = false;
         noNewText = false;
         capturedPages.clear();
+        capturedLanguage.clear();
+        capturedModels.clear();
     }
 
     void requiresLoadedSavedDocument()
@@ -134,7 +142,12 @@ private slots:
     {
         QTest::addColumn<QString>("language");
         QTest::addColumn<QString>("range");
-        QTest::newRow("unknown-language") << QStringLiteral("fra") << QString();
+        QTest::newRow("unknown-language") << QStringLiteral("zzz") << QString();
+        QTest::newRow("empty-language") << QString() << QString();
+        QTest::newRow("traversal-language") << QStringLiteral("../eng") << QString();
+        QTest::newRow("duplicate-language") << QStringLiteral("eng+eng") << QString();
+        QTest::newRow("empty-language-part") << QStringLiteral("eng++vie") << QString();
+        QTest::newRow("too-many-languages") << QStringLiteral("eng+vie+fra+tha+hrv") << QString();
         QTest::newRow("zero") << QStringLiteral("eng") << QStringLiteral("0");
         QTest::newRow("negative") << QStringLiteral("eng") << QStringLiteral("-1");
         QTest::newRow("backwards") << QStringLiteral("eng") << QStringLiteral("3-1");
@@ -197,12 +210,36 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 12000);
         QVERIFY(finished.first().at(0).toBool());
         QCOMPARE(capturedPages, QVector<int>({0, 1, 2, 4}));
+        QCOMPARE(capturedLanguage, QStringLiteral("eng+vie"));
+        QCOMPARE(capturedModels.size(), 2);
+        QCOMPARE(capturedModels.value(QStringLiteral("eng")), OCRLanguageManager::installedModelPath(QStringLiteral("eng")));
+        QCOMPARE(capturedModels.value(QStringLiteral("vie")), OCRLanguageManager::installedModelPath(QStringLiteral("vie")));
         QCOMPARE(controller.completedPages(), 4);
         QCOMPARE(controller.totalPages(), 4);
         QCOMPARE(controller.recognizedPages(), 4);
         QVERIFY(!controller.busy());
         QCOMPARE(readBytes(target), outputBytes);
         QCOMPARE(readBytes(source), original);
+    }
+
+    void preservesLanguagePriorityOrder()
+    {
+        QTemporaryDir directory;
+        const QString source = directory.filePath("in.pdf");
+        QVERIFY(writeBlankPDF(source));
+        PDFDocument document;
+        QVERIFY(document.open(QUrl::fromLocalFile(source)));
+        PDFOCRController controller;
+        controller.setDocument(&document);
+        QSignalSpy finished(&controller, &PDFOCRController::finished);
+        QVERIFY(controller.recognizeTo(QUrl::fromLocalFile(directory.filePath("out.pdf")),
+                                       QStringLiteral("vie+eng"), QStringLiteral("1")));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 12000);
+        QVERIFY(finished.first().at(0).toBool());
+        QCOMPARE(capturedLanguage, QStringLiteral("vie+eng"));
+        QCOMPARE(capturedModels.size(), 2);
+        for (const QString &path : std::as_const(capturedModels))
+            QVERIFY(QFileInfo(path).isAbsolute());
     }
 
     void cancellationPreservesExistingDestinationAndBoundsWorkers()

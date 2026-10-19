@@ -1,4 +1,5 @@
 #include "PDFEditControllerTestSupport.h"
+#include "OCRLanguageManager.h"
 #include "PDFFileOpenHandler.h"
 #include "PDFMergeController.h"
 #include "PDFOCRController.h"
@@ -880,6 +881,8 @@ bool registerQmlTestTypes(const QString &themePath)
                "TrePDF", 1, 0, "PDFExcelExportController") >= 0
         && qmlRegisterType<PDFOCRController>(
                "TrePDF", 1, 0, "PDFOCRController") >= 0
+        && qmlRegisterType<OCRLanguageManager>(
+               "TrePDF", 1, 0, "OCRLanguageManager") >= 0
         && qmlRegisterType<PDFFormController>(
                "TrePDF",
                1,

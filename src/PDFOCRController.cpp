@@ -2,6 +2,7 @@
 
 #include "PDFDocument.h"
 #include "PDFOCRPipeline.h"
+#include "OCRLanguageManager.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -42,21 +43,6 @@ QString fileIdentity(const QFileInfo &info)
 {
     const QString canonical = info.canonicalFilePath();
     return canonical.isEmpty() ? QDir::cleanPath(info.absoluteFilePath()) : canonical;
-}
-
-QString tessdataDirectory()
-{
-    const QDir application(QCoreApplication::applicationDirPath());
-    QStringList candidates{application.filePath(QStringLiteral("../Resources/tessdata")),
-                           application.filePath(QStringLiteral("tessdata"))};
-#ifdef TREPDF_OCR_TESSDATA_DIR
-    candidates.append(QString::fromUtf8(TREPDF_OCR_TESSDATA_DIR));
-#endif
-    for (const QString &candidate : candidates) {
-        if (QDir(candidate).exists())
-            return QDir(candidate).absolutePath();
-    }
-    return {};
 }
 
 bool parsePages(const QString &input, int pageCount, QVector<int> &pages)
@@ -202,9 +188,8 @@ bool PDFOCRController::recognizeTo(const QUrl &target, const QString &language,
         //% "This PDF does not allow text recognition."
         return reject(qtTrId("OCRPermissionDenied"));
     }
-    if (language != QStringLiteral("eng") && language != QStringLiteral("vie")
-        && language != QStringLiteral("eng+vie")) {
-        //% "Choose English, Vietnamese, or English and Vietnamese for OCR."
+    if (!OCRLanguageManager::validSelection(language)) {
+        //% "Choose between one and four different OCR languages."
         return reject(qtTrId("OCRInvalidLanguage"));
     }
     const QFileInfo source(m_document->renderFilePath());
@@ -241,7 +226,15 @@ bool PDFOCRController::recognizeTo(const QUrl &target, const QString &language,
     work->request.password = m_document->documentPassword();
     work->request.sourcePages = pages;
     work->request.language = language;
-    work->request.tessdataPath = tessdataDirectory();
+    work->request.tessdataPath = OCRLanguageManager::bundledDirectory();
+    for (const QString &code : language.split(QLatin1Char('+'))) {
+        const QString path = OCRLanguageManager::installedModelPath(code);
+        if (path.isEmpty()) {
+            //% "The selected language files are not ready. Open Languages and download them before starting OCR."
+            return reject(qtTrId("OCRLanguagesNotReady"));
+        }
+        work->request.modelPaths.insert(code, path);
+    }
     work->request.cancellation = std::make_shared<std::atomic_bool>(false);
     work->documentPath = m_document->renderFilePath();
     work->sourceIdentity = fileIdentity(source);
