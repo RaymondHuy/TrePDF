@@ -23,6 +23,8 @@ EditRibbonTools {
     removingWebLinks: editController.removingWebLinks
     loadingEditableLinks: editController.loadingEditableLinks
     mergeVisible: Qt.platform.os !== "ios"
+    splitAvailable: Qt.platform.os !== "ios"
+    splitVisible: Qt.platform.os !== "ios"
 
     onSelectToolRequested: toolName => {
         switch (toolName) {

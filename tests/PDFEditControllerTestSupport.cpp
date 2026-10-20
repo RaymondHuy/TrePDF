@@ -2,6 +2,7 @@
 #include "OCRLanguageManager.h"
 #include "PDFFileOpenHandler.h"
 #include "PDFMergeController.h"
+#include "PDFSplitController.h"
 #include "PDFOCRController.h"
 #include "SignatureLibrary.h"
 #include "UserFontManager.h"
@@ -877,6 +878,7 @@ bool registerQmlTestTypes(const QString &themePath)
         && qmlRegisterType<PDFTextSelectionItem>(
                "TrePDF", 1, 0, "PDFTextSelectionItem") >= 0
         && qmlRegisterType<PDFMergeController>("TrePDF", 1, 0, "PDFMergeController") >= 0
+        && qmlRegisterType<PDFSplitController>("TrePDF", 1, 0, "PDFSplitController") >= 0
         && qmlRegisterType<PDFExcelExportController>(
                "TrePDF", 1, 0, "PDFExcelExportController") >= 0
         && qmlRegisterType<PDFOCRController>(

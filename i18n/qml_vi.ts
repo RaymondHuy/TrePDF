@@ -5248,5 +5248,188 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <source>Choose languages…</source>
         <translation>Chọn ngôn ngữ…</translation>
     </message>
+    <message id="SplitPdfWaitBeforeClosing">
+        <location filename="../src/Main.qml" line="1166"/>
+        <source>Splitting is still running. Please wait, or cancel it in the Split PDF window.</source>
+        <translation>App vẫn đang tách PDF. Bạn hãy đợi hoàn tất hoặc bấm Hủy trong cửa sổ Tách PDF nhé.</translation>
+    </message>
+    <message id="SplitPdf">
+        <location filename="../src/Components/EditRibbonTools.qml" line="505"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="39"/>
+        <source>Split PDF</source>
+        <translation>Tách PDF</translation>
+    </message>
+    <message id="SplitPdfSaveSourceFirst">
+        <location filename="../src/PDFTabModel.cpp" line="782"/>
+        <source>Save the changes in “%1” before splitting so the new PDFs include your latest edits.</source>
+        <translation>Bạn hãy lưu thay đổi trong “%1” trước khi tách để các PDF mới có đủ nội dung vừa chỉnh sửa nhé.</translation>
+    </message>
+    <message id="SplitPdfDescription">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="101"/>
+        <source>Turn one PDF into smaller files. Choose how to group the pages; your original PDF stays unchanged.</source>
+        <translation>Tách một PDF thành các file nhỏ hơn. Chọn cách chia trang; file PDF gốc vẫn được giữ nguyên.</translation>
+    </message>
+    <message id="SplitPdfChooseFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="114"/>
+        <source>Choose PDF…</source>
+        <translation>Chọn PDF…</translation>
+    </message>
+    <message id="SplitPdfNoFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="132"/>
+        <source>No PDF selected</source>
+        <translation>Chưa chọn PDF</translation>
+    </message>
+    <message id="SplitPdfPageCount">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="142"/>
+        <source>%1 pages</source>
+        <translation>%1 trang</translation>
+    </message>
+    <message id="SplitPdfMethod">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="157"/>
+        <source>How would you like to split it?</source>
+        <translation>Bạn muốn tách PDF như thế nào?</translation>
+    </message>
+    <message id="SplitPdfEachPage">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="167"/>
+        <source>One file per page</source>
+        <translation>Mỗi trang thành một file</translation>
+    </message>
+    <message id="SplitPdfEveryN">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="179"/>
+        <source>Split into groups of pages</source>
+        <translation>Chia theo số trang mỗi file</translation>
+    </message>
+    <message id="SplitPdfPagesPerFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="195"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="205"/>
+        <source>Pages per file</source>
+        <translation>Số trang mỗi file</translation>
+    </message>
+    <message id="SplitPdfCustom">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="218"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="237"/>
+        <source>Choose page ranges</source>
+        <translation>Chọn các nhóm trang</translation>
+    </message>
+    <message id="SplitPdfRangesExample">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="235"/>
+        <source>Example: 1-3; 4-6; 7,9</source>
+        <translation>Ví dụ: 1-3; 4-6; 7,9</translation>
+    </message>
+    <message id="SplitPdfRangesHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="249"/>
+        <source>Separate files with a semicolon (;). Use a dash for a range and commas for individual pages. For example, 1-3; 4-6; 7,9 makes three files. Only the pages you enter are included.</source>
+        <translation>Dùng dấu chấm phẩy (;) để ngăn cách các file, dấu gạch ngang cho khoảng trang và dấu phẩy cho từng trang riêng. Ví dụ, 1-3; 4-6; 7,9 tạo ba file. Chỉ các trang bạn nhập mới được tách.</translation>
+    </message>
+    <message id="SplitPdfOutputSummary">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="261"/>
+        <source>%1 PDF files will be created.</source>
+        <translation>Sẽ tạo %1 file PDF.</translation>
+    </message>
+    <message id="SplitPdfDestinationHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="271"/>
+        <source>Choose a destination next. TrePDF creates a new folder there for the split files, without replacing existing files.</source>
+        <translation>Tiếp theo, chọn nơi lưu. TrePDF sẽ tạo một thư mục mới tại đó cho các file đã tách, không ghi đè file có sẵn.</translation>
+    </message>
+    <message id="SplitPdfSupportNotice">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="281"/>
+        <source>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</source>
+        <translation>Phiên bản này chưa hỗ trợ PDF có mật khẩu, chữ ký số hoặc biểu mẫu có thể điền. Dấu trang, tệp đính kèm ở cấp tài liệu và thẻ trợ năng không được đưa vào file đã tách. Liên kết đến trang không có trong từng file kết quả sẽ bị vô hiệu hóa.</translation>
+    </message>
+    <message id="SplitPdfCompletedSummary">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="292"/>
+        <source>Created %1 PDF files in a new folder.</source>
+        <translation>Đã tạo %1 file PDF trong một thư mục mới.</translation>
+    </message>
+    <message id="SplitPdfOutputFolder">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="311"/>
+        <source>Output folder</source>
+        <translation>Thư mục kết quả</translation>
+    </message>
+    <message id="SplitPdfChooseFolderAndSplit">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="363"/>
+        <source>Choose folder and split…</source>
+        <translation>Chọn thư mục và tách…</translation>
+    </message>
+    <message id="SplitPdfOpenFolder">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="376"/>
+        <source>Open folder</source>
+        <translation>Mở thư mục</translation>
+    </message>
+    <message id="SplitPdfChooseTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="392"/>
+        <source>Choose a PDF to split</source>
+        <translation>Chọn PDF cần tách</translation>
+    </message>
+    <message id="SplitPdfChooseFolderTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="415"/>
+        <source>Choose where to save the split PDF files</source>
+        <translation>Chọn nơi lưu các file PDF đã tách</translation>
+    </message>
+    <message id="SplitPdfInvalidFile">
+        <location filename="../src/PDFSplitController.cpp" line="107"/>
+        <source>This file could not be read as a complete PDF. Choose the PDF again.</source>
+        <translation>Không thể đọc đầy đủ file PDF này. Bạn hãy chọn lại file nhé.</translation>
+    </message>
+    <message id="SplitPdfEncryptedFile">
+        <location filename="../src/PDFSplitController.cpp" line="110"/>
+        <source>This PDF is password-protected. Choose a PDF without password protection to split it.</source>
+        <translation>PDF này có mật khẩu bảo vệ. Tính năng tách hiện chỉ hỗ trợ PDF không có mật khẩu.</translation>
+    </message>
+    <message id="SplitPdfUnsupportedFile">
+        <location filename="../src/PDFSplitController.cpp" line="113"/>
+        <source>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
+        <translation>PDF này có biểu mẫu, chữ ký số, lớp nội dung hoặc tác vụ chưa thể giữ nguyên khi tách.</translation>
+    </message>
+    <message id="SplitPdfLimitExceeded">
+        <location filename="../src/PDFSplitController.cpp" line="116"/>
+        <source>Split supports up to 10,000 source pages, 1,000 output files, a 256 MB source, and 1 GB of output in total.</source>
+        <translation>Có thể tách PDF tối đa 10.000 trang, 256 MB thành tối đa 1.000 file với tổng dung lượng không quá 1 GB.</translation>
+    </message>
+    <message id="SplitPdfSourceChanged">
+        <location filename="../src/PDFSplitController.cpp" line="119"/>
+        <source>The PDF changed after it was selected. Choose it again before splitting.</source>
+        <translation>PDF đã thay đổi sau khi được chọn. Bạn hãy chọn lại file trước khi tách nhé.</translation>
+    </message>
+    <message id="SplitPdfInvalidDestination">
+        <location filename="../src/PDFSplitController.cpp" line="122"/>
+        <source>Choose an existing writable folder. TrePDF will create a new folder inside it without replacing your files.</source>
+        <translation>Bạn hãy chọn thư mục có sẵn và có quyền ghi. TrePDF sẽ tạo thư mục mới bên trong, không ghi đè các file của bạn.</translation>
+    </message>
+    <message id="SplitPdfInvalidRanges">
+        <location filename="../src/PDFSplitController.cpp" line="125"/>
+        <source>Enter valid page groups, such as 1-3; 4-6; 7,9. Use each page only once and stay within the PDF's page count.</source>
+        <translation>Nhập các nhóm trang hợp lệ, ví dụ 1-3; 4-6; 7,9. Mỗi trang chỉ được dùng một lần và không được vượt quá số trang của PDF.</translation>
+    </message>
+    <message id="SplitPdfFailed">
+        <location filename="../src/PDFSplitController.cpp" line="128"/>
+        <source>Could not split this PDF. Your original file has not been changed and no output folder was created.</source>
+        <translation>Chưa thể tách PDF này. File gốc vẫn được giữ nguyên và chưa tạo thư mục kết quả.</translation>
+    </message>
+    <message id="SplitPdfReading">
+        <location filename="../src/PDFSplitController.cpp" line="669"/>
+        <source>Reading PDF…</source>
+        <translation>Đang đọc PDF…</translation>
+    </message>
+    <message id="SplitPdfWorking">
+        <location filename="../src/PDFSplitController.cpp" line="702"/>
+        <source>Splitting PDF…</source>
+        <translation>Đang tách PDF…</translation>
+    </message>
+    <message id="SplitPdfAlreadyRunning">
+        <location filename="../src/PDFSplitController.cpp" line="735"/>
+        <source>Another PDF split is finishing. Please try again in a moment.</source>
+        <translation>Tác vụ tách PDF trước đang kết thúc. Bạn hãy thử lại sau giây lát nhé.</translation>
+    </message>
+    <message id="SplitPdfSucceeded">
+        <location filename="../src/PDFSplitController.cpp" line="920"/>
+        <source>Saved %1 PDF files in %2.</source>
+        <translation>Đã lưu %1 file PDF vào %2.</translation>
+    </message>
+    <message id="SplitPdfCancelled">
+        <location filename="../src/PDFSplitController.cpp" line="923"/>
+        <source>PDF split cancelled. Your original file has not been changed.</source>
+        <translation>Đã hủy tách PDF. File gốc vẫn được giữ nguyên.</translation>
+    </message>
 </context>
 </TS>

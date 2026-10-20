@@ -290,6 +290,8 @@ qt_add_qml_module(trepdf
         src/PDFOCRController.h
         src/PDFMergeController.cpp
         src/PDFMergeController.h
+        src/PDFSplitController.cpp
+        src/PDFSplitController.h
         src/PDFFormController.cpp
         src/PDFFormController.h
         src/PDFFormAppearance.h
@@ -398,6 +400,7 @@ qt_add_qml_module(trepdf
         src/Components/SetPasswordDialog.qml
         src/Components/WatermarkDialog.qml
         src/Components/MergePdfDialog.qml
+        src/Components/SplitPdfDialog.qml
         src/Components/SignatureDialog.qml
         src/Components/FontSettingsDialog.qml
         src/Components/SearchHighlightLayer.qml
@@ -425,6 +428,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/comment.svg
         src/assets/icons/delete-page.svg
         src/assets/icons/merge-pdf.svg
+        src/assets/icons/split-pdf.svg
         src/assets/icons/diamond.svg
         src/assets/icons/down.svg
         src/assets/icons/dropdown-menu.svg

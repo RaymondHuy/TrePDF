@@ -258,6 +258,7 @@ public:
     Q_INVOKABLE bool requestOCR(PDFDocumentSession *session, const QUrl &target,
                                const QString &language, const QString &pageRange);
     Q_INVOKABLE QString mergeValidationError(const QList<QUrl> &sources, const QUrl &target) const;
+    Q_INVOKABLE QString splitValidationError(const QUrl &source) const;
     Q_INVOKABLE PDFDocumentSession *firstDraftSession() const;
     Q_INVOKABLE void finishAllEdits();
 

@@ -20,6 +20,7 @@ qt_add_executable(trepdf_edit_controller_tests
     tst_PDFEditControllerDrawingComments.cpp
     tst_PDFEditControllerFileOpen.cpp
     tst_PDFEditControllerMerge.cpp
+    tst_PDFEditControllerSplit.cpp
     tst_PDFEditControllerFonts.cpp
     tst_PDFEditControllerFormButtons.cpp
     tst_PDFEditControllerFormChoices.cpp
@@ -93,6 +94,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFOCRController.h
     ../src/PDFMergeController.cpp
     ../src/PDFMergeController.h
+    ../src/PDFSplitController.cpp
+    ../src/PDFSplitController.h
     ../src/PDFTableExtractor.cpp
     ../src/PDFTableExtractor.h
     ../src/PDFTableLayout.h
@@ -298,6 +301,43 @@ if(APPLE)
 endif()
 add_test(NAME PDFMergeTests COMMAND trepdf_merge_tests)
 set_tests_properties(PDFMergeTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+qt_add_executable(trepdf_split_tests
+    tst_PDFSplitController.cpp
+    ../src/PDFSplitController.cpp
+    ../src/PDFSplitController.h
+    ../src/PDFDocument.cpp
+    ../src/PDFDocument.h
+    ../src/PDFiumDocument.cpp
+    ../src/PDFiumDocument.h
+)
+target_include_directories(trepdf_split_tests PRIVATE ../src)
+target_link_libraries(trepdf_split_tests PRIVATE
+    Qt6::Gui Qt6::Qml Qt6::Test PDFium::PDFium QPDF::QPDF
+)
+if(WIN32)
+    target_compile_definitions(trepdf_split_tests PRIVATE NOMINMAX)
+endif()
+if(APPLE)
+    add_custom_command(TARGET trepdf_split_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${TREPDF_TEST_PDFIUM_LIBRARY}"
+            "$<TARGET_FILE_DIR:trepdf_split_tests>/libpdfium.dylib"
+        COMMAND install_name_tool -change ./libpdfium.dylib
+            @loader_path/libpdfium.dylib "$<TARGET_FILE:trepdf_split_tests>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${TREPDF_TEST_QPDF_LIBRARY}"
+            "$<TARGET_FILE_DIR:trepdf_split_tests>/libqpdf.dylib"
+        COMMAND install_name_tool -change @rpath/libqpdf.dylib
+            @loader_path/libqpdf.dylib "$<TARGET_FILE:trepdf_split_tests>"
+        VERBATIM
+    )
+endif()
+add_test(NAME PDFSplitTests COMMAND trepdf_split_tests)
+set_tests_properties(PDFSplitTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+if(WIN32 AND NOT TREPDF_DEPLOY_RUNTIME)
+    trepdf_deploy_windows_runtime(trepdf_split_tests)
+endif()
 
 add_test(NAME PDFExcelExportTests COMMAND trepdf_excel_export_tests)
 set_tests_properties(PDFExcelExportTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

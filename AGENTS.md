@@ -233,6 +233,17 @@ Current features:
   input drafts and rejects destinations used by open tabs; success opens the
   result in a new tab. See `docs/pdf-merge-pipeline.md` for supported features
   and limits.
+- Edit > Pages > Split PDF sits beside Merge PDF and opens a lazy modal with
+  one-file-per-page, every-N-pages and custom page-group modes. The active PDF
+  is offered as the source, or users can choose another local PDF.
+  `PDFSplitController` validates saved input, copies page content through qpdf
+  and publishes the complete batch in a new uniquely named subfolder.
+  Existing files and the source remain untouched; cancellation before
+  publication leaves no partial output. Open source drafts must be saved first.
+  Internal links are remapped within each output; links to omitted pages are
+  disabled while retaining their annotations. AcroForms, encrypted PDFs and
+  unsupported interactive structures are rejected. See `docs/pdf-split-pipeline.md` for range syntax, limits,
+  preservation rules and cancellation behavior.
 - Open local PDFs through Finder/Open With and the Dock on macOS, positional
   command-line paths/file URLs, or window drag-and-drop. `PDFFileOpenHandler`
   buffers native requests before QML loads, filters local PDF files and deduplicates
