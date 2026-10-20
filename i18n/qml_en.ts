@@ -5249,5 +5249,188 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <source>Choose languages…</source>
         <translation>Choose languages…</translation>
     </message>
+    <message id="SplitPdfWaitBeforeClosing">
+        <location filename="../src/Main.qml" line="1166"/>
+        <source>Splitting is still running. Please wait, or cancel it in the Split PDF window.</source>
+        <translation>Splitting is still running. Please wait, or cancel it in the Split PDF window.</translation>
+    </message>
+    <message id="SplitPdf">
+        <location filename="../src/Components/EditRibbonTools.qml" line="505"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="39"/>
+        <source>Split PDF</source>
+        <translation>Split PDF</translation>
+    </message>
+    <message id="SplitPdfSaveSourceFirst">
+        <location filename="../src/PDFTabModel.cpp" line="782"/>
+        <source>Save the changes in “%1” before splitting so the new PDFs include your latest edits.</source>
+        <translation>Save the changes in “%1” before splitting so the new PDFs include your latest edits.</translation>
+    </message>
+    <message id="SplitPdfDescription">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="101"/>
+        <source>Turn one PDF into smaller files. Choose how to group the pages; your original PDF stays unchanged.</source>
+        <translation>Turn one PDF into smaller files. Choose how to group the pages; your original PDF stays unchanged.</translation>
+    </message>
+    <message id="SplitPdfChooseFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="114"/>
+        <source>Choose PDF…</source>
+        <translation>Choose PDF…</translation>
+    </message>
+    <message id="SplitPdfNoFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="132"/>
+        <source>No PDF selected</source>
+        <translation>No PDF selected</translation>
+    </message>
+    <message id="SplitPdfPageCount">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="142"/>
+        <source>%1 pages</source>
+        <translation>%1 pages</translation>
+    </message>
+    <message id="SplitPdfMethod">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="157"/>
+        <source>How would you like to split it?</source>
+        <translation>How would you like to split it?</translation>
+    </message>
+    <message id="SplitPdfEachPage">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="167"/>
+        <source>One file per page</source>
+        <translation>One file per page</translation>
+    </message>
+    <message id="SplitPdfEveryN">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="179"/>
+        <source>Split into groups of pages</source>
+        <translation>Split into groups of pages</translation>
+    </message>
+    <message id="SplitPdfPagesPerFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="195"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="205"/>
+        <source>Pages per file</source>
+        <translation>Pages per file</translation>
+    </message>
+    <message id="SplitPdfCustom">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="218"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="237"/>
+        <source>Choose page ranges</source>
+        <translation>Choose page ranges</translation>
+    </message>
+    <message id="SplitPdfRangesExample">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="235"/>
+        <source>Example: 1-3; 4-6; 7,9</source>
+        <translation>Example: 1-3; 4-6; 7,9</translation>
+    </message>
+    <message id="SplitPdfRangesHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="249"/>
+        <source>Separate files with a semicolon (;). Use a dash for a range and commas for individual pages. For example, 1-3; 4-6; 7,9 makes three files. Only the pages you enter are included.</source>
+        <translation>Separate files with a semicolon (;). Use a dash for a range and commas for individual pages. For example, 1-3; 4-6; 7,9 makes three files. Only the pages you enter are included.</translation>
+    </message>
+    <message id="SplitPdfOutputSummary">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="261"/>
+        <source>%1 PDF files will be created.</source>
+        <translation>%1 PDF files will be created.</translation>
+    </message>
+    <message id="SplitPdfDestinationHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="271"/>
+        <source>Choose a destination next. TrePDF creates a new folder there for the split files, without replacing existing files.</source>
+        <translation>Choose a destination next. TrePDF creates a new folder there for the split files, without replacing existing files.</translation>
+    </message>
+    <message id="SplitPdfSupportNotice">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="281"/>
+        <source>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</source>
+        <translation>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</translation>
+    </message>
+    <message id="SplitPdfCompletedSummary">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="292"/>
+        <source>Created %1 PDF files in a new folder.</source>
+        <translation>Created %1 PDF files in a new folder.</translation>
+    </message>
+    <message id="SplitPdfOutputFolder">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="311"/>
+        <source>Output folder</source>
+        <translation>Output folder</translation>
+    </message>
+    <message id="SplitPdfChooseFolderAndSplit">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="363"/>
+        <source>Choose folder and split…</source>
+        <translation>Choose folder and split…</translation>
+    </message>
+    <message id="SplitPdfOpenFolder">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="376"/>
+        <source>Open folder</source>
+        <translation>Open folder</translation>
+    </message>
+    <message id="SplitPdfChooseTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="392"/>
+        <source>Choose a PDF to split</source>
+        <translation>Choose a PDF to split</translation>
+    </message>
+    <message id="SplitPdfChooseFolderTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="415"/>
+        <source>Choose where to save the split PDF files</source>
+        <translation>Choose where to save the split PDF files</translation>
+    </message>
+    <message id="SplitPdfInvalidFile">
+        <location filename="../src/PDFSplitController.cpp" line="107"/>
+        <source>This file could not be read as a complete PDF. Choose the PDF again.</source>
+        <translation>This file could not be read as a complete PDF. Choose the PDF again.</translation>
+    </message>
+    <message id="SplitPdfEncryptedFile">
+        <location filename="../src/PDFSplitController.cpp" line="110"/>
+        <source>This PDF is password-protected. Choose a PDF without password protection to split it.</source>
+        <translation>This PDF is password-protected. Choose a PDF without password protection to split it.</translation>
+    </message>
+    <message id="SplitPdfUnsupportedFile">
+        <location filename="../src/PDFSplitController.cpp" line="113"/>
+        <source>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
+        <translation>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</translation>
+    </message>
+    <message id="SplitPdfLimitExceeded">
+        <location filename="../src/PDFSplitController.cpp" line="116"/>
+        <source>Split supports up to 10,000 source pages, 1,000 output files, a 256 MB source, and 1 GB of output in total.</source>
+        <translation>Split supports up to 10,000 source pages, 1,000 output files, a 256 MB source, and 1 GB of output in total.</translation>
+    </message>
+    <message id="SplitPdfSourceChanged">
+        <location filename="../src/PDFSplitController.cpp" line="119"/>
+        <source>The PDF changed after it was selected. Choose it again before splitting.</source>
+        <translation>The PDF changed after it was selected. Choose it again before splitting.</translation>
+    </message>
+    <message id="SplitPdfInvalidDestination">
+        <location filename="../src/PDFSplitController.cpp" line="122"/>
+        <source>Choose an existing writable folder. TrePDF will create a new folder inside it without replacing your files.</source>
+        <translation>Choose an existing writable folder. TrePDF will create a new folder inside it without replacing your files.</translation>
+    </message>
+    <message id="SplitPdfInvalidRanges">
+        <location filename="../src/PDFSplitController.cpp" line="125"/>
+        <source>Enter valid page groups, such as 1-3; 4-6; 7,9. Use each page only once and stay within the PDF's page count.</source>
+        <translation>Enter valid page groups, such as 1-3; 4-6; 7,9. Use each page only once and stay within the PDF's page count.</translation>
+    </message>
+    <message id="SplitPdfFailed">
+        <location filename="../src/PDFSplitController.cpp" line="128"/>
+        <source>Could not split this PDF. Your original file has not been changed and no output folder was created.</source>
+        <translation>Could not split this PDF. Your original file has not been changed and no output folder was created.</translation>
+    </message>
+    <message id="SplitPdfReading">
+        <location filename="../src/PDFSplitController.cpp" line="669"/>
+        <source>Reading PDF…</source>
+        <translation>Reading PDF…</translation>
+    </message>
+    <message id="SplitPdfWorking">
+        <location filename="../src/PDFSplitController.cpp" line="702"/>
+        <source>Splitting PDF…</source>
+        <translation>Splitting PDF…</translation>
+    </message>
+    <message id="SplitPdfAlreadyRunning">
+        <location filename="../src/PDFSplitController.cpp" line="735"/>
+        <source>Another PDF split is finishing. Please try again in a moment.</source>
+        <translation>Another PDF split is finishing. Please try again in a moment.</translation>
+    </message>
+    <message id="SplitPdfSucceeded">
+        <location filename="../src/PDFSplitController.cpp" line="920"/>
+        <source>Saved %1 PDF files in %2.</source>
+        <translation>Saved %1 PDF files in %2.</translation>
+    </message>
+    <message id="SplitPdfCancelled">
+        <location filename="../src/PDFSplitController.cpp" line="923"/>
+        <source>PDF split cancelled. Your original file has not been changed.</source>
+        <translation>PDF split cancelled. Your original file has not been changed.</translation>
+    </message>
 </context>
 </TS>

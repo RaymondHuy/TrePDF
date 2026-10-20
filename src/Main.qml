@@ -94,7 +94,7 @@ AppWindow {
         passwordRequests.length > 0 || fontDownloadController !== null
         || fontDownloadFailureLoader.active
         || signatureDialogLoader.active || setPasswordDialogLoader.active
-        || watermarkDialogLoader.active || mergePdfDialogLoader.active
+        || watermarkDialogLoader.active || mergePdfDialogLoader.active || splitPdfDialogLoader.active
         || fontSettingsDialogLoader.active
         || headerEntryNoticeLoader.active || openDialog.visible
         || imageDialog.visible || headerImageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
@@ -571,6 +571,43 @@ AppWindow {
         tabModel.finishAllEdits()
         pdfMergeController.clear()
         mergePdfDialogLoader.active = true
+    }
+
+    function requestSplitPdf() {
+        if (Qt.platform.os === "ios" || fileOpenBlocked || !prepareActiveWorkspace())
+            return
+        pdfSplitController.clear()
+        splitPdfDialogLoader.active = true
+    }
+
+    function selectSplitPdfSource(source: url) {
+        if (splitPdfDialogLoader.status !== Loader.Ready || pdfSplitController.busy)
+            return
+        const dialog = splitPdfDialogLoader.item as SplitPdfDialog
+        if (!dialog)
+            return
+        const error = tabModel.splitValidationError(source)
+        if (error.length > 0) {
+            dialog.errorText = error
+            return
+        }
+        dialog.errorText = ""
+        pdfSplitController.setSource(source)
+    }
+
+    function splitPdfTo(folder: url) {
+        if (splitPdfDialogLoader.status !== Loader.Ready || pdfSplitController.busy)
+            return
+        const dialog = splitPdfDialogLoader.item as SplitPdfDialog
+        if (!dialog)
+            return
+        const error = tabModel.splitValidationError(pdfSplitController.source)
+        if (error.length > 0) {
+            dialog.errorText = error
+            return
+        }
+        dialog.errorText = ""
+        pdfSplitController.splitTo(folder)
     }
 
     function mergePdfTo(target) {
@@ -1124,6 +1161,11 @@ AppWindow {
             return
 
         close.accepted = false
+        if (pdfSplitController.busy) {
+            //% "Splitting is still running. Please wait, or cancel it in the Split PDF window."
+            showStatus(qsTrId("SplitPdfWaitBeforeClosing"))
+            return
+        }
         if (pdfMergeController.busy) {
             //% "Merging is still running. Please wait, or cancel it in the Merge PDF window."
             showStatus(qsTrId("MergePdfWaitBeforeClosing"))
@@ -1460,6 +1502,34 @@ AppWindow {
         }
     }
 
+    PDFSplitController {
+        id: pdfSplitController
+        objectName: "pdfSplitController"
+    }
+
+    Loader {
+        id: splitPdfDialogLoader
+        objectName: "splitPdfDialogLoader"
+        active: false
+        sourceComponent: SplitPdfDialog {
+            theme: appTheme
+            controller: pdfSplitController
+            onSourceRequested: source => window.selectSplitPdfSource(source)
+            onSplitRequested: folder => window.splitPdfTo(folder)
+            onClosed: splitPdfDialogLoader.active = false
+        }
+        onLoaded: {
+            if (status === Loader.Ready) {
+                const dialog = item as SplitPdfDialog
+                if (dialog) {
+                    dialog.open()
+                    if (window.activeDocument.loaded)
+                        window.selectSplitPdfSource(window.activeDocument.source)
+                }
+            }
+        }
+    }
+
     PDFMergeController {
         id: pdfMergeController
         objectName: "pdfMergeController"
@@ -1589,7 +1659,8 @@ AppWindow {
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
             && !tabModel.anySaving
-            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
+            && !mergePdfDialogLoader.active && !splitPdfDialogLoader.active
+            && !fontSettingsDialogLoader.active
         onActivated: window.requestUndo()
     }
 
@@ -1607,7 +1678,8 @@ AppWindow {
             && !window.activeFormDesignerController.textFieldFocused
             && !appRibbon.formsTabActive
             && !tabModel.anySaving
-            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
+            && !mergePdfDialogLoader.active && !splitPdfDialogLoader.active
+            && !fontSettingsDialogLoader.active
         onActivated: window.requestRedo()
     }
 
@@ -1620,21 +1692,24 @@ AppWindow {
                 || (window.activeWorkspaceItem !== null
                     && window.activeWorkspaceItem.hasPendingHeaderPlacement))
             && !tabModel.anySaving && window.headerSaveRequest === null
-            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
+            && !mergePdfDialogLoader.active && !splitPdfDialogLoader.active
+            && !fontSettingsDialogLoader.active
         onActivated: window.requestSave()
     }
 
     Shortcut {
         sequences: [StandardKey.SaveAs]
         enabled: window.activeDocument.loaded && !tabModel.anySaving
-            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
+            && !mergePdfDialogLoader.active && !splitPdfDialogLoader.active
+            && !fontSettingsDialogLoader.active
         onActivated: window.requestSaveAs()
     }
 
     Shortcut {
         sequences: [StandardKey.Close]
         enabled: window.activeSession !== null && !tabModel.anySaving
-            && !mergePdfDialogLoader.active && !fontSettingsDialogLoader.active
+            && !mergePdfDialogLoader.active && !splitPdfDialogLoader.active
+            && !fontSettingsDialogLoader.active
         onActivated: window.requestCloseSession(window.activeSession)
     }
 
@@ -2390,6 +2465,7 @@ AppWindow {
             onExcelExportRequested: window.requestExcelExport()
             onOcrRequested: window.showOCRPanel()
             onMergePdfRequested: window.requestMergePdf()
+            onSplitPdfRequested: window.requestSplitPdf()
             onFontSettingsRequested: {
                 if (!window.fileOpenBlocked)
                     fontSettingsDialogLoader.active = true

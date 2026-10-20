@@ -4,6 +4,8 @@
 #include <QFileInfo>
 #include <QtTranslation>
 
+#include <filesystem>
+
 PDFViewState::PDFViewState(QObject *parent)
     : QObject(parent)
 {
@@ -748,6 +750,36 @@ QString PDFTabModel::mergeValidationError(const QList<QUrl> &sources, const QUrl
         if (sourceIdentities.contains(identity) && session->hasDrafts()) {
             //% "Save the changes in “%1” before merging so the new PDF includes your latest edits."
             return qtTrId("MergePdfSaveSourceFirst").arg(session->title());
+        }
+    }
+    return {};
+}
+
+QString PDFTabModel::splitValidationError(const QUrl &source) const
+{
+    if (anySaving()) {
+        //% "Please wait for the PDF to finish saving."
+        return qtTrId("WaitForPdfSave");
+    }
+    const QString identity = fileIdentity(source);
+    if (identity.isEmpty())
+        return {};
+    for (const PDFDocumentSession *session : m_sessions) {
+        if (!session->hasDrafts())
+            continue;
+        const QString openIdentity = fileIdentity(session->document()->source());
+        bool sameSource = identity == openIdentity;
+        if (!sameSource && !openIdentity.isEmpty()) {
+            // Canonical paths resolve symlinks; filesystem identity also catches
+            // a second hard link to a document with pending form/content input.
+            std::error_code error;
+            sameSource = std::filesystem::equivalent(
+                std::filesystem::u8path(identity.toUtf8().constData()),
+                std::filesystem::u8path(openIdentity.toUtf8().constData()), error) && !error;
+        }
+        if (sameSource) {
+            //% "Save the changes in “%1” before splitting so the new PDFs include your latest edits."
+            return qtTrId("SplitPdfSaveSourceFirst").arg(session->title());
         }
     }
     return {};

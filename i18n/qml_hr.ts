@@ -5127,5 +5127,188 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <source>Choose languages…</source>
         <translation>Odaberi jezike…</translation>
     </message>
+    <message id="SplitPdfWaitBeforeClosing">
+        <location filename="../src/Main.qml" line="1166"/>
+        <source>Splitting is still running. Please wait, or cancel it in the Split PDF window.</source>
+        <translation>Razdvajanje je još u tijeku. Pričekajte ili ga otkažite u prozoru Razdvoji PDF.</translation>
+    </message>
+    <message id="SplitPdf">
+        <location filename="../src/Components/EditRibbonTools.qml" line="505"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="39"/>
+        <source>Split PDF</source>
+        <translation>Razdvoji PDF</translation>
+    </message>
+    <message id="SplitPdfSaveSourceFirst">
+        <location filename="../src/PDFTabModel.cpp" line="782"/>
+        <source>Save the changes in “%1” before splitting so the new PDFs include your latest edits.</source>
+        <translation>Spremite promjene u dokumentu „%1” prije razdvajanja kako bi novi PDF-ovi sadržavali najnovije izmjene.</translation>
+    </message>
+    <message id="SplitPdfDescription">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="101"/>
+        <source>Turn one PDF into smaller files. Choose how to group the pages; your original PDF stays unchanged.</source>
+        <translation>Razdvojite jedan PDF u manje datoteke. Odaberite način grupiranja stranica; izvorni PDF ostaje nepromijenjen.</translation>
+    </message>
+    <message id="SplitPdfChooseFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="114"/>
+        <source>Choose PDF…</source>
+        <translation>Odaberi PDF…</translation>
+    </message>
+    <message id="SplitPdfNoFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="132"/>
+        <source>No PDF selected</source>
+        <translation>Nije odabran PDF</translation>
+    </message>
+    <message id="SplitPdfPageCount">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="142"/>
+        <source>%1 pages</source>
+        <translation>Broj stranica: %1</translation>
+    </message>
+    <message id="SplitPdfMethod">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="157"/>
+        <source>How would you like to split it?</source>
+        <translation>Kako želite razdvojiti PDF?</translation>
+    </message>
+    <message id="SplitPdfEachPage">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="167"/>
+        <source>One file per page</source>
+        <translation>Jedna datoteka po stranici</translation>
+    </message>
+    <message id="SplitPdfEveryN">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="179"/>
+        <source>Split into groups of pages</source>
+        <translation>Podijeli u grupe stranica</translation>
+    </message>
+    <message id="SplitPdfPagesPerFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="195"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="205"/>
+        <source>Pages per file</source>
+        <translation>Stranica po datoteci</translation>
+    </message>
+    <message id="SplitPdfCustom">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="218"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="237"/>
+        <source>Choose page ranges</source>
+        <translation>Odaberi raspone stranica</translation>
+    </message>
+    <message id="SplitPdfRangesExample">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="235"/>
+        <source>Example: 1-3; 4-6; 7,9</source>
+        <translation>Primjer: 1-3; 4-6; 7,9</translation>
+    </message>
+    <message id="SplitPdfRangesHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="249"/>
+        <source>Separate files with a semicolon (;). Use a dash for a range and commas for individual pages. For example, 1-3; 4-6; 7,9 makes three files. Only the pages you enter are included.</source>
+        <translation>Datoteke odvojite točkom sa zarezom (;). Za raspon upotrijebite crticu, a za pojedinačne stranice zareze. Na primjer, 1-3; 4-6; 7,9 stvara tri datoteke. Uključene su samo unesene stranice.</translation>
+    </message>
+    <message id="SplitPdfOutputSummary">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="261"/>
+        <source>%1 PDF files will be created.</source>
+        <translation>Broj PDF datoteka koje će se stvoriti: %1.</translation>
+    </message>
+    <message id="SplitPdfDestinationHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="271"/>
+        <source>Choose a destination next. TrePDF creates a new folder there for the split files, without replacing existing files.</source>
+        <translation>Zatim odaberite odredište. TrePDF će ondje stvoriti novu mapu za razdvojene datoteke, bez zamjene postojećih datoteka.</translation>
+    </message>
+    <message id="SplitPdfSupportNotice">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="281"/>
+        <source>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</source>
+        <translation>Ova verzija ne podržava PDF-ove zaštićene lozinkom, digitalne potpise ni obrasce za ispunjavanje. Knjižne oznake, privici na razini dokumenta i oznake pristupačnosti nisu uključeni. Poveznice na stranice izvan pojedine izlazne datoteke su onemogućene.</translation>
+    </message>
+    <message id="SplitPdfCompletedSummary">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="292"/>
+        <source>Created %1 PDF files in a new folder.</source>
+        <translation>PDF datoteke stvorene u novoj mapi: %1.</translation>
+    </message>
+    <message id="SplitPdfOutputFolder">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="311"/>
+        <source>Output folder</source>
+        <translation>Izlazna mapa</translation>
+    </message>
+    <message id="SplitPdfChooseFolderAndSplit">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="363"/>
+        <source>Choose folder and split…</source>
+        <translation>Odaberi mapu i razdvoji…</translation>
+    </message>
+    <message id="SplitPdfOpenFolder">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="376"/>
+        <source>Open folder</source>
+        <translation>Otvori mapu</translation>
+    </message>
+    <message id="SplitPdfChooseTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="392"/>
+        <source>Choose a PDF to split</source>
+        <translation>Odaberi PDF za razdvajanje</translation>
+    </message>
+    <message id="SplitPdfChooseFolderTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="415"/>
+        <source>Choose where to save the split PDF files</source>
+        <translation>Odaberi mjesto za spremanje razdvojenih PDF datoteka</translation>
+    </message>
+    <message id="SplitPdfInvalidFile">
+        <location filename="../src/PDFSplitController.cpp" line="107"/>
+        <source>This file could not be read as a complete PDF. Choose the PDF again.</source>
+        <translation>Ovu datoteku nije moguće pročitati kao cjelovit PDF. Ponovno odaberite PDF.</translation>
+    </message>
+    <message id="SplitPdfEncryptedFile">
+        <location filename="../src/PDFSplitController.cpp" line="110"/>
+        <source>This PDF is password-protected. Choose a PDF without password protection to split it.</source>
+        <translation>Ovaj PDF zaštićen je lozinkom. Za razdvajanje odaberite PDF bez zaštite lozinkom.</translation>
+    </message>
+    <message id="SplitPdfUnsupportedFile">
+        <location filename="../src/PDFSplitController.cpp" line="113"/>
+        <source>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
+        <translation>Ovaj PDF sadrži obrasce, digitalne potpise, slojeve ili radnje koje još nije moguće sačuvati pri razdvajanju.</translation>
+    </message>
+    <message id="SplitPdfLimitExceeded">
+        <location filename="../src/PDFSplitController.cpp" line="116"/>
+        <source>Split supports up to 10,000 source pages, 1,000 output files, a 256 MB source, and 1 GB of output in total.</source>
+        <translation>Razdvajanje podržava do 10.000 izvornih stranica, 1.000 izlaznih datoteka, izvor veličine do 256 MB i ukupno 1 GB izlaznih podataka.</translation>
+    </message>
+    <message id="SplitPdfSourceChanged">
+        <location filename="../src/PDFSplitController.cpp" line="119"/>
+        <source>The PDF changed after it was selected. Choose it again before splitting.</source>
+        <translation>PDF je promijenjen nakon odabira. Ponovno ga odaberite prije razdvajanja.</translation>
+    </message>
+    <message id="SplitPdfInvalidDestination">
+        <location filename="../src/PDFSplitController.cpp" line="122"/>
+        <source>Choose an existing writable folder. TrePDF will create a new folder inside it without replacing your files.</source>
+        <translation>Odaberite postojeću mapu u koju je moguće pisati. TrePDF će u njoj stvoriti novu mapu bez zamjene vaših datoteka.</translation>
+    </message>
+    <message id="SplitPdfInvalidRanges">
+        <location filename="../src/PDFSplitController.cpp" line="125"/>
+        <source>Enter valid page groups, such as 1-3; 4-6; 7,9. Use each page only once and stay within the PDF's page count.</source>
+        <translation>Unesite valjane grupe stranica, primjerice 1-3; 4-6; 7,9. Svaku stranicu upotrijebite samo jednom i ne premašujte broj stranica u PDF-u.</translation>
+    </message>
+    <message id="SplitPdfFailed">
+        <location filename="../src/PDFSplitController.cpp" line="128"/>
+        <source>Could not split this PDF. Your original file has not been changed and no output folder was created.</source>
+        <translation>Ovaj PDF nije moguće razdvojiti. Izvorna datoteka nije promijenjena i nije stvorena izlazna mapa.</translation>
+    </message>
+    <message id="SplitPdfReading">
+        <location filename="../src/PDFSplitController.cpp" line="669"/>
+        <source>Reading PDF…</source>
+        <translation>Čitanje PDF-a…</translation>
+    </message>
+    <message id="SplitPdfWorking">
+        <location filename="../src/PDFSplitController.cpp" line="702"/>
+        <source>Splitting PDF…</source>
+        <translation>Razdvajanje PDF-a…</translation>
+    </message>
+    <message id="SplitPdfAlreadyRunning">
+        <location filename="../src/PDFSplitController.cpp" line="735"/>
+        <source>Another PDF split is finishing. Please try again in a moment.</source>
+        <translation>Drugo razdvajanje PDF-a privodi se kraju. Pokušajte ponovno za trenutak.</translation>
+    </message>
+    <message id="SplitPdfSucceeded">
+        <location filename="../src/PDFSplitController.cpp" line="920"/>
+        <source>Saved %1 PDF files in %2.</source>
+        <translation>PDF datoteke spremljene u %2: %1.</translation>
+    </message>
+    <message id="SplitPdfCancelled">
+        <location filename="../src/PDFSplitController.cpp" line="923"/>
+        <source>PDF split cancelled. Your original file has not been changed.</source>
+        <translation>Razdvajanje PDF-a otkazano je. Izvorna datoteka nije promijenjena.</translation>
+    </message>
 </context>
 </TS>

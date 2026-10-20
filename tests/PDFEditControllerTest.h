@@ -200,6 +200,8 @@ private slots:
     void suppressesOriginalDestinationWhileEditingSourceLink();
     void exposesExcelExportTabAndDraftGuard();
     void routesOCRPanelAndGuardsDirtySources();
+    void routesSplitPdfDialogAndGuardsDirtySources();
+    void completesSplitPdfWithoutOpeningAllOutputs();
     void storesTransientTextFieldsByPage();
     void limitsTransientTextFieldInputLength();
     void storesTransientRadioButtons();

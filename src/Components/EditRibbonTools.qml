@@ -32,6 +32,8 @@ Flickable {
     property bool deletePageAvailable: true
     property bool mergeAvailable: true
     property bool mergeVisible: true
+    property bool splitAvailable: false
+    property bool splitVisible: false
 
     signal pageRequested(int page)
     signal selectToolRequested(string toolName)
@@ -43,6 +45,7 @@ Flickable {
     signal cancelLinksRequested()
     signal deletePageRequested(int page)
     signal mergePdfRequested()
+    signal splitPdfRequested()
     signal undoRequested()
     signal redoRequested()
     signal toolRequested(string toolName)
@@ -491,6 +494,18 @@ Flickable {
                 iconSource: "../assets/icons/merge-pdf.svg"
                 enabled: root.mergeAvailable && !root.saving
                 onClicked: root.mergePdfRequested()
+            }
+
+            RibbonButton {
+                objectName: "splitPdfButton"
+                theme: root.theme
+                documentLoaded: true
+                visible: root.splitVisible
+                //% "Split PDF"
+                text: qsTrId("SplitPdf")
+                iconSource: "../assets/icons/split-pdf.svg"
+                enabled: root.splitAvailable && !root.saving
+                onClicked: root.splitPdfRequested()
             }
         }
 

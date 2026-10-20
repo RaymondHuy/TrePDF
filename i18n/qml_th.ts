@@ -5125,5 +5125,188 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <source>Choose languages…</source>
         <translation>เลือกภาษา…</translation>
     </message>
+    <message id="SplitPdfWaitBeforeClosing">
+        <location filename="../src/Main.qml" line="1166"/>
+        <source>Splitting is still running. Please wait, or cancel it in the Split PDF window.</source>
+        <translation>กำลังแยกไฟล์อยู่ โปรดรอหรือยกเลิกในหน้าต่างแยก PDF</translation>
+    </message>
+    <message id="SplitPdf">
+        <location filename="../src/Components/EditRibbonTools.qml" line="505"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="39"/>
+        <source>Split PDF</source>
+        <translation>แยก PDF</translation>
+    </message>
+    <message id="SplitPdfSaveSourceFirst">
+        <location filename="../src/PDFTabModel.cpp" line="782"/>
+        <source>Save the changes in “%1” before splitting so the new PDFs include your latest edits.</source>
+        <translation>บันทึกการเปลี่ยนแปลงใน “%1” ก่อนแยก เพื่อให้ PDF ใหม่มีการแก้ไขล่าสุดของคุณ</translation>
+    </message>
+    <message id="SplitPdfDescription">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="101"/>
+        <source>Turn one PDF into smaller files. Choose how to group the pages; your original PDF stays unchanged.</source>
+        <translation>แยก PDF หนึ่งไฟล์เป็นไฟล์ย่อย เลือกวิธีจัดกลุ่มหน้า โดยไฟล์ PDF ต้นฉบับจะคงเดิม</translation>
+    </message>
+    <message id="SplitPdfChooseFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="114"/>
+        <source>Choose PDF…</source>
+        <translation>เลือก PDF…</translation>
+    </message>
+    <message id="SplitPdfNoFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="132"/>
+        <source>No PDF selected</source>
+        <translation>ยังไม่ได้เลือก PDF</translation>
+    </message>
+    <message id="SplitPdfPageCount">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="142"/>
+        <source>%1 pages</source>
+        <translation>%1 หน้า</translation>
+    </message>
+    <message id="SplitPdfMethod">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="157"/>
+        <source>How would you like to split it?</source>
+        <translation>คุณต้องการแยก PDF อย่างไร?</translation>
+    </message>
+    <message id="SplitPdfEachPage">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="167"/>
+        <source>One file per page</source>
+        <translation>หนึ่งไฟล์ต่อหน้า</translation>
+    </message>
+    <message id="SplitPdfEveryN">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="179"/>
+        <source>Split into groups of pages</source>
+        <translation>แบ่งเป็นกลุ่มหน้า</translation>
+    </message>
+    <message id="SplitPdfPagesPerFile">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="195"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="205"/>
+        <source>Pages per file</source>
+        <translation>จำนวนหน้าต่อไฟล์</translation>
+    </message>
+    <message id="SplitPdfCustom">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="218"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="237"/>
+        <source>Choose page ranges</source>
+        <translation>เลือกช่วงหน้า</translation>
+    </message>
+    <message id="SplitPdfRangesExample">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="235"/>
+        <source>Example: 1-3; 4-6; 7,9</source>
+        <translation>ตัวอย่าง: 1-3; 4-6; 7,9</translation>
+    </message>
+    <message id="SplitPdfRangesHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="249"/>
+        <source>Separate files with a semicolon (;). Use a dash for a range and commas for individual pages. For example, 1-3; 4-6; 7,9 makes three files. Only the pages you enter are included.</source>
+        <translation>ใช้เครื่องหมายอัฒภาค (;) แยกแต่ละไฟล์ ใช้ขีดกลางระบุช่วงหน้า และจุลภาคระบุแต่ละหน้า เช่น 1-3; 4-6; 7,9 จะสร้างสามไฟล์ โดยรวมเฉพาะหน้าที่คุณระบุเท่านั้น</translation>
+    </message>
+    <message id="SplitPdfOutputSummary">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="261"/>
+        <source>%1 PDF files will be created.</source>
+        <translation>จะสร้างไฟล์ PDF จำนวน %1 ไฟล์</translation>
+    </message>
+    <message id="SplitPdfDestinationHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="271"/>
+        <source>Choose a destination next. TrePDF creates a new folder there for the split files, without replacing existing files.</source>
+        <translation>จากนั้นเลือกตำแหน่งบันทึก TrePDF จะสร้างโฟลเดอร์ใหม่ที่นั่นสำหรับไฟล์ที่แยก โดยไม่แทนที่ไฟล์เดิม</translation>
+    </message>
+    <message id="SplitPdfSupportNotice">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="281"/>
+        <source>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</source>
+        <translation>เวอร์ชันนี้ยังไม่รองรับ PDF ที่มีรหัสผ่าน ลายเซ็นดิจิทัล หรือแบบฟอร์มที่กรอกได้ ไฟล์ที่แยกจะไม่รวมบุ๊กมาร์ก ไฟล์แนบระดับเอกสาร และแท็กการช่วยการเข้าถึง ลิงก์ไปยังหน้าที่ไม่อยู่ในไฟล์ผลลัพธ์แต่ละไฟล์จะถูกปิดใช้งาน</translation>
+    </message>
+    <message id="SplitPdfCompletedSummary">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="292"/>
+        <source>Created %1 PDF files in a new folder.</source>
+        <translation>สร้างไฟล์ PDF จำนวน %1 ไฟล์ในโฟลเดอร์ใหม่แล้ว</translation>
+    </message>
+    <message id="SplitPdfOutputFolder">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="311"/>
+        <source>Output folder</source>
+        <translation>โฟลเดอร์ผลลัพธ์</translation>
+    </message>
+    <message id="SplitPdfChooseFolderAndSplit">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="363"/>
+        <source>Choose folder and split…</source>
+        <translation>เลือกโฟลเดอร์และแยก…</translation>
+    </message>
+    <message id="SplitPdfOpenFolder">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="376"/>
+        <source>Open folder</source>
+        <translation>เปิดโฟลเดอร์</translation>
+    </message>
+    <message id="SplitPdfChooseTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="392"/>
+        <source>Choose a PDF to split</source>
+        <translation>เลือก PDF ที่จะแยก</translation>
+    </message>
+    <message id="SplitPdfChooseFolderTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="415"/>
+        <source>Choose where to save the split PDF files</source>
+        <translation>เลือกตำแหน่งบันทึกไฟล์ PDF ที่แยก</translation>
+    </message>
+    <message id="SplitPdfInvalidFile">
+        <location filename="../src/PDFSplitController.cpp" line="107"/>
+        <source>This file could not be read as a complete PDF. Choose the PDF again.</source>
+        <translation>ไม่สามารถอ่านไฟล์นี้เป็น PDF ที่สมบูรณ์ได้ โปรดเลือก PDF อีกครั้ง</translation>
+    </message>
+    <message id="SplitPdfEncryptedFile">
+        <location filename="../src/PDFSplitController.cpp" line="110"/>
+        <source>This PDF is password-protected. Choose a PDF without password protection to split it.</source>
+        <translation>PDF นี้มีการป้องกันด้วยรหัสผ่าน เลือก PDF ที่ไม่มีการป้องกันด้วยรหัสผ่านเพื่อแยกไฟล์</translation>
+    </message>
+    <message id="SplitPdfUnsupportedFile">
+        <location filename="../src/PDFSplitController.cpp" line="113"/>
+        <source>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
+        <translation>PDF นี้มีแบบฟอร์ม ลายเซ็นดิจิทัล เลเยอร์ หรือการกระทำที่ยังไม่สามารถเก็บไว้เมื่อแยกไฟล์ได้</translation>
+    </message>
+    <message id="SplitPdfLimitExceeded">
+        <location filename="../src/PDFSplitController.cpp" line="116"/>
+        <source>Split supports up to 10,000 source pages, 1,000 output files, a 256 MB source, and 1 GB of output in total.</source>
+        <translation>การแยกรองรับต้นฉบับสูงสุด 10,000 หน้า ขนาด 256 MB และไฟล์ผลลัพธ์สูงสุด 1,000 ไฟล์ ขนาดรวมไม่เกิน 1 GB</translation>
+    </message>
+    <message id="SplitPdfSourceChanged">
+        <location filename="../src/PDFSplitController.cpp" line="119"/>
+        <source>The PDF changed after it was selected. Choose it again before splitting.</source>
+        <translation>PDF มีการเปลี่ยนแปลงหลังจากเลือก โปรดเลือกไฟล์อีกครั้งก่อนแยก</translation>
+    </message>
+    <message id="SplitPdfInvalidDestination">
+        <location filename="../src/PDFSplitController.cpp" line="122"/>
+        <source>Choose an existing writable folder. TrePDF will create a new folder inside it without replacing your files.</source>
+        <translation>เลือกโฟลเดอร์ที่มีอยู่และเขียนได้ TrePDF จะสร้างโฟลเดอร์ใหม่ภายใน โดยไม่แทนที่ไฟล์ของคุณ</translation>
+    </message>
+    <message id="SplitPdfInvalidRanges">
+        <location filename="../src/PDFSplitController.cpp" line="125"/>
+        <source>Enter valid page groups, such as 1-3; 4-6; 7,9. Use each page only once and stay within the PDF's page count.</source>
+        <translation>ระบุกลุ่มหน้าที่ถูกต้อง เช่น 1-3; 4-6; 7,9 ใช้แต่ละหน้าได้เพียงครั้งเดียว และหมายเลขหน้าต้องไม่เกินจำนวนหน้าใน PDF</translation>
+    </message>
+    <message id="SplitPdfFailed">
+        <location filename="../src/PDFSplitController.cpp" line="128"/>
+        <source>Could not split this PDF. Your original file has not been changed and no output folder was created.</source>
+        <translation>ไม่สามารถแยก PDF นี้ได้ ไฟล์ต้นฉบับยังไม่ได้ถูกเปลี่ยนแปลง และยังไม่ได้สร้างโฟลเดอร์ผลลัพธ์</translation>
+    </message>
+    <message id="SplitPdfReading">
+        <location filename="../src/PDFSplitController.cpp" line="669"/>
+        <source>Reading PDF…</source>
+        <translation>กำลังอ่าน PDF…</translation>
+    </message>
+    <message id="SplitPdfWorking">
+        <location filename="../src/PDFSplitController.cpp" line="702"/>
+        <source>Splitting PDF…</source>
+        <translation>กำลังแยก PDF…</translation>
+    </message>
+    <message id="SplitPdfAlreadyRunning">
+        <location filename="../src/PDFSplitController.cpp" line="735"/>
+        <source>Another PDF split is finishing. Please try again in a moment.</source>
+        <translation>การแยก PDF อีกงานกำลังจะเสร็จสิ้น โปรดลองอีกครั้งในอีกสักครู่</translation>
+    </message>
+    <message id="SplitPdfSucceeded">
+        <location filename="../src/PDFSplitController.cpp" line="920"/>
+        <source>Saved %1 PDF files in %2.</source>
+        <translation>บันทึกไฟล์ PDF จำนวน %1 ไฟล์ใน %2 แล้ว</translation>
+    </message>
+    <message id="SplitPdfCancelled">
+        <location filename="../src/PDFSplitController.cpp" line="923"/>
+        <source>PDF split cancelled. Your original file has not been changed.</source>
+        <translation>ยกเลิกการแยก PDF แล้ว ไฟล์ต้นฉบับยังไม่ได้ถูกเปลี่ยนแปลง</translation>
+    </message>
 </context>
 </TS>
