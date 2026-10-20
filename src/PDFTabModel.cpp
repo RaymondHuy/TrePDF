@@ -774,8 +774,8 @@ QString PDFTabModel::splitValidationError(const QUrl &source) const
             // a second hard link to a document with pending form/content input.
             std::error_code error;
             sameSource = std::filesystem::equivalent(
-                std::filesystem::u8path(identity.toUtf8().constData()),
-                std::filesystem::u8path(openIdentity.toUtf8().constData()), error) && !error;
+                QFileInfo(identity).filesystemFilePath(),
+                QFileInfo(openIdentity).filesystemFilePath(), error) && !error;
         }
         if (sameSource) {
             //% "Save the changes in “%1” before splitting so the new PDFs include your latest edits."

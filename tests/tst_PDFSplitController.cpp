@@ -444,9 +444,13 @@ private slots:
         QVERIFY(createPdf(source));
         QVERIFY(writeFile(broken, "not a PDF"));
         {
+            // qpdf retains the output filename while configuring encryption
+            // and writing. Both byte buffers outlive the entire qpdf handle.
+            const QByteArray sourcePath = source.toUtf8();
+            const QByteArray encryptedPath = encrypted.toUtf8();
             PdfHandle pdf;
-            QCOMPARE(qpdf_read(pdf.value, source.toUtf8().constData(), ""), QPDF_SUCCESS);
-            QCOMPARE(qpdf_init_write(pdf.value, encrypted.toUtf8().constData()), QPDF_SUCCESS);
+            QCOMPARE(qpdf_read(pdf.value, sourcePath.constData(), ""), QPDF_SUCCESS);
+            QCOMPARE(qpdf_init_write(pdf.value, encryptedPath.constData()), QPDF_SUCCESS);
             qpdf_set_r6_encryption_parameters2(pdf.value, "secret", "owner", true, true, true,
                 true, true, true, qpdf_r3p_full, true);
             QCOMPARE(qpdf_write(pdf.value), QPDF_SUCCESS);

@@ -716,7 +716,7 @@ giữ handle khóa đầu ra. Xem `windows-clion.md` và `tests/windows-save/REA
 ### [`src/PDFPasswordWriter.cpp`](../src/PDFPasswordWriter.cpp) và
 [`src/PDFPasswordWriter.h`](../src/PDFPasswordWriter.h)
 
-**Vai trò:** adapter C++17 cho C API của qpdf 12.4.1 được bundle trong
+**Vai trò:** adapter C++23 cho C API của qpdf 12.4.1 được bundle trong
 `third_party/qpdf`, mã hóa staging plaintext hoặc thay mật khẩu mở của source
 PDF đã xác thực và không có giới hạn quyền.
 
@@ -727,9 +727,9 @@ PDF đã xác thực và không có giới hạn quyền.
 - qpdf được bundle dưới dạng dylib Release đã build sẵn cho macOS arm64 (macOS
   13 trở lên), dùng native crypto với OS secure randomness và chứa JPEG tĩnh;
   runtime chỉ phụ thuộc thư viện hệ thống. CMake dùng imported target
-  `QPDF::QPDF`, cho phép đổi package qua `QPDF_ROOT`. Build ứng dụng vẫn dùng
-  C++17, không tải hay biên dịch source qpdf; chỉ script rebuild dependency khi
-  nâng cấp mới cần C++20 và JPEG tĩnh của Qt SDK.
+  `QPDF::QPDF`, cho phép đổi package qua `QPDF_ROOT`. Build ứng dụng dùng
+  C++23, không tải hay biên dịch source qpdf. Script rebuild dependency khi
+  nâng cấp yêu cầu tối thiểu C++20 và JPEG tĩnh của Qt SDK.
 - Ứng dụng không gọi CLI, không lưu mật khẩu vào settings/file và không đưa
   mật khẩu vào log hay thông báo lỗi backend.
 - Adapter luôn ghi file tạm riêng, không ghi đè nguồn. Kiểm chứng PDFium và

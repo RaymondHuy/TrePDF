@@ -2623,7 +2623,7 @@ void PDFEditController::appendPageObjectCandidates(
     candidate.horizontalScale = horizontalScaleForTransform(textTransform);
     candidate.fontStretch = qBound(
         static_cast<int>(QFont::UltraCondensed),
-        qRound(candidate.horizontalScale * QFont::Unstretched),
+        qRound(candidate.horizontalScale * static_cast<qreal>(QFont::Unstretched)),
         static_cast<int>(QFont::UltraExpanded));
     candidate.textRenderMode = renderMode;
     candidate.fillColor = pageObjectColor(pageObject, false);

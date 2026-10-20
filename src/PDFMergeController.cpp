@@ -50,8 +50,8 @@ bool sameFile(const QString &left, const QString &right)
 {
     if (QFileInfo(left).absoluteFilePath() == QFileInfo(right).absoluteFilePath())
         return true;
-    const auto a = std::filesystem::u8path(left.toUtf8().constData());
-    const auto b = std::filesystem::u8path(right.toUtf8().constData());
+    const auto a = QFileInfo(left).filesystemFilePath();
+    const auto b = QFileInfo(right).filesystemFilePath();
     std::error_code error;
     return std::filesystem::equivalent(a, b, error) && !error;
 }

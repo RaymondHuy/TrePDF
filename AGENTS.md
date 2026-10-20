@@ -9,7 +9,7 @@
 ## Project Summary
 
 TrePDF is a macOS desktop PDF reader built with Qt 6, Qt Quick Controls, QML,
-C++17, and PDFium. The current scope includes PDF viewing, sandboxed AcroForm
+C++23, and PDFium. The current scope includes PDF viewing, sandboxed AcroForm
 interaction, draft editing for supported text, images, and page operations,
 and Save/Save As persistence.
 
@@ -692,7 +692,7 @@ Current features:
 - `src/PDFSaveWriter.h/.cpp`: resolves source object paths, reflows rich-text
   runs, embeds/reuses fonts, creates added image objects, regenerates changed
   page content, and writes the PDF transactionally.
-- `src/PDFPasswordWriter.h/.cpp`: C++17 adapter to qpdf's C API; encrypts a
+- `src/PDFPasswordWriter.h/.cpp`: C++23 adapter to qpdf's C API; encrypts a
   completed plaintext staging PDF or replaces an unrestricted source PDF's
   opening password using its authenticated session password. The prebuilt qpdf
   dylib uses native crypto with OS secure randomness and contains its static
@@ -739,8 +739,8 @@ Current features:
   headers, version, checksums, and upstream notices; requires macOS 13 or newer.
   Normal builds use this package without compiling or downloading qpdf sources.
 - `scripts/build-qpdf-macos.sh`: separate dependency rebuild script for upgrades;
-  accepts a Qt prefix and optional output directory. Only this step requires
-  C++20 and the Qt SDK's static JPEG library. See the package README for tool
+  accepts a Qt prefix and optional output directory. This dependency build requires
+  at least C++20 and the Qt SDK's static JPEG library. See the package README for tool
   overrides and verified offline source archives.
 
 ## Local Toolchain
@@ -754,6 +754,11 @@ This project is configured for the following local SDK:
 - qpdf root: `<repo>/third_party/qpdf` (override with `QPDF_ROOT`)
 - CLion: `/Applications/CLion.app`
 - Default build directory: `<repo>/cmake-build-debug`
+
+Application and test targets require C++23 with compiler extensions disabled.
+The iOS Objective-C++ bridge uses the same standard. Use a compiler and
+standard library that support the C++23 features used by the project; CMake
+must fail rather than silently select an older language standard.
 
 There is intentionally no `CMakePresets.json`. Do not add one unless the user
 explicitly requests it. `CMakeLists.txt` already contains local fallback paths

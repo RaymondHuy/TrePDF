@@ -12,8 +12,8 @@ records the files in this binary package.
 
 TrePDF imports this library through `cmake/FindQPDF.cmake` as `QPDF::QPDF` and
 copies it into the app bundle. Set `QPDF_ROOT` to use another compatible package.
-Normal configure/build steps neither download nor compile qpdf; TrePDF remains
-C++17 and calls the C API. No qpdf CLI or Homebrew installation is required.
+Normal configure/build steps neither download nor compile qpdf; TrePDF uses
+C++23 and calls the C API. No qpdf CLI or Homebrew installation is required.
 The public C++ headers are included because `qpdf-c.h` exposes optional C++
 interop declarations when included from C++ code.
 
