@@ -136,8 +136,8 @@ void PDFEditControllerTest::routesSplitPdfDialogAndGuardsDirtySources()
 #endif
     const QString hardlinkPath = m_temporaryDirectory.filePath(QStringLiteral("split-ui-hardlink.pdf"));
     std::error_code linkError;
-    std::filesystem::create_hard_link(std::filesystem::u8path(sourcePath.toUtf8().constData()),
-                                     std::filesystem::u8path(hardlinkPath.toUtf8().constData()), linkError);
+    std::filesystem::create_hard_link(QFileInfo(sourcePath).filesystemFilePath(),
+                                     QFileInfo(hardlinkPath).filesystemFilePath(), linkError);
     QVERIFY2(!linkError, linkError.message().c_str());
     QVERIFY(!model->splitValidationError(QUrl::fromLocalFile(hardlinkPath)).isEmpty());
     QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));

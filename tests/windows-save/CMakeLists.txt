@@ -5,14 +5,15 @@ if(NOT WIN32)
     message(FATAL_ERROR "These tests exercise Windows atomic file replacement")
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTOMOC ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../cmake")
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Test)
+qt_standard_project_setup()
 find_package(PDFium REQUIRED)
 
-add_executable(trepdf_windows_save_tests
+qt_add_executable(trepdf_windows_save_tests
     tst_WindowsSave.cpp
     ../../src/PDFAtomicSaveFile.cpp
     ../../src/PDFiumDocument.cpp

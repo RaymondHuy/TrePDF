@@ -12,8 +12,14 @@ project(TrePDF
 
 option(TREPDF_DEPLOY_RUNTIME "Install Qt, QML and PDF runtime dependencies for distribution" OFF)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+if(IOS)
+    set(CMAKE_OBJCXX_STANDARD ${CMAKE_CXX_STANDARD})
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+    set(CMAKE_OBJCXX_EXTENSIONS OFF)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -602,8 +608,6 @@ if(IOS)
         message(FATAL_ERROR "Use the Xcode generator for iOS framework embedding and signing")
     endif()
     enable_language(OBJCXX)
-    set(CMAKE_OBJCXX_STANDARD 17)
-    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
     set(TREPDF_IOS_BUNDLE_ID "com.treoffice.trepdf" CACHE STRING "iPad application bundle identifier")
     set(TREPDF_IOS_TEAM_ID "" CACHE STRING "Apple development team ID for device signing")
     set(TREPDF_IOS_LICENSE_DIR "" CACHE PATH "Third-party notices prepared for iPad")

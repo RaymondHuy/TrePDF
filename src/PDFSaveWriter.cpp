@@ -3717,7 +3717,8 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             // word advance would stretch the glyphs themselves.
             horizontalScale = qBound(
                 kMinimumScale,
-                static_cast<qreal>(run.format.fontStretch) / QFont::Unstretched,
+                static_cast<qreal>(run.format.fontStretch)
+                    / static_cast<qreal>(QFont::Unstretched),
                 kMaximumScale);
         } else if (configured
             && FPDFPageObj_GetBounds(textObject, &left, &bottom, &right, &top)

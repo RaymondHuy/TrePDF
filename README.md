@@ -545,12 +545,14 @@ and the `pdfium` library. Like PDFium, qpdf 12.4.1 is bundled as a prebuilt macO
 arm64 library with public headers under `third_party/qpdf` (macOS 13 or newer).
 CMake imports it as `QPDF::QPDF` and copies the library into the app bundle.
 Normal configure/build steps download no dependencies and require neither qpdf
-sources nor a qpdf CLI installation; the application remains C++17. Use
+sources nor a qpdf CLI installation; the application requires a C++23-capable
+compiler and standard library. CMake requires C++23 for application and test
+targets without falling back to an older standard. Use
 `-DQPDF_ROOT=/path/to/qpdf` to select another compatible package.
 
 To rebuild qpdf when upgrading the dependency, run
-`scripts/build-qpdf-macos.sh <Qt-prefix> [output-directory]`. Only this separate
-step needs C++20 and the Qt SDK's static JPEG library. See
+`scripts/build-qpdf-macos.sh <Qt-prefix> [output-directory]`. This separate
+dependency build requires at least C++20 and the Qt SDK's static JPEG library. See
 [`third_party/qpdf/README.trepdf.md`](third_party/qpdf/README.trepdf.md) for
 provenance, checksums, and offline rebuild instructions.
 
