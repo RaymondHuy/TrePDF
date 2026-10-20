@@ -22,10 +22,29 @@ cmake -S . -B build -DOCR_ROOT=/path/to/native-ocr
 The script requires Python 3.9+, CMake, Ninja and a native compiler. Set `--cmake`
 and `--ninja` when these are outside PATH. `--offline` uses the verified files
 already in `<work>/downloads`. Every network artifact has a fixed SHA-256 pin.
-On Windows, use an MSVC developer shell and pass `--zlib-root` to the static zlib
-prefix prepared by `scripts/ci/prepare_dependencies.py`. Match the app's build
-configuration (`--build-type Debug` for MSVC Debug). On macOS, `--arch` and
-`--macos-target` select the native architecture and minimum supported OS.
+On Windows, the default `--windows-toolchain msvc` uses an MSVC developer shell.
+Pass `--zlib-root` to the static zlib prefix prepared by
+`scripts/ci/prepare_dependencies.py` and match the app's build configuration
+(`--build-type Debug` for MSVC Debug). MSVC packages contain `.lib` files.
+
+For a MinGW app, select `--windows-toolchain mingw` and put the matching `gcc`
+and `g++` first on PATH. Supply a zlib prefix built for that compiler. Use separate
+work and install directories from MSVC; MinGW packages contain `libtesseract.a`
+and `libleptonica.a`. For the local Qt 6.12 / MinGW 15.1 kit:
+
+```powershell
+$env:PATH = 'E:\Qt\Tools\mingw1510_64\bin;' + $env:PATH
+python scripts/build-ocr.py --windows-toolchain mingw `
+  --prefix _deps/windows/ocr-mingw1510 --work _deps/windows/ocr-build-mingw1510 `
+  --zlib-root E:/Qt/Tools/mingw1510_64/x86_64-w64-mingw32 `
+  --cmake 'E:/App/CLion 2026.1.2/bin/cmake/win/x64/bin/cmake.exe' `
+  --ninja 'E:/App/CLion 2026.1.2/bin/ninja/win/x64/ninja.exe'
+```
+
+Point the app's `OCR_ROOT` at `_deps/windows/ocr-mingw1510`. The checked-in
+macOS package in this directory remains separate from these Windows outputs.
+On macOS, `--arch` and `--macos-target` select the native architecture and
+minimum supported OS.
 
 `scripts/ci/prepare_dependencies.py` rebuilds this package for Windows x64,
 macOS arm64/x64 and Linux x64 and exports `OCR_ROOT`. An ordinary CMake build

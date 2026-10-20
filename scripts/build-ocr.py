@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build the pinned, static desktop OCR package; ordinary app builds stay offline.
 
-Requires CMake, Ninja and a native C/C++ toolchain. On Windows run from the
-matching MSVC developer shell and supply --zlib-root from prepare_dependencies.
+Requires CMake, Ninja and a native C/C++ toolchain. On Windows use the matching
+MSVC developer shell, or --windows-toolchain mingw with gcc/g++ on PATH.
+Supply --zlib-root built for the selected Windows compiler.
 Use --offline with a populated cache for reproducible disconnected rebuilds.
 """
 
@@ -114,8 +115,14 @@ def build(args):
         common += [f"-DCMAKE_OSX_ARCHITECTURES={args.arch or platform.machine()}",
                    f"-DCMAKE_OSX_DEPLOYMENT_TARGET={args.macos_target}"]
     elif platform.system() == "Windows":
-        common += ["-DCMAKE_C_COMPILER=cl", "-DCMAKE_CXX_COMPILER=cl",
-                   "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"]
+        if args.windows_toolchain == "mingw":
+            gcc, gxx = shutil.which("gcc"), shutil.which("g++")
+            if not gcc or not gxx:
+                raise RuntimeError("MinGW gcc and g++ are required on PATH")
+            common += [f"-DCMAKE_C_COMPILER={gcc}", f"-DCMAKE_CXX_COMPILER={gxx}"]
+        else:
+            common += ["-DCMAKE_C_COMPILER=cl", "-DCMAKE_CXX_COMPILER=cl",
+                       "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"]
 
     lept_source = sources / f"leptonica-{LEPTONICA_VERSION}"
     tess_source = sources / f"tesseract-{TESSERACT_VERSION}"
@@ -147,12 +154,19 @@ def build(args):
     for header in (tess_source / "include/tesseract").glob("*.h"):
         shutil.copy2(header, tess_headers / header.name)
     shutil.copy2(tess_build / "include/tesseract/version.h", tess_headers / "version.h")
-    suffix = ".lib" if platform.system() == "Windows" else ".a"
+    suffix = ".lib" if platform.system() == "Windows" and args.windows_toolchain == "msvc" else ".a"
     for source, pattern, name in ((lept_install / "lib", "*leptonica*", "leptonica"),
                                   (tess_build, "*tesseract*", "tesseract")):
         libraries = list(source.glob(pattern + suffix))
+        if not libraries and name == "leptonica" and platform.system() == "Windows" and args.windows_toolchain == "mingw":
+            # Leptonica 1.87 assigns a .dll suffix to every MinGW target,
+            # including static archives. Normalize it only after verification.
+            libraries = list(source.glob(pattern + ".dll"))
         if len(libraries) != 1:
             raise RuntimeError(f"Expected one static {name} library, found {libraries}")
+        with libraries[0].open("rb") as library:
+            if library.read(8) != b"!<arch>\n":
+                raise RuntimeError(f"Expected a static archive: {libraries[0]}")
         filename = name + suffix if suffix == ".lib" else "lib" + name + suffix
         shutil.copy2(libraries[0], prefix / "lib" / filename)
     data = prefix / "share/tessdata"
@@ -169,6 +183,7 @@ def build(args):
     manifest = {"tesseract": TESSERACT_VERSION, "leptonica": LEPTONICA_VERSION,
                 "models": MODEL_REVISION, "build_type": args.build_type, "system": platform.system(),
                 "architecture": args.arch or platform.machine(),
+                "windows_toolchain": args.windows_toolchain if platform.system() == "Windows" else None,
                 "macos_target": args.macos_target if platform.system() == "Darwin" else None}
     (prefix / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     files = [p for directory in ("lib", "include", "share", "licenses")
@@ -186,6 +201,8 @@ if __name__ == "__main__":
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--ninja")
     parser.add_argument("--zlib-root", type=Path)
+    parser.add_argument("--windows-toolchain", choices=("msvc", "mingw"), default="msvc",
+                        help="Windows compiler family; MinGW requires gcc/g++ on PATH")
     parser.add_argument("--arch", default=os.environ.get("MACOS_ARCHITECTURE"))
     parser.add_argument("--macos-target", default=os.environ.get("MACOS_DEPLOYMENT_TARGET") or "13.0")
     parser.add_argument("--build-type", choices=("Release", "Debug"), default="Release")

@@ -1,6 +1,6 @@
 # Windows / CLion setup
 
-This local setup uses Qt 6.10.3 MinGW x64 and CLion's bundled GCC 13.1.0.
+This local setup uses Qt 6.12.0 MinGW x64 and GCC 15.1.0.
 CMake configuration and the application build have been verified with the
 paths below. An offscreen startup check loaded the application for 12 seconds
 without errors. The preset builds the application only; the full feature test
@@ -10,22 +10,28 @@ suite has not been run on Windows.
 
 | Setting | Path |
 | --- | --- |
-| Qt prefix | `E:/Qt/6.10.3/mingw_64` |
-| GCC / G++ | `E:/App/CLion 2026.1.2/bin/mingw/bin` |
+| Qt prefix | `E:/Qt/6.12.0/mingw_64` |
+| GCC / G++ / windres | `E:/Qt/Tools/mingw1510_64/bin` |
 | CMake | `E:/App/CLion 2026.1.2/bin/cmake/win/x64/bin/cmake.exe` |
 | Ninja | `E:/App/CLion 2026.1.2/bin/ninja/win/x64/ninja.exe` |
-| ZLIB root | `E:/App/CLion 2026.1.2/bin/mingw/x86_64-w64-mingw32` |
+| ZLIB root | `E:/Qt/Tools/mingw1510_64/x86_64-w64-mingw32` |
+| OCR root | `<repo>/_deps/windows/ocr-mingw1510` |
 
 Use the MinGW Qt kit with this compiler. The separate `msvc2022_64` Qt kit
 requires an MSVC toolchain and is not used by this preset. ZLIB headers and
-the static library are already provided by the CLion MinGW sysroot.
+the static library are already provided by the MinGW 15.1 sysroot.
+The Qt kit's compiler runtime DLLs must match GCC 15.1; this installation
+includes them. Qt TaskTree is also installed for Qt 6.12's QML dependencies.
 
 `CMakeUserPresets.json` contains the machine-specific preset
-`windows-clion-debug`, displayed as **Windows Qt 6.10.3 Debug**. It sets the
+`windows-clion-debug`, displayed as **Windows Qt 6.12.0 Debug**. It sets the
 tool paths, dependency roots, a build-local PATH, and `BUILD_TESTING=OFF`.
 The existing test suite includes Unix-specific code and is not enabled by
 this application setup. The preset, `.idea/`, `_deps/`, and
-`cmake-build-windows-debug/` are ignored by Git.
+`cmake-build-windows-qt612-debug/` are ignored by Git. This build directory
+is separate from the old Qt 6.10/GCC 13 build to avoid reusing cached Qt module
+paths or compiler checks. The profile name stays unchanged, so existing
+run configurations continue to use it.
 
 ## Local PDF dependencies
 
@@ -44,7 +50,18 @@ _deps/windows/
     include/qpdf/qpdf-c.h
     lib/libqpdf.a
     bin/qpdf30.dll
+  ocr-mingw1510/
+    include/tesseract/baseapi.h
+    lib/libtesseract.a
+    lib/libleptonica.a
+    share/tessdata/
 ```
+
+The checked-in `third_party/ocr` libraries are macOS arm64. The Windows
+preset uses a separate native MinGW OCR package; build it with
+`scripts/build-ocr.py --windows-toolchain mingw` as documented in
+[`third_party/ocr/README.md`](../third_party/ocr/README.md). Its compiler and
+zlib must match the toolchain above.
 
 The downloaded packages and SHA-256 hashes are:
 
@@ -70,7 +87,7 @@ $trepdfCMake = 'E:/App/CLion 2026.1.2/bin/cmake/win/x64/bin/cmake.exe'
 & $trepdfCMake --build --preset windows-clion-debug
 ```
 
-The executable is `cmake-build-windows-debug/trepdf.exe`. After linking,
+The executable is `cmake-build-windows-qt612-debug/trepdf.exe`. After linking,
 the Windows deployment helper copies PDFium and qpdf DLLs and runs the Qt
 kit's `windeployqt` to deploy Qt libraries, QML imports, plugins, and compiler
 runtime beside the executable. It uses the compiler runtime selected by Qt,
@@ -88,12 +105,30 @@ In CLion:
 
 1. Open this repository and reload the CMake project.
 2. Go to **Settings > Build, Execution, Deployment > CMake** and enable the
-   imported **Windows Qt 6.10.3 Debug** preset. Disable the old unconfigured
+   imported **Windows Qt 6.12.0 Debug** preset. Disable the old unconfigured
    default Debug profile if CLion still tries to load it.
 3. Choose the `trepdf` run target with that CMake profile, then Build / Run.
 
 If local installation paths change, update `CMakeUserPresets.json` and reload
 CMake. No global PATH or shared Mac Qt path needs to change.
+
+## Local release package
+
+`pipelines/build-windows.ps1` uses the separate MSVC Qt kit. With no override,
+it selects `E:/Qt/6.12.0/msvc2022_64` when installed; `-QtRoot` and
+`QT_ROOT_DIR` still take precedence. It prefers Visual Studio 2022 and also
+accepts Visual Studio 2026, including Insiders, with x64 C++ tools and a
+Windows SDK. Python 3.12+ x64, CMake and Ninja must be available on PATH.
+
+```powershell
+.\pipelines\build-windows.ps1 -CheckOnly
+.\pipelines\build-windows.ps1
+```
+
+The script prepares its own MSVC PDF/OCR dependencies and writes packages
+under `artifacts/local/windows-x64/`. Its build and dependencies are separated
+by Qt version under `build/local/` and `_deps/local/`, independently of the
+CLion MinGW preset.
 
 ## Saving an open PDF on Windows
 

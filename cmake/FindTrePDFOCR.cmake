@@ -10,6 +10,10 @@ if(NOT OCR_ROOT)
     endif()
 endif()
 
+# Command-line and environment roots can contain native Windows separators.
+# This root also becomes a C++ string literal and generated install code.
+file(TO_CMAKE_PATH "${OCR_ROOT}" OCR_ROOT)
+
 find_path(TREPDF_OCR_INCLUDE_DIR tesseract/baseapi.h PATHS "${OCR_ROOT}/include" NO_DEFAULT_PATH)
 find_library(TREPDF_TESSERACT_LIBRARY NAMES tesseract PATHS "${OCR_ROOT}/lib" NO_DEFAULT_PATH)
 find_library(TREPDF_LEPTONICA_LIBRARY NAMES leptonica PATHS "${OCR_ROOT}/lib" NO_DEFAULT_PATH)
