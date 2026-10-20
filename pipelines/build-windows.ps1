@@ -2,20 +2,23 @@
 .SYNOPSIS
 Build and package TrePDF locally for Windows x64, using installed tools.
 .DESCRIPTION
-Requires 64-bit PowerShell, Visual Studio 2022 C++ tools + Windows SDK,
+Requires 64-bit PowerShell, Visual Studio 2022 or 2026 C++ tools + Windows SDK,
 Qt 6.8+ MSVC x64 (QML, Quick Controls, LinguistTools, ShaderTools,
 ImageFormats and, for Qt 6.12, TaskTree), Python 3.12+, CMake and Ninja.
+Visual Studio discovery prefers 2022, then 2026 (including Insiders).
+Defaults to E:\Qt\6.12.0\msvc2022_64 when installed. Override with -QtRoot
+or QT_ROOT_DIR; otherwise falls back to qmake.exe on PATH.
 Does not install Qt, Node.js or build tools. The first run downloads and
 builds the pinned PDF/OCR dependencies; later runs reuse their manifest.
 Output: artifacts/local/windows-x64/*.zip and *.sha256.
 Without -Version / TREPDF_VERSION, increments the highest local 0.0.x output
 or staging folder, including incomplete builds. Existing output is never replaced.
 .EXAMPLE
-.\pipelines\build-windows.ps1 -QtRoot C:\Qt\6.12.0\msvc2022_64
+.\pipelines\build-windows.ps1
 .EXAMPLE
-.\pipelines\build-windows.ps1 -QtRoot C:\Qt\6.12.0\msvc2022_64 -Version 0.0.10 -RefreshDependencies
+.\pipelines\build-windows.ps1 -QtRoot E:\Qt\6.12.0\msvc2022_64 -Version 0.0.10 -RefreshDependencies
 .EXAMPLE
-.\pipelines\build-windows.ps1 -QtRoot C:\Qt\6.12.0\msvc2022_64 -CheckOnly
+.\pipelines\build-windows.ps1 -CheckOnly
 #>
 [CmdletBinding()]
 param(
@@ -55,13 +58,17 @@ function Get-QtQuery([string]$Key) {
     return ($result -join "`n").Trim()
 }
 
+$DefaultQtRoot = 'E:\Qt\6.12.0\msvc2022_64'
+if (-not $QtRoot -and (Test-Path -LiteralPath $DefaultQtRoot -PathType Container)) {
+    $QtRoot = $DefaultQtRoot
+}
 if (-not $QtRoot) {
     $qmakeCommand = Get-Command qmake.exe -ErrorAction SilentlyContinue
     if (-not $qmakeCommand) { throw 'Supply -QtRoot <Qt MSVC x64 kit> or set QT_ROOT_DIR / qmake.exe on PATH.' }
     $Qmake = $qmakeCommand.Source
     $QtRoot = Get-QtQuery 'QT_INSTALL_PREFIX'
 }
-$QtRoot = (Resolve-Path -LiteralPath $QtRoot).Path
+$QtRoot = (Resolve-Path -LiteralPath $QtRoot).Path.Replace('\', '/')
 $Qmake = Join-Path $QtRoot 'bin/qmake.exe'
 if (-not (Test-Path -LiteralPath $Qmake -PathType Leaf)) { throw "Missing $Qmake." }
 $QtVersion = Get-QtQuery 'QT_VERSION'
@@ -90,13 +97,16 @@ foreach ($relative in @('CMake_64/bin', 'Ninja')) {
 }
 
 if ($env:VSCMD_ARG_TGT_ARCH -ne 'x64' -or $env:VSCMD_ARG_HOST_ARCH -ne 'x64' -or
-        $env:VisualStudioVersion -notlike '17.*' -or -not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+        $env:VisualStudioVersion -notmatch '^(17|18)\.' -or -not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
     $Vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     if (-not (Test-Path -LiteralPath $Vswhere -PathType Leaf)) {
-        throw 'Install Visual Studio 2022 C++ build tools and a Windows SDK before running this script.'
+        throw 'Install Visual Studio 2022 or 2026 C++ build tools and a Windows SDK before running this script.'
     }
     $VsPath = & $Vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if ($LASTEXITCODE -ne 0 -or -not $VsPath) { throw 'Visual Studio 2022 MSVC x64 tools were not found.' }
+    if ($LASTEXITCODE -ne 0 -or -not $VsPath) {
+        $VsPath = & $Vswhere -latest -version '[18.0,19.0)' -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $VsPath) { throw 'Visual Studio 2022 or 2026 MSVC x64 tools were not found.' }
     Import-Module (Join-Path $VsPath 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
     Enter-VsDevShell -VsInstallPath $VsPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
 }
@@ -113,7 +123,12 @@ foreach ($candidate in @('python.exe', 'python3.exe', 'py.exe')) {
     if (-not $command) { continue }
     $prefix = @()
     if ($candidate -eq 'py.exe') { $prefix = @('-3') }
-    & $command.Source @prefix -c 'import platform, struct, sys; sys.exit(0 if sys.version_info >= (3,12) and struct.calcsize(''P'') == 8 and platform.machine().lower() in (''amd64'', ''x86_64'') else 1)'
+    try {
+        & $command.Source @prefix -c 'import platform, struct, sys; sys.exit(0 if sys.version_info >= (3,12) and struct.calcsize(''P'') == 8 and platform.machine().lower() in (''amd64'', ''x86_64'') else 1)'
+    } catch {
+        # A Windows App Execution Alias may exist without an installed Python.
+        continue
+    }
     if ($LASTEXITCODE -eq 0) { $Python = $command.Source; $PythonArgs = $prefix; break }
 }
 if (-not $Python) { throw 'Python 3.12+ x64 is required on PATH (python.exe or py.exe).' }
@@ -178,7 +193,8 @@ try {
         if (-not $value -or -not (Test-Path -LiteralPath $value -PathType Container)) {
             throw "Invalid dependency root $name; use -RefreshDependencies."
         }
-        $Roots[$name] = (Resolve-Path -LiteralPath $value).Path
+        # CMake embeds these paths in generated scripts and C++ definitions.
+        $Roots[$name] = (Resolve-Path -LiteralPath $value).Path.Replace('\', '/')
     }
 
     Write-Host "Building TrePDF $Version for $Platform using Qt $QtVersion"
