@@ -785,6 +785,38 @@ QString PDFTabModel::splitValidationError(const QUrl &source) const
     return {};
 }
 
+bool PDFTabModel::prepareSplitSource(PDFSplitController *controller, const QUrl &source)
+{
+    if (!controller || controller->busy())
+        return false;
+    const QString error = splitValidationError(source);
+    if (!error.isEmpty()) {
+        emit statusMessage(error);
+        return false;
+    }
+
+    const QString identity = fileIdentity(source);
+    if (!identity.isEmpty()) {
+        for (const PDFDocumentSession *session : m_sessions) {
+            const PDFDocument *document = session->document();
+            if (!document->isLoaded())
+                continue;
+            const QString openIdentity = fileIdentity(document->source());
+            bool sameSource = identity == openIdentity;
+            if (!sameSource && !openIdentity.isEmpty()) {
+                std::error_code fileError;
+                sameSource = std::filesystem::equivalent(
+                    QFileInfo(identity).filesystemFilePath(),
+                    QFileInfo(openIdentity).filesystemFilePath(), fileError) && !fileError;
+            }
+            if (sameSource)
+                return controller->setSource(
+                    source, QString::fromUtf8(document->documentPassword()));
+        }
+    }
+    return controller->setSource(source);
+}
+
 PDFDocumentSession *PDFTabModel::firstDraftSession() const
 {
     for (PDFDocumentSession *session : m_sessions) {

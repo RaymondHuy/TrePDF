@@ -592,7 +592,7 @@ AppWindow {
             return
         }
         dialog.errorText = ""
-        pdfSplitController.setSource(source)
+        tabModel.prepareSplitSource(pdfSplitController, source)
     }
 
     function splitPdfTo(folder: url) {
@@ -1516,7 +1516,10 @@ AppWindow {
             controller: pdfSplitController
             onSourceRequested: source => window.selectSplitPdfSource(source)
             onSplitRequested: folder => window.splitPdfTo(folder)
-            onClosed: splitPdfDialogLoader.active = false
+            onClosed: {
+                pdfSplitController.clear()
+                splitPdfDialogLoader.active = false
+            }
         }
         onLoaded: {
             if (status === Loader.Ready) {

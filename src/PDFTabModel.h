@@ -7,6 +7,7 @@
 #include "PDFFormDesignerController.h"
 #include "PDFOCRController.h"
 #include "PDFSearchController.h"
+#include "PDFSplitController.h"
 
 #include <QAbstractListModel>
 #include <QUrl>
@@ -259,6 +260,9 @@ public:
                                const QString &language, const QString &pageRange);
     Q_INVOKABLE QString mergeValidationError(const QList<QUrl> &sources, const QUrl &target) const;
     Q_INVOKABLE QString splitValidationError(const QUrl &source) const;
+    // Reuses an already authenticated tab entirely in C++; credentials are
+    // never returned to QML or persisted by the split dialog.
+    Q_INVOKABLE bool prepareSplitSource(PDFSplitController *controller, const QUrl &source);
     Q_INVOKABLE PDFDocumentSession *firstDraftSession() const;
     Q_INVOKABLE void finishAllEdits();
 

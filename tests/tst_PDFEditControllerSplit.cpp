@@ -201,3 +201,117 @@ void PDFEditControllerTest::completesSplitPdfWithoutOpeningAllOutputs()
     QTRY_VERIFY(dialog.isNull());
     QVERIFY(!window->property("modalOperationActive").toBool());
 }
+
+void PDFEditControllerTest::reusesSplitPasswordFromOpenTabs()
+{
+    const QString protectedPath = m_temporaryDirectory.filePath(QStringLiteral("split-session-password.pdf"));
+    QVERIFY(QFile::copy(QFINDTESTDATA("fixtures/password-1.pdf"), protectedPath));
+    const QUrl source = QUrl::fromLocalFile(protectedPath);
+    const QString password = QStringLiteral("fixture-open-1");
+    const QString otherPath = m_temporaryDirectory.filePath(QStringLiteral("split-session-unrelated.pdf"));
+    QVERIFY(createThreePageTextPdf(otherPath));
+    PDFTabModel tabs;
+    PDFSplitController controller;
+    QVERIFY(!tabs.prepareSplitSource(nullptr, source));
+
+    QVERIFY(tabs.prepareSplitSource(&controller, source));
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(controller.passwordRequired());
+    QVERIFY(!controller.canSplit());
+    auto *session = tabs.open(source, password);
+    QVERIFY(session);
+    QVERIFY(tabs.open(QUrl::fromLocalFile(otherPath)));
+    // Reuse the matching session, even when a different tab is active.
+    QVERIFY(tabs.prepareSplitSource(&controller, source));
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(!controller.passwordRequired());
+    QVERIFY(controller.encryptedSource());
+    QVERIFY2(controller.canSplit(), qPrintable(controller.statusText()));
+
+    const QString aliasPath = m_temporaryDirectory.filePath(QStringLiteral("split-session-hardlink.pdf"));
+    std::error_code linkError;
+    std::filesystem::create_hard_link(QFileInfo(protectedPath).filesystemFilePath(),
+                                     QFileInfo(aliasPath).filesystemFilePath(), linkError);
+    QVERIFY2(!linkError, linkError.message().c_str());
+    QVERIFY(tabs.prepareSplitSource(&controller, QUrl::fromLocalFile(aliasPath)));
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(controller.canSplit());
+    QVERIFY(session->editController()->addBlankPage() >= 0);
+    QVERIFY(!tabs.prepareSplitSource(&controller, QUrl::fromLocalFile(aliasPath)));
+    QVERIFY(!controller.busy());
+    session->editController()->discardDrafts();
+
+    // Direct source selection starts fresh: no accidental credential reuse
+    // between files, and no getter exposes the authenticated secret to QML.
+    controller.clear();
+    QVERIFY(controller.source().isEmpty());
+    QVERIFY(controller.setSource(source));
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(controller.passwordRequired());
+    QCOMPARE(controller.metaObject()->indexOfProperty("password"), -1);
+    QCOMPARE(controller.metaObject()->indexOfMethod("documentPassword()"), -1);
+}
+
+void PDFEditControllerTest::promptsForSplitPasswordsAndClearsOnClose()
+{
+    const QUrl source = QUrl::fromLocalFile(QFINDTESTDATA("fixtures/password-1.pdf"));
+    const QString password = QStringLiteral("fixture-open-1");
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> window(component.create());
+    QVERIFY2(window, qPrintable(component.errorString()));
+    window->setProperty("visible", false);
+    window->setProperty("allowWindowClose", true);
+    auto *controller = window->findChild<PDFSplitController *>();
+    QVERIFY(controller);
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestSplitPdf"));
+    QPointer<QObject> dialog;
+    QTRY_VERIFY((dialog = window->findChild<QObject *>(QStringLiteral("splitPdfDialog"))));
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "selectSplitPdfSource", Q_ARG(QUrl, source)));
+    QTRY_VERIFY(!controller->busy());
+    QVERIFY(controller->passwordRequired());
+
+    auto *input = dialog->findChild<QObject *>(QStringLiteral("splitPdfPasswordInput"));
+    auto *unlock = dialog->findChild<QObject *>(QStringLiteral("splitPdfUnlockButton"));
+    auto *show = dialog->findChild<QObject *>(QStringLiteral("splitPdfShowPasswordCheckBox"));
+    auto *save = dialog->findChild<QObject *>(QStringLiteral("saveSplitPdfButton"));
+    QVERIFY(input);
+    QVERIFY(unlock);
+    QVERIFY(show);
+    QVERIFY(save);
+    QCOMPARE(input->property("echoMode").toInt(), 2); // TextInput.Password
+    QVERIFY(!save->property("enabled").toBool());
+    QVERIFY(input->setProperty("text", QStringLiteral("incorrect")));
+    QVERIFY(show->setProperty("checked", true));
+    QCOMPARE(input->property("echoMode").toInt(), 0); // TextInput.Normal
+    QVERIFY(QMetaObject::invokeMethod(unlock, "clicked"));
+    QTRY_VERIFY(!controller->busy());
+    QVERIFY(controller->passwordRequired());
+    QVERIFY(input->property("text").toString().isEmpty());
+    QVERIFY(!show->property("checked").toBool());
+
+    QVERIFY(input->setProperty("text", password));
+    // Enter and the button must share the same validation/clearing path.
+    QVERIFY(QMetaObject::invokeMethod(input, "accepted"));
+    QTRY_VERIFY(!controller->busy());
+    QVERIFY2(controller->canSplit(), qPrintable(controller->statusText()));
+    QVERIFY(!controller->passwordRequired());
+    QVERIFY(input->property("text").toString().isEmpty());
+    QVERIFY(save->property("enabled").toBool());
+    QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+    QTRY_VERIFY(dialog.isNull());
+    QVERIFY(controller->source().isEmpty());
+
+    // Reopening the modal for the same unopened file asks again.
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestSplitPdf"));
+    QTRY_VERIFY((dialog = window->findChild<QObject *>(QStringLiteral("splitPdfDialog"))));
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "selectSplitPdfSource", Q_ARG(QUrl, source)));
+    QTRY_VERIFY(!controller->busy());
+    QVERIFY(controller->passwordRequired());
+    input = dialog->findChild<QObject *>(QStringLiteral("splitPdfPasswordInput"));
+    QVERIFY(input);
+    QVERIFY(input->property("text").toString().isEmpty());
+    QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+    QTRY_VERIFY(dialog.isNull());
+}

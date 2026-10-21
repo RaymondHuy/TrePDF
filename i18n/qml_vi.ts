@@ -3592,6 +3592,7 @@ PDF chưa được lưu. Các chỉnh sửa của bạn vẫn được giữ l�
     </message>
     <message id="ShowPdfPassword">
         <location filename="../src/Components/SetPasswordDialog.qml" line="151"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="232"/>
         <source>Show password</source>
         <translation>Hiện mật khẩu</translation>
     </message>
@@ -5332,9 +5333,9 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <translation>Tiếp theo, chọn nơi lưu. TrePDF sẽ tạo một thư mục mới tại đó cho các file đã tách, không ghi đè file có sẵn.</translation>
     </message>
     <message id="SplitPdfSupportNotice">
-        <location filename="../src/Components/SplitPdfDialog.qml" line="281"/>
-        <source>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</source>
-        <translation>Phiên bản này chưa hỗ trợ PDF có mật khẩu, chữ ký số hoặc biểu mẫu có thể điền. Dấu trang, tệp đính kèm ở cấp tài liệu và thẻ trợ năng không được đưa vào file đã tách. Liên kết đến trang không có trong từng file kết quả sẽ bị vô hiệu hóa.</translation>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="400"/>
+        <source>Standard fillable forms are kept. Digital signatures, XFA forms and forms with scripts or calculations are not supported. Bookmarks, document-level attachments and accessibility tags are not included. Links to omitted pages are disabled.</source>
+        <translation>Biểu mẫu điền thông thường được giữ lại. Chưa hỗ trợ chữ ký số, biểu mẫu XFA hoặc biểu mẫu có script hay công thức tính. File mới không chứa dấu trang, file đính kèm cấp tài liệu và thẻ trợ năng. Liên kết đến trang không có trong file mới sẽ bị vô hiệu hóa.</translation>
     </message>
     <message id="SplitPdfCompletedSummary">
         <location filename="../src/Components/SplitPdfDialog.qml" line="292"/>
@@ -5372,14 +5373,13 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <translation>Không thể đọc đầy đủ file PDF này. Bạn hãy chọn lại file nhé.</translation>
     </message>
     <message id="SplitPdfEncryptedFile">
-        <location filename="../src/PDFSplitController.cpp" line="110"/>
         <source>This PDF is password-protected. Choose a PDF without password protection to split it.</source>
-        <translation>PDF này có mật khẩu bảo vệ. Tính năng tách hiện chỉ hỗ trợ PDF không có mật khẩu.</translation>
+        <translation type="vanished">PDF này có mật khẩu bảo vệ. Tính năng tách hiện chỉ hỗ trợ PDF không có mật khẩu.</translation>
     </message>
     <message id="SplitPdfUnsupportedFile">
-        <location filename="../src/PDFSplitController.cpp" line="113"/>
-        <source>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
-        <translation>PDF này có biểu mẫu, chữ ký số, lớp nội dung hoặc tác vụ chưa thể giữ nguyên khi tách.</translation>
+        <location filename="../src/PDFSplitController.cpp" line="129"/>
+        <source>This PDF contains unsupported forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
+        <translation>PDF này chứa biểu mẫu chưa được hỗ trợ, chữ ký số, lớp hoặc thao tác chưa thể giữ nguyên khi tách.</translation>
     </message>
     <message id="SplitPdfLimitExceeded">
         <location filename="../src/PDFSplitController.cpp" line="116"/>
@@ -5430,6 +5430,51 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <location filename="../src/PDFSplitController.cpp" line="923"/>
         <source>PDF split cancelled. Your original file has not been changed.</source>
         <translation>Đã hủy tách PDF. File gốc vẫn được giữ nguyên.</translation>
+    </message>
+    <message id="SplitPdfUnlockTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="194"/>
+        <source>Unlock this PDF to continue</source>
+        <translation>Mở khóa PDF này để tiếp tục</translation>
+    </message>
+    <message id="SplitPdfPasswordHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="203"/>
+        <source>Enter the PDF password. TrePDF uses it only for this split and keeps the original password protection on every new file.</source>
+        <translation>Nhập mật khẩu của PDF. TrePDF chỉ dùng mật khẩu để tách lần này và giữ nguyên cơ chế bảo vệ của file gốc cho mọi file mới.</translation>
+    </message>
+    <message id="SplitPdfPassword">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="219"/>
+        <source>PDF password</source>
+        <translation>Mật khẩu PDF</translation>
+    </message>
+    <message id="SplitPdfUnlock">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="238"/>
+        <source>Unlock PDF</source>
+        <translation>Mở khóa PDF</translation>
+    </message>
+    <message id="SplitPdfEncryptionNotice">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="262"/>
+        <source>Split files keep the original PDF’s password protection.</source>
+        <translation>Các file sau khi tách giữ nguyên cơ chế bảo vệ bằng mật khẩu của PDF gốc.</translation>
+    </message>
+    <message id="SplitPdfPasswordRequired">
+        <location filename="../src/PDFSplitController.cpp" line="117"/>
+        <source>Enter the password to unlock this PDF for splitting.</source>
+        <translation>Nhập mật khẩu để mở khóa PDF này và tiếp tục tách.</translation>
+    </message>
+    <message id="SplitPdfIncorrectPassword">
+        <location filename="../src/PDFSplitController.cpp" line="120"/>
+        <source>That password did not unlock the PDF. Please try again.</source>
+        <translation>Mật khẩu chưa đúng. Vui lòng thử lại.</translation>
+    </message>
+    <message id="SplitPdfPermissionDenied">
+        <location filename="../src/PDFSplitController.cpp" line="123"/>
+        <source>This password does not allow page extraction and assembly. Enter the owner password to split this PDF.</source>
+        <translation>Mật khẩu này không cho phép trích xuất và sắp xếp trang. Nhập mật khẩu chủ sở hữu để tách PDF này.</translation>
+    </message>
+    <message id="SplitPdfInvalidPassword">
+        <location filename="../src/PDFSplitController.cpp" line="126"/>
+        <source>Enter a password of up to 1,024 bytes without null characters.</source>
+        <translation>Nhập mật khẩu tối đa 1.024 byte, không chứa ký tự null.</translation>
     </message>
 </context>
 </TS>

@@ -202,6 +202,8 @@ private slots:
     void routesOCRPanelAndGuardsDirtySources();
     void routesSplitPdfDialogAndGuardsDirtySources();
     void completesSplitPdfWithoutOpeningAllOutputs();
+    void reusesSplitPasswordFromOpenTabs();
+    void promptsForSplitPasswordsAndClearsOnClose();
     void storesTransientTextFieldsByPage();
     void limitsTransientTextFieldInputLength();
     void storesTransientRadioButtons();

@@ -3428,6 +3428,7 @@ PDF ของคุณยังไม่ได้บันทึก การแ
     </message>
     <message id="ShowPdfPassword">
         <location filename="../src/Components/SetPasswordDialog.qml" line="151"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="232"/>
         <source>Show password</source>
         <translation>แสดงรหัสผ่าน</translation>
     </message>
@@ -5209,9 +5210,9 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <translation>จากนั้นเลือกตำแหน่งบันทึก TrePDF จะสร้างโฟลเดอร์ใหม่ที่นั่นสำหรับไฟล์ที่แยก โดยไม่แทนที่ไฟล์เดิม</translation>
     </message>
     <message id="SplitPdfSupportNotice">
-        <location filename="../src/Components/SplitPdfDialog.qml" line="281"/>
-        <source>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</source>
-        <translation>เวอร์ชันนี้ยังไม่รองรับ PDF ที่มีรหัสผ่าน ลายเซ็นดิจิทัล หรือแบบฟอร์มที่กรอกได้ ไฟล์ที่แยกจะไม่รวมบุ๊กมาร์ก ไฟล์แนบระดับเอกสาร และแท็กการช่วยการเข้าถึง ลิงก์ไปยังหน้าที่ไม่อยู่ในไฟล์ผลลัพธ์แต่ละไฟล์จะถูกปิดใช้งาน</translation>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="400"/>
+        <source>Standard fillable forms are kept. Digital signatures, XFA forms and forms with scripts or calculations are not supported. Bookmarks, document-level attachments and accessibility tags are not included. Links to omitted pages are disabled.</source>
+        <translation>แบบฟอร์มกรอกข้อมูลทั่วไปจะถูกเก็บไว้ ยังไม่รองรับลายเซ็นดิจิทัล แบบฟอร์ม XFA และแบบฟอร์มที่มีสคริปต์หรือการคำนวณ ไฟล์ใหม่จะไม่รวมบุ๊กมาร์ก ไฟล์แนบระดับเอกสาร และแท็กการช่วยการเข้าถึง ลิงก์ไปยังหน้าที่ไม่ได้รวมไว้จะถูกปิดใช้งาน</translation>
     </message>
     <message id="SplitPdfCompletedSummary">
         <location filename="../src/Components/SplitPdfDialog.qml" line="292"/>
@@ -5249,14 +5250,13 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <translation>ไม่สามารถอ่านไฟล์นี้เป็น PDF ที่สมบูรณ์ได้ โปรดเลือก PDF อีกครั้ง</translation>
     </message>
     <message id="SplitPdfEncryptedFile">
-        <location filename="../src/PDFSplitController.cpp" line="110"/>
         <source>This PDF is password-protected. Choose a PDF without password protection to split it.</source>
-        <translation>PDF นี้มีการป้องกันด้วยรหัสผ่าน เลือก PDF ที่ไม่มีการป้องกันด้วยรหัสผ่านเพื่อแยกไฟล์</translation>
+        <translation type="vanished">PDF นี้มีการป้องกันด้วยรหัสผ่าน เลือก PDF ที่ไม่มีการป้องกันด้วยรหัสผ่านเพื่อแยกไฟล์</translation>
     </message>
     <message id="SplitPdfUnsupportedFile">
-        <location filename="../src/PDFSplitController.cpp" line="113"/>
-        <source>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
-        <translation>PDF นี้มีแบบฟอร์ม ลายเซ็นดิจิทัล เลเยอร์ หรือการกระทำที่ยังไม่สามารถเก็บไว้เมื่อแยกไฟล์ได้</translation>
+        <location filename="../src/PDFSplitController.cpp" line="129"/>
+        <source>This PDF contains unsupported forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
+        <translation>PDF นี้มีแบบฟอร์มที่ยังไม่รองรับ ลายเซ็นดิจิทัล เลเยอร์ หรือการดำเนินการที่ยังไม่สามารถคงไว้เมื่อแยกไฟล์ได้</translation>
     </message>
     <message id="SplitPdfLimitExceeded">
         <location filename="../src/PDFSplitController.cpp" line="116"/>
@@ -5307,6 +5307,51 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <location filename="../src/PDFSplitController.cpp" line="923"/>
         <source>PDF split cancelled. Your original file has not been changed.</source>
         <translation>ยกเลิกการแยก PDF แล้ว ไฟล์ต้นฉบับยังไม่ได้ถูกเปลี่ยนแปลง</translation>
+    </message>
+    <message id="SplitPdfUnlockTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="194"/>
+        <source>Unlock this PDF to continue</source>
+        <translation>ปลดล็อก PDF นี้เพื่อดำเนินการต่อ</translation>
+    </message>
+    <message id="SplitPdfPasswordHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="203"/>
+        <source>Enter the PDF password. TrePDF uses it only for this split and keeps the original password protection on every new file.</source>
+        <translation>ป้อนรหัสผ่านของ PDF TrePDF จะใช้รหัสผ่านสำหรับการแยกครั้งนี้เท่านั้น และคงการป้องกันด้วยรหัสผ่านเดิมไว้ในไฟล์ใหม่ทุกไฟล์</translation>
+    </message>
+    <message id="SplitPdfPassword">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="219"/>
+        <source>PDF password</source>
+        <translation>รหัสผ่าน PDF</translation>
+    </message>
+    <message id="SplitPdfUnlock">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="238"/>
+        <source>Unlock PDF</source>
+        <translation>ปลดล็อก PDF</translation>
+    </message>
+    <message id="SplitPdfEncryptionNotice">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="262"/>
+        <source>Split files keep the original PDF’s password protection.</source>
+        <translation>ไฟล์ที่แยกแล้วจะคงการป้องกันด้วยรหัสผ่านของ PDF ต้นฉบับ</translation>
+    </message>
+    <message id="SplitPdfPasswordRequired">
+        <location filename="../src/PDFSplitController.cpp" line="117"/>
+        <source>Enter the password to unlock this PDF for splitting.</source>
+        <translation>ป้อนรหัสผ่านเพื่อปลดล็อก PDF นี้สำหรับการแยกไฟล์</translation>
+    </message>
+    <message id="SplitPdfIncorrectPassword">
+        <location filename="../src/PDFSplitController.cpp" line="120"/>
+        <source>That password did not unlock the PDF. Please try again.</source>
+        <translation>รหัสผ่านนี้ไม่สามารถปลดล็อก PDF ได้ โปรดลองอีกครั้ง</translation>
+    </message>
+    <message id="SplitPdfPermissionDenied">
+        <location filename="../src/PDFSplitController.cpp" line="123"/>
+        <source>This password does not allow page extraction and assembly. Enter the owner password to split this PDF.</source>
+        <translation>รหัสผ่านนี้ไม่อนุญาตให้แยกและจัดเรียงหน้า ป้อนรหัสผ่านเจ้าของเพื่อแยก PDF นี้</translation>
+    </message>
+    <message id="SplitPdfInvalidPassword">
+        <location filename="../src/PDFSplitController.cpp" line="126"/>
+        <source>Enter a password of up to 1,024 bytes without null characters.</source>
+        <translation>ป้อนรหัสผ่านที่มีขนาดไม่เกิน 1,024 ไบต์และไม่มีอักขระ null</translation>
     </message>
 </context>
 </TS>

@@ -21,6 +21,8 @@ class PDFSplitController : public QObject
     Q_PROPERTY(int pageCount READ pageCount NOTIFY changed FINAL)
     Q_PROPERTY(bool busy READ busy NOTIFY changed FINAL)
     Q_PROPERTY(bool canSplit READ canSplit NOTIFY changed FINAL)
+    Q_PROPERTY(bool passwordRequired READ passwordRequired NOTIFY changed FINAL)
+    Q_PROPERTY(bool encryptedSource READ encryptedSource NOTIFY changed FINAL)
     Q_PROPERTY(QString statusText READ statusText NOTIFY changed FINAL)
     Q_PROPERTY(int outputCount READ outputCount NOTIFY changed FINAL)
     Q_PROPERTY(qreal progress READ progress NOTIFY changed FINAL)
@@ -37,6 +39,8 @@ public:
     int pageCount() const;
     bool busy() const;
     bool canSplit() const;
+    bool passwordRequired() const;
+    bool encryptedSource() const;
     QString statusText() const;
     int outputCount() const;
     qreal progress() const;
@@ -47,7 +51,8 @@ public:
     void setPagesPerFile(int value);
     void setPageRanges(const QString &value);
 
-    Q_INVOKABLE bool setSource(const QUrl &url);
+    Q_INVOKABLE bool setSource(const QUrl &url, const QString &password = {});
+    Q_INVOKABLE bool unlockSource(const QString &password);
     Q_INVOKABLE void clear();
     Q_INVOKABLE bool splitTo(const QUrl &parentFolder);
     Q_INVOKABLE void cancel();
@@ -65,6 +70,8 @@ private:
         qint64 size = 0;
         QDateTime modified;
         QByteArray fingerprint;
+        QByteArray password;
+        bool encrypted = false;
     };
     struct Work;
     struct Result;
@@ -84,4 +91,5 @@ private:
     int m_outputCount = 0;
     qreal m_progress = 0;
     bool m_clearWhenFinished = false;
+    bool m_passwordRequired = false;
 };

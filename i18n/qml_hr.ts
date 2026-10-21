@@ -3430,6 +3430,7 @@ Vaš PDF nije spremljen. Vaše su izmjene sačuvane.</translation>
     </message>
     <message id="ShowPdfPassword">
         <location filename="../src/Components/SetPasswordDialog.qml" line="151"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="232"/>
         <source>Show password</source>
         <translation>Prikaži lozinku</translation>
     </message>
@@ -5211,9 +5212,9 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <translation>Zatim odaberite odredište. TrePDF će ondje stvoriti novu mapu za razdvojene datoteke, bez zamjene postojećih datoteka.</translation>
     </message>
     <message id="SplitPdfSupportNotice">
-        <location filename="../src/Components/SplitPdfDialog.qml" line="281"/>
-        <source>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</source>
-        <translation>Ova verzija ne podržava PDF-ove zaštićene lozinkom, digitalne potpise ni obrasce za ispunjavanje. Knjižne oznake, privici na razini dokumenta i oznake pristupačnosti nisu uključeni. Poveznice na stranice izvan pojedine izlazne datoteke su onemogućene.</translation>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="400"/>
+        <source>Standard fillable forms are kept. Digital signatures, XFA forms and forms with scripts or calculations are not supported. Bookmarks, document-level attachments and accessibility tags are not included. Links to omitted pages are disabled.</source>
+        <translation>Standardni obrasci za ispunjavanje se zadržavaju. Digitalni potpisi, XFA obrasci i obrasci sa skriptama ili izračunima nisu podržani. Knjižne oznake, privici na razini dokumenta i oznake pristupačnosti nisu uključeni. Veze na izostavljene stranice su onemogućene.</translation>
     </message>
     <message id="SplitPdfCompletedSummary">
         <location filename="../src/Components/SplitPdfDialog.qml" line="292"/>
@@ -5251,14 +5252,13 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <translation>Ovu datoteku nije moguće pročitati kao cjelovit PDF. Ponovno odaberite PDF.</translation>
     </message>
     <message id="SplitPdfEncryptedFile">
-        <location filename="../src/PDFSplitController.cpp" line="110"/>
         <source>This PDF is password-protected. Choose a PDF without password protection to split it.</source>
-        <translation>Ovaj PDF zaštićen je lozinkom. Za razdvajanje odaberite PDF bez zaštite lozinkom.</translation>
+        <translation type="vanished">Ovaj PDF zaštićen je lozinkom. Za razdvajanje odaberite PDF bez zaštite lozinkom.</translation>
     </message>
     <message id="SplitPdfUnsupportedFile">
-        <location filename="../src/PDFSplitController.cpp" line="113"/>
-        <source>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
-        <translation>Ovaj PDF sadrži obrasce, digitalne potpise, slojeve ili radnje koje još nije moguće sačuvati pri razdvajanju.</translation>
+        <location filename="../src/PDFSplitController.cpp" line="129"/>
+        <source>This PDF contains unsupported forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
+        <translation>Ovaj PDF sadrži nepodržane obrasce, digitalne potpise, slojeve ili radnje koje se još ne mogu sačuvati pri razdvajanju.</translation>
     </message>
     <message id="SplitPdfLimitExceeded">
         <location filename="../src/PDFSplitController.cpp" line="116"/>
@@ -5309,6 +5309,51 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <location filename="../src/PDFSplitController.cpp" line="923"/>
         <source>PDF split cancelled. Your original file has not been changed.</source>
         <translation>Razdvajanje PDF-a otkazano je. Izvorna datoteka nije promijenjena.</translation>
+    </message>
+    <message id="SplitPdfUnlockTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="194"/>
+        <source>Unlock this PDF to continue</source>
+        <translation>Otključajte ovaj PDF za nastavak</translation>
+    </message>
+    <message id="SplitPdfPasswordHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="203"/>
+        <source>Enter the PDF password. TrePDF uses it only for this split and keeps the original password protection on every new file.</source>
+        <translation>Unesite lozinku PDF-a. TrePDF je koristi samo za ovo razdvajanje i zadržava izvornu zaštitu lozinkom na svakoj novoj datoteci.</translation>
+    </message>
+    <message id="SplitPdfPassword">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="219"/>
+        <source>PDF password</source>
+        <translation>Lozinka PDF-a</translation>
+    </message>
+    <message id="SplitPdfUnlock">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="238"/>
+        <source>Unlock PDF</source>
+        <translation>Otključaj PDF</translation>
+    </message>
+    <message id="SplitPdfEncryptionNotice">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="262"/>
+        <source>Split files keep the original PDF’s password protection.</source>
+        <translation>Razdvojene datoteke zadržavaju zaštitu lozinkom izvornog PDF-a.</translation>
+    </message>
+    <message id="SplitPdfPasswordRequired">
+        <location filename="../src/PDFSplitController.cpp" line="117"/>
+        <source>Enter the password to unlock this PDF for splitting.</source>
+        <translation>Unesite lozinku kako biste otključali ovaj PDF za razdvajanje.</translation>
+    </message>
+    <message id="SplitPdfIncorrectPassword">
+        <location filename="../src/PDFSplitController.cpp" line="120"/>
+        <source>That password did not unlock the PDF. Please try again.</source>
+        <translation>Ta lozinka nije otključala PDF. Pokušajte ponovno.</translation>
+    </message>
+    <message id="SplitPdfPermissionDenied">
+        <location filename="../src/PDFSplitController.cpp" line="123"/>
+        <source>This password does not allow page extraction and assembly. Enter the owner password to split this PDF.</source>
+        <translation>Ova lozinka ne dopušta izdvajanje i sastavljanje stranica. Unesite vlasničku lozinku za razdvajanje ovog PDF-a.</translation>
+    </message>
+    <message id="SplitPdfInvalidPassword">
+        <location filename="../src/PDFSplitController.cpp" line="126"/>
+        <source>Enter a password of up to 1,024 bytes without null characters.</source>
+        <translation>Unesite lozinku duljine do 1.024 bajta bez nul-znakova.</translation>
     </message>
 </context>
 </TS>

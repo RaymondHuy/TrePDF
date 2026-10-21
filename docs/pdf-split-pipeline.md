@@ -38,6 +38,67 @@ drafts do not block splitting. The modal participates in the existing
 file-open, save, history and close guards. Split is an export operation, not an
 undoable document edit.
 
+`PDFTabModel::prepareSplitSource()` reuses the authenticated password of a
+matching open tab entirely within C++. Matching includes canonical paths and
+hard links; a different active tab does not supply its credentials. A selected
+file that still needs authentication shows a masked password field inside the
+Split modal, with Show password, Enter/Unlock, and retry. Entering a password
+only inspects the source; it does not start exporting.
+
+Passwords are kept in memory only. They are not exposed through a QML getter,
+saved in settings, passed to an external process or logged. The input clears
+after submission, when the source changes and when the modal closes. Closing
+also clears the controller's source and credentials.
+
+## Password protection
+
+Encrypted sources are inspected using the supplied password. A user password
+must permit both extraction and page assembly. A source that denies these
+operations requires its owner password; the dialog allows another attempt.
+Authentication never silently removes source restrictions.
+
+Each output retains the source encryption settings, user and owner passwords,
+and permission flags through qpdf's encryption-copy path. The modal explains
+that split files keep the original protection. A PDF with an empty user password
+continues to open without a password while retaining its owner restrictions;
+splitting does not introduce or remove an opening password.
+
+Export reauthenticates the private source snapshot, and output validation opens
+each result with the authenticated password before publication. Password-only
+sources and encrypted sources containing supported forms use the same atomic
+batch export. The original document is never decrypted or rewritten in place.
+Legacy RC4 protection is copied as-is. Validation compares `/P` as the same
+32-bit permission mask when a source uses unsigned spelling and qpdf writes
+the signed equivalent; all other encryption dictionary entries remain part
+of the exact fingerprint.
+
+## Ordinary forms
+
+Split supports ordinary AcroForm text fields (including multiline and comb
+fields), check boxes, radio groups and choice fields (dropdowns and list boxes).
+They remain interactive PDF fields, with their saved values, field flags,
+options, default appearance, fonts and widget appearances retained.
+
+The output form tree includes only widgets on retained pages and their necessary
+field ancestors. A field shared across retained pages stays one logical field;
+widgets on omitted pages and empty field branches are removed. Each output is
+an independent form: later changes in one output do not update another output
+or the source. Split copies saved form values, so pending input in an open tab
+must be saved first.
+
+If a radio group's selected or default option is on an omitted page, that
+value becomes `/Off` in the output. Remaining options keep their appearances
+and stay selectable; a selection on a retained page remains selected.
+For radio groups with indexed `/Opt` export labels, the retained labels,
+numeric appearance states and selected/default indices are renumbered together.
+Custom nonnumeric `/Opt` state encodings are rejected instead of guessing how
+their export values correspond to widgets.
+
+XFA, signature fields, form actions/scripts and calculation dependencies remain
+unsupported. Malformed, ambiguous or oversized field/widget graphs are rejected
+before publication. The feature does not flatten fields or claim to preserve
+digital signatures.
+
 ## PDF content and links
 
 qpdf copies page objects directly without rendering text, fonts, vectors or
@@ -47,16 +108,18 @@ output's page objects. Links to pages omitted from that output are disabled
 by removing their action or destination. Their annotation objects and
 appearances remain intact, preserving popup and reply relationships.
 
-For supported annotations, `/Popup`, `/Parent` and `/IRT` references are
+For supported comment annotations, `/Popup`, `/Parent` and `/IRT` references are
 remapped to the matching output annotation indices. This avoids retaining
 duplicate annotation objects introduced while qpdf copies references.
 This first version requires comment, popup and reply relationships to be
 unambiguous and confined to one page; cross-page, ambiguous and self-referencing
 relationships are rejected.
 
-This first version rejects encrypted PDFs, AcroForm fields or Widget
-annotations, digital signatures, XFA, optional-content layers, scripts and
-unsupported actions. Only supported internal GoTo destinations and absolute
+Widget `/Parent` references belong to the form field hierarchy and are handled
+separately from comment relations.
+
+Digital signatures, XFA, optional-content layers, scripts and unsupported
+actions remain rejected. Only supported internal GoTo destinations and absolute
 URI actions are allowed. Relative URI and remote GoTo links are rejected
 because their meaning may change when the output moves.
 
@@ -90,10 +153,27 @@ The operation supports a source of at most 10,000 pages and 256 MiB, at most
 limited to 65,536 UTF-16 code units. The fixed worker bound prevents repeated
 actions from queuing unbounded PDF jobs.
 
+Form validation accepts at most 10,000 field/widget nodes and 32 parent levels.
+It rejects cycles, duplicate field identities or ambiguous names, and widgets
+that do not belong to exactly one source page and one form tree. Password input
+is limited to 1,024 UTF-8 bytes and cannot contain null characters.
+
 Automated coverage should exercise all three modes, range parsing and limits,
 page order and content, internal links to retained/omitted pages, source
 changes, unsupported PDFs, destination collisions and cancellation before
-publication. UI coverage should exercise adjacent ribbon actions, lazy dialog
+publication. Password coverage includes missing/wrong/correct credentials,
+open-session reuse, owner authorization, retained output protection and source
+integrity. Form coverage includes retained values and appearances, shared
+fields, omitted widgets, filling and saving reopened outputs, and encrypted
+forms. UI coverage should exercise adjacent ribbon actions, lazy dialog
 loading with and without an open PDF, source draft guards and the success
-state. Run the application build and QML lint after changing the dialog, and
+state, password retry/clearing and the protection notice. Run the application
+build and QML lint after changing the dialog, and
 check localized labels in the native application.
+
+The password/form extension was verified on macOS with all 64 Split test cases,
+the complete eight-suite CTest run (1,367 passed, 13 skipped), and the Split
+suite under AddressSanitizer/UndefinedBehaviorSanitizer. Native verification
+covered password masking/retry/clearing, owner-password requirements, open-tab
+credential reuse, export into a new temporary folder, opening the result with
+the original user password, rendering, zoom/scroll and normal application exit.
