@@ -5,11 +5,16 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <fpdf_annot.h>
 #include <fpdf_edit.h>
+#include <fpdf_formfill.h>
+#include <fpdf_save.h>
 #include <fpdf_text.h>
 #include <fpdfview.h>
 #include <qpdf/qpdf-c.h>
@@ -138,6 +143,342 @@ bool createManyPages(const QString &path, int pages)
     }
     objects[1] = "<< /Type /Pages /Count " + QByteArray::number(pages) + " /Kids [" + kids + "] >>";
     return writeObjects(path, objects);
+}
+
+// Includes both merged field/widget dictionaries and separate Widgets with a
+// field Parent, inherited DA/DR, a hierarchical name, and shared text/radio
+// fields spanning two pages. Page 3 deliberately has no fields.
+QList<QByteArray> ordinaryFormObjects()
+{
+    const QByteArray appearanceDictionary =
+        "/Type /XObject /Subtype /Form /BBox [0 0 160 24] "
+        "/Resources << /Font << /Helv 7 0 R >> >>";
+    return {
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 6 0 R >>",
+        "<< /Type /Pages /Count 3 /Kids [3 0 R 4 0 R 5 0 R] >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> /Annots [10 0 R 12 0 R 14 0 R 17 0 R] >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> /Annots [11 0 R 15 0 R 16 0 R 18 0 R] >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>",
+        "<< /Fields [8 0 R 12 0 R 13 0 R 17 0 R 18 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 7 0 R >> >> /NeedAppearances false >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        "<< /T (person) /Kids [9 0 R 16 0 R] >>",
+        "<< /Parent 8 0 R /T (name) /FT /Tx /Ff 4096 /V (Alice) /DV (Default) /Kids [10 0 R 11 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 9 0 R /P 3 0 R /Rect [20 330 180 354] /F 4 /AP << /N 19 0 R >> >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 9 0 R /P 4 0 R /Rect [20 330 180 354] /F 4 /AP << /N 19 0 R >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (accept) /V /Yes /DV /Off /AS /Yes /P 3 0 R /Rect [20 280 44 304] /F 4 /AP << /N << /Off 20 0 R /Yes 21 0 R >> >> >>",
+        "<< /T (consent) /FT /Btn /Ff 32768 /V /YesB /DV /YesA /Kids [14 0 R 15 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 13 0 R /P 3 0 R /Rect [70 280 94 304] /F 4 /AS /Off /AP << /N << /Off 20 0 R /YesA 21 0 R >> >> >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 13 0 R /P 4 0 R /Rect [70 280 94 304] /F 4 /AS /YesB /AP << /N << /Off 20 0 R /YesB 21 0 R >> >> >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 8 0 R /FT /Tx /T (code) /Ff 16777216 /MaxLen 6 /V (ABC123) /DV (000000) /P 4 0 R /Rect [20 220 180 244] /F 4 /AP << /N 22 0 R >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (category) /Ff 131072 /Opt [[(a) (Alpha)] [(b) (Beta)]] /V (b) /DV (a) /I [1] /P 3 0 R /Rect [20 220 180 244] /F 4 /AP << /N 23 0 R >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (regions) /Ff 2097152 /Opt [(North) (South) (West)] /V [(North) (West)] /I [0 2] /P 4 0 R /Rect [20 150 180 198] /F 4 /AP << /N 24 0 R >> >>",
+        stream("BT /Helv 12 Tf 2 6 Td (Alice) Tj ET", appearanceDictionary),
+        stream("0 G 0 0 24 24 re S", "/Type /XObject /Subtype /Form /BBox [0 0 24 24] /Resources << >>"),
+        stream("0 G 0 0 24 24 re S 3 3 m 21 21 l 3 21 m 21 3 l S", "/Type /XObject /Subtype /Form /BBox [0 0 24 24] /Resources << >>"),
+        stream("BT /Helv 12 Tf 2 6 Td (ABC123) Tj ET", appearanceDictionary),
+        stream("BT /Helv 12 Tf 2 6 Td (Beta) Tj ET", appearanceDictionary),
+        stream("BT /Helv 12 Tf 2 16 Td (North) Tj 0 -12 Td (West) Tj ET", appearanceDictionary)
+    };
+}
+
+bool encryptPdf(const QString &source, const QString &destination,
+                const QByteArray &userPassword = "secret",
+                bool extract = true, bool assemble = true)
+{
+    const QByteArray sourcePath = source.toUtf8();
+    const QByteArray destinationPath = destination.toUtf8();
+    PdfHandle pdf;
+    if (qpdf_read(pdf.value, sourcePath.constData(), "") != QPDF_SUCCESS
+        || qpdf_init_write(pdf.value, destinationPath.constData()) != QPDF_SUCCESS)
+        return false;
+    // Leave printing, annotations and other modifications restricted. A split
+    // must not silently replace these settings with unrestricted encryption.
+    qpdf_set_r6_encryption_parameters2(pdf.value, userPassword.constData(), "owner",
+        true, extract, assemble, false, true, false, qpdf_r3p_none, false);
+    return qpdf_write(pdf.value) == QPDF_SUCCESS;
+}
+
+QMap<QByteArray, QByteArray> encryptionParameters(const QString &path, const QByteArray &password)
+{
+    const QByteArray encoded = path.toUtf8();
+    PdfHandle pdf;
+    if (qpdf_read(pdf.value, encoded.constData(), password.constData()) != QPDF_SUCCESS
+        || !qpdf_is_encrypted(pdf.value))
+        return {};
+    const auto encrypt = qpdf_oh_get_key(pdf.value, qpdf_get_trailer(pdf.value), "/Encrypt");
+    QMap<QByteArray, QByteArray> result;
+    for (const char *key : {"/V", "/R", "/Length", "/P", "/EncryptMetadata",
+                           "/CF", "/StmF", "/StrF", "/U", "/UE", "/O", "/OE", "/Perms"}) {
+        const auto value = qpdf_oh_get_key(pdf.value, encrypt, key);
+        // /P is a 32-bit permission mask; its signed/unsigned spelling is not
+        // an encryption change (the legacy fixture uses unsigned spelling).
+        result.insert(key, QByteArray(key) == "/P"
+            ? QByteArray::number(quint32(qpdf_oh_get_int_value(pdf.value, value)))
+            : QByteArray(qpdf_oh_unparse_resolved(pdf.value, value)));
+    }
+    return result;
+}
+
+QString pdfWideString(const auto &getter)
+{
+    const unsigned long bytes = getter(nullptr, 0);
+    if (bytes < sizeof(FPDF_WCHAR) || bytes > 65536)
+        return {};
+    QVector<FPDF_WCHAR> buffer((bytes + sizeof(FPDF_WCHAR) - 1) / sizeof(FPDF_WCHAR));
+    const auto actual = getter(buffer.data(), bytes) / sizeof(FPDF_WCHAR);
+    return actual > 0 ? QString::fromUtf16(
+        reinterpret_cast<const char16_t *>(buffer.constData()), actual - 1) : QString();
+}
+
+struct FormWidget {
+    int page = -1;
+    QString name;
+    QString value;
+    QString exportValue;
+    int type = 0;
+    int flags = 0;
+    QStringList options;
+    QList<int> selected;
+    bool checked = false;
+    int controls = 0;
+};
+
+QList<FormWidget> inspectFormWidgets(const QString &path, const QByteArray &password = {})
+{
+    PDFiumProcessLock lock;
+    const QByteArray encoded = QFile::encodeName(path);
+    const auto document = FPDF_LoadDocument(encoded.constData(), password.constData());
+    if (!document)
+        return {};
+    FPDF_FORMFILLINFO info{};
+    info.version = 2;
+    info.xfa_disabled = true;
+    const auto form = FPDFDOC_InitFormFillEnvironment(document, &info);
+    QList<FormWidget> widgets;
+    if (form) {
+        for (int pageIndex = 0; pageIndex < FPDF_GetPageCount(document); ++pageIndex) {
+            const auto page = FPDF_LoadPage(document, pageIndex);
+            if (!page)
+                break;
+            FORM_OnAfterLoadPage(page, form);
+            for (int index = 0; index < FPDFPage_GetAnnotCount(page); ++index) {
+                const auto annotation = FPDFPage_GetAnnot(page, index);
+                if (FPDFAnnot_GetSubtype(annotation) == FPDF_ANNOT_WIDGET) {
+                    FormWidget widget;
+                    widget.page = pageIndex;
+                    widget.name = pdfWideString([&](FPDF_WCHAR *buffer, unsigned long bytes) {
+                        return FPDFAnnot_GetFormFieldName(form, annotation, buffer, bytes);
+                    });
+                    widget.value = pdfWideString([&](FPDF_WCHAR *buffer, unsigned long bytes) {
+                        return FPDFAnnot_GetFormFieldValue(form, annotation, buffer, bytes);
+                    });
+                    widget.exportValue = pdfWideString([&](FPDF_WCHAR *buffer, unsigned long bytes) {
+                        return FPDFAnnot_GetFormFieldExportValue(form, annotation, buffer, bytes);
+                    });
+                    widget.type = FPDFAnnot_GetFormFieldType(form, annotation);
+                    widget.flags = FPDFAnnot_GetFormFieldFlags(form, annotation);
+                    widget.checked = FPDFAnnot_IsChecked(form, annotation);
+                    widget.controls = FPDFAnnot_GetFormControlCount(form, annotation);
+                    for (int option = 0; option < FPDFAnnot_GetOptionCount(form, annotation); ++option) {
+                        widget.options.append(pdfWideString([&](FPDF_WCHAR *buffer, unsigned long bytes) {
+                            return FPDFAnnot_GetOptionLabel(form, annotation, option, buffer, bytes);
+                        }));
+                        if (FPDFAnnot_IsOptionSelected(form, annotation, option))
+                            widget.selected.append(option);
+                    }
+                    widgets.append(widget);
+                }
+                FPDFPage_CloseAnnot(annotation);
+            }
+            FORM_OnBeforeClosePage(page, form);
+            FPDF_ClosePage(page);
+        }
+        FPDFDOC_ExitFormFillEnvironment(form);
+    }
+    FPDF_CloseDocument(document);
+    return widgets;
+}
+
+// Every widget reachable from /AcroForm must occur exactly once on a retained
+// page, and its /Parent and /P must point to that same output's field/page tree.
+// This catches invisible orphan fields that a rendering-only check misses.
+bool hasConsistentFormTree(const QString &path, const QByteArray &password = {})
+{
+    const QByteArray encoded = path.toUtf8();
+    PdfHandle document;
+    auto pdf = document.value;
+    if (qpdf_read(pdf, encoded.constData(), password.constData()) != QPDF_SUCCESS)
+        return false;
+    QSet<int> pageWidgets;
+    for (int pageIndex = 0; pageIndex < qpdf_get_num_pages(pdf); ++pageIndex) {
+        const auto page = qpdf_get_page_n(pdf, pageIndex);
+        const auto annotations = qpdf_oh_get_key(pdf, page, "/Annots");
+        const int annotationCount = qpdf_oh_is_array(pdf, annotations)
+            ? qpdf_oh_get_array_n_items(pdf, annotations) : 0;
+        for (int index = 0; index < annotationCount; ++index) {
+            const auto annotation = qpdf_oh_get_array_item(pdf, annotations, index);
+            if (!qpdf_oh_is_name_and_equals(pdf, qpdf_oh_get_key(pdf, annotation, "/Subtype"), "/Widget"))
+                continue;
+            const int id = qpdf_oh_get_object_id(pdf, annotation);
+            if (pageWidgets.contains(id) || id == 0
+                || qpdf_oh_get_object_id(pdf, qpdf_oh_get_key(pdf, annotation, "/P"))
+                    != qpdf_oh_get_object_id(pdf, page))
+                return false;
+            pageWidgets.insert(id);
+        }
+    }
+    QSet<int> treeWidgets;
+    QSet<int> visited;
+    const auto visit = [&](const auto &self, qpdf_oh node, int parent, int depth) -> bool {
+        const int id = qpdf_oh_get_object_id(pdf, node);
+        if (!qpdf_oh_is_dictionary(pdf, node) || id == 0 || depth > 32 || visited.contains(id))
+            return false;
+        visited.insert(id);
+        if (qpdf_oh_get_object_id(pdf, qpdf_oh_get_key(pdf, node, "/Parent")) != parent)
+            return false;
+        if (qpdf_oh_is_name_and_equals(pdf, qpdf_oh_get_key(pdf, node, "/Subtype"), "/Widget"))
+            treeWidgets.insert(id);
+        const auto kids = qpdf_oh_get_key(pdf, node, "/Kids");
+        const int childCount = qpdf_oh_is_array(pdf, kids) ? qpdf_oh_get_array_n_items(pdf, kids) : 0;
+        for (int index = 0; index < childCount; ++index) {
+            if (!self(self, qpdf_oh_get_array_item(pdf, kids, index), id, depth + 1))
+                return false;
+        }
+        return true;
+    };
+    const auto acroForm = qpdf_oh_get_key(pdf, qpdf_get_root(pdf), "/AcroForm");
+    if (qpdf_oh_is_null(pdf, acroForm))
+        return pageWidgets.isEmpty();
+    const auto fields = qpdf_oh_get_key(pdf, acroForm, "/Fields");
+    if (!qpdf_oh_is_array(pdf, fields))
+        return false;
+    for (int index = 0; index < qpdf_oh_get_array_n_items(pdf, fields); ++index) {
+        if (!visit(visit, qpdf_oh_get_array_item(pdf, fields, index), 0, 0))
+            return false;
+    }
+    return treeWidgets == pageWidgets;
+}
+
+QImage renderFormPage(const QString &path, int pageIndex, const QByteArray &password = {})
+{
+    PDFiumProcessLock lock;
+    const QByteArray encoded = QFile::encodeName(path);
+    const auto document = FPDF_LoadDocument(encoded.constData(), password.constData());
+    if (!document)
+        return {};
+    FPDF_FORMFILLINFO info{};
+    info.version = 2;
+    info.xfa_disabled = true;
+    const auto form = FPDFDOC_InitFormFillEnvironment(document, &info);
+    const auto page = FPDF_LoadPage(document, pageIndex);
+    QImage result(600, 800, QImage::Format_ARGB32);
+    result.fill(Qt::white);
+    if (page && form) {
+        FORM_OnAfterLoadPage(page, form);
+        const auto bitmap = FPDFBitmap_CreateEx(result.width(), result.height(),
+            FPDFBitmap_BGRA, result.bits(), result.bytesPerLine());
+        FPDF_RenderPageBitmap(bitmap, page, 0, 0, result.width(), result.height(), 0, FPDF_ANNOT);
+        FPDF_FFLDraw(form, bitmap, page, 0, 0, result.width(), result.height(), 0, FPDF_ANNOT);
+        FPDFBitmap_Destroy(bitmap);
+        FORM_OnBeforeClosePage(page, form);
+    } else {
+        result = {};
+    }
+    if (page)
+        FPDF_ClosePage(page);
+    if (form)
+        FPDFDOC_ExitFormFillEnvironment(form);
+    FPDF_CloseDocument(document);
+    return result;
+}
+
+struct MemoryWriter : FPDF_FILEWRITE {
+    QByteArray bytes;
+    MemoryWriter()
+    {
+        version = 1;
+        WriteBlock = [](FPDF_FILEWRITE *self, const void *data, unsigned long size) -> int {
+            static_cast<MemoryWriter *>(self)->bytes.append(static_cast<const char *>(data), size);
+            return 1;
+        };
+    }
+};
+
+bool editFormAndSave(const QString &path, const QString &destination,
+                     const QString &fieldName, const auto &edit)
+{
+    PDFiumProcessLock lock;
+    const QByteArray encoded = QFile::encodeName(path);
+    const auto document = FPDF_LoadDocument(encoded.constData(), nullptr);
+    if (!document)
+        return false;
+    FPDF_FORMFILLINFO info{};
+    info.version = 2;
+    info.xfa_disabled = true;
+    const auto form = FPDFDOC_InitFormFillEnvironment(document, &info);
+    const auto page = FPDF_LoadPage(document, 0);
+    bool edited = false;
+    MemoryWriter writer;
+    if (page && form) {
+        FORM_OnAfterLoadPage(page, form);
+        for (int index = 0; index < FPDFPage_GetAnnotCount(page); ++index) {
+            const auto annotation = FPDFPage_GetAnnot(page, index);
+            const auto name = pdfWideString([&](FPDF_WCHAR *buffer, unsigned long bytes) {
+                return FPDFAnnot_GetFormFieldName(form, annotation, buffer, bytes);
+            });
+            if (name == fieldName && FORM_SetFocusedAnnot(form, annotation)) {
+                edited = edit(form, page, annotation);
+                FORM_ForceToKillFocus(form);
+            }
+            FPDFPage_CloseAnnot(annotation);
+        }
+        if (edited)
+            edited = FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+        FORM_OnBeforeClosePage(page, form);
+    }
+    if (page)
+        FPDF_ClosePage(page);
+    if (form)
+        FPDFDOC_ExitFormFillEnvironment(form);
+    FPDF_CloseDocument(document);
+    return edited && writeFile(destination, writer.bytes);
+}
+
+bool fillTextAndSave(const QString &path, const QString &destination,
+                     const QString &fieldName, const QString &value)
+{
+    return editFormAndSave(path, destination, fieldName,
+        [&](FPDF_FORMHANDLE form, FPDF_PAGE page, FPDF_ANNOTATION) {
+            if (!FORM_SelectAllText(form, page))
+                return false;
+            FORM_ReplaceSelection(form, page,
+                reinterpret_cast<FPDF_WIDESTRING>(value.utf16()));
+            return true;
+        });
+}
+
+bool clickFieldAndSave(const QString &path, const QString &destination,
+                      const QString &fieldName)
+{
+    return editFormAndSave(path, destination, fieldName,
+        [](FPDF_FORMHANDLE form, FPDF_PAGE page, FPDF_ANNOTATION annotation) {
+            FS_RECTF rect{};
+            if (!FPDFAnnot_GetRect(annotation, &rect))
+                return false;
+            const double x = (rect.left + rect.right) / 2.0;
+            const double y = (rect.top + rect.bottom) / 2.0;
+            return FORM_OnLButtonDown(form, page, 0, x, y)
+                && FORM_OnLButtonUp(form, page, 0, x, y);
+        });
+}
+
+bool selectOptionAndSave(const QString &path, const QString &destination,
+                        const QString &fieldName, int option)
+{
+    return editFormAndSave(path, destination, fieldName,
+        [option](FPDF_FORMHANDLE form, FPDF_PAGE page, FPDF_ANNOTATION) {
+            return FORM_SetIndexSelected(form, page, option, true);
+        });
 }
 }
 
@@ -409,7 +750,6 @@ private slots:
     {
         QTest::addColumn<QByteArray>("catalog");
         QTest::addColumn<QByteArray>("annotation");
-        QTest::newRow("AcroForm") << QByteArray("/AcroForm << /Fields [] >>") << QByteArray();
         QTest::newRow("XFA") << QByteArray("/AcroForm << /XFA (data) >>") << QByteArray();
         QTest::newRow("signature") << QByteArray("/Perms << /DocMDP 1 0 R >>") << QByteArray();
         QTest::newRow("layers") << QByteArray("/OCProperties << >>") << QByteArray();
@@ -473,6 +813,493 @@ private slots:
         const auto alias = dir.filePath("alias");
         QVERIFY(QFile::link(dir.path(), alias));
         QVERIFY(!controller.splitTo(QUrl::fromLocalFile(alias)));
+    }
+
+    void unlocksPasswordAndPreservesEncryption_data()
+    {
+        QTest::addColumn<QString>("password");
+        QTest::addColumn<QByteArray>("userPassword");
+        QTest::newRow("user") << QStringLiteral("secret") << QByteArray("secret");
+        QTest::newRow("owner") << QStringLiteral("owner") << QByteArray("secret");
+        QTest::newRow("vietnamese") << QStringLiteral("Mật khẩu Việt 23")
+                                  << QStringLiteral("Mật khẩu Việt 23").toUtf8();
+    }
+    void unlocksPasswordAndPreservesEncryption()
+    {
+        QFETCH(QString, password);
+        QFETCH(QByteArray, userPassword);
+        QTemporaryDir dir;
+        const auto plain = dir.filePath("source.pdf");
+        const auto encrypted = dir.filePath("encrypted.pdf");
+        QVERIFY(createPdf(plain));
+        QVERIFY(encryptPdf(plain, encrypted, userPassword));
+        const auto original = readFile(encrypted);
+        const auto expectedEncryption = encryptionParameters(encrypted, userPassword);
+        QVERIFY(!expectedEncryption.isEmpty());
+        PDFSplitController controller;
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(encrypted)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(controller.passwordRequired());
+        QVERIFY(!controller.canSplit());
+        QVERIFY(!controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QVERIFY(controller.unlockSource("wrong-password"));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(controller.passwordRequired());
+        QVERIFY(!controller.canSplit());
+        QVERIFY(!controller.statusText().contains("wrong-password"));
+        QVERIFY(controller.unlockSource(password));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(!controller.passwordRequired());
+        QVERIFY(controller.encryptedSource());
+        QVERIFY2(controller.canSplit(), qPrintable(controller.statusText()));
+        QSignalSpy finished(&controller, &PDFSplitController::finished);
+        QSignalSpy completed(&controller, &PDFSplitController::completed);
+        QVERIFY(controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 20000);
+        QVERIFY2(finished[0][0].toBool(), qPrintable(controller.statusText()));
+        QCOMPARE(completed.size(), 1);
+        const auto outputs = qvariant_cast<QList<QUrl>>(completed[0][1]);
+        QCOMPARE(outputs.size(), 5);
+        for (const auto &output : outputs) {
+            const QByteArray path = output.toLocalFile().toUtf8();
+            PdfHandle noPassword;
+            QVERIFY(qpdf_read(noPassword.value, path.constData(), "") != QPDF_SUCCESS);
+            QCOMPARE(encryptionParameters(output.toLocalFile(), userPassword), expectedEncryption);
+            QCOMPARE(encryptionParameters(output.toLocalFile(), "owner"), expectedEncryption);
+            PdfHandle reopened;
+            QCOMPARE(qpdf_read(reopened.value, path.constData(), userPassword.constData()), QPDF_SUCCESS);
+            QCOMPARE(qpdf_get_num_pages(reopened.value), 1);
+            QVERIFY(qpdf_allow_extract_all(reopened.value));
+            QVERIFY(qpdf_allow_modify_assembly(reopened.value));
+            QVERIFY(!qpdf_allow_print_high_res(reopened.value));
+            QVERIFY(!qpdf_allow_modify_other(reopened.value));
+        }
+        QCOMPARE(readFile(encrypted), original);
+    }
+
+    void rejectsRestrictedUserButAcceptsOwner_data()
+    {
+        QTest::addColumn<bool>("extract");
+        QTest::addColumn<bool>("assemble");
+        QTest::newRow("no-extraction") << false << true;
+        QTest::newRow("no-assembly") << true << false;
+        QTest::newRow("neither") << false << false;
+    }
+    void rejectsRestrictedUserButAcceptsOwner()
+    {
+        QFETCH(bool, extract);
+        QFETCH(bool, assemble);
+        QTemporaryDir dir;
+        const auto plain = dir.filePath("source.pdf");
+        const auto encrypted = dir.filePath("restricted.pdf");
+        QVERIFY(createPdf(plain));
+        QVERIFY(encryptPdf(plain, encrypted, "secret", extract, assemble));
+        const auto original = readFile(encrypted);
+        PDFSplitController controller;
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(encrypted), "secret"));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(!controller.canSplit());
+        QVERIFY(!controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QCOMPARE(directoryEntries(dir.path()), (QStringList{"restricted.pdf", "source.pdf"}));
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(encrypted), "owner"));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY2(controller.canSplit(), qPrintable(controller.statusText()));
+        controller.setMode(2);
+        controller.setPageRanges("1");
+        QSignalSpy finished(&controller, &PDFSplitController::finished);
+        QSignalSpy completed(&controller, &PDFSplitController::completed);
+        QVERIFY(controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 20000);
+        QVERIFY2(finished[0][0].toBool(), qPrintable(controller.statusText()));
+        const auto outputs = qvariant_cast<QList<QUrl>>(completed[0][1]);
+        QCOMPARE(outputs.size(), 1);
+        QCOMPARE(encryptionParameters(outputs[0].toLocalFile(), "secret"),
+            encryptionParameters(encrypted, "secret"));
+        QCOMPARE(readFile(encrypted), original);
+    }
+
+    void passwordStateClearsOnSourceChangeAndCancellation()
+    {
+        QTemporaryDir dir;
+        const auto plain = dir.filePath("source.pdf");
+        const auto encrypted = dir.filePath("encrypted.pdf");
+        const auto other = dir.filePath("other.pdf");
+        QVERIFY(createPdf(plain));
+        QVERIFY(encryptPdf(plain, encrypted));
+        QVERIFY(encryptPdf(plain, other, "different"));
+        PDFSplitController controller;
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(encrypted), "secret"));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(controller.canSplit());
+        QSignalSpy finished(&controller, &PDFSplitController::finished);
+        QVERIFY(controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        controller.cancel();
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 10000);
+        QVERIFY(!finished[0][0].toBool());
+        QVERIFY(controller.canSplit());
+        QCOMPARE(directoryEntries(dir.path()), (QStringList{"encrypted.pdf", "other.pdf", "source.pdf"}));
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(other)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(controller.passwordRequired());
+        QVERIFY(!controller.canSplit());
+        controller.clear();
+        QVERIFY(!controller.passwordRequired());
+        QVERIFY(!controller.encryptedSource());
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(encrypted)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(controller.passwordRequired());
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(plain)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(!controller.passwordRequired());
+        QVERIFY(!controller.encryptedSource());
+        QVERIFY(controller.canSplit());
+    }
+
+    void preservesPermissionOnlyEncryption()
+    {
+        QTemporaryDir dir;
+        const auto plain = dir.filePath("source.pdf");
+        const auto encrypted = dir.filePath("protected.pdf");
+        QVERIFY(createPdf(plain));
+        QVERIFY(encryptPdf(plain, encrypted, ""));
+        PDFSplitController controller;
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(encrypted)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(!controller.passwordRequired());
+        QVERIFY(controller.encryptedSource());
+        QVERIFY(controller.canSplit());
+        controller.setMode(2);
+        controller.setPageRanges("2");
+        QSignalSpy finished(&controller, &PDFSplitController::finished);
+        QSignalSpy completed(&controller, &PDFSplitController::completed);
+        QVERIFY(controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 10000);
+        QVERIFY2(finished[0][0].toBool(), qPrintable(controller.statusText()));
+        const auto outputs = qvariant_cast<QList<QUrl>>(completed[0][1]);
+        QCOMPARE(encryptionParameters(outputs[0].toLocalFile(), ""),
+            encryptionParameters(encrypted, ""));
+        QVERIFY(!encryptionParameters(outputs[0].toLocalFile(), "owner").isEmpty());
+    }
+
+    void preservesLegacyRc4EncryptionAndCheckbox()
+    {
+        QTemporaryDir dir;
+        const auto source = dir.filePath("legacy-protected.pdf");
+        QVERIFY(QFile::copy(QFINDTESTDATA("fixtures/password-1.pdf"), source));
+        const auto original = readFile(source);
+        const QByteArray password("fixture-open-1");
+        const auto encryption = encryptionParameters(source, password);
+        QCOMPARE(encryption.value("/V"), QByteArray("2"));
+        QCOMPARE(encryption.value("/R"), QByteArray("3"));
+        QCOMPARE(encryption.value("/Length"), QByteArray("128"));
+        const auto originalWidgets = inspectFormWidgets(source, password);
+        QCOMPARE(originalWidgets.size(), 1);
+        QCOMPARE(originalWidgets[0].type, FPDF_FORMFIELD_CHECKBOX);
+        PDFSplitController controller;
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(source), QString::fromUtf8(password)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY2(controller.canSplit(), qPrintable(controller.statusText()));
+        QSignalSpy finished(&controller, &PDFSplitController::finished);
+        QSignalSpy completed(&controller, &PDFSplitController::completed);
+        QVERIFY(controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 10000);
+        QVERIFY2(finished[0][0].toBool(), qPrintable(controller.statusText()));
+        QCOMPARE(completed.size(), 1);
+        const auto outputs = qvariant_cast<QList<QUrl>>(completed[0][1]);
+        QCOMPARE(outputs.size(), 1);
+        const auto path = outputs[0].toLocalFile();
+        QCOMPARE(encryptionParameters(path, password), encryption);
+        QCOMPARE(encryptionParameters(path, "fixture-owner-1"), encryption);
+        const QByteArray encoded = path.toUtf8();
+        PdfHandle locked;
+        QVERIFY(qpdf_read(locked.value, encoded.constData(), "") != QPDF_SUCCESS);
+        const auto widgets = inspectFormWidgets(path, password);
+        QCOMPARE(widgets.size(), 1);
+        QCOMPARE(widgets[0].name, originalWidgets[0].name);
+        QCOMPARE(widgets[0].value, originalWidgets[0].value);
+        QCOMPARE(widgets[0].checked, originalWidgets[0].checked);
+        QVERIFY(hasConsistentFormTree(path, password));
+        const auto before = renderFormPage(source, 0, password);
+        QVERIFY(!before.isNull());
+        QCOMPARE(renderFormPage(path, 0, password), before);
+        QCOMPARE(readFile(source), original);
+    }
+
+    void preservesOrdinaryAcroForms_data()
+    {
+        QTest::addColumn<bool>("encrypted");
+        QTest::newRow("plain") << false;
+        QTest::newRow("encrypted") << true;
+    }
+    void preservesOrdinaryAcroForms()
+    {
+        QFETCH(bool, encrypted);
+        QTemporaryDir dir;
+        const auto plain = dir.filePath("forms.pdf");
+        const auto source = encrypted ? dir.filePath("protected-forms.pdf") : plain;
+        QVERIFY(writeObjects(plain, ordinaryFormObjects()));
+        if (encrypted)
+            QVERIFY(encryptPdf(plain, source));
+        const auto original = readFile(source);
+        const auto password = encrypted ? QByteArray("secret") : QByteArray();
+        const auto sourceWidgets = inspectFormWidgets(source, password);
+        QCOMPARE(sourceWidgets.size(), 8);
+        QVERIFY(hasConsistentFormTree(source, password));
+        PDFSplitController controller;
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(source), QString::fromUtf8(password)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY2(controller.canSplit(), qPrintable(controller.statusText()));
+        QSignalSpy finished(&controller, &PDFSplitController::finished);
+        QSignalSpy completed(&controller, &PDFSplitController::completed);
+        QVERIFY(controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 20000);
+        QVERIFY2(finished[0][0].toBool(), qPrintable(controller.statusText()));
+        const auto outputs = qvariant_cast<QList<QUrl>>(completed[0][1]);
+        QCOMPARE(outputs.size(), 3);
+        for (int page = 0; page < outputs.size(); ++page) {
+            const auto path = outputs[page].toLocalFile();
+            QVERIFY2(hasConsistentFormTree(path, password), qPrintable(path));
+            const auto widgets = inspectFormWidgets(path, password);
+            QList<FormWidget> expected;
+            for (const auto &widget : sourceWidgets) {
+                if (widget.page == page)
+                    expected.append(widget);
+            }
+            QCOMPARE(widgets.size(), expected.size());
+            for (int index = 0; index < widgets.size(); ++index) {
+                const auto &actual = widgets[index];
+                const auto &wanted = expected[index];
+                QCOMPARE(actual.name, wanted.name);
+                QCOMPARE(actual.type, wanted.type);
+                QCOMPARE(actual.flags, wanted.flags);
+                QCOMPARE(actual.options, wanted.options);
+                QCOMPARE(actual.selected, wanted.selected);
+                QCOMPARE(actual.checked, wanted.checked);
+                QCOMPARE(actual.value, actual.name == "consent" && page == 0
+                    ? QString("Off") : wanted.value);
+                QCOMPARE(actual.controls, 1);
+            }
+            const auto before = renderFormPage(source, page, password);
+            QVERIFY(!before.isNull());
+            QCOMPARE(renderFormPage(path, 0, password), before);
+            if (encrypted)
+                QCOMPARE(encryptionParameters(path, password), encryptionParameters(source, password));
+            if (page < 2) {
+                const QByteArray encoded = path.toUtf8();
+                PdfHandle pdf;
+                QCOMPARE(qpdf_read(pdf.value, encoded.constData(), password.constData()), QPDF_SUCCESS);
+                const auto annotations = qpdf_oh_get_key(pdf.value, qpdf_get_page_n(pdf.value, 0), "/Annots");
+                const auto radio = qpdf_oh_get_array_item(pdf.value, annotations, page == 0 ? 2 : 1);
+                const auto field = qpdf_oh_get_key(pdf.value, radio, "/Parent");
+                const auto defaultValue = qpdf_oh_get_key(pdf.value, field, "/DV");
+                QVERIFY(qpdf_oh_is_name_and_equals(pdf.value, defaultValue, page == 0 ? "/YesA" : "/Off"));
+            }
+            if (page == 2) {
+                const QByteArray encoded = path.toUtf8();
+                PdfHandle pdf;
+                QCOMPARE(qpdf_read(pdf.value, encoded.constData(), password.constData()), QPDF_SUCCESS);
+                const auto acroForm = qpdf_oh_get_key(pdf.value, qpdf_get_root(pdf.value), "/AcroForm");
+                if (!qpdf_oh_is_null(pdf.value, acroForm)) {
+                    const auto fields = qpdf_oh_get_key(pdf.value, acroForm, "/Fields");
+                    QVERIFY(qpdf_oh_is_array(pdf.value, fields));
+                    QCOMPARE(qpdf_oh_get_array_n_items(pdf.value, fields), 0);
+                }
+            }
+        }
+        if (!encrypted) {
+            const auto edited = dir.filePath("filled.pdf");
+            QVERIFY(fillTextAndSave(outputs[0].toLocalFile(), edited, "person.name", "Edited after split"));
+            const auto widgets = inspectFormWidgets(edited);
+            QCOMPARE(widgets.size(), 4);
+            QCOMPARE(widgets[0].value, QString("Edited after split"));
+            QVERIFY(hasConsistentFormTree(edited));
+            const auto unchecked = dir.filePath("unchecked.pdf");
+            QVERIFY(clickFieldAndSave(edited, unchecked, "accept"));
+            QVERIFY(!inspectFormWidgets(unchecked)[1].checked);
+            const auto chosen = dir.filePath("choice.pdf");
+            QVERIFY(selectOptionAndSave(unchecked, chosen, "category", 0));
+            QCOMPARE(inspectFormWidgets(chosen)[3].value, QString("a"));
+            const auto list = dir.filePath("list.pdf");
+            QVERIFY(selectOptionAndSave(outputs[1].toLocalFile(), list, "regions", 1));
+            QCOMPARE(inspectFormWidgets(list)[3].selected, (QList<int>{0, 1, 2}));
+            const auto comb = dir.filePath("comb.pdf");
+            QVERIFY(fillTextAndSave(list, comb, "person.code", "Z98765"));
+            QCOMPARE(inspectFormWidgets(comb)[2].value, QString("Z98765"));
+        }
+        QCOMPARE(readFile(source), original);
+    }
+
+    void keepsSharedFieldsWhenRetainingMultiplePages()
+    {
+        QTemporaryDir dir;
+        const auto source = dir.filePath("shared.pdf");
+        QVERIFY(writeObjects(source, ordinaryFormObjects()));
+        PDFSplitController controller;
+        controller.setMode(2);
+        controller.setPageRanges("1-2");
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(source)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY2(controller.canSplit(), qPrintable(controller.statusText()));
+        QSignalSpy finished(&controller, &PDFSplitController::finished);
+        QSignalSpy completed(&controller, &PDFSplitController::completed);
+        QVERIFY(controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 10000);
+        QVERIFY2(finished[0][0].toBool(), qPrintable(controller.statusText()));
+        const auto outputs = qvariant_cast<QList<QUrl>>(completed[0][1]);
+        QCOMPARE(outputs.size(), 1);
+        const auto path = outputs[0].toLocalFile();
+        QVERIFY(hasConsistentFormTree(path));
+        const auto widgets = inspectFormWidgets(path);
+        QCOMPARE(widgets.size(), 8);
+        QCOMPARE(widgets[0].name, QString("person.name"));
+        QCOMPARE(widgets[4].name, QString("person.name"));
+        QCOMPARE(widgets[0].controls, 2);
+        QCOMPARE(widgets[4].controls, 2);
+        QCOMPARE(widgets[2].name, QString("consent"));
+        QCOMPARE(widgets[5].name, QString("consent"));
+        QCOMPARE(widgets[2].controls, 2);
+        QCOMPARE(widgets[5].controls, 2);
+        const auto edited = dir.filePath("edited.pdf");
+        QVERIFY(fillTextAndSave(path, edited, "person.name", "Both pages updated"));
+        const auto afterEdit = inspectFormWidgets(edited);
+        QCOMPARE(afterEdit.size(), 8);
+        QCOMPARE(afterEdit[0].value, QString("Both pages updated"));
+        QCOMPARE(afterEdit[4].value, QString("Both pages updated"));
+        QVERIFY(hasConsistentFormTree(edited));
+        const auto selected = dir.filePath("radio.pdf");
+        QVERIFY(clickFieldAndSave(edited, selected, "consent"));
+        const auto afterClick = inspectFormWidgets(selected);
+        QCOMPARE(afterClick.size(), 8);
+        QVERIFY(afterClick[2].checked);
+        QVERIFY(!afterClick[5].checked);
+        QCOMPARE(afterClick[2].value, QString("YesA"));
+        QCOMPARE(afterClick[5].value, QString("YesA"));
+        QVERIFY(hasConsistentFormTree(selected));
+    }
+
+    void retainsIndexedRadioExportsAfterPruning_data()
+    {
+        QTest::addColumn<QString>("ranges");
+        QTest::addColumn<QStringList>("exports");
+        QTest::addColumn<QByteArray>("value");
+        QTest::addColumn<QByteArray>("defaultValue");
+        QTest::newRow("first-only") << QString("1") << QStringList{"Alpha"}
+            << QByteArray("/Off") << QByteArray("/0");
+        QTest::newRow("second-only") << QString("2") << QStringList{"Beta"}
+            << QByteArray("/0") << QByteArray("/Off");
+        QTest::newRow("both") << QString("1-2") << QStringList{"Alpha", "Beta"}
+            << QByteArray("/1") << QByteArray("/0");
+    }
+    void retainsIndexedRadioExportsAfterPruning()
+    {
+        QFETCH(QString, ranges);
+        QFETCH(QStringList, exports);
+        QFETCH(QByteArray, value);
+        QFETCH(QByteArray, defaultValue);
+        QTemporaryDir dir;
+        const auto source = dir.filePath("indexed-radio.pdf");
+        auto objects = ordinaryFormObjects();
+        objects[12] = "<< /T (consent) /FT /Btn /Ff 32768 /V /1 /DV /0 "
+                      "/Opt [(Alpha) (Beta)] /Kids [14 0 R 15 0 R] >>";
+        objects[13].replace("/YesA", "/0");
+        objects[14].replace("/YesB", "/1");
+        QVERIFY(writeObjects(source, objects));
+        const auto original = readFile(source);
+        const auto originalWidgets = inspectFormWidgets(source);
+        QCOMPARE(originalWidgets.size(), 8);
+        QCOMPARE(originalWidgets[2].exportValue, QString("Alpha"));
+        QCOMPARE(originalWidgets[5].exportValue, QString("Beta"));
+        QCOMPARE(originalWidgets[2].value, QString("Beta"));
+        QCOMPARE(originalWidgets[5].value, QString("Beta"));
+        PDFSplitController controller;
+        controller.setMode(2);
+        controller.setPageRanges(ranges);
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(source)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY2(controller.canSplit(), qPrintable(controller.statusText()));
+        QSignalSpy finished(&controller, &PDFSplitController::finished);
+        QSignalSpy completed(&controller, &PDFSplitController::completed);
+        QVERIFY(controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 10000);
+        QVERIFY2(finished[0][0].toBool(), qPrintable(controller.statusText()));
+        QCOMPARE(completed.size(), 1);
+        const auto outputs = qvariant_cast<QList<QUrl>>(completed[0][1]);
+        QCOMPARE(outputs.size(), 1);
+        const auto path = outputs[0].toLocalFile();
+        QVERIFY(hasConsistentFormTree(path));
+        const auto widgets = inspectFormWidgets(path);
+        QStringList actualExports;
+        for (const auto &widget : widgets) {
+            if (widget.name == "consent")
+                actualExports.append(widget.exportValue);
+        }
+        QCOMPARE(actualExports, exports);
+        const QByteArray encoded = path.toUtf8();
+        {
+            PdfHandle pdf;
+            QCOMPARE(qpdf_read(pdf.value, encoded.constData(), ""), QPDF_SUCCESS);
+            const auto annotations = qpdf_oh_get_key(pdf.value, qpdf_get_page_n(pdf.value, 0), "/Annots");
+            const auto radio = qpdf_oh_get_array_item(pdf.value, annotations, ranges == "2" ? 1 : 2);
+            const auto field = qpdf_oh_get_key(pdf.value, radio, "/Parent");
+            QCOMPARE(QByteArray(qpdf_oh_unparse(pdf.value, qpdf_oh_get_key(pdf.value, field, "/V"))), value);
+            QCOMPARE(QByteArray(qpdf_oh_unparse(pdf.value, qpdf_oh_get_key(pdf.value, field, "/DV"))), defaultValue);
+            const auto options = qpdf_oh_get_key(pdf.value, field, "/Opt");
+            QCOMPARE(qpdf_oh_get_array_n_items(pdf.value, options), exports.size());
+            for (int index = 0; index < exports.size(); ++index) {
+                QCOMPARE(QString::fromUtf8(qpdf_oh_get_string_value(pdf.value,
+                    qpdf_oh_get_array_item(pdf.value, options, index))), exports[index]);
+            }
+        }
+        const auto edited = dir.filePath("clicked.pdf");
+        QVERIFY(clickFieldAndSave(path, edited, "consent"));
+        const auto editedWidgets = inspectFormWidgets(edited);
+        int radioCount = 0;
+        for (const auto &widget : editedWidgets) {
+            if (widget.name != "consent")
+                continue;
+            QVERIFY(radioCount < exports.size());
+            QCOMPARE(widget.exportValue, exports[radioCount]);
+            QCOMPARE(widget.value, exports[0]);
+            QCOMPARE(widget.checked, radioCount == 0);
+            ++radioCount;
+        }
+        QCOMPARE(radioCount, exports.size());
+        QVERIFY(hasConsistentFormTree(edited));
+        QCOMPARE(readFile(source), original);
+    }
+
+    void rejectsUnsafeOrMalformedAcroForms_data()
+    {
+        QTest::addColumn<int>("object");
+        QTest::addColumn<QByteArray>("replacement");
+        QTest::newRow("signature-field") << 8 << QByteArray("<< /Parent 8 0 R /T (name) /FT /Sig /Kids [10 0 R 11 0 R] >>");
+        QTest::newRow("xfa") << 5 << QByteArray("<< /Fields [8 0 R] /XFA (unsupported) >>");
+        QTest::newRow("calculation-order") << 5 << QByteArray("<< /Fields [8 0 R] /CO [9 0 R] >>");
+        QTest::newRow("field-action") << 8 << QByteArray("<< /Parent 8 0 R /T (name) /FT /Tx /Kids [10 0 R 11 0 R] /AA << /K << /S /JavaScript /JS (alert) >> >> >>");
+        QTest::newRow("parent-action") << 7 << QByteArray("<< /T (person) /Kids [9 0 R 16 0 R] /AA << /C << /S /JavaScript /JS (alert) >> >> >>");
+        QTest::newRow("widget-action") << 9 << QByteArray("<< /Type /Annot /Subtype /Widget /Parent 9 0 R /P 3 0 R /Rect [20 330 180 354] /A << /S /SubmitForm /F (https://example.com/) >> >>");
+        QTest::newRow("field-cycle") << 7 << QByteArray("<< /T (person) /Kids [8 0 R] >>");
+        QTest::newRow("mismatched-parent") << 9 << QByteArray("<< /Type /Annot /Subtype /Widget /Parent 13 0 R /P 3 0 R /Rect [20 330 180 354] >>");
+        QTest::newRow("orphan-widget") << 8 << QByteArray("<< /Parent 8 0 R /T (name) /FT /Tx /Kids [10 0 R] >>");
+        QTest::newRow("duplicate-field") << 5 << QByteArray("<< /Fields [8 0 R 8 0 R 12 0 R 13 0 R 17 0 R 18 0 R] >>");
+    }
+    void rejectsUnsafeOrMalformedAcroForms()
+    {
+        QFETCH(int, object);
+        QFETCH(QByteArray, replacement);
+        QTemporaryDir dir;
+        const auto source = dir.filePath("unsafe-form.pdf");
+        auto objects = ordinaryFormObjects();
+        objects[object] = replacement;
+        QVERIFY(writeObjects(source, objects));
+        const auto original = readFile(source);
+        PDFSplitController controller;
+        QVERIFY(controller.setSource(QUrl::fromLocalFile(source)));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 10000);
+        QVERIFY(!controller.canSplit());
+        QVERIFY(!controller.splitTo(QUrl::fromLocalFile(dir.path())));
+        QCOMPARE(directoryEntries(dir.path()), QStringList{"unsafe-form.pdf"});
+        QCOMPARE(readFile(source), original);
     }
 
     void sourceChangedWithSameSizeAndTimestampIsRejected()

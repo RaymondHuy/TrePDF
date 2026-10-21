@@ -19,6 +19,8 @@ Dialog {
     property int completedCount: 0
     readonly property bool completed: completedFolder.toString().length > 0
     readonly property string message: errorText.length > 0 ? errorText : controller.statusText
+    readonly property bool awaitingPassword: controller.passwordRequired
+    readonly property url selectedSource: controller.source
     signal sourceRequested(url source)
     signal splitRequested(url folder)
 
@@ -43,7 +45,37 @@ Dialog {
         overlay: root.parent
     }
 
+    function clearPasswordInput() {
+        if (passwordInput)
+            passwordInput.clear()
+        if (showPassword)
+            showPassword.checked = false
+    }
+
+    function unlockSource() {
+        if (!awaitingPassword || controller.busy || passwordInput.text.length === 0)
+            return
+        errorText = ""
+        controller.unlockSource(passwordInput.text)
+        clearPasswordInput()
+    }
+
+    function focusPasswordInput() {
+        if (visible && awaitingPassword && !controller.busy)
+            passwordInput.forceActiveFocus()
+    }
+
+    onOpened: focusPasswordInput()
+    onSelectedSourceChanged: clearPasswordInput()
+    onAwaitingPasswordChanged: {
+        if (!awaitingPassword)
+            clearPasswordInput()
+        else
+            Qt.callLater(root.focusPasswordInput)
+    }
+
     onAboutToHide: {
+        clearPasswordInput()
         if (inputPickerLoader.status === Loader.Ready && inputPickerLoader.item)
             (inputPickerLoader.item as PlatformFileDialog).close()
         if (folderPickerLoader.status === Loader.Ready && folderPickerLoader.item)
@@ -56,8 +88,11 @@ Dialog {
         target: root.controller
 
         function onChanged() {
-            if (!root.controller.busy)
+            if (!root.controller.busy) {
                 root.cancellationRequested = false
+                if (root.awaitingPassword)
+                    Qt.callLater(root.focusPasswordInput)
+            }
         }
 
         function onCompleted(folder: url, outputs: list<url>) {
@@ -116,6 +151,7 @@ Dialog {
                 enabled: !root.controller.busy
                 onClicked: {
                     root.errorText = ""
+                    root.clearPasswordInput()
                     inputPickerLoader.active = true
                 }
             }
@@ -148,8 +184,90 @@ Dialog {
 
         ColumnLayout {
             Layout.fillWidth: true
+            spacing: 8
+            visible: !root.completed && root.awaitingPassword
+            enabled: !root.controller.busy
+
+            Label {
+                Layout.fillWidth: true
+                //% "Unlock this PDF to continue"
+                text: qsTrId("SplitPdfUnlockTitle")
+                font.weight: Font.DemiBold
+                color: root.theme.ribbonTextColor
+                wrapMode: Text.Wrap
+            }
+
+            Label {
+                Layout.fillWidth: true
+                //% "Enter the PDF password. TrePDF uses it only for this split and keeps the original password protection on every new file."
+                text: qsTrId("SplitPdfPasswordHint")
+                color: root.theme.ribbonTextColor
+                wrapMode: Text.Wrap
+            }
+
+            TextField {
+                id: passwordInput
+                objectName: "splitPdfPasswordInput"
+                Layout.fillWidth: true
+                echoMode: showPassword.checked ? TextInput.Normal : TextInput.Password
+                inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
+                    | Qt.ImhNoAutoUppercase
+                // Keep one extra character so oversized input reaches validation.
+                maximumLength: 1025
+                selectByMouse: true
+                //% "PDF password"
+                placeholderText: qsTrId("SplitPdfPassword")
+                Accessible.name: placeholderText
+                onTextEdited: root.errorText = ""
+                onAccepted: root.unlockSource()
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                CheckBox {
+                    id: showPassword
+                    objectName: "splitPdfShowPasswordCheckBox"
+                    //% "Show password"
+                    text: qsTrId("ShowPdfPassword")
+                }
+                Item { Layout.fillWidth: true }
+                Button {
+                    objectName: "splitPdfUnlockButton"
+                    //% "Unlock PDF"
+                    text: qsTrId("SplitPdfUnlock")
+                    enabled: passwordInput.text.length > 0 && !root.controller.busy
+                    onClicked: root.unlockSource()
+                }
+            }
+
+            Label {
+                objectName: "splitPdfPasswordStatus"
+                Layout.fillWidth: true
+                visible: root.message.length > 0
+                text: root.message
+                textFormat: Text.PlainText
+                color: root.controller.busy && root.errorText.length === 0
+                    ? root.theme.ribbonTextColor : "#b3261e"
+                wrapMode: Text.Wrap
+                Accessible.role: Accessible.AlertMessage
+            }
+        }
+
+        Label {
+            objectName: "splitPdfEncryptionNotice"
+            Layout.fillWidth: true
+            visible: root.controller.encryptedSource && !root.awaitingPassword
+            //% "Split files keep the original PDF’s password protection."
+            text: qsTrId("SplitPdfEncryptionNotice")
+            color: root.theme.ribbonTextColor
+            wrapMode: Text.Wrap
+        }
+
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 4
-            visible: !root.completed
+            visible: !root.completed && !root.awaitingPassword
             enabled: !root.controller.busy
 
             Label {
@@ -267,7 +385,7 @@ Dialog {
 
         Label {
             Layout.fillWidth: true
-            visible: !root.completed
+            visible: !root.completed && !root.awaitingPassword
             //% "Choose a destination next. TrePDF creates a new folder there for the split files, without replacing existing files."
             text: qsTrId("SplitPdfDestinationHint")
             color: "#706b67"
@@ -278,7 +396,7 @@ Dialog {
         Label {
             Layout.fillWidth: true
             visible: !root.completed
-            //% "This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled."
+            //% "Standard fillable forms are kept. Digital signatures, XFA forms and forms with scripts or calculations are not supported. Bookmarks, document-level attachments and accessibility tags are not included. Links to omitted pages are disabled."
             text: qsTrId("SplitPdfSupportNotice")
             color: "#706b67"
             font.pixelSize: 12
@@ -323,7 +441,7 @@ Dialog {
         Label {
             objectName: "splitPdfStatus"
             Layout.fillWidth: true
-            visible: !root.completed && root.message.length > 0
+            visible: !root.completed && !root.awaitingPassword && root.message.length > 0
             text: root.message
             textFormat: Text.PlainText
             color: root.controller.busy && root.errorText.length === 0
@@ -395,6 +513,7 @@ Dialog {
             //% "PDF files (*.pdf)"
             nameFilters: [qsTrId("MergePdfFilesFilter")]
             onAccepted: {
+                root.clearPasswordInput()
                 root.sourceRequested(selectedFile)
                 inputPickerLoader.active = false
             }

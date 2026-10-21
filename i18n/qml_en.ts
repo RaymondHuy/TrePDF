@@ -3593,6 +3593,7 @@ Your PDF was not saved. Your edits have been kept.</translation>
     </message>
     <message id="ShowPdfPassword">
         <location filename="../src/Components/SetPasswordDialog.qml" line="151"/>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="232"/>
         <source>Show password</source>
         <translation>Show password</translation>
     </message>
@@ -5333,9 +5334,9 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <translation>Choose a destination next. TrePDF creates a new folder there for the split files, without replacing existing files.</translation>
     </message>
     <message id="SplitPdfSupportNotice">
-        <location filename="../src/Components/SplitPdfDialog.qml" line="281"/>
-        <source>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</source>
-        <translation>This version does not support password-protected PDFs, digital signatures or fillable forms. Bookmarks, document-level attachments and accessibility tags are not included. Links to pages outside each output file are disabled.</translation>
+        <location filename="../src/Components/SplitPdfDialog.qml" line="400"/>
+        <source>Standard fillable forms are kept. Digital signatures, XFA forms and forms with scripts or calculations are not supported. Bookmarks, document-level attachments and accessibility tags are not included. Links to omitted pages are disabled.</source>
+        <translation>Standard fillable forms are kept. Digital signatures, XFA forms and forms with scripts or calculations are not supported. Bookmarks, document-level attachments and accessibility tags are not included. Links to omitted pages are disabled.</translation>
     </message>
     <message id="SplitPdfCompletedSummary">
         <location filename="../src/Components/SplitPdfDialog.qml" line="292"/>
@@ -5373,14 +5374,13 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <translation>This file could not be read as a complete PDF. Choose the PDF again.</translation>
     </message>
     <message id="SplitPdfEncryptedFile">
-        <location filename="../src/PDFSplitController.cpp" line="110"/>
         <source>This PDF is password-protected. Choose a PDF without password protection to split it.</source>
-        <translation>This PDF is password-protected. Choose a PDF without password protection to split it.</translation>
+        <translation type="vanished">This PDF is password-protected. Choose a PDF without password protection to split it.</translation>
     </message>
     <message id="SplitPdfUnsupportedFile">
-        <location filename="../src/PDFSplitController.cpp" line="113"/>
-        <source>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
-        <translation>This PDF contains forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</translation>
+        <location filename="../src/PDFSplitController.cpp" line="129"/>
+        <source>This PDF contains unsupported forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</source>
+        <translation>This PDF contains unsupported forms, digital signatures, layers, or actions that cannot be preserved when splitting yet.</translation>
     </message>
     <message id="SplitPdfLimitExceeded">
         <location filename="../src/PDFSplitController.cpp" line="116"/>
@@ -5431,6 +5431,51 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <location filename="../src/PDFSplitController.cpp" line="923"/>
         <source>PDF split cancelled. Your original file has not been changed.</source>
         <translation>PDF split cancelled. Your original file has not been changed.</translation>
+    </message>
+    <message id="SplitPdfUnlockTitle">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="194"/>
+        <source>Unlock this PDF to continue</source>
+        <translation>Unlock this PDF to continue</translation>
+    </message>
+    <message id="SplitPdfPasswordHint">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="203"/>
+        <source>Enter the PDF password. TrePDF uses it only for this split and keeps the original password protection on every new file.</source>
+        <translation>Enter the PDF password. TrePDF uses it only for this split and keeps the original password protection on every new file.</translation>
+    </message>
+    <message id="SplitPdfPassword">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="219"/>
+        <source>PDF password</source>
+        <translation>PDF password</translation>
+    </message>
+    <message id="SplitPdfUnlock">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="238"/>
+        <source>Unlock PDF</source>
+        <translation>Unlock PDF</translation>
+    </message>
+    <message id="SplitPdfEncryptionNotice">
+        <location filename="../src/Components/SplitPdfDialog.qml" line="262"/>
+        <source>Split files keep the original PDF’s password protection.</source>
+        <translation>Split files keep the original PDF’s password protection.</translation>
+    </message>
+    <message id="SplitPdfPasswordRequired">
+        <location filename="../src/PDFSplitController.cpp" line="117"/>
+        <source>Enter the password to unlock this PDF for splitting.</source>
+        <translation>Enter the password to unlock this PDF for splitting.</translation>
+    </message>
+    <message id="SplitPdfIncorrectPassword">
+        <location filename="../src/PDFSplitController.cpp" line="120"/>
+        <source>That password did not unlock the PDF. Please try again.</source>
+        <translation>That password did not unlock the PDF. Please try again.</translation>
+    </message>
+    <message id="SplitPdfPermissionDenied">
+        <location filename="../src/PDFSplitController.cpp" line="123"/>
+        <source>This password does not allow page extraction and assembly. Enter the owner password to split this PDF.</source>
+        <translation>This password does not allow page extraction and assembly. Enter the owner password to split this PDF.</translation>
+    </message>
+    <message id="SplitPdfInvalidPassword">
+        <location filename="../src/PDFSplitController.cpp" line="126"/>
+        <source>Enter a password of up to 1,024 bytes without null characters.</source>
+        <translation>Enter a password of up to 1,024 bytes without null characters.</translation>
     </message>
 </context>
 </TS>

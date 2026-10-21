@@ -241,8 +241,13 @@ Current features:
   Existing files and the source remain untouched; cancellation before
   publication leaves no partial output. Open source drafts must be saved first.
   Internal links are remapped within each output; links to omitted pages are
-  disabled while retaining their annotations. AcroForms, encrypted PDFs and
-  unsupported interactive structures are rejected. See `docs/pdf-split-pipeline.md` for range syntax, limits,
+  disabled while retaining their annotations. Password-protected sources reuse
+  the matching open tab's credentials in C++ or prompt within the modal. Outputs
+  retain source encryption, passwords and permissions; restricted extraction
+  or page assembly requires owner authentication. Ordinary AcroForms retain
+  interactive fields, saved values and appearances, pruning widgets and field
+  branches on omitted pages. XFA, signature fields, form scripts/calculations
+  and unsupported interactive structures remain rejected. See `docs/pdf-split-pipeline.md` for range syntax, limits,
   preservation rules and cancellation behavior.
 - Open local PDFs through Finder/Open With and the Dock on macOS, positional
   command-line paths/file URLs, or window drag-and-drop. `PDFFileOpenHandler`
