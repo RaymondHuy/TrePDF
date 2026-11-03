@@ -549,7 +549,8 @@ một dòng hợp lệ.
 | Text dùng render mode clipping | Có | Không | Chưa thể bảo toàn text clipping khi save |
 | Form chỉ chứa một text Fill ngang qua chuỗi single-child an toàn | Có | Có | Candidate sở hữu occurrence ngoài; font và geometry lấy từ leaf |
 | Text trong Form hỗn hợp, có mark/transparency/clip hoặc geometry không an toàn | Có | Không | Không thể thay cả occurrence mà vẫn bảo toàn nội dung/paint |
-| Text xoay/skew hoặc một source object tự chứa nhiều dòng | Có | Không | Layout nguồn chưa được hỗ trợ |
+| Text top-level Fill có shear ngang, baseline ngang và face thường | Có | Có trong giới hạn mục 7.6.1 | Giữ riêng từng run nguồn, độ nghiêng đi theo character span |
+| Text xoay/phản chiếu, shear ngoài giới hạn hoặc một source object tự chứa nhiều dòng | Có | Không | Layout nguồn chưa được hỗ trợ |
 | Text vô hình hoặc chỉ dùng để clip | Không | Không | Bị bỏ qua khi scan |
 | Image top-level | Có | Di chuyển/xóa nếu PDF cho phép sửa; resize nếu `imageResizable` | Resize yêu cầu matrix hữu hạn, không suy biến, không custom clip và ảnh nằm trọn trong page; không mở text editor |
 | Form top-level chỉ chứa một image | Có | Di chuyển/xóa; resize/xoay khi đủ điều kiện | Chỉ sửa occurrence ngoài cùng; giữ nguyên shared stream, mask và clip nội bộ |
@@ -794,6 +795,63 @@ Khi người dùng chọn một family khác, stretch của range được đổ
 không mang scale của font nguồn sang font mới. Chọn lại chính family hiện tại
 khi stretch khác `100` cũng là thao tác normalize rõ ràng; cách này cho phép
 sửa một object đã bị kéo ngang do file được lưu bởi phiên bản cũ.
+
+### 7.6.1 Chữ nghiêng bằng ma trận nguồn
+
+Một số PDF dùng font Regular với ma trận `[a 0 c d e f]` để tạo chữ nghiêng.
+TrePDF cho phép chỉnh top-level text Fill khi baseline hướng sang phải và nằm
+ngang trong tọa độ trang đang hiển thị, trục đứng hướng lên, ma trận hữu hạn,
+không phản chiếu, không clipping và `abs(c / d) <= 0.5`. Kiểm tra có đổi hệ trục
+theo intrinsic rotation của trang. Font đã là Italic kèm shear bổ sung và text
+trong Form tiếp tục dùng giới hạn hình học hiện có.
+
+`Candidate.textShear` và `CharacterFormat.textShear` giữ hệ số nghiêng độc lập
+với `fontItalic` của face. Hệ số dương đẩy phần mực phía trên baseline sang phải.
+Khi có shear, em-size dùng độ cao chiếu theo trục đứng, còn stretch dùng tỷ lệ
+chiều dài baseline trên độ cao đó. Vì vậy ma trận `[1 0 0.26794 1 ...]` giữ
+font 10.5 pt và stretch 100%, với độ nghiêng khoảng 15 độ.
+
+Các run nguồn có shear không tham gia ghép dòng/đoạn theo khoảng cách. Khi Save
+chia một draft đã sửa thành nhiều object, `TrePDFParagraphLayout` đã kiểm tra
+hợp lệ vẫn khôi phục chúng thành cùng logical frame. Mỗi span giữ shear riêng,
+bao gồm span khoảng trắng trong `whitespaceFormats`. Nếu subset nguồn không có
+space, object PDF mang space có thể dùng font của từ bên cạnh. Metadata giữ
+định dạng logic của space để lần mở sau khôi phục đúng phạm vi định dạng.
+
+Nút Italic báo bật khi face là Italic hoặc span có shear. Tắt Italic trên vùng
+chọn đặt cả hai về không. Chữ gõ kế tiếp kế thừa định dạng tại caret. Đổi family
+sang một family có face Italic dùng face đó và xóa shear, tránh cộng thêm một
+lần nghiêng. Nếu family mới chỉ có face Regular đủ điều kiện, giữ shear. Kích
+thước, màu, underline và Undo/Redo dùng cùng mô hình character span. Các custom
+property trong `QTextDocument` và MIME nội bộ của clipboard giữ shear theo ký tự.
+
+Một dòng có cùng shear dùng transform quanh baseline của native `TextEdit`.
+Dòng có nhiều shear hoặc bị wrap dùng `ShearedTextView` và `ShearedTextSlices`
+để biến đổi từng phần của texture native theo baseline riêng của dòng. Native
+editor vẫn tạo glyph, selection, preedit và caret. Hit test đổi tọa độ ngược
+qua shear trước khi đưa sự kiện chuột vào editor. Preview dùng cùng layout.
+Ranh giới vẽ dùng bounds của glyph đã shape để giữ nét nhô sang khoảng trắng
+trong cùng kiểu nghiêng. Caret và hit test vẫn dùng bước tiến logic của ký tự.
+Nếu nét của hai run có shear khác nhau thật sự chồng lên nhau, hoặc một ligature
+đi qua ranh giới đó, texture đã gộp không thể tách riêng từng glyph. Preview
+hiện vẫn có thể cắt lệch nét ở ranh giới này. Writer đặt transform riêng cho
+từng run khi lưu. Caret nằm đúng đường cắt đã dịch cũng có thể mang độ nghiêng
+của run bên cạnh; chỉ số caret, selection và vị trí nhập vẫn theo layout logic.
+Texture chỉ chụp phần source nằm trong viewport và các ancestor clip, cộng phần
+bleed có thể được shear vào vùng nhìn thấy. Kích thước texture theo scene scale
+và device pixel ratio hiện tại. Cuộn hoặc đổi zoom cập nhật vùng chụp, nên
+memory theo phần đang thấy thay vì toàn bộ chiều cao draft. Khi nhánh này đóng,
+Loader giải phóng capture và native editor được hiển thị trực tiếp trở lại.
+
+Writer đặt shear trong trục đứng của từng text matrix, giữ baseline và các
+character positions đã layout. `preservePhysicalFontSizes` trong metadata
+paragraph giữ em-size PDF có phần thập phân qua lần Save sau, kể cả khi người
+dùng đã bỏ hết shear. Với nguồn có shear, em-size được tính từ ma trận trước
+khi làm tròn tọa độ device. Ô cỡ chữ hiển thị giá trị nguồn đến hai chữ số thập
+phân, ví dụ 10.5 pt; nhập cỡ mới vẫn dùng giới hạn số nguyên hiện có.
+Qt vẫn dùng cỡ layout pixel nguyên như pipeline hiện tại,
+nên glyph preview có thể lệch nhẹ về kích thước so với PDFium ở cỡ 10.5 pt.
+Mở editor rồi đóng không sửa không tạo draft và không thay object gốc.
 
 ### 7.7 Màu chữ
 
@@ -1772,7 +1830,7 @@ TrePDF hiện đã lấy và áp dụng:
   dùng chung trong editor, preview và Save;
 - giãn dòng và khoảng trước/sau đoạn do người dùng đặt trong draft;
 - embedded/installed font family nếu Qt dùng được;
-- bold và italic;
+- bold, italic của face và shear ngang đủ điều kiện ở mục 7.6.1;
 - underline do người dùng áp dụng cho draft;
 - màu chữ.
 
@@ -1791,7 +1849,8 @@ sau chưa được tái tạo đầy đủ trong `TextEdit`:
   spacing/advance đã hiệu chỉnh;
 - horizontal scaling riêng của text state nếu không thể hiện đủ qua object
   transform;
-- italic angle chính xác, synthetic slant và underline path của PDF gốc;
+- italic angle của face, synthetic slant ngoài giới hạn mục 7.6.1 và underline
+  path của PDF gốc;
 - font hinting/rendering của PDFium;
 - subset font không đăng ký được hoặc không map Unicode đúng trong Qt;
 - line metrics/ascent/descent riêng của font Qt.

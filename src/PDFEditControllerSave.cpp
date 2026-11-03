@@ -624,9 +624,9 @@ bool PDFEditController::requestSelectedTextEdit(const QString &styleAction)
         if (styleAction == QLatin1String("bold"))
             typing.fontBold = !typing.fontBold;
         else if (styleAction == QLatin1String("italic"))
-            typing.fontItalic = !typing.fontItalic;
+            typing.fontItalic = !typing.fontItalic && typing.textShear == 0.0;
         else
-            typing.fontFamily = requestedFamily;
+            changeFormatFamily(typing, requestedFamily);
         valid = addRun(typing, {});
     }
     if (!valid) {
@@ -754,14 +754,13 @@ bool PDFEditController::continueTextEditWithFallback()
         typing.fontBold = !typing.fontBold;
         typing.sourceAdvanceRatio = 0.0;
     } else if (pending->styleAction == QLatin1String("italic")) {
-        typing.fontItalic = !typing.fontItalic;
+        typing.fontItalic = !typing.fontItalic && typing.textShear == 0.0;
+        typing.textShear = 0.0;
         typing.sourceAdvanceRatio = 0.0;
     } else if (pending->styleAction == QLatin1String("underline")) {
         typing.fontUnderline = !typing.fontUnderline;
     } else if (pending->styleAction.startsWith(QLatin1String("fontFamily:"))) {
-        typing.fontFamily = pending->styleAction.mid(11).trimmed();
-        typing.fontStretch = QFont::Unstretched;
-        typing.sourceAdvanceRatio = 0.0;
+        changeFormatFamily(typing, pending->styleAction.mid(11).trimmed());
     }
     replaceMissing(typing);
     const bool changed = updateCharacterFormats(draft, 0, draft.text.size(), replaceMissing);

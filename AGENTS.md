@@ -522,6 +522,20 @@ Current features:
   paragraph formats, a layout frame, and content bounds. The inline `TextEdit`
   supports multiple lines, wraps/reflows inside the layout frame, renders every
   character span, and applies formatting to the selected text range.
+- Eligible top-level Fill text with a regular face and horizontal matrix shear
+  is editable. Keep `textShear` separate from the face's `fontItalic`, with a
+  finite forward horizontal baseline and absolute shear at most 0.5. Clipping,
+  reflection, rotated baselines and an already italic face with additional
+  shear remain unsupported. Sheared source runs do not join geometric text
+  groups. Validated paragraph metadata restores runs emitted by the same edit.
+  Native editor/preview transforms preserve the slant, while mixed or wrapped
+  spans use shared texture slices around each line's baseline, capturing only
+  the clipped viewport plus shear bleed at native device pixel density. Italic
+  off removes shear in the selected range, and choosing an available genuine
+  Italic face clears shear. Save preserves each run's matrix and fractional PDF
+  em size through `preservePhysicalFontSizes` paragraph metadata, including
+  later saves after removing shear. A no-op editor session leaves the source
+  objects intact. See `docs/text-editing-pipeline.md` section 7.6.1.
 - Editable geometry separates immutable source bounds, the draft layout frame,
   and laid-out content bounds. The frame and content bounds participate in
   draft comparison and undo/redo. Existing PDF text seeds the initial frame

@@ -660,6 +660,8 @@ private:
         qreal wordSpacingRatio = 0.0;
         // Per-cluster source adjustment, separate from user tracking controls.
         qreal sourceAdvanceRatio = 0.0;
+        // Horizontal displacement per unit of glyph height above the baseline.
+        qreal textShear = 0.0;
         // Editor-only U+0020 cell with fixed physical width; never PDF text.
         qreal virtualSpaceRatio = 0.0;
         int fontStretch = 100;
@@ -779,6 +781,8 @@ private:
         qreal fontSizeRatio = 0.0;
         qreal displayFontSizeRatio = 0.0;
         qreal horizontalScale = 1.0;
+        qreal textShear = 0.0;
+        bool preservePhysicalFontSizes = false;
         qreal letterSpacingRatio = 0.0;
         qreal wordSpacingRatio = 0.0;
         int fontStretch = 100;
@@ -1119,6 +1123,7 @@ private:
                                        const QSizeF &pageSize);
     static void readSourceTextSpacing(FPDF_PAGEOBJECT object, Candidate &candidate,
                                       const QSizeF &pageSize, const QString &encodedSourceText);
+    static void changeFormatFamily(CharacterFormat &format, const QString &family);
     static CharacterFormat characterFormatForCandidate(const Candidate &candidate);
     static CharacterFormat primaryCharacterFormat(const Draft &draft);
     bool addHeaderTextBatch(const QList<int> &pages, const QStringList &texts,

@@ -112,6 +112,7 @@ struct SaveFormat {
     // A source cluster's residual advance is independent of the spacing the
     // user chose. Keep it in layout and metadata without stretching glyphs.
     qreal sourceAdvanceRatio = 0.0;
+    qreal textShear = 0.0;
     int fontStretch = QFont::Unstretched;
     bool fontBold = false;
     bool fontItalic = false;
@@ -166,6 +167,7 @@ struct SaveDraft {
     QVector<SaveParagraph> paragraphFormats;
     QVector<qsizetype> sourceLineBreaks;
     bool sourceParagraphLayout = false;
+    bool preservePhysicalFontSizes = false;
     QRectF sourceRect;
     QRectF frameRect;
     QVector<QRectF> highlightRects;
@@ -522,19 +524,22 @@ public:
     bool textMatrix(qreal x,
                     qreal baselineFromTop,
                     qreal horizontalScale,
+                    qreal textShear,
                     FS_MATRIX &matrix) const
     {
         QPointF origin;
         QPointF deviceRight;
         QPointF deviceUp;
-        if (!pagePoint(x, baselineFromTop, origin)
+        if (!qIsFinite(textShear) || !pagePoint(x, baselineFromTop, origin)
             || !pagePoint(x + 1.0, baselineFromTop, deviceRight)
             || !pagePoint(x, baselineFromTop - 1.0, deviceUp)) {
             return false;
         }
 
         const QPointF horizontal = deviceRight - origin;
-        const QPointF vertical = deviceUp - origin;
+        // Shear is measured in the displayed page's right/up basis. It
+        // displaces ink above the baseline without changing text advances.
+        const QPointF vertical = (deviceUp - origin) + textShear * horizontal;
         matrix = FS_MATRIX{
             static_cast<float>(horizontal.x() * horizontalScale),
             static_cast<float>(horizontal.y() * horizontalScale),
@@ -621,6 +626,7 @@ bool sameFormat(const SaveFormat &left, const SaveFormat &right)
         && left.letterSpacingRatio == right.letterSpacingRatio
         && left.wordSpacingRatio == right.wordSpacingRatio
         && left.sourceAdvanceRatio == right.sourceAdvanceRatio
+        && left.textShear == right.textShear
         && left.fontStretch == right.fontStretch
         && left.fontBold == right.fontBold
         && left.fontItalic == right.fontItalic
@@ -1066,6 +1072,10 @@ bool hasParagraphLayout(const SaveDraft &draft)
     // Header groups also need their frame retained for identical wrapping on
     // other pages, even when their text uses only one default character format.
     return draft.sourceParagraphLayout || !draft.headerGroupId.isEmpty()
+        // Sheared source text is deliberately excluded from geometric
+        // grouping. Retain its logical frame and the exact origins of the
+        // replacement runs when the user adds a line or changes its style.
+        || draft.preservePhysicalFontSizes
         || std::any_of(draft.characterSpans.cbegin(), draft.characterSpans.cend(),
                        [](const SaveSpan &span) {
             return !qFuzzyIsNull(span.format.sourceAdvanceRatio);
@@ -1139,7 +1149,7 @@ QJsonObject paragraphLayoutModel(const SaveDraft &draft)
             if (next <= start) {
                 break;
             }
-            whitespaceFormats.append(QJsonObject{
+            QJsonObject whitespace{
                 {QStringLiteral("start"), start}, {QStringLiteral("length"), next - start},
                 {QStringLiteral("fontFamily"), format.semanticFontFamily},
                 {QStringLiteral("fontSizeRatio"), format.fontSizeRatio},
@@ -1151,7 +1161,10 @@ QJsonObject paragraphLayoutModel(const SaveDraft &draft)
                 {QStringLiteral("letterSpacingRatio"), format.letterSpacingRatio},
                 {QStringLiteral("wordSpacingRatio"), format.wordSpacingRatio},
                 {QStringLiteral("sourceAdvanceRatio"), format.sourceAdvanceRatio},
-                {QStringLiteral("color"), format.color.name(QColor::HexArgb)}});
+                {QStringLiteral("color"), format.color.name(QColor::HexArgb)}};
+            if (format.textShear != 0.0)
+                whitespace.insert(QStringLiteral("textShear"), format.textShear);
+            whitespaceFormats.append(whitespace);
             start = next;
         }
     };
@@ -1166,11 +1179,14 @@ QJsonObject paragraphLayoutModel(const SaveDraft &draft)
         }
         appendWhitespace(start, position);
     }
-    return QJsonObject{
+    QJsonObject model{
         {QStringLiteral("text"), draft.text},
         {QStringLiteral("paragraphs"), paragraphs},
         {QStringLiteral("sourceLineBreaks"), sourceLineBreaks},
         {QStringLiteral("whitespaceFormats"), whitespaceFormats}};
+    if (draft.preservePhysicalFontSizes)
+        model.insert(QStringLiteral("preservePhysicalFontSizes"), true);
+    return model;
 }
 
 bool appendSpacedLineRuns(const SaveDraft &draft,
@@ -3234,10 +3250,14 @@ FPDF_PAGEOBJECT createUnderline(const LayoutRun &run,
 {
     const qreal underlineY = run.baselineFromTop
         + qMax<qreal>(0.8, fontSize * 0.10);
+    // The editor shears the complete run about its baseline, including the
+    // underline below it. Apply the same horizontal displacement to the path.
+    const qreal underlineX = run.x
+        - run.format.textShear * (underlineY - run.baselineFromTop);
     QPointF start;
     QPointF end;
-    if (!coordinateMapper.pagePoint(run.x, underlineY, start)
-        || !coordinateMapper.pagePoint(run.x + run.width, underlineY, end)) {
+    if (!coordinateMapper.pagePoint(underlineX, underlineY, start)
+        || !coordinateMapper.pagePoint(underlineX + run.width, underlineY, end)) {
         return nullptr;
     }
     FPDF_PAGEOBJECT path = FPDFPageObj_CreateNewPath(
@@ -3636,7 +3656,11 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
         const qreal sizeRatio = run.format.displayFontSizeRatio > 0.0
             ? run.format.displayFontSizeRatio
             : run.format.fontSizeRatio;
-        const qreal fontSize = qMax<qreal>(1.0, qRound(sizeRatio * pageHeight));
+        // The text matrix carries the source slant, not a change of em size.
+        // Preserve fractional sizes (e.g. 10.5 pt) even if Italic was removed.
+        const qreal fontSize = draft.preservePhysicalFontSizes
+            ? run.format.fontSizeRatio * pageHeight
+            : qMax<qreal>(1.0, qRound(sizeRatio * pageHeight));
         FPDF_PAGEOBJECT textObject = FPDFPageObj_CreateTextObj(
             document,
             font,
@@ -3763,6 +3787,7 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 run.x + originOffset,
                 run.baselineFromTop,
                 horizontalScale,
+                run.format.textShear,
                 matrix)
             && FPDFPageObj_SetMatrix(textObject, &matrix)
             && markTextSpacing(document, textObject, run, pageHeight, originOffset)
@@ -7257,6 +7282,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         result.letterSpacingRatio = format.letterSpacingRatio;
         result.wordSpacingRatio = format.wordSpacingRatio;
         result.sourceAdvanceRatio = format.sourceAdvanceRatio;
+        result.textShear = format.textShear;
         result.fontStretch = format.fontStretch;
         result.fontBold = format.fontBold;
         result.fontItalic = format.fontItalic;
@@ -7459,12 +7485,15 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         }
         saveDraft.originalFormat = copiedFormat(
             PDFEditController::characterFormatForCandidate(draft->candidate), draft->text);
+        saveDraft.preservePhysicalFontSizes = draft->candidate.preservePhysicalFontSizes;
         saveDraft.originalHorizontalScale = draft->candidate.horizontalScale;
         saveDraft.originalFillColor = draft->candidate.fillColor;
         saveDraft.originalStrokeColor = draft->candidate.strokeColor;
         saveDraft.originalStrokeWidth = draft->candidate.strokeWidth;
         saveDraft.originalRenderMode = draft->candidate.textRenderMode;
         for (const PDFEditController::CharacterSpan &span : draft->characterSpans) {
+            if (span.format.textShear != 0.0)
+                saveDraft.preservePhysicalFontSizes = true;
             saveDraft.characterSpans.append(SaveSpan{
                 span.start,
                 span.length,

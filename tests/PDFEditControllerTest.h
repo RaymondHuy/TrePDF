@@ -259,6 +259,12 @@ private slots:
     void repairsSourceSymbolMappings();
     void intersectsFontFiltersAcrossMixedStyles();
     void detectsPdfFontStyles();
+    void editsHorizontalShearThroughSave_data();
+    void editsHorizontalShearThroughSave();
+    void preservesHorizontalShearOnRotatedPage();
+    void editsHorizontalShearInOverlay();
+    void rendersMixedShearAcrossLines();
+    void rendersShearedGlyphOverhang();
     void propagatesSourceStylesThroughSelection();
     void groupsCompatibleTextObjectsOnSameLine();
     void groupsMixedFontLineWithHistoryAndSave_data();

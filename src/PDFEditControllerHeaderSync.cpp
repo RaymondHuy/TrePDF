@@ -473,6 +473,7 @@ bool PDFEditController::headerSyncDraftMatches(const Draft &draft, bool &pageNum
     const auto sameFormat = [&](const CharacterFormat &left, const CharacterFormat &right) {
         return sameFontFamily(left.fontFamily, right.fontFamily)
             && withinTolerance(left.fontSizeRatio * anchorSize.height(), right.fontSizeRatio * targetSize.height(), 0.1)
+            && left.textShear == right.textShear
             && left.fontBold == right.fontBold && left.fontItalic == right.fontItalic
             && left.fontUnderline == right.fontUnderline && left.color == right.color
             && withinTolerance(left.letterSpacingRatio * anchorSize.height(), right.letterSpacingRatio * targetSize.height(), 0.01)
@@ -754,6 +755,8 @@ bool PDFEditController::applyHeaderChanges(const QString &pages)
                         format.fontStretch = newFormat.fontStretch;
                     if (oldFormat.fontBold != newFormat.fontBold)
                         format.fontBold = newFormat.fontBold;
+                    if (oldFormat.textShear != newFormat.textShear)
+                        format.textShear = newFormat.textShear;
                     if (oldFormat.fontItalic != newFormat.fontItalic)
                         format.fontItalic = newFormat.fontItalic;
                     if (oldFormat.fontUnderline != newFormat.fontUnderline)

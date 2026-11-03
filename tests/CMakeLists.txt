@@ -68,6 +68,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/CtanFontProvider.h
     ../src/DraftImageItem.cpp
     ../src/DraftImageItem.h
+    ../src/ShearedTextSlices.cpp
+    ../src/ShearedTextSlices.h
     ../src/FormFieldLayer.cpp
     ../src/FormFieldLayer.h
     ../src/PDFAcroFormCanonicalizer.cpp

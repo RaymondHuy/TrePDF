@@ -19,6 +19,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <utility>
 
 #include <QByteArray>
@@ -68,6 +69,15 @@ bool sameHeaderGroup(const Candidate &left, const Candidate &right)
 {
     return !left.headerMetadataInvalid && !right.headerMetadataInvalid
         && left.headerGroupId == right.headerGroupId && left.headerRole == right.headerRole;
+}
+
+template<typename Candidate>
+bool containsShearedText(const Candidate &candidate)
+{
+    return candidate.textShear != 0.0
+        || std::any_of(candidate.sourceCharacterSpans.cbegin(),
+                       candidate.sourceCharacterSpans.cend(),
+                       [](const auto &span) { return span.format.textShear != 0.0; });
 }
 
 QByteArray headerImageDigest(FPDF_DOCUMENT document, FPDF_PAGE page,
@@ -363,9 +373,9 @@ bool transformedPointToDevice(FPDF_PAGE page,
     return pagePointToDevice(page, deviceSize, mapPoint(transform, point), devicePoint);
 }
 
-bool supportsInlineTextLayout(FPDF_PAGE page,
-                              const QSizeF &pageSize,
-                              const FS_MATRIX &transform)
+bool supportsFormTextLayout(FPDF_PAGE page,
+                            const QSizeF &pageSize,
+                            const FS_MATRIX &transform)
 {
     const QSize deviceSize = mappingDeviceSize(pageSize);
     QPointF origin;
@@ -392,11 +402,58 @@ bool supportsInlineTextLayout(FPDF_PAGE page,
         && qAbs(vertical.x()) <= verticalLength * 0.10;
 }
 
+// Return the horizontal displacement per unit of ascent (positive means
+// leaning right). Work with the PDF matrix before PageToDevice rounding:
+// otherwise a small font or a fractional origin changes the apparent angle.
+std::optional<qreal> horizontalTextShear(FPDF_PAGE page, const FS_MATRIX &matrix)
+{
+    if (!qIsFinite(matrix.a) || !qIsFinite(matrix.b) || !qIsFinite(matrix.c)
+        || !qIsFinite(matrix.d) || !qIsFinite(matrix.e) || !qIsFinite(matrix.f))
+        return std::nullopt;
+
+    // Express both axes in the displayed page's right/up basis. Intrinsic
+    // page rotation can make a vertical PDF baseline horizontal on screen.
+    QPointF baseline(matrix.a, matrix.b);
+    QPointF up(matrix.c, matrix.d);
+    switch (FPDFPage_GetRotation(page)) {
+    case 0: break;
+    case 1:
+        baseline = {matrix.b, -matrix.a};
+        up = {matrix.d, -matrix.c};
+        break;
+    case 2:
+        baseline = -baseline;
+        up = -up;
+        break;
+    case 3:
+        baseline = {-matrix.b, matrix.a};
+        up = {-matrix.d, matrix.c};
+        break;
+    default: return std::nullopt;
+    }
+    if (baseline.x() <= 0.0 || up.y() <= 0.0
+        || std::abs(baseline.y()) > 1e-6 * baseline.x())
+        return std::nullopt;
+    const qreal shear = up.x() / up.y();
+    // Up to about 26.6 degrees in either direction. Reflections, rotated
+    // baselines and more extreme oblique artwork stay outside this editor.
+    if (std::abs(shear) > 0.5)
+        return std::nullopt;
+    return std::abs(shear) <= 1e-6 ? 0.0 : shear;
+}
+
 qreal normalizedFontSize(FPDF_PAGE page,
                          const QSizeF &pageSize,
                          const FS_MATRIX &transform,
-                         qreal fontSize)
+                         qreal fontSize,
+                         qreal textShear)
 {
+    if (textShear != 0.0) {
+        // This transform has a horizontal baseline in displayed page space.
+        // Project the up vector onto its normal before device rounding.
+        const qreal up = (FPDFPage_GetRotation(page) & 1) ? transform.c : transform.d;
+        return pageSize.height() > 0.0 ? fontSize * qAbs(up) / pageSize.height() : 0.0;
+    }
     const QSize deviceSize = mappingDeviceSize(pageSize);
     QPointF origin;
     QPointF fontTop;
@@ -407,17 +464,19 @@ qreal normalizedFontSize(FPDF_PAGE page,
         return 0.0;
     }
 
-    return std::hypot(fontTop.x() - origin.x(), fontTop.y() - origin.y())
-        / deviceSize.height();
+    const QPointF up = fontTop - origin;
+    return std::hypot(up.x(), up.y()) / deviceSize.height();
 }
 
-qreal horizontalScaleForTransform(const FS_MATRIX &transform)
+qreal horizontalScaleForTransform(const FS_MATRIX &transform, qreal textShear)
 {
     // PageToDevice rounds to integer coordinates, making identical transforms
     // appear to have different stretches at fractional text origins. Page
-    // rotation and uniform scaling preserve this ratio of the source axes.
+    // rotation and uniform scaling preserve this ratio. Project the up axis
+    // onto the normal to the baseline so slant does not also compress text.
     const qreal baselineLength = std::hypot(qreal(transform.a), qreal(transform.b));
-    const qreal verticalLength = std::hypot(qreal(transform.c), qreal(transform.d));
+    const qreal verticalLength = std::hypot(qreal(transform.c), qreal(transform.d))
+        / std::hypot(1.0, textShear);
     if (!qIsFinite(baselineLength)
         || !qIsFinite(verticalLength)
         || baselineLength <= 0.0
@@ -2603,9 +2662,6 @@ void PDFEditController::appendPageObjectCandidates(
     }
     const FS_MATRIX textTransform = combinedTransform(containerTransform, objectTransform);
     const bool suppressionSupported = isSuppressibleTextRenderMode(renderMode);
-    const bool inlineLayoutSupported = supportsInlineTextLayout(page, pageSize, textTransform)
-        && !text.contains(QLatin1Char('\n'))
-        && !text.contains(QLatin1Char('\r'));
     candidate.kind = QStringLiteral("text");
     //% "Text"
     candidate.label = qtTrId("Text");
@@ -2616,11 +2672,34 @@ void PDFEditController::appendPageObjectCandidates(
         request,
         fontResolutionCache,
         embeddedFontDataBytes);
+    const bool topLevelObject = objectPath.size() == 1;
+    bool geometrySupported = false;
+    if (topLevelObject) {
+        const auto shear = horizontalTextShear(page, textTransform);
+        geometrySupported = shear.has_value();
+        if (shear && *shear != 0.0) {
+            // A regular face transformed about a horizontal baseline can be
+            // reproduced exactly. Additional clipping or an already italic
+            // font would require independent paint or inclination handling.
+            const FPDF_CLIPPATH clip = FPDFPageObj_GetClipPath(pageObject);
+            geometrySupported = candidate.hasBaseline && !candidate.fontItalic
+                && renderMode == FPDF_TEXTRENDERMODE_FILL
+                && clip && FPDFClipPath_CountPaths(clip) == -1;
+            if (geometrySupported) {
+                candidate.textShear = *shear;
+                candidate.preservePhysicalFontSizes = true;
+            }
+        }
+    } else {
+        geometrySupported = supportsFormTextLayout(page, pageSize, textTransform);
+    }
+    const bool inlineLayoutSupported = geometrySupported
+        && !text.contains(QLatin1Char('\n')) && !text.contains(QLatin1Char('\r'));
     candidate.fontSizeRatio = qMax<qreal>(
         0.0,
-        normalizedFontSize(page, pageSize, textTransform, fontSize));
+        normalizedFontSize(page, pageSize, textTransform, fontSize, candidate.textShear));
     candidate.displayFontSizeRatio = candidate.fontSizeRatio;
-    candidate.horizontalScale = horizontalScaleForTransform(textTransform);
+    candidate.horizontalScale = horizontalScaleForTransform(textTransform, candidate.textShear);
     candidate.fontStretch = qBound(
         static_cast<int>(QFont::UltraCondensed),
         qRound(candidate.horizontalScale * static_cast<qreal>(QFont::Unstretched)),
@@ -2634,7 +2713,6 @@ void PDFEditController::appendPageObjectCandidates(
     }
     candidate.color = textColor(pageObject, renderMode);
     const bool editingAllowed = request.editingAllowed;
-    const bool topLevelObject = objectPath.size() == 1;
     const FPDF_PAGEOBJECT outerObject = !topLevelObject && !objectPath.isEmpty()
         ? FPDFPage_GetObject(page, objectPath.constFirst())
         : nullptr;
@@ -3129,6 +3207,9 @@ QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphL
             continue;
         }
         const QJsonObject model = document.object();
+        const QJsonValue physicalSizes = model.value(QStringLiteral("preservePhysicalFontSizes"));
+        if (!physicalSizes.isUndefined() && !physicalSizes.isBool())
+            continue;
         const QString text = model.value(QStringLiteral("text")).toString();
         const QJsonArray paragraphs = model.value(QStringLiteral("paragraphs")).toArray();
         if (text.isEmpty() || text.size() > 32768 || text.contains(QChar::Null)
@@ -3260,6 +3341,8 @@ QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphL
             format.fontSizeRatio = number("fontSizeRatio");
             format.displayFontSizeRatio = number("displayFontSizeRatio");
             format.fontStretch = object.value(QStringLiteral("fontStretch")).toInt(-1);
+            format.textShear = object.contains(QStringLiteral("textShear"))
+                ? number("textShear") : 0.0;
             format.letterSpacingRatio = number("letterSpacingRatio");
             format.wordSpacingRatio = number("wordSpacingRatio");
             const auto sourceAdvance = object.value(QStringLiteral("sourceAdvanceRatio"));
@@ -3280,6 +3363,8 @@ QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphL
                 || !bounded(format.displayFontSizeRatio, 0.0, 4.0)
                 || format.fontStretch < QFont::UltraCondensed || format.fontStretch > QFont::UltraExpanded
                 || number("fontStretch") != format.fontStretch
+                || !bounded(format.textShear, -0.5, 0.5)
+                || (format.fontItalic && format.textShear != 0.0)
                 || !bounded(format.letterSpacingRatio * pageSize.height(), -10.001, 50.001)
                 || !bounded(format.wordSpacingRatio * pageSize.height(), -10.001, 50.001)
                 || !bounded(format.sourceAdvanceRatio * pageSize.height(), -512.0, 512.0)
@@ -3302,6 +3387,7 @@ QVector<PDFEditController::Candidate> PDFEditController::restoreSourceParagraphL
             continue;
         }
         Candidate restored = first;
+        restored.preservePhysicalFontSizes = restored.preservePhysicalFontSizes || physicalSizes.toBool();
         restored.objectPath.clear();
         restored.parts.clear();
         restored.sourceCharacterSpans.clear();
@@ -3591,6 +3677,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
         return candidate.kind == QLatin1String("text") && candidate.editable
             && candidate.renderSuppressible && candidate.hasBaseline
             && !candidate.headerGroupId.isEmpty() && !candidate.headerMetadataInvalid
+            && !containsShearedText(candidate)
             && candidate.headerRole == QLatin1String("text")
             && !candidate.invalidSpacingMetadata && candidate.spacingGroup.isEmpty()
             && candidate.paragraphLayoutGroup.isEmpty()
@@ -3714,6 +3801,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             && candidate.editable
             && candidate.hasBaseline
             && !candidate.added
+            && !containsShearedText(candidate)
             && !overlappingText.contains(candidate.objectId)
             && candidate.parts.size() == 1
             && candidate.sourceParagraphFormats.isEmpty()
@@ -4178,6 +4266,7 @@ QVector<PDFEditController::Candidate> PDFEditController::groupTextLineCandidates
             && candidate.editable && candidate.renderSuppressible
             && candidate.hasBaseline && !candidate.added
             && !candidate.parts.isEmpty()
+            && !containsShearedText(candidate)
             && hasJoinableParagraphLayout(candidate)
             && !overlappingText.contains(candidate.objectId)
             && !candidate.text.contains(QLatin1Char('\n'))

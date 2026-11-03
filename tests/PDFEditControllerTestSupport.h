@@ -515,7 +515,8 @@ struct TextCharacterInfo {
 };
 
 QVector<TextCharacterInfo> textCharacterRangeInfo(const QString &filePath,
-                                                const QString &text);
+                                                const QString &text,
+                                                bool skipGeneratedLineBreaks = false);
 
 bool textObjectsShareFont(const QString &filePath,
                           const QString &firstText,

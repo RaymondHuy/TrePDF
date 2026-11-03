@@ -3,7 +3,8 @@
 namespace PDFEditControllerTestSupport {
 
 QVector<TextCharacterInfo> textCharacterRangeInfo(const QString &filePath,
-                                                const QString &text)
+                                                const QString &text,
+                                                bool skipGeneratedLineBreaks)
 {
     if (text.isEmpty())
         return {};
@@ -32,11 +33,14 @@ QVector<TextCharacterInfo> textCharacterRangeInfo(const QString &filePath,
     QVector<TextCharacterInfo> result;
     QString recovered;
     for (int index = start; index < start + count; ++index) {
+        const char32_t unicode = FPDFText_GetUnicode(textPage, index);
+        if (skipGeneratedLineBreaks && (unicode == U'\r' || unicode == U'\n')
+            && FPDFText_IsGenerated(textPage, index) == 1)
+            continue;
         FPDF_PAGEOBJECT object = FPDFText_GetTextObject(textPage, index);
         FPDF_FONT font = object ? FPDFTextObj_GetFont(object) : nullptr;
         if (!font)
             return {};
-        const char32_t unicode = FPDFText_GetUnicode(textPage, index);
         TextCharacterInfo character;
         character.text = QString::fromUcs4(&unicode, 1);
         character.font.found = true;
