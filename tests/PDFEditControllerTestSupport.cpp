@@ -4,6 +4,7 @@
 #include "PDFMergeController.h"
 #include "PDFSplitController.h"
 #include "PDFOCRController.h"
+#include "ShearedTextSlices.h"
 #include "SignatureLibrary.h"
 #include "UserFontManager.h"
 #include "platform/PlatformService.h"
@@ -910,6 +911,7 @@ bool registerQmlTestTypes(const QString &themePath)
                1,
                0,
                "PDFPageView") >= 0
+        && qmlRegisterType<ShearedTextSlices>("TrePDF", 1, 0, "ShearedTextSlices") >= 0
         && qmlRegisterType<DraftImageItem>(
                "TrePDF",
                1,

@@ -252,6 +252,8 @@ qt_add_qml_module(trepdf
         src/CtanFontProvider.h
         src/DraftImageItem.cpp
         src/DraftImageItem.h
+        src/ShearedTextSlices.cpp
+        src/ShearedTextSlices.h
         src/FormFieldLayer.cpp
         src/FormFieldLayer.h
         src/LibxlsxwriterWorkbook.cpp
@@ -346,6 +348,7 @@ qt_add_qml_module(trepdf
         src/Components/AppRibbon.qml
         src/Components/InformationRibbon.qml
         src/Components/AppTheme.qml
+        src/Components/ShearedTextView.qml
         src/Components/platform/AppWindow.qml
         src/Components/DocumentTabs.qml
         src/Components/DocumentEmptyState.qml

@@ -631,6 +631,7 @@ QVariantList PDFEditController::characterSpanMaps(
         map.insert(QStringLiteral("sourceAdvanceRatio"), span.format.sourceAdvanceRatio);
         map.insert(QStringLiteral("virtualSpaceRatio"), span.format.virtualSpaceRatio);
         map.insert(QStringLiteral("fontBold"), span.format.fontBold);
+        map.insert(QStringLiteral("textShear"), span.format.textShear);
         map.insert(QStringLiteral("fontItalic"), span.format.fontItalic);
         map.insert(QStringLiteral("fontUnderline"), span.format.fontUnderline);
         map.insert(QStringLiteral("color"), span.format.color);
@@ -784,6 +785,7 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("wordSpacingRatio"), format.wordSpacingRatio);
     map.insert(QStringLiteral("sourceAdvanceRatio"), format.sourceAdvanceRatio);
     map.insert(QStringLiteral("fontBold"), format.fontBold);
+    map.insert(QStringLiteral("textShear"), format.textShear);
     map.insert(QStringLiteral("fontItalic"), format.fontItalic);
     map.insert(QStringLiteral("fontUnderline"), format.fontUnderline);
     map.insert(QStringLiteral("color"), format.color);
@@ -956,6 +958,7 @@ bool PDFEditController::sameCharacterFormat(const CharacterFormat &left,
         && left.sourceAdvanceRatio == right.sourceAdvanceRatio
         && left.virtualSpaceRatio == right.virtualSpaceRatio
         && left.fontBold == right.fontBold
+        && left.textShear == right.textShear
         && left.fontItalic == right.fontItalic
         && left.fontUnderline == right.fontUnderline
         && left.color == right.color;

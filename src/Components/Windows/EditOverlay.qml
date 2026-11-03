@@ -531,6 +531,7 @@ Item {
             sourceAdvanceRatio: primaryFormat.sourceAdvanceRatio,
             fontBold: primaryFormat.fontBold,
             fontItalic: primaryFormat.fontItalic,
+            textShear: primaryFormat.textShear,
             fontUnderline: primaryFormat.fontUnderline,
             hasBaseline: draft.hasBaseline,
             originX: draft.originX,
@@ -741,6 +742,26 @@ Item {
             fontUnderline: controller.selectedFontUnderline,
             color: controller.selectedColor
         }
+    }
+
+    // NaN denotes a line with different slopes. Each glyph keeps its native
+    // advance; only its horizontal distance from the baseline changes.
+    function commonTextShear(spans) {
+        if (!spans || !spans.length)
+            return 0
+        const slope = Number(spans[0].textShear || 0)
+        for (let i = 1; i < spans.length; ++i) {
+            if (Number(spans[i].textShear || 0) !== slope)
+                return NaN
+        }
+        return slope
+    }
+
+    function textDisplayMatrix(slope, baseline, scale) {
+        return Qt.matrix4x4(scale, -slope * scale, 0, slope * baseline * scale,
+                            0, scale, 0, 0,
+                            0, 0, 1, 0,
+                            0, 0, 0, 1)
     }
 
     function selectedBaseFormat() {
@@ -3079,6 +3100,11 @@ Item {
                 boxBottom - frameY)
             readonly property bool usesBaseline: modelData.hasBaseline === true
                 && modelData.added !== true
+            readonly property real commonShear: root.commonTextShear(modelData.characterSpans)
+            readonly property real draftBaseline: slantedDraft.item
+                ? slantedDraft.item.baselineOffset : draftText.baselineOffset
+            readonly property real draftHeight: slantedDraft.item
+                ? slantedDraft.item.implicitHeight : draftText.implicitHeight
             readonly property real textOriginX: modelData.originX * root.width
             readonly property var paragraphFormats: modelData.paragraphFormats || []
             readonly property real firstParagraphSpaceBefore: paragraphFormats.length > 0
@@ -3130,20 +3156,20 @@ Item {
             readonly property real desiredTextPageY: usesBaseline
                 ? Math.min(
                     frameY - root.fallbackBleed,
-                    textBaselineY - draftText.baselineOffset * root.textLayoutScale)
+                    textBaselineY - draftItem.draftBaseline * root.textLayoutScale)
                 : frameY - root.fallbackBleed
             readonly property real textPageY: Math.max(0, desiredTextPageY)
             readonly property real textTop: usesBaseline
                 ? Math.max(
                     0,
-                    textBaselineY - textPageY - draftText.baselineOffset * root.textLayoutScale)
+                    textBaselineY - textPageY - draftItem.draftBaseline * root.textLayoutScale)
                 : root.fallbackBleed + firstParagraphSpaceBefore
             readonly property real frameBottom: frameY
                 + frameHeight
                 + root.fallbackBleed
                 - textPageY
             readonly property real contentBottom: textTop
-                + (isImage || isShape ? 0 : draftText.implicitHeight * root.textLayoutScale
+                + (isImage || isShape ? 0 : draftItem.draftHeight * root.textLayoutScale
                     + lastParagraphSpaceAfter)
                 + root.fallbackBleed
             readonly property real textHeight: Math.max(
@@ -3183,7 +3209,7 @@ Item {
                     root.height,
                     draftItem.textPageY
                         + draftItem.textTop
-                        + draftText.implicitHeight * root.textLayoutScale
+                        + draftItem.draftHeight * root.textLayoutScale
                         + draftItem.lastParagraphSpaceAfter
                         + root.fallbackBleed)
                 const contentHeight = Math.min(
@@ -3274,13 +3300,58 @@ Item {
                 font: draftItem.displayFont
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                 elide: Text.ElideNone
-                visible: !draftItem.isImage
+                visible: draftItem.commonShear === 0
+                    && !draftItem.isImage
                     && !draftItem.isShape
                     && !(draftItem.sourceTextMoveOnly
                         && root.draftTextureReady)
                 onImplicitHeightChanged: {
                     if (draftItem.selected && root.resizingFrame)
                         Qt.callLater(root.syncSelectedDraftContentBounds)
+                }
+            }
+
+            // A live QTextDocument exposes the same native line layout as the
+            // editor, including the baselines of wrapped lines in this draft.
+            Loader {
+                id: slantedDraft
+                active: draftItem.visible && draftItem.commonShear !== 0
+                    && !(draftItem.sourceTextMoveOnly && root.draftTextureReady)
+                x: draftText.x
+                y: draftText.y
+                width: draftText.width
+                scale: root.textLayoutScale
+                transformOrigin: Item.TopLeft
+                sourceComponent: Item {
+                    implicitHeight: proof.implicitHeight
+                    baselineOffset: proof.baselineOffset
+                    TextEdit {
+                        id: proof
+                        readonly property bool segmented: !isFinite(draftItem.commonShear)
+                            || lineCount > 1
+                        width: parent.width
+                        readOnly: true
+                        activeFocusOnTab: false
+                        Accessible.ignored: true
+                        leftPadding: draftText.leftPadding
+                        rightPadding: draftText.rightPadding
+                        textMargin: 0
+                        font: draftItem.displayFont
+                        color: draftItem.modelData.color
+                        text: draftItem.richText
+                        textFormat: TextEdit.RichText
+                        wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                        transform: Matrix4x4 {
+                            matrix: root.textDisplayMatrix(proof.segmented ? 0 : draftItem.commonShear,
+                                                           proof.baselineOffset, 1)
+                        }
+                    }
+
+                    ShearedTextView {
+                        editor: proof
+                        characterSpans: draftItem.modelData.characterSpans
+                        active: proof.segmented
+                    }
                 }
             }
 
@@ -4087,6 +4158,9 @@ Item {
             (contentBounds.y + contentBounds.height - frameRect.y)
                 * root.height)
         readonly property bool editsAddedText: root.controller.selectedKind === "addedText"
+        readonly property real commonShear: root.commonTextShear(root.controller.selectedCharacterSpans)
+        readonly property bool segmentedShear: !isFinite(commonShear)
+            || (commonShear !== 0 && editor.lineCount > 1)
         readonly property bool editsGroupedText: root.controller.selectedSourceRects.length > 1
         readonly property var baseFormat: root.selectedBaseFormat()
         readonly property real leftBleed: editsAddedText
@@ -4196,7 +4270,11 @@ Item {
             y: editorFrame.contentTop
             width: parent.width / root.textLayoutScale
             height: Math.max(1, contentHeight)
-            scale: root.textLayoutScale
+            scale: editorFrame.segmentedShear || editorFrame.commonShear === 0 ? root.textLayoutScale : 1
+            transform: Matrix4x4 {
+                matrix: root.textDisplayMatrix(editorFrame.segmentedShear ? 0 : editorFrame.commonShear,
+                                               editor.baselineOffset, root.textLayoutScale / editor.scale)
+            }
             transformOrigin: Item.TopLeft
             leftPadding: Math.max(
                 0,
@@ -4248,6 +4326,12 @@ Item {
                     event.accepted = true
                 }
             }
+        }
+
+        ShearedTextView {
+            editor: editor
+            characterSpans: root.controller.selectedCharacterSpans
+            active: editorFrame.visible && editorFrame.segmentedShear
         }
     }
 

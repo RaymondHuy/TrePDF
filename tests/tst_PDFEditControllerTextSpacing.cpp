@@ -13,14 +13,15 @@ using namespace PDFEditControllerTestSupport;
 namespace {
 
 bool createPositionedTextPdf(const QString &path, const QByteArray &content,
-                             qreal pageHeight = 842.0)
+                             qreal pageHeight = 842.0, int pageRotation = 0)
 {
     return writePdfObjects(path, {
         QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
         QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
         QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 ")
             + QByteArray::number(pageHeight, 'g', 17)
-            + "] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            + "] /Rotate " + QByteArray::number(pageRotation)
+            + " /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
         QByteArray("<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman "
                    "/Encoding /WinAnsiEncoding >>"),
         QByteArray("<< /Length ") + QByteArray::number(content.size())
@@ -86,7 +87,7 @@ QByteArray managedSpacingContent(const QString &text, qreal advance, qreal lette
 }
 
 bool createPositionedUnicodeTextPdf(const QString &path, const QString &text,
-                                   const QByteArray &fontData)
+                                   const QByteArray &fontData, qreal shear = 0.0)
 {
     // Use a real embedded Unicode face and explicit CID/ToUnicode mappings.
     // WinAnsi's accented Latin characters do not exercise Vietnamese glyphs.
@@ -100,7 +101,8 @@ bool createPositionedUnicodeTextPdf(const QString &path, const QString &text,
     const auto hex = [](uint value) {
         return QByteArray::number(value, 16).rightJustified(4, '0');
     };
-    QByteArray content("BT /F1 12 Tf 1 0 0 1 72 740 Tm [");
+    QByteArray content = QByteArrayLiteral("BT /F1 12 Tf 1 0 ")
+        + QByteArray::number(shear, 'g', 10) + " 1 72 740 Tm [";
     QByteArray widthEntries;
     QByteArray unicodeEntries;
     QSet<uint> mappedGlyphs;
@@ -250,6 +252,566 @@ QVector<qreal> editorVisibleOrigins(QTextDocument *document, qreal originX,
 }
 
 } // namespace
+
+void PDFEditControllerTest::editsHorizontalShearThroughSave_data()
+{
+    QTest::addColumn<QString>("operation");
+    QTest::addColumn<bool>("external");
+    for (const char *operation : {"unchanged", "edit", "resize", "remove-italic", "change-family", "underline"}) {
+        QTest::newRow(operation) << QString::fromLatin1(operation) << false;
+    }
+    if (qEnvironmentVariableIsSet("TREPDF_TEST_SHEARED_TEXT_PDF")) {
+        QTest::newRow("sample-unchanged") << QStringLiteral("unchanged") << true;
+        QTest::newRow("sample-edit") << QStringLiteral("edit") << true;
+        QTest::newRow("sample-vietnamese") << QStringLiteral("vietnamese") << true;
+    }
+}
+
+void PDFEditControllerTest::editsHorizontalShearThroughSave()
+{
+    QFETCH(QString, operation);
+    QFETCH(bool, external);
+    const QString tag = QString::fromLatin1(QTest::currentDataTag());
+    const QString sourcePath = m_temporaryDirectory.filePath(tag + QStringLiteral("-shear.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(tag + QStringLiteral("-shear-out.pdf"));
+    const QString original = QStringLiteral("Nullam mollis convallis ipsum,");
+    const QString neighbor = external ? QStringLiteral("ac accumsan nunc vehicula vitae.")
+                                      : QStringLiteral("Next run");
+    if (external) {
+        QVERIFY(QFile::copy(qEnvironmentVariable("TREPDF_TEST_SHEARED_TEXT_PDF"), sourcePath));
+    } else {
+        // The first two strings are adjacent on one baseline. Grouping them
+        // would give the upright neighbor the selected object's transformation.
+        QVERIFY(createPositionedTextPdf(sourcePath, QByteArray(
+            "BT /F1 10.5 Tf 1 0 .26794 1 72 740 Tm (Nullam mollis convallis ipsum,) Tj ET\n"
+            "BT /F1 10.5 Tf 1 0 0 1 200 740 Tm (Next run) Tj ET\n"
+            "BT /F1 10.5 Tf .8 .6 -.6 .8 72 650 Tm (Rotated) Tj ET\n"
+            "BT /F1 10.5 Tf -1 0 .26794 1 200 600 Tm (Reflected) Tj ET\n"
+            "BT /F1 10.5 Tf 1 0 .8 1 72 550 Tm (Excessive) Tj ET\n"
+            "BT /F1 10.5 Tf 1 Tr 1 0 .26794 1 72 500 Tm (Stroked) Tj ET\n"
+            "q 72 400 70 25 re W n BT /F1 10.5 Tf 1 0 .26794 1 72 408 Tm (Clipped) Tj ET Q\n")));
+    }
+    const auto before = textCharacterRangeInfo(sourcePath, original);
+    QCOMPARE(before.size(), original.size());
+    const auto neighborBefore = textCharacterRangeInfo(sourcePath, neighbor);
+    QCOMPARE(neighborBefore.size(), neighbor.size());
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    const QVariantList candidates = waitForCandidates(controller, 0);
+    if (!external) {
+        QVERIFY(!candidateForText(candidates, neighbor).isEmpty());
+        for (const QString &text : {QStringLiteral("Rotated"), QStringLiteral("Reflected"),
+                                    QStringLiteral("Excessive"), QStringLiteral("Stroked"),
+                                    QStringLiteral("Clipped")}) {
+            const QVariantMap unsafe = candidateForText(candidates, text);
+            QVERIFY(!unsafe.isEmpty());
+            QVERIFY(!unsafe.value(QStringLiteral("editable")).toBool());
+        }
+    }
+    const QVariantMap candidate = candidateForText(candidates, original);
+    QVERIFY2(!candidate.isEmpty(), "The sheared source object must be selectable separately from its neighbors");
+    QVERIFY2(candidate.value(QStringLiteral("editable")).toBool(), "Horizontal synthetic italics must be editable");
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.selectedFontItalic());
+    QVERIFY(qAbs(controller.selectedFontSizeRatio() * document.pageSize(0).height() - 10.5) < .02);
+    QCOMPARE(controller.selectedFontSize(), 10.5);
+    QCOMPARE(candidate.value(QStringLiteral("fontStretch")).toInt(), 100);
+    const auto sourceMatrix = before.first().matrix;
+    const qreal slope = sourceMatrix.c / sourceMatrix.d;
+    QVERIFY(qAbs(candidate.value(QStringLiteral("textShear")).toReal() - slope) < .0001);
+    QString expected = original;
+    int changedFamilyStart = -1;
+    int changedFamilyEnd = -1;
+    controller.beginSelectedTextEdit();
+    QVERIFY(controller.textEditActive());
+    if (operation == QLatin1String("edit")) {
+        expected.replace(QStringLiteral("Nullam"), QStringLiteral("Nulmam"));
+        controller.updateSelectedTextPreview(expected);
+    } else if (operation == QLatin1String("vietnamese")) {
+        const QString insertion = QStringLiteral("tiếng");
+        changedFamilyStart = expected.indexOf(QStringLiteral("mollis"));
+        changedFamilyEnd = changedFamilyStart + insertion.size();
+        expected.replace(QStringLiteral("mollis"), insertion);
+        controller.updateSelectedTextPreview(expected);
+        // This document carries a subset without these Vietnamese glyphs.
+        // Pick a local face for the replacement and retain the source face
+        // and its matrix everywhere else in the same text object.
+        controller.setSelectedTextRange(changedFamilyStart, insertion.size());
+        controller.setSelectedFontFamily(testFontFamily());
+    } else if (operation != QLatin1String("unchanged")) {
+        controller.setSelectedTextRange(0, original.size());
+        if (operation == QLatin1String("resize"))
+            controller.setSelectedFontSize(12);
+        else if (operation == QLatin1String("change-family"))
+            controller.setSelectedFontFamily(testFontFamily());
+        else if (operation == QLatin1String("underline"))
+            controller.setSelectedFontUnderline(true);
+        else
+            controller.setSelectedFontItalic(false);
+    }
+    controller.finishSelectedTextEdit();
+    if (operation == QLatin1String("unchanged")) {
+        QVERIFY(!controller.hasDrafts());
+        QVERIFY(!controller.canUndo());
+    } else {
+        QVERIFY(controller.hasDrafts());
+        controller.undo();
+        QVERIFY(!controller.hasDrafts());
+        QCOMPARE(controller.selectedText(), original);
+        QVERIFY(controller.selectedFontItalic());
+        QVERIFY(!controller.selectedFontUnderline());
+        controller.redo();
+        QCOMPARE(controller.selectedText(), expected);
+        QCOMPARE(controller.selectedFontItalic(), operation != QLatin1String("remove-italic"));
+        QCOMPARE(controller.selectedFontUnderline(), operation == QLatin1String("underline"));
+    }
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+    const auto saved = textCharacterRangeInfo(savedPath, expected, true);
+    QVERIFY2(saved.size() == expected.size(), qPrintable(pageText(savedPath)));
+    const bool genuineItalic = operation == QLatin1String("change-family");
+    const qreal expectedSlope = operation == QLatin1String("remove-italic") || genuineItalic ? 0.0 : slope;
+    for (qsizetype index = 0; index < saved.size(); ++index) {
+        const auto &ch = saved.at(index);
+        const bool usesNewFace = genuineItalic || (index >= changedFamilyStart && index < changedFamilyEnd);
+        // Positioning may encode a space with its neighboring face when the
+        // original subset lacks that glyph. Validate its logical style below.
+        if (!expected.at(index).isSpace())
+            QVERIFY(qAbs(ch.matrix.c / ch.matrix.d - (usesNewFace ? 0.0 : expectedSlope)) < .0001);
+        QVERIFY(qAbs(ch.matrix.b) < .0001);
+        QVERIFY(qAbs(ch.matrix.a / ch.matrix.d - 1.0) < .001);
+        QVERIFY(qAbs(ch.pointSize * ch.matrix.d - (operation == QLatin1String("resize") ? 12.0 : 10.5)) < .02);
+        if (!expected.at(index).isSpace()) {
+            QCOMPARE(ch.font.italic, usesNewFace);
+            if (usesNewFace)
+                QCOMPARE(ch.font.familyName, testFontFamily());
+        }
+    }
+    QVERIFY(qAbs(saved.first().matrix.e - sourceMatrix.e) < .12);
+    QVERIFY(qAbs(saved.first().matrix.f - sourceMatrix.f) < .12);
+    if (operation == QLatin1String("underline")) {
+        const auto paths = inspectTextUnderlinePaths(savedPath);
+        QVERIFY(paths.readable);
+        QVERIFY(!paths.underlines.isEmpty());
+        const auto &line = paths.underlines.first();
+        const auto &matrix = saved.first().matrix;
+        // In PDF coordinates a baseline-relative shear also displaces the
+        // underline below the baseline. Its start must follow that affine
+        // transform, instead of staying at the unsheared text origin.
+        QVERIFY(line.y1() < matrix.f);
+        QVERIFY(qAbs(line.y2() - line.y1()) < .002);
+        QVERIFY(qAbs(line.x1() - (matrix.e + slope * (line.y1() - matrix.f))) < .02);
+        QVERIFY(line.length() > 1.0);
+    }
+    const auto neighborAfter = textCharacterRangeInfo(savedPath, neighbor);
+    QCOMPARE(neighborAfter.size(), neighborBefore.size());
+    QCOMPARE(neighborAfter.first().matrix.e, neighborBefore.first().matrix.e);
+    QCOMPARE(neighborAfter.first().matrix.f, neighborBefore.first().matrix.f);
+    QCOMPARE(neighborAfter.first().matrix.c, neighborBefore.first().matrix.c);
+    if (expectedSlope != 0.0) {
+        const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), expected);
+        QVERIFY(reopened.value(QStringLiteral("editable")).toBool());
+        QVERIFY(qAbs(reopened.value(QStringLiteral("textShear")).toReal() - expectedSlope) < .0001);
+        QCOMPARE(reopened.value(QStringLiteral("fontUnderline")).toBool(), operation == QLatin1String("underline"));
+        if (changedFamilyStart >= 0) {
+            for (const int position : {changedFamilyStart - 1, changedFamilyEnd}) {
+                bool found = false;
+                for (const auto &value : reopened.value(QStringLiteral("characterSpans")).toList()) {
+                    const QVariantMap span = value.toMap();
+                    const int start = span.value(QStringLiteral("start")).toInt();
+                    const int end = start + span.value(QStringLiteral("length")).toInt();
+                    if (position < start || position >= end)
+                        continue;
+                    QVERIFY(!span.value(QStringLiteral("fontItalic")).toBool());
+                    QVERIFY(qAbs(span.value(QStringLiteral("textShear")).toReal() - slope) < .0001);
+                    found = true;
+                }
+                QVERIFY(found);
+            }
+        }
+    }
+    if (operation == QLatin1String("remove-italic")) {
+        const QVariantMap reopened = candidateForText(waitForCandidates(controller, 0), expected);
+        QVERIFY(reopened.value(QStringLiteral("editable")).toBool());
+        QVERIFY(controller.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+        QVERIFY(!controller.selectedFontItalic());
+        QString again = expected;
+        again.replace(again.size() - 1, 1, QStringLiteral("."));
+        controller.commitSelectedText(again);
+        const QString secondPath = m_temporaryDirectory.filePath(tag + QStringLiteral("-shear-second.pdf"));
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(secondPath)));
+        const auto second = textCharacterRangeInfo(secondPath, again, true);
+        QCOMPARE(second.size(), again.size());
+        for (const auto &ch : second) {
+            QVERIFY(qAbs(ch.pointSize * ch.matrix.d - 10.5) < .02);
+            QVERIFY(qAbs(ch.matrix.c) < .0001);
+        }
+    }
+}
+
+void PDFEditControllerTest::preservesHorizontalShearOnRotatedPage()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("shear-rotate90.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("shear-rotate90-saved.pdf"));
+    // With clockwise page rotation, PDF +Y points right on screen. Up points
+    // along -X; the negative Y component of the up vector is a left lean.
+    QVERIFY(createPositionedTextPdf(source, QByteArray(
+        "BT /F1 12 Tf 0 1 -1 -.26794 84 132 Tm (Left lean) Tj ET\n"), 842.0, 90));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0),
+                                                     QStringLiteral("Left lean"));
+    QVERIFY(candidate.value(QStringLiteral("editable")).toBool());
+    QVERIFY(qAbs(candidate.value(QStringLiteral("textShear")).toReal() + .26794) < .0001);
+    QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Left tilt"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    const auto chars = textCharacterRangeInfo(output, QStringLiteral("Left tilt"));
+    QCOMPARE(chars.size(), 9);
+    for (const auto &ch : chars) {
+        QVERIFY(qAbs(ch.matrix.a) < .001);
+        QVERIFY(qAbs(ch.matrix.b - 1.0) < .001);
+        QVERIFY(qAbs(ch.matrix.c + 1.0) < .001);
+        QVERIFY(qAbs(ch.matrix.d + .26794) < .001);
+    }
+    QVERIFY(qAbs(chars.first().matrix.e - 84.0) < .12);
+    QVERIFY(qAbs(chars.first().matrix.f - 132.0) < .12);
+}
+
+void PDFEditControllerTest::editsHorizontalShearInOverlay()
+{
+    const QString original = QStringLiteral("tiếng Việt");
+    const QString expected = QStringLiteral("tiếng tiếViệt");
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("shear-ime.pdf"));
+    const QString savedPath = m_temporaryDirectory.filePath(QStringLiteral("shear-ime-edited.pdf"));
+    QVERIFY(createPositionedUnicodeTextPdf(sourcePath, original, testFontData(), .26794));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTool(PDFEditController::EditTextTool);
+    const QVariantMap candidate = candidateForText(waitForCandidates(controller, 0), original);
+    QVERIFY(candidate.value(QStringLiteral("editable")).toBool());
+
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent themeComponent(&engine);
+    themeComponent.setData(QByteArrayLiteral("import TrePDF\nAppTheme {}"), QUrl());
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    QVERIFY2(theme, qPrintable(themeComponent.errorString()));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(editOverlayQmlPath()));
+    const QSizeF pageSize = document.pageSize(0);
+    std::unique_ptr<QObject> overlay(component.createWithInitialProperties({
+        {QStringLiteral("page"), 0}, {QStringLiteral("pooled"), false},
+        {QStringLiteral("draftTextureCurrent"), false}, {QStringLiteral("draftTextureReady"), false},
+        {QStringLiteral("displayedSuppressedCommentObjectIds"), QStringList()},
+        {QStringLiteral("theme"), QVariant::fromValue(theme.get())},
+        {QStringLiteral("controller"), QVariant::fromValue(&controller)},
+        {QStringLiteral("pagePointScale"), 1.5}, {QStringLiteral("width"), pageSize.width() * 1.5},
+        {QStringLiteral("height"), pageSize.height() * 1.5}}));
+    QVERIFY2(overlay, qPrintable(component.errorString()));
+    QQuickWindow window;
+    window.resize(qCeil(pageSize.width() * 1.5), qCeil(pageSize.height() * 1.5));
+    qobject_cast<QQuickItem *>(overlay.get())->setParentItem(window.contentItem());
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing", Q_ARG(QVariant, QVariant(candidate))));
+    QTRY_VERIFY(controller.textEditActive());
+    QQuickItem *editor = nullptr;
+    for (QQuickItem *item : overlay->findChildren<QQuickItem *>()) {
+        if (item->metaObject()->indexOfProperty("textDocument") >= 0) {
+            editor = item;
+            break;
+        }
+    }
+    QVERIFY(editor);
+    auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+    QVERIFY(quickDocument);
+    QTextDocument *richText = quickDocument->textDocument();
+    QTRY_COMPARE(richText->toPlainText(), original);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "beginEditing", Q_ARG(QVariant, QVariant(candidate))));
+    QTRY_VERIFY(controller.textEditActive());
+    editor->forceActiveFocus();
+    QTRY_VERIFY(editor->hasActiveFocus());
+    const int insertion = original.indexOf(QLatin1Char('V'));
+    QVERIFY(editor->setProperty("cursorPosition", insertion));
+    const QRectF caret = editor->property("cursorRectangle").toRectF();
+    QVERIFY(caret.height() > 0);
+    // The font is upright. Only the PDF text matrix can make the top of
+    // this caret lean right relative to its foot, including at non-unit zoom.
+    const QPointF top = editor->mapToScene(caret.topLeft());
+    const QPointF foot = editor->mapToScene(caret.bottomLeft());
+    QVERIFY(foot.y() > top.y());
+    QVERIFY(qAbs((top.x() - foot.x()) / (foot.y() - top.y()) - .26794) < .001);
+    // Clicking the visible caret after moving it tests the actual input item,
+    // including any transform applied by its ancestors.
+    const QPoint click = editor->mapToScene(caret.center()).toPoint();
+    QVERIFY(editor->setProperty("cursorPosition", 0));
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, click);
+    QCOMPARE(editor->property("cursorPosition").toInt(), insertion);
+
+    QInputMethodEvent preedit(QStringLiteral("tie"), {});
+    QCoreApplication::sendEvent(editor, &preedit);
+    QCOMPARE(richText->toPlainText(), original);
+    QInputMethodEvent commit;
+    commit.setCommitString(QStringLiteral("tiế"));
+    QCoreApplication::sendEvent(editor, &commit);
+    QTRY_COMPARE(richText->toPlainText(), expected);
+    QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+    QTRY_COMPARE(richText->toPlainText(), original);
+    QVERIFY(QMetaObject::invokeMethod(editor, "redo"));
+    QTRY_COMPARE(richText->toPlainText(), expected);
+    QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, insertion), Q_ARG(int, insertion + 3)));
+    QTRY_COMPARE(editor->property("selectedText").toString(), QStringLiteral("tiế"));
+    controller.setSelectedFontItalic(false);
+    QVERIFY(QMetaObject::invokeMethod(overlay.get(), "commitEditing"));
+    QCOMPARE(controller.selectedText(), expected);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+    const auto chars = textCharacterRangeInfo(savedPath, expected);
+    QCOMPARE(chars.size(), expected.size());
+    for (qsizetype i = 0; i < chars.size(); ++i) {
+        const qreal wanted = i >= insertion && i < insertion + 3 ? 0.0 : .26794;
+        QVERIFY(qAbs(chars[i].matrix.c / chars[i].matrix.d - wanted) < .0001);
+        QVERIFY(!chars[i].font.italic);
+    }
+}
+
+void PDFEditControllerTest::rendersMixedShearAcrossLines()
+{
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral(R"qml(
+import QtQuick
+import TrePDF
+Item {
+    required property string fontFamily
+    width: 430
+    height: 220
+    TextEdit {
+        id: editor
+        objectName: "mixedShearEditor"
+        x: 40
+        y: 20
+        leftPadding: 16
+        width: 136
+        height: 190
+        text: "llll llll llll llll"
+        wrapMode: TextEdit.WordWrap
+        font.family: parent.fontFamily
+        font.pixelSize: 48
+        color: "black"
+        selectionColor: "#4488ff"
+        selectedTextColor: "white"
+        selectByMouse: true
+        persistentSelection: true
+        textMargin: 0
+    }
+    ShearedTextView {
+        editor: editor
+        characterSpans: [
+            { start: 0, end: 4, textShear: 0.26794 },
+            { start: 4, end: 10, textShear: 0 },
+            { start: 10, end: 14, textShear: -0.26794 },
+            { start: 14, end: 19, textShear: 0 }
+        ]
+    }
+}
+)qml"), QUrl());
+    std::unique_ptr<QObject> view(component.createWithInitialProperties({
+        {QStringLiteral("fontFamily"), testFontFamily()}}));
+    QVERIFY2(view, qPrintable(component.errorString()));
+    auto *item = qobject_cast<QQuickItem *>(view.get());
+    auto *editor = view->findChild<QQuickItem *>(QStringLiteral("mixedShearEditor"));
+    QVERIFY(item && editor);
+    auto *document = editor->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+    QQuickWindow window;
+    window.setColor(Qt::white);
+    window.resize(430, 220);
+    item->setParentItem(window.contentItem());
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QTRY_COMPARE(document->blockCount(), 1);
+    QTRY_COMPARE(document->firstBlock().layout()->lineCount(), 2);
+    QCOMPARE(document->firstBlock().layout()->lineAt(1).textStart(), 10);
+    const auto rectangleAt = [&](int position) {
+        QRectF rect;
+        QMetaObject::invokeMethod(editor, "positionToRectangle", Qt::DirectConnection,
+                                  Q_RETURN_ARG(QRectF, rect), Q_ARG(int, position));
+        return rect;
+    };
+    // The four upright 'l' stems in each group have a constant horizontal
+    // center. Their raster centers at two heights independently measure the
+    // visible shear, catching blank captures and accidentally upright slices.
+    QImage rendered;
+    const auto inkCenter = [&](int groupStart, qreal aboveBaseline, qreal sampleSlope) {
+        const QRectF first = rectangleAt(groupStart);
+        const QRectF after = rectangleAt(groupStart + 4);
+        const QTextBlock block = document->findBlock(groupStart);
+        const auto line = block.layout()->lineForTextPosition(groupStart - block.position());
+        const qreal baseline = first.top() + line.ascent();
+        // Restrict the sample to this group's projected cells. A neighboring
+        // slanted stem can otherwise enter an upright group's left margin.
+        const qreal offset = sampleSlope * aboveBaseline;
+        const QPointF topLeft = editor->mapToScene(QPointF(first.x() + offset, baseline - aboveBaseline - 1));
+        const QPointF bottomRight = editor->mapToScene(QPointF(after.x() + offset, baseline - aboveBaseline + 1));
+        const qreal density = qreal(rendered.width()) / window.width();
+        const QRect sample = QRectF(topLeft * density, bottomRight * density).toAlignedRect()
+                                 .intersected(rendered.rect());
+        qreal sum = 0;
+        int count = 0;
+        for (int y = sample.top(); y <= sample.bottom(); ++y) {
+            for (int x = sample.left(); x <= sample.right(); ++x) {
+                if (qGray(rendered.pixel(x, y)) < 100) {
+                    sum += x / density;
+                    ++count;
+                }
+            }
+        }
+        return count ? sum / count : std::numeric_limits<qreal>::quiet_NaN();
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        rendered = window.grabWindow();
+        return !rendered.isNull() && qIsFinite(inkCenter(0, 26, .26794))
+            && qIsFinite(inkCenter(10, 26, -.26794));
+    })(), 5000);
+    for (const auto &[start, slope] : {std::pair{0, .26794}, std::pair{5, 0.0},
+                                      std::pair{10, -.26794}, std::pair{15, 0.0}}) {
+        const qreal upperCenter = inkCenter(start, 26, slope);
+        const qreal lowerCenter = inkCenter(start, 10, slope);
+        const qreal measured = (upperCenter - lowerCenter) / 16;
+        if (!(qAbs(measured - slope) < .09)) {
+            const QString artifactDirectory = qEnvironmentVariable("TREPDF_TEST_RENDER_ARTIFACT_DIR");
+            if (!artifactDirectory.isEmpty()) {
+                const QString path = QDir(artifactDirectory).filePath(QStringLiteral("mixed-shear-failure.png"));
+                if (rendered.save(path))
+                    qWarning().noquote() << "Mixed-shear raster:" << path;
+            }
+        }
+        QVERIFY2(qAbs(measured - slope) < .09,
+                 qPrintable(QStringLiteral("group %1 rendered slope %2, expected %3; upper/lower centers %4/%5")
+                                .arg(start).arg(measured).arg(slope).arg(upperCenter).arg(lowerCenter)));
+    }
+    editor->forceActiveFocus();
+    for (const auto &[position, slope] : {std::pair{2, .26794}, std::pair{12, -.26794}}) {
+        const QRectF caret = rectangleAt(position);
+        const QTextBlock block = document->findBlock(position);
+        const auto line = block.layout()->lineForTextPosition(position - block.position());
+        const qreal baseline = caret.top() + line.ascent();
+        const qreal y = baseline - 26;
+        const QPointF visible(caret.x() + slope * (baseline - y), y);
+        editor->setProperty("cursorPosition", 0);
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier,
+                         editor->mapToScene(visible).toPoint());
+        QCOMPARE(editor->property("cursorPosition").toInt(), position);
+    }
+    QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
+    QCOMPARE(editor->property("selectedText").toString(), QStringLiteral("l"));
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        const QImage selected = window.grabWindow();
+        int bluePixels = 0;
+        for (int y = 0; y < selected.height(); ++y) {
+            for (int x = 0; x < selected.width(); ++x) {
+                const QColor color = selected.pixelColor(x, y);
+                if (color.blue() > 200 && color.red() < 120 && color.green() > 80)
+                    ++bluePixels;
+            }
+        }
+        return bluePixels > 40;
+    })(), 5000);
+}
+
+void PDFEditControllerTest::rendersShearedGlyphOverhang()
+{
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral(R"qml(
+import QtQuick
+import TrePDF
+Item {
+    id: scene
+    required property url fontUrl
+    width: 330
+    height: 112
+    FontLoader { id: typeface; source: scene.fontUrl }
+    component Sample: Item {
+        required property bool isolated
+        required property string family
+        width: 150
+        height: 96
+        TextEdit {
+            id: editor
+            objectName: parent.isolated ? "isolatedEditor" : "mixedEditor"
+            anchors.fill: parent
+            leftPadding: 8
+            textMargin: 0
+            text: parent.isolated ? "f" : "f  H"
+            font.family: parent.family
+            font.pixelSize: 64
+            color: "black"
+            readOnly: true
+        }
+        ShearedTextView { editor: editor; characterSpans: [{start: 0, end: 1, textShear: 0.26794}] }
+    }
+    Sample { x: 12; y: 8; isolated: false; family: typeface.name }
+    Sample { x: 172; y: 8; isolated: true; family: typeface.name }
+}
+)qml"), QUrl());
+    const QString fontPath = QFINDTESTDATA("fixtures/fonts/tex-gyre/texgyretermes-regular.otf");
+    QVERIFY(!fontPath.isEmpty());
+    std::unique_ptr<QObject> view(component.createWithInitialProperties({
+        {QStringLiteral("fontUrl"), QUrl::fromLocalFile(fontPath)}}));
+    QVERIFY2(view, qPrintable(component.errorString()));
+    auto *root = qobject_cast<QQuickItem *>(view.get());
+    auto *reference = view->findChild<QQuickItem *>(QStringLiteral("isolatedEditor"));
+    auto *mixed = view->findChild<QQuickItem *>(QStringLiteral("mixedEditor"));
+    QVERIFY(root && reference && mixed);
+    QQuickWindow window;
+    window.setColor(Qt::white);
+    window.resize(330, 112);
+    root->setParentItem(window.contentItem());
+    window.show();
+    QTRY_VERIFY(window.isExposed());
+    QRectF caret;
+    QVERIFY(QMetaObject::invokeMethod(reference, "positionToRectangle",
+                                      Q_RETURN_ARG(QRectF, caret), Q_ARG(int, 1)));
+    const QPointF boundary = reference->mapToScene({caret.x(), reference->baselineOffset()});
+    // Only count the isolated f's ink beyond its sheared advance. A slice cut
+    // at the caret would paint that ink upright in the neighboring spaces.
+    int expected = 0;
+    int covered = 0;
+    const auto coveredOverhang = [&]() -> bool {
+        const QImage pixels = window.grabWindow();
+        if (pixels.isNull())
+            return false;
+        const qreal scale = qreal(pixels.width()) / window.width();
+        const int offset = qRound((reference->mapToScene({}).x() - mixed->mapToScene({}).x()) * scale);
+        expected = 0;
+        covered = 0;
+        for (int y = 0; y < pixels.height(); ++y) {
+            const qreal shiftedBoundary = boundary.x() + .26794 * (boundary.y() - (y + .5) / scale);
+            for (int x = qCeil(shiftedBoundary * scale); x < pixels.width(); ++x) {
+                if (qGray(pixels.pixel(x, y)) < 100) {
+                    ++expected;
+                    if (qGray(pixels.pixel(x - offset, y)) < 150)
+                        ++covered;
+                }
+            }
+        }
+        return expected >= 3 && covered >= .85 * expected;
+    };
+    QTRY_VERIFY2_WITH_TIMEOUT(coveredOverhang(),
+                              qPrintable(QStringLiteral("Mixed run retained %1 of %2 overhang pixels")
+                                             .arg(covered).arg(expected)), 5000);
+}
 
 void PDFEditControllerTest::rejectsOversizedRetainedGlyphLineTransactionally()
 {

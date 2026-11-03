@@ -82,6 +82,7 @@ constexpr int kEditorFontFamily = QTextFormat::UserProperty + 9;
 constexpr int kEditorFontStretch = QTextFormat::UserProperty + 10;
 constexpr int kEditorFirstLineIndentRatio = QTextFormat::UserProperty + 11;
 constexpr int kEditorVirtualSpaceRatio = QTextFormat::UserProperty + 12;
+constexpr int kEditorTextShear = QTextFormat::UserProperty + 13;
 
 // Keep a cell's physical width independent of its font, zoom and user tracking.
 // The marker participates in QTextDocument history; a literal space has zero.
@@ -343,6 +344,7 @@ protected:
                                 const double displaySize = record.value(QStringLiteral("displaySize")).toDouble(-1);
                                 const double letter = record.value(QStringLiteral("letter")).toDouble(1000);
                                 const double word = record.value(QStringLiteral("word")).toDouble(1000);
+                                const double shear = record.value(QStringLiteral("textShear")).toDouble();
                                 const int stretch = record.value(QStringLiteral("stretch")).toInt(-1);
                                 const QColor color(record.value(QStringLiteral("color")).toString());
                                 if (family.isEmpty() || family.size() > 1024
@@ -350,6 +352,7 @@ protected:
                                     || !qIsFinite(displaySize) || displaySize < 0 || displaySize > 512
                                     || !qIsFinite(letter) || qAbs(letter) > 512
                                     || !qIsFinite(word) || qAbs(word) > 512
+                                    || !qIsFinite(shear) || qAbs(shear) > 0.5
                                     || stretch < 1 || stretch > 4000 || !color.isValid()) {
                                     m_pastedFormats.clear();
                                     break;
@@ -362,6 +365,7 @@ protected:
                                 format.setFontFamilies({face.isEmpty() ? family : face});
                                 format.setFontWeight(bold ? QFont::Bold : QFont::Normal);
                                 format.setFontItalic(italic);
+                                format.setProperty(kEditorTextShear, italic ? 0.0 : shear);
                                 format.setFontUnderline(record.value(QStringLiteral("underline")).toBool());
                                 format.setForeground(color);
                                 format.setProperty(QTextFormat::FontPixelSize, pixels);
@@ -443,6 +447,7 @@ private:
                     {QStringLiteral("stretch"), format.intProperty(kEditorFontStretch)},
                     {QStringLiteral("bold"), format.fontWeight() >= QFont::Bold},
                     {QStringLiteral("italic"), format.fontItalic()},
+                    {QStringLiteral("textShear"), format.doubleProperty(kEditorTextShear)},
                     {QStringLiteral("underline"), format.fontUnderline()},
                     {QStringLiteral("color"), format.foreground().color().name(QColor::HexArgb)}});
             }
@@ -944,7 +949,7 @@ QStringList PDFEditController::availableFontFamilies() const
 {
     return ApplicationFonts::availableFontFamilies(
         selectedFontBold(),
-        selectedFontItalic());
+        m_hasSelection && selectedCharacterFormatForDisplay().fontItalic);
 }
 
 QStringList PDFEditController::fontFamiliesForFilter(FontFilter filter) const
@@ -1120,6 +1125,8 @@ qreal PDFEditController::selectedFontSize() const
             }
         }
     }
+    if (m_selectedCandidate.preservePhysicalFontSizes || selectedFormat.textShear != 0.0)
+        return std::round(points * 100.0) / 100.0;
     return qRound(points);
 }
 
@@ -1192,7 +1199,10 @@ bool PDFEditController::selectedFontBold() const
 
 bool PDFEditController::selectedFontItalic() const
 {
-    return m_hasSelection && selectedCharacterFormatForDisplay().fontItalic;
+    if (!m_hasSelection)
+        return false;
+    const auto format = selectedCharacterFormatForDisplay();
+    return format.fontItalic || format.textShear != 0.0;
 }
 
 bool PDFEditController::selectedFontUnderline() const
@@ -1368,6 +1378,7 @@ void PDFEditController::applyTypingFormatToEditorDocument(
     format.setFontWeight(
         m_typingCharacterFormat.fontBold ? QFont::Bold : QFont::Normal);
     format.setFontItalic(m_typingCharacterFormat.fontItalic);
+    format.setProperty(kEditorTextShear, m_typingCharacterFormat.textShear);
     format.setFontUnderline(m_typingCharacterFormat.fontUnderline);
     format.setForeground(m_typingCharacterFormat.color);
     format.setProperty(kEditorFontSizeRatio, m_typingCharacterFormat.fontSizeRatio);
@@ -1482,7 +1493,8 @@ void PDFEditController::initializeEditorFontSizes(
             return controller->m_typingCharacterFormatActive
                 || std::any_of(current.characterSpans.cbegin(), current.characterSpans.cend(),
                                [](const CharacterSpan &span) {
-                    return !qFuzzyIsNull(span.format.sourceAdvanceRatio)
+                    return span.format.textShear != 0.0
+                        || !qFuzzyIsNull(span.format.sourceAdvanceRatio)
                         || span.format.virtualSpaceRatio > 0.0;
                 });
         });
@@ -1512,6 +1524,7 @@ void PDFEditController::initializeEditorFontSizes(
         // separator. Seed its complete style along with the exact metrics.
         format.setFontWeight(span.format.fontBold ? QFont::Bold : QFont::Normal);
         format.setFontItalic(span.format.fontItalic);
+        format.setProperty(kEditorTextShear, span.format.textShear);
         format.setFontUnderline(span.format.fontUnderline);
         format.setForeground(span.format.color);
         format.setFontKerning(qFuzzyIsNull(span.format.sourceAdvanceRatio));
@@ -1630,8 +1643,16 @@ bool PDFEditController::applyFontFamilyToEditorDocument(
         cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
         QTextCharFormat format = cursor.charFormat();
         const bool bold = format.fontWeight() >= QFont::Bold;
+        CharacterFormat face;
+        face.fontFamily = format.stringProperty(kEditorFontFamily);
+        face.fontBold = bold;
+        face.fontItalic = format.fontItalic();
+        face.textShear = format.doubleProperty(kEditorTextShear);
+        changeFormatFamily(face, family);
+        format.setFontItalic(face.fontItalic);
+        format.setProperty(kEditorTextShear, face.textShear);
         const QString displayFamily = ApplicationFonts::displayFamilyForStyle(
-            family, bold, format.fontItalic(), cursor.selectedText());
+            family, bold, face.fontItalic, cursor.selectedText());
         format.setFontFamilies({displayFamily.isEmpty() ? family : displayFamily});
         format.setProperty(kEditorFontFamily, family);
         format.setProperty(kEditorFontStretch, QFont::Unstretched);
@@ -1812,8 +1833,13 @@ bool PDFEditController::applyFontStyleToEditorDocument(
             cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
             const QTextCharFormat previous = cursor.charFormat();
             QTextCharFormat updated = format;
+            if (style == static_cast<int>(FontStyle::Italic)) {
+                const qreal shear = previous.doubleProperty(kEditorTextShear);
+                updated.setProperty(kEditorTextShear, enabled ? shear : 0.0);
+                updated.setFontItalic(enabled && shear == 0.0);
+            }
             QTextCharFormat styled = previous;
-            styled.merge(format);
+            styled.merge(updated);
             const QString family = previous.hasProperty(kEditorFontFamily)
                 ? previous.stringProperty(kEditorFontFamily)
                 : previous.font().family();
@@ -2012,6 +2038,7 @@ bool PDFEditController::syncEditorFontStyles(QObject *textDocument)
             format.fontStretch = editorFormat.intProperty(kEditorFontStretch);
         format.fontBold = editorFormat.fontWeight() >= QFont::Bold;
         format.fontItalic = editorFormat.fontItalic();
+        format.textShear = format.fontItalic ? 0.0 : editorFormat.doubleProperty(kEditorTextShear);
         format.fontUnderline = editorFormat.fontUnderline();
         if (editorFormat.hasProperty(QTextFormat::ForegroundBrush)
             && editorFormat.foreground().color().isValid()) {
@@ -2201,6 +2228,20 @@ void PDFEditController::setSelectedTextRange(int start, int length)
     }
 }
 
+void PDFEditController::changeFormatFamily(CharacterFormat &format, const QString &family)
+{
+    if (sameFontFamily(format.fontFamily, family) && format.fontStretch == QFont::Unstretched)
+        return;
+    if (format.textShear != 0.0 && !sameFontFamily(format.fontFamily, family)
+        && ApplicationFonts::isFontFaceSelectable(family, format.fontBold, true)) {
+        format.fontItalic = true;
+        format.textShear = 0.0;
+    }
+    format.fontFamily = family;
+    format.fontStretch = QFont::Unstretched;
+    format.sourceAdvanceRatio = 0.0;
+}
+
 void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
 {
     if (m_saving || !m_hasSelection
@@ -2212,16 +2253,16 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
     }
 
     Draft draft = selectedDraftForDisplay();
+    const auto faceIsSelectable = [&fontFamily](CharacterFormat format) {
+        changeFormatFamily(format, fontFamily);
+        return ApplicationFonts::isFontFaceSelectable(fontFamily, format.fontBold, format.fontItalic);
+    };
     if (m_textEditActive && m_selectedTextRangeLength == 0) {
         const CharacterFormat current = selectedCharacterFormatForDisplay();
-        if (!ApplicationFonts::isFontFaceSelectable(
-                fontFamily, current.fontBold, current.fontItalic)) {
+        if (!faceIsSelectable(current))
             return;
-        }
         CharacterFormat typing = current;
-        typing.fontFamily = fontFamily;
-        typing.fontStretch = QFont::Unstretched;
-        typing.sourceAdvanceRatio = 0.0;
+        changeFormatFamily(typing, fontFamily);
         if (sameCharacterFormat(current, typing))
             return;
         const qsizetype caret = qBound<qsizetype>(
@@ -2250,19 +2291,13 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
             continue;
         }
         checkedSpan = true;
-        if (!ApplicationFonts::isFontFaceSelectable(
-                fontFamily,
-                span.format.fontBold,
-                span.format.fontItalic)) {
+        if (!faceIsSelectable(span.format)) {
             return;
         }
     }
     if (!checkedSpan) {
         const CharacterFormat format = primaryCharacterFormat(draft);
-        if (!ApplicationFonts::isFontFaceSelectable(
-                fontFamily,
-                format.fontBold,
-                format.fontItalic)) {
+        if (!faceIsSelectable(format)) {
             return;
         }
     }
@@ -2280,13 +2315,7 @@ void PDFEditController::setSelectedFontFamily(const QString &fontFamily)
         rangeStart,
         rangeLength,
         [&fontFamily](CharacterFormat &format) {
-            if (sameFontFamily(format.fontFamily, fontFamily)
-                && format.fontStretch == QFont::Unstretched) {
-                return;
-            }
-            format.fontFamily = fontFamily;
-            format.fontStretch = QFont::Unstretched;
-            format.sourceAdvanceRatio = 0.0;
+            changeFormatFamily(format, fontFamily);
         });
     if (!changed) {
         if (finishImmediately) {
@@ -2729,10 +2758,12 @@ void PDFEditController::setSelectedFontStyle(FontStyle style, bool enabled)
             format.fontBold = enabled;
             break;
         case FontStyle::Italic:
-            if (format.fontItalic != enabled) {
+            if ((format.fontItalic || format.textShear != 0.0) != enabled) {
                 format.sourceAdvanceRatio = 0.0;
             }
-            format.fontItalic = enabled;
+            if (!enabled)
+                format.textShear = 0.0;
+            format.fontItalic = enabled && format.textShear == 0.0;
             break;
         case FontStyle::Underline:
             format.fontUnderline = enabled;
@@ -3133,6 +3164,7 @@ PDFEditController::CharacterFormat PDFEditController::characterFormatForCandidat
     format.wordSpacingRatio = candidate.wordSpacingRatio;
     format.fontBold = candidate.fontBold;
     format.fontItalic = candidate.fontItalic;
+    format.textShear = candidate.textShear;
     format.fontUnderline = candidate.fontUnderline;
     format.color = candidate.color;
     return format;
@@ -3942,6 +3974,7 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
     const qreal sourceAdvanceRatio = m_typingCharacterFormat.sourceAdvanceRatio;
     const bool fontBold = m_typingCharacterFormat.fontBold;
     const bool fontItalic = m_typingCharacterFormat.fontItalic;
+    const qreal textShear = m_typingCharacterFormat.textShear;
     const bool fontUnderline = m_typingCharacterFormat.fontUnderline;
     const qreal fontSizeRatio = m_typingCharacterFormat.fontSizeRatio;
     const qreal displayFontSizeRatio = m_typingCharacterFormat.displayFontSizeRatio;
@@ -3957,6 +3990,7 @@ void PDFEditController::rebaseTypingFormat(const Draft &draft)
     m_typingCharacterFormat.sourceAdvanceRatio = sourceAdvanceRatio;
     m_typingCharacterFormat.fontBold = fontBold;
     m_typingCharacterFormat.fontItalic = fontItalic;
+    m_typingCharacterFormat.textShear = textShear;
     m_typingCharacterFormat.fontUnderline = fontUnderline;
     m_typingCharacterFormat.fontSizeRatio = fontSizeRatio;
     m_typingCharacterFormat.displayFontSizeRatio = displayFontSizeRatio;
