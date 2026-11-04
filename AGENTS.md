@@ -602,7 +602,10 @@ Current features:
   This is bounded source-layout preservation,
   not a general PDF glyph-positioning engine. See `docs/text-editing-pipeline.md`.
 - Draft fonts resolve through embedded PDF faces, system fonts, the private app
-  cache, Google Fonts, then the packaged CTAN JSON catalogue. Fonts under
+  cache, the pinned FontSource catalogue, Google Fonts, then the packaged CTAN JSON catalogue.
+  FontSource downloads exact files from `tre-base/FontSource` at a reviewed commit,
+  checking byte size and SHA-256 before the shared font validator and atomic install.
+  Fonts under
   `src/assets/fonts` remain available as local fallback. Opening the inline
   editor first checks every selected text span's family/style/glyph coverage.
   Missing faces use a single consent popup with Cancel, Use replacement font,

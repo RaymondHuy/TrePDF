@@ -99,6 +99,29 @@ Arial's former resource is absent, and all four test faces are usable.
 The specifically named system-Arial regression still checks actual Arial and
 skips only when that exact system face is unavailable; generic tests do not.
 
+## FontSource provider
+
+FontSource regressions in `tst_PDFEditControllerFonts.cpp` use the unchanged
+Liberation Sans fixture bytes above, which match the pinned public repository.
+They cover exact family/style lookup, URL and redirect restrictions, malformed
+catalogues, size/SHA-256 rejection, atomic batches, cancellation, cache reuse and
+Save/reopen. Unknown families continue through the existing Google/CTAN tests.
+Normal tests use simulated network responses and an isolated font store.
+
+To audit all 24 real faces against the bundled snapshot and TrePDF's Qt font
+validator, supply a local FontSource checkout:
+
+```sh
+TREPDF_TEST_FONTSOURCE_REPO=../FontSource QT_QPA_PLATFORM=offscreen \
+  cmake-build-debug/tests/trepdf_edit_controller_tests validatesExternalFontSourceCatalogFaces
+```
+
+The external audit checks actual bytes, family/style, embedding rights, ASCII
+and declared Vietnamese coverage; it skips when the environment variable is
+absent. The application bundles only `fontsource-catalog.json`, not these fonts.
+See [`docs/font-providers.md`](../docs/font-providers.md) for the snapshot update
+command and pinned revision policy.
+
 `keepsAcroFormFontResourcesConsistentAcrossFontChanges` covers font changes,
 reusing the same face, and migrating legacy resources without changing untouched
 fields. Form and Free Text Save regressions run without application font assets.

@@ -250,6 +250,8 @@ qt_add_qml_module(trepdf
         src/GoogleFontsProvider.h
         src/CtanFontProvider.cpp
         src/CtanFontProvider.h
+        src/FontSourceProvider.cpp
+        src/FontSourceProvider.h
         src/DraftImageItem.cpp
         src/DraftImageItem.h
         src/ShearedTextSlices.cpp
@@ -495,7 +497,9 @@ qt_add_qml_module(trepdf
 qt_add_resources(trepdf "trepdf_font_catalog"
     PREFIX "/trepdf/font-catalog"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/fonts"
-    FILES src/assets/fonts/ctan-catalog.json
+    FILES
+        src/assets/fonts/ctan-catalog.json
+        src/assets/fonts/fontsource-catalog.json
 )
 
 if(TREPDF_BUNDLED_FONT_FILES)

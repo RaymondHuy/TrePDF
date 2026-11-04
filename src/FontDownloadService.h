@@ -24,7 +24,7 @@ class QNetworkReply;
  * usable cache entries can satisfy a face without another download; a cache hit
  * for the requested face can satisfy start() immediately without fetching siblings.
  *
- * Ordinary families use Google Fonts followed by the packaged CTAN catalogue when
+ * Ordinary families use the pinned FontSource catalogue, Google Fonts, then CTAN when
  * a provider reports that the family is absent. Supported Aptos families instead
  * use the reviewed Microsoft archive. Providers describe resources and URL rules;
  * this service owns network requests, response limits, cancellation, and staging.
@@ -46,7 +46,7 @@ public:
     /**
      * @brief Creates an idle service and configures its providers and deadline.
      *
-     * Registers Google Fonts before CTAN and sets a single-shot, 120-second
+     * Registers FontSource, Google Fonts, then CTAN and sets a single-shot, 120-second
      * deadline for an entire operation. Construction does not start the timer,
      * issue requests, or install fonts. The deadline reports a localized timeout
      * through the same completion path as other failures.
@@ -348,6 +348,7 @@ private:
     /**
      * @brief Validates one downloaded face and retains its bytes for the batch.
      *
+     * The provider first checks any pinned size/digest policy for downloaded faces.
      * ApplicationFonts checks that the data is an acceptable editable font matching
      * the resolved family and exact bold/italic flags. A valid QRawFont must then
      * cover printable ASCII U+0020 through U+007E. The requested face additionally

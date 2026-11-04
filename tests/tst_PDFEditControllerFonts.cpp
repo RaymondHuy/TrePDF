@@ -5,6 +5,7 @@
 #include <QGlyphRun>
 #include <QPainterPath>
 #include "FontDownloadService.h"
+#include "FontSourceProvider.h"
 #include "CtanFontProvider.h"
 #include "GoogleFontsProvider.h"
 #include "PDFFontAliases.h"
@@ -201,6 +202,15 @@ QByteArray ctanTermesFontData(int style)
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
 }
 
+QByteArray fontSourceLiberationData(int style)
+{
+    const QStringList styles{QStringLiteral("Regular"), QStringLiteral("Italic"),
+                             QStringLiteral("Bold"), QStringLiteral("BoldItalic")};
+    QFile file(QStringLiteral(":/trepdf/tests/fonts/liberation/LiberationSans-%1.ttf")
+                   .arg(styles.at(style)));
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
 // Give each test its own standard application-data directory without touching
 // the user's real TrePDF font store or changing the process home directory.
 class IsolatedFontStore final
@@ -249,6 +259,19 @@ void setSfntUInt32(QByteArray &data, qsizetype offset, quint32 value)
 {
     for (int byte = 0; byte < 4; ++byte)
         data[offset + byte] = char(value >> (24 - byte * 8));
+}
+
+QByteArray changedFontSourceChecksum(QByteArray bytes)
+{
+    for (int table = 0; table < sfntUInt16(bytes, 4); ++table) {
+        const qsizetype entry = 12 + table * 16;
+        if (bytes.mid(entry, 4) == QByteArrayLiteral("head")) {
+            const qsizetype checksum = sfntUInt32(bytes, entry + 8) + 8;
+            bytes[checksum] = char(quint8(bytes.at(checksum)) ^ 1U);
+            return bytes;
+        }
+    }
+    return {};
 }
 
 quint32 sfntChecksum(const QByteArray &data, qsizetype offset, qsizetype length)
@@ -3046,6 +3069,410 @@ void PDFEditControllerTest::skipsCachedFontStylesWhenDownloadingFamily()
             .endsWith(QStringLiteral(":700italic")));
     QCOMPARE(ApplicationFonts::downloadedFontFace(family, true, true).data, cached);
     QCOMPARE(QDir(store.path).entryList({QStringLiteral("*.ttf")}, QDir::Files).size(), 4);
+}
+
+void PDFEditControllerTest::limitsFontSourceToPinnedCatalogue()
+{
+    FontSourceProvider provider;
+    const QStringList names{QStringLiteral("Hack"), QStringLiteral("Iosevka"),
+        QStringLiteral("Liberation Mono"), QStringLiteral("Liberation Sans"),
+        QStringLiteral("Liberation Serif"), QStringLiteral("Sarasa Gothic CL")};
+    QString revision;
+    for (const QString &name : names) {
+        const auto family = provider.resolve(name.toLower(), {});
+        QCOMPARE(family.availability, IFontProvider::Availability::Found);
+        QCOMPARE(family.name, name);
+        QVERIFY(!family.license.isEmpty());
+        QVERIFY(family.source.toString().startsWith(QStringLiteral("https://github.com/tre-base/FontSource/tree/")));
+        QCOMPARE(family.vietnamese, name != QLatin1String("Hack"));
+        QVERIFY(provider.metadataUrl(name).isEmpty());
+        QCOMPARE(provider.faceResource(), IFontProvider::Resource::Font);
+        for (int style = 0; style < 4; ++style) {
+            QVERIFY(family.styles[style]);
+            const QUrl url = provider.faceUrl(family, style & 2, style & 1);
+            QCOMPARE(url.scheme(), QStringLiteral("https"));
+            QCOMPARE(url.host(), QStringLiteral("raw.githubusercontent.com"));
+            const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+            QCOMPARE(segments.size(), 7);
+            QCOMPARE(segments.at(0), QStringLiteral("tre-base"));
+            QCOMPARE(segments.at(1), QStringLiteral("FontSource"));
+            QVERIFY(QRegularExpression(QStringLiteral("^[0-9a-f]{40}$")).match(segments.at(2)).hasMatch());
+            if (revision.isEmpty())
+                revision = segments.at(2);
+            QCOMPARE(segments.at(2), revision);
+            QCOMPARE(segments.at(3), QStringLiteral("fonts"));
+            QVERIFY(provider.allowsUrl(url, IFontProvider::Resource::Font));
+            QVERIFY(!provider.allowsUrl(url, IFontProvider::Resource::Metadata));
+            QVERIFY(!provider.allowsUrl(url, IFontProvider::Resource::Stylesheet));
+            QVERIFY(provider.fallbackFaceUrls(family, style & 2, style & 1).isEmpty());
+        }
+    }
+    const auto liberation = provider.resolve(QStringLiteral("Liberation Sans"), {});
+    const QStringList styles{QStringLiteral("Regular"), QStringLiteral("Italic"),
+                             QStringLiteral("Bold"), QStringLiteral("BoldItalic")};
+    for (int style = 0; style < 4; ++style) {
+        QCOMPARE(provider.faceUrl(liberation, style & 2, style & 1), QUrl(QStringLiteral(
+            "https://raw.githubusercontent.com/tre-base/FontSource/%1/fonts/liberation-sans/2.1.5/LiberationSans-%2.ttf")
+            .arg(revision, styles.at(style))));
+    }
+    for (const QString &name : {QStringLiteral("LiberationSans"), QStringLiteral("Libreation Sans"),
+                               QStringLiteral("Arial"), QStringLiteral("Sarasa Gothic"),
+                               QStringLiteral("Iosevka Term")}) {
+        const auto family = provider.resolve(name, {});
+        QCOMPARE(family.availability, IFontProvider::Availability::NotFound);
+        QVERIFY(provider.faceUrl(family, false, false).isEmpty());
+        QVERIFY(!provider.acceptsFaceData(family, false, false, fontSourceLiberationData(0)));
+    }
+}
+
+void PDFEditControllerTest::rejectsMalformedFontSourceCatalogues_data()
+{
+    QTest::addColumn<int>("scenario");
+    QTest::newRow("malformed-json") << 0;
+    QTest::newRow("wrong-schema") << 1;
+    QTest::newRow("mutable-revision") << 2;
+    QTest::newRow("wrong-repository") << 3;
+    QTest::newRow("duplicate-family") << 4;
+    QTest::newRow("duplicate-face-path") << 5;
+    QTest::newRow("path-traversal") << 6;
+    QTest::newRow("bad-hash") << 7;
+    QTest::newRow("empty-face") << 8;
+    QTest::newRow("oversized-catalogue") << 9;
+    QTest::newRow("revision-trailing-newline") << 10;
+    QTest::newRow("hash-trailing-newline") << 11;
+    QTest::newRow("path-trailing-newline") << 12;
+}
+
+void PDFEditControllerTest::rejectsMalformedFontSourceCatalogues()
+{
+    QFETCH(int, scenario);
+    QFile source(QStringLiteral(":/trepdf/font-catalog/fontsource-catalog.json"));
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    QJsonObject root = QJsonDocument::fromJson(source.readAll()).object();
+    QJsonArray families = root.value(QStringLiteral("families")).toArray();
+    QVERIFY(!families.isEmpty());
+    const QString name = families.first().toObject().value(QStringLiteral("name")).toString();
+    QVERIFY(!name.isEmpty());
+    if (scenario == 1)
+        root.insert(QStringLiteral("schemaVersion"), 2);
+    else if (scenario == 2)
+        root.insert(QStringLiteral("revision"), QStringLiteral("main"));
+    else if (scenario == 3)
+        root.insert(QStringLiteral("repository"), QStringLiteral("https://github.com/untrusted/FontSource"));
+    else if (scenario == 4)
+        families.append(families.first());
+    else if (scenario == 10)
+        root.insert(QStringLiteral("revision"), root.value(QStringLiteral("revision")).toString() + QLatin1Char('\n'));
+    else if ((scenario >= 5 && scenario <= 8) || scenario >= 11) {
+        QJsonObject family = families.first().toObject();
+        QJsonObject faces = family.value(QStringLiteral("faces")).toObject();
+        QJsonObject face = faces.value(QStringLiteral("regular")).toObject();
+        if (scenario == 5)
+            face.insert(QStringLiteral("path"), faces.value(QStringLiteral("italic")).toObject().value(QStringLiteral("path")));
+        else if (scenario == 6)
+            face.insert(QStringLiteral("path"), QStringLiteral("fonts/../outside.ttf"));
+        else if (scenario == 7)
+            face.insert(QStringLiteral("sha256"), QStringLiteral("not-a-sha256"));
+        else if (scenario == 8)
+            face.insert(QStringLiteral("bytes"), 0);
+        else if (scenario == 11)
+            face.insert(QStringLiteral("sha256"), face.value(QStringLiteral("sha256")).toString() + QLatin1Char('\n'));
+        else
+            face.insert(QStringLiteral("path"), face.value(QStringLiteral("path")).toString() + QLatin1Char('\n'));
+        faces.insert(QStringLiteral("regular"), face);
+        family.insert(QStringLiteral("faces"), faces);
+        families[0] = family;
+    }
+    root.insert(QStringLiteral("families"), families);
+    QByteArray bytes = QJsonDocument(root).toJson(QJsonDocument::Compact);
+    if (scenario == 0)
+        bytes = QByteArrayLiteral("{broken");
+    else if (scenario == 9)
+        bytes.prepend(QByteArray(2 * 1024 * 1024 + 1, ' '));
+    FontSourceProvider provider(bytes);
+    QCOMPARE(provider.resolve(name, {}).availability, IFontProvider::Availability::Invalid);
+}
+
+void PDFEditControllerTest::verifiesFontSourceFaceIntegrity()
+{
+    FontSourceProvider provider;
+    const auto family = provider.resolve(QStringLiteral("Liberation Sans"), {});
+    QCOMPARE(family.availability, IFontProvider::Availability::Found);
+    for (int style = 0; style < 4; ++style) {
+        const QByteArray original = fontSourceLiberationData(style);
+        QVERIFY(!original.isEmpty());
+        QVERIFY(provider.acceptsFaceData(family, style & 2, style & 1, original));
+        QVERIFY(!provider.acceptsFaceData(family, style & 2, style & 1, original.chopped(1)));
+        QVERIFY(!provider.acceptsFaceData(family, style & 2, style & 1, original + '\0'));
+        QVERIFY(!provider.acceptsFaceData(family, style & 2, style & 1, fontSourceLiberationData((style + 1) % 4)));
+        const QByteArray changed = changedFontSourceChecksum(original);
+        QCOMPARE(changed.size(), original.size());
+        QVERIFY(changed != original);
+        // A font that still passes the ordinary validator must fail the pinned digest.
+        QString error;
+        QVERIFY2(ApplicationFonts::validateDownloadedFontData(changed, family.name,
+                     style & 2, style & 1, uint('z'), error), qPrintable(error));
+        QVERIFY(!provider.acceptsFaceData(family, style & 2, style & 1, changed));
+    }
+}
+
+void PDFEditControllerTest::downloadsFontSourceAndSavesReopenedText()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString familyName = QStringLiteral("Liberation Sans");
+    FontSourceProvider provider;
+    const auto family = provider.resolve(familyName, {});
+    const QList<int> order{3, 0, 1, 2};
+    FontNetwork network;
+    for (int style : order)
+        network.responses.append(FontResponse{fontSourceLiberationData(style)});
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(familyName, true, true, 0x1ec7U);
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY2(finished.first().first().toBool(), qPrintable(finished.first().at(1).toString()));
+    QCOMPARE(network.requests.size(), 4);
+    QCOMPARE(QDir(store.path).entryList({QStringLiteral("*.ttf")}, QDir::Files).size(), 4);
+    for (int index = 0; index < order.size(); ++index) {
+        const int style = order.at(index);
+        QCOMPARE(network.requests.at(index).url(), provider.faceUrl(family, style & 2, style & 1));
+        const auto installed = ApplicationFonts::downloadedFontFace(familyName, style & 2, style & 1);
+        QVERIFY(installed.isValid());
+        QCOMPARE(installed.data, fontSourceLiberationData(style));
+    }
+    FontNetwork cachedNetwork;
+    FontDownloadService cachedService(nullptr, &cachedNetwork);
+    QSignalSpy cachedFinished(&cachedService, &FontDownloadService::finished);
+    cachedService.start(familyName, false, false, 0x1ec7U);
+    QTRY_COMPARE_WITH_TIMEOUT(cachedFinished.size(), 1, 5000);
+    QVERIFY(cachedFinished.first().first().toBool());
+    QVERIFY(cachedNetwork.requests.isEmpty());
+
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("fontsource-source.pdf"));
+    const QString output = m_temporaryDirectory.filePath(QStringLiteral("fontsource-saved.pdf"));
+    const QString text = QStringLiteral("Liberation: Tiếng Việt Ệ ộ ự.");
+    QVERIFY(createFontStylePdf(source));
+    {
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(source)));
+        controller.setDocument(&document);
+        const auto candidate = candidateForText(waitForCandidates(controller, 0),
+                                               QString::fromLatin1(kRegularText));
+        QVERIFY(!candidate.isEmpty());
+        QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+        controller.beginSelectedTextEdit();
+        controller.updateSelectedTextPreview(text);
+        controller.setSelectedTextRange(0, text.size());
+        controller.setSelectedFontFamily(familyName);
+        controller.setSelectedFontBold(true);
+        controller.setSelectedFontItalic(true);
+        controller.finishSelectedTextEdit();
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(output)));
+    }
+    QVERIFY2(normalizedPageText(output).contains(text), qPrintable(pageText(output)));
+    const auto savedFont = textObjectFontInfo(output, QStringLiteral("Liberation:"));
+    QVERIFY(savedFont.found);
+    QCOMPARE(savedFont.embedded, 1);
+    QCOMPARE(compactFontName(savedFont.familyName), compactFontName(familyName));
+    PDFDocument reopenedDocument;
+    PDFEditController reopenedController;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(output)));
+    reopenedController.setDocument(&reopenedDocument);
+    const auto reopened = candidateForText(waitForCandidates(reopenedController, 0), text);
+    QVERIFY(!reopened.isEmpty());
+    QVERIFY(reopenedController.selectCandidate(0, reopened.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(reopenedController.selectedFontFamily(), familyName);
+    QVERIFY(reopenedController.selectedFontBold());
+    QVERIFY(reopenedController.selectedFontItalic());
+    QVERIFY(!renderFirstPage(output, QSize(595, 842)).isNull());
+}
+
+void PDFEditControllerTest::cancelsFontSourceBeforeBatchInstallation()
+{
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    const QString name = QStringLiteral("Liberation Sans");
+    FontNetwork network;
+    network.responses = {{fontSourceLiberationData(0)},
+                         {fontSourceLiberationData(1), 200, {}, -1, 250}};
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(name, false, false, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(network.requests.size(), 2, 5000);
+    QVERIFY(!QFileInfo::exists(store.path));
+    service.cancel();
+    QTest::qWait(300);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCOMPARE(finished.size(), 0);
+    QCOMPARE(network.requests.size(), 2);
+    QVERIFY(!QFileInfo::exists(store.path));
+    for (int style = 0; style < 4; ++style)
+        QVERIFY(!ApplicationFonts::downloadedFontFace(name, style & 2, style & 1).isValid());
+}
+
+void PDFEditControllerTest::rejectsInvalidFontSourceSibling_data()
+{
+    QTest::addColumn<int>("scenario");
+    QTest::newRow("digest-mismatch") << 0;
+    QTest::newRow("size-mismatch") << 1;
+    QTest::newRow("wrong-style") << 2;
+    QTest::newRow("http-failure") << 3;
+}
+
+void PDFEditControllerTest::rejectsInvalidFontSourceSibling()
+{
+    QFETCH(int, scenario);
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    FontNetwork network;
+    QByteArray sibling = fontSourceLiberationData(1);
+    QVERIFY(!sibling.isEmpty());
+    if (scenario == 0)
+        sibling = changedFontSourceChecksum(sibling);
+    else if (scenario == 1)
+        sibling.chop(1);
+    else if (scenario == 2)
+        sibling = fontSourceLiberationData(2);
+    network.responses = {{fontSourceLiberationData(0)},
+                         {sibling, scenario == 3 ? 404 : 200}};
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(QStringLiteral("Liberation Sans"), false, false, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY(!finished.first().first().toBool());
+    QVERIFY(!finished.first().at(1).toString().isEmpty());
+    QCOMPARE(network.requests.size(), 2); // Never fall through to another provider on failure.
+    QVERIFY(!QFileInfo::exists(store.path));
+    for (int style = 0; style < 4; ++style)
+        QVERIFY(!ApplicationFonts::downloadedFontFace(QStringLiteral("Liberation Sans"), style & 2, style & 1).isValid());
+}
+
+void PDFEditControllerTest::rejectsFontSourceRedirects_data()
+{
+    QTest::addColumn<int>("scenario");
+    QTest::newRow("other-host") << 0;
+    QTest::newRow("mutable-revision") << 1;
+    QTest::newRow("other-approved-face") << 2;
+    QTest::newRow("query") << 3;
+    QTest::newRow("http") << 4;
+    QTest::newRow("traversal") << 5;
+    QTest::newRow("encoded-path") << 6;
+    QTest::newRow("credentials") << 7;
+}
+
+void PDFEditControllerTest::rejectsFontSourceRedirects()
+{
+    QFETCH(int, scenario);
+    IsolatedFontStore store;
+    QVERIFY(store.fresh);
+    FontSourceProvider provider;
+    const auto family = provider.resolve(QStringLiteral("Liberation Sans"), {});
+    const QUrl original = provider.faceUrl(family, false, false);
+    QVERIFY(!original.isEmpty());
+    QUrl redirect = original;
+    switch (scenario) {
+    case 0: redirect.setHost(QStringLiteral("untrusted.example.com")); break;
+    case 1: {
+        QStringList segments = redirect.path().split(QLatin1Char('/'));
+        segments[3] = QStringLiteral("main");
+        redirect.setPath(segments.join(QLatin1Char('/')));
+        break;
+    }
+    case 2: redirect = provider.faceUrl(family, true, false); break;
+    case 3: redirect.setQuery(QStringLiteral("download=1")); break;
+    case 4: redirect.setScheme(QStringLiteral("http")); break;
+    case 5: redirect.setPath(QStringLiteral("/../") + redirect.path()); break;
+    case 6: redirect = QUrl(original.toString().replace(QStringLiteral("/fonts/"), QStringLiteral("/%2ffonts/"))); break;
+    case 7: redirect.setUserName(QStringLiteral("user")); break;
+    }
+    QVERIFY(!provider.allowsRedirect(original, redirect, IFontProvider::Resource::Font));
+    if (scenario != 2)
+        QVERIFY(!provider.allowsUrl(redirect, IFontProvider::Resource::Font));
+    FontNetwork network;
+    network.responses = {{{}, 302, redirect}};
+    FontDownloadService service(nullptr, &network);
+    QSignalSpy finished(&service, &FontDownloadService::finished);
+    service.start(family.name, false, false, uint('z'));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 5000);
+    QVERIFY(!finished.first().first().toBool());
+    QCOMPARE(network.requests.size(), 1);
+    QCOMPARE(network.requests.first().url(), original);
+    QVERIFY(!QFileInfo::exists(store.path));
+}
+
+void PDFEditControllerTest::validatesExternalFontSourceCatalogFaces()
+{
+    const QString repository = qEnvironmentVariable("TREPDF_TEST_FONTSOURCE_REPO");
+    if (repository.isEmpty())
+        QSKIP("Set TREPDF_TEST_FONTSOURCE_REPO to a local checkout of the pinned FontSource repository.");
+    QVERIFY(QFileInfo(repository).isDir());
+    QFile catalogue(QStringLiteral(":/trepdf/font-catalog/fontsource-catalog.json"));
+    QVERIFY(catalogue.open(QIODevice::ReadOnly));
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(catalogue.readAll(), &parseError);
+    QCOMPARE(parseError.error, QJsonParseError::NoError);
+    const QJsonArray entries = document.object().value(QStringLiteral("families")).toArray();
+    QVERIFY(!entries.isEmpty());
+    const QDir files(repository);
+    const QStringList styles{QStringLiteral("regular"), QStringLiteral("italic"),
+                             QStringLiteral("bold"), QStringLiteral("bolditalic")};
+    const QString accents = QStringLiteral(
+        "ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝàáâãèéêìíòóôõùúýĂăĐđĨĩŨũƠơƯư");
+    FontSourceProvider provider;
+    QStringList failures;
+    int faceCount = 0;
+    for (const QJsonValue &value : entries) {
+        const QJsonObject entry = value.toObject();
+        const QString name = entry.value(QStringLiteral("name")).toString();
+        const auto family = provider.resolve(name, {});
+        QCOMPARE(family.availability, IFontProvider::Availability::Found);
+        const QJsonObject faces = entry.value(QStringLiteral("faces")).toObject();
+        for (int style = 0; style < styles.size(); ++style) {
+            if (!faces.contains(styles.at(style)))
+                continue;
+            ++faceCount;
+            const QJsonObject face = faces.value(styles.at(style)).toObject();
+            QFile file(files.filePath(face.value(QStringLiteral("path")).toString()));
+            const QString label = name + QLatin1Char('/') + styles.at(style);
+            if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > 16 * 1024 * 1024) {
+                failures.append(label + QStringLiteral(": missing or oversized file"));
+                continue;
+            }
+            const QByteArray bytes = file.readAll();
+            if (!provider.acceptsFaceData(family, style & 2, style & 1, bytes)) {
+                failures.append(label + QStringLiteral(": pinned size/SHA-256 mismatch"));
+                continue;
+            }
+            QString error;
+            if (!ApplicationFonts::validateDownloadedFontData(bytes, name, style & 2, style & 1, uint('z'), error)) {
+                failures.append(label + QStringLiteral(": ") + error);
+                continue;
+            }
+            const QRawFont raw(bytes, 16.0, QFont::PreferNoHinting);
+            uint missing = 0;
+            for (uint character = 32; character <= 126 && !missing; ++character) {
+                if (!raw.supportsCharacter(character))
+                    missing = character;
+            }
+            if (family.vietnamese) {
+                for (QChar character : accents) {
+                    if (!missing && !raw.supportsCharacter(character.unicode()))
+                        missing = character.unicode();
+                }
+                for (uint character = 0x1ea0; character <= 0x1ef9 && !missing; ++character) {
+                    if (!raw.supportsCharacter(character))
+                        missing = character;
+                }
+            }
+            if (missing)
+                failures.append(label + QStringLiteral(": missing advertised U+") + QString::number(missing, 16).toUpper());
+        }
+    }
+    qInfo() << "FontSource validation:" << entries.size() << "families," << faceCount << "faces," << failures.size() << "failures";
+    QCOMPARE(faceCount, 24);
+    QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QLatin1Char('\n'))));
 }
 
 void PDFEditControllerTest::limitsCtanCatalogueToReviewedFamilies()
