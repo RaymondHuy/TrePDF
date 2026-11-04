@@ -1,6 +1,7 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTranslator>
@@ -1020,6 +1021,33 @@ void PDFEditControllerTest::rejectsTamperedSourceShapeProvenance()
 }
 
 namespace {
+QJsonObject readTableTestMetadata(const QString &sourcePath)
+{
+    PDFiumProcessLock lock;
+    const QByteArray path = QFile::encodeName(sourcePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(path.constData(), nullptr);
+    if (!document)
+        return {};
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    FPDF_PAGE page = FPDF_LoadPage(document, 0);
+    if (!page)
+        return {};
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, 0);
+    if (!object || FPDFPageObj_CountMarks(object) != 1)
+        return {};
+    FPDF_PAGEOBJECTMARK mark = FPDFPageObj_GetMark(object, 0);
+    unsigned long length = 0;
+    if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data", nullptr, 0, &length)
+        || length == 0 || length > 16 * 1024)
+        return {};
+    QByteArray bytes(qsizetype(length), Qt::Uninitialized);
+    if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data",
+            reinterpret_cast<unsigned char *>(bytes.data()), length, &length))
+        return {};
+    return QJsonDocument::fromJson(bytes).object();
+}
+
 bool rewriteTableTestMetadata(const QString &sourcePath, const QString &targetPath,
                               const QString &key, const QVariant &value)
 {
@@ -1137,6 +1165,212 @@ void PDFEditControllerTest::addsTableWithAtomicHistory()
     QVERIFY(controller.selectCandidate(0, objectId));
     QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), 4);
     controller.discardDrafts();
+    QVERIFY(!controller.hasDrafts());
+}
+
+
+void PDFEditControllerTest::editsTableDividersWithAtomicHistory()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("table-divider-history.pdf"));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableColumns(4);
+    QVERIFY(!controller.addShape(0, QPointF(.2, .2), QPointF(.8, .8)).isEmpty());
+    const QRectF frame = controller.selectedFrameRect();
+    const QString objectId = controller.selectedObjectId();
+    const auto stops = [&](bool column) {
+        return controller.selectedDraftPreview().value(column
+            ? QStringLiteral("tableColumnStops") : QStringLiteral("tableRowStops")).toList();
+    };
+    controller.updateSelectedTableDivider(true, 0, .15); // Requires a gesture.
+    QVERIFY(stops(true).isEmpty());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(true, -1, .15);
+    controller.updateSelectedTableDivider(true, 3, .15);
+    controller.updateSelectedTableDivider(false, 0, std::numeric_limits<qreal>::quiet_NaN());
+    QVERIFY(stops(true).isEmpty());
+    QVERIFY(stops(false).isEmpty());
+    controller.updateSelectedTableDivider(true, 0, .2);
+    controller.updateSelectedTableDivider(true, 0, .15);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(stops(true), QVariantList({.15, .5, .75}));
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    QCOMPARE(controller.tableColumns(), 4);
+    controller.undo();
+    QVERIFY(stops(true).isEmpty());
+    controller.undo(); // Only creation remains below the completed gesture.
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    controller.redo();
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QCOMPARE(stops(true), QVariantList({.15, .5, .75}));
+
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(false, 0, .2);
+    controller.cancelSelectedFrameResize();
+    QVERIFY(stops(false).isEmpty());
+    QCOMPARE(stops(true), QVariantList({.15, .5, .75}));
+    controller.beginSelectedTextEdit();
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(true, 1, .6);
+    controller.cancelSelectedFrameResize(); // The enclosing edit remains active.
+    QCOMPARE(stops(true), QVariantList({.15, .5, .75}));
+    controller.finishSelectedTextEdit();
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(true, 0, 1.0);
+    QCOMPARE(stops(true).at(0).toDouble(), .495);
+    controller.updateSelectedTableDivider(false, 0, -1.0);
+    QCOMPARE(stops(false).at(0).toDouble(), .005);
+    controller.cancelSelectedFrameResize();
+    const QRectF resized(.1, .1, .7, .5);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resized);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(stops(true), QVariantList({.15, .5, .75}));
+    controller.undo();
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    controller.undo();
+    QVERIFY(stops(true).isEmpty());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(true, 0, .15);
+    controller.updateSelectedTableDivider(true, 0, .25);
+    controller.finishSelectedFrameResize(); // Returning to start creates no history.
+    QVERIFY(stops(true).isEmpty());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.setShapeType(PDFEditController::RectangleShape);
+    QVERIFY(!controller.addShape(0, QPointF(.2, .2), QPointF(.8, .8)).isEmpty());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(true, 0, .1);
+    controller.finishSelectedFrameResize();
+    QVERIFY(stops(true).isEmpty());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::savesUnevenTableDividers_data()
+{
+    QTest::addColumn<int>("rotation");
+    for (int rotation = 0; rotation < 4; ++rotation)
+        QTest::newRow(qPrintable(QString::number(rotation))) << rotation;
+}
+
+void PDFEditControllerTest::savesUnevenTableDividers()
+{
+    QFETCH(int, rotation);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("uneven-%1.pdf").arg(rotation));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("uneven-saved-%1.pdf").arg(rotation));
+    QVERIFY(createTableTestPage(path, rotation));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableColumns(4);
+    QVERIFY(!controller.addShape(0, QPointF(.15, .2), QPointF(.75, .7)).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QCOMPARE(readTableTestMetadata(saved).value(QStringLiteral("version")).toInt(), 2);
+    const auto original = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(controller.selectCandidate(0, original.value(QStringLiteral("objectId")).toString()));
+    const QRectF frame = controller.selectedFrameRect();
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(true, 0, .12);
+    controller.updateSelectedTableDivider(true, 2, .87);
+    controller.updateSelectedTableDivider(false, 0, .2);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QVERIFY(controller.save());
+    const auto metadata = readTableTestMetadata(saved);
+    QCOMPARE(metadata.value(QStringLiteral("version")).toInt(), 3);
+    QCOMPARE(metadata.value(QStringLiteral("columnStops")).toArray(), QJsonArray({.12, .5, .87}));
+    QCOMPARE(metadata.value(QStringLiteral("rowStops")).toArray(), QJsonArray({.2, 2.0 / 3}));
+    // Check actual PDF path coordinates independently of its metadata.
+    const auto inspection = inspectShapePaths(saved);
+    QCOMPARE(inspection.count, 1);
+    const auto points = inspection.normalizedPathPoints.constFirst();
+    QCOMPARE(points.size(), 16);
+    qreal left = 1, right = 0, top = 1, bottom = 0;
+    for (const auto &point : points) {
+        left = qMin(left, point.x()); right = qMax(right, point.x());
+        top = qMin(top, point.y()); bottom = qMax(bottom, point.y());
+    }
+    for (int i = 0; i < 2; ++i) {
+        const qreal ratio = (points.at(6 + i * 2).y() - top) / (bottom - top);
+        QVERIFY(qAbs(ratio - (i == 0 ? .2 : 2.0 / 3)) < .0001);
+    }
+    const QList<qreal> columns{.12, .5, .87};
+    for (int i = 0; i < 3; ++i) {
+        const qreal ratio = (points.at(10 + i * 2).x() - left) / (right - left);
+        QVERIFY(qAbs(ratio - columns.at(i)) < .0001);
+    }
+    PDFDocument reopenedDocument;
+    PDFEditController reopened;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+    reopened.setDocument(&reopenedDocument);
+    const auto source = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QVERIFY(!source.isEmpty());
+    QCOMPARE(source.value(QStringLiteral("tableColumnStops")).toList(), QVariantList({.12, .5, .87}));
+    QVERIFY(reopened.selectCandidate(0, source.value(QStringLiteral("objectId")).toString()));
+    reopened.beginSelectedFrameResize();
+    reopened.updateSelectedTableDivider(false, 1, .8);
+    reopened.updateSelectedFrameRect(QRectF(.2, .25, .5, .4));
+    reopened.finishSelectedFrameResize();
+    QVERIFY(reopened.save());
+    const auto again = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(again.value(QStringLiteral("tableRowStops")).toList(), QVariantList({.2, .8}));
+    QCOMPARE(again.value(QStringLiteral("tableColumnStops")).toList(), QVariantList({.12, .5, .87}));
+}
+
+void PDFEditControllerTest::rejectsInvalidTableDividers_data()
+{
+    QTest::addColumn<QString>("key");
+    QTest::addColumn<QVariant>("value");
+    QTest::newRow("missing") << QStringLiteral("rowStops") << QVariant();
+    QTest::newRow("not-array") << QStringLiteral("rowStops") << QVariant(QStringLiteral("0.2,0.7"));
+    QTest::newRow("empty") << QStringLiteral("rowStops") << QVariant(QVariantList{});
+    QTest::newRow("wrong-count") << QStringLiteral("rowStops") << QVariant(QVariantList{.2});
+    QTest::newRow("reversed") << QStringLiteral("rowStops") << QVariant(QVariantList{.7, .2});
+    QTest::newRow("coincident") << QStringLiteral("rowStops") << QVariant(QVariantList{.2, .2});
+    QTest::newRow("too-close") << QStringLiteral("rowStops") << QVariant(QVariantList{.2, .20001});
+    QTest::newRow("on-edge") << QStringLiteral("rowStops") << QVariant(QVariantList{0., .7});
+    QTest::newRow("outside") << QStringLiteral("rowStops") << QVariant(QVariantList{.2, 1.1});
+    QTest::newRow("string-number") << QStringLiteral("rowStops") << QVariant(QVariantList{QStringLiteral("0.2"), .7});
+    QTest::newRow("path-disagrees") << QStringLiteral("rowStops") << QVariant(QVariantList{.3, .7});
+    QTest::newRow("column-count") << QStringLiteral("columnStops") << QVariant(QVariantList{.1});
+    QTest::newRow("downgraded") << QStringLiteral("version") << QVariant(2);
+}
+
+void PDFEditControllerTest::rejectsInvalidTableDividers()
+{
+    QFETCH(QString, key);
+    QFETCH(QVariant, value);
+    const QString suffix = QString::fromLatin1(QTest::currentDataTag());
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("divider-invalid-%1.pdf").arg(suffix));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("divider-valid-%1.pdf").arg(suffix));
+    const QString tampered = m_temporaryDirectory.filePath(QStringLiteral("divider-tampered-%1.pdf").arg(suffix));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    QVERIFY(!controller.addShape(0, QPointF(.2, .2), QPointF(.8, .8)).isEmpty());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(false, 0, .2);
+    controller.updateSelectedTableDivider(false, 1, .7);
+    controller.finishSelectedFrameResize();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QVERIFY(rewriteTableTestMetadata(saved, tampered, key, value));
+    QVERIFY(document.open(QUrl::fromLocalFile(tampered)));
+    QVERIFY(candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape")).isEmpty());
+    QCOMPARE(inspectShapePaths(tampered).count, 1);
     QVERIFY(!controller.hasDrafts());
 }
 
@@ -1267,7 +1501,7 @@ void PDFEditControllerTest::rejectsInvalidTableMetadata_data()
     QTest::newRow("string-rows") << QStringLiteral("rows") << QVariant(QStringLiteral("1"));
     QTest::newRow("grid-disagrees-with-path") << QStringLiteral("rows") << QVariant(2);
     QTest::newRow("legacy-version") << QStringLiteral("version") << QVariant(1);
-    QTest::newRow("unknown-version") << QStringLiteral("version") << QVariant(3);
+    QTest::newRow("unknown-version") << QStringLiteral("version") << QVariant(4);
     QTest::newRow("filled-grid") << QStringLiteral("fill") << QVariant(QStringLiteral("#ff0000"));
 }
 
@@ -1412,10 +1646,71 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
         QTest::qWait(100);
         QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-grid.png")));
     }
+    const QRectF tableFrame = controller.selectedFrameRect();
+    QQuickItem *columnDivider = nullptr;
+    QQuickItem *rowDivider = nullptr;
+    QTRY_VERIFY((columnDivider = itemNamed(QStringLiteral("tableColumnDivider0"))));
+    QTRY_VERIFY((rowDivider = itemNamed(QStringLiteral("tableRowDivider0"))));
+    const auto dividerPoint = [](QQuickItem *item, bool column) {
+        // Avoid the intersection with a perpendicular divider.
+        return item->mapToScene(QPointF(item->width() * (column ? .5 : .1),
+                                       item->height() * (column ? .1 : .5))).toPoint();
+    };
+    const QPoint columnStart = dividerPoint(columnDivider, true);
+    const QPoint columnEnd = columnStart + QPoint(25, 0);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, columnStart);
+    QTest::mouseMove(window, columnEnd, 30);
+    QTRY_VERIFY(!controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList().isEmpty());
+    QCOMPARE(controller.selectedFrameRect(), tableFrame);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, columnEnd);
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList().isEmpty());
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, columnStart);
+    QTest::mouseMove(window, columnEnd, 30);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, columnEnd);
+    const QVariantList movedColumns = controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList();
+    QCOMPARE(movedColumns.size(), 3);
+    QVERIFY(movedColumns.at(0).toDouble() > .25);
+    QCOMPARE(controller.selectedFrameRect(), tableFrame);
     controller.undo();
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList().isEmpty());
+    controller.redo();
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList(), movedColumns);
+    QTRY_VERIFY((rowDivider = itemNamed(QStringLiteral("tableRowDivider0"))));
+    const QPoint rowStart = dividerPoint(rowDivider, false);
+    const QPoint rowEnd = rowStart + QPoint(0, 20);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, rowStart);
+    QTest::mouseMove(window, rowEnd, 30);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, rowEnd);
+    const QVariantList movedRows = controller.selectedDraftPreview().value(QStringLiteral("tableRowStops")).toList();
+    QCOMPARE(movedRows.size(), 2);
+    QVERIFY(movedRows.at(0).toDouble() > 1.0 / 3);
+    QCOMPARE(controller.selectedFrameRect(), tableFrame);
+    if (!screenshotPrefix.isEmpty()) {
+        QTest::qWait(100);
+        QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-dividers.png")));
+    }
+    controller.undo(); // Row gesture.
+    controller.undo(); // Column gesture.
+    controller.undo(); // Creation.
     QVERIFY(!controller.hasDrafts());
     controller.redo();
     QCOMPARE(controller.draftsForPage(0).size(), 1);
+    const QString savedPath = m_temporaryDirectory.filePath(QStringLiteral("table-ui-saved.pdf"));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+    const auto source = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(controller.selectCandidate(0, source.value(QStringLiteral("objectId")).toString()));
+    QTRY_VERIFY((columnDivider = itemNamed(QStringLiteral("tableColumnDivider0"))));
+    const QPoint savedStart = dividerPoint(columnDivider, true);
+    const QPoint savedEnd = savedStart + QPoint(20, 0);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, savedStart);
+    QTest::mouseMove(window, savedEnd, 30);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, savedEnd);
+    QTRY_VERIFY(controller.hasDrafts());
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList().at(0).toDouble() > .25);
+    QCOMPARE(controller.selectedFrameRect(), tableFrame);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
     controller.discardDrafts();
     clickItem(tableButton);
     QTRY_VERIFY(itemNamed(QStringLiteral("tableRowsSpinBox")));

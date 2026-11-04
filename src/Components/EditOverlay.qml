@@ -3367,6 +3367,8 @@ Item {
                     : PDFEditController.RectangleShape
                 tableRows: draftItem.modelData.tableRows ?? 3
                 tableColumns: draftItem.modelData.tableColumns ?? 3
+                tableRowStops: draftItem.modelData.tableRowStops ?? []
+                tableColumnStops: draftItem.modelData.tableColumnStops ?? []
                 startRatio: draftItem.modelData.shapeStart !== undefined
                     ? draftItem.modelData.shapeStart
                     : Qt.point(0, 0)
@@ -4333,6 +4335,16 @@ Item {
 
         readonly property var selectedDraft:
             root.shapeDraft(root.controller.selectedObjectId)
+        readonly property bool selectedTable: root.isShapeKind(root.controller.selectedKind)
+            && selectedDraft.shapeType === PDFEditController.TableShape
+        readonly property int tableRows: selectedTable ? Number(selectedDraft.tableRows || 1) : 1
+        readonly property int tableColumns: selectedTable ? Number(selectedDraft.tableColumns || 1) : 1
+        readonly property real tableInset: Math.min(
+            Math.max(1.25, Number(selectedDraft.shapeStrokeWidthRatio || 0) * root.height) / 2,
+            layoutFrameRect.width * root.width / 4,
+            layoutFrameRect.height * root.height / 4)
+        readonly property real tableInnerWidth: Math.max(0, layoutFrameRect.width * root.width - 2 * tableInset)
+        readonly property real tableInnerHeight: Math.max(0, layoutFrameRect.height * root.height - 2 * tableInset)
         readonly property rect layoutFrameRect: root.controller.selectedFrameRect
         readonly property rect contentBounds: root.controller.selectedContentBounds
         readonly property rect frameRect: Qt.rect(
@@ -4513,6 +4525,110 @@ Item {
 
                 commitKeyboardMove(deltaX, deltaY)
                 event.accepted = true
+            }
+        }
+
+        Repeater {
+            model: resizeOverlay.selectedTable
+                ? resizeOverlay.tableColumns + resizeOverlay.tableRows - 2 : 0
+
+            delegate: MouseArea {
+                id: tableDivider
+
+                required property int index
+                readonly property bool column: index < resizeOverlay.tableColumns - 1
+                readonly property int dividerIndex: column ? index : index - resizeOverlay.tableColumns + 1
+                readonly property int dimension: column ? resizeOverlay.tableColumns : resizeOverlay.tableRows
+                readonly property var stops: column
+                    ? (resizeOverlay.selectedDraft.tableColumnStops || [])
+                    : (resizeOverlay.selectedDraft.tableRowStops || [])
+                readonly property real stop: stops.length === dimension - 1
+                    ? Number(stops[dividerIndex]) : (dividerIndex + 1) / dimension
+                readonly property real innerExtent: column
+                    ? resizeOverlay.tableInnerWidth : resizeOverlay.tableInnerHeight
+                property point dragStartPosition: Qt.point(0, 0)
+                property real dragStartStop: 0
+
+                objectName: (column ? "tableColumnDivider" : "tableRowDivider") + dividerIndex
+                x: root.boundingBoxPadding + resizeOverlay.tableInset
+                    + (column ? stop * resizeOverlay.tableInnerWidth - width / 2 : 0)
+                y: root.boundingBoxPadding + resizeOverlay.tableInset
+                    + (column ? 0 : stop * resizeOverlay.tableInnerHeight - height / 2)
+                width: column ? 10 : resizeOverlay.tableInnerWidth
+                height: column ? resizeOverlay.tableInnerHeight : 10
+                enabled: !root.editing && innerExtent > 0
+                acceptedButtons: Qt.LeftButton
+                hoverEnabled: true
+                preventStealing: true
+                cursorShape: root.resizeCursorForHandle(column ? 1 : 0, column ? 0 : 1)
+                activeFocusOnTab: true
+                Accessible.role: Accessible.Slider
+                Accessible.name: {
+                    if (column) {
+                        //% "Columns"
+                        return qsTrId("TableColumns")
+                    }
+                    //% "Rows"
+                    return qsTrId("TableRows")
+                }
+
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: tableDivider.column ? 2 : parent.width
+                    height: tableDivider.column ? parent.height : 2
+                    color: root.editBoxColor
+                    visible: tableDivider.containsMouse || tableDivider.activeFocus
+                    Accessible.ignored: true
+                }
+
+                onPressed: mouse => {
+                    root.pointerInteractionStarted()
+                    forceActiveFocus()
+                    selectionActions.close()
+                    dragStartPosition = mapToItem(root, mouse.x, mouse.y)
+                    dragStartStop = stop
+                    root.startFrameResize()
+                    mouse.accepted = true
+                }
+                onPositionChanged: mouse => {
+                    if (!pressed || !root.resizingFrame || innerExtent <= 0)
+                        return
+                    const position = mapToItem(root, mouse.x, mouse.y)
+                    const delta = column ? position.x - dragStartPosition.x
+                        : position.y - dragStartPosition.y
+                    root.controller.updateSelectedTableDivider(
+                        column, dividerIndex, dragStartStop + delta / innerExtent)
+                }
+                onReleased: root.finishFrameResize()
+                onCanceled: root.cancelFrameResize()
+
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_Escape) {
+                        root.cancelFrameResize()
+                        event.accepted = true
+                        return
+                    }
+                    let direction = 0
+                    if (column) {
+                        if (event.key === Qt.Key_Left)
+                            direction = -1
+                        else if (event.key === Qt.Key_Right)
+                            direction = 1
+                    } else {
+                        if (event.key === Qt.Key_Up)
+                            direction = -1
+                        else if (event.key === Qt.Key_Down)
+                            direction = 1
+                    }
+                    if (direction === 0 || innerExtent <= 0)
+                        return
+                    const nextStop = stop + direction
+                        * ((event.modifiers & Qt.ShiftModifier) ? 10 : 1) / innerExtent
+                    root.startFrameResize()
+                    root.controller.updateSelectedTableDivider(column, dividerIndex, nextStop)
+                    root.finishFrameResize()
+                    event.accepted = true
+                }
             }
         }
 

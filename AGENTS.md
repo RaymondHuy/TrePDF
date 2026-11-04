@@ -380,10 +380,13 @@ Current features:
   These Edit shapes are page content, separate from comment annotations.
 - Edit > Table opens a lazy Rows/Columns popup (1–20 each, initially 3×3).
   Draw table arms drag placement through AddShapeTool. Each grid is one
-  TableShape vector object, with equal cells and no fill or cell text. It shares
+  TableShape vector object, initially with equal cells and no fill or cell text. It shares
   shape selection, stroke/opacity, movement, eight-handle resize, delete and
-  Undo/Redo. Save/reopen retains rows and columns in bounded TrePDFShape v2
-  metadata; existing shapes retain v1. Only validated managed table paths
+  Undo/Redo. Selected tables expose draggable internal dividers, adjusting adjacent
+  rows/columns while preserving the outer frame; each gesture is one undoable
+  edit and Escape cancels it. Save/reopen retains uneven spacing in bounded
+  TrePDFShape v3 metadata. Equal grids retain v2, which remains editable;
+  existing shapes retain v1. Only validated managed table paths
   rehydrate; arbitrary lines in imported PDFs are not grouped into a table.
   See docs/table-drawing.md for the storage and UI contract.
 - Render every page through PDFium.

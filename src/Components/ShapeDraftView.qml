@@ -13,6 +13,8 @@ Item {
     property real strokeWidth: 2
     property int tableRows: 3
     property int tableColumns: 3
+    property var tableRowStops: []
+    property var tableColumnStops: []
 
     readonly property int boundedTableRows: Math.max(1, Math.min(20, tableRows))
     readonly property int boundedTableColumns: Math.max(1, Math.min(20, tableColumns))
@@ -24,11 +26,15 @@ Item {
                        [Qt.point(pathRight, pathBottom), Qt.point(pathLeft, pathBottom),
                         Qt.point(pathLeft, pathTop)]]
         for (let row = 1; row < boundedTableRows; ++row) {
-            const y = pathTop + (pathBottom - pathTop) * row / boundedTableRows
+            const stop = tableRowStops.length === boundedTableRows - 1
+                ? Number(tableRowStops[row - 1]) : row / boundedTableRows
+            const y = pathTop + (pathBottom - pathTop) * stop
             paths.push([Qt.point(pathLeft, y), Qt.point(pathRight, y)])
         }
         for (let column = 1; column < boundedTableColumns; ++column) {
-            const x = pathLeft + (pathRight - pathLeft) * column / boundedTableColumns
+            const stop = tableColumnStops.length === boundedTableColumns - 1
+                ? Number(tableColumnStops[column - 1]) : column / boundedTableColumns
+            const x = pathLeft + (pathRight - pathLeft) * stop
             paths.push([Qt.point(x, pathTop), Qt.point(x, pathBottom)])
         }
         return paths

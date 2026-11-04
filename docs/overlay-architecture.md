@@ -398,8 +398,11 @@ dùng nhánh nhận diện không marker; QML không suy đoán khả năng ch�
 
 Table dùng cùng pipeline với `TableShape`, giữ `tableRows`/`tableColumns` trên
 candidate và vẽ grid bằng `ShapeDraftView`. Preview placement đọc cấu hình từ
-controller; draft/restoration đọc số hàng/cột của chính candidate. Cả hai
-EditOverlay nhận toàn bộ phần trong khung bảng để chọn/kéo. Xem
+controller; draft/restoration đọc số hàng/cột của chính candidate và
+`tableRowStops`/`tableColumnStops` từ draft. Cả hai EditOverlay nhận toàn bộ
+phần trong khung bảng để chọn/kéo. Bảng đang chọn có vùng kéo đường phân cách
+ưu tiên hơn kéo khung; dùng cùng phiên frame resize để preview, Undo/Redo và
+hủy khi Escape. Kéo khung ngoài giữ nguyên tỉ lệ hàng/cột. Xem
 [table-drawing.md](table-drawing.md) về popup và định dạng lưu.
 
 Highlight, Underline, Squiggly và Strikeout dùng cùng bước resolve geometry cho
