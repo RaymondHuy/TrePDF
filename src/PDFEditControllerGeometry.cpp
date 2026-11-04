@@ -919,6 +919,8 @@ void PDFEditController::beginSelectedFrameResize()
         = m_textEditGeometryExplicitlyChanged;
     m_frameResizeStartFrameRect = draft.frameRect;
     m_frameResizeStartContentBounds = draft.contentBounds;
+    m_frameResizeStartTableRowStops = draft.tableRowStops;
+    m_frameResizeStartTableColumnStops = draft.tableColumnStops;
     if (isGeometryCommentCandidateKind(draft.candidate.kind)
         && !draft.candidate.added) {
         markDraftStateChanged(draft.candidate.page, true, false);
@@ -1022,6 +1024,57 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
     updateSelectedDraft(draft);
 }
 
+void PDFEditController::updateSelectedTableDivider(bool column, int index, qreal position)
+{
+    if (m_saving || !m_frameResizeActive || !m_textEditActive || !m_hasSelection
+        || !m_selectedCandidate.editable || !qIsFinite(position)
+        || !isShapeCandidateKind(m_selectedCandidate.kind)
+        || m_selectedCandidate.shapeType != TableShape) {
+        return;
+    }
+
+    Draft draft = selectedDraftForDisplay();
+    const int dimension = column ? draft.candidate.tableColumns : draft.candidate.tableRows;
+    if (dimension < 2 || dimension > MaximumTableDimension || index < 0 || index >= dimension - 1)
+        return;
+    QVector<qreal> &stops = column ? draft.tableColumnStops : draft.tableRowStops;
+    if (stops.isEmpty()) {
+        for (int divider = 1; divider < dimension; ++divider)
+            stops.append(qreal(divider) / dimension);
+    }
+    if (stops.size() != dimension - 1)
+        return;
+
+    const qreal previous = index > 0 ? stops.at(index - 1) : 0.0;
+    const qreal next = index + 1 < stops.size() ? stops.at(index + 1) : 1.0;
+    // Keep adjacent cells usable without moving any other divider. Older tables
+    // may contain narrower cells, so retain room to adjust those too.
+    const qreal gap = qBound<qreal>(0.0001, (next - previous) / 3.0, 0.005);
+    const qreal minimum = previous + gap;
+    const qreal maximum = next - gap;
+    if (minimum > maximum)
+        return;
+    const qreal boundedPosition = qBound(minimum, position, maximum);
+    if (qAbs(stops.at(index) - boundedPosition) < 1e-9)
+        return;
+    stops[index] = boundedPosition;
+
+    const QVector<qreal> &sourceStops = column
+        ? draft.candidate.tableColumnStops : draft.candidate.tableRowStops;
+    bool matchesSource = true;
+    for (int divider = 0; divider < stops.size(); ++divider) {
+        const qreal source = sourceStops.isEmpty()
+            ? qreal(divider + 1) / dimension : sourceStops.at(divider);
+        if (qAbs(stops.at(divider) - source) >= 1e-9) {
+            matchesSource = false;
+            break;
+        }
+    }
+    if (matchesSource)
+        stops = sourceStops;
+    updateSelectedDraft(draft);
+}
+
 void PDFEditController::updateSelectedContentBounds(const QRectF &contentBounds)
 {
     if (!m_textEditActive || !m_hasSelection) {
@@ -1094,6 +1147,8 @@ void PDFEditController::cancelSelectedFrameResize()
     const bool ownsTextEdit = m_frameResizeOwnsTextEdit;
     const QRectF startFrameRect = m_frameResizeStartFrameRect;
     const QRectF startContentBounds = m_frameResizeStartContentBounds;
+    const QVector<qreal> startTableRowStops = m_frameResizeStartTableRowStops;
+    const QVector<qreal> startTableColumnStops = m_frameResizeStartTableColumnStops;
     const bool startGeometryExplicitlyChanged
         = m_frameResizeStartGeometryExplicitlyChanged;
     resetFrameResizeState();
@@ -1110,6 +1165,8 @@ void PDFEditController::cancelSelectedFrameResize()
     Draft draft = selectedDraftForDisplay();
     draft.frameRect = startFrameRect;
     draft.contentBounds = startContentBounds;
+    draft.tableRowStops = startTableRowStops;
+    draft.tableColumnStops = startTableColumnStops;
     updateSelectedDraft(draft);
     m_textEditGeometryExplicitlyChanged = startGeometryExplicitlyChanged;
     if (refreshesSourceComment
@@ -1125,4 +1182,6 @@ void PDFEditController::resetFrameResizeState()
     m_frameResizeStartGeometryExplicitlyChanged = false;
     m_frameResizeStartFrameRect = QRectF();
     m_frameResizeStartContentBounds = QRectF();
+    m_frameResizeStartTableRowStops.clear();
+    m_frameResizeStartTableColumnStops.clear();
 }

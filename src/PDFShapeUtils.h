@@ -27,14 +27,17 @@ inline constexpr char kMarkName[] = "TrePDFShape";
 inline constexpr char kDataKey[] = "Data";
 inline constexpr int kMaximumMetadataBytes = 16 * 1024;
 inline constexpr int kMaximumSegments = 32;
-// Only version-2 managed tables may exceed the legacy shape segment bound.
+// Only managed tables may exceed the legacy shape segment bound.
 inline constexpr int kMaximumTableSegments
     = 6 + 4 * (PDFEditController::MaximumTableDimension - 1);
+inline constexpr qreal kMinimumTableCellRatio = 0.0001;
 
 struct Metadata {
     PDFEditController::ShapeType type = PDFEditController::RectangleShape;
     int tableRows = 0;
     int tableColumns = 0;
+    QVector<qreal> tableRowStops;
+    QVector<qreal> tableColumnStops;
     QRectF frame;
     QPointF start;
     QPointF end = QPointF(1.0, 1.0);
@@ -43,6 +46,34 @@ struct Metadata {
     QColor fill;
     qreal opacity = 1.0;
 };
+
+// Empty stops retain the equal-cell layout used by version-2 table markers.
+inline bool validTableStops(const QVector<qreal> &stops, int dimension)
+{
+    if (dimension < 1 || dimension > PDFEditController::MaximumTableDimension) {
+        return false;
+    }
+    if (stops.isEmpty()) {
+        return true;
+    }
+    if (stops.size() != dimension - 1) {
+        return false;
+    }
+    qreal previous = 0.0;
+    for (const qreal stop : stops) {
+        if (!std::isfinite(stop) || stop - previous + 1e-12 < kMinimumTableCellRatio) {
+            return false;
+        }
+        previous = stop;
+    }
+    return 1.0 - previous + 1e-12 >= kMinimumTableCellRatio;
+}
+
+// The caller validates stops and supplies a one-based interior divider index.
+inline qreal tableStop(const QVector<qreal> &stops, int dimension, int divider)
+{
+    return stops.isEmpty() ? qreal(divider) / dimension : stops.at(divider - 1);
+}
 
 inline bool validMetadata(const Metadata &metadata)
 {
@@ -56,8 +87,11 @@ inline bool validMetadata(const Metadata &metadata)
                && metadata.tableRows <= PDFEditController::MaximumTableDimension
                && metadata.tableColumns >= 1
                && metadata.tableColumns <= PDFEditController::MaximumTableDimension
+               && validTableStops(metadata.tableRowStops, metadata.tableRows)
+               && validTableStops(metadata.tableColumnStops, metadata.tableColumns)
                && !metadata.fill.isValid())
-            : (metadata.tableRows == 0 && metadata.tableColumns == 0))
+            : (metadata.tableRows == 0 && metadata.tableColumns == 0
+               && metadata.tableRowStops.isEmpty() && metadata.tableColumnStops.isEmpty()))
         && unit(metadata.frame.left()) && unit(metadata.frame.top())
         && unit(metadata.frame.width()) && unit(metadata.frame.height())
         && metadata.frame.width() > 0.0 && metadata.frame.height() > 0.0
@@ -252,13 +286,15 @@ inline FPDF_PAGEOBJECT createPath(FPDF_PAGE page, const QSizeF &pageSize,
         // outline with `re`, which changes vertex order on rotated pages.
         for (int row = 1; shapeCreated && row < metadata.tableRows; ++row) {
             const qreal y = drawingRect.top()
-                + drawingRect.height() * row / metadata.tableRows;
+                + drawingRect.height() * tableStop(
+                    metadata.tableRowStops, metadata.tableRows, row);
             shapeCreated = moveTo(QPointF(drawingRect.left(), y))
                 && lineTo(QPointF(drawingRect.right(), y));
         }
         for (int column = 1; shapeCreated && column < metadata.tableColumns; ++column) {
             const qreal x = drawingRect.left()
-                + drawingRect.width() * column / metadata.tableColumns;
+                + drawingRect.width() * tableStop(
+                    metadata.tableColumnStops, metadata.tableColumns, column);
             shapeCreated = moveTo(QPointF(x, drawingRect.top()))
                 && lineTo(QPointF(x, drawingRect.bottom()));
         }
@@ -565,13 +601,15 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
         return {};
     }
     const bool table = metadata.type == PDFEditController::TableShape;
+    const bool customTableStops = table
+        && (!metadata.tableRowStops.isEmpty() || !metadata.tableColumnStops.isEmpty());
     const QJsonArray signature = physicalSignature(
         path, table ? kMaximumTableSegments : kMaximumSegments);
     if (signature.isEmpty()) {
         return {};
     }
     QJsonObject object{
-        {QStringLiteral("version"), table ? 2 : 1},
+        {QStringLiteral("version"), customTableStops ? 3 : table ? 2 : 1},
         {QStringLiteral("type"), metadata.type},
         {QStringLiteral("frame"), QJsonArray{metadata.frame.x(), metadata.frame.y(),
              metadata.frame.width(), metadata.frame.height()}},
@@ -586,6 +624,19 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
     if (table) {
         object.insert(QStringLiteral("rows"), metadata.tableRows);
         object.insert(QStringLiteral("columns"), metadata.tableColumns);
+        if (customTableStops) {
+            const auto stopsArray = [](const QVector<qreal> &stops, int dimension) {
+                QJsonArray result;
+                for (int divider = 1; divider < dimension; ++divider) {
+                    result.append(tableStop(stops, dimension, divider));
+                }
+                return result;
+            };
+            object.insert(QStringLiteral("rowStops"),
+                          stopsArray(metadata.tableRowStops, metadata.tableRows));
+            object.insert(QStringLiteral("columnStops"),
+                          stopsArray(metadata.tableColumnStops, metadata.tableColumns));
+        }
     }
     return QJsonDocument(object).toJson(QJsonDocument::Compact);
 }
@@ -641,8 +692,8 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
     const QJsonValue versionValue = object.value(QStringLiteral("version"));
     const int version = versionValue.toInt(-1);
     if (!versionValue.isDouble() || versionValue.toDouble() != version
-        || (version != 1 && version != 2)
-        || object.size() != (version == 2 ? 12 : 10)
+        || (version != 1 && version != 2 && version != 3)
+        || object.size() != (version == 3 ? 14 : version == 2 ? 12 : 10)
         || !object.value(QStringLiteral("stroke")).isString()
         || !object.value(QStringLiteral("fill")).isString()) {
         return false;
@@ -671,17 +722,32 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
         return false;
     }
     parsed.type = static_cast<PDFEditController::ShapeType>(type.toInt(-1));
-    if ((version == 2) != (parsed.type == PDFEditController::TableShape)) {
+    if ((version >= 2) != (parsed.type == PDFEditController::TableShape)) {
         return false;
     }
-    if (version == 2) {
+    if (version >= 2) {
         const QJsonValue rows = object.value(QStringLiteral("rows"));
         const QJsonValue columns = object.value(QStringLiteral("columns"));
         parsed.tableRows = rows.toInt(-1);
         parsed.tableColumns = columns.toInt(-1);
         if (!rows.isDouble() || rows.toDouble() != parsed.tableRows
-            || !columns.isDouble() || columns.toDouble() != parsed.tableColumns) {
+            || !columns.isDouble() || columns.toDouble() != parsed.tableColumns
+            || parsed.tableRows < 1
+            || parsed.tableRows > PDFEditController::MaximumTableDimension
+            || parsed.tableColumns < 1
+            || parsed.tableColumns > PDFEditController::MaximumTableDimension) {
             return false;
+        }
+        if (version == 3) {
+            const QJsonValue rowStops = object.value(QStringLiteral("rowStops"));
+            const QJsonValue columnStops = object.value(QStringLiteral("columnStops"));
+            if (!rowStops.isArray() || !columnStops.isArray()
+                || rowStops.toArray().size() != parsed.tableRows - 1
+                || columnStops.toArray().size() != parsed.tableColumns - 1) {
+                return false;
+            }
+            parsed.tableRowStops = numbers(rowStops, parsed.tableRows - 1);
+            parsed.tableColumnStops = numbers(columnStops, parsed.tableColumns - 1);
         }
     }
     parsed.frame = QRectF(frame[0], frame[1], frame[2], frame[3]);
@@ -702,7 +768,7 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
     if (!validMetadata(parsed) || (!fill.isEmpty() && !parsed.fill.isValid())) {
         return false;
     }
-    const int maximumSegments = version == 2 ? kMaximumTableSegments : kMaximumSegments;
+    const int maximumSegments = version >= 2 ? kMaximumTableSegments : kMaximumSegments;
     const QJsonArray actual = physicalSignature(path, maximumSegments);
     if (!signaturesMatch(actual, object.value(QStringLiteral("path")).toArray(),
                          maximumSegments)) {

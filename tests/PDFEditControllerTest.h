@@ -555,6 +555,11 @@ private slots:
     void addsShapeWithUndoRedo();
     void savesShapesRoundTrip();
     void addsTableWithAtomicHistory();
+    void editsTableDividersWithAtomicHistory();
+    void savesUnevenTableDividers_data();
+    void savesUnevenTableDividers();
+    void rejectsInvalidTableDividers_data();
+    void rejectsInvalidTableDividers();
     void savesAndEditsTableGrid_data();
     void savesAndEditsTableGrid();
     void rejectsInvalidTableMetadata_data();

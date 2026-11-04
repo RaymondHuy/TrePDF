@@ -528,6 +528,7 @@ public:
                                                int cursorPosition = -1);
     Q_INVOKABLE void beginSelectedFrameResize();
     Q_INVOKABLE void updateSelectedFrameRect(const QRectF &frameRect);
+    Q_INVOKABLE void updateSelectedTableDivider(bool column, int index, qreal position);
     Q_INVOKABLE void updateSelectedContentBounds(const QRectF &contentBounds);
     Q_INVOKABLE void finishSelectedFrameResize();
     Q_INVOKABLE void cancelSelectedFrameResize();
@@ -815,6 +816,9 @@ private:
         ShapeType shapeType = RectangleShape;
         int tableRows = 0;
         int tableColumns = 0;
+        // Interior dividers relative to the grid's inner frame; empty means equal cells.
+        QVector<qreal> tableRowStops;
+        QVector<qreal> tableColumnStops;
         QPointF shapeStartRatio;
         QPointF shapeEndRatio = QPointF(1.0, 1.0);
         qreal shapeStrokeWidthRatio = 0.0;
@@ -894,6 +898,8 @@ private:
 
     struct Draft {
         Candidate candidate;
+        QVector<qreal> tableRowStops;
+        QVector<qreal> tableColumnStops;
         PDFCommentAnnotation::CommonProperties commentProperties;
         QString text;
         QVector<CharacterSpan> characterSpans;
@@ -1372,4 +1378,6 @@ private:
     bool m_frameResizeStartGeometryExplicitlyChanged = false;
     QRectF m_frameResizeStartFrameRect;
     QRectF m_frameResizeStartContentBounds;
+    QVector<qreal> m_frameResizeStartTableRowStops;
+    QVector<qreal> m_frameResizeStartTableColumnStops;
 };

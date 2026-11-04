@@ -2495,6 +2495,8 @@ void PDFEditController::appendPageObjectCandidates(
         candidate.shapeType = metadata.type;
         candidate.tableRows = metadata.tableRows;
         candidate.tableColumns = metadata.tableColumns;
+        candidate.tableRowStops = metadata.tableRowStops;
+        candidate.tableColumnStops = metadata.tableColumnStops;
         candidate.shapeStartRatio = metadata.start;
         candidate.shapeEndRatio = metadata.end;
         candidate.shapeStrokeWidthRatio = metadata.strokeWidthRatio;

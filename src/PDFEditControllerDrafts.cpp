@@ -711,7 +711,9 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("contentBounds"), draft.contentBounds);
     map.insert(
         QStringLiteral("geometryChanged"),
-        draft.frameRect != initialFrameRect || draft.imageQuarterTurns != 0);
+        draft.frameRect != initialFrameRect || draft.imageQuarterTurns != 0
+            || draft.tableRowStops != candidate.tableRowStops
+            || draft.tableColumnStops != candidate.tableColumnStops);
     map.insert(
         QStringLiteral("styleChanged"),
         isDrawingCommentCandidateKind(candidate.kind)
@@ -806,6 +808,15 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("shapeEnd"), candidate.shapeEndRatio);
     map.insert(QStringLiteral("tableRows"), candidate.tableRows);
     map.insert(QStringLiteral("tableColumns"), candidate.tableColumns);
+    const auto stopValues = [](const QVector<qreal> &stops) {
+        QVariantList values;
+        values.reserve(stops.size());
+        for (qreal stop : stops)
+            values.append(stop);
+        return values;
+    };
+    map.insert(QStringLiteral("tableRowStops"), stopValues(draft.tableRowStops));
+    map.insert(QStringLiteral("tableColumnStops"), stopValues(draft.tableColumnStops));
     const auto shapeColor = [&commentProperties](const QColor &color) {
         QColor result = color.isValid() ? color.toRgb() : QColor(Qt::transparent);
         result.setAlphaF(result.alphaF() * commentProperties.opacity);
@@ -1022,6 +1033,8 @@ bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
         && left.frameRect == right.frameRect
         && left.contentBounds == right.contentBounds
         && left.imageQuarterTurns == right.imageQuarterTurns
+        && left.tableRowStops == right.tableRowStops
+        && left.tableColumnStops == right.tableColumnStops
         && left.deleted == right.deleted;
 }
 
