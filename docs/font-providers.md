@@ -7,10 +7,13 @@ nguyên tử. Provider chỉ nhận tên font, không nhận nội dung hay đư
 ## Thứ tự và trách nhiệm
 
 Thứ tự resolve là font nhúng trong PDF → font hệ thống → font trong cache
-của ứng dụng → Google Fonts → CTAN → fallback hiện có. Mỗi bước phải có
+của ứng dụng → FontSource → Google Fonts → CTAN → fallback hiện có. Mỗi bước phải có
 đúng family, style và glyph cần dùng. Font nhúng dạng subset không được xem
 là một bản font đầy đủ có thể tải hoặc dùng cho mọi ký tự.
 
+`FontSourceProvider` tra snapshot cục bộ của repository `tre-base/FontSource`
+trước khi gửi bất kỳ request Google nào. Family không có trong snapshot đi tiếp
+qua các provider cũ; family có trong snapshot tải trực tiếp từ commit đã ghim.
 `GoogleFontsProvider` giữ luồng Google Fonts hiện có: tra catalogue Google
 qua Fontsource, lấy stylesheet từ `fonts.googleapis.com`, rồi chỉ nhận file
 font từ `fonts.gstatic.com`. `CtanFontProvider` dùng catalogue cục bộ đã kiểm
@@ -20,14 +23,78 @@ trong cùng provider như mô tả bên dưới; metadata sai, font hỏng, thi�
 hoặc hết nguồn tải hợp lệ kết thúc lượt tải và giữ draft/fallback hiện có.
 
 `IFontProvider` cung cấp metadata/catalogue, các face, giấy phép, URL và
-quy tắc redirect cùng danh sách mirror dự phòng tùy chọn. Thêm provider bằng implementation mới và đăng ký theo thứ
+quy tắc redirect, kiểm tra integrity của bytes tải về và danh sách mirror dự phòng
+tùy chọn. Thêm provider bằng implementation mới và đăng ký theo thứ
 tự trong constructor của `FontDownloadService`; không cần viết lại luồng
 mạng, hủy hay cài đặt. Provider có catalogue cục bộ trả metadata URL rỗng.
 Mỗi provider phải phân biệt `NotFound` với dữ liệu `Invalid` và chỉ đánh dấu
 `Found` cho nguồn/font có giấy phép đã được kiểm tra.
 
 Luồng Aptos có sẵn vẫn dùng package chính thức của Microsoft; nó độc lập
-với catalogue Google Fonts/CTAN và không mở rộng việc tìm kiếm nguồn tải.
+với catalogue FontSource/Google Fonts/CTAN và không mở rộng việc tìm kiếm nguồn tải.
+
+## Provider FontSource
+
+Nguồn này là [tre-base/FontSource](https://github.com/tre-base/FontSource), khác với
+dịch vụ Fontsource được Google provider dùng để tra metadata.
+`src/assets/fonts/fontsource-catalog.json` được đóng gói ở
+`:/trepdf/font-catalog/fontsource-catalog.json`. App chỉ đóng gói metadata,
+không đóng gói các file font của repository.
+
+Snapshot hiện tại ghim commit `8386afe71207bccf5b2d7bfbbb36697e4d0634a3`, gồm
+Liberation Sans/Serif/Mono 2.1.5, Hack 3.003, Iosevka 34.9.1 và Sarasa Gothic CL
+1.0.43; mỗi family có Regular, Italic, Bold và Bold Italic. CL là Classical
+orthography; không ánh xạ tên `Sarasa Gothic` hoặc biến thể khác sang CL.
+Hack không khai báo đủ tiếng Việt; ký tự thực tế cần dùng vẫn phải vượt qua
+kiểm tra glyph của service và bước chuẩn bị edit/Save.
+
+Provider chỉ cho phép HTTPS trên `raw.githubusercontent.com` với đường dẫn
+`/tre-base/FontSource/<commit>/fonts/<family-key>/<version>/<file>` có trong
+snapshot. Không nhận branch `main`, `latest`, query, credentials, port riêng,
+fragment hoặc redirect. Không tải catalog/manifest từ mạng lúc chạy ứng dụng.
+Parser từ chối snapshot hỏng, revision không hợp lệ, trùng tên/path và face
+thiếu size/checksum; không tự mở rộng nguồn tải theo metadata từ PDF.
+
+`IFontProvider::acceptsFaceData()` kiểm size và SHA-256 của từng face trước
+khi `ApplicationFonts` đọc font. Sau đó vẫn kiểm family/style, outline tĩnh,
+quyền nhúng, ASCII, tiếng Việt được khai báo và ký tự yêu cầu. Giữ giới hạn
+download hiện tại **16 MiB/face**, deadline 120 giây cho cả family và cache dùng
+chung 128 file/256 MiB. Cả 24 face trong snapshot đều dưới 16 MiB; giới hạn
+64 MiB của font cục bộ không phải giới hạn tải qua provider.
+
+Tên family chỉ được trim và so khớp không phân biệt hoa/thường; service vẫn
+bỏ prefix subset PDF hợp lệ như `ABCDEF+`. Không tự sửa tên gõ sai
+`Libreation Sans`, bỏ khoảng trắng giữa tên hoặc thay bằng Arial. Khi tải
+`Liberation Sans`, service lấy face đang cần trước rồi các face còn thiếu.
+Font cache hợp lệ tiếp tục được dùng theo chính sách cũ; checksum snapshot áp
+dụng cho bytes mới tải, không ép thay các bản font người dùng đã cài hợp lệ.
+Lỗi mạng/checksum/validation hoặc Cancel không cài một phần batch và giữ
+nguyên draft. Lỗi của FontSource không âm thầm chuyển sang nguồn khác.
+
+### Thêm font hoặc cập nhật snapshot
+
+Sau khi thêm font, manifest và giấy phép vào FontSource rồi commit/push, chạy:
+
+```sh
+python3 scripts/fonts/update_fontsource_catalog.py \
+  --repository ../FontSource \
+  --revision <full-40-character-commit> \
+  --output src/assets/fonts/fontsource-catalog.json
+```
+
+Script đọc nội dung tại commit bằng Git, đối chiếu manifest với bytes, style,
+size/checksum và các file license/authors. File chưa commit không tham gia
+snapshot; phiên bản cuối trong `versions` của mỗi family được chọn. Xem lại
+diff JSON rồi build và chạy kiểm tra Qt thực tế:
+
+```sh
+TREPDF_TEST_FONTSOURCE_REPO=../FontSource QT_QPA_PLATFORM=offscreen \
+  cmake-build-debug/tests/trepdf_edit_controller_tests validatesExternalFontSourceCatalogFaces
+```
+
+Kiểm tra commit/file đã public trước khi phát hành TrePDF. Thêm font vào
+GitHub chưa tự thay đổi catalogue trong một bản app đã phát hành; cần tạo lại
+snapshot và build. Cơ chế này giữ URL và checksum cùng một phiên bản được duyệt.
 
 ## Font hệ thống trên Windows và macOS
 

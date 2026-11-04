@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/tre-base/FontSource",
+  "revision": "8386afe71207bccf5b2d7bfbbb36697e4d0634a3",
+  "families": [
+    {
+      "name": "Hack",
+      "key": "hack",
+      "version": "3.003",
+      "license": "MIT and Bitstream Vera License",
+      "source": "https://github.com/tre-base/FontSource/tree/8386afe71207bccf5b2d7bfbbb36697e4d0634a3/fonts/hack/3.003",
+      "vietnamese": false,
+      "faces": {
+        "regular": {
+          "path": "fonts/hack/3.003/Hack-Regular.ttf",
+          "bytes": 309408,
+          "sha256": "15f55cc0c85a2988d2b4b3a8cdb5d77fdfbaf319e1bb5309d725db9818fb7125"
+        },
+        "italic": {
+          "path": "fonts/hack/3.003/Hack-Italic.ttf",
+          "bytes": 316156,
+          "sha256": "096fb67a2b85f3c866e9cb3e965b27c2c10b977315f4d3d7f095674be35091c1"
+        },
+        "bold": {
+          "path": "fonts/hack/3.003/Hack-Bold.ttf",
+          "bytes": 317628,
+          "sha256": "5bbf531eff7f8a0c2559c9a0656718e2828a012a9b1f60b5f54006d59a4de8d4"
+        },
+        "bolditalic": {
+          "path": "fonts/hack/3.003/Hack-BoldItalic.ttf",
+          "bytes": 322288,
+          "sha256": "64f74a079700b7dfe128551a1e28875d5ba980971e55f5e0f0596e37bdc6a6bc"
+        }
+      }
+    },
+    {
+      "name": "Iosevka",
+      "key": "iosevka",
+      "version": "34.9.1",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/tre-base/FontSource/tree/8386afe71207bccf5b2d7bfbbb36697e4d0634a3/fonts/iosevka/34.9.1",
+      "vietnamese": true,
+      "faces": {
+        "regular": {
+          "path": "fonts/iosevka/34.9.1/Iosevka-Regular.ttf",
+          "bytes": 11613712,
+          "sha256": "1ba24b81d82df65a68c9d0bb44bda306fdcdb5d7763afe89b0dea29ea827d1a2"
+        },
+        "italic": {
+          "path": "fonts/iosevka/34.9.1/Iosevka-Italic.ttf",
+          "bytes": 12162044,
+          "sha256": "8bb76fdd0bda08193781e9f1703e4021d3afca6b48a3e7bbb61b699efe989115"
+        },
+        "bold": {
+          "path": "fonts/iosevka/34.9.1/Iosevka-Bold.ttf",
+          "bytes": 11679068,
+          "sha256": "1988973571c96725d240c97bd2131b5deecdedfc537ffd30e11aff6ec0286488"
+        },
+        "bolditalic": {
+          "path": "fonts/iosevka/34.9.1/Iosevka-BoldItalic.ttf",
+          "bytes": 12228616,
+          "sha256": "13579582b40296b7b79200c3d419d99de2c8b1ef051ec92c9fbc1df841991bec"
+        }
+      }
+    },
+    {
+      "name": "Liberation Mono",
+      "key": "liberation-mono",
+      "version": "2.1.5",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/tre-base/FontSource/tree/8386afe71207bccf5b2d7bfbbb36697e4d0634a3/fonts/liberation-mono/2.1.5",
+      "vietnamese": true,
+      "faces": {
+        "regular": {
+          "path": "fonts/liberation-mono/2.1.5/LiberationMono-Regular.ttf",
+          "bytes": 319508,
+          "sha256": "f2b83c763e8afd21709333370bed4774337fae82267937e2b5aea7e2fbd922c1"
+        },
+        "italic": {
+          "path": "fonts/liberation-mono/2.1.5/LiberationMono-Italic.ttf",
+          "bytes": 281536,
+          "sha256": "605c01c711b44480a7508d349dfbf3264e81fa43d69e61cfa7d10b86e764c4d1"
+        },
+        "bold": {
+          "path": "fonts/liberation-mono/2.1.5/LiberationMono-Bold.ttf",
+          "bytes": 307996,
+          "sha256": "bd62a0672d0b9b6710b01df434c80ad54fa5f0835207eb7b17b7a761463067bb"
+        },
+        "bolditalic": {
+          "path": "fonts/liberation-mono/2.1.5/LiberationMono-BoldItalic.ttf",
+          "bytes": 284068,
+          "sha256": "79451f3c09fe25116098853b7a2ca6e2436220ccc11af022979adbcf195be130"
+        }
+      }
+    },
+    {
+      "name": "Liberation Sans",
+      "key": "liberation-sans",
+      "version": "2.1.5",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/tre-base/FontSource/tree/8386afe71207bccf5b2d7bfbbb36697e4d0634a3/fonts/liberation-sans/2.1.5",
+      "vietnamese": true,
+      "faces": {
+        "regular": {
+          "path": "fonts/liberation-sans/2.1.5/LiberationSans-Regular.ttf",
+          "bytes": 410712,
+          "sha256": "76d04c18ea243f426b7de1f3ad208e927008f961dc5945e5aad352d0dfde8ee8"
+        },
+        "italic": {
+          "path": "fonts/liberation-sans/2.1.5/LiberationSans-Italic.ttf",
+          "bytes": 415816,
+          "sha256": "e5bae5c4cde31f22142753855f4f8fb86da6ff39955ed3c0a11248b0d16948b0"
+        },
+        "bold": {
+          "path": "fonts/liberation-sans/2.1.5/LiberationSans-Bold.ttf",
+          "bytes": 414456,
+          "sha256": "788abee4c806d660e8aee46689dd8540cd4bb98da03dcc9d171ce3efd99a9173"
+        },
+        "bolditalic": {
+          "path": "fonts/liberation-sans/2.1.5/LiberationSans-BoldItalic.ttf",
+          "bytes": 408996,
+          "sha256": "698da70fc191cc5f33ad4d6d3fe830fe4624b898ea2e3169955928b7c491f1ee"
+        }
+      }
+    },
+    {
+      "name": "Liberation Serif",
+      "key": "liberation-serif",
+      "version": "2.1.5",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/tre-base/FontSource/tree/8386afe71207bccf5b2d7bfbbb36697e4d0634a3/fonts/liberation-serif/2.1.5",
+      "vietnamese": true,
+      "faces": {
+        "regular": {
+          "path": "fonts/liberation-serif/2.1.5/LiberationSerif-Regular.ttf",
+          "bytes": 393576,
+          "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74"
+        },
+        "italic": {
+          "path": "fonts/liberation-serif/2.1.5/LiberationSerif-Italic.ttf",
+          "bytes": 375632,
+          "sha256": "0e3dea9f8d613e006ccfa62201f33e265d19167bd0907725c3e145368b04fc2e"
+        },
+        "bold": {
+          "path": "fonts/liberation-serif/2.1.5/LiberationSerif-Bold.ttf",
+          "bytes": 370096,
+          "sha256": "d754ba427cfe0bca54ae052384baa8f842da5bd6550ad4da024ac441e7a7d5ce"
+        },
+        "bolditalic": {
+          "path": "fonts/liberation-serif/2.1.5/LiberationSerif-BoldItalic.ttf",
+          "bytes": 376772,
+          "sha256": "f17db8af71e24d2066b587546021d4f0b296be389512b658dec3c09affeb11a7"
+        }
+      }
+    },
+    {
+      "name": "Sarasa Gothic CL",
+      "key": "sarasa-gothic-cl",
+      "version": "1.0.43",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/tre-base/FontSource/tree/8386afe71207bccf5b2d7bfbbb36697e4d0634a3/fonts/sarasa-gothic-cl/1.0.43",
+      "vietnamese": true,
+      "faces": {
+        "regular": {
+          "path": "fonts/sarasa-gothic-cl/1.0.43/SarasaGothicCL-Regular.ttf",
+          "bytes": 13054272,
+          "sha256": "8aa8ee372c1e81948387019b0a23b21f24ed0917dbd7dc019950447320d5fcb3"
+        },
+        "italic": {
+          "path": "fonts/sarasa-gothic-cl/1.0.43/SarasaGothicCL-Italic.ttf",
+          "bytes": 13840900,
+          "sha256": "858ae5cf9d53059f064e1cace9f6c3473536bf3d9b71c574d65104a3b8d38169"
+        },
+        "bold": {
+          "path": "fonts/sarasa-gothic-cl/1.0.43/SarasaGothicCL-Bold.ttf",
+          "bytes": 12882644,
+          "sha256": "83f3ffb573b10615ceddcfc63118e55edb3a1df625d9aaac49c88305d3b9f416"
+        },
+        "bolditalic": {
+          "path": "fonts/sarasa-gothic-cl/1.0.43/SarasaGothicCL-BoldItalic.ttf",
+          "bytes": 13670556,
+          "sha256": "5a5872fa2fc004622dc7eb0ab34784aae1cfc017aa995fb99c340ab27d7413b5"
+        }
+      }
+    }
+  ]
+}

@@ -33,6 +33,11 @@ public:
     virtual QList<QUrl> fallbackFaceUrls(const Family &family, bool bold, bool italic) const
     { Q_UNUSED(family); Q_UNUSED(bold); Q_UNUSED(italic); return {}; }
     virtual QUrl fontUrl(const QByteArray &stylesheet) const { Q_UNUSED(stylesheet); return {}; }
+    // Optional integrity policy for a reviewed catalogue. Called before parsing
+    // downloaded font bytes; does not replace family/style/embedding validation.
+    virtual bool acceptsFaceData(const Family &family, bool bold, bool italic,
+                                 const QByteArray &data) const
+    { Q_UNUSED(family); Q_UNUSED(bold); Q_UNUSED(italic); Q_UNUSED(data); return true; }
     virtual bool allowsUrl(const QUrl &url, Resource resource) const = 0;
     virtual bool allowsRedirect(const QUrl &from, const QUrl &to, Resource resource) const
     { Q_UNUSED(from); return allowsUrl(to, resource); }

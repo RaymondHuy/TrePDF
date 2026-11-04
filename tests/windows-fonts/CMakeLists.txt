@@ -22,13 +22,16 @@ qt_add_executable(trepdf_windows_font_tests
     ../../src/FontDownloadService.cpp
     ../../src/GoogleFontsProvider.cpp
     ../../src/CtanFontProvider.cpp
+    ../../src/FontSourceProvider.cpp
     ../../third_party/libxlsxwriter/third_party/minizip/unzip.c
     ../../third_party/libxlsxwriter/third_party/minizip/ioapi.c
 )
 qt_add_resources(trepdf_windows_font_tests "trepdf_windows_font_catalog"
     PREFIX "/trepdf/font-catalog"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/../../src/assets/fonts"
-    FILES ../../src/assets/fonts/ctan-catalog.json
+    FILES
+        ../../src/assets/fonts/ctan-catalog.json
+        ../../src/assets/fonts/fontsource-catalog.json
 )
 target_include_directories(trepdf_windows_font_tests PRIVATE ../../src
     ../../third_party/libxlsxwriter/third_party/minizip)

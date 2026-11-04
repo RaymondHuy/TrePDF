@@ -3,6 +3,7 @@
 #include "ApplicationFonts.h"
 #include "GoogleFontsProvider.h"
 #include "CtanFontProvider.h"
+#include "FontSourceProvider.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -53,6 +54,7 @@ QString incompleteFontMessage(const QString &family)
 FontDownloadService::FontDownloadService(QObject *parent, QNetworkAccessManager *network)
     : QObject(parent), m_network(network ? network : new QNetworkAccessManager(this))
 {
+    m_providers.emplace_back(std::make_unique<FontSourceProvider>());
     m_providers.emplace_back(std::make_unique<GoogleFontsProvider>());
     m_providers.emplace_back(std::make_unique<CtanFontProvider>());
     m_deadline.setSingleShot(true);
@@ -528,6 +530,15 @@ bool FontDownloadService::stageFont(const QByteArray &data, Face &face)
         return false;
     m_errorBold = face.bold;
     m_errorItalic = face.italic;
+    if (m_stage == Stage::Font
+        && (m_providerIndex < 0 || size_t(m_providerIndex) >= m_providers.size()
+            || !m_providers[size_t(m_providerIndex)]->acceptsFaceData(
+                m_providerFamily, face.bold, face.italic, data))) {
+        qWarning().noquote() << "Font download integrity check failed for" << m_family;
+        //% "The downloaded file is invalid, does not match the requested font style, or cannot be used for editing."
+        complete(false, qtTrId("FontDownloadValidationFailed"));
+        return false;
+    }
     QString error;
     if (!ApplicationFonts::validateDownloadedFontData(
             data, m_family, face.bold, face.italic, 0, error)) {

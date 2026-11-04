@@ -66,6 +66,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/GoogleFontsProvider.h
     ../src/CtanFontProvider.cpp
     ../src/CtanFontProvider.h
+    ../src/FontSourceProvider.cpp
+    ../src/FontSourceProvider.h
     ../src/DraftImageItem.cpp
     ../src/DraftImageItem.h
     ../src/ShearedTextSlices.cpp
@@ -160,7 +162,9 @@ qt_add_executable(trepdf_edit_controller_tests
 qt_add_resources(trepdf_edit_controller_tests "trepdf_test_font_catalog"
     PREFIX "/trepdf/font-catalog"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/../src/assets/fonts"
-    FILES ../src/assets/fonts/ctan-catalog.json
+    FILES
+        ../src/assets/fonts/ctan-catalog.json
+        ../src/assets/fonts/fontsource-catalog.json
 )
 
 qt_add_resources(trepdf_edit_controller_tests "trepdf_fixture_fonts"

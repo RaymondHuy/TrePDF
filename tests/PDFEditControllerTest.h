@@ -655,6 +655,17 @@ private slots:
     void downloadsEveryAvailableFontStyle();
     void downloadsOnlyAdvertisedFontStyles();
     void skipsCachedFontStylesWhenDownloadingFamily();
+    void limitsFontSourceToPinnedCatalogue();
+    void rejectsMalformedFontSourceCatalogues_data();
+    void rejectsMalformedFontSourceCatalogues();
+    void verifiesFontSourceFaceIntegrity();
+    void downloadsFontSourceAndSavesReopenedText();
+    void cancelsFontSourceBeforeBatchInstallation();
+    void rejectsInvalidFontSourceSibling_data();
+    void rejectsInvalidFontSourceSibling();
+    void rejectsFontSourceRedirects_data();
+    void rejectsFontSourceRedirects();
+    void validatesExternalFontSourceCatalogFaces();
     void limitsCtanCatalogueToReviewedFamilies();
     void loadsEveryCtanCatalogueEntry();
     void validatesExternalCtanCatalogFaces();
