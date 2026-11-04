@@ -396,6 +396,12 @@ metadata `TrePDFShape`, hoặc nhận diện geometry/style hình chữ nhật, 
 hình thoi canonical của path hoàn toàn không có mark. Path có marker lỗi không
 dùng nhánh nhận diện không marker; QML không suy đoán khả năng chỉnh sửa từ hình hiển thị.
 
+Table dùng cùng pipeline với `TableShape`, giữ `tableRows`/`tableColumns` trên
+candidate và vẽ grid bằng `ShapeDraftView`. Preview placement đọc cấu hình từ
+controller; draft/restoration đọc số hàng/cột của chính candidate. Cả hai
+EditOverlay nhận toàn bộ phần trong khung bảng để chọn/kéo. Xem
+[table-drawing.md](table-drawing.md) về popup và định dạng lưu.
+
 Highlight, Underline, Squiggly và Strikeout dùng cùng bước resolve geometry cho
 preview và commit. `EditOverlay` gửi vùng kéo normalized cho controller;
 controller chỉ hit-test các glyph source-text không phải whitespace đã có trong

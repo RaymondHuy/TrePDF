@@ -2493,6 +2493,8 @@ void PDFEditController::appendPageObjectCandidates(
         candidate.label = qtTrId("Shapes");
         setInitialGeometry(candidate, metadata.frame);
         candidate.shapeType = metadata.type;
+        candidate.tableRows = metadata.tableRows;
+        candidate.tableColumns = metadata.tableColumns;
         candidate.shapeStartRatio = metadata.start;
         candidate.shapeEndRatio = metadata.end;
         candidate.shapeStrokeWidthRatio = metadata.strokeWidthRatio;

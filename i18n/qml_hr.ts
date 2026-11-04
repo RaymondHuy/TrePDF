@@ -693,6 +693,34 @@ Spremite promjene, a zatim prijeđite na karticu Prikaz da biste isprobali povez
         <source>Shapes</source>
         <translation>Oblici</translation>
     </message>
+    <message id="TableShape">
+        <location filename="../src/Components/EditRibbonTools.qml" line="462"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="96"/>
+        <source>Table</source>
+        <translation>Tablica</translation>
+    </message>
+    <message id="TableRows">
+        <location filename="../src/Components/EditRibbonTools.qml" line="522"/>
+        <location filename="../src/Components/EditRibbonTools.qml" line="534"/>
+        <source>Rows</source>
+        <translation>Redci</translation>
+    </message>
+    <message id="TableColumns">
+        <location filename="../src/Components/EditRibbonTools.qml" line="539"/>
+        <location filename="../src/Components/EditRibbonTools.qml" line="551"/>
+        <source>Columns</source>
+        <translation>Stupci</translation>
+    </message>
+    <message id="DrawTableHelp">
+        <location filename="../src/Components/EditRibbonTools.qml" line="558"/>
+        <source>Choose rows and columns, then drag on the page to draw the table.</source>
+        <translation>Odaberite broj redaka i stupaca, a zatim povucite po stranici da biste nacrtali tablicu.</translation>
+    </message>
+    <message id="DrawTable">
+        <location filename="../src/Components/EditRibbonTools.qml" line="568"/>
+        <source>Draw table</source>
+        <translation>Nacrtaj tablicu</translation>
+    </message>
     <message id="ChooseShape">
         <location filename="../src/Components/CommentRibbon.qml" line="1140"/>
         <location filename="../src/Components/EditRibbon.qml" line="359"/>

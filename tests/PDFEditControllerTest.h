@@ -554,6 +554,12 @@ private slots:
     void movesAddedImageWithUndoRedo();
     void addsShapeWithUndoRedo();
     void savesShapesRoundTrip();
+    void addsTableWithAtomicHistory();
+    void savesAndEditsTableGrid_data();
+    void savesAndEditsTableGrid();
+    void rejectsInvalidTableMetadata_data();
+    void rejectsInvalidTableMetadata();
+    void drawsTableThroughRibbonAndOverlay();
     void editsShapePropertiesWithUndoRedo_data();
     void editsShapePropertiesWithUndoRedo();
     void editsSavedShapesRoundTrip_data();

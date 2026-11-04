@@ -1,6 +1,10 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTranslator>
+
 using namespace PDFEditControllerTestSupport;
 
 void PDFEditControllerTest::addsShapeWithUndoRedo()
@@ -1013,4 +1017,409 @@ void PDFEditControllerTest::rejectsTamperedSourceShapeProvenance()
                              QStringLiteral("sourceShape")).isEmpty());
     QVERIFY(!controller.hasDrafts());
     QCOMPARE(inspectShapePaths(tamperedPath).count, 1);
+}
+
+namespace {
+bool rewriteTableTestMetadata(const QString &sourcePath, const QString &targetPath,
+                              const QString &key, const QVariant &value)
+{
+    PDFiumProcessLock lock;
+    const QByteArray path = QFile::encodeName(sourcePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(path.constData(), nullptr);
+    if (!document)
+        return false;
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    FPDF_PAGE page = FPDF_LoadPage(document, 0);
+    if (!page)
+        return false;
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, 0);
+    if (!object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_PATH
+        || FPDFPageObj_CountMarks(object) != 1)
+        return false;
+    FPDF_PAGEOBJECTMARK mark = FPDFPageObj_GetMark(object, 0);
+    unsigned long length = 0;
+    if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data", nullptr, 0, &length)
+        || length == 0 || length > 16 * 1024)
+        return false;
+    QByteArray bytes(qsizetype(length), Qt::Uninitialized);
+    if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data",
+            reinterpret_cast<unsigned char *>(bytes.data()), length, &length))
+        return false;
+    QJsonObject metadata = QJsonDocument::fromJson(bytes).object();
+    if (metadata.isEmpty())
+        return false;
+    if (value.isValid())
+        metadata.insert(key, QJsonValue::fromVariant(value));
+    else
+        metadata.remove(key);
+    bytes = QJsonDocument(metadata).toJson(QJsonDocument::Compact);
+    if (!FPDFPageObjMark_SetBlobParam(document, object, mark, "Data",
+            reinterpret_cast<const unsigned char *>(bytes.constData()),
+            static_cast<unsigned long>(bytes.size())) || !FPDFPage_GenerateContent(page))
+        return false;
+    PdfFileWriter writer(targetPath);
+    return writer.open() && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+}
+
+bool createTableTestPage(const QString &path, int rotation)
+{
+    const QByteArray page = QByteArrayLiteral(
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 640 800] "
+        "/CropBox [20 30 620 770] /Resources << >> /Contents 4 0 R /Rotate ")
+        + QByteArray::number(rotation * 90) + " >>";
+    return writePdfObjects(path, {
+        QByteArrayLiteral("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArrayLiteral("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        page, QByteArrayLiteral("<< /Length 0 >>\nstream\n\nendstream")});
+}
+}
+
+void PDFEditControllerTest::addsTableWithAtomicHistory()
+{
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("table-history.pdf"));
+    QVERIFY(createTableTestPage(sourcePath, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QCOMPARE(controller.tableRows(), 3);
+    QCOMPARE(controller.tableColumns(), 3);
+    controller.setTableRows(0);
+    controller.setTableColumns(21);
+    QCOMPARE(controller.tableRows(), 3);
+    QCOMPARE(controller.tableColumns(), 3);
+    controller.setTableRows(3);
+    controller.setTableColumns(4);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTool(PDFEditController::AddShapeTool);
+    QVERIFY(controller.addShape(0, QPointF(0.2, 0.3), QPointF(0.2, 0.3)).isEmpty());
+    QVERIFY(controller.addShape(-1, QPointF(0.2, 0.3), QPointF(0.6, 0.7)).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    const QVariantMap added = controller.addShape(0, QPointF(0.6, 0.7), QPointF(0.2, 0.3));
+    QVERIFY(!added.isEmpty());
+    QCOMPARE(added.value(QStringLiteral("shapeType")).toInt(), int(PDFEditController::TableShape));
+    QCOMPARE(added.value(QStringLiteral("tableRows")).toInt(), 3);
+    QCOMPARE(added.value(QStringLiteral("tableColumns")).toInt(), 4);
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    const QString objectId = added.value(QStringLiteral("objectId")).toString();
+    const QRectF initialFrame = controller.selectedFrameRect();
+    QVERIFY(QLineF(initialFrame.topLeft(), QPointF(0.2, 0.3)).length() < 0.00001);
+    QVERIFY(QLineF(initialFrame.bottomRight(), QPointF(0.6, 0.7)).length() < 0.00001);
+    // A cell interior is a hit too; the grid is one movable object.
+    QCOMPARE(controller.candidateAt(0, 0.237, 0.351).value(QStringLiteral("objectId")).toString(), objectId);
+    QVERIFY(controller.selectedDrawingPropertiesEditable());
+    QVERIFY(!controller.selectedDrawingSupportsFill());
+    QVERIFY(!controller.setSelectedDrawingInteriorColor(Qt::yellow));
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    controller.redo();
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    controller.setTableRows(8);
+    controller.setTableColumns(9);
+    const QRectF resized(0.25, 0.32, 0.5, 0.3);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resized);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), resized);
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableRows")).toInt(), 3);
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), 4);
+    controller.undo();
+    QCOMPARE(controller.selectedFrameRect(), initialFrame);
+    controller.redo();
+    QCOMPARE(controller.selectedFrameRect(), resized);
+    controller.deleteSelectedObject();
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    controller.undo();
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), 4);
+    controller.discardDrafts();
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::savesAndEditsTableGrid_data()
+{
+    QTest::addColumn<int>("rows");
+    QTest::addColumn<int>("columns");
+    QTest::addColumn<int>("rotation");
+    QTest::newRow("cropped") << 3 << 4 << 0;
+    QTest::newRow("cropped-90") << 3 << 4 << 1;
+    QTest::newRow("cropped-180") << 3 << 4 << 2;
+    QTest::newRow("cropped-270") << 3 << 4 << 3;
+    QTest::newRow("maximum-grid") << 20 << 20 << 0;
+    QTest::newRow("single-cell") << 1 << 1 << 0;
+    QTest::newRow("single-cell-90") << 1 << 1 << 1;
+    QTest::newRow("single-cell-180") << 1 << 1 << 2;
+    QTest::newRow("single-cell-270") << 1 << 1 << 3;
+}
+
+void PDFEditControllerTest::savesAndEditsTableGrid()
+{
+    QFETCH(int, rows);
+    QFETCH(int, columns);
+    QFETCH(int, rotation);
+    const QString suffix = QString::fromLatin1(QTest::currentDataTag());
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("table-source-%1.pdf").arg(suffix));
+    const QString savedPath = m_temporaryDirectory.filePath(QStringLiteral("table-saved-%1.pdf").arg(suffix));
+    const QString editedPath = m_temporaryDirectory.filePath(QStringLiteral("table-edited-%1.pdf").arg(suffix));
+    QVERIFY(createTableTestPage(sourcePath, rotation));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTableRows(rows);
+    controller.setTableColumns(columns);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTool(PDFEditController::AddShapeTool);
+    QVERIFY(!controller.addShape(0, QPointF(0.15, 0.2), QPointF(0.75, 0.7)).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+    const ShapeSaveInspection first = inspectShapePaths(savedPath);
+    QVERIFY(first.readable);
+    QCOMPARE(first.count, 1);
+    QCOMPARE(first.managedCount, 1);
+    QCOMPARE(first.filledCount, 0);
+    QCOMPARE(first.normalizedPathPoints.size(), 1);
+    const auto &points = first.normalizedPathPoints.constFirst();
+    QCOMPARE(points.size(), 6 + 2 * (rows + columns - 2));
+    qreal left = 1, right = 0, top = 1, bottom = 0;
+    for (const QPointF &point : points) {
+        left = qMin(left, point.x()); right = qMax(right, point.x());
+        top = qMin(top, point.y()); bottom = qMax(bottom, point.y());
+    }
+    QVERIFY(qAbs(left - 0.15) < 0.003);
+    QVERIFY(qAbs(right - 0.75) < 0.003);
+    QVERIFY(qAbs(top - 0.2) < 0.003);
+    QVERIFY(qAbs(bottom - 0.7) < 0.003);
+    QVector<bool> horizontal(rows - 1, false), vertical(columns - 1, false);
+    // Inspect the PDF path itself, independently from the marker. Internal
+    // rules must span the frame and divide it into the requested equal cells.
+    for (qsizetype index = 6; index + 1 < points.size(); index += 2) {
+        const QPointF a = points.at(index), b = points.at(index + 1);
+        if (qAbs(a.y() - b.y()) < 0.0001) {
+            const int row = qRound((a.y() - top) / (bottom - top) * rows);
+            QVERIFY(row > 0 && row < rows);
+            QVERIFY(!horizontal.at(row - 1));
+            horizontal[row - 1] = true;
+            QVERIFY(qAbs(qMin(a.x(), b.x()) - left) < 0.0001);
+            QVERIFY(qAbs(qMax(a.x(), b.x()) - right) < 0.0001);
+            QVERIFY(qAbs(a.y() - (top + (bottom - top) * row / rows)) < 0.0001);
+        } else {
+            QVERIFY(qAbs(a.x() - b.x()) < 0.0001);
+            const int column = qRound((a.x() - left) / (right - left) * columns);
+            QVERIFY(column > 0 && column < columns);
+            QVERIFY(!vertical.at(column - 1));
+            vertical[column - 1] = true;
+            QVERIFY(qAbs(qMin(a.y(), b.y()) - top) < 0.0001);
+            QVERIFY(qAbs(qMax(a.y(), b.y()) - bottom) < 0.0001);
+            QVERIFY(qAbs(a.x() - (left + (right - left) * column / columns)) < 0.0001);
+        }
+    }
+    QVERIFY(std::all_of(horizontal.cbegin(), horizontal.cend(), [](bool value) { return value; }));
+    QVERIFY(std::all_of(vertical.cbegin(), vertical.cend(), [](bool value) { return value; }));
+    const QVariantMap source = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(!source.isEmpty());
+    QCOMPARE(source.value(QStringLiteral("tableRows")).toInt(), rows);
+    QCOMPARE(source.value(QStringLiteral("tableColumns")).toInt(), columns);
+    QVERIFY(controller.selectCandidate(0, source.value(QStringLiteral("objectId")).toString()));
+    const QRectF resized(0.2, 0.25, 0.55, 0.45);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(resized);
+    controller.finishSelectedFrameResize();
+    QVERIFY(controller.setSelectedDrawingStrokeColor(QColor(20, 80, 180)));
+    QVERIFY(controller.setSelectedDrawingOpacity(0.7));
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(editedPath)));
+    PDFDocument reopenedDocument;
+    PDFEditController reopened;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(editedPath)));
+    reopened.setDocument(&reopenedDocument);
+    const QVariantMap edited = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QVERIFY(!edited.isEmpty());
+    QCOMPARE(edited.value(QStringLiteral("tableRows")).toInt(), rows);
+    QCOMPARE(edited.value(QStringLiteral("tableColumns")).toInt(), columns);
+    QVERIFY(reopened.selectCandidate(0, edited.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(QLineF(reopened.selectedFrameRect().topLeft(), resized.topLeft()).length() < 0.002);
+    QVERIFY(QLineF(reopened.selectedFrameRect().bottomRight(), resized.bottomRight()).length() < 0.002);
+    QCOMPARE(reopened.selectedDrawingStrokeColor(), QColor(20, 80, 180));
+    QVERIFY(qAbs(reopened.selectedDrawingOpacity() - 0.7) < 0.005);
+    QCOMPARE(inspectShapePaths(editedPath).count, 1);
+    reopened.deleteSelectedObject();
+    reopened.undo();
+    QVERIFY(reopened.selectCandidate(0, edited.value(QStringLiteral("objectId")).toString()));
+    reopened.redo();
+    QVERIFY(reopened.save());
+    QCOMPARE(inspectShapePaths(editedPath).count, 0);
+    QCOMPARE(inspectShapePaths(savedPath).count, 1);
+    QCOMPARE(inspectShapePaths(sourcePath).count, 0);
+}
+
+void PDFEditControllerTest::rejectsInvalidTableMetadata_data()
+{
+    QTest::addColumn<QString>("key");
+    QTest::addColumn<QVariant>("value");
+    QTest::newRow("zero-rows") << QStringLiteral("rows") << QVariant(0);
+    QTest::newRow("negative-columns") << QStringLiteral("columns") << QVariant(-1);
+    QTest::newRow("too-many-rows") << QStringLiteral("rows") << QVariant(21);
+    QTest::newRow("fractional-columns") << QStringLiteral("columns") << QVariant(1.5);
+    QTest::newRow("missing-rows") << QStringLiteral("rows") << QVariant();
+    QTest::newRow("string-rows") << QStringLiteral("rows") << QVariant(QStringLiteral("1"));
+    QTest::newRow("grid-disagrees-with-path") << QStringLiteral("rows") << QVariant(2);
+    QTest::newRow("legacy-version") << QStringLiteral("version") << QVariant(1);
+    QTest::newRow("unknown-version") << QStringLiteral("version") << QVariant(3);
+    QTest::newRow("filled-grid") << QStringLiteral("fill") << QVariant(QStringLiteral("#ff0000"));
+}
+
+void PDFEditControllerTest::rejectsInvalidTableMetadata()
+{
+    QFETCH(QString, key);
+    QFETCH(QVariant, value);
+    const QString suffix = QString::fromLatin1(QTest::currentDataTag());
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("table-invalid-source-%1.pdf").arg(suffix));
+    const QString savedPath = m_temporaryDirectory.filePath(QStringLiteral("table-invalid-saved-%1.pdf").arg(suffix));
+    const QString tamperedPath = m_temporaryDirectory.filePath(QStringLiteral("table-invalid-tampered-%1.pdf").arg(suffix));
+    QVERIFY(createTableTestPage(sourcePath, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    controller.setShapeType(PDFEditController::TableShape);
+    QVERIFY(!controller.addShape(0, QPointF(0.2, 0.3), QPointF(0.6, 0.7)).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(savedPath)));
+    QVERIFY(rewriteTableTestMetadata(savedPath, tamperedPath, key, value));
+    QVERIFY(document.open(QUrl::fromLocalFile(tamperedPath)));
+    // Even the 1x1 grid resembles a rectangle; an invalid marker must never
+    // silently become an editable unmarked rectangle.
+    QVERIFY(candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape")).isEmpty());
+    QCOMPARE(inspectShapePaths(tamperedPath).count, 1);
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
+{
+    QTest::failOnWarning(QRegularExpression(QStringLiteral(".*(?:Binding loop|TypeError|ReferenceError).*")));
+    QTranslator translator;
+    const QString translationPath = qEnvironmentVariable("TREPDF_TABLE_TEST_TRANSLATION");
+    if (!translationPath.isEmpty()) {
+        QVERIFY(translator.load(translationPath));
+        QCoreApplication::installTranslator(&translator);
+    }
+    const auto removeTranslator = qScopeGuard([&] { QCoreApplication::removeTranslator(&translator); });
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("table-ui.pdf"));
+    QVERIFY(createTableTestPage(sourcePath, 0));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(root.get());
+    QVERIFY(window);
+    window->resize(1200, 900);
+    window->show();
+    auto *tabs = root->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    auto *model = root->findChild<PDFTabModel *>();
+    QVERIFY(tabs);
+    QVERIFY(model);
+    auto *session = model->open(QUrl::fromLocalFile(sourcePath));
+    QVERIFY(session);
+    auto &controller = *session->editController();
+    QVERIFY(tabs->setProperty("currentIndex", 1));
+    QTRY_COMPARE(controller.tool(), PDFEditController::SelectTool);
+    const auto findItem = [](auto &&self, QQuickItem *parent, const QString &name) -> QQuickItem * {
+        if (parent->objectName() == name)
+            return parent;
+        for (auto *child : parent->childItems()) {
+            if (auto *match = self(self, child, name))
+                return match;
+        }
+        return nullptr;
+    };
+    const auto itemNamed = [&](const QString &name) {
+        return findItem(findItem, window->contentItem(), name);
+    };
+    const auto clickItem = [&](QQuickItem *item) {
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+                          item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
+    };
+    QQuickItem *tableButton = nullptr;
+    QTRY_VERIFY((tableButton = itemNamed(QStringLiteral("editTableButton"))));
+    QVERIFY(tableButton->isEnabled());
+    QVERIFY(!itemNamed(QStringLiteral("tableRowsSpinBox")));
+    clickItem(tableButton);
+    QQuickItem *rows = nullptr;
+    QQuickItem *columns = nullptr;
+    QTRY_VERIFY((rows = itemNamed(QStringLiteral("tableRowsSpinBox"))));
+    QTRY_VERIFY((columns = itemNamed(QStringLiteral("tableColumnsSpinBox"))));
+    QCOMPARE(rows->property("from").toInt(), 1);
+    QCOMPARE(rows->property("to").toInt(), 20);
+    QVERIFY(rows->setProperty("value", 5));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!itemNamed(QStringLiteral("tableRowsSpinBox")));
+    QCOMPARE(controller.tableRows(), 3);
+    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    QVERIFY(!controller.hasDrafts());
+
+    clickItem(tableButton);
+    QTRY_VERIFY((rows = itemNamed(QStringLiteral("tableRowsSpinBox"))));
+    QTRY_VERIFY((columns = itemNamed(QStringLiteral("tableColumnsSpinBox"))));
+    QCOMPARE(rows->property("value").toInt(), 3);
+    QVERIFY(columns->setProperty("value", 4));
+    QQuickItem *drawButton = itemNamed(QStringLiteral("drawTableButton"));
+    QVERIFY(drawButton);
+    const QString screenshotPrefix = qEnvironmentVariable("TREPDF_TABLE_TEST_SCREENSHOT");
+    if (!screenshotPrefix.isEmpty()) {
+        QTest::qWait(100);
+        QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-popup.png")));
+    }
+    clickItem(drawButton);
+    QTRY_VERIFY(!itemNamed(QStringLiteral("tableRowsSpinBox")));
+    QCOMPARE(controller.shapeType(), PDFEditController::TableShape);
+    QCOMPARE(controller.tool(), PDFEditController::AddShapeTool);
+    QCOMPARE(controller.tableRows(), 3);
+    QCOMPARE(controller.tableColumns(), 4);
+
+    const auto findOverlay = [](auto &&self, QQuickItem *parent) -> QQuickItem * {
+        if (parent->isVisible() && parent->width() > 100 && parent->height() > 100
+            && parent->metaObject()->indexOfMethod("beginShape(QVariant,QVariant)") >= 0)
+            return parent;
+        for (auto *child : parent->childItems()) {
+            if (auto *match = self(self, child))
+                return match;
+        }
+        return nullptr;
+    };
+    QQuickItem *overlay = nullptr;
+    QTRY_VERIFY((overlay = findOverlay(findOverlay, window->contentItem())));
+    const auto start = overlay->mapToScene(QPointF(overlay->width() * .2, overlay->height() * .25)).toPoint();
+    const auto end = overlay->mapToScene(QPointF(overlay->width() * .7, overlay->height() * .6)).toPoint();
+    QVERIFY(window->contentItem()->contains(end));
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove(window, end, 30);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, end);
+    QVERIFY(!controller.hasDrafts());
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove(window, end, 30);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, end);
+    QTRY_COMPARE(controller.draftsForPage(0).size(), 1);
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableRows")).toInt(), 3);
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), 4);
+    QCOMPARE(controller.tool(), PDFEditController::SelectTool);
+    if (!screenshotPrefix.isEmpty()) {
+        QTest::qWait(100);
+        QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-grid.png")));
+    }
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    controller.discardDrafts();
+    clickItem(tableButton);
+    QTRY_VERIFY(itemNamed(QStringLiteral("tableRowsSpinBox")));
+    QVERIFY(tabs->setProperty("currentIndex", 0));
+    QTRY_VERIFY(!itemNamed(QStringLiteral("tableRowsSpinBox")));
+    QVERIFY(root->setProperty("allowWindowClose", true));
 }

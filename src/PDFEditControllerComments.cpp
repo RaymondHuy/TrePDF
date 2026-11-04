@@ -671,7 +671,8 @@ bool PDFEditController::selectedDrawingSupportsFill() const
         && (drawingSupportsFill(m_selectedCandidate.kind)
             || (isShapeCandidateKind(m_selectedCandidate.kind)
                 && m_selectedCandidate.shapeType != LineShape
-                && m_selectedCandidate.shapeType != ArrowShape));
+                && m_selectedCandidate.shapeType != ArrowShape
+                && m_selectedCandidate.shapeType != TableShape));
 }
 
 QColor PDFEditController::selectedDrawingStrokeColor() const

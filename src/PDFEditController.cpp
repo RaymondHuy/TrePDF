@@ -152,7 +152,8 @@ bool shapeContainsPoint(PDFEditController::ShapeType shapeType,
     // Closed shapes remain interactive throughout their interior, regardless
     // of fill or opacity. Keep this in sync with EditOverlay's move mask.
     switch (shapeType) {
-    case PDFEditController::RectangleShape: {
+    case PDFEditController::RectangleShape:
+    case PDFEditController::TableShape: {
         QPolygonF polygon;
         polygon << drawingRect.topLeft()
                 << drawingRect.topRight()
@@ -664,6 +665,22 @@ void PDFEditController::setShapeType(ShapeType shapeType)
 
     m_shapeType = shapeType;
     emit shapeTypeChanged();
+}
+
+void PDFEditController::setTableRows(int rows)
+{
+    if (rows < 1 || rows > MaximumTableDimension || m_tableRows == rows)
+        return;
+    m_tableRows = rows;
+    emit tableDimensionsChanged();
+}
+
+void PDFEditController::setTableColumns(int columns)
+{
+    if (columns < 1 || columns > MaximumTableDimension || m_tableColumns == columns)
+        return;
+    m_tableColumns = columns;
+    emit tableDimensionsChanged();
 }
 
 bool PDFEditController::imageAspectRatioLocked() const

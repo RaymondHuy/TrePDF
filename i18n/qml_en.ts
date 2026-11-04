@@ -758,6 +758,34 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <source>Shapes</source>
         <translation>Shapes</translation>
     </message>
+    <message id="TableShape">
+        <location filename="../src/Components/EditRibbonTools.qml" line="462"/>
+        <location filename="../src/PDFEditControllerGeometry.cpp" line="96"/>
+        <source>Table</source>
+        <translation>Table</translation>
+    </message>
+    <message id="TableRows">
+        <location filename="../src/Components/EditRibbonTools.qml" line="522"/>
+        <location filename="../src/Components/EditRibbonTools.qml" line="534"/>
+        <source>Rows</source>
+        <translation>Rows</translation>
+    </message>
+    <message id="TableColumns">
+        <location filename="../src/Components/EditRibbonTools.qml" line="539"/>
+        <location filename="../src/Components/EditRibbonTools.qml" line="551"/>
+        <source>Columns</source>
+        <translation>Columns</translation>
+    </message>
+    <message id="DrawTableHelp">
+        <location filename="../src/Components/EditRibbonTools.qml" line="558"/>
+        <source>Choose rows and columns, then drag on the page to draw the table.</source>
+        <translation>Choose rows and columns, then drag on the page to draw the table.</translation>
+    </message>
+    <message id="DrawTable">
+        <location filename="../src/Components/EditRibbonTools.qml" line="568"/>
+        <source>Draw table</source>
+        <translation>Draw table</translation>
+    </message>
     <message id="ChooseShape">
         <location filename="../src/Components/CommentRibbon.qml" line="1140"/>
         <location filename="../src/Components/EditRibbon.qml" line="358"/>

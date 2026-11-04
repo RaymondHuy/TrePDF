@@ -105,6 +105,7 @@ bool isSupportedShapeType(PDFEditController::ShapeType shapeType)
     case PDFEditController::ArrowShape:
     case PDFEditController::TriangleShape:
     case PDFEditController::DiamondShape:
+    case PDFEditController::TableShape:
         return true;
     }
     return false;

@@ -1200,6 +1200,7 @@ Item {
         // dragging when the shape has no fill or is fully transparent.
         switch (Number(candidate.shapeType)) {
         case PDFEditController.RectangleShape:
+        case PDFEditController.TableShape:
             return polygonContainsPoint([
                 Qt.point(left, top),
                 Qt.point(right, top),
@@ -3376,6 +3377,8 @@ Item {
                 shapeType: draftItem.modelData.shapeType !== undefined
                     ? draftItem.modelData.shapeType
                     : PDFEditController.RectangleShape
+                tableRows: draftItem.modelData.tableRows ?? 3
+                tableColumns: draftItem.modelData.tableColumns ?? 3
                 startRatio: draftItem.modelData.shapeStart !== undefined
                     ? draftItem.modelData.shapeStart
                     : Qt.point(0, 0)
@@ -3818,6 +3821,8 @@ Item {
         width: root.activeShapeRect.width
         height: root.activeShapeRect.height
         shapeType: root.controller.shapeType
+        tableRows: root.controller.tableRows
+        tableColumns: root.controller.tableColumns
         startRatio: Qt.point(
             (root.shapeStart.x - root.activeShapeRect.x)
                 / root.activeShapeRect.width,
