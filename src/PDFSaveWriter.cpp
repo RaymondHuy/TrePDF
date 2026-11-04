@@ -206,6 +206,8 @@ struct SaveDraft {
     int imageQuarterTurns = 0;
     PDFEditController::ShapeType shapeType
         = PDFEditController::RectangleShape;
+    int tableRows = 0;
+    int tableColumns = 0;
     QPointF shapeStartRatio;
     QPointF shapeEndRatio = QPointF(1.0, 1.0);
     qreal shapeStrokeWidthRatio = 0.0;
@@ -3378,6 +3380,8 @@ PDFSaveWriter::Result createShapeDraftObject(
 {
     PDFShapeUtils::Metadata metadata;
     metadata.type = draft.shapeType;
+    metadata.tableRows = draft.tableRows;
+    metadata.tableColumns = draft.tableColumns;
     metadata.frame = draft.frameRect;
     metadata.start = draft.shapeStartRatio;
     metadata.end = draft.shapeEndRatio;
@@ -7440,6 +7444,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             saveDraft.annotationSubtype = FPDF_ANNOT_INK;
         }
         saveDraft.shapeType = draft->candidate.shapeType;
+        saveDraft.tableRows = draft->candidate.tableRows;
+        saveDraft.tableColumns = draft->candidate.tableColumns;
         saveDraft.shapeStartRatio = draft->candidate.shapeStartRatio;
         saveDraft.shapeEndRatio = draft->candidate.shapeEndRatio;
         saveDraft.sourceShapeMetadata = draft->candidate.sourceShapeMetadata;

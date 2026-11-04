@@ -91,6 +91,9 @@ QString shapeLabel(PDFEditController::ShapeType shapeType)
     case PDFEditController::DiamondShape:
         //% "Diamond"
         return qtTrId("DiamondShape");
+    case PDFEditController::TableShape:
+        //% "Table"
+        return qtTrId("TableShape");
     }
     return {};
 }
@@ -512,6 +515,10 @@ QVariantMap PDFEditController::addShape(int page,
     candidate.editable = true;
     candidate.added = true;
     candidate.shapeType = m_shapeType;
+    if (m_shapeType == TableShape) {
+        candidate.tableRows = m_tableRows;
+        candidate.tableColumns = m_tableColumns;
+    }
     candidate.shapeStartRatio = pointRatio(boundedStart);
     candidate.shapeEndRatio = pointRatio(shapeEnd);
     candidate.shapeStrokeWidthRatio = kAddedShapeStrokeWidthRatio;

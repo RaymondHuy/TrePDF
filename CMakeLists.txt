@@ -477,6 +477,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/search.svg
         src/assets/icons/send.svg
         src/assets/icons/shapes.svg
+        src/assets/icons/table.svg
         src/assets/icons/shield-check.svg
         src/assets/icons/signature.svg
         src/assets/icons/square-check-big.svg

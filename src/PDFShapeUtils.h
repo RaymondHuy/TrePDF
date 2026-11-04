@@ -27,9 +27,14 @@ inline constexpr char kMarkName[] = "TrePDFShape";
 inline constexpr char kDataKey[] = "Data";
 inline constexpr int kMaximumMetadataBytes = 16 * 1024;
 inline constexpr int kMaximumSegments = 32;
+// Only version-2 managed tables may exceed the legacy shape segment bound.
+inline constexpr int kMaximumTableSegments
+    = 6 + 4 * (PDFEditController::MaximumTableDimension - 1);
 
 struct Metadata {
     PDFEditController::ShapeType type = PDFEditController::RectangleShape;
+    int tableRows = 0;
+    int tableColumns = 0;
     QRectF frame;
     QPointF start;
     QPointF end = QPointF(1.0, 1.0);
@@ -45,7 +50,14 @@ inline bool validMetadata(const Metadata &metadata)
         return std::isfinite(value) && value >= 0.0 && value <= 1.0;
     };
     return metadata.type >= PDFEditController::RectangleShape
-        && metadata.type <= PDFEditController::DiamondShape
+        && metadata.type <= PDFEditController::TableShape
+        && (metadata.type == PDFEditController::TableShape
+            ? (metadata.tableRows >= 1
+               && metadata.tableRows <= PDFEditController::MaximumTableDimension
+               && metadata.tableColumns >= 1
+               && metadata.tableColumns <= PDFEditController::MaximumTableDimension
+               && !metadata.fill.isValid())
+            : (metadata.tableRows == 0 && metadata.tableColumns == 0))
         && unit(metadata.frame.left()) && unit(metadata.frame.top())
         && unit(metadata.frame.width()) && unit(metadata.frame.height())
         && metadata.frame.width() > 0.0 && metadata.frame.height() > 0.0
@@ -229,6 +241,30 @@ inline FPDF_PAGEOBJECT createPath(FPDF_PAGE page, const QSizeF &pageSize,
     bool closedShape = false;
     bool shapeCreated = false;
     switch (metadata.type) {
+    case PDFEditController::TableShape: {
+        shapeCreated = createPath(drawingRect.topLeft())
+            && lineTo(drawingRect.topRight())
+            && lineTo(drawingRect.bottomRight())
+            && moveTo(drawingRect.bottomRight())
+            && lineTo(drawingRect.bottomLeft())
+            && lineTo(drawingRect.topLeft());
+        // Two L-shaped subpaths prevent PDFium from replacing a single-cell
+        // outline with `re`, which changes vertex order on rotated pages.
+        for (int row = 1; shapeCreated && row < metadata.tableRows; ++row) {
+            const qreal y = drawingRect.top()
+                + drawingRect.height() * row / metadata.tableRows;
+            shapeCreated = moveTo(QPointF(drawingRect.left(), y))
+                && lineTo(QPointF(drawingRect.right(), y));
+        }
+        for (int column = 1; shapeCreated && column < metadata.tableColumns; ++column) {
+            const qreal x = drawingRect.left()
+                + drawingRect.width() * column / metadata.tableColumns;
+            shapeCreated = moveTo(QPointF(x, drawingRect.top()))
+                && lineTo(QPointF(x, drawingRect.bottom()));
+        }
+        // All grid lines share one stroked path; there is no cell/background fill.
+        break;
+    }
     case PDFEditController::RectangleShape: {
         const QPointF topLeft = drawingRect.topLeft();
         shapeCreated = createPath(topLeft)
@@ -371,7 +407,8 @@ inline FPDF_PAGEOBJECT createPath(FPDF_PAGE page, const QSizeF &pageSize,
     return path;
 }
 
-inline QJsonArray physicalSignature(FPDF_PAGEOBJECT path)
+inline QJsonArray physicalSignature(FPDF_PAGEOBJECT path,
+                                   int maximumSegments = kMaximumSegments)
 {
     assertPDFiumProcessLockHeld();
     if (!path || FPDFPageObj_GetType(path) != FPDF_PAGEOBJ_PATH
@@ -425,7 +462,8 @@ inline QJsonArray physicalSignature(FPDF_PAGEOBJECT path)
                                     blue / 255.0, alpha / 255.0});
     }
     const int count = FPDFPath_CountSegments(path);
-    if (count < 2 || count > kMaximumSegments) {
+    if (maximumSegments < 2 || maximumSegments > kMaximumTableSegments
+        || count < 2 || count > maximumSegments) {
         return {};
     }
     QJsonArray segments;
@@ -461,7 +499,8 @@ inline QJsonArray physicalSignature(FPDF_PAGEOBJECT path)
     return signature;
 }
 
-inline bool signaturesMatch(const QJsonArray &left, const QJsonArray &right)
+inline bool signaturesMatch(const QJsonArray &left, const QJsonArray &right,
+                            int maximumSegments = kMaximumSegments)
 {
     if (left.size() < 10 || left.size() > 11 || left.size() != right.size()) {
         return false;
@@ -493,7 +532,8 @@ inline bool signaturesMatch(const QJsonArray &left, const QJsonArray &right)
         }
     }
     const QJsonArray a = left.last().toArray(), b = right.last().toArray();
-    if (a.size() < 2 || a.size() > kMaximumSegments || a.size() != b.size()) {
+    if (maximumSegments < 2 || maximumSegments > kMaximumTableSegments
+        || a.size() < 2 || a.size() > maximumSegments || a.size() != b.size()) {
         return false;
     }
     for (qsizetype index = 0; index < a.size(); ++index) {
@@ -524,12 +564,14 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
     if (!validMetadata(metadata)) {
         return {};
     }
-    const QJsonArray signature = physicalSignature(path);
+    const bool table = metadata.type == PDFEditController::TableShape;
+    const QJsonArray signature = physicalSignature(
+        path, table ? kMaximumTableSegments : kMaximumSegments);
     if (signature.isEmpty()) {
         return {};
     }
-    const QJsonObject object{
-        {QStringLiteral("version"), 1},
+    QJsonObject object{
+        {QStringLiteral("version"), table ? 2 : 1},
         {QStringLiteral("type"), metadata.type},
         {QStringLiteral("frame"), QJsonArray{metadata.frame.x(), metadata.frame.y(),
              metadata.frame.width(), metadata.frame.height()}},
@@ -541,6 +583,10 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
             ? metadata.fill.name(QColor::HexRgb) : QString()},
         {QStringLiteral("opacity"), metadata.opacity},
         {QStringLiteral("path"), signature}};
+    if (table) {
+        object.insert(QStringLiteral("rows"), metadata.tableRows);
+        object.insert(QStringLiteral("columns"), metadata.tableColumns);
+    }
     return QJsonDocument(object).toJson(QJsonDocument::Compact);
 }
 
@@ -592,7 +638,11 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
         return false;
     }
     const QJsonObject object = document.object();
-    if (object.size() != 10 || object.value(QStringLiteral("version")).toInt(-1) != 1
+    const QJsonValue versionValue = object.value(QStringLiteral("version"));
+    const int version = versionValue.toInt(-1);
+    if (!versionValue.isDouble() || versionValue.toDouble() != version
+        || (version != 1 && version != 2)
+        || object.size() != (version == 2 ? 12 : 10)
         || !object.value(QStringLiteral("stroke")).isString()
         || !object.value(QStringLiteral("fill")).isString()) {
         return false;
@@ -621,6 +671,19 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
         return false;
     }
     parsed.type = static_cast<PDFEditController::ShapeType>(type.toInt(-1));
+    if ((version == 2) != (parsed.type == PDFEditController::TableShape)) {
+        return false;
+    }
+    if (version == 2) {
+        const QJsonValue rows = object.value(QStringLiteral("rows"));
+        const QJsonValue columns = object.value(QStringLiteral("columns"));
+        parsed.tableRows = rows.toInt(-1);
+        parsed.tableColumns = columns.toInt(-1);
+        if (!rows.isDouble() || rows.toDouble() != parsed.tableRows
+            || !columns.isDouble() || columns.toDouble() != parsed.tableColumns) {
+            return false;
+        }
+    }
     parsed.frame = QRectF(frame[0], frame[1], frame[2], frame[3]);
     parsed.start = QPointF(start[0], start[1]);
     parsed.end = QPointF(end[0], end[1]);
@@ -639,15 +702,18 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
     if (!validMetadata(parsed) || (!fill.isEmpty() && !parsed.fill.isValid())) {
         return false;
     }
-    const QJsonArray actual = physicalSignature(path);
-    if (!signaturesMatch(actual, object.value(QStringLiteral("path")).toArray())) {
+    const int maximumSegments = version == 2 ? kMaximumTableSegments : kMaximumSegments;
+    const QJsonArray actual = physicalSignature(path, maximumSegments);
+    if (!signaturesMatch(actual, object.value(QStringLiteral("path")).toArray(),
+                         maximumSegments)) {
         return false;
     }
     FPDF_PAGEOBJECT canonical = createPath(page, pageSize, parsed);
     if (!canonical) {
         return false;
     }
-    const bool matches = signaturesMatch(actual, physicalSignature(canonical))
+    const bool matches = signaturesMatch(
+        actual, physicalSignature(canonical, maximumSegments), maximumSegments)
         && static_cast<bool>(FPDFPageObj_HasTransparency(path))
             == static_cast<bool>(FPDFPageObj_HasTransparency(canonical));
     FPDFPageObj_Destroy(canonical);

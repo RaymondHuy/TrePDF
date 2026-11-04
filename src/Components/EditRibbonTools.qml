@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Layouts
 
 Flickable {
     id: root
@@ -26,6 +27,9 @@ Flickable {
     property bool textAddingAvailable: true
     property bool imageAddingAvailable: true
     property bool shapesAvailable: true
+    property bool tablesAvailable: false
+    property int tableRows: 3
+    property int tableColumns: 3
     property list<string> allowedShapes: ["rectangle", "ellipse", "line", "arrow", "triangle", "diamond"]
     property bool linksAvailable: true
     property bool addPageAvailable: true
@@ -38,6 +42,7 @@ Flickable {
     signal pageRequested(int page)
     signal selectToolRequested(string toolName)
     signal shapeRequested(string shapeName)
+    signal tableRequested(int rows, int columns)
     signal addBlankPageRequested()
     signal beginLinkEditingRequested()
     signal autoCreateLinksRequested()
@@ -401,8 +406,8 @@ Flickable {
                 enabled: root.documentLoaded && root.shapesAvailable
                     && root.allowedShapes.length > 0
                     && !root.saving
-                primary: root.currentTool
-                    === "addShape"
+                primary: root.currentTool === "addShape"
+                    && root.currentShape !== "table"
                 onClicked: shapePopup.open()
                 onMenuRequested: shapePopup.open()
                 onEnabledChanged: {
@@ -443,6 +448,137 @@ Flickable {
                         color: root.theme.ribbonSurface
                         border.width: 1
                         border.color: root.theme.ribbonBorder
+                    }
+                }
+            }
+
+            RibbonButton {
+                id: tableButton
+                objectName: "editTableButton"
+
+                theme: root.theme
+                documentLoaded: root.documentLoaded
+                //% "Table"
+                text: qsTrId("TableShape")
+                iconSource: "../assets/icons/table.svg"
+                menuIndicatorVisible: true
+                menuToolTipText: text
+                visible: root.tablesAvailable
+                enabled: root.documentLoaded && root.tablesAvailable && !root.saving
+                primary: root.currentTool === "addShape" && root.currentShape === "table"
+                onClicked: tablePopupLoader.active = true
+                onMenuRequested: tablePopupLoader.active = true
+                onEnabledChanged: {
+                    if (!enabled)
+                        tablePopupLoader.active = false
+                }
+                onVisibleChanged: {
+                    if (!visible)
+                        tablePopupLoader.active = false
+                }
+
+                Connections {
+                    target: root
+                    function onDocumentContextChanged() {
+                        tablePopupLoader.active = false
+                    }
+                }
+
+                Loader {
+                    id: tablePopupLoader
+
+                    active: false
+                    onLoaded: {
+                        if (status === Loader.Ready && item)
+                            (item as Popup).open()
+                    }
+
+                    sourceComponent: Popup {
+                        id: tablePopup
+                        objectName: "tablePopup"
+
+                        parent: tableButton
+                        x: tableButton.width - width
+                        y: tableButton.height
+                        width: 280
+                        padding: 12
+                        popupType: Popup.Item
+                        focus: true
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        onClosed: tablePopupLoader.active = false
+
+                        contentItem: ColumnLayout {
+                            spacing: 10
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                columnSpacing: 12
+                                rowSpacing: 8
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    //% "Rows"
+                                    text: qsTrId("TableRows")
+                                    color: root.theme.ribbonTextColor
+                                }
+                                SpinBox {
+                                    id: tableRowsInput
+                                    objectName: "tableRowsSpinBox"
+                                    from: 1
+                                    to: 20
+                                    value: root.tableRows
+                                    editable: true
+                                    live: true
+                                    //% "Rows"
+                                    Accessible.name: qsTrId("TableRows")
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    //% "Columns"
+                                    text: qsTrId("TableColumns")
+                                    color: root.theme.ribbonTextColor
+                                }
+                                SpinBox {
+                                    id: tableColumnsInput
+                                    objectName: "tableColumnsSpinBox"
+                                    from: 1
+                                    to: 20
+                                    value: root.tableColumns
+                                    editable: true
+                                    live: true
+                                    //% "Columns"
+                                    Accessible.name: qsTrId("TableColumns")
+                                }
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                //% "Choose rows and columns, then drag on the page to draw the table."
+                                text: qsTrId("DrawTableHelp")
+                                color: root.theme.ribbonTextColor
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Button {
+                                objectName: "drawTableButton"
+                                Layout.fillWidth: true
+                                //% "Draw table"
+                                text: qsTrId("DrawTable")
+                                onClicked: {
+                                    root.tableRequested(tableRowsInput.value, tableColumnsInput.value)
+                                    tablePopup.close()
+                                }
+                            }
+                        }
+
+                        background: Rectangle {
+                            radius: 7
+                            color: root.theme.ribbonSurface
+                            border.width: 1
+                            border.color: root.theme.ribbonBorder
+                        }
                     }
                 }
             }

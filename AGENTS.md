@@ -378,6 +378,14 @@ Current features:
   edited Save adds `TrePDFShape` metadata. Arbitrary and nested paths remain
   excluded, and invalid marked paths never fall back to unmarked recognition.
   These Edit shapes are page content, separate from comment annotations.
+- Edit > Table opens a lazy Rows/Columns popup (1–20 each, initially 3×3).
+  Draw table arms drag placement through AddShapeTool. Each grid is one
+  TableShape vector object, with equal cells and no fill or cell text. It shares
+  shape selection, stroke/opacity, movement, eight-handle resize, delete and
+  Undo/Redo. Save/reopen retains rows and columns in bounded TrePDFShape v2
+  metadata; existing shapes retain v1. Only validated managed table paths
+  rehydrate; arbitrary lines in imported PDFs are not grouped into a table.
+  See docs/table-drawing.md for the storage and UI contract.
 - Render every page through PDFium.
 - Virtualized continuous scrolling with reusable QML delegates.
 - `PageThumbnailPanel.qml` provides a collapsible, virtualized left thumbnail

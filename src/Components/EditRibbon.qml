@@ -15,6 +15,9 @@ EditRibbonTools {
     currentPage: document.currentPage
     currentTool: toolName(editController.tool)
     currentShape: shapeTypeName(editController.shapeType)
+    tablesAvailable: true
+    tableRows: editController.tableRows
+    tableColumns: editController.tableColumns
     saving: editController.saving
     canUndo: editController.canUndo
     canRedo: editController.canRedo
@@ -44,6 +47,14 @@ EditRibbonTools {
         case "diamond": editController.shapeType = PDFEditController.DiamondShape; break
         default: return
         }
+        editController.tool = PDFEditController.AddShapeTool
+    }
+    onTableRequested: (rows, columns) => {
+        if (!root.documentLoaded || root.saving || !root.enabled)
+            return
+        editController.tableRows = rows
+        editController.tableColumns = columns
+        editController.shapeType = PDFEditController.TableShape
         editController.tool = PDFEditController.AddShapeTool
     }
     onAddBlankPageRequested: {
@@ -76,6 +87,7 @@ EditRibbonTools {
         case PDFEditController.ArrowShape: return "arrow"
         case PDFEditController.TriangleShape: return "triangle"
         case PDFEditController.DiamondShape: return "diamond"
+        case PDFEditController.TableShape: return "table"
         }
         return ""
     }

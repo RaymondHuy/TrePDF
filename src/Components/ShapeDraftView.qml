@@ -11,6 +11,28 @@ Item {
     property color fillColor: "transparent"
     property color strokeColor: "#000000"
     property real strokeWidth: 2
+    property int tableRows: 3
+    property int tableColumns: 3
+
+    readonly property int boundedTableRows: Math.max(1, Math.min(20, tableRows))
+    readonly property int boundedTableColumns: Math.max(1, Math.min(20, tableColumns))
+    readonly property var tablePaths: {
+        if (shapeType !== PDFEditController.TableShape)
+            return []
+        const paths = [[Qt.point(pathLeft, pathTop), Qt.point(pathRight, pathTop),
+                        Qt.point(pathRight, pathBottom)],
+                       [Qt.point(pathRight, pathBottom), Qt.point(pathLeft, pathBottom),
+                        Qt.point(pathLeft, pathTop)]]
+        for (let row = 1; row < boundedTableRows; ++row) {
+            const y = pathTop + (pathBottom - pathTop) * row / boundedTableRows
+            paths.push([Qt.point(pathLeft, y), Qt.point(pathRight, y)])
+        }
+        for (let column = 1; column < boundedTableColumns; ++column) {
+            const x = pathLeft + (pathRight - pathLeft) * column / boundedTableColumns
+            paths.push([Qt.point(x, pathTop), Qt.point(x, pathBottom)])
+        }
+        return paths
+    }
 
     readonly property real effectiveStrokeWidth: Math.max(0.75, strokeWidth)
     readonly property real inset: Math.min(
@@ -55,6 +77,22 @@ Item {
 
     function boundedRatio(value) {
         return Math.max(0, Math.min(1, Number(value)))
+    }
+
+    Shape {
+        anchors.fill: parent
+        visible: root.shapeType === PDFEditController.TableShape
+        preferredRendererType: Shape.CurveRenderer
+
+        ShapePath {
+            fillColor: "transparent"
+            strokeColor: root.strokeColor
+            strokeWidth: root.effectiveStrokeWidth
+            capStyle: ShapePath.RoundCap
+            joinStyle: ShapePath.RoundJoin
+
+            PathMultiline { paths: root.tablePaths }
+        }
     }
 
     Shape {

@@ -49,6 +49,8 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool headerSyncCanApply READ headerSyncCanApply NOTIFY headerSyncChanged FINAL)
     Q_PROPERTY(QString headerSyncError READ headerSyncError NOTIFY headerSyncChanged FINAL)
     Q_PROPERTY(ShapeType shapeType READ shapeType WRITE setShapeType NOTIFY shapeTypeChanged FINAL)
+    Q_PROPERTY(int tableRows READ tableRows WRITE setTableRows NOTIFY tableDimensionsChanged FINAL)
+    Q_PROPERTY(int tableColumns READ tableColumns WRITE setTableColumns NOTIFY tableDimensionsChanged FINAL)
     Q_PROPERTY(bool imageAspectRatioLocked READ imageAspectRatioLocked WRITE setImageAspectRatioLocked NOTIFY imageAspectRatioLockedChanged FINAL)
     Q_PROPERTY(QColor highlightColor READ highlightColor WRITE setHighlightColor NOTIFY highlightColorChanged FINAL)
     Q_PROPERTY(QColor underlineColor READ underlineColor WRITE setUnderlineColor NOTIFY underlineColorChanged FINAL)
@@ -211,9 +213,12 @@ public:
         LineShape,
         ArrowShape,
         TriangleShape,
-        DiamondShape
+        DiamondShape,
+        TableShape
     };
     Q_ENUM(ShapeType)
+
+    static constexpr int MaximumTableDimension = 20;
 
     enum FontFilter {
         VietnameseFonts,
@@ -265,6 +270,10 @@ public:
     Q_INVOKABLE bool candidateAllowedInSelection(int page, const QString &objectId);
     ShapeType shapeType() const;
     void setShapeType(ShapeType shapeType);
+    int tableRows() const { return m_tableRows; }
+    int tableColumns() const { return m_tableColumns; }
+    void setTableRows(int rows);
+    void setTableColumns(int columns);
     QColor highlightColor() const;
     void setHighlightColor(const QColor &color);
     QColor underlineColor() const;
@@ -574,6 +583,7 @@ signals:
     void headerSelectionOnlyChanged();
     void headerSyncChanged();
     void shapeTypeChanged();
+    void tableDimensionsChanged();
     void imageAspectRatioLockedChanged();
     void clipboardImageChanged();
     void selectedImageCopyableChanged();
@@ -803,6 +813,8 @@ private:
         quint64 addedOrder = 0;
         QImage image;
         ShapeType shapeType = RectangleShape;
+        int tableRows = 0;
+        int tableColumns = 0;
         QPointF shapeStartRatio;
         QPointF shapeEndRatio = QPointF(1.0, 1.0);
         qreal shapeStrokeWidthRatio = 0.0;
@@ -1227,6 +1239,8 @@ private:
     bool m_headerSelectionOnly = false;
     bool m_footerMode = false;
     ShapeType m_shapeType = RectangleShape;
+    int m_tableRows = 3;
+    int m_tableColumns = 3;
     QColor m_highlightColor;
     QColor m_underlineColor;
     QColor m_squigglyColor;

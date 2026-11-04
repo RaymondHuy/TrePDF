@@ -804,6 +804,8 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
         static_cast<int>(candidate.shapeType));
     map.insert(QStringLiteral("shapeStart"), candidate.shapeStartRatio);
     map.insert(QStringLiteral("shapeEnd"), candidate.shapeEndRatio);
+    map.insert(QStringLiteral("tableRows"), candidate.tableRows);
+    map.insert(QStringLiteral("tableColumns"), candidate.tableColumns);
     const auto shapeColor = [&commentProperties](const QColor &color) {
         QColor result = color.isValid() ? color.toRgb() : QColor(Qt::transparent);
         result.setAlphaF(result.alphaF() * commentProperties.opacity);
