@@ -7,6 +7,7 @@
 #include "PDFFormDesignerController.h"
 #include "PDFSaveWriter.h"
 #include "PDFShapeUtils.h"
+#include "PDFTableCellMetadata.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFSourceTextGeometry.h"
 #include "PDFSymbolFont.h"
@@ -2298,6 +2299,7 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
 
     QHash<FPDF_FONT, FontResolutionSnapshot> fontResolutionCache;
     qsizetype embeddedFontDataBytes = 0;
+    PDFTableCellMetadata::PageIndex tableCellIndex;
     const int objectCount = FPDFPage_CountObjects(page);
     for (int index = 0;
          index < objectCount && !candidateScanCancelled(cancellation);
@@ -2313,6 +2315,7 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
             candidates,
             fontResolutionCache,
             embeddedFontDataBytes,
+            tableCellIndex,
             cancellation);
     }
     qint64 remainingHeaderImagePixels = PDFHeaderMetadata::kMaximumDigestPixels;
@@ -2437,11 +2440,13 @@ void PDFEditController::appendPageObjectCandidates(
     QVector<Candidate> &candidates,
     QHash<FPDF_FONT, FontResolutionSnapshot> &fontResolutionCache,
     qsizetype &embeddedFontDataBytes,
+    PDFTableCellMetadata::PageIndex &tableCellIndex,
     const std::shared_ptr<std::atomic_bool> &cancellation)
 {
     assertPDFiumProcessLockHeld();
     if (!pageObject || candidateScanCancelled(cancellation)
-        || PDFWatermarks::hasMark(pageObject)) {
+        || PDFWatermarks::hasMark(pageObject)
+        || PDFTableCellMetadata::hasMark(pageObject)) {
         return;
     }
     const QSizeF &pageSize = request.pageSize;
@@ -2472,6 +2477,7 @@ void PDFEditController::appendPageObjectCandidates(
                 candidates,
                 fontResolutionCache,
                 embeddedFontDataBytes,
+                tableCellIndex,
                 cancellation);
         }
         return;
@@ -2485,6 +2491,10 @@ void PDFEditController::appendPageObjectCandidates(
                                                  metadata, bytes)) {
             return;
         }
+        PDFTableCellMetadata::Group tableCells;
+        if (!PDFTableCellMetadata::readGroup(page, pageSize, metadata, textPage, tableCells,
+                                             &tableCellIndex, cancellation))
+            return;
         Candidate candidate;
         candidate.objectId = pageObjectId(objectPath);
         candidate.objectPath = objectPath;
@@ -2497,6 +2507,12 @@ void PDFEditController::appendPageObjectCandidates(
         candidate.tableColumns = metadata.tableColumns;
         candidate.tableRowStops = metadata.tableRowStops;
         candidate.tableColumnStops = metadata.tableColumnStops;
+        candidate.tableCellTexts = metadata.tableCellTexts;
+        candidate.tableFontFamily = metadata.tableFontFamily;
+        candidate.tableFontSize = metadata.tableFontSize;
+        candidate.tableId = metadata.tableId;
+        candidate.tableCellObjectPaths = std::move(tableCells.objectPaths);
+        candidate.tableCellFingerprint = std::move(tableCells.fingerprint);
         candidate.shapeStartRatio = metadata.start;
         candidate.shapeEndRatio = metadata.end;
         candidate.shapeStrokeWidthRatio = metadata.strokeWidthRatio;

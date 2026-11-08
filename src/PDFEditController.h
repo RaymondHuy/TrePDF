@@ -32,6 +32,7 @@
 class PDFFormController;
 class PDFFormDesignerController;
 class FontDownloadService;
+namespace PDFTableCellMetadata { struct PageIndex; }
 
 class PDFEditController : public QObject
 {
@@ -529,6 +530,7 @@ public:
     Q_INVOKABLE void beginSelectedFrameResize();
     Q_INVOKABLE void updateSelectedFrameRect(const QRectF &frameRect);
     Q_INVOKABLE void updateSelectedTableDivider(bool column, int index, qreal position);
+    Q_INVOKABLE QString setSelectedTableCellText(int row, int column, const QString &text);
     Q_INVOKABLE void updateSelectedContentBounds(const QRectF &contentBounds);
     Q_INVOKABLE void finishSelectedFrameResize();
     Q_INVOKABLE void cancelSelectedFrameResize();
@@ -819,6 +821,12 @@ private:
         // Interior dividers relative to the grid's inner frame; empty means equal cells.
         QVector<qreal> tableRowStops;
         QVector<qreal> tableColumnStops;
+        QStringList tableCellTexts;
+        QString tableFontFamily;
+        qreal tableFontSize = 12.0;
+        QString tableId;
+        QVector<QVector<int>> tableCellObjectPaths;
+        QByteArray tableCellFingerprint;
         QPointF shapeStartRatio;
         QPointF shapeEndRatio = QPointF(1.0, 1.0);
         qreal shapeStrokeWidthRatio = 0.0;
@@ -900,6 +908,10 @@ private:
         Candidate candidate;
         QVector<qreal> tableRowStops;
         QVector<qreal> tableColumnStops;
+        QStringList tableCellTexts;
+        QString tableFontFamily;
+        qreal tableFontSize = 12.0;
+        QString tableId;
         PDFCommentAnnotation::CommonProperties commentProperties;
         QString text;
         QVector<CharacterSpan> characterSpans;
@@ -1097,6 +1109,7 @@ private:
         QVector<Candidate> &candidates,
         QHash<FPDF_FONT, FontResolutionSnapshot> &fontResolutionCache,
         qsizetype &embeddedFontDataBytes,
+        PDFTableCellMetadata::PageIndex &tableCellIndex,
         const std::shared_ptr<std::atomic_bool> &cancellation);
     QVector<Candidate> groupTextLineCandidates(QVector<Candidate> candidates,
                                                const QSizeF &pageSize) const;
@@ -1182,6 +1195,8 @@ private:
     static bool sameParagraphFormats(const QVector<ParagraphFormat> &left,
                                      const QVector<ParagraphFormat> &right);
     static bool sameDraftContent(const Draft &left, const Draft &right);
+    QVector<QRectF> tableCellRects(const Draft &draft) const;
+    bool tableCellTextFits(const Draft &draft) const;
     static bool isSourceTextMoveOnly(const Draft &draft);
     static TextChange setDraftText(
         Draft &draft,

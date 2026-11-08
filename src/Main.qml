@@ -2434,6 +2434,8 @@ AppWindow {
             ocrPanelVisible: ocrPanelLoader.active
             prepareHeaderEntry: footerMode => window.prepareHeaderEntry(footerMode)
             prepareHeaderExit: footerMode => window.prepareHeaderExit(footerMode)
+            prepareEditTransition: () => !window.activeWorkspaceItem
+                || window.activeWorkspaceItem.commitPendingTableCellEdit()
             hasPendingHeaderPlacement: window.activeWorkspaceItem !== null
                 && window.activeWorkspaceItem.hasPendingHeaderPlacement
             headerTextToolSelected: window.activeWorkspaceItem !== null

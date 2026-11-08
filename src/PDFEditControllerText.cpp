@@ -3268,6 +3268,10 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
     draft.candidate = candidate;
     draft.tableRowStops = candidate.tableRowStops;
     draft.tableColumnStops = candidate.tableColumnStops;
+    draft.tableCellTexts = candidate.tableCellTexts;
+    draft.tableFontFamily = candidate.tableFontFamily;
+    draft.tableFontSize = candidate.tableFontSize;
+    draft.tableId = candidate.tableId;
     draft.commentProperties = candidate.commentProperties;
     draft.text = candidate.text;
     draft.characterSpans = candidate.sourceCharacterSpans;

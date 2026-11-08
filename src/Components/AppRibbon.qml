@@ -23,6 +23,7 @@ Column {
     property int acceptedTabIndex: 0
     property var prepareHeaderEntry: function() { return !root.hasUnsavedChanges }
     property var prepareHeaderExit: function() { return !root.hasUnsavedChanges }
+    property var prepareEditTransition: function() { return true }
     property PDFEditController syncedEditController: null
     property int viewNavigationPage: document.currentPage
     property bool viewCanNavigateBackward: viewNavigationPage > 0
@@ -117,6 +118,10 @@ Column {
         const requestedIndex = ribbonTabs.currentIndex
         if (requestedIndex === acceptedTabIndex)
             return
+        if (!prepareEditTransition()) {
+            ribbonTabs.setCurrentIndex(acceptedTabIndex)
+            return
+        }
         if (marginTabActive && document.loaded && !prepareHeaderExit(footerTabActive)) {
             ribbonTabs.setCurrentIndex(acceptedTabIndex)
             return
@@ -327,6 +332,7 @@ Column {
             document: root.document
             editController: root.editController
             hasPendingPanelEdits: root.hasPendingPanelEdits
+            prepareEditTransition: root.prepareEditTransition
             onPageRequested: page => root.pageRequested(page)
             onDeletePageRequested: page => root.deletePageRequested(page)
             onMergePdfRequested: root.mergePdfRequested()

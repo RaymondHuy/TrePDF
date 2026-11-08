@@ -13,6 +13,7 @@ Rectangle {
     required property PDFDocument document
     required property PDFEditController editController
     required property bool collapsed
+    property var prepareEditTransition: function() { return true }
 
     property bool colorDialogEditsInterior: false
     property int colorDialogPage: -1
@@ -79,6 +80,8 @@ Rectangle {
     }
 
     function openColorDialog(interior) {
+        if (!prepareEditTransition())
+            return
         if ((!root.drawingCommentSelected && !root.editShapeSelected)
                 || !root.editController.selectedDrawingPropertiesEditable
                 || root.editController.saving) {
@@ -102,7 +105,8 @@ Rectangle {
         if (colorDialogLoader.status === Loader.Ready
                 && root.colorDialogMatchesSelection()
                 && root.editController.selectedDrawingPropertiesEditable
-                && !root.editController.saving) {
+                && !root.editController.saving
+                && root.prepareEditTransition()) {
             const dialog = colorDialogLoader.item as ColorDialog
             if (dialog) {
                 const color = root.opaqueColor(dialog.selectedColor)
@@ -446,8 +450,10 @@ Rectangle {
                                     && !root.editController.saving
                                 //% "No fill"
                                 text: qsTrId("NoFill")
-                                onClicked: root.editController
-                                    .clearSelectedDrawingInteriorColor()
+                                onClicked: {
+                                    if (root.prepareEditTransition())
+                                        root.editController.clearSelectedDrawingInteriorColor()
+                                }
                             }
                         }
 
@@ -511,27 +517,34 @@ Rectangle {
                                     && pointerObjectId
                                         === root.editController
                                             .selectedObjectId
+                                const requestedOpacity = value / 100
                                 if (pointerValueChanged
                                         && sameSelection
                                         && root.editController
                                             .selectedDrawingPropertiesEditable
-                                        && !root.editController.saving) {
+                                        && !root.editController.saving
+                                        && root.prepareEditTransition()) {
                                     root.editController
-                                        .setSelectedDrawingOpacity(value / 100)
+                                        .setSelectedDrawingOpacity(requestedOpacity)
                                 }
                                 pointerValueChanged = false
                                 pointerPage = -1
                                 pointerObjectId = ""
+                                value = Qt.binding(() => root.editController.selectedDrawingOpacity * 100)
                             }
                             onMoved: {
+                                const requestedOpacity = value / 100
                                 if (pressed) {
                                     pointerValueChanged = true
                                 } else if (root.editController
                                                .selectedDrawingPropertiesEditable
-                                           && !root.editController.saving) {
+                                           && !root.editController.saving
+                                           && root.prepareEditTransition()) {
                                     root.editController
-                                        .setSelectedDrawingOpacity(value / 100)
+                                        .setSelectedDrawingOpacity(requestedOpacity)
                                 }
+                                if (!pressed)
+                                    value = Qt.binding(() => root.editController.selectedDrawingOpacity * 100)
                             }
                         }
                     }

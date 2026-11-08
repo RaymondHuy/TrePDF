@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Shapes
 import TrePDF
@@ -15,6 +17,10 @@ Item {
     property int tableColumns: 3
     property var tableRowStops: []
     property var tableColumnStops: []
+    property var tableCellTexts: []
+    property var tableCellRects: []
+    property font tableTextFont: Qt.font({ pixelSize: 12 })
+    property real tableTextScale: 1
 
     readonly property int boundedTableRows: Math.max(1, Math.min(20, tableRows))
     readonly property int boundedTableColumns: Math.max(1, Math.min(20, tableColumns))
@@ -98,6 +104,29 @@ Item {
             joinStyle: ShapePath.RoundJoin
 
             PathMultiline { paths: root.tablePaths }
+        }
+    }
+
+    Repeater {
+        model: root.shapeType === PDFEditController.TableShape
+            && root.tableCellTexts.length === root.tableCellRects.length
+            ? root.tableCellTexts.length : 0
+
+        delegate: Text {
+            required property int index
+            readonly property rect cellRect: root.tableCellRects[index]
+            objectName: "tableCellPreview" + index
+            x: cellRect.x * root.width
+            y: cellRect.y * root.height + root.tableTextScale
+            width: cellRect.width * root.width / Math.max(0.01, root.tableTextScale)
+            scale: root.tableTextScale
+            transformOrigin: Item.TopLeft
+            text: root.tableCellTexts[index]
+            textFormat: Text.PlainText
+            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+            font: root.tableTextFont
+            color: "#000000"
+            Accessible.ignored: true
         }
     }
 

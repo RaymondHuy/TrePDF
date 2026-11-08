@@ -13,6 +13,7 @@ Item {
     property PDFTextSelectionController textSelectionController
     property bool textSelectionActive: false
     property point textMenuPosition
+    property TableCellEditing tableCellState: null
     required property PDFEditController editController
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
@@ -208,6 +209,7 @@ Item {
         pooled: root.pooled
         theme: root.theme
         controller: root.editController
+        tableCellState: root.tableCellState
         imageClipboardEnabled: root.editTabActive || root.editController.headerSelectionOnly
         pagePointScale: root.pagePointScale
         viewRotation: root.viewportTransformState.length > 0

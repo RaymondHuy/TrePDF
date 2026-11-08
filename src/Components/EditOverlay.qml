@@ -41,6 +41,8 @@ Item {
     property var hoverCandidate: ({})
     property bool editing: false
     property string editingObjectId: ""
+    property TableCellEditing tableCellState: null
+    readonly property bool tableCellEditing: tableCellEditorLoader.active
     property int editFocusGeneration: 0
     property PDFEditController textEditPreparationController: null
     property int textEditPreparationPage: -1
@@ -1106,6 +1108,45 @@ Item {
             }
         }
         return ({})
+    }
+
+    function beginTableCellEditing(x, y) {
+        if (!tableCellState || !interactionActive || !resizeOverlay.selectedTable
+                || controller.selectedPage !== page || !controller.selectedEditable)
+            return
+
+        cancelFrameResize()
+        const frame = resizeOverlay.layoutFrameRect
+        const innerWidth = resizeOverlay.tableInnerWidth
+        const innerHeight = resizeOverlay.tableInnerHeight
+        if (innerWidth <= 0 || innerHeight <= 0)
+            return
+        const cellX = (x - frame.x * width - resizeOverlay.tableInset) / innerWidth
+        const cellY = (y - frame.y * height - resizeOverlay.tableInset) / innerHeight
+        if (cellX < 0 || cellX > 1 || cellY < 0 || cellY > 1)
+            return
+
+        // Display restoration drafts may outlive Save until the new texture
+        // arrives. Always seed input from the controller's current selection.
+        const draft = controller.selectedDraftPreview()
+        const columns = Number(draft.tableColumns || 1)
+        const rows = Number(draft.tableRows || 1)
+        const columnStops = draft.tableColumnStops || []
+        const rowStops = draft.tableRowStops || []
+        let column = 0
+        let row = 0
+        while (column < columns - 1
+                && cellX >= (columnStops.length === columns - 1
+                    ? Number(columnStops[column]) : (column + 1) / columns))
+            ++column
+        while (row < rows - 1
+                && cellY >= (rowStops.length === rows - 1
+                    ? Number(rowStops[row]) : (row + 1) / rows))
+            ++row
+
+        selectionActions.close()
+        clearTextEditPreparation(true)
+        tableCellState.begin(page, controller.selectedObjectId, row, column)
     }
 
     function distanceToSegment(point, start, end) {
@@ -2337,6 +2378,32 @@ Item {
     Component.onCompleted: reloadData()
     Component.onDestruction: clearTextEditPreparation(true)
 
+    Loader {
+        id: tableCellEditorLoader
+        anchors.fill: parent
+        z: 10
+        active: root.interactionActive && !root.pooled
+            && root.tableCellState !== null && root.tableCellState.active
+            && root.tableCellState.page === root.page
+        sourceComponent: Component {
+            TableCellEditor {
+                editingState: root.tableCellState
+                theme: root.theme
+                pointScale: root.textLayoutScale
+            }
+        }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        z: 10
+        enabled: root.interactionActive && !root.pooled
+            && root.tableCellState !== null && root.tableCellState.active
+            && root.tableCellState.page !== root.page
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onPressed: root.tableCellState.commit()
+    }
+
     FrameAnimation {
         running: root.textMarkupPreviewUpdatePending
 
@@ -3369,6 +3436,13 @@ Item {
                 tableColumns: draftItem.modelData.tableColumns ?? 3
                 tableRowStops: draftItem.modelData.tableRowStops ?? []
                 tableColumnStops: draftItem.modelData.tableColumnStops ?? []
+                tableCellTexts: draftItem.modelData.tableCellTexts ?? []
+                tableCellRects: root.normalizedRectsForFrame(
+                    draftItem.modelData.tableCellRects ?? [], draftItem.modelData.frameRect)
+                tableTextFont: root.controller.fontForDisplay(
+                    draftItem.modelData.tableFontFamily || "",
+                    100, false, false, false, draftItem.modelData.tableFontSize || 12)
+                tableTextScale: root.textLayoutScale
                 startRatio: draftItem.modelData.shapeStart !== undefined
                     ? draftItem.modelData.shapeStart
                     : Qt.point(0, 0)
@@ -3645,8 +3719,13 @@ Item {
                 return
 
             root.hoverCandidate = root.candidateAtPosition(mouse.x, mouse.y)
-            if (root.hasCandidate(root.hoverCandidate))
+            if (root.isShapeCandidate(root.hoverCandidate)
+                    && root.hoverCandidate.shapeType === PDFEditController.TableShape) {
+                root.selectCandidate(root.hoverCandidate)
+                root.beginTableCellEditing(mouse.x, mouse.y)
+            } else if (root.hasCandidate(root.hoverCandidate)) {
                 root.beginEditing(root.hoverCandidate)
+            }
         }
 
         Keys.onReturnPressed: event => {
@@ -4384,6 +4463,7 @@ Item {
 
         MouseArea {
             id: moveObjectMouse
+            objectName: "tableCellMoveArea"
 
             property rect dragStartFrameRect: Qt.rect(0, 0, 0, 0)
             property point dragStartPosition: Qt.point(0, 0)
@@ -4484,6 +4564,12 @@ Item {
             }
             onCanceled: root.cancelFrameResize()
             onDoubleClicked: mouse => {
+                if (resizeOverlay.selectedTable) {
+                    const point = mapToItem(root, mouse.x, mouse.y)
+                    root.beginTableCellEditing(point.x, point.y)
+                    mouse.accepted = true
+                    return
+                }
                 if (root.controller.selectedKind !== "text"
                         && root.controller.selectedKind !== "addedText") {
                     return

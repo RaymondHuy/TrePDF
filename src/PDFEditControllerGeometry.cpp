@@ -1012,10 +1012,12 @@ void PDFEditController::updateSelectedFrameRect(const QRectF &frameRect)
         return;
     }
 
-    m_textEditGeometryExplicitlyChanged
-        = boundedRect != m_textEditInitialDisplayFrameRect;
     draft.frameRect = boundedRect;
     draft.contentBounds = resizedContentBounds;
+    if (!tableCellTextFits(draft))
+        return;
+    m_textEditGeometryExplicitlyChanged
+        = boundedRect != m_textEditInitialDisplayFrameRect;
     if (isGeometryCommentCandidateKind(draft.candidate.kind)) {
         m_textEditDisplayDraft = draft;
         emit selectedGeometryChanged();
@@ -1072,6 +1074,8 @@ void PDFEditController::updateSelectedTableDivider(bool column, int index, qreal
     }
     if (matchesSource)
         stops = sourceStops;
+    if (!tableCellTextFits(draft))
+        return;
     updateSelectedDraft(draft);
 }
 

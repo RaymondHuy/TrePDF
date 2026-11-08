@@ -8,6 +8,7 @@ EditRibbonTools {
 
     required property PDFDocument document
     required property PDFEditController editController
+    property var prepareEditTransition: function() { return true }
 
     documentLoaded: document.loaded
     documentContext: document
@@ -30,6 +31,8 @@ EditRibbonTools {
     splitVisible: Qt.platform.os !== "ios"
 
     onSelectToolRequested: toolName => {
+        if (!root.prepareEditTransition())
+            return
         switch (toolName) {
         case "select": editController.tool = PDFEditController.SelectTool; break
         case "editText": editController.tool = PDFEditController.EditTextTool; break
@@ -38,6 +41,8 @@ EditRibbonTools {
         }
     }
     onShapeRequested: shapeName => {
+        if (!root.prepareEditTransition())
+            return
         switch (shapeName) {
         case "rectangle": editController.shapeType = PDFEditController.RectangleShape; break
         case "ellipse": editController.shapeType = PDFEditController.EllipseShape; break
@@ -52,19 +57,32 @@ EditRibbonTools {
     onTableRequested: (rows, columns) => {
         if (!root.documentLoaded || root.saving || !root.enabled)
             return
+        if (!root.prepareEditTransition())
+            return
         editController.tableRows = rows
         editController.tableColumns = columns
         editController.shapeType = PDFEditController.TableShape
         editController.tool = PDFEditController.AddShapeTool
     }
     onAddBlankPageRequested: {
+        if (!root.prepareEditTransition())
+            return
         const page = editController.addBlankPage()
         if (page >= 0)
             root.pageRequested(page)
     }
-    onBeginLinkEditingRequested: editController.beginLinkEditing()
-    onAutoCreateLinksRequested: editController.autoCreateWebLinks()
-    onRemoveLinksRequested: editController.removeWebLinks()
+    onBeginLinkEditingRequested: {
+        if (root.prepareEditTransition())
+            editController.beginLinkEditing()
+    }
+    onAutoCreateLinksRequested: {
+        if (root.prepareEditTransition())
+            editController.autoCreateWebLinks()
+    }
+    onRemoveLinksRequested: {
+        if (root.prepareEditTransition())
+            editController.removeWebLinks()
+    }
     onCancelLinksRequested: editController.cancelWebLinkCreation()
 
     function toolName(tool: int): string {
