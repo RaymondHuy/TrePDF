@@ -1,6 +1,7 @@
 #include "PDFSaveWriter.h"
 #include "PDFAtomicSaveFile.h"
 #include "PDFShapeUtils.h"
+#include "PDFTableCellMetadata.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFSourceTextGeometry.h"
 #include "PDFHeaderMetadata.h"
@@ -210,6 +211,13 @@ struct SaveDraft {
     int tableColumns = 0;
     QVector<qreal> tableRowStops;
     QVector<qreal> tableColumnStops;
+    QStringList tableCellTexts;
+    QString tableFontFamily;
+    qreal tableFontSize = 12.0;
+    QString tableId;
+    int tableCellIndex = -1;
+    QVector<QVector<int>> tableCellObjectPaths;
+    QByteArray tableCellFingerprint;
     QPointF shapeStartRatio;
     QPointF shapeEndRatio = QPointF(1.0, 1.0);
     qreal shapeStrokeWidthRatio = 0.0;
@@ -1763,6 +1771,12 @@ public:
             }
         };
         for (const SaveDraft &draft : drafts) {
+            if (draft.kind == SaveDraft::Kind::Shape && !draft.deleted
+                && !draft.tableCellTexts.isEmpty()) {
+                collect(draft.originalFormat,
+                        draft.tableCellTexts.join(QLatin1Char('\n')));
+                continue;
+            }
             if (draft.kind != SaveDraft::Kind::Text || draft.deleted || draft.movesSourceObjects)
                 continue;
             QSet<QString> collectedFaces;
@@ -1807,6 +1821,7 @@ public:
     }
 
     const QList<QByteArray> &openTypeFonts() const { return m_openTypeFonts; }
+    PDFTableCellMetadata::FontFingerprints &tableFontFingerprints() { return m_tableFonts; }
 
     void collectOriginalType1Fonts(FPDF_PAGE page, const QVector<SourceObject> &sources,
                                    FPDF_TEXTPAGE &textPage)
@@ -2281,6 +2296,7 @@ private:
     }
 
     FPDF_DOCUMENT m_document = nullptr;
+    PDFTableCellMetadata::FontFingerprints m_tableFonts;
     QHash<QString, QRawFont> m_rawFontCache;
     QHash<QString, QByteArray> m_fontProgramFingerprintCache;
     QHash<QByteArray, QVector<char32_t>> m_completeFontCharacters;
@@ -3039,7 +3055,9 @@ bool replaceUnsupportedPaints(FPDF_PAGE page, RasterizedPaints &paints)
 
 QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
                                              const SaveDraft &draft,
-                                             PDFSaveWriter::Result &result)
+                                             PDFSaveWriter::Result &result,
+                                             PDFTableCellMetadata::PageIndex &tableIndex,
+                                             FPDF_TEXTPAGE &tableTextPage)
 {
     QVector<SourceObject> objects;
     QSet<FPDF_PAGEOBJECT> seen;
@@ -3086,6 +3104,28 @@ QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
                 result = failure(PDFSaveWriter::Error::SourceObjectMissing,
                                  draft.page, draft.objectId);
                 return {};
+            }
+            if (!metadata.tableId.isEmpty() && !tableTextPage)
+                tableTextPage = FPDFText_LoadPage(page);
+            PDFTableCellMetadata::Group group;
+            if (!PDFTableCellMetadata::readGroup(page,
+                    QSizeF(FPDF_GetPageWidthF(page), FPDF_GetPageHeightF(page)),
+                    metadata, tableTextPage, group, &tableIndex)
+                || group.objectPaths != draft.tableCellObjectPaths
+                || group.fingerprint != draft.tableCellFingerprint) {
+                result = failure(PDFSaveWriter::Error::SourceObjectMissing,
+                                 draft.page, draft.objectId);
+                return {};
+            }
+            for (const auto &childPath : group.objectPaths) {
+                const SourceObject child = sourceObjectAtPath(page, childPath);
+                if (!child.object || seen.contains(child.object)) {
+                    result = failure(PDFSaveWriter::Error::SourceObjectMissing,
+                                     draft.page, draft.objectId);
+                    return {};
+                }
+                seen.insert(child.object);
+                objects.append(child);
             }
         }
         if (!seen.contains(source.object)) {
@@ -3386,6 +3426,10 @@ PDFSaveWriter::Result createShapeDraftObject(
     metadata.tableColumns = draft.tableColumns;
     metadata.tableRowStops = draft.tableRowStops;
     metadata.tableColumnStops = draft.tableColumnStops;
+    metadata.tableCellTexts = draft.tableCellTexts;
+    metadata.tableId = draft.tableId;
+    metadata.tableFontFamily = draft.tableFontFamily;
+    metadata.tableFontSize = draft.tableFontSize;
     metadata.frame = draft.frameRect;
     metadata.start = draft.shapeStartRatio;
     metadata.end = draft.shapeEndRatio;
@@ -3509,13 +3553,43 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             bitmaps);
     }
     if (draft.kind == SaveDraft::Kind::Shape) {
-        return createShapeDraftObject(
+        auto result = createShapeDraftObject(
             document,
             page,
             draft,
             pageWidth,
             pageHeight,
             objects);
+        if (!result.succeeded() || draft.tableCellTexts.isEmpty())
+            return result;
+        const auto cells = PDFTableCellLayout::cellRects(draft.frameRect,
+            QSizeF(pageWidth, pageHeight), draft.shapeStrokeWidthRatio,
+            draft.tableRows, draft.tableColumns, draft.tableRowStops, draft.tableColumnStops);
+        if (cells.size() != draft.tableCellTexts.size())
+            return failure(PDFSaveWriter::Error::ShapeObjectCreationFailed, draft.page, draft.objectId);
+        for (int cell = 0; cell < cells.size(); ++cell) {
+            if (draft.tableCellTexts[cell].isEmpty())
+                continue;
+            SaveDraft textDraft;
+            textDraft.page = draft.page;
+            textDraft.objectId = draft.objectId;
+            textDraft.added = true;
+            textDraft.text = draft.tableCellTexts[cell];
+            textDraft.frameRect = cells[cell];
+            textDraft.originalFormat = draft.originalFormat;
+            textDraft.preservePhysicalFontSizes = true;
+            textDraft.tableId = draft.tableId;
+            textDraft.tableCellIndex = cell;
+            if (!PDFTableCellLayout::fits(textDraft.text,
+                    displayFont(textDraft.originalFormat, pageHeight),
+                    QSizeF(cells[cell].width() * pageWidth, cells[cell].height() * pageHeight)))
+                return failure(PDFSaveWriter::Error::TextObjectCreationFailed, draft.page, draft.objectId);
+            result = createDraftObjects(document, page, textDraft, pageWidth, pageHeight,
+                nullptr, {}, fontResolver, coordinateMapper, objects, bitmaps);
+            if (!result.succeeded())
+                return result;
+        }
+        return {};
     }
 
     SaveDraft preparedDraft = draft;
@@ -3645,6 +3719,7 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             QString::fromUcs4(characters.constData(), characters.size()).toUtf8(),
             QCryptographicHash::Sha256);
     }
+    int tableFragmentIndex = 0;
     for (LayoutRun &run : runs) {
         if (!run.format.embeddedFontCharacters.isEmpty()) {
             const auto encoding = embeddedEncodings.constFind(
@@ -3797,11 +3872,18 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 horizontalScale,
                 run.format.textShear,
                 matrix)
-            && FPDFPageObj_SetMatrix(textObject, &matrix)
-            && markTextSpacing(document, textObject, run, pageHeight, originOffset)
-            && markParagraphLayout(document, textObject, run,
-                                   pageWidth, pageHeight, originOffset)
-            && PDFHeaderMetadata::write(document, textObject, draft.headerGroupId, draft.headerRole);
+            && FPDFPageObj_SetMatrix(textObject, &matrix);
+        if (configured) {
+            configured = draft.tableCellIndex >= 0
+                ? PDFTableCellMetadata::write(document, textObject, draft.tableId,
+                    draft.tableCellIndex, tableFragmentIndex++, int(runs.size()),
+                    int(run.textStart), int(run.textLength), run.text,
+                    fontResolver.tableFontFingerprints())
+                : (markTextSpacing(document, textObject, run, pageHeight, originOffset)
+                   && markParagraphLayout(document, textObject, run,
+                                          pageWidth, pageHeight, originOffset)
+                   && PDFHeaderMetadata::write(document, textObject, draft.headerGroupId, draft.headerRole));
+        }
         if (!configured) {
             FPDFPageObj_Destroy(textObject);
             return failure(
@@ -5653,6 +5735,12 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         pageWidth,
         pageHeight);
     RasterizedPaints rasterizedPaints;
+    PDFTableCellMetadata::PageIndex sourceTableIndex;
+    FPDF_TEXTPAGE tableTextPage = nullptr;
+    const auto closeTableTextPage = qScopeGuard([&] {
+        if (tableTextPage)
+            FPDFText_ClosePage(tableTextPage);
+    });
     // Validate indexed shapes and text occurrences before the paint-preservation
     // pass can replace source objects. A text-only Form must still have its
     // bounded, safe single-child structure, including when it is deleted.
@@ -5663,15 +5751,21 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         }
         PDFSaveWriter::Result sourceResult;
         const QVector<SourceObject> sources = sourceObjectsForDraft(
-            page.get(), draft, sourceResult);
+            page.get(), draft, sourceResult, sourceTableIndex, tableTextPage);
         if (!sourceResult.succeeded()) {
             return sourceResult;
         }
-        if (draft.kind == SaveDraft::Kind::Shape && sources.size() != 1) {
+        if (draft.kind == SaveDraft::Kind::Shape
+            && sources.size() != 1 + draft.tableCellObjectPaths.size()) {
             return failure(PDFSaveWriter::Error::SourceObjectMissing,
                            pageIndex, draft.objectId);
         }
     }
+    if (tableTextPage) {
+        FPDFText_ClosePage(tableTextPage);
+        tableTextPage = nullptr;
+    }
+    sourceTableIndex = {};
     const bool hasPageObjectDrafts = std::any_of(
         drafts.cbegin(),
         drafts.cend(),
@@ -5758,6 +5852,9 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     const int originalObjectCount = FPDFPage_CountObjects(page.get());
     QVector<PreparedDraft> preparedDrafts;
     preparedDrafts.reserve(drafts.size());
+    // Paint preservation may replace source objects. Index again after that
+    // phase, and share this snapshot until all replacements are prepared.
+    PDFTableCellMetadata::PageIndex preparedTableIndex;
     for (const SaveDraft &draft : drafts) {
         if (draft.kind == SaveDraft::Kind::TextMarkup
             || draft.kind == SaveDraft::Kind::StickyNote
@@ -5773,7 +5870,9 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         prepared.sources = sourceObjectsForDraft(
             page.get(),
             draft,
-            sourceResult);
+            sourceResult,
+            preparedTableIndex,
+            tableTextPage);
         if (!sourceResult.succeeded()) {
             destroyPreparedObjects(preparedDrafts);
             return sourceResult;
@@ -7452,6 +7551,12 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.tableColumns = draft->candidate.tableColumns;
         saveDraft.tableRowStops = draft->tableRowStops;
         saveDraft.tableColumnStops = draft->tableColumnStops;
+        saveDraft.tableCellTexts = draft->tableCellTexts;
+        saveDraft.tableFontFamily = draft->tableFontFamily;
+        saveDraft.tableFontSize = draft->tableFontSize;
+        saveDraft.tableId = draft->tableId;
+        saveDraft.tableCellObjectPaths = draft->candidate.tableCellObjectPaths;
+        saveDraft.tableCellFingerprint = draft->candidate.tableCellFingerprint;
         saveDraft.shapeStartRatio = draft->candidate.shapeStartRatio;
         saveDraft.shapeEndRatio = draft->candidate.shapeEndRatio;
         saveDraft.sourceShapeMetadata = draft->candidate.sourceShapeMetadata;
@@ -7488,6 +7593,16 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             }
         } else if (!draft->candidate.objectPath.isEmpty()) {
             saveDraft.sourceObjectPaths.append(draft->candidate.objectPath);
+        }
+        if (shapeDraft && !saveDraft.deleted && !saveDraft.tableCellTexts.isEmpty()) {
+            PDFEditController::CharacterFormat format;
+            format.fontFamily = saveDraft.tableFontFamily;
+            format.fontSizeRatio = saveDraft.tableFontSize
+                / controller.m_document->pageSize(saveDraft.page).height();
+            format.displayFontSizeRatio = format.fontSizeRatio;
+            format.color = Qt::black;
+            saveDraft.originalFormat = copiedFormat(format,
+                saveDraft.tableCellTexts.join(QLatin1Char('\n')));
         }
         if (saveDraft.kind == SaveDraft::Kind::Image
             || saveDraft.kind == SaveDraft::Kind::Shape

@@ -14,6 +14,7 @@ Item {
     property bool viewTabActive: false
     property bool headerTabActive: false
     property bool footerMode: false
+    property TableCellEditing tableCellState: null
     property HeaderTextPlacement headerTextPlacement: null
     property HeaderImagePlacement headerImagePlacement: null
     property HeaderPageNumberPlacement headerPageNumberPlacement: null
@@ -201,6 +202,7 @@ Item {
                 && pageCard.visibleRasterRect.height > 0
             onTextSelectionStarted: pageCard.textSelectionStarted()
             editController: pageCard.editController
+            tableCellState: pageCard.tableCellState
             formController: pageCard.formController
             formDesignerController: pageCard.formDesignerController
             page: pageCard.page

@@ -556,6 +556,15 @@ private slots:
     void savesShapesRoundTrip();
     void addsTableWithAtomicHistory();
     void editsTableDividersWithAtomicHistory();
+    void editsTableCellsWithAtomicHistory();
+    void rejectsInvalidTableCellEdits();
+    void savesTableCellsRoundTrip_data();
+    void savesTableCellsRoundTrip();
+    void savesMultipleTablesWithCellText();
+    void rejectsInvalidTableCellMetadata_data();
+    void rejectsInvalidTableCellMetadata();
+    void rejectsTamperedTableCellObjects_data();
+    void rejectsTamperedTableCellObjects();
     void savesUnevenTableDividers_data();
     void savesUnevenTableDividers();
     void rejectsInvalidTableDividers_data();

@@ -1,12 +1,14 @@
 #pragma once
 
 #include "PDFEditController.h"
+#include "PDFTableCellLayout.h"
 #include "PDFiumSynchronization.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSizeF>
+#include <QUuid>
 
 #include <algorithm>
 #include <array>
@@ -25,7 +27,7 @@ namespace PDFShapeUtils {
 
 inline constexpr char kMarkName[] = "TrePDFShape";
 inline constexpr char kDataKey[] = "Data";
-inline constexpr int kMaximumMetadataBytes = 16 * 1024;
+inline constexpr int kMaximumMetadataBytes = 128 * 1024;
 inline constexpr int kMaximumSegments = 32;
 // Only managed tables may exceed the legacy shape segment bound.
 inline constexpr int kMaximumTableSegments
@@ -38,6 +40,10 @@ struct Metadata {
     int tableColumns = 0;
     QVector<qreal> tableRowStops;
     QVector<qreal> tableColumnStops;
+    QStringList tableCellTexts;
+    QString tableId;
+    QString tableFontFamily;
+    qreal tableFontSize = 12.0;
     QRectF frame;
     QPointF start;
     QPointF end = QPointF(1.0, 1.0);
@@ -80,6 +86,27 @@ inline bool validMetadata(const Metadata &metadata)
     const auto unit = [](qreal value) {
         return std::isfinite(value) && value >= 0.0 && value <= 1.0;
     };
+    const bool cellMetadata = !metadata.tableId.isEmpty();
+    qsizetype totalCharacters = 0;
+    for (const QString &text : metadata.tableCellTexts) {
+        if (!PDFTableCellLayout::validText(text)
+            || text != text.normalized(QString::NormalizationForm_C))
+            return false;
+        totalCharacters += text.size();
+    }
+    if (totalCharacters > PDFTableCellLayout::MaximumTableCharacters
+        || (cellMetadata
+            ? (metadata.type != PDFEditController::TableShape
+               || QUuid(metadata.tableId).isNull()
+               || QUuid(metadata.tableId).toString(QUuid::WithoutBraces) != metadata.tableId
+               || metadata.tableFontFamily.trimmed().isEmpty()
+               || metadata.tableFontFamily.size() > 256
+               || !PDFTableCellLayout::validText(metadata.tableFontFamily)
+               || metadata.tableFontSize != 12.0
+               || (!metadata.tableCellTexts.isEmpty()
+                   && metadata.tableCellTexts.size() != metadata.tableRows * metadata.tableColumns))
+            : (!metadata.tableCellTexts.isEmpty() || !metadata.tableFontFamily.isEmpty())))
+        return false;
     return metadata.type >= PDFEditController::RectangleShape
         && metadata.type <= PDFEditController::TableShape
         && (metadata.type == PDFEditController::TableShape
@@ -603,13 +630,14 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
     const bool table = metadata.type == PDFEditController::TableShape;
     const bool customTableStops = table
         && (!metadata.tableRowStops.isEmpty() || !metadata.tableColumnStops.isEmpty());
+    const bool tableCells = table && !metadata.tableId.isEmpty();
     const QJsonArray signature = physicalSignature(
         path, table ? kMaximumTableSegments : kMaximumSegments);
     if (signature.isEmpty()) {
         return {};
     }
     QJsonObject object{
-        {QStringLiteral("version"), customTableStops ? 3 : table ? 2 : 1},
+        {QStringLiteral("version"), tableCells ? 4 : customTableStops ? 3 : table ? 2 : 1},
         {QStringLiteral("type"), metadata.type},
         {QStringLiteral("frame"), QJsonArray{metadata.frame.x(), metadata.frame.y(),
              metadata.frame.width(), metadata.frame.height()}},
@@ -624,7 +652,7 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
     if (table) {
         object.insert(QStringLiteral("rows"), metadata.tableRows);
         object.insert(QStringLiteral("columns"), metadata.tableColumns);
-        if (customTableStops) {
+        if (customTableStops || tableCells) {
             const auto stopsArray = [](const QVector<qreal> &stops, int dimension) {
                 QJsonArray result;
                 for (int divider = 1; divider < dimension; ++divider) {
@@ -636,6 +664,12 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
                           stopsArray(metadata.tableRowStops, metadata.tableRows));
             object.insert(QStringLiteral("columnStops"),
                           stopsArray(metadata.tableColumnStops, metadata.tableColumns));
+        }
+        if (tableCells) {
+            object.insert(QStringLiteral("id"), metadata.tableId);
+            object.insert(QStringLiteral("cells"), QJsonArray::fromStringList(metadata.tableCellTexts));
+            object.insert(QStringLiteral("font"), metadata.tableFontFamily);
+            object.insert(QStringLiteral("fontSize"), metadata.tableFontSize);
         }
     }
     return QJsonDocument(object).toJson(QJsonDocument::Compact);
@@ -692,8 +726,9 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
     const QJsonValue versionValue = object.value(QStringLiteral("version"));
     const int version = versionValue.toInt(-1);
     if (!versionValue.isDouble() || versionValue.toDouble() != version
-        || (version != 1 && version != 2 && version != 3)
-        || object.size() != (version == 3 ? 14 : version == 2 ? 12 : 10)
+        || (version != 1 && version != 2 && version != 3 && version != 4)
+        || (version < 4 && raw.size() > 16 * 1024)
+        || object.size() != (version == 4 ? 18 : version == 3 ? 14 : version == 2 ? 12 : 10)
         || !object.value(QStringLiteral("stroke")).isString()
         || !object.value(QStringLiteral("fill")).isString()) {
         return false;
@@ -738,7 +773,7 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
             || parsed.tableColumns > PDFEditController::MaximumTableDimension) {
             return false;
         }
-        if (version == 3) {
+        if (version >= 3) {
             const QJsonValue rowStops = object.value(QStringLiteral("rowStops"));
             const QJsonValue columnStops = object.value(QStringLiteral("columnStops"));
             if (!rowStops.isArray() || !columnStops.isArray()
@@ -748,6 +783,24 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
             }
             parsed.tableRowStops = numbers(rowStops, parsed.tableRows - 1);
             parsed.tableColumnStops = numbers(columnStops, parsed.tableColumns - 1);
+        }
+        if (version == 4) {
+            if (!object.value(QStringLiteral("id")).isString()
+                || !object.value(QStringLiteral("font")).isString()
+                || !object.value(QStringLiteral("cells")).isArray()
+                || !object.value(QStringLiteral("fontSize")).isDouble())
+                return false;
+            parsed.tableId = object.value(QStringLiteral("id")).toString();
+            parsed.tableFontFamily = object.value(QStringLiteral("font")).toString();
+            parsed.tableFontSize = object.value(QStringLiteral("fontSize")).toDouble();
+            const QJsonArray cells = object.value(QStringLiteral("cells")).toArray();
+            if (parsed.tableId.isEmpty() || cells.size() > 400)
+                return false;
+            for (const QJsonValue &cell : cells) {
+                if (!cell.isString())
+                    return false;
+                parsed.tableCellTexts.append(cell.toString());
+            }
         }
     }
     parsed.frame = QRectF(frame[0], frame[1], frame[2], frame[3]);

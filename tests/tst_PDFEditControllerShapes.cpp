@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
 #include <QTranslator>
 
 using namespace PDFEditControllerTestSupport;
@@ -1039,7 +1040,7 @@ QJsonObject readTableTestMetadata(const QString &sourcePath)
     FPDF_PAGEOBJECTMARK mark = FPDFPageObj_GetMark(object, 0);
     unsigned long length = 0;
     if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data", nullptr, 0, &length)
-        || length == 0 || length > 16 * 1024)
+        || length == 0 || length > 128 * 1024)
         return {};
     QByteArray bytes(qsizetype(length), Qt::Uninitialized);
     if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data",
@@ -1068,7 +1069,7 @@ bool rewriteTableTestMetadata(const QString &sourcePath, const QString &targetPa
     FPDF_PAGEOBJECTMARK mark = FPDFPageObj_GetMark(object, 0);
     unsigned long length = 0;
     if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data", nullptr, 0, &length)
-        || length == 0 || length > 16 * 1024)
+        || length == 0 || length > 128 * 1024)
         return false;
     QByteArray bytes(qsizetype(length), Qt::Uninitialized);
     if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data",
@@ -1100,6 +1101,87 @@ bool createTableTestPage(const QString &path, int rotation)
         QByteArrayLiteral("<< /Type /Catalog /Pages 2 0 R >>"),
         QByteArrayLiteral("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
         page, QByteArrayLiteral("<< /Length 0 >>\nstream\n\nendstream")});
+}
+
+bool tamperTableCellObject(const QString &sourcePath, const QString &targetPath,
+                           const QString &change)
+{
+    PDFiumProcessLock lock;
+    const QByteArray path = QFile::encodeName(sourcePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(path.constData(), nullptr);
+    if (!document)
+        return false;
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    FPDF_PAGE page = FPDF_LoadPage(document, 0);
+    if (!page)
+        return false;
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    FPDF_PAGEOBJECT cell = nullptr;
+    int cellIndex = -1;
+    for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
+        const auto object = FPDFPage_GetObject(page, index);
+        if (FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_TEXT) {
+            cell = object;
+            cellIndex = index;
+            break;
+        }
+    }
+    if (!cell)
+        return false;
+    if (change == QLatin1String("missing-fragment")) {
+        if (!FPDFPage_RemoveObject(page, cell))
+            return false;
+        FPDFPageObj_Destroy(cell);
+    } else if (change == QLatin1String("moved-fragment")) {
+        FPDFPageObj_Transform(cell, 1, 0, 0, 1, 20, 0);
+    } else if (change == QLatin1String("recolored-fragment")) {
+        if (!FPDFPageObj_SetFillColor(cell, 255, 0, 0, 255))
+            return false;
+    } else if (change == QLatin1String("duplicate-marker")) {
+        if (!FPDFPageObj_AddMark(cell, "TrePDFTableCell"))
+            return false;
+    } else if (change == QLatin1String("interleaved-paint")) {
+        // A foreign opaque path between grid and text must never be moved
+        // above the text when a table group is replaced during Save.
+        const auto paint = FPDFPageObj_CreateNewPath(40, 40);
+        if (!paint)
+            return false;
+        if (!FPDFPath_LineTo(paint, 600, 40)
+            || !FPDFPath_LineTo(paint, 600, 760)
+            || !FPDFPath_BezierTo(paint, 400, 780, 200, 720, 40, 760)
+            || !FPDFPath_Close(paint)
+            || !FPDFPageObj_SetFillColor(paint, 255, 255, 255, 255)
+            || !FPDFPath_SetDrawMode(paint, FPDF_FILLMODE_WINDING, false)
+            || !FPDFPage_InsertObjectAtIndex(page, paint, static_cast<size_t>(cellIndex))) {
+            FPDFPageObj_Destroy(paint);
+            return false;
+        }
+    } else if (change == QLatin1String("malformed-marker")) {
+        bool changed = false;
+        for (int index = 0; index < FPDFPageObj_CountMarks(cell); ++index) {
+            const auto mark = FPDFPageObj_GetMark(cell, index);
+            FPDF_WCHAR name[64]{};
+            unsigned long length = 0;
+            if (!FPDFPageObjMark_GetName(mark, name, sizeof(name), &length)
+                || length > sizeof(name)
+                || QString::fromUtf16(reinterpret_cast<const char16_t *>(name))
+                    != QLatin1String("TrePDFTableCell"))
+                continue;
+            const QByteArray invalid = QByteArrayLiteral("{invalid");
+            changed = FPDFPageObjMark_SetBlobParam(document, cell, mark, "Data",
+                reinterpret_cast<const unsigned char *>(invalid.constData()),
+                static_cast<unsigned long>(invalid.size()));
+            break;
+        }
+        if (!changed)
+            return false;
+    } else {
+        return false;
+    }
+    if (!FPDFPage_GenerateContent(page))
+        return false;
+    PdfFileWriter writer(targetPath);
+    return writer.open() && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
 }
 }
 
@@ -1374,6 +1456,372 @@ void PDFEditControllerTest::rejectsInvalidTableDividers()
     QVERIFY(!controller.hasDrafts());
 }
 
+void PDFEditControllerTest::editsTableCellsWithAtomicHistory()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("table-cell-history.pdf"));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(2);
+    controller.setTableColumns(2);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    const QString objectId = controller.selectedObjectId();
+    const auto cells = [&] {
+        return controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList();
+    };
+    QVERIFY(cells().isEmpty());
+    QVERIFY(controller.setSelectedTableCellText(0, 0, QString()).isEmpty()); // No-op.
+    const QString input = QStringLiteral("Tiếng Việt\r\nDòng hai").normalized(QString::NormalizationForm_D);
+    const QString normalized = QStringLiteral("Tiếng Việt\nDòng hai");
+    QVERIFY(controller.setSelectedTableCellText(0, 0, input).isEmpty());
+    QCOMPARE(cells(), QStringList({normalized, {}, {}, {}}));
+    QVERIFY(!controller.selectedDraftPreview().value(QStringLiteral("tableFontFamily")).toString().isEmpty());
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableFontSize")).toDouble(), 12.0);
+    const QVariantList rects = controller.selectedDraftPreview().value(QStringLiteral("tableCellRects")).toList();
+    QCOMPARE(rects.size(), 4);
+    for (const QVariant &rect : rects) {
+        QVERIFY(!rect.toRectF().isEmpty());
+        QVERIFY(controller.selectedFrameRect().contains(rect.toRectF()));
+    }
+    QVERIFY(controller.setSelectedTableCellText(0, 0, normalized).isEmpty()); // No-op.
+    controller.undo();
+    QVERIFY(cells().isEmpty());
+    controller.undo(); // Both no-ops must leave creation as the next command.
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    controller.redo();
+    controller.redo();
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QCOMPARE(cells().at(0), normalized);
+    QVERIFY(controller.setSelectedTableCellText(1, 1, QStringLiteral("42")).isEmpty());
+    QCOMPARE(cells(), QStringList({normalized, {}, {}, QStringLiteral("42")}));
+    QVERIFY(controller.setSelectedTableCellText(0, 0, QString()).isEmpty());
+    QCOMPARE(cells(), QStringList({{}, {}, {}, QStringLiteral("42")}));
+    QVERIFY(controller.setSelectedTableCellText(1, 1, QString()).isEmpty());
+    QVERIFY(cells().isEmpty());
+    controller.undo();
+    QCOMPARE(cells().at(3), QStringLiteral("42"));
+    controller.undo();
+    QCOMPARE(cells().at(0), normalized);
+    controller.deleteSelectedObject();
+    QVERIFY(controller.draftsForPage(0).isEmpty());
+    controller.undo();
+    QVERIFY(controller.selectCandidate(0, objectId));
+    QCOMPARE(cells(), QStringList({normalized, {}, {}, QStringLiteral("42")}));
+    controller.discardDrafts();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
+void PDFEditControllerTest::rejectsInvalidTableCellEdits()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("table-cell-validation.pdf"));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.setSelectedTableCellText(0, 0, QStringLiteral("Text")).isEmpty());
+    controller.setShapeType(PDFEditController::RectangleShape);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(0, 0, QStringLiteral("Text")).isEmpty());
+    controller.discardDrafts();
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(2);
+    controller.setTableColumns(2);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(-1, 0, QStringLiteral("Text")).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(2, 0, QStringLiteral("Text")).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(0, -1, QStringLiteral("Text")).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(0, 2, QStringLiteral("Text")).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(0, 0, QString(1025, QLatin1Char('a'))).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(0, 0, QString(QChar::Null)).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(0, 0, QStringLiteral("bad\tcontrol")).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(0, 0, QString(QChar(0xd800))).isEmpty());
+    QVERIFY(!controller.setSelectedTableCellText(0, 0, QStringLiteral("Line\n").repeated(70)).isEmpty());
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toList().isEmpty());
+    const QString text = QStringLiteral("A cell with content\nSecond line");
+    QVERIFY(controller.setSelectedTableCellText(0, 0, text).isEmpty());
+    const QRectF frame = controller.selectedFrameRect();
+    controller.beginSelectedFrameResize();
+    QVERIFY(!controller.setSelectedTableCellText(0, 0, QStringLiteral("During resize")).isEmpty());
+    controller.updateSelectedFrameRect(QRectF(.1, .1, .02, .02));
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(true, 0, .005);
+    controller.updateSelectedTableDivider(false, 0, .005);
+    controller.finishSelectedFrameResize();
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList().isEmpty());
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableRowStops")).toList().isEmpty());
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList().at(0), text);
+    controller.undo(); // Rejected content and geometry never create history entries.
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toList().isEmpty());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
+void PDFEditControllerTest::savesTableCellsRoundTrip_data()
+{
+    QTest::addColumn<int>("rotation");
+    QTest::addColumn<QString>("firstCell");
+    for (int rotation = 0; rotation < 4; ++rotation) {
+        const QString suffix = QString::number(rotation * 90);
+        QTest::newRow(qPrintable(suffix)) << rotation << QStringLiteral("Tiếng Việt\nDòng hai");
+        QTest::newRow(qPrintable(suffix + QStringLiteral("-whitespace")))
+            << rotation << QStringLiteral("\n  Tiếng Việt  \n\n  Dòng hai  \n");
+        QTest::newRow(qPrintable(suffix + QStringLiteral("-wrapped")))
+            << rotation << (QStringLiteral("Tiếng Việt\nDòng hai ") + QStringLiteral("word ").repeated(40));
+    }
+}
+
+void PDFEditControllerTest::savesTableCellsRoundTrip()
+{
+    QFETCH(int, rotation);
+    QFETCH(QString, firstCell);
+    const QString suffix = QString::fromLatin1(QTest::currentDataTag());
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("table-cell-source-%1.pdf").arg(suffix));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("table-cell-saved-%1.pdf").arg(suffix));
+    const QString edited = m_temporaryDirectory.filePath(QStringLiteral("table-cell-edited-%1.pdf").arg(suffix));
+    QVERIFY(createTableTestPage(path, rotation));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(2);
+    controller.setTableColumns(2);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    QVERIFY(controller.setSelectedTableCellText(0, 0, firstCell).isEmpty());
+    QVERIFY(controller.setSelectedTableCellText(1, 1, QStringLiteral("42")).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QCOMPARE(readTableTestMetadata(saved).value(QStringLiteral("version")).toInt(), 4);
+    QCOMPARE(inspectShapePaths(saved).count, 1);
+    const QString savedText = pageText(saved);
+    QVERIFY2(savedText.contains(QStringLiteral("Tiếng Việt")), qPrintable(savedText));
+    QVERIFY2(savedText.contains(QStringLiteral("Dòng hai")), qPrintable(savedText));
+    QVERIFY(savedText.contains(QStringLiteral("42")));
+
+    PDFDocument reopenedDocument;
+    PDFEditController reopened;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+    reopened.setDocument(&reopenedDocument);
+    const QVariantList candidates = waitForCandidates(reopened, 0);
+    const auto table = candidateForKind(candidates, QStringLiteral("sourceShape"));
+    QVERIFY(!table.isEmpty());
+    QCOMPARE(table.value(QStringLiteral("tableCellTexts")).toStringList(),
+             QStringList({firstCell, {}, {}, QStringLiteral("42")}));
+    for (const QVariant &entry : candidates) {
+        const auto candidate = entry.toMap();
+        if (candidate.value(QStringLiteral("objectId")) != table.value(QStringLiteral("objectId")))
+            QVERIFY2(!candidate.value(QStringLiteral("editable")).toBool(),
+                     "Managed cell text must not become an independently editable object.");
+    }
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    reopened.beginSelectedFrameResize();
+    reopened.updateSelectedTableDivider(true, 0, .6);
+    reopened.updateSelectedTableDivider(false, 0, .55);
+    reopened.finishSelectedFrameResize();
+    const QRectF newFrame(.15, .15, .7, .7);
+    reopened.beginSelectedFrameResize();
+    reopened.updateSelectedFrameRect(newFrame);
+    reopened.finishSelectedFrameResize();
+    QCOMPARE(reopened.selectedFrameRect(), newFrame);
+    QVERIFY(reopened.setSelectedTableCellText(0, 0, QStringLiteral("Đã sửa")).isEmpty());
+    QVERIFY(reopened.setSelectedTableCellText(1, 1, QString()).isEmpty());
+    QVERIFY(reopened.saveAs(QUrl::fromLocalFile(edited)));
+    const QString editedText = pageText(edited);
+    QVERIFY2(editedText.contains(QStringLiteral("Đã sửa")), qPrintable(editedText));
+    QVERIFY(!editedText.contains(QStringLiteral("Tiếng Việt")));
+    QVERIFY(!editedText.contains(QStringLiteral("Dòng hai")));
+    QVERIFY(!editedText.contains(QStringLiteral("42")));
+    QCOMPARE(inspectShapePaths(edited).count, 1);
+
+    auto editedTable = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(editedTable.value(QStringLiteral("tableCellTexts")).toStringList(),
+             QStringList({QStringLiteral("Đã sửa"), {}, {}, {}}));
+    QCOMPARE(editedTable.value(QStringLiteral("tableColumnStops")).toList(), QVariantList{QVariant(.6)});
+    QCOMPARE(editedTable.value(QStringLiteral("tableRowStops")).toList(), QVariantList{QVariant(.55)});
+    QVERIFY(reopened.selectCandidate(0, editedTable.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(reopened.setSelectedTableCellText(0, 0, QStringLiteral("Temporary")).isEmpty());
+    reopened.discardDrafts();
+    editedTable = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QVERIFY(reopened.selectCandidate(0, editedTable.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(reopened.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList().at(0),
+             QStringLiteral("Đã sửa"));
+    QVERIFY(reopened.setSelectedTableCellText(0, 0, QString()).isEmpty());
+    reopened.undo();
+    QVERIFY(!reopened.hasDrafts());
+    QVERIFY(reopened.setSelectedTableCellText(0, 0, QString()).isEmpty());
+    QVERIFY(reopened.save());
+    QCOMPARE(inspectShapePaths(edited).count, 1);
+    QVERIFY(pageText(edited).trimmed().isEmpty());
+    editedTable = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QVERIFY(!editedTable.isEmpty());
+    QVERIFY(editedTable.value(QStringLiteral("tableCellTexts")).toStringList().isEmpty());
+    QVERIFY(reopened.selectCandidate(0, editedTable.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(reopened.setSelectedTableCellText(0, 0, QStringLiteral("Đã sửa")).isEmpty());
+    QVERIFY(reopened.save());
+    editedTable = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QVERIFY(reopened.selectCandidate(0, editedTable.value(QStringLiteral("objectId")).toString()));
+    reopened.deleteSelectedObject();
+    reopened.undo();
+    QVERIFY(reopened.selectCandidate(0, editedTable.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(reopened.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList().at(0),
+             QStringLiteral("Đã sửa"));
+    reopened.deleteSelectedObject();
+    QVERIFY(reopened.save());
+    QCOMPARE(inspectShapePaths(edited).count, 0);
+    QVERIFY(pageText(edited).trimmed().isEmpty());
+    QVERIFY(waitForCandidates(reopened, 0).isEmpty());
+}
+
+void PDFEditControllerTest::savesMultipleTablesWithCellText()
+{
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("multiple-cell-tables-source.pdf"));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("multiple-cell-tables-saved.pdf"));
+    QVERIFY(createTableTestPage(source, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .4)).isEmpty());
+    QVERIFY(controller.setSelectedTableCellText(0, 0, QStringLiteral("First table")).isEmpty());
+    QVERIFY(!controller.addShape(0, QPointF(.1, .55), QPointF(.9, .9)).isEmpty());
+    QVERIFY(controller.setSelectedTableCellText(0, 0, QStringLiteral("Second table")).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QCOMPARE(inspectShapePaths(saved).count, 2);
+    const auto tableWithText = [](const QVariantList &candidates, const QString &text) {
+        for (const QVariant &entry : candidates) {
+            const QVariantMap candidate = entry.toMap();
+            if (candidate.value(QStringLiteral("kind")).toString() == QLatin1String("sourceShape")
+                && candidate.value(QStringLiteral("tableCellTexts")).toStringList() == QStringList{text})
+                return candidate;
+        }
+        return QVariantMap();
+    };
+    const auto candidates = waitForCandidates(controller, 0);
+    const auto first = tableWithText(candidates, QStringLiteral("First table"));
+    const auto second = tableWithText(candidates, QStringLiteral("Second table"));
+    QVERIFY(!first.isEmpty());
+    QVERIFY(!second.isEmpty());
+    QVERIFY(controller.selectCandidate(0, first.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.setSelectedTableCellText(0, 0, QStringLiteral("Changed first")).isEmpty());
+    QVERIFY(controller.selectCandidate(0, second.value(QStringLiteral("objectId")).toString()));
+    controller.deleteSelectedObject();
+    QVERIFY(controller.save());
+    QCOMPARE(inspectShapePaths(saved).count, 1);
+    const QString text = pageText(saved);
+    QVERIFY2(text.contains(QStringLiteral("Changed first")), qPrintable(text));
+    QVERIFY(!text.contains(QStringLiteral("First table")));
+    QVERIFY(!text.contains(QStringLiteral("Second table")));
+    QVERIFY(!tableWithText(waitForCandidates(controller, 0), QStringLiteral("Changed first")).isEmpty());
+}
+
+void PDFEditControllerTest::rejectsInvalidTableCellMetadata_data()
+{
+    QTest::addColumn<QString>("key");
+    QTest::addColumn<QVariant>("value");
+    QTest::newRow("missing-id") << QStringLiteral("id") << QVariant();
+    QTest::newRow("invalid-id") << QStringLiteral("id") << QVariant(QStringLiteral("table-1"));
+    QTest::newRow("different-id") << QStringLiteral("id")
+        << QVariant(QStringLiteral("8c989be4-d9f4-4e24-9b2c-cf4a61e02642"));
+    QTest::newRow("missing-cells") << QStringLiteral("cells") << QVariant();
+    QTest::newRow("wrong-cell-count") << QStringLiteral("cells")
+        << QVariant(QVariantList{QStringLiteral("Cell"), QString()});
+    QTest::newRow("non-string-cell") << QStringLiteral("cells")
+        << QVariant(QVariantList{QVariant(42)});
+    QTest::newRow("overlong-cell") << QStringLiteral("cells")
+        << QVariant(QVariantList{QString(1025, QLatin1Char('a'))});
+    QTest::newRow("control-in-cell") << QStringLiteral("cells")
+        << QVariant(QVariantList{QStringLiteral("Bad\tcontrol")});
+    QTest::newRow("non-normalized-cell") << QStringLiteral("cells")
+        << QVariant(QVariantList{QStringLiteral("Tiếng Việt").normalized(QString::NormalizationForm_D)});
+    QTest::newRow("changed-cell-text") << QStringLiteral("cells")
+        << QVariant(QVariantList{QStringLiteral("Replaced")});
+    QTest::newRow("missing-font") << QStringLiteral("font") << QVariant();
+    QTest::newRow("empty-font") << QStringLiteral("font") << QVariant(QString());
+    QTest::newRow("overlong-font") << QStringLiteral("font") << QVariant(QString(257, QLatin1Char('a')));
+    QTest::newRow("invalid-size") << QStringLiteral("fontSize") << QVariant(13.0);
+    QTest::newRow("string-size") << QStringLiteral("fontSize") << QVariant(QStringLiteral("12"));
+}
+
+void PDFEditControllerTest::rejectsInvalidTableCellMetadata()
+{
+    QFETCH(QString, key);
+    QFETCH(QVariant, value);
+    const QString suffix = QString::fromLatin1(QTest::currentDataTag());
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("cell-metadata-source-%1.pdf").arg(suffix));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("cell-metadata-saved-%1.pdf").arg(suffix));
+    const QString tampered = m_temporaryDirectory.filePath(QStringLiteral("cell-metadata-tampered-%1.pdf").arg(suffix));
+    QVERIFY(createTableTestPage(source, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    QVERIFY(controller.setSelectedTableCellText(0, 0, QStringLiteral("Cell")).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QVERIFY(rewriteTableTestMetadata(saved, tampered, key, value));
+    QVERIFY(document.open(QUrl::fromLocalFile(tampered)));
+    const auto candidates = waitForCandidates(controller, 0);
+    QVERIFY(candidateForKind(candidates, QStringLiteral("sourceShape")).isEmpty());
+    for (const QVariant &candidate : candidates)
+        QVERIFY2(!candidate.toMap().value(QStringLiteral("editable")).toBool(),
+                 "Malformed table groups must not expose editable child text.");
+    QCOMPARE(inspectShapePaths(tampered).count, 1);
+    QVERIFY(pageText(tampered).contains(QStringLiteral("Cell")));
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::rejectsTamperedTableCellObjects_data()
+{
+    QTest::addColumn<QString>("change");
+    for (const QString &change : {QStringLiteral("missing-fragment"), QStringLiteral("moved-fragment"),
+                                 QStringLiteral("recolored-fragment"), QStringLiteral("duplicate-marker"),
+                                 QStringLiteral("malformed-marker"), QStringLiteral("interleaved-paint")})
+        QTest::newRow(qPrintable(change)) << change;
+}
+
+void PDFEditControllerTest::rejectsTamperedTableCellObjects()
+{
+    QFETCH(QString, change);
+    const QString source = m_temporaryDirectory.filePath(QStringLiteral("cell-object-source-%1.pdf").arg(change));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("cell-object-saved-%1.pdf").arg(change));
+    const QString tampered = m_temporaryDirectory.filePath(QStringLiteral("cell-object-tampered-%1.pdf").arg(change));
+    QVERIFY(createTableTestPage(source, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(source)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    QVERIFY(controller.setSelectedTableCellText(0, 0, QStringLiteral("First line\nSecond line")).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QVERIFY(tamperTableCellObject(saved, tampered, change));
+    QVERIFY(document.open(QUrl::fromLocalFile(tampered)));
+    const auto candidates = waitForCandidates(controller, 0);
+    QVERIFY(candidateForKind(candidates, QStringLiteral("sourceShape")).isEmpty());
+    for (const QVariant &candidate : candidates)
+        QVERIFY2(!candidate.toMap().value(QStringLiteral("editable")).toBool(),
+                 "Incomplete or altered table text must remain unavailable for editing.");
+    QCOMPARE(inspectShapePaths(tampered).count, change == QLatin1String("interleaved-paint") ? 2 : 1);
+    QVERIFY(!pageText(tampered).trimmed().isEmpty());
+    QVERIFY(!controller.hasDrafts());
+}
+
 void PDFEditControllerTest::savesAndEditsTableGrid_data()
 {
     QTest::addColumn<int>("rows");
@@ -1501,7 +1949,7 @@ void PDFEditControllerTest::rejectsInvalidTableMetadata_data()
     QTest::newRow("string-rows") << QStringLiteral("rows") << QVariant(QStringLiteral("1"));
     QTest::newRow("grid-disagrees-with-path") << QStringLiteral("rows") << QVariant(2);
     QTest::newRow("legacy-version") << QStringLiteral("version") << QVariant(1);
-    QTest::newRow("unknown-version") << QStringLiteral("version") << QVariant(4);
+    QTest::newRow("unknown-version") << QStringLiteral("version") << QVariant(5);
     QTest::newRow("filled-grid") << QStringLiteral("fill") << QVariant(QStringLiteral("#ff0000"));
 }
 
@@ -1711,7 +2159,219 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QCOMPARE(controller.selectedFrameRect(), tableFrame);
     controller.undo();
     QVERIFY(!controller.hasDrafts());
+    const QPoint cellPoint = overlay->mapToScene(QPointF(
+        (tableFrame.left() + tableFrame.width() / 8) * overlay->width(),
+        (tableFrame.top() + tableFrame.height() / 6) * overlay->height())).toPoint();
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QQuickItem *cellInput = nullptr;
+    QQuickItem *cellEditor = nullptr;
+    const auto cellInputVisible = [&] {
+        auto *input = itemNamed(QStringLiteral("tableCellTextInput"));
+        return input && input->isVisible();
+    };
+    const auto currentCellTexts = [&] {
+        return controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList();
+    };
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QTRY_VERIFY((cellEditor = itemNamed(QStringLiteral("tableCellInlineEditor"))) && cellEditor->isVisible());
+    QVERIFY(!itemNamed(QStringLiteral("tableCellDialog")));
+    const QRectF firstCellInOverlay(tableFrame.left() * overlay->width(),
+        tableFrame.top() * overlay->height(), tableFrame.width() * overlay->width() / 4,
+        tableFrame.height() * overlay->height() / 3);
+    const auto inputRect = cellInput->mapRectToItem(overlay,
+        QRectF(0, 0, cellInput->width(), cellInput->height()));
+    QVERIFY2(firstCellInOverlay.adjusted(-2, -2, 2, 2).contains(inputRect),
+             "Cell input must be inside the table cell, not in a separate dialog.");
+    QVERIFY(cellInput->setProperty("text", QStringLiteral("Cancelled input")));
+    cellInput->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!cellInputVisible());
+    QVERIFY(!controller.hasDrafts());
+
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QVERIFY(cellInput->property("text").toString().isEmpty());
+    const QString oversized(1025, QLatin1Char('a'));
+    QVERIFY(cellInput->setProperty("text", oversized));
+    cellInput->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Return, Qt::ControlModifier);
+    QQuickItem *cellError = nullptr;
+    QTRY_VERIFY((cellError = itemNamed(QStringLiteral("tableCellError")))
+                && cellError->isVisible() && !cellError->property("text").toString().isEmpty());
+    QCOMPARE(cellInput->property("text").toString(), oversized);
+    QVERIFY(!controller.hasDrafts());
+    QTest::keyClick(window, Qt::Key_Tab);
+    QTRY_VERIFY(cellInputVisible());
+    QCOMPARE(cellInput->property("text").toString(), oversized);
+    QTRY_VERIFY((cellEditor = itemNamed(QStringLiteral("tableCellInlineEditor"))) && cellEditor->isVisible());
+    QVERIFY(firstCellInOverlay.adjusted(-2, -2, 2, 2).contains(
+        cellEditor->mapToItem(overlay, QPointF(0, 0))));
+    QVERIFY(!controller.hasDrafts()); // Invalid input must not advance to another cell.
+    QQuickItem *opacitySlider = nullptr;
+    QTRY_VERIFY((opacitySlider = itemNamed(QStringLiteral("drawingOpacitySlider")))
+                && opacitySlider->isVisible() && opacitySlider->isEnabled());
+    clickItem(opacitySlider);
+    QTRY_VERIFY(cellInputVisible());
+    QCOMPARE(cellInput->property("text").toString(), oversized);
+    QCOMPARE(controller.selectedDrawingOpacity(), 1.0);
+    QTRY_COMPARE(opacitySlider->property("value").toDouble(), 100.0);
+    QVERIFY(!controller.hasDrafts()); // A property edit must not discard invalid pending text.
+    QTest::keySequence(window, QKeySequence(QKeySequence::Save));
+    QTRY_VERIFY(cellInputVisible());
+    QVERIFY(!controller.saving());
+    QVERIFY(pageText(savedPath).trimmed().isEmpty());
+    QVERIFY(tabs->setProperty("currentIndex", 0));
+    QTRY_COMPARE(tabs->property("currentIndex").toInt(), 1);
+    QTRY_VERIFY(cellInputVisible());
+    QCOMPARE(cellInput->property("text").toString(), oversized);
+    QVERIFY(!controller.hasDrafts());
+    if (!screenshotPrefix.isEmpty()) {
+        QTest::qWait(100);
+        QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-cell-error.png")));
+    }
+
+    // Enter remains a line break; finishing is an explicit Ctrl/Cmd+Enter.
+    QVERIFY(cellInput->setProperty("text", QStringLiteral("Ô đầu")));
+    QVERIFY(cellInput->setProperty("cursorPosition", QStringLiteral("Ô đầu").size()));
+    cellInput->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(cellInput->property("text").toString(), QStringLiteral("Ô đầu\n"));
+    const QString cellText = QStringLiteral("Ô đầu\nDòng hai");
+    QVERIFY(cellInput->setProperty("text", cellText));
+    // Recycling the page only destroys its editor view. Pending text belongs
+    // to the workspace and must be restored when the page is visible again.
+    const QPointer<QQuickItem> pooledInput = cellInput;
+    QVERIFY(overlay->setProperty("pooled", true));
+    QTRY_VERIFY(!cellInputVisible());
+    QTRY_VERIFY(pooledInput.isNull());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(overlay->setProperty("pooled", false));
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QCOMPARE(cellInput->property("text").toString(), cellText);
+    QTRY_VERIFY(cellInput->hasActiveFocus());
+    if (!screenshotPrefix.isEmpty()) {
+        QTest::qWait(100);
+        QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-cell-inline.png")));
+    }
+    QTest::keyClick(window, Qt::Key_Return, Qt::ControlModifier);
+    QTRY_VERIFY(controller.hasDrafts());
+    QTRY_VERIFY(!cellInputVisible());
+    QCOMPARE(currentCellTexts().at(0), cellText);
+    QQuickItem *cellPreview = nullptr;
+    QTRY_VERIFY((cellPreview = itemNamed(QStringLiteral("tableCellPreview0"))) && cellPreview->isVisible());
+    QCOMPARE(cellPreview->property("text").toString(), cellText);
+    if (!screenshotPrefix.isEmpty()) {
+        QTest::qWait(100);
+        QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-cell-text.png")));
+    }
+    controller.undo();
+    QVERIFY(!controller.hasDrafts()); // All typing in one cell is one document Undo.
+    controller.redo();
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.save());
+    QVERIFY(pageText(savedPath).contains(QStringLiteral("Ô đầu")));
+    auto savedCells = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(savedCells.value(QStringLiteral("tableCellTexts")).toStringList().at(0), cellText);
+    QVERIFY(controller.selectCandidate(0, savedCells.value(QStringLiteral("objectId")).toString()));
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QCOMPARE(cellInput->property("text").toString(), cellText);
+    cellInput->forceActiveFocus();
+    QVERIFY(cellInput->setProperty("cursorPosition", cellText.size()));
+    for (const char character : QByteArrayLiteral(" temporary"))
+        QTest::keyClick(window, character);
+    QTRY_COMPARE(cellInput->property("text").toString(), cellText + QStringLiteral(" temporary"));
+    QTest::keySequence(window, QKeySequence(QKeySequence::Undo));
+    QTRY_COMPARE(cellInput->property("text").toString(), cellText);
+    QVERIFY(cellInputVisible());
+    QVERIFY(!controller.hasDrafts()); // Undo while typing stays local to the input.
+    QTest::keyClick(window, Qt::Key_Return, Qt::ControlModifier);
+    QTRY_VERIFY(!cellInputVisible());
+    QVERIFY(!controller.hasDrafts()); // Finishing identical text is a no-op.
+
+    // Standard Save must include text still being typed in the cell.
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    const QString savedInline = QStringLiteral("Saved inline");
+    QVERIFY(cellInput->setProperty("text", savedInline));
+    cellInput->forceActiveFocus();
+    QTest::keySequence(window, QKeySequence(QKeySequence::Save));
+    QTRY_VERIFY(!cellInputVisible());
+    QTRY_VERIFY(pageText(savedPath).contains(savedInline));
+    QTRY_VERIFY(!controller.saving());
+    QVERIFY(!controller.hasDrafts());
+    savedCells = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(controller.selectCandidate(0, savedCells.value(QStringLiteral("objectId")).toString()));
+
+    // Tab commits this cell and opens its neighbor; Shift+Tab goes back.
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QVERIFY(cellInput->setProperty("text", QStringLiteral("First")));
+    cellInput->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Tab);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QTRY_VERIFY(cellInput->property("text").toString().isEmpty());
+    QCOMPARE(currentCellTexts().at(0), QStringLiteral("First"));
+    QVERIFY(cellInput->mapToItem(overlay, QPointF(0, 0)).x() > firstCellInOverlay.right() - 2);
+    QVERIFY(cellInput->setProperty("text", QStringLiteral("Second")));
+    QTest::keyClick(window, Qt::Key_Backtab, Qt::ShiftModifier);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QTRY_COMPARE(cellInput->property("text").toString(), QStringLiteral("First"));
+    QCOMPARE(currentCellTexts().at(1), QStringLiteral("Second"));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!cellInputVisible());
+    controller.undo();
+    QCOMPARE(currentCellTexts().at(0), QStringLiteral("First"));
+    QVERIFY(currentCellTexts().at(1).isEmpty());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QVERIFY(cellInput->setProperty("text", QStringLiteral("Outside click")));
+    const QPoint outsideCell = overlay->mapToScene(QPointF(
+        (tableFrame.left() - .03) * overlay->width(),
+        (tableFrame.top() + tableFrame.height() / 6) * overlay->height())).toPoint();
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, outsideCell);
+    QTRY_VERIFY(!cellInputVisible());
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(controller.selectCandidate(0, savedCells.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(currentCellTexts().at(0), QStringLiteral("Outside click"));
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+
+    // Property changes commit pending cell text before starting their own undo step.
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QVERIFY(cellInput->setProperty("text", QStringLiteral("Panel transition")));
+    QTRY_VERIFY((opacitySlider = itemNamed(QStringLiteral("drawingOpacitySlider")))
+                && opacitySlider->isVisible() && opacitySlider->isEnabled());
+    clickItem(opacitySlider);
+    QTRY_VERIFY(!cellInputVisible());
+    QTRY_VERIFY(controller.selectedDrawingOpacity() < 1.0);
+    QCOMPARE(currentCellTexts().at(0), QStringLiteral("Panel transition"));
+    controller.undo();
+    QCOMPARE(controller.selectedDrawingOpacity(), 1.0);
+    QCOMPARE(currentCellTexts().at(0), QStringLiteral("Panel transition"));
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+
+    // The ribbon preflight commits valid input before changing tools/tabs.
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QVERIFY(cellInput->setProperty("text", QStringLiteral("Tab transition")));
+    QVERIFY(tabs->setProperty("currentIndex", 0));
+    QTRY_COMPARE(tabs->property("currentIndex").toInt(), 0);
+    QTRY_VERIFY(!cellInputVisible());
+    QVERIFY(controller.hasDrafts());
+    QVERIFY(tabs->setProperty("currentIndex", 1));
+    QTRY_COMPARE(controller.tool(), PDFEditController::SelectTool);
+    QVERIFY(controller.selectCandidate(0, savedCells.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(currentCellTexts().at(0), QStringLiteral("Tab transition"));
     controller.discardDrafts();
+    // Switching ribbon tabs destroys and recreates the lazy Edit ribbon.
+    QTRY_VERIFY((tableButton = itemNamed(QStringLiteral("editTableButton")))
+                && tableButton->isVisible() && tableButton->isEnabled());
     clickItem(tableButton);
     QTRY_VERIFY(itemNamed(QStringLiteral("tableRowsSpinBox")));
     QVERIFY(tabs->setProperty("currentIndex", 0));

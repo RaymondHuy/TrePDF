@@ -280,6 +280,9 @@ qt_add_qml_module(trepdf
         src/PDFEditControllerComments.cpp
         src/PDFEditControllerClipboard.cpp
         src/PDFEditControllerGeometry.cpp
+        src/PDFEditControllerTable.cpp
+        src/PDFTableCellLayout.h
+        src/PDFTableCellMetadata.h
         src/PDFEditControllerHeaderText.cpp
         src/PDFEditControllerHeaderSync.cpp
         src/PDFHeaderMetadata.h
@@ -406,6 +409,8 @@ qt_add_qml_module(trepdf
         src/Components/RibbonGroup.qml
         src/Components/RibbonTabButton.qml
         src/Components/ShapeDraftView.qml
+        src/Components/TableCellEditing.qml
+        src/Components/TableCellEditor.qml
         src/Components/SignRibbon.qml
         src/Components/ProtectRibbon.qml
         src/Components/SetPasswordDialog.qml

@@ -402,7 +402,15 @@ controller; draft/restoration đọc số hàng/cột của chính candidate và
 `tableRowStops`/`tableColumnStops` từ draft. Cả hai EditOverlay nhận toàn bộ
 phần trong khung bảng để chọn/kéo. Bảng đang chọn có vùng kéo đường phân cách
 ưu tiên hơn kéo khung; dùng cùng phiên frame resize để preview, Undo/Redo và
-hủy khi Escape. Kéo khung ngoài giữ nguyên tỉ lệ hàng/cột. Xem
+hủy khi Escape. Kéo khung ngoài giữ nguyên tỉ lệ hàng/cột. Nhấp đúp vào ô tạo
+`TableCellEditor` qua Loader ngay trên trang; `TableCellEditing` thuộc workspace
+giữ nội dung độc lập với delegate. Hoàn tất gọi `setSelectedTableCellText`,
+Escape hủy mà không tạo draft. Save/navigation dùng `commitPendingPanelEdits`;
+đổi ribbon tab/công cụ dùng `prepareEditTransition` để chặn input không hợp lệ.
+`ShapeDraftView` nhận nội dung và các vùng chữ trong ô từ controller, vẽ chữ ở
+kích thước PDF trước khi scale theo zoom. Controller chặn thay đổi geometry
+nếu chữ không còn vừa ô. Pooling chỉ hủy editor hiển thị, giữ state để dựng
+lại khi trang xuất hiện. Xem
 [table-drawing.md](table-drawing.md) về popup và định dạng lưu.
 
 Highlight, Underline, Squiggly và Strikeout dùng cùng bước resolve geometry cho

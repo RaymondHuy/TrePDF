@@ -127,6 +127,7 @@ QVector<QVector<int>> PDFEditController::draftedTextObjectPathsForPage(int page)
             } else if (!candidate.objectPath.isEmpty()) {
                 objectPaths.append(candidate.objectPath);
             }
+            objectPaths.append(candidate.tableCellObjectPaths);
         }
     }
 
@@ -808,6 +809,16 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("shapeEnd"), candidate.shapeEndRatio);
     map.insert(QStringLiteral("tableRows"), candidate.tableRows);
     map.insert(QStringLiteral("tableColumns"), candidate.tableColumns);
+    map.insert(QStringLiteral("tableCellTexts"), draft.tableCellTexts);
+    map.insert(QStringLiteral("tableFontFamily"), draft.tableFontFamily);
+    map.insert(QStringLiteral("tableFontSize"), draft.tableFontSize);
+    QVariantList cellRects;
+    for (const QRectF &rect : tableCellRects(draft))
+        cellRects.append(rect);
+    map.insert(QStringLiteral("tableCellRects"), cellRects);
+    const qreal tablePageHeight = m_document ? m_document->pageSize(candidate.page).height() : 0.0;
+    map.insert(QStringLiteral("tableFontSizeRatio"), tablePageHeight > 0
+        ? draft.tableFontSize / tablePageHeight : 0.0);
     const auto stopValues = [](const QVector<qreal> &stops) {
         QVariantList values;
         values.reserve(stops.size());
@@ -1035,6 +1046,10 @@ bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
         && left.imageQuarterTurns == right.imageQuarterTurns
         && left.tableRowStops == right.tableRowStops
         && left.tableColumnStops == right.tableColumnStops
+        && left.tableCellTexts == right.tableCellTexts
+        && left.tableFontFamily == right.tableFontFamily
+        && left.tableFontSize == right.tableFontSize
+        && left.tableId == right.tableId
         && left.deleted == right.deleted;
 }
 

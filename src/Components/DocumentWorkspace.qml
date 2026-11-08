@@ -16,6 +16,8 @@ Item {
     readonly property bool headerSelectionActive: headerTabActive
         && session.editController.headerSelectionOnly
         && session.editController.tool === PDFEditController.SelectTool
+    readonly property bool hasPendingTableCellEdit: tableCellEditingState.active
+    readonly property bool tableCellInputFocused: tableCellEditingState.inputFocused
     readonly property HeaderTextPlacement headerTextPlacement: headerPlacement
     readonly property HeaderImagePlacement headerImagePlacement: headerImagePlacementState
     readonly property HeaderPageNumberPlacement headerPageNumberPlacement: headerPageNumberPlacementState
@@ -154,6 +156,8 @@ Item {
         ? activeDocumentView.canNavigateForward
         : false
     readonly property bool hasPendingPanelEdits: {
+        if (tableCellEditingState.active)
+            return true
         if (textFormatPanelLoader.status === Loader.Ready) {
             const textFormatPanel = textFormatPanelLoader.item as TextFormatPanel
             if (textFormatPanel && textFormatPanel.fontSizeEditPending)
@@ -282,6 +286,11 @@ Item {
     onFooterModeChanged: closeHeaderPlacement()
     onSessionChanged: closeHeaderPlacement()
 
+    TableCellEditing {
+        id: tableCellEditingState
+        controller: root.session.editController
+    }
+
     HeaderTextPlacement {
         id: headerPlacement
         document: root.session.document
@@ -318,6 +327,7 @@ Item {
         viewTabActive: root.viewTabActive
         headerTabActive: root.headerTabActive
         footerMode: root.footerMode
+        tableCellState: secondaryPane ? null : tableCellEditingState
         headerTextPlacement: secondaryPane ? null : root.headerTextPlacement
         headerImagePlacement: secondaryPane ? null : root.headerImagePlacement
         headerPageNumberPlacement: secondaryPane ? null : root.headerPageNumberPlacement
@@ -455,7 +465,8 @@ Item {
     function setPageDisplayMode(mode) {
         if (session.pageDisplayMode === mode)
             return
-        preparePaneViews()
+        if (!preparePaneViews())
+            return
         session.pageDisplayMode = mode
     }
 
@@ -466,16 +477,20 @@ Item {
                 === PDFDocumentSession.ContinuousFacingMode
         if (!facingMode)
             return
-        preparePaneViews()
+        if (!preparePaneViews())
+            return
         session.separateCoverPage = !session.separateCoverPage
     }
 
     function preparePaneViews() {
+        if (!commitPendingTableCellEdit())
+            return false
         for (let paneIndex = 0; paneIndex < 2; ++paneIndex) {
             const view = paneView(paneIndex)
             if (view)
                 view.prepareForSessionChange()
         }
+        return true
     }
 
     function storePanePosition(paneIndex) {
@@ -509,8 +524,9 @@ Item {
             return
         }
 
+        if (!preparePaneViews())
+            return
         storeSplitPositions()
-        preparePaneViews()
         if (mode !== PDFDocumentSession.NoSplit)
             initializePaneState(1)
         session.splitViewMode = mode
@@ -665,7 +681,18 @@ Item {
         }
     }
 
+    function commitPendingTableCellEdit() {
+        if (tableCellEditingState.commit())
+            return true
+        documentView.navigateToPage(tableCellEditingState.page)
+        return false
+    }
+
+    function cancelPendingTableCellEdit() { tableCellEditingState.cancel() }
+
     function commitPendingPanelEdits() {
+        if (!commitPendingTableCellEdit())
+            return false
         if (textFormatPanelLoader.status === Loader.Ready) {
             const textFormatPanel = textFormatPanelLoader.item as TextFormatPanel
             if (textFormatPanel && !textFormatPanel.commitPendingEdit())
@@ -1011,6 +1038,7 @@ Item {
                     theme: root.theme
                     document: root.session.document
                     editController: root.session.editController
+                    prepareEditTransition: () => root.commitPendingTableCellEdit()
                     collapsed: root.session.panelCollapsed
                     onCollapsedChangeRequested: collapsed => {
                         root.session.panelCollapsed = collapsed

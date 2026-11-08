@@ -18,6 +18,7 @@ Rectangle {
     property bool viewTabActive: false
     property bool headerTabActive: false
     property bool footerMode: false
+    property TableCellEditing tableCellState: null
     property HeaderTextPlacement headerTextPlacement: null
     property HeaderImagePlacement headerImagePlacement: null
     property HeaderPageNumberPlacement headerPageNumberPlacement: null
@@ -745,6 +746,7 @@ Rectangle {
             viewTabActive: root.viewTabActive
             headerTabActive: root.headerTabActive
             footerMode: root.footerMode
+            tableCellState: root.tableCellState
             headerTextPlacement: root.headerTextPlacement
             headerImagePlacement: root.headerImagePlacement
             headerPageNumberPlacement: root.headerPageNumberPlacement

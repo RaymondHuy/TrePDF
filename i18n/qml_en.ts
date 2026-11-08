@@ -5505,5 +5505,50 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <source>Enter a password of up to 1,024 bytes without null characters.</source>
         <translation>Enter a password of up to 1,024 bytes without null characters.</translation>
     </message>
+    <message id="TableCellText">
+        <location filename="../src/Components/TableCellEditor.qml" line="80"/>
+        <source>Cell text</source>
+        <translation>Cell text</translation>
+    </message>
+    <message id="TableCellApply">
+        <location filename="../src/Components/TableCellEditor.qml" line="159"/>
+        <source>Apply</source>
+        <translation>Apply</translation>
+    </message>
+    <message id="TableCellNotEditable">
+        <location filename="../src/PDFEditControllerTable.cpp" line="46"/>
+        <source>Select an editable table before editing a cell.</source>
+        <translation>Select an editable table before editing a cell.</translation>
+    </message>
+    <message id="TableCellUnavailable">
+        <location filename="../src/PDFEditControllerTable.cpp" line="53"/>
+        <source>This cell is no longer available. Select the table again.</source>
+        <translation>This cell is no longer available. Select the table again.</translation>
+    </message>
+    <message id="TableCellInvalidText">
+        <location filename="../src/PDFEditControllerTable.cpp" line="65"/>
+        <source>Use at most 1,024 characters per cell, without unsupported control characters.</source>
+        <translation>Use at most 1,024 characters per cell, without unsupported control characters.</translation>
+    </message>
+    <message id="TableTextTooLong">
+        <location filename="../src/PDFEditControllerTable.cpp" line="80"/>
+        <source>This table supports up to 8,192 characters. Shorten the cell text.</source>
+        <translation>This table supports up to 8,192 characters. Shorten the cell text.</translation>
+    </message>
+    <message id="TableCellFontUnavailable">
+        <location filename="../src/PDFEditControllerTable.cpp" line="96"/>
+        <source>The table font is unavailable or does not support this text. Install the font in Settings &gt; Font.</source>
+        <translation>The table font is unavailable or does not support this text. Install the font in Settings &gt; Font.</translation>
+    </message>
+    <message id="TableCellTextDoesNotFit">
+        <location filename="../src/PDFEditControllerTable.cpp" line="100"/>
+        <source>The text does not fit in this cell. Shorten it or enlarge the row or column.</source>
+        <translation>The text does not fit in this cell. Shorten it or enlarge the row or column.</translation>
+    </message>
+    <message id="TableCellInlineHint">
+        <location filename="../src/Components/TableCellEditor.qml" line="143"/>
+        <source>Enter: new line · Tab: next cell · Ctrl/Cmd+Enter: finish · Esc: cancel</source>
+        <translation>Enter: new line · Tab: next cell · Ctrl/Cmd+Enter: finish · Esc: cancel</translation>
+    </message>
 </context>
 </TS>

@@ -380,7 +380,7 @@ Current features:
   These Edit shapes are page content, separate from comment annotations.
 - Edit > Table opens a lazy Rows/Columns popup (1–20 each, initially 3×3).
   Draw table arms drag placement through AddShapeTool. Each grid is one
-  TableShape vector object, initially with equal cells and no fill or cell text. It shares
+  TableShape vector object, initially with equal empty cells and no fill. It shares
   shape selection, stroke/opacity, movement, eight-handle resize, delete and
   Undo/Redo. Selected tables expose draggable internal dividers, adjusting adjacent
   rows/columns while preserving the outer frame; each gesture is one undoable
@@ -388,6 +388,17 @@ Current features:
   TrePDFShape v3 metadata. Equal grids retain v2, which remains editable;
   existing shapes retain v1. Only validated managed table paths
   rehydrate; arbitrary lines in imported PDFs are not grouped into a table.
+  Double-clicking a cell edits plain text inline inside its frame. Enter adds
+  a line, Ctrl/Cmd+Enter commits, Escape cancels, and Tab/Shift+Tab commit then
+  move between cells. Workspace-owned pending input survives delegate pooling;
+  Save/navigation/tool changes commit first and invalid input blocks the change.
+  Multiline cell text uses one 12-point black font per table,
+  follows the frame/dividers, and shares atomic Undo/Redo, deletion and Save.
+  Each cell is limited to 1,024 UTF-16 units, each table to 8,192; text and
+  geometry changes that overflow a cell are rejected. Version 4 grid metadata
+  and validated `TrePDFTableCell` child marks retain semantic text through
+  Save/reopen; real embedded PDF text remains searchable/copyable, while child
+  fragments stay excluded from independent Edit candidates.
   See docs/table-drawing.md for the storage and UI contract.
 - Render every page through PDFium.
 - Virtualized continuous scrolling with reusable QML delegates.
