@@ -43,6 +43,7 @@ struct Metadata {
     QVector<qreal> tableColumnStops;
     QStringList tableCellTexts;
     PDFTableCellFormat::Cells tableCellFormats;
+    int tableCellFormatVersion = 0;
     QString tableId;
     QString tableFontFamily;
     qreal tableFontSize = 12.0;
@@ -653,7 +654,7 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
         return {};
     }
     QJsonObject object{
-        {QStringLiteral("version"), !metadata.tableCellFormats.isEmpty() ? 5
+        {QStringLiteral("version"), !metadata.tableCellFormats.isEmpty() ? 6
             : tableCells ? 4 : customTableStops ? 3 : table ? 2 : 1},
         {QStringLiteral("type"), metadata.type},
         {QStringLiteral("frame"), QJsonArray{metadata.frame.x(), metadata.frame.y(),
@@ -749,9 +750,9 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
     const QJsonValue versionValue = object.value(QStringLiteral("version"));
     const int version = versionValue.toInt(-1);
     if (!versionValue.isDouble() || versionValue.toDouble() != version
-        || (version != 1 && version != 2 && version != 3 && version != 4 && version != 5)
+        || (version < 1 || version > 6)
         || (version < 4 && raw.size() > 16 * 1024)
-        || object.size() != (version == 5 ? 19 : version == 4 ? 18 : version == 3 ? 14 : version == 2 ? 12 : 10)
+        || object.size() != (version >= 5 ? 19 : version == 4 ? 18 : version == 3 ? 14 : version == 2 ? 12 : 10)
         || !object.value(QStringLiteral("stroke")).isString()
         || !object.value(QStringLiteral("fill")).isString()) {
         return false;
@@ -824,7 +825,8 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
                     return false;
                 parsed.tableCellTexts.append(cell.toString());
             }
-            if (version == 5) {
+            if (version >= 5) {
+                parsed.tableCellFormatVersion = version;
                 const auto formats = object.value(QStringLiteral("cellFormats"));
                 if (!formats.isArray() || formats.toArray().size() != cells.size()
                     || cells.size() != parsed.tableRows * parsed.tableColumns)
@@ -833,7 +835,12 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
                     PDFTableCellFormat::Cell format;
                     const auto value = formats.toArray().at(cell);
                     if (!value.isObject() || !PDFTableCellFormat::fromJson(
-                            value.toObject(), parsed.tableCellTexts[cell], format))
+                            value.toObject(), parsed.tableCellTexts[cell], format,
+                            PDFTableCellFormat::MaximumSpansPerCell, version >= 6))
+                        return false;
+                    if (version == 5 && (format.defaultStyle.fontSize != 12.0
+                        || std::any_of(format.spans.cbegin(), format.spans.cend(),
+                            [](const PDFTableCellFormat::Span &span) { return span.style.fontSize != 12.0; })))
                         return false;
                     parsed.tableCellFormats.append(std::move(format));
                 }

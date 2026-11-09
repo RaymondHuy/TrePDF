@@ -31,6 +31,7 @@ QtObject {
     property TableCellEditor editorItem: null
 
     signal focusRequested()
+    signal formatCommitRequested()
 
     function begin(targetPage, targetObjectId, targetRow, targetColumn) {
         if (active && !commit())
@@ -60,17 +61,20 @@ QtObject {
         fontSize = draft.tableFontSize || 12
         text = (draft.tableCellTexts || [])[index] || ""
         const formats = draft.tableCellFormats || []
-        const plainStyle = { family: fontFamily, bold: false, italic: false, underline: false }
+        const plainStyle = { family: fontFamily, bold: false, italic: false,
+            underline: false, fontSize: fontSize }
         cellFormat = formats.length > index ? formats[index] : {
             defaultStyle: plainStyle,
             spans: text.length > 0 ? [{ start: 0, length: text.length,
-                family: fontFamily, bold: false, italic: false, underline: false }] : []
+                family: fontFamily, bold: false, italic: false,
+                underline: false, fontSize: fontSize }] : []
         }
         const initialStyle = cellFormat.defaultStyle
         bold = initialStyle.bold
         italic = initialStyle.italic
         underline = initialStyle.underline
         fontFamily = initialStyle.family
+        fontSize = initialStyle.fontSize || 12
         editorState = { cursorPosition: text.length, selectionStart: text.length,
             selectionEnd: text.length, typingPosition: -1 }
         errorText = ""
@@ -89,6 +93,7 @@ QtObject {
         // qmllint disable missing-property
         Qt.inputMethod.commit()
         // qmllint enable missing-property
+        formatCommitRequested()
         if (editorItem)
             editorItem.synchronize()
         submitting = true

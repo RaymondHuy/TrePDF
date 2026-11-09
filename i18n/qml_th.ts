@@ -103,6 +103,7 @@
         <location filename="../src/Components/MergePdfDialog.qml" line="364"/>
         <location filename="../src/Components/SignatureDialog.qml" line="705"/>
         <location filename="../src/Components/FontSettingsDialog.qml" line="353"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="321"/>
         <source>Cancel</source>
         <translation>ยกเลิก</translation>
     </message>
@@ -923,6 +924,7 @@ Save your changes, then switch to the View tab to try the link.</source>
         <location filename="../src/Components/TextFormatPanel.qml" line="905"/>
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="978"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="1215"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="272"/>
         <source>Underline</source>
         <translation>ขีดเส้นใต้</translation>
     </message>
@@ -2162,6 +2164,8 @@ PDF ของคุณยังไม่ได้บันทึก การแ
         <location filename="../src/Components/HeaderTextPanel.qml" line="146"/>
         <location filename="../src/Components/HeaderTextPanel.qml" line="162"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="414"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="86"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="101"/>
         <source>Font family</source>
         <translation>ตระกูลแบบอักษร</translation>
     </message>
@@ -2178,6 +2182,9 @@ PDF ของคุณยังไม่ได้บันทึก การแ
         <location filename="../src/Components/TextFormatPanel.qml" line="595"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="649"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="716"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="108"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="147"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="185"/>
         <source>Font size</source>
         <translation>ขนาดแบบอักษร</translation>
     </message>
@@ -2190,12 +2197,14 @@ PDF ของคุณยังไม่ได้บันทึก การแ
     <message id="Bold">
         <location filename="../src/Components/HeaderTextPanel.qml" line="462"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="825"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="230"/>
         <source>Bold</source>
         <translation>ตัวหนา</translation>
     </message>
     <message id="Italic">
         <location filename="../src/Components/HeaderTextPanel.qml" line="505"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="865"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="251"/>
         <source>Italic</source>
         <translation>ตัวเอียง</translation>
     </message>
@@ -5382,12 +5391,12 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <translation>ป้อนรหัสผ่านที่มีขนาดไม่เกิน 1,024 ไบต์และไม่มีอักขระ null</translation>
     </message>
     <message id="TableCellText">
-        <location filename="../src/Components/TableCellEditor.qml" line="80"/>
+        <location filename="../src/Components/TableCellEditor.qml" line="119"/>
         <source>Cell text</source>
         <translation>ข้อความในเซลล์</translation>
     </message>
     <message id="TableCellApply">
-        <location filename="../src/Components/TableCellPanel.qml" line="213"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="328"/>
         <source>Apply</source>
         <translation>นำไปใช้</translation>
     </message>
@@ -5398,6 +5407,7 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
     </message>
     <message id="TableCellUnavailable">
         <location filename="../src/PDFEditControllerTable.cpp" line="53"/>
+        <location filename="../src/Components/TableCellEditing.qml" line="104"/>
         <source>This cell is no longer available. Select the table again.</source>
         <translation>เซลล์นี้ไม่พร้อมใช้งานแล้ว โปรดเลือกตารางอีกครั้ง</translation>
     </message>
@@ -5413,6 +5423,7 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
     </message>
     <message id="TableCellFontUnavailable">
         <location filename="../src/PDFEditControllerTable.cpp" line="96"/>
+        <location filename="../src/PDFEditControllerTableEditor.cpp" line="165"/>
         <source>The table font is unavailable or does not support this text. Install the font in Settings &gt; Font.</source>
         <translation>ฟอนต์ของตารางไม่พร้อมใช้งานหรือไม่รองรับข้อความนี้ โปรดติดตั้งฟอนต์ใน การตั้งค่า &gt; ฟอนต์</translation>
     </message>
@@ -5422,28 +5433,29 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <translation>ข้อความยาวเกินเซลล์นี้ โปรดย่อข้อความหรือขยายแถวหรือคอลัมน์</translation>
     </message>
     <message id="TableCellInlineHint">
-        <location filename="../src/Components/TableCellPanel.qml" line="193"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="308"/>
         <source>Enter: new line · Tab: next cell · Ctrl/Cmd+Enter: finish · Esc: cancel</source>
         <translation>Enter: ขึ้นบรรทัดใหม่ · Tab: เซลล์ถัดไป · Ctrl/Cmd+Enter: เสร็จสิ้น · Esc: ยกเลิก</translation>
     </message>
     <message id="TableCellInvalidFormat">
         <location filename="../src/PDFEditControllerTable.cpp" line="131"/>
         <location filename="../src/PDFEditControllerTable.cpp" line="171"/>
+        <location filename="../src/PDFEditControllerTableEditor.cpp" line="132"/>
         <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
         <translation>รูปแบบเซลล์ไม่ถูกต้องหรือซับซ้อนเกินไป โปรดลดจำนวนครั้งที่เปลี่ยนแบบอักษรหรือรูปแบบตัวอักษร</translation>
     </message>
     <message id="TableCellProperties">
-        <location filename="../src/Components/TableCellPanel.qml" line="57"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="59"/>
         <source>Cell properties</source>
         <translation>คุณสมบัติเซลล์</translation>
     </message>
     <message id="TableCellPosition">
-        <location filename="../src/Components/TableCellPanel.qml" line="67"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="69"/>
         <source>Row %1 · Column %2</source>
         <translation>แถว %1 · คอลัมน์ %2</translation>
     </message>
     <message id="TableCellGoTo">
-        <location filename="../src/Components/TableCellPanel.qml" line="176"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="291"/>
         <source>Go to cell</source>
         <translation>ไปยังเซลล์</translation>
     </message>

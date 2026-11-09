@@ -24,6 +24,7 @@ Item {
             editingState.cellFormat = snapshot.format
             editingState.editorState = snapshot
             editingState.fontFamily = snapshot.fontFamily
+            editingState.fontSize = snapshot.fontSize
             editingState.bold = snapshot.bold
             editingState.italic = snapshot.italic
             editingState.underline = snapshot.underline
@@ -31,7 +32,7 @@ Item {
         input.synchronizing = false
     }
 
-    function applyFormatting(property, value) {
+    function applyFormatting(property, value, restoreFocus = true) {
         if (!editingState.active || editorGeneration !== editingState.focusGeneration)
             return
         synchronize()
@@ -41,8 +42,10 @@ Item {
         input.synchronizing = false
         synchronize()
         editingState.errorText = error
-        input.forceActiveFocus()
-        textViewport.revealCursor()
+        if (restoreFocus) {
+            input.forceActiveFocus()
+            textViewport.revealCursor()
+        }
     }
 
     MouseArea {
@@ -111,7 +114,7 @@ Item {
                 persistentSelection: true
                 font: root.editingState.controller.fontForDisplay(
                     root.editingState.cellFormat.defaultStyle.family || root.editingState.fontFamily,
-                    100, false, false, false, root.editingState.fontSize)
+                    100, false, false, false, root.editingState.cellFormat.defaultStyle.fontSize || 12)
                 //% "Cell text"
                 Accessible.name: qsTrId("TableCellText")
                 onTextChanged: {
@@ -191,8 +194,11 @@ Item {
         Qt.callLater(root.focusInput)
     }
     Component.onDestruction: {
-        if (root.editingState.editorItem === root)
+        if (root.editingState.editorItem === root) {
+            root.editingState.formatCommitRequested()
+            synchronize()
             root.editingState.editorItem = null
+        }
     }
     Connections {
         target: root.editingState

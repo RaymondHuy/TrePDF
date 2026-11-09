@@ -877,6 +877,10 @@ const SaveFormat &formatAt(const SaveDraft &draft, qsizetype position)
             return span.format;
         }
     }
+    if (!draft.tableCellFormats.isEmpty() && !draft.characterSpans.isEmpty()
+        && position == draft.text.size()) {
+        return draft.characterSpans.constLast().format;
+    }
     return draft.characterSpans.isEmpty()
         ? draft.originalFormat
         : draft.characterSpans.constFirst().format;
@@ -1737,6 +1741,10 @@ bool tableCellDraftFits(const SaveDraft &draft, const QSizeF &size, qreal pageHe
         bool fits = true;
         for (QTextLine line = layout.createLine(); line.isValid(); line = layout.createLine()) {
             line.setLineWidth(size.width());
+            if (!PDFTableCellLayout::lineInkFits(line, height, size)) {
+                fits = false;
+                break;
+            }
             height += line.height();
             if (height > size.height() + .001 || line.naturalTextWidth() > size.width() + .001) {
                 fits = false;
@@ -7677,6 +7685,9 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
                 const auto copyStyle = [&](const PDFTableCellFormat::Style &style, const QString &text) {
                     auto styled = format;
                     styled.fontFamily = style.family;
+                    styled.fontSizeRatio = style.fontSize
+                        / controller.m_document->pageSize(saveDraft.page).height();
+                    styled.displayFontSizeRatio = styled.fontSizeRatio;
                     styled.fontBold = style.bold;
                     styled.fontItalic = style.italic;
                     styled.fontUnderline = style.underline;

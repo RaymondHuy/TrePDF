@@ -103,6 +103,7 @@
         <location filename="../src/Components/MergePdfDialog.qml" line="364"/>
         <location filename="../src/Components/SignatureDialog.qml" line="705"/>
         <location filename="../src/Components/FontSettingsDialog.qml" line="353"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="321"/>
         <source>Cancel</source>
         <translation>Odustani</translation>
     </message>
@@ -923,6 +924,7 @@ Spremite promjene, a zatim prijeđite na karticu Prikaz da biste isprobali povez
         <location filename="../src/Components/TextFormatPanel.qml" line="905"/>
         <location filename="../src/PDFEditControllerAnnotationScan.cpp" line="978"/>
         <location filename="../src/PDFEditControllerComments.cpp" line="1215"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="272"/>
         <source>Underline</source>
         <translation>Podcrtaj</translation>
     </message>
@@ -2164,6 +2166,8 @@ Vaš PDF nije spremljen. Vaše su izmjene sačuvane.</translation>
         <location filename="../src/Components/HeaderTextPanel.qml" line="146"/>
         <location filename="../src/Components/HeaderTextPanel.qml" line="162"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="414"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="86"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="101"/>
         <source>Font family</source>
         <translation>Obitelj fontova</translation>
     </message>
@@ -2180,6 +2184,9 @@ Vaš PDF nije spremljen. Vaše su izmjene sačuvane.</translation>
         <location filename="../src/Components/TextFormatPanel.qml" line="595"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="649"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="716"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="108"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="147"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="185"/>
         <source>Font size</source>
         <translation>Veličina fonta</translation>
     </message>
@@ -2192,12 +2199,14 @@ Vaš PDF nije spremljen. Vaše su izmjene sačuvane.</translation>
     <message id="Bold">
         <location filename="../src/Components/HeaderTextPanel.qml" line="462"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="825"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="230"/>
         <source>Bold</source>
         <translation>Podebljano</translation>
     </message>
     <message id="Italic">
         <location filename="../src/Components/HeaderTextPanel.qml" line="505"/>
         <location filename="../src/Components/TextFormatPanel.qml" line="865"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="251"/>
         <source>Italic</source>
         <translation>Kurziv</translation>
     </message>
@@ -5384,12 +5393,12 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <translation>Unesite lozinku duljine do 1.024 bajta bez nul-znakova.</translation>
     </message>
     <message id="TableCellText">
-        <location filename="../src/Components/TableCellEditor.qml" line="80"/>
+        <location filename="../src/Components/TableCellEditor.qml" line="119"/>
         <source>Cell text</source>
         <translation>Tekst ćelije</translation>
     </message>
     <message id="TableCellApply">
-        <location filename="../src/Components/TableCellPanel.qml" line="213"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="328"/>
         <source>Apply</source>
         <translation>Primijeni</translation>
     </message>
@@ -5400,6 +5409,7 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
     </message>
     <message id="TableCellUnavailable">
         <location filename="../src/PDFEditControllerTable.cpp" line="53"/>
+        <location filename="../src/Components/TableCellEditing.qml" line="104"/>
         <source>This cell is no longer available. Select the table again.</source>
         <translation>Ova ćelija više nije dostupna. Ponovno odaberite tablicu.</translation>
     </message>
@@ -5415,6 +5425,7 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
     </message>
     <message id="TableCellFontUnavailable">
         <location filename="../src/PDFEditControllerTable.cpp" line="96"/>
+        <location filename="../src/PDFEditControllerTableEditor.cpp" line="165"/>
         <source>The table font is unavailable or does not support this text. Install the font in Settings &gt; Font.</source>
         <translation>Font tablice nije dostupan ili ne podržava ovaj tekst. Instalirajte font u Postavke &gt; Font.</translation>
     </message>
@@ -5424,28 +5435,29 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <translation>Tekst ne stane u ovu ćeliju. Skratite ga ili povećajte redak ili stupac.</translation>
     </message>
     <message id="TableCellInlineHint">
-        <location filename="../src/Components/TableCellPanel.qml" line="193"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="308"/>
         <source>Enter: new line · Tab: next cell · Ctrl/Cmd+Enter: finish · Esc: cancel</source>
         <translation>Enter: novi redak · Tab: sljedeća ćelija · Ctrl/Cmd+Enter: dovrši · Esc: odustani</translation>
     </message>
     <message id="TableCellInvalidFormat">
         <location filename="../src/PDFEditControllerTable.cpp" line="131"/>
         <location filename="../src/PDFEditControllerTable.cpp" line="171"/>
+        <location filename="../src/PDFEditControllerTableEditor.cpp" line="132"/>
         <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
         <translation>Oblikovanje ćelije nije valjano ili je presloženo. Smanjite broj promjena fonta ili stila.</translation>
     </message>
     <message id="TableCellProperties">
-        <location filename="../src/Components/TableCellPanel.qml" line="57"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="59"/>
         <source>Cell properties</source>
         <translation>Svojstva ćelije</translation>
     </message>
     <message id="TableCellPosition">
-        <location filename="../src/Components/TableCellPanel.qml" line="67"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="69"/>
         <source>Row %1 · Column %2</source>
         <translation>Redak %1 · Stupac %2</translation>
     </message>
     <message id="TableCellGoTo">
-        <location filename="../src/Components/TableCellPanel.qml" line="176"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="291"/>
         <source>Go to cell</source>
         <translation>Idi na ćeliju</translation>
     </message>

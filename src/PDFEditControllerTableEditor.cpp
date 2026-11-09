@@ -19,7 +19,7 @@ constexpr int SemanticFamilyProperty = QTextFormat::UserProperty + 421;
 QTextCharFormat characterFormat(const Style &style)
 {
     QTextCharFormat format;
-    format.setFont(displayFont(style, 12.0));
+    format.setFont(displayFont(style));
     format.setForeground(Qt::black);
     format.setProperty(SemanticFamilyProperty, style.family);
     return format;
@@ -66,7 +66,7 @@ public:
         const bool undoEnabled = document->isUndoRedoEnabled();
         document->setUndoRedoEnabled(false);
         m_defaultStyle = format.defaultStyle;
-        document->setDefaultFont(displayFont(m_defaultStyle, 12.0));
+        document->setDefaultFont(displayFont(m_defaultStyle));
         if (document->toPlainText() != text)
             document->setPlainText(text);
         QTextCursor cursor(document);
@@ -114,6 +114,7 @@ public:
                 {QStringLiteral("typingPosition"), m_typingPosition},
                 {QStringLiteral("typingStyle"), styleJson(m_typingStyle).toVariantMap()},
                 {QStringLiteral("fontFamily"), selected.family},
+                {QStringLiteral("fontSize"), selected.fontSize},
                 {QStringLiteral("bold"), selected.bold},
                 {QStringLiteral("italic"), selected.italic},
                 {QStringLiteral("underline"), selected.underline}};
@@ -123,10 +124,16 @@ public:
     {
         synchronize();
         if (property != QLatin1String("family") && property != QLatin1String("bold")
-            && property != QLatin1String("italic") && property != QLatin1String("underline"))
+            && property != QLatin1String("italic") && property != QLatin1String("underline")
+            && property != QLatin1String("fontSize"))
             return {};
+        if (property == QLatin1String("fontSize") && !validFontSize(value.toDouble())) {
+            //% "The cell formatting is invalid or too complex. Use fewer font or style changes."
+            return qtTrId("TableCellInvalidFormat");
+        }
         const auto update = [&](Style style) {
             if (property == QLatin1String("family")) style.family = value.toString();
+            else if (property == QLatin1String("fontSize")) style.fontSize = value.toDouble();
             else if (property == QLatin1String("bold")) style.bold = value.toBool();
             else if (property == QLatin1String("italic")) style.italic = value.toBool();
             else style.underline = value.toBool();
@@ -249,8 +256,10 @@ private:
             family = families.isEmpty() ? m_defaultStyle.family
                 : PDFFontAliases::semanticFamily(families.constFirst());
         }
+        const int pixels = format.font().pixelSize();
         return {family, format.fontWeight() >= QFont::Bold,
-                format.fontItalic(), format.fontUnderline()};
+                format.fontItalic(), format.fontUnderline(),
+                pixels > 0 ? qreal(pixels) : m_defaultStyle.fontSize};
     }
     Style currentStyle() const {
         if (selectionStart() < selectionEnd())

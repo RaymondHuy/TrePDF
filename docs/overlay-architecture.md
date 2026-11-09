@@ -408,12 +408,14 @@ giữ nội dung độc lập với delegate. Hoàn tất gọi `setSelectedTabl
 Escape hủy mà không tạo draft. Save/navigation dùng `commitPendingPanelEdits`;
 đổi ribbon tab/công cụ dùng `prepareEditTransition` để chặn input không hợp lệ.
 `TableCellPanel` được lazy-load ở bên phải workspace khi nhập ô, thay panel
-thuộc tính hình. Font/B/I/U, lỗi và Áp dụng/Hủy nằm trong panel;
+thuộc tính hình. Font/cỡ chữ/B/I/U, lỗi và Áp dụng/Hủy nằm trong panel;
 `TableCellEditor` trên trang chỉ giữ input inline. Panel tồn tại độc lập
 delegate và có thể đưa người dùng về ô sau khi cuộn ra ngoài.
 `PDFEditControllerTableEditor` định dạng trực tiếp `QQuickTextDocument` của ô,
 độc lập phiên sửa text object thông thường. State workspace giữ các đoạn
-font/B/I/U, vùng chọn, caret và định dạng gõ tiếp; preview chỉ đọc dùng cùng
+font/cỡ chữ/B/I/U, vùng chọn, caret và định dạng gõ tiếp. Cỡ chữ nhận số nguyên
+1–512 pt; input số đang nhập được áp dụng trước commit hoặc pooling.
+Preview chỉ đọc dùng cùng
 helper để giữ cách xuống dòng. `ShapeDraftView` nhận nội dung và các vùng chữ trong ô từ controller, vẽ chữ ở
 kích thước PDF trước khi scale theo zoom. Controller chặn thay đổi geometry
 nếu chữ không còn vừa ô. Pooling chỉ hủy editor hiển thị, giữ state để dựng
